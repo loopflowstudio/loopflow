@@ -14,10 +14,10 @@ use tokio::process::Command;
 use tokio::sync::RwLock;
 
 use crate::id::WaveId;
-use crate::store::{open_existing_store, SharedStore, StoreResult};
+use crate::store::{open_existing_store, SharedStore, Store, StoreResult};
 use crate::task::TaskObservation;
 use crate::wave::runtime::WaveRuntime;
-use crate::wave::Wave;
+use crate::wave::{Wave, WaveLocator};
 
 /// How often the observer re-reads the store between turns. Modest by
 /// design: the loop also refreshes right before every turn it takes.
@@ -40,18 +40,16 @@ pub struct RegistryConfig {
 ///
 /// # Errors
 /// Store failures only; the caller treats them as soft (run unregistered).
-pub async fn ensure_wave_row(
-    store: &SharedStore,
-    main_repo: &Path,
-    name: &str,
-) -> StoreResult<Wave> {
-    let existing = store.get_wave_by_name(name).await?;
+pub async fn ensure_wave_row(store: &Store, main_repo: &Path, name: &str) -> StoreResult<Wave> {
+    let locator = WaveLocator::discover(main_repo, name)
+        .map_err(|error| crate::store::StoreError::InvalidData(error.to_string()))?;
+    let existing = store.get_wave_at(&locator).await?;
     let is_new = existing.is_none();
     let wave = existing.unwrap_or_else(|| {
         Wave::new(
             WaveId::new(),
-            name.to_string(),
-            main_repo.display().to_string(),
+            locator.slug().to_string(),
+            locator.repo().to_string(),
         )
     });
     store.create_wave(&wave).await?;
@@ -69,12 +67,14 @@ pub async fn ensure_wave_row(
 /// A remote Home may observe a different repo path, but never mint a second id
 /// for the same named Work.
 pub async fn ensure_wave_row_with_id(
-    store: &SharedStore,
+    store: &Store,
     main_repo: &Path,
     name: &str,
     wave_id: &WaveId,
 ) -> StoreResult<Wave> {
-    if let Some(existing) = store.get_wave_by_name(name).await? {
+    let locator = WaveLocator::discover(main_repo, name)
+        .map_err(|error| crate::store::StoreError::InvalidData(error.to_string()))?;
+    if let Some(existing) = store.get_wave_at(&locator).await? {
         if existing.id() != wave_id {
             return Err(crate::store::StoreError::InvalidData(format!(
                 "Wave '{name}' is {} on this Home, not authoritative id {wave_id}",
@@ -91,8 +91,8 @@ pub async fn ensure_wave_row_with_id(
     }
     let wave = Wave::new(
         wave_id.clone(),
-        name.to_string(),
-        main_repo.display().to_string(),
+        locator.slug().to_string(),
+        locator.repo().to_string(),
     );
     store.create_wave(&wave).await?;
     Ok(wave)
@@ -380,12 +380,18 @@ mod tests {
             .await
             .expect("row created");
         let stored = store
-            .get_wave_by_name("ship")
+            .get_wave_at(&WaveLocator::discover(&repo, "ship").unwrap())
             .await
             .expect("lookup")
             .expect("row exists");
         assert_eq!(stored.id(), wave.id());
-        assert_eq!(stored.repo(), repo.display().to_string());
+        assert_eq!(
+            stored.repo(),
+            WaveLocator::discover(&repo, "ship")
+                .unwrap()
+                .repo()
+                .to_string()
+        );
 
         let again = ensure_wave_row(&store, &repo, "ship")
             .await
@@ -525,7 +531,6 @@ mod tests {
         });
         runtime.apply_resident_delta(crate::wave::wire::ResidentDelta::TurnFinished {
             status: Lifecycle::Completed,
-            cost_usd: None,
             reason: None,
         });
         assert!(runtime.pending_messages().is_empty());

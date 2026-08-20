@@ -29,7 +29,7 @@ cargo install --git https://github.com/loopflowstudio/loopflow --bin lf
 
 The Mac app — wave chat, the machine-wide roadmap, every task's worktree — is
 [`Loopflow-latest.dmg`](https://downloads.loopflow.studio/Loopflow-latest.dmg).
-It bundles `lf`; `lf` (bare) opens it.
+It bundles `lf`; open it explicitly with `lf desktop`. Bare `lf` starts the terminal control conversation.
 
 Give an external agent harness the Loopflow operating skill:
 
@@ -62,7 +62,10 @@ Task only after it has a Linear issue, and fold what changed into memory.
 ```bash
 lf start designer                           # serve it from this Home's one keeper
 lf chat --steer "ship the button audit first"
-lf stop designer
+lf pause designer                           # keep listening; queue new turn starts
+lf resume designer
+lf stop designer                            # stay off across Home restarts
+lf start designer                           # turn it back on
 ```
 
 Edit `wave/designer/MEMORY.md` directly when durable context changes; it is a
@@ -77,15 +80,39 @@ lf task status INF-123 --json                         # inspect durable state
 lf pr land -c                                         # merge the PR, complete the Task
 ```
 
+Turn a reviewed design into work without another planning subsystem:
+
+```bash
+lf design                                             # author and review one design
+lf launch-plan                                        # keep the core here; launch independent Tasks
+```
+
 Watch the whole machine:
 
 ```bash
 lf ls                  # every durable Wave and its Home/runtime evidence
 lf roadmap             # every open Task across every wave, bucketed by need
 lf status designer     # one wave's live Project → Task hierarchy
+lf activity            # durable Work changes with exact Run, PR, and Steer proof
 lf trace <exec-id>     # what one agent did — and exactly what it was told
-lf usage               # subscription state and spend, per account and repo
+lf ps                  # rank live call trees by cumulative completed output
+lf top                 # refresh call-tree rates, age, idle time, and health
+lf prune --dry-run     # inspect dead receipts and registered orphan providers
+lf usage               # subscription state, provider tokens, cache, and cost
 ```
+
+Keep Loopflow development inside its local resource envelope:
+
+```bash
+uv run python scripts/resource_envelope.py             # attribute disk use to its owner
+uv run python scripts/resource_envelope.py --recover   # clean only safe disposable pressure
+lf telemetry-daily                                     # maintainer health and budget report
+uv run python scripts/test.py                          # preflight, then run affected suites
+```
+
+The verifier keeps 64 GiB free, caps build/test concurrency at four
+low-priority workers, and records build bytes plus child CPU for the daily
+maintainer scorecard. See [TESTING.md](TESTING.md#bounded-and-honest).
 
 ## The model
 
@@ -117,7 +144,7 @@ corpus at [/llms-full.txt](https://loopflow.studio/llms-full.txt).
 | [The Agent API](docs/agent-api.md) | How agents launch, steer, and prove control of other agents |
 | [Conducting](docs/conducting.md) | Monitoring and steering many agents; the Mac podium |
 | [Authoring](docs/authoring.md) | Writing skills, flows, directions, and goals |
-| [Architecture](docs/architecture.md) | Decentralized stores, Wave hosts, journals, `lf ssh`, `lfd` |
+| [Architecture](docs/architecture.md) | Concepts, truth owners, persistence, processes, public APIs, and provider edges |
 | [Security](docs/security.md) | Execution boundaries, permissions, credentials, and account authority |
 | [`lf` reference](docs/lf.md) | Every command, PR/planning/release operations, the builtin catalog |
 | [Configuration](docs/config.md) · [Troubleshooting](docs/troubleshooting.md) | Reference |
@@ -125,8 +152,8 @@ corpus at [/llms-full.txt](https://loopflow.studio/llms-full.txt).
 ## Developing loopflow
 
 ```bash
-uv run python scripts/install.py local --use   # build lf + Loopflow.app from this checkout, make active
-uv run python scripts/install.py refresh       # fast CLI-only rebuild from the default branch
+uv run python scripts/install.py local     # build validation-only lf + lfd + Loopflow.app under local-bin/
+uv run python scripts/install.py refresh   # install the latest published release through the public installer
 ```
 
 `TESTING.md` covers the test suites; `STYLE.md` is the governing style guide;

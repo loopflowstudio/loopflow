@@ -5,7 +5,7 @@ use std::time::{Duration, Instant};
 use crate::child::ChildRef;
 use crate::durable::{
     AgentInvocation, AuthenticatedRequest, Author, Containment, ContainmentObservation, ControlCtx,
-    RunState, WorkStatus,
+    RunState, RunTrigger, WorkRef, WorkStatus,
 };
 use crate::engine::config::{load_config_or_default, parse_agent};
 use crate::engine::git::{current_branch, get_default_branch, is_clean, worktree_root};
@@ -28,6 +28,7 @@ pub struct ProjectSnapshot {
     pub project_name: String,
     pub wave: String,
     pub status: WorkStatus,
+    pub reason: String,
     pub iteration: u32,
     pub observation_cursor: i64,
     pub pending_observations: u32,
@@ -89,12 +90,14 @@ async fn project_work_status(store: &Store, project: &Project) -> OpsResult<Work
         .map_err(|error| project_error(error.to_string()))
 }
 
-pub(crate) fn require_registered_wave(wave: &str) -> OpsResult<Wave> {
+pub(crate) fn require_registered_wave(repo: &Path, wave: &str) -> OpsResult<Wave> {
+    let locator = crate::wave::WaveLocator::discover(repo, wave)
+        .map_err(|error| project_error(error.to_string()))?;
     let wave = wave.to_string();
     block_on_project(async move {
         project_store()
             .await?
-            .get_wave_by_name(&wave)
+            .get_wave_at(&locator)
             .await
             .map_err(|error| project_error(format!("failed to read owning Wave: {error}")))?
             .ok_or_else(|| {
@@ -164,6 +167,8 @@ pub(crate) fn reserve_project(
     resolved: crate::ops::task_pm::ResolvedProject,
     directive: Option<String>,
 ) -> OpsResult<Project> {
+    let locator = crate::wave::WaveLocator::discover(repo, &resolved.snapshot.wave)
+        .map_err(|error| project_error(error.to_string()))?;
     let config = load_config_or_default(Some(repo));
     let agent = config.agent();
     let (provider, _) = parse_agent(agent);
@@ -189,7 +194,7 @@ pub(crate) fn reserve_project(
             }
         }
         let wave = store
-            .get_wave_by_name(&resolved.snapshot.wave)
+            .get_wave_at(&locator)
             .await
             .map_err(|error| project_error(format!("failed to read owning Wave: {error}")))?
             .ok_or_else(|| {
@@ -199,20 +204,13 @@ pub(crate) fn reserve_project(
                 ))
             })?;
         let now = time::OffsetDateTime::now_utc();
-        let context = crate::ops::task::project_context(&resolved.project);
+        let plan = project_plan(&resolved.project, resolved.snapshot.synced_at)?;
         let project = Project {
             id: predecessor
                 .as_ref()
                 .map(|project| project.id.clone())
                 .unwrap_or_else(ProjectId::new),
-            plan: ProjectPlan {
-                id: LinearProjectId::new(resolved.project.id.clone())
-                    .map_err(|error| project_error(error.to_string()))?,
-                slug: resolved.project.slug,
-                name: resolved.project.name,
-                prompt_context: context,
-                pm_snapshot_synced_at: resolved.snapshot.synced_at,
-            },
+            plan,
             wave_id: wave.id().clone(),
             iteration: 0,
             observation_cursor: 0,
@@ -251,6 +249,20 @@ pub(crate) fn reserve_project(
             return Err(project_error(format!("failed to reserve Project: {error}")));
         }
         Ok(project)
+    })
+}
+
+pub(crate) fn project_plan(
+    project: &crate::pm::PmProject,
+    pm_snapshot_synced_at: i64,
+) -> OpsResult<ProjectPlan> {
+    Ok(ProjectPlan {
+        id: LinearProjectId::new(project.id.clone())
+            .map_err(|error| project_error(error.to_string()))?,
+        slug: project.slug.clone(),
+        name: project.name.clone(),
+        prompt_context: crate::ops::task::project_context(project),
+        pm_snapshot_synced_at,
     })
 }
 
@@ -311,7 +323,7 @@ pub fn project_start(
     directive: Option<String>,
 ) -> OpsResult<Project> {
     let main = ensure_clean_main(repo, "Project start")?;
-    let wave = crate::engine::wave_context::resolve_managed_wave_name_sync(wave).map_err(
+    let wave = crate::engine::wave_context::resolve_managed_wave_sync(Some(&main), wave).map_err(
         |err| match err {
             crate::engine::wave_context::WaveResolveError::NoContext => {
                 project_error("cannot determine wave; pass --wave <name>")
@@ -319,7 +331,7 @@ pub fn project_start(
             other => project_error(other.to_string()),
         },
     )?;
-    require_registered_wave(&wave)?;
+    let wave = wave.name().to_string();
     let project = crate::ops::pm::pm_create_project(&main, Some(&wave), title)?;
     if let Err(error) =
         crate::ops::task_pm::load_wave(&main, &wave, crate::ops::pm::PmRefresh::Force)
@@ -335,6 +347,19 @@ pub fn project_start(
 pub(crate) async fn launch_project_process(
     store: &SharedStore,
     project: &mut Project,
+) -> OpsResult<()> {
+    let basis = store
+        .current_epoch(&WorkRef::Project(project.id.clone()))
+        .await
+        .map_err(|error| project_error(error.to_string()))?
+        .current_basis;
+    launch_project_process_with_trigger(store, project, RunTrigger::Input { basis }).await
+}
+
+pub(crate) async fn launch_project_process_with_trigger(
+    store: &SharedStore,
+    project: &mut Project,
+    trigger: RunTrigger,
 ) -> OpsResult<()> {
     // Re-check at the launch boundary: commands and observations can wake a
     // stopped Project long after its initial reservation.
@@ -352,13 +377,8 @@ pub(crate) async fn launch_project_process(
     {
         return Ok(());
     }
-    let basis = store
-        .current_epoch(&work)
-        .await
-        .map_err(|error| project_error(error.to_string()))?
-        .current_basis;
     let (run, lease) = store
-        .reserve_run(&work, crate::durable::RunTrigger::Input { basis })
+        .reserve_run(&work, trigger)
         .await
         .map_err(|error| project_error(format!("failed to reserve Project Run: {error}")))?;
     let tmux_name = format!(
@@ -503,11 +523,9 @@ pub fn project_snapshot(project: &Project) -> OpsResult<ProjectSnapshot> {
             None => false,
         };
         let latest_event = store
-            .project_events_after(&project.id, 0)
+            .latest_project_event(&project.id)
             .await
-            .map_err(|error| project_error(error.to_string()))?
-            .into_iter()
-            .last();
+            .map_err(|error| project_error(error.to_string()))?;
         let pending_observations = store
             .pending_project_observations(&project.id)
             .await
@@ -517,6 +535,8 @@ pub fn project_snapshot(project: &Project) -> OpsResult<ProjectSnapshot> {
             .work_status(&work)
             .await
             .map_err(|error| project_error(error.to_string()))?;
+        let reason =
+            crate::project::status_reason(&status, latest_event.as_ref().map(|event| &event.kind));
         Ok(ProjectSnapshot {
             id: project.id.to_string(),
             external_project_id: project.plan.id.as_str().to_string(),
@@ -524,6 +544,7 @@ pub fn project_snapshot(project: &Project) -> OpsResult<ProjectSnapshot> {
             project_name: project.plan.name,
             wave: wave.name().to_string(),
             status,
+            reason,
             iteration: project.iteration,
             observation_cursor: project.observation_cursor,
             pending_observations,
@@ -753,6 +774,71 @@ pub(crate) async fn wake_project(project_id: &ProjectId) -> OpsResult<()> {
 pub(crate) async fn wake_task_project_route(_store: &Store, task: &Task) -> OpsResult<()> {
     wake_project(&task.project_id).await
 }
+
+/// Persist the child's ancestry before the authored promotion flow creates its
+/// first Initiative or Project. Completion records the promotion occurrence.
+pub fn prepare_promotion(repo: &Path, parent: &str, child: &str) -> OpsResult<()> {
+    let origin = crate::engine::wave_context::wave_origin(repo);
+    block_on_project(async {
+        let store = open_existing_store().await.ok_or_else(|| {
+            OpsError::Message(
+                "project promotion requires the wave registry; start the parent wave first"
+                    .to_string(),
+            )
+        })?;
+        prepare_promotion_with_store(&store, &origin, parent, child).await
+    })
+}
+
+async fn prepare_promotion_with_store(
+    store: &Store,
+    repo: &Path,
+    parent: &str,
+    child: &str,
+) -> OpsResult<()> {
+    let parent_locator = crate::wave::WaveLocator::discover(repo, parent)
+        .map_err(|error| project_error(error.to_string()))?;
+    let child_locator = crate::wave::WaveLocator::discover(repo, child)
+        .map_err(|error| project_error(error.to_string()))?;
+    let parent = store
+        .get_wave_at(&parent_locator)
+        .await
+        .map_err(|error| project_error(format!("failed to read parent Wave: {error}")))?
+        .ok_or_else(|| project_error(format!("parent Wave '{parent}' is not registered")))?;
+    let existing = store
+        .get_wave_at(&child_locator)
+        .await
+        .map_err(|error| project_error(format!("failed to read child Wave: {error}")))?;
+    if let Some(mut child_wave) = existing {
+        if child_wave
+            .parent_wave_id()
+            .is_some_and(|id| id != parent.id())
+        {
+            return Err(project_error(format!(
+                "child Wave '{child}' already belongs to another parent"
+            )));
+        }
+        if child_wave.parent_wave_id().is_none() {
+            child_wave = child_wave.with_parent(parent.id().clone());
+            store.update_wave(&child_wave).await.map_err(|error| {
+                project_error(format!("failed to prepare child Wave ancestry: {error}"))
+            })?;
+        }
+        return Ok(());
+    }
+
+    let child_wave = Wave::new(
+        WaveId::new(),
+        child_locator.slug().to_string(),
+        child_locator.repo().to_string(),
+    )
+    .with_parent(parent.id().clone());
+    store
+        .create_wave(&child_wave)
+        .await
+        .map_err(|error| project_error(format!("failed to prepare child Wave ancestry: {error}")))
+}
+
 /// Complete the mechanical half of an authored project-promotion flow: record
 /// the promotion and ancestry, start the child residency, and wait for its endpoint.
 pub fn complete_promotion(repo: &Path, parent: &str, child: &str) -> OpsResult<String> {
@@ -818,18 +904,26 @@ async fn wake_child_observer(endpoint: &str, parent: &str, wave: &str) {
 }
 
 async fn record_promotion(store: &Store, repo: &Path, parent: &str, child: &str) -> OpsResult<()> {
+    let parent_locator = crate::wave::WaveLocator::discover(repo, parent)
+        .map_err(|error| OpsError::Message(error.to_string()))?;
+    let child_locator = crate::wave::WaveLocator::discover(repo, child)
+        .map_err(|error| OpsError::Message(error.to_string()))?;
     let parent = store
-        .get_wave_by_name(parent)
+        .get_wave_at(&parent_locator)
         .await
         .map_err(|err| OpsError::Message(format!("failed to read parent wave: {err}")))?
         .ok_or_else(|| OpsError::Message(format!("parent wave '{parent}' is not registered")))?;
     let mut child_wave = match store
-        .get_wave_by_name(child)
+        .get_wave_at(&child_locator)
         .await
         .map_err(|err| OpsError::Message(format!("failed to read child wave: {err}")))?
     {
         Some(wave) => wave,
-        None => Wave::new(WaveId::new(), child.to_string(), repo.display().to_string()),
+        None => Wave::new(
+            WaveId::new(),
+            child_locator.slug().to_string(),
+            child_locator.repo().to_string(),
+        ),
     };
     child_wave
         .record_promotion(parent.id(), time::OffsetDateTime::now_utc())
@@ -1058,9 +1152,51 @@ mod tests {
     }
 
     #[tokio::test]
+    async fn prepare_promotion_persists_ancestry_without_occurrence() {
+        let tmp = tempfile::tempdir().unwrap();
+        let database = tmp.path().join("loopflow.db");
+        let store = open_store(&StorageConfig::sqlite(database.clone()))
+            .await
+            .unwrap();
+        let parent = Wave::new(
+            WaveId::new(),
+            "survival".into(),
+            tmp.path().display().to_string(),
+        );
+        store.create_wave(&parent).await.unwrap();
+
+        prepare_promotion_with_store(&store, tmp.path(), "survival", "infrastructure")
+            .await
+            .unwrap();
+        prepare_promotion_with_store(&store, tmp.path(), "survival", "infrastructure")
+            .await
+            .unwrap();
+
+        let child = store
+            .get_wave_at(&crate::wave::WaveLocator::discover(tmp.path(), "infrastructure").unwrap())
+            .await
+            .unwrap()
+            .unwrap();
+        assert_eq!(child.parent_wave_id(), Some(parent.id()));
+        assert_eq!(child.promoted_at(), None);
+
+        let other = Wave::new(
+            WaveId::new(),
+            "other".into(),
+            tmp.path().display().to_string(),
+        );
+        store.create_wave(&other).await.unwrap();
+        let error = prepare_promotion_with_store(&store, tmp.path(), "other", "infrastructure")
+            .await
+            .unwrap_err();
+        assert!(error.to_string().contains("another parent"));
+    }
+
+    #[tokio::test]
     async fn record_promotion_persists_occurrence_and_ancestry() {
         let tmp = tempfile::tempdir().unwrap();
-        let store = open_store(&StorageConfig::sqlite(tmp.path().join("loopflow.db")))
+        let database = tmp.path().join("loopflow.db");
+        let store = open_store(&StorageConfig::sqlite(database.clone()))
             .await
             .unwrap();
         let parent = Wave::new(
@@ -1074,32 +1210,21 @@ mod tests {
             .await
             .unwrap();
 
-        let child = store
-            .get_wave_by_name("release-stability")
-            .await
-            .unwrap()
-            .unwrap();
+        let locator = crate::wave::WaveLocator::discover(tmp.path(), "release-stability").unwrap();
+        let child = store.get_wave_at(&locator).await.unwrap().unwrap();
         assert_eq!(child.parent_wave_id(), Some(parent.id()));
         let promoted_at = child.promoted_at().expect("promotion occurrence");
-        assert_eq!(child.repo(), tmp.path().display().to_string());
+        assert_eq!(child.repo(), locator.repo().to_string());
 
         record_promotion(&store, tmp.path(), "platform", "release-stability")
             .await
             .unwrap();
-        let replayed = store
-            .get_wave_by_name("release-stability")
-            .await
-            .unwrap()
-            .unwrap();
+        let replayed = store.get_wave_at(&locator).await.unwrap().unwrap();
         assert_eq!(replayed.promoted_at(), Some(promoted_at));
 
         let stale = replayed.with_parent(WaveId::new());
         store.update_wave(&stale).await.unwrap();
-        let preserved = store
-            .get_wave_by_name("release-stability")
-            .await
-            .unwrap()
-            .unwrap();
+        let preserved = store.get_wave_at(&locator).await.unwrap().unwrap();
         assert_eq!(preserved.parent_wave_id(), Some(parent.id()));
         assert_eq!(preserved.promoted_at(), Some(promoted_at));
     }

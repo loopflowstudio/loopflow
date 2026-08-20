@@ -7,7 +7,7 @@ import Testing
 //
 // What a human must see: the wave's prose and the decision. What must disappear:
 // twenty-odd tool calls, shell commands, file edits, thoughts, and the
-// `task_clarify` / `task_pursue` / `task_mutate` phase structure.
+// `task/clarify` / `task/pursue` / `task/mutate` phase structure.
 
 private func turn(
     id: String,
@@ -83,7 +83,7 @@ private func childActivity(_ kind: ChildActivityKind) -> ChildControlActivity {
 
 @Suite("Wave chat reads as a conversation")
 struct WaveChatTranscriptTests {
-    /// task_clarify: five items of machinery behind one sentence of speech.
+    /// task/clarify: five items of machinery behind one sentence of speech.
     @Test func machineryDoesNotEnterTheConversation() throws {
         let clarify = try turn(
             id: "turn-2",
@@ -95,7 +95,7 @@ struct WaveChatTranscriptTests {
                 command("c0", "git log --oneline -3"),
                 edit("f0", "scratch/w2-129.md"),
             ],
-            body: provenance(step: "task_clarify")
+            body: provenance(step: "task/clarify")
         )
 
         let view = turnPresentation(clarify)
@@ -103,7 +103,7 @@ struct WaveChatTranscriptTests {
         #expect(view == TurnPresentation(prose: clarify.text))
     }
 
-    /// task_pursue: an expected red test is execution evidence, not another
+    /// task/pursue: an expected red test is execution evidence, not another
     /// command card in the human conversation.
     @Test func backendFailuresDoNotBecomeChatCards() throws {
         let pursue = try turn(
@@ -116,7 +116,7 @@ struct WaveChatTranscriptTests {
                 tool("t2", "Edit"),
                 command("c3", "swift test"),
             ],
-            body: provenance(step: "task_pursue")
+            body: provenance(step: "task/pursue")
         )
 
         let view = turnPresentation(pursue)
@@ -130,7 +130,7 @@ struct WaveChatTranscriptTests {
             id: "turn-4",
             status: .running,
             items: [tool("t0", "Read"), command("c0", "cargo test")],
-            body: provenance(step: "task_pursue")
+            body: provenance(step: "task/pursue")
         )
         #expect(!turnPresentation(running).hasProse)
         #expect(isVisibleTurn(running))
@@ -143,7 +143,7 @@ struct WaveChatTranscriptTests {
             id: "turn-5",
             text: "Opened the PR.",
             items: [
-                .message(id: "m0", text: "Waiting on CI.", phase: "task_mutate"),
+                .message(id: "m0", text: "Waiting on CI.", phase: "task/mutate"),
                 .thought(id: "h0", text: "should I rebase?"),
             ]
         )
@@ -160,7 +160,7 @@ struct WaveChatTranscriptTests {
             items: [
                 .message(
                     id: "m0",
-                    text: "I’m using `wave_clarify` to finish the interrupted audit: verify the "
+                    text: "I’m using `wave/clarify` to finish the interrupted audit: verify the "
                         + "product charter, project KRs, executable cadence, and live backlog.",
                     phase: "commentary"
                 ),
@@ -177,7 +177,7 @@ struct WaveChatTranscriptTests {
                     phase: "final_answer"
                 ),
             ],
-            body: provenance(step: "wave_clarify")
+            body: provenance(step: "wave/clarify")
         )
 
         let view = turnPresentation(structured)
@@ -185,7 +185,7 @@ struct WaveChatTranscriptTests {
         #expect(view.steps.count == 2)
         #expect(view.hasSteps)
         // Nothing is lost: the raw prose still carries the narration.
-        #expect(view.prose.contains("wave_clarify"))
+        #expect(view.prose.contains("wave/clarify"))
         #expect(view.prose.contains("Clarification complete."))
     }
 
@@ -195,11 +195,11 @@ struct WaveChatTranscriptTests {
     @Test func streamingProseStaysWholeWithNoSteps() throws {
         let streaming = try turn(
             id: "turn-22979",
-            text: "I’m using `wave_mutate` to judge the accepted human controls. "
+            text: "I’m using `wave/mutate` to judge the accepted human controls. "
                 + "The receipts show both are incorporated. Product’s objective, "
                 + "portfolio, KRs, and memory remain unchanged.",
             items: [command("c0", "lf pm show")],
-            body: provenance(step: "wave_mutate")
+            body: provenance(step: "wave/mutate")
         )
 
         let view = turnPresentation(streaming)
@@ -224,10 +224,10 @@ struct WaveChatTranscriptTests {
                 id: "turn-2",
                 text: "Collapsing the cards into one activity line.",
                 items: [tool("t0", "Read"), command("c0", "git log")],
-                body: provenance(step: "task_clarify")
+                body: provenance(step: "task/clarify")
             ),
             // An empty span at a step boundary: nothing said, nothing done.
-            try turn(id: "turn-3", body: provenance(step: "task_pursue")),
+            try turn(id: "turn-3", body: provenance(step: "task/pursue")),
             try turn(id: "turn-4", role: .user, status: .completed,
                      activity: childActivity(.stateChanged)),
             try turn(id: "turn-5", role: .user, status: .completed,
@@ -236,7 +236,7 @@ struct WaveChatTranscriptTests {
                 id: "turn-6",
                 text: "PR is up.",
                 items: [command("c1", "lf pr open")],
-                body: provenance(step: "task_mutate")
+                body: provenance(step: "task/mutate")
             ),
         ]
 

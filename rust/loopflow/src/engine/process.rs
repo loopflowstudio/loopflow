@@ -8,6 +8,47 @@ pub(crate) fn current_process_group_id() -> Option<u32> {
     u32::try_from(process_group).ok().filter(|id| *id > 1)
 }
 
+pub(crate) fn process_group_id(pid: u32) -> Option<u32> {
+    let pid = i32::try_from(pid).ok()?;
+    // SAFETY: getpgid reads kernel process metadata for one numeric pid and
+    // does not dereference memory.
+    let process_group = unsafe { libc::getpgid(pid) };
+    u32::try_from(process_group).ok().filter(|id| *id > 1)
+}
+
+pub(crate) fn process_group_observation(
+    process_group: i64,
+) -> crate::durable::ContainmentObservation {
+    use crate::durable::ContainmentObservation;
+
+    #[cfg(unix)]
+    {
+        let Ok(process_group) = i32::try_from(process_group) else {
+            return ContainmentObservation::Unprovable;
+        };
+        if process_group <= 1 {
+            return ContainmentObservation::Unprovable;
+        }
+        // SAFETY: a negative pid selects one process group and signal 0 only
+        // probes its existence; no pointers are used and no signal is sent.
+        let result = unsafe { libc::kill(-process_group, 0) };
+        if result == 0 {
+            return ContainmentObservation::Present;
+        }
+        match std::io::Error::last_os_error().raw_os_error() {
+            Some(libc::ESRCH) => ContainmentObservation::Absent,
+            Some(libc::EPERM) => ContainmentObservation::Present,
+            _ => ContainmentObservation::Unprovable,
+        }
+    }
+
+    #[cfg(not(unix))]
+    {
+        let _ = process_group;
+        ContainmentObservation::Unprovable
+    }
+}
+
 pub(crate) fn resolve_lf_binary() -> PathBuf {
     if let Some(path) = select_binary_override(
         crate::build_info::provenance(),
@@ -44,35 +85,77 @@ pub(crate) fn resolve_lf_binary() -> PathBuf {
 }
 
 pub(crate) fn resolve_lfd_binary() -> PathBuf {
-    if let Ok(path) = std::env::var("CARGO_BIN_EXE_lfd") {
-        let trimmed = path.trim();
-        if !trimmed.is_empty() {
-            return PathBuf::from(trimmed);
-        }
-    }
+    let cargo_override = std::env::var("CARGO_BIN_EXE_lfd")
+        .ok()
+        .filter(|path| !path.trim().is_empty())
+        .map(PathBuf::from);
     let lf = resolve_lf_binary();
-    if let Some(parent) = lf.parent() {
-        let sibling = parent.join("lfd");
-        if sibling.exists() {
-            return sibling;
-        }
-    }
-    if let Ok(current) = std::env::current_exe() {
-        if current
-            .file_name()
+    let lf_sibling = lf
+        .parent()
+        .map(|parent| parent.join("lfd"))
+        .filter(|path| path.is_file());
+    let invoked_sibling = std::env::args_os()
+        .next()
+        .map(PathBuf::from)
+        .and_then(|invoked| invoked.parent().map(|parent| parent.join("lfd")))
+        .filter(|path| path.is_file());
+    let path_binary = which_on_path(Path::new("lfd"));
+    let current = std::env::current_exe().ok().filter(|path| {
+        path.file_name()
             .and_then(|name| name.to_str())
             .is_some_and(|name| name == "lfd")
-        {
-            return current;
-        }
-        if let Some(parent) = current.parent() {
-            let sibling = parent.join("lfd");
-            if sibling.exists() {
-                return sibling;
-            }
+    });
+
+    select_lfd_binary(
+        crate::build_info::provenance(),
+        cargo_override,
+        lf_sibling,
+        invoked_sibling,
+        path_binary,
+        current,
+    )
+}
+
+pub(crate) fn resolve_lfd_binary_checked() -> Result<PathBuf> {
+    let candidate = resolve_lfd_binary();
+    if candidate.is_absolute() {
+        return if candidate.is_file() {
+            Ok(candidate)
+        } else {
+            Err(anyhow!(
+                "lfd binary {} does not exist; install the current Home control pair",
+                candidate.display()
+            ))
+        };
+    }
+    which_on_path(&candidate).ok_or_else(|| {
+        anyhow!(
+            "cannot resolve an absolute path for `{}`; install lfd beside the current Home lf",
+            candidate.display()
+        )
+    })
+}
+
+fn select_lfd_binary(
+    provenance: crate::build_info::BuildProvenance,
+    cargo_override: Option<PathBuf>,
+    lf_sibling: Option<PathBuf>,
+    invoked_sibling: Option<PathBuf>,
+    path_binary: Option<PathBuf>,
+    current_lfd: Option<PathBuf>,
+) -> PathBuf {
+    if let Some(path) = cargo_override {
+        return path;
+    }
+    if provenance == crate::build_info::BuildProvenance::Development {
+        if let Some(path) = lf_sibling {
+            return path;
         }
     }
-    PathBuf::from("lfd")
+    invoked_sibling
+        .or(path_binary)
+        .or(current_lfd)
+        .unwrap_or_else(|| PathBuf::from("lfd"))
 }
 
 fn select_binary_override(
@@ -163,7 +246,7 @@ pub(crate) fn pinned_execution_context() -> Result<crate::child::ChildExecutionC
 /// that is exactly the stranding this resolver exists to prevent, so the
 /// control override is deliberately skipped: `LF_BIN` (the current Home), then
 /// the installed `lf` on `PATH`, then this executable, then the bare name.
-fn resolve_current_home_lf_binary() -> PathBuf {
+pub(crate) fn resolve_current_home_lf_binary() -> PathBuf {
     if let Some(bin) = select_current_home_binary(std::env::var_os("LF_BIN")) {
         return bin;
     }
@@ -196,7 +279,7 @@ fn resolve_current_home_lf_binary() -> PathBuf {
 
 /// The current Home `lf`, resolved to an absolute path that exists. Mirrors
 /// [`resolve_pinned_lf_binary`] but over [`resolve_current_home_lf_binary`].
-fn resolve_current_home_lf_binary_checked() -> Result<PathBuf> {
+pub(crate) fn resolve_current_home_lf_binary_checked() -> Result<PathBuf> {
     let candidate = resolve_current_home_lf_binary();
     if candidate.is_absolute() {
         return if candidate.exists() {
@@ -295,6 +378,14 @@ pub(crate) async fn start_lf_session(session: &str, cwd: &Path, argv: &[String])
     start_lf_session_with_env(session, cwd, argv, &[]).await
 }
 
+/// Start a machine-Home process through the current installed/dev control pair,
+/// ignoring a historical body's `LF_CONTROL_*` pins.
+pub(crate) async fn start_home_session(session: &str, cwd: &Path, argv: &[String]) -> Result<()> {
+    let context = current_home_execution_context()?;
+    let lf_bin = context.lf_bin.to_string_lossy().to_string();
+    start_session_with_context(session, cwd, argv, &[("LF_BIN", &lf_bin)], context).await
+}
+
 pub(crate) async fn start_lf_session_with_env(
     session: &str,
     cwd: &Path,
@@ -302,6 +393,16 @@ pub(crate) async fn start_lf_session_with_env(
     env: &[(&str, &str)],
 ) -> Result<()> {
     let context = pinned_execution_context()?;
+    start_session_with_context(session, cwd, argv, env, context).await
+}
+
+async fn start_session_with_context(
+    session: &str,
+    cwd: &Path,
+    argv: &[String],
+    env: &[(&str, &str)],
+    context: crate::child::ChildExecutionContext,
+) -> Result<()> {
     let inherited_context = ["LF_TRACE_ID", "LF_PROCESS_ID"]
         .into_iter()
         .filter(|key| !env.iter().any(|(explicit, _)| explicit == key))
@@ -325,38 +426,6 @@ pub(crate) async fn start_lf_session_with_env(
     start_tmux_session(session, &cwd.display().to_string(), &shell_command).await
 }
 
-pub(crate) async fn start_tmux_window_with_env(
-    session: &str,
-    window: &str,
-    cwd: &Path,
-    argv: &[String],
-    env: &[(&str, &str)],
-) -> Result<()> {
-    let context = pinned_execution_context()?;
-    let mut child_env = env
-        .iter()
-        .map(|(key, value)| ((*key).to_string(), (*value).to_string()))
-        .collect::<Vec<_>>();
-    extend_session_control_context(&mut child_env, &context, crate::build_info::provenance());
-    let environment = child_env
-        .iter()
-        .map(|(key, value)| (key.as_str(), value.as_str()))
-        .collect::<Vec<_>>();
-    let shell_command = lf_session_shell_command(argv, &environment);
-    let status = tokio::process::Command::new("tmux")
-        .args(["new-window", "-d", "-t", session, "-n", window, "-c"])
-        .arg(cwd)
-        .args(["/bin/zsh", "-lc", &shell_command])
-        .status()
-        .await
-        .map_err(|error| anyhow!("tmux failed to spawn window: {error}"))?;
-    if !status.success() {
-        return Err(anyhow!(
-            "tmux failed to launch window '{window}' in session '{session}'"
-        ));
-    }
-    Ok(())
-}
 fn extend_session_control_context(
     child_env: &mut Vec<(String, String)>,
     context: &crate::child::ChildExecutionContext,
@@ -411,7 +480,7 @@ pub(crate) fn lf_session_shell_command(argv: &[String], env: &[(&str, &str)]) ->
         .map(|(key, value)| format!("{}={}", shell_escape(key), shell_escape(value)))
         .collect::<Vec<_>>()
         .join(" ");
-    let clear_context = "if [ -n \"${LF_FORWARDED_SECRET_NAMES:-}\" ]; then unset $LF_FORWARDED_SECRET_NAMES; fi; unset LF_TRACE_ID LF_PROCESS_ID LF_WAVE_ID LF_RUN_CONTEXT LF_RUN_LEASE LF_AGENT_INVOCATION_ID LF_BIN LF_HOME LF_DB_PATH LF_CONTROL_BIN LF_CONTROL_HOME LF_CONTROL_DB_PATH LF_ACCOUNT_LEASE LF_ACCOUNT_SELECTION LF_FORWARDED_PM_TOKEN LF_FORWARDED_PM_PROVIDER LF_FORWARDED_SECRET_NAMES LF_SSH_TARGET LF_LINEAR_WEBHOOK_SECRET LF_LINEAR_VIEWER_ID LF_GITHUB_WEBHOOK_SECRET LF_GITHUB_WEBHOOK_URL LF_LFD_ALLOW_NON_LOOPBACK GH_TOKEN OPENCODE_API_KEY CLAUDE_CODE_OAUTH_TOKEN ANTHROPIC_API_KEY CODEX_ACCESS_TOKEN OPENAI_API_KEY";
+    let clear_context = "if [ -n \"${LF_FORWARDED_SECRET_NAMES:-}\" ]; then unset $LF_FORWARDED_SECRET_NAMES; fi; unset LF_TRACE_ID LF_PROCESS_ID LF_WAVE_ID LF_RUN_CONTEXT LF_RUN_LEASE LF_AGENT_INVOCATION_ID LF_BIN LF_HOME LF_DB_PATH LF_CONTROL_BIN LF_CONTROL_HOME LF_CONTROL_DB_PATH LF_ACCOUNT_LEASE LF_ACCOUNT_SELECTION LF_FORWARDED_PM_TOKEN LF_FORWARDED_PM_PROVIDER LF_FORWARDED_SECRET_NAMES LF_SSH_TARGET LF_LINEAR_WEBHOOK_SECRET LF_LINEAR_VIEWER_ID LF_GITHUB_WEBHOOK_SECRET LF_GITHUB_WEBHOOK_URL LF_LFD_ALLOW_NON_LOOPBACK LF_DISCORD_TOKEN GH_TOKEN OPENCODE_API_KEY CLAUDE_CODE_OAUTH_TOKEN ANTHROPIC_API_KEY CODEX_ACCESS_TOKEN OPENAI_API_KEY";
     if env.is_empty() {
         format!("{clear_context}; exec {command}")
     } else {
@@ -466,6 +535,7 @@ fn forwarded_authority_env_names() -> Vec<String> {
         "LF_GITHUB_WEBHOOK_SECRET".to_string(),
         "LF_GITHUB_WEBHOOK_URL".to_string(),
         "LF_LFD_ALLOW_NON_LOOPBACK".to_string(),
+        crate::wave::discord::TOKEN_ENV.to_string(),
         "GH_TOKEN".to_string(),
         "OPENCODE_API_KEY".to_string(),
         "CLAUDE_CODE_OAUTH_TOKEN".to_string(),
@@ -498,7 +568,8 @@ mod tests {
 
     use super::{
         extend_session_control_context, forwarded_authority_env_names, lf_session_shell_command,
-        pin_control_binary, select_binary_override, select_current_home_binary, tmux_installed,
+        pin_control_binary, select_binary_override, select_current_home_binary, select_lfd_binary,
+        tmux_installed,
     };
     use crate::build_info::BuildProvenance;
     use crate::child::ChildExecutionContext;
@@ -542,6 +613,32 @@ mod tests {
                 Some("/ambient/lf".into()),
             ),
             Some(PathBuf::from("/production/lf"))
+        );
+    }
+
+    #[test]
+    fn release_daemon_resolution_prefers_the_promoted_target_over_a_stale_store_sibling() {
+        assert_eq!(
+            select_lfd_binary(
+                BuildProvenance::Release,
+                None,
+                Some(PathBuf::from("/home/op/.lf/bin/lfd")),
+                None,
+                Some(PathBuf::from("/home/op/.local/bin/lfd")),
+                None,
+            ),
+            PathBuf::from("/home/op/.local/bin/lfd")
+        );
+        assert_eq!(
+            select_lfd_binary(
+                BuildProvenance::Development,
+                None,
+                Some(PathBuf::from("/repo/target/debug/lfd")),
+                None,
+                Some(PathBuf::from("/home/op/.local/bin/lfd")),
+                None,
+            ),
+            PathBuf::from("/repo/target/debug/lfd")
         );
     }
 
@@ -630,6 +727,7 @@ mod tests {
         ));
         assert!(command.contains("LF_AGENT_INVOCATION_ID"));
         assert!(command.contains("LF_ACCOUNT_LEASE LF_ACCOUNT_SELECTION"));
+        assert!(command.contains("LF_DISCORD_TOKEN"));
         assert!(command.contains("GH_TOKEN OPENCODE_API_KEY"));
         assert!(command.ends_with(
             "exec env 'LF_RUN_CONTEXT'='agent' 'LF_WAVE_ID'='infra' 'lf' '__work' 'task' 'tsk_123'"
@@ -663,8 +761,19 @@ mod tests {
         assert!(names.iter().any(|name| name == "GH_TOKEN"));
         assert!(names.iter().any(|name| name == "LF_LINEAR_WEBHOOK_SECRET"));
         assert!(names.iter().any(|name| name == "LF_LFD_ALLOW_NON_LOOPBACK"));
+        assert!(names.iter().any(|name| name == "LF_DISCORD_TOKEN"));
         assert!(names.iter().any(|name| name == "SENTRY_TOKEN"));
         assert!(names.iter().any(|name| name == "STRIPE_KEY"));
+    }
+
+    #[test]
+    fn discord_chat_token_is_scrubbed_from_durable_provider_children() {
+        assert!(forwarded_authority_env_names()
+            .iter()
+            .any(|name| name == crate::wave::discord::TOKEN_ENV));
+        let command = lf_session_shell_command(&["lf".into(), "wave".into()], &[]);
+        assert!(command.contains("unset "));
+        assert!(command.contains(crate::wave::discord::TOKEN_ENV));
     }
 
     #[test]

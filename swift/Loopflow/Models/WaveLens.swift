@@ -88,18 +88,36 @@ public struct WaveLens: Sendable, Hashable {
     /// no such reading; see `WaveViewModel.lens`, which shows it as unknown rather
     /// than guessing from a local session probe.
     ///
-    /// - green: a live body is advancing.
-    /// - red: no live body, but active work still expects execution.
-    /// - black: off and clean — no live body, no active work.
+    /// - green: the Wave listener answered its health probe.
+    /// - blue: authored policy pauses new turns; listener evidence stays in the reason.
+    /// - red: enabled and observed liveness have not converged.
+    /// - black: disabled and no listener remains.
     public static func forWave(
         live: Bool,
+        paused: Bool = false,
+        enabled: Bool = true,
         status: WorkStatus,
         activeTasks: Int,
         activeProjects: Int
     ) -> WaveLens {
-        let hasLiveBody = live || status.isRunning
-        if hasLiveBody {
-            return WaveLens(color: .green, reason: "Running · a body is advancing")
+        if !enabled {
+            return live
+                ? WaveLens(color: .red, reason: "Disabled · listener still answered")
+                : WaveLens(color: .black, reason: "Disabled on this Home")
+        }
+        if paused {
+            return WaveLens(
+                color: .blue,
+                reason: live
+                    ? "Paused · listener is serving and queueing input"
+                    : "Paused · listener is stopped"
+            )
+        }
+        if live {
+            return WaveLens(color: .green, reason: "Listening · Wave listener answered")
+        }
+        if status.isRunning {
+            return WaveLens(color: .red, reason: "Run active · Wave listener did not answer")
         }
         let outstanding = activeTasks + activeProjects
         if outstanding > 0 {
@@ -109,7 +127,7 @@ public struct WaveLens: Sendable, Hashable {
                 reason: "Stopped · \(outstanding) active \(noun) still expect work"
             )
         }
-        return WaveLens(color: .black, reason: "Off · no active work")
+        return WaveLens(color: .red, reason: "Expected live · Wave listener did not answer")
     }
 
     /// Fold Task attention into the parent's single reading. Priority is

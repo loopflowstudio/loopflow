@@ -1,8 +1,8 @@
 use crate::child::ChildRef;
 use crate::durable::{
-    AdvanceReceipt, AgentInvocation, AgentInvocationId, Answer, AnswerAttemptHistory,
-    AnswerContext, AskExchange, AskId, Author, Basis, BoundarySeed, ContainmentObservation,
-    ControlCtx, DoneProposal, EpochReceipt, FlowPosition, Home, HomeId, InterruptReceipt,
+    AdvanceReceipt, AgentInvocation, AgentInvocationId, Ask, AskBody, AskClaim, AskId, AskOrigin,
+    AskResult, AskTarget, Author, Basis, BoundarySeed, ContainmentObservation, ControlCtx,
+    DoneProposal, EpochReceipt, FlowPosition, Home, HomeId, InterruptReceipt, InvocationRoute,
     InvocationSurface, Placement, Run, RunAdvance, RunControl, RunLease, RunTrigger, Send, SendId,
     SendState, SteerId, SteerReceipt, StopCause, StopReceipt, ToolResponseReceipt,
     ToolResponseWrite, WorkRef, WorkStatus,
@@ -19,15 +19,17 @@ pub(crate) struct TaskWriterState {
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub(crate) enum AskCommentTransition {
-    Ask,
-    Answer,
+    Requested,
+    Result,
 }
 
 impl AskCommentTransition {
+    // These are published outbox/marker values. Keep their bytes stable while
+    // the Rust vocabulary follows requested-session and typed-result state.
     pub(crate) fn as_str(self) -> &'static str {
         match self {
-            Self::Ask => "ask",
-            Self::Answer => "answer",
+            Self::Requested => "ask",
+            Self::Result => "answer",
         }
     }
 
@@ -86,6 +88,14 @@ impl Store {
         run_sqlite(&self.sqlite, move |store| store.placement(&work)).await
     }
 
+    pub async fn set_work_enabled(&self, work: &WorkRef, enabled: bool) -> StoreResult<Placement> {
+        let work = work.clone();
+        run_sqlite(&self.sqlite, move |store| {
+            store.set_work_enabled(&work, enabled)
+        })
+        .await
+    }
+
     pub(crate) async fn place_work(
         &self,
         work: &WorkRef,
@@ -111,6 +121,28 @@ impl Store {
         let work = work.clone();
         run_sqlite(&self.sqlite, move |store| {
             store.reserve_run(&work, &trigger)
+        })
+        .await
+    }
+
+    /// Reserve an immediate child only if the caller's selected Turn Basis is current.
+    pub(crate) async fn reserve_child_run(
+        &self,
+        caller: &RunLease,
+        work: &WorkRef,
+        trigger: RunTrigger,
+    ) -> StoreResult<(Run, RunLease)> {
+        let _promotion_lock = crate::promotion_lock::acquire_shared()
+            .await
+            .map_err(|error| {
+                StoreError::InvalidData(format!(
+                    "acquire shared promotion lock before child Run reservation: {error}"
+                ))
+            })?;
+        let caller = caller.clone();
+        let work = work.clone();
+        run_sqlite(&self.sqlite, move |store| {
+            store.reserve_child_run(&caller, &work, &trigger)
         })
         .await
     }
@@ -143,6 +175,11 @@ impl Store {
         run_sqlite(&self.sqlite, move |store| store.run_by_id(&run_id)).await
     }
 
+    pub(crate) async fn latest_run(&self, work: &WorkRef) -> StoreResult<Option<Run>> {
+        let work = work.clone();
+        run_sqlite(&self.sqlite, move |store| store.latest_run(&work)).await
+    }
+
     pub(crate) async fn resolve_run_lease(
         &self,
         token: crate::durable::RunLeaseToken,
@@ -153,6 +190,18 @@ impl Store {
     pub(crate) async fn validate_run_lease(&self, lease: &RunLease) -> StoreResult<()> {
         let lease = lease.clone();
         run_sqlite(&self.sqlite, move |store| store.validate_run_lease(&lease)).await
+    }
+
+    pub(crate) async fn record_first_material_at(
+        &self,
+        lease: &RunLease,
+        observed_at: time::OffsetDateTime,
+    ) -> StoreResult<time::OffsetDateTime> {
+        let lease = lease.clone();
+        run_sqlite(&self.sqlite, move |store| {
+            store.record_first_material_at(&lease, observed_at)
+        })
+        .await
     }
 
     pub async fn advance_run(
@@ -180,6 +229,22 @@ impl Store {
         .await
     }
 
+    pub(crate) async fn finish_run(
+        &self,
+        lease: &RunLease,
+        outcome: crate::durable::BoundaryState,
+    ) -> StoreResult<()> {
+        let lease = lease.clone();
+        run_sqlite(&self.sqlite, move |store| store.finish_run(&lease, outcome)).await
+    }
+
+    /// Release Wave Run authority from the process interrupt handler, which
+    /// exits before Tokio can drive the listener's async shutdown path.
+    pub(crate) fn stop_run_on_interrupt(&self, lease: &RunLease) -> StoreResult<StopReceipt> {
+        self.sqlite
+            .stop_run(lease, &StopCause::Requested, ContainmentObservation::Absent)
+    }
+
     pub(crate) async fn run_control(
         &self,
         lease: &RunLease,
@@ -205,52 +270,266 @@ impl Store {
         .await
     }
 
-    pub(crate) async fn open_ask(
+    pub async fn create_ask(
         &self,
         lease: &RunLease,
-        invocation_id: &AgentInvocationId,
-        question: &str,
-    ) -> StoreResult<AskExchange> {
+        origin: AskOrigin,
+        request: AskBody,
+        target: AskTarget,
+    ) -> StoreResult<Ask> {
         let lease = lease.clone();
-        let invocation_id = invocation_id.clone();
-        let question = question.to_string();
         run_sqlite(&self.sqlite, move |store| {
-            store.open_ask(&lease, &invocation_id, &question)
+            store.create_ask(&lease, &origin, &request, &target)
         })
         .await
     }
 
-    pub(crate) async fn current_ask(
+    pub async fn ask_by_id(&self, ask_id: &AskId) -> StoreResult<Ask> {
+        let ask_id = ask_id.clone();
+        run_sqlite(&self.sqlite, move |store| store.ask_by_id(&ask_id)).await
+    }
+
+    pub async fn pending_asks(
         &self,
-        lease: &RunLease,
-        invocation_id: &AgentInvocationId,
-        ask_id: Option<&AskId>,
-    ) -> StoreResult<AskExchange> {
-        let lease = lease.clone();
-        let invocation_id = invocation_id.clone();
-        let ask_id = ask_id.cloned();
+        context: &ControlCtx<'_>,
+        target: &AskTarget,
+    ) -> StoreResult<Vec<Ask>> {
+        let lease = match context {
+            ControlCtx::User(_) => None,
+            ControlCtx::Run(lease) => Some((*lease).clone()),
+        };
+        let target = target.clone();
         run_sqlite(&self.sqlite, move |store| {
-            store.current_ask(&lease, &invocation_id, ask_id.as_ref())
+            store.pending_asks(lease.as_ref(), &target)
         })
         .await
     }
 
-    pub async fn answer_ask(
+    pub(crate) async fn claim_ask(
         &self,
         context: &ControlCtx<'_>,
         ask_id: &AskId,
-        text: &str,
-    ) -> StoreResult<Answer> {
+        route: InvocationRoute,
+        surface: &str,
+    ) -> StoreResult<AskClaim> {
         let lease = match context {
             ControlCtx::User(_) => None,
             ControlCtx::Run(lease) => Some((*lease).clone()),
         };
         let ask_id = ask_id.clone();
-        let text = text.to_string();
+        let surface = surface.to_string();
         run_sqlite(&self.sqlite, move |store| {
-            store.answer_ask(lease.as_ref(), &ask_id, &text)
+            store.claim_ask(lease.as_ref(), &ask_id, &route, &surface)
         })
         .await
+    }
+
+    pub(crate) async fn claim_flow_step_run_lease(
+        &self,
+        ask_id: &AskId,
+        invocation_id: &AgentInvocationId,
+    ) -> StoreResult<Option<RunLease>> {
+        let ask_id = ask_id.clone();
+        let invocation_id = invocation_id.clone();
+        run_sqlite(&self.sqlite, move |store| {
+            store.claim_flow_step_run_lease(&ask_id, &invocation_id)
+        })
+        .await
+    }
+
+    pub async fn mark_ask_ready(
+        &self,
+        ask_id: &AskId,
+        invocation_id: &AgentInvocationId,
+    ) -> StoreResult<AgentInvocation> {
+        let ask_id = ask_id.clone();
+        let invocation_id = invocation_id.clone();
+        run_sqlite(&self.sqlite, move |store| {
+            store.mark_ask_ready(&ask_id, &invocation_id)
+        })
+        .await
+    }
+
+    pub async fn mark_ask_presented(
+        &self,
+        ask_id: &AskId,
+        invocation_id: &AgentInvocationId,
+    ) -> StoreResult<AgentInvocation> {
+        let ask_id = ask_id.clone();
+        let invocation_id = invocation_id.clone();
+        run_sqlite(&self.sqlite, move |store| {
+            store.mark_ask_presented(&ask_id, &invocation_id)
+        })
+        .await
+    }
+
+    pub async fn mark_presented_by_target(
+        &self,
+        context: &ControlCtx<'_>,
+        ask_id: &AskId,
+        invocation_id: &AgentInvocationId,
+    ) -> StoreResult<AgentInvocation> {
+        let caller = match context {
+            ControlCtx::User(_) => None,
+            ControlCtx::Run(lease) => Some((*lease).clone()),
+        };
+        let ask_id = ask_id.clone();
+        let invocation_id = invocation_id.clone();
+        run_sqlite(&self.sqlite, move |store| {
+            store.mark_presented_by_target(caller.as_ref(), &ask_id, &invocation_id)
+        })
+        .await
+    }
+
+    pub(crate) fn interrupt_ask_on_interrupt(
+        &self,
+        ask_id: &AskId,
+        invocation_id: &AgentInvocationId,
+    ) -> StoreResult<()> {
+        self.sqlite
+            .interrupt_ask_on_interrupt(ask_id, invocation_id)
+            .map(|_| ())
+    }
+
+    pub async fn settle_ask(
+        &self,
+        ask_id: &AskId,
+        invocation_id: &AgentInvocationId,
+        result: AskResult,
+    ) -> StoreResult<Ask> {
+        let ask_id = ask_id.clone();
+        let invocation_id = invocation_id.clone();
+        run_sqlite(&self.sqlite, move |store| {
+            store.settle_ask(&ask_id, &invocation_id, &result)
+        })
+        .await
+    }
+
+    pub async fn release_ask(
+        &self,
+        ask_id: &AskId,
+        invocation_id: &AgentInvocationId,
+        reason: Option<&str>,
+    ) -> StoreResult<Ask> {
+        let ask_id = ask_id.clone();
+        let invocation_id = invocation_id.clone();
+        let reason = reason.map(str::to_string);
+        run_sqlite(&self.sqlite, move |store| {
+            store.release_ask(&ask_id, &invocation_id, reason.as_deref())
+        })
+        .await
+    }
+
+    pub(crate) async fn close_ask_invocation(
+        &self,
+        ask_id: &AskId,
+        invocation_id: &AgentInvocationId,
+        reason: Option<&str>,
+        outcome: crate::durable::BoundaryState,
+    ) -> StoreResult<Ask> {
+        let ask_id = ask_id.clone();
+        let invocation_id = invocation_id.clone();
+        let reason = reason.map(str::to_string);
+        run_sqlite(&self.sqlite, move |store| {
+            store.close_ask_invocation(&ask_id, &invocation_id, reason.as_deref(), outcome)
+        })
+        .await
+    }
+
+    pub async fn escalate_ask(
+        &self,
+        ask_id: &AskId,
+        invocation_id: &AgentInvocationId,
+    ) -> StoreResult<Ask> {
+        let ask_id = ask_id.clone();
+        let invocation_id = invocation_id.clone();
+        run_sqlite(&self.sqlite, move |store| {
+            store.escalate_ask(&ask_id, &invocation_id)
+        })
+        .await
+    }
+
+    pub async fn escalate_queued_ask(
+        &self,
+        context: &ControlCtx<'_>,
+        ask_id: &AskId,
+    ) -> StoreResult<Ask> {
+        let caller = match context {
+            ControlCtx::User(_) => None,
+            ControlCtx::Run(lease) => Some((*lease).clone()),
+        };
+        let ask_id = ask_id.clone();
+        run_sqlite(&self.sqlite, move |store| {
+            store.escalate_queued_ask(caller.as_ref(), &ask_id)
+        })
+        .await
+    }
+
+    pub async fn cancel_ask(
+        &self,
+        context: &ControlCtx<'_>,
+        ask_id: &AskId,
+        reason: &str,
+    ) -> StoreResult<Ask> {
+        let lease = match context {
+            ControlCtx::User(_) => None,
+            ControlCtx::Run(lease) => Some((*lease).clone()),
+        };
+        let ask_id = ask_id.clone();
+        let reason = reason.to_string();
+        run_sqlite(&self.sqlite, move |store| {
+            store.cancel_ask(lease.as_ref(), &ask_id, &reason)
+        })
+        .await
+    }
+
+    pub async fn reconcile_ask(
+        &self,
+        invocation_id: &AgentInvocationId,
+        observation: ContainmentObservation,
+    ) -> StoreResult<Ask> {
+        let invocation_id = invocation_id.clone();
+        run_sqlite(&self.sqlite, move |store| {
+            store.reconcile_ask(&invocation_id, observation)
+        })
+        .await
+    }
+
+    pub async fn ask_invocations(&self, ask_id: &AskId) -> StoreResult<Vec<AgentInvocation>> {
+        let ask_id = ask_id.clone();
+        run_sqlite(&self.sqlite, move |store| store.ask_invocations(&ask_id)).await
+    }
+
+    pub(crate) async fn ask_presentation(
+        &self,
+        invocation_id: &AgentInvocationId,
+    ) -> StoreResult<(bool, bool)> {
+        let invocation_id = invocation_id.clone();
+        run_sqlite(&self.sqlite, move |store| {
+            store.ask_presentation(&invocation_id)
+        })
+        .await
+    }
+
+    pub(crate) async fn request_intervention(
+        &self,
+        lease: &RunLease,
+        invocation_id: &AgentInvocationId,
+        prompt: &str,
+        user: bool,
+    ) -> StoreResult<Ask> {
+        let lease = lease.clone();
+        let invocation_id = invocation_id.clone();
+        let prompt = prompt.to_string();
+        run_sqlite(&self.sqlite, move |store| {
+            store.request_intervention(&lease, &invocation_id, &prompt, user)
+        })
+        .await
+    }
+
+    pub(crate) async fn asks_for_work_epoch(&self, lease: &RunLease) -> StoreResult<Vec<Ask>> {
+        let lease = lease.clone();
+        run_sqlite(&self.sqlite, move |store| store.asks_for_work_epoch(&lease)).await
     }
 
     pub(crate) async fn pending_ask_comment_writes(&self) -> StoreResult<Vec<AskCommentWrite>> {
@@ -301,40 +580,6 @@ impl Store {
             store.fail_ask_comment_write(&ask_id, transition, &error)
         })
         .await
-    }
-
-    pub async fn pending_asks_for_parent(&self, parent: &WorkRef) -> StoreResult<Vec<AskExchange>> {
-        let parent = parent.clone();
-        run_sqlite(&self.sqlite, move |store| {
-            store.pending_asks_for_parent(&parent)
-        })
-        .await
-    }
-
-    pub(crate) async fn oldest_answer_context(
-        &self,
-        parent: &WorkRef,
-    ) -> StoreResult<Option<AnswerContext>> {
-        let parent = parent.clone();
-        run_sqlite(&self.sqlite, move |store| {
-            store.oldest_answer_context(&parent)
-        })
-        .await
-    }
-
-    pub(crate) async fn answer_attempt_history(
-        &self,
-        ask_id: &AskId,
-    ) -> StoreResult<AnswerAttemptHistory> {
-        let ask_id = ask_id.clone();
-        run_sqlite(&self.sqlite, move |store| {
-            store.answer_attempt_history(&ask_id)
-        })
-        .await
-    }
-
-    pub async fn pending_user_asks(&self) -> StoreResult<Vec<AskExchange>> {
-        run_sqlite(&self.sqlite, move |store| store.pending_user_asks()).await
     }
 
     pub async fn has_pending_user_ask_for_work(&self, work: &WorkRef) -> StoreResult<bool> {
@@ -646,18 +891,40 @@ impl Store {
 #[cfg(test)]
 mod tests {
     use std::path::PathBuf;
+    use std::sync::Arc;
 
     use time::OffsetDateTime;
 
     use crate::durable::{
-        AuthenticatedRequest, BoundaryState, Containment, ContainmentObservation, ControlCtx,
-        InvocationRoute, RunAdvance, RunState, RunTrigger, StopCause, WorkRef, WorkStatus,
+        AskBody, AskOrigin, AskResult, AskState, AskTarget, AuthenticatedRequest, BoundaryState,
+        Containment, ContainmentObservation, ControlCtx, FlowPosition, InvocationRoute, RunAdvance,
+        RunState, RunTrigger, StopCause, WorkRef, WorkStatus,
     };
     use crate::id::WaveId;
     use crate::planning::{LinearProjectId, ProjectPlan};
     use crate::project::{Project, ProjectId};
     use crate::store::{open_store, StorageConfig, StoreError};
     use crate::wave::Wave;
+
+    impl super::Store {
+        pub(crate) async fn claim_test_ask(
+            &self,
+            context: &ControlCtx<'_>,
+            ask_id: &crate::durable::AskId,
+        ) -> crate::store::StoreResult<crate::durable::AskClaim> {
+            self.claim_ask(
+                context,
+                ask_id,
+                InvocationRoute {
+                    provider: "codex".to_string(),
+                    model: None,
+                    account_id: None,
+                },
+                "ask_tui",
+            )
+            .await
+        }
+    }
 
     async fn wave_work() -> (super::Store, WorkRef) {
         let directory = tempfile::tempdir().unwrap().keep();
@@ -737,6 +1004,156 @@ mod tests {
         (lease, invocation)
     }
 
+    struct AskFixture {
+        store: super::Store,
+        parent_work: WorkRef,
+        parent_lease: crate::durable::RunLease,
+        child_lease: crate::durable::RunLease,
+        child_invocation: crate::durable::AgentInvocation,
+        turn: crate::durable::Turn,
+    }
+
+    async fn ask_fixture() -> AskFixture {
+        let directory = tempfile::tempdir().unwrap().keep();
+        let store = open_store(&StorageConfig::sqlite(directory.join("registry.db")))
+            .await
+            .unwrap();
+        let wave = Wave::new(
+            WaveId::new(),
+            "runtime".to_string(),
+            directory.display().to_string(),
+        );
+        store.create_wave(&wave).await.unwrap();
+        let parent_work = WorkRef::Wave(wave.id().clone());
+        let (parent_lease, _) = start_invocation(&store, &parent_work).await;
+        let project = project_for(&wave);
+        store.create_project(&project).await.unwrap();
+        let child_work = WorkRef::Project(project.id.clone());
+        let (child_lease, child_invocation) = start_invocation(&store, &child_work).await;
+        let crate::durable::AdvanceReceipt::Turn(turn) = store
+            .advance_run(
+                &child_lease,
+                RunAdvance::TurnStarting {
+                    invocation_id: child_invocation.id.clone(),
+                },
+            )
+            .await
+            .unwrap()
+        else {
+            panic!("expected Turn receipt")
+        };
+        AskFixture {
+            store,
+            parent_work,
+            parent_lease,
+            child_lease,
+            child_invocation,
+            turn,
+        }
+    }
+
+    async fn create_parent_ask(fixture: &AskFixture, prompt: &str) -> crate::durable::Ask {
+        let run = fixture
+            .store
+            .run_by_id(&fixture.child_lease.run_id)
+            .await
+            .unwrap();
+        fixture
+            .store
+            .create_ask(
+                &fixture.child_lease,
+                AskOrigin {
+                    work: fixture.child_lease.work.clone(),
+                    run_id: run.id,
+                    turn_id: Some(fixture.turn.id.clone()),
+                    invocation_id: Some(fixture.child_invocation.id.clone()),
+                    home_id: run.home_id,
+                    cwd: run.cwd.unwrap(),
+                },
+                AskBody::Intervention {
+                    prompt: prompt.to_string(),
+                },
+                AskTarget::Parent(fixture.parent_work.clone()),
+            )
+            .await
+            .unwrap()
+    }
+
+    #[tokio::test]
+    async fn intervention_routes_to_parent_by_default_and_user_only_explicitly() {
+        let fixture = ask_fixture().await;
+        let parent = fixture
+            .store
+            .request_intervention(
+                &fixture.child_lease,
+                &fixture.child_invocation.id,
+                "Choose the proof",
+                false,
+            )
+            .await
+            .unwrap();
+        assert_eq!(
+            parent.target,
+            AskTarget::Parent(fixture.parent_work.clone())
+        );
+        fixture
+            .store
+            .cancel_ask(
+                &ControlCtx::Run(&fixture.child_lease),
+                &parent.id,
+                "route proof complete",
+            )
+            .await
+            .unwrap();
+
+        let user = fixture
+            .store
+            .request_intervention(
+                &fixture.child_lease,
+                &fixture.child_invocation.id,
+                "Connect the account",
+                true,
+            )
+            .await
+            .unwrap();
+        assert_eq!(user.target, AskTarget::User);
+
+        let (root_store, root_work) = wave_work().await;
+        let (root_lease, root_invocation) = start_invocation(&root_store, &root_work).await;
+        root_store
+            .advance_run(
+                &root_lease,
+                RunAdvance::TurnStarting {
+                    invocation_id: root_invocation.id.clone(),
+                },
+            )
+            .await
+            .unwrap();
+        let missing_parent = root_store
+            .request_intervention(
+                &root_lease,
+                &root_invocation.id,
+                "Do not escalate silently",
+                false,
+            )
+            .await
+            .unwrap_err();
+        assert!(missing_parent.to_string().contains("lf ask --user"));
+        assert_eq!(
+            root_store
+                .request_intervention(
+                    &root_lease,
+                    &root_invocation.id,
+                    "User intervention is genuinely required",
+                    true,
+                )
+                .await
+                .unwrap()
+                .target,
+            AskTarget::User
+        );
+    }
+
     #[tokio::test]
     async fn interrupt_ends_a_reserved_run_before_containment_exists() {
         let (store, work) = wave_work().await;
@@ -752,6 +1169,35 @@ mod tests {
         assert!(receipt.turn_ids.is_empty());
         assert!(store.current_run(&work).await.unwrap().is_none());
         assert_eq!(store.work_status(&work).await.unwrap(), WorkStatus::Ready);
+    }
+
+    #[tokio::test]
+    async fn listener_interrupt_releases_run_authority_for_restart() {
+        let (store, work) = wave_work().await;
+        let (_, lease) = store.reserve_run(&work, RunTrigger::User).await.unwrap();
+
+        let stopped = store.stop_run_on_interrupt(&lease).unwrap();
+
+        assert_eq!(stopped.run.state, RunState::Ended);
+        assert!(store.current_run(&work).await.unwrap().is_none());
+        assert!(store.reserve_run(&work, RunTrigger::User).await.is_ok());
+    }
+
+    #[tokio::test]
+    async fn reserving_a_fenced_run_names_the_existing_authority() {
+        let (store, work) = wave_work().await;
+        let (run, _) = store.reserve_run(&work, RunTrigger::User).await.unwrap();
+
+        let error = store
+            .reserve_run(&work, RunTrigger::User)
+            .await
+            .expect_err("second Run must remain fenced");
+
+        assert!(matches!(
+            error,
+            StoreError::RunFenced { run_id, state, .. }
+                if run_id == run.id && state == RunState::Reserved
+        ));
     }
 
     #[tokio::test]
@@ -801,7 +1247,7 @@ mod tests {
     }
 
     #[tokio::test]
-    async fn parent_answer_wins_and_stale_run_cannot_write() {
+    async fn parent_ask_session_wins_and_stale_run_cannot_claim() {
         let directory = tempfile::tempdir().unwrap().keep();
         let store = open_store(&StorageConfig::sqlite(directory.join("registry.db")))
             .await
@@ -833,21 +1279,40 @@ mod tests {
 
         let ask = store
             .sqlite
-            .open_ask(&child_lease, &child_invocation.id, "Which proof matters?")
+            .request_intervention(
+                &child_lease,
+                &child_invocation.id,
+                "Which proof matters?",
+                false,
+            )
             .unwrap();
-        assert_eq!(ask.turn_id, turn.id);
+        assert_eq!(ask.origin.turn_id, Some(turn.id));
         assert_eq!(
-            ask.route,
-            crate::durable::AnswerRoute::Parent(parent_work.clone())
+            ask.target,
+            crate::durable::AskTarget::Parent(parent_work.clone())
         );
-        let recovered = store
+        let duplicate = store
             .sqlite
-            .open_ask(&child_lease, &child_invocation.id, "Which proof matters?")
+            .request_intervention(
+                &child_lease,
+                &child_invocation.id,
+                "Which proof matters?",
+                false,
+            )
             .unwrap();
-        assert_eq!(recovered.id, ask.id);
+        assert_ne!(
+            duplicate.id, ask.id,
+            "duplicate request text must not collapse Ask identity"
+        );
         assert_eq!(
-            store.pending_asks_for_parent(&parent_work).await.unwrap(),
-            vec![ask.clone()]
+            store
+                .pending_asks(
+                    &ControlCtx::Run(&parent_lease),
+                    &AskTarget::Parent(parent_work.clone()),
+                )
+                .await
+                .unwrap(),
+            vec![ask.clone(), duplicate]
         );
 
         store
@@ -860,11 +1325,7 @@ mod tests {
             .unwrap();
         assert!(matches!(
             store
-                .answer_ask(
-                    &ControlCtx::Run(&parent_lease),
-                    &ask.id,
-                    "The live blocking exchange."
-                )
+                .claim_test_ask(&ControlCtx::Run(&parent_lease), &ask.id)
                 .await,
             Err(StoreError::InvalidAuthority(_))
         ));
@@ -878,49 +1339,66 @@ mod tests {
             .await
             .unwrap();
         assert_eq!(
-            store.pending_asks_for_parent(&parent_work).await.unwrap(),
-            vec![ask.clone()],
+            store.ask_by_id(&ask.id).await.unwrap(),
+            ask,
             "runner loss must not erase its unanswered Ask"
         );
 
         let (replacement_lease, _replacement_invocation) =
             start_invocation(&store, &parent_work).await;
-        let answer = store
-            .answer_ask(
-                &ControlCtx::Run(&replacement_lease),
-                &ask.id,
-                "The live blocking exchange.",
+        let claim = store
+            .claim_test_ask(&ControlCtx::Run(&replacement_lease), &ask.id)
+            .await
+            .unwrap();
+        store
+            .mark_ask_ready(&ask.id, &claim.invocation_id)
+            .await
+            .unwrap();
+        store
+            .mark_ask_presented(&ask.id, &claim.invocation_id)
+            .await
+            .unwrap();
+        store
+            .stop_run(
+                &replacement_lease,
+                StopCause::Requested,
+                ContainmentObservation::Absent,
             )
             .await
             .unwrap();
-        assert_eq!(answer.ask_id, ask.id);
+        let result = AskResult::Resolved {
+            summary: "The live blocking exchange.".to_string(),
+        };
+        let settled = store
+            .settle_ask(&ask.id, &claim.invocation_id, result.clone())
+            .await
+            .unwrap();
+        assert_eq!(settled.id, ask.id);
+        assert_eq!(
+            settled.terminal_author,
+            Some(crate::durable::Author::Run(
+                replacement_lease.run_id.clone()
+            ))
+        );
         assert_eq!(
             store
-                .answer_ask(
-                    &ControlCtx::Run(&replacement_lease),
-                    &ask.id,
-                    "The live blocking exchange.",
-                )
+                .settle_ask(&ask.id, &claim.invocation_id, result)
                 .await
                 .unwrap(),
-            answer
+            settled
         );
         assert!(matches!(
             store
-                .answer_ask(
-                    &ControlCtx::Run(&replacement_lease),
+                .settle_ask(
                     &ask.id,
-                    "A different answer",
+                    &claim.invocation_id,
+                    AskResult::Resolved {
+                        summary: "A different answer".to_string()
+                    }
                 )
                 .await,
             Err(StoreError::InvalidAuthority(_))
         ));
-        assert!(store
-            .pending_asks_for_parent(&parent_work)
-            .await
-            .unwrap()
-            .is_empty());
-
         let (recovery_lease, recovery_invocation) = start_invocation(&store, &child_work).await;
         store
             .advance_run(
@@ -932,10 +1410,631 @@ mod tests {
             .await
             .unwrap();
         let current = store
-            .current_ask(&recovery_lease, &recovery_invocation.id, Some(&ask.id))
+            .asks_for_work_epoch(&recovery_lease)
+            .await
+            .unwrap()
+            .into_iter()
+            .find(|candidate| candidate.id == ask.id)
+            .unwrap();
+        assert_eq!(current.result, settled.result);
+    }
+
+    #[tokio::test]
+    async fn ask_claim_is_idempotent_and_first_terminal_result_wins() {
+        let fixture = ask_fixture().await;
+        let ask = create_parent_ask(&fixture, "Which proof matters?").await;
+        let request = AuthenticatedRequest::cli();
+
+        assert!(matches!(
+            fixture
+                .store
+                .claim_test_ask(&ControlCtx::User(&request), &ask.id)
+                .await,
+            Err(StoreError::InvalidAuthority(_))
+        ));
+        let first = fixture
+            .store
+            .claim_test_ask(&ControlCtx::Run(&fixture.parent_lease), &ask.id)
             .await
             .unwrap();
-        assert_eq!(current.answer, Some(answer));
+        assert!(first.needs_launch);
+        let reopened = fixture
+            .store
+            .claim_test_ask(&ControlCtx::Run(&fixture.parent_lease), &ask.id)
+            .await
+            .unwrap();
+        assert_eq!(reopened.invocation_id, first.invocation_id);
+        assert!(!reopened.needs_launch);
+
+        let ask_invocation = fixture
+            .store
+            .ask_invocations(&ask.id)
+            .await
+            .unwrap()
+            .into_iter()
+            .find(|invocation| invocation.id == first.invocation_id)
+            .unwrap();
+        let surface = fixture
+            .store
+            .invocation_surface(&ask_invocation.id)
+            .await
+            .unwrap()
+            .unwrap();
+        assert_eq!(surface.run.cwd, Some(ask.origin.cwd.clone()));
+        assert_eq!(
+            surface.attach_argv,
+            Some(vec![
+                "tmux".to_string(),
+                "attach-session".to_string(),
+                "-t".to_string(),
+                crate::ops::ask::session_name(&ask_invocation.id),
+            ])
+        );
+        assert!(matches!(
+            fixture
+                .store
+                .mark_ask_presented(&ask.id, &first.invocation_id)
+                .await,
+            Err(StoreError::InvalidAuthority(_))
+        ));
+        fixture
+            .store
+            .mark_ask_ready(&ask.id, &first.invocation_id)
+            .await
+            .unwrap();
+        fixture
+            .store
+            .mark_ask_presented(&ask.id, &first.invocation_id)
+            .await
+            .unwrap();
+        let resolved = AskResult::Resolved {
+            summary: "The durable blocking exchange.".to_string(),
+        };
+        let declined = AskResult::Declined {
+            reason: "Different terminal result".to_string(),
+        };
+        let (resolved_write, declined_write) = tokio::join!(
+            fixture
+                .store
+                .settle_ask(&ask.id, &first.invocation_id, resolved.clone()),
+            fixture
+                .store
+                .settle_ask(&ask.id, &first.invocation_id, declined.clone()),
+        );
+        let (settled, committed, rejected) = match (resolved_write, declined_write) {
+            (Ok(ask), Err(error)) => (ask, resolved, error),
+            (Err(error), Ok(ask)) => (ask, declined, error),
+            outcome => panic!("exactly one settlement must commit: {outcome:?}"),
+        };
+        assert!(matches!(rejected, StoreError::InvalidAuthority(_)));
+        assert_eq!(settled.state, committed.state());
+        assert_eq!(settled.active_invocation_id, None);
+        assert_eq!(settled.result, Some(committed.clone()));
+        assert_eq!(
+            fixture
+                .store
+                .settle_ask(&ask.id, &first.invocation_id, committed)
+                .await
+                .unwrap(),
+            settled,
+            "an exact retry observes the first committed result"
+        );
+        assert!(fixture
+            .store
+            .pending_asks(
+                &ControlCtx::Run(&fixture.parent_lease),
+                &AskTarget::Parent(fixture.parent_work),
+            )
+            .await
+            .unwrap()
+            .is_empty());
+    }
+
+    #[tokio::test]
+    async fn headless_ask_surface_keeps_its_liveness_attach_route() {
+        let fixture = ask_fixture().await;
+        let ask = create_parent_ask(&fixture, "Supervise the detached Ask session").await;
+        let claim = fixture
+            .store
+            .claim_ask(
+                &ControlCtx::Run(&fixture.parent_lease),
+                &ask.id,
+                InvocationRoute {
+                    provider: "claude".to_string(),
+                    model: Some("sonnet".to_string()),
+                    account_id: None,
+                },
+                "ask_headless",
+            )
+            .await
+            .unwrap();
+        assert!(claim.needs_launch);
+        let invocation = fixture
+            .store
+            .ask_invocations(&ask.id)
+            .await
+            .unwrap()
+            .into_iter()
+            .find(|invocation| invocation.id == claim.invocation_id)
+            .unwrap();
+
+        let surface = fixture
+            .store
+            .invocation_surface(&invocation.id)
+            .await
+            .unwrap()
+            .unwrap();
+        assert_eq!(surface.run.cwd, Some(ask.origin.cwd));
+        assert_eq!(
+            surface.attach_argv,
+            Some(vec![
+                "tmux".to_string(),
+                "attach-session".to_string(),
+                "-t".to_string(),
+                crate::ops::ask::session_name(&invocation.id),
+            ])
+        );
+    }
+
+    #[tokio::test]
+    async fn only_the_settling_attempt_can_replay_its_terminal_write() {
+        let fixture = ask_fixture().await;
+        let ask = create_parent_ask(&fixture, "Fence stale Ask authority").await;
+        let first = fixture
+            .store
+            .claim_test_ask(&ControlCtx::Run(&fixture.parent_lease), &ask.id)
+            .await
+            .unwrap();
+        fixture
+            .store
+            .release_ask(
+                &ask.id,
+                &first.invocation_id,
+                Some("retry with a new attempt"),
+            )
+            .await
+            .unwrap();
+
+        let second = fixture
+            .store
+            .claim_test_ask(&ControlCtx::Run(&fixture.parent_lease), &ask.id)
+            .await
+            .unwrap();
+        fixture
+            .store
+            .mark_ask_ready(&ask.id, &second.invocation_id)
+            .await
+            .unwrap();
+        fixture
+            .store
+            .mark_ask_presented(&ask.id, &second.invocation_id)
+            .await
+            .unwrap();
+        let result = AskResult::Resolved {
+            summary: "The current attempt settled the Ask.".to_string(),
+        };
+        fixture
+            .store
+            .settle_ask(&ask.id, &second.invocation_id, result.clone())
+            .await
+            .unwrap();
+
+        assert!(matches!(
+            fixture
+                .store
+                .settle_ask(&ask.id, &first.invocation_id, result)
+                .await,
+            Err(StoreError::InvalidAuthority(_))
+        ));
+    }
+
+    #[tokio::test]
+    async fn escalation_keeps_ask_identity_and_cancellation_closes_the_attempt() {
+        let fixture = ask_fixture().await;
+        let ask = create_parent_ask(&fixture, "Need User judgment").await;
+        let claim = fixture
+            .store
+            .claim_test_ask(&ControlCtx::Run(&fixture.parent_lease), &ask.id)
+            .await
+            .unwrap();
+        let escalated = fixture
+            .store
+            .escalate_ask(&ask.id, &claim.invocation_id)
+            .await
+            .unwrap();
+        assert_eq!(escalated.id, ask.id);
+        assert_eq!(escalated.state, AskState::Queued);
+        assert_eq!(escalated.target, AskTarget::User);
+        assert!(matches!(
+            fixture
+                .store
+                .mark_ask_ready(&ask.id, &claim.invocation_id)
+                .await,
+            Err(StoreError::InvalidAuthority(_))
+        ));
+        assert!(matches!(
+            fixture
+                .store
+                .claim_test_ask(&ControlCtx::Run(&fixture.parent_lease), &ask.id)
+                .await,
+            Err(StoreError::InvalidAuthority(_))
+        ));
+
+        let request = AuthenticatedRequest::cli();
+        let user_claim = fixture
+            .store
+            .claim_test_ask(&ControlCtx::User(&request), &ask.id)
+            .await
+            .unwrap();
+        let cancelled = fixture
+            .store
+            .cancel_ask(
+                &ControlCtx::User(&request),
+                &ask.id,
+                "No intervention needed",
+            )
+            .await
+            .unwrap();
+        assert_eq!(cancelled.id, ask.id);
+        assert_eq!(cancelled.state, AskState::Cancelled);
+        assert_eq!(cancelled.active_invocation_id, None);
+        assert_eq!(
+            cancelled.result,
+            Some(AskResult::Cancelled {
+                reason: "No intervention needed".to_string()
+            })
+        );
+        let invocations = fixture.store.ask_invocations(&ask.id).await.unwrap();
+        assert_eq!(invocations.len(), 2);
+        assert!(invocations[0].ended_at.is_some());
+        assert_eq!(invocations[1].id, user_claim.invocation_id);
+        assert!(invocations[1].ended_at.is_some());
+        for invocation in invocations {
+            assert_eq!(
+                fixture
+                    .store
+                    .invocation_surface(&invocation.id)
+                    .await
+                    .unwrap()
+                    .unwrap()
+                    .handback,
+                Some(BoundaryState::Unknown)
+            );
+        }
+    }
+
+    #[tokio::test]
+    async fn remote_unreachable_stays_claimed_but_local_absence_requeues() {
+        let fixture = ask_fixture().await;
+        let ask = create_parent_ask(&fixture, "Recover this Ask session").await;
+        let claim = fixture
+            .store
+            .claim_test_ask(&ControlCtx::Run(&fixture.parent_lease), &ask.id)
+            .await
+            .unwrap();
+
+        let remote_unreachable = fixture
+            .store
+            .reconcile_ask(&claim.invocation_id, ContainmentObservation::Unprovable)
+            .await
+            .unwrap();
+        assert_eq!(remote_unreachable.state, AskState::Claimed);
+        let still_present = fixture
+            .store
+            .reconcile_ask(&claim.invocation_id, ContainmentObservation::Present)
+            .await
+            .unwrap();
+        assert_eq!(still_present.state, AskState::Claimed);
+
+        let locally_absent = fixture
+            .store
+            .reconcile_ask(&claim.invocation_id, ContainmentObservation::Absent)
+            .await
+            .unwrap();
+        assert_eq!(locally_absent.state, AskState::Queued);
+        assert_eq!(locally_absent.active_invocation_id, None);
+        let history = fixture.store.ask_invocations(&ask.id).await.unwrap();
+        assert!(history[0].ended_at.is_some());
+        assert_eq!(
+            fixture
+                .store
+                .invocation_surface(&history[0].id)
+                .await
+                .unwrap()
+                .unwrap()
+                .handback,
+            Some(BoundaryState::Unknown)
+        );
+        let retry = fixture
+            .store
+            .claim_test_ask(&ControlCtx::Run(&fixture.parent_lease), &ask.id)
+            .await
+            .unwrap();
+        assert_ne!(retry.invocation_id, claim.invocation_id);
+    }
+
+    #[tokio::test]
+    async fn ask_invocation_endings_requeue_without_settling() {
+        let fixture = ask_fixture().await;
+        let ask = create_parent_ask(&fixture, "Keep the Ask pending").await;
+        let first = fixture
+            .store
+            .claim_test_ask(&ControlCtx::Run(&fixture.parent_lease), &ask.id)
+            .await
+            .unwrap();
+        let released = fixture
+            .store
+            .release_ask(
+                &ask.id,
+                &first.invocation_id,
+                Some("session exited cleanly"),
+            )
+            .await
+            .unwrap();
+        assert_eq!(released.state, AskState::Queued);
+        assert_eq!(released.result, None);
+
+        let second = fixture
+            .store
+            .claim_test_ask(&ControlCtx::Run(&fixture.parent_lease), &ask.id)
+            .await
+            .unwrap();
+        let interrupted = fixture
+            .store
+            .release_ask(
+                &ask.id,
+                &second.invocation_id,
+                Some("session received TERM"),
+            )
+            .await
+            .unwrap();
+        assert_eq!(interrupted.state, AskState::Queued);
+        assert_eq!(interrupted.result, None);
+
+        let invocations = fixture.store.ask_invocations(&ask.id).await.unwrap();
+        assert!(invocations
+            .iter()
+            .all(|invocation| invocation.ended_at.is_some()));
+        for invocation in invocations {
+            assert_eq!(
+                fixture
+                    .store
+                    .invocation_surface(&invocation.id)
+                    .await
+                    .unwrap()
+                    .unwrap()
+                    .handback,
+                Some(BoundaryState::Unknown)
+            );
+        }
+    }
+
+    #[tokio::test]
+    async fn parent_lane_adopts_a_claimed_attempt_before_queued_work() {
+        let fixture = ask_fixture().await;
+        let claimed = create_parent_ask(&fixture, "Keep this Ask session attached").await;
+        fixture
+            .store
+            .claim_test_ask(&ControlCtx::Run(&fixture.parent_lease), &claimed.id)
+            .await
+            .unwrap();
+        let run = fixture
+            .store
+            .run_by_id(&fixture.child_lease.run_id)
+            .await
+            .unwrap();
+        let queued = fixture
+            .store
+            .create_ask(
+                &fixture.child_lease,
+                AskOrigin {
+                    work: run.work,
+                    run_id: run.id,
+                    turn_id: None,
+                    invocation_id: None,
+                    home_id: run.home_id,
+                    cwd: run.cwd.unwrap(),
+                },
+                AskBody::FlowStep {
+                    flow: "task-first".to_string(),
+                    node_id: "queued-review".to_string(),
+                    skill: "review".to_string(),
+                    iteration: 0,
+                },
+                AskTarget::Parent(fixture.parent_work.clone()),
+            )
+            .await
+            .unwrap();
+
+        let mut lane = crate::ops::ask::AskLane::new(
+            fixture.parent_work.clone(),
+            fixture.parent_lease.clone(),
+        );
+        let store = Arc::new(fixture.store);
+        assert!(lane.reconcile(&store).await.unwrap());
+        assert_eq!(
+            store.ask_by_id(&queued.id).await.unwrap().state,
+            AskState::Queued
+        );
+        assert_eq!(
+            store.ask_by_id(&claimed.id).await.unwrap().state,
+            AskState::Claimed
+        );
+    }
+
+    #[tokio::test]
+    async fn flow_created_ask_needs_no_invocation_and_epoch_cleanup_is_historical() {
+        let (store, work) = wave_work().await;
+        let (run, lease) = store.reserve_run(&work, RunTrigger::User).await.unwrap();
+        store
+            .advance_run(
+                &lease,
+                RunAdvance::RunStarting {
+                    containment: Containment::Tmux {
+                        name: "lf-flow-ask".to_string(),
+                    },
+                    cwd: PathBuf::from("/tmp/flow-ask"),
+                },
+            )
+            .await
+            .unwrap();
+        let origin = AskOrigin {
+            work: work.clone(),
+            run_id: run.id,
+            turn_id: None,
+            invocation_id: None,
+            home_id: run.home_id,
+            cwd: PathBuf::from("/tmp/flow-ask"),
+        };
+        let request = AskBody::FlowStep {
+            flow: "task-design".to_string(),
+            node_id: "review_kickoff".to_string(),
+            skill: "review-design".to_string(),
+            iteration: 0,
+        };
+        store
+            .set_flow_position(
+                &lease,
+                FlowPosition {
+                    work: work.clone(),
+                    epoch_id: lease.basis.epoch_id.clone(),
+                    flow: "task-design".to_string(),
+                    step: "review-design".to_string(),
+                    node_id: Some("review_kickoff".to_string()),
+                    human: true,
+                    step_index: 1,
+                    iteration: 0,
+                    updated_at: OffsetDateTime::now_utc(),
+                },
+            )
+            .await
+            .unwrap();
+        let ask = store
+            .create_ask(&lease, origin.clone(), request.clone(), AskTarget::User)
+            .await
+            .unwrap();
+        let replay = store
+            .create_ask(&lease, origin, request, AskTarget::User)
+            .await
+            .unwrap();
+        assert_eq!(replay.id, ask.id);
+        assert_eq!(ask.origin.invocation_id, None);
+
+        let user = AuthenticatedRequest::cli();
+        let claim = store
+            .claim_test_ask(&ControlCtx::User(&user), &ask.id)
+            .await
+            .unwrap();
+        store
+            .set_flow_position(
+                &lease,
+                FlowPosition {
+                    work: work.clone(),
+                    epoch_id: lease.basis.epoch_id.clone(),
+                    flow: "task-design".to_string(),
+                    step: "kickoff".to_string(),
+                    node_id: None,
+                    human: false,
+                    step_index: 0,
+                    iteration: 0,
+                    updated_at: OffsetDateTime::now_utc(),
+                },
+            )
+            .await
+            .unwrap();
+        assert!(matches!(
+            store
+                .claim_flow_step_run_lease(&ask.id, &claim.invocation_id)
+                .await,
+            Err(StoreError::InvalidAuthority(_))
+        ));
+        store
+            .set_flow_position(
+                &lease,
+                FlowPosition {
+                    work: work.clone(),
+                    epoch_id: lease.basis.epoch_id.clone(),
+                    flow: "task-design".to_string(),
+                    step: "review-design".to_string(),
+                    node_id: Some("review_kickoff".to_string()),
+                    human: true,
+                    step_index: 1,
+                    iteration: 0,
+                    updated_at: OffsetDateTime::now_utc(),
+                },
+            )
+            .await
+            .unwrap();
+        let flow_writer = store
+            .claim_flow_step_run_lease(&ask.id, &claim.invocation_id)
+            .await
+            .unwrap()
+            .expect("flow-step Ask receives the current writer");
+        store.validate_run_lease(&flow_writer).await.unwrap();
+        assert!(store.validate_run_lease(&lease).await.is_err());
+        store
+            .mark_ask_ready(&ask.id, &claim.invocation_id)
+            .await
+            .unwrap();
+        store
+            .mark_ask_presented(&ask.id, &claim.invocation_id)
+            .await
+            .unwrap();
+        store
+            .set_flow_position(
+                &flow_writer,
+                FlowPosition {
+                    work: work.clone(),
+                    epoch_id: flow_writer.basis.epoch_id.clone(),
+                    flow: "task-design".to_string(),
+                    step: "kickoff".to_string(),
+                    node_id: None,
+                    human: false,
+                    step_index: 0,
+                    iteration: 0,
+                    updated_at: OffsetDateTime::now_utc(),
+                },
+            )
+            .await
+            .unwrap();
+        assert!(matches!(
+            store
+                .settle_ask(
+                    &ask.id,
+                    &claim.invocation_id,
+                    AskResult::Resolved {
+                        summary: "stale acceptance".to_string()
+                    }
+                )
+                .await,
+            Err(StoreError::InvalidAuthority(_))
+        ));
+        store
+            .release_ask(&ask.id, &claim.invocation_id, Some("flow position changed"))
+            .await
+            .unwrap();
+        store
+            .abandon(&work, "directive withdrawn", &lease.basis)
+            .await
+            .unwrap();
+        let cancelled = store.ask_by_id(&ask.id).await.unwrap();
+        assert_eq!(cancelled.state, AskState::Cancelled);
+        assert_eq!(cancelled.active_invocation_id, None);
+        assert_eq!(
+            cancelled.result,
+            Some(AskResult::Cancelled {
+                reason: "owning Work Epoch abandoned".to_string()
+            })
+        );
+        assert!(store.ask_invocations(&ask.id).await.unwrap()[0]
+            .ended_at
+            .is_some());
+        assert!(matches!(
+            store
+                .mark_ask_presented(&ask.id, &claim.invocation_id)
+                .await,
+            Err(StoreError::InvalidAuthority(_))
+        ));
     }
 
     #[tokio::test]
@@ -1026,6 +2125,7 @@ mod tests {
         let (store, work) = wave_work().await;
         let local = store.placement(&work).await.unwrap();
         assert_eq!(local.home_id, store.local_home().await.unwrap().id);
+        assert!(local.enabled);
 
         let remote = store
             .observe_home(&crate::durable::HomeId::new(), "ssh://jack@buildbox")
@@ -1053,6 +2153,29 @@ mod tests {
             .unwrap();
         let moved = store.place_work(&work, &remote.id).await.unwrap();
         assert_eq!(moved.home_id, remote.id);
+    }
+
+    #[tokio::test]
+    async fn disabled_work_cannot_reserve_a_run_and_remains_disabled_when_moved() {
+        let (store, work) = wave_work().await;
+        let local = store.local_home().await.unwrap();
+
+        let disabled = store.set_work_enabled(&work, false).await.unwrap();
+        assert!(!disabled.enabled);
+        assert!(matches!(
+            store.reserve_run(&work, RunTrigger::User).await,
+            Err(StoreError::InvalidData(message)) if message.contains("is disabled")
+        ));
+
+        let remote = store
+            .observe_home(&crate::durable::HomeId::new(), "ssh://jack@buildbox")
+            .await
+            .unwrap();
+        assert!(!store.place_work(&work, &remote.id).await.unwrap().enabled);
+        assert!(!store.place_work(&work, &local.id).await.unwrap().enabled);
+
+        assert!(store.set_work_enabled(&work, true).await.unwrap().enabled);
+        store.reserve_run(&work, RunTrigger::User).await.unwrap();
     }
 
     #[tokio::test]
@@ -1156,5 +2279,54 @@ mod tests {
             .handback_invocation(&headless.id, BoundaryState::Succeeded)
             .await
             .is_err());
+    }
+
+    #[tokio::test]
+    async fn interactive_launch_and_late_handback_are_independent_evidence() {
+        let (store, work) = wave_work().await;
+        let (_lease, invocation) = start_invocation(&store, &work).await;
+
+        let launched = store
+            .invocation_surface(&invocation.id)
+            .await
+            .unwrap()
+            .unwrap();
+        assert!(launched.invocation.ended_at.is_none());
+        assert_eq!(launched.handback, None);
+        assert_eq!(store.invocation_surfaces(true).await.unwrap().len(), 1);
+
+        let handed_back = store
+            .handback_invocation(&invocation.id, BoundaryState::Failed)
+            .await
+            .unwrap();
+        assert!(handed_back.invocation.ended_at.is_some());
+        assert_eq!(handed_back.handback, Some(BoundaryState::Failed));
+        assert!(store.invocation_surfaces(true).await.unwrap().is_empty());
+    }
+
+    #[tokio::test]
+    async fn failed_interactive_launch_is_not_an_active_surface() {
+        let (store, work) = wave_work().await;
+        let (lease, invocation) = start_invocation(&store, &work).await;
+
+        store
+            .advance_run(
+                &lease,
+                RunAdvance::InvocationEnded {
+                    invocation_id: invocation.id.clone(),
+                    outcome: BoundaryState::Failed,
+                },
+            )
+            .await
+            .unwrap();
+
+        let failed = store
+            .invocation_surface(&invocation.id)
+            .await
+            .unwrap()
+            .unwrap();
+        assert!(failed.invocation.ended_at.is_some());
+        assert_eq!(failed.handback, None);
+        assert!(store.invocation_surfaces(true).await.unwrap().is_empty());
     }
 }

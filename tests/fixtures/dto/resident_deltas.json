@@ -7,7 +7,7 @@
         "invocation_id": "inv-wave-1",
         "step_index": 1,
         "flow": "wave",
-        "step": "wave_pursue",
+        "step": "wave/pursue",
         "iteration": 2,
         "session_id": null,
         "harness": "codex",
@@ -47,15 +47,8 @@
       }
     },
     {
-      "kind": "turn_usage",
-      "input_tokens": 1204,
-      "output_tokens": 96,
-      "cache_read_tokens": null
-    },
-    {
       "kind": "turn_finished",
       "status": "completed",
-      "cost_usd": 0.0125,
       "reason": null
     },
     {

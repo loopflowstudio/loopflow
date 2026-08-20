@@ -2,15 +2,215 @@ import Foundation
 
 // Live client for a wave's chat server. A running `lf wave <name>` publishes its
 // loopback address to `wave/<name>/.wave-endpoint`; this client discovers it,
-// consumes the unified `GET /events` SSE stream (turn, turn-delta, state, and
-// playhead frames; thread replay on connect), and posts messages back. When the
-// pointer file is absent or the server refuses the connection, the connection
-// settles into `.notRunning` and keeps polling so it attaches when the wave starts.
+// consumes the unified `GET /events` SSE stream (epoch, backing-health,
+// message, message-delta, state, and playhead frames), and posts messages back.
+// When the pointer file is absent or the server refuses the connection, the
+// connection settles into `.notRunning` and keeps polling so it attaches when
+// the wave starts.
 
 public enum WaveChatError: Error, Sendable {
     case notRunning
     case badStatus(Int)
     case badEndpoint(String)
+    case openDiscord(ChatAction)
+}
+
+public enum ChatAction: Codable, Sendable, Equatable {
+    case openDiscord(label: String, url: String)
+
+    private enum CodingKeys: String, CodingKey { case kind, label, url }
+
+    public init(from decoder: Decoder) throws {
+        let values = try decoder.container(keyedBy: CodingKeys.self)
+        switch try values.decode(String.self, forKey: .kind) {
+        case "open_discord":
+            self = .openDiscord(
+                label: try values.decode(String.self, forKey: .label),
+                url: try values.decode(String.self, forKey: .url)
+            )
+        default:
+            throw DecodingError.dataCorruptedError(
+                forKey: .kind,
+                in: values,
+                debugDescription: "Unknown Wave Chat action"
+            )
+        }
+    }
+
+    public func encode(to encoder: Encoder) throws {
+        var values = encoder.container(keyedBy: CodingKeys.self)
+        switch self {
+        case let .openDiscord(label, url):
+            try values.encode("open_discord", forKey: .kind)
+            try values.encode(label, forKey: .label)
+            try values.encode(url, forKey: .url)
+        }
+    }
+
+    public var label: String {
+        switch self {
+        case let .openDiscord(label, _): label
+        }
+    }
+
+    public var url: URL? {
+        switch self {
+        case let .openDiscord(_, url): URL(string: url)
+        }
+    }
+}
+
+public enum ChatBacking: Codable, Sendable, Equatable {
+    case local
+    case discord(guildId: String, channelId: String, open: ChatAction)
+
+    private enum CodingKeys: String, CodingKey {
+        case kind
+        case guildId = "guild_id"
+        case channelId = "channel_id"
+        case open
+    }
+
+    public init(from decoder: Decoder) throws {
+        let values = try decoder.container(keyedBy: CodingKeys.self)
+        switch try values.decode(String.self, forKey: .kind) {
+        case "local": self = .local
+        case "discord":
+            self = .discord(
+                guildId: try values.decode(String.self, forKey: .guildId),
+                channelId: try values.decode(String.self, forKey: .channelId),
+                open: try values.decode(ChatAction.self, forKey: .open)
+            )
+        default:
+            throw DecodingError.dataCorruptedError(
+                forKey: .kind,
+                in: values,
+                debugDescription: "Unknown Wave Chat backing"
+            )
+        }
+    }
+
+    public func encode(to encoder: Encoder) throws {
+        var values = encoder.container(keyedBy: CodingKeys.self)
+        switch self {
+        case .local:
+            try values.encode("local", forKey: .kind)
+        case let .discord(guildId, channelId, open):
+            try values.encode("discord", forKey: .kind)
+            try values.encode(guildId, forKey: .guildId)
+            try values.encode(channelId, forKey: .channelId)
+            try values.encode(open, forKey: .open)
+        }
+    }
+}
+
+public enum WaveChatComposeRoute: Sendable, Equatable {
+    case unavailable
+    case local
+    case discord(ChatAction)
+    case archived
+}
+
+public func waveChatComposeRoute(
+    activeEpoch: ConversationEpoch?,
+    selectedEpoch: ConversationEpoch?
+) -> WaveChatComposeRoute {
+    guard let activeEpoch else { return .unavailable }
+    if let selectedEpoch, selectedEpoch.id != activeEpoch.id {
+        return .archived
+    }
+    switch activeEpoch.backing {
+    case .local:
+        return .local
+    case let .discord(_, _, open):
+        return .discord(open)
+    }
+}
+
+public struct ConversationEpoch: Codable, Sendable, Equatable {
+    public let id: String
+    public let number: UInt64
+    public let backing: ChatBacking
+    public let journalSeq: UInt64
+    public let startedAt: String
+    public let endedAt: String?
+
+    private enum CodingKeys: String, CodingKey {
+        case id, number, backing
+        case journalSeq = "journal_seq"
+        case startedAt = "started_at"
+        case endedAt = "ended_at"
+    }
+}
+
+public enum ChatMessageSource: Codable, Sendable, Equatable {
+    case local(journalSeq: UInt64)
+    case discord(
+        guildId: String,
+        channelId: String,
+        messageId: String,
+        authorId: String,
+        url: String
+    )
+
+    private enum CodingKeys: String, CodingKey {
+        case kind
+        case journalSeq = "journal_seq"
+        case guildId = "guild_id"
+        case channelId = "channel_id"
+        case messageId = "message_id"
+        case authorId = "author_id"
+        case url
+    }
+
+    public init(from decoder: Decoder) throws {
+        let values = try decoder.container(keyedBy: CodingKeys.self)
+        switch try values.decode(String.self, forKey: .kind) {
+        case "local":
+            self = .local(journalSeq: try values.decode(UInt64.self, forKey: .journalSeq))
+        case "discord":
+            self = .discord(
+                guildId: try values.decode(String.self, forKey: .guildId),
+                channelId: try values.decode(String.self, forKey: .channelId),
+                messageId: try values.decode(String.self, forKey: .messageId),
+                authorId: try values.decode(String.self, forKey: .authorId),
+                url: try values.decode(String.self, forKey: .url)
+            )
+        default:
+            throw DecodingError.dataCorruptedError(
+                forKey: .kind,
+                in: values,
+                debugDescription: "Unknown Wave Chat message source"
+            )
+        }
+    }
+
+    public func encode(to encoder: Encoder) throws {
+        var values = encoder.container(keyedBy: CodingKeys.self)
+        switch self {
+        case let .local(journalSeq):
+            try values.encode("local", forKey: .kind)
+            try values.encode(journalSeq, forKey: .journalSeq)
+        case let .discord(guildId, channelId, messageId, authorId, url):
+            try values.encode("discord", forKey: .kind)
+            try values.encode(guildId, forKey: .guildId)
+            try values.encode(channelId, forKey: .channelId)
+            try values.encode(messageId, forKey: .messageId)
+            try values.encode(authorId, forKey: .authorId)
+            try values.encode(url, forKey: .url)
+        }
+    }
+}
+
+public struct WaveChatMessage: Codable, Sendable, Equatable {
+    public let epochId: String
+    public let source: ChatMessageSource
+    public let turn: ChatTurn
+
+    private enum CodingKeys: String, CodingKey {
+        case epochId = "epoch_id"
+        case source, turn
+    }
 }
 
 /// Evidence state of a read-only fold over the durable Wave journal.
@@ -21,30 +221,82 @@ public enum ChatHistoryState: String, Codable, Sendable, Equatable {
     case unavailable
 }
 
+public enum ChatBackingHealth: Codable, Sendable, Equatable {
+    case ready
+    case retrying(detail: String)
+    case blocked(detail: String)
+
+    private enum CodingKeys: String, CodingKey { case state, detail }
+
+    public init(from decoder: Decoder) throws {
+        let values = try decoder.container(keyedBy: CodingKeys.self)
+        switch try values.decode(String.self, forKey: .state) {
+        case "ready": self = .ready
+        case "retrying":
+            self = .retrying(detail: try values.decode(String.self, forKey: .detail))
+        case "blocked":
+            self = .blocked(detail: try values.decode(String.self, forKey: .detail))
+        default:
+            throw DecodingError.dataCorruptedError(
+                forKey: .state,
+                in: values,
+                debugDescription: "Unknown Wave Chat backing health"
+            )
+        }
+    }
+
+    public func encode(to encoder: Encoder) throws {
+        var values = encoder.container(keyedBy: CodingKeys.self)
+        switch self {
+        case .ready:
+            try values.encode("ready", forKey: .state)
+        case let .retrying(detail):
+            try values.encode("retrying", forKey: .state)
+            try values.encode(detail, forKey: .detail)
+        case let .blocked(detail):
+            try values.encode("blocked", forKey: .state)
+            try values.encode(detail, forKey: .detail)
+        }
+    }
+}
+
 /// Bounded `lf chat --history --json` response. Every field mirrors Rust.
 public struct ChatHistorySnapshot: Codable, Sendable, Equatable {
+    public let epochs: [ConversationEpoch]
+    public let selectedEpochId: String?
     public let state: ChatHistoryState
     public let detail: String?
-    public let turns: [ChatTurn]
+    public let messages: [WaveChatMessage]
     public let truncated: Bool
 
     public init(
+        epochs: [ConversationEpoch],
+        selectedEpochId: String?,
         state: ChatHistoryState,
         detail: String?,
-        turns: [ChatTurn],
+        messages: [WaveChatMessage],
         truncated: Bool
     ) {
+        self.epochs = epochs
+        self.selectedEpochId = selectedEpochId
         self.state = state
         self.detail = detail
-        self.turns = turns
+        self.messages = messages
         self.truncated = truncated
+    }
+
+    private enum CodingKeys: String, CodingKey {
+        case epochs
+        case selectedEpochId = "selected_epoch_id"
+        case state, detail, messages, truncated
     }
 }
 
 public typealias ChatHistoryLoader = @Sendable (
     _ repoPath: String,
     _ waveName: String,
-    _ limit: Int
+    _ limit: Int,
+    _ epoch: String?
 ) async throws -> ChatHistorySnapshot
 
 /// Reads the discovery pointer a running wave writes under its `wave/<name>/` dir.
@@ -235,7 +487,7 @@ public enum WaveLoopState: String, Equatable, Sendable {
 }
 
 /// How a posted message asks to be handled — the required `op` of the
-/// `POST /messages {op, text}` body. Explicit at the API, never inferred.
+/// `POST /messages {id, op, text}` body. Explicit at the API, never inferred.
 public enum WaveMessageOp: String, Equatable, Sendable {
     /// Queued; the loop's next turn answers it.
     case message
@@ -280,17 +532,22 @@ public func composerVerbs(state: WaveLoopState, hasText: Bool) -> ComposerVerbs 
     }
 }
 
-/// `POST /messages {op, text}` response: the appended user turn (null for a
-/// bare interrupt) plus the loop-state name at acceptance. Mirrors Rust
+/// `POST /messages {op, text}` response: the source-bearing committed message
+/// (null for a bare interrupt), active epoch, and loop state. Mirrors Rust
 /// `PostMessageResponse` (wave/server.rs); pinned by the
 /// `post_message_response.json` fixture in ContractTests.
 struct PostMessageResponse: Decodable {
-    let turn: ChatTurn?
+    let message: WaveChatMessage?
     let state: String
+    let epoch: ConversationEpoch
 }
 
-/// Observable connection to one wave's chat server: the live thread plus a phase
-/// the UI renders (not running / connecting / live).
+struct PostMessageErrorResponse: Decodable {
+    let error: String
+    let epoch: ConversationEpoch
+}
+
+/// Observable connection to one wave's active conversation and backing state.
 @MainActor
 @Observable
 public final class WaveChatConnection {
@@ -304,9 +561,14 @@ public final class WaveChatConnection {
     public let repoPath: String
     public let waveName: String
 
-    public private(set) var turns: [ChatTurn] = []
+    public private(set) var messages: [WaveChatMessage] = []
+    public var turns: [ChatTurn] { messages.map(\.turn) }
+    public private(set) var activeEpoch: ConversationEpoch?
+    public private(set) var epochs: [ConversationEpoch] = []
+    public private(set) var selectedEpoch: ConversationEpoch?
+    public private(set) var backingHealth: ChatBackingHealth = .ready
     public private(set) var phase: Phase = .idle
-    /// Nil while the bounded local read has not completed.
+    /// Nil while the initial bounded history read has not completed.
     public private(set) var historyState: ChatHistoryState?
     public private(set) var historyDetail: String?
     public private(set) var historyTruncated = false
@@ -356,6 +618,14 @@ public final class WaveChatConnection {
         loop = nil
     }
 
+    /// Rediscover immediately after `lf start` has published a live endpoint.
+    public func reconnect() {
+        stop()
+        currentEndpoint = nil
+        phase = .idle
+        start()
+    }
+
     /// POST a message with an explicit op; a created user turn is applied
     /// immediately and also arrives over the stream (deduped by id). The
     /// assistant reply streams later. Text may be empty only for `.interrupt`
@@ -369,14 +639,26 @@ public final class WaveChatConnection {
         var request = URLRequest(url: url)
         request.httpMethod = "POST"
         request.setValue("application/json", forHTTPHeaderField: "Content-Type")
-        request.httpBody = try JSONSerialization.data(withJSONObject: ["op": op.rawValue, "text": trimmed])
+        request.httpBody = try JSONSerialization.data(
+            withJSONObject: ["id": UUID().uuidString, "op": op.rawValue, "text": trimmed]
+        )
         let (data, response) = try await session.data(for: request)
-        guard let http = response as? HTTPURLResponse, http.statusCode == 200 else {
-            throw WaveChatError.badStatus((response as? HTTPURLResponse)?.statusCode ?? -1)
+        guard let http = response as? HTTPURLResponse else {
+            throw WaveChatError.badStatus(-1)
+        }
+        guard http.statusCode == 200 else {
+            if http.statusCode == 409,
+               let rejection = try? decoder.decode(PostMessageErrorResponse.self, from: data),
+               case let .discord(_, _, action) = rejection.epoch.backing {
+                applyActiveEpoch(rejection.epoch)
+                throw WaveChatError.openDiscord(action)
+            }
+            throw WaveChatError.badStatus(http.statusCode)
         }
         let posted = try decoder.decode(PostMessageResponse.self, from: data)
-        if let turn = posted.turn {
-            upsert(turn)
+        applyActiveEpoch(posted.epoch)
+        if let message = posted.message {
+            upsert(message)
         }
         if let state = WaveLoopState(rawValue: posted.state) {
             loopState = state
@@ -413,14 +695,7 @@ public final class WaveChatConnection {
     private func loadDurableHistory() async {
         guard let loadHistory else { return }
         do {
-            let snapshot = try await loadHistory(repoPath, waveName, historyLimit)
-            turns = snapshot.turns.sorted { a, b in
-                if a.sequence != b.sequence { return a.sequence < b.sequence }
-                return a.id < b.id
-            }
-            historyState = snapshot.state
-            historyDetail = snapshot.detail
-            historyTruncated = snapshot.truncated
+            applyHistory(try await loadHistory(repoPath, waveName, historyLimit, nil))
         } catch is CancellationError {
             return
         } catch {
@@ -428,6 +703,30 @@ public final class WaveChatConnection {
             historyDetail = "Saved conversation could not be read: \(error.localizedDescription)"
             historyTruncated = false
         }
+    }
+
+    public func selectEpoch(_ id: String) async {
+        guard let loadHistory, epochs.contains(where: { $0.id == id }) else { return }
+        do {
+            applyHistory(try await loadHistory(repoPath, waveName, historyLimit, id))
+        } catch is CancellationError {
+            return
+        } catch {
+            historyState = .unavailable
+            historyDetail = "Conversation epoch could not be read: \(error.localizedDescription)"
+        }
+    }
+
+    private func applyHistory(_ snapshot: ChatHistorySnapshot) {
+        epochs = snapshot.epochs
+        activeEpoch = snapshot.epochs.last
+        selectedEpoch = snapshot.selectedEpochId.flatMap { id in
+            snapshot.epochs.first { $0.id == id }
+        }
+        messages = snapshot.messages.sorted(by: messageOrder)
+        historyState = snapshot.state
+        historyDetail = snapshot.detail
+        historyTruncated = snapshot.truncated
     }
 
     private func stream(endpoint: String) async throws {
@@ -444,9 +743,9 @@ public final class WaveChatConnection {
         guard http.statusCode == 200 else {
             throw WaveChatError.badStatus(http.statusCode)
         }
-        // A fresh stream replays the same journal tail as the bounded local
-        // read. Keep the saved snapshot painted and upsert replay frames by id;
-        // connecting cannot repair a partial or unavailable durable read.
+        // A fresh stream replays the selected backing's bounded history. Keep
+        // the saved snapshot painted and upsert replay frames by id; connecting
+        // cannot repair a partial or unavailable read.
         loopState = .idle
         playhead = nil
         if historyState == nil {
@@ -458,10 +757,9 @@ public final class WaveChatConnection {
         for try await chunk in body {
             for frame in parser.consume(chunk) {
                 if Task.isCancelled { return }
-                // `resync`: the live turn stream lagged, so a `turn-delta` may
-                // have been dropped and the open-turn reconstruction could be
-                // short a fragment. End this connection; `run()` reconnects for
-                // a fresh whole-turn replay into the stable turn ids.
+                // `resync`: the live message stream lagged, so a
+                // `message-delta` may have been dropped. End this connection;
+                // `run()` reconnects for a fresh provider or journal snapshot.
                 if frame.event == "resync" { return }
                 handle(event: frame.event, data: frame.data)
             }
@@ -469,12 +767,11 @@ public final class WaveChatConnection {
     }
 
     /// One SSE frame off `/events`. `state` carries the bare loop-state name
-    /// (sent on subscribe and on every transition); `turn` carries a whole turn
-    /// — sent when a turn opens and finalizes, replacing its id's state;
-    /// `turn-delta` carries one in-turn increment absorbed into the matching
-    /// turn (so a per-token turn does not re-send whole each frame); `resync`
-    /// (handled in `stream`, not here) means the turn stream lagged and the
-    /// connection reconnects. Unknown events drop. A turn payload that fails
+    /// (sent on subscribe and on every transition); `message` carries a whole
+    /// source-bearing message, while `message-delta` grows one local message;
+    /// `resync`
+    /// (handled in `stream`, not here) means the message stream lagged and the
+    /// connection reconnects. Unknown events drop. A message payload that fails
     /// to decode is a hole in the transcript: logged always, asserted in debug
     /// — never silent. Internal for tests.
     func handle(event: String, data: String) {
@@ -489,60 +786,106 @@ public final class WaveChatConnection {
             playhead = snapshot
             return
         }
-        if event == "turn-delta" {
+        if event == "epoch" {
+            guard let json = data.data(using: .utf8),
+                  let epoch = try? decoder.decode(ConversationEpoch.self, from: json) else { return }
+            applyActiveEpoch(epoch)
+            return
+        }
+        if event == "backing-health" {
+            guard let json = data.data(using: .utf8),
+                  let health = try? decoder.decode(ChatBackingHealth.self, from: json) else { return }
+            backingHealth = health
+            return
+        }
+        if event == "message-delta" {
             guard let json = data.data(using: .utf8) else { return }
             do {
                 applyDelta(try decoder.decode(TurnDelta.self, from: json))
             } catch {
-                LoggingService.wave("wave chat: dropped turn-delta frame (\(error)): \(data.prefix(200))")
-                assertionFailure("wave chat turn-delta frame failed to decode: \(error)")
+                LoggingService.wave("wave chat: dropped message-delta frame (\(error)): \(data.prefix(200))")
+                assertionFailure("wave chat message-delta frame failed to decode: \(error)")
             }
             return
         }
-        guard event.isEmpty || event == "turn", let json = data.data(using: .utf8) else { return }
-        do {
-            upsert(try decoder.decode(ChatTurn.self, from: json))
-            if historyState == .missing {
-                historyState = .available
-                historyDetail = nil
+        if event == "message" {
+            guard let json = data.data(using: .utf8) else { return }
+            do {
+                let message = try decoder.decode(WaveChatMessage.self, from: json)
+                if selectedEpoch?.id == message.epochId {
+                    upsert(message)
+                }
+                if historyState == .missing {
+                    historyState = .available
+                    historyDetail = nil
+                }
+            } catch {
+                LoggingService.wave("wave chat: dropped message frame (\(error)): \(data.prefix(200))")
+                assertionFailure("wave chat message frame failed to decode: \(error)")
             }
-        } catch {
-            LoggingService.wave("wave chat: dropped turn frame (\(error)): \(data.prefix(200))")
-            assertionFailure("wave chat turn frame failed to decode: \(error)")
+            return
         }
     }
 
-    /// Grow the open turn named by a `turn-delta` frame through the same
-    /// `absorb` rule the listener folds with. No turn for this id means we
-    /// missed its opening (a gap the server heals with `resync`) — drop the
-    /// delta until the whole-turn replay rebuilds it. Internal for tests.
+    private func applyActiveEpoch(_ epoch: ConversationEpoch) {
+        let followsActive = selectedEpoch == nil || selectedEpoch?.id == activeEpoch?.id
+        activeEpoch = epoch
+        if let index = epochs.firstIndex(where: { $0.id == epoch.id }) {
+            epochs[index] = epoch
+        } else {
+            epochs.append(epoch)
+            epochs.sort { $0.number < $1.number }
+        }
+        if followsActive {
+            selectedEpoch = epoch
+            messages.removeAll { $0.epochId != epoch.id }
+        }
+    }
+
+    /// Grow the open source-bearing message named by a `message-delta` frame
+    /// through the same `absorb` rule the listener folds with. No message for
+    /// this id means we missed its opening (a gap the server heals with
+    /// `resync`) — drop the delta until message replay rebuilds it. Internal
+    /// for tests.
     func applyDelta(_ delta: TurnDelta) {
-        guard let index = turns.firstIndex(where: { $0.id == delta.turnId }) else { return }
+        guard let index = messages.firstIndex(where: { $0.turn.id == delta.turnId }) else { return }
         do {
-            turns[index] = try turns[index].absorbing(delta.item)
+            let message = messages[index]
+            messages[index] = WaveChatMessage(
+                epochId: message.epochId,
+                source: message.source,
+                turn: try message.turn.absorbing(delta.item)
+            )
         } catch {
-            LoggingService.wave("wave chat: turn-delta absorb failed (\(error))")
-            assertionFailure("wave chat turn-delta absorb failed: \(error)")
+            LoggingService.wave("wave chat: message-delta absorb failed (\(error))")
+            assertionFailure("wave chat message-delta absorb failed: \(error)")
         }
     }
 
-    /// Replace a turn already in the thread (an in-progress turn re-sent as it
+    /// Replace a message already in the selected epoch (an in-progress local
+    /// turn re-sent as it
     /// grows, then finalized under the same id), or append a new one. Ordered
     /// by monotonic sequence, id as tie-break: `sort` isn't guaranteed stable
     /// and unparseable ids share a `.max` sentinel sequence, so the tie-break
     /// keeps the order deterministic. A replace skips the sort — the key is
     /// (sequence, id) and both derive from the id, so an in-place frame can't
-    /// move; no reason to re-sort the thread on every SSE growth frame.
+    /// move; no reason to re-sort the epoch on every SSE growth frame.
     /// Internal for tests.
-    func upsert(_ turn: ChatTurn) {
-        if let index = turns.firstIndex(where: { $0.id == turn.id }) {
-            turns[index] = turn
+    func upsert(_ message: WaveChatMessage) {
+        if let index = messages.firstIndex(where: { $0.turn.id == message.turn.id }) {
+            messages[index] = message
             return
         }
-        turns.append(turn)
-        turns.sort { a, b in
-            if a.sequence != b.sequence { return a.sequence < b.sequence }
-            return a.id < b.id
-        }
+        messages.append(message)
+        messages.sort(by: messageOrder)
     }
+
+}
+
+private func messageOrder(_ lhs: WaveChatMessage, _ rhs: WaveChatMessage) -> Bool {
+    if let left = lhs.turn.createdAtDate, let right = rhs.turn.createdAtDate, left != right {
+        return left < right
+    }
+    if lhs.turn.sequence != rhs.turn.sequence { return lhs.turn.sequence < rhs.turn.sequence }
+    return lhs.turn.id < rhs.turn.id
 }

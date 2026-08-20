@@ -53,6 +53,15 @@ pub(crate) fn configure_agent_authority(
         .env_remove(crate::durable::AGENT_INVOCATION_ENV);
 }
 
+pub(crate) fn configure_agent_env(command: &mut tokio::process::Command, config: &AgentConfig) {
+    command
+        .envs(&config.env)
+        .env_remove("LOOPFLOW_DIRECTIVE_FILE");
+    if let Some(path) = &config.directive_relay {
+        command.env("LOOPFLOW_DIRECTIVE_FILE", path);
+    }
+}
+
 fn vendor_control_context() -> Result<(std::path::PathBuf, std::path::PathBuf, std::path::PathBuf)>
 {
     let context = crate::engine::process::pinned_execution_context()?;
@@ -186,34 +195,27 @@ pub(crate) fn is_disconnect_class_failure(code: &str) -> bool {
 }
 
 /// Drain events trailing a `TurnCompleted { Failed }` to extract an actionable
-/// error code. The opencode mapping emits `TurnCompleted { Failed }` +
-/// `TurnUsage` + `Error { code }` for hollow-body, decode-gap, and disconnect
-/// failures. The harness sends all three synchronously, so the trailing events
-/// are already in the buffer when the runner processes the `TurnCompleted`.
+/// error code. The opencode mapping emits usage before completion, then an
+/// `Error { code }` for hollow-body, decode-gap, and disconnect failures. The
+/// harness sends them synchronously, so the error is already in the buffer when
+/// the runner processes the completion.
 /// Returns the best failure reason: the error code/message if found, else the
 /// generic fallback.
 pub(crate) fn drain_turn_failure_reason(
     event_rx: &mut mpsc::UnboundedReceiver<ConversationEvent>,
     fallback: &str,
 ) -> String {
-    let mut reason = fallback.to_string();
-    while let Ok(event) = event_rx.try_recv() {
-        match event {
-            ConversationEvent::Error { code, message, .. } => {
-                reason = format!("{code}: {message}");
-                break;
-            }
-            ConversationEvent::TurnUsage { .. } => continue,
-            other => {
-                tracing::debug!(
-                    event = ?other,
-                    "unexpected event trailing a Failed turn; keeping fallback reason"
-                );
-                break;
-            }
+    match event_rx.try_recv() {
+        Ok(ConversationEvent::Error { code, message, .. }) => format!("{code}: {message}"),
+        Ok(other) => {
+            tracing::debug!(
+                event = ?other,
+                "unexpected event trailing a Failed turn; keeping fallback reason"
+            );
+            fallback.to_string()
         }
+        Err(_) => fallback.to_string(),
     }
-    reason
 }
 
 /// What the runner should do after a body failure, based on whether it's a

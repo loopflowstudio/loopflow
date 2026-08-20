@@ -3,7 +3,7 @@
 You are running inside loopflow. Loopflow owns git, worktrees, delegation, and
 release plumbing. Route those operations through `lf`, not around it. Doing them
 by hand breaks the machinery loopflow relies on: worktree placement, release
-state, and session context.
+state, and Run authority.
 
 ## Git, Worktrees, GitHub -> `lf`
 
@@ -98,10 +98,20 @@ Task with `--stack-on <parent-task>`. Do not rotate the parent Task onto a secon
 simultaneously open PR; its multi-PR history remains serial. The child binds to
 the parent's active PR at launch and never follows later serial PRs implicitly.
 
-When work feels slow or stuck, run `lf top` before guessing. It shows provider-
-reported output-token throughput for the last hour and the currently running
-`lf` and provider processes; use it as machine-health evidence, not as a
-lifecycle control.
+When work feels slow or stuck, run `lf top` before guessing. It continuously
+ranks OS-live Loopflow call trees by five-second normalized-output throughput and
+shows cumulative tokens, age, idle time, health, and provider PIDs. Completed
+calls and launches disappear. Use it as machine-health evidence, not as a
+lifecycle control. Use `lf ps --json` for one stable, parseable frame;
+redirected `lf top` also emits once without ANSI. Both commands read the live
+Home's ledger and ownership registry without migrating or writing them,
+including when invoked through `scripts/dev-lf`.
+
+Rates count normalized output deltas while a Turn runs; cumulative tokens remain
+provider-reported completed usage. Time alone never means dead. `lf prune
+--dry-run` lists the separate cleanup boundary; plain `lf prune` removes dead
+Exec receipts and reaps registered orphan OpenCode process groups. Never kill
+an `unclaimed` provider PID from `lf ps`: ownership is not proven.
 
 ## Inspect
 
@@ -125,6 +135,7 @@ A Work names one stable Home authority, whose SSH route may change without
 moving the Work.
 
 ```bash
+lf --as task:DES-123 implement                  # one skill in the Task worktree
 lf home id                                      # this machine's HomeId
 lf work place wave <wave-id> <home-id>          # only while no Run is live
 lf start <wave>                                 # start it on this machine
@@ -132,6 +143,11 @@ lf stop <wave>                                  # stop it on this machine
 lf ssh <home-id> status <wave> --json           # inspect it on that Home
 lf ssh <home-id> start <wave>                   # start it on that Home
 ```
+
+Use `--as task:...`, `--as project:...`, or `--as wave:...` only with one
+named skill. In a plain terminal it starts a supervised User Run at that
+Work's placement. Inside a Run it is an exact identity assertion; a mismatch
+fails. It never binds a multi-step flow.
 
 `lf ssh` runs only the target machine's `lf`; the inner `lf` and `--` separator
 are implicit. Foreground commands can choose from origin-forwarded and
@@ -141,8 +157,10 @@ on their machine.
 
 ## Speak
 
-Answer a human message in your turn text. Tasks, Projects, and Waves communicate
-through typed Work observations and targeted Ask/Answer exchanges.
+Answer a human message in your turn text. When a human is present, keep questions
+in that conversation. `lf ask` crosses to the immediate parent Work; headless
+`lf ask --user` requests genuine intervention from an absent User. An Ask is a
+durable Ask session, not a chat message or textual Answer.
 
 When the active skill calls for a durable Wave learning, edit
 `wave/<name>/MEMORY.md` through the ordinary repository workflow. Keep it

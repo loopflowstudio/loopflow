@@ -157,6 +157,16 @@ pub fn migration_authority() -> MigrationAuthority {
     }
 }
 
+/// Drafts present when this binary was compiled and therefore absent from its registry.
+pub fn pending_migration_drafts() -> Vec<&'static str> {
+    let drafts = env!("LOOPFLOW_PENDING_MIGRATION_DRAFTS");
+    if drafts.is_empty() {
+        Vec::new()
+    } else {
+        drafts.split(',').collect()
+    }
+}
+
 fn parse_provenance(value: &str) -> Option<BuildProvenance> {
     match value {
         "development" => Some(BuildProvenance::Development),
@@ -189,9 +199,9 @@ mod tests {
     use std::process::Command;
 
     use super::{
-        classify_revision, migration_authority, parse_provenance, provenance, short_revision,
-        source_identity_for, source_revision, source_root, BuildFreshness, BuildProvenance,
-        MigrationAuthority, BUILD_VERSION,
+        classify_revision, migration_authority, parse_provenance, pending_migration_drafts,
+        provenance, short_revision, source_identity_for, source_revision, source_root,
+        BuildFreshness, BuildProvenance, MigrationAuthority, BUILD_VERSION,
     };
 
     /// A throwaway `A -> B -> C` repo keeps classifier tests offline.
@@ -340,6 +350,9 @@ mod tests {
             migration_authority(),
             MigrationAuthority::Published | MigrationAuthority::ValidationOnly
         ));
+        assert!(pending_migration_drafts()
+            .iter()
+            .all(|name| !name.is_empty()));
         assert!(!source_revision().is_empty());
         let package_version = env!("CARGO_PKG_VERSION");
         assert!(

@@ -8,20 +8,72 @@ import Foundation
 import Testing
 @testable import Loopflow
 
+private let localEpochFrame = #"{"id":"chat-epoch-1","number":1,"backing":{"kind":"local"},"journal_seq":1,"started_at":"2026-07-15T04:00:00Z","ended_at":null}"#
+
+private func localJournalSeq(_ turnId: String) -> UInt64 {
+    guard let suffix = turnId.split(separator: "-").last,
+          let sequence = UInt64(suffix) else { return 999 }
+    return max(2, sequence)
+}
+
+private func localMessageFrame(turn: String, turnId: String) -> String {
+    "{\"epoch_id\":\"chat-epoch-1\",\"source\":{\"kind\":\"local\",\"journal_seq\":\(localJournalSeq(turnId))},\"turn\":\(turn)}"
+}
+
 @MainActor
 @Suite("WaveChat streaming upsert")
 struct WaveChatConnectionTests {
     private func connection() -> WaveChatConnection {
-        WaveChatConnection(repoPath: "/tmp/nowhere", waveName: "ship")
+        let connection = WaveChatConnection(repoPath: "/tmp/nowhere", waveName: "ship")
+        connection.handle(event: "epoch", data: localEpochFrame)
+        return connection
     }
 
-    /// A wire-shaped `turn` SSE payload. `text` is spliced raw, so escape
+    private func localEpoch() -> ConversationEpoch {
+        ConversationEpoch(
+            id: "chat-epoch-1",
+            number: 1,
+            backing: .local,
+            journalSeq: 1,
+            startedAt: "2026-07-15T04:00:00Z",
+            endedAt: nil
+        )
+    }
+
+    private func discordEpoch(number: UInt64 = 2) -> ConversationEpoch {
+        ConversationEpoch(
+            id: "chat-epoch-\(number)",
+            number: number,
+            backing: .discord(
+                guildId: "guild",
+                channelId: "channel",
+                open: .openDiscord(
+                    label: "Open in Discord",
+                    url: "https://discord.com/channels/guild/channel"
+                )
+            ),
+            journalSeq: number,
+            startedAt: "2026-07-15T05:00:00Z",
+            endedAt: nil
+        )
+    }
+
+    private func localMessage(_ turn: ChatTurn, epoch: ConversationEpoch) -> WaveChatMessage {
+        WaveChatMessage(
+            epochId: epoch.id,
+            source: .local(journalSeq: UInt64(max(0, turn.sequence))),
+            turn: turn
+        )
+    }
+
+    /// A wire-shaped `message` SSE payload. `text` is spliced raw, so escape
     /// inside it (e.g. `\\n`) as the server would.
     private func frame(id: String, role: String = "assistant", text: String, status: String, items: String = "[]") -> String {
-        "{\"id\":\"\(id)\",\"role\":\"\(role)\",\"text\":\"\(text)\",\"status\":\"\(status)\",\"items\":\(items),\"created_at\":\"2026-07-04T00:00:00Z\"}"
+        let turn = "{\"id\":\"\(id)\",\"role\":\"\(role)\",\"text\":\"\(text)\",\"status\":\"\(status)\",\"items\":\(items),\"created_at\":\"2026-07-04T00:00:00Z\"}"
+        return localMessageFrame(turn: turn, turnId: id)
     }
 
-    /// A wire-shaped `turn-delta` SSE payload growing the turn named `turnId`
+    /// A wire-shaped `message-delta` SSE payload growing the turn named `turnId`
     /// by one item.
     private func deltaFrame(turnId: String, item: String) -> String {
         "{\"turn_id\":\"\(turnId)\",\"item\":\(item)}"
@@ -29,6 +81,25 @@ struct WaveChatConnectionTests {
 
     private func streamMessage(id: String, text: String) -> String {
         "{\"type\":\"message\",\"id\":\"\(id)\",\"text\":\"\(text)\",\"phase\":\"stream\"}"
+    }
+
+    @Test("compose follows the selected conversation backing")
+    func composeRouteIsSingleBacked() {
+        let local = localEpoch()
+        let discord = discordEpoch()
+
+        #expect(waveChatComposeRoute(activeEpoch: nil, selectedEpoch: nil) == .unavailable)
+        #expect(waveChatComposeRoute(activeEpoch: local, selectedEpoch: local) == .local)
+        #expect(
+            waveChatComposeRoute(activeEpoch: discord, selectedEpoch: discord)
+                == .discord(
+                    .openDiscord(
+                        label: "Open in Discord",
+                        url: "https://discord.com/channels/guild/channel"
+                    )
+                )
+        )
+        #expect(waveChatComposeRoute(activeEpoch: discord, selectedEpoch: local) == .archived)
     }
 
     @Test("start installs durable history before waiting for a listener")
@@ -43,17 +114,22 @@ struct WaveChatConnectionTests {
             body: nil,
             activity: nil
         )
+        let savedEpoch = localEpoch()
+        let savedMessage = localMessage(saved, epoch: savedEpoch)
         let conn = WaveChatConnection(
             repoPath: "/tmp/no-wave-listener",
             waveName: "ship",
-            loadHistory: { repo, wave, limit in
+            loadHistory: { repo, wave, limit, selectedEpoch in
                 #expect(repo == "/tmp/no-wave-listener")
                 #expect(wave == "ship")
                 #expect(limit == 12)
+                #expect(selectedEpoch == nil)
                 return ChatHistorySnapshot(
+                    epochs: [savedEpoch],
+                    selectedEpochId: savedEpoch.id,
                     state: .partial,
                     detail: "Later history is unreadable.",
-                    turns: [saved],
+                    messages: [savedMessage],
                     truncated: true
                 )
             }
@@ -71,7 +147,7 @@ struct WaveChatConnectionTests {
         #expect(conn.historyTruncated)
         #expect(conn.phase == .notRunning)
 
-        conn.handle(event: "turn", data: frame(id: "turn-8", text: "live", status: "completed"))
+        conn.handle(event: "message", data: frame(id: "turn-8", text: "live", status: "completed"))
         #expect(conn.historyState == .partial, "a live frame cannot repair durable history")
     }
 
@@ -80,8 +156,15 @@ struct WaveChatConnectionTests {
         let conn = WaveChatConnection(
             repoPath: "/tmp/no-wave-listener",
             waveName: "ship",
-            loadHistory: { _, _, _ in
-                ChatHistorySnapshot(state: .missing, detail: "No journal.", turns: [], truncated: false)
+            loadHistory: { _, _, _, _ in
+                ChatHistorySnapshot(
+                    epochs: [],
+                    selectedEpochId: nil,
+                    state: .missing,
+                    detail: "No journal.",
+                    messages: [],
+                    truncated: false
+                )
             }
         )
         conn.start()
@@ -90,45 +173,93 @@ struct WaveChatConnectionTests {
         for _ in 0..<100 where conn.historyState == nil {
             try await Task.sleep(for: .milliseconds(5))
         }
-        conn.handle(event: "turn", data: frame(id: "turn-1", text: "now durable", status: "completed"))
+        conn.handle(event: "epoch", data: localEpochFrame)
+        conn.handle(event: "message", data: frame(id: "turn-1", text: "now durable", status: "completed"))
 
         #expect(conn.historyState == .available)
         #expect(conn.historyDetail == nil)
     }
 
-    @Test("turn-delta frames grow the open turn to match a whole-turn reconstruction")
+    @Test("epoch and source-bearing messages replace the active conversation")
+    func epochAndSourceFramesStayClosed() throws {
+        let conn = connection()
+        let local = localEpoch()
+        conn.handle(
+            event: "epoch",
+            data: String(decoding: try JSONEncoder().encode(local), as: UTF8.self)
+        )
+        let localTurn = try ChatTurn(
+            id: "turn-2",
+            role: .user,
+            text: "local",
+            status: .completed,
+            items: [],
+            createdAt: "2026-07-15T04:01:00Z",
+            body: nil,
+            activity: nil
+        )
+        let localMessage = localMessage(localTurn, epoch: local)
+        conn.handle(
+            event: "message",
+            data: String(decoding: try JSONEncoder().encode(localMessage), as: UTF8.self)
+        )
+        #expect(conn.messages == [localMessage])
+
+        let open = ChatAction.openDiscord(
+            label: "Open in Discord",
+            url: "https://discord.com/channels/guild/channel"
+        )
+        let discord = ConversationEpoch(
+            id: "chat-epoch-3",
+            number: 2,
+            backing: .discord(guildId: "guild", channelId: "channel", open: open),
+            journalSeq: 3,
+            startedAt: "2026-07-15T05:00:00Z",
+            endedAt: nil
+        )
+        conn.handle(
+            event: "epoch",
+            data: String(decoding: try JSONEncoder().encode(discord), as: UTF8.self)
+        )
+        #expect(conn.activeEpoch == discord)
+        #expect(conn.selectedEpoch == discord)
+        #expect(conn.messages.isEmpty, "a backing switch cannot stitch the local epoch")
+        #expect(conn.epochs.map(\.id) == [local.id, discord.id])
+    }
+
+    @Test("message-delta frames grow the open source-bearing message")
     func turnDeltaFramesReconstructTheTurn() {
         let conn = connection()
         // The turn opens as a whole (empty, running) frame.
-        conn.handle(event: "turn", data: frame(id: "turn-1", text: "", status: "running"))
+        conn.handle(event: "message", data: frame(id: "turn-1", text: "", status: "running"))
         #expect(conn.turns.count == 1)
         #expect(conn.turns[0].text == "")
 
         // Prose arrives as stream-message increments — concatenated into text,
         // never added to items, exactly as the listener folds.
-        conn.handle(event: "turn-delta", data: deltaFrame(turnId: "turn-1", item: streamMessage(id: "text-0", text: "I fixed ")))
-        conn.handle(event: "turn-delta", data: deltaFrame(turnId: "turn-1", item: streamMessage(id: "text-1", text: "the parser.")))
+        conn.handle(event: "message-delta", data: deltaFrame(turnId: "turn-1", item: streamMessage(id: "text-0", text: "I fixed ")))
+        conn.handle(event: "message-delta", data: deltaFrame(turnId: "turn-1", item: streamMessage(id: "text-1", text: "the parser.")))
         #expect(conn.turns[0].text == "I fixed the parser.")
         #expect(conn.turns[0].items.isEmpty)
 
         // A non-message item appends to items and leaves text alone.
         let tool = "{\"type\":\"tool\",\"id\":\"t-1\",\"name\":\"Bash\",\"status\":\"completed\",\"input\":null,\"output\":\"ok\"}"
-        conn.handle(event: "turn-delta", data: deltaFrame(turnId: "turn-1", item: tool))
+        conn.handle(event: "message-delta", data: deltaFrame(turnId: "turn-1", item: tool))
         #expect(conn.turns[0].text == "I fixed the parser.")
         #expect(conn.turns[0].items.count == 1)
         #expect(conn.turns[0].isInProgress)
 
         // The finalized whole turn re-baselines under the same id.
-        conn.handle(event: "turn", data: frame(id: "turn-1", text: "I fixed the parser.", status: "completed", items: "[\(tool)]"))
+        conn.handle(event: "message", data: frame(id: "turn-1", text: "I fixed the parser.", status: "completed", items: "[\(tool)]"))
         #expect(conn.turns.count == 1)
         #expect(!conn.turns[0].isInProgress)
     }
 
-    @Test("a turn-delta for an unknown turn id is dropped, not misapplied")
+    @Test("a message-delta for an unknown turn id is dropped, not misapplied")
     func deltaForUnknownTurnDrops() {
         let conn = connection()
-        conn.handle(event: "turn", data: frame(id: "turn-1", text: "hi", status: "running"))
-        conn.handle(event: "turn-delta", data: deltaFrame(turnId: "turn-99", item: streamMessage(id: "text-0", text: "stray")))
+        conn.handle(event: "message", data: frame(id: "turn-1", text: "hi", status: "running"))
+        conn.handle(event: "message-delta", data: deltaFrame(turnId: "turn-99", item: streamMessage(id: "text-0", text: "stray")))
         #expect(conn.turns.count == 1)
         #expect(conn.turns[0].text == "hi", "a delta for a turn we never opened changes nothing")
     }
@@ -136,8 +267,8 @@ struct WaveChatConnectionTests {
     @Test("repeated same-id frames grow the turn in place and finalize it")
     func sameIdFramesUpdateInPlace() {
         let conn = connection()
-        conn.handle(event: "turn", data: frame(id: "turn-1", role: "user", text: "status?", status: "completed"))
-        conn.handle(event: "turn", data: frame(id: "turn-2", text: "thinking", status: "running"))
+        conn.handle(event: "message", data: frame(id: "turn-1", role: "user", text: "status?", status: "completed"))
+        conn.handle(event: "message", data: frame(id: "turn-2", text: "thinking", status: "running"))
 
         #expect(conn.turns.count == 2)
         #expect(conn.turns[1].isInProgress)
@@ -145,14 +276,14 @@ struct WaveChatConnectionTests {
 
         // The open turn re-sent with more text and a first item.
         let items = "[{\"type\":\"tool\",\"id\":\"item-0\",\"name\":\"Bash\",\"status\":\"completed\",\"input\":null,\"output\":\"ok\"}]"
-        conn.handle(event: "turn", data: frame(id: "turn-2", text: "thinking\\nmore", status: "running", items: items))
+        conn.handle(event: "message", data: frame(id: "turn-2", text: "thinking\\nmore", status: "running", items: items))
         #expect(conn.turns.count == 2, "same id replaces, never appends")
         #expect(conn.turns[1].text == "thinking\nmore")
         #expect(conn.turns[1].items.count == 1)
         #expect(conn.turns[1].isInProgress)
 
         // Finalization flips the status under the same id.
-        conn.handle(event: "turn", data: frame(id: "turn-2", text: "thinking\\nmore", status: "completed", items: items))
+        conn.handle(event: "message", data: frame(id: "turn-2", text: "thinking\\nmore", status: "completed", items: items))
         #expect(conn.turns.count == 2)
         #expect(!conn.turns[1].isInProgress)
         #expect(conn.turns.map(\.id) == ["turn-1", "turn-2"])
@@ -161,12 +292,12 @@ struct WaveChatConnectionTests {
     @Test("running turns can finalize as failed or interrupted")
     func terminalStatusFlips() {
         let conn = connection()
-        conn.handle(event: "turn", data: frame(id: "turn-1", text: "a", status: "running"))
-        conn.handle(event: "turn", data: frame(id: "turn-1", text: "a", status: "interrupted"))
+        conn.handle(event: "message", data: frame(id: "turn-1", text: "a", status: "running"))
+        conn.handle(event: "message", data: frame(id: "turn-1", text: "a", status: "interrupted"))
         #expect(conn.turns[0].status == .interrupted)
 
-        conn.handle(event: "turn", data: frame(id: "turn-2", text: "b", status: "running"))
-        conn.handle(event: "turn", data: frame(id: "turn-2", text: "b", status: "failed"))
+        conn.handle(event: "message", data: frame(id: "turn-2", text: "b", status: "running"))
+        conn.handle(event: "message", data: frame(id: "turn-2", text: "b", status: "failed"))
         #expect(conn.turns[1].status == .failed)
         #expect(conn.turns.allSatisfy { !$0.isInProgress })
     }
@@ -176,13 +307,13 @@ struct WaveChatConnectionTests {
         let conn = connection()
         // Replay serves the open turn after the finalized thread; a user turn
         // committed mid-turn can also arrive out of id order.
-        conn.handle(event: "turn", data: frame(id: "turn-3", role: "user", text: "hey", status: "completed"))
-        conn.handle(event: "turn", data: frame(id: "turn-2", text: "grinding", status: "running"))
+        conn.handle(event: "message", data: frame(id: "turn-3", role: "user", text: "hey", status: "completed"))
+        conn.handle(event: "message", data: frame(id: "turn-2", text: "grinding", status: "running"))
         #expect(conn.turns.map(\.id) == ["turn-2", "turn-3"])
 
         // A replace frame (same id, so the same (sequence, id) sort key) skips
         // the sort — the order must survive the in-place growth untouched.
-        conn.handle(event: "turn", data: frame(id: "turn-2", text: "grinding\\nstill", status: "running"))
+        conn.handle(event: "message", data: frame(id: "turn-2", text: "grinding\\nstill", status: "running"))
         #expect(conn.turns.map(\.id) == ["turn-2", "turn-3"])
         #expect(conn.turns[0].text == "grinding\nstill")
     }
@@ -191,9 +322,9 @@ struct WaveChatConnectionTests {
     func unparseableIdsAreDeterministic() {
         let conn = connection()
         // Both fall to the `.max` sentinel sequence; id breaks the tie.
-        conn.handle(event: "turn", data: frame(id: "weird-b", text: "b", status: "completed"))
-        conn.handle(event: "turn", data: frame(id: "weird-a", text: "a", status: "completed"))
-        conn.handle(event: "turn", data: frame(id: "turn-7", text: "real", status: "completed"))
+        conn.handle(event: "message", data: frame(id: "weird-b", text: "b", status: "completed"))
+        conn.handle(event: "message", data: frame(id: "weird-a", text: "a", status: "completed"))
+        conn.handle(event: "message", data: frame(id: "turn-7", text: "real", status: "completed"))
         #expect(conn.turns.map(\.id) == ["turn-7", "weird-a", "weird-b"])
     }
 
@@ -275,7 +406,8 @@ struct WaveChatConnectionTests {
         let conn = connection()
         var parser = SSEFrameParser()
         var frames: [SSEFrameParser.Frame] = []
-        let stream = "event: state\ndata: turning\n\nevent: turn\ndata: \(currentTurnFrame)\n\n"
+        let message = localMessageFrame(turn: currentTurnFrame, turnId: "turn-101")
+        let stream = "event: state\ndata: turning\n\nevent: message\ndata: \(message)\n\n"
         for byte in stream.utf8 {
             if let frame = parser.consume(byte) { frames.append(frame) }
         }

@@ -34,16 +34,6 @@ def _write_fake_macho(path: Path, content: bytes = b"fake-macho") -> None:
     path.chmod(0o755)
 
 
-def _git(repo: Path, *args: str) -> str:
-    result = subprocess.run(
-        ["git", "-C", str(repo), *args],
-        check=True,
-        capture_output=True,
-        text=True,
-    )
-    return result.stdout.strip()
-
-
 def _stage_build_artifacts(root: Path) -> None:
     swift_rel = root / "swift" / ".build" / "release"
     swift_rel.mkdir(parents=True)
@@ -65,6 +55,7 @@ def _stage_build_artifacts(root: Path) -> None:
     cargo_rel = root / "target" / "release"
     cargo_rel.mkdir(parents=True)
     _write_fake_macho(cargo_rel / "lf")
+    _write_fake_macho(cargo_rel / "lfd")
 
 
 def _make_spec(root: Path) -> install.BundleSpec:
@@ -79,53 +70,6 @@ def _stage_bundle(spec: install.BundleSpec, binaries: tuple[str, ...]) -> None:
     (spec.contents_dir / spec.info_plist.name).write_text("<plist/>")
     for resource in spec.resources:
         (spec.resources_dir / resource.name).write_bytes(b"x")
-
-
-def _write_fake_promotion_boundary(path: Path) -> None:
-    path.parent.mkdir(parents=True, exist_ok=True)
-    path.write_text(
-        """#!/usr/bin/env python3
-import os
-import pathlib
-import shutil
-import sys
-
-args = sys.argv[1:]
-if args == ["--version"]:
-    print("lf 9.9.9")
-    raise SystemExit(0)
-if args[:2] != ["install", "promote"]:
-    raise SystemExit(2)
-
-log = pathlib.Path(os.environ["PROMOTION_LOG"])
-log.write_text(" ".join(args) + "\\n")
-immutable = pathlib.Path(os.environ["PROMOTED_BINARY"])
-shutil.copy2(pathlib.Path(sys.argv[0]), immutable)
-immutable.chmod(0o555)
-
-def option(name):
-    return pathlib.Path(args[args.index(name) + 1])
-
-cli_target = option("--cli-target")
-cli_target.parent.mkdir(parents=True, exist_ok=True)
-temporary = cli_target.with_name(".lf.fake-boundary")
-temporary.unlink(missing_ok=True)
-temporary.symlink_to(immutable)
-temporary.replace(cli_target)
-
-if "--app-source" in args:
-    app_source = option("--app-source")
-    app_target = option("--app-target")
-    if app_target.exists():
-        shutil.rmtree(app_target)
-    shutil.copytree(app_source, app_target, symlinks=True)
-    (app_target / ".rust-promotion-boundary").write_text("committed")
-    legacy = option("--legacy-app-target")
-    if legacy.exists():
-        shutil.rmtree(legacy)
-"""
-    )
-    path.chmod(0o755)
 
 
 def _patch_subprocess(
@@ -158,7 +102,7 @@ def _patch_subprocess(
 # --- Tests ---
 
 
-def test_install_loopflow_bundles_only_the_lf_helper(
+def test_install_loopflow_bundles_the_control_plane_helpers(
     monkeypatch: pytest.MonkeyPatch, tmp_path: Path
 ) -> None:
     root = tmp_path / "repo"
@@ -170,6 +114,7 @@ def test_install_loopflow_bundles_only_the_lf_helper(
 
     assert (spec.macos_dir / "Loopflow").exists()
     assert (spec.macos_dir / "lf").exists()
+    assert (spec.macos_dir / "lfd").exists()
 
     stamped = plistlib.loads((spec.contents_dir / "Info.plist").read_bytes())
     assert stamped["CFBundleShortVersionString"] == "9.9.9"
@@ -191,7 +136,7 @@ def test_verify_bundle_rejects_wrong_architecture(
     monkeypatch: pytest.MonkeyPatch, tmp_path: Path
 ) -> None:
     spec = _make_spec(tmp_path / "repo")
-    _stage_bundle(spec, binaries=("Loopflow", "lf"))
+    _stage_bundle(spec, binaries=("Loopflow", "lf", "lfd"))
     _patch_subprocess(monkeypatch, archs=["sparc64"])
 
     with pytest.raises(install.StageError, match="built for sparc64"):
@@ -200,7 +145,7 @@ def test_verify_bundle_rejects_wrong_architecture(
 
 def test_verify_bundle_rejects_non_macho(monkeypatch: pytest.MonkeyPatch, tmp_path: Path) -> None:
     spec = _make_spec(tmp_path / "repo")
-    _stage_bundle(spec, binaries=("Loopflow", "lf"))
+    _stage_bundle(spec, binaries=("Loopflow", "lf", "lfd"))
     _patch_subprocess(monkeypatch, archs=[])  # lipo fails -> not Mach-O
 
     with pytest.raises(install.StageError, match="not a Mach-O"):
@@ -234,147 +179,113 @@ def test_stage_binaries_errors_on_missing_cargo_output(
         install._stage_binaries(tmp_path / "local-bin")
 
 
-def test_only_canonical_or_tagged_installs_receive_migration_authority(
+def test_source_builds_are_always_development_validation_only(
     monkeypatch: pytest.MonkeyPatch,
 ) -> None:
-    values = {
-        ("rev-parse", "HEAD"): "branch-head",
-        ("symbolic-ref", "--quiet", "refs/remotes/origin/HEAD"): "refs/remotes/origin/main",
-        ("rev-parse", "refs/remotes/origin/main"): "main-head",
-        ("tag", "--points-at", "HEAD"): "",
-        ("status", "--porcelain"): "",
-    }
-    monkeypatch.setattr(
-        install,
-        "_git_stdout",
-        lambda args, repo=install.ROOT, check=True: values[tuple(args)],
-    )
+    monkeypatch.setenv("LOOPFLOW_BUILD_PROVENANCE", "release")
+    monkeypatch.setenv("LOOPFLOW_MIGRATION_AUTHORITY", "published")
 
-    assert install._migration_authority() == "validation_only"
-    values[("rev-parse", "HEAD")] = "main-head"
-    assert install._migration_authority() == "published"
-    values[("rev-parse", "HEAD")] = "tagged-head"
-    values[("tag", "--points-at", "HEAD")] = "v0.11.2"
-    assert install._migration_authority() == "published"
-    values[("status", "--porcelain")] = " M rust/loopflow/src/store/migrations.rs"
-    assert install._migration_authority() == "validation_only"
+    env = install._development_build_env()
+
+    assert env["LOOPFLOW_BUILD_PROVENANCE"] == "development"
+    assert env["LOOPFLOW_MIGRATION_AUTHORITY"] == "validation_only"
 
 
-@pytest.mark.parametrize("no_pull", [False, True])
-def test_refresh_routes_default_no_pull_and_custom_dir_through_rust_promotion(
-    monkeypatch: pytest.MonkeyPatch, tmp_path: Path, no_pull: bool
-) -> None:
-    root = tmp_path / "repo"
-    candidate = root / "target" / "release" / "lf"
-    _write_fake_promotion_boundary(candidate)
-    install_dir = tmp_path / "custom-bin"
-    install_dir.mkdir()
-    (install_dir / "lf").write_text("python-direct-copy")
-    log = tmp_path / "promotion.log"
-    immutable = tmp_path / "immutable-lf"
-    refreshed: list[Path] = []
-
-    monkeypatch.setattr(install, "ROOT", root)
-    monkeypatch.setattr(install, "_build_cli_binaries", lambda: None)
-    monkeypatch.setattr(install, "_refresh_default_branch", refreshed.append)
-    monkeypatch.setenv("PROMOTION_LOG", str(log))
-    monkeypatch.setenv("PROMOTED_BINARY", str(immutable))
-
-    install.refresh(no_pull=no_pull, install_dir=install_dir)
-
-    assert (install_dir / "lf").is_symlink()
-    assert (install_dir / "lf").resolve() == immutable
-    command = log.read_text()
-    assert command.startswith("install promote ")
-    assert f"--cli-target {install_dir / 'lf'}" in command
-    assert "--sync-skills" in command
-    assert refreshed == ([] if no_pull else [root])
-
-
-def test_refresh_fast_forwards_default_branch_despite_pull_config(tmp_path: Path) -> None:
-    origin = tmp_path / "origin.git"
-    author = tmp_path / "author"
-    checkout = tmp_path / "checkout"
-
-    subprocess.run(
-        ["git", "init", "--bare", "--initial-branch=main", str(origin)],
-        check=True,
-        capture_output=True,
-        text=True,
-    )
-    subprocess.run(
-        ["git", "init", "--initial-branch=main", str(author)],
-        check=True,
-        capture_output=True,
-        text=True,
-    )
-    _git(author, "config", "user.name", "Loopflow Test")
-    _git(author, "config", "user.email", "test@loopflow.invalid")
-    (author / "version.txt").write_text("one\n")
-    _git(author, "add", "version.txt")
-    _git(author, "commit", "-m", "initial")
-    _git(author, "remote", "add", "origin", str(origin))
-    _git(author, "push", "-u", "origin", "main")
-
-    subprocess.run(
-        ["git", "clone", str(origin), str(checkout)],
-        check=True,
-        capture_output=True,
-        text=True,
-    )
-    _git(checkout, "config", "pull.rebase", "true")
-
-    (author / "version.txt").write_text("two\n")
-    _git(author, "commit", "-am", "update")
-    _git(author, "push")
-
-    install._refresh_default_branch(checkout)
-
-    assert (checkout / "version.txt").read_text() == "two\n"
-    assert _git(checkout, "rev-parse", "HEAD") == _git(author, "rev-parse", "HEAD")
-
-
-def test_local_use_routes_cli_app_bundled_helper_and_skills_through_rust_promotion(
+def test_published_refresh_pins_and_verifies_the_external_installer(
     monkeypatch: pytest.MonkeyPatch, tmp_path: Path
 ) -> None:
-    root = tmp_path / "repo"
-    _stage_build_artifacts(root)
-    _write_fake_promotion_boundary(root / "target" / "release" / "lf")
-    local_bin = root / "local-bin"
+    installer_payload = b"#!/bin/sh\nexit 0\n"
+    digest = install.hashlib.sha256(installer_payload).hexdigest()
+    downloads: list[str] = []
+    runs: list[tuple[list[str], dict[str, str]]] = []
+
+    def download(url: str, destination: Path) -> str:
+        downloads.append(url)
+        if destination.name == "SHA256SUMS":
+            destination.write_text(f"{digest}  install.sh\n")
+            return "https://release-assets.githubusercontent.com/signed-checksums"
+        destination.write_bytes(installer_payload)
+        return "https://release-assets.githubusercontent.com/signed-installer"
+
+    monkeypatch.setattr(install, "_latest_release_tag", lambda: "v9.9.9")
+    monkeypatch.setattr(install, "_download_release_asset", download)
+    monkeypatch.setattr(
+        install,
+        "_run_or_raise",
+        lambda command, _label, cwd=None, env=None: runs.append((command, env)),
+    )
+
+    tag = install._install_published_release(tmp_path / "bin")
+
+    assert tag == "v9.9.9"
+    assert downloads == [
+        f"{install.RELEASE_DOWNLOAD_BASE}/v9.9.9/SHA256SUMS",
+        f"{install.RELEASE_DOWNLOAD_BASE}/v9.9.9/install.sh",
+    ]
+    assert runs[0][0][0] == "sh"
+    assert runs[0][0][-2:] == ["--version", "v9.9.9"]
+    assert runs[0][1]["LF_INSTALL_DIR"] == str(tmp_path / "bin")
+
+
+def test_published_refresh_rejects_an_installer_digest_mismatch(
+    monkeypatch: pytest.MonkeyPatch, tmp_path: Path
+) -> None:
+    def download(url: str, destination: Path) -> str:
+        if destination.name == "SHA256SUMS":
+            destination.write_text(f"{'0' * 64}  install.sh\n")
+            return "https://release-assets.githubusercontent.com/signed-checksums"
+        destination.write_text("different")
+        return "https://release-assets.githubusercontent.com/signed-installer"
+
+    monkeypatch.setattr(install, "_latest_release_tag", lambda: "v9.9.9")
+    monkeypatch.setattr(install, "_download_release_asset", download)
+    monkeypatch.setattr(
+        install,
+        "_run_or_raise",
+        lambda *_args, **_kwargs: pytest.fail("unverified installer must not execute"),
+    )
+
+    with pytest.raises(install.StageError, match="digest mismatch"):
+        install._install_published_release(tmp_path / "bin")
+
+
+def test_refresh_uses_only_the_published_release_path(
+    monkeypatch: pytest.MonkeyPatch,
+    tmp_path: Path,
+    capsys: pytest.CaptureFixture[str],
+) -> None:
     install_dir = tmp_path / "bin"
-    applications = tmp_path / "Applications"
     install_dir.mkdir()
-    (install_dir / "lf").write_text("python-direct-copy")
-    (applications / "Loopflow.app").mkdir(parents=True)
-    (applications / "Loopflow.app" / "old").write_text("old app")
-    (applications / "Concerto.app").mkdir()
-    log = tmp_path / "promotion.log"
-    immutable = tmp_path / "immutable-lf"
+    target = install_dir / "lf"
+    target.write_text("#!/bin/sh\nexit 0\n")
+    target.chmod(0o755)
+    calls: list[Path] = []
+    monkeypatch.setattr(
+        install,
+        "_install_published_release",
+        lambda destination: calls.append(destination) or "v9.9.9",
+    )
 
-    # Build the bundle spec from the tmp root before patching so local() stages
-    # the app under local_bin (its default arg would otherwise bind the real ROOT).
-    spec = install.default_bundle_spec(root=root)
+    install.refresh(install_dir=install_dir)
 
+    assert calls == [install_dir]
+    assert "release: v9.9.9" in capsys.readouterr().out
+
+
+def test_local_dry_run_has_no_production_activation_path(
+    monkeypatch: pytest.MonkeyPatch,
+    tmp_path: Path,
+    capsys: pytest.CaptureFixture[str],
+) -> None:
+    root = tmp_path / "repo"
+    bundle_spec = install.default_bundle_spec(root)
     monkeypatch.setattr(install, "ROOT", root)
-    monkeypatch.setattr(install, "LOCAL_BIN", local_bin)
-    monkeypatch.setattr(install, "APPLICATIONS_DIR", applications)
-    monkeypatch.setattr(install, "default_bundle_spec", lambda: spec)
-    monkeypatch.setattr(install, "_resolve_install_dir", lambda: install_dir)
-    monkeypatch.setattr(install, "_run_parallel_builds", lambda _skip: None)
+    monkeypatch.setattr(install, "LOCAL_BIN", root / "local-bin")
+    monkeypatch.setattr(install, "default_bundle_spec", lambda: bundle_spec)
     monkeypatch.setattr(install, "read_release_version", lambda _root: "9.9.9")
-    monkeypatch.setenv("PROMOTION_LOG", str(log))
-    monkeypatch.setenv("PROMOTED_BINARY", str(immutable))
-    _patch_subprocess(monkeypatch)
 
-    install.local(use=True, dry_run=False, skip=[])
+    install.local(dry_run=True, skip=[])
 
-    assert (install_dir / "lf").is_symlink()
-    assert (install_dir / "lf").resolve() == immutable
-    installed_app = applications / "Loopflow.app"
-    assert (installed_app / ".rust-promotion-boundary").read_text() == "committed"
-    assert (installed_app / "Contents" / "MacOS" / "lf").exists()
-    assert not (applications / "Concerto.app").exists()
-    command = log.read_text()
-    assert f"--app-source {local_bin / 'Loopflow.app'}" in command
-    assert f"--app-target {installed_app}" in command
-    assert "--sync-skills" in command
+    output = capsys.readouterr().out
+    assert "validation-only build under local-bin" in output
+    assert "promote" not in output.lower()

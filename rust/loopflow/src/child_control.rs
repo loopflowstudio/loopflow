@@ -26,6 +26,7 @@ impl PendingInput {
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub(crate) enum CommandStop {
     Interrupted,
+    Quiesced,
     Abandoned(String),
 }
 
@@ -43,6 +44,16 @@ pub(crate) async fn absorb_run_control(
                 harness.interrupt().await?;
             }
             Ok(Some(CommandStop::Interrupted))
+        }
+        Some(crate::durable::RunControl::Quiesce { deadline, .. }) => {
+            if turn_active && time::OffsetDateTime::now_utc().unix_timestamp() < deadline {
+                return Ok(None);
+            }
+            if turn_active {
+                harness.interrupt().await?;
+                return Ok(Some(CommandStop::Interrupted));
+            }
+            Ok(Some(CommandStop::Quiesced))
         }
         Some(crate::durable::RunControl::Abandon { reason }) => {
             Ok(Some(CommandStop::Abandoned(reason)))

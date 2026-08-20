@@ -336,7 +336,23 @@ pub struct GithubObservation {
 #[serde(tag = "state", rename_all = "snake_case")]
 pub enum GithubObservationResult {
     Fresh,
+    Partial { reason: String },
     Degraded { reason: String },
+}
+
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub(crate) enum TaskPrRepairKind {
+    AvoidableRebaseAgent,
+    ManualGitRepair,
+}
+
+impl TaskPrRepairKind {
+    pub(crate) fn as_str(self) -> &'static str {
+        match self {
+            Self::AvoidableRebaseAgent => "avoidable_rebase_agent",
+            Self::ManualGitRepair => "manual_git_repair",
+        }
+    }
 }
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize)]
@@ -723,7 +739,7 @@ impl Task {
     /// The third was the 2026-07-14 W2-129 failure: `Open` is not terminal
     /// and carries no live process, so it reads exactly like Work that
     /// merely stopped. A wake therefore launched generation 2, which reopened
-    /// the flow at `task_clarify` and began re-doing work whose PR (#878) was
+    /// the flow at `task/clarify` and began re-doing work whose PR (#878) was
     /// already awaiting a merge. An explicit merge request is not an invitation
     /// to start over.
     ///
@@ -919,6 +935,13 @@ impl Task {
 #[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
 #[serde(tag = "kind", rename_all = "snake_case")]
 pub enum TaskEventKind {
+    WorktreeInitializing {
+        pr_id: TaskPrId,
+        sequence: u32,
+        branch: String,
+        path: String,
+        base_commit: String,
+    },
     Started,
     BodyHandedOff {
         handoff: crate::child::ChildBodyHandoff,
@@ -957,7 +980,10 @@ pub enum TaskEventKind {
 impl TaskEventKind {
     /// Whether the event crosses the required Task → Project boundary.
     pub fn is_project_observable(&self) -> bool {
-        !matches!(self, Self::Started | Self::Progress { .. })
+        !matches!(
+            self,
+            Self::WorktreeInitializing { .. } | Self::Started | Self::Progress { .. }
+        )
     }
 
     /// Whether a Project-observable Task event also belongs in the root Wave.

@@ -8,20 +8,32 @@ find release -maxdepth 2 -type f | sort
 ```
 
 ```bash
-lf cron sync --wave infrastructure   # daily patch release on the maintained host
-lf cron list
+scripts/bootstrap-cron-host.sh infrastructure  # preflight, sync, and configured-path receipts
+lf cron history --wave infrastructure --days 35
 ```
 
 ```bash
-uv run python scripts/install.py local --use   # full build: lf + Loopflow.app -> local-bin/, make active
-uv run python scripts/install.py refresh       # CLI refresh: pull default branch, rebuild/install lf
+uv run python scripts/install.py local     # build validation-only artifacts under local-bin/
+uv run python scripts/install.py refresh   # install the latest published release
 cat release/SCHEDULE.md      # hosted-build and cron-host release boundaries
 ```
 
-`install.py` is the local entry point. `local --use` builds this worktree's
-`lf` and `Loopflow.app` into `<worktree>/local-bin/`, then promotes that build.
-`refresh` is the fast CLI-only path: pull the default branch, rebuild `lf`, and
-install it into the local bin dir.
+`install.py` is the local entry point. `local` builds this worktree's `lf`,
+`lfd`, and `Loopflow.app` into `<worktree>/local-bin/` with validation-only
+migration authority. It cannot activate the production Home. `refresh`
+resolves one published tag, verifies its installer from `SHA256SUMS`, then runs
+the same release installer an external user receives.
+
+Promotion stops before compilation while draft migrations remain. Cut the
+release first so the binary embeds the schema its runtime code expects.
+Promotion also snapshots the shared store, applies candidate migrations to the
+copy, and expands every lifecycle reachable by placed open Work. An unresolved
+flow or skill rejects the candidate before the installed binaries move.
+On an active Home, promotion fences the old runtime generation, checkpoints and
+drains exact Wave/Project/Task containment, advances the store, restarts the
+same keeper, then reconciles every enabled open Work onto a new Run. `refresh`
+prints the terminal upgrade result directly; no manual zero-Run window is
+required.
 
 Use `release/` to keep the rationale and notes for each shipped version close
 to the code.
@@ -31,6 +43,11 @@ intent, an isolated release PR, the tag, and observed completion. This
 repository owns migration checks and preparation in `.lf/config.yaml`, plus
 package builds, signing, notarization, uploads, deployment, smoke tests, and
 secrets in its workflows and scripts.
+
+The repository names the logical `loopflow-release-publisher` command. The
+maintained Home supplies that executable on PATH and keeps its credential
+provider and selectors untracked. `lf release run` invokes its read-only
+`check` before changing release state, so missing host authority fails closed.
 
 | Path | What it does |
 |------|--------------|
@@ -48,6 +65,7 @@ the app is not a side artifact.
 |----------|-------|--------------|
 | `lf-<target>.tar.gz` | GitHub Release | `Cargo.toml` |
 | `Loopflow-<version>.dmg`, `Loopflow-latest.dmg` | R2 `downloads/` + GitHub Release | tag |
+| `SHA256SUMS` | GitHub Release | release artifact bytes |
 | `loopflow` crate | crates.io | `Cargo.toml` |
 
 `Loopflow.app`'s `CFBundleShortVersionString`/`CFBundleVersion` are stamped from
@@ -61,8 +79,8 @@ version as `lf --version` — no separate manifest to bump or drift.
 | Nightly | `Packages (nightly)` | Builds every native `lf` tarball, extracts each package, and smoke-tests `--version` | No — artifacts expire after 14 days |
 | Daily | Loopflow host `release-run` cron | Checks host credentials, opens and lands a patch release when commits landed, waits for hosted builds, then publishes and deploys | Yes |
 | Tag | `Release build` | Builds and smoke-tests the four native tarballs on GitHub's target machines; stores workflow artifacts for the host publisher | No |
-| Local | `scripts/install.py local --use` | Build this worktree's `lf` and `Loopflow.app` into `local-bin/`, then promote it active | Local only |
-| Local | `scripts/install.py refresh` | Pull, release-build `lf`, and atomically copy it into the local bin dir | Local only |
+| Local | `scripts/install.py local` | Build validation-only `lf`, `lfd`, and `Loopflow.app` into `local-bin/` | No |
+| Local | `scripts/install.py refresh` | Download, verify, and promote the latest published control plane and Mac app | Yes, installed Home |
 
 GitHub owns credential-free compilation. The maintained Loopflow host owns the
 credentialed boundary: DMG signing/notarization, crates.io, R2, Fly deployment,
@@ -71,9 +89,18 @@ and the GitHub Release. It deploys the website from the exact tag and requires
 image and leaves the release incomplete. Publishing the non-draft GitHub
 Release is the final completion marker.
 
+The publisher controller runs from current main while its source path is the
+leased exact-tag worktree. This lets an incomplete immutable tag resume with a
+release-plumbing repair without changing the code or artifacts being shipped.
+An ambiguous Fly command result is accepted only when `/healthz` and the root
+page prove the exact tag; rollback starts only after that production proof
+fails.
+
 The daily run is idempotent. No merged changes is success. If a tag's hosted
 build succeeded but publishing stopped, the next run downloads that run's
 artifacts and resumes the same tag instead of cutting another patch.
+The runner leases that tag's publisher worktree until the publisher exits, so
+concurrent re-entry and worktree cleanup cannot remove a checkout still in use.
 
 Append to `release/unreleased/DECISIONS.md` only when the change captures durable intent: policy choices, scope calls, paths not taken, or decisions a contributor would cite months later. Skip bug-fix churn and mechanical edits.
 
@@ -85,7 +112,14 @@ writes the final notes to both `RELEASE_NOTES.md` and
 the shipped-behavior ledger; matching PRs add narrative context. If the
 decisions directory is absent, the same commit evidence still produces notes.
 
-Scheduled releases prefer the same agent-backed `release-notes` skill. When
-the runner has no Claude, Codex, or OpenCode CLI, `lf release run` writes
-deterministic notes from the exact commits, matching PRs, and archived
-decisions instead of blocking the patch release.
+Scheduled releases prefer the same agent-backed `release-notes` skill. Missing
+CLIs, provider cooldowns, rate limits, quota exhaustion, authentication loss,
+and provider outages select concise deterministic notes instead of stranding a
+verified patch release. Release-note source context is capped at 128 KiB and
+the resulting notes/merge-queue body at 60 KiB; omission counts travel with the
+agent context. Unknown skill failures, stale-version output, missing output,
+and oversized notes still block the release gate.
+
+`lf release status` reports narrative notes, degraded-but-safe deterministic
+notes, missing unsafe notes, or an unmarked legacy archive separately from the
+workflow and GitHub Release status.

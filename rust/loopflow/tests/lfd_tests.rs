@@ -102,6 +102,8 @@ fn spawn_lfd(repo: &std::path::Path, db_path: &std::path::Path, addr: SocketAddr
         .arg(addr.to_string())
         .env("LF_DB_PATH", db_path)
         .env("LF_HOME", repo.join(".lf-test"))
+        .env("LF_CONTROL_HOME", repo.join(".lf-test"))
+        .env_remove("LF_CONTROL_DB_PATH")
         .env("LF_LINEAR_WEBHOOK_SECRET", SECRET)
         .env("LF_LINEAR_VIEWER_ID", VIEWER_ID)
         .stdout(Stdio::null())
@@ -109,6 +111,20 @@ fn spawn_lfd(repo: &std::path::Path, db_path: &std::path::Path, addr: SocketAddr
         .spawn()
         .expect("spawn lfd");
     ChildGuard(child)
+}
+
+#[test]
+fn lfd_reports_the_control_plane_build_version() {
+    let output = Command::new(env!("CARGO_BIN_EXE_lfd"))
+        .arg("--version")
+        .output()
+        .expect("run lfd --version");
+
+    assert!(output.status.success());
+    assert_eq!(
+        String::from_utf8(output.stdout).unwrap(),
+        format!("lfd {}\n", loopflow::build_info::BUILD_VERSION)
+    );
 }
 
 #[tokio::test]

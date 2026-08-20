@@ -1,24 +1,18 @@
 ---
 crons:
-  - flow: telemetry-daily
-    schedule: "0 0 9 * * *"
-  - flow: release-run
-    schedule: "0 0 10 * * *"
+- flow: telemetry-daily
+  schedule: 0 0 9 * * *
+- flow: release-run
+  schedule: 0 0 10 * * *
 pm:
-  provider: linear
   linear_initiative: 218967b6-a760-4b7c-9a46-11d9d61a42c2
-  linear_team: 08c8d501-791d-4db0-a14c-15599d365955
 ---
 
 ## Objective
 
-Loopflow's infrastructure keeps real waves moving. It owns the substrate around
-the product: technical architecture, developer efficiency, and release
-stability.
-
-The work succeeds when the system is legible, local work is fast, and shipping
-is boring. Infrastructure does not build a generic platform ahead of need; it
-turns repeated friction and operational risk into system capability.
+Loopflow's infrastructure makes ordinary work fast, safe, and boring. It keeps
+the system legible, converts failures into prevention, and turns repeated
+operational friction into durable capability.
 
 ## Projects
 

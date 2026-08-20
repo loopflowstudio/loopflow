@@ -1,5 +1,4 @@
 ---
-interactive: true
 requires: none
 produces: understanding, scratch/notes.md (optional)
 action_style: exploratory

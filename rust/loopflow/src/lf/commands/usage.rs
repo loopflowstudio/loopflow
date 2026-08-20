@@ -6,13 +6,12 @@ use time::OffsetDateTime;
 use crate::journal::open_ledger;
 use crate::lf::output::{format_int, truncate, Colors};
 use crate::provider_account::open_account_store;
-use crate::store::{AccountLimitRow, AccountLimitWindow, ProviderAccount, TurnSpendRow};
+use crate::store::{AccountLimitRow, AccountLimitWindow, AttributedTurnUsage, ProviderAccount};
 use crate::subscription::{poll_account, SubscriptionError};
 
 const REPO_WIDTH: usize = 32;
 const PROVIDER_WIDTH: usize = 12;
 const NUM_WIDTH: usize = 14;
-const SHARE_WIDTH: usize = 8;
 const ACCOUNT_WIDTH: usize = 30;
 const WINDOW_WIDTH: usize = 14;
 
@@ -20,31 +19,35 @@ const WINDOW_WIDTH: usize = 14;
 const FRESH_SECS: i64 = 15 * 60;
 
 /// `lf usage`: how much of each account's subscription is used, then token
-/// spend by repo and provider. Both read local stores; accounts whose stored
+/// usage by repo and provider. Both read local stores; accounts whose stored
 /// window observations have gone stale are polled live first.
 ///
-/// `--json` emits one row per *Turn* instead: what the provider measured for
-/// one exchange, attributed by the invocation that ran it. That is the grain the
-/// dashboard groups by — skill, `provider:model`, repo — and consumers sum,
-/// never diff.
+/// `--json` emits the canonical fixed-window usage snapshot consumed by every
+/// CLI and UI surface. Provider account limits remain a separate subscription
+/// concern and are rendered only in the human report.
 pub fn run(json: bool, days: u32, refresh: bool, cached: bool) -> Result<()> {
+    let ledger = open_ledger()?;
+    if json {
+        let now = OffsetDateTime::now_utc().unix_timestamp();
+        println!(
+            "{}",
+            serde_json::to_string(&crate::usage::snapshot(&ledger, now)?)?
+        );
+        return Ok(());
+    }
     let since = if days == 0 {
         0
     } else {
         OffsetDateTime::now_utc().unix_timestamp() - i64::from(days) * 86_400
     };
-    let spend = open_ledger()?.turn_spend_since(since)?;
-    if json {
-        println!("{}", serde_json::to_string(&spend)?);
-        return Ok(());
-    }
+    let usage = ledger.attributed_turn_usage_since(since)?;
 
     let runtime = tokio::runtime::Runtime::new()?;
     match runtime.block_on(account_statuses(refresh, cached)) {
         Ok(accounts) => print_accounts(&accounts),
         Err(error) => println!("accounts unavailable: {error}\n"),
     }
-    print_report(&aggregate_spend(&spend), days);
+    print_report(&aggregate_usage(&usage), days);
     Ok(())
 }
 
@@ -289,86 +292,116 @@ fn format_age(seconds: i64) -> String {
 
 // -- Spend ---------------------------------------------------------------------
 
-/// A running sum over `(repo, provider)` rows — the only grain the ledger
-/// reports. Every coarser row in this table is one of these.
+/// A running sum over measured `(repo, provider)` fields. Optional counters
+/// stay absent until at least one provider reports them.
 #[derive(Default)]
 struct Totals {
-    input: u64,
-    output: u64,
-    cache: u64,
+    input: Option<u64>,
+    cache_read: Option<u64>,
+    cache_write: Option<u64>,
+    output: Option<u64>,
+    reasoning: Option<u64>,
+    cost_usd: Option<f64>,
 }
 
 impl Totals {
     fn add(&mut self, row: &UsageRow) {
-        self.input += row.input_tokens;
-        self.output += row.output_tokens;
-        self.cache += row.cache_read_tokens;
+        add_optional(&mut self.input, row.input_tokens);
+        add_optional(&mut self.cache_read, row.cache_read_tokens);
+        add_optional(&mut self.cache_write, row.cache_write_tokens);
+        add_optional(&mut self.output, row.output_tokens);
+        add_optional(&mut self.reasoning, row.reasoning_tokens);
+        add_optional_f64(&mut self.cost_usd, row.cost_usd);
     }
 
-    fn total(&self) -> u64 {
-        self.input + self.output
-    }
-
-    fn cells(&self, grand_total: u64) -> [String; 5] {
+    fn cells(&self) -> [String; 6] {
         [
-            format_int(self.input),
-            format_int(self.output),
-            format_int(self.cache),
-            format_int(self.total()),
-            format_share(self.total(), grand_total),
+            format_optional(self.input),
+            format_optional(self.cache_read),
+            format_optional(self.cache_write),
+            format_optional(self.output),
+            format_optional(self.reasoning),
+            self.cost_usd
+                .map(|cost| format!("${cost:.2}"))
+                .unwrap_or_else(|| "-".to_string()),
         ]
     }
 }
 
-fn format_share(total: u64, grand_total: u64) -> String {
-    if grand_total == 0 {
-        return "-".to_string();
+fn add_optional(total: &mut Option<u64>, value: Option<u64>) {
+    if let Some(value) = value {
+        *total = Some(total.unwrap_or(0).saturating_add(value));
     }
-    let share = total as f64 * 100.0 / grand_total as f64;
-    if total > 0 && share < 1.0 {
-        return "<1%".to_string();
-    }
-    format!("{share:.0}%")
 }
 
-/// Spend attributed to one `(repo, provider)` pair, folded from the same
-/// per-Turn rows emitted by `--json`: terminal-only SQL cannot assign a flow
-/// that uses Claude for one skill and Codex for another.
+fn add_optional_f64(total: &mut Option<f64>, value: Option<f64>) {
+    if let Some(value) = value {
+        *total = Some(total.unwrap_or(0.0) + value);
+    }
+}
+
+fn format_optional(value: Option<u64>) -> String {
+    value.map(format_int).unwrap_or_else(|| "-".to_string())
+}
+
+/// Usage attributed to one `(repo, provider)` pair. A Turn reaches this report
+/// through the Invocation that ran it, so a mixed-provider flow stays exact.
 ///
-/// Every Turn is reached through the invocation that ran it, and a invocation always
-/// names its repo and provider — so spend here is never unattributed.
+/// Global unattributed output remains visible in the canonical snapshot; this
+/// historical table only groups provider Turns with a repository.
 #[derive(Debug, PartialEq)]
 struct UsageRow {
     repo: String,
     provider: String,
-    input_tokens: u64,
-    output_tokens: u64,
-    cache_read_tokens: u64,
+    input_tokens: Option<u64>,
+    cache_read_tokens: Option<u64>,
+    cache_write_tokens: Option<u64>,
+    output_tokens: Option<u64>,
+    reasoning_tokens: Option<u64>,
+    cost_usd: Option<f64>,
 }
 
-fn aggregate_spend(spend: &[TurnSpendRow]) -> Vec<UsageRow> {
+fn aggregate_usage(usage: &[AttributedTurnUsage]) -> Vec<UsageRow> {
     let mut rows: BTreeMap<(String, String), Totals> = BTreeMap::new();
-    for turn in spend {
-        let input = turn.input_tokens.unwrap_or(0).max(0) as u64;
-        let output = turn.output_tokens.unwrap_or(0).max(0) as u64;
-        let cache = turn.cache_read_tokens.unwrap_or(0).max(0) as u64;
-        if input == 0 && output == 0 && cache == 0 {
+    for turn in usage {
+        let input = turn.usage.input_tokens;
+        let cache_read = turn.usage.cache_read_tokens;
+        let cache_write = turn.usage.cache_write_tokens;
+        let output = turn.usage.output_tokens;
+        let reasoning = turn.usage.reasoning_tokens;
+        if input.is_none()
+            && cache_read.is_none()
+            && cache_write.is_none()
+            && output.is_none()
+            && reasoning.is_none()
+            && turn.usage.cost_usd.is_none()
+        {
             continue;
         }
         let totals = rows
             .entry((turn.repo.clone(), turn.provider.clone()))
             .or_default();
-        totals.input += input;
-        totals.output += output;
-        totals.cache += cache;
+        totals.add(&UsageRow {
+            repo: turn.repo.clone(),
+            provider: turn.provider.clone(),
+            input_tokens: input,
+            cache_read_tokens: cache_read,
+            cache_write_tokens: cache_write,
+            output_tokens: output,
+            reasoning_tokens: reasoning,
+            cost_usd: turn.usage.cost_usd,
+        });
     }
     rows.into_iter()
         .map(|((repo, provider), totals)| UsageRow {
             repo,
             provider,
             input_tokens: totals.input,
+            cache_read_tokens: totals.cache_read,
+            cache_write_tokens: totals.cache_write,
             output_tokens: totals.output,
-            cache_read_tokens: totals.cache,
+            reasoning_tokens: totals.reasoning,
+            cost_usd: totals.cost_usd,
         })
         .collect()
 }
@@ -393,8 +426,6 @@ fn print_report(rows: &[UsageRow], days: u32) {
             .add(row);
         grand.add(row);
     }
-    let grand_total = grand.total();
-
     let colors = Colors::default();
     println!("{}SPEND ({window}){}", colors.bold, colors.reset);
     print_row(
@@ -407,7 +438,7 @@ fn print_report(rows: &[UsageRow], days: u32) {
         totals.add(row);
         print_row(
             &repo_lead(&truncate(&short_repo(&row.repo), REPO_WIDTH), &row.provider),
-            totals.cells(grand_total),
+            totals.cells(),
             false,
         );
     }
@@ -415,18 +446,21 @@ fn print_report(rows: &[UsageRow], days: u32) {
 
     print_row(&provider_lead("PROVIDER"), HEADINGS.map(String::from), true);
     for (provider, totals) in &by_provider {
-        print_row(&provider_lead(provider), totals.cells(grand_total), false);
+        print_row(&provider_lead(provider), totals.cells(), false);
     }
     println!();
 
-    print_row(&provider_lead("TOTAL"), grand.cells(grand_total), true);
+    print_row(&provider_lead("TOTAL"), grand.cells(), true);
 }
 
-/// `% TOKENS` is each row's slice of all tokens in the window — a relative
-/// distribution across repos, deliberately not a subscription measure (a repo
-/// can burn through many subscriptions' worth; subscription state lives in
-/// the ACCOUNTS section, always as percent *used*).
-const HEADINGS: [&str; 5] = ["INPUT", "OUTPUT", "CACHE READ", "TOTAL", "% TOKENS"];
+const HEADINGS: [&str; 6] = [
+    "INPUT",
+    "CACHE READ",
+    "CACHE WRITE",
+    "OUTPUT",
+    "REASONING",
+    "COST",
+];
 
 fn repo_lead(repo: &str, provider: &str) -> String {
     format!("{repo:<REPO_WIDTH$}  {provider:<PROVIDER_WIDTH$}")
@@ -436,20 +470,19 @@ fn provider_lead(provider: &str) -> String {
     format!("{provider:<PROVIDER_WIDTH$}")
 }
 
-/// Both tables are the same five columns behind a label; only the label differs,
+/// Both tables are the same six columns behind a label; only the label differs,
 /// so one printer serves headers, rows, and totals.
-fn print_row(lead: &str, cells: [String; 5], bold: bool) {
+fn print_row(lead: &str, cells: [String; 6], bold: bool) {
     let colors = Colors::default();
     let (on, off) = if bold {
         (colors.bold, colors.reset)
     } else {
         ("", "")
     };
-    let [input, output, cache, total, share] = cells;
+    let [input, cache_read, cache_write, output, reasoning, cost] = cells;
     println!(
-        "{on}{lead}  {input:>num_w$}  {output:>num_w$}  {cache:>num_w$}  {total:>num_w$}  {share:>share_w$}{off}",
+        "{on}{lead}  {input:>num_w$}  {cache_read:>num_w$}  {cache_write:>num_w$}  {output:>num_w$}  {reasoning:>num_w$}  {cost:>num_w$}{off}",
         num_w = NUM_WIDTH,
-        share_w = SHARE_WIDTH,
     );
 }
 
@@ -464,18 +497,14 @@ fn short_repo(repo: &str) -> String {
 
 #[cfg(test)]
 mod tests {
-    use super::{
-        account_label, aggregate_spend, format_share, format_window, short_repo, Totals, UsageRow,
-    };
+    use super::{account_label, aggregate_usage, format_window, short_repo, Totals, UsageRow};
+    use crate::chat::types::TurnUsage;
     use crate::profile::EmailAddress;
     use crate::store::{
-        sqlite::SqliteStore, AccountLimitWindow, CredentialState, ProviderAccount,
-        ProviderAccountId, RoutingState, TurnSpendRow,
+        sqlite::SqliteStore, AccountLimitWindow, AttributedTurnUsage, CredentialState,
+        ProviderAccount, ProviderAccountId, RoutingState, TurnUsageSample,
     };
     use crate::trace::{AgentInvocationRow, AgentTurnRow};
-
-    const TURN_SPEND_FIXTURE: &str =
-        include_str!("../../../../../tests/fixtures/dto/turn_spend.json");
 
     #[test]
     fn account_label_uses_login_email_without_internal_id() {
@@ -497,25 +526,6 @@ mod tests {
         };
 
         assert_eq!(account_label(&account), "loopflow-eng@loopflow.studio");
-    }
-
-    #[test]
-    fn turn_spend_fixture_round_trips_the_public_wire() {
-        let turns: Vec<TurnSpendRow> =
-            serde_json::from_str(TURN_SPEND_FIXTURE).expect("turn spend fixture");
-
-        assert_eq!(turns.len(), 2);
-        assert_eq!(turns[0].turn_id, "turn-1");
-        assert_eq!(turns[0].invocation_id, "invocation-1");
-        assert_eq!(turns[1].input_tokens, None);
-        assert_eq!(turns[1].output_tokens, Some(0));
-        assert_eq!(turns[1].cache_read_tokens, Some(150));
-        assert_eq!(turns[1].cost_usd, None);
-        assert_eq!(
-            serde_json::to_value(&turns).expect("serialize turn spend"),
-            serde_json::from_str::<serde_json::Value>(TURN_SPEND_FIXTURE)
-                .expect("turn spend fixture value")
-        );
     }
 
     fn invocation(id: &str) -> AgentInvocationRow {
@@ -550,11 +560,7 @@ mod tests {
         }
     }
 
-    fn measured_turn(
-        invocation: &AgentInvocationRow,
-        output: Option<i64>,
-        cache_read: Option<i64>,
-    ) -> AgentTurnRow {
+    fn measured_turn(invocation: &AgentInvocationRow) -> AgentTurnRow {
         AgentTurnRow {
             id: invocation.id.replacen("invocation", "turn", 1),
             invocation_id: invocation.id.clone(),
@@ -571,15 +577,7 @@ mod tests {
             system_tokens: 0,
             task_tokens: 0,
             supplied_context_tokens: 0,
-            provider_input_tokens: None,
-            provider_total_input_tokens: None,
-            peak_input_tokens: None,
-            context_window_tokens: None,
-            provider_output_tokens: output,
-            reasoning_tokens: None,
-            cache_read_tokens: cache_read,
-            cache_write_tokens: None,
-            cost_usd: None,
+            usage: None,
             context_gather_ms: 0,
             context_render_ms: 0,
             context_persist_ms: 0,
@@ -594,43 +592,130 @@ mod tests {
     fn spend_query_keeps_zero_and_cache_only_but_omits_absent_usage() {
         let directory = tempfile::tempdir().expect("tempdir");
         let store = SqliteStore::new(&directory.path().join("loopflow.db")).expect("store");
-        for (id, output, cache_read) in [
-            ("absent", None, None),
-            ("zero", Some(0), None),
-            ("cache", None, Some(150)),
-        ] {
+        store
+            .apply_migration_for_test("add_turn_usage_samples")
+            .expect("usage sample migration");
+        for id in ["absent", "zero", "cache", "write"] {
             let invocation = invocation(id);
-            let turn = measured_turn(&invocation, output, cache_read);
+            let turn = measured_turn(&invocation);
             store
                 .insert_trace_capture(&invocation, &turn, &[], &[])
                 .expect("insert capture");
+            let usage = match id {
+                "zero" => Some(TurnUsage {
+                    output_tokens: Some(0),
+                    ..Default::default()
+                }),
+                "cache" => Some(TurnUsage {
+                    cache_read_tokens: Some(150),
+                    ..Default::default()
+                }),
+                "write" => Some(TurnUsage {
+                    cache_write_tokens: Some(75),
+                    ..Default::default()
+                }),
+                _ => None,
+            };
+            if let Some(usage) = usage {
+                store
+                    .record_turn_usage_sample(&TurnUsageSample {
+                        turn_id: turn.id,
+                        observed_at: 110,
+                        final_receipt: true,
+                        usage,
+                    })
+                    .expect("record usage");
+            }
         }
 
-        let rows = store.turn_spend_since(0).expect("turn spend");
+        let rows = store.attributed_turn_usage_since(0).expect("turn usage");
 
-        assert_eq!(rows.len(), 2);
+        assert_eq!(rows.len(), 3);
         assert!(rows.iter().all(|row| row.turn_id != "turn-absent"));
         let zero = rows
             .iter()
             .find(|row| row.turn_id == "turn-zero")
             .expect("zero report");
-        assert_eq!(zero.output_tokens, Some(0));
+        assert_eq!(zero.usage.output_tokens, Some(0));
         let cache = rows
             .iter()
             .find(|row| row.turn_id == "turn-cache")
             .expect("cache-only report");
-        assert_eq!(cache.input_tokens, None);
-        assert_eq!(cache.output_tokens, None);
-        assert_eq!(cache.cache_read_tokens, Some(150));
+        assert_eq!(cache.usage.input_tokens, None);
+        assert_eq!(cache.usage.output_tokens, None);
+        assert_eq!(cache.usage.cache_read_tokens, Some(150));
+        let write = rows
+            .iter()
+            .find(|row| row.turn_id == "turn-write")
+            .expect("cache-write-only report");
+        assert_eq!(write.usage.cache_write_tokens, Some(75));
+    }
+
+    #[test]
+    fn usage_checkpoints_are_monotonic_final_and_bounded() {
+        let directory = tempfile::tempdir().expect("tempdir");
+        let store = SqliteStore::new(&directory.path().join("loopflow.db")).expect("store");
+        let invocation = invocation("progress");
+        let turn = measured_turn(&invocation);
+        store
+            .insert_trace_capture(&invocation, &turn, &[], &[])
+            .expect("insert capture");
+
+        let checkpoint = |at, output, reasoning, final_receipt| TurnUsageSample {
+            turn_id: turn.id.clone(),
+            observed_at: at,
+            final_receipt,
+            usage: TurnUsage {
+                output_tokens: Some(output),
+                reasoning_tokens: reasoning,
+                ..Default::default()
+            },
+        };
+        store
+            .record_turn_usage_sample(&checkpoint(0, 10, Some(4), false))
+            .expect("first checkpoint");
+        store
+            .record_turn_usage_sample(&checkpoint(1, 20, Some(8), false))
+            .expect("progress checkpoint");
+
+        let decreased = store
+            .record_turn_usage_sample(&checkpoint(2, 19, Some(8), false))
+            .expect_err("cumulative output cannot decrease");
+        assert!(decreased.to_string().contains("output_tokens decreased"));
+        let invalid_breakdown = store
+            .record_turn_usage_sample(&checkpoint(2, 20, Some(21), false))
+            .expect_err("reasoning is included in output");
+        assert!(invalid_breakdown
+            .to_string()
+            .contains("reasoning tokens exceed inclusive output"));
+
+        store
+            .record_turn_usage_sample(&checkpoint(90_000, 30, Some(12), true))
+            .expect("final receipt");
+        let reopened = store
+            .record_turn_usage_sample(&checkpoint(90_001, 31, Some(12), false))
+            .expect_err("a final receipt cannot become provisional");
+        assert!(reopened.to_string().contains("cannot become provisional"));
+
+        let retained = store
+            .turn_usage_samples_since(0)
+            .expect("retained checkpoints");
+        assert_eq!(retained.len(), 1);
+        assert_eq!(retained[0].observed_at, 90_000);
+        assert!(retained[0].final_receipt);
+        assert_eq!(retained[0].usage.output_tokens, Some(30));
     }
 
     fn row(repo: &str, provider: &str, input: u64) -> UsageRow {
         UsageRow {
             repo: repo.to_string(),
             provider: provider.to_string(),
-            input_tokens: input,
-            output_tokens: 1,
-            cache_read_tokens: 2,
+            input_tokens: Some(input),
+            cache_read_tokens: Some(2),
+            cache_write_tokens: None,
+            output_tokens: Some(1),
+            reasoning_tokens: None,
+            cost_usd: None,
         }
     }
 
@@ -641,7 +726,7 @@ mod tests {
         assert_eq!(short_repo("/Users/jack/src/cadenza/"), "cadenza");
     }
 
-    /// The per-provider table is a fold of the repo rows: one provider's spend
+    /// The per-provider table is a fold of the repo rows: one provider's usage
     /// across every repo reaches its total, and the grand total is every row.
     #[test]
     fn provider_rollup_folds_every_repo_row() {
@@ -660,20 +745,8 @@ mod tests {
             grand.add(row);
         }
 
-        assert_eq!(claude.input, 150);
-        assert_eq!(grand.input, 157);
-    }
-
-    #[test]
-    fn share_is_of_input_plus_output() {
-        assert_eq!(format_share(50, 200), "25%");
-        assert_eq!(format_share(0, 0), "-");
-        assert_eq!(
-            format_share(1, 1_000_000),
-            "<1%",
-            "small spend stays visible"
-        );
-        assert_eq!(format_share(0, 200), "0%");
+        assert_eq!(claude.input, Some(150));
+        assert_eq!(grand.input, Some(157));
     }
 
     fn window(name: &str, percent: u8) -> AccountLimitWindow {
@@ -693,29 +766,31 @@ mod tests {
         assert_eq!(format_window(&[], "session", 0), "-");
     }
 
-    fn turn(process: &str, at: i64, provider: &str, input: i64) -> TurnSpendRow {
-        TurnSpendRow {
+    fn turn(process: &str, at: i64, provider: &str, input: i64) -> AttributedTurnUsage {
+        AttributedTurnUsage {
             turn_id: format!("turn-{process}-{at}"),
             invocation_id: format!("invocation-{process}"),
-            trace_id: "trace".to_string(),
             exec_id: process.to_string(),
             repo: "/src/loopflow".to_string(),
             wave: None,
             flow: Some("ship".to_string()),
             skill: Some("implement".to_string()),
             provider: provider.to_string(),
-            model: None,
             at,
-            input_tokens: Some(input),
-            output_tokens: Some(0),
-            cache_read_tokens: Some(0),
-            cost_usd: Some(input as f64 / 100.0),
+            usage: TurnUsage {
+                input_tokens: Some(input as u64),
+                total_input_tokens: Some(input as u64),
+                output_tokens: Some(0),
+                cache_read_tokens: Some(0),
+                cost_usd: Some(input as f64 / 100.0),
+                ..Default::default()
+            },
         }
     }
 
     #[test]
     fn mixed_provider_flow_spend_stays_with_each_provider() {
-        let rows = aggregate_spend(&[
+        let rows = aggregate_usage(&[
             turn("process", 1, "claude", 100),
             turn("process", 2, "codex", 25),
         ]);
@@ -726,25 +801,25 @@ mod tests {
                 .find(|row| row.provider == "claude")
                 .expect("claude row")
                 .input_tokens,
-            100
+            Some(100)
         );
         assert_eq!(
             rows.iter()
                 .find(|row| row.provider == "codex")
                 .expect("codex row")
                 .input_tokens,
-            25
+            Some(25)
         );
     }
 
     #[test]
     fn processes_sharing_a_trace_remain_additive() {
-        let rows = aggregate_spend(&[
+        let rows = aggregate_usage(&[
             turn("parent", 1, "claude", 100),
             turn("child", 1, "claude", 5),
         ]);
 
         assert_eq!(rows.len(), 1);
-        assert_eq!(rows[0].input_tokens, 105);
+        assert_eq!(rows[0].input_tokens, Some(105));
     }
 }

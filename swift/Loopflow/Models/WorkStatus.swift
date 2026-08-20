@@ -102,6 +102,58 @@ public struct WorkReference: Codable, Sendable, Hashable {
 
     public let kind: Kind
     public let id: String
+
+    public init(kind: Kind, id: String) {
+        self.kind = kind
+        self.id = id
+    }
+
+    public static func wave(id: String) -> WorkReference {
+        WorkReference(kind: .wave, id: id)
+    }
+
+    public static func project(id: String) -> WorkReference {
+        WorkReference(kind: .project, id: id)
+    }
+
+    public static func task(id: String) -> WorkReference {
+        WorkReference(kind: .task, id: id)
+    }
+}
+
+/// The durable author shared by Answers and Steers.
+public enum WorkAuthor: Codable, Sendable, Hashable {
+    case user
+    case run(id: String)
+
+    private enum CodingKeys: String, CodingKey {
+        case kind, id
+    }
+
+    private enum Kind: String, Codable {
+        case user, run
+    }
+
+    public init(from decoder: Decoder) throws {
+        let container = try decoder.container(keyedBy: CodingKeys.self)
+        switch try container.decode(Kind.self, forKey: .kind) {
+        case .user:
+            self = .user
+        case .run:
+            self = .run(id: try container.decode(String.self, forKey: .id))
+        }
+    }
+
+    public func encode(to encoder: Encoder) throws {
+        var container = encoder.container(keyedBy: CodingKeys.self)
+        switch self {
+        case .user:
+            try container.encode(Kind.user, forKey: .kind)
+        case .run(let id):
+            try container.encode(Kind.run, forKey: .kind)
+            try container.encode(id, forKey: .id)
+        }
+    }
 }
 
 public struct WorkBasis: Codable, Sendable, Hashable {

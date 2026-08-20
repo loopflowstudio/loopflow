@@ -21,12 +21,15 @@ child's work.
    Use a weekly pursue cadence when the Project gives no sharper signal.
 3. Create an empty `wave/<slug>/MEMORY.md`. Never copy parent memory: the
    runtime inherits it through `parent_wave_id`.
-4. Initialize the child's Linear Initiative with `lf pm init --wave <slug>`,
-   recreate the measured bet there with `lf pm project create`, and move every
-   source task with `lf pm task move --id <id> --wave <slug> --project <slug>`.
-   Only after the child snapshot is complete, remove the duplicate parent bet
-   with `lf pm project archive --wave <parent> --project <slug>`.
-6. Add a child `Process` instruction requiring its first pass to report the
+4. Initialize the child's Linear Initiative with `lf pm init --wave <slug>`;
+   it reuses the repository Team. Recreate the measured bet there with
+   `lf pm project create`, and move every source task with
+   `lf pm task move --id <id> --wave <slug> --project <slug>`. Loopflow already
+   prepared durable ancestry before this flow, so the first Project title uses
+   the full Wave path. Only after the child snapshot is complete, remove the
+   duplicate parent bet with
+   `lf pm project archive --wave <parent> --project <slug>`.
+5. Add a child `Process` instruction requiring its first pass to report the
    newly owned definition and KRs in its own thread. Parent/child continuity
    is already represented by the typed Wave and Project relationship.
 

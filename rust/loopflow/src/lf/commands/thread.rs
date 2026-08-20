@@ -28,6 +28,7 @@ use crate::chat::turns::{
 use crate::chat::types::{ConversationItem, Lifecycle};
 use crate::lf::commands::chat::{resolve_target, CliContext};
 use crate::lf::WaveTargetArgs;
+use crate::wave::chat::{ChatBacking, ChatMessageSource, ConversationEpoch, WaveChatMessage};
 use crate::wave::journal::ellipsize;
 use crate::wave::subscription::{stream_events, Frame};
 
@@ -116,12 +117,11 @@ struct TurnProgress {
 #[derive(Debug)]
 struct Renderer {
     turns: HashMap<String, TurnProgress>,
-    /// Open turns reconstructed from `turn`/`turn-delta` frames, keyed by id.
-    /// A whole `turn` frame (re)baselines an entry; each `turn-delta` absorbs
-    /// one increment into it through the same rule the listener folds with, so
-    /// the reconstruction matches the served turn without the whole turn
-    /// crossing the wire per token.
-    open: HashMap<String, ChatTurn>,
+    /// Open source-bearing messages reconstructed from `message` and
+    /// `message-delta` frames, keyed by turn id. The opening message owns
+    /// provenance; deltas carry only the incremental turn item.
+    open: HashMap<String, WaveChatMessage>,
+    epoch: Option<ConversationEpoch>,
 }
 
 impl Renderer {
@@ -129,6 +129,7 @@ impl Renderer {
         Self {
             turns: HashMap::new(),
             open: HashMap::new(),
+            epoch: None,
         }
     }
 
@@ -144,33 +145,48 @@ impl Renderer {
             // A state transition is loop bookkeeping; the conversation shows
             // motion through the turns themselves.
             "state" => Vec::new(),
-            "turn" => {
-                let Ok(turn) = serde_json::from_str::<ChatTurn>(&frame.data) else {
+            "epoch" => {
+                let Ok(epoch) = serde_json::from_str::<ConversationEpoch>(&frame.data) else {
                     return vec![format!(
-                        "(unparseable turn frame: {})",
+                        "(unparseable epoch frame: {})",
                         ellipsize(&frame.data, 80)
                     )];
                 };
-                // Re-baseline the reconstruction: the whole turn is authoritative.
-                self.open.insert(turn.id.clone(), turn.clone());
-                self.turn_lines(&turn)
+                if self.epoch.as_ref().map(|current| &current.id) == Some(&epoch.id) {
+                    return Vec::new();
+                }
+                self.open.clear();
+                self.epoch = Some(epoch.clone());
+                vec![format!(
+                    "chat · epoch {} · {}",
+                    epoch.number,
+                    backing_name(&epoch.backing)
+                )]
             }
-            "turn-delta" => {
+            "message" => {
+                let Ok(message) = serde_json::from_str::<WaveChatMessage>(&frame.data) else {
+                    return vec![format!(
+                        "(unparseable message frame: {})",
+                        ellipsize(&frame.data, 80)
+                    )];
+                };
+                self.open.insert(message.turn.id.clone(), message.clone());
+                prefix_source(self.turn_lines(&message.turn), &message.source)
+            }
+            "message-delta" => {
                 let Ok(delta) = serde_json::from_str::<TurnDelta>(&frame.data) else {
                     return vec![format!(
-                        "(unparseable turn-delta frame: {})",
+                        "(unparseable message-delta frame: {})",
                         ellipsize(&frame.data, 80)
                     )];
                 };
-                // Grow the reconstructed open turn, then render as if a whole
-                // turn arrived. No open turn for this id means we missed its
-                // opening (a gap the server heals with `resync`); nothing to show.
-                let Some(turn) = self.open.get_mut(&delta.turn_id) else {
+                let Some(message) = self.open.get_mut(&delta.turn_id) else {
                     return Vec::new();
                 };
-                turn.absorb_item(delta.item);
-                let turn = turn.clone();
-                self.turn_lines(&turn)
+                message.turn.absorb_item(delta.item);
+                let turn = message.turn.clone();
+                let source = message.source.clone();
+                prefix_source(self.turn_lines(&turn), &source)
             }
             // The live turn stream lagged; our open-turn reconstructions may
             // have a gap. Drop them so the reconnect's whole-turn replay
@@ -255,6 +271,24 @@ impl Renderer {
     }
 }
 
+fn backing_name(backing: &ChatBacking) -> &'static str {
+    match backing {
+        ChatBacking::Local => "local",
+        ChatBacking::Discord { .. } => "discord",
+    }
+}
+
+fn prefix_source(lines: Vec<String>, source: &ChatMessageSource) -> Vec<String> {
+    let prefix = match source {
+        ChatMessageSource::Local { journal_seq } => format!("local event {journal_seq}"),
+        ChatMessageSource::Discord { .. } => "discord".to_string(),
+    };
+    lines
+        .into_iter()
+        .map(|line| format!("{prefix} · {line}"))
+        .collect()
+}
+
 fn child_activity_line(activity: &ChildControlActivity) -> Option<String> {
     match activity.kind {
         ChildActivityKind::StateChanged => return None,
@@ -289,25 +323,31 @@ mod tests {
         out
     }
 
-    fn turn_json(id: &str, role: &str, text: &str, status: &str, items: &str) -> String {
-        format!(
+    fn message_json(id: &str, role: &str, text: &str, status: &str, items: &str) -> String {
+        let turn = format!(
             "{{\"id\":\"{id}\",\"role\":\"{role}\",\"text\":\"{text}\",\"status\":\"{status}\",\
              \"items\":{items},\"created_at\":\"2026-07-04T00:00:00Z\",\"from\":null}}"
+        );
+        format!(
+            "{{\"epoch_id\":\"chat-epoch-1\",\"source\":{{\"kind\":\"local\",\"journal_seq\":2}},\"turn\":{turn}}}"
         )
     }
 
-    fn activity_turn_json(id: &str, kind: &str, title: &str, summary: &str) -> String {
-        format!(
+    fn activity_message_json(id: &str, kind: &str, title: &str, summary: &str) -> String {
+        let turn = format!(
             "{{\"id\":\"{id}\",\"role\":\"user\",\"text\":\"\",\"status\":\"completed\",\
              \"items\":[],\"created_at\":\"2026-07-04T00:00:00Z\",\"from\":\"task\",\
              \"activity\":{{\"id\":\"activity-{id}\",\"subject\":\"task\",\"subject_id\":\"W2-132\",\
              \"work_id\":\"ts_1\",\"kind\":\"{kind}\",\"title\":\"{title}\",\"summary\":\"{summary}\",\
              \"directive_version\":null,\"command_id\":null,\"effect\":null,\"source\":null,\
              \"decision_id\":null,\"options\":[]}}}}"
+        );
+        format!(
+            "{{\"epoch_id\":\"chat-epoch-1\",\"source\":{{\"kind\":\"local\",\"journal_seq\":2}},\"turn\":{turn}}}"
         )
     }
 
-    fn turn_delta_json(turn_id: &str, item: &str) -> String {
+    fn message_delta_json(turn_id: &str, item: &str) -> String {
         format!("{{\"turn_id\":\"{turn_id}\",\"item\":{item}}}")
     }
 
@@ -321,6 +361,60 @@ mod tests {
         )
     }
 
+    #[test]
+    fn source_bearing_messages_print_their_epoch_and_authority() {
+        let mut renderer = Renderer::new();
+        let epoch = ConversationEpoch {
+            id: "chat-epoch-1".into(),
+            number: 1,
+            backing: ChatBacking::Local,
+            journal_seq: 1,
+            started_at: "2026-07-04T00:00:00Z".into(),
+            ended_at: None,
+        };
+        assert_eq!(
+            renderer.lines_for(&Frame {
+                event: "epoch".into(),
+                data: serde_json::to_string(&epoch).expect("epoch JSON"),
+            }),
+            vec!["chat · epoch 1 · local"]
+        );
+
+        let local = WaveChatMessage {
+            epoch_id: epoch.id.clone(),
+            source: ChatMessageSource::Local { journal_seq: 7 },
+            turn: ChatTurn::user("turn-7".into(), "hello".into()),
+        };
+        assert_eq!(
+            renderer.lines_for(&Frame {
+                event: "message".into(),
+                data: serde_json::to_string(&local).expect("local message JSON"),
+            }),
+            vec!["local event 7 · you › hello"]
+        );
+
+        let mut assistant = ChatTurn::user("discord-9".into(), "shipped".into());
+        assistant.role = ChatRole::Assistant;
+        let discord = WaveChatMessage {
+            epoch_id: "chat-epoch-2".into(),
+            source: ChatMessageSource::Discord {
+                guild_id: "guild".into(),
+                channel_id: "channel".into(),
+                message_id: "9".into(),
+                author_id: "bot".into(),
+                url: "https://discord.com/channels/guild/channel/9".into(),
+            },
+            turn: assistant,
+        };
+        assert_eq!(
+            renderer.lines_for(&Frame {
+                event: "message".into(),
+                data: serde_json::to_string(&discord).expect("Discord message JSON"),
+            }),
+            vec!["discord · wave › shipped"]
+        );
+    }
+
     /// The GUI curates `commentary` narration behind a disclosure; the live
     /// follow has no such surface, so it prints the narration as the wave
     /// speaking — the same reading it had before the fold kept it out of `text`.
@@ -331,37 +425,37 @@ mod tests {
 
         assert!(renderer
             .lines_for(&Frame {
-                event: "turn".into(),
-                data: turn_json("turn-10", "assistant", "", "running", "[]"),
+                event: "message".into(),
+                data: message_json("turn-10", "assistant", "", "running", "[]"),
             })
             .is_empty());
 
         // A commentary increment reads as conversation, once.
         assert_eq!(
             renderer.lines_for(&Frame {
-                event: "turn-delta".into(),
-                data: turn_delta_json(
+                event: "message-delta".into(),
+                data: message_delta_json(
                     "turn-10",
                     &commentary_message_item("m-0", "Auditing the plan first."),
                 ),
             }),
-            vec!["wave › Auditing the plan first."]
+            vec!["local event 2 · wave › Auditing the plan first."]
         );
 
         // The conclusion streams as prose after it.
         assert_eq!(
             renderer.lines_for(&Frame {
-                event: "turn-delta".into(),
-                data: turn_delta_json("turn-10", &stream_message_item("text-0", "Done.")),
+                event: "message-delta".into(),
+                data: message_delta_json("turn-10", &stream_message_item("text-0", "Done.")),
             }),
-            vec!["wave › Done."]
+            vec!["local event 2 · wave › Done."]
         );
 
         // A re-baselining whole-turn frame reprints nothing already shown.
         assert!(renderer
             .lines_for(&Frame {
-                event: "turn".into(),
-                data: turn_json(
+                event: "message".into(),
+                data: message_json(
                     "turn-10",
                     "assistant",
                     "Done.",
@@ -375,39 +469,38 @@ mod tests {
             .is_empty());
     }
 
-    /// The wire the server actually sends now: a whole `turn` frame opens the
-    /// turn, then `turn-delta` increments grow it — and the reader renders the
-    /// wave's speech from the deltas without a whole turn per token. A `resync`
-    /// drops the reconstruction so the reconnect's whole-turn replay resumes it.
+    /// The human wire: a source-bearing `message` opens the turn, then plain
+    /// `message-delta` increments grow it. A `resync` drops the reconstruction
+    /// so the reconnect's source-bearing replay resumes it.
     #[test]
-    fn turn_delta_frames_render_growth_and_resync_drops_reconstruction() {
+    fn message_delta_frames_render_growth_and_resync_drops_reconstruction() {
         let mut renderer = Renderer::new();
 
         // The turn opens as a whole (empty, running) frame — no prose yet.
         assert!(renderer
             .lines_for(&Frame {
-                event: "turn".into(),
-                data: turn_json("turn-1", "assistant", "", "running", "[]"),
+                event: "message".into(),
+                data: message_json("turn-1", "assistant", "", "running", "[]"),
             })
             .is_empty());
 
         // Prose increments render as the wave speaking; nothing else on the wire.
         assert_eq!(
             renderer.lines_for(&Frame {
-                event: "turn-delta".into(),
-                data: turn_delta_json(
+                event: "message-delta".into(),
+                data: message_delta_json(
                     "turn-1",
                     &stream_message_item("text-0", "I fixed the parser.")
                 ),
             }),
-            vec!["wave › I fixed the parser."]
+            vec!["local event 2 · wave › I fixed the parser."]
         );
 
         // A tool increment stays out of the conversation, exactly like a whole turn.
         assert!(renderer
             .lines_for(&Frame {
-                event: "turn-delta".into(),
-                data: turn_delta_json(
+                event: "message-delta".into(),
+                data: message_delta_json(
                     "turn-1",
                     "{\"type\":\"tool\",\"id\":\"t-1\",\"name\":\"Bash\",\"status\":\"completed\",\"input\":null,\"output\":null}",
                 ),
@@ -425,8 +518,8 @@ mod tests {
         assert!(
             renderer
                 .lines_for(&Frame {
-                    event: "turn-delta".into(),
-                    data: turn_delta_json("turn-1", &stream_message_item("text-1", "more")),
+                    event: "message-delta".into(),
+                    data: message_delta_json("turn-1", &stream_message_item("text-1", "more")),
                 })
                 .is_empty(),
             "no reconstruction survives a resync; the whole-turn replay rebuilds it"
@@ -435,7 +528,7 @@ mod tests {
 
     #[test]
     fn sse_parser_splits_frames_on_blank_lines() {
-        let out = frames("event: state\ndata: idle\n\nevent: turn\ndata: {\"id\":1}\n\n");
+        let out = frames("event: state\ndata: idle\n\nevent: message\ndata: {\"id\":1}\n\n");
         assert_eq!(
             out,
             vec![
@@ -444,7 +537,7 @@ mod tests {
                     data: "idle".into()
                 },
                 Frame {
-                    event: "turn".into(),
+                    event: "message".into(),
                     data: "{\"id\":1}".into()
                 },
             ]
@@ -462,7 +555,7 @@ mod tests {
             }]
         );
         // An unterminated frame stays pending.
-        assert!(frames("event: turn\ndata: {\"id\":1}\n").is_empty());
+        assert!(frames("event: message\ndata: {\"id\":1}\n").is_empty());
     }
 
     /// The failure case this task exists to fix, in one transcript: a
@@ -507,8 +600,8 @@ mod tests {
         // The human asks for the work.
         feed(
             &mut renderer,
-            "turn",
-            turn_json(
+            "message",
+            message_json(
                 "turn-1",
                 "user",
                 "make wave chat human-first",
@@ -518,7 +611,7 @@ mod tests {
         );
         feed(&mut renderer, "state", "turning".into());
 
-        // task_clarify: reads the repo, writes a design note, says what it found.
+        // task/clarify: reads the repo, writes a design note, says what it found.
         let clarify_items = format!(
             "[{},{},{},{},{}]",
             think("h0"),
@@ -529,13 +622,13 @@ mod tests {
         );
         feed(
             &mut renderer,
-            "turn",
-            turn_json("turn-2", "assistant", "", "running", "[]"),
+            "message",
+            message_json("turn-2", "assistant", "", "running", "[]"),
         );
         feed(
             &mut renderer,
-            "turn",
-            turn_json(
+            "message",
+            message_json(
                 "turn-2",
                 "assistant",
                 "The transcript renders every tool call as a card. I'll keep them out of the conversation.",
@@ -544,7 +637,7 @@ mod tests {
             ),
         );
 
-        // task_pursue: builds, and the test run goes red.
+        // task/pursue: builds, and the test run goes red.
         let pursue_items = format!(
             "[{},{},{},{},{},{}]",
             edit("f1", "swift/Loopflow/Models/WaveChatTranscript.swift"),
@@ -556,8 +649,8 @@ mod tests {
         );
         feed(
             &mut renderer,
-            "turn",
-            turn_json(
+            "message",
+            message_json(
                 "turn-3",
                 "assistant",
                 "Projection landed. One test caught a stale signature; fixed and green.",
@@ -569,9 +662,9 @@ mod tests {
         assert_eq!(
             out,
             vec![
-                "you › make wave chat human-first",
-                "wave › The transcript renders every tool call as a card. I'll keep them out of the conversation.",
-                "wave › Projection landed. One test caught a stale signature; fixed and green.",
+                "local event 2 · you › make wave chat human-first",
+                "local event 2 · wave › The transcript renders every tool call as a card. I'll keep them out of the conversation.",
+                "local event 2 · wave › Projection landed. One test caught a stale signature; fixed and green.",
             ],
             "the conversation is prose; backend evidence remains in the journal"
         );
@@ -587,18 +680,18 @@ mod tests {
             }),
             Vec::<String>::new()
         );
-        let user = turn_json("turn-1", "user", "how goes it?", "completed", "[]");
+        let user = message_json("turn-1", "user", "how goes it?", "completed", "[]");
         assert_eq!(
             renderer.lines_for(&Frame {
-                event: "turn".into(),
+                event: "message".into(),
                 data: user.clone()
             }),
-            vec!["you › how goes it?"]
+            vec!["local event 2 · you › how goes it?"]
         );
         // Replay of the same user turn (reconnect) prints nothing.
         assert!(renderer
             .lines_for(&Frame {
-                event: "turn".into(),
+                event: "message".into(),
                 data: user
             })
             .is_empty());
@@ -607,7 +700,7 @@ mod tests {
     #[test]
     fn conversation_shows_child_outcomes_but_not_lifecycle_churn() {
         let mut renderer = Renderer::new();
-        let state = activity_turn_json(
+        let state = activity_message_json(
             "turn-1",
             "state_changed",
             "Task is running",
@@ -615,12 +708,12 @@ mod tests {
         );
         assert!(renderer
             .lines_for(&Frame {
-                event: "turn".into(),
+                event: "message".into(),
                 data: state,
             })
             .is_empty());
 
-        let opened = activity_turn_json(
+        let opened = activity_message_json(
             "turn-2",
             "pr_opened",
             "Opened PR #877",
@@ -628,10 +721,10 @@ mod tests {
         );
         assert_eq!(
             renderer.lines_for(&Frame {
-                event: "turn".into(),
+                event: "message".into(),
                 data: opened,
             }),
-            vec!["task W2-132 › Opened PR #877 — https://github.com/loopflowstudio/loopflow/pull/877"]
+            vec!["local event 2 · task W2-132 › Opened PR #877 — https://github.com/loopflowstudio/loopflow/pull/877"]
         );
     }
 
@@ -639,40 +732,40 @@ mod tests {
     fn conversation_prints_only_the_growth_of_a_repeating_turn_id() {
         let mut renderer = Renderer::new();
         let running =
-            |text: &str, items: &str| turn_json("turn-2", "assistant", text, "running", items);
+            |text: &str, items: &str| message_json("turn-2", "assistant", text, "running", items);
         let tool = "[{\"type\":\"tool\",\"id\":\"t0\",\"name\":\"Bash\",\"status\":\"completed\",\
               \"input\":null,\"output\":null}]";
 
         let lines = renderer.lines_for(&Frame {
-            event: "turn".into(),
+            event: "message".into(),
             data: running("", "[]"),
         });
         assert!(lines.is_empty());
 
         let lines = renderer.lines_for(&Frame {
-            event: "turn".into(),
+            event: "message".into(),
             data: running("thinking", "[]"),
         });
-        assert_eq!(lines, vec!["wave › thinking"]);
+        assert_eq!(lines, vec!["local event 2 · wave › thinking"]);
 
         // Same text re-sent with a successful item: backend machinery stays
         // quiet.
         let lines = renderer.lines_for(&Frame {
-            event: "turn".into(),
+            event: "message".into(),
             data: running("thinking", tool),
         });
         assert!(lines.is_empty());
 
         // The terminal frame closes the turn; replays of it are quiet.
-        let terminal = turn_json("turn-2", "assistant", "thinking", "completed", tool);
+        let terminal = message_json("turn-2", "assistant", "thinking", "completed", tool);
         let lines = renderer.lines_for(&Frame {
-            event: "turn".into(),
+            event: "message".into(),
             data: terminal.clone(),
         });
         assert!(lines.is_empty());
         assert!(renderer
             .lines_for(&Frame {
-                event: "turn".into(),
+                event: "message".into(),
                 data: terminal
             })
             .is_empty());
@@ -730,7 +823,7 @@ mod tests {
                 .lock()
                 .unwrap()
                 .iter()
-                .filter(|f| f.event == "turn")
+                .filter(|f| f.event == "message")
                 .count()
                 == 12
             {
@@ -749,7 +842,7 @@ mod tests {
                 .lock()
                 .unwrap()
                 .iter()
-                .any(|f| f.event == "turn" && f.data.contains("live after subscribe"))
+                .any(|f| f.event == "message" && f.data.contains("live after subscribe"))
             {
                 break;
             }
@@ -758,29 +851,31 @@ mod tests {
         task.abort();
 
         let frames = seen.lock().unwrap().clone();
-        assert_eq!(frames[0].event, "state", "replay opens with the state");
+        assert_eq!(frames[0].event, "epoch", "replay names its authority first");
+        assert_eq!(frames[1].event, "backing-health");
+        assert_eq!(frames[2].event, "state");
         assert!(
             frames
                 .iter()
-                .any(|f| f.event == "turn" && f.data.contains("replayed")),
-            "replayed turn arrives: {frames:?}"
+                .any(|f| f.event == "message" && f.data.contains("replayed")),
+            "replayed source-bearing message arrives: {frames:?}"
         );
         assert!(
             frames
                 .iter()
-                .all(|f| f.event != "turn" || !f.data.contains("old 0")),
-            "the default bounded replay omits older turns: {frames:?}"
+                .all(|f| f.event != "message" || !f.data.contains("old 0")),
+            "the default bounded replay omits older messages: {frames:?}"
         );
         assert_eq!(
-            frames.iter().filter(|f| f.event == "turn").count(),
+            frames.iter().filter(|f| f.event == "message").count(),
             13,
-            "human subscriptions replay 12 turns, then stream the live turn"
+            "human subscriptions replay 12 messages, then stream the live message"
         );
         assert!(
             frames
                 .iter()
-                .any(|f| f.event == "turn" && f.data.contains("live after subscribe")),
-            "live turn arrives: {frames:?}"
+                .any(|f| f.event == "message" && f.data.contains("live after subscribe")),
+            "live source-bearing message arrives: {frames:?}"
         );
     }
 }

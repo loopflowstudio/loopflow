@@ -1,8 +1,8 @@
 use crate::engine::flow::load_xor_path_items;
 use crate::engine::{
-    expand_flow, xor_verdict_path, ConcreteStep, ConcreteXor, ExecutionContext, ExecutionSkill,
-    Flow, FlowEngine, FlowOutcome, FlowProgress, SkillExecutor, SkillOutcome,
-    TEMP_XOR_ROUTE_STEP_NAME,
+    expand_flow, human_occurrence_ids, xor_verdict_path, ConcreteStep, ConcreteXor,
+    ExecutionContext, ExecutionSkill, Flow, FlowEngine, FlowOutcome, FlowProgress, SkillExecutor,
+    SkillOutcome, TEMP_XOR_ROUTE_STEP_NAME,
 };
 use crate::journal::{self, LfEventFields, LfEventType, LfNode};
 use crate::lf::output::Colors;
@@ -10,6 +10,7 @@ use crate::lf::Cli;
 use crate::ops::{commit_workflow, CommitOptions, NullProgress};
 use anyhow::{anyhow, Context, Result};
 use async_trait::async_trait;
+use std::io::{BufRead, Write};
 use std::path::{Path, PathBuf};
 
 /// Run a flow: print pipeline header, then execute each skill sequentially.
@@ -17,6 +18,27 @@ pub fn run(flow: &Flow, message: Option<&str>, cli: &Cli, repo: &Path) -> Result
     let items = expand_flow(flow, repo)?;
     print_pipeline_header(&flow.name, &items, repo)?;
     execute(&flow.name, &items, None, message, cli, repo)
+}
+
+pub fn show(name: &str, repo: &Path) -> Result<()> {
+    let flow = crate::engine::load_flow(name, repo)?;
+    let items = expand_flow(&flow, repo)?;
+    for line in render_pipeline_lines(&items, repo)? {
+        println!("{line}");
+    }
+    Ok(())
+}
+
+pub fn validate(name: &str, repo: &Path) -> Result<()> {
+    let flow = crate::engine::load_flow(name, repo)?;
+    let mut human = human_occurrence_ids(&flow, repo)?;
+    human.sort();
+    if human.is_empty() {
+        println!("{}: valid (no human nodes)", flow.name);
+    } else {
+        println!("{}: valid (human nodes: {})", flow.name, human.join(", "));
+    }
+    Ok(())
 }
 
 /// Run exactly one expanded top-level step. The resident owns the cursor and
@@ -131,6 +153,15 @@ fn render_pipeline_lines(items: &[ConcreteStep], repo: &Path) -> Result<Vec<Stri
 
 fn render_pipeline_item(item: &ConcreteStep, repo: &Path) -> Result<Vec<String>> {
     match item {
+        ConcreteStep::Skill(skill) if skill.policy.human => Ok(vec![format!(
+            "{} [human:{}]",
+            skill.skill.name,
+            skill
+                .policy
+                .id
+                .as_deref()
+                .expect("validated human node has an id"),
+        )]),
         ConcreteStep::Skill(skill) => Ok(vec![skill.skill.name.clone()]),
         ConcreteStep::Op(ops) => Ok(vec![format!("op: {}", ops.item.display_name())]),
         ConcreteStep::Xor(branch) => {
@@ -230,6 +261,23 @@ impl SkillExecutor for CliFlowExecutor<'_> {
         skill: &ExecutionSkill,
         ctx: ExecutionContext,
     ) -> Result<SkillOutcome> {
+        if skill.skill.policy.human
+            && !crate::lf::commands::run::is_interactive_run(
+                self.cli,
+                Some(&skill.invoke_as),
+                self.message,
+            )
+        {
+            let node_id = skill
+                .skill
+                .policy
+                .id
+                .as_deref()
+                .expect("validated human flow node has an id");
+            anyhow::bail!(
+                "human flow node {node_id} requires an attached User surface; run it through durable Task Work to park it in the User Ask queue"
+            );
+        }
         if let Some(progress) = ctx.progress {
             print_skill_progress(progress, &skill.display_name);
         } else {
@@ -256,6 +304,18 @@ impl SkillExecutor for CliFlowExecutor<'_> {
                     )?;
                 }
                 commit_skill_work(&self.repo, &skill.display_name)?;
+                if skill.skill.policy.human {
+                    confirm_present_human_review(
+                        skill
+                            .skill
+                            .policy
+                            .id
+                            .as_deref()
+                            .expect("validated human node has an id"),
+                        &mut std::io::stdin().lock(),
+                        &mut std::io::stderr().lock(),
+                    )?;
+                }
                 Ok(())
             },
         )?;
@@ -285,6 +345,29 @@ impl SkillExecutor for CliFlowExecutor<'_> {
         crate::engine::flow::read_xor_verdict(&xor_verdict_path(&self.repo), branch)
             .map_err(anyhow::Error::msg)
     }
+}
+
+fn confirm_present_human_review(
+    node_id: &str,
+    input: &mut impl BufRead,
+    output: &mut impl Write,
+) -> Result<()> {
+    write!(
+        output,
+        "Accept human flow node {node_id} against its exact current content? [y/N] "
+    )?;
+    output.flush()?;
+    let mut response = String::new();
+    if input.read_line(&mut response)? == 0 {
+        anyhow::bail!("human flow node {node_id} exited without explicit User acceptance");
+    }
+    if matches!(
+        response.trim().to_ascii_lowercase().as_str(),
+        "y" | "yes" | "accept"
+    ) {
+        return Ok(());
+    }
+    anyhow::bail!("human flow node {node_id} was not accepted by the User")
 }
 
 fn print_skill_progress(progress: FlowProgress, skill_name: &str) {
@@ -404,8 +487,13 @@ impl Drop for TempSkillGuard {
 
 #[cfg(test)]
 mod tests {
-    use super::{render_pipeline_lines, write_temp_skill};
-    use crate::engine::{ConcreteStep, Flow};
+    use super::{
+        confirm_present_human_review, render_pipeline_lines, write_temp_skill, CliFlowExecutor,
+    };
+    use crate::engine::{
+        ConcreteSkill, ConcreteStep, ExecutionContext, ExecutionSkill, Flow, Skill, SkillExecutor,
+    };
+    use crate::lf::Cli;
     use std::fs;
     use tempfile::tempdir;
     use tempfile::TempDir;
@@ -467,9 +555,10 @@ mod tests {
         let flow = Flow {
             name: "tend".to_string(),
             items: vec![
-                crate::engine::flow::Step::Skill(crate::engine::flow::Skill::named(
-                    "tend/scan-waves",
-                )),
+                crate::engine::flow::Step::Skill(crate::engine::flow::SkillStep {
+                    skill: crate::engine::flow::Skill::named("tend/scan-waves"),
+                    policy: crate::engine::OccurrencePolicy::default(),
+                }),
                 crate::engine::flow::Step::Xor(crate::engine::flow::XorDef {
                     router: Some("tend/assess".to_string()),
                     paths: [
@@ -514,5 +603,103 @@ mod tests {
         );
 
         assert!(matches!(items[1], ConcreteStep::Xor(_)));
+    }
+
+    #[test]
+    fn rendered_pipeline_lists_human_node_identity() {
+        let repo = std::path::Path::new(env!("CARGO_MANIFEST_DIR")).join("../..");
+        let flow = crate::engine::load_flow("task-design", &repo).unwrap();
+        let items = crate::engine::expand_flow(&flow, &repo).unwrap();
+
+        let lines = render_pipeline_lines(&items, &repo).unwrap();
+        assert_eq!(
+            lines,
+            vec![
+                "kickoff".to_string(),
+                "review-design [human:review_kickoff]".to_string(),
+            ]
+        );
+    }
+
+    #[test]
+    fn validation_lists_human_nodes_hidden_in_xor_paths() {
+        let repo = tempdir().unwrap();
+        let flows = repo.path().join(".lf/flows");
+        fs::create_dir_all(&flows).unwrap();
+        fs::write(
+            flows.join("choice.yaml"),
+            "- xor:\n    paths:\n      review:\n        description: Review it\n        steps:\n          - step:\n              id: revise_choice\n              name: implement\n          - step:\n              id: review_choice\n              name: review-design\n              human: true\n",
+        )
+        .unwrap();
+        let flow = crate::engine::load_flow("choice", repo.path()).unwrap();
+        let human = crate::engine::human_occurrence_ids(&flow, repo.path()).unwrap();
+        assert_eq!(human, vec!["review_choice"]);
+        let items = crate::engine::expand_flow(&flow, repo.path()).unwrap();
+        assert!(render_pipeline_lines(&items, repo.path())
+            .unwrap()
+            .iter()
+            .any(|line| line.contains("review-design [human:review_choice]")));
+    }
+
+    #[test]
+    fn present_human_flow_requires_a_typed_acceptance_after_the_session() {
+        let mut output = Vec::new();
+        confirm_present_human_review(
+            "review_design",
+            &mut std::io::Cursor::new("accept\n"),
+            &mut output,
+        )
+        .expect("typed acceptance settles the present-human node");
+        assert!(String::from_utf8(output)
+            .unwrap()
+            .contains("exact current content"));
+
+        let declined = confirm_present_human_review(
+            "review_design",
+            &mut std::io::Cursor::new("no\n"),
+            &mut Vec::new(),
+        )
+        .expect_err("an explicit refusal cannot advance the node");
+        assert!(declined.to_string().contains("was not accepted"));
+
+        let closed = confirm_present_human_review(
+            "review_design",
+            &mut std::io::Cursor::new(Vec::<u8>::new()),
+            &mut Vec::new(),
+        )
+        .expect_err("raw session exit cannot advance the node");
+        assert!(closed
+            .to_string()
+            .contains("without explicit User acceptance"));
+    }
+
+    #[tokio::test]
+    async fn detached_human_flow_refuses_to_invent_user_acceptance() {
+        let repo = tempdir().unwrap();
+        let cli = Cli {
+            batch: true,
+            ..Cli::default()
+        };
+        let executor = CliFlowExecutor {
+            cli: &cli,
+            message: None,
+            repo: repo.path().to_path_buf(),
+        };
+        let skill = ExecutionSkill::regular(ConcreteSkill {
+            skill: Skill::named("design"),
+            policy: crate::engine::OccurrencePolicy {
+                id: Some("review_design".to_string()),
+                human: true,
+            },
+            flow_parents: vec!["design".to_string()],
+        });
+
+        let error = executor
+            .run_skill(&skill, ExecutionContext { progress: None })
+            .await
+            .expect_err("a detached direct flow has no User authority");
+
+        assert!(error.to_string().contains("durable Task Work"));
+        assert!(!repo.path().join("scratch").exists());
     }
 }

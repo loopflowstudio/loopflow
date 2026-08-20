@@ -1,4 +1,5 @@
 mod abandon;
+pub(crate) mod ask;
 mod ask_comments;
 mod child;
 mod commit;
@@ -25,12 +26,19 @@ pub(crate) mod util;
 
 pub use abandon::{abandon_branch, AbandonOptions};
 pub(crate) use ask_comments::publish_pending_ask_comments;
-pub(crate) use child::{ambient_run_lease, required_run_lease};
+#[doc(hidden)]
+pub use child::ambient_run_lease;
+pub(crate) use child::required_run_lease;
+pub(crate) use commit::checkpoint_task_worktree;
 pub use commit::{commit_workflow, commit_workflow_traced, CommitOptions};
+pub(crate) use cron::cron_receipt_ids;
 pub use cron::{
-    add_cron, daily_time_of, default_launch_agents_dir, list_crons, parse_schedule, remove_cron,
-    resolve_lf_path, schedule_from_cron, sync_crons, CronSpec, CronSyncResult, InstalledCron,
-    Schedule, SkippedCron, SystemLaunchctl,
+    add_cron, daily_time_of, default_launch_agents_dir, latest_cron_receipt, list_cron_receipts,
+    list_crons, parse_schedule, parse_wait_duration, receipt_is_stale, receipt_root,
+    record_cron_preflight_failure, remove_cron, resolve_lf_path, run_cron, schedule_from_cron,
+    sync_crons, trigger_cron, validate_cron_specs, wait_for_cron_receipt, CronHost, CronOutcome,
+    CronReceipt, CronSchedule, CronSource, CronSpec, CronSyncResult, CronTargetKind, InstalledCron,
+    SystemLaunchctl,
 };
 pub use error::{OpsError, OpsResult};
 pub use flow::execute_flow_ops;
@@ -39,6 +47,7 @@ pub use land::{land, mark_ready, submit, LandOptions};
 pub use pr::{create_or_update_pr, current_pr, PrInfo, PrOptions, PrResult};
 pub use present::{present_pr_review, ReviewSurface};
 pub use progress::{NullProgress, Progress};
+pub(crate) use rebase::{abort_rebase_after_authorization, continue_rebase_after_authorization};
 pub use rebase::{
     abort_rebase_for_resolution, continue_rebase_for_resolution, plan_rebase, rebase_class_name,
     rebase_strategy_name, rebase_with_recovery, recover_rebase, start_rebase_for_resolution,
@@ -46,9 +55,11 @@ pub use rebase::{
 };
 pub use release::{
     bump_version, generate_release, release_bump, release_check, release_notes, release_publish,
-    release_run, release_status, release_tag, MergedPr, ReleaseReceipt, ReleaseRunOutcome,
-    ReleaseStatusResult,
+    release_run, release_status, release_tag, MergedPr, ReleaseNotesDegradation,
+    ReleaseNotesStatus, ReleaseReceipt, ReleaseRunOutcome, ReleaseStatusResult,
 };
-pub(crate) use run::{launch_in_run, RunLaunch};
+pub(crate) use run::{launch_in_run, DirectRun, RunLaunch};
+#[doc(hidden)]
+pub use run::{resolve_work_binding, WorkBinding};
 pub use trace::{hash_prompt, trace_enabled, MockResponses, OpTrace, Tracer};
 pub use util::normalize_wave_name;

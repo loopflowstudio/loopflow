@@ -7,7 +7,7 @@
 //! - **Resident → listener**: ordered turn deltas over `POST /resident/deltas`
 //!   (the resident sends serially and awaits each response, so per-turn order
 //!   is the connection's order). The old in-process `TurnSink` vocabulary —
-//!   Opened / Text / Item / Usage / Finished — IS this wire, promoted to full
+//!   Opened / Text / Item / Finished — IS this wire, promoted to full
 //!   DTO discipline, plus the consumption markers (`TurnOpened.answers`,
 //!   `TurnSteered.answers` — the RESIDENT decides what a turn answers; the
 //!   listener validates against its queue fold and journals), the resident's
@@ -39,7 +39,7 @@ use serde::{Deserialize, Serialize};
 use crate::chat::types::{ConversationItem, Lifecycle};
 use crate::project::ProjectObservation;
 use crate::task::TaskObservation;
-use crate::wave::journal::MessageOp;
+use crate::wave::journal::{DiscordMessageSource, MessageOp};
 use crate::wave::playhead::{BodyProvenance, PlayheadView, StepOutcome};
 
 /// Header carrying the resident token on every `/resident/*` request.
@@ -69,18 +69,10 @@ pub enum ResidentDelta {
     TurnText { text: String },
     /// A non-prose item (tool / command / file / thought) of the open turn.
     TurnItem { item: ConversationItem },
-    /// Token usage reported for the open turn (accumulates).
-    TurnUsage {
-        input_tokens: Option<u64>,
-        output_tokens: Option<u64>,
-        cache_read_tokens: Option<u64>,
-    },
     /// The open turn finalized. The listener already holds the turn's content
-    /// (grown from the Text/Item deltas); only the terminal status and cost
-    /// cross the wire.
+    /// grown from the Text/Item deltas.
     TurnFinished {
         status: Lifecycle,
-        cost_usd: Option<f64>,
         reason: Option<String>,
     },
     /// Mid-turn consumption: the harness accepted these queued messages as
@@ -184,6 +176,7 @@ pub enum InboxFrame {
         id: String,
         op: MessageOp,
         text: String,
+        source: Option<DiscordMessageSource>,
     },
     Task {
         observation: TaskObservation,
@@ -221,14 +214,8 @@ mod tests {
                     output: Some("ok".into()),
                 },
             },
-            ResidentDelta::TurnUsage {
-                input_tokens: Some(10),
-                output_tokens: Some(4),
-                cache_read_tokens: None,
-            },
             ResidentDelta::TurnFinished {
                 status: Lifecycle::Completed,
-                cost_usd: Some(0.02),
                 reason: None,
             },
             ResidentDelta::TurnSteered {
@@ -256,7 +243,7 @@ mod tests {
     fn absent_required_fields_are_parse_errors() {
         for bad in [
             serde_json::json!({ "kind": "turn_opened" }),
-            serde_json::json!({ "kind": "turn_finished", "cost_usd": null }),
+            serde_json::json!({ "kind": "turn_finished" }),
             serde_json::json!({ "kind": "turn_text" }),
             serde_json::json!({ "kind": "loop_state", "to": "failed" }),
             serde_json::json!({ "kind": "messages_requeued" }),

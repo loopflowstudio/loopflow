@@ -1,0 +1,102 @@
+{
+  "generated_at": 1784654800,
+  "since": 1784050000,
+  "limit": 50,
+  "truncated": false,
+  "items": [
+    {
+      "id": "run:invocation-product-run:finished",
+      "recorded_at": 1784654700,
+      "summary": "task/task_pursue finished ok",
+      "work": {
+        "kind": "task",
+        "id": "task_00000000000000000000000000000001"
+      },
+      "subject": "W2-144",
+      "fact": {
+        "kind": "run_finished",
+        "invocation_id": "invocation-product-run",
+        "trace_id": "trace-product-run",
+        "exec_id": "exec-product-run",
+        "status": "ok"
+      }
+    },
+    {
+      "id": "pr:pr_00000000000000000000000000000001:merged",
+      "recorded_at": 1784654600,
+      "summary": "PR #1144 merged",
+      "work": {
+        "kind": "task",
+        "id": "task_00000000000000000000000000000001"
+      },
+      "subject": "W2-144",
+      "fact": {
+        "kind": "pr_merged",
+        "id": "pr_00000000000000000000000000000001",
+        "github": {
+          "number": 1144,
+          "url": "https://github.com/loopflowstudio/loopflow/pull/1144",
+          "head_sha": "3333333333333333333333333333333333333333"
+        },
+        "merge_commit": "27707c0204779d801e70c3076db731b1224db9ad"
+      }
+    },
+    {
+      "id": "pr:pr_00000000000000000000000000000001:merge_requested",
+      "recorded_at": 1784654550,
+      "summary": "Merge requested for PR #1144",
+      "work": {
+        "kind": "task",
+        "id": "task_00000000000000000000000000000001"
+      },
+      "subject": "W2-144",
+      "fact": {
+        "kind": "pr_merge_requested",
+        "id": "pr_00000000000000000000000000000001",
+        "request": {
+          "mode": "auto",
+          "requested_at": "2026-07-21T18:35:51Z",
+          "head_sha": "3333333333333333333333333333333333333333",
+          "after_merge": "complete_task",
+          "next_slug": null
+        },
+        "github": {
+          "number": 1144,
+          "url": "https://github.com/loopflowstudio/loopflow/pull/1144",
+          "head_sha": "3333333333333333333333333333333333333333"
+        }
+      }
+    },
+    {
+      "id": "steer:steer_00000000000000000000000000000001",
+      "recorded_at": 1784654500,
+      "summary": "Steered: Make The Podium primary",
+      "work": {
+        "kind": "wave",
+        "id": "00000000-0000-4000-8000-000000000001"
+      },
+      "subject": "product",
+      "fact": {
+        "kind": "steer_issued",
+        "id": "steer_00000000000000000000000000000001",
+        "author": {
+          "kind": "run",
+          "id": "run_00000000000000000000000000000001"
+        }
+      }
+    },
+    {
+      "id": "work:project:proj_00000000000000000000000000000001:created",
+      "recorded_at": 1784654400,
+      "summary": "Project created",
+      "work": {
+        "kind": "project",
+        "id": "proj_00000000000000000000000000000001"
+      },
+      "subject": "mac-surface-ux",
+      "fact": {
+        "kind": "work_created"
+      }
+    }
+  ]
+}

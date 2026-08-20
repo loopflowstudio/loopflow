@@ -36,6 +36,7 @@ const TASK_SUPERVISION_INTERVAL: Duration = Duration::from_secs(5);
 struct PreparedProjectStep {
     turn: crate::lf::commands::run::PreparedHarnessTurn,
     basis: Basis,
+    planning: crate::ops::task_pm::ResolvedProject,
 }
 
 pub(crate) async fn run(store: SharedStore, project_id: ProjectId, lease: &RunLease) -> Result<()> {
@@ -117,14 +118,15 @@ async fn run_project_inner(
         account_id: invocation.route.account_id.clone(),
         resume_token: invocation.resume_token.clone(),
     };
-    let mut answer_lane = crate::project::answer::AnswerLane::new(work.clone(), lease.clone());
-    answer_lane.reconcile(&store, &project, &wave).await?;
+    let mut ask_lane = crate::ops::ask::AskLane::new(work.clone(), lease.clone());
+    ask_lane.reconcile(&store).await?;
     let mut pending = VecDeque::new();
     let initial_input = take_current_input(&store, &project, lease, &mut pending).await?;
     let observations = consume_task_observations(&store, &mut project, lease).await?;
     let (mut flow, _) = Playhead::new(QueuedInvocation::load(Path::new(wave.repo()), "project")?);
     let prepared =
         prepare_project_flow_step(&store, &mut project, lease, &wave, &flow, &observations).await?;
+    let mut active_planning = prepared.planning.clone();
     let (harness_name, _) = crate::engine::config::parse_agent(&project.agent);
     let (event_tx, mut event_rx) = mpsc::unbounded_channel();
     let mut harness = default_create_harness(&harness_name, ApprovalPolicy::AutoApprove, event_tx)?;
@@ -249,7 +251,7 @@ async fn run_project_inner(
                 }
             }
             _ = poll.tick() => {
-                answer_lane.reconcile(&store, &project, &wave).await?;
+                ask_lane.reconcile(&store).await?;
                 let active_turn_id = provider_turn_active
                     .then(|| capture.as_ref().map(|capture| capture.current_turn_id()))
                     .flatten();
@@ -295,12 +297,6 @@ async fn run_project_inner(
                         "could not supervise Task progress leases"
                     );
                 }
-            }
-            answer = answer_lane.receive(), if answer_lane.active() => {
-                let Some(answer) = answer else {
-                    return Err(anyhow!("Project answer lane event stream closed"));
-                };
-                answer_lane.settle(&store, answer).await?;
             }
             event = event_rx.recv() => {
                 let Some(event) = event else {
@@ -420,6 +416,7 @@ async fn run_project_inner(
                                 &[],
                             )
                             .await?;
+                            active_planning = prepared.planning.clone();
                             active_basis = prepared.basis.clone();
                             start_project_flow_turn(
                                 &store,
@@ -447,7 +444,7 @@ async fn run_project_inner(
                                 },
                             ).await?;
                         }
-                        let mut outcome = inspect_outcome(&store, &project, &wave).await?;
+                        let mut outcome = inspect_outcome(&store, &project, &active_planning).await?;
                         if status == Lifecycle::Interrupted {
                             outcome.disposition = ProjectDisposition::Wait;
                         }
@@ -465,6 +462,7 @@ async fn run_project_inner(
                                 &[],
                             )
                             .await?;
+                            active_planning = prepared.planning.clone();
                             active_basis = prepared.basis.clone();
                             start_project_flow_turn(
                                 &store,
@@ -494,21 +492,19 @@ async fn run_project_inner(
                         if project_run_must_remain_resident(
                             &store,
                             &project,
-                            &work,
-                            &answer_lane,
+                            &mut ask_lane,
                             outcome.disposition,
                         ).await? {
-                            return run_answer_only_supervisor(
+                            return run_ask_only_supervisor(
                                 &store,
                                 &mut project,
                                 lease,
                                 &run_lease,
-                                &wave,
                                 &work,
                                 &active_basis,
                                 outcome.disposition,
                                 summary,
-                                &mut answer_lane,
+                                &mut ask_lane,
                                 &mut attachment_rx,
                             ).await;
                         }
@@ -542,7 +538,7 @@ async fn run_project_inner(
                     | ConversationEvent::ItemUpdated { .. }
                     | ConversationEvent::ReasoningDelta { .. }
                     | ConversationEvent::DiffUpdated { .. }
-                    | ConversationEvent::TurnUsage { .. }
+                    | ConversationEvent::UsageCheckpoint { .. }
                     | ConversationEvent::SuggestedActions { .. }
                     | ConversationEvent::StatusChanged { .. } => {}
                 }
@@ -562,11 +558,10 @@ fn spawn_ask_comment_publication(store: SharedStore) {
 async fn project_run_must_remain_resident(
     store: &SharedStore,
     project: &Project,
-    work: &crate::durable::WorkRef,
-    answer_lane: &crate::project::answer::AnswerLane,
+    ask_lane: &mut crate::ops::ask::AskLane,
     disposition: ProjectDisposition,
 ) -> Result<bool> {
-    if answer_lane.active() || !store.pending_asks_for_parent(work).await?.is_empty() {
+    if ask_lane.reconcile(store).await? {
         return Ok(true);
     }
     if disposition != ProjectDisposition::Wait {
@@ -589,17 +584,16 @@ async fn project_has_running_tasks(store: &SharedStore, project: &Project) -> Re
 }
 
 #[allow(clippy::too_many_arguments)]
-async fn run_answer_only_supervisor(
+async fn run_ask_only_supervisor(
     store: &SharedStore,
     project: &mut Project,
     lease: &RunLease,
     run_lease: &RunLease,
-    wave: &Wave,
     work: &crate::durable::WorkRef,
     settled_basis: &Basis,
     disposition: ProjectDisposition,
     summary: String,
-    answer_lane: &mut crate::project::answer::AnswerLane,
+    ask_lane: &mut crate::ops::ask::AskLane,
     attachment_rx: &mut mpsc::UnboundedReceiver<String>,
 ) -> Result<()> {
     let mut poll = tokio::time::interval(Duration::from_millis(200));
@@ -617,8 +611,8 @@ async fn run_answer_only_supervisor(
             _ = poll.tick() => {
                 match store.run_control(run_lease, None).await? {
                     Some(crate::durable::RunControl::Interrupt)
+                    | Some(crate::durable::RunControl::Quiesce { .. })
                     | Some(crate::durable::RunControl::Abandon { .. }) => {
-                        answer_lane.cancel();
                         store.finish_project_run(
                             project,
                             lease,
@@ -628,11 +622,7 @@ async fn run_answer_only_supervisor(
                     }
                     None => {}
                 }
-                answer_lane.reconcile(store, project, wave).await?;
-                if answer_lane.active() {
-                    continue;
-                }
-                if !store.pending_asks_for_parent(work).await?.is_empty() {
+                if ask_lane.reconcile(store).await? {
                     continue;
                 }
                 let new_direction = store.boundary_seed(work).await?.basis.revision
@@ -673,12 +663,6 @@ async fn run_answer_only_supervisor(
                     );
                 }
             }
-            answer = answer_lane.receive(), if answer_lane.active() => {
-                let Some(answer) = answer else {
-                    return Err(anyhow!("Project answer lane event stream closed"));
-                };
-                answer_lane.settle(store, answer).await?;
-            }
         }
     }
 }
@@ -692,14 +676,15 @@ async fn finish_project_outcome(
     summary: String,
 ) -> Result<()> {
     if disposition == ProjectDisposition::Done {
-        store
-            .append_project_event_for_run(
-                &project.id,
-                lease,
-                &ProjectEventKind::Completed { summary },
-            )
+        let work = store
+            .work_for_child(&ChildRef::Project(project.id.clone()))
             .await?;
-        store.done(lease, basis).await?;
+        if store.work_status(&work).await? == WorkStatus::Done {
+            return Ok(());
+        }
+        store
+            .complete_project_run(project, lease, basis, &summary)
+            .await?;
     } else {
         store
             .finish_project_run(project, lease, crate::durable::BoundaryState::Succeeded)
@@ -716,6 +701,7 @@ async fn prepare_project_flow_step(
     flow: &Playhead,
     observations: &[String],
 ) -> Result<PreparedProjectStep> {
+    let planning = refresh_project_plan(store, project, lease, wave).await?;
     let work = store
         .work_for_child(&ChildRef::Project(project.id.clone()))
         .await?;
@@ -730,7 +716,6 @@ async fn prepare_project_flow_step(
             step.kind
         );
     }
-    store.update_project_for_run(project, lease).await?;
     let seed = project_seed(project, wave.name(), &boundary, observations);
     let mut prepared =
         crate::lf::commands::run::prepare_harness_turn(&step.step, &seed, wave.name(), None)?;
@@ -738,7 +723,50 @@ async fn prepare_project_flow_step(
     Ok(PreparedProjectStep {
         turn: prepared,
         basis: boundary.basis,
+        planning,
     })
+}
+
+async fn refresh_project_plan(
+    store: &SharedStore,
+    project: &mut Project,
+    lease: &RunLease,
+    wave: &Wave,
+) -> Result<crate::ops::task_pm::ResolvedProject> {
+    let planning = crate::ops::task_pm::refresh_project(
+        Path::new(wave.repo()),
+        wave.name(),
+        project.plan.id.as_str(),
+    )
+    .await
+    .map_err(|error| {
+        anyhow!(
+            "Project plan refresh blocked before the next phase: {error}. Project Work {} did not continue on its stale plan; repair Linear planning, then restart it with `lf project run {}`",
+            project.id,
+            project.plan.id.as_str()
+        )
+    })?;
+    let plan = crate::ops::project::project_plan(&planning.project, planning.snapshot.synced_at)
+        .map_err(|error| anyhow!(error.to_string()))?;
+    let (adopted, changed) = store
+        .adopt_project_plan_for_run(&project.id, &plan, lease)
+        .await
+        .map_err(|error| {
+            anyhow!(
+                "Project plan refresh could not be adopted safely: {error}. Project Work {} did not continue on its stale plan; restart it after repairing the planning conflict",
+                project.id
+            )
+        })?;
+    if changed {
+        tracing::info!(
+            project = %project.id,
+            linear_project = %project.plan.id.as_str(),
+            snapshot = adopted.plan.pm_snapshot_synced_at,
+            "adopted refreshed Project planning at a phase boundary"
+        );
+    }
+    *project = adopted;
+    Ok(planning)
 }
 
 fn open_project_flow_body(flow: &mut Playhead, control_repo: &str) -> Result<()> {
@@ -868,27 +896,16 @@ struct ProjectOutcome {
 async fn inspect_outcome(
     store: &SharedStore,
     project: &Project,
-    wave: &Wave,
+    planning: &crate::ops::task_pm::ResolvedProject,
 ) -> Result<ProjectOutcome> {
-    let repo = wave.repo().to_string();
-    let project_id = project.plan.id.as_str().to_string();
-    let resolved = tokio::task::spawn_blocking(move || {
-        crate::ops::task_pm::resolve_project(
-            std::path::Path::new(&repo),
-            &project_id,
-            crate::ops::pm::PmRefresh::Never,
-        )
-    })
-    .await
-    .map_err(|error| anyhow!(error.to_string()))??;
     let tasks = crate::ops::task::reconcile_project_tasks(store, project)
         .await
         .map_err(|error| anyhow!(error.to_string()))?;
-    let pm_tasks = resolved
+    let pm_tasks = planning
         .snapshot
         .items
         .iter()
-        .filter(|item| item.project.as_deref() == Some(project.plan.slug.as_str()))
+        .filter(|item| item.project_id == project.plan.id.as_str())
         .collect::<Vec<_>>();
     let mut task_states = Vec::with_capacity(tasks.len());
     for task in &tasks {
@@ -902,12 +919,12 @@ async fn inspect_outcome(
         ));
     }
     let fingerprint_payload = serde_json::json!({
-        "project": resolved.project,
+        "project": planning.project,
         "pm_tasks": pm_tasks,
         "tasks": &task_states,
     });
     let fingerprint = hex::encode(Sha256::digest(serde_json::to_vec(&fingerprint_payload)?));
-    if !resolved.project.krs.is_empty() && resolved.project.krs.iter().all(|kr| kr.holds) {
+    if !planning.project.krs.is_empty() && planning.project.krs.iter().all(|kr| kr.holds) {
         return Ok(ProjectOutcome {
             disposition: ProjectDisposition::Done,
             fingerprint,
@@ -1004,19 +1021,7 @@ async fn finish_failed(
 ) -> Result<()> {
     finish_capture(capture, "failed");
     let _ = harness.stop().await;
-    store
-        .append_project_event_for_run(
-            &project.id,
-            lease,
-            &ProjectEventKind::Failed {
-                error: error.to_string(),
-                resumable: true,
-            },
-        )
-        .await?;
-    store
-        .finish_project_run(project, lease, crate::durable::BoundaryState::Failed)
-        .await?;
+    store.fail_project_run(project, lease, error).await?;
     anyhow::bail!(error.to_string())
 }
 
@@ -1204,6 +1209,14 @@ async fn finish_command_stop(
                 .await?;
             Ok(())
         }
+        CommandStop::Quiesced => {
+            finish_capture(capture, "completed");
+            let _ = harness.stop().await;
+            store
+                .finish_project_run(project, lease, crate::durable::BoundaryState::Interrupted)
+                .await?;
+            Ok(())
+        }
         CommandStop::Abandoned(reason) => {
             finish_abandoned(store, project, lease, harness, reason, capture).await
         }
@@ -1229,19 +1242,7 @@ async fn record_unhandled_failure(
         return;
     }
     let message = format!("project runner failed: {error}");
-    let _ = store
-        .append_project_event_for_run(
-            &project.id,
-            lease,
-            &ProjectEventKind::Failed {
-                error: message.clone(),
-                resumable: true,
-            },
-        )
-        .await;
-    let _ = store
-        .finish_project_run(&project, lease, crate::durable::BoundaryState::Failed)
-        .await;
+    let _ = store.fail_project_run(&project, lease, &message).await;
 }
 
 fn project_seed(
@@ -1281,11 +1282,401 @@ fn bounded_summary(text: &str) -> String {
 
 #[cfg(test)]
 mod tests {
+    use std::path::PathBuf;
+
+    use anyhow::anyhow;
+    use time::OffsetDateTime;
+
+    use crate::child::ChildRef;
+    use crate::durable::{Author, BoundaryState, RunAdvance, RunLease, WorkStatus};
+    use crate::id::WaveId;
+    use crate::planning::{LinearProjectId, ProjectPlan};
+    use crate::pm::{PmKr, PmProject, ProjectFlowPlan};
+    use crate::project::{Project, ProjectEventKind, ProjectId};
+    use crate::store::{open_store, SharedStore, StorageConfig};
+    use crate::wave::Wave;
+
+    async fn project_fixture() -> (
+        tempfile::TempDir,
+        PathBuf,
+        SharedStore,
+        Project,
+        RunLease,
+        crate::durable::AgentInvocation,
+    ) {
+        let directory = tempfile::tempdir().unwrap();
+        let database = directory.path().join("registry.db");
+        let store = std::sync::Arc::new(
+            open_store(&StorageConfig::sqlite(database.clone()))
+                .await
+                .unwrap(),
+        );
+        let wave = Wave::new(
+            WaveId::new(),
+            "incident-management".to_string(),
+            directory.path().display().to_string(),
+        );
+        store.create_wave(&wave).await.unwrap();
+        let now = OffsetDateTime::now_utc();
+        let project = Project {
+            id: ProjectId::new(),
+            plan: ProjectPlan {
+                id: LinearProjectId::new("incident-management-project").unwrap(),
+                slug: "incident-management".to_string(),
+                name: "Incident Management".to_string(),
+                prompt_context: "Restore incidents before prevention.".to_string(),
+                pm_snapshot_synced_at: now.unix_timestamp(),
+            },
+            wave_id: wave.id().clone(),
+            iteration: 0,
+            observation_cursor: 0,
+            last_state_fingerprint: None,
+            agent: "codex".to_string(),
+            provider: "codex".to_string(),
+            provider_session_id: None,
+            abandon_intent: None,
+            created_at: now,
+            updated_at: now,
+        };
+        store.create_project(&project).await.unwrap();
+        let reservation = store
+            .reserve_project_process(&project, WorkStatus::Ready)
+            .await
+            .unwrap()
+            .unwrap();
+        let lease = store
+            .resolve_run_lease(reservation.run_token.clone())
+            .await
+            .unwrap();
+        let invocation = store
+            .open_invocation_for_run(&lease.run_id)
+            .await
+            .unwrap()
+            .unwrap();
+        (directory, database, store, project, lease, invocation)
+    }
+
     #[test]
     fn project_summary_is_bounded() {
         assert_eq!(
             super::bounded_summary(&"x".repeat(2_500)).chars().count(),
             2_000
         );
+    }
+
+    #[tokio::test]
+    async fn project_plan_refresh_reaches_the_next_boundary_once_with_all_krs() {
+        let (_directory, _database, store, mut project, lease, _invocation) =
+            project_fixture().await;
+        let work = store
+            .work_for_child(&ChildRef::Project(project.id.clone()))
+            .await
+            .unwrap();
+        store
+            .append_steer(
+                &work,
+                Author::User,
+                "Preserve this direction across planning refresh.",
+                None,
+            )
+            .await
+            .unwrap();
+        project.observation_cursor = 17;
+        store
+            .update_project_for_run(&project, &lease)
+            .await
+            .unwrap();
+        let prior_event = store
+            .append_project_event_for_run(
+                &project.id,
+                &lease,
+                &ProjectEventKind::IterationCompleted {
+                    iteration: 0,
+                    summary: "prior evidence remains durable".to_string(),
+                },
+            )
+            .await
+            .unwrap();
+        let prior_basis = store.boundary_seed(&work).await.unwrap();
+        let prior_epoch = store.current_epoch(&work).await.unwrap();
+        let prior_id = project.id.clone();
+        let refreshed = PmProject {
+            id: project.plan.id.as_str().to_string(),
+            slug: project.plan.slug.clone(),
+            name: "Incident Prevention".to_string(),
+            summary: "Prevent recurrence after restoring service.".to_string(),
+            definition: "Prevent repeated incidents with evidence from production.".to_string(),
+            flows: Some(ProjectFlowPlan::empty()),
+            krs: (1..=6)
+                .map(|number| PmKr {
+                    text: format!("proof {number} holds"),
+                    holds: number == 6,
+                })
+                .collect(),
+            initiative_ids: vec!["initiative-1".to_string()],
+            team_ids: vec!["team-1".to_string()],
+        };
+        let refreshed_plan =
+            crate::ops::project::project_plan(&refreshed, project.plan.pm_snapshot_synced_at + 1)
+                .unwrap();
+
+        let (adopted, changed) = store
+            .adopt_project_plan_for_run(&project.id, &refreshed_plan, &lease)
+            .await
+            .unwrap();
+        let (same_plan, changed_again) = store
+            .adopt_project_plan_for_run(&project.id, &refreshed_plan, &lease)
+            .await
+            .unwrap();
+
+        assert!(changed);
+        assert!(!changed_again);
+        assert_eq!(same_plan.plan, adopted.plan);
+        assert_eq!(adopted.id, prior_id);
+        assert_eq!(adopted.observation_cursor, 17);
+        assert_eq!(store.current_epoch(&work).await.unwrap(), prior_epoch);
+        assert_eq!(store.boundary_seed(&work).await.unwrap(), prior_basis);
+        let events = store.project_events_after(&adopted.id, 0).await.unwrap();
+        assert_eq!(events.len(), 1);
+        assert_eq!(events[0], prior_event);
+
+        let seed = super::project_seed(&adopted, "incident-management", &prior_basis, &[]);
+        assert!(seed.contains("Prevent repeated incidents with evidence from production."));
+        assert!(!seed.contains("Restore incidents before prevention."));
+        assert!(seed.contains("Preserve this direction across planning refresh."));
+        for number in 1..=6 {
+            let line = format!(
+                "- [{}] proof {number} holds",
+                if number == 6 { "x" } else { " " }
+            );
+            assert_eq!(seed.matches(&line).count(), 1, "missing or repeated {line}");
+        }
+    }
+
+    #[tokio::test]
+    async fn successful_project_flow_boundary_settles_once_without_turn_capture() {
+        let (_directory, database, store, mut project, lease, invocation) = project_fixture().await;
+        let work = store
+            .work_for_child(&ChildRef::Project(project.id.clone()))
+            .await
+            .unwrap();
+        let basis = store.boundary_seed(&work).await.unwrap().basis;
+        project.iteration = 1;
+        store
+            .append_project_event_for_run(
+                &project.id,
+                &lease,
+                &ProjectEventKind::IterationCompleted {
+                    iteration: project.iteration,
+                    summary: "restored the reported surface".to_string(),
+                },
+            )
+            .await
+            .unwrap();
+        store
+            .advance_run(
+                &lease,
+                RunAdvance::InvocationEnded {
+                    invocation_id: invocation.id,
+                    outcome: BoundaryState::Succeeded,
+                },
+            )
+            .await
+            .unwrap();
+
+        super::finish_project_outcome(
+            &store,
+            &project,
+            &lease,
+            &basis,
+            super::ProjectDisposition::Done,
+            "restored the reported surface".to_string(),
+        )
+        .await
+        .unwrap();
+        super::finish_project_outcome(
+            &store,
+            &project,
+            &lease,
+            &basis,
+            super::ProjectDisposition::Done,
+            "restored the reported surface".to_string(),
+        )
+        .await
+        .unwrap();
+
+        assert_eq!(store.work_status(&work).await.unwrap(), WorkStatus::Done);
+        let events = store.project_events_after(&project.id, 0).await.unwrap();
+        assert_eq!(events.len(), 2);
+        assert!(matches!(
+            events[0].kind,
+            ProjectEventKind::IterationCompleted { iteration: 1, .. }
+        ));
+        assert!(matches!(events[1].kind, ProjectEventKind::Completed { .. }));
+        assert!(!events
+            .iter()
+            .any(|event| matches!(event.kind, ProjectEventKind::Failed { .. })));
+
+        let connection = rusqlite::Connection::open(database).unwrap();
+        let run_count: i64 = connection
+            .query_row(
+                "SELECT COUNT(*) FROM runs WHERE epoch_id=?1",
+                [basis.epoch_id.as_str()],
+                |row| row.get(0),
+            )
+            .unwrap();
+        let turn_count: i64 = connection
+            .query_row(
+                "SELECT COUNT(*) FROM agent_turns WHERE epoch_id=?1",
+                [basis.epoch_id.as_str()],
+                |row| row.get(0),
+            )
+            .unwrap();
+        assert_eq!(run_count, 1);
+        assert_eq!(turn_count, 0);
+    }
+
+    #[tokio::test]
+    async fn project_failure_before_success_remains_resumable_and_exact() {
+        let (_directory, database, store, project, lease, invocation) = project_fixture().await;
+        let work = store
+            .work_for_child(&ChildRef::Project(project.id.clone()))
+            .await
+            .unwrap();
+
+        super::record_unhandled_failure(
+            &store,
+            &project.id,
+            &lease,
+            &anyhow!(
+                "Project plan refresh blocked before the next phase: Linear Project was archived; restore it before restarting Project Work"
+            ),
+        )
+        .await;
+
+        assert_eq!(store.work_status(&work).await.unwrap(), WorkStatus::Ready);
+        let events = store.project_events_after(&project.id, 0).await.unwrap();
+        assert_eq!(events.len(), 1);
+        assert!(matches!(
+            &events[0].kind,
+            ProjectEventKind::Failed { error, resumable: true }
+                if error == "project runner failed: Project plan refresh blocked before the next phase: Linear Project was archived; restore it before restarting Project Work"
+        ));
+        assert_eq!(
+            crate::project::status_reason(&WorkStatus::Ready, Some(&events[0].kind)),
+            "project runner failed: Project plan refresh blocked before the next phase: Linear Project was archived; restore it before restarting Project Work"
+        );
+
+        let connection = rusqlite::Connection::open(database).unwrap();
+        let run_state: String = connection
+            .query_row(
+                "SELECT state FROM runs WHERE id=?1",
+                [lease.run_id.as_str()],
+                |row| row.get(0),
+            )
+            .unwrap();
+        let (invocation_ended, invocation_outcome): (bool, String) = connection
+            .query_row(
+                "SELECT ended_at IS NOT NULL, outcome FROM agent_invocations WHERE id=?1",
+                [invocation.id.as_str()],
+                |row| Ok((row.get(0)?, row.get(1)?)),
+            )
+            .unwrap();
+        assert_eq!(run_state, "ended");
+        assert!(invocation_ended);
+        assert_eq!(invocation_outcome, "failed");
+    }
+
+    #[tokio::test]
+    async fn project_failure_cannot_bypass_its_atomic_receipt() {
+        let (_directory, _database, store, project, lease, _invocation) = project_fixture().await;
+        let work = store
+            .work_for_child(&ChildRef::Project(project.id.clone()))
+            .await
+            .unwrap();
+
+        let error = store
+            .finish_project_run(&project, &lease, BoundaryState::Failed)
+            .await
+            .unwrap_err();
+
+        assert!(error.to_string().contains("must use fail_project_run"));
+        assert!(matches!(
+            store.work_status(&work).await.unwrap(),
+            WorkStatus::Running { .. }
+        ));
+        assert!(store
+            .project_events_after(&project.id, 0)
+            .await
+            .unwrap()
+            .is_empty());
+        assert!(store
+            .open_invocation_for_run(&lease.run_id)
+            .await
+            .unwrap()
+            .is_some());
+    }
+
+    #[tokio::test]
+    async fn project_failure_receipt_rolls_back_together() {
+        let (_directory, database, store, project, lease, invocation) = project_fixture().await;
+        let work = store
+            .work_for_child(&ChildRef::Project(project.id.clone()))
+            .await
+            .unwrap();
+        let connection = rusqlite::Connection::open(&database).unwrap();
+        connection
+            .execute_batch(
+                "CREATE TRIGGER inject_project_failure_receipt_error
+                 BEFORE UPDATE OF state ON runs
+                 WHEN NEW.state='ended'
+                 BEGIN
+                    SELECT RAISE(ABORT, 'injected Project failure receipt error');
+                 END;",
+            )
+            .unwrap();
+        drop(connection);
+
+        let error = store
+            .fail_project_run(&project, &lease, "provider event stream closed")
+            .await
+            .unwrap_err();
+
+        assert!(error
+            .to_string()
+            .contains("injected Project failure receipt error"));
+        assert!(matches!(
+            store.work_status(&work).await.unwrap(),
+            WorkStatus::Running { .. }
+        ));
+        assert!(store
+            .project_events_after(&project.id, 0)
+            .await
+            .unwrap()
+            .is_empty());
+        let connection = rusqlite::Connection::open(database).unwrap();
+        let run_state: String = connection
+            .query_row(
+                "SELECT state FROM runs WHERE id=?1",
+                [lease.run_id.as_str()],
+                |row| row.get(0),
+            )
+            .unwrap();
+        let (invocation_ended, invocation_outcome): (bool, String) = connection
+            .query_row(
+                "SELECT ended_at IS NOT NULL, outcome FROM agent_invocations WHERE id=?1",
+                [invocation.id.as_str()],
+                |row| Ok((row.get(0)?, row.get(1)?)),
+            )
+            .unwrap();
+        let observation_count: i64 = connection
+            .query_row("SELECT COUNT(*) FROM observation_outbox", [], |row| {
+                row.get(0)
+            })
+            .unwrap();
+        assert_eq!(run_state, "active");
+        assert!(!invocation_ended);
+        assert_eq!(invocation_outcome, "running");
+        assert_eq!(observation_count, 0);
     }
 }

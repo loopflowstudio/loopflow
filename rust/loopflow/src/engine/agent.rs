@@ -6,7 +6,7 @@
 use std::collections::BTreeMap;
 use std::env;
 use std::fs;
-use std::io::{BufRead, BufReader, Read};
+use std::io::{BufRead, BufReader, Read, Write};
 use std::path::{Path, PathBuf};
 use std::process::{Child, Command, ExitStatus, Stdio};
 use std::sync::atomic::{AtomicU32, Ordering};
@@ -89,6 +89,8 @@ pub struct LaunchResult {
     pub exit_code: i32,
     pub stdout: String,
     pub stderr: String,
+    /// Opaque provider continuation token observed during this launch.
+    pub provider_session_id: Option<String>,
     /// Typed provider failure when the process output identifies one.
     pub failure: Option<AgentFailure>,
 }
@@ -99,6 +101,16 @@ pub enum AgentAuthority {
     #[default]
     Inherit,
     Detached,
+}
+
+/// Filesystem write boundary for a provider launch.
+#[derive(Debug, Clone, Copy, Default, PartialEq, Eq)]
+pub enum AgentWriteScope {
+    /// Respect the provider's configured permissions and Loopflow's ordinary floor.
+    #[default]
+    Configured,
+    /// Permit writes only inside the assigned working directory.
+    Worktree,
 }
 
 #[derive(Clone, Default)]
@@ -117,6 +129,8 @@ pub struct AgentConfig {
     pub cwd: Option<std::path::PathBuf>,
     /// Whether the provider process inherits ambient Work execution authority.
     pub authority: AgentAuthority,
+    /// Maximum filesystem write scope granted to the provider.
+    pub write_scope: AgentWriteScope,
     /// Skip permission prompts
     pub skip_permissions: bool,
     /// Engine-injected structured replies (rendered via harness prompt guidance).
@@ -126,6 +140,8 @@ pub struct AgentConfig {
     /// to this path. The caller reads it after the agent exits and forwards
     /// safe directives (e.g. `cd`) to the real directive file.
     pub directive_relay: Option<std::path::PathBuf>,
+    /// Environment scoped to this provider process and its descendants.
+    pub env: BTreeMap<String, String>,
 }
 
 impl AgentConfig {
@@ -153,10 +169,12 @@ impl std::fmt::Debug for AgentConfig {
             .field("max_turns", &self.max_turns)
             .field("resume_token", &self.resume_token)
             .field("authority", &self.authority)
+            .field("write_scope", &self.write_scope)
             .field("cwd", &self.cwd)
             .field("skip_permissions", &self.skip_permissions)
             .field("structured_replies", &self.structured_replies)
             .field("directive_relay", &self.directive_relay)
+            .field("env_keys", &self.env.keys().collect::<Vec<_>>())
             .finish()
     }
 }
@@ -190,8 +208,6 @@ pub struct ProcessConfig {
     pub timeout: Option<Duration>,
     /// Durable local capture for this provider invocation.
     pub capture: Option<crate::trace::CaptureHandle>,
-    /// Environment scoped to this subprocess and its descendants.
-    pub env: BTreeMap<String, String>,
 }
 
 /// Agent capability flags.
@@ -344,6 +360,23 @@ pub fn codex_permission_args(
     auto: bool,
     skip_permissions: bool,
 ) -> Vec<String> {
+    codex_permission_args_for_scope(cwd, auto, skip_permissions, AgentWriteScope::Configured)
+}
+
+fn codex_permission_args_for_scope(
+    cwd: Option<&Path>,
+    auto: bool,
+    skip_permissions: bool,
+    write_scope: AgentWriteScope,
+) -> Vec<String> {
+    if write_scope == AgentWriteScope::Worktree {
+        let mut args = vec!["--sandbox".to_string(), "workspace-write".to_string()];
+        if auto {
+            args.push("--ask-for-approval".to_string());
+            args.push("never".to_string());
+        }
+        return args;
+    }
     if skip_permissions {
         return vec!["--dangerously-bypass-approvals-and-sandbox".to_string()];
     }
@@ -462,6 +495,8 @@ pub struct ClaudeArgs {
     pub add_dirs: Vec<PathBuf>,
     /// Skip permission prompts.
     pub skip_permissions: bool,
+    /// Enforce the managed Task worktree boundary.
+    pub worktree_isolation: bool,
     /// Max turn budget.
     pub max_turns: Option<u32>,
     /// Enable streaming output (`--output-format stream-json --verbose`).
@@ -522,6 +557,24 @@ impl ClaudeArgs {
             args.push("--dangerously-skip-permissions".to_string());
         }
 
+        if self.worktree_isolation {
+            args.push("--permission-mode".to_string());
+            args.push("acceptEdits".to_string());
+            args.push("--setting-sources".to_string());
+            args.push(String::new());
+            args.push("--settings".to_string());
+            args.push(
+                serde_json::json!({
+                    "sandbox": {
+                        "enabled": true,
+                        "failIfUnavailable": true,
+                        "allowUnsandboxedCommands": false
+                    }
+                })
+                .to_string(),
+            );
+        }
+
         if let Some(max_turns) = self.max_turns {
             args.push("--max-turns".to_string());
             args.push(max_turns.to_string());
@@ -556,16 +609,13 @@ pub fn build_claude_session_turn_args(
         model: config.agent.as_deref().and_then(ClaudeArgs::resolve_model),
         system_prompt: Some(system_prompt_with_structured_replies(config)),
         system_prompt_file: None,
-        add_dirs: config
-            .cwd
-            .as_deref()
-            .map(workspace_add_dirs)
+        add_dirs: (config.write_scope == AgentWriteScope::Configured)
+            .then(|| config.cwd.as_deref().map(workspace_add_dirs))
+            .flatten()
             .unwrap_or_default(),
-        skip_permissions: claude_skip_permissions(
-            config.cwd.as_deref(),
-            true,
-            config.skip_permissions,
-        ),
+        skip_permissions: config.write_scope == AgentWriteScope::Configured
+            && claude_skip_permissions(config.cwd.as_deref(), true, config.skip_permissions),
+        worktree_isolation: config.write_scope == AgentWriteScope::Worktree,
         max_turns: config.max_turns,
         stream: true,
         chrome: false,
@@ -647,7 +697,16 @@ pub fn build_codex_thread_start_params(
         );
     }
 
-    if launch.skip_permissions {
+    if launch.write_scope == AgentWriteScope::Worktree {
+        params.insert(
+            "approvalPolicy".to_string(),
+            serde_json::Value::String("never".to_string()),
+        );
+        params.insert(
+            "sandbox".to_string(),
+            serde_json::Value::String("workspace-write".to_string()),
+        );
+    } else if launch.skip_permissions {
         params.insert(
             "approvalPolicy".to_string(),
             serde_json::Value::String("never".to_string()),
@@ -707,16 +766,17 @@ pub fn build_claude_command(
         model: model_variant.map(str::to_string),
         system_prompt: Some(system_prompt_with_structured_replies(launch)),
         system_prompt_file: process.context_file.clone(),
-        add_dirs: launch
-            .cwd
-            .as_deref()
-            .map(workspace_add_dirs)
+        add_dirs: (launch.write_scope == AgentWriteScope::Configured)
+            .then(|| launch.cwd.as_deref().map(workspace_add_dirs))
+            .flatten()
             .unwrap_or_default(),
-        skip_permissions: claude_skip_permissions(
-            launch.cwd.as_deref(),
-            process.auto,
-            launch.skip_permissions,
-        ),
+        skip_permissions: launch.write_scope == AgentWriteScope::Configured
+            && claude_skip_permissions(
+                launch.cwd.as_deref(),
+                process.auto,
+                launch.skip_permissions,
+            ),
+        worktree_isolation: launch.write_scope == AgentWriteScope::Worktree,
         max_turns: launch.max_turns,
         stream: process.auto && process.stream,
         chrome: capabilities.chrome,
@@ -770,7 +830,7 @@ pub fn build_codex_command(
         cmd.push(cwd.to_string_lossy().to_string());
     }
 
-    if !launch.skip_permissions {
+    if !launch.skip_permissions && launch.write_scope == AgentWriteScope::Configured {
         for dir in launch
             .cwd
             .as_deref()
@@ -786,10 +846,11 @@ pub fn build_codex_command(
         cmd.push("--json".to_string());
     }
 
-    cmd.extend(codex_permission_args(
+    cmd.extend(codex_permission_args_for_scope(
         launch.cwd.as_deref(),
         process.auto,
         launch.skip_permissions,
+        launch.write_scope,
     ));
 
     if process.auto {
@@ -852,8 +913,20 @@ pub fn build_opencode_command(process: &ProcessConfig, model_variant: Option<&st
 ///
 /// Returns `None` when no config overrides are needed (interactive mode, no context).
 pub fn build_opencode_env(process: &ProcessConfig) -> Option<String> {
+    build_opencode_env_for_scope(process, AgentWriteScope::Configured)
+}
+
+fn build_opencode_env_for_scope(
+    process: &ProcessConfig,
+    write_scope: AgentWriteScope,
+) -> Option<String> {
     let mut oc_config = serde_json::Map::new();
-    if process.auto {
+    if write_scope == AgentWriteScope::Worktree {
+        oc_config.insert(
+            "permission".into(),
+            serde_json::json!({"*": "allow", "external_directory": "deny"}),
+        );
+    } else if process.auto {
         oc_config.insert(
             "permission".into(),
             serde_json::Value::String("allow".into()),
@@ -872,8 +945,14 @@ pub fn build_opencode_env(process: &ProcessConfig) -> Option<String> {
     }
 }
 
+/// Highest-priority OpenCode configuration for a managed Task provider.
+pub fn opencode_worktree_config() -> String {
+    build_opencode_env_for_scope(&ProcessConfig::default(), AgentWriteScope::Worktree)
+        .expect("worktree scope always produces OpenCode configuration")
+}
+
 pub fn build_agent_env(launch: &AgentConfig, process: &ProcessConfig) -> BTreeMap<String, String> {
-    let mut env = process.env.clone();
+    let mut env = launch.env.clone();
     let agent = launch.agent();
     let (harness, _) = parse_agent(agent);
     match harness.as_str() {
@@ -886,7 +965,7 @@ pub fn build_agent_env(launch: &AgentConfig, process: &ProcessConfig) -> BTreeMa
             }
         }
         "opencode" => {
-            if let Some(env_val) = build_opencode_env(process) {
+            if let Some(env_val) = build_opencode_env_for_scope(process, launch.write_scope) {
                 env.insert("OPENCODE_CONFIG_CONTENT".to_string(), env_val);
             }
         }
@@ -897,7 +976,12 @@ pub fn build_agent_env(launch: &AgentConfig, process: &ProcessConfig) -> BTreeMa
 }
 
 /// Apply harness-specific environment variables to a command.
-fn apply_harness_env(harness: &str, cmd: &mut Command, process: &ProcessConfig) {
+fn apply_harness_env(
+    harness: &str,
+    cmd: &mut Command,
+    launch: &AgentConfig,
+    process: &ProcessConfig,
+) {
     match harness {
         "gemini" => {
             if let Some(ref context_file) = process.context_file {
@@ -908,7 +992,7 @@ fn apply_harness_env(harness: &str, cmd: &mut Command, process: &ProcessConfig) 
             }
         }
         "opencode" => {
-            if let Some(env_val) = build_opencode_env(process) {
+            if let Some(env_val) = build_opencode_env_for_scope(process, launch.write_scope) {
                 cmd.env("OPENCODE_CONFIG_CONTENT", env_val);
             }
         }
@@ -1229,21 +1313,275 @@ fn _classify_subscription_limit(text: &str) -> Option<()> {
 }
 
 fn _provider_resume_token(result: &LaunchResult) -> Option<String> {
-    result.stdout.lines().find_map(|line| {
-        let value: serde_json::Value = serde_json::from_str(line).ok()?;
-        let session_id = [
-            value.get("session_id"),
-            value.get("sessionId"),
-            value.get("thread_id"),
-            value.pointer("/stream_event/event/session_id"),
-            value.pointer("/params/thread/id"),
-        ]
-        .into_iter()
-        .flatten()
-        .find_map(|value| value.as_str().filter(|value| !value.is_empty()))
-        .map(str::to_string);
-        session_id
+    result.provider_session_id.clone().or_else(|| {
+        result.stdout.lines().find_map(|line| {
+            let value: serde_json::Value = serde_json::from_str(line).ok()?;
+            let session_id = [
+                value.get("session_id"),
+                value.get("sessionId"),
+                value.get("thread_id"),
+                value.pointer("/stream_event/event/session_id"),
+                value.pointer("/params/thread/id"),
+            ]
+            .into_iter()
+            .flatten()
+            .find_map(|value| value.as_str().filter(|value| !value.is_empty()))
+            .map(str::to_string);
+            session_id
+        })
     })
+}
+
+fn _begin_implicit_capture(
+    launch: &AgentConfig,
+    process: &ProcessConfig,
+    harness: &str,
+    model: Option<String>,
+) -> Result<Option<crate::trace::CaptureHandle>, CoreError> {
+    if process.capture.is_some() {
+        return Ok(None);
+    }
+    launch
+        .cwd
+        .as_deref()
+        .and_then(|cwd| {
+            crate::journal::trace_capture_context(cwd, None, None).map(|context| {
+                let system_prompt = process
+                    .context_file
+                    .as_deref()
+                    .and_then(|path| fs::read_to_string(path).ok())
+                    .unwrap_or_else(|| system_prompt_with_structured_replies(launch));
+                crate::trace::CaptureHandle::begin(
+                    context,
+                    crate::trace::PreparedTurnContext::from_prompts(
+                        &system_prompt,
+                        &launch.task_prompt,
+                    ),
+                    crate::trace::CaptureStart {
+                        provider: harness.to_string(),
+                        model,
+                        surface: if process.auto { "headless" } else { "tui" }.to_string(),
+                        input_op: "initial".to_string(),
+                        gather_ms: 0,
+                        render_ms: 0,
+                        raw_provider: process.auto,
+                        basis: None,
+                        supervision: None,
+                    },
+                )
+            })
+        })
+        .transpose()
+        .map_err(|error| {
+            CoreError::ExecutionFailed(format!(
+                "failed to establish trace capture before agent launch: {error}"
+            ))
+        })
+}
+
+fn _launch_codex_harness_once(
+    launch: &AgentConfig,
+    process: &ProcessConfig,
+    model: Option<String>,
+    retry: bool,
+) -> Result<AgentAttempt, CoreError> {
+    if tokio::runtime::Handle::try_current().is_ok() {
+        let launch = launch.clone();
+        let process = process.clone();
+        return std::thread::Builder::new()
+            .name("lf-codex-harness".to_string())
+            .spawn(move || _launch_codex_harness_once(&launch, &process, model, retry))
+            .map_err(|error| CoreError::ExecutionFailed(error.to_string()))?
+            .join()
+            .map_err(|_| {
+                CoreError::ExecutionFailed("Codex harness thread panicked".to_string())
+            })?;
+    }
+
+    use crate::chat::types::{ConversationEvent, Lifecycle};
+    use crate::harness::ApprovalPolicy;
+
+    let implicit_capture = _begin_implicit_capture(launch, process, "codex", model.clone())?;
+    let capture = process.capture.as_ref().or(implicit_capture.as_ref());
+    let account_route =
+        match resolve_provider_account_blocking(Provider::Codex, launch.resume_token.clone()) {
+            Ok(route) => route,
+            Err(error) => {
+                return Ok(AgentAttempt::AccountUnavailable(
+                    CoreError::ExecutionFailed(format!(
+                        "failed to select provider account: {error}"
+                    )),
+                ));
+            }
+        };
+    if retry {
+        if let Some(capture) = capture {
+            capture
+                .fail_and_begin_invocation("codex".to_string(), model, &launch.task_prompt)
+                .map_err(|error| CoreError::ExecutionFailed(error.to_string()))?;
+        }
+    }
+
+    let mut config = launch.clone();
+    let prompt = std::mem::take(&mut config.task_prompt);
+    let writer_worktree = config.cwd.clone().or_else(|| std::env::current_dir().ok());
+    let writer_guard = writer_worktree
+        .as_deref()
+        .map(|cwd| crate::ops::git_operation::prepare_agent_writer(cwd, &config.env))
+        .transpose()
+        .map_err(|error| CoreError::ExecutionFailed(error.to_string()))?
+        .flatten();
+    if let Some(guard) = writer_guard.as_ref() {
+        config
+            .env
+            .entry(crate::ops::git_operation::LF_WORKTREE_WRITER_ID_ENV.to_string())
+            .or_insert_with(|| guard.writer_id().to_string());
+    }
+
+    let runtime = tokio::runtime::Builder::new_current_thread()
+        .enable_all()
+        .build()
+        .map_err(|error| CoreError::ExecutionFailed(error.to_string()))?;
+    let result = runtime.block_on(async {
+        let (event_tx, mut event_rx) = tokio::sync::mpsc::unbounded_channel();
+        let (raw_tx, mut raw_rx) = tokio::sync::mpsc::unbounded_channel();
+        let mut harness = crate::harness::default_create_harness(
+            "codex",
+            ApprovalPolicy::AutoApprove,
+            event_tx,
+        )
+        .map_err(|error| CoreError::ExecutionFailed(error.to_string()))?;
+        harness.set_provider_account_id(
+            account_route
+                .as_ref()
+                .map(|route| route.account_id().clone()),
+        );
+        harness.set_provider_session_id(launch.resume_token.clone());
+        if capture.is_some() {
+            harness.set_raw_provider_sender(Some(raw_tx));
+        }
+        harness
+            .start(&config)
+            .await
+            .map_err(|error| CoreError::ExecutionFailed(error.to_string()))?;
+        let provider_session_id = harness.provider_session_id();
+        if let Some(capture) = capture {
+            capture.set_provider_session_id(provider_session_id.clone());
+        }
+        let can_failover = account_route.is_some();
+
+        let drive = async {
+            harness
+                .send_input(&prompt)
+                .await
+                .map_err(|error| CoreError::ExecutionFailed(error.to_string()))?;
+            let mut stdout = String::new();
+            let mut stderr = String::new();
+            let mut exit_code = None;
+            while exit_code.is_none() {
+                tokio::select! {
+                    raw = raw_rx.recv(), if capture.is_some() => {
+                        if let Some(raw) = raw {
+                            if let Some(capture) = capture {
+                                capture.record_raw(raw.stream, &raw.line);
+                            }
+                            if process.stream && process.stream_format == StreamFormat::Raw {
+                                println!("{}", raw.line);
+                            }
+                        }
+                    }
+                    event = event_rx.recv() => {
+                        let Some(event) = event else {
+                            stderr.push_str("codex event stream closed\n");
+                            exit_code = Some(1);
+                            continue;
+                        };
+                        if let Some(capture) = capture {
+                            capture.record_conversation(event.clone());
+                        }
+                        match event {
+                            ConversationEvent::TextDelta { content, .. } => {
+                                stdout.push_str(&content);
+                                if process.stream && process.stream_format != StreamFormat::Raw {
+                                    print!("{content}");
+                                    let _ = std::io::stdout().flush();
+                                }
+                            }
+                            ConversationEvent::Error { code, message, .. } => {
+                                stderr.push_str(&format!("{code}: {message}\n"));
+                                if matches!(code.as_str(), "codex_disconnected" | "provider_rate_limited") {
+                                    exit_code = Some(1);
+                                }
+                            }
+                            ConversationEvent::TurnCompleted { status, .. } => {
+                                exit_code = Some(if status == Lifecycle::Completed { 0 } else { 1 });
+                            }
+                            _ => {}
+                        }
+                    }
+                }
+            }
+            while let Ok(raw) = raw_rx.try_recv() {
+                if let Some(capture) = capture {
+                    capture.record_raw(raw.stream, &raw.line);
+                }
+                if process.stream && process.stream_format == StreamFormat::Raw {
+                    println!("{}", raw.line);
+                }
+            }
+            if process.stream
+                && process.stream_format != StreamFormat::Raw
+                && !stdout.ends_with('\n')
+            {
+                println!();
+            }
+            Ok(LaunchResult {
+                exit_code: exit_code.expect("event loop stops with an exit code"),
+                stdout,
+                stderr,
+                provider_session_id,
+                failure: None,
+            })
+        };
+        let result = match process.timeout {
+            Some(timeout) => match tokio::time::timeout(timeout, drive).await {
+                Ok(result) => result,
+                Err(_) => Err(CoreError::ExecutionFailed(format!(
+                        "agent timed out after {}",
+                        format_timeout(Some(timeout))
+                    ))),
+            },
+            None => drive.await,
+        };
+        let _ = harness.stop().await;
+        result.map(|result| AgentAttempt::Finished {
+            result,
+            can_failover,
+        })
+    });
+
+    if let (Some(route), Ok(AgentAttempt::Finished { result, .. })) = (&account_route, &result) {
+        if _find_provider_error(result, _classify_credential_invalidated).is_some() {
+            route
+                .record_credential_invalidated_blocking("token_invalidated")
+                .map_err(|error| CoreError::ExecutionFailed(error.to_string()))?;
+        } else {
+            route
+                .record_launch_blocking(result.provider_session_id.clone(), None)
+                .map_err(|error| CoreError::ExecutionFailed(error.to_string()))?;
+        }
+    }
+
+    if let Some(capture) = implicit_capture {
+        let outcome = match &result {
+            Ok(AgentAttempt::Finished { result, .. }) if result.exit_code == 0 => "completed",
+            _ => "failed",
+        };
+        capture
+            .finish(outcome, false)
+            .map_err(|error| CoreError::ExecutionFailed(error.to_string()))?;
+    }
+    result
 }
 
 fn _launch_agent_once(
@@ -1253,6 +1591,10 @@ fn _launch_agent_once(
     retry: bool,
 ) -> Result<AgentAttempt, CoreError> {
     let start = Instant::now();
+    let (harness, model) = parse_agent(launch.agent());
+    if harness == "codex" && process.auto {
+        return _launch_codex_harness_once(launch, process, model, retry);
+    }
     let cmd_args = build_model_command(launch, process, capabilities);
     if cmd_args.is_empty() {
         return Err(CoreError::ExecutionFailed("Empty command".to_string()));
@@ -1276,7 +1618,7 @@ fn _launch_agent_once(
         cmd.current_dir(cwd);
     }
 
-    let mut scoped_env = process.env.clone();
+    let mut scoped_env = launch.env.clone();
     let writer_worktree = launch.cwd.clone().or_else(|| std::env::current_dir().ok());
     let writer_guard = writer_worktree
         .as_deref()
@@ -1310,8 +1652,6 @@ fn _launch_agent_once(
         .map_err(|error| CoreError::ExecutionFailed(error.to_string()))?;
 
     // Harness-specific environment setup.
-    let agent = launch.agent();
-    let (harness, model) = parse_agent(agent);
     let managed_provider = match harness.as_str() {
         "claude" => Some(Provider::Claude),
         "codex" => Some(Provider::Codex),
@@ -1350,48 +1690,12 @@ fn _launch_agent_once(
                 .map_err(|error| CoreError::ExecutionFailed(error.to_string()))?;
         }
     }
-    apply_harness_env(&harness, &mut cmd, process);
+    apply_harness_env(&harness, &mut cmd, launch, process);
 
     // Callers that already assembled semantic assets supply a capture handle.
     // Small internal agent launches (PR copy, commit copy, ops fallback) still
     // get an exact assembly manifest when they run inside a journaled `lf`.
-    let implicit_capture = if process.capture.is_none() {
-        launch.cwd.as_deref().and_then(|cwd| {
-            crate::journal::trace_capture_context(cwd, None, None).map(|context| {
-                let system_prompt = process
-                    .context_file
-                    .as_deref()
-                    .and_then(|path| fs::read_to_string(path).ok())
-                    .unwrap_or_else(|| system_prompt_with_structured_replies(launch));
-                crate::trace::CaptureHandle::begin(
-                    context,
-                    crate::trace::PreparedTurnContext::from_prompts(
-                        &system_prompt,
-                        &launch.task_prompt,
-                    ),
-                    crate::trace::CaptureStart {
-                        provider: harness.clone(),
-                        model: model.clone(),
-                        surface: if process.auto { "headless" } else { "tui" }.to_string(),
-                        input_op: "initial".to_string(),
-                        gather_ms: 0,
-                        render_ms: 0,
-                        raw_provider: process.auto,
-                        basis: None,
-                        supervision: None,
-                    },
-                )
-            })
-        })
-    } else {
-        None
-    }
-    .transpose()
-    .map_err(|error| {
-        CoreError::ExecutionFailed(format!(
-            "failed to establish trace capture before agent launch: {error}"
-        ))
-    })?;
+    let implicit_capture = _begin_implicit_capture(launch, process, &harness, model.clone())?;
     let capture = process.capture.as_ref().or(implicit_capture.as_ref());
 
     let result = if process.auto && process.stream {
@@ -1515,6 +1819,7 @@ fn launch_batch(
         exit_code: status.code().unwrap_or(1),
         stdout: String::from_utf8_lossy(&stdout_bytes).to_string(),
         stderr: String::from_utf8_lossy(&stderr_bytes).to_string(),
+        provider_session_id: None,
         failure: None,
     })
 }
@@ -1545,6 +1850,7 @@ fn launch_interactive(
         exit_code: status.code().unwrap_or(1),
         stdout: String::new(),
         stderr: String::new(),
+        provider_session_id: None,
         failure: None,
     })
 }
@@ -1701,6 +2007,7 @@ fn launch_streaming(
         exit_code: status.code().unwrap_or(1),
         stdout: stdout_content,
         stderr: stderr_content,
+        provider_session_id: None,
         failure: None,
     })
 }
@@ -2102,6 +2409,48 @@ trust_level = "trusted"
     }
 
     #[test]
+    fn managed_task_scope_cannot_be_widened_by_yolo_or_linked_main() {
+        let (_tmp, _main, worktree) = git_worktree_fixture();
+        let launch = AgentConfig {
+            agent: Some("codex".to_string()),
+            cwd: Some(worktree),
+            write_scope: AgentWriteScope::Worktree,
+            skip_permissions: true,
+            ..default_launch()
+        };
+        let process = auto_process();
+
+        let codex = build_codex_command(&launch, &process, None);
+        assert_arg_pair(&codex, "--sandbox", "workspace-write");
+        assert_arg_pair(&codex, "--ask-for-approval", "never");
+        assert!(!codex.contains(&"--add-dir".to_string()));
+        assert!(!codex.contains(&"--dangerously-bypass-approvals-and-sandbox".to_string()));
+        let thread = build_codex_thread_start_params(&launch);
+        assert_eq!(thread["sandbox"], "workspace-write");
+        assert_eq!(thread["approvalPolicy"], "never");
+
+        let claude = build_claude_command(&launch, &process, &AgentCapabilities::default(), None);
+        assert_arg_pair(&claude, "--permission-mode", "acceptEdits");
+        assert_arg_pair(&claude, "--setting-sources", "");
+        assert!(!claude.contains(&"--add-dir".to_string()));
+        assert!(!claude.contains(&"--dangerously-skip-permissions".to_string()));
+        let settings = claude
+            .windows(2)
+            .find_map(|pair| (pair[0] == "--settings").then_some(&pair[1]))
+            .expect("managed Claude settings");
+        let settings: serde_json::Value = serde_json::from_str(settings).unwrap();
+        assert_eq!(settings["sandbox"]["enabled"], true);
+        assert_eq!(settings["sandbox"]["failIfUnavailable"], true);
+        assert_eq!(settings["sandbox"]["allowUnsandboxedCommands"], false);
+
+        let opencode = build_opencode_env_for_scope(&process, AgentWriteScope::Worktree)
+            .expect("managed OpenCode settings");
+        let opencode: serde_json::Value = serde_json::from_str(&opencode).unwrap();
+        assert_eq!(opencode["permission"]["*"], "allow");
+        assert_eq!(opencode["permission"]["external_directory"], "deny");
+    }
+
+    #[test]
     fn build_codex_command_with_model() {
         let launch = default_launch();
         let process = auto_process();
@@ -2358,6 +2707,7 @@ trust_level = "trusted"
             system_prompt_file: None,
             add_dirs: vec!["/tmp/repo".into()],
             skip_permissions: true,
+            worktree_isolation: false,
             max_turns: Some(10),
             stream: true,
             chrome: true,
@@ -2477,9 +2827,11 @@ trust_level = "trusted"
             max_turns: None,
             resume_token: None,
             authority: AgentAuthority::Inherit,
+            write_scope: AgentWriteScope::Configured,
             skip_permissions: false,
             structured_replies: Vec::new(),
             directive_relay: None,
+            env: BTreeMap::new(),
         };
         let args = build_claude_session_turn_args("hello", &config, None);
         assert_eq!(args[0], "-p");
@@ -2503,9 +2855,11 @@ trust_level = "trusted"
             max_turns: Some(5),
             resume_token: None,
             authority: AgentAuthority::Inherit,
+            write_scope: AgentWriteScope::Configured,
             skip_permissions: true,
             structured_replies: Vec::new(),
             directive_relay: None,
+            env: BTreeMap::new(),
         };
         let args = build_claude_session_turn_args("fix tests", &config, Some("sess_abc"));
         assert!(args.contains(&"--resume".to_string()));
@@ -2529,6 +2883,7 @@ trust_level = "trusted"
             max_turns: None,
             resume_token: None,
             authority: AgentAuthority::Inherit,
+            write_scope: AgentWriteScope::Configured,
             skip_permissions: false,
             structured_replies: vec![StructuredReply {
                 name: "suggest_actions".to_string(),
@@ -2536,6 +2891,7 @@ trust_level = "trusted"
                 guidance: "Emit <lf:suggest_actions> JSON.".to_string(),
             }],
             directive_relay: None,
+            env: BTreeMap::new(),
         };
 
         let args = build_claude_session_turn_args("hello", &config, None);
@@ -2621,6 +2977,7 @@ trust_level = "trusted"
                 )
                 .to_string(),
                 stderr: String::new(),
+                provider_session_id: None,
                 failure: None,
             },
             LaunchResult {
@@ -2673,6 +3030,7 @@ trust_level = "trusted"
             )
             .to_string(),
             stderr: String::new(),
+            provider_session_id: None,
             failure: None,
         };
         assert!(matches!(

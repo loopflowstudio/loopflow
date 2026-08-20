@@ -20,6 +20,8 @@ the CLI:
 lf start shipper                       # explicitly start the Wave on this machine
 lf chat --steer "invoices first"       # steer the live body, else queue
 lf status shipper                      # its Project → Task hierarchy
+lf pause shipper                       # refuse new turns; keep listening and queueing
+lf resume shipper                      # start the next queued turn
 lf stop shipper                        # stop this Wave; sibling Waves keep running
 ```
 
@@ -82,7 +84,22 @@ radius crosses storage, auth, or public APIs.
 `owner` and `home` are independent, optional automatic-start filters. `owner`
 names the OS user that should run the Wave. `home` accepts this machine's
 HomeId, hostname, or IP address. Omit either field to leave that dimension
-unrestricted. An explicit `lf start <name>` still starts that Wave here.
+unrestricted. Locally placed Waves are enabled by default. `lf stop <name>`
+disables the Wave in this Home's registry; an explicit `lf start <name>` enables
+and starts it here. Neither command edits the goal.
+
+Pause turn execution without stopping the listener:
+
+```bash
+lf pause shipper --json    # {"wave":"shipper","paused":true}
+lf ls                      # TURNS shows paused independently from LIVE
+lf resume shipper
+```
+
+Pause writes `paused: true` into the canonical `GOAL.md` frontmatter; resume
+removes it because enabled turns are the default. Messages continue to queue,
+and heartbeat and cron turn starts wait. For a Wave served from another Home,
+run the same command there: `lf ssh <home-id> pause shipper`.
 
 Builtin goals resolve by name, so the five Viable System Model charters ship
 as `s1`…`s5`:
@@ -93,6 +110,79 @@ lf wave s3            # the s3 (control) charter
 
 Writing a goal well — the weight of each section, frontmatter fields, KR
 craft — is covered in [Authoring → Goals](authoring.md#goals).
+
+### Discord chat
+
+Wave Chat is local by default. Omitting `chat` (or explicitly choosing
+`provider: local`) keeps messages in the Wave journal and exposes the local
+composer in Loopflow:
+
+```yaml
+chat:
+  provider: local
+```
+
+Bind one existing guild text channel to replace the local backing for future
+messages:
+
+```yaml
+# wave/product/GOAL.md
+---
+chat:
+  provider: discord
+  home_id: "home_0123456789abcdef0123456789abcdef"
+  guild_id: "123456789012345678"
+  channel_id: "234567890123456789"
+---
+```
+
+Store the bot token in the Home daemon repository's Doppler config, reload the
+service, then start the Wave:
+
+```bash
+doppler secrets set LF_DISCORD_TOKEN > /dev/null
+doppler run -- lfd install
+lf start product
+```
+
+The service file retains only the non-secret Doppler project and config names.
+`lfd` resolves the token from Doppler once at boot and keeps it inside the
+trusted Home process. The Wave resident and its provider children never
+inherit it. Reload the service after changing or rotating the token. For a
+foreground listener without `lfd`, inject the same secret for that process:
+
+```bash
+doppler run -- lf wave product
+```
+
+The bot needs only **View Channel**, **Read Message History**, and **Send
+Messages**, with Message Content enabled in the Discord developer portal. A
+backing change takes effect when the listener restarts and starts one durable
+conversation epoch. Earlier local epochs stay selectable and read-only.
+
+Discord is the transcript authority while its epoch is active. Loopflow reads
+bounded history from Discord on demand and stores no duplicate presentation
+transcript. The Mac composer and `lf chat "text"` post through the bot, visibly
+prefix the message with the Wave name, and preserve message, steer, or interrupt
+intent when the provider echo reaches the resident. The Open in Discord action
+stays beside the native composer. A provider failure never falls through to a
+hidden local message. Human and agent speech appears only after Discord returns
+its provider message id. Every API message names its epoch and exact local
+journal event or Discord message source.
+
+Loopflow retains source-linked inputs until the resident consumes them,
+execution turns, deterministic send intents, cursors, and provider receipts as
+Run evidence. `home_id` is the portable binding owner (`lf home id`) and must
+match the Wave's durable placement. Another Home fails before contacting
+Discord, while an OS-held lease prevents another checkout on the owner Home
+from consuming the same channel.
+
+Read the active epoch or an earlier one explicitly:
+
+```bash
+lf chat --history --json --wave product
+lf chat --history --json --wave product --epoch chat-epoch-42
+```
 
 ### Memory
 
@@ -122,15 +212,19 @@ lf home id                    # this machine's stable HomeId
 lf ls --json                  # Wave ids and their current Homes
 lf start shipper              # start one Wave on this machine
 lf start                      # start eligible repo Waves on this machine
+lf pause shipper              # keep serving but refuse new turns
+lf resume shipper             # enable queued and future turns
 lf stop shipper               # stop this machine's Wave
+lf work disable task task_... # exclude one Task without stopping its current Run
+lf work enable task task_...  # restore eligibility
 ```
 
 With a name, `lf start` is an explicit instruction: it records this machine as
-the Wave's Home and starts it. Without names, it starts only Waves whose
-optional `owner` and `home` policy matches this process and whose recorded
-placement is already local. New Project or Task Work inherits its parent's
-recorded Home once. Record a different Home only while the Wave has no live
-Run:
+the Wave's Home, enables it in the local registry, and starts it. Without names,
+it starts only enabled Waves whose optional `owner` and `home` policy matches
+this process and whose recorded placement is already local. New Project or Task
+Work inherits its parent's recorded Home once. Record a different Home only
+while the Wave has no live Run:
 
 ```bash
 lf work place wave <wave-id> <home-id>
@@ -139,6 +233,22 @@ lf work place wave <wave-id> <home-id>
 Project and Task movement stays closed while their Runs remain the
 executor. The shared Run supervisor will open that placement boundary without
 another Work-to-Run routing bridge.
+
+A Wave name is local to its canonical repository. Its UUID remains stable when
+the name or repository changes, so relocation is separate from Home placement:
+
+```bash
+lf work relocate wave <wave-id> --name platform
+lf work relocate wave <wave-id> --repo ../moved-repository
+```
+
+Stop the Wave and its descendants first. Relocation preserves its Linear
+Initiative projection, Work and Run history, journal, authored files, and Home
+placement. A repository move carries the complete Wave chord, and renaming a
+Wave carries descendants whose authored paths are nested below it. Configured
+source and target PM Teams must match; use `lf pm reteam` for an intentional
+provider ownership change. Divergent target files fail closed instead of being
+merged, and retry finishes cleanup if the locator committed before a crash.
 
 `lfd` is the one keeper process per Home. Its in-process `WaveHost` starts every
 eligible Wave known to the local store across repositories, then reconciles
@@ -149,9 +259,11 @@ sibling Waves.
 chooses no work. Each hosted Wave body is the agent with a goal, memory, and
 conversation.
 
-`lf stop <wave>` suppresses automatic restart until the next explicit
-`lf start <wave>` or `lfd` restart. To keep a Wave off this Home across reboots,
-change its `owner`/`home` policy or recorded placement.
+`lf stop <wave>` records `enabled = false` in this Home's SQLite registry. A new
+`lfd` process reads the same control and leaves the Wave off. `lf start <wave>`
+enables it again. Change `owner`, `home`, or placement to move ownership; use
+`lf work enable|disable` to control otherwise assigned Work without producing a
+repository diff.
 
 `home: localhost`, `home: 127.0.0.1`, and `home: ::1` always match the current
 machine. Loopflow also matches its stable HomeId, hostname and short hostname,
@@ -183,7 +295,7 @@ Foreground SSH work can use origin and target subscription accounts. Durable
 residents shed forwarded authority before detaching and use credentials
 installed on their machine.
 
-See [Architecture → Decentralized Home](architecture.md#decentralized-home).
+See [Architecture → Processes](architecture.md#processes).
 
 ## Projects and KRs
 
@@ -206,16 +318,23 @@ carries the craft and examples.
 
 Tasks live in Linear; there are no local task lists. A wave maps to an
 Initiative, each project to a Linear Project, each task to an Issue. Connect
-once — `lf pm init` links or creates the Initiative and wave-owned team and
-writes both ids into `GOAL.md` frontmatter. Don't paste ids by hand.
+once — `lf pm init` links or creates the Wave Initiative and establishes one
+repository Team in `.lf/config.yaml`. Every Wave reuses that Team and issue-key
+namespace. Don't paste ids by hand.
 
 ```bash
-lf pm init --wave infra --team-key INF     # connect or rebind
+lf pm init --wave infra --team-key LOO     # first Wave establishes the repo Team
+lf pm init --all                           # all nested Waves reuse it
 lf pm sync --wave infra                    # refresh the local SQLite snapshot
 lf pm show --wave infra --no-sync          # deterministic cache-only read
 lf pm task create --wave infra --project stability --title "Daemon data integrity"
 lf pm task done --id 1207... --pr "https://github.com/acme/app/pull/42"
 ```
+
+A managed Project belongs to exactly one Initiative and exactly the repository
+Team. Project titles include the canonical Wave ancestry for orientation
+(`Survival / Infrastructure — Gmail`), but stable ids and Project membership —
+never titles or issue prefixes — resolve Work.
 
 ## Tasks
 

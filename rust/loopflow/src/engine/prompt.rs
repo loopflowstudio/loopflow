@@ -143,13 +143,12 @@ pub enum Surface {
 }
 
 impl Surface {
-    /// Only headless runs need a preamble — no user is present, so the agent
-    /// must be told not to wait for one. Interactive surfaces speak for
-    /// themselves.
+    /// State whether this conversation has a human before the skill can decide
+    /// where a real dependency should route.
     pub fn instructions(self) -> &'static str {
         match self {
             Self::Headless => crate::engine::builtins::SURFACE_HEADLESS,
-            _ => "",
+            _ => crate::engine::builtins::SURFACE_HUMAN_PRESENT,
         }
     }
 }
@@ -2082,7 +2081,7 @@ mod tests {
     }
 
     #[test]
-    fn format_prompt_interactive_surfaces_have_no_preamble() {
+    fn format_prompt_interactive_surfaces_keep_questions_with_present_human() {
         for surface in [Surface::Cli, Surface::Ide, Surface::Mac, Surface::Iphone] {
             let components = PromptComponents {
                 surface,
@@ -2090,8 +2089,11 @@ mod tests {
             };
 
             let prompt = render_full_prompt(components);
-            assert!(!prompt.contains("Run mode"), "surface {surface:?}");
-            assert!(!prompt.contains("Surface:"), "surface {surface:?}");
+            assert!(prompt.contains("A human is present"), "surface {surface:?}");
+            assert!(
+                prompt.contains("never enqueue a User Ask"),
+                "surface {surface:?}"
+            );
         }
     }
 
@@ -2344,7 +2346,6 @@ mod tests {
                 default_agent: None,
                 directions: vec![],
                 action_style: None,
-                interactive: None,
             }),
             ..Default::default()
         };
@@ -2366,7 +2367,6 @@ mod tests {
                 default_agent: None,
                 directions: vec![],
                 action_style: None,
-                interactive: None,
             }),
             ..Default::default()
         };
@@ -2465,7 +2465,6 @@ mod tests {
                 default_agent: None,
                 directions: vec![],
                 action_style: None,
-                interactive: None,
             }),
             diff: Some("diff content".to_string()),
             clipboard: Some("clipboard content".to_string()),
@@ -2496,6 +2495,8 @@ mod tests {
         let components = PromptComponents::default();
         let prompt = render_full_prompt(components);
         assert!(prompt.contains("Run mode is headless"));
+        assert!(prompt.contains("requests an Ask session from the\nparent Work"));
+        assert!(prompt.contains("only for genuine absent-User action"));
     }
 
     #[test]
@@ -3057,7 +3058,6 @@ directions:
                 default_agent: None,
                 directions: vec![],
                 action_style: None,
-                interactive: None,
             }),
             ..Default::default()
         };
@@ -3092,7 +3092,6 @@ directions:
                 default_agent: None,
                 directions: vec![],
                 action_style: None,
-                interactive: None,
             }),
             ..Default::default()
         };
@@ -3136,7 +3135,6 @@ directions:
                 default_agent: None,
                 directions: vec![],
                 action_style: None,
-                interactive: None,
             }),
             ..Default::default()
         };
@@ -3174,7 +3172,6 @@ directions:
                 default_agent: None,
                 directions: vec![],
                 action_style: None,
-                interactive: None,
             }),
             message: Some("login page crashes".to_string()),
             ..Default::default()
@@ -3194,7 +3191,6 @@ directions:
                 default_agent: None,
                 directions: vec![],
                 action_style: None,
-                interactive: None,
             }),
             ..Default::default()
         };

@@ -176,9 +176,11 @@ pub fn prepare_launch_prompt(
         resume_token: None,
         cwd: Some(cwd.unwrap_or(repo_root)),
         authority: crate::engine::agent::AgentAuthority::Inherit,
+        write_scope: crate::engine::agent::AgentWriteScope::Configured,
         skip_permissions: yolo_mode,
         structured_replies: structured_replies_for_context(&client_context, action_style),
         directive_relay: None,
+        env: Default::default(),
     };
 
     Ok(PreparedLaunchPrompt {
@@ -577,7 +579,6 @@ Test skill body.
                     default_agent: None,
                     directions: vec!["thorough".to_string()],
                     action_style: Some("procedural".to_string()),
-                    interactive: Some(true),
                     content: Some("Skill body".to_string()),
                 }),
                 surface: Surface::Headless,

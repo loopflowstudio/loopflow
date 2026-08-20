@@ -9,13 +9,17 @@ from scripts import publish_release
 
 
 def _native_artifacts(directory: Path) -> None:
-    binary = directory / "lf"
-    binary.write_bytes(b"loopflow release binary")
+    binaries = []
+    for name in ("lf", "lfd"):
+        binary = directory / name
+        binary.write_bytes(f"loopflow release {name}".encode())
+        binaries.append(binary)
     for target in publish_release.TARGETS:
         package_dir = directory / target
         package_dir.mkdir()
         with tarfile.open(package_dir / f"lf-{target}.tar.gz", "w:gz") as package:
-            package.add(binary, arcname="lf")
+            for binary in binaries:
+                package.add(binary, arcname=binary.name)
 
 
 def test_publisher_requires_the_complete_native_matrix(tmp_path: Path):
@@ -33,7 +37,40 @@ def test_publisher_rejects_unexpected_archive_contents(tmp_path: Path):
         package.addfile(member, io.BytesIO(b"nope"))
 
     with pytest.raises(RuntimeError, match="unexpected archive contents"):
-        publish_release._extract_arm_binary((archive,), tmp_path)
+        publish_release._extract_arm_binaries((archive,), tmp_path)
+
+
+def test_publisher_extracts_the_arm_control_plane_pair(tmp_path: Path):
+    artifacts = tmp_path / "artifacts"
+    artifacts.mkdir()
+    _native_artifacts(artifacts)
+    archives = publish_release._find_native_archives(artifacts)
+    output = tmp_path / "extracted"
+    output.mkdir()
+
+    cli, daemon = publish_release._extract_arm_binaries(archives, output)
+
+    assert cli.read_bytes() == b"loopflow release lf"
+    assert daemon.read_bytes() == b"loopflow release lfd"
+    assert cli.stat().st_mode & 0o111
+    assert daemon.stat().st_mode & 0o111
+
+
+def test_publisher_rejects_validation_only_control_plane(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+):
+    binary = tmp_path / "lf"
+    binary.touch()
+    monkeypatch.setattr(
+        publish_release,
+        "_run",
+        lambda *_args, **_kwargs: subprocess.CompletedProcess(
+            [], 0, '{"candidate":{"authority":"validation_only"}}', ""
+        ),
+    )
+
+    with pytest.raises(RuntimeError, match="validation-only"):
+        publish_release._validate_release_candidate(binary, tmp_path)
 
 
 def test_publisher_completes_all_stages_before_marking_release_published(
@@ -48,6 +85,7 @@ def test_publisher_completes_all_stages_before_marking_release_published(
     (tmp_path / "RELEASE_NOTES.md").write_text("# v1.2.3\n")
     (tmp_path / "swift/dist").mkdir(parents=True)
     receipts: list[publish_release.PublishReceipt] = []
+    commands: list[list[str]] = []
 
     def fake_run(
         command: list[str],
@@ -56,10 +94,18 @@ def test_publisher_completes_all_stages_before_marking_release_published(
         capture: bool = False,
         env: dict[str, str] | None = None,
     ) -> subprocess.CompletedProcess[str]:
+        commands.append(command)
         if command[:3] == ["git", "tag", "--points-at"]:
             return subprocess.CompletedProcess(command, 0, "v1.2.3\n", "")
         if command[:3] == ["git", "rev-parse", "HEAD"]:
             return subprocess.CompletedProcess(command, 0, "abc123\n", "")
+        if command[1:] == ["install", "preflight", "--json"]:
+            return subprocess.CompletedProcess(
+                command,
+                0,
+                '{"candidate":{"authority":"published"}}\n',
+                "",
+            )
         if command[-1:] == ["scripts/release-loopflow.py"]:
             (tmp_path / "swift/dist/Loopflow.dmg").write_bytes(b"notarized dmg")
         return subprocess.CompletedProcess(command, 0, "", "")
@@ -90,5 +136,15 @@ def test_publisher_completes_all_stages_before_marking_release_published(
         *(f"lf-{target}.tar.gz" for target in publish_release.TARGETS),
         "Loopflow.dmg",
         "install.sh",
+        "SHA256SUMS",
+    }
+    checksum_lines = (artifact_dir / "SHA256SUMS").read_text().splitlines()
+    assert {line.split(maxsplit=1)[1] for line in checksum_lines} == {
+        *(f"lf-{target}.tar.gz" for target in publish_release.TARGETS),
+        "Loopflow.dmg",
+        "install.sh",
     }
     assert receipts == [receipt]
+    deploy = next(command for command in commands if "deploy_website.py" in command[1])
+    assert deploy[1] == str(publish_release.CONTROL_ROOT / "scripts/deploy_website.py")
+    assert deploy[-2:] == ["--repo", str(tmp_path)]

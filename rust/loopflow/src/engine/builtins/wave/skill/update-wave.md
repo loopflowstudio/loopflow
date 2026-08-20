@@ -116,7 +116,6 @@ When `scratch/` holds a proposal and no wave exists yet, create one:
 ```yaml
 ---
 pm:
-  provider: linear
   linear_initiative: "8c4ba3f9-cf23-4136-87ed-37847aa7dc82" # written by `lf pm init`
 ---
 ```

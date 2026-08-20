@@ -9,7 +9,7 @@ use crate::engine::worktrees::{main_repo_root, worktree_path};
 use crate::engine::command::run_command;
 use crate::ops::commit::{commit_workflow, CommitOptions};
 use crate::ops::error::{OpsError, OpsResult};
-use crate::ops::pr::{generate_pr_copy, PrInfo};
+use crate::ops::pr::{generate_pr_copy, read_cached_pr_copy, PrInfo};
 
 use crate::ops::progress::Progress;
 
@@ -48,8 +48,9 @@ enum Integration {
 /// Run every land skill: commit, rebase onto main, clear scratch, mark the PR
 /// ready, and finalize per `finalize`. `land` arms auto-merge; `submit` assigns
 /// the PR for a human to merge. Neither rotates the worktree — the wave home is
-/// permanent. Returns the resulting PR (`None` for a local merge) so callers can
-/// record it against the run.
+/// permanent. Returns the resulting PR, or `None` for a local merge or direct
+/// Task completion over an already-merged PR, so callers can record it against
+/// the run.
 fn prepare_pr(
     repo: &Path,
     options: &LandOptions,
@@ -70,6 +71,18 @@ fn prepare_pr(
     }
     let (repo_root, main_repo) = resolve_repos(repo, options.worktree.as_deref())?;
     crate::ops::pr::reject_control_plane_pr(&repo_root)?;
+    if options.complete && (!options.strict || is_clean(&repo_root)?) {
+        if let Some(issue) = crate::ops::task::find_discardable_final_task(&repo_root)? {
+            // The final flow approved work that already landed, and rotation left
+            // one unpublished branch at its recorded base. Consume that approval
+            // instead of manufacturing either an empty GitHub PR or a new outcome.
+            // Pre-final Tasks continue through the ordinary range refusal.
+            clear_scratch(&repo_root, progress)?;
+            crate::ops::task::task_complete_approved(&issue)?;
+            progress.status("Completed Task over its merged pull request.");
+            return Ok(None);
+        }
+    }
     if !options.local && !crate::ops::pr::gh_available() {
         return Err(OpsError::Message("gh CLI not found".to_string()));
     }
@@ -80,7 +93,46 @@ fn prepare_pr(
     crate::ops::task::verify_task_pr_range(&repo_root)?;
     {
         let _mutation = crate::ops::task::lock_task_pr_mutation(&repo_root)?;
-        crate::ops::task::clear_task_pr_merge_before_head_mutation(&repo_root, true)?;
+        if matches!(finalize, Finalize::AutoMerge) && matches!(integration, Integration::Required) {
+            let after_merge = if options.complete {
+                crate::task::AfterMerge::CompleteTask
+            } else {
+                crate::task::AfterMerge::ContinueTask
+            };
+            if let Some((number, head)) = crate::ops::task::matching_task_pr_merge_request(
+                &repo_root,
+                crate::task::PrMergeMode::Auto,
+                after_merge,
+                options.next_slug.as_deref(),
+            )? {
+                if let Some(pr) = crate::ops::pr::current_pr(&repo_root)? {
+                    if pr.number == u64::from(number)
+                        && pr.head_sha.as_deref() == Some(head.as_str())
+                        && crate::ops::pr::auto_merge_enabled(&repo_root, pr.number)?
+                    {
+                        progress.status("Pull request is already armed for this exact head");
+                        return Ok(Some(pr));
+                    }
+                }
+            }
+        }
+        let cleared_task_request =
+            crate::ops::task::clear_task_pr_merge_before_head_mutation(&repo_root, true)?;
+        if !options.local && !cleared_task_request {
+            // Wave and other non-Task PRs have no durable Task request to
+            // revoke, but GitHub may still have this branch in its merge queue.
+            // Dequeue it before rebase/push; otherwise GitHub rejects the head
+            // update and the repair cannot publish.
+            if let Some(pr) = crate::ops::pr::current_pr(&repo_root)? {
+                let number = u32::try_from(pr.number).map_err(|_| {
+                    OpsError::Message(format!(
+                        "pull request #{} exceeds supported range",
+                        pr.number
+                    ))
+                })?;
+                crate::ops::pr::disable_auto_merge(&repo_root, number)?;
+            }
+        }
     }
     match integration {
         Integration::Required => prepare_land(&repo_root, options, progress)?,
@@ -273,11 +325,11 @@ fn resolve_pr_copy(
         return Ok((pr_title, pr_body));
     }
 
-    if let Some((title, body)) = read_cached_pr_copy(repo_root, progress)? {
+    if let Some(copy) = read_cached_pr_copy(repo_root, progress)? {
         progress.status("Using cached PR copy from scratch/");
-        pr_title = Some(title);
+        pr_title = Some(copy.title);
         if pr_body.is_none() {
-            pr_body = Some(body);
+            pr_body = Some(copy.body);
         }
         return Ok((pr_title, pr_body));
     }
@@ -288,57 +340,6 @@ fn resolve_pr_copy(
         pr_body = Some(generated.body);
     }
     Ok((pr_title, pr_body))
-}
-
-fn read_cached_pr_copy(
-    repo_root: &Path,
-    progress: &impl Progress,
-) -> OpsResult<Option<(String, String)>> {
-    let title_path = repo_root.join("scratch/pr-title.txt");
-    let body_path = repo_root.join("scratch/pr-body.md");
-    let ref_path = repo_root.join("scratch/.pr-copy-ref");
-
-    if !title_path.exists() || !body_path.exists() {
-        return Ok(None);
-    }
-
-    let title = std::fs::read_to_string(&title_path)?.trim().to_string();
-    if title.is_empty() {
-        return Ok(None);
-    }
-
-    let copied_for = match std::fs::read_to_string(&ref_path) {
-        Ok(value) => value.trim().to_string(),
-        Err(_) => {
-            progress.status("Ignoring cached PR copy: scratch/.pr-copy-ref is missing");
-            return Ok(None);
-        }
-    };
-    if !is_recent_ancestor(repo_root, &copied_for, 1)? {
-        progress.status("Ignoring cached PR copy: branch changed since gate output");
-        return Ok(None);
-    }
-
-    let body = std::fs::read_to_string(body_path)?;
-    Ok(Some((title, body)))
-}
-
-/// Check if HEAD is no more than `max_ahead` commits ahead of `commit`.
-/// This tolerates one bookkeeping commit after gate output while still
-/// forcing regeneration if substantive commits were added later.
-fn is_recent_ancestor(repo_root: &Path, commit: &str, max_ahead: u32) -> OpsResult<bool> {
-    let output = Command::new("git")
-        .args(["rev-list", "--count", &format!("{commit}..HEAD")])
-        .current_dir(repo_root)
-        .output()?;
-    if !output.status.success() {
-        return Ok(false);
-    }
-    let ahead = String::from_utf8_lossy(&output.stdout)
-        .trim()
-        .parse::<u32>()
-        .unwrap_or(u32::MAX);
-    Ok(ahead <= max_ahead)
 }
 
 fn prepare_land(
@@ -488,7 +489,7 @@ fn finalize_remote(
                 )
             })?;
             progress.status("Enabling auto-merge...");
-            enable_auto_merge(repo_root, number, pr_title, pr_body, head_sha)?;
+            crate::ops::pr::enable_auto_merge(repo_root, number, pr_title, pr_body, head_sha)?;
         }
         Finalize::UserMerge => {
             progress.status("Assigning PR for you to merge...");
@@ -640,45 +641,6 @@ fn update_pr_message(repo: &Path, title: &str, body: &str) -> OpsResult<()> {
 pub fn mark_ready(repo: &Path) -> OpsResult<()> {
     let mut cmd = Command::new("gh");
     cmd.arg("pr").arg("ready").current_dir(repo);
-    if let Err(err) = run_command(&mut cmd) {
-        return Err(OpsError::CommandFailed {
-            command: err.command_line(),
-            stderr: err.stderr,
-        });
-    }
-    Ok(())
-}
-
-fn enable_auto_merge(
-    repo: &Path,
-    number: u64,
-    title: Option<&str>,
-    body: Option<&str>,
-    head_sha: &str,
-) -> OpsResult<()> {
-    if crate::ops::pr::auto_merge_enabled(repo, number)? {
-        let number = u32::try_from(number).map_err(|_| {
-            OpsError::Message(format!("pull request #{number} exceeds supported range"))
-        })?;
-        // A pre-existing remote arm carries no durable Loopflow head binding.
-        // Replace it so every accepted Auto request crosses our exact-head
-        // command boundary, even when GitHub already reports auto-merge.
-        crate::ops::pr::disable_auto_merge(repo, number)?;
-    }
-    let mut cmd = Command::new("gh");
-    cmd.arg("pr")
-        .arg("merge")
-        .arg("--squash")
-        .arg("--auto")
-        .arg("--match-head-commit")
-        .arg(head_sha);
-    if let Some(title) = title {
-        cmd.arg("--subject").arg(title);
-    }
-    if let Some(body) = body.filter(|b| !b.trim().is_empty()) {
-        cmd.arg("--body").arg(body);
-    }
-    cmd.current_dir(repo);
     if let Err(err) = run_command(&mut cmd) {
         return Err(OpsError::CommandFailed {
             command: err.command_line(),

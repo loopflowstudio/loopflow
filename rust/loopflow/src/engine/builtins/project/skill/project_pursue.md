@@ -66,7 +66,7 @@ its available status/next owner.
 - Use `lf task steer`, `interrupt`, `wait`, and `resume`. Do not create another
   worktree or session for review feedback or CI repair.
 - When the choice needs Wave judgment, run `lf ask "<exact question>"` and
-  continue the same Turn after the Answer returns.
+  continue the same Turn after the Ask settles.
 - Never start another Project or Wave from Project pursuit, and never collapse
   the remaining Project into one anonymous task.
 - Discovered debt becomes a task under an existing KR unless it

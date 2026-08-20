@@ -24,7 +24,7 @@ re-derive what these already record.
 `lf pr land` handles the entire mechanical workflow: staging uncommitted changes, rebasing, creating or updating the PR, and enabling auto-merge. In a Task worktree, bare land settles one PR and keeps the Task open.
 
 ```
-lf pr land [--create-pr] [--complete|-c] [--next <slug>] [-m "commit message"] [--title "..."] [--body "..."]
+lf pr land [--complete|-c] [--next <slug>] [-m "commit message"] [--title "..."] [--body "..."]
 ```
 
 **Do not run git commit, git push, gh pr create, or gh pr merge directly.** `lf pr land` does all of this. Running those commands manually means auto-merge never gets enabled.
@@ -64,7 +64,7 @@ Examples:
 ### 3. Land
 
 ```bash
-lf pr land --create-pr
+lf pr land
 ```
 
 Inside a Task, choose the disposition explicitly:
@@ -80,7 +80,7 @@ before merge; the last land or submit call wins.
 If you wrote title/body manually, include them:
 
 ```bash
-lf pr land --create-pr --title "<title>" --body "<body>"
+lf pr land --title "<title>" --body "<body>"
 ```
 
 Include `-m "<message>"` if the working tree was dirty in step 1.
@@ -91,6 +91,9 @@ If `lf pr land` fails due to rebase conflicts, launch a sub-agent to run the
 ## Notes
 
 - If the PR already has a good title and body, run `lf pr land` without `--title`/`--body` to keep existing content.
+- In a Task's `finally` phase, `-c` completes directly over already-merged work
+  when lifecycle rotation left a provably empty unpublished successor. It does
+  not create an empty PR; earlier phases keep the ordinary empty-range refusal.
 
 ## Adaptation
 

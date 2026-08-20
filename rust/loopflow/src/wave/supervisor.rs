@@ -60,7 +60,7 @@ pub const ATTACH_PROBE: Duration = Duration::from_secs(10);
 
 /// Spawn one resident process. Production spawns `lf __resident <name>` with the
 /// resident endpoint/token in its environment
-/// (the current executable); tests spawn whatever stands in for a resident.
+/// (the current Home's resolved `lf`); tests spawn whatever stands in for a resident.
 /// A closure, not a trait: the supervisor needs exactly one behavior.
 pub type SpawnResident = Box<dyn FnMut() -> std::io::Result<Child> + Send>;
 
@@ -615,7 +615,6 @@ mod tests {
         // And a late wire delta for that turn is dropped, not journaled.
         rt.apply_resident_delta(ResidentDelta::TurnFinished {
             status: Lifecycle::Completed,
-            cost_usd: None,
             reason: None,
         });
         assert_eq!(rt.thread_snapshot().len(), 1);
@@ -827,7 +826,6 @@ mod tests {
         });
         rt.apply_resident_delta(ResidentDelta::TurnFinished {
             status: Lifecycle::Completed,
-            cost_usd: None,
             reason: None,
         });
         // Resident 2's death then respawns on rung 0 (30ms), not rung 1.

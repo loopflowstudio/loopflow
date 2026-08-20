@@ -19,6 +19,7 @@ use crate::store::RunEventRow;
 
 const JOURNAL_ROOT: &str = ".lf/journal/runs";
 const JOURNAL_EXCLUDE_ENTRY: &str = ".lf/journal/";
+const EXEC_PROCESS_ROOT: &str = "runtime/exec-processes";
 pub const LF_TRACE_ID_ENV: &str = "LF_TRACE_ID";
 pub const LF_PROCESS_ID_ENV: &str = "LF_PROCESS_ID";
 
@@ -128,6 +129,16 @@ struct RunContext {
     /// True when this process minted the run id (vs inheriting LF_TRACE_ID);
     /// the export is removed again when the run ends.
     minted_run_id: bool,
+}
+
+/// Exact, process-local ownership evidence for a live Loopflow Exec.
+#[derive(Debug, Clone, Serialize, Deserialize, PartialEq, Eq)]
+pub(crate) struct ExecProcessReceipt {
+    pub schema_version: u32,
+    pub trace_id: String,
+    pub exec_id: String,
+    pub pid: u32,
+    pub started_at: i64,
 }
 
 #[derive(Debug, Clone, Copy, Serialize, Deserialize, PartialEq, Eq)]
@@ -268,6 +279,7 @@ fn try_emit(
             LfEventType::Completed | LfEventType::Errored | LfEventType::Escalated
         )
     {
+        remove_exec_process_receipt();
         if context.minted_run_id {
             std::env::remove_var(LF_TRACE_ID_ENV);
         }
@@ -445,7 +457,7 @@ fn ensure_run_context(
     }
 
     let main_repo = main_repo_root(repo_root).ok();
-    let attribution = crate::engine::wave_context::run_attribution();
+    let attribution = crate::engine::wave_context::run_attribution(main_repo.as_deref());
     let wave_name = attribution.wave;
     if let Some(failure) = attribution.failure.as_deref() {
         debug!(
@@ -526,6 +538,11 @@ fn ensure_run_context(
         minted_run_id,
     };
     set_context(context.clone());
+    if let Err(error) = write_exec_process_receipt(&context) {
+        debug!(error = %error, exec_id = %context.process_id, "live Exec receipt unavailable");
+    } else {
+        crate::engine::agent::register_interrupt_cleanup(remove_exec_process_receipt);
+    }
 
     if let Some(wave_name) = wave_name {
         if fields.wave_name.as_deref() != Some(wave_name.as_str()) {
@@ -674,6 +691,85 @@ fn clear_context() {
     RUN_CONTEXT.with(|cell| {
         *cell.borrow_mut() = None;
     });
+}
+
+pub(crate) fn read_exec_process_receipts_at(
+    lf_home: &Path,
+) -> Result<Vec<ExecProcessReceipt>, std::io::Error> {
+    let root = lf_home.join(EXEC_PROCESS_ROOT);
+    let entries = match fs::read_dir(root) {
+        Ok(entries) => entries,
+        Err(error) if error.kind() == std::io::ErrorKind::NotFound => return Ok(Vec::new()),
+        Err(error) => return Err(error),
+    };
+    let mut receipts = Vec::new();
+    for entry in entries {
+        let entry = entry?;
+        if !entry.file_type()?.is_file() {
+            continue;
+        }
+        let path = entry.path();
+        if path.extension().and_then(|value| value.to_str()) != Some("json")
+            || path
+                .file_stem()
+                .and_then(|value| value.to_str())
+                .and_then(|value| value.parse::<u32>().ok())
+                .is_none()
+        {
+            continue;
+        }
+        let Ok(content) = fs::read(path) else {
+            continue;
+        };
+        let Ok(receipt) = serde_json::from_slice::<ExecProcessReceipt>(&content) else {
+            continue;
+        };
+        if receipt.schema_version == 1 {
+            receipts.push(receipt);
+        }
+    }
+    Ok(receipts)
+}
+
+pub(crate) fn remove_exec_process_receipt_at(
+    lf_home: &Path,
+    pid: u32,
+) -> Result<bool, std::io::Error> {
+    let path = lf_home.join(EXEC_PROCESS_ROOT).join(format!("{pid}.json"));
+    match fs::remove_file(path) {
+        Ok(()) => Ok(true),
+        Err(error) if error.kind() == std::io::ErrorKind::NotFound => Ok(false),
+        Err(error) => Err(error),
+    }
+}
+
+fn write_exec_process_receipt(context: &RunContext) -> Result<(), std::io::Error> {
+    let root = crate::store::lf_home_dir().join(EXEC_PROCESS_ROOT);
+    fs::create_dir_all(&root)?;
+    let pid = std::process::id();
+    let receipt = ExecProcessReceipt {
+        schema_version: 1,
+        trace_id: context.run_id.to_string(),
+        exec_id: context.process_id.to_string(),
+        pid,
+        started_at: OffsetDateTime::now_utc().unix_timestamp(),
+    };
+    let bytes = serde_json::to_vec(&receipt).map_err(std::io::Error::other)?;
+    let path = root.join(format!("{pid}.json"));
+    let temporary = root.join(format!(".{pid}.json.tmp"));
+    fs::write(&temporary, bytes)?;
+    fs::rename(temporary, path)
+}
+
+fn remove_exec_process_receipt() {
+    let path = crate::store::lf_home_dir()
+        .join(EXEC_PROCESS_ROOT)
+        .join(format!("{}.json", std::process::id()));
+    if let Err(error) = fs::remove_file(path) {
+        if error.kind() != std::io::ErrorKind::NotFound {
+            debug!(error = %error, "failed to remove live Exec receipt");
+        }
+    }
 }
 
 fn ensure_journal_ignored(repo_root: &Path) -> Result<(), std::io::Error> {
@@ -1045,7 +1141,7 @@ mod tests {
         std::env::set_var(crate::engine::wave_context::WAVE_ID_ENV, stale_id.as_str());
 
         // `with_runtime` resolves once and records wave + failure; mirror that.
-        let attribution = crate::engine::wave_context::run_attribution();
+        let attribution = crate::engine::wave_context::run_attribution(Some(&worktree));
         assert_eq!(
             attribution.wave, None,
             "stale identity attributes to no wave"
@@ -1367,6 +1463,39 @@ mod tests {
         );
 
         assert!(is_clean(&worktree).expect("worktree should stay clean"));
+    }
+
+    #[test]
+    fn run_lifecycle_publishes_and_removes_exact_process_ownership() {
+        let guard = journal_test_guard();
+        let repo = TestRepo::new();
+        let worktree = repo.create_named_worktree("runtime");
+        let command = vec!["lf".to_string(), "build".to_string()];
+
+        emit(
+            &worktree,
+            LfNode::Run,
+            LfEventType::Started,
+            started_fields(&command, &worktree, "runtime"),
+        );
+        let receipts =
+            super::read_exec_process_receipts_at(guard.home()).expect("read live receipt");
+        assert_eq!(receipts.len(), 1);
+        assert_eq!(receipts[0].pid, std::process::id());
+        assert_eq!(
+            receipts[0].exec_id,
+            std::env::var(super::LF_PROCESS_ID_ENV).expect("current Exec id")
+        );
+
+        emit(
+            &worktree,
+            LfNode::Run,
+            LfEventType::Completed,
+            LfEventFields::default(),
+        );
+        assert!(super::read_exec_process_receipts_at(guard.home())
+            .expect("read terminal receipt state")
+            .is_empty());
     }
 
     #[test]

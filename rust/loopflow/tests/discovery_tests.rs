@@ -95,15 +95,28 @@ fn discover_builtin_skills() {
 }
 
 #[test]
+fn builtin_catalog_uses_slashes_for_ownership_and_never_underscores() {
+    let skill_names = builtin_skill_names();
+    assert!(skill_names.contains(&"wave/clarify"));
+    assert!(skill_names.contains(&"project/pursue"));
+    assert!(skill_names.contains(&"task/mutate"));
+    assert!(skill_names.iter().all(|name| !name.contains('_')));
+    assert!(builtin_flow_names().iter().all(|name| !name.contains('_')));
+}
+
+#[test]
 fn discover_repo_skills() {
     let _home = HomeGuard::new();
     let repo = TempDir::new().expect("repo");
     let skills_dir = repo.path().join(".lf/skills");
     std::fs::create_dir_all(&skills_dir).expect("create skills dir");
     std::fs::write(skills_dir.join("custom.md"), "# custom").expect("write skill");
+    std::fs::create_dir_all(skills_dir.join("team")).expect("create skill namespace");
+    std::fs::write(skills_dir.join("team/review.md"), "# review").expect("write namespaced skill");
 
     let (user_skills, _global, _builtin_only, _skills) = list_all_skills(Some(repo.path()));
     assert!(user_skills.contains(&"custom".to_string()));
+    assert!(user_skills.contains(&"team/review".to_string()));
 }
 
 #[test]
@@ -112,23 +125,34 @@ fn discover_repo_flows() {
     let repo = TempDir::new().expect("repo");
     let flows_dir = repo.path().join(".lf/flows");
     std::fs::create_dir_all(&flows_dir).expect("create flows dir");
-    std::fs::write(
-        flows_dir.join("ship.yaml"),
-        "skills:\n  - implement\n  - gate\n",
-    )
-    .expect("write flow");
+    std::fs::write(flows_dir.join("ship.yaml"), "- implement\n- gate\n").expect("write flow");
 
     let flows = list_user_flows(repo.path());
     let flow = flows.iter().find(|f| f.name == "ship").expect("flow");
-    assert_eq!(flow.skill_names, vec!["implement", "gate"]);
+    assert_eq!(flow.written, "implement → gate");
+    assert_eq!(flow.collapsed, "implement → gate");
 }
 
 #[test]
-fn discover_namespaced_flows_with_hyphenated_names_and_branch_summaries() {
+fn discover_namespaced_flows_with_slash_names_and_expanded_branch_summaries() {
     let _home = HomeGuard::new();
     let repo = TempDir::new().expect("repo");
     let flows_dir = repo.path().join(".lf/flows/gstack");
+    let skills_dir = repo.path().join(".lf/skills/gstack");
     std::fs::create_dir_all(&flows_dir).expect("create namespaced flows dir");
+    std::fs::create_dir_all(&skills_dir).expect("create namespaced skills dir");
+    for skill in ["office-hours", "autoplan", "pr-review"] {
+        std::fs::write(
+            skills_dir.join(format!("{skill}.md")),
+            format!("Run {skill}."),
+        )
+        .expect("write namespaced skill");
+    }
+    std::fs::write(
+        flows_dir.join("plan-manual.yaml"),
+        "- gstack/office-hours\n",
+    )
+    .expect("write nested flow");
     std::fs::write(
         flows_dir.join("sprint.yaml"),
         r#"
@@ -151,18 +175,15 @@ fn discover_namespaced_flows_with_hyphenated_names_and_branch_summaries() {
     let flows = list_user_flows(repo.path());
     let flow = flows
         .iter()
-        .find(|f| f.name == "gstack-sprint")
+        .find(|f| f.name == "gstack/sprint")
         .expect("flow");
     assert_eq!(
-        flow.skill_names,
-        vec![
-            "gstack/office-hours",
-            "[xor]",
-            "gstack/autoplan",
-            "gstack/plan-manual",
-            "implement",
-            "gstack/pr-review",
-        ]
+        flow.written,
+        "gstack/office-hours → xor[gstack/office-hours]{autoplan: gstack/autoplan | manual: gstack/plan-manual} → implement → gstack/pr-review"
+    );
+    assert_eq!(
+        flow.collapsed,
+        "gstack/office-hours → xor[gstack/office-hours]{autoplan: gstack/autoplan | manual: gstack/office-hours} → implement → gstack/pr-review"
     );
 }
 

@@ -55,11 +55,11 @@ if [ "$1 $2" = "pr list" ]; then
   echo '[{{"url":"https://example.com/pr/925","state":"OPEN","isDraft":false,"number":925,"mergeCommit":null,"headRefOid":"head-925"}}]'
   exit 0
 fi
+if [ "$1 $2" = "api graphql" ]; then
+  if [ -f "$auto_state" ]; then echo 'true'; else echo 'false'; fi
+  exit 0
+fi
 if [ "$1 $2" = "pr view" ]; then
-  if [ "$4" = "--json" ] && [ "$5" = "autoMergeRequest" ]; then
-    if [ -f "$auto_state" ]; then echo 'true'; else echo 'false'; fi
-    exit 0
-  fi
   echo 'https://example.com/pr/925'
   exit 0
 fi
@@ -79,11 +79,11 @@ if [ "$1" = "--version" ]; then
   exit 0
 fi
 echo "$@" >> "{log_path}"
-if [ "$1 $2" = "pr view" ]; then
+if [ "$1 $2" = "api graphql" ]; then
   echo 'true'
   exit 0
 fi
-if [ "$1 $2 $3 $4" = "pr merge 912 --disable" ]; then
+if [ "$1 $2 $3 $4" = "pr merge 912 --disable-auto" ]; then
   exit 0
 fi
 exit 0
@@ -413,7 +413,9 @@ fn rebase_revokes_auto_before_force_pushing_a_new_task_head() {
         .expect("active PR");
     assert!(persisted.merge_request().is_none());
     let log = fs::read_to_string(log_path).expect("read operation log");
-    let disable = log.find("pr merge 912 --disable").expect("Auto is revoked");
+    let disable = log
+        .find("pr merge 912 --disable-auto")
+        .expect("Auto is revoked");
     let push = log.find("git-push").expect("rebased head is pushed");
     assert!(
         disable < push,

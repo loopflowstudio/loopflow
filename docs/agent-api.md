@@ -25,7 +25,7 @@ kind as the Mac app. It may inspect status and use `lf chat` when the person
 asks it to converse with or steer a Wave.
 
 A Loopflow-launched Wave, Project, or Task agent is an internal participant.
-It receives `LOOPFLOW.md`; typed Work observations and Ask/Answer carry
+It receives `LOOPFLOW.md`; typed Work observations and Ask carry
 coordination across the parent relationship.
 
 A Wave directing a task is the internal case:
@@ -85,8 +85,8 @@ same stable Work control surface:
 ```bash
 lf work status task task_... --json
 lf work steer task task_... "show the failing fixture" --json
-lf work asks project proj_... --json                  # pending child questions
-lf work answer ask_... "use the smaller change"    # answer one exact Ask
+lf ask list --json                                    # pending parent requests
+lf ask open ask_...                                    # open one exact Ask session
 ```
 
 A Steer receipt reports immutable delivery attempts, not incorporation. A
@@ -95,8 +95,15 @@ later successful boundary's Basis is the proof that the direction was applied.
 
 Work survives its provider process. `lf task resume INF-123 --model codex`
 selects another provider without losing durable direction, the worktree, or
-the PR chain; `lf task recover` restarts abandoned Task pursuit on the same
-worktree.
+the PR chain. `lf task run` never reopens terminal Work: a person can use
+`lf task recover` to restart an abandoned Task on the same worktree, while a
+completed Task requires a new Linear task.
+
+Automated Task commit, PR, and completion commands also re-check current PM
+ownership. If Linear moved the issue to another Project, the historical Task
+Run fails closed before a commit, push, publication, merge request, rotation,
+or completion; a person retains explicit authority to inspect and remediate the
+preserved Work.
 
 `lf project` carries the same control verbs one level up: `steer`, `interrupt`,
 `wait`, `resume`, and `attach`.
@@ -129,13 +136,17 @@ Every read the conducting surfaces offer is `--json`:
 lf ls --json                # every durable Wave and its Home/runtime evidence
 lf status <wave> --json     # live Project → Task hierarchy
 lf roadmap --json           # every open Task across every wave
+lf activity --task INF-123 --json
+lf runs --project parser --json
 lf runs --task INF-123 --json
 lf trace <exec-id> --json
 ```
 
 `lf ls` is the registry plane, `lf status` is the focused operational view,
-and `lf roadmap` joins the current Linear plan to that runtime truth. Agents
-consume those projections; they do not rebuild the joins.
+and `lf roadmap` joins the current Linear plan to that runtime truth.
+`lf activity` is the ordered durable history; each item reuses `WorkRef` and
+carries one typed fact with its Run, Task PR, or Steer evidence. Agents consume
+those projections; they do not rebuild the joins.
 
 Wave lifecycle uses the same durable `WorkStatus` as Project and Task work:
 `ready`, `running`, `waiting`, `done`, or `abandoned`. `live` stays separate —
@@ -153,7 +164,7 @@ Every launched agent gets `LOOPFLOW.md` — the operating contract — in contex
 - Execute here first; delegation must make the problem smaller.
 - Checkpoint and proceed: don't ask permission for reversible work.
 - Answer humans in turn text; use typed Work observations and explicit
-  Ask/Answer exchanges for parent/child coordination.
+  Ask exchanges for parent/child coordination.
 - Write repo-specific learnings into `.lf/` and commit them with the work.
 
 Source: `rust/loopflow/src/engine/builtins/LOOPFLOW.md`.

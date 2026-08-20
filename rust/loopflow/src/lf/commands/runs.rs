@@ -12,39 +12,27 @@ use std::path::Path;
 use anyhow::{anyhow, Result};
 
 use crate::journal::open_ledger;
+use crate::lf::commands::WorkFilter;
 use crate::lf::output::{format_cost, truncate, Colors};
 use crate::store::sqlite::SqliteStore;
-use crate::store::{RunEventRow, TurnSpendRow};
+use crate::store::{AttributedTurnUsage, RunEventRow};
 use crate::wave::journal::short_id;
 
 const WINDOW_DAYS: i64 = 7;
 const MAX_RUNS: usize = 50;
 
-/// A drill filter over the run ledger. Both constituents scope the same invocation
-/// set: `wave` narrows to one Wave, `task` to one roadmap Task by its Linear
-/// issue identifier — the key that joins a roadmap row to its runs.
-#[derive(Debug, Clone, Copy, Default)]
-pub(crate) struct RunFilter<'a> {
-    pub wave: Option<&'a str>,
-    pub task: Option<&'a str>,
-}
-
-impl RunFilter<'_> {
-    fn matches(&self, invocation: &crate::trace::AgentInvocationRow) -> bool {
-        self.wave
-            .is_none_or(|wave| invocation.wave.as_deref() == Some(wave))
-            && self
-                .task
-                .is_none_or(|task| invocation.task.as_deref() == Some(task))
-    }
-}
-
 /// The skill runs matching a filter, newest first, capped. One reader behind
-/// `lf runs`, its `--wave`/`--task` drills, and `lf status`'s Runs evidence, so
-/// the surfaces can never disagree on what a run is.
-pub(crate) fn collect_runs(filter: RunFilter) -> Result<(Vec<SkillRunEntry>, bool)> {
-    let store = open_ledger().map_err(|err| anyhow!("run ledger unavailable: {err}"))?;
+/// `lf runs`, its Work drills, and `lf status`'s Runs evidence, so the surfaces
+/// can never disagree on what a run is.
+pub(crate) fn collect_runs(filter: WorkFilter) -> Result<(Vec<SkillRunEntry>, bool)> {
     let since = chrono::Utc::now().timestamp() - WINDOW_DAYS * 24 * 3600;
+    let mut runs = collect_runs_started_since(filter, since)?;
+    let truncated = cap_runs(&mut runs);
+    Ok((runs, truncated))
+}
+
+fn collect_runs_started_since(filter: WorkFilter, since: i64) -> Result<Vec<SkillRunEntry>> {
+    let store = open_ledger().map_err(|err| anyhow!("run ledger unavailable: {err}"))?;
     let events = store
         .list_run_events_since(since)
         .map_err(|err| anyhow!("failed to read run ledger: {err}"))?;
@@ -53,8 +41,49 @@ pub(crate) fn collect_runs(filter: RunFilter) -> Result<(Vec<SkillRunEntry>, boo
         .map_err(|err| anyhow!("failed to read skill invocations: {err}"))?
         .into_iter()
         .filter(|invocation| invocation.skill.is_some())
-        .filter(|invocation| filter.matches(invocation))
+        .filter(|invocation| {
+            filter.matches(
+                invocation.wave.as_deref(),
+                invocation.project.as_deref(),
+                invocation.task.as_deref(),
+            )
+        })
         .collect::<Vec<_>>();
+    summarize_filtered_runs(&store, events, invocations)
+}
+
+/// The filtered Run definition without a presentation cap. Compound activity
+/// surfaces include both starts and finishes inside their requested window,
+/// then cap only after joining Runs to their other durable facts.
+pub(crate) fn collect_run_activity_since(
+    store: &SqliteStore,
+    filter: WorkFilter,
+    since: i64,
+) -> Result<Vec<SkillRunEntry>> {
+    let events = store
+        .list_run_events_since(since)
+        .map_err(|err| anyhow!("failed to read run ledger: {err}"))?;
+    let invocations = store
+        .agent_invocations_with_activity_since(since)
+        .map_err(|err| anyhow!("failed to read skill invocations: {err}"))?
+        .into_iter()
+        .filter(|invocation| invocation.skill.is_some())
+        .filter(|invocation| {
+            filter.matches(
+                invocation.wave.as_deref(),
+                invocation.project.as_deref(),
+                invocation.task.as_deref(),
+            )
+        })
+        .collect::<Vec<_>>();
+    summarize_filtered_runs(store, events, invocations)
+}
+
+fn summarize_filtered_runs(
+    store: &SqliteStore,
+    events: Vec<RunEventRow>,
+    invocations: Vec<crate::trace::AgentInvocationRow>,
+) -> Result<Vec<SkillRunEntry>> {
     let invocation_ids = invocations
         .iter()
         .map(|invocation| invocation.id.clone())
@@ -65,14 +94,22 @@ pub(crate) fn collect_runs(filter: RunFilter) -> Result<(Vec<SkillRunEntry>, boo
 
     let mut runs = summarize_runs(&events, &invocations, &turns);
     sort_runs(&mut runs);
-    let truncated = cap_runs(&mut runs);
-    Ok((runs, truncated))
+    Ok(runs)
 }
 
-/// `lf runs [--wave <name>] [--task <id>]`: recent agent-backed skill invocations,
-/// optionally drilled to one Wave or one roadmap Task.
-pub fn list(json: bool, wave: Option<&str>, task: Option<&str>) -> Result<()> {
-    let (runs, _truncated) = collect_runs(RunFilter { wave, task })?;
+/// `lf runs [--wave <name>] [--project <slug>] [--task <id>]`: recent
+/// agent-backed skill invocations, optionally drilled to one Work owner.
+pub fn list(
+    json: bool,
+    wave: Option<&str>,
+    project: Option<&str>,
+    task: Option<&str>,
+) -> Result<()> {
+    let (runs, _truncated) = collect_runs(WorkFilter {
+        wave,
+        project,
+        task,
+    })?;
 
     if json {
         println!("{}", serde_json::to_string(&runs)?);
@@ -80,14 +117,21 @@ pub fn list(json: bool, wave: Option<&str>, task: Option<&str>) -> Result<()> {
     }
 
     if runs.is_empty() {
-        match (wave, task) {
-            (_, Some(task)) => {
+        match (wave, project, task) {
+            (_, _, Some(task)) => {
                 println!("No skill runs recorded for {task} in the last {WINDOW_DAYS} days.")
             }
-            (Some(wave), None) => {
+            (_, Some(project), None) => {
+                println!(
+                    "No skill runs recorded for project/{project} in the last {WINDOW_DAYS} days."
+                )
+            }
+            (Some(wave), None, None) => {
                 println!("No skill runs recorded for wave/{wave} in the last {WINDOW_DAYS} days.")
             }
-            (None, None) => println!("No skill runs recorded in the last {WINDOW_DAYS} days."),
+            (None, None, None) => {
+                println!("No skill runs recorded in the last {WINDOW_DAYS} days.")
+            }
         }
         return Ok(());
     }
@@ -188,8 +232,9 @@ pub(super) const RECONCILE_AGE_GUARD_HOURS: i64 = 48;
 /// survives. Tombstones terminal captures whose conversation artifacts are
 /// gone, interrupts dead `capturing` invocations with intact evidence, acknowledges
 /// aged write loss, and removes artifact directories no invocation row claims.
-/// Dry-run by default; `--apply` writes. A red `lf doctor` capture check means
-/// unacknowledged loss — this is the explicit acknowledgment.
+/// Dry-run by default; `--apply` writes. This is lifecycle repair, not the
+/// recovery gate: `lf doctor` derives current capture health without mutating
+/// historical evidence.
 pub fn reconcile(apply: bool, all: bool, json: bool) -> Result<()> {
     let store = open_ledger().map_err(|err| anyhow!("run ledger unavailable: {err}"))?;
     let invocations = store
@@ -559,7 +604,7 @@ pub fn trace(
     };
 
     let invocations = store.agent_invocations_matching(&trace_id)?;
-    let spans = trace_spans(&events, &store.turn_spend_since(0)?);
+    let spans = trace_spans(&events, &store.attributed_turn_usage_since(0)?);
     if events_mode {
         return trace_events(&invocations, invocation_prefix, jsonl);
     }
@@ -569,7 +614,7 @@ pub fn trace(
         .collect::<Vec<_>>();
     let turns = store.agent_turns_for_invocations(&invocation_ids)?;
     let turn_ids = turns.iter().map(|turn| turn.id.clone()).collect::<Vec<_>>();
-    let asks = store.ask_exchanges_for_turns(&turn_ids)?;
+    let asks = store.asks_for_turns(&turn_ids)?;
     if content {
         let dto = trace_content(&invocations, &turns, invocation_prefix, turn_prefix)?;
         println!("{}", serde_json::to_string(&dto)?);
@@ -670,7 +715,9 @@ pub fn trace(
                 "    turn {}  {} tokens  provider input {}  {}",
                 turn.ordinal,
                 turn.supplied_context_tokens,
-                turn.provider_input_tokens
+                turn.usage
+                    .as_ref()
+                    .and_then(|usage| usage.input_tokens)
                     .map(|value| value.to_string())
                     .unwrap_or_else(|| "-".to_string()),
                 turn.status,
@@ -685,14 +732,19 @@ pub fn trace(
                 "      task    {}",
                 crate::trace::resolve_artifact(&turn.task_prompt_path)?.display()
             );
-            for ask in asks.iter().filter(|ask| ask.turn_id.as_str() == turn.id) {
+            for ask in asks.iter().filter(|ask| {
+                ask.origin
+                    .turn_id
+                    .as_ref()
+                    .is_some_and(|turn_id| turn_id.as_str() == turn.id)
+            }) {
                 println!(
                     "      ask     {}  {}",
                     short_id(ask.id.as_str()),
-                    ask.question
+                    ask.request
                 );
-                if let Some(answer) = &ask.answer {
-                    println!("      answer  {}", answer.text);
+                if let Some(result) = &ask.result {
+                    println!("      result  {}", result.text());
                 }
             }
         }
@@ -879,7 +931,7 @@ pub struct TraceDto {
     pub spans: Vec<SpanDto>,
     pub invocations: Vec<crate::trace::AgentInvocationRow>,
     pub turns: Vec<crate::trace::AgentTurnRow>,
-    pub asks: Vec<crate::durable::AskExchange>,
+    pub asks: Vec<crate::durable::Ask>,
     pub assets: Vec<crate::trace::ContextAssetRow>,
     pub decisions: Vec<crate::trace::ContextDecisionRow>,
 }
@@ -965,14 +1017,6 @@ fn print_recorded_event(event: &crate::trace::RecordedConversationEvent) {
         RecordedConversationPayload::LegacyTool { name, summary } => {
             println!("tool {name}  {summary}");
         }
-        RecordedConversationPayload::Usage { usage } => {
-            println!(
-                "usage  input {} output {} cache {}",
-                usage.input_tokens,
-                usage.output_tokens,
-                usage.cache_read_tokens.unwrap_or(0)
-            );
-        }
         RecordedConversationPayload::Result { status, .. } => println!("result  {status}"),
         RecordedConversationPayload::CaptureError { message } => {
             println!("capture error  {message}");
@@ -1057,11 +1101,21 @@ pub struct ExecLedgerEntry {
 }
 
 /// The skill runs one Wave produced, newest first.
-pub(crate) fn wave_runs(wave: &str) -> Result<(Vec<SkillRunEntry>, bool)> {
-    collect_runs(RunFilter {
-        wave: Some(wave),
-        task: None,
-    })
+pub(crate) fn wave_runs(wave_id: &crate::id::WaveId) -> Result<(Vec<SkillRunEntry>, bool)> {
+    let since = chrono::Utc::now().timestamp() - WINDOW_DAYS * 24 * 3600;
+    let store = open_ledger().map_err(|err| anyhow!("run ledger unavailable: {err}"))?;
+    let events = store
+        .list_run_events_since(since)
+        .map_err(|err| anyhow!("failed to read run ledger: {err}"))?;
+    let invocations = store
+        .agent_invocations_for_wave_since(wave_id, since)
+        .map_err(|err| anyhow!("failed to read skill invocations: {err}"))?
+        .into_iter()
+        .filter(|invocation| invocation.skill.is_some())
+        .collect::<Vec<_>>();
+    let mut runs = summarize_filtered_runs(&store, events, invocations)?;
+    let truncated = cap_runs(&mut runs);
+    Ok((runs, truncated))
 }
 
 fn sort_runs(runs: &mut [SkillRunEntry]) {
@@ -1143,18 +1197,36 @@ fn summarize_runs(
                     .iter()
                     .map(|turn| turn.supplied_context_tokens)
                     .sum(),
-                input_tokens: sum_optional_i64(turns.iter().map(|turn| turn.provider_input_tokens)),
+                input_tokens: sum_optional_i64(
+                    turns
+                        .iter()
+                        .map(|turn| turn.usage.as_ref().and_then(|usage| usage.input_tokens)),
+                ),
                 output_tokens: sum_optional_i64(
-                    turns.iter().map(|turn| turn.provider_output_tokens),
+                    turns
+                        .iter()
+                        .map(|turn| turn.usage.as_ref().and_then(|usage| usage.output_tokens)),
                 ),
-                reasoning_tokens: sum_optional_i64(turns.iter().map(|turn| turn.reasoning_tokens)),
-                cache_read_tokens: sum_optional_i64(
-                    turns.iter().map(|turn| turn.cache_read_tokens),
+                reasoning_tokens: sum_optional_i64(
+                    turns
+                        .iter()
+                        .map(|turn| turn.usage.as_ref().and_then(|usage| usage.reasoning_tokens)),
                 ),
-                cache_write_tokens: sum_optional_i64(
-                    turns.iter().map(|turn| turn.cache_write_tokens),
+                cache_read_tokens: sum_optional_i64(turns.iter().map(|turn| {
+                    turn.usage
+                        .as_ref()
+                        .and_then(|usage| usage.cache_read_tokens)
+                })),
+                cache_write_tokens: sum_optional_i64(turns.iter().map(|turn| {
+                    turn.usage
+                        .as_ref()
+                        .and_then(|usage| usage.cache_write_tokens)
+                })),
+                cost_usd: sum_optional_f64(
+                    turns
+                        .iter()
+                        .map(|turn| turn.usage.as_ref().and_then(|usage| usage.cost_usd)),
                 ),
-                cost_usd: sum_optional_f64(turns.iter().map(|turn| turn.cost_usd)),
                 duration_secs: invocation
                     .ended_at
                     .map(|ended| ended.saturating_sub(invocation.started_at).max(0) as f64),
@@ -1167,11 +1239,12 @@ fn summarize_runs(
         .collect()
 }
 
-fn sum_optional_i64(values: impl Iterator<Item = Option<i64>>) -> Option<i64> {
-    values.fold(None, |total, value| match (total, value) {
+fn sum_optional_i64(values: impl Iterator<Item = Option<u64>>) -> Option<i64> {
+    let total = values.fold(None, |total, value| match (total, value) {
         (None, None) => None,
         (total, value) => Some(total.unwrap_or(0) + value.unwrap_or(0)),
-    })
+    });
+    total.map(|value| i64::try_from(value).expect("stored token total fits SQLite INTEGER"))
 }
 
 fn sum_optional_f64(values: impl Iterator<Item = Option<f64>>) -> Option<f64> {
@@ -1245,19 +1318,19 @@ pub struct SpanDto {
     pub model: Option<String>,
 }
 
-/// One process in a run trace, with the spend of every Turn its agents ran.
+/// One process in a run trace, with the usage of every Turn its agents ran.
 ///
 /// The exec ledger knows the process tree; `agent_turns` knows what the
 /// provider measured. Joining them on `process_id` is the only way to say what
 /// a process cost.
-fn trace_spans(events: &[RunEventRow], spend: &[TurnSpendRow]) -> Vec<SpanDto> {
+fn trace_spans(events: &[RunEventRow], usage: &[AttributedTurnUsage]) -> Vec<SpanDto> {
     let mut by_process: BTreeMap<&str, Vec<&RunEventRow>> = BTreeMap::new();
     for event in events {
         by_process.entry(&event.process_id).or_default().push(event);
     }
-    let mut spend_by_process: BTreeMap<&str, Vec<&TurnSpendRow>> = BTreeMap::new();
-    for turn in spend {
-        spend_by_process
+    let mut usage_by_process: BTreeMap<&str, Vec<&AttributedTurnUsage>> = BTreeMap::new();
+    for turn in usage {
+        usage_by_process
             .entry(&turn.exec_id)
             .or_default()
             .push(turn);
@@ -1276,13 +1349,13 @@ fn trace_spans(events: &[RunEventRow], spend: &[TurnSpendRow]) -> Vec<SpanDto> {
                 .rev()
                 .find(|event| event.node == "run" && event.event != "started")
                 .copied();
-            let turns = spend_by_process.get(process_id);
+            let turns = usage_by_process.get(process_id);
             let turns = || turns.into_iter().flatten();
             let providers = turns()
                 .map(|turn| turn.provider.as_str())
                 .collect::<BTreeSet<_>>();
             let models = turns()
-                .map(|turn| turn.model.as_deref())
+                .map(|turn| turn.usage.model.as_deref())
                 .collect::<BTreeSet<_>>();
             SpanDto {
                 run_id: started.run_id.clone(),
@@ -1304,10 +1377,12 @@ fn trace_spans(events: &[RunEventRow], spend: &[TurnSpendRow]) -> Vec<SpanDto> {
                 status: terminal
                     .map(|event| event.event.clone())
                     .unwrap_or_else(|| "open".to_string()),
-                input_tokens: sum_optional_i64(turns().map(|turn| turn.input_tokens)),
-                output_tokens: sum_optional_i64(turns().map(|turn| turn.output_tokens)),
-                cache_read_tokens: sum_optional_i64(turns().map(|turn| turn.cache_read_tokens)),
-                cost_usd: sum_optional_f64(turns().map(|turn| turn.cost_usd)),
+                input_tokens: sum_optional_i64(turns().map(|turn| turn.usage.input_tokens)),
+                output_tokens: sum_optional_i64(turns().map(|turn| turn.usage.output_tokens)),
+                cache_read_tokens: sum_optional_i64(
+                    turns().map(|turn| turn.usage.cache_read_tokens),
+                ),
+                cost_usd: sum_optional_f64(turns().map(|turn| turn.usage.cost_usd)),
                 provider: (providers.len() == 1)
                     .then(|| providers.first().map(|provider| (*provider).to_string()))
                     .flatten(),
@@ -1452,7 +1527,8 @@ mod tests {
         format_duration, format_tokens, plan_orphans, plan_reconcile, summarize_execs,
         trace_id_for_address, trace_spans, ArtifactState,
     };
-    use crate::store::{RunEventRow, TurnSpendRow};
+    use crate::chat::types::TurnUsage;
+    use crate::store::{AttributedTurnUsage, RunEventRow};
     use crate::trace::AgentInvocationRow;
 
     const NOW: i64 = 1_800_000_000;
@@ -1757,23 +1833,25 @@ mod tests {
         }
     }
 
-    fn turn(process: &str, at: i64, input: i64, cost: f64) -> TurnSpendRow {
-        TurnSpendRow {
+    fn turn(process: &str, at: i64, input: i64, cost: f64) -> AttributedTurnUsage {
+        AttributedTurnUsage {
             turn_id: format!("turn-{process}-{at}"),
             invocation_id: format!("invocation-{process}"),
-            trace_id: process.to_string(),
             exec_id: process.to_string(),
             repo: "/src/loopflow".to_string(),
             wave: None,
             flow: None,
             skill: None,
             provider: "claude".to_string(),
-            model: Some("opus".to_string()),
             at,
-            input_tokens: Some(input),
-            output_tokens: Some(0),
-            cache_read_tokens: None,
-            cost_usd: Some(cost),
+            usage: TurnUsage {
+                input_tokens: Some(input as u64),
+                total_input_tokens: Some(input as u64),
+                output_tokens: Some(0),
+                model: Some("opus".to_string()),
+                cost_usd: Some(cost),
+                ..Default::default()
+            },
         }
     }
 
@@ -1860,9 +1938,9 @@ mod tests {
             row("trace", 1, 100, "run", "started"),
             row("trace", 4, 130, "run", "completed"),
         ];
-        let spend = vec![turn("trace", 110, 100, 1.0), turn("trace", 120, 50, 0.25)];
+        let usage = vec![turn("trace", 110, 100, 1.0), turn("trace", 120, 50, 0.25)];
 
-        let spans = trace_spans(&events, &spend);
+        let spans = trace_spans(&events, &usage);
 
         assert_eq!(spans.len(), 1);
         assert_eq!(spans[0].input_tokens, Some(150));
@@ -1881,17 +1959,17 @@ mod tests {
         assert_eq!(spans[0].provider, None);
     }
 
-    /// Turns are joined to their own process: one process's spend can never be
+    /// Turns are joined to their own process: one process's usage can never be
     /// attributed to another in the same trace.
     #[test]
-    fn turn_spend_lands_only_on_the_process_that_ran_it() {
+    fn turn_usage_lands_only_on_the_process_that_ran_it() {
         let events = vec![
             row("parent", 0, 100, "run", "completed"),
             row("child", 0, 105, "run", "completed"),
         ];
-        let spend = vec![turn("child", 110, 70, 0.5)];
+        let usage = vec![turn("child", 110, 70, 0.5)];
 
-        let spans = trace_spans(&events, &spend);
+        let spans = trace_spans(&events, &usage);
         let parent = spans.iter().find(|s| s.process_id == "parent").unwrap();
         let child = spans.iter().find(|s| s.process_id == "child").unwrap();
 
@@ -1906,7 +1984,7 @@ mod tests {
         codex.turn_id = "turn-codex".to_string();
         codex.invocation_id = "invocation-codex".to_string();
         codex.provider = "codex".to_string();
-        codex.model = None;
+        codex.usage.model = None;
 
         let spans = trace_spans(&events, &[turn("process", 110, 70, 0.5), codex]);
 

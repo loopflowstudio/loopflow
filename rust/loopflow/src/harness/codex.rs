@@ -190,46 +190,61 @@ impl NotificationState {
         }
     }
 
-    /// Convert the latest cumulative snapshot into this turn's own usage and
-    /// advance the attributed baseline. Input is reported net of cache reads —
-    /// the same shape Claude reports — with the gross figure in
-    /// `total_input_tokens`.
-    fn take_turn_usage(&mut self) -> TurnUsage {
-        let Some(snapshot) = self.pending_usage.take() else {
-            return TurnUsage::default();
-        };
+    /// Convert the latest thread-lifetime snapshot into this Turn's cumulative
+    /// usage without advancing the completed-Turn baseline.
+    fn current_turn_usage(&self) -> Option<TurnUsage> {
+        let snapshot = self.pending_usage.as_ref()?;
+        if !snapshot.is_reported() {
+            return None;
+        }
         let baseline = self.reported.unwrap_or_default();
-        let gross_input = snapshot.input_tokens.saturating_sub(baseline.gross_input);
-        let output = snapshot.output_tokens.saturating_sub(baseline.output);
+        let gross_input = snapshot
+            .input_tokens
+            .map(|value| value.saturating_sub(baseline.gross_input));
+        let output = snapshot
+            .output_tokens
+            .map(|value| value.saturating_sub(baseline.output));
         let reasoning = snapshot
             .reasoning_tokens
-            .unwrap_or(0)
-            .saturating_sub(baseline.reasoning);
+            .map(|value| value.saturating_sub(baseline.reasoning));
         let cached = snapshot
             .cache_read_tokens
-            .unwrap_or(0)
-            .saturating_sub(baseline.cached);
+            .map(|value| value.saturating_sub(baseline.cached));
+        Some(TurnUsage {
+            input_tokens: gross_input.map(|gross| gross.saturating_sub(cached.unwrap_or(0))),
+            output_tokens: output,
+            total_input_tokens: gross_input,
+            peak_input_tokens: snapshot.peak_input_tokens,
+            context_window_tokens: snapshot.context_window_tokens,
+            reasoning_tokens: reasoning,
+            cache_read_tokens: cached,
+            cache_write_tokens: None,
+            model: None,
+            cost_usd: None,
+        })
+    }
+
+    /// Finish the Turn and advance the attributed thread baseline.
+    fn take_turn_usage(&mut self) -> Option<TurnUsage> {
+        let usage = self.current_turn_usage()?;
+        let snapshot = self.pending_usage.take()?;
+        let baseline = self.reported.unwrap_or_default();
         self.reported = Some(ReportedTotals {
-            gross_input: snapshot.input_tokens.max(baseline.gross_input),
-            output: snapshot.output_tokens.max(baseline.output),
+            gross_input: snapshot
+                .input_tokens
+                .unwrap_or(baseline.gross_input)
+                .max(baseline.gross_input),
+            output: snapshot
+                .output_tokens
+                .unwrap_or(baseline.output)
+                .max(baseline.output),
             reasoning: snapshot
                 .reasoning_tokens
                 .unwrap_or(0)
                 .max(baseline.reasoning),
             cached: snapshot.cache_read_tokens.unwrap_or(0).max(baseline.cached),
         });
-        TurnUsage {
-            input_tokens: gross_input.saturating_sub(cached),
-            output_tokens: output,
-            total_input_tokens: Some(gross_input),
-            peak_input_tokens: snapshot.peak_input_tokens,
-            context_window_tokens: snapshot.context_window_tokens,
-            reasoning_tokens: Some(reasoning),
-            cache_read_tokens: Some(cached),
-            cache_write_tokens: None,
-            model: None,
-            cost_usd: None,
-        }
+        Some(usage)
     }
 
     /// On the first snapshot of the process, everything the thread consumed
@@ -321,14 +336,16 @@ pub(super) fn process_notification(
             state.turn_in_progress.store(false, Ordering::Relaxed);
             state.set_current_turn_id(None);
             let status = codex_mapping::map_turn_status(params);
+            if let Some(usage) = state.take_turn_usage() {
+                let _ = events.send(ConversationEvent::UsageCheckpoint {
+                    turn_id: tid.clone(),
+                    usage,
+                    final_receipt: true,
+                });
+            }
             let _ = events.send(ConversationEvent::TurnCompleted {
-                turn_id: tid.clone(),
-                status,
-            });
-            let usage = state.take_turn_usage();
-            let _ = events.send(ConversationEvent::TurnUsage {
                 turn_id: tid,
-                usage,
+                status,
             });
         }
         "thread/tokenUsage/updated" => {
@@ -340,6 +357,20 @@ pub(super) fn process_notification(
                 retain_higher_context_pressure(&mut latest, &previous);
             }
             state.pending_usage = Some(latest);
+            if let (Some(turn_id), Some(usage)) = (
+                state
+                    .current_turn_id
+                    .lock()
+                    .expect("codex turn id lock poisoned")
+                    .clone(),
+                state.current_turn_usage(),
+            ) {
+                let _ = events.send(ConversationEvent::UsageCheckpoint {
+                    turn_id,
+                    usage,
+                    final_receipt: false,
+                });
+            }
         }
         "item/started" | "item/completed" => {
             // The server echoes the client's own input (turn/start and
@@ -918,6 +949,10 @@ impl CodexHarness {
             // Dropping the harness (e.g. a run task is aborted)
             // must not leak a live app-server.
             .kill_on_drop(true);
+        super::configure_agent_env(&mut command, launch);
+        if let Some(cwd) = &launch.cwd {
+            command.current_dir(cwd);
+        }
         if let Some(route) = &self.account_route {
             route.apply_tokio(&mut command);
         }
@@ -1271,23 +1306,25 @@ mod tests {
         };
 
         state.pending_usage = Some(codex_mapping::map_token_usage(&usage(16_065, 5, 9_600)));
-        let first = state.take_turn_usage();
-        assert_eq!(first.input_tokens, 6_465);
+        let first = state.take_turn_usage().expect("first usage");
+        assert_eq!(first.input_tokens, Some(6_465));
         assert_eq!(first.total_input_tokens, Some(16_065));
         assert_eq!(first.cache_read_tokens, Some(9_600));
-        assert_eq!(first.output_tokens, 5);
+        assert_eq!(first.output_tokens, Some(5));
 
         state.pending_usage = Some(codex_mapping::map_token_usage(&usage(20_065, 12, 13_100)));
-        let second = state.take_turn_usage();
-        assert_eq!(second.input_tokens, 500, "gross Δ4000 minus cached Δ3500");
+        let second = state.take_turn_usage().expect("second usage");
+        assert_eq!(
+            second.input_tokens,
+            Some(500),
+            "gross Δ4000 minus cached Δ3500"
+        );
         assert_eq!(second.total_input_tokens, Some(4_000));
         assert_eq!(second.cache_read_tokens, Some(3_500));
-        assert_eq!(second.output_tokens, 7);
+        assert_eq!(second.output_tokens, Some(7));
 
-        // A turn that reported no usage stays zero rather than repeating.
-        let quiet = state.take_turn_usage();
-        assert_eq!(quiet.input_tokens, 0);
-        assert_eq!(quiet.output_tokens, 0);
+        // A turn that reported no usage stays missing rather than repeating.
+        assert_eq!(state.take_turn_usage(), None);
     }
 
     /// A resumed thread's first snapshot carries every earlier launch's
@@ -1307,11 +1344,11 @@ mod tests {
         state.seed_reported_baseline(&params);
         state.pending_usage = Some(codex_mapping::map_token_usage(&params));
 
-        let usage = state.take_turn_usage();
+        let usage = state.take_turn_usage().expect("resumed usage");
         assert_eq!(usage.total_input_tokens, Some(4_000));
         assert_eq!(usage.cache_read_tokens, Some(3_000));
-        assert_eq!(usage.input_tokens, 1_000);
-        assert_eq!(usage.output_tokens, 50);
+        assert_eq!(usage.input_tokens, Some(1_000));
+        assert_eq!(usage.output_tokens, Some(50));
         assert_eq!(usage.reasoning_tokens, Some(10));
     }
 

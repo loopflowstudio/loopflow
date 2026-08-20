@@ -1,10 +1,13 @@
+mod support;
+
 use std::fs;
 use std::path::Path;
 use std::process::Command;
 
-use loopflow::engine::flow::{ConcreteStep, Skill, Step};
+use loopflow::engine::flow::{ConcreteStep, Skill, SkillStep, Step};
 use loopflow::engine::{expand_flow, load_flow};
 use loopflow::store::sqlite::SqliteStore;
+use support::codex_app_server_script;
 use tempfile::TempDir;
 
 fn write_skill(repo: &Path, name: &str, content: &str) {
@@ -97,26 +100,30 @@ fn flow_parsing_parity() {
     assert_eq!(flow.items.len(), 2);
     assert_eq!(
         flow.items[0],
-        Step::Skill(Skill {
-            name: "implement".to_string(),
-            agent: None,
-            default_agent: None,
-            directions: vec![],
-            action_style: None,
-            interactive: None,
-            content: None,
+        Step::Skill(SkillStep {
+            skill: Skill {
+                name: "implement".to_string(),
+                agent: None,
+                default_agent: None,
+                directions: vec![],
+                action_style: None,
+                content: None,
+            },
+            policy: Default::default(),
         })
     );
     assert_eq!(
         flow.items[1],
-        Step::Skill(Skill {
-            name: "review".to_string(),
-            agent: None,
-            default_agent: None,
-            directions: vec!["ux".to_string(), "security".to_string()],
-            action_style: None,
-            interactive: None,
-            content: None,
+        Step::Skill(SkillStep {
+            skill: Skill {
+                name: "review".to_string(),
+                agent: None,
+                default_agent: None,
+                directions: vec!["ux".to_string(), "security".to_string()],
+                action_style: None,
+                content: None,
+            },
+            policy: Default::default(),
         })
     );
 }
@@ -135,7 +142,10 @@ fn code_flow_records_each_agent_invocation_in_one_trace() {
 
     let home = TempDir::new().unwrap();
     let bin = TempDir::new().unwrap();
-    write_executable(&bin.path().join("codex"), "#!/bin/sh\nexit 0\n");
+    write_executable(
+        &bin.path().join("codex"),
+        &codex_app_server_script("done", ""),
+    );
     let path = std::env::var("PATH")
         .map(|path| format!("{}:{path}", bin.path().display()))
         .unwrap_or_else(|_| bin.path().display().to_string());
@@ -273,7 +283,7 @@ fn ops_item_parses_and_expands() {
         "ship-ish",
         r#"
 - implement
-- op: pr land --create-pr
+- op: pr land
 "#,
     );
 
@@ -282,7 +292,7 @@ fn ops_item_parses_and_expands() {
     match &flow.items[1] {
         Step::Op(item) => {
             assert_eq!(item.command, "pr");
-            assert_eq!(item.args, vec!["land", "--create-pr"]);
+            assert_eq!(item.args, vec!["land"]);
         }
         other => panic!("expected ops item, got {other:?}"),
     }

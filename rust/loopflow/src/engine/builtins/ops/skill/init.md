@@ -1,5 +1,4 @@
 ---
-interactive: true
 produces: connected Loopflow path and an evidence-backed next command
 ---
 Connect this repository to Loopflow's distributed control system.
@@ -17,10 +16,10 @@ The launch prompt identifies the reviewer.
   interactive account connections and edit personal config only after the
   human explicitly chooses them.
 - **Parent reviewer:** inspect the same state, but make only repo-scoped,
-  reversible changes through the review protocol with the Task. Never initiate
-  OAuth, modify personal config, start or place a Wave, create Linear/GitHub
-  objects, or guess a human preference. Report those actions as exact next
-  commands.
+  reversible changes through the review protocol with the Task. Never guess a
+  human preference. OAuth, personal config, placement, and external object
+  creation require a narrow `lf ask --user` when they genuinely block the
+  assigned path; otherwise report their exact next commands and return.
 
 Never expose credential values. Use Loopflow's auth commands; do not read
 tokens from dotfiles or environment variables.
@@ -147,11 +146,14 @@ lf pm show --wave <wave> --no-sync
 If PM is not bound and Linear is connected, offer the explicit binding command:
 
 ```bash
-lf pm init --wave <wave> --team-key <KEY>
+lf pm init --wave <wave>
 ```
 
-Creating or rebinding Linear state requires the human's choice. Do not infer a
-team key, Initiative, Project, or KR.
+The first Wave establishes the repository Team and defaults its key from the
+repository name; `--team-key <KEY>` is an explicit override. Later Waves must
+reuse that binding. Choosing the initial repository Team requires the human's
+choice. Do not invent another Team, Initiative, Project, or KR; an existing
+repository binding changes only through the repository-wide migration.
 
 ### New durable Wave
 
@@ -173,7 +175,7 @@ Projects carry definitions and KRs, while Tasks carry concrete work.
 ### Existing Linear Task
 
 Require its exact issue identifier. If Linear is connected and the Task belongs
-to a Wave-owned Project, the durable execution path is:
+to the repository Team and one Wave-owned Project, the durable execution path is:
 
 ```bash
 lf task run <ISSUE-ID>
@@ -189,7 +191,7 @@ Offer the lightweight path without pretending it is the whole product:
 ```bash
 lf debug -c
 lf design
-lf --list
+lf list
 ```
 
 These are next commands, not setup probes; do not run them automatically.

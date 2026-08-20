@@ -14,6 +14,7 @@ consume this wire.
 AgentInvocation, its supervising Run authority and containment, stable Work and
 Wave identity, Home route, temporary User/parent attention and handback
 evidence, and a generic attach argv.
+
 `task_attention_states.json` pins the Rust-owned desktop attention fold for
 live advancing, live human wait, dead dirty, dead authored commits, clean
 backlog, completed, stale active intent, and unavailable local evidence. Rust
@@ -26,7 +27,19 @@ addresses. Revision evidence carries both Rust's effective-content hash and the
 current source-file hash used to reject a stale Task worktree without
 reimplementing prompt transformations in Swift.
 
-`turn_spend.json` is the additive `lf usage --json` wire. Each row names its
-Turn, AgentInvocation, trace, and exec; the second row proves a cache-only measurement
-survives while absent token and cost fields remain explicit nulls. Rust and
-Swift both round-trip it.
+`activity_snapshot.json` pins `lf ps --json` and its embedded canonical usage
+snapshot: Exec and provider nodes retain their existing Work attribution,
+working/stalled state, and exact provider-output rates, while a registered
+orphan stays separate from the counted call tree. Rust and Swift both
+round-trip it; The Podium derives no process state of its own.
+
+`work_activity_snapshot.json` pins `lf activity --json`: durable Work creation,
+Run, PR, and Steer facts retain their existing Work, Run, author, and GitHub
+identities. Rust and Swift both round-trip it; The Podium filters this one
+history instead of maintaining a second activity store.
+
+`pm_show.json` pins the repository-owned Linear hierarchy read by `lf pm show`
+and the app: a Project carries exactly one Wave Initiative and the repository
+Team; its Task carries the stable Project and Team ids used for ownership.
+The shared `LOO-*` identifier and canonical Project name remain presentation;
+the provider's Wave-qualified title is normalized before this wire boundary.

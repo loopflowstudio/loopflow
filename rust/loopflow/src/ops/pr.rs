@@ -34,6 +34,8 @@ pub struct PrInfo {
     pub state: String,
     pub branch: String,
     pub merge_commit: Option<String>,
+    /// GitHub's authoritative merge instant from the single-PR REST response.
+    pub merged_at: Option<String>,
     /// The PR's current head commit (`headRefOid`), when GitHub reports one.
     pub head_sha: Option<String>,
 }
@@ -85,6 +87,11 @@ pub fn create_or_update_pr(
     // first remote side effect. No-op for non-Task worktrees.
     crate::ops::task::verify_task_pr_range_without_healing(repo)?;
 
+    // Gate output is an in-worktree handoff, never published content. Consume
+    // valid cached copy before deleting the gate-owned files so the commit and
+    // push below can only expose the reviewed implementation tree.
+    let cached_copy = consume_gate_artifacts(repo, progress)?;
+
     // Publication owns no integration. Commit locally, prove the resulting
     // range, then push exactly the branch the user has now. A PR may honestly
     // remain behind its base until an explicit integration boundary.
@@ -103,7 +110,7 @@ pub fn create_or_update_pr(
     let published_head = rev_parse(repo, "HEAD")?;
     crate::ops::commit::push_with_upstream_if_needed(repo)?;
 
-    let copy = resolve_pr_copy(repo, options, progress)?;
+    let copy = resolve_pr_copy(repo, options, cached_copy, progress)?;
     let current_branch_state = current_branch(repo)?;
     let current_head = rev_parse(repo, "HEAD")?;
     if current_branch_state.as_deref() != Some(branch.as_str()) || current_head != published_head {
@@ -158,6 +165,7 @@ pub fn create_or_update_pr(
                 state: "open".to_string(),
                 branch: branch.clone(),
                 merge_commit: None,
+                merged_at: None,
                 head_sha: None,
             }),
         };
@@ -178,6 +186,7 @@ fn pr_info(branch: &str, pr: GhPr) -> PrInfo {
         },
         branch: branch.to_string(),
         merge_commit: pr.merge_commit.map(|commit| commit.oid),
+        merged_at: None,
         head_sha: pr.head_ref_oid,
     }
 }
@@ -204,6 +213,7 @@ pub(crate) fn reject_control_plane_pr(repo: &Path) -> OpsResult<()> {
 fn resolve_pr_copy(
     repo: &Path,
     options: &PrOptions,
+    cached: Option<PrCopy>,
     progress: &impl Progress,
 ) -> OpsResult<PrCopy> {
     if let Some(title) = options
@@ -218,11 +228,99 @@ fn resolve_pr_copy(
         });
     }
 
-    let mut generated = generate_pr_copy(repo, progress, options.agent.as_deref())?;
+    let mut copy = match cached {
+        Some(copy) => {
+            progress.status("Using cached PR copy from task gate");
+            copy
+        }
+        None => generate_pr_copy(repo, progress, options.agent.as_deref())?,
+    };
     if let Some(body_override) = options.body.as_deref() {
-        generated.body = body_override.to_string();
+        copy.body = body_override.to_string();
     }
-    Ok(generated)
+    Ok(copy)
+}
+
+fn consume_gate_artifacts(repo: &Path, progress: &impl Progress) -> OpsResult<Option<PrCopy>> {
+    let cached = read_cached_pr_copy(repo, progress)?;
+    let scratch = repo.join("scratch");
+    if !scratch.exists() {
+        return Ok(cached);
+    }
+
+    let mut removed = false;
+    for entry in std::fs::read_dir(&scratch)? {
+        let entry = entry?;
+        let path = entry.path();
+        if !path.is_file() {
+            continue;
+        }
+        let name = entry.file_name();
+        let name = name.to_string_lossy();
+        let gate_owned = matches!(
+            name.as_ref(),
+            ".pr-copy-ref" | "pr-title.txt" | "pr-body.md"
+        ) || name.ends_with("-review.md");
+        if gate_owned {
+            std::fs::remove_file(path)?;
+            removed = true;
+        }
+    }
+    if removed {
+        progress.status("Removing task-gate artifacts before publication");
+    }
+    Ok(cached)
+}
+
+pub(crate) fn read_cached_pr_copy(
+    repo: &Path,
+    progress: &impl Progress,
+) -> OpsResult<Option<PrCopy>> {
+    let title_path = repo.join("scratch/pr-title.txt");
+    let body_path = repo.join("scratch/pr-body.md");
+    let ref_path = repo.join("scratch/.pr-copy-ref");
+
+    if !title_path.exists() || !body_path.exists() {
+        return Ok(None);
+    }
+
+    let title = std::fs::read_to_string(&title_path)?.trim().to_string();
+    if title.is_empty() {
+        return Ok(None);
+    }
+
+    let copied_for = match std::fs::read_to_string(&ref_path) {
+        Ok(value) => value.trim().to_string(),
+        Err(_) => {
+            progress.status("Ignoring cached PR copy: scratch/.pr-copy-ref is missing");
+            return Ok(None);
+        }
+    };
+    if !is_recent_ancestor(repo, &copied_for, 1)? {
+        progress.status("Ignoring cached PR copy: branch changed since gate output");
+        return Ok(None);
+    }
+
+    let body = std::fs::read_to_string(body_path)?;
+    Ok(Some(PrCopy { title, body }))
+}
+
+/// Check if HEAD is no more than `max_ahead` commits ahead of `commit`.
+/// This tolerates one bookkeeping commit after gate output while still
+/// forcing regeneration if substantive commits were added later.
+fn is_recent_ancestor(repo: &Path, commit: &str, max_ahead: u32) -> OpsResult<bool> {
+    let output = Command::new("git")
+        .args(["rev-list", "--count", &format!("{commit}..HEAD")])
+        .current_dir(repo)
+        .output()?;
+    if !output.status.success() {
+        return Ok(false);
+    }
+    let ahead = String::from_utf8_lossy(&output.stdout)
+        .trim()
+        .parse::<u32>()
+        .unwrap_or(u32::MAX);
+    Ok(ahead <= max_ahead)
 }
 
 pub fn generate_pr_copy(
@@ -348,6 +446,7 @@ pub fn current_pr(repo: &Path) -> OpsResult<Option<PrInfo>> {
             state,
             branch,
             merge_commit: pr.merge_commit.map(|commit| commit.oid),
+            merged_at: None,
             head_sha: pr.head_ref_oid,
         }));
     }
@@ -356,23 +455,27 @@ pub fn current_pr(repo: &Path) -> OpsResult<Option<PrInfo>> {
 }
 
 pub(crate) fn auto_merge_enabled(repo: &Path, number: u64) -> OpsResult<bool> {
+    let query = "query($owner:String!,$name:String!,$number:Int!){repository(owner:$owner,name:$name){pullRequest(number:$number){autoMergeRequest{enabledAt} mergeQueueEntry{id}}}}";
     let observation = Command::new("gh")
         .args([
-            "pr",
-            "view",
-            &number.to_string(),
-            "--json",
-            "autoMergeRequest",
+            "api",
+            "graphql",
+            "-F",
+            "owner={owner}",
+            "-F",
+            "name={repo}",
+            "-F",
+            &format!("number={number}"),
+            "-f",
+            &format!("query={query}"),
             "--jq",
-            ".autoMergeRequest != null",
+            ".data.repository.pullRequest | (.autoMergeRequest != null) or (.mergeQueueEntry != null)",
         ])
         .current_dir(repo)
         .output()?;
     if !observation.status.success() {
         return Err(OpsError::CommandFailed {
-            command: format!(
-                "gh pr view {number} --json autoMergeRequest --jq .autoMergeRequest!=null"
-            ),
+            command: format!("gh api graphql [pull request #{number} merge request]"),
             stderr: stderr_from_output(&observation),
         });
     }
@@ -392,14 +495,57 @@ pub(crate) fn disable_auto_merge(repo: &Path, number: u32) -> OpsResult<()> {
         return Ok(());
     }
     let output = Command::new("gh")
-        .args(["pr", "merge", &number.to_string(), "--disable"])
+        .args(["pr", "merge", &number.to_string(), "--disable-auto"])
         .current_dir(repo)
         .output()?;
     if output.status.success() {
         return Ok(());
     }
     Err(OpsError::CommandFailed {
-        command: format!("gh pr merge {number} --disable"),
+        command: format!("gh pr merge {number} --disable-auto"),
+        stderr: stderr_from_output(&output),
+    })
+}
+
+pub(crate) fn enable_auto_merge(
+    repo: &Path,
+    number: u64,
+    title: Option<&str>,
+    body: Option<&str>,
+    head_sha: &str,
+) -> OpsResult<()> {
+    if auto_merge_enabled(repo, number)? {
+        let number = u32::try_from(number).map_err(|_| {
+            OpsError::Message(format!("pull request #{number} exceeds supported range"))
+        })?;
+        // A pre-existing remote arm carries no durable Loopflow head binding.
+        // Replace it so every accepted Auto request crosses our exact-head
+        // command boundary, even when GitHub already reports auto-merge.
+        disable_auto_merge(repo, number)?;
+    }
+
+    let number_arg = number.to_string();
+    let mut command = Command::new("gh");
+    command
+        .arg("pr")
+        .arg("merge")
+        .arg(&number_arg)
+        .arg("--squash")
+        .arg("--auto")
+        .arg("--match-head-commit")
+        .arg(head_sha);
+    if let Some(title) = title {
+        command.arg("--subject").arg(title);
+    }
+    if let Some(body) = body.filter(|body| !body.trim().is_empty()) {
+        command.arg("--body").arg(body);
+    }
+    let output = command.current_dir(repo).output()?;
+    if output.status.success() {
+        return Ok(());
+    }
+    Err(OpsError::CommandFailed {
+        command: format!("gh pr merge {number} --squash --auto --match-head-commit {head_sha}"),
         stderr: stderr_from_output(&output),
     })
 }
@@ -530,6 +676,8 @@ struct GhRestPr {
     draft: bool,
     #[serde(default, rename = "merge_commit_sha")]
     merge_commit_sha: Option<String>,
+    #[serde(default)]
+    merged_at: Option<String>,
     number: u64,
     #[serde(rename = "html_url")]
     html_url: String,
@@ -564,6 +712,7 @@ impl GhRestPr {
             } else {
                 None
             },
+            merged_at: if self.merged { self.merged_at } else { None },
             head_sha: self.head.sha,
         }
     }
@@ -845,6 +994,7 @@ pub(crate) fn create_pr_from_pushed_branch(
         state: "open".to_string(),
         branch,
         merge_commit: None,
+        merged_at: None,
         head_sha: Some(rev_parse(repo, "HEAD")?),
     })
 }
@@ -1228,6 +1378,7 @@ mod tests {
             state: state.to_string(),
             draft,
             merge_commit_sha: merged.then(|| "deadbeef".to_string()),
+            merged_at: merged.then(|| "2026-07-21T19:00:00Z".to_string()),
             number: 905,
             html_url: "https://github.com/loopflowstudio/loopflow/pull/905".to_string(),
             head: GhRestHead {
@@ -1243,6 +1394,7 @@ mod tests {
         let info = rest_pr("closed", true, false).into_info("jack/task-1");
         assert_eq!(info.state, "merged");
         assert_eq!(info.merge_commit.as_deref(), Some("deadbeef"));
+        assert_eq!(info.merged_at.as_deref(), Some("2026-07-21T19:00:00Z"));
         assert_eq!(info.head_sha.as_deref(), Some("headsha"));
         assert_eq!(info.branch, "jack/task-1");
     }

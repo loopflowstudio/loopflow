@@ -1,38 +1,134 @@
 #!/usr/bin/env bash
+# Bootstrap repo-owned cron jobs on the Wave's placed Home.
 #
-# Bootstrap a maintained lf cron host.
+# Run this from the placed Home after promoting a release `lf`. The script
+# reconstructs the unattended environment from non-secret host-local paths;
+# the Home-local publisher command injects authority only into its child.
 #
-# Probes reachability + auth over bounded SSH, verifies lf and Doppler are
-# present, syncs the wave's repo-owned schedules onto the host, and lists the
-# result. Idempotent and secret-free — re-run any time to reconcile.
-#
-# Usage: scripts/bootstrap-cron-host.sh <ssh-host-or-alias> [wave]
-#   scripts/bootstrap-cron-host.sh mini-heart infrastructure
-#
-# Secrets are configured out of band via `doppler setup` on the host; this
-# script never reads, prints, or forwards a value.
+# Usage: scripts/bootstrap-cron-host.sh [wave]
+#   scripts/bootstrap-cron-host.sh infrastructure
 set -euo pipefail
 
-host="${1:?usage: bootstrap-cron-host.sh <ssh-host-or-alias> [wave]}"
-wave="${2:-infrastructure}"
+wave="${1:-infrastructure}"
+repo_root="$(git rev-parse --show-toplevel)"
+main_repo="$(dirname "$(git rev-parse --path-format=absolute --git-common-dir)")"
+if [ "$repo_root" != "$main_repo" ]; then
+  printf 'run bootstrap from the authoritative main checkout %s, not %s\n' \
+    "$main_repo" "$repo_root" >&2
+  exit 1
+fi
+cd "$repo_root"
 
 step() { printf '\n== %s ==\n' "$1"; }
 
-step "reachability + auth ($host)"
-# Bounded lf ssh: an unreachable host fails in ~10s instead of hanging.
-lf ssh "$host" --version
+step "placed Home"
+local_home="$(lf home id)"
+placed_home="$(lf status "$wave" --json | jq -er '.wave.home.id')"
+if [ "$local_home" != "$placed_home" ]; then
+  printf 'Wave %s is not placed on this Home\n' "$wave" >&2
+  exit 1
+fi
+printf 'Wave %s is placed on this Home\n' "$wave"
 
-step "host prerequisites"
-ssh -o BatchMode=yes -o ConnectTimeout=10 "$host" doppler --version
+lf_home="${LF_CONTROL_HOME:-${LF_HOME:-$HOME/.lf}}"
+lf_db_path="${LF_CONTROL_DB_PATH:-${LF_DB_PATH:-$lf_home/loopflow.db}}"
+minimal_env=(
+  env -i
+  "HOME=$HOME"
+  "USER=${USER:-}"
+  "PATH=$PATH"
+  "LF_HOME=$lf_home"
+  "LF_DB_PATH=$lf_db_path"
+  "TMPDIR=${TMPDIR:-/tmp}"
+  "LANG=${LANG:-C}"
+)
 
-step "release publisher preflight"
-ssh -o BatchMode=yes -o ConnectTimeout=10 "$host" \
-  doppler run -- uv run python scripts/publish_release.py check
+step "installed binary + declared jobs"
+"${minimal_env[@]}" lf cron preflight --wave "$wave" >/dev/null
+printf 'installed cron preflight passed for Wave %s\n' "$wave"
 
-step "sync repo-owned schedules (wave: $wave)"
-lf ssh "$host" cron sync --wave "$wave"
+step "unattended tool path"
+"${minimal_env[@]}" sh -c '
+  missing=0
+  for tool in lf loopflow-release-publisher uv gh cargo flyctl security swift xcrun jq; do
+    if ! command -v "$tool" >/dev/null 2>&1; then
+      printf "missing: %s\n" "$tool" >&2
+      missing=1
+    fi
+  done
+  if ! command -v codex >/dev/null 2>&1 && ! command -v claude >/dev/null 2>&1; then
+    printf "missing: codex or claude provider CLI\n" >&2
+    missing=1
+  fi
+  exit "$missing"
+'
+step "host-local provider authority"
+auth_status="$("${minimal_env[@]}" lf auth accounts --verify)"
+printf '%s\n' "$auth_status"
+if ! grep -q 'live active' <<<"$auth_status"; then
+  printf 'no managed provider account verified live from the Home store\n' >&2
+  exit 1
+fi
 
-step "installed schedules"
-lf ssh "$host" cron list
+step "configured publisher authority"
+"${minimal_env[@]}" loopflow-release-publisher \
+  uv run python scripts/publish_release.py check
 
-printf '\nbootstrap complete: %s runs wave %s schedules via launchd\n' "$host" "$wave"
+step "sync repo-owned schedules"
+"${minimal_env[@]}" lf cron sync --wave "$wave"
+
+step "prove GOAL.md matches loaded launchd jobs"
+cron_json="$("${minimal_env[@]}" lf cron list --wave "$wave" --json)"
+"${minimal_env[@]}" \
+  "CRON_LIST_JSON=$cron_json" \
+  "EXPECTED_HOME_ID=$local_home" \
+  uv run python - "$wave" <<'PY'
+import json
+import os
+import sys
+from pathlib import Path
+
+import yaml
+
+wave = sys.argv[1]
+goal = Path("wave") / wave / "GOAL.md"
+frontmatter = yaml.safe_load(goal.read_text().split("---", 2)[1])
+expected = [
+    (entry["flow"], entry["schedule"])
+    for entry in frontmatter.get("crons", [])
+]
+installed = json.loads(os.environ["CRON_LIST_JSON"])
+actual = [(entry["flow"], entry["schedule"]) for entry in installed]
+if sorted(actual) != sorted(expected):
+    raise SystemExit(f"cron drift: GOAL.md={sorted(expected)!r} installed={sorted(actual)!r}")
+for entry in installed:
+    if entry["wave"] != wave:
+        raise SystemExit(f"wrong Wave in installed cron: {entry['flow']}")
+    if not entry["loaded"]:
+        raise SystemExit(f"cron is not loaded: {entry['flow']}")
+    if entry["home_id"] != os.environ["EXPECTED_HOME_ID"]:
+        raise SystemExit(f"wrong Home in installed cron: {entry['flow']}")
+print(f"{len(installed)}/{len(expected)} jobs loaded and exact")
+PY
+
+step "configured-path telemetry receipt"
+result=0
+if ! "${minimal_env[@]}" lf cron trigger \
+  --wave "$wave" --flow telemetry-daily --wait --timeout 15m; then
+  result=1
+fi
+
+step "configured-path release receipt"
+if ! "${minimal_env[@]}" lf cron trigger \
+  --wave "$wave" --flow release-run --wait --timeout 3h; then
+  result=1
+fi
+
+step "35-day durable receipt window"
+"${minimal_env[@]}" lf cron history --wave "$wave" --days 35
+
+if [ "$result" -ne 0 ]; then
+  printf '\nbootstrap installed the jobs, but a configured-path run is red; inspect the receipt and log above\n' >&2
+  exit "$result"
+fi
+printf '\nbootstrap complete: this Home owns Wave %s cron receipts\n' "$wave"

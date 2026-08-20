@@ -57,13 +57,13 @@ use chrono::{DateTime, Utc};
 use tokio::sync::mpsc;
 use tokio::time::Instant;
 
-use crate::chat::types::{ConversationEvent, Lifecycle, TurnUsage};
+use crate::chat::types::{ConversationEvent, Lifecycle};
 use crate::durable::{RunLease, WorkRef};
 use crate::engine::flow::{available_flow_names, load_goal, render_goal, GoalRenderContext};
 use crate::engine::wave_config::{read_wave_config, WaveCronDef};
 use crate::harness::{default_create_harness, ApprovalPolicy, Harness, SendCurrentOutcome};
 use crate::store::{open_store, storage_config_from_env, Store};
-use crate::wave::journal::{MessageId, MessageOp, PendingMessage};
+use crate::wave::journal::{MessageDestination, MessageId, MessageOp, PendingMessage};
 use crate::wave::playhead::{BodyProvenance, StepKind, StepOutcome, StepRef};
 use crate::wave::resident::ListenerClient;
 use crate::wave::runtime::InboxItem;
@@ -174,17 +174,21 @@ pub fn path_for_children() -> OsString {
     std::env::join_paths(paths).unwrap_or(inherited)
 }
 
-/// One pass's seed: the rendered goal seed, the orchestration discipline,
-/// the shared loopflow operating document (pass seeds bypass context
-/// assembly, so the `<lf:loopflow>` section is appended here), and the
-/// wake that opened the pass. Reads GOAL.md and MEMORY.md from the ORIGIN
-/// repo (reads are free; writes go through the listener's doors).
+/// One pass's seed: the shared loopflow operating document (pass seeds
+/// bypass context assembly, so the `<lf:loopflow>` section is emitted here),
+/// the orchestration discipline, the rendered goal seed, and the wake that
+/// opened the pass. Reads GOAL.md and MEMORY.md from the ORIGIN repo (reads
+/// are free; writes go through the listener's doors).
+///
+/// Order is stable → volatile so providers can prefix-cache fresh sessions:
+/// the doctrine and discipline are byte-identical every pass, the goal seed
+/// ends with rewritten-every-pass memory, and the wake is unique per pass.
 fn wave_pass_seed(origin_repo: &Path, wave: &str, wake: &str) -> String {
     let seed = build_goal_seed(origin_repo, wave);
     format!(
-        "{seed}\n\n{}\n\n{}\n\n<wake>\n{wake}\n</wake>",
+        "{}\n\n{}\n\n{seed}\n\n<wake>\n{wake}\n</wake>",
+        crate::engine::prompt::loopflow_section(),
         orchestration_discipline(wave),
-        crate::engine::prompt::loopflow_section()
     )
 }
 
@@ -362,7 +366,6 @@ pub async fn run_loop(
 struct WaveControl {
     store: Arc<Store>,
     lease: RunLease,
-    wave: crate::wave::Wave,
 }
 
 async fn wave_control(wave: &str) -> Result<Option<WaveControl>> {
@@ -373,21 +376,24 @@ async fn wave_control(wave: &str) -> Result<Option<WaveControl>> {
     }
     let store = Arc::new(open_store(&storage_config_from_env()?).await?);
     let lease = crate::ops::required_run_lease(&store).await?;
-    let registered = store
-        .get_wave_by_name(wave)
-        .await?
-        .ok_or_else(|| anyhow!("Wave {wave} is absent from the control store"))?;
-    if lease.work != WorkRef::Wave(registered.id().clone()) {
+    let WorkRef::Wave(wave_id) = &lease.work else {
         return Err(anyhow!(
-            "ambient Run {} does not own Wave {wave}",
+            "ambient Run {} does not own Wave Work",
             lease.run_id
         ));
+    };
+    let registered = store
+        .get_wave(wave_id)
+        .await?
+        .ok_or_else(|| anyhow!("Wave {wave_id} is absent from the control store"))?;
+    if registered.name() != wave {
+        return Err(anyhow!(
+            "ambient Run {} owns Wave '{}', not '{wave}'",
+            lease.run_id,
+            registered.name()
+        ));
     }
-    Ok(Some(WaveControl {
-        store,
-        lease,
-        wave: registered,
-    }))
+    Ok(Some(WaveControl { store, lease }))
 }
 
 #[allow(clippy::too_many_arguments)]
@@ -401,8 +407,8 @@ async fn run_loop_with(
     backend: BodyBackend,
     control: Option<WaveControl>,
 ) -> Result<()> {
-    let answer_lane = control.as_ref().map(|control| {
-        crate::project::answer::AnswerLane::new(control.lease.work.clone(), control.lease.clone())
+    let ask_lane = control.as_ref().map(|control| {
+        crate::ops::ask::AskLane::new(control.lease.work.clone(), control.lease.clone())
     });
     let mut wave_loop = WaveLoop {
         client,
@@ -419,14 +425,14 @@ async fn run_loop_with(
         cron_last_fired: HashMap::new(),
         provider_session: None,
         control,
-        answer_lane,
+        ask_lane,
         end: None,
     };
-    let mut answer_poll = tokio::time::interval(Duration::from_millis(200));
-    answer_poll.set_missed_tick_behavior(tokio::time::MissedTickBehavior::Delay);
+    let mut ask_poll = tokio::time::interval(Duration::from_millis(200));
+    ask_poll.set_missed_tick_behavior(tokio::time::MissedTickBehavior::Delay);
 
     while wave_loop.end.is_none() {
-        wave_loop.service_answers().await;
+        wave_loop.service_resolvers().await;
         if !wave_loop.queue.is_empty() {
             wave_loop.start_queued_pass(&mut inbox_rx).await;
             continue;
@@ -451,12 +457,8 @@ async fn run_loop_with(
             _ = sleep_until_opt(Some(heartbeat_at)) => {
                 wave_loop.on_heartbeat(&mut inbox_rx).await;
             }
-            _ = answer_poll.tick(), if wave_loop.answer_lane.is_some() => {}
+            _ = ask_poll.tick(), if wave_loop.ask_lane.is_some() => {}
         }
-    }
-
-    if let Some(answer_lane) = wave_loop.answer_lane.as_mut() {
-        answer_lane.cancel();
     }
 
     match wave_loop.end {
@@ -480,25 +482,17 @@ struct WaveLoop {
     cron_last_fired: HashMap<String, DateTime<Utc>>,
     provider_session: Option<ProviderSessionRef>,
     control: Option<WaveControl>,
-    answer_lane: Option<crate::project::answer::AnswerLane>,
+    ask_lane: Option<crate::ops::ask::AskLane>,
     end: Option<LoopEnd>,
 }
 
 impl WaveLoop {
-    async fn service_answers(&mut self) {
-        let (Some(control), Some(answer_lane)) = (&self.control, self.answer_lane.as_mut()) else {
+    async fn service_resolvers(&mut self) {
+        let (Some(control), Some(ask_lane)) = (&self.control, self.ask_lane.as_mut()) else {
             return;
         };
-        if let Some(attempt) = answer_lane.try_receive() {
-            if let Err(error) = answer_lane.settle(&control.store, attempt).await {
-                tracing::warn!(%error, "failed to settle Wave answer attempt");
-            }
-        }
-        if let Err(error) = answer_lane
-            .reconcile_wave(&control.store, &control.wave)
-            .await
-        {
-            tracing::warn!(%error, "failed to reconcile Wave answer lane");
+        if let Err(error) = ask_lane.reconcile(&control.store).await {
+            tracing::warn!(%error, "failed to reconcile Wave Ask lane");
         }
     }
 
@@ -561,8 +555,13 @@ impl WaveLoop {
     }
 
     async fn on_heartbeat(&mut self, inbox_rx: &mut mpsc::UnboundedReceiver<InboxItem>) {
-        self.run_pass(HEARTBEAT_PROMPT.to_string(), Vec::new(), inbox_rx)
-            .await;
+        self.run_pass(
+            HEARTBEAT_PROMPT.to_string(),
+            Vec::new(),
+            MessageDestination::Local,
+            inbox_rx,
+        )
+        .await;
     }
 
     async fn on_cron(&mut self, inbox_rx: &mut mpsc::UnboundedReceiver<InboxItem>) {
@@ -585,11 +584,12 @@ impl WaveLoop {
             self.cron_last_fired.insert(cron_key(cron), now);
         }
         let prompt = cron_prompt(&due);
-        self.run_pass(prompt, Vec::new(), inbox_rx).await;
+        self.run_pass(prompt, Vec::new(), MessageDestination::Local, inbox_rx)
+            .await;
     }
 
     async fn start_queued_pass(&mut self, inbox_rx: &mut mpsc::UnboundedReceiver<InboxItem>) {
-        let messages = std::mem::take(&mut self.queue);
+        let messages = take_destination_prefix(&mut self.queue);
         self.start_message_pass(messages, inbox_rx).await;
     }
 
@@ -604,12 +604,16 @@ impl WaveLoop {
         inbox_rx: &mut mpsc::UnboundedReceiver<InboxItem>,
     ) {
         let answers: Vec<MessageId> = messages.iter().map(|m| m.id.clone()).collect();
+        let destination = messages
+            .first()
+            .map(PendingMessage::destination)
+            .unwrap_or(MessageDestination::Local);
         let content = messages
             .iter()
             .map(|m| m.text.clone())
             .collect::<Vec<_>>()
             .join("\n\n");
-        self.run_pass(content, answers, inbox_rx).await;
+        self.run_pass(content, answers, destination, inbox_rx).await;
     }
 
     async fn capture_control(
@@ -690,6 +694,7 @@ impl WaveLoop {
         &mut self,
         wake: String,
         answers: Vec<MessageId>,
+        destination: MessageDestination,
         inbox_rx: &mut mpsc::UnboundedReceiver<InboxItem>,
     ) {
         let mut answers = answers.into_iter().map(|id| id.0).collect::<Vec<_>>();
@@ -713,7 +718,8 @@ impl WaveLoop {
             let live_skill = step.kind == StepKind::Skill
                 && matches!(&self.backend, BodyBackend::Harness { .. });
             if live_skill {
-                self.run_harness_pass(step, seed, answers, inbox_rx).await;
+                self.run_harness_pass(step, seed, answers, &destination, inbox_rx)
+                    .await;
             } else {
                 self.run_process_pass(step, seed, answers, inbox_rx).await;
             }
@@ -769,8 +775,8 @@ impl WaveLoop {
         };
         let mut wait_task = tokio::spawn(async move { child.wait_with_output().await });
         let mut timeout = Box::pin(tokio::time::sleep(self.config.pass_timeout));
-        let mut answer_poll = tokio::time::interval(Duration::from_millis(200));
-        answer_poll.set_missed_tick_behavior(tokio::time::MissedTickBehavior::Delay);
+        let mut ask_poll = tokio::time::interval(Duration::from_millis(200));
+        ask_poll.set_missed_tick_behavior(tokio::time::MissedTickBehavior::Delay);
         loop {
             tokio::select! {
                 biased;
@@ -800,8 +806,8 @@ impl WaveLoop {
                         }
                     }
                 }
-                _ = answer_poll.tick(), if self.answer_lane.is_some() => {
-                    self.service_answers().await;
+                _ = ask_poll.tick(), if self.ask_lane.is_some() => {
+                    self.service_resolvers().await;
                 }
                 result = &mut wait_task => {
                     match result {
@@ -825,6 +831,7 @@ impl WaveLoop {
         step: StepRef,
         seed: String,
         answers: Vec<String>,
+        destination: &MessageDestination,
         inbox_rx: &mut mpsc::UnboundedReceiver<InboxItem>,
     ) {
         let mut body = body_provenance(&step, &self.cwd);
@@ -985,11 +992,8 @@ impl WaveLoop {
         }
 
         let mut timeout = Box::pin(tokio::time::sleep(self.config.pass_timeout));
-        let mut terminal_wait = Box::pin(tokio::time::sleep(Duration::from_secs(86_400)));
-        let mut answer_poll = tokio::time::interval(Duration::from_millis(200));
-        answer_poll.set_missed_tick_behavior(tokio::time::MissedTickBehavior::Delay);
-        let mut terminal_status: Option<Lifecycle> = None;
-        let mut usage = TurnUsage::default();
+        let mut ask_poll = tokio::time::interval(Duration::from_millis(200));
+        ask_poll.set_missed_tick_behavior(tokio::time::MissedTickBehavior::Delay);
         loop {
             tokio::select! {
                 biased;
@@ -1002,11 +1006,15 @@ impl WaveLoop {
                         }
                         InboxAction::Deliver(item) => match *item {
                             InboxItem::Message(message) if message.op == MessageOp::Steer => {
-                                if self
-                                    .steer_harness(message, harness.as_mut())
-                                    .await
-                                {
-                                    timeout.as_mut().reset(Instant::now() + self.config.pass_timeout);
+                                if message.destination() == *destination {
+                                    if self
+                                        .steer_harness(message, harness.as_mut())
+                                        .await
+                                    {
+                                        timeout.as_mut().reset(Instant::now() + self.config.pass_timeout);
+                                    }
+                                } else {
+                                    self.on_inbox(InboxItem::Message(message)).await;
                                 }
                             }
                             item => self.on_inbox(item).await,
@@ -1057,38 +1065,23 @@ impl WaveLoop {
                         ConversationEvent::ItemCompleted { item, .. } => {
                             self.send(vec![ResidentDelta::TurnItem { item }]).await;
                         }
-                        ConversationEvent::TurnUsage { usage: reported, .. } => {
-                            usage = reported;
-                            self.send(vec![ResidentDelta::TurnUsage {
-                                input_tokens: Some(usage.input_tokens),
-                                output_tokens: Some(usage.output_tokens),
-                                cache_read_tokens: usage.cache_read_tokens,
-                            }]).await;
-                            if terminal_status.is_some() {
-                                let status = terminal_status.take().expect("checked");
-                                let outcome = if status == Lifecycle::Completed {
-                                    "completed"
-                                } else if status == Lifecycle::Interrupted {
-                                    "interrupted"
-                                } else {
-                                    "failed"
-                                };
-                                self.finish_harness_pass(
-                                    &body_id,
-                                    &step,
-                                    status,
-                                    usage.cost_usd,
-                                    harness.as_mut(),
-                                ).await;
-                                finish_capture(capture.as_ref(), outcome);
-                                return;
-                            }
-                        }
+                        ConversationEvent::UsageCheckpoint { .. } => {}
                         ConversationEvent::TurnCompleted { status, .. } => {
-                            terminal_status = Some(status);
-                            terminal_wait.as_mut().reset(
-                                Instant::now() + Duration::from_millis(100)
-                            );
+                            let outcome = if status == Lifecycle::Completed {
+                                "completed"
+                            } else if status == Lifecycle::Interrupted {
+                                "interrupted"
+                            } else {
+                                "failed"
+                            };
+                            self.finish_harness_pass(
+                                &body_id,
+                                &step,
+                                status,
+                                harness.as_mut(),
+                            ).await;
+                            finish_capture(capture.as_ref(), outcome);
+                            return;
                         }
                         ConversationEvent::Error { code, message, .. } => {
                             let _ = harness.stop().await;
@@ -1113,25 +1106,6 @@ impl WaveLoop {
                         return;
                     }
                 }
-                _ = &mut terminal_wait, if terminal_status.is_some() => {
-                    let status = terminal_status.take().expect("checked");
-                    let outcome = if status == Lifecycle::Completed {
-                        "completed"
-                    } else if status == Lifecycle::Interrupted {
-                        "interrupted"
-                    } else {
-                        "failed"
-                    };
-                    self.finish_harness_pass(
-                        &body_id,
-                        &step,
-                        status,
-                        usage.cost_usd,
-                        harness.as_mut(),
-                    ).await;
-                    finish_capture(capture.as_ref(), outcome);
-                    return;
-                }
                 _ = &mut timeout => {
                     match self.timeout_action() {
                         TimeoutAction::End => {
@@ -1148,8 +1122,8 @@ impl WaveLoop {
                         }
                     }
                 }
-                _ = answer_poll.tick(), if self.answer_lane.is_some() => {
-                    self.service_answers().await;
+                _ = ask_poll.tick(), if self.ask_lane.is_some() => {
+                    self.service_resolvers().await;
                 }
             }
         }
@@ -1177,6 +1151,9 @@ impl WaveLoop {
         }
         match harness.send_current(&message.text).await {
             SendCurrentOutcome::Sent { .. } => {
+                if message.source.is_some() {
+                    return true;
+                }
                 // Live delivery improves latency; it does not advance the
                 // Turn's immutable starting Basis. Keep the message pending so
                 // a later boundary can incorporate it durably.
@@ -1266,7 +1243,6 @@ impl WaveLoop {
         body_id: &str,
         step: &StepRef,
         status: Lifecycle,
-        cost_usd: Option<f64>,
         harness: &mut dyn Harness,
     ) {
         let _ = harness.stop().await;
@@ -1283,7 +1259,7 @@ impl WaveLoop {
                     return;
                 }
                 self.consecutive_failures = 0;
-                self.finish_pass(body_id, StepOutcome::Completed, None, cost_usd)
+                self.finish_pass(body_id, StepOutcome::Completed, None)
                     .await;
             }
             Lifecycle::Interrupted => self.finish_interrupted_pass(body_id, false).await,
@@ -1307,7 +1283,7 @@ impl WaveLoop {
             Ok(output) if output.status.success() => {
                 self.consecutive_failures = 0;
                 self.ship_output(output).await;
-                self.finish_pass(body_id, StepOutcome::Completed, None, None)
+                self.finish_pass(body_id, StepOutcome::Completed, None)
                     .await;
             }
             Ok(output) => {
@@ -1351,13 +1327,7 @@ impl WaveLoop {
     /// turn closes and the playhead's body closes with it. The outcome picks
     /// the turn's lifecycle — a skip is an interrupted turn whose playhead
     /// advances anyway — and names itself when the caller has nothing to add.
-    async fn finish_pass(
-        &mut self,
-        body_id: &str,
-        outcome: StepOutcome,
-        reason: Option<String>,
-        cost_usd: Option<f64>,
-    ) {
+    async fn finish_pass(&mut self, body_id: &str, outcome: StepOutcome, reason: Option<String>) {
         let status = match outcome {
             StepOutcome::Completed => Lifecycle::Completed,
             StepOutcome::Skipped | StepOutcome::Interrupted => Lifecycle::Interrupted,
@@ -1367,7 +1337,6 @@ impl WaveLoop {
         self.send(vec![
             ResidentDelta::TurnFinished {
                 status,
-                cost_usd,
                 reason: (status != Lifecycle::Completed).then(|| reason.clone()),
             },
             ResidentDelta::BodyFinished {
@@ -1387,12 +1356,12 @@ impl WaveLoop {
         } else {
             (StepOutcome::Interrupted, "interrupted by user")
         };
-        self.finish_pass(body_id, outcome, Some(reason.to_string()), None)
+        self.finish_pass(body_id, outcome, Some(reason.to_string()))
             .await;
     }
 
     async fn finish_failed_pass(&mut self, body_id: &str, reason: &str) {
-        self.finish_pass(body_id, StepOutcome::Failed, Some(reason.to_string()), None)
+        self.finish_pass(body_id, StepOutcome::Failed, Some(reason.to_string()))
             .await;
         self.consecutive_failures += 1;
         if self.consecutive_failures >= MAX_CONSECUTIVE_PASS_FAILURES {
@@ -1455,6 +1424,19 @@ impl WaveLoop {
     }
 }
 
+fn take_destination_prefix(queue: &mut Vec<PendingMessage>) -> Vec<PendingMessage> {
+    let destination = queue
+        .first()
+        .expect("a queued pass starts with a message")
+        .destination();
+    let split = queue
+        .iter()
+        .position(|message| message.destination() != destination)
+        .unwrap_or(queue.len());
+    let remaining = queue.split_off(split);
+    std::mem::replace(queue, remaining)
+}
+
 fn spawn_wave_step(
     cwd: &Path,
     step: &StepRef,
@@ -1484,11 +1466,63 @@ mod tests {
     use std::sync::{Arc, Mutex};
 
     use crate::chat::turns::{ChatRole, ChatTurn};
-    use crate::wave::journal::{journal_path, EventKind, Journal};
+    use crate::chat::types::TurnUsage;
+    use crate::wave::journal::{
+        journal_path, DiscordChatBinding, DiscordMessageSource, EventKind, Journal,
+    };
     use crate::wave::runtime::WaveRuntime;
     use crate::wave::server::{self, ResidentDoor};
     use crate::wave::state::LoopState;
     use async_trait::async_trait;
+
+    fn queued_message(id: &str, source: Option<DiscordMessageSource>) -> PendingMessage {
+        PendingMessage {
+            id: MessageId(id.into()),
+            op: MessageOp::Message,
+            text: id.into(),
+            source,
+        }
+    }
+
+    fn discord_source(id: &str) -> DiscordMessageSource {
+        DiscordMessageSource {
+            binding: DiscordChatBinding {
+                guild_id: "guild".into(),
+                channel_id: "channel".into(),
+            },
+            message_id: id.into(),
+            author_id: "human".into(),
+        }
+    }
+
+    #[test]
+    fn discord_chat_batches_only_the_fifo_prefix_for_one_destination() {
+        let mut queue = vec![
+            queued_message("discord-1", Some(discord_source("1"))),
+            queued_message("discord-2", Some(discord_source("2"))),
+            queued_message("local", None),
+            queued_message("discord-3", Some(discord_source("3"))),
+        ];
+
+        let first = take_destination_prefix(&mut queue);
+        assert_eq!(
+            first
+                .iter()
+                .map(|message| message.id.0.as_str())
+                .collect::<Vec<_>>(),
+            vec!["discord-1", "discord-2"]
+        );
+        assert_eq!(
+            queue
+                .iter()
+                .map(|message| message.id.0.as_str())
+                .collect::<Vec<_>>(),
+            vec!["local", "discord-3"]
+        );
+        let second = take_destination_prefix(&mut queue);
+        assert_eq!(second[0].id.0, "local");
+        assert_eq!(queue[0].id.0, "discord-3");
+    }
 
     /// The rig: a REAL listener (runtime + router with the resident door)
     /// and a resident (subscription follower + `run_loop_with` and a
@@ -1731,17 +1765,18 @@ mod tests {
                     turn_id: "vendor-turn".to_string(),
                     content: " world".to_string(),
                 });
+                let _ = self.events.send(ConversationEvent::UsageCheckpoint {
+                    turn_id: "vendor-turn".to_string(),
+                    usage: TurnUsage {
+                        input_tokens: Some(20),
+                        output_tokens: Some(2),
+                        ..TurnUsage::default()
+                    },
+                    final_receipt: true,
+                });
                 let _ = self.events.send(ConversationEvent::TurnCompleted {
                     turn_id: "vendor-turn".to_string(),
                     status: Lifecycle::Completed,
-                });
-                let _ = self.events.send(ConversationEvent::TurnUsage {
-                    turn_id: "vendor-turn".to_string(),
-                    usage: TurnUsage {
-                        input_tokens: 20,
-                        output_tokens: 2,
-                        ..TurnUsage::default()
-                    },
                 });
             }
             Ok(())
@@ -1858,7 +1893,7 @@ mod tests {
             EventKind::TurnSteered { answers, .. }
                 if answers == &[message_id(&steer)]
         )));
-        assert!(inputs.lock().unwrap()[0].contains("wave_clarify"));
+        assert!(inputs.lock().unwrap()[0].contains("wave/clarify"));
     }
 
     #[tokio::test]
@@ -1929,7 +1964,7 @@ mod tests {
         .await;
 
         let inputs = inputs.lock().unwrap();
-        assert!(inputs[0].starts_with("wave_clarify\n"));
+        assert!(inputs[0].starts_with("wave/clarify\n"));
         assert_eq!(
             inputs.len(),
             1,
@@ -1985,6 +2020,13 @@ mod tests {
         assert!(seed.contains("Ship the thing."));
         assert!(seed.contains("<lf:loopflow>"));
         assert!(seed.contains("<wake>\nhello from chat\n</wake>"));
+        // Stable → volatile: the byte-identical doctrine leads so fresh
+        // sessions prefix-cache it; per-pass memory and wake trail it.
+        let doctrine_at = seed.find("<lf:loopflow>").expect("doctrine");
+        let goal_at = seed.find("Ship the thing.").expect("goal");
+        let wake_at = seed.find("<wake>").expect("wake");
+        assert!(doctrine_at < goal_at, "doctrine precedes the goal seed");
+        assert!(goal_at < wake_at, "wake closes the seed");
         assert_eq!(
             LoopConfig::default().heartbeat_idle,
             Duration::from_secs(4 * 60 * 60)
@@ -1993,13 +2035,15 @@ mod tests {
 
     #[tokio::test]
     async fn one_wake_runs_one_full_wave_flow_then_idles() {
-        let loop_ = boot(Duration::from_secs(600), "echo done").await;
+        let mut loop_ = boot(Duration::from_secs(600), "echo done").await;
 
         loop_
             .runtime
             .deliver(MessageOp::Message, "first wake".into())
             .expect("first wake");
-        wait_for("first Wave flow", || loop_.pass_count() == 3).await;
+        for _ in 0..3 {
+            loop_.next_seed().await;
+        }
         tokio::time::sleep(Duration::from_millis(100)).await;
         assert_eq!(
             loop_.pass_count(),
@@ -2011,7 +2055,9 @@ mod tests {
             .runtime
             .deliver(MessageOp::Message, "second wake".into())
             .expect("second wake");
-        wait_for("second Wave flow", || loop_.pass_count() == 6).await;
+        for _ in 0..3 {
+            loop_.next_seed().await;
+        }
     }
 
     #[tokio::test]
@@ -2090,12 +2136,12 @@ mod tests {
     /// and the next full Wave iteration drains the whole queue.
     #[tokio::test]
     async fn messages_during_a_pass_coalesce_into_one_boundary_pass() {
-        let loop_ = boot(Duration::from_secs(600), "sleep 0.4; echo done").await;
+        let mut loop_ = boot(Duration::from_secs(600), "sleep 0.4; echo done").await;
         loop_
             .runtime
             .deliver(MessageOp::Message, "first".into())
             .expect("user turn");
-        wait_for("pass 1 spawned", || loop_.pass_count() == 1).await;
+        loop_.next_seed().await;
 
         // Two messages land mid-pass: queued, never rejected. Give the SSE
         // hop time to reach the loop before the pass exits (the biased
@@ -2111,14 +2157,11 @@ mod tests {
 
         // Clarify, pursue, and mutate finish the current iteration before the
         // queued human direction starts the next one.
-        wait_for("next iteration spawned", || loop_.pass_count() == 4).await;
-        let wake = wake_of(&loop_.seed(3));
+        loop_.next_seed().await;
+        loop_.next_seed().await;
+        let wake = wake_of(&loop_.next_seed().await);
         assert!(wake.contains("second") && wake.contains("third"));
 
-        wait_for("next iteration TurnStarted journaled", || {
-            started_answers(&loop_.journal_events()).len() == 4
-        })
-        .await;
         let answers = started_answers(&loop_.journal_events());
         assert!(answers[1].is_empty());
         assert!(answers[2].is_empty());

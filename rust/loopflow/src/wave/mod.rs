@@ -47,9 +47,12 @@
 //! exists on the machine, child observations wait durably; the listener remains
 //! functional and acquires the registry when it appears.
 
+pub mod chat;
+pub(crate) mod discord;
 pub mod journal;
 pub(crate) mod memory;
 pub mod playhead;
+pub mod relocate;
 
 pub(crate) mod registry;
 pub mod resident;
@@ -62,24 +65,39 @@ mod types;
 pub mod wire;
 
 pub(crate) use types::PromotionWake;
-pub use types::Wave;
+pub use types::{Wave, WaveLocator, WaveLocatorError};
 
 use std::future::Future;
 use std::path::{Path, PathBuf};
 use std::sync::Arc;
 
 use anyhow::{anyhow, Result};
+use secrecy::SecretString;
 
 use crate::engine::repo::find_repo_root;
+use crate::engine::wave_config::{try_read_wave_chat_config, WaveChatConfig};
 use crate::engine::worktrees::main_repo_root;
 use crate::ops::util::normalize_wave_name;
 use crate::store::{open_existing_store, SharedStore};
+use crate::wave::chat::ChatBacking;
 use crate::wave::runtime::WaveRuntime;
 
 /// The hidden subcommand a listener spawns for its own resident body. Named
 /// here so the spawner and the CLI cannot drift apart silently.
 pub(crate) const RESIDENT_SUBCOMMAND: &str = "__resident";
 pub(crate) const WAVE_SERVER_ENDPOINT_ENV: &str = "LF_WAVE_SERVER_ENDPOINT";
+
+#[derive(Debug)]
+pub(crate) struct ListenerSignals<F> {
+    startup: Option<tokio::sync::oneshot::Sender<String>>,
+    shutdown: F,
+}
+
+impl<F> ListenerSignals<F> {
+    pub(crate) fn new(startup: Option<tokio::sync::oneshot::Sender<String>>, shutdown: F) -> Self {
+        Self { startup, shutdown }
+    }
+}
 
 /// `lf wave <name>` — boot the named mind's listener and supervise its
 /// resident. The steerable half: an endpoint, a thread, a cadence.
@@ -102,6 +120,7 @@ pub fn run(name: &str, force: bool) -> Result<()> {
             registry_config,
             force,
             true,
+            None,
             shutdown_signal(),
         )
         .await
@@ -221,14 +240,16 @@ impl Drop for WaveRunGuard {
     }
 }
 
-/// The production resident spawner: `lf __resident <wave>`, run by this
-/// same executable, endpoint + token + Wave context in env. The
-/// resident's stdout/stderr inherit — one `lf wave` terminal shows both
-/// halves, today's UX.
+/// The production resident spawner: `lf __resident <wave>`, run by the
+/// current Home's `lf` binary with endpoint + token + Wave context in env.
+/// The resident's stdout/stderr inherit — one `lf wave` terminal shows both
+/// halves, today's UX. Resolving `lf` explicitly matters when the listener is
+/// hosted in-process by `lfd`: the daemon does not own the hidden subcommand.
 // TODO(M1): keep this shutdown contract in the wave/supervisor owner: stand
 // the respawn ladder down before terminating the resident, honor interrupt
 // cleanup, and keep SIGKILL deadlines in the supervisor path.
 fn resident_spawner(
+    lf_bin: PathBuf,
     wave: String,
     repo_root: PathBuf,
     endpoint: String,
@@ -236,30 +257,43 @@ fn resident_spawner(
     resident_env: Vec<(String, String)>,
 ) -> supervisor::SpawnResident {
     Box::new(move || {
-        let exe = std::env::current_exe()?;
-        let mut command = tokio::process::Command::new(exe);
-        command
-            .arg(RESIDENT_SUBCOMMAND)
-            .arg(&wave)
-            .current_dir(&repo_root)
-            .env(WAVE_SERVER_ENDPOINT_ENV, &endpoint)
-            .env(wire::RESIDENT_TOKEN_ENV, &token)
-            // The resident's children must resolve `lf` to this binary.
-            .env("PATH", crate::flowloop::wave::path_for_children())
-            .env_remove(crate::durable::RUN_CONTEXT_ENV)
-            .env_remove(crate::durable::RUN_LEASE_ENV)
-            .stdin(std::process::Stdio::null());
+        let mut command =
+            resident_command(&lf_bin, &wave, &repo_root, &endpoint, &token, &resident_env);
         // No kill_on_drop: shutdown stops the supervisor FIRST (so a TERM'd
         // resident's exit isn't journaled as a failure), then SIGTERMs the
         // resident by pid — its hooks stop the vendor process group. A
         // SIGKILL-on-drop here would orphan the codex group instead.
-        for (key, value) in &resident_env {
-            command.env(key, value);
-        }
         #[cfg(unix)]
         command.process_group(0);
         command.spawn()
     })
+}
+
+fn resident_command(
+    lf_bin: &Path,
+    wave: &str,
+    repo_root: &Path,
+    endpoint: &str,
+    token: &str,
+    resident_env: &[(String, String)],
+) -> tokio::process::Command {
+    let mut command = tokio::process::Command::new(lf_bin);
+    command
+        .arg(RESIDENT_SUBCOMMAND)
+        .arg(wave)
+        .current_dir(repo_root)
+        .env(WAVE_SERVER_ENDPOINT_ENV, endpoint)
+        .env(wire::RESIDENT_TOKEN_ENV, token)
+        // The resident's children must resolve `lf` to this binary.
+        .env("PATH", crate::flowloop::wave::path_for_children())
+        .env_remove(crate::durable::RUN_CONTEXT_ENV)
+        .env_remove(crate::durable::RUN_LEASE_ENV)
+        .stdin(std::process::Stdio::null());
+    for (key, value) in resident_env {
+        command.env(key, value);
+    }
+    command.env_remove(discord::TOKEN_ENV);
+    command
 }
 
 /// Serve the wave until `shutdown` resolves. Vendor-free by construction:
@@ -275,8 +309,68 @@ pub(crate) async fn run_listener(
     registry_config: Option<registry::RegistryConfig>,
     force: bool,
     spawn_resident: bool,
+    discord_token: Option<SecretString>,
     shutdown: impl Future<Output = ()> + Send + 'static,
 ) -> Result<()> {
+    run_listener_with_startup(
+        repo_root,
+        wave,
+        registry_config,
+        force,
+        spawn_resident,
+        discord_token,
+        ListenerSignals::new(None, shutdown),
+    )
+    .await
+}
+
+/// Run a listener and publish the exact point at which its endpoint becomes
+/// attachable. The Home host uses this instead of polling the discovery file;
+/// direct `lf wave` callers need no startup receiver.
+pub(crate) async fn run_listener_with_startup<F>(
+    repo_root: PathBuf,
+    wave: String,
+    registry_config: Option<registry::RegistryConfig>,
+    force: bool,
+    spawn_resident: bool,
+    discord_token: Option<SecretString>,
+    signals: ListenerSignals<F>,
+) -> Result<()>
+where
+    F: Future<Output = ()> + Send + 'static,
+{
+    let ListenerSignals { startup, shutdown } = signals;
+    let _locator_lock = match relocate::WaveLocatorLock::acquire(&repo_root, &wave) {
+        Ok(lock) => lock,
+        Err(lock_error) if force => {
+            if !request_stop(&repo_root, &wave).await? {
+                return Err(lock_error);
+            }
+            relocate::WaveLocatorLock::acquire(&repo_root, &wave)?
+        }
+        Err(lock_error) => return Err(lock_error),
+    };
+    if let Some(config) = registry_config.as_ref() {
+        let current = config
+            .store
+            .get_wave(config.wave.id())
+            .await?
+            .ok_or_else(|| {
+                anyhow!(
+                    "Wave {} disappeared before listener start",
+                    config.wave.id()
+                )
+            })?;
+        let locator = WaveLocator::discover(&repo_root, &wave)?;
+        if current.repo() != locator.repo().to_string() || current.name() != locator.slug() {
+            return Err(anyhow!(
+                "Wave {} moved to {}/{} before listener start",
+                current.id(),
+                current.repo(),
+                current.name()
+            ));
+        }
+    }
     // File-level one-brain floor, before anything else: an existing pointer
     // that answers /health for this wave is a live server — refuse (unless
     // --force takes over and overwrites); a dead pointer is stale and gets
@@ -303,6 +397,39 @@ pub(crate) async fn run_listener(
     // writes nothing.
     let listener = tokio::net::TcpListener::bind("127.0.0.1:0").await?;
     let addr = listener.local_addr()?;
+    let resident_lf = spawn_resident
+        .then(crate::engine::process::resolve_current_home_lf_binary_checked)
+        .transpose()?;
+
+    let (chat_backing, discord_adapter) = match try_read_wave_chat_config(&repo_root, &wave)? {
+        Some(WaveChatConfig::Discord {
+            home_id,
+            guild_id,
+            channel_id,
+        }) => {
+            let registry = registry_config.as_ref().ok_or_else(|| {
+                anyhow!("Discord chat requires the local registry to verify its owner Home")
+            })?;
+            let work = crate::durable::WorkRef::Wave(registry.wave.id().clone());
+            let placement = registry.store.placement(&work).await?;
+            let local_home = registry.store.local_home().await?;
+            let binding = journal::DiscordChatBinding {
+                guild_id,
+                channel_id,
+            };
+            let backing = ChatBacking::discord(&binding);
+            let adapter = discord::DiscordAdapter::preflight(
+                binding,
+                &home_id,
+                &placement.home_id,
+                &local_home.id,
+                discord_token,
+            )
+            .await?;
+            (backing, Some(adapter))
+        }
+        Some(WaveChatConfig::Local) | None => (ChatBacking::Local, None),
+    };
 
     let registered = registry_config
         .as_ref()
@@ -311,10 +438,9 @@ pub(crate) async fn run_listener(
         match registry_config.as_ref() {
             Some(config) => {
                 let work = crate::durable::WorkRef::Wave(config.wave.id().clone());
-                let (_, lease) = config
-                    .store
-                    .reserve_run(&work, crate::durable::RunTrigger::User)
-                    .await?;
+                let trigger = crate::lf::commands::install::upgrade_trigger_for_work(&work)
+                    .unwrap_or(crate::durable::RunTrigger::User);
+                let (_, lease) = config.store.reserve_run(&work, trigger).await?;
                 Some((config.store.clone(), lease))
             }
             None => None,
@@ -346,7 +472,10 @@ pub(crate) async fn run_listener(
 
     // Refusals are behind us: NOW open the journal for writing and mark the
     // boot. The store-polling observer starts once the runtime exists.
-    let runtime = WaveRuntime::open(wave.clone(), repo_root.clone())?;
+    let runtime = WaveRuntime::open_with_backing(wave.clone(), repo_root.clone(), chat_backing)?;
+    if let Some(adapter) = discord_adapter.as_ref() {
+        adapter.attach(&runtime)?;
+    }
     // Boot marker, once per life, after replay: restarts are visible in the
     // journal itself (the boot janitor already leaks process lifecycle into
     // the record; make it honest and forensically legible).
@@ -361,6 +490,10 @@ pub(crate) async fn run_listener(
     });
     let observer = Arc::new(registry::ObserverSlot::new(runtime.clone(), observer));
     let observer_task = tokio::spawn(Arc::clone(&observer).run(registry::POLL_CADENCE));
+    let discord_projection = discord_adapter
+        .as_ref()
+        .map(discord::DiscordAdapter::projection);
+    let discord_task = discord_adapter.map(|adapter| tokio::spawn(adapter.run(runtime.clone())));
 
     // The resident door: a per-boot token, published beside the endpoint
     // pointer so the resident can attach (same trust domain).
@@ -371,8 +504,9 @@ pub(crate) async fn run_listener(
     // The keeper's watch: resident liveness, respawn ladder, interrupt
     // janitor. Runs even without a spawner — the pen-side anti-wedges (janitor, attach
     // probe) never depend on who spawned the resident.
-    let spawner = spawn_resident.then(|| {
+    let spawner = resident_lf.map(|lf_bin| {
         resident_spawner(
+            lf_bin,
             wave.clone(),
             repo_root.clone(),
             addr.to_string(),
@@ -394,6 +528,9 @@ pub(crate) async fn run_listener(
     let supervisor_task = tokio::spawn(supervisor.run());
 
     server::write_endpoint(&repo_root, &wave, addr)?;
+    if let Some(startup) = startup {
+        let _ = startup.send(addr.to_string());
+    }
     // Ctrl+C exits the process before graceful shutdown runs, so clean up
     // from the interrupt handler too: SIGTERM the resident (its hooks stop
     // the vendor process group) and remove the discovery files — only while
@@ -404,9 +541,17 @@ pub(crate) async fn run_listener(
     let cleanup_addr = own_addr.clone();
     let cleanup_token = token.clone();
     let cleanup_door = door.clone();
+    let cleanup_run = wave_run
+        .as_ref()
+        .map(|(store, lease)| (Arc::clone(store), lease.clone()));
     crate::engine::agent::register_interrupt_cleanup(move || {
         if let Some(pid) = cleanup_door.seat_pid() {
             supervisor::terminate_resident_blocking(pid);
+        }
+        if let Some((store, lease)) = cleanup_run.as_ref() {
+            if let Err(error) = store.stop_run_on_interrupt(lease) {
+                tracing::warn!(%error, "failed to release Wave Run authority on interrupt");
+            }
         }
         server::remove_endpoint(&cleanup_repo, &cleanup_wave, &cleanup_addr);
         server::remove_resident_token(&cleanup_repo, &cleanup_wave, &cleanup_token);
@@ -429,22 +574,33 @@ pub(crate) async fn run_listener(
             _ = shutdown_request.wait() => {}
         }
     };
-    let app = server::router_with_observer(
+    let app = server::router_with_chat_projection(
         runtime.clone(),
         door.clone(),
         observer,
         Some(supervisor_handle),
         shutdown_door,
+        discord_projection,
+        wave_run
+            .as_ref()
+            .map(|(store, lease)| server::WaveRunAttach {
+                store: Arc::clone(store),
+                lease: lease.clone(),
+                cwd: repo_root.clone(),
+            }),
     );
     let result = axum::serve(listener, app)
         .with_graceful_shutdown(graceful_shutdown)
         .await;
 
-    // Shutdown: stand the keeper down FIRST (so the resident's exit below
-    // is not journaled as a failure), then ask the resident to leave
+    // Shutdown: stop external delivery and stand the keeper down FIRST (so
+    // the resident's exit below is not journaled as a failure), then ask the resident to leave
     // (SIGTERM → its interrupt hooks stop the harness; SIGKILL after a
     // grace), mark the registry row terminal, drop the discovery files.
     // Workers are their own tmux sessions — nothing here owns them.
+    if let Some(task) = discord_task {
+        task.abort();
+    }
     supervisor_task.abort();
     if let Some(pid) = door.seat_pid() {
         supervisor::terminate_resident(pid).await;
@@ -481,6 +637,7 @@ mod tests {
 
     use crate::chat::turns::{ChatRole, ChatTurn, TurnDelta};
     use crate::chat::types::Lifecycle;
+    use crate::wave::chat::{ChatHistorySnapshot, PostMessageResponse, WaveChatMessage};
     use crate::wave::journal::MessageOp;
     use crate::wave::server::ResidentDoor;
     use crate::wave::wire::{ResidentDelta, RESIDENT_TOKEN_HEADER};
@@ -510,6 +667,23 @@ mod tests {
                 .command,
             Some(Commands::External(parts)) if parts[0] == "loop"
         ));
+    }
+
+    #[test]
+    fn discord_chat_token_is_explicitly_scrubbed_from_the_resident() {
+        let command = resident_command(
+            Path::new("/paired/bin/lf"),
+            "goals",
+            Path::new("/tmp"),
+            "127.0.0.1:1234",
+            "resident-token",
+            &[(discord::TOKEN_ENV.to_string(), "must-not-pass".to_string())],
+        );
+        assert_eq!(command.as_std().get_program(), "/paired/bin/lf");
+        assert!(command
+            .as_std()
+            .get_envs()
+            .any(|(name, value)| { name == discord::TOKEN_ENV && value.is_none() }));
     }
 
     #[tokio::test]
@@ -596,16 +770,16 @@ mod tests {
         narrate(&runtime, "second");
         narrate(&runtime, "third");
 
-        let body: serde_json::Value = reqwest::get(format!("{base}/conversation?limit=2"))
+        let body: ChatHistorySnapshot = reqwest::get(format!("{base}/conversation?limit=2"))
             .await
             .unwrap()
             .json()
             .await
             .unwrap();
-        let turns = body["turns"].as_array().unwrap();
+        let turns: Vec<_> = body.messages.iter().map(|message| &message.turn).collect();
         assert_eq!(turns.len(), 2);
-        assert_eq!(turns[0]["text"], "second");
-        assert_eq!(turns[1]["text"], "third");
+        assert_eq!(turns[0].text, "second");
+        assert_eq!(turns[1].text, "third");
 
         // A limit past the thread length serves the whole thread; no limit
         // does too.
@@ -613,8 +787,8 @@ mod tests {
             format!("{base}/conversation?limit=99"),
             format!("{base}/conversation"),
         ] {
-            let body: serde_json::Value = reqwest::get(url).await.unwrap().json().await.unwrap();
-            assert_eq!(body["turns"].as_array().unwrap().len(), 3);
+            let body: ChatHistorySnapshot = reqwest::get(url).await.unwrap().json().await.unwrap();
+            assert_eq!(body.messages.len(), 3);
         }
 
         // The open turn counts as the newest turn in the tail.
@@ -624,16 +798,16 @@ mod tests {
         runtime.apply_resident_delta(ResidentDelta::TurnText {
             text: "in progress".into(),
         });
-        let body: serde_json::Value = reqwest::get(format!("{base}/conversation?limit=1"))
+        let body: ChatHistorySnapshot = reqwest::get(format!("{base}/conversation?limit=1"))
             .await
             .unwrap()
             .json()
             .await
             .unwrap();
-        let turns = body["turns"].as_array().unwrap();
+        let turns: Vec<_> = body.messages.iter().map(|message| &message.turn).collect();
         assert_eq!(turns.len(), 1);
-        assert_eq!(turns[0]["status"], "running");
-        assert_eq!(turns[0]["text"], "in progress");
+        assert_eq!(turns[0].status, Lifecycle::Running);
+        assert_eq!(turns[0].text, "in progress");
     }
 
     #[tokio::test]
@@ -641,7 +815,7 @@ mod tests {
         let (base, runtime, _tmp) = boot().await;
 
         let client = reqwest::Client::new();
-        let body: serde_json::Value = client
+        let body: PostMessageResponse = client
             .post(format!("{base}/messages"))
             .json(&serde_json::json!({ "op": "message", "text": "how's it going?" }))
             .send()
@@ -650,10 +824,10 @@ mod tests {
             .json()
             .await
             .unwrap();
-        let posted: ChatTurn = serde_json::from_value(body["turn"].clone()).unwrap();
+        let posted = body.message.expect("posted message").turn;
         assert_eq!(posted.role, ChatRole::User);
         assert_eq!(posted.text, "how's it going?");
-        assert_eq!(body["state"], "idle");
+        assert_eq!(body.state, "idle");
 
         // The message is in the thread; the resident answers it at its next
         // turn (loop scheduling is covered in loop/wave.rs tests).
@@ -739,7 +913,7 @@ mod tests {
     async fn bare_interrupt_while_idle_is_a_noop_success_with_state() {
         let (base, runtime, _tmp) = boot().await;
         let client = reqwest::Client::new();
-        let body: serde_json::Value = client
+        let body: PostMessageResponse = client
             .post(format!("{base}/messages"))
             .json(&serde_json::json!({ "op": "interrupt", "text": "" }))
             .send()
@@ -748,8 +922,8 @@ mod tests {
             .json()
             .await
             .unwrap();
-        assert!(body["turn"].is_null(), "nothing said, nothing appended");
-        assert_eq!(body["state"], "idle");
+        assert!(body.message.is_none(), "nothing said, nothing appended");
+        assert_eq!(body.state, "idle");
         assert!(runtime.thread_snapshot().is_empty());
     }
 
@@ -852,8 +1026,7 @@ mod tests {
             .json(&serde_json::json!({ "deltas": [
                 { "kind": "turn_opened", "answers": [] },
                 { "kind": "turn_text", "text": "over the wire" },
-                { "kind": "turn_usage", "input_tokens": 7, "output_tokens": 3, "cache_read_tokens": null },
-                { "kind": "turn_finished", "status": "completed", "cost_usd": 0.01 },
+                { "kind": "turn_finished", "status": "completed" },
             ] }))
             .send()
             .await
@@ -861,7 +1034,7 @@ mod tests {
             .json()
             .await
             .unwrap();
-        assert_eq!(deltas["accepted"], 4);
+        assert_eq!(deltas["accepted"], 3);
         let thread = runtime.thread_snapshot();
         assert_eq!(thread.len(), 1);
         assert_eq!(thread[0].text, "over the wire");
@@ -913,7 +1086,10 @@ mod tests {
                 Ok(Err(_)) => break,
             }
         }
-        assert!(acc.contains("event: turn"), "SSE frames are named `turn`");
+        assert!(
+            acc.contains("event: message"),
+            "human SSE frames are named `message`"
+        );
         assert!(
             acc.contains("replayed turn"),
             "replays the thread on connect"
@@ -981,8 +1157,8 @@ mod tests {
         );
     }
 
-    /// Raw-TCP SSE client that decodes the chunked body and parses every
-    /// `data:` line into a [`ChatTurn`], in arrival order.
+    /// Raw-TCP SSE client that decodes the chunked body and folds source-bearing
+    /// message frames into their [`ChatTurn`] values in arrival order.
     struct SseClient {
         stream: tokio::net::TcpStream,
         raw: Vec<u8>,
@@ -1010,7 +1186,7 @@ mod tests {
             let deadline = tokio::time::Instant::now() + Duration::from_secs(5);
             let mut buf = [0u8; 4096];
             loop {
-                let frames = parse_turn_frames(&dechunk(&self.raw));
+                let frames = parse_message_frames(&dechunk(&self.raw));
                 if pred(&frames) {
                     return frames;
                 }
@@ -1068,10 +1244,11 @@ mod tests {
         out
     }
 
-    /// Reconstruct the thread the way a real client does: a `turn` frame
-    /// replaces the turn of its id, a `turn-delta` frame absorbs one increment
-    /// into it. Returns the turns in first-seen order, each at its latest state.
-    fn parse_turn_frames(sse_body: &str) -> Vec<ChatTurn> {
+    /// Reconstruct the thread the way a real client does: a `message` frame
+    /// replaces the source-bearing message's turn, and a `message-delta` frame
+    /// absorbs one increment into it. Returns turns in first-seen order at their
+    /// latest state.
+    fn parse_message_frames(sse_body: &str) -> Vec<ChatTurn> {
         let mut order: Vec<String> = Vec::new();
         let mut by_id: std::collections::HashMap<String, ChatTurn> =
             std::collections::HashMap::new();
@@ -1082,15 +1259,16 @@ mod tests {
             } else if let Some(data) = line.strip_prefix("data:") {
                 let data = data.trim();
                 match event.as_str() {
-                    "turn" => {
-                        if let Ok(turn) = serde_json::from_str::<ChatTurn>(data) {
+                    "message" => {
+                        if let Ok(message) = serde_json::from_str::<WaveChatMessage>(data) {
+                            let turn = message.turn;
                             if !by_id.contains_key(&turn.id) {
                                 order.push(turn.id.clone());
                             }
                             by_id.insert(turn.id.clone(), turn);
                         }
                     }
-                    "turn-delta" => {
+                    "message-delta" => {
                         if let Ok(delta) = serde_json::from_str::<TurnDelta>(data) {
                             if let Some(turn) = by_id.get_mut(&delta.turn_id) {
                                 turn.absorb_item(delta.item);
@@ -1168,7 +1346,6 @@ mod tests {
         // Finalization replaces it terminally, same id.
         runtime.apply_resident_delta(ResidentDelta::TurnFinished {
             status: Lifecycle::Completed,
-            cost_usd: None,
             reason: None,
         });
         let frames = client
@@ -1201,7 +1378,6 @@ mod tests {
 
         runtime.apply_resident_delta(ResidentDelta::TurnFinished {
             status: Lifecycle::Completed,
-            cost_usd: None,
             reason: None,
         });
         let states = client.states_until(|s| s.len() >= 3).await;
@@ -1218,32 +1394,31 @@ mod tests {
             text: "half a thought".into(),
         });
 
-        let body: serde_json::Value = reqwest::get(format!("{base}/conversation"))
+        let body: ChatHistorySnapshot = reqwest::get(format!("{base}/conversation"))
             .await
             .unwrap()
             .json()
             .await
             .unwrap();
-        let turns = body["turns"].as_array().unwrap();
+        let turns: Vec<_> = body.messages.iter().map(|message| &message.turn).collect();
         assert_eq!(turns.len(), 1);
-        assert_eq!(turns[0]["status"], "running");
-        assert_eq!(turns[0]["text"], "half a thought");
+        assert_eq!(turns[0].status, Lifecycle::Running);
+        assert_eq!(turns[0].text, "half a thought");
 
         // After finalization the same id is served exactly once, terminal.
         runtime.apply_resident_delta(ResidentDelta::TurnFinished {
             status: Lifecycle::Completed,
-            cost_usd: None,
             reason: None,
         });
-        let body: serde_json::Value = reqwest::get(format!("{base}/conversation"))
+        let body: ChatHistorySnapshot = reqwest::get(format!("{base}/conversation"))
             .await
             .unwrap()
             .json()
             .await
             .unwrap();
-        let turns = body["turns"].as_array().unwrap();
+        let turns: Vec<_> = body.messages.iter().map(|message| &message.turn).collect();
         assert_eq!(turns.len(), 1);
-        assert_eq!(turns[0]["status"], "completed");
+        assert_eq!(turns[0].status, Lifecycle::Completed);
     }
 
     #[tokio::test]
@@ -1277,16 +1452,20 @@ mod tests {
         });
         let base = format!("http://{addr}");
 
-        let body: serde_json::Value = reqwest::get(format!("{base}/conversation"))
+        let body: ChatHistorySnapshot = reqwest::get(format!("{base}/conversation"))
             .await
             .unwrap()
             .json()
             .await
             .unwrap();
-        let turns = body["turns"].as_array().unwrap();
+        let turns: Vec<_> = body.messages.iter().map(|message| &message.turn).collect();
         assert_eq!(turns.len(), 1);
-        assert_eq!(turns[0]["status"], "failed", "janitor closed the turn");
-        assert_eq!(turns[0]["text"], "half a thought");
+        assert_eq!(
+            turns[0].status,
+            Lifecycle::Failed,
+            "janitor closed the turn"
+        );
+        assert_eq!(turns[0].text, "half a thought");
 
         // SSE replay agrees: the turn arrives failed, never running.
         let mut client = SseClient::connect(&base).await;
@@ -1327,7 +1506,7 @@ mod tests {
         let (base, runtime, tmp) = boot_family().await;
         let client = reqwest::Client::new();
 
-        let body: serde_json::Value = client
+        let body: PostMessageResponse = client
             .post(format!("{base}/messages"))
             .json(&serde_json::json!({ "op": "message", "text": "landed the parser" }))
             .send()
@@ -1336,7 +1515,10 @@ mod tests {
             .json()
             .await
             .unwrap();
-        assert_eq!(body["turn"]["text"], "landed the parser");
+        assert_eq!(
+            body.message.expect("posted message").turn.text,
+            "landed the parser"
+        );
 
         let thread = runtime.thread_snapshot();
         assert_eq!(thread.len(), 1);
@@ -1358,6 +1540,111 @@ mod tests {
     }
 
     #[tokio::test]
+    async fn same_named_waves_in_two_repositories_serve_independently() {
+        let tmp = tempfile::tempdir().expect("tempdir");
+        let repo_a = tmp.path().join("alpha");
+        let repo_b = tmp.path().join("beta");
+        for repo in [&repo_a, &repo_b] {
+            std::fs::create_dir_all(repo.join("wave/infrastructure")).unwrap();
+            std::fs::write(
+                repo.join("wave/infrastructure/GOAL.md"),
+                format!("# {}\n", repo.file_name().unwrap().to_string_lossy()),
+            )
+            .unwrap();
+        }
+
+        let store = Arc::new(
+            crate::store::open_store(&crate::store::StorageConfig::sqlite(
+                tmp.path().join("registry.db"),
+            ))
+            .await
+            .unwrap(),
+        );
+        let wave_a = registry::ensure_wave_row(&store, &repo_a, "infrastructure")
+            .await
+            .unwrap();
+        let wave_b = registry::ensure_wave_row(&store, &repo_b, "infrastructure")
+            .await
+            .unwrap();
+        assert_ne!(wave_a.id(), wave_b.id());
+
+        let (stop_a_tx, stop_a_rx) = tokio::sync::oneshot::channel::<()>();
+        let (stop_b_tx, stop_b_rx) = tokio::sync::oneshot::channel::<()>();
+        let handle_a = tokio::spawn(run_listener(
+            repo_a.clone(),
+            "infrastructure".to_string(),
+            Some(registry::RegistryConfig {
+                store: store.clone(),
+                wave: wave_a.clone(),
+            }),
+            false,
+            false,
+            None,
+            async move {
+                let _ = stop_a_rx.await;
+            },
+        ));
+        let handle_b = tokio::spawn(run_listener(
+            repo_b.clone(),
+            "infrastructure".to_string(),
+            Some(registry::RegistryConfig {
+                store,
+                wave: wave_b.clone(),
+            }),
+            false,
+            false,
+            None,
+            async move {
+                let _ = stop_b_rx.await;
+            },
+        ));
+
+        let endpoint_a = server::endpoint_path(&repo_a, "infrastructure");
+        let endpoint_b = server::endpoint_path(&repo_b, "infrastructure");
+        wait_for(|| endpoint_a.exists() && endpoint_b.exists()).await;
+        let address_a = std::fs::read_to_string(&endpoint_a).unwrap();
+        let address_b = std::fs::read_to_string(&endpoint_b).unwrap();
+        assert_ne!(address_a, address_b);
+        for address in [&address_a, &address_b] {
+            let health: serde_json::Value =
+                reqwest::get(format!("http://{}/health", address.trim()))
+                    .await
+                    .unwrap()
+                    .json()
+                    .await
+                    .unwrap();
+            assert_eq!(health["wave"], "infrastructure");
+        }
+
+        let response = reqwest::Client::new()
+            .post(format!("http://{}/messages", address_a.trim()))
+            .json(&serde_json::json!({ "op": "message", "text": "alpha only" }))
+            .send()
+            .await
+            .unwrap();
+        assert!(response.status().is_success());
+        assert_eq!(
+            journal::read_events(&journal::journal_path(&repo_a, "infrastructure"))
+                .iter()
+                .filter(|event| matches!(event.kind, journal::EventKind::UserMessage { .. }))
+                .count(),
+            1
+        );
+        assert_eq!(
+            journal::read_events(&journal::journal_path(&repo_b, "infrastructure"))
+                .iter()
+                .filter(|event| matches!(event.kind, journal::EventKind::UserMessage { .. }))
+                .count(),
+            0
+        );
+
+        stop_a_tx.send(()).unwrap();
+        stop_b_tx.send(()).unwrap();
+        handle_a.await.unwrap().unwrap();
+        handle_b.await.unwrap().unwrap();
+    }
+
+    #[tokio::test]
     async fn serve_publishes_and_removes_discovery_pointer_and_token() {
         let tmp = tempfile::tempdir().expect("tempdir");
         std::fs::create_dir_all(tmp.path().join("wave/ship")).unwrap();
@@ -1366,7 +1653,7 @@ mod tests {
         let (shutdown_tx, shutdown_rx) = tokio::sync::oneshot::channel::<()>();
         let repo2 = repo.clone();
         let handle = tokio::spawn(async move {
-            run_listener(repo2, "ship".into(), None, false, false, async {
+            run_listener(repo2, "ship".into(), None, false, false, None, async {
                 let _ = shutdown_rx.await;
             })
             .await
@@ -1406,6 +1693,7 @@ mod tests {
                 None,
                 false,
                 false,
+                None,
                 std::future::pending(),
             )
             .await
@@ -1435,6 +1723,7 @@ mod tests {
                 None,
                 false,
                 false,
+                None,
                 std::future::pending(),
             )
             .await
@@ -1489,7 +1778,7 @@ mod tests {
         let (shutdown_tx, shutdown_rx) = tokio::sync::oneshot::channel::<()>();
         let repo2 = repo.clone();
         let handle = tokio::spawn(async move {
-            run_listener(repo2, "ship".into(), None, false, false, async {
+            run_listener(repo2, "ship".into(), None, false, false, None, async {
                 let _ = shutdown_rx.await;
             })
             .await
@@ -1518,7 +1807,7 @@ mod tests {
         let (shutdown_tx, shutdown_rx) = tokio::sync::oneshot::channel::<()>();
         let repo2 = repo.clone();
         let first = tokio::spawn(async move {
-            run_listener(repo2, "ship".into(), None, false, false, async {
+            run_listener(repo2, "ship".into(), None, false, false, None, async {
                 let _ = shutdown_rx.await;
             })
             .await
@@ -1529,9 +1818,17 @@ mod tests {
 
         // Second server: probed live, refused, pointer untouched.
         let (_shutdown_tx2, shutdown_rx2) = tokio::sync::oneshot::channel::<()>();
-        let err = run_listener(repo.clone(), "ship".into(), None, false, false, async {
-            let _ = shutdown_rx2.await;
-        })
+        let err = run_listener(
+            repo.clone(),
+            "ship".into(),
+            None,
+            false,
+            false,
+            None,
+            async {
+                let _ = shutdown_rx2.await;
+            },
+        )
         .await
         .expect_err("live endpoint refuses a second server");
         assert!(
@@ -1547,5 +1844,42 @@ mod tests {
         shutdown_tx.send(()).unwrap();
         first.await.unwrap().unwrap();
         assert!(!endpoint.exists(), "first server still owns its shutdown");
+    }
+
+    #[tokio::test]
+    async fn force_stops_the_current_listener_before_taking_its_locator_lock() {
+        let tmp = tempfile::tempdir().expect("tempdir");
+        std::fs::create_dir_all(tmp.path().join("wave/ship")).unwrap();
+        let repo = tmp.path().to_path_buf();
+
+        let (_first_stop_tx, first_stop_rx) = tokio::sync::oneshot::channel::<()>();
+        let first_repo = repo.clone();
+        let first = tokio::spawn(async move {
+            run_listener(first_repo, "ship".into(), None, false, false, None, async {
+                let _ = first_stop_rx.await;
+            })
+            .await
+        });
+        let endpoint = server::endpoint_path(&repo, "ship");
+        wait_for(|| endpoint.exists()).await;
+        let first_address = std::fs::read_to_string(&endpoint).unwrap();
+
+        let (second_stop_tx, second_stop_rx) = tokio::sync::oneshot::channel::<()>();
+        let second_repo = repo.clone();
+        let second = tokio::spawn(async move {
+            run_listener(second_repo, "ship".into(), None, true, false, None, async {
+                let _ = second_stop_rx.await;
+            })
+            .await
+        });
+        wait_for(|| {
+            std::fs::read_to_string(&endpoint).is_ok_and(|address| address != first_address)
+        })
+        .await;
+        first.await.unwrap().unwrap();
+
+        second_stop_tx.send(()).unwrap();
+        second.await.unwrap().unwrap();
+        assert!(!endpoint.exists());
     }
 }

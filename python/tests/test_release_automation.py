@@ -16,6 +16,10 @@ def test_nightly_packages_workflow_builds_and_smokes_without_deploying():
 
     assert workflow["name"] == "Packages (nightly)"
     assert workflow["on"]["schedule"] == [{"cron": "0 9 * * *"}]
+    assert "refs/tags/v" in workflow["env"]["LOOPFLOW_BUILD_PROVENANCE"]
+    assert "development" in workflow["env"]["LOOPFLOW_BUILD_PROVENANCE"]
+    assert "published" in workflow["env"]["LOOPFLOW_MIGRATION_AUTHORITY"]
+    assert "validation_only" in workflow["env"]["LOOPFLOW_MIGRATION_AUTHORITY"]
 
     native = workflow["jobs"]["native-packages"]
     assert "needs" not in native
@@ -45,9 +49,7 @@ def test_nightly_packages_workflow_builds_and_smokes_without_deploying():
     assert not any(term in commands for term in forbidden)
 
     acceptance = workflow["jobs"]["release-acceptance"]
-    acceptance_commands = "\n".join(
-        step.get("run", "") for step in acceptance["steps"]
-    )
+    acceptance_commands = "\n".join(step.get("run", "") for step in acceptance["steps"])
     assert "release_acceptance_recovers_from_a_revoked_selected_account" in acceptance_commands
 
 
@@ -120,46 +122,22 @@ def test_bump_patch_version_groups_long_commit_lists_without_dropping_commits(tm
             assert subject in notes
 
 
-def test_pull_local_bin_builds_and_installs_lf(tmp_path: Path):
+def test_pull_local_bin_forwards_to_published_refresh(tmp_path: Path):
     repo = tmp_path / "repo"
     repo.mkdir()
-    (repo / "Cargo.toml").write_text("[workspace]\nmembers = []\n")
     scripts = repo / "scripts"
     scripts.mkdir()
-    (scripts / "install.py").write_text((ROOT / "scripts/install.py").read_text())
-    (scripts / "bundle_version.py").write_text((ROOT / "scripts/bundle_version.py").read_text())
-    subprocess.run(["git", "init"], cwd=repo, check=True, stdout=subprocess.DEVNULL)
-
-    fake_bin = tmp_path / "fake-bin"
-    fake_bin.mkdir()
-    cargo_log = tmp_path / "cargo.log"
-    cargo = fake_bin / "cargo"
-    cargo.write_text(
-        f"""#!/usr/bin/env bash
-set -euo pipefail
-printf '%s\n' "$*" > {cargo_log}
-repo="$PWD"
-mkdir -p "$repo/target/release"
-cat > "$repo/target/release/lf" <<'LF'
-#!/usr/bin/env bash
-if [ "$1" = "install" ] && [ "$2" = "promote" ]; then
-    shift 2
-    while [ "$#" -gt 0 ]; do
-        if [ "$1" = "--cli-target" ]; then mkdir -p "$(dirname "$2")"; ln -sf "$0" "$2"; fi
-        shift
-    done
-    exit 0
-fi
-echo lf fake
-LF
-chmod +x "$repo/target/release/lf"
-"""
+    invocation = tmp_path / "invocation.txt"
+    (scripts / "install.py").write_text(
+        "import os, pathlib, sys\n"
+        "pathlib.Path(os.environ['LFTEST_INVOCATION']).write_text(' '.join(sys.argv[1:]))\n"
+        "print('installed: published release')\n"
     )
-    cargo.chmod(cargo.stat().st_mode | stat.S_IXUSR)
+    subprocess.run(["git", "init"], cwd=repo, check=True, stdout=subprocess.DEVNULL)
 
     install_dir = tmp_path / "local-bin"
     env = os.environ.copy()
-    env["PATH"] = f"{fake_bin}:{env['PATH']}"
+    env["LFTEST_INVOCATION"] = str(invocation)
 
     result = subprocess.run(
         [
@@ -168,7 +146,6 @@ chmod +x "$repo/target/release/lf"
             str(repo),
             "--install-dir",
             str(install_dir),
-            "--no-pull",
         ],
         check=True,
         text=True,
@@ -177,9 +154,7 @@ chmod +x "$repo/target/release/lf"
     )
 
     assert "installed:" in result.stdout
-    assert "lf fake" in result.stdout
-    assert (install_dir / "lf").read_text().startswith("#!/usr/bin/env bash")
-    assert "build --release -p loopflow --bin lf" in cargo_log.read_text()
+    assert invocation.read_text() == f"refresh --install-dir {install_dir}"
     assert "scripts/install.py refresh" in (ROOT / "scripts/pull-local-bin.sh").read_text()
 
 
@@ -189,9 +164,7 @@ def test_release_build_workflow_is_credential_free():
         Loader=yaml.BaseLoader,
     )
 
-    assert release["jobs"] == {
-        "packages": {"uses": "./.github/workflows/nightly-packages.yml"}
-    }
+    assert release["jobs"] == {"packages": {"uses": "./.github/workflows/nightly-packages.yml"}}
     assert "schedule" not in release["on"]
 
     workflow_text = (ROOT / ".github/workflows/release.yml").read_text()
@@ -207,6 +180,18 @@ def test_release_build_workflow_is_credential_free():
     assert not any(term in workflow_text for term in forbidden)
     assert not (ROOT / ".github/workflows/weekly-release.yml").exists()
     assert not (ROOT / ".github/workflows/website-deploy.yml").exists()
+
+
+def test_auto_tag_dispatch_matches_the_input_free_release_contract():
+    release = yaml.load(
+        (ROOT / ".github/workflows/release.yml").read_text(),
+        Loader=yaml.BaseLoader,
+    )
+    assert not release["on"]["workflow_dispatch"]
+
+    auto_tag = (ROOT / ".github/workflows/auto-tag.yml").read_text()
+    assert 'gh workflow run release.yml --ref "$version"' in auto_tag
+    assert "-f tag=" not in auto_tag
 
 
 def test_host_publisher_owns_credentialed_release_steps():
@@ -237,29 +222,63 @@ def test_infrastructure_cron_runs_the_host_release_after_telemetry():
 
     config = yaml.safe_load((ROOT / ".lf/config.yaml").read_text())
     assert config["release"]["targets"]["default"]["publisher"] == [
-        "doppler",
-        "run",
-        "--",
+        "loopflow-release-publisher",
         "uv",
         "run",
         "python",
-        "scripts/publish_release.py",
+        "{repo}/scripts/publish_release.py",
     ]
 
     bootstrap = (ROOT / "scripts/bootstrap-cron-host.sh").read_text()
     assert "--remote-native" not in bootstrap
-    assert 'lf ssh "$host" --version' in bootstrap
-    assert 'lf ssh "$host" cron sync --wave "$wave"' in bootstrap
-    assert 'lf ssh "$host" cron list' in bootstrap
-    assert bootstrap.index("scripts/publish_release.py check") < bootstrap.index(
-        'lf ssh "$host" cron sync'
+    assert 'local_home="$(lf home id)"' in bootstrap
+    assert 'placed_home="$(lf status "$wave" --json' in bootstrap
+    assert "--git-common-dir" in bootstrap
+    assert 'lf cron preflight --wave "$wave"' in bootstrap
+    assert '"${minimal_env[@]}" lf cron sync --wave "$wave"' in bootstrap
+    assert 'lf cron list --wave "$wave" --json' in bootstrap
+    assert 'lf cron trigger' in bootstrap
+    assert '--flow telemetry-daily --wait --timeout 15m' in bootstrap
+    assert '--flow release-run --wait --timeout 3h' in bootstrap
+    assert 'lf cron history --wave "$wave" --days 35' in bootstrap
+    assert "env -i" in bootstrap
+    assert "DOPPLER_TOKEN" not in bootstrap
+    assert "loopflow-release-publisher" in bootstrap
+    assert "not local Home %s" not in bootstrap
+    assert "printf '%s\\n' \"$local_home\"" not in bootstrap
+    assert "bootstrap complete: %s owns" not in bootstrap
+    assert "wrong Home in installed cron: {entry!r}" not in bootstrap
+    assert bootstrap.index('lf cron preflight --wave "$wave"') < bootstrap.index(
+        "scripts/publish_release.py check"
     )
+    assert bootstrap.index("scripts/publish_release.py check") < bootstrap.index(
+        'lf cron sync --wave "$wave"'
+    )
+
+    public_contract = "\n".join(
+        [
+            (ROOT / ".lf/config.yaml").read_text(),
+            bootstrap,
+            (ROOT / "release/CRON_HOST.md").read_text(),
+        ]
+    )
+    for private_selector in (
+        "doppler",
+        "--project",
+        "--config",
+        "DOPPLER_PROJECT",
+        "DOPPLER_CONFIG",
+    ):
+        assert private_selector not in public_contract
 
 
 def test_release_installer_uses_the_promotion_boundary_to_activate_the_binary():
     installer = (ROOT / "release/install.sh").read_text()
 
-    assert '"$src" install promote --cli-target "$dst"' in installer
+    assert '"$src" install promote \\' in installer
+    assert '--cli-target "$dst"' in installer
+    assert '--daemon-source "$daemon_src"' in installer
+    assert '--daemon-target "$daemon_dst"' in installer
     assert 'mv -f "$tmp" "$dst"' not in installer
 
 
@@ -279,9 +298,7 @@ def test_loopflow_ui_gate_keeps_mac_test_runners_signed():
 
 
 def test_rust_ci_materializes_drafts_before_running_tests():
-    ci = yaml.load(
-        (ROOT / ".github/workflows/ci.yml").read_text(), Loader=yaml.BaseLoader
-    )
+    ci = yaml.load((ROOT / ".github/workflows/ci.yml").read_text(), Loader=yaml.BaseLoader)
     steps = ci["jobs"]["rust-test"]["steps"]
     names = [step.get("name") for step in steps]
 
@@ -313,7 +330,8 @@ def test_changed_aware_runner_includes_ci_static_checks():
     )
 
     assert "cargo fmt --all -- --check" in result.stdout
-    assert "cargo clippy --all-targets -- -D warnings" in result.stdout
+    assert "cargo clippy --all-targets --jobs 4 -- -D warnings" in result.stdout
+    assert "scripts/materialize_rust_tests.py -- cargo" in result.stdout
     assert "cargo nextest run --all" in result.stdout or "cargo test --all" in result.stdout
     assert "uv run python scripts/check_swift_multiplatform_boundaries.py" in result.stdout
 

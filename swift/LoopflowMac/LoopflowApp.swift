@@ -56,7 +56,7 @@ struct LoopflowApp: App {
         let launchRepoURL = LaunchArguments.repoURL()
 
         WindowGroup {
-            WavesView(
+            PodiumView(
                 portfolioService: portfolioService,
                 initialRepoPath: launchRepoURL?.path
             )
@@ -71,7 +71,7 @@ struct LoopflowApp: App {
             }
         }
         .windowStyle(.automatic)
-        .defaultSize(width: 1080, height: 760)
+        .defaultSize(width: 1280, height: 800)
         .commands {
             CommandGroup(after: .appSettings) {
                 Picker("Appearance", selection: Binding(
@@ -254,6 +254,7 @@ private extension View {
     func uiTestWindowWidth() -> some View {
         if let width = AppTestMode.viewPinnedWidth {
             frame(width: width)
+                .frame(maxHeight: .infinity, alignment: .top)
         } else {
             self
         }

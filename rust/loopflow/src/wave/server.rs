@@ -54,14 +54,16 @@
 //!   - `GET /resident/context` → `{playhead, provider_session}` — the
 //!     pre-turn snapshot and optional typed provider thread; serving it drains
 //!     pending child observations first.
-//! - `POST /messages {op, text}` → `{turn, state}`. `op` is
+//! - `POST /messages {id?, op, text}` → `{message, state, epoch}`. `op` is
 //!   required — `"message"` (queued; the next turn answers it), `"steer"`
 //!   (into the live turn when the harness supports it, else degrades to a
 //!   queued message), `"interrupt"` (cancel the open turn; non-empty text
 //!   becomes the next turn — "interrupt & send"; while idle, an interrupt is
 //!   a no-op success). `text` may be empty only for `interrupt` (400
-//!   otherwise). `turn` is the appended user `Turn`,
-//!   or null for a bare interrupt (nothing was said); `state` is the
+//!   otherwise). A local epoch journals immediately; a Discord epoch uses
+//!   `id` as an enforced provider nonce and returns the source-bearing provider
+//!   message, which the adapter then queues from its canonical Discord id.
+//!   `message` is null only for a bare interrupt (nothing was said); `state` is the
 //!   loop-state name when the request was accepted — ops are applied by the
 //!   loop asynchronously, so watch the stream's `state` events for the
 //!   outcome.
@@ -76,6 +78,7 @@
 //!
 //! `Turn` is [`crate::chat::turns::ChatTurn`].
 
+use std::collections::{HashSet, VecDeque};
 use std::convert::Infallible;
 use std::path::{Path, PathBuf};
 use std::sync::{Arc, Mutex};
@@ -83,6 +86,7 @@ use std::sync::{Arc, Mutex};
 use axum::extract::{DefaultBodyLimit, Query, State};
 use axum::http::{HeaderMap, StatusCode};
 use axum::response::sse::{Event, KeepAlive, Sse};
+use axum::response::IntoResponse;
 use axum::routing::{get, post};
 use axum::{Json, Router};
 use futures_util::stream::{self, Stream, StreamExt};
@@ -95,10 +99,17 @@ use tokio_stream::wrappers::errors::BroadcastStreamRecvError;
 use tokio_stream::wrappers::BroadcastStream;
 
 use crate::chat::turns::ChatTurn;
+use crate::wave::chat::{
+    ChatBacking, ChatBackingHealth, ChatHistorySnapshot, ChatHistoryState, ChatMessageSource,
+    ConversationEpoch, PostMessageErrorResponse, PostMessageResponse, WaveChatMessage,
+};
+use crate::wave::discord::{DiscordError, DiscordProjection};
 use crate::wave::journal::{MessageOp, PendingMessage};
 use crate::wave::playhead::PlayheadView;
 use crate::wave::registry::{process_alive, ObserverSlot, StoreObserver};
-use crate::wave::runtime::{InboxItem, TurnBroadcast, TurnDeltaFrame, TurnFrame, WaveRuntime};
+use crate::wave::runtime::{
+    ChatWriteError, InboxItem, TurnBroadcast, TurnDeltaFrame, TurnFrame, WaveRuntime,
+};
 use crate::wave::state::LoopState;
 use crate::wave::supervisor::SupervisorHandle;
 use crate::wave::wire::{
@@ -228,11 +239,8 @@ struct HealthBody {
     /// refuses to start turns while set, though it keeps serving and queueing.
     paused: bool,
     uptime_seconds: i64,
-}
-
-#[derive(Debug, Serialize)]
-struct ConversationBody {
-    turns: Vec<ChatTurn>,
+    active_epoch: ConversationEpoch,
+    chat_backing_health: ChatBackingHealth,
 }
 
 /// `GET /conversation` query. `limit` is explicitly Optional: `None` serves
@@ -240,12 +248,15 @@ struct ConversationBody {
 #[derive(Debug, Deserialize)]
 struct ConversationQuery {
     limit: Option<usize>,
+    epoch: Option<String>,
 }
 
 /// `POST /messages` request body. `op` is required — explicit, never inferred.
+/// `id` becomes the Discord nonce when the active epoch is provider-backed.
 #[derive(Debug, Deserialize)]
 #[serde(deny_unknown_fields)]
 struct PostMessage {
+    id: Option<String>,
     op: MessageOp,
     text: String,
 }
@@ -274,15 +285,6 @@ struct EventsQuery {
 
 pub(crate) const HUMAN_THREAD_REPLAY_LIMIT: usize = 12;
 
-/// `POST /messages` response. `turn` is the appended user turn; null for a
-/// bare interrupt, which appends nothing. `state` is the loop-state name at
-/// acceptance time.
-#[derive(Debug, Serialize)]
-struct PostMessageResponse {
-    turn: Option<ChatTurn>,
-    state: String,
-}
-
 /// Server state: the runtime, the resident door, the shared observer slot (for the
 /// context door's freshness poll), the supervisor handle (to signal an
 /// attach), and when the server started (for uptime).
@@ -293,7 +295,16 @@ struct ServerState {
     observer: Arc<ObserverSlot>,
     supervisor: Option<SupervisorHandle>,
     shutdown: ShutdownDoor,
+    discord: Option<DiscordProjection>,
+    run_attach: Option<WaveRunAttach>,
     started_at: OffsetDateTime,
+}
+
+#[derive(Debug, Clone)]
+pub(crate) struct WaveRunAttach {
+    pub store: crate::store::SharedStore,
+    pub lease: crate::durable::RunLease,
+    pub cwd: PathBuf,
 }
 
 /// Request-body ceiling for the wave routes. Loopback + token gate this, but
@@ -323,12 +334,28 @@ pub(crate) fn router_with_observer(
     supervisor: Option<SupervisorHandle>,
     shutdown: ShutdownDoor,
 ) -> Router {
+    router_with_chat_projection(
+        runtime, resident, observer, supervisor, shutdown, None, None,
+    )
+}
+
+pub(crate) fn router_with_chat_projection(
+    runtime: Arc<WaveRuntime>,
+    resident: ResidentDoor,
+    observer: Arc<ObserverSlot>,
+    supervisor: Option<SupervisorHandle>,
+    shutdown: ShutdownDoor,
+    discord: Option<DiscordProjection>,
+    run_attach: Option<WaveRunAttach>,
+) -> Router {
     let state = ServerState {
         runtime,
         resident,
         observer,
         supervisor,
         shutdown,
+        discord,
+        run_attach,
         started_at: OffsetDateTime::now_utc(),
     };
     Router::new()
@@ -393,6 +420,16 @@ async fn health_handler(State(state): State<ServerState>) -> Json<HealthBody> {
         .runtime
         .resident_expected()
         .then(|| state.runtime.loop_state().name().to_string());
+    let active_epoch = state.runtime.active_conversation_epoch();
+    let chat_backing_health = if matches!(active_epoch.backing, ChatBacking::Local) {
+        ChatBackingHealth::Ready
+    } else if let Some(discord) = &state.discord {
+        discord.health()
+    } else {
+        ChatBackingHealth::Blocked {
+            detail: "Discord projection is not available on this listener".to_string(),
+        }
+    };
     Json(HealthBody {
         status: "serving".to_string(),
         loop_state,
@@ -400,6 +437,8 @@ async fn health_handler(State(state): State<ServerState>) -> Json<HealthBody> {
         turns: state.runtime.thread_len(),
         paused: state.runtime.paused(),
         uptime_seconds: (OffsetDateTime::now_utc() - state.started_at).whole_seconds(),
+        active_epoch,
+        chat_backing_health,
     })
 }
 
@@ -426,6 +465,41 @@ async fn resident_attach_handler(
                     state.runtime.name()
                 ),
             ));
+        }
+    }
+    if let Some(run_attach) = &state.run_attach {
+        let process_group =
+            crate::engine::process::process_group_id(body.pid).ok_or_else(|| {
+                (
+                    StatusCode::CONFLICT,
+                    format!("resident pid {} has no isolated process group", body.pid),
+                )
+            })?;
+        let run = run_attach
+            .store
+            .current_run(&run_attach.lease.work)
+            .await
+            .map_err(|error| (StatusCode::INTERNAL_SERVER_ERROR, error.to_string()))?
+            .ok_or_else(|| {
+                (
+                    StatusCode::CONFLICT,
+                    "Wave Run authority disappeared before resident attach".to_string(),
+                )
+            })?;
+        if run.state == crate::durable::RunState::Reserved {
+            run_attach
+                .store
+                .advance_run(
+                    &run_attach.lease,
+                    crate::durable::RunAdvance::RunStarting {
+                        containment: crate::durable::Containment::ProcessGroup {
+                            id: i64::from(process_group),
+                        },
+                        cwd: run_attach.cwd.clone(),
+                    },
+                )
+                .await
+                .map_err(|error| (StatusCode::INTERNAL_SERVER_ERROR, error.to_string()))?;
         }
     }
     state.resident.record_pid(body.pid);
@@ -484,12 +558,74 @@ async fn resident_context_handler(
 async fn conversation_handler(
     State(state): State<ServerState>,
     Query(query): Query<ConversationQuery>,
-) -> Json<ConversationBody> {
+) -> Result<Json<ChatHistorySnapshot>, (StatusCode, String)> {
+    if query.limit == Some(0) {
+        return Err((StatusCode::BAD_REQUEST, "limit must be at least 1".into()));
+    }
     // The tail is taken inside the runtime lock: a `?limit=N` request clones
     // only the N turns it serves, not the whole thread.
-    Json(ConversationBody {
-        turns: state.runtime.thread_tail(query.limit),
-    })
+    let active_epoch = state.runtime.active_conversation_epoch();
+    let epochs = state.runtime.conversation_epochs();
+    let selected_epoch = match query.epoch.as_deref() {
+        Some(id) => epochs
+            .iter()
+            .find(|epoch| epoch.id == id)
+            .cloned()
+            .ok_or_else(|| (StatusCode::NOT_FOUND, format!("unknown chat epoch '{id}'")))?,
+        None => active_epoch.clone(),
+    };
+    let fetch_limit = query.limit.map(|limit| limit.saturating_add(1));
+    let (state_value, detail, mut messages) = match &selected_epoch.backing {
+        ChatBacking::Local => (
+            ChatHistoryState::Available,
+            None,
+            state
+                .runtime
+                .chat_messages(Some(&selected_epoch.id), fetch_limit),
+        ),
+        ChatBacking::Discord { .. }
+            if state
+                .runtime
+                .is_imported_conversation_epoch(&selected_epoch.id) =>
+        {
+            (
+                ChatHistoryState::Unavailable,
+                Some(
+                    "Legacy Discord history has no safe provider boundary; open the channel in Discord"
+                        .to_string(),
+                ),
+                Vec::new(),
+            )
+        }
+        ChatBacking::Discord { .. } => match &state.discord {
+            Some(discord) => match discord
+                .history(&state.runtime, &selected_epoch, fetch_limit)
+                .await
+            {
+                Ok(messages) => (ChatHistoryState::Available, None, messages),
+                Err(error) => (
+                    ChatHistoryState::Unavailable,
+                    Some(error.to_string()),
+                    Vec::new(),
+                ),
+            },
+            None => (
+                ChatHistoryState::Unavailable,
+                Some("Discord history requires the active Wave listener".to_string()),
+                Vec::new(),
+            ),
+        },
+    };
+    let truncated = query.limit.is_some_and(|limit| messages.len() > limit);
+    messages = tail_wave_messages(messages, query.limit);
+    Ok(Json(ChatHistorySnapshot {
+        epochs,
+        selected_epoch_id: Some(selected_epoch.id),
+        state: state_value,
+        detail,
+        messages,
+        truncated,
+    }))
 }
 
 /// The door is opaque on resident ops: this handler validates SHAPE only —
@@ -502,38 +638,87 @@ async fn conversation_handler(
 async fn messages_handler(
     State(state): State<ServerState>,
     Json(body): Json<PostMessage>,
-) -> Result<Json<PostMessageResponse>, (StatusCode, String)> {
+) -> axum::response::Response {
     if body.text.trim().is_empty() && !matches!(body.op, MessageOp::Interrupt) {
-        return Err((
+        return (
             StatusCode::BAD_REQUEST,
-            "text is required for every op but interrupt".to_string(),
-        ));
+            Json(PostMessageErrorResponse {
+                error: "text is required for every op but interrupt".to_string(),
+                epoch: state.runtime.active_conversation_epoch(),
+            }),
+        )
+            .into_response();
     }
-    let turn = state
-        .runtime
-        .try_deliver(body.op, body.text)
-        .map_err(|err| {
-            (
-                StatusCode::INTERNAL_SERVER_ERROR,
-                format!("message was not accepted: {err}"),
+    let active_epoch = state.runtime.active_conversation_epoch();
+    if !body.text.trim().is_empty() && matches!(active_epoch.backing, ChatBacking::Discord { .. }) {
+        if let Some(discord) = &state.discord {
+            let request_id = body
+                .id
+                .as_deref()
+                .filter(|id| !id.trim().is_empty())
+                .map(str::to_string)
+                .unwrap_or_else(|| uuid::Uuid::new_v4().to_string());
+            return match discord
+                .post_authored(&state.runtime, body.op, body.text.trim(), &request_id)
+                .await
+            {
+                Ok(message) => Json(PostMessageResponse {
+                    message: Some(message),
+                    state: state.runtime.loop_state().name().to_string(),
+                    epoch: active_epoch,
+                })
+                .into_response(),
+                Err(error) => {
+                    let status = if matches!(error, DiscordError::MessageTooLong { .. }) {
+                        StatusCode::BAD_REQUEST
+                    } else {
+                        StatusCode::BAD_GATEWAY
+                    };
+                    (
+                        status,
+                        Json(PostMessageErrorResponse {
+                            error: format!("message was not accepted: {error}"),
+                            epoch: active_epoch,
+                        }),
+                    )
+                        .into_response()
+                }
+            };
+        }
+    }
+    let turn = match state.runtime.try_deliver_authored(body.op, body.text) {
+        Ok(turn) => turn,
+        Err(error) => {
+            let status = match &error {
+                ChatWriteError::OpenDiscord => StatusCode::CONFLICT,
+                ChatWriteError::Journal(_) => StatusCode::INTERNAL_SERVER_ERROR,
+            };
+            return (
+                status,
+                Json(PostMessageErrorResponse {
+                    error: format!("message was not accepted: {error}"),
+                    epoch: state.runtime.active_conversation_epoch(),
+                }),
             )
-        })?;
-    Ok(Json(PostMessageResponse {
-        turn,
+                .into_response();
+        }
+    };
+    let message = turn.map(|turn| state.runtime.committed_local_message(turn));
+    Json(PostMessageResponse {
+        message,
         state: state.runtime.loop_state().name().to_string(),
-    }))
+        epoch: state.runtime.active_conversation_epoch(),
+    })
+    .into_response()
 }
 
-/// The served mind's thread as SSE: the loop state, the thread on connect
-/// (open turn included, status `running`), then live frames — `state` on every
-/// transition; `turn` (whole turn, replace-by-id) when a turn opens or
-/// finalizes, with `turn-delta` (one increment, absorb-by-id) for in-turn
-/// growth so a per-token turn does not re-serialize whole each frame; `resync`
-/// when the turn broadcast lagged (the client reconnects for a fresh atomic
-/// snapshot). Snapshot and subscription are atomic in the runtime (broadcasts
-/// share the append lock), so no live frame is
-/// ever older than the replayed snapshot, and the client's delta reconstruction
-/// picks up exactly where the snapshot's open turn left off.
+/// The served mind's thread as SSE. Human subscriptions open with epoch and
+/// backing health, then carry source-bearing `message` frames and plain
+/// `message-delta` increments. Resident inbox subscriptions keep the private
+/// `turn`/`turn-delta` wire. Both emit `resync` when a turn broadcast lags so
+/// the client reconnects for a fresh atomic snapshot. Snapshot and
+/// subscription are atomic in the runtime (broadcasts share the append lock),
+/// so no live frame is older than the replayed snapshot.
 ///
 /// There is no secondary routing scope inside a Wave listener.
 async fn events_handler(
@@ -548,6 +733,46 @@ async fn events_handler(
         Some(query.limit.unwrap_or(HUMAN_THREAD_REPLAY_LIMIT))
     };
     let sub = state.runtime.subscribe_with_snapshot(replay_limit);
+    let epoch = sub.epoch.clone();
+    let (discord_replay, discord_seen, backing_health) =
+        if !include_inbox && matches!(epoch.backing, ChatBacking::Discord { .. }) {
+            match &state.discord {
+                Some(discord) => {
+                    let fetch_limit = replay_limit.unwrap_or(HUMAN_THREAD_REPLAY_LIMIT).max(100);
+                    match discord
+                        .history(&state.runtime, &epoch, Some(fetch_limit))
+                        .await
+                    {
+                        Ok(messages) => {
+                            let seen = discord_message_ids(&messages);
+                            let replay = tail_wave_messages(messages, replay_limit)
+                                .into_iter()
+                                .map(|message| Ok(wave_message_event(&message)))
+                                .collect();
+                            (replay, seen, discord.health())
+                        }
+                        Err(error) => {
+                            let health = match discord.health() {
+                                blocked @ ChatBackingHealth::Blocked { .. } => blocked,
+                                _ => ChatBackingHealth::Retrying {
+                                    detail: error.to_string(),
+                                },
+                            };
+                            (Vec::new(), HashSet::new(), health)
+                        }
+                    }
+                }
+                None => (
+                    Vec::new(),
+                    HashSet::new(),
+                    ChatBackingHealth::Blocked {
+                        detail: "Discord history requires the active Wave listener".to_string(),
+                    },
+                ),
+            }
+        } else {
+            (Vec::new(), HashSet::new(), ChatBackingHealth::Ready)
+        };
     // The resident's subscription replays the pending queue after the
     // thread — its boot inbox. Consumption is validated at the resident
     // door, so a stale replay can never double-consume.
@@ -577,17 +802,48 @@ async fn events_handler(
     } else {
         Vec::new()
     };
+    let turn_replay: Vec<Result<Event, Infallible>> = if include_inbox {
+        sub.turns
+            .into_iter()
+            .map(|turn| Ok(turn_event(&turn)))
+            .collect()
+    } else if matches!(epoch.backing, ChatBacking::Local) {
+        sub.turns
+            .into_iter()
+            .filter_map(|turn| local_message_event(&epoch, turn).map(Ok))
+            .collect()
+    } else {
+        discord_replay
+    };
+    let epoch_replay = (!include_inbox)
+        .then(|| Ok(conversation_epoch_event(&epoch)))
+        .into_iter();
     let replay = stream::iter(
-        std::iter::once(Ok(state_event(&sub.state)))
+        epoch_replay
+            .chain((!include_inbox).then(|| Ok(backing_health_event(&backing_health))))
+            .chain(std::iter::once(Ok(state_event(&sub.state))))
             .chain(sub.playhead.into_iter().map(|p| Ok(playhead_event(&p))))
-            .chain(sub.turns.into_iter().map(|t| Ok(turn_event(&t))))
+            .chain(turn_replay)
             .chain(inbox_replay),
     );
-    // Whole turns ride `turn` frames, in-turn growth rides `turn-delta` frames,
-    // and a lag emits an explicit `resync` (never a silent drop — see
-    // `turn_event_stream`). The frame's wire JSON was serialized once at the
-    // send site.
-    let live_turns = turn_event_stream(sub.turn_rx);
+    // The resident keeps private turn frames; human chat converts the same
+    // broadcasts into source-bearing messages. Both make lag an explicit
+    // `resync`, never a silent drop.
+    let live_turns: BoxedEventStream = if include_inbox {
+        Box::pin(turn_event_stream(sub.turn_rx))
+    } else if matches!(epoch.backing, ChatBacking::Local) {
+        Box::pin(chat_message_event_stream(sub.turn_rx, epoch))
+    } else if let Some(discord) = state.discord.clone() {
+        Box::pin(discord_message_event_stream(
+            discord,
+            state.runtime.clone(),
+            epoch,
+            discord_seen,
+            backing_health,
+        ))
+    } else {
+        Box::pin(stream::empty())
+    };
     // Lagged: fine — the next transition carries the current state.
     let live_states = live_stream(sub.state_rx, |s| state_event(&s));
     let live_playhead = live_stream(sub.playhead_rx, |p| playhead_event(&p));
@@ -666,6 +922,116 @@ fn turn_event_stream(
     })
 }
 
+fn chat_message_event_stream(
+    rx: broadcast::Receiver<TurnBroadcast>,
+    epoch: ConversationEpoch,
+) -> impl Stream<Item = Result<Event, Infallible>> + Send + 'static {
+    stream::unfold(Some(BroadcastStream::new(rx)), move |state| {
+        let epoch = epoch.clone();
+        async move {
+            let mut inner = state?;
+            loop {
+                let recv = inner.next().await?;
+                match recv {
+                    Ok(TurnBroadcast::Whole(frame)) => {
+                        if let Some(event) = local_message_event(&epoch, frame.turn.clone()) {
+                            return Some((Ok(event), Some(inner)));
+                        }
+                    }
+                    Ok(TurnBroadcast::Delta(frame)) => {
+                        let Some(journal_seq) = turn_id_seq(&frame.delta.turn_id) else {
+                            continue;
+                        };
+                        if journal_seq <= epoch.journal_seq {
+                            continue;
+                        }
+                        return Some((
+                            Ok(Event::default().event("message-delta").data(
+                                serde_json::to_string(&frame.delta)
+                                    .expect("TurnDelta serializes to JSON"),
+                            )),
+                            Some(inner),
+                        ));
+                    }
+                    Err(BroadcastStreamRecvError::Lagged(_)) => {
+                        return Some((
+                            Ok(Event::default().event("resync").data("reconnect")),
+                            None,
+                        ));
+                    }
+                }
+            }
+        }
+    })
+}
+
+struct DiscordMessageStreamState {
+    projection: DiscordProjection,
+    runtime: Arc<WaveRuntime>,
+    epoch: ConversationEpoch,
+    seen: HashSet<String>,
+    pending: VecDeque<WaveChatMessage>,
+    health: ChatBackingHealth,
+}
+
+fn discord_message_event_stream(
+    projection: DiscordProjection,
+    runtime: Arc<WaveRuntime>,
+    epoch: ConversationEpoch,
+    seen: HashSet<String>,
+    health: ChatBackingHealth,
+) -> impl Stream<Item = Result<Event, Infallible>> + Send + 'static {
+    let state = DiscordMessageStreamState {
+        projection,
+        runtime,
+        epoch,
+        seen,
+        pending: VecDeque::new(),
+        health,
+    };
+    stream::unfold(state, |mut state| async move {
+        loop {
+            if let Some(message) = state.pending.pop_front() {
+                return Some((Ok(wave_message_event(&message)), state));
+            }
+            let provider_health = state.projection.health();
+            if provider_health != state.health {
+                state.health = provider_health;
+                return Some((Ok(backing_health_event(&state.health)), state));
+            }
+            tokio::time::sleep(std::time::Duration::from_secs(2)).await;
+            match state
+                .projection
+                .history(&state.runtime, &state.epoch, Some(100))
+                .await
+            {
+                Ok(messages) => {
+                    for message in messages {
+                        let Some(id) = discord_message_id(&message) else {
+                            continue;
+                        };
+                        if state.seen.insert(id.to_string()) {
+                            state.pending.push_back(message);
+                        }
+                    }
+                }
+                Err(error) => {
+                    let health = match state.projection.health() {
+                        blocked @ ChatBackingHealth::Blocked { .. } => blocked,
+                        _ => ChatBackingHealth::Retrying {
+                            detail: error.to_string(),
+                        },
+                    };
+                    if health != state.health {
+                        state.health = health;
+                        return Some((Ok(backing_health_event(&state.health)), state));
+                    }
+                }
+            }
+        }
+    })
+}
+
 /// One turn broadcast poll resolved to what it becomes on the wire. A lag is
 /// `Resync`, NEVER a silently dropped frame — that distinction is the whole
 /// point of this substream, so it is pinned by a unit test.
@@ -689,6 +1055,68 @@ fn turn_event(turn: &ChatTurn) -> Event {
         .data(serde_json::to_string(turn).expect("ChatTurn serializes to JSON"))
 }
 
+fn conversation_epoch_event(epoch: &ConversationEpoch) -> Event {
+    Event::default()
+        .event("epoch")
+        .data(serde_json::to_string(epoch).expect("ConversationEpoch serializes to JSON"))
+}
+
+fn backing_health_event(health: &ChatBackingHealth) -> Event {
+    Event::default()
+        .event("backing-health")
+        .data(serde_json::to_string(health).expect("ChatBackingHealth serializes to JSON"))
+}
+
+fn wave_message_event(message: &WaveChatMessage) -> Event {
+    Event::default()
+        .event("message")
+        .data(serde_json::to_string(message).expect("WaveChatMessage serializes to JSON"))
+}
+
+fn discord_message_ids(messages: &[WaveChatMessage]) -> HashSet<String> {
+    messages
+        .iter()
+        .filter_map(discord_message_id)
+        .map(str::to_string)
+        .collect()
+}
+
+fn discord_message_id(message: &WaveChatMessage) -> Option<&str> {
+    match &message.source {
+        ChatMessageSource::Discord { message_id, .. } => Some(message_id),
+        ChatMessageSource::Local { .. } => None,
+    }
+}
+
+fn tail_wave_messages(
+    messages: Vec<WaveChatMessage>,
+    limit: Option<usize>,
+) -> Vec<WaveChatMessage> {
+    let take = limit.unwrap_or(messages.len()).min(messages.len());
+    messages[messages.len() - take..].to_vec()
+}
+
+fn local_message_event(epoch: &ConversationEpoch, turn: ChatTurn) -> Option<Event> {
+    let journal_seq = turn_id_seq(&turn.id)?;
+    if journal_seq <= epoch.journal_seq {
+        return None;
+    }
+    let message = WaveChatMessage {
+        epoch_id: epoch.id.clone(),
+        source: ChatMessageSource::Local { journal_seq },
+        turn,
+    };
+    Some(
+        Event::default()
+            .event("message")
+            .data(serde_json::to_string(&message).expect("WaveChatMessage serializes to JSON")),
+    )
+}
+
+fn turn_id_seq(turn_id: &str) -> Option<u64> {
+    turn_id.strip_prefix("turn-")?.parse().ok()
+}
+
 fn playhead_event(playhead: &PlayheadView) -> Event {
     Event::default()
         .event("playhead")
@@ -710,6 +1138,7 @@ fn pending_inbox_frame(message: &PendingMessage) -> InboxFrame {
         id: message.id.0.clone(),
         op: message.op,
         text: message.text.clone(),
+        source: message.source.clone(),
     }
 }
 
@@ -851,6 +1280,34 @@ mod tests {
         let turn = ChatTurn::user(id.to_string(), "hi".to_string());
         let json = serde_json::to_string(&turn).expect("serialize");
         TurnBroadcast::Whole(Arc::new(TurnFrame { turn, json }))
+    }
+
+    #[test]
+    fn post_message_response_fixture_round_trips() {
+        let fixture = include_str!(concat!(
+            env!("CARGO_MANIFEST_DIR"),
+            "/../../tests/fixtures/dto/post_message_response.json"
+        ));
+        let response: PostMessageResponse =
+            serde_json::from_str(fixture).expect("decode post message response fixture");
+        let encoded = serde_json::to_string(&response).expect("encode post message response");
+        let decoded: PostMessageResponse =
+            serde_json::from_str(&encoded).expect("re-decode post message response");
+        assert_eq!(decoded, response);
+    }
+
+    #[test]
+    fn post_message_error_response_fixture_round_trips() {
+        let fixture = include_str!(concat!(
+            env!("CARGO_MANIFEST_DIR"),
+            "/../../tests/fixtures/dto/post_message_error_response.json"
+        ));
+        let response: PostMessageErrorResponse =
+            serde_json::from_str(fixture).expect("decode post message error fixture");
+        let encoded = serde_json::to_string(&response).expect("encode post message error");
+        let decoded: PostMessageErrorResponse =
+            serde_json::from_str(&encoded).expect("re-decode post message error");
+        assert_eq!(decoded, response);
     }
 
     #[test]
@@ -1012,7 +1469,11 @@ mod tests {
                 .contains("message was not accepted"));
             assert!(runtime.thread_snapshot().is_empty());
             assert!(runtime.pending_messages().is_empty());
-            assert!(read_events(&journal_path(tmp.path(), "ship")).is_empty());
+            assert_eq!(
+                read_events(&journal_path(tmp.path(), "ship")).len(),
+                1,
+                "only the epoch boundary exists"
+            );
             assert!(matches!(
                 turn_rx.try_recv(),
                 Err(broadcast::error::TryRecvError::Empty)
@@ -1031,15 +1492,16 @@ mod tests {
             .expect("retry response");
         assert_eq!(response.status(), StatusCode::OK);
         let accepted: serde_json::Value = response.json().await.expect("accepted body");
-        assert_eq!(accepted["turn"]["id"], "turn-1");
-        assert_eq!(accepted["turn"]["role"], "user");
-        assert_eq!(accepted["turn"]["text"], "keep this");
+        assert_eq!(accepted["message"]["turn"]["id"], "turn-2");
+        assert_eq!(accepted["message"]["turn"]["role"], "user");
+        assert_eq!(accepted["message"]["turn"]["text"], "keep this");
+        assert_eq!(accepted["message"]["source"]["kind"], "local");
         assert_eq!(runtime.thread_snapshot().len(), 1);
         assert_eq!(runtime.pending_messages().len(), 1);
 
         let events = read_events(&journal_path(tmp.path(), "ship"));
-        assert_eq!(events.len(), 1);
-        assert!(matches!(events[0].kind, EventKind::UserMessage { .. }));
+        assert_eq!(events.len(), 2);
+        assert!(matches!(events[1].kind, EventKind::UserMessage { .. }));
         server.abort();
         let _ = server.await;
         drop(runtime);
@@ -1047,8 +1509,89 @@ mod tests {
         let reopened = WaveRuntime::open("ship".into(), tmp.path().to_path_buf()).expect("reopen");
         let transcript = reopened.thread_snapshot();
         assert_eq!(transcript.len(), 1);
-        assert_eq!(transcript[0].id, "turn-1");
+        assert_eq!(transcript[0].id, "turn-2");
         assert_eq!(transcript[0].text, "keep this");
+    }
+
+    #[tokio::test]
+    async fn discord_backing_rejects_compose_with_open_action_and_no_local_write() {
+        let tmp = tempfile::tempdir().expect("tempdir");
+        let binding = crate::wave::journal::DiscordChatBinding {
+            guild_id: "guild".into(),
+            channel_id: "channel".into(),
+        };
+        let runtime = WaveRuntime::open_with_backing(
+            "ship".into(),
+            tmp.path().to_path_buf(),
+            ChatBacking::discord(&binding),
+        )
+        .expect("open Discord epoch");
+        let app = router_with_observer(
+            runtime.clone(),
+            ResidentDoor::new("resident"),
+            Arc::new(ObserverSlot::new(runtime.clone(), None)),
+            None,
+            ShutdownDoor::new(),
+        );
+        let listener = tokio::net::TcpListener::bind("127.0.0.1:0")
+            .await
+            .expect("bind");
+        let addr = listener.local_addr().expect("address");
+        let server = tokio::spawn(async move {
+            axum::serve(listener, app).await.ok();
+        });
+        let client = reqwest::Client::new();
+        let before = read_events(&journal_path(tmp.path(), "ship"));
+
+        let response = client
+            .post(format!("http://{addr}/messages"))
+            .json(&serde_json::json!({"op": "message", "text": "shadow"}))
+            .send()
+            .await
+            .expect("compose response");
+        assert_eq!(response.status(), StatusCode::CONFLICT);
+        let rejection: serde_json::Value = response.json().await.expect("rejection JSON");
+        assert_eq!(
+            rejection["epoch"]["backing"]["open"]["kind"],
+            "open_discord"
+        );
+        assert_eq!(
+            rejection["epoch"]["backing"]["open"]["url"],
+            "https://discord.com/channels/guild/channel"
+        );
+        assert_eq!(
+            read_events(&journal_path(tmp.path(), "ship")),
+            before,
+            "Discord rejection appends no local turn"
+        );
+        assert!(runtime.pending_messages().is_empty());
+
+        let interrupt = client
+            .post(format!("http://{addr}/messages"))
+            .json(&serde_json::json!({"op": "interrupt", "text": ""}))
+            .send()
+            .await
+            .expect("bare interrupt response");
+        assert_eq!(interrupt.status(), StatusCode::OK);
+        let interrupt: serde_json::Value = interrupt.json().await.expect("interrupt JSON");
+        assert!(interrupt["message"].is_null());
+
+        let conversation: serde_json::Value = client
+            .get(format!("http://{addr}/conversation"))
+            .send()
+            .await
+            .expect("conversation response")
+            .json()
+            .await
+            .expect("conversation JSON");
+        assert_eq!(conversation["epochs"][0]["backing"]["kind"], "discord");
+        assert_eq!(
+            conversation["selected_epoch_id"],
+            conversation["epochs"][0]["id"]
+        );
+        assert_eq!(conversation["state"], "unavailable");
+        assert_eq!(conversation["messages"], serde_json::json!([]));
+        server.abort();
     }
 
     #[tokio::test]

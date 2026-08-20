@@ -48,30 +48,37 @@ public enum RunLifecycleStateRecord: String, Codable, Sendable, Hashable {
 }
 
 public enum RunTriggerRecord: Codable, Sendable, Hashable {
+    case migration
     case input(basis: WorkBasis)
     case time(scheduledAt: String)
     case event(WorkEventReference)
     case child(WorkReference)
     case ciIncident(id: String)
     case recovery(priorRunId: String)
+    case homeUpgrade(upgradeId: String, priorRunId: String?)
     case user
 
     private enum CodingKeys: String, CodingKey {
         case kind, basis, event, work
+        case upgradeId = "upgrade_id"
         case scheduledAt = "scheduled_at"
         case incidentId = "incident_id"
         case priorRunId = "prior_run_id"
     }
 
     private enum Kind: String, Codable {
-        case input, time, event, child
+        case migration, input, time, event, child
         case ciIncident = "ci_incident"
-        case recovery, user
+        case recovery
+        case homeUpgrade = "home_upgrade"
+        case user
     }
 
     public init(from decoder: Decoder) throws {
         let values = try decoder.container(keyedBy: CodingKeys.self)
         switch try values.decode(Kind.self, forKey: .kind) {
+        case .migration:
+            self = .migration
         case .input:
             self = .input(basis: try values.decode(WorkBasis.self, forKey: .basis))
         case .time:
@@ -84,6 +91,11 @@ public enum RunTriggerRecord: Codable, Sendable, Hashable {
             self = .ciIncident(id: try values.decode(String.self, forKey: .incidentId))
         case .recovery:
             self = .recovery(priorRunId: try values.decode(String.self, forKey: .priorRunId))
+        case .homeUpgrade:
+            self = .homeUpgrade(
+                upgradeId: try values.decode(String.self, forKey: .upgradeId),
+                priorRunId: try values.decodeIfPresent(String.self, forKey: .priorRunId)
+            )
         case .user:
             self = .user
         }
@@ -92,6 +104,8 @@ public enum RunTriggerRecord: Codable, Sendable, Hashable {
     public func encode(to encoder: Encoder) throws {
         var values = encoder.container(keyedBy: CodingKeys.self)
         switch self {
+        case .migration:
+            try values.encode(Kind.migration, forKey: .kind)
         case .input(let basis):
             try values.encode(Kind.input, forKey: .kind)
             try values.encode(basis, forKey: .basis)
@@ -110,6 +124,10 @@ public enum RunTriggerRecord: Codable, Sendable, Hashable {
         case .recovery(let priorRunId):
             try values.encode(Kind.recovery, forKey: .kind)
             try values.encode(priorRunId, forKey: .priorRunId)
+        case .homeUpgrade(let upgradeId, let priorRunId):
+            try values.encode(Kind.homeUpgrade, forKey: .kind)
+            try values.encode(upgradeId, forKey: .upgradeId)
+            try values.encodeIfPresent(priorRunId, forKey: .priorRunId)
         case .user:
             try values.encode(Kind.user, forKey: .kind)
         }
@@ -121,6 +139,7 @@ public struct RunRecord: Codable, Sendable, Hashable {
     public let work: WorkReference
     public let epochId: String
     public let homeId: String
+    public let runtimeGeneration: UInt64?
     public let state: RunLifecycleStateRecord
     public let trigger: RunTriggerRecord
     public let retryOf: String?
@@ -134,6 +153,7 @@ public struct RunRecord: Codable, Sendable, Hashable {
         case id, work, state, trigger, containment, cwd
         case epochId = "epoch_id"
         case homeId = "home_id"
+        case runtimeGeneration = "runtime_generation"
         case retryOf = "retry_of"
         case createdAt = "created_at"
         case startedAt = "started_at"

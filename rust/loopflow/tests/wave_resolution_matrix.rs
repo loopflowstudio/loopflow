@@ -14,10 +14,8 @@
 use std::collections::HashSet;
 use std::io::Write;
 use std::os::unix::fs::PermissionsExt;
-use std::os::unix::process::CommandExt;
 use std::path::Path;
 use std::process::{Command, Stdio};
-use std::time::{Duration, Instant};
 
 use clap::{ArgAction, CommandFactory};
 use loopflow::id::WaveId;
@@ -54,10 +52,6 @@ struct Special {
     /// `NoContext` → exit 0 "dropped" (publish-to-no-subscriber). `chat post`
     /// drops silently instead of erroring.
     silent_drop: bool,
-    /// Blocks (server or subscriber); needs a kill timeout.
-    long_running: bool,
-    /// Needs `LF_LINEAR_WEBHOOK_SECRET` to reach wave resolution.
-    needs_secret: bool,
     /// Pipes this text to stdin (for commands whose `trailing_var_arg` would
     /// swallow `--wave` if text were on the command line).
     stdin: Option<&'static str>,
@@ -67,8 +61,6 @@ impl Special {
     const NONE: Self = Self {
         global_default: false,
         silent_drop: false,
-        long_running: false,
-        needs_secret: false,
         stdin: None,
     };
 }
@@ -94,7 +86,19 @@ const AMBIENT_ONLY: &[&[&str]] = &[];
 /// Commands whose optional `--wave` narrows a machine-wide result instead of
 /// selecting ambient Wave context. These must not inherit `LF_WAVE_ID` or
 /// reject names absent from the registry.
-const FILTER_ONLY: &[&[&str]] = &[&["ci"], &["runs"]];
+const FILTER_ONLY: &[&[&str]] = &[&["activity"], &["ci"], &["cron", "list"], &["runs"]];
+
+/// Commands that require a Wave on the command line and therefore never
+/// resolve ambient context. Cron keeps these explicit because scheduled host
+/// operations must name the installed Wave whose authority they validate.
+const EXPLICIT_WAVE_ONLY: &[&[&str]] = &[
+    &["cron", "preflight"],
+    &["cron", "sync"],
+    &["cron", "run"],
+    &["cron", "history"],
+    &["cron", "trigger"],
+    &["cron", "remove"],
+];
 
 const COMMANDS: &[Cmd] = &[
     // ── Reads ────────────────────────────────────────────────────────────
@@ -206,14 +210,6 @@ const COMMANDS: &[Cmd] = &[
         special: Special::NONE,
     },
     Cmd {
-        id: "pm reteam",
-        path: &["pm", "reteam"],
-        base_args: &["pm", "reteam"],
-        wave_form: WaveForm::Flag,
-        kind: Kind::Mutation,
-        special: Special::NONE,
-    },
-    Cmd {
         id: "pm task create",
         path: &["pm", "task", "create"],
         base_args: &["pm", "task", "create", "--project", "test", "--title", "T"],
@@ -288,35 +284,6 @@ const COMMANDS: &[Cmd] = &[
         wave_form: WaveForm::Flag,
         kind: Kind::Mutation,
         special: Special::NONE,
-    },
-    Cmd {
-        id: "pm webhook serve",
-        path: &["pm", "webhook", "serve"],
-        base_args: &["pm", "webhook", "serve", "--addr", "127.0.0.1:0"],
-        wave_form: WaveForm::Flag,
-        kind: Kind::Mutation,
-        special: Special {
-            needs_secret: true,
-            long_running: true,
-            ..Special::NONE
-        },
-    },
-    Cmd {
-        id: "pm webhook register",
-        path: &["pm", "webhook", "register"],
-        base_args: &[
-            "pm",
-            "webhook",
-            "register",
-            "--url",
-            "https://example.com/wh",
-        ],
-        wave_form: WaveForm::Flag,
-        kind: Kind::Mutation,
-        special: Special {
-            needs_secret: true,
-            ..Special::NONE
-        },
     },
     Cmd {
         id: "cron add",
@@ -407,7 +374,7 @@ fn make_envs(product_uuid: &str, stale_uuid: &str) -> Vec<Env> {
             id: "stale-name",
             wave_id: Some("ghost".to_string()),
             explicit_wave: None,
-            default_expected: Outcome::Resolved,
+            default_expected: Outcome::StaleIdentity,
         },
         Env {
             id: "explicit-unknown",
@@ -430,13 +397,6 @@ fn expected_outcome(cmd: &Cmd, env: &Env) -> Outcome {
     // Creation flows may name the Wave being registered.
     if env.id == "explicit-unknown" && cmd.id == "pm init" {
         return Outcome::Resolved;
-    }
-
-    // Project start now resolves caller authority at the CLI surface before
-    // creating anything. An inherited hand-set name without a registry row is
-    // stale transport evidence, not an explicit target selection.
-    if cmd.id == "project start" && env.id == "stale-name" {
-        return Outcome::StaleIdentity;
     }
 
     if env.id == "absent" {
@@ -496,6 +456,10 @@ fn classify(output: &std::process::Output) -> Outcome {
 
 // ─── Helpers ────────────────────────────────────────────────────────────
 
+fn open_test_store(path: &Path) -> SqliteStore {
+    SqliteStore::new(path).expect("open store")
+}
+
 /// Seed a machine home with one registered wave ("product"), a PM snapshot,
 /// a wave directory with MEMORY.md, and a git repo on a clean `main` branch.
 fn seed(home: &Path, repo: &Path) -> Wave {
@@ -527,21 +491,16 @@ fn seed(home: &Path, repo: &Path) -> Wave {
         git(&["config", "user.name", "Matrix Test"]);
     }
 
-    let store = SqliteStore::new(&home.join("loopflow.db")).expect("open store");
+    let store = open_test_store(&home.join("loopflow.db"));
     let wave = Wave::new(
         WaveId::new(),
         "product".to_string(),
         repo.display().to_string(),
     );
     store.create_wave(&wave).expect("register wave");
-    let repo_key = std::fs::canonicalize(repo)
-        .expect("canonicalize repo")
-        .display()
-        .to_string();
     store
         .put_pm_snapshot(&PmSnapshotRow {
-            repo: repo_key,
-            wave: "product".to_string(),
+            wave_id: wave.id().clone(),
             provider: "linear".to_string(),
             initiative: "initiative-1".to_string(),
             synced_at: chrono::Utc::now().timestamp(),
@@ -612,10 +571,6 @@ fn run_lf(home: &Path, repo: &Path, cmd: &Cmd, env: &Env) -> std::process::Outpu
     if let Some(id) = &env.wave_id {
         command.env("LF_WAVE_ID", id);
     }
-    if cmd.special.needs_secret {
-        command.env("LF_LINEAR_WEBHOOK_SECRET", "test");
-    }
-
     if let Some(stdin_text) = cmd.special.stdin {
         command
             .stdin(Stdio::piped())
@@ -635,32 +590,6 @@ fn run_lf(home: &Path, repo: &Path, cmd: &Cmd, env: &Env) -> std::process::Outpu
         let output = child.wait_with_output().expect("wait");
         let _ = handle.join();
         return output;
-    }
-
-    if cmd.special.long_running {
-        command
-            .stdout(Stdio::piped())
-            .stderr(Stdio::piped())
-            .process_group(0);
-        let mut child = command.spawn().expect("spawn");
-        let deadline = Instant::now() + Duration::from_secs(3);
-        loop {
-            match child.try_wait() {
-                Ok(Some(_)) => return child.wait_with_output().expect("wait"),
-                Ok(None) if Instant::now() < deadline => {
-                    std::thread::sleep(Duration::from_millis(50));
-                }
-                _ => {
-                    // SAFETY: the child created its own process group above,
-                    // and its pid is therefore the group id. A negative pid
-                    // targets only that test-owned group and its descendants.
-                    unsafe {
-                        libc::kill(-(child.id() as i32), libc::SIGKILL);
-                    }
-                    return child.wait_with_output().expect("wait after kill");
-                }
-            }
-        }
     }
 
     command.output().expect("lf runs")
@@ -782,10 +711,11 @@ fn find_clap_command<'a>(root: &'a clap::Command, path: &[&str]) -> Option<&'a c
 }
 
 /// The registry is complete: every `wave`-bearing clap leaf is classified as
-/// either a resolver or a machine-wide filter, every ambient-only command
-/// exists as a real clap leaf, and every registry entry maps to a real clap
-/// leaf. Adding a new `--wave`-bearing command without classifying it fails CI;
-/// removing a command leaves a stale entry that also fails.
+/// either a resolver or a machine-wide filter, every cron leaf has exactly one
+/// Wave-context classification, every ambient/explicit-only command exists as
+/// a real clap leaf, and every registry entry maps to a real clap leaf. Adding
+/// a new `--wave`-bearing command without classifying it fails CI; removing a
+/// command leaves a stale entry that also fails.
 #[test]
 fn registry_is_complete() {
     let root = Cli::command();
@@ -805,6 +735,10 @@ fn registry_is_complete() {
         .iter()
         .map(|path| path.iter().map(|s| s.to_string()).collect())
         .collect();
+    let explicit_paths: HashSet<Vec<String>> = EXPLICIT_WAVE_ONLY
+        .iter()
+        .map(|path| path.iter().map(|s| s.to_string()).collect())
+        .collect();
 
     // 3. Every wave-arg clap command must be classified.
     for path in &found {
@@ -816,8 +750,24 @@ fn registry_is_complete() {
         );
     }
 
-    // 4. Every ambient-only and filter-only command must exist as a real clap
-    //    leaf.
+    // 4. Every cron leaf must be classified exactly once. Required-wave cron
+    //    commands do not appear in the optional-wave discovery above.
+    let cron = root
+        .find_subcommand("cron")
+        .expect("cron command must exist");
+    for subcommand in cron.get_subcommands() {
+        let path = vec!["cron".to_string(), subcommand.get_name().to_string()];
+        let classifications = usize::from(registry_paths.contains(&path))
+            + usize::from(filter_paths.contains(&path))
+            + usize::from(explicit_paths.contains(&path));
+        assert_eq!(
+            classifications, 1,
+            "cron command {path:?} must have exactly one Wave-context classification"
+        );
+    }
+
+    // 5. Every ambient-only, filter-only, and explicit-only command must exist
+    //    as a real clap leaf. Explicit-only commands must require `wave`.
     for path in AMBIENT_ONLY.iter().chain(FILTER_ONLY) {
         assert!(
             find_clap_command(&root, path).is_some(),
@@ -825,8 +775,21 @@ fn registry_is_complete() {
             path
         );
     }
+    for path in EXPLICIT_WAVE_ONLY {
+        let command = find_clap_command(&root, path).unwrap_or_else(|| {
+            panic!("classified command {path:?} does not exist in the clap tree")
+        });
+        assert!(
+            command.get_arguments().any(|arg| {
+                (arg.get_long() == Some("wave") || arg.get_id() == "wave")
+                    && arg.is_required_set()
+                    && !matches!(arg.get_action(), ArgAction::Append)
+            }),
+            "explicit-only command {path:?} must require one `wave` argument"
+        );
+    }
 
-    // 5. Every registry entry must map to a real clap command (no stale
+    // 6. Every registry entry must map to a real clap command (no stale
     //    entries). Ambient-only commands are checked above.
     let ambient_set: HashSet<Vec<String>> = AMBIENT_ONLY
         .iter()
@@ -849,12 +812,12 @@ fn registry_is_complete() {
 
 // ─── Mutation targeting ─────────────────────────────────────────────────
 
-/// Cache-only mutations target exactly the resolved Wave. Seed two waves
-/// ("alpha" and "beta"); run `lf cron add` resolving to alpha; assert the
-/// plist names alpha, not beta. `cron add` writes the plist before calling
-/// `launchctl load`, so the file is on disk even when `launchctl` fails.
+/// Cron installation refuses a development binary before writing host state.
+/// The matrix above already proves the command resolves an ambient Wave; this
+/// boundary proves that successful resolution cannot leave a disposable binary
+/// in launchd.
 #[test]
-fn cache_mutations_target_the_resolved_wave() {
+fn cron_add_rejects_a_development_binary_before_mutation() {
     let tmp = tempfile::tempdir().expect("tempdir");
     let home = tmp.path().join("home");
     let repo = tmp.path().join("repo");
@@ -877,25 +840,16 @@ fn cache_mutations_target_the_resolved_wave() {
     git(&["add", "."]);
     git(&["commit", "-m", "init"]);
 
-    let store = SqliteStore::new(&home.join("loopflow.db")).expect("open store");
+    let store = open_test_store(&home.join("loopflow.db"));
     let alpha = Wave::new(
         WaveId::new(),
         "alpha".to_string(),
         repo.display().to_string(),
     );
-    let beta = Wave::new(
-        WaveId::new(),
-        "beta".to_string(),
-        repo.display().to_string(),
-    );
     store.create_wave(&alpha).expect("register alpha");
-    store.create_wave(&beta).expect("register beta");
 
     let alpha_uuid = alpha.id().as_str();
 
-    // `lf cron add` with alpha's UUID → plist names alpha, not beta.
-    // `launchctl load` may fail (no launchd on CI); the plist is written
-    // before that call, so we can read it regardless.
     let cron = Command::new(env!("CARGO_BIN_EXE_lf"))
         .args([
             "cron",
@@ -909,31 +863,26 @@ fn cache_mutations_target_the_resolved_wave() {
         .env("LF_HOME", &home)
         .env("HOME", &home)
         .env("LF_WAVE_ID", alpha_uuid)
+        .env_remove("LF_DB_PATH")
+        .env_remove("LF_CONTROL_HOME")
+        .env_remove("LF_CONTROL_DB_PATH")
+        .env_remove("LF_RUN_CONTEXT")
+        .env_remove("LF_RUN_LEASE")
+        .env_remove("LF_AGENT_INVOCATION_ID")
         .output()
         .expect("run cron add");
 
-    let launch_agents = home.join("Library/LaunchAgents");
-    let alpha_plist = launch_agents.join("loopflow.cron.alpha.mutation-test.plist");
-    let beta_plist = launch_agents.join("loopflow.cron.beta.mutation-test.plist");
-
     assert!(
-        alpha_plist.exists(),
-        "alpha plist should exist (cron add exit: {}, stderr: {})",
-        cron.status,
-        String::from_utf8_lossy(&cron.stderr).trim()
+        !cron.status.success(),
+        "development cron installation should fail"
+    );
+    let stderr = String::from_utf8_lossy(&cron.stderr);
+    assert!(
+        stderr.contains("requires an installed release binary"),
+        "unexpected cron add error: {stderr}"
     );
     assert!(
-        !beta_plist.exists(),
-        "beta plist should NOT exist — mutation targeted the wrong wave"
-    );
-
-    let plist = std::fs::read_to_string(&alpha_plist).expect("read plist");
-    assert!(
-        plist.contains("<string>alpha</string>"),
-        "plist should contain the resolved wave name 'alpha':\n{plist}"
-    );
-    assert!(
-        !plist.contains("<string>beta</string>"),
-        "plist must not contain 'beta':\n{plist}"
+        !home.join("Library/LaunchAgents").exists(),
+        "development cron installation must not create launchd state"
     );
 }

@@ -11,6 +11,7 @@ import platform
 import shlex
 import shutil
 import subprocess
+import sys
 import tarfile
 import tempfile
 from dataclasses import asdict, dataclass
@@ -18,7 +19,8 @@ from pathlib import Path
 
 import boto3
 
-ROOT = Path(__file__).resolve().parent.parent
+CONTROL_ROOT = Path(__file__).resolve().parent.parent
+ROOT = Path(os.environ.get("LF_RELEASE_SOURCE_REPO", CONTROL_ROOT))
 TARGETS = (
     "aarch64-apple-darwin",
     "x86_64-apple-darwin",
@@ -43,6 +45,7 @@ class ReleaseArtifacts:
     native_archives: tuple[Path, ...]
     dmg: Path
     installer: Path
+    checksums: Path
 
 
 @dataclass(frozen=True)
@@ -75,9 +78,7 @@ def _run(
 def _r2_client():
     return boto3.client(
         "s3",
-        endpoint_url=(
-            f"https://{os.environ['R2_ACCOUNT_ID'].strip()}.r2.cloudflarestorage.com"
-        ),
+        endpoint_url=(f"https://{os.environ['R2_ACCOUNT_ID'].strip()}.r2.cloudflarestorage.com"),
         aws_access_key_id=os.environ["R2_ACCESS_KEY_ID"].strip(),
         aws_secret_access_key=os.environ["R2_SECRET_ACCESS_KEY"].strip(),
         region_name="auto",
@@ -115,27 +116,45 @@ def _find_native_archives(artifact_dir: Path) -> tuple[Path, ...]:
     for target in TARGETS:
         matches = list(artifact_dir.rglob(f"lf-{target}.tar.gz"))
         if len(matches) != 1:
-            raise RuntimeError(
-                f"expected one lf-{target}.tar.gz artifact, found {len(matches)}"
-            )
+            raise RuntimeError(f"expected one lf-{target}.tar.gz artifact, found {len(matches)}")
         archives.append(matches[0])
     return tuple(archives)
 
 
-def _extract_arm_binary(archives: tuple[Path, ...], output_dir: Path) -> Path:
+def _extract_arm_binaries(archives: tuple[Path, ...], output_dir: Path) -> tuple[Path, Path]:
     arm_archive = next(path for path in archives if "aarch64-apple-darwin" in path.name)
     with tarfile.open(arm_archive, "r:gz") as package:
         members = package.getmembers()
-        if len(members) != 1 or members[0].name != "lf" or not members[0].isfile():
+        if sorted(member.name for member in members) != ["lf", "lfd"] or not all(
+            member.isfile() for member in members
+        ):
             raise RuntimeError(f"unexpected archive contents in {arm_archive.name}")
-        source = package.extractfile(members[0])
-        if source is None:
-            raise RuntimeError(f"could not read lf from {arm_archive.name}")
-        with (output_dir / "lf").open("wb") as destination:
-            shutil.copyfileobj(source, destination)
-    binary = output_dir / "lf"
-    binary.chmod(0o755)
-    return binary
+        binaries = []
+        for name in ("lf", "lfd"):
+            member = next(member for member in members if member.name == name)
+            source = package.extractfile(member)
+            if source is None:
+                raise RuntimeError(f"could not read {name} from {arm_archive.name}")
+            binary = output_dir / name
+            with binary.open("wb") as destination:
+                shutil.copyfileobj(source, destination)
+            binary.chmod(0o755)
+            binaries.append(binary)
+    return binaries[0], binaries[1]
+
+
+def _validate_release_candidate(binary: Path, scratch: Path) -> None:
+    result = _run(
+        [str(binary), "install", "preflight", "--json"],
+        capture=True,
+        env={**os.environ, "LF_CONTROL_DB_PATH": str(scratch / "uninitialized.db")},
+    )
+    try:
+        candidate = json.loads(result.stdout)["candidate"]
+    except (KeyError, TypeError, json.JSONDecodeError) as exc:
+        raise RuntimeError("release candidate did not emit a promotion identity") from exc
+    if candidate.get("authority") != "published":
+        raise RuntimeError("release candidate has validation-only migration authority")
 
 
 def _sha256(path: Path) -> str:
@@ -144,6 +163,11 @@ def _sha256(path: Path) -> str:
         for chunk in iter(lambda: file.read(1024 * 1024), b""):
             digest.update(chunk)
     return digest.hexdigest()
+
+
+def _write_checksums(paths: tuple[Path, ...], destination: Path) -> None:
+    lines = [f"{_sha256(path)}  {path.name}" for path in paths]
+    destination.write_text("\n".join(lines) + "\n")
 
 
 def _stage_github_release(artifacts: ReleaseArtifacts) -> None:
@@ -155,7 +179,12 @@ def _stage_github_release(artifacts: ReleaseArtifacts) -> None:
         "--notes",
         str(ROOT / "RELEASE_NOTES.md"),
     ]
-    for asset in (*artifacts.native_archives, artifacts.dmg, artifacts.installer):
+    for asset in (
+        *artifacts.native_archives,
+        artifacts.dmg,
+        artifacts.installer,
+        artifacts.checksums,
+    ):
         command.extend(["--asset", str(asset)])
     _run(command)
 
@@ -213,7 +242,9 @@ def publish_release(tag: str, artifact_dir: Path) -> PublishReceipt:
 
     stages: list[str] = ["artifacts_verified"]
     with tempfile.TemporaryDirectory() as temp:
-        arm_binary = _extract_arm_binary(archives, Path(temp))
+        scratch = Path(temp)
+        arm_binary, _arm_daemon = _extract_arm_binaries(archives, scratch)
+        _validate_release_candidate(arm_binary, scratch)
         env = {
             **os.environ,
             "LF_RELEASE_BINARY": str(arm_binary),
@@ -228,7 +259,9 @@ def publish_release(tag: str, artifact_dir: Path) -> PublishReceipt:
         raise RuntimeError(f"DMG builder did not produce {dmg}")
     stages.append("dmg_notarized")
 
-    artifacts = ReleaseArtifacts(tag, archives, dmg, installer)
+    checksums = artifact_dir / "SHA256SUMS"
+    _write_checksums((*archives, dmg, installer), checksums)
+    artifacts = ReleaseArtifacts(tag, archives, dmg, installer, checksums)
     _stage_github_release(artifacts)
     stages.append("github_draft_staged")
 
@@ -239,7 +272,16 @@ def publish_release(tag: str, artifact_dir: Path) -> PublishReceipt:
     _upload_dmg(dmg, f"Loopflow-{version}.dmg", "public, max-age=31536000, immutable")
     stages.append("versioned_dmg_uploaded")
 
-    _run(["uv", "run", "python", "scripts/deploy_website.py", "--tag", tag])
+    _run(
+        [
+            sys.executable,
+            str(CONTROL_ROOT / "scripts/deploy_website.py"),
+            "--tag",
+            tag,
+            "--repo",
+            str(ROOT),
+        ]
+    )
     stages.append("website_deployed")
 
     _upload_dmg(dmg, "Loopflow-latest.dmg", "public, max-age=60")
@@ -248,7 +290,7 @@ def publish_release(tag: str, artifact_dir: Path) -> PublishReceipt:
     _run(["lf", "release", "publish", tag, "--finalize"])
     stages.append("github_release_published")
 
-    paths = (*archives, dmg, installer)
+    paths = (*archives, dmg, installer, checksums)
     receipt = PublishReceipt(
         tag=tag,
         source_commit=source_commit,

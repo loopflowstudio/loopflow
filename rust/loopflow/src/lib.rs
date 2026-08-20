@@ -24,6 +24,7 @@ pub mod store;
 pub mod subscription;
 pub mod task;
 pub mod trace;
+pub mod usage;
 pub mod wave;
 pub(crate) mod wave_host;
 pub mod webhook;

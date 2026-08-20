@@ -269,6 +269,11 @@ struct ActivityFields {
 
 fn task_activity_fields(event: &TaskEventKind) -> ActivityFields {
     match event {
+        TaskEventKind::WorktreeInitializing { path, branch, .. } => activity(
+            ChildActivityKind::StateChanged,
+            "Task worktree initializing",
+            &format!("{path} on {branch}"),
+        ),
         TaskEventKind::Started => activity(ChildActivityKind::StateChanged, "Task started", ""),
         TaskEventKind::BodyHandedOff { handoff } => activity(
             ChildActivityKind::StateChanged,
@@ -446,7 +451,7 @@ mod tests {
         turn.role = ChatRole::Assistant;
         turn.absorb_item(ConversationItem::Message {
             id: "m-0".into(),
-            text: "I'm using `wave_clarify` to audit the plan.".into(),
+            text: "I'm using `wave/clarify` to audit the plan.".into(),
             phase: Some("commentary".into()),
         });
         turn.absorb_item(ConversationItem::Message {
@@ -462,7 +467,7 @@ mod tests {
         match &turn.items[0] {
             ConversationItem::Message { text, phase, .. } => {
                 assert_eq!(phase.as_deref(), Some("commentary"));
-                assert!(text.contains("wave_clarify"));
+                assert!(text.contains("wave/clarify"));
             }
             other => panic!("expected the commentary message in items, got {other:?}"),
         }

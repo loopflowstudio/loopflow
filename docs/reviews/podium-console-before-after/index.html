@@ -1,0 +1,611 @@
+<!doctype html>
+<html lang="en">
+<head>
+  <meta charset="utf-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1">
+  <title>Podium console — before / after</title>
+  <style>
+    :root {
+      --ink: #251c1d;
+      --paper: #f3eee6;
+      --paper-deep: #e9dfd2;
+      --burgundy: #6f2732;
+      --burgundy-dark: #43151d;
+      --wine: #8a434e;
+      --green: #2c7c57;
+      --amber: #b8752a;
+      --red: #a84d4b;
+      --line: rgba(67, 21, 29, 0.18);
+      --muted: #77696a;
+      --shadow: 0 24px 70px rgba(54, 24, 27, 0.18);
+    }
+
+    * { box-sizing: border-box; }
+
+    html { scroll-behavior: smooth; }
+
+    body {
+      margin: 0;
+      color: var(--ink);
+      background:
+        radial-gradient(circle at 82% 8%, rgba(138, 67, 78, 0.14), transparent 31rem),
+        linear-gradient(180deg, #f8f4ed 0, var(--paper) 42rem, #ede5da 100%);
+      font-family: "Avenir Next", Avenir, "Helvetica Neue", sans-serif;
+      line-height: 1.5;
+    }
+
+    a { color: inherit; }
+
+    .masthead {
+      position: relative;
+      overflow: hidden;
+      min-height: 31rem;
+      padding: 2rem max(5vw, 1.5rem) 4.5rem;
+      color: #fff8ed;
+      background:
+        linear-gradient(112deg, rgba(255,255,255,0.035) 1px, transparent 1px) 0 0 / 34px 34px,
+        linear-gradient(132deg, var(--burgundy-dark), var(--burgundy) 62%, #7f3540);
+    }
+
+    .masthead::after {
+      content: "";
+      position: absolute;
+      width: 34rem;
+      height: 34rem;
+      right: -11rem;
+      top: -18rem;
+      border: 1px solid rgba(255, 248, 237, 0.2);
+      border-radius: 50%;
+      box-shadow: 0 0 0 5rem rgba(255, 248, 237, 0.025), 0 0 0 10rem rgba(255, 248, 237, 0.018);
+    }
+
+    .nav {
+      position: relative;
+      z-index: 1;
+      display: flex;
+      align-items: center;
+      justify-content: space-between;
+      gap: 1rem;
+      padding-bottom: 4.5rem;
+    }
+
+    .eyebrow,
+    .kicker,
+    .metric-label,
+    th {
+      font-family: "SFMono-Regular", Consolas, monospace;
+      font-size: 0.72rem;
+      font-weight: 700;
+      letter-spacing: 0.13em;
+      text-transform: uppercase;
+    }
+
+    .nav-links { display: flex; gap: 1.5rem; }
+    .nav-links a { text-decoration: none; color: rgba(255,248,237,0.7); }
+    .nav-links a:hover { color: #fff; }
+
+    .hero {
+      position: relative;
+      z-index: 1;
+      display: grid;
+      grid-template-columns: minmax(0, 1.4fr) minmax(17rem, 0.6fr);
+      gap: clamp(2rem, 7vw, 8rem);
+      align-items: end;
+      max-width: 88rem;
+    }
+
+    h1, h2, h3 {
+      font-family: "Iowan Old Style", "Baskerville", Georgia, serif;
+      font-weight: 500;
+      line-height: 1.05;
+      margin: 0;
+    }
+
+    h1 {
+      max-width: 11ch;
+      margin-top: 0.8rem;
+      font-size: clamp(3.8rem, 8vw, 8.2rem);
+      letter-spacing: -0.055em;
+    }
+
+    .hero-copy {
+      max-width: 31rem;
+      padding-bottom: 0.7rem;
+      font-size: clamp(1rem, 1.4vw, 1.25rem);
+      color: rgba(255,248,237,0.78);
+    }
+
+    .hero-copy strong { color: #fff8ed; font-weight: 600; }
+
+    .meta-row {
+      display: flex;
+      flex-wrap: wrap;
+      gap: 0.55rem;
+      margin-top: 1.5rem;
+    }
+
+    .pill {
+      display: inline-flex;
+      align-items: center;
+      gap: 0.45rem;
+      padding: 0.38rem 0.75rem;
+      border: 1px solid rgba(255,248,237,0.22);
+      border-radius: 999px;
+      font: 650 0.78rem/1.2 "SFMono-Regular", Consolas, monospace;
+      color: rgba(255,248,237,0.9);
+      background: rgba(255,255,255,0.055);
+    }
+
+    .dot { width: 0.48rem; height: 0.48rem; border-radius: 50%; background: #69c890; }
+
+    main { padding: 0 max(5vw, 1.5rem) 6rem; }
+
+    .section {
+      max-width: 90rem;
+      margin: 0 auto;
+      padding: 6rem 0 0;
+    }
+
+    .section-head {
+      display: grid;
+      grid-template-columns: minmax(0, 1fr) minmax(17rem, 0.62fr);
+      gap: 3rem;
+      align-items: end;
+      margin-bottom: 2.2rem;
+    }
+
+    .section h2 { font-size: clamp(2.6rem, 5vw, 5rem); letter-spacing: -0.045em; }
+    .section-intro { color: var(--muted); max-width: 36rem; }
+    .kicker { color: var(--burgundy); margin-bottom: 0.7rem; }
+
+    .comparison-shell {
+      overflow: hidden;
+      border: 1px solid var(--line);
+      border-radius: 1.2rem;
+      background: var(--burgundy-dark);
+      box-shadow: var(--shadow);
+    }
+
+    .comparison-toolbar {
+      display: grid;
+      grid-template-columns: 1fr auto 1fr;
+      align-items: center;
+      min-height: 3.5rem;
+      padding: 0 1.1rem;
+      color: rgba(255,248,237,0.82);
+      background: var(--burgundy-dark);
+      font: 700 0.73rem/1 "SFMono-Regular", Consolas, monospace;
+      letter-spacing: 0.1em;
+      text-transform: uppercase;
+    }
+
+    .comparison-toolbar span:last-child { text-align: right; }
+    .comparison-toolbar .hint { color: rgba(255,248,237,0.45); letter-spacing: 0; text-transform: none; }
+
+    .compare {
+      --split: 50%;
+      position: relative;
+      aspect-ratio: 16 / 10;
+      overflow: hidden;
+      background: #f6f3ed;
+      cursor: ew-resize;
+    }
+
+    .compare img {
+      position: absolute;
+      inset: 0;
+      width: 100%;
+      height: 100%;
+      object-fit: cover;
+      object-position: top left;
+      user-select: none;
+      pointer-events: none;
+    }
+
+    .compare .after {
+      clip-path: inset(0 0 0 var(--split));
+    }
+
+    .divider {
+      position: absolute;
+      z-index: 3;
+      top: 0;
+      bottom: 0;
+      left: var(--split);
+      width: 2px;
+      transform: translateX(-1px);
+      background: #fff8ed;
+      box-shadow: 0 0 0 1px rgba(67,21,29,0.35), 0 0 18px rgba(67,21,29,0.28);
+      pointer-events: none;
+    }
+
+    .divider::after {
+      content: "↔";
+      position: absolute;
+      top: 50%;
+      left: 50%;
+      display: grid;
+      place-items: center;
+      width: 2.6rem;
+      height: 2.6rem;
+      transform: translate(-50%, -50%);
+      border: 2px solid #fff8ed;
+      border-radius: 50%;
+      color: #fff8ed;
+      background: var(--burgundy);
+      font: 700 1rem/1 sans-serif;
+    }
+
+    .compare input {
+      position: absolute;
+      z-index: 5;
+      inset: 0;
+      width: 100%;
+      height: 100%;
+      margin: 0;
+      opacity: 0;
+      cursor: ew-resize;
+    }
+
+    .capture-note {
+      display: flex;
+      justify-content: space-between;
+      gap: 1rem;
+      padding: 0.9rem 1.1rem;
+      color: rgba(255,248,237,0.6);
+      background: var(--burgundy-dark);
+      font: 0.73rem/1.4 "SFMono-Regular", Consolas, monospace;
+    }
+
+    .change-grid {
+      display: grid;
+      grid-template-columns: repeat(4, minmax(0, 1fr));
+      gap: 1px;
+      overflow: hidden;
+      margin-top: 2.5rem;
+      border: 1px solid var(--line);
+      border-radius: 1rem;
+      background: var(--line);
+    }
+
+    .change {
+      min-height: 16rem;
+      padding: 1.4rem;
+      background: rgba(255,255,255,0.54);
+    }
+
+    .change-number {
+      margin-bottom: 3.7rem;
+      color: var(--wine);
+      font: 700 0.75rem/1 "SFMono-Regular", Consolas, monospace;
+    }
+
+    .change h3 { font-size: 1.7rem; margin-bottom: 0.65rem; }
+    .change p { margin: 0; color: var(--muted); font-size: 0.92rem; }
+
+    .evidence-layout {
+      display: grid;
+      grid-template-columns: 0.75fr 1.25fr;
+      gap: 1.5rem;
+      align-items: stretch;
+    }
+
+    .scorecard {
+      display: grid;
+      grid-template-columns: 1fr 1fr;
+      gap: 1px;
+      overflow: hidden;
+      border: 1px solid var(--line);
+      border-radius: 1rem;
+      background: var(--line);
+    }
+
+    .metric { padding: 1.4rem; background: rgba(255,255,255,0.6); }
+    .metric-value { display: block; margin: 0.5rem 0 0.3rem; font: 500 2.6rem/1 "Iowan Old Style", Georgia, serif; }
+    .metric-note { color: var(--muted); font-size: 0.82rem; }
+
+    .matrix-wrap {
+      overflow: hidden;
+      border: 1px solid var(--line);
+      border-radius: 1rem;
+      background: rgba(255,255,255,0.58);
+    }
+
+    table { width: 100%; border-collapse: collapse; }
+    th, td { padding: 1rem 1.1rem; text-align: left; border-bottom: 1px solid var(--line); }
+    th { color: var(--muted); background: rgba(111,39,50,0.055); }
+    tr:last-child td { border-bottom: 0; }
+    td:first-child { font-weight: 700; }
+
+    .state {
+      display: inline-flex;
+      align-items: center;
+      gap: 0.45rem;
+      font: 700 0.78rem/1 "SFMono-Regular", Consolas, monospace;
+    }
+
+    .state::before { content: ""; width: 0.55rem; height: 0.55rem; border-radius: 50%; background: currentColor; }
+    .state.off { color: #574e4f; }
+    .state.starting { color: var(--amber); }
+    .state.producing { color: var(--green); }
+    .state.waiting { color: var(--red); }
+
+    .review-grid {
+      display: grid;
+      grid-template-columns: 1.15fr 0.85fr;
+      gap: 1.5rem;
+    }
+
+    .review-card, .boundary-card {
+      padding: clamp(1.5rem, 3vw, 2.7rem);
+      border-radius: 1rem;
+    }
+
+    .review-card { color: #fff8ed; background: var(--burgundy); box-shadow: var(--shadow); }
+    .boundary-card { border: 1px solid var(--line); background: rgba(255,255,255,0.5); }
+    .review-card h3, .boundary-card h3 { font-size: 2rem; margin-bottom: 1.2rem; }
+
+    .checklist { display: grid; gap: 0.9rem; margin: 0; padding: 0; list-style: none; }
+    .checklist li { display: grid; grid-template-columns: 1.4rem 1fr; gap: 0.75rem; }
+    .checklist li::before { content: "□"; font: 1.05rem/1.35 "SFMono-Regular", monospace; }
+    .review-card .checklist li::before { color: #f1bf79; }
+
+    .commit-strip {
+      display: grid;
+      grid-template-columns: repeat(5, 1fr);
+      gap: 0.65rem;
+      margin-top: 2rem;
+    }
+
+    .commit {
+      min-width: 0;
+      padding: 0.8rem;
+      border-top: 3px solid var(--wine);
+      color: var(--muted);
+      background: rgba(255,255,255,0.38);
+      font-size: 0.78rem;
+    }
+
+    .commit code { display: block; color: var(--burgundy); margin-bottom: 0.4rem; font-weight: 700; }
+
+    footer {
+      display: flex;
+      justify-content: space-between;
+      gap: 1rem;
+      max-width: 90rem;
+      margin: 6rem auto 0;
+      padding-top: 1.5rem;
+      border-top: 1px solid var(--line);
+      color: var(--muted);
+      font-size: 0.82rem;
+    }
+
+    @media (max-width: 900px) {
+      .hero, .section-head, .evidence-layout, .review-grid { grid-template-columns: 1fr; }
+      .nav-links { display: none; }
+      .change-grid { grid-template-columns: 1fr 1fr; }
+      .commit-strip { grid-template-columns: 1fr; }
+      .comparison-toolbar .hint { display: none; }
+    }
+
+    @media (max-width: 560px) {
+      .masthead { min-height: auto; }
+      h1 { font-size: 3.5rem; }
+      .section h2 { font-size: 2.25rem; }
+      .change-grid, .scorecard { grid-template-columns: 1fr; }
+      .capture-note, footer { flex-direction: column; }
+      thead {
+        position: absolute;
+        width: 1px;
+        height: 1px;
+        overflow: hidden;
+        clip-path: inset(50%);
+      }
+      table, tbody { display: block; }
+      tr {
+        display: grid;
+        grid-template-columns: minmax(0, 0.82fr) minmax(0, 1.18fr);
+        padding: 0.75rem;
+        border-bottom: 1px solid var(--line);
+      }
+      td { padding: 0.35rem; border: 0; font-size: 0.8rem; }
+      td:last-child {
+        grid-column: 1 / -1;
+        padding-top: 0.65rem;
+        color: var(--muted);
+      }
+      td:last-child::before {
+        content: "Press · ";
+        color: var(--burgundy);
+        font-family: "SFMono-Regular", Consolas, monospace;
+        font-weight: 700;
+        text-transform: uppercase;
+      }
+    }
+
+    @media (prefers-reduced-motion: no-preference) {
+      .masthead .hero > * { animation: rise 650ms cubic-bezier(.2,.75,.2,1) both; }
+      .masthead .hero > :last-child { animation-delay: 90ms; }
+      @keyframes rise { from { opacity: 0; transform: translateY(18px); } }
+    }
+  </style>
+</head>
+<body>
+  <header class="masthead">
+    <nav class="nav" aria-label="Review sections">
+      <span class="eyebrow">Loopflow · PR #1195</span>
+      <div class="nav-links">
+        <a href="#compare">Compare</a>
+        <a href="#behavior">Behavior</a>
+        <a href="#review">Review</a>
+      </div>
+    </nav>
+    <div class="hero">
+      <div>
+        <div class="eyebrow">Podium console</div>
+        <h1>From score­board to instrument.</h1>
+      </div>
+      <div class="hero-copy">
+        <p><strong>The hierarchy stops occupying the work surface.</strong> A path header and temporary drawer cascade replace the permanent Wave Score sidebar; one fader language joins liveness, output, and legal control.</p>
+        <div class="meta-row">
+          <span class="pill"><span class="dot"></span> Focused proof 5 / 5</span>
+          <span class="pill">8 files</span>
+          <span class="pill">+1,785 / −637</span>
+        </div>
+      </div>
+    </div>
+  </header>
+
+  <main>
+    <section class="section" id="compare">
+      <div class="section-head">
+        <div>
+          <div class="kicker">Same evidence, same viewport</div>
+          <h2>Drag across the cut.</h2>
+        </div>
+        <p class="section-intro">Both frames use the repository-owned <code>mock-waves</code> fixture, light appearance, a 1440 × 900 point window, and the app's own window renderer. The change on screen is the branch—not hand-positioned state.</p>
+      </div>
+
+      <div class="comparison-shell">
+        <div class="comparison-toolbar">
+          <span>Before · main</span>
+          <span class="hint">drag the divider</span>
+          <span>After · PR #1195</span>
+        </div>
+        <div class="compare" id="image-compare">
+          <img src="podium-review/before.png" alt="Before: Podium with permanent burgundy Wave Score sidebar">
+          <img class="after" src="podium-review/after.png" alt="After: Podium with full-width work surface and burgundy path console">
+          <div class="divider" aria-hidden="true"></div>
+          <input type="range" min="0" max="100" value="50" aria-label="Reveal before or after screenshot">
+        </div>
+        <div class="capture-note">
+          <span>main @ f04718d53 · mock-waves · 1440 × 900 pt</span>
+          <span>jack-heart/survival @ 3491e5c42 · identical fixture</span>
+        </div>
+      </div>
+
+      <div class="change-grid" aria-label="Primary interface changes">
+        <article class="change">
+          <div class="change-number">01 / SPACE</div>
+          <h3>Work gets the room.</h3>
+          <p>The persistent left rail disappears. Hierarchy becomes temporary navigation, leaving the selected Work and Activity as the durable frame.</p>
+        </article>
+        <article class="change">
+          <div class="change-number">02 / PLACE</div>
+          <h3>Path replaces outline.</h3>
+          <p>The burgundy header names the current Wave › Project › Task. Selecting a segment reopens the appropriate drawer instead of expanding an indented tree.</p>
+        </article>
+        <article class="change">
+          <div class="change-number">03 / SIGNAL</div>
+          <h3>One fader language.</h3>
+          <p>Color says state, fill says five-minute output rate, and press performs the legal lifecycle action. Display-only levels do not pretend to control an agent.</p>
+        </article>
+        <article class="change">
+          <div class="change-number">04 / FOCUS</div>
+          <h3>Selection owns center.</h3>
+          <p><code>WorkSurfaceView</code> renders the chosen node. The console alone renders hierarchy, removing the old split ownership between sidebar and detail pane.</p>
+        </article>
+      </div>
+    </section>
+
+    <section class="section" id="behavior">
+      <div class="section-head">
+        <div>
+          <div class="kicker">Behavior, not decoration</div>
+          <h2>The fader earns its press.</h2>
+        </div>
+        <p class="section-intro">The visual phase collapses runtime signal and human attention into four states. Each state maps to at most one honest verb; waiting never guesses how to resolve the blocker.</p>
+      </div>
+
+      <div class="evidence-layout">
+        <div class="scorecard">
+          <div class="metric">
+            <span class="metric-label">Commits</span>
+            <span class="metric-value">5</span>
+            <span class="metric-note">July 22–23, 2026</span>
+          </div>
+          <div class="metric">
+            <span class="metric-label">Focused tests</span>
+            <span class="metric-value">5/5</span>
+            <span class="metric-note">FaderSwitchTests</span>
+          </div>
+          <div class="metric">
+            <span class="metric-label">New views</span>
+            <span class="metric-value">3</span>
+            <span class="metric-note">Console, surface, fader</span>
+          </div>
+          <div class="metric">
+            <span class="metric-label">Permanent trees</span>
+            <span class="metric-value">0</span>
+            <span class="metric-note">inside the Podium</span>
+          </div>
+        </div>
+
+        <div class="matrix-wrap">
+          <table>
+            <thead>
+              <tr><th>Phase</th><th>What it means</th><th>Press</th></tr>
+            </thead>
+            <tbody>
+              <tr><td><span class="state off">Off</span></td><td>No agent is running.</td><td>Start Wave or Task.</td></tr>
+              <tr><td><span class="state starting">Starting</span></td><td>Agent is live; no output yet.</td><td>Stop or interrupt.</td></tr>
+              <tr><td><span class="state producing">Producing</span></td><td>Output flows; fill tracks five-minute TOK/s.</td><td>Stop or interrupt.</td></tr>
+              <tr><td><span class="state waiting">Waiting</span></td><td>A human-owned stop outranks sibling output.</td><td>Select and show reason.</td></tr>
+            </tbody>
+          </table>
+        </div>
+      </div>
+
+      <div class="commit-strip" aria-label="Commit sequence">
+        <div class="commit"><code>5ebfd94c2</code>Replace Wave Score with console</div>
+        <div class="commit"><code>edf271eeb</code>Give selected node the surface</div>
+        <div class="commit"><code>42eec730c</code>Name drawers and Waves column</div>
+        <div class="commit"><code>fd3317f79</code>Pin selection zoom behavior</div>
+        <div class="commit"><code>3491e5c42</code>Apply live dogfood fixes</div>
+      </div>
+    </section>
+
+    <section class="section" id="review">
+      <div class="section-head">
+        <div>
+          <div class="kicker">Reviewer route</div>
+          <h2>What to challenge.</h2>
+        </div>
+        <p class="section-intro">The screenshots prove composition. The review should press on navigation, lifecycle truth, and whether the new control density remains calm at real data volume.</p>
+      </div>
+
+      <div class="review-grid">
+        <article class="review-card">
+          <h3>Live review checklist</h3>
+          <ul class="checklist">
+            <li>Open the Waves chip; walk Wave → Project → Task and verify each column preserves context.</li>
+            <li>Select a Task; confirm drawers retract and Activity scopes to that Task.</li>
+            <li>Press an off Wave or ready Task fader; confirm the actual <code>lf</code> lifecycle path runs.</li>
+            <li>Press a producing fader; confirm stopping does not invent completion or discard Work.</li>
+            <li>Resize narrow and wide; state color must survive even when rate precision and glyphs compress.</li>
+          </ul>
+        </article>
+        <aside class="boundary-card">
+          <h3>Intentional boundary</h3>
+          <p>A red fader currently selects the waiting Work and exposes its reason. It does <em>not</em> open a resolver session yet.</p>
+          <p>That action waits for the durable Ask queue from <strong>blockings</strong>. Project and master faders also remain display-only because no agent lives at those levels.</p>
+          <p><a href="https://github.com/loopflowstudio/loopflow/pull/1195">Open PR #1195 ↗</a></p>
+        </aside>
+      </div>
+    </section>
+
+    <footer>
+      <span>Generated from repository-owned fixture captures · 2026-08-14</span>
+      <span>No external assets or runtime dependencies</span>
+    </footer>
+  </main>
+
+  <script>
+    const compare = document.querySelector('#image-compare');
+    const slider = compare.querySelector('input');
+    const setSplit = value => compare.style.setProperty('--split', `${value}%`);
+    slider.addEventListener('input', event => setSplit(event.target.value));
+    setSplit(slider.value);
+  </script>
+</body>
+</html>

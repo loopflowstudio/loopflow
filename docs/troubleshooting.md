@@ -26,14 +26,14 @@ Read its durable state before restarting anything:
 
 ```bash
 lf task status INF-123 --json
-lf work asks
+lf ask list --user
 ```
 
 Answer an exact pending question, send unsolicited durable direction through
 Steer, or resume a stopped process through the same Task Work:
 
 ```bash
-lf work answer ask_... "address the failing check first"
+lf ask open ask_...
 lf task steer INF-123 "address the latest feedback"
 lf task interrupt INF-123
 lf task resume INF-123
@@ -45,6 +45,10 @@ Work, Steers, worktree, and active PR, but gives the next Invocation to the sele
 agent. It refuses while another executor is still writing; interrupt that
 boundary first. A Steer is durable before live delivery is attempted. Provider
 acceptance is not incorporation; the Basis of a later successful boundary is.
+
+During new-Task placement, status reports the declared worktree as initializing.
+If creation does not finish, status keeps the Task identity and names the exact
+path and branch to restore before resuming.
 
 ## Rate limits
 

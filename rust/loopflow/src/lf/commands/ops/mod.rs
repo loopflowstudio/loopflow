@@ -13,19 +13,21 @@ use crate::engine::{
     SkillSyncOptions, Surface,
 };
 use crate::lf::commands::util::find_repo_root;
-use crate::lf::discovery::discover_skill;
+use crate::lf::discovery::{discover_skill, discover_target, Target};
 use crate::lf::output::{column_width, Colors};
 use crate::lf::{
     CronCommand, PmCommand, PmProjectCommand, PmTaskCommand, PrCommand, ReleaseCommand, WtCommand,
 };
 use crate::ops::OpsError;
 use crate::ops::{
-    abandon_branch, abort_rebase_for_resolution, commit_workflow, continue_rebase_for_resolution,
-    create_or_update_pr, current_pr, finish_land_after_rebase, finish_submit_after_rebase, land,
-    plan_rebase, rebase_class_name, rebase_strategy_name, rebase_with_recovery, recover_rebase,
-    release_bump, release_check, release_notes, release_publish, release_run, release_status,
-    release_tag, start_rebase_for_resolution, submit, AbandonOptions, CommitOptions, CronSpec,
-    LandOptions, PrOptions, Progress, RebaseOptions, SystemLaunchctl,
+    abandon_branch, abort_rebase_after_authorization, abort_rebase_for_resolution, commit_workflow,
+    continue_rebase_after_authorization, continue_rebase_for_resolution, create_or_update_pr,
+    current_pr, finish_land_after_rebase, finish_submit_after_rebase, land, plan_rebase,
+    rebase_class_name, rebase_strategy_name, rebase_with_recovery, recover_rebase, release_bump,
+    release_check, release_notes, release_publish, release_run, release_status, release_tag,
+    start_rebase_for_resolution, submit, AbandonOptions, CommitOptions, CronHost, CronOutcome,
+    CronSource, CronSpec, CronTargetKind, LandOptions, PrOptions, Progress, RebaseOptions,
+    SystemLaunchctl,
 };
 use crate::store::RegistryUnavailable;
 use anyhow::{anyhow, Result};
@@ -78,7 +80,6 @@ pub fn run_pr(cmd: Option<&PrCommand>, cli_model: Option<&str>) -> Result<()> {
         Some(PrCommand::Land {
             strict,
             local,
-            create_pr,
             complete,
             next,
             worktree,
@@ -89,7 +90,7 @@ pub fn run_pr(cmd: Option<&PrCommand>, cli_model: Option<&str>) -> Result<()> {
             &LandOptions {
                 strict: *strict,
                 local: *local,
-                create_pr: *create_pr,
+                create_pr: true,
                 complete: *complete,
                 next_slug: next.clone(),
                 worktree: worktree.clone(),
@@ -205,12 +206,32 @@ pub fn run_rebase(
         ));
     }
     if continue_rebase {
-        continue_rebase_for_resolution(&repo_root, adopt)?;
+        if adopt {
+            continue_rebase_after_authorization(&repo_root, true, || {
+                crate::ops::task::record_task_pr_repair(
+                    &repo_root,
+                    crate::task::TaskPrRepairKind::ManualGitRepair,
+                )
+                .map(|_| ())
+            })?;
+        } else {
+            continue_rebase_for_resolution(&repo_root, false)?;
+        }
         progress.status("Rebase complete; branch remains local.");
         return Ok(());
     }
     if abort {
-        abort_rebase_for_resolution(&repo_root, adopt)?;
+        if adopt {
+            abort_rebase_after_authorization(&repo_root, true, || {
+                crate::ops::task::record_task_pr_repair(
+                    &repo_root,
+                    crate::task::TaskPrRepairKind::ManualGitRepair,
+                )
+                .map(|_| ())
+            })?;
+        } else {
+            abort_rebase_for_resolution(&repo_root, false)?;
+        }
         progress.status("Rebase aborted.");
         return Ok(());
     }
@@ -266,7 +287,14 @@ pub fn run_rebase(
             detail,
             recovery,
         }) => (
-            resolve_rebase_conflict(&repo_root, &onto, &detail, recovery, progress)?,
+            resolve_rebase_conflict(
+                &repo_root,
+                &onto,
+                &detail,
+                recovery,
+                is_avoidable_rebase_class(&plan.class),
+                progress,
+            )?,
             true,
         ),
         Err(err) => return Err(err.into()),
@@ -322,6 +350,7 @@ fn resolve_rebase_conflict(
     onto: &str,
     detail: &str,
     recovery: Option<Box<crate::ops::RebaseRecovery>>,
+    avoidable: bool,
     progress: &impl Progress,
 ) -> Result<crate::ops::RebaseVerification> {
     let recovery =
@@ -329,11 +358,41 @@ fn resolve_rebase_conflict(
     let context = format!(
         "<lf:rebase-conflict>\nRebase onto: {onto}\n{detail}\nContinue the existing owned sequencer; do not start another rebase or push.\n</lf:rebase-conflict>"
     );
+    if avoidable {
+        crate::ops::task::record_task_pr_repair(
+            repo_root,
+            crate::task::TaskPrRepairKind::AvoidableRebaseAgent,
+        )?;
+    }
     progress.status("Launching rebase agent to resolve conflicts...");
     Ok(recover_rebase(*recovery, |env| {
         launch_skill_agent(repo_root, "rebase-conflicts", Some(&context), Some(env))
             .map_err(|error| OpsError::Message(error.to_string()))
     })?)
+}
+
+fn is_avoidable_rebase_class(class: &crate::ops::RebaseClass) -> bool {
+    matches!(
+        class,
+        crate::ops::RebaseClass::StaleEmpty
+            | crate::ops::RebaseClass::ScratchOnly
+            | crate::ops::RebaseClass::GeneratedOnly
+    )
+}
+
+#[cfg(test)]
+mod rebase_performance_tests {
+    use super::is_avoidable_rebase_class;
+    use crate::ops::RebaseClass;
+
+    #[test]
+    fn disposable_rebase_classes_make_an_agent_launch_a_repair_incident() {
+        assert!(is_avoidable_rebase_class(&RebaseClass::StaleEmpty));
+        assert!(is_avoidable_rebase_class(&RebaseClass::ScratchOnly));
+        assert!(is_avoidable_rebase_class(&RebaseClass::GeneratedOnly));
+        assert!(!is_avoidable_rebase_class(&RebaseClass::CleanAuthored));
+        assert!(!is_avoidable_rebase_class(&RebaseClass::Protected));
+    }
 }
 
 /// Run a PR-mutating op; on a rebase conflict, launch the rebase agent to
@@ -351,7 +410,7 @@ fn with_rebase_retry<T>(
             detail,
             recovery,
         }) => {
-            resolve_rebase_conflict(repo_root, &onto, &detail, recovery, progress)?;
+            resolve_rebase_conflict(repo_root, &onto, &detail, recovery, false, progress)?;
             progress.status(&format!("Retrying {label} after rebase..."));
             op(repo_root, true).map_err(Into::into)
         }
@@ -525,34 +584,14 @@ fn abandon_current(branch: Option<&str>, force: bool, progress: &impl Progress) 
 pub fn run_pm(cmd: &PmCommand) -> Result<()> {
     let progress = &CliProgress;
     let repo_root = find_repo_root()?;
-    let list_all_waves = || -> Result<Vec<String>> {
-        let wave_dir = repo_root.join("wave");
-        if !wave_dir.is_dir() {
-            return Err(anyhow!("no wave/ directory found"));
-        }
-        let mut waves = Vec::new();
-        for entry in std::fs::read_dir(&wave_dir)? {
-            let entry = entry?;
-            if entry.file_type()?.is_dir() {
-                if let Some(name) = entry.file_name().to_str() {
-                    waves.push(name.to_string());
-                }
-            }
-        }
-        waves.sort();
-        if waves.is_empty() {
-            return Err(anyhow!("no waves found in wave/"));
-        }
-        Ok(waves)
-    };
     // The one ambient-Wave rule for every PM arm: `--wave` wins, else
-    // `LF_WAVE_ID` (durable UUID → registry name, hand-set name as fallback).
+    // `LF_WAVE_ID` (durable UUID or repository-scoped registered name).
     // `NoContext` stays `None` so a bare command keeps its "all waves" / "pass
     // --wave" behavior outside a managed process; a stale id is a loud error.
     let ambient_wave = |explicit: Option<&str>| -> Result<Option<String>> {
         use crate::engine::wave_context::WaveResolveError;
-        match crate::engine::wave_context::resolve_managed_wave_name_sync(explicit) {
-            Ok(name) => Ok(Some(name)),
+        match crate::engine::wave_context::resolve_managed_wave_sync(Some(&repo_root), explicit) {
+            Ok(wave) => Ok(Some(wave.name().to_string())),
             Err(WaveResolveError::NoContext) => Ok(None),
             Err(other) => Err(other.into()),
         }
@@ -566,13 +605,8 @@ pub fn run_pm(cmd: &PmCommand) -> Result<()> {
             team_key,
             team_name,
         } => {
-            if *all && (team_key.is_some() || team_name.is_some()) {
-                return Err(anyhow!(
-                    "--team-key/--team-name apply to one wave; omit them with --all so each wave keys off its own name"
-                ));
-            }
             let targets = if *all {
-                list_all_waves()?
+                crate::ops::pm::list_local_waves(&repo_root)?
             } else {
                 let explicit = wave.as_deref().or(wave_flag.as_deref());
                 // pm init is a creation flow: an explicit --wave may name a
@@ -599,10 +633,16 @@ pub fn run_pm(cmd: &PmCommand) -> Result<()> {
                     progress,
                 )?;
                 let initiative_state = if result.created { "created" } else { "linked" };
-                let team_state = match (&result.team_key, result.team_created) {
-                    (Some(key), true) => format!(", team {} created ({key}-*)", result.team_id),
-                    (Some(key), false) => format!(", team {} adopted ({key}-*)", result.team_id),
-                    (None, _) => format!(", team {} linked", result.team_id),
+                let team_state = if result.team_created {
+                    format!(
+                        ", repository Team {} created ({}-*)",
+                        result.team_id, result.team_key
+                    )
+                } else {
+                    format!(
+                        ", repository Team {} adopted ({}-*)",
+                        result.team_id, result.team_key
+                    )
                 };
                 println!(
                     "{}: Linear Initiative {} ({initiative_state}){team_state}",
@@ -856,18 +896,15 @@ pub fn run_pm(cmd: &PmCommand) -> Result<()> {
             )?;
             print_pm_sync_result(&result);
         }
-        PmCommand::Reteam { wave, apply } => {
+        PmCommand::Reteam { apply } => {
             let result = crate::ops::pm::pm_reteam(
                 &repo_root,
-                &crate::ops::pm::PmReteamOptions {
-                    wave: ambient_wave(wave.as_deref())?,
-                    apply: *apply,
-                },
+                &crate::ops::pm::PmReteamOptions { apply: *apply },
                 progress,
             )?;
             print_pm_reteam_result(&result);
         }
-        PmCommand::Webhook { cmd } => run_pm_webhook(&repo_root, cmd, &ambient_wave)?,
+        PmCommand::Webhook { cmd } => run_pm_webhook(&repo_root, cmd)?,
     }
     Ok(())
 }
@@ -875,11 +912,7 @@ pub fn run_pm(cmd: &PmCommand) -> Result<()> {
 /// The Linear webhook receiver and its one-time registration. The signing secret
 /// is read from the environment (sourced from Doppler), never a flag or the
 /// store, so a raw value never lands in shell history or a process listing.
-fn run_pm_webhook(
-    repo_root: &std::path::Path,
-    cmd: &crate::lf::PmWebhookCommand,
-    ambient_wave: &impl Fn(Option<&str>) -> Result<Option<String>>,
-) -> Result<()> {
+fn run_pm_webhook(repo_root: &std::path::Path, cmd: &crate::lf::PmWebhookCommand) -> Result<()> {
     use crate::lf::PmWebhookCommand;
 
     let secret = std::env::var("LF_LINEAR_WEBHOOK_SECRET").unwrap_or_default();
@@ -888,17 +921,9 @@ fn run_pm_webhook(
             "set LF_LINEAR_WEBHOOK_SECRET to a non-empty value (source it from Doppler: `doppler run -- lf pm webhook ...`)"
         ));
     }
-    let wave_arg = match cmd {
-        PmWebhookCommand::Serve { wave, .. } | PmWebhookCommand::Register { wave, .. } => {
-            wave.as_deref()
-        }
-    };
-    let wave = ambient_wave(wave_arg)?
-        .ok_or_else(|| anyhow!("cannot determine wave; pass --wave <name>"))?;
-
     let runtime = tokio::runtime::Runtime::new()?;
     runtime.block_on(async {
-        let client = crate::ops::pm::linear_client(repo_root, &wave).await?;
+        let client = crate::ops::pm::linear_client(repo_root).await?;
         match cmd {
             PmWebhookCommand::Register { url, .. } => {
                 let id = client.create_webhook(url, &secret).await?;
@@ -927,8 +952,9 @@ fn run_pm_webhook(
 fn print_pm_reteam_result(result: &crate::ops::pm::PmReteamResult) {
     let verb = if result.applied { "moved" } else { "will move" };
     println!(
-        "wave/{} → team {} ({}-*){}",
-        result.wave,
+        "repository {} (waves: {}) → team {} ({}-*){}",
+        result.repository,
+        result.waves.join(", "),
         result.team_id,
         result.team_key,
         if result.applied {
@@ -946,7 +972,10 @@ fn print_pm_reteam_result(result: &crate::ops::pm::PmReteamResult) {
             } else {
                 format!("team(s) [{}]", pm.from_teams.join(", "))
             };
-            println!("    {}  (from {from})", pm.name);
+            println!(
+                "    wave/{}: {} → {}  (from {from})",
+                pm.wave, pm.name, pm.target_name
+            );
         }
     }
 
@@ -956,10 +985,13 @@ fn print_pm_reteam_result(result: &crate::ops::pm::PmReteamResult) {
         println!("  {verb} ({}):", result.moves.len());
         for mv in &result.moves {
             match &mv.new_identifier {
-                Some(new_id) => println!("    {} → {new_id}  {}", mv.old_identifier, mv.title),
+                Some(new_id) => println!(
+                    "    wave/{}: {} → {new_id}  {}",
+                    mv.wave, mv.old_identifier, mv.title
+                ),
                 None => println!(
-                    "    {}  {}  (Linear assigns the new number at move time)",
-                    mv.old_identifier, mv.title
+                    "    wave/{}: {}  {}  (Linear assigns the new number at move time)",
+                    mv.wave, mv.old_identifier, mv.title
                 ),
             }
         }
@@ -972,8 +1004,8 @@ fn print_pm_reteam_result(result: &crate::ops::pm::PmReteamResult) {
         );
         for deferral in &result.deferrals {
             println!(
-                "    {}  {}  ({})",
-                deferral.identifier, deferral.title, deferral.reason
+                "    wave/{}: {}  {}  ({})",
+                deferral.wave, deferral.identifier, deferral.title, deferral.reason
             );
         }
     }
@@ -981,7 +1013,7 @@ fn print_pm_reteam_result(result: &crate::ops::pm::PmReteamResult) {
         println!("  reconciled Task identifiers: {}", result.task_updates);
     }
     if result.already > 0 {
-        println!("  already in team: {} (skipped)", result.already);
+        println!("  already in repository Team: {} (skipped)", result.already);
     }
 }
 
@@ -1036,7 +1068,7 @@ fn format_pm_task_table(items: &[crate::pm::PmItem]) -> Vec<String> {
         .map(|item| PmTaskRow {
             status: if item.completed { "done" } else { "open" },
             title: item.name.split_whitespace().collect::<Vec<_>>().join(" "),
-            project: item.project.clone().unwrap_or_else(|| "-".to_string()),
+            project: item.project.clone(),
             assignee: item.assignee.clone().unwrap_or_else(|| "-".to_string()),
             id: item.id.clone(),
             completed: item.completed,
@@ -1080,7 +1112,9 @@ mod pm_output_tests {
                 description: String::new(),
                 rank: 0,
                 completed: true,
-                project: None,
+                project_id: "project-done".to_string(),
+                project: "-".to_string(),
+                team_id: "team-loo".to_string(),
                 assignee: None,
             },
             PmItem {
@@ -1091,7 +1125,9 @@ mod pm_output_tests {
                 description: String::new(),
                 rank: 1,
                 completed: false,
-                project: Some("wave-chat".to_string()),
+                project_id: "project-chat".to_string(),
+                project: "wave-chat".to_string(),
+                team_id: "team-loo".to_string(),
                 assignee: Some("me".to_string()),
             },
         ]);
@@ -1131,52 +1167,85 @@ pub fn cron_cmd(cmd: &CronCommand) -> Result<()> {
         } => {
             let repo_root = find_repo_root()?;
             // The one ambient-Wave rule, like every PM arm: `--wave` wins, else
-            // `LF_WAVE_ID` (UUID → registry name, hand-set name as fallback). A
+            // `LF_WAVE_ID` (UUID or repository-scoped registered name). A
             // scheduled invocation needs a concrete wave, so `NoContext` is the
             // familiar "pass --wave" error.
-            let wave = crate::engine::wave_context::resolve_managed_wave_name_sync(wave.as_deref())
-                .map_err(|err| match err {
-                    crate::engine::wave_context::WaveResolveError::NoContext => {
-                        anyhow!("cannot determine wave; pass --wave <name>")
-                    }
-                    other => other.into(),
-                })?;
+            let wave = crate::engine::wave_context::resolve_managed_wave_sync(
+                Some(&repo_root),
+                wave.as_deref(),
+            )
+            .map(|wave| wave.name().to_string())
+            .map_err(|err| match err {
+                crate::engine::wave_context::WaveResolveError::NoContext => {
+                    anyhow!("cannot determine wave; pass --wave <name>")
+                }
+                other => other.into(),
+            })?;
+            require_release_cron_binary()?;
+            let authority = cron_authority(&wave)?;
+            ensure_cron_placement(&wave, &authority)?;
+            let target_kind = cron_target_kind(&authority.repo, flow)?;
             let spec = CronSpec {
                 wave,
                 flow: flow.clone(),
+                target_kind,
                 schedule: crate::ops::parse_schedule(schedule)?,
-                working_directory: repo_root,
+                working_directory: authority.repo,
                 lf_path: crate::ops::resolve_lf_path()?,
+                host: authority.host,
             };
             let cron = crate::ops::add_cron(&launch_agents_dir, &spec, &SystemLaunchctl)?;
             println!("installed {} at {}", cron.label, cron.path.display());
         }
-        CronCommand::List => {
-            let crons = crate::ops::list_crons(&launch_agents_dir)?;
+        CronCommand::List { wave, json } => {
+            let mut crons = crate::ops::list_crons(&launch_agents_dir, &SystemLaunchctl)?;
+            if let Some(wave) = wave {
+                crons.retain(|cron| cron.wave == *wave);
+            }
+            if *json {
+                println!("{}", serde_json::to_string(&crons)?);
+                return Ok(());
+            }
             if crons.is_empty() {
                 println!("no loopflow crons installed");
             } else {
                 for cron in crons {
-                    println!("{} {} {}", cron.label, cron.wave, cron.flow);
+                    let latest = cron
+                        .latest_receipt
+                        .as_ref()
+                        .map(cron_receipt_outcome)
+                        .unwrap_or("never");
+                    println!(
+                        "{}  {}  {}  {}  {}",
+                        cron.flow,
+                        cron.schedule,
+                        if cron.loaded { "loaded" } else { "not-loaded" },
+                        cron.home_id,
+                        latest,
+                    );
                 }
             }
         }
+        CronCommand::Preflight { wave } => {
+            require_release_cron_binary()?;
+            let authority = cron_authority(wave)?;
+            ensure_cron_placement(wave, &authority)?;
+            let specs = cron_specs(&authority, wave)?;
+            crate::ops::validate_cron_specs(wave, &specs)?;
+            println!(
+                "cron preflight passed: {} jobs for Wave {wave} on Home {}",
+                specs.len(),
+                authority.local_home
+            );
+        }
         CronCommand::Sync { wave } => {
-            let repo_root = find_repo_root()?;
-            let declared = crate::engine::wave_config::read_wave_config(&repo_root, wave)
-                .and_then(|config| config.crons)
-                .unwrap_or_default();
-            let lf_path = crate::ops::resolve_lf_path()?;
-            let result = crate::ops::sync_crons(
-                &launch_agents_dir,
-                wave,
-                &declared,
-                &repo_root,
-                &lf_path,
-                &SystemLaunchctl,
-            )?;
-            if result.installed.is_empty() && result.removed.is_empty() && result.skipped.is_empty()
-            {
+            require_release_cron_binary()?;
+            let authority = cron_authority(wave)?;
+            ensure_cron_placement(wave, &authority)?;
+            let specs = cron_specs(&authority, wave)?;
+            let result =
+                crate::ops::sync_crons(&launch_agents_dir, wave, &specs, &SystemLaunchctl)?;
+            if result.installed.is_empty() && result.removed.is_empty() {
                 println!("no crons declared for wave {wave}; nothing to sync");
             }
             for cron in &result.installed {
@@ -1185,8 +1254,135 @@ pub fn cron_cmd(cmd: &CronCommand) -> Result<()> {
             for cron in &result.removed {
                 println!("pruned {} ({})", cron.label, cron.flow);
             }
-            for skip in &result.skipped {
-                eprintln!("skipped {} ({}): {}", skip.flow, skip.schedule, skip.reason);
+        }
+        CronCommand::Run {
+            wave,
+            flow,
+            scheduled,
+        } => {
+            let source = if *scheduled {
+                CronSource::Scheduled
+            } else {
+                CronSource::Manual
+            };
+            let authority = match cron_authority(wave) {
+                Ok(authority) => authority,
+                Err(error) => {
+                    let detail = error.to_string();
+                    return match crate::ops::record_cron_preflight_failure(
+                        &launch_agents_dir,
+                        wave,
+                        flow,
+                        source,
+                        &detail,
+                    ) {
+                        Ok(receipt) => Err(anyhow!(
+                            "cron {wave}/{flow} failed before launch: {}; log {}",
+                            receipt.error.as_deref().unwrap_or(&detail),
+                            receipt.log_path.display()
+                        )),
+                        Err(receipt_error) => Err(anyhow!(
+                            "cron {wave}/{flow} failed before launch: {detail}; receipt persistence also failed: {receipt_error}"
+                        )),
+                    };
+                }
+            };
+            let receipt = crate::ops::run_cron(
+                &launch_agents_dir,
+                wave,
+                flow,
+                &authority.local_home,
+                &authority.placed_home,
+                source,
+            )?;
+            println!(
+                "{} {} {}",
+                receipt.id,
+                receipt.flow,
+                cron_receipt_outcome(&receipt)
+            );
+        }
+        CronCommand::History {
+            wave,
+            flow,
+            days,
+            json,
+        } => {
+            let root = crate::ops::receipt_root(&crate::store::authority_home_dir());
+            let receipts = crate::ops::list_cron_receipts(&root, wave, flow.as_deref(), *days)?;
+            if *json {
+                println!("{}", serde_json::to_string(&receipts)?);
+                return Ok(());
+            }
+            if receipts.is_empty() {
+                println!("no cron receipts for wave {wave} in the last {days} days");
+            }
+            for receipt in receipts {
+                let started = chrono::DateTime::from_timestamp(receipt.started_at, 0)
+                    .map(|time| time.to_rfc3339())
+                    .unwrap_or_else(|| receipt.started_at.to_string());
+                let duration = receipt
+                    .finished_at
+                    .map(|finished| finished.saturating_sub(receipt.started_at))
+                    .map(|seconds| format!("{seconds}s"))
+                    .unwrap_or_else(|| "open".to_string());
+                let exit = receipt
+                    .exit_code
+                    .map(|code| format!("exit={code}"))
+                    .unwrap_or_else(|| "exit=-".to_string());
+                println!(
+                    "{}  {}  {}  {}  {}  {}  {}",
+                    started,
+                    receipt.flow,
+                    cron_source_name(receipt.source),
+                    cron_receipt_outcome(&receipt),
+                    duration,
+                    exit,
+                    receipt.log_path.display(),
+                );
+            }
+        }
+        CronCommand::Trigger {
+            wave,
+            flow,
+            wait,
+            timeout,
+        } => {
+            let authority = cron_authority(wave)?;
+            ensure_cron_placement(wave, &authority)?;
+            let root = crate::ops::receipt_root(&authority.host.lf_home);
+            let prior = crate::ops::cron_receipt_ids(&root, wave, flow)?;
+            let triggered_at = chrono::Utc::now().timestamp();
+            crate::ops::trigger_cron(&SystemLaunchctl, wave, flow)?;
+            println!("triggered {wave}/{flow} through launchd");
+            if *wait {
+                let receipt = crate::ops::wait_for_cron_receipt(
+                    &root,
+                    wave,
+                    flow,
+                    &prior,
+                    triggered_at,
+                    crate::ops::parse_wait_duration(timeout)?,
+                )?;
+                println!(
+                    "{} {} {}",
+                    receipt.id,
+                    receipt.flow,
+                    cron_receipt_outcome(&receipt)
+                );
+                if receipt.outcome == CronOutcome::Failed
+                    || crate::ops::receipt_is_stale(&receipt, chrono::Utc::now().timestamp())
+                {
+                    return Err(anyhow!(
+                        "cron {wave}/{flow} {}: {}; log {}",
+                        cron_receipt_outcome(&receipt),
+                        receipt
+                            .error
+                            .as_deref()
+                            .unwrap_or("no terminal error recorded"),
+                        receipt.log_path.display()
+                    ));
+                }
             }
         }
         CronCommand::Remove { wave, flow } => {
@@ -1197,6 +1393,155 @@ pub fn cron_cmd(cmd: &CronCommand) -> Result<()> {
         }
     }
     Ok(())
+}
+
+#[derive(Debug)]
+struct CronAuthority {
+    host: CronHost,
+    local_home: crate::durable::HomeId,
+    placed_home: crate::durable::HomeId,
+    repo: PathBuf,
+}
+
+fn cron_authority(wave_name: &str) -> Result<CronAuthority> {
+    let repo_root = find_repo_root()?;
+    tokio::runtime::Runtime::new()?.block_on(async {
+        let store = crate::store::open_registry_for_authority()
+            .await
+            .map_err(cron_registry_error)?;
+        let wave = crate::engine::wave_context::resolve_managed_wave(
+            Some(&store),
+            Some(&repo_root),
+            Some(wave_name),
+            None,
+        )
+        .await?;
+        let placement = store
+            .placement(&crate::durable::WorkRef::Wave(wave.id().clone()))
+            .await?;
+        let local = store.local_home().await?;
+        let repo = main_repo_root(Path::new(wave.repo())).map_err(|error| {
+            anyhow!(
+                "Wave {wave_name} repo {} has no authoritative main checkout: {error}",
+                wave.repo()
+            )
+        })?;
+        let path_env = std::env::var("PATH").map_err(|_| {
+            anyhow!("PATH is absent; cannot install an unattended cron environment")
+        })?;
+        if path_env.is_empty() {
+            return Err(anyhow!(
+                "PATH is empty; cannot install an unattended cron environment"
+            ));
+        }
+        Ok(CronAuthority {
+            host: CronHost {
+                home_id: local.id.clone(),
+                lf_home: crate::store::authority_home_dir(),
+                db_path: crate::store::observability_database_path()?,
+                path_env,
+            },
+            local_home: local.id,
+            placed_home: placement.home_id,
+            repo,
+        })
+    })
+}
+
+fn cron_registry_error(error: RegistryUnavailable) -> anyhow::Error {
+    match error {
+        RegistryUnavailable::MissingFile { path } => anyhow!(
+            "Home registry is missing at {}; initialize or restore it before running cron",
+            path.display()
+        ),
+        RegistryUnavailable::Unresolved { error } => {
+            anyhow!("Home registry path cannot be resolved: {error}")
+        }
+        RegistryUnavailable::Incompatible { path, error } => anyhow!(
+            "Home registry at {} is incompatible: {error}; run `lf doctor`",
+            path.display()
+        ),
+    }
+}
+
+fn ensure_cron_placement(wave: &str, authority: &CronAuthority) -> Result<()> {
+    if authority.local_home == authority.placed_home {
+        return Ok(());
+    }
+    Err(anyhow!(
+        "Wave {wave} is placed on Home {}, not local Home {}; run `lf ssh {} cron sync --wave {wave}`",
+        authority.placed_home,
+        authority.local_home,
+        authority.placed_home,
+    ))
+}
+
+fn cron_target_kind(repo: &Path, name: &str) -> Result<CronTargetKind> {
+    match discover_target(repo, name)? {
+        Target::Flow(_) => Ok(CronTargetKind::Flow),
+        Target::Skill(_) => Ok(CronTargetKind::Skill),
+    }
+}
+
+fn cron_specs(authority: &CronAuthority, wave: &str) -> Result<Vec<CronSpec>> {
+    let lf_path = crate::ops::resolve_lf_path()?;
+    crate::engine::wave_config::try_read_wave_config(&authority.repo, wave)?
+        .ok_or_else(|| {
+            anyhow!(
+                "Wave {wave} has no GOAL.md in {}; refusing to prune installed cron jobs",
+                authority.repo.display()
+            )
+        })?
+        .crons
+        .unwrap_or_default()
+        .into_iter()
+        .map(|cron| {
+            let schedule = crate::ops::parse_schedule(&cron.schedule).map_err(|error| {
+                anyhow!(
+                    "{} ({}) cannot be installed: {error}",
+                    cron.flow,
+                    cron.schedule
+                )
+            })?;
+            let target_kind = cron_target_kind(&authority.repo, &cron.flow)?;
+            Ok(CronSpec {
+                wave: wave.to_string(),
+                flow: cron.flow,
+                target_kind,
+                schedule,
+                working_directory: authority.repo.clone(),
+                lf_path: lf_path.clone(),
+                host: authority.host.clone(),
+            })
+        })
+        .collect()
+}
+
+fn require_release_cron_binary() -> Result<()> {
+    if crate::build_info::provenance().is_release() {
+        return Ok(());
+    }
+    Err(anyhow!(
+        "lf cron installation requires an installed release binary; promote this build before configuring launchd"
+    ))
+}
+
+fn cron_receipt_outcome(receipt: &crate::ops::CronReceipt) -> &'static str {
+    if crate::ops::receipt_is_stale(receipt, chrono::Utc::now().timestamp()) {
+        return "stale";
+    }
+    match receipt.outcome {
+        CronOutcome::Running => "running",
+        CronOutcome::Succeeded => "succeeded",
+        CronOutcome::Failed => "failed",
+    }
+}
+
+fn cron_source_name(source: CronSource) -> &'static str {
+    match source {
+        CronSource::Scheduled => "scheduled",
+        CronSource::Manual => "manual",
+    }
 }
 
 fn release_check_cmd(target_name: Option<&str>) -> Result<()> {
@@ -1319,6 +1664,22 @@ fn release_status_cmd(target_name: Option<&str>) -> Result<()> {
 
     if let Some(url) = status.workflow_url.as_deref() {
         println!("Workflow URL: {url}");
+    }
+
+    match status.notes_status {
+        Some(crate::ops::ReleaseNotesStatus::Narrative) => {
+            println!("Release notes: narrative / gate safe");
+        }
+        Some(crate::ops::ReleaseNotesStatus::Degraded(reason)) => {
+            println!("Release notes: degraded ({reason}) / gate safe");
+        }
+        Some(crate::ops::ReleaseNotesStatus::Missing) => {
+            println!("Release notes: missing / gate unsafe");
+        }
+        Some(crate::ops::ReleaseNotesStatus::Legacy) => {
+            println!("Release notes: legacy / gate status unknown");
+        }
+        None => println!("Release notes: (no release tag)"),
     }
 
     println!(
@@ -2027,18 +2388,19 @@ fn launch_skill_agent(
         },
     )?;
 
+    let mut launch = prepared.config;
+    launch.env = env.cloned().unwrap_or_default();
     let process = ProcessConfig {
         auto: true,
         stream: true,
         capture: Some(capture.clone()),
-        env: env.cloned().unwrap_or_default(),
         ..Default::default()
     };
     let capabilities = AgentCapabilities {
         chrome: config.chrome,
     };
 
-    let result = launch_agent(&prepared.config, &process, &capabilities);
+    let result = launch_agent(&launch, &process, &capabilities);
     let outcome = match &result {
         Ok(result) if result.exit_code == 0 => "completed",
         Ok(_) | Err(_) => "failed",

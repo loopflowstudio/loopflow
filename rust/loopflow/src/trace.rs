@@ -657,7 +657,7 @@ pub enum RecordedConversationPayload {
         text: String,
     },
     Conversation {
-        event: ConversationEvent,
+        event: Box<ConversationEvent>,
     },
     LegacyText {
         stream: String,
@@ -667,12 +667,8 @@ pub enum RecordedConversationPayload {
         name: String,
         summary: String,
     },
-    Usage {
-        usage: TurnUsage,
-    },
     Result {
         status: String,
-        cost_usd: Option<f64>,
         duration_secs: Option<f64>,
     },
     CaptureError {
@@ -736,15 +732,9 @@ pub struct AgentTurnRow {
     pub system_tokens: i64,
     pub task_tokens: i64,
     pub supplied_context_tokens: i64,
-    pub provider_input_tokens: Option<i64>,
-    pub provider_total_input_tokens: Option<i64>,
-    pub peak_input_tokens: Option<i64>,
-    pub context_window_tokens: Option<i64>,
-    pub provider_output_tokens: Option<i64>,
-    pub reasoning_tokens: Option<i64>,
-    pub cache_read_tokens: Option<i64>,
-    pub cache_write_tokens: Option<i64>,
-    pub cost_usd: Option<f64>,
+    /// Latest provider receipt joined from `turn_usage_samples`; never stored
+    /// on the Turn lifecycle row.
+    pub usage: Option<TurnUsage>,
     pub context_gather_ms: i64,
     pub context_render_ms: i64,
     pub context_persist_ms: i64,
@@ -949,6 +939,7 @@ struct TraceCapture {
     provider_seq: u64,
     usage: TurnUsage,
     usage_observed: bool,
+    usage_final: bool,
     failed: Option<String>,
 }
 
@@ -1086,15 +1077,7 @@ impl TraceCapture {
             system_tokens,
             task_tokens,
             supplied_context_tokens: system_tokens + task_tokens,
-            provider_input_tokens: None,
-            provider_total_input_tokens: None,
-            peak_input_tokens: None,
-            context_window_tokens: None,
-            provider_output_tokens: None,
-            reasoning_tokens: None,
-            cache_read_tokens: None,
-            cache_write_tokens: None,
-            cost_usd: None,
+            usage: None,
             context_gather_ms: start.gather_ms as i64,
             context_render_ms: start.render_ms as i64,
             context_persist_ms: persist_ms,
@@ -1134,6 +1117,7 @@ impl TraceCapture {
             provider_seq: 0,
             usage: TurnUsage::default(),
             usage_observed: false,
+            usage_final: false,
             failed: None,
         })
     }
@@ -1200,15 +1184,7 @@ impl TraceCapture {
             system_tokens: 0,
             task_tokens,
             supplied_context_tokens: task_tokens,
-            provider_input_tokens: None,
-            provider_total_input_tokens: None,
-            peak_input_tokens: None,
-            context_window_tokens: None,
-            provider_output_tokens: None,
-            reasoning_tokens: None,
-            cache_read_tokens: None,
-            cache_write_tokens: None,
-            cost_usd: None,
+            usage: None,
             context_gather_ms: 0,
             context_render_ms: 0,
             context_persist_ms: persist_start.elapsed().as_millis() as i64,
@@ -1243,6 +1219,7 @@ impl TraceCapture {
         self.turn = turn.clone();
         self.usage = TurnUsage::default();
         self.usage_observed = false;
+        self.usage_final = false;
         self.append_payload(RecordedConversationPayload::UserInput {
             op: input_op.to_string(),
             text: prepared.task.text,
@@ -1252,21 +1229,66 @@ impl TraceCapture {
         Ok(())
     }
 
-    /// Copy the accumulated turn usage onto the turn row before persisting it.
-    fn apply_usage_to_turn(&mut self) {
+    fn record_usage_checkpoint(
+        &mut self,
+        mut usage: TurnUsage,
+        observed_at: i64,
+        final_receipt: bool,
+    ) -> StoreResult<()> {
         if self.usage_observed {
-            self.turn.provider_input_tokens = Some(self.usage.input_tokens as i64);
-            self.turn.provider_total_input_tokens =
-                self.usage.total_input_tokens.map(|value| value as i64);
-            self.turn.peak_input_tokens = self.usage.peak_input_tokens.map(|value| value as i64);
-            self.turn.context_window_tokens =
-                self.usage.context_window_tokens.map(|value| value as i64);
-            self.turn.provider_output_tokens = Some(self.usage.output_tokens as i64);
-            self.turn.reasoning_tokens = self.usage.reasoning_tokens.map(|value| value as i64);
-            self.turn.cache_read_tokens = self.usage.cache_read_tokens.map(|value| value as i64);
-            self.turn.cache_write_tokens = self.usage.cache_write_tokens.map(|value| value as i64);
+            usage.input_tokens = usage.input_tokens.or(self.usage.input_tokens);
+            usage.total_input_tokens = usage.total_input_tokens.or(self.usage.total_input_tokens);
+            usage.peak_input_tokens = usage.peak_input_tokens.or(self.usage.peak_input_tokens);
+            usage.context_window_tokens = usage
+                .context_window_tokens
+                .or(self.usage.context_window_tokens);
+            usage.output_tokens = usage.output_tokens.or(self.usage.output_tokens);
+            usage.reasoning_tokens = usage.reasoning_tokens.or(self.usage.reasoning_tokens);
+            usage.cache_read_tokens = usage.cache_read_tokens.or(self.usage.cache_read_tokens);
+            usage.cache_write_tokens = usage.cache_write_tokens.or(self.usage.cache_write_tokens);
+            usage.model = usage.model.or_else(|| self.usage.model.clone());
+            usage.cost_usd = usage.cost_usd.or(self.usage.cost_usd);
         }
-        self.turn.cost_usd = self.usage.cost_usd;
+        crate::journal::open_ledger()?.record_turn_usage_sample(
+            &crate::store::TurnUsageSample {
+                turn_id: self.turn.id.clone(),
+                observed_at,
+                final_receipt,
+                usage: usage.clone(),
+            },
+        )?;
+        self.usage = usage;
+        self.usage_observed = true;
+        self.usage_final = final_receipt;
+        Ok(())
+    }
+
+    fn finish_usage(&mut self, ended_at: i64) -> StoreResult<()> {
+        if self.usage_observed && !self.usage_final {
+            self.append_usage_checkpoint(self.usage.clone(), ended_at, true)?;
+        }
+        Ok(())
+    }
+
+    fn append_usage_checkpoint(
+        &mut self,
+        usage: TurnUsage,
+        observed_at: i64,
+        final_receipt: bool,
+    ) -> StoreResult<()> {
+        self.record_usage_checkpoint(usage.clone(), observed_at, final_receipt)?;
+        let turn_id = self
+            .turn
+            .provider_turn_id
+            .clone()
+            .unwrap_or_else(|| self.turn.id.clone());
+        self.append_payload(RecordedConversationPayload::Conversation {
+            event: Box::new(ConversationEvent::UsageCheckpoint {
+                turn_id,
+                usage,
+                final_receipt,
+            }),
+        })
     }
 
     fn finish_current_turn(&mut self, status: &str, ended_at: i64) -> StoreResult<()> {
@@ -1275,7 +1297,7 @@ impl TraceCapture {
         }
         self.turn.ended_at = Some(ended_at);
         self.turn.status = status.to_string();
-        self.apply_usage_to_turn();
+        self.finish_usage(ended_at)?;
         crate::journal::open_ledger()?.finish_agent_turn_capture(&self.turn)
     }
 
@@ -1319,33 +1341,55 @@ impl TraceCapture {
                 output_tokens,
                 cache_read_tokens,
             } => {
-                self.usage_observed = true;
-                self.usage.input_tokens += input_tokens.unwrap_or(0);
-                self.usage.output_tokens += output_tokens.unwrap_or(0);
-                self.usage.cache_read_tokens = Some(
-                    self.usage.cache_read_tokens.unwrap_or(0) + cache_read_tokens.unwrap_or(0),
-                );
-                self.usage.total_input_tokens =
-                    Some(self.usage.input_tokens + self.usage.cache_read_tokens.unwrap_or(0));
-                RecordedConversationPayload::Usage {
-                    usage: self.usage.clone(),
+                self.usage_observed |= input_tokens.is_some()
+                    || output_tokens.is_some()
+                    || cache_read_tokens.is_some();
+                if let Some(input) = input_tokens {
+                    self.usage.input_tokens = Some(self.usage.input_tokens.unwrap_or(0) + input);
                 }
+                if let Some(output) = output_tokens {
+                    self.usage.output_tokens = Some(self.usage.output_tokens.unwrap_or(0) + output);
+                }
+                if let Some(cache_read) = cache_read_tokens {
+                    self.usage.cache_read_tokens =
+                        Some(self.usage.cache_read_tokens.unwrap_or(0) + cache_read);
+                }
+                if self.usage.input_tokens.is_some() || self.usage.cache_read_tokens.is_some() {
+                    self.usage.total_input_tokens = Some(
+                        self.usage.input_tokens.unwrap_or(0)
+                            + self.usage.cache_read_tokens.unwrap_or(0),
+                    );
+                }
+                return self.append_usage_checkpoint(
+                    self.usage.clone(),
+                    OffsetDateTime::now_utc().unix_timestamp(),
+                    false,
+                );
             }
             StreamEvent::Result {
                 subtype,
                 cost_usd,
                 duration_secs,
             } => {
-                self.usage.cost_usd = *cost_usd;
-                RecordedConversationPayload::Result {
+                if let Some(cost_usd) = cost_usd {
+                    self.usage.cost_usd = Some(*cost_usd);
+                }
+                if self.usage.is_reported() {
+                    self.append_usage_checkpoint(
+                        self.usage.clone(),
+                        OffsetDateTime::now_utc().unix_timestamp(),
+                        true,
+                    )?;
+                }
+                let result = RecordedConversationPayload::Result {
                     status: match subtype {
                         ResultSubtype::Success => "completed",
                         ResultSubtype::Error => "failed",
                     }
                     .to_string(),
-                    cost_usd: *cost_usd,
                     duration_secs: *duration_secs,
-                }
+                };
+                return self.append_payload(result);
             }
         };
         self.append_payload(payload)
@@ -1356,16 +1400,30 @@ impl TraceCapture {
             ConversationEvent::TurnStarted { turn_id } => {
                 self.turn.provider_turn_id = Some(turn_id.clone());
             }
-            ConversationEvent::TurnUsage { usage, .. } => {
-                self.usage_observed = true;
-                self.usage = usage.clone();
+            ConversationEvent::UsageCheckpoint {
+                usage,
+                final_receipt,
+                ..
+            } => {
+                if !usage.is_reported() {
+                    return Err(StoreError::InvalidData(
+                        "provider emitted an empty usage checkpoint".to_string(),
+                    ));
+                }
+                self.record_usage_checkpoint(
+                    usage.clone(),
+                    OffsetDateTime::now_utc().unix_timestamp(),
+                    *final_receipt,
+                )?;
             }
             ConversationEvent::TextDelta { content, .. } => {
                 self.record_root_output(content)?;
             }
             _ => {}
         }
-        self.append_payload(RecordedConversationPayload::Conversation { event })
+        self.append_payload(RecordedConversationPayload::Conversation {
+            event: Box::new(event),
+        })
     }
 
     fn record_root_output(&mut self, text: &str) -> StoreResult<()> {
@@ -1385,6 +1443,7 @@ impl TraceCapture {
         let now = OffsetDateTime::now_utc().unix_timestamp();
         self.invocation.ended_at = Some(now);
         self.invocation.outcome = outcome.to_string();
+        self.finish_usage(now)?;
         let sync_error = sync_file(&self.conversation_path)
             .and_then(|_| self.provider_path.as_deref().map_or(Ok(()), sync_file))
             .err();
@@ -1414,7 +1473,6 @@ impl TraceCapture {
             }
             .to_string()
         };
-        self.apply_usage_to_turn();
         crate::journal::open_ledger()?.finish_trace_capture(&self.invocation, &self.turn)
     }
 }
@@ -1623,6 +1681,7 @@ mod tests {
         TraceCaptureContext,
     };
     use crate::id::{ExecId, TraceId};
+    use time::OffsetDateTime;
 
     #[test]
     fn prompt_manifest_covers_exact_bytes_and_tokens() {
@@ -1937,7 +1996,7 @@ mod tests {
             .unwrap();
         assert_eq!(retry_turns.len(), 1);
         assert_eq!(retry_turns[0].context_coverage, "provider_total_only");
-        assert_eq!(retry_turns[0].provider_input_tokens, None);
+        assert_eq!(retry_turns[0].usage, None);
         #[cfg(unix)]
         {
             use std::os::unix::fs::PermissionsExt;
@@ -1948,6 +2007,170 @@ mod tests {
                 & 0o777;
             assert_eq!(mode, 0o600);
         }
+    }
+
+    #[test]
+    fn capture_persists_progressive_usage_checkpoints() {
+        let guard = crate::journal::TestLedgerGuard::new();
+        let run_id = TraceId::new();
+        let capture = CaptureHandle::begin(
+            TraceCaptureContext {
+                run_id: run_id.clone(),
+                process_id: ExecId::new(),
+                repo: guard.home().to_path_buf(),
+                worktree: guard.home().to_path_buf(),
+                wave: Some("infrastructure".to_string()),
+                project: None,
+                task: Some("LOO-45".to_string()),
+                flow: None,
+                skill: Some("implement".to_string()),
+            },
+            PreparedTurnContext::from_prompts("system", "task"),
+            super::CaptureStart {
+                provider: "codex".to_string(),
+                model: Some("gpt-5".to_string()),
+                surface: "headless".to_string(),
+                input_op: "initial".to_string(),
+                gather_ms: 1,
+                render_ms: 2,
+                raw_provider: true,
+                basis: None,
+                supervision: None,
+            },
+        )
+        .unwrap();
+        let accepted = crate::chat::types::TurnUsage {
+            input_tokens: Some(10),
+            output_tokens: Some(0),
+            ..Default::default()
+        };
+        capture.record_conversation(crate::chat::types::ConversationEvent::UsageCheckpoint {
+            turn_id: "provider-turn".to_string(),
+            usage: accepted.clone(),
+            final_receipt: false,
+        });
+        capture.record_conversation(crate::chat::types::ConversationEvent::UsageCheckpoint {
+            turn_id: "provider-turn".to_string(),
+            usage: accepted,
+            final_receipt: false,
+        });
+        capture.record_conversation(crate::chat::types::ConversationEvent::UsageCheckpoint {
+            turn_id: "provider-turn".to_string(),
+            usage: crate::chat::types::TurnUsage {
+                input_tokens: Some(99),
+                output_tokens: Some(1),
+                ..Default::default()
+            },
+            final_receipt: true,
+        });
+        capture.finish("completed", false).unwrap();
+
+        let store = crate::journal::open_ledger().unwrap();
+        let recent = store
+            .agent_invocations_with_turns_ended_since(
+                OffsetDateTime::now_utc().unix_timestamp() - 5,
+            )
+            .unwrap();
+        assert!(recent.iter().any(|row| row.run_id == run_id.as_str()));
+        let invocation = store
+            .agent_invocations_matching(run_id.as_str())
+            .unwrap()
+            .pop()
+            .expect("captured invocation");
+        assert_eq!(invocation.capture_status, "complete");
+        let turn = store
+            .agent_turns_for_invocations(&[invocation.id])
+            .unwrap()
+            .pop()
+            .expect("captured turn");
+        assert_eq!(
+            turn.usage.as_ref().and_then(|usage| usage.input_tokens),
+            Some(99)
+        );
+        assert_eq!(
+            turn.usage.as_ref().and_then(|usage| usage.output_tokens),
+            Some(1)
+        );
+    }
+
+    #[test]
+    fn legacy_stream_usage_enters_the_same_checkpoint_ledger() {
+        let guard = crate::journal::TestLedgerGuard::new();
+        let run_id = TraceId::new();
+        let capture = CaptureHandle::begin(
+            TraceCaptureContext {
+                run_id: run_id.clone(),
+                process_id: ExecId::new(),
+                repo: guard.home().to_path_buf(),
+                worktree: guard.home().to_path_buf(),
+                wave: None,
+                project: None,
+                task: None,
+                flow: None,
+                skill: Some("implement".to_string()),
+            },
+            PreparedTurnContext::from_prompts("system", "task"),
+            super::CaptureStart {
+                provider: "claude".to_string(),
+                model: Some("opus".to_string()),
+                surface: "headless".to_string(),
+                input_op: "initial".to_string(),
+                gather_ms: 1,
+                render_ms: 1,
+                raw_provider: true,
+                basis: None,
+                supervision: None,
+            },
+        )
+        .unwrap();
+        capture.record_stream_event(&crate::engine::stream::StreamEvent::Usage {
+            input_tokens: Some(100),
+            output_tokens: Some(25),
+            cache_read_tokens: Some(300),
+        });
+        capture.record_stream_event(&crate::engine::stream::StreamEvent::Result {
+            subtype: crate::engine::stream::ResultSubtype::Success,
+            cost_usd: Some(0.5),
+            duration_secs: Some(2.0),
+        });
+        capture.finish("completed", false).unwrap();
+
+        let store = crate::journal::open_ledger().unwrap();
+        let invocation = store
+            .agent_invocations_matching(run_id.as_str())
+            .unwrap()
+            .pop()
+            .expect("captured invocation");
+        let turn = store
+            .agent_turns_for_invocations(std::slice::from_ref(&invocation.id))
+            .unwrap()
+            .pop()
+            .expect("captured turn");
+        let usage = turn.usage.expect("normalized usage");
+        assert_eq!(usage.output_tokens, Some(25));
+        assert_eq!(usage.cost_usd, Some(0.5));
+
+        let conversation = resolve_artifact(&invocation.conversation_path).unwrap();
+        let checkpoints = read_conversation_status(&conversation)
+            .unwrap()
+            .events
+            .into_iter()
+            .filter_map(|record| match record.payload {
+                super::RecordedConversationPayload::Conversation { event } => match *event {
+                    crate::chat::types::ConversationEvent::UsageCheckpoint {
+                        usage,
+                        final_receipt,
+                        ..
+                    } => Some((usage, final_receipt)),
+                    _ => None,
+                },
+                _ => None,
+            })
+            .collect::<Vec<_>>();
+        assert_eq!(checkpoints.len(), 2);
+        assert!(!checkpoints[0].1);
+        assert!(checkpoints[1].1);
+        assert_eq!(checkpoints[1].0.cost_usd, Some(0.5));
     }
 
     #[test]

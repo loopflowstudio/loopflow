@@ -44,7 +44,7 @@ final class PortfolioRepoState {
         self.registryQuery = registryQuery
     }
 
-    /// Author a Wave before it is served. `lf wave` later registers the
+    /// Author a Wave before it is served. `lf start` later registers the
     /// coordination row; GOAL.md and MEMORY.md remain the authored objective
     /// and durable learning.
     ///
@@ -130,38 +130,6 @@ final class PortfolioRepoState {
         waves.sorted {
             $0.displayName.localizedCaseInsensitiveCompare($1.displayName) == .orderedAscending
         }
-    }
-
-    /// The tmux session name for a wave. Named after the wave's ORIGIN repo
-    /// (`WaveOrigin.resolve`, memoized): the launcher launches at the origin,
-    /// so launch guards and attach hints must derive the same name from a
-    /// worktree path.
-    nonisolated static func waveAgentSessionName(repoPath: String, waveName: String) -> String {
-        let repoName = URL(fileURLWithPath: WaveOrigin.resolve(repoPath)).lastPathComponent
-        return "lf-\(repoName)-\(sanitizeWavePathComponent(waveName))"
-            .replacingOccurrences(of: ".", with: "-")
-            .replacingOccurrences(of: ":", with: "-")
-    }
-
-    nonisolated static func waveAgentSessionExists(repoPath: String, waveName: String) -> Bool {
-        LocalWaveAgentLauncher.sessionExists(repoPath: repoPath, waveName: waveName)
-    }
-
-    private nonisolated static func sanitizeWavePathComponent(_ value: String) -> String {
-        var sanitized = ""
-        var pendingDash = false
-        for char in value {
-            if char.isASCII && (char.isLetter || char.isNumber || char == "_" || char == "-") {
-                if pendingDash && !sanitized.isEmpty {
-                    sanitized.append("-")
-                }
-                pendingDash = false
-                sanitized.append(char)
-            } else {
-                pendingDash = true
-            }
-        }
-        return sanitized.isEmpty ? "wave" : sanitized
     }
 
 }

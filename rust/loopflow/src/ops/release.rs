@@ -1,5 +1,7 @@
 use std::collections::HashSet;
+use std::ffi::OsString;
 use std::fs;
+use std::io::{Read, Write};
 use std::path::{Path, PathBuf};
 use std::process::{Command, Output};
 use std::thread;
@@ -12,15 +14,71 @@ use crate::engine::command::{run_command, CommandError};
 use crate::engine::config::{
     load_config_or_default, Config, ReleaseCompletion, ReleaseTargetConfig,
 };
-use crate::engine::git::{delete_local_branch, get_default_branch, sync_main, worktree_remove};
+use crate::engine::git::{
+    acquire_worktree_lease, delete_local_branch, fetch, get_default_branch, sync_main,
+    worktree_remove, worktree_remove_owned, WorktreeLease,
+};
 use crate::engine::naming::{git_user, sanitize_for_branch};
-use crate::engine::worktrees::{create_named_worktree, main_repo_root};
+use crate::engine::worktrees::{create_named_worktree, main_repo_root, worktree_path};
 use crate::ops::commit::{commit_workflow, CommitOptions};
 use crate::ops::error::{OpsError, OpsResult};
-use crate::ops::land::{land, LandOptions};
+use crate::ops::land::{finish_land_after_rebase, LandOptions};
 use crate::ops::pr::PrCopy;
 use crate::ops::progress::Progress;
 use crate::ops::util::command_exists;
+
+const RELEASE_QUEUE_PR_LIMIT: usize = 200;
+const RELEASE_CONTEXT_MAX_BYTES: usize = 128 * 1024;
+const RELEASE_CONTEXT_MAX_COMMITS: usize = 256;
+const RELEASE_CONTEXT_MAX_PRS: usize = RELEASE_QUEUE_PR_LIMIT;
+const RELEASE_CONTEXT_MAX_FILES_PER_CHANGE: usize = 100;
+const RELEASE_CONTEXT_MAX_AREA_SCOPES: usize = 32;
+const RELEASE_CONTEXT_MAX_NAME_BYTES: usize = 256;
+const RELEASE_CONTEXT_MAX_TITLE_BYTES: usize = 300;
+const RELEASE_CONTEXT_MAX_PATH_BYTES: usize = 512;
+const RELEASE_CONTEXT_MAX_PR_BODY_BYTES: usize = 4 * 1024;
+const RELEASE_CONTEXT_MAX_DECISIONS_BYTES: usize = 16 * 1024;
+const RELEASE_CONTEXT_MAX_PREVIOUS_NOTES_BYTES: usize = 16 * 1024;
+const RELEASE_NOTES_MAX_BYTES: usize = 60 * 1024;
+const FALLBACK_NOTES_MAX_COMMITS: usize = 50;
+const FALLBACK_NOTES_MAX_PRS: usize = 50;
+const RELEASE_NOTES_STATUS_PREFIX: &str = "<!-- loopflow:release-notes=";
+const RELEASE_WORKTREE_CONTEXT_ENV: [&str; 5] = [
+    crate::durable::RUN_CONTEXT_ENV,
+    "LF_RUN_ID",
+    crate::durable::RUN_LEASE_ENV,
+    crate::durable::AGENT_INVOCATION_ENV,
+    crate::engine::wave_context::WAVE_ID_ENV,
+];
+
+struct ReleaseWorktreeContext {
+    previous: Vec<(&'static str, Option<OsString>)>,
+}
+
+impl ReleaseWorktreeContext {
+    fn enter() -> Self {
+        let previous = RELEASE_WORKTREE_CONTEXT_ENV
+            .iter()
+            .map(|name| {
+                let value = std::env::var_os(name);
+                std::env::remove_var(name);
+                (*name, value)
+            })
+            .collect();
+        Self { previous }
+    }
+}
+
+impl Drop for ReleaseWorktreeContext {
+    fn drop(&mut self) {
+        for (name, value) in &self.previous {
+            match value {
+                Some(value) => std::env::set_var(name, value),
+                None => std::env::remove_var(name),
+            }
+        }
+    }
+}
 
 /// A merged PR with enough context for release notes.
 #[derive(Debug, Clone, Serialize)]
@@ -96,11 +154,6 @@ struct GhRunListEntry {
 }
 
 #[derive(Debug, Deserialize)]
-struct GhPrSummary {
-    number: u64,
-}
-
-#[derive(Debug, Deserialize)]
 struct GhPrMergeCommit {
     oid: String,
 }
@@ -108,6 +161,8 @@ struct GhPrMergeCommit {
 #[derive(Debug, Deserialize)]
 struct GhPrView {
     state: String,
+    #[serde(rename = "mergeStateStatus")]
+    merge_state_status: String,
     #[serde(default, rename = "mergeCommit")]
     merge_commit: Option<GhPrMergeCommit>,
     #[serde(default)]
@@ -122,6 +177,8 @@ struct GhReleasePr {
     merge_commit: Option<GhPrMergeCommit>,
     #[serde(default)]
     url: Option<String>,
+    #[serde(default, rename = "headRefOid")]
+    head_ref_oid: Option<String>,
 }
 
 impl From<GhMergedPr> for MergedPr {
@@ -161,10 +218,62 @@ struct ReleaseTarget {
 pub struct ReleaseStatusResult {
     pub target: String,
     pub latest_tag: Option<String>,
+    pub notes_status: Option<ReleaseNotesStatus>,
     pub workflow_status: Option<String>,
     pub workflow_conclusion: Option<String>,
     pub workflow_url: Option<String>,
     pub release_exists: bool,
+}
+
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+#[non_exhaustive]
+pub enum ReleaseNotesDegradation {
+    MissingCli,
+    Cooldown,
+    Quota,
+    Authentication,
+    RateLimit,
+    ProviderUnavailable,
+}
+
+impl ReleaseNotesDegradation {
+    fn slug(self) -> &'static str {
+        match self {
+            Self::MissingCli => "missing-cli",
+            Self::Cooldown => "cooldown",
+            Self::Quota => "quota",
+            Self::Authentication => "authentication",
+            Self::RateLimit => "rate-limit",
+            Self::ProviderUnavailable => "provider-unavailable",
+        }
+    }
+
+    fn from_slug(value: &str) -> Option<Self> {
+        match value {
+            "missing-cli" => Some(Self::MissingCli),
+            "cooldown" => Some(Self::Cooldown),
+            "quota" => Some(Self::Quota),
+            "authentication" => Some(Self::Authentication),
+            "rate-limit" => Some(Self::RateLimit),
+            "provider-unavailable" => Some(Self::ProviderUnavailable),
+            _ => None,
+        }
+    }
+}
+
+impl std::fmt::Display for ReleaseNotesDegradation {
+    fn fmt(&self, formatter: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+        formatter.write_str(self.slug())
+    }
+}
+
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+#[non_exhaustive]
+pub enum ReleaseNotesStatus {
+    Narrative,
+    Degraded(ReleaseNotesDegradation),
+    Missing,
+    Legacy,
 }
 
 #[derive(Debug, Clone, PartialEq)]
@@ -261,17 +370,19 @@ pub fn release_status(repo: &Path, target_name: Option<&str>) -> OpsResult<Relea
     let (main_repo, target) = resolve_repo_and_target(repo, target_name)?;
 
     let latest_tag = latest_tag_optional(&main_repo, &target)?;
-    let (workflow, release_exists) = match latest_tag.as_deref() {
+    let (notes_status, workflow, release_exists) = match latest_tag.as_deref() {
         Some(tag) => (
+            Some(release_notes_status(&main_repo, tag, &target)?),
             find_workflow_run(&main_repo, tag, &target)?,
             github_release_exists(&main_repo, tag)?,
         ),
-        None => (None, false),
+        None => (None, None, false),
     };
 
     Ok(ReleaseStatusResult {
         target: target.name,
         latest_tag,
+        notes_status,
         workflow_status: workflow.as_ref().map(|run| run.status.clone()),
         workflow_conclusion: workflow.as_ref().and_then(|run| run.conclusion.clone()),
         workflow_url: workflow.and_then(|run| run.url),
@@ -328,6 +439,7 @@ pub fn release_notes(
         &commits,
         &prs,
         &target,
+        progress,
     )?;
 
     let notes = fs::read_to_string(main_repo.join("RELEASE_NOTES.md"))?;
@@ -576,8 +688,25 @@ pub fn release_run(
                 ))
             })?,
             "OPEN" => {
+                let head_sha = pr.head_ref_oid.as_deref().ok_or_else(|| {
+                    OpsError::Message(format!(
+                        "open release PR #{} has no observable head commit",
+                        pr.number
+                    ))
+                })?;
                 progress.status(&format!("Resuming release PR #{}...", pr.number));
-                wait_for_pr_merge(&main_repo, pr.number, progress)?
+                finish_release_pr(
+                    &main_repo,
+                    &wt_name,
+                    &branch,
+                    PreparedRelease {
+                        pr_number: pr.number,
+                        head_sha: head_sha.to_string(),
+                    },
+                    &target,
+                    &version,
+                    progress,
+                )?
             }
             _ => {
                 let url = pr.url.unwrap_or_else(|| format!("PR #{}", pr.number));
@@ -602,11 +731,13 @@ pub fn release_run(
             &target,
             progress,
         );
-        cleanup_release_worktree(&main_repo, &wt_path, &wt_branch, progress);
+        cleanup_release_worktree(&main_repo, &wt_path, &wt_branch, None, progress);
         let prepared = prepared?;
 
         progress.status("Waiting for release PR to merge...");
-        wait_for_pr_merge(&main_repo, prepared.pr_number, progress)?
+        finish_release_pr(
+            &main_repo, &wt_name, &branch, prepared, &target, &version, progress,
+        )?
     };
 
     progress.status(&format!("Tagging {}...", target_tag(&target, &version)));
@@ -671,7 +802,8 @@ fn run_publisher_check(
     target: &ReleaseTarget,
     progress: &impl Progress,
 ) -> OpsResult<()> {
-    let Some((program, args)) = target.publisher.split_first() else {
+    let publisher = expand_publisher_command(repo, &target.publisher);
+    let Some((program, args)) = publisher.split_first() else {
         return Ok(());
     };
     progress.status("Checking release host...");
@@ -691,7 +823,8 @@ fn run_publisher(
     workflow: &ReleaseWorkflowResult,
     progress: &impl Progress,
 ) -> OpsResult<()> {
-    let Some((program, args)) = target.publisher.split_first() else {
+    let publisher = expand_publisher_command(repo, &target.publisher);
+    let Some((program, args)) = publisher.split_first() else {
         return Ok(());
     };
     if workflow.database_id == 0 {
@@ -699,6 +832,10 @@ fn run_publisher(
             "release workflow for {tag} did not expose a run id"
         )));
     }
+
+    let wt_name = publish_worktree_name(target, tag);
+    let wt_path = worktree_path(repo, &wt_name);
+    let lease = acquire_worktree_lease(repo, &wt_path, &format!("release publisher for {tag}"))?;
 
     let artifact_dir = tempfile::tempdir()?;
     let run_id = workflow.database_id.to_string();
@@ -715,7 +852,6 @@ fn run_publisher(
         ],
     )?;
 
-    let wt_name = publish_worktree_name(target, tag);
     progress.status(&format!(
         "Materializing tagged publisher worktree {wt_name}..."
     ));
@@ -729,6 +865,7 @@ fn run_publisher(
             .arg("--artifacts")
             .arg(artifact_dir.path())
             .env("LF_RELEASE_MAIN_REPO", repo)
+            .env("LF_RELEASE_SOURCE_REPO", &wt.path)
             .env(
                 "LF_RELEASE_WORKFLOW_RUN_ID",
                 workflow.database_id.to_string(),
@@ -739,7 +876,7 @@ fn run_publisher(
             stderr: err.stderr,
         })
     };
-    cleanup_release_worktree(repo, &wt.path, &wt.branch, progress);
+    cleanup_release_worktree(repo, &wt.path, &wt.branch, Some(&lease), progress);
     publish_result?;
 
     if github_release_state(repo, tag)? != GitHubReleaseState::Published {
@@ -750,9 +887,18 @@ fn run_publisher(
     Ok(())
 }
 
+fn expand_publisher_command(repo: &Path, publisher: &[String]) -> Vec<String> {
+    let repo = repo.to_string_lossy();
+    publisher
+        .iter()
+        .map(|arg| arg.replace("{repo}", &repo))
+        .collect()
+}
+
 #[derive(Debug)]
 struct PreparedRelease {
     pr_number: u64,
+    head_sha: String,
 }
 
 fn prepare_release_in_worktree(
@@ -764,6 +910,9 @@ fn prepare_release_in_worktree(
     target: &ReleaseTarget,
     progress: &impl Progress,
 ) -> OpsResult<PreparedRelease> {
+    // Release preparation owns its branch independently of whichever Work
+    // launched the controller. Provider/account authority remains available.
+    let _context = ReleaseWorktreeContext::enter();
     progress.status(&format!(
         "Bumping manifests for {}...",
         target_tag(target, version)
@@ -786,7 +935,9 @@ fn prepare_release_in_worktree(
         "Generating release notes for {}...",
         target_tag(target, version)
     ));
-    run_release_notes_stage(wt_path, version, prev_tag, commits, merged_prs, target)?;
+    run_release_notes_stage(
+        wt_path, version, prev_tag, commits, merged_prs, target, progress,
+    )?;
 
     progress.status("Committing release changes...");
     let _ = commit_workflow(
@@ -801,30 +952,111 @@ fn prepare_release_in_worktree(
         progress,
     )?;
 
-    let pr = current_pr_summary(wt_path)?;
-    let pr_copy = release_pr_copy(wt_path, target, version)?;
-
     progress.status("Enqueuing release PR for merge...");
-    land(
-        wt_path,
-        &LandOptions {
-            strict: true,
-            local: false,
-            create_pr: false,
-            complete: false,
-            next_slug: None,
-            worktree: None,
-            commit_message: None,
-            pr_title: Some(pr_copy.title),
-            pr_body: Some(pr_copy.body),
-            agent: None,
-        },
-        progress,
-    )?;
+    let pr_copy = release_pr_copy(wt_path, target, version)?;
+    let options = LandOptions {
+        strict: true,
+        local: false,
+        create_pr: false,
+        complete: false,
+        next_slug: None,
+        worktree: None,
+        commit_message: None,
+        pr_title: Some(pr_copy.title),
+        pr_body: Some(pr_copy.body),
+        agent: None,
+    };
+    let pr = finish_land_after_rebase(wt_path, &options, progress)?.ok_or_else(|| {
+        OpsError::Message("release land completed without a pull request".to_string())
+    })?;
+    let head_sha = pr.head_sha.ok_or_else(|| {
+        OpsError::Message(format!(
+            "release pull request #{} has no observable head commit",
+            pr.number
+        ))
+    })?;
 
     Ok(PreparedRelease {
         pr_number: pr.number,
+        head_sha,
     })
+}
+
+fn finish_release_pr(
+    main_repo: &Path,
+    worktree_name: &str,
+    release_branch: &str,
+    mut prepared: PreparedRelease,
+    target: &ReleaseTarget,
+    version: &str,
+    progress: &impl Progress,
+) -> OpsResult<String> {
+    loop {
+        match wait_for_pr_merge(main_repo, prepared.pr_number, &prepared.head_sha, progress)? {
+            ReleasePrWait::Merged(commit) => return Ok(commit),
+            ReleasePrWait::NeedsIntegration(state) => {
+                progress.status(&format!(
+                    "Release PR #{} is {state}; rebuilding on current main...",
+                    prepared.pr_number
+                ));
+                fetch_release_branch(main_repo, release_branch, &prepared.head_sha)?;
+                let wt = create_named_worktree(main_repo, worktree_name, None, true)?;
+                let refreshed = rebuild_release_pr(
+                    main_repo,
+                    &wt.path,
+                    &prepared.head_sha,
+                    target,
+                    version,
+                    progress,
+                );
+                cleanup_release_worktree(main_repo, &wt.path, &wt.branch, None, progress);
+                prepared = refreshed?;
+            }
+        }
+    }
+}
+
+fn fetch_release_branch(repo: &Path, branch: &str, expected_head: &str) -> OpsResult<()> {
+    let remote_ref = format!("refs/remotes/origin/{branch}");
+    let refspec = format!("+refs/heads/{branch}:{remote_ref}");
+    fetch(repo, "origin", &refspec)?;
+    let remote_head = crate::engine::git::rev_parse(repo, &remote_ref)?;
+    if remote_head != expected_head {
+        return Err(OpsError::Message(format!(
+            "release PR head changed while recovery was fetching it: expected {expected_head}, found {remote_head}"
+        )));
+    }
+    Ok(())
+}
+
+fn rebuild_release_pr(
+    main_repo: &Path,
+    worktree: &Path,
+    expected_head: &str,
+    target: &ReleaseTarget,
+    version: &str,
+    progress: &impl Progress,
+) -> OpsResult<PreparedRelease> {
+    let current_head = crate::engine::git::rev_parse(worktree, "HEAD")?;
+    if current_head != expected_head {
+        return Err(OpsError::Message(format!(
+            "release PR head changed while recovery was materializing it: expected {expected_head}, found {current_head}"
+        )));
+    }
+
+    let main_branch = get_default_branch(main_repo)?;
+    let main_ref = format!("origin/{main_branch}");
+    run_stdout(worktree, "git", &["reset", "--hard", &main_ref])?;
+    let changes = collect_release_changes(main_repo, target)?;
+    prepare_release_in_worktree(
+        worktree,
+        version,
+        changes.previous_tag.as_deref(),
+        &changes.commits,
+        &changes.merged_prs,
+        target,
+        progress,
+    )
 }
 
 #[derive(Debug, Serialize)]
@@ -838,6 +1070,36 @@ struct ReleaseNotesContext {
     merged_prs: Vec<MergedPr>,
     decisions: Option<String>,
     previous_release_notes: Option<String>,
+    source_limits: ReleaseNotesSourceLimits,
+    omissions: ReleaseNotesOmissions,
+}
+
+#[derive(Debug, Serialize)]
+struct ReleaseNotesSourceLimits {
+    context_bytes: usize,
+    commits: usize,
+    merged_prs: usize,
+    files_per_change: usize,
+    area_scopes: usize,
+    name_bytes: usize,
+    title_bytes: usize,
+    path_bytes: usize,
+    pr_body_bytes: usize,
+    decisions_bytes: usize,
+    previous_release_notes_bytes: usize,
+    release_notes_bytes: usize,
+}
+
+#[derive(Debug, Serialize)]
+struct ReleaseNotesOmissions {
+    commits: usize,
+    merged_prs: usize,
+    commit_files: usize,
+    pr_files: usize,
+    area_scopes: usize,
+    text_bytes: usize,
+    decisions_bytes: usize,
+    previous_release_notes_bytes: usize,
 }
 
 fn run_release_notes_stage(
@@ -847,66 +1109,322 @@ fn run_release_notes_stage(
     commits: &[ReleaseCommit],
     merged_prs: &[MergedPr],
     target: &ReleaseTarget,
+    progress: &impl Progress,
 ) -> OpsResult<()> {
-    let previous_notes = fs::read_to_string(repo.join("RELEASE_NOTES.md")).ok();
-    promote_unreleased_dir(repo, version)?;
-    let decisions = fs::read_to_string(
-        repo.join("release")
+    let notes_path = repo.join("RELEASE_NOTES.md");
+    let (previous_notes, previous_notes_omitted) =
+        read_bounded_text(&notes_path, RELEASE_CONTEXT_MAX_PREVIOUS_NOTES_BYTES)?;
+    let previous_notes_file = move_release_notes_aside(repo, &notes_path)?;
+
+    let result = (|| -> OpsResult<()> {
+        promote_unreleased_dir(repo, version)?;
+        let decisions_path = repo
+            .join("release")
             .join(format!("v{version}"))
-            .join("DECISIONS.md"),
-    )
-    .ok();
+            .join("DECISIONS.md");
+        let (decisions, decisions_omitted) =
+            read_bounded_text(&decisions_path, RELEASE_CONTEXT_MAX_DECISIONS_BYTES)?;
+        let (context, context_json) = build_release_notes_context(
+            version,
+            prev_tag,
+            commits,
+            merged_prs,
+            target,
+            decisions,
+            decisions_omitted,
+            previous_notes,
+            previous_notes_omitted,
+        )?;
 
-    let context = ReleaseNotesContext {
-        version: version.to_string(),
-        prev_tag: prev_tag.map(str::to_string),
-        target: target.name.clone(),
-        tag_prefix: target.tag_prefix.clone(),
-        area_scope: target.area.clone(),
-        commits: commits.to_vec(),
-        merged_prs: merged_prs.to_vec(),
-        decisions,
-        previous_release_notes: previous_notes,
-    };
+        let mut context_file = tempfile::NamedTempFile::new_in(repo)?;
+        context_file.write_all(&context_json)?;
+        let context_path = context_file.path().to_string_lossy().to_string();
 
-    let mut context_file = tempfile::NamedTempFile::new_in(repo)?;
-    serde_json::to_writer_pretty(&mut context_file, &context)
-        .map_err(|err| OpsError::Parse(format!("failed to encode release-notes context: {err}")))?;
-    let context_path = context_file.path().to_string_lossy().to_string();
+        let mut cmd = Command::new("lf");
+        cmd.arg("--batch")
+            .arg("release-notes")
+            .current_dir(repo)
+            .env("LF_RELEASE_NOTES_CONTEXT", &context_path);
+        let degradation = match run_command(&mut cmd) {
+            Ok(_) => None,
+            Err(err) => match classify_release_notes_degradation(&err) {
+                Some(degradation) => {
+                    let notes = generate_release_notes(&context)?;
+                    write_release_notes(repo, &notes, version)?;
+                    Some(degradation)
+                }
+                None => {
+                    return Err(OpsError::Message(format!(
+                        "release gate blocked: release-notes agent failed outside the supported provider-degradation policy: {err}"
+                    )));
+                }
+            },
+        };
 
-    let mut cmd = Command::new("lf");
-    cmd.arg("--batch")
-        .arg("release-notes")
-        .current_dir(repo)
-        .env("LF_RELEASE_NOTES_CONTEXT", &context_path);
-    match run_command(&mut cmd) {
-        Ok(_) => {}
-        Err(err) if is_missing_release_notes_agent_cli(&err) => {
-            eprintln!(
-                "release-notes agent unavailable; writing deterministic fallback release notes"
-            );
-            let notes = generate_release_notes(commits, merged_prs, version, prev_tag, target)?;
-            write_release_notes(repo, &notes, version)?;
+        finalize_release_notes(repo, version, degradation)?;
+        archive_release_notes(repo, version)?;
+        match degradation {
+            None => progress.status("Release notes: narrative; release gate safe."),
+            Some(reason) => progress.warning(&format!(
+                "Release notes: degraded ({reason}); deterministic fallback keeps the release gate safe."
+            )),
         }
-        Err(err) => {
-            return Err(OpsError::CommandFailed {
-                command: err.command_line(),
-                stderr: err.stderr,
-            });
-        }
-    }
+        Ok(())
+    })();
 
-    if !repo.join("RELEASE_NOTES.md").exists() {
-        return Err(OpsError::Message(
-            "release-notes skill did not write RELEASE_NOTES.md".to_string(),
-        ));
+    if result.is_err() {
+        restore_release_notes(&notes_path, previous_notes_file.as_ref())?;
     }
+    result
+}
 
-    archive_release_notes(repo, version)?;
+fn move_release_notes_aside(
+    repo: &Path,
+    notes_path: &Path,
+) -> OpsResult<Option<tempfile::TempPath>> {
+    if !notes_path.exists() {
+        return Ok(None);
+    }
+    let backup = tempfile::NamedTempFile::new_in(repo)?.into_temp_path();
+    fs::remove_file(&backup)?;
+    fs::rename(notes_path, &backup)?;
+    Ok(Some(backup))
+}
+
+fn restore_release_notes(
+    notes_path: &Path,
+    previous_notes: Option<&tempfile::TempPath>,
+) -> OpsResult<()> {
+    match fs::remove_file(notes_path) {
+        Ok(()) => {}
+        Err(error) if error.kind() == std::io::ErrorKind::NotFound => {}
+        Err(error) => return Err(error.into()),
+    }
+    if let Some(previous_notes) = previous_notes {
+        fs::rename(previous_notes, notes_path)?;
+    }
     Ok(())
 }
 
-fn is_missing_release_notes_agent_cli(err: &CommandError) -> bool {
+#[allow(clippy::too_many_arguments)]
+fn build_release_notes_context(
+    version: &str,
+    prev_tag: Option<&str>,
+    commits: &[ReleaseCommit],
+    merged_prs: &[MergedPr],
+    target: &ReleaseTarget,
+    decisions: Option<String>,
+    decisions_omitted: usize,
+    previous_release_notes: Option<String>,
+    previous_release_notes_omitted: usize,
+) -> OpsResult<(ReleaseNotesContext, Vec<u8>)> {
+    let mut omissions = ReleaseNotesOmissions {
+        commits: commits.len().saturating_sub(RELEASE_CONTEXT_MAX_COMMITS),
+        merged_prs: merged_prs.len().saturating_sub(RELEASE_CONTEXT_MAX_PRS),
+        commit_files: 0,
+        pr_files: 0,
+        area_scopes: target
+            .area
+            .len()
+            .saturating_sub(RELEASE_CONTEXT_MAX_AREA_SCOPES),
+        text_bytes: 0,
+        decisions_bytes: decisions_omitted,
+        previous_release_notes_bytes: previous_release_notes_omitted,
+    };
+    let mut context = ReleaseNotesContext {
+        version: bound_text(
+            version,
+            RELEASE_CONTEXT_MAX_NAME_BYTES,
+            &mut omissions.text_bytes,
+        ),
+        prev_tag: prev_tag.map(|tag| {
+            bound_text(
+                tag,
+                RELEASE_CONTEXT_MAX_NAME_BYTES,
+                &mut omissions.text_bytes,
+            )
+        }),
+        target: bound_text(
+            &target.name,
+            RELEASE_CONTEXT_MAX_NAME_BYTES,
+            &mut omissions.text_bytes,
+        ),
+        tag_prefix: bound_text(
+            &target.tag_prefix,
+            RELEASE_CONTEXT_MAX_NAME_BYTES,
+            &mut omissions.text_bytes,
+        ),
+        area_scope: target
+            .area
+            .iter()
+            .take(RELEASE_CONTEXT_MAX_AREA_SCOPES)
+            .map(|scope| {
+                bound_text(
+                    scope,
+                    RELEASE_CONTEXT_MAX_PATH_BYTES,
+                    &mut omissions.text_bytes,
+                )
+            })
+            .collect(),
+        commits: commits
+            .iter()
+            .take(RELEASE_CONTEXT_MAX_COMMITS)
+            .map(|commit| bound_release_commit(commit, &mut omissions))
+            .collect(),
+        merged_prs: merged_prs
+            .iter()
+            .take(RELEASE_CONTEXT_MAX_PRS)
+            .map(|pr| bound_merged_pr(pr, &mut omissions))
+            .collect(),
+        decisions,
+        previous_release_notes,
+        source_limits: ReleaseNotesSourceLimits {
+            context_bytes: RELEASE_CONTEXT_MAX_BYTES,
+            commits: RELEASE_CONTEXT_MAX_COMMITS,
+            merged_prs: RELEASE_CONTEXT_MAX_PRS,
+            files_per_change: RELEASE_CONTEXT_MAX_FILES_PER_CHANGE,
+            area_scopes: RELEASE_CONTEXT_MAX_AREA_SCOPES,
+            name_bytes: RELEASE_CONTEXT_MAX_NAME_BYTES,
+            title_bytes: RELEASE_CONTEXT_MAX_TITLE_BYTES,
+            path_bytes: RELEASE_CONTEXT_MAX_PATH_BYTES,
+            pr_body_bytes: RELEASE_CONTEXT_MAX_PR_BODY_BYTES,
+            decisions_bytes: RELEASE_CONTEXT_MAX_DECISIONS_BYTES,
+            previous_release_notes_bytes: RELEASE_CONTEXT_MAX_PREVIOUS_NOTES_BYTES,
+            release_notes_bytes: RELEASE_NOTES_MAX_BYTES,
+        },
+        omissions,
+    };
+
+    loop {
+        let json = serde_json::to_vec(&context).map_err(|err| {
+            OpsError::Parse(format!("failed to encode release-notes context: {err}"))
+        })?;
+        if json.len() <= RELEASE_CONTEXT_MAX_BYTES {
+            return Ok((context, json));
+        }
+        if context.merged_prs.len() >= context.commits.len() && !context.merged_prs.is_empty() {
+            context.merged_prs.pop();
+            context.omissions.merged_prs += 1;
+        } else if !context.commits.is_empty() {
+            context.commits.pop();
+            context.omissions.commits += 1;
+        } else if !context.merged_prs.is_empty() {
+            context.merged_prs.pop();
+            context.omissions.merged_prs += 1;
+        } else {
+            return Err(OpsError::Message(format!(
+                "release gate blocked: bounded release-notes metadata exceeds {RELEASE_CONTEXT_MAX_BYTES} bytes"
+            )));
+        }
+    }
+}
+
+fn bound_release_commit(
+    commit: &ReleaseCommit,
+    omissions: &mut ReleaseNotesOmissions,
+) -> ReleaseCommit {
+    omissions.commit_files += commit
+        .files
+        .len()
+        .saturating_sub(RELEASE_CONTEXT_MAX_FILES_PER_CHANGE);
+    ReleaseCommit {
+        sha: bound_text(
+            &commit.sha,
+            RELEASE_CONTEXT_MAX_NAME_BYTES,
+            &mut omissions.text_bytes,
+        ),
+        title: bound_text(
+            &commit.title,
+            RELEASE_CONTEXT_MAX_TITLE_BYTES,
+            &mut omissions.text_bytes,
+        ),
+        files: commit
+            .files
+            .iter()
+            .take(RELEASE_CONTEXT_MAX_FILES_PER_CHANGE)
+            .map(|path| {
+                bound_text(
+                    path,
+                    RELEASE_CONTEXT_MAX_PATH_BYTES,
+                    &mut omissions.text_bytes,
+                )
+            })
+            .collect(),
+    }
+}
+
+fn bound_merged_pr(pr: &MergedPr, omissions: &mut ReleaseNotesOmissions) -> MergedPr {
+    omissions.pr_files += pr
+        .files
+        .len()
+        .saturating_sub(RELEASE_CONTEXT_MAX_FILES_PER_CHANGE);
+    MergedPr {
+        number: pr.number,
+        title: bound_text(
+            &pr.title,
+            RELEASE_CONTEXT_MAX_TITLE_BYTES,
+            &mut omissions.text_bytes,
+        ),
+        body: pr.body.as_deref().map(|body| {
+            bound_text(
+                body,
+                RELEASE_CONTEXT_MAX_PR_BODY_BYTES,
+                &mut omissions.text_bytes,
+            )
+        }),
+        files: pr
+            .files
+            .iter()
+            .take(RELEASE_CONTEXT_MAX_FILES_PER_CHANGE)
+            .map(|path| {
+                bound_text(
+                    path,
+                    RELEASE_CONTEXT_MAX_PATH_BYTES,
+                    &mut omissions.text_bytes,
+                )
+            })
+            .collect(),
+        additions: pr.additions,
+        deletions: pr.deletions,
+        changed_files: pr.changed_files,
+        merge_commit: pr.merge_commit.as_deref().map(|commit| {
+            bound_text(
+                commit,
+                RELEASE_CONTEXT_MAX_NAME_BYTES,
+                &mut omissions.text_bytes,
+            )
+        }),
+    }
+}
+
+fn bound_text(value: &str, max_bytes: usize, omitted: &mut usize) -> String {
+    if value.len() <= max_bytes {
+        return value.to_string();
+    }
+    let mut end = max_bytes;
+    while !value.is_char_boundary(end) {
+        end -= 1;
+    }
+    *omitted += value.len() - end;
+    value[..end].to_string()
+}
+
+fn read_bounded_text(path: &Path, max_bytes: usize) -> OpsResult<(Option<String>, usize)> {
+    let file = match fs::File::open(path) {
+        Ok(file) => file,
+        Err(error) if error.kind() == std::io::ErrorKind::NotFound => return Ok((None, 0)),
+        Err(error) => return Err(error.into()),
+    };
+    let total_bytes = file.metadata()?.len().min(usize::MAX as u64) as usize;
+    let mut bytes = Vec::with_capacity(total_bytes.min(max_bytes));
+    file.take(max_bytes as u64).read_to_end(&mut bytes)?;
+    let mut omitted = total_bytes.saturating_sub(bytes.len());
+    let decoded = String::from_utf8_lossy(&bytes);
+    let value = bound_text(&decoded, max_bytes, &mut omitted);
+    Ok((Some(value), omitted))
+}
+
+fn classify_release_notes_degradation(err: &CommandError) -> Option<ReleaseNotesDegradation> {
     let stderr = err.stderr.to_lowercase();
     let message = err.message.to_lowercase();
     let combined = format!("{stderr}\n{message}");
@@ -919,8 +1437,142 @@ fn is_missing_release_notes_agent_cli(err: &CommandError) -> bool {
         || combined.contains("not found on path")
         || combined.contains("no such file or directory")
         || combined.contains("failed to spawn");
+    if mentions_agent_cli && missing_binary {
+        return Some(ReleaseNotesDegradation::MissingCli);
+    }
+    if combined.contains("account subscription limit")
+        || combined.contains("usage limit reached")
+        || combined.contains("usage limit has been reached")
+        || combined.contains("you've hit your usage limit")
+        || combined.contains("subscription quota")
+        || combined.contains("quota exceeded")
+        || combined.contains("insufficient_quota")
+    {
+        return Some(ReleaseNotesDegradation::Quota);
+    }
+    if combined.contains("account credential invalidated")
+        || combined.contains("no authenticated")
+        || combined.contains("not authenticated")
+        || combined.contains("not logged in")
+        || combined.contains("please sign in")
+        || combined.contains("log in again")
+        || combined.contains("login required")
+        || combined.contains("unauthorized")
+        || combined.contains("status 401")
+    {
+        return Some(ReleaseNotesDegradation::Authentication);
+    }
+    if combined.contains("no eligible managed")
+        || combined.contains("cooling down")
+        || combined.contains("cooldown")
+    {
+        return Some(ReleaseNotesDegradation::Cooldown);
+    }
+    if combined.contains("provider rate limit")
+        || combined.contains("too many requests")
+        || combined.contains("status 429")
+        || combined.contains("status code 429")
+    {
+        return Some(ReleaseNotesDegradation::RateLimit);
+    }
+    if combined.contains("provider capacity")
+        || combined.contains("provider unavailable")
+        || combined.contains("provider transport")
+        || combined.contains("temporarily unavailable")
+        || combined.contains("service unavailable")
+        || combined.contains("server is busy")
+        || combined.contains("server overloaded")
+        || combined.contains("try again later")
+        || combined.contains("internal server error")
+        || combined.contains("status 502")
+        || combined.contains("status 503")
+        || combined.contains("status 504")
+        || combined.contains("connection reset")
+        || combined.contains("connection closed")
+        || combined.contains("connection refused")
+        || combined.contains("network error")
+        || combined.contains("request timed out")
+        || combined.contains("request timeout")
+    {
+        return Some(ReleaseNotesDegradation::ProviderUnavailable);
+    }
+    None
+}
 
-    mentions_agent_cli && missing_binary
+fn finalize_release_notes(
+    repo: &Path,
+    version: &str,
+    degradation: Option<ReleaseNotesDegradation>,
+) -> OpsResult<()> {
+    let path = repo.join("RELEASE_NOTES.md");
+    let file = fs::File::open(&path).map_err(|error| {
+        if error.kind() == std::io::ErrorKind::NotFound {
+            OpsError::Message(
+                "release gate blocked: release-notes skill did not write fresh RELEASE_NOTES.md"
+                    .to_string(),
+            )
+        } else {
+            error.into()
+        }
+    })?;
+    let reported_bytes = file.metadata()?.len();
+    let mut raw =
+        String::with_capacity(reported_bytes.min((RELEASE_NOTES_MAX_BYTES + 1) as u64) as usize);
+    file.take((RELEASE_NOTES_MAX_BYTES + 1) as u64)
+        .read_to_string(&mut raw)?;
+    if reported_bytes > RELEASE_NOTES_MAX_BYTES as u64 || raw.len() > RELEASE_NOTES_MAX_BYTES {
+        return Err(OpsError::Message(format!(
+            "release gate blocked: release notes are at least {} bytes; maximum queue metadata is {RELEASE_NOTES_MAX_BYTES} bytes",
+            reported_bytes.max(raw.len() as u64)
+        )));
+    }
+    let expected_header = format!("# v{version}");
+    let mut lines = raw.trim().lines();
+    let actual_header = lines.next().map(str::trim);
+    if actual_header != Some(expected_header.as_str()) {
+        return Err(OpsError::Message(format!(
+            "release gate blocked: release notes must start with '{expected_header}'"
+        )));
+    }
+
+    let body = lines
+        .filter(|line| !line.trim().starts_with(RELEASE_NOTES_STATUS_PREFIX))
+        .collect::<Vec<_>>()
+        .join("\n")
+        .trim()
+        .to_string();
+    if body.is_empty() {
+        return Err(OpsError::Message(
+            "release gate blocked: release notes contain no release content".to_string(),
+        ));
+    }
+    let marker = match degradation {
+        None => "<!-- loopflow:release-notes=narrative;gate=safe -->".to_string(),
+        Some(reason) => format!(
+            "<!-- loopflow:release-notes=degraded;reason={};gate=safe -->",
+            reason.slug()
+        ),
+    };
+    let content = format!("{expected_header}\n\n{marker}\n\n{body}");
+    if content.len() > RELEASE_NOTES_MAX_BYTES {
+        return Err(OpsError::Message(format!(
+            "release gate blocked: release notes are {} bytes; maximum queue metadata is {RELEASE_NOTES_MAX_BYTES} bytes",
+            content.len()
+        )));
+    }
+    write_atomic(&path, content.as_bytes())
+}
+
+fn write_atomic(path: &Path, content: &[u8]) -> OpsResult<()> {
+    let parent = path
+        .parent()
+        .ok_or_else(|| OpsError::Message(format!("path has no parent: {}", path.display())))?;
+    fs::create_dir_all(parent)?;
+    let mut file = tempfile::NamedTempFile::new_in(parent)?;
+    file.write_all(content)?;
+    file.persist(path)
+        .map_err(|error| OpsError::Io(error.error))?;
+    Ok(())
 }
 
 /// Rename `release/unreleased/` to `release/v<version>/` at tag time.
@@ -962,18 +1614,58 @@ fn promote_unreleased_dir(repo: &Path, version: &str) -> OpsResult<()> {
 fn archive_release_notes(repo: &Path, version: &str) -> OpsResult<()> {
     let src = repo.join("RELEASE_NOTES.md");
     let dir = repo.join("release").join(format!("v{version}"));
-    fs::create_dir_all(&dir)?;
-    fs::copy(&src, dir.join("NOTES.md"))?;
-    Ok(())
+    let notes = fs::read(&src)?;
+    write_atomic(&dir.join("NOTES.md"), &notes)
+}
+
+fn release_notes_status(
+    repo: &Path,
+    tag: &str,
+    target: &ReleaseTarget,
+) -> OpsResult<ReleaseNotesStatus> {
+    let version = version_from_tag(tag, target)?;
+    let archive = format!("release/v{version}/NOTES.md");
+    let reference = format!("{tag}:{archive}");
+    let output = run_output(repo, "git", &["show", &reference])?;
+    if !output.status.success() {
+        return Ok(ReleaseNotesStatus::Missing);
+    }
+    let notes = String::from_utf8_lossy(&output.stdout);
+    Ok(parse_release_notes_status(&notes))
+}
+
+fn parse_release_notes_status(notes: &str) -> ReleaseNotesStatus {
+    let marker = notes
+        .lines()
+        .find_map(|line| line.trim().strip_prefix(RELEASE_NOTES_STATUS_PREFIX));
+    let Some(marker) = marker else {
+        return ReleaseNotesStatus::Legacy;
+    };
+    if marker == "narrative;gate=safe -->" {
+        return ReleaseNotesStatus::Narrative;
+    }
+    let reason = marker
+        .strip_prefix("degraded;reason=")
+        .and_then(|value| value.strip_suffix(";gate=safe -->"))
+        .and_then(ReleaseNotesDegradation::from_slug);
+    if let Some(reason) = reason {
+        return ReleaseNotesStatus::Degraded(reason);
+    }
+    ReleaseNotesStatus::Legacy
 }
 
 fn cleanup_release_worktree(
     main_repo: &Path,
     wt_path: &Path,
     branch: &str,
+    lease: Option<&WorktreeLease>,
     progress: &impl Progress,
 ) {
-    if let Err(err) = worktree_remove(main_repo, wt_path) {
+    let result = match lease {
+        Some(lease) => worktree_remove_owned(main_repo, wt_path, lease),
+        None => worktree_remove(main_repo, wt_path),
+    };
+    if let Err(err) = result {
         progress.error(&format!(
             "Warning: could not remove release worktree {}: {err}",
             wt_path.display()
@@ -997,12 +1689,6 @@ fn release_pr_copy(repo: &Path, target: &ReleaseTarget, version: &str) -> OpsRes
     })
 }
 
-fn current_pr_summary(repo: &Path) -> OpsResult<GhPrSummary> {
-    let output = run_stdout(repo, "gh", &["pr", "view", "--json", "number"])?;
-    serde_json::from_str(&output)
-        .map_err(|err| OpsError::Parse(format!("failed to parse PR summary: {err}")))
-}
-
 fn release_branch_name(repo: &Path, worktree_name: &str) -> OpsResult<String> {
     let author = git_user(repo)?;
     Ok(format!("{author}/{}", sanitize_for_branch(worktree_name)))
@@ -1020,7 +1706,7 @@ fn find_release_pr(repo: &Path, branch: &str) -> OpsResult<Option<GhReleasePr>> 
             "--state",
             "all",
             "--json",
-            "number,state,mergeCommit,url",
+            "number,state,mergeCommit,url,headRefOid",
             "--limit",
             "1",
         ],
@@ -1030,7 +1716,17 @@ fn find_release_pr(repo: &Path, branch: &str) -> OpsResult<Option<GhReleasePr>> 
     Ok(prs.pop())
 }
 
-fn wait_for_pr_merge(repo: &Path, pr_number: u64, progress: &impl Progress) -> OpsResult<String> {
+enum ReleasePrWait {
+    Merged(String),
+    NeedsIntegration(String),
+}
+
+fn wait_for_pr_merge(
+    repo: &Path,
+    pr_number: u64,
+    head_sha: &str,
+    progress: &impl Progress,
+) -> OpsResult<ReleasePrWait> {
     let started = Instant::now();
     let timeout = Duration::from_secs(60 * 60);
     let poll = Duration::from_secs(10);
@@ -1046,7 +1742,7 @@ fn wait_for_pr_merge(repo: &Path, pr_number: u64, progress: &impl Progress) -> O
                 "view",
                 &pr_number_arg,
                 "--json",
-                "state,mergeCommit,url",
+                "state,mergeStateStatus,mergeCommit,url",
             ],
         )?;
         let view: GhPrView = serde_json::from_str(&output)
@@ -1059,7 +1755,7 @@ fn wait_for_pr_merge(repo: &Path, pr_number: u64, progress: &impl Progress) -> O
                         "PR #{pr_number} is merged but merge commit is unavailable"
                     ))
                 })?;
-                return Ok(commit.oid);
+                return Ok(ReleasePrWait::Merged(commit.oid));
             }
             "CLOSED" => {
                 let url = view.url.unwrap_or_else(|| format!("PR #{pr_number}"));
@@ -1070,14 +1766,30 @@ fn wait_for_pr_merge(repo: &Path, pr_number: u64, progress: &impl Progress) -> O
             _ => {}
         }
 
+        if matches!(view.merge_state_status.as_str(), "BEHIND" | "DIRTY") {
+            return Ok(ReleasePrWait::NeedsIntegration(
+                view.merge_state_status.to_ascii_lowercase(),
+            ));
+        }
+
         if started.elapsed() >= timeout {
             return Err(OpsError::Message(format!(
                 "timed out waiting for PR #{pr_number} to merge"
             )));
         }
 
+        if !crate::ops::pr::auto_merge_enabled(repo, pr_number)? {
+            progress.status(&format!(
+                "Re-arming release PR #{pr_number} for exact-head auto-merge..."
+            ));
+            crate::ops::pr::enable_auto_merge(repo, pr_number, None, None, head_sha)?;
+        }
+
         if attempt.is_multiple_of(6) {
-            progress.status(&format!("PR #{pr_number} still in merge queue..."));
+            progress.status(&format!(
+                "PR #{pr_number} is open ({}) and awaiting GitHub auto-merge...",
+                view.merge_state_status.to_ascii_lowercase()
+            ));
         }
         attempt += 1;
         thread::sleep(poll);
@@ -1222,7 +1934,18 @@ fn generate_release_with_target(
     let prs = merged_prs_since(repo, prev_tag.as_deref(), target, &commit_shas)?;
 
     progress.status("Generating release notes...");
-    let notes = generate_release_notes(&commits, &prs, &version, prev_tag.as_deref(), target)?;
+    let (context, _) = build_release_notes_context(
+        &version,
+        prev_tag.as_deref(),
+        &commits,
+        &prs,
+        target,
+        None,
+        0,
+        None,
+        0,
+    )?;
+    let notes = generate_release_notes(&context)?;
 
     progress.status("Writing RELEASE_NOTES.md...");
     write_release_notes(repo, &notes, &version)?;
@@ -1489,22 +2212,6 @@ fn target_tag(target: &ReleaseTarget, version: &str) -> String {
     format!("{}v{version}", target.tag_prefix)
 }
 
-fn display_tag_prefix(target: &ReleaseTarget) -> &str {
-    if target.tag_prefix.is_empty() {
-        "(none)"
-    } else {
-        target.tag_prefix.as_str()
-    }
-}
-
-fn display_area_scope(target: &ReleaseTarget) -> String {
-    if target.area.is_empty() {
-        "(entire repository)".to_string()
-    } else {
-        target.area.join(", ")
-    }
-}
-
 fn latest_tag(repo: &Path, target: &ReleaseTarget) -> OpsResult<String> {
     latest_tag_optional(repo, target)?.ok_or_else(|| {
         OpsError::Message(format!(
@@ -1700,13 +2407,18 @@ fn list_merged_prs(
     if let Some(search) = search {
         args.extend(["--search", search]);
     }
-    args.extend(["--json", fields, "--limit", "200"]);
+    let limit = RELEASE_QUEUE_PR_LIMIT.to_string();
+    args.extend(["--json", fields, "--limit", &limit]);
     let output = run_stdout(repo, "gh", &args)?;
 
     let prs: Vec<GhMergedPr> = serde_json::from_str(&output)
         .map_err(|err| OpsError::Parse(format!("failed to parse merged PR list: {err}")))?;
 
-    Ok(prs.into_iter().map(Into::into).collect())
+    Ok(prs
+        .into_iter()
+        .take(RELEASE_QUEUE_PR_LIMIT)
+        .map(Into::into)
+        .collect())
 }
 
 fn should_fallback_for_pr_files(err: &OpsError) -> bool {
@@ -1803,57 +2515,87 @@ fn glob_to_regex(pattern: &str) -> String {
     regex
 }
 
-fn generate_release_notes(
-    commits: &[ReleaseCommit],
-    prs: &[MergedPr],
-    version: &str,
-    prev_tag: Option<&str>,
-    target: &ReleaseTarget,
-) -> OpsResult<String> {
-    let previous = prev_tag.unwrap_or("repository start");
+fn generate_release_notes(context: &ReleaseNotesContext) -> OpsResult<String> {
+    let previous = context.prev_tag.as_deref().unwrap_or("repository start");
+    let tag_prefix = if context.tag_prefix.is_empty() {
+        "v".to_string()
+    } else {
+        format!("{}v", context.tag_prefix)
+    };
+    let area_scope = if context.area_scope.is_empty() {
+        "all files".to_string()
+    } else {
+        context.area_scope.join(", ")
+    };
     let mut lines = vec![
         format!("## Changes since {previous}"),
         String::new(),
-        format!("- Target: {}", target.name),
-        format!("- Tag prefix: {}", display_tag_prefix(target)),
-        format!("- Area scope: {}", display_area_scope(target)),
+        format!("- Target: {}", context.target),
+        format!("- Tag prefix: {tag_prefix}"),
+        format!("- Area scope: {area_scope}"),
         String::new(),
     ];
 
     lines.push("## Commits".to_string());
     lines.push(String::new());
 
-    for commit in commits {
+    for commit in context.commits.iter().take(FALLBACK_NOTES_MAX_COMMITS) {
         let short_sha = commit.sha.get(..7).unwrap_or(&commit.sha);
         lines.push(format!("- `{short_sha}` {}", commit.title));
+    }
+    let omitted_commits = context.omissions.commits
+        + context
+            .commits
+            .len()
+            .saturating_sub(FALLBACK_NOTES_MAX_COMMITS);
+    if omitted_commits > 0 {
+        lines.push(format!(
+            "- … {omitted_commits} more commit(s) in the release range."
+        ));
     }
 
     lines.push(String::new());
     lines.push("## Merged PRs".to_string());
     lines.push(String::new());
 
-    if prs.is_empty() {
+    if context.merged_prs.is_empty() {
         lines.push("- No merged PRs found in this window.".to_string());
     } else {
-        for pr in prs {
+        for pr in context.merged_prs.iter().take(FALLBACK_NOTES_MAX_PRS) {
             lines.push(format!(
                 "- #{} {} (+{} -{}, {} files)",
                 pr.number, pr.title, pr.additions, pr.deletions, pr.changed_files
             ));
-            if let Some(body) = pr
-                .body
-                .as_deref()
-                .map(str::trim)
-                .filter(|body| !body.is_empty())
-            {
-                let single_line = body.replace('\n', " ");
-                lines.push(format!("  - {}", single_line));
-            }
+        }
+        let omitted_prs = context.omissions.merged_prs
+            + context
+                .merged_prs
+                .len()
+                .saturating_sub(FALLBACK_NOTES_MAX_PRS);
+        if omitted_prs > 0 {
+            lines.push(format!(
+                "- … {omitted_prs} more merged PR(s) in the release range."
+            ));
         }
     }
 
     lines.push(String::new());
-    lines.push(format!("_Generated mechanically for v{version}._"));
+    if context.omissions.text_bytes > 0
+        || context.omissions.commit_files > 0
+        || context.omissions.pr_files > 0
+        || context.omissions.decisions_bytes > 0
+        || context.omissions.previous_release_notes_bytes > 0
+        || context.omissions.area_scopes > 0
+    {
+        lines.push(
+            "_Some narrative source was omitted to keep release context bounded._".to_string(),
+        );
+        lines.push(String::new());
+    }
+    lines.push(format!(
+        "_Generated mechanically for v{}._",
+        context.version
+    ));
     Ok(lines.join("\n"))
 }
 

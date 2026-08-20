@@ -10,6 +10,8 @@ use std::process::Command;
 /// Category directories whose skill/flow names are registered flat (no prefix).
 /// Everything else is a namespaced category: names are stored as `<cat>/<name>`.
 /// Core categories share one flat namespace and must not collide with each other.
+/// Within a filename, `_` encodes a namespace separator (`wave_clarify.md`
+/// registers as `wave/clarify`); `-` remains a word separator.
 const CORE_CATEGORIES: &[&str] = &["task", "project", "wave", "ops"];
 
 fn main() {
@@ -115,6 +117,7 @@ fn emit_build_provenance(manifest_dir: &Path) {
             "LOOPFLOW_MIGRATION_AUTHORITY must be `published` or `validation_only`, got `{migration_authority}`"
         );
     }
+    let pending_migration_drafts = pending_migration_drafts(manifest_dir);
     let source_revision = git_root
         .and_then(|root| {
             Command::new("git")
@@ -163,6 +166,10 @@ fn emit_build_provenance(manifest_dir: &Path) {
     println!("cargo:rustc-env=LOOPFLOW_BUILD_PROVENANCE={provenance}");
     println!("cargo:rustc-env=LOOPFLOW_BUILD_SOURCE_ROOT={}", source_root);
     println!("cargo:rustc-env=LOOPFLOW_MIGRATION_AUTHORITY={migration_authority}");
+    println!(
+        "cargo:rustc-env=LOOPFLOW_PENDING_MIGRATION_DRAFTS={}",
+        pending_migration_drafts.join(",")
+    );
     println!("cargo:rustc-env=LOOPFLOW_BUILD_SOURCE_REVISION={source_revision}");
     println!("cargo:rustc-env=LOOPFLOW_BUILD_VERSION={build_version}");
     println!("cargo:rerun-if-env-changed=LOOPFLOW_BUILD_PROVENANCE");
@@ -191,6 +198,44 @@ fn emit_build_provenance(manifest_dir: &Path) {
             }
         }
     }
+}
+
+fn pending_migration_drafts(manifest_dir: &Path) -> Vec<String> {
+    let drafts_dir = manifest_dir.join("src/store/migrations/drafts");
+    println!("cargo:rerun-if-changed={}", drafts_dir.display());
+    let entries = match fs::read_dir(&drafts_dir) {
+        Ok(entries) => entries,
+        Err(error) if error.kind() == std::io::ErrorKind::NotFound => return Vec::new(),
+        Err(error) => panic!(
+            "read migration drafts from {}: {error}",
+            drafts_dir.display()
+        ),
+    };
+    let mut drafts = entries
+        .map(|entry| {
+            entry
+                .unwrap_or_else(|error| {
+                    panic!(
+                        "read migration draft entry from {}: {error}",
+                        drafts_dir.display()
+                    )
+                })
+                .path()
+        })
+        .filter(|path| path.extension().is_some_and(|extension| extension == "sql"))
+        .map(|path| {
+            println!("cargo:rerun-if-changed={}", path.display());
+            let stem = path
+                .file_stem()
+                .and_then(|stem| stem.to_str())
+                .unwrap_or("unreadable_draft");
+            stem.rsplit_once("__")
+                .map_or(stem, |(name, _)| name)
+                .to_string()
+        })
+        .collect::<Vec<_>>();
+    drafts.sort();
+    drafts
 }
 
 fn generate_map(dir: &Path, extension: &str, map_name: &str, out_path: &Path) {
@@ -227,11 +272,12 @@ fn generate_kind_map(
             let is_core = CORE_CATEGORIES.contains(&cat_name.as_str());
             let mut files: Vec<(String, PathBuf)> = Vec::new();
             collect_files(&kind_dir, extension, &mut files);
-            if is_core {
-                entries.extend(files);
-            } else {
-                for (stem, path) in files {
-                    entries.push((format!("{cat_name}/{stem}"), path));
+            for (stem, path) in files {
+                let name = canonical_builtin_name(&stem);
+                if is_core {
+                    entries.push((name, path));
+                } else {
+                    entries.push((format!("{cat_name}/{name}"), path));
                 }
             }
         }
@@ -346,6 +392,7 @@ fn generate_category_map(
                         .expect("file has no stem")
                         .to_string_lossy()
                         .to_string();
+                    let stem = canonical_builtin_name(&stem);
                     let name = if is_core {
                         stem
                     } else {
@@ -511,6 +558,10 @@ fn title_case(s: &str) -> String {
         None => String::new(),
         Some(c) => c.to_uppercase().to_string() + chars.as_str(),
     }
+}
+
+fn canonical_builtin_name(stem: &str) -> String {
+    stem.replace('_', "/")
 }
 
 /// Recursively collect files with the given extension. The key is the file stem.

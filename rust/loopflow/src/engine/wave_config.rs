@@ -1,8 +1,24 @@
-use serde::{Deserialize, Serialize};
+use serde::{Deserialize, Deserializer, Serialize};
 use serde_yaml_ng::{Mapping, Value};
 use std::collections::HashMap;
 use std::path::Path;
 use tracing::warn;
+
+use crate::durable::HomeId;
+
+#[derive(Debug, thiserror::Error)]
+pub(crate) enum WaveConfigError {
+    #[error("failed to read {path}: {source}")]
+    Read {
+        path: std::path::PathBuf,
+        source: std::io::Error,
+    },
+    #[error("invalid wave goal frontmatter in {path}: {source}")]
+    Parse {
+        path: std::path::PathBuf,
+        source: serde_yaml_ng::Error,
+    },
+}
 
 /// One cron line from GOAL.md frontmatter: `crons: [{flow, schedule}]`.
 /// The wave's resident loop reads these and opens a system pass when a
@@ -13,9 +29,11 @@ pub struct WaveCronDef {
     pub schedule: String,
 }
 
-/// The Linear Initiative and team representing a wave, from `pm.*` in GOAL.md.
-/// The Initiative is the durable middle tier; the team owns the Task prefix
-/// (`PRD-*`, `INF-*`, …). Both store stable provider ids, not presentation.
+/// The Linear Initiative representing a wave, from `pm.*` in GOAL.md.
+///
+/// `provider` and `linear_team` remain decodable only as repository-Team
+/// migration sentinels. Normal PM authority reads provider and Team from the
+/// repository's `.lf/config.yaml`.
 #[derive(Debug, Clone, Deserialize, Serialize, Default, PartialEq, Eq)]
 pub struct WavePmConfig {
     #[serde(default)]
@@ -24,6 +42,28 @@ pub struct WavePmConfig {
     pub linear_initiative: Option<String>,
     #[serde(default)]
     pub linear_team: Option<String>,
+}
+
+/// One existing Discord guild text channel bound to this Wave's chat.
+#[derive(Debug, Clone, Deserialize, Serialize, PartialEq, Eq)]
+#[serde(tag = "provider", rename_all = "snake_case", deny_unknown_fields)]
+#[non_exhaustive]
+pub enum WaveChatConfig {
+    Local,
+    Discord {
+        #[serde(deserialize_with = "deserialize_home_id")]
+        home_id: HomeId,
+        guild_id: String,
+        channel_id: String,
+    },
+}
+
+fn deserialize_home_id<'de, D>(deserializer: D) -> Result<HomeId, D::Error>
+where
+    D: Deserializer<'de>,
+{
+    let value = String::deserialize(deserializer)?;
+    HomeId::parse(&value).map_err(serde::de::Error::custom)
 }
 
 /// Machine policy read from `wave/<name>/GOAL.md` frontmatter.
@@ -38,6 +78,9 @@ pub struct WaveConfig {
     pub agent: Option<String>,
     pub skill_agents: Option<HashMap<String, String>>,
     pub pm: Option<WavePmConfig>,
+    /// One external presentation binding. Discord is the only supported
+    /// provider and remains a concrete variant rather than a registry.
+    pub chat: Option<WaveChatConfig>,
     /// The safety valve: `paused: true` in GOAL.md frontmatter tells the wave
     /// listener to refuse to START turns (message→turn, heartbeat, cron)
     /// while keeping the listener serving and queueing. File-first and re-read
@@ -56,25 +99,64 @@ pub struct WaveConfig {
 
 /// Read wave intent from `wave/<name>/GOAL.md` frontmatter.
 pub fn read_wave_config(repo: &Path, name: &str) -> Option<WaveConfig> {
+    match try_read_wave_config(repo, name) {
+        Ok(config) => config,
+        Err(err) => {
+            warn!(error = %err, "failed to read wave config");
+            None
+        }
+    }
+}
+
+/// Read wave machine policy and surface malformed frontmatter to callers that
+/// must fail closed before starting external side effects.
+pub(crate) fn try_read_wave_config(
+    repo: &Path,
+    name: &str,
+) -> Result<Option<WaveConfig>, WaveConfigError> {
     let path = goal_path(repo, name);
     let content = match std::fs::read_to_string(&path) {
         Ok(content) => content,
-        Err(err) if err.kind() == std::io::ErrorKind::NotFound => return None,
-        Err(err) => {
-            warn!(path = %path.display(), error = %err, "failed to read wave config");
-            return None;
-        }
+        Err(err) if err.kind() == std::io::ErrorKind::NotFound => return Ok(None),
+        Err(source) => return Err(WaveConfigError::Read { path, source }),
     };
-    Some(match split_frontmatter(&content) {
-        Some((frontmatter, _)) => match serde_yaml_ng::from_str::<WaveConfig>(&frontmatter) {
-            Ok(config) => config,
-            Err(err) => {
-                warn!(path = %path.display(), error = %err, "invalid wave goal frontmatter");
-                return None;
-            }
-        },
+    Ok(Some(match split_frontmatter(&content) {
+        Some((frontmatter, _)) => serde_yaml_ng::from_str::<WaveConfig>(&frontmatter)
+            .map_err(|source| WaveConfigError::Parse { path, source })?,
         None => WaveConfig::default(),
-    })
+    }))
+}
+
+/// Read only the external chat binding, so malformed unrelated Wave policy
+/// cannot turn listener startup into a new validation boundary.
+pub(crate) fn try_read_wave_chat_config(
+    repo: &Path,
+    name: &str,
+) -> Result<Option<WaveChatConfig>, WaveConfigError> {
+    let path = goal_path(repo, name);
+    let content = match std::fs::read_to_string(&path) {
+        Ok(content) => content,
+        Err(err) if err.kind() == std::io::ErrorKind::NotFound => return Ok(None),
+        Err(source) => return Err(WaveConfigError::Read { path, source }),
+    };
+    let Some((frontmatter, _)) = split_frontmatter(&content) else {
+        return Ok(None);
+    };
+    let value = serde_yaml_ng::from_str::<Value>(&frontmatter).map_err(|source| {
+        WaveConfigError::Parse {
+            path: path.clone(),
+            source,
+        }
+    })?;
+    let Some(chat) = value
+        .as_mapping()
+        .and_then(|mapping| mapping.get(Value::String("chat".to_string())))
+    else {
+        return Ok(None);
+    };
+    serde_yaml_ng::from_value(chat.clone())
+        .map(Some)
+        .map_err(|source| WaveConfigError::Parse { path, source })
 }
 
 /// One-line Wave objective for status, PM, and API projections.
@@ -254,6 +336,22 @@ pub fn update_wave_agent_config(
     })
 }
 
+/// Set authored Wave turn intent, preserving unrelated frontmatter and body.
+///
+/// Enabled turns are the default, so resuming removes `paused` rather than
+/// persisting a redundant `paused: false` field.
+pub fn update_wave_paused(repo: &Path, name: &str, paused: bool) -> Result<(), String> {
+    update_wave_goal_config(repo, name, |map| {
+        let key = Value::String("paused".to_string());
+        if paused {
+            map.insert(key, Value::Bool(true));
+        } else {
+            map.remove(&key);
+        }
+        Ok(())
+    })
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;
@@ -310,6 +408,75 @@ mod tests {
         assert_eq!(pm.provider.as_deref(), Some("linear"));
         assert_eq!(pm.linear_initiative.as_deref(), Some("lin-123"));
         assert_eq!(pm.linear_team.as_deref(), Some("team-prd"));
+    }
+
+    #[test]
+    fn discord_chat_config_is_typed_and_invalid_bindings_fail_closed() {
+        let temp = tempdir().expect("temp dir");
+        let dir = temp.path().join("wave").join("scan");
+        fs::create_dir_all(&dir).expect("create dir");
+        fs::write(
+            dir.join("GOAL.md"),
+            "---\nchat:\n  provider: discord\n  home_id: home_11111111111111111111111111111111\n  guild_id: guild\n  channel_id: channel\n---\nDrive the work.\n",
+        )
+        .expect("write");
+        let config = read_wave_config(temp.path(), "scan").expect("config should parse");
+        assert!(matches!(
+            config.chat,
+            Some(WaveChatConfig::Discord { home_id, guild_id, channel_id })
+                if home_id.as_str() == "home_11111111111111111111111111111111"
+                    && guild_id == "guild"
+                    && channel_id == "channel"
+        ));
+        assert!(matches!(
+            try_read_wave_chat_config(temp.path(), "scan"),
+            Ok(Some(WaveChatConfig::Discord { home_id, guild_id, channel_id }))
+                if home_id.as_str() == "home_11111111111111111111111111111111"
+                    && guild_id == "guild"
+                    && channel_id == "channel"
+        ));
+
+        fs::write(
+            dir.join("GOAL.md"),
+            "---\nchat:\n  provider: discord\n  home_id: home_39860354aaca640c2ccb50bf6ca609d8\n  guild_id: guild\n---\nDrive the work.\n",
+        )
+        .expect("write invalid");
+        assert!(matches!(
+            try_read_wave_chat_config(temp.path(), "scan"),
+            Err(WaveConfigError::Parse { .. })
+        ));
+
+        fs::write(
+            dir.join("GOAL.md"),
+            "---\nchat:\n  provider: local\n---\nDrive the work.\n",
+        )
+        .expect("write local chat");
+        assert!(matches!(
+            try_read_wave_config(temp.path(), "scan")
+                .expect("local config")
+                .and_then(|config| config.chat),
+            Some(WaveChatConfig::Local)
+        ));
+
+        fs::write(
+            dir.join("GOAL.md"),
+            "---\nchat:\n  provider: discord\n  home_id: not-a-home\n  guild_id: guild\n  channel_id: channel\n---\nDrive the work.\n",
+        )
+        .expect("write invalid HomeId");
+        assert!(matches!(
+            try_read_wave_chat_config(temp.path(), "scan"),
+            Err(WaveConfigError::Parse { .. })
+        ));
+
+        fs::write(
+            dir.join("GOAL.md"),
+            "---\npaused: not-a-boolean\n---\nDrive the work.\n",
+        )
+        .expect("write unrelated invalid policy");
+        assert!(matches!(
+            try_read_wave_chat_config(temp.path(), "scan"),
+            Ok(None)
+        ));
     }
 
     /// Crons live in GOAL.md frontmatter — the resident loop's schedule
@@ -393,5 +560,33 @@ mod tests {
         let config = read_wave_config(temp.path(), "scan").expect("config should parse");
         assert!(config.agent.is_none());
         assert!(config.skill_agents.is_none());
+    }
+
+    #[test]
+    fn update_wave_paused_preserves_goal_and_removes_default() {
+        let temp = tempdir().expect("temp dir");
+        let dir = temp.path().join("wave").join("product");
+        fs::create_dir_all(&dir).expect("create dir");
+        let goal = dir.join("GOAL.md");
+        let body = "\n## Objective\n\nShip the control room.\n";
+        fs::write(
+            &goal,
+            format!("---\nowner: jack\nagent: codex\n---\n{body}"),
+        )
+        .expect("write");
+
+        update_wave_paused(temp.path(), "product", true).expect("pause");
+        let paused = fs::read_to_string(&goal).expect("read paused goal");
+        assert!(paused.contains("owner: jack"));
+        assert!(paused.contains("agent: codex"));
+        assert!(paused.contains("paused: true"));
+        assert!(paused.ends_with(body));
+
+        update_wave_paused(temp.path(), "product", false).expect("resume");
+        let resumed = fs::read_to_string(&goal).expect("read resumed goal");
+        assert!(resumed.contains("owner: jack"));
+        assert!(resumed.contains("agent: codex"));
+        assert!(!resumed.contains("paused:"));
+        assert!(resumed.ends_with(body));
     }
 }

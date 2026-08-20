@@ -8,7 +8,7 @@
 
 use std::path::{Path, PathBuf};
 
-use serde::Serialize;
+use serde::{Deserialize, Serialize};
 
 pub const LABEL: &str = "com.loopflow.lfd";
 
@@ -29,6 +29,10 @@ pub struct ServiceSpec {
     /// Executable search path captured at install time so launchd can find
     /// Homebrew tools such as `gh` and `doppler`.
     pub path_env: Option<String>,
+    /// Non-secret Doppler project selection captured from `doppler run`.
+    pub doppler_project: Option<String>,
+    /// Non-secret Doppler config selection captured from `doppler run`.
+    pub doppler_config: Option<String>,
 }
 
 /// Where the rendered service file lands, and how it is loaded, per platform.
@@ -36,6 +40,14 @@ pub struct ServiceSpec {
 pub struct ServiceFile {
     pub path: PathBuf,
     pub platform: &'static str,
+}
+
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Deserialize, Serialize)]
+#[serde(rename_all = "snake_case")]
+pub enum KeeperMode {
+    None,
+    Launchd,
+    Systemd,
 }
 
 fn xml_escape(value: &str) -> String {
@@ -98,6 +110,18 @@ pub fn render_launchd_plist(spec: &ServiceSpec) -> String {
             xml_escape(path)
         ));
     }
+    if let Some(project) = &spec.doppler_project {
+        env.push_str(&format!(
+            "        <key>DOPPLER_PROJECT</key>\n        <string>{}</string>\n",
+            xml_escape(project)
+        ));
+    }
+    if let Some(config) = &spec.doppler_config {
+        env.push_str(&format!(
+            "        <key>DOPPLER_CONFIG</key>\n        <string>{}</string>\n",
+            xml_escape(config)
+        ));
+    }
     let env_block = if env.is_empty() {
         String::new()
     } else {
@@ -149,6 +173,18 @@ pub fn render_systemd_unit(spec: &ServiceSpec) -> String {
     }
     if let Some(path) = &spec.path_env {
         env_lines.push_str(&format!("Environment=PATH={}\n", shell_escape(path)));
+    }
+    if let Some(project) = &spec.doppler_project {
+        env_lines.push_str(&format!(
+            "Environment=DOPPLER_PROJECT={}\n",
+            shell_escape(project)
+        ));
+    }
+    if let Some(config) = &spec.doppler_config {
+        env_lines.push_str(&format!(
+            "Environment=DOPPLER_CONFIG={}\n",
+            shell_escape(config)
+        ));
     }
     let exec_start = shell_escape(&spec.lfd_path.to_string_lossy());
     format!(
@@ -298,6 +334,118 @@ pub fn status() -> anyhow::Result<String> {
     }
 }
 
+#[cfg(target_os = "macos")]
+pub fn configured_mode() -> anyhow::Result<KeeperMode> {
+    let home = dirs::home_dir().ok_or_else(|| anyhow::anyhow!("no home directory to inspect"))?;
+    let path = home
+        .join("Library/LaunchAgents")
+        .join(format!("{LABEL}.plist"));
+    if !path.exists() {
+        return Ok(KeeperMode::None);
+    }
+    Ok(KeeperMode::Launchd)
+}
+
+#[cfg(target_os = "macos")]
+pub fn pause() -> anyhow::Result<KeeperMode> {
+    let mode = configured_mode()?;
+    if mode == KeeperMode::None {
+        return Ok(mode);
+    }
+    let home = dirs::home_dir().ok_or_else(|| anyhow::anyhow!("no home directory to inspect"))?;
+    let path = home
+        .join("Library/LaunchAgents")
+        .join(format!("{LABEL}.plist"));
+    let _ = std::process::Command::new("launchctl")
+        .arg("unload")
+        .arg(&path)
+        .status()?;
+    Ok(mode)
+}
+
+#[cfg(target_os = "macos")]
+pub fn resume(mode: KeeperMode) -> anyhow::Result<()> {
+    if mode != KeeperMode::Launchd {
+        return Ok(());
+    }
+    let home = dirs::home_dir().ok_or_else(|| anyhow::anyhow!("no home directory to inspect"))?;
+    let path = home
+        .join("Library/LaunchAgents")
+        .join(format!("{LABEL}.plist"));
+    if std::process::Command::new("launchctl")
+        .args(["list", LABEL])
+        .status()
+        .is_ok_and(|status| status.success())
+    {
+        return Ok(());
+    }
+    let status = std::process::Command::new("launchctl")
+        .arg("load")
+        .arg(&path)
+        .status()?;
+    if !status.success() {
+        anyhow::bail!("launchctl load failed for {}", path.display());
+    }
+    Ok(())
+}
+
+#[cfg(target_os = "linux")]
+pub fn configured_mode() -> anyhow::Result<KeeperMode> {
+    let home = dirs::home_dir().ok_or_else(|| anyhow::anyhow!("no home directory to inspect"))?;
+    if !home.join(".config/systemd/user/lfd.service").exists() {
+        return Ok(KeeperMode::None);
+    }
+    Ok(KeeperMode::Systemd)
+}
+
+#[cfg(target_os = "linux")]
+pub fn pause() -> anyhow::Result<KeeperMode> {
+    let mode = configured_mode()?;
+    if mode == KeeperMode::None {
+        return Ok(mode);
+    }
+    let _ = std::process::Command::new("systemctl")
+        .args(["--user", "stop", "lfd"])
+        .status()?;
+    Ok(mode)
+}
+
+#[cfg(target_os = "linux")]
+pub fn resume(mode: KeeperMode) -> anyhow::Result<()> {
+    if mode != KeeperMode::Systemd {
+        return Ok(());
+    }
+    if std::process::Command::new("systemctl")
+        .args(["--user", "is-active", "--quiet", "lfd"])
+        .status()
+        .is_ok_and(|status| status.success())
+    {
+        return Ok(());
+    }
+    let status = std::process::Command::new("systemctl")
+        .args(["--user", "start", "lfd"])
+        .status()?;
+    if !status.success() {
+        anyhow::bail!("systemctl --user start lfd failed");
+    }
+    Ok(())
+}
+
+#[cfg(not(any(target_os = "macos", target_os = "linux")))]
+pub fn configured_mode() -> anyhow::Result<KeeperMode> {
+    Ok(KeeperMode::None)
+}
+
+#[cfg(not(any(target_os = "macos", target_os = "linux")))]
+pub fn pause() -> anyhow::Result<KeeperMode> {
+    Ok(KeeperMode::None)
+}
+
+#[cfg(not(any(target_os = "macos", target_os = "linux")))]
+pub fn resume(_mode: KeeperMode) -> anyhow::Result<()> {
+    Ok(())
+}
+
 #[cfg(target_os = "linux")]
 pub fn status() -> anyhow::Result<String> {
     let out = std::process::Command::new("systemctl")
@@ -331,6 +479,8 @@ mod tests {
             lf_home: Some(PathBuf::from("/home/op/.lf")),
             db_path: None,
             path_env: Some("/opt/homebrew/bin:/usr/bin:/bin".to_string()),
+            doppler_project: Some("example-project".to_string()),
+            doppler_config: Some("example-config".to_string()),
         }
     }
 
@@ -349,6 +499,10 @@ mod tests {
         assert!(plist.contains("/home/op/src/loopflow</string>"));
         assert!(plist.contains("<key>PATH</key>"));
         assert!(plist.contains("/opt/homebrew/bin:/usr/bin:/bin"));
+        assert!(plist.contains("<key>DOPPLER_PROJECT</key>"));
+        assert!(plist.contains("<string>example-project</string>"));
+        assert!(plist.contains("<key>DOPPLER_CONFIG</key>"));
+        assert!(plist.contains("<string>example-config</string>"));
         assert_eq!(plist.matches("<string>/dev/null</string>").count(), 2);
         // Secrets must never appear in the file.
         assert!(!plist.contains("WEBHOOK_SECRET"));
@@ -368,6 +522,8 @@ mod tests {
         assert!(unit.contains("StandardError=null"));
         assert!(unit.contains("Environment=LF_HOME=/home/op/.lf"));
         assert!(unit.contains("Environment=PATH=/opt/homebrew/bin:/usr/bin:/bin"));
+        assert!(unit.contains("Environment=DOPPLER_PROJECT=example-project"));
+        assert!(unit.contains("Environment=DOPPLER_CONFIG=example-config"));
         assert!(unit.contains("WantedBy=default.target"));
         assert!(!unit.contains("WEBHOOK_SECRET"));
     }
@@ -381,6 +537,8 @@ mod tests {
             lf_home: None,
             db_path: None,
             path_env: None,
+            doppler_project: None,
+            doppler_config: None,
         };
         let plist = render_launchd_plist(&bare);
         assert!(!plist.contains("EnvironmentVariables"));

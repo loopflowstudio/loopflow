@@ -13,7 +13,7 @@ use crate::child_control::{
     absorb_run_control, apply_input as apply_child_input, input_is_current,
     send_outstanding_steers, CommandStop, PendingInput,
 };
-use crate::durable::{Basis, BoundarySeed, FlowPosition, RunLease};
+use crate::durable::{AskId, Basis, BoundarySeed, FlowPosition, RunLease};
 use crate::engine::wave_config::read_wave_config;
 use crate::harness::{
     classify_disconnect_recovery, drain_turn_failure_reason, ApprovalPolicy, Harness,
@@ -40,21 +40,6 @@ struct PreparedTaskStep {
     turn: crate::lf::commands::run::PreparedHarnessTurn,
     position: FlowPosition,
     basis: Basis,
-    interactive: bool,
-}
-
-#[derive(Debug)]
-struct StartedTaskStep {
-    provider_turn_active: bool,
-    basis: Option<Basis>,
-}
-
-#[derive(Debug)]
-struct ActiveDemo {
-    invocation_id: crate::durable::AgentInvocationId,
-    session: String,
-    window: String,
-    completion_sent: bool,
 }
 
 pub(crate) async fn run(store: SharedStore, task_id: TaskId, lease: &RunLease) -> Result<()> {
@@ -156,18 +141,30 @@ async fn run_task_with(
     } else {
         resume_task_phase(&task)?
     };
-    let prepared = prepare_task_flow_step(
+    let Some(prepared) = prepare_task_flow_step(
         &store,
         &mut task,
         lease,
         wave.name(),
-        &flow,
+        &mut flow,
         ci_fix_wake.as_ref(),
     )
-    .await?;
+    .await?
+    else {
+        store
+            .advance_run(
+                lease,
+                crate::durable::RunAdvance::InvocationEnded {
+                    invocation_id: invocation.id,
+                    outcome: crate::durable::BoundaryState::Succeeded,
+                },
+            )
+            .await?;
+        wait_for_parked_run(&store, &lease.run_id).await?;
+        return Ok(());
+    };
     let (harness_name, _) = crate::engine::config::parse_agent(&task.agent);
     let (event_tx, mut event_rx) = mpsc::unbounded_channel();
-    let runner_event_tx = event_tx.clone();
     let mut harness = create_harness(&harness_name, ApprovalPolicy::AutoApprove, event_tx)?;
     harness.set_provider_session_id(task.provider_session_id.clone());
     let requested_account = invocation
@@ -210,59 +207,50 @@ async fn run_task_with(
     // Record this body's turns the way `flowloop/wave.rs` does. Without it a
     // Task's spend reaches no store at all: the provider runs in this
     // process, so no child `lf` records on its behalf.
-    let capture = (!prepared.interactive)
-        .then(|| flow.current())
-        .flatten()
-        .and_then(|step| {
-            let context = crate::journal::trace_capture_context(
-                Path::new(&task.worktree),
-                Some(step.flow.clone()),
-                Some(step.step.clone()),
-            )?;
-            match crate::trace::CaptureHandle::begin(
-                context,
-                prepared.turn.context.clone(),
-                crate::trace::CaptureStart {
-                    provider: prepared.turn.harness.clone(),
-                    model: prepared.turn.model.clone(),
-                    surface: "headless".to_string(),
-                    input_op: "initial".to_string(),
-                    gather_ms: prepared.turn.context_gather_ms,
-                    render_ms: prepared.turn.context_render_ms,
-                    raw_provider: true,
-                    basis: Some(prepared.basis.clone()),
-                    supervision: Some(supervision.clone()),
-                },
-            ) {
-                Ok(capture) => Some(capture),
-                Err(error) => {
-                    // Spend telemetry must never take a Task body down.
-                    tracing::warn!(%error, "failed to establish Task trace capture");
-                    None
-                }
+    let capture = flow.current().and_then(|step| {
+        let context = crate::journal::trace_capture_context(
+            Path::new(&task.worktree),
+            Some(step.flow.clone()),
+            Some(step.step.clone()),
+        )?;
+        match crate::trace::CaptureHandle::begin(
+            context,
+            prepared.turn.context.clone(),
+            crate::trace::CaptureStart {
+                provider: prepared.turn.harness.clone(),
+                model: prepared.turn.model.clone(),
+                surface: "headless".to_string(),
+                input_op: "initial".to_string(),
+                gather_ms: prepared.turn.context_gather_ms,
+                render_ms: prepared.turn.context_render_ms,
+                raw_provider: true,
+                basis: Some(prepared.basis.clone()),
+                supervision: Some(supervision.clone()),
+            },
+        ) {
+            Ok(capture) => Some(capture),
+            Err(error) => {
+                // Spend telemetry must never take a Task body down.
+                tracing::warn!(%error, "failed to establish Task trace capture");
+                None
             }
-        });
+        }
+    });
     if let Some(capture) = &capture {
         capture.set_provider_session_id(task.provider_session_id.clone());
     }
-    let mut active_basis = prepared.basis.clone();
-    let mut active_demo = None;
-    let started = start_prepared_task_step(
+    let mut active_basis = start_prepared_task_step(
         &store,
         &mut task,
         lease,
         harness.as_mut(),
         &mut flow,
         capture.as_ref(),
-        &mut active_demo,
         prepared,
     )
     .await?;
-    if let Some(basis) = started.basis {
-        active_basis = basis;
-    }
     let mut flow_turn_active = true;
-    let mut provider_turn_active = started.provider_turn_active;
+    let mut provider_turn_active = true;
 
     let (attachment_tx, mut attachment_rx) = mpsc::unbounded_channel();
     std::thread::spawn(move || {
@@ -281,6 +269,8 @@ async fn run_task_with(
     command_poll.set_missed_tick_behavior(tokio::time::MissedTickBehavior::Delay);
     let mut last_text = String::new();
     let mut turn_had_durable_side_effect = false;
+    let mut first_material_recorded = false;
+    let mut first_material_warning_emitted = false;
     'runner: loop {
         tokio::select! {
             line = attachment_rx.recv() => {
@@ -308,27 +298,7 @@ async fn run_task_with(
                         capture.as_ref(),
                     ).await;
                 }
-                if let Some(demo) = active_demo.as_mut().filter(|demo| !demo.completion_sent) {
-                    let surface = store.invocation_surface(&demo.invocation_id).await?
-                        .ok_or_else(|| anyhow!("Demo Invocation {} disappeared", demo.invocation_id))?;
-                    if let Some(outcome) = surface.handback {
-                        let _ = tokio::process::Command::new("tmux")
-                            .args([
-                                "kill-window",
-                                "-t",
-                                &format!("{}:{}", demo.session, demo.window),
-                            ])
-                            .status()
-                            .await;
-                        let status = demo_handback_status(outcome);
-                        runner_event_tx.send(ConversationEvent::TurnCompleted {
-                            turn_id: format!("demo:{}", demo.invocation_id),
-                            status,
-                        })?;
-                        demo.completion_sent = true;
-                    }
-                }
-                let wake = if provider_turn_active || active_demo.is_some() {
+                let wake = if provider_turn_active {
                     None
                 } else if ci_fix_wake.is_none() {
                     arm_ci_fix_wake(&store, &task, lease).await?
@@ -362,7 +332,7 @@ async fn run_task_with(
                         .await?;
                     }
                 }
-                if !provider_turn_active && active_demo.is_none() {
+                if !provider_turn_active {
                     provider_turn_active = apply_next_pending(
                         &store,
                         &task,
@@ -383,15 +353,24 @@ async fn run_task_with(
                         capture.as_ref(),
                     ).await;
                 };
-                let demo_event = matches!(
-                    &event,
-                    ConversationEvent::TurnCompleted { turn_id, .. }
-                        if turn_id.starts_with("demo:")
-                );
-                if !demo_event {
-                    if let Some(capture) = &capture {
-                        capture.record_conversation(event.clone());
+                if !first_material_recorded && event.is_material_progress() {
+                    let observed_at = time::OffsetDateTime::now_utc();
+                    match store.record_first_material_at(lease, observed_at).await {
+                        Ok(_) => first_material_recorded = true,
+                        Err(error) if !first_material_warning_emitted => {
+                            tracing::warn!(
+                                task = %task.id,
+                                run = %lease.run_id,
+                                %error,
+                                "Task first-material evidence did not persist; a later material event will retry"
+                            );
+                            first_material_warning_emitted = true;
+                        }
+                        Err(_) => {}
                     }
+                }
+                if let Some(capture) = &capture {
+                    capture.record_conversation(event.clone());
                 }
                 let provider_session_id = harness.provider_session_id();
                 if provider_session_id != task.provider_session_id {
@@ -412,9 +391,7 @@ async fn run_task_with(
                         }
                     }
                     ConversationEvent::TurnCompleted { status, .. } => {
-                        if demo_event {
-                            active_demo = None;
-                        } else if let Some(capture) = &capture {
+                        if let Some(capture) = &capture {
                             let outcome = match status {
                                 Lifecycle::Completed => "completed",
                                 Lifecycle::Interrupted => "interrupted",
@@ -591,7 +568,7 @@ async fn run_task_with(
                                     gate_fingerprint = None;
                                     task.enter_loop()?;
                                     store.update_task_for_run(&task, lease).await?;
-                                    let started = start_resumed_task_phase(
+                                    let Some(basis) = start_resumed_task_phase(
                                         &store,
                                         &mut task,
                                         lease,
@@ -599,14 +576,21 @@ async fn run_task_with(
                                         &mut flow,
                                         wave.name(),
                                         capture.as_ref(),
-                                        &mut active_demo,
                                     )
-                                    .await?;
-                                    if let Some(basis) = &started.basis {
-                                        active_basis = basis.clone();
-                                    }
+                                    .await?
+                                    else {
+                                        return park_task_at_human(
+                                            &store,
+                                            lease,
+                                            &invocation_id,
+                                            Some(harness.as_mut()),
+                                            capture.as_ref(),
+                                        )
+                                        .await;
+                                    };
+                                    active_basis = basis;
                                     flow_turn_active = true;
-                                    provider_turn_active = started.provider_turn_active;
+                                    provider_turn_active = true;
                                     last_text.clear();
                                     continue 'runner;
                                 }
@@ -615,31 +599,37 @@ async fn run_task_with(
                                 None
                             };
                             if !flow_iteration_completed && status != Lifecycle::Interrupted {
-                                let prepared = prepare_task_flow_step(
+                                let Some(prepared) = prepare_task_flow_step(
                                     &store,
                                     &mut task,
                                     lease,
                                     wave.name(),
-                                    &flow,
+                                    &mut flow,
                                     ci_fix_wake.as_ref(),
                                 )
-                                .await?;
-                                let started = start_prepared_task_step(
+                                .await?
+                                else {
+                                    return park_task_at_human(
+                                        &store,
+                                        lease,
+                                        &invocation_id,
+                                        Some(harness.as_mut()),
+                                        capture.as_ref(),
+                                    )
+                                    .await;
+                                };
+                                active_basis = start_prepared_task_step(
                                     &store,
                                     &mut task,
                                     lease,
                                     harness.as_mut(),
                                     &mut flow,
                                     capture.as_ref(),
-                                    &mut active_demo,
                                     prepared,
                                 )
                                 .await?;
-                                if let Some(basis) = &started.basis {
-                                    active_basis = basis.clone();
-                                }
                                 flow_turn_active = true;
-                                provider_turn_active = started.provider_turn_active;
+                                provider_turn_active = true;
                                 continue 'runner;
                             }
                             let summary = progress_summary(&last_text);
@@ -719,31 +709,37 @@ async fn run_task_with(
                                 .await
                                 .map_err(|error| anyhow!(error.to_string()))?;
                                 store.update_task_for_run(&task, lease).await?;
-                                let prepared = prepare_task_flow_step(
+                                let Some(prepared) = prepare_task_flow_step(
                                     &store,
                                     &mut task,
                                     lease,
                                     wave.name(),
-                                    &flow,
+                                    &mut flow,
                                     ci_fix_wake.as_ref(),
                                 )
-                                .await?;
-                                let started = start_prepared_task_step(
+                                .await?
+                                else {
+                                    return park_task_at_human(
+                                        &store,
+                                        lease,
+                                        &invocation_id,
+                                        Some(harness.as_mut()),
+                                        capture.as_ref(),
+                                    )
+                                    .await;
+                                };
+                                active_basis = start_prepared_task_step(
                                     &store,
                                     &mut task,
                                     lease,
                                     harness.as_mut(),
                                     &mut flow,
                                     capture.as_ref(),
-                                    &mut active_demo,
                                     prepared,
                                 )
                                 .await?;
-                                if let Some(basis) = &started.basis {
-                                    active_basis = basis.clone();
-                                }
                                 flow_turn_active = true;
-                                provider_turn_active = started.provider_turn_active;
+                                provider_turn_active = true;
                                 last_text.clear();
                                 continue 'runner;
                             } else if let Some(pr) = observed_pr
@@ -772,31 +768,37 @@ async fn run_task_with(
                                 if next_fingerprint != state_fingerprint {
                                     state_fingerprint = next_fingerprint;
                                     store.update_task_for_run(&task, lease).await?;
-                                    let prepared = prepare_task_flow_step(
+                                    let Some(prepared) = prepare_task_flow_step(
                                         &store,
                                         &mut task,
                                         lease,
                                         wave.name(),
-                                        &flow,
+                                        &mut flow,
                                         ci_fix_wake.as_ref(),
                                     )
-                                    .await?;
-                                    let started = start_prepared_task_step(
+                                    .await?
+                                    else {
+                                        return park_task_at_human(
+                                            &store,
+                                            lease,
+                                            &invocation_id,
+                                            Some(harness.as_mut()),
+                                            capture.as_ref(),
+                                        )
+                                        .await;
+                                    };
+                                    active_basis = start_prepared_task_step(
                                         &store,
                                         &mut task,
                                         lease,
                                         harness.as_mut(),
                                         &mut flow,
                                         capture.as_ref(),
-                                        &mut active_demo,
                                         prepared,
                                     )
                                     .await?;
-                                    if let Some(basis) = &started.basis {
-                                        active_basis = basis.clone();
-                                    }
                                     flow_turn_active = true;
-                                    provider_turn_active = started.provider_turn_active;
+                                    provider_turn_active = true;
                                     last_text.clear();
                                     continue 'runner;
                                 }
@@ -842,7 +844,7 @@ async fn run_task_with(
                                 }
                                 gate_fingerprint = Some(task_gate_fingerprint(&task)?);
                                 store.update_task_for_run(&task, lease).await?;
-                                let started = start_resumed_task_phase(
+                                let Some(basis) = start_resumed_task_phase(
                                     &store,
                                     &mut task,
                                     lease,
@@ -850,14 +852,21 @@ async fn run_task_with(
                                     &mut flow,
                                     wave.name(),
                                     capture.as_ref(),
-                                    &mut active_demo,
                                 )
-                                .await?;
-                                if let Some(basis) = &started.basis {
-                                    active_basis = basis.clone();
-                                }
+                                .await?
+                                else {
+                                    return park_task_at_human(
+                                        &store,
+                                        lease,
+                                        &invocation_id,
+                                        Some(harness.as_mut()),
+                                        capture.as_ref(),
+                                    )
+                                    .await;
+                                };
+                                active_basis = basis;
                                 flow_turn_active = true;
-                                provider_turn_active = started.provider_turn_active;
+                                provider_turn_active = true;
                                 last_text.clear();
                                 continue 'runner;
                             }
@@ -918,7 +927,7 @@ async fn run_task_with(
                     | ConversationEvent::ItemUpdated { .. }
                     | ConversationEvent::ReasoningDelta { .. }
                     | ConversationEvent::DiffUpdated { .. }
-                    | ConversationEvent::TurnUsage { .. }
+                    | ConversationEvent::UsageCheckpoint { .. }
                     | ConversationEvent::SuggestedActions { .. }
                     | ConversationEvent::StatusChanged { .. } => {}
                 }
@@ -927,7 +936,7 @@ async fn run_task_with(
     }
 }
 
-async fn prepare_task_flow_step(
+async fn prepare_task_flow_step_once(
     store: &SharedStore,
     task: &mut Task,
     lease: &RunLease,
@@ -972,20 +981,18 @@ async fn prepare_task_flow_step(
         }
         _ => task_seed(task, &project.plan, &pr, wave_name, &boundary),
     };
-    let interactive = crate::engine::load_skill(&step.step, &task.worktree)?
-        .interactive
-        .unwrap_or(false);
-    let mut prepared = if interactive {
-        crate::lf::commands::run::prepare_interactive_harness_turn(&step.step, &seed, wave_name)?
-    } else {
-        crate::lf::commands::run::prepare_harness_turn(&step.step, &seed, wave_name, None)?
-    };
+    let mut prepared =
+        crate::lf::commands::run::prepare_harness_turn(&step.step, &seed, wave_name, None)?;
     prepared.config.agent = Some(task.agent.clone());
+    prepared.config.write_scope = crate::engine::agent::AgentWriteScope::Worktree;
+    prepared.config.skip_permissions = false;
     let position = FlowPosition {
         work,
         epoch_id: boundary.basis.epoch_id.clone(),
         flow: task.phase_plan().flow.clone(),
         step: step.step.clone(),
+        node_id: step.policy.id.clone(),
+        human: step.policy.human,
         step_index: step.index,
         iteration: step.iteration,
         updated_at: time::OffsetDateTime::now_utc(),
@@ -994,8 +1001,127 @@ async fn prepare_task_flow_step(
         turn: prepared,
         position,
         basis: boundary.basis,
-        interactive,
     })
+}
+
+async fn prepare_task_flow_step(
+    store: &SharedStore,
+    task: &mut Task,
+    lease: &RunLease,
+    wave_name: &str,
+    flow: &mut Playhead,
+    ci_fix: Option<&CiFixWake>,
+) -> Result<Option<PreparedTaskStep>> {
+    loop {
+        let prepared =
+            prepare_task_flow_step_once(store, task, lease, wave_name, flow, ci_fix).await?;
+        if !prepared.position.human {
+            return Ok(Some(prepared));
+        }
+
+        let node_id = prepared
+            .position
+            .node_id
+            .clone()
+            .ok_or_else(|| anyhow!("human Task flow step has no stable node id"))?;
+        checkpoint_worktree_before_human(task, &node_id).await;
+        store
+            .set_flow_position(lease, prepared.position.clone())
+            .await?;
+        let run = store.run_by_id(&lease.run_id).await?;
+        let origin_cwd = run
+            .cwd
+            .ok_or_else(|| anyhow!("active Task Run has no execution cwd"))?;
+        let ask = store
+            .create_ask(
+                lease,
+                crate::durable::AskOrigin {
+                    work: lease.work.clone(),
+                    run_id: lease.run_id.clone(),
+                    turn_id: None,
+                    invocation_id: None,
+                    home_id: run.home_id,
+                    cwd: origin_cwd,
+                },
+                crate::durable::AskBody::FlowStep {
+                    flow: prepared.position.flow.clone(),
+                    node_id: node_id.clone(),
+                    skill: prepared.position.step.clone(),
+                    iteration: prepared.position.iteration,
+                },
+                crate::durable::AskTarget::User,
+            )
+            .await?;
+
+        match (ask.state, ask.result.as_ref()) {
+            (crate::durable::AskState::Queued | crate::durable::AskState::Claimed, None) => {
+                tracing::info!(task = %task.id, ask = %ask.id, node = %node_id, "Task is waiting at a human flow node");
+                return Ok(None);
+            }
+            (
+                crate::durable::AskState::Resolved,
+                Some(crate::durable::AskResult::Resolved { .. }),
+            ) => {
+                complete_human_task_step(store, task, lease, flow).await?;
+            }
+            (
+                crate::durable::AskState::Declined,
+                Some(crate::durable::AskResult::Declined { reason }),
+            )
+            | (
+                crate::durable::AskState::Cancelled,
+                Some(crate::durable::AskResult::Cancelled { reason }),
+            ) => {
+                store
+                    .append_steer(
+                        &lease.work,
+                        crate::durable::Author::User,
+                        &format!("Human flow node {node_id} did not accept the step: {reason}"),
+                        None,
+                    )
+                    .await?;
+                task.phase_cursor = preceding_autonomous_step(flow, prepared.position.step_index)?;
+                task.phase_iteration += 1;
+                task.updated_at = time::OffsetDateTime::now_utc();
+                store.update_task_for_run(task, lease).await?;
+                *flow = resume_task_phase(task)?;
+            }
+            _ => anyhow::bail!("human Task Ask {} has an invalid terminal result", ask.id),
+        }
+    }
+}
+
+async fn complete_human_task_step(
+    store: &SharedStore,
+    task: &mut Task,
+    lease: &RunLease,
+    flow: &mut Playhead,
+) -> Result<()> {
+    open_task_flow_body(flow, task)?;
+    let completed = finish_task_flow_turn(flow, Lifecycle::Completed)?;
+    if completed && task.lifecycle_phase == TaskLifecyclePhase::First {
+        task.enter_loop()?;
+        *flow = resume_task_phase(task)?;
+    } else {
+        record_task_flow_position(task, flow)?;
+    }
+    store.update_task_for_run(task, lease).await?;
+    Ok(())
+}
+
+fn preceding_autonomous_step(flow: &Playhead, current: u32) -> Result<u32> {
+    let root = flow
+        .stack
+        .first()
+        .ok_or_else(|| anyhow!("Task flow has no root invocation"))?;
+    root.steps
+        .iter()
+        .enumerate()
+        .take(current as usize)
+        .rev()
+        .find(|(_, step)| step.kind == StepKind::Skill && !step.policy.human)
+        .map(|(index, _)| index as u32)
+        .ok_or_else(|| anyhow!("human Task flow node has no preceding autonomous skill"))
 }
 
 fn open_task_flow_body(flow: &mut Playhead, task: &Task) -> Result<()> {
@@ -1022,101 +1148,6 @@ async fn start_task_flow_turn(
     Ok(())
 }
 
-async fn start_demo_step(
-    store: &SharedStore,
-    task: &Task,
-    lease: &RunLease,
-    flow: &mut Playhead,
-    prepared: &crate::lf::commands::run::PreparedHarnessTurn,
-) -> Result<ActiveDemo> {
-    let (provider, model) = crate::engine::config::parse_agent(
-        prepared
-            .config
-            .agent
-            .as_deref()
-            .unwrap_or(&prepared.harness),
-    );
-    let receipt = store
-        .advance_run(
-            lease,
-            crate::durable::RunAdvance::InvocationStarting {
-                route: crate::durable::InvocationRoute {
-                    provider: provider.clone(),
-                    model: model.clone(),
-                    account_id: None,
-                },
-                surface: "tui".to_string(),
-                resume_token: None,
-                answer_ask_id: None,
-            },
-        )
-        .await?;
-    let crate::durable::AdvanceReceipt::Invocation(invocation) = receipt else {
-        unreachable!("InvocationStarting returns an Invocation receipt")
-    };
-    let run = store
-        .current_run(&lease.work)
-        .await?
-        .ok_or_else(|| anyhow!("Task Run {} disappeared before Demo", lease.run_id))?;
-    let crate::durable::Containment::Tmux { name: session } = run
-        .containment
-        .ok_or_else(|| anyhow!("Task Run {} has no Demo containment", run.id))?
-    else {
-        anyhow::bail!("Task Demo requires tmux containment");
-    };
-    let prompt = format!(
-        "{}\n\n<lf:demo-handback>\nWalk the User through the running behavior. Do not mark the Demo successful until the User explicitly confirms it. After confirmation, run `lf invocation handback {} --outcome succeeded`. If the User rejects the result, use `--outcome failed`. Closing or detaching without handback leaves this step waiting.\n</lf:demo-handback>",
-        prepared.input, invocation.id
-    );
-    let command = crate::lf::commands::util::build_session_command(
-        &provider,
-        model.as_deref(),
-        &task.worktree,
-        &prompt,
-    )?;
-    let mut argv = vec![command.program];
-    argv.extend(command.args);
-    let invocation_id = invocation.id.as_str().to_string();
-    let wave_id = task.wave_id.as_str().to_string();
-    let environment = [
-        (crate::engine::wave_context::WAVE_ID_ENV, wave_id.as_str()),
-        (crate::durable::RUN_CONTEXT_ENV, "agent"),
-        (crate::durable::AGENT_INVOCATION_ENV, invocation_id.as_str()),
-    ];
-    let window = format!("demo-{}", &invocation.id.as_str()[4..12]);
-    if let Err(error) = crate::engine::process::start_tmux_window_with_env(
-        &session,
-        &window,
-        &command.cwd,
-        &argv,
-        &environment,
-    )
-    .await
-    {
-        let _ = store
-            .advance_run(
-                lease,
-                crate::durable::RunAdvance::InvocationEnded {
-                    invocation_id: invocation.id,
-                    outcome: crate::durable::BoundaryState::Failed,
-                },
-            )
-            .await;
-        return Err(error);
-    }
-    open_task_flow_body(flow, task)?;
-    #[cfg(target_os = "macos")]
-    if let Err(error) = crate::lf::commands::desktop::run() {
-        tracing::warn!(%error, "could not present interactive Demo in Loopflow.app");
-    }
-    Ok(ActiveDemo {
-        invocation_id: invocation.id,
-        session,
-        window,
-        completion_sent: false,
-    })
-}
-
 #[allow(clippy::too_many_arguments)]
 async fn start_prepared_task_step(
     store: &SharedStore,
@@ -1125,27 +1156,17 @@ async fn start_prepared_task_step(
     harness: &mut dyn Harness,
     flow: &mut Playhead,
     capture: Option<&crate::trace::CaptureHandle>,
-    active_demo: &mut Option<ActiveDemo>,
     prepared: PreparedTaskStep,
-) -> Result<StartedTaskStep> {
+) -> Result<Basis> {
     store
         .set_flow_position(lease, prepared.position.clone())
         .await?;
-    if prepared.interactive {
-        *active_demo = Some(start_demo_step(store, task, lease, flow, &prepared.turn).await?);
-        return Ok(StartedTaskStep {
-            provider_turn_active: false,
-            basis: Some(prepared.basis),
-        });
-    }
+    debug_assert!(!prepared.position.human);
     if let Some(capture) = capture {
         capture.begin_turn_at("queued", &prepared.turn.input, Some(prepared.basis.clone()))?;
     }
     start_task_flow_turn(store, task, lease, harness, flow, prepared.turn).await?;
-    Ok(StartedTaskStep {
-        provider_turn_active: true,
-        basis: Some(prepared.basis),
-    })
+    Ok(prepared.basis)
 }
 
 #[allow(clippy::too_many_arguments)]
@@ -1157,21 +1178,15 @@ async fn start_resumed_task_phase(
     flow: &mut Playhead,
     wave_name: &str,
     capture: Option<&crate::trace::CaptureHandle>,
-    active_demo: &mut Option<ActiveDemo>,
-) -> Result<StartedTaskStep> {
+) -> Result<Option<Basis>> {
     *flow = resume_task_phase(task)?;
-    let prepared = prepare_task_flow_step(store, task, lease, wave_name, flow, None).await?;
-    start_prepared_task_step(
-        store,
-        task,
-        lease,
-        harness,
-        flow,
-        capture,
-        active_demo,
-        prepared,
-    )
-    .await
+    let Some(prepared) = prepare_task_flow_step(store, task, lease, wave_name, flow, None).await?
+    else {
+        return Ok(None);
+    };
+    Ok(Some(
+        start_prepared_task_step(store, task, lease, harness, flow, capture, prepared).await?,
+    ))
 }
 
 fn finish_task_flow_turn(flow: &mut Playhead, status: Lifecycle) -> Result<bool> {
@@ -1189,14 +1204,6 @@ fn finish_task_flow_turn(flow: &mut Playhead, status: Lifecycle) -> Result<bool>
     Ok(events
         .iter()
         .any(|event| matches!(event, PlayheadEvent::InvocationCompleted { .. })))
-}
-
-fn demo_handback_status(outcome: crate::durable::BoundaryState) -> Lifecycle {
-    if outcome == crate::durable::BoundaryState::Succeeded {
-        Lifecycle::Completed
-    } else {
-        Lifecycle::Interrupted
-    }
 }
 
 async fn run_task_flow_ops(task: &Task, flow: &mut Playhead) -> Result<bool> {
@@ -1275,6 +1282,53 @@ async fn finish_parked(
     Ok(())
 }
 
+/// A human Ask can outlive this machine's uptime; nothing the Task produced
+/// may exist only in the local worktree while it waits. Failure to checkpoint
+/// (offline, no remote) must never block the park itself.
+async fn checkpoint_worktree_before_human(task: &Task, node_id: &str) {
+    if let Err(error) = crate::ops::checkpoint_task_worktree(
+        task.worktree.clone(),
+        task.plan.identifier.clone(),
+        format!("checkpoint: park at human node {node_id}"),
+    )
+    .await
+    {
+        tracing::warn!(task = %task.id, %error, "Task parks at a human node without a pushed checkpoint");
+    }
+}
+
+async fn park_task_at_human(
+    store: &SharedStore,
+    lease: &RunLease,
+    invocation_id: &crate::durable::AgentInvocationId,
+    harness: Option<&mut dyn Harness>,
+    capture: Option<&crate::trace::CaptureHandle>,
+) -> Result<()> {
+    finish_capture(capture, "completed");
+    if let Some(harness) = harness {
+        let _ = harness.stop().await;
+    }
+    store
+        .advance_run(
+            lease,
+            crate::durable::RunAdvance::InvocationEnded {
+                invocation_id: invocation_id.clone(),
+                outcome: crate::durable::BoundaryState::Succeeded,
+            },
+        )
+        .await?;
+    wait_for_parked_run(store, &lease.run_id).await
+}
+
+async fn wait_for_parked_run(store: &SharedStore, run_id: &crate::durable::RunId) -> Result<()> {
+    loop {
+        if store.run_by_id(run_id).await?.state != crate::durable::RunState::Active {
+            return Ok(());
+        }
+        tokio::time::sleep(Duration::from_millis(500)).await;
+    }
+}
+
 fn record_task_flow_position(task: &mut Task, flow: &Playhead) -> Result<()> {
     let root = flow
         .stack
@@ -1306,7 +1360,15 @@ fn resume_task_phase(task: &Task) -> Result<Playhead> {
 
 fn sync_task_state(task: &mut Task, latest: &Task) {
     task.pm_writeback = latest.pm_writeback.clone();
-    task.gate_proposal = latest.gate_proposal.clone();
+    if task.lifecycle_phase == TaskLifecyclePhase::Finally && task.phase_epoch == latest.phase_epoch
+    {
+        task.gate_proposal = latest.gate_proposal.clone();
+    } else if task.lifecycle_phase != TaskLifecyclePhase::Finally {
+        // A gate proposal belongs to one Finally epoch. Copying a newer
+        // proposal into a pre-final body forms an invalid Task before the store's
+        // phase-epoch fence can discard that stale body's write.
+        task.gate_proposal = None;
+    }
 }
 
 fn task_state_fingerprint(task: &Task) -> Result<String> {
@@ -1419,7 +1481,7 @@ async fn start_ci_fix_flow(
     *flow = Playhead::new(QueuedInvocation::load(&task.worktree, "ci-fix")?).0;
     let wave = owning_wave(store, task).await?;
     let prepared =
-        prepare_task_flow_step(store, task, lease, wave.name(), flow, Some(wake)).await?;
+        prepare_task_flow_step_once(store, task, lease, wave.name(), flow, Some(wake)).await?;
     if let Some(capture) = capture {
         capture.begin_turn_at("queued", &prepared.turn.input, Some(prepared.basis.clone()))?;
     }
@@ -1434,29 +1496,28 @@ async fn record_unhandled_failure(
     lease: &RunLease,
     error: &anyhow::Error,
 ) {
-    let Ok(Some(task)) = store.get_task(task_id).await else {
-        return;
-    };
-    let Ok(work) = store.work_for_child(&ChildRef::Task(task.id.clone())).await else {
-        return;
-    };
-    if lease.work != work {
-        return;
+    match store.current_run(&lease.work).await {
+        Ok(Some(run)) if run.id == lease.run_id => {}
+        Ok(_) => return,
+        Err(store_error) => {
+            tracing::error!(
+                task = %task_id,
+                run = %lease.run_id,
+                error = %store_error,
+                "cannot inspect Task Run before recording its failure receipt"
+            );
+            return;
+        }
     }
     let message = format!("task process failed: {error}");
-    let _ = store
-        .append_task_event_for_run(
-            &task.id,
-            lease,
-            &TaskEventKind::Failed {
-                error: message.clone(),
-                resumable: true,
-            },
-        )
-        .await;
-    let _ = store
-        .finish_task_run(&task, lease, crate::durable::BoundaryState::Failed)
-        .await;
+    if let Err(persist_error) = store.fail_task_run(task_id, lease, &message).await {
+        tracing::error!(
+            task = %task_id,
+            run = %lease.run_id,
+            error = %persist_error,
+            "Task failure receipt did not persist; Run remains recoverable"
+        );
+    }
 }
 
 async fn apply_input(
@@ -1485,19 +1546,8 @@ async fn finish_failed(
 ) -> Result<()> {
     finish_capture(capture, "failed");
     let _ = harness.stop().await;
-    store
-        .append_task_event_for_run(
-            &task.id,
-            lease,
-            &TaskEventKind::Failed {
-                error: error.to_string(),
-                resumable: true,
-            },
-        )
-        .await?;
-    store
-        .finish_task_run(task, lease, crate::durable::BoundaryState::Failed)
-        .await?;
+    store.update_task_for_run(task, lease).await?;
+    store.fail_task_run(&task.id, lease, error).await?;
     anyhow::bail!(error.to_string())
 }
 
@@ -1511,11 +1561,11 @@ fn infra_blocked_reason(capability: &str, detail: &str, pr_number: Option<u32>) 
     format!("ci-fix blocked by {capability}: {detail}.{pr_note}")
 }
 
-/// Stop the body and transition the Task to Blocked for an infrastructure
-/// failure (provider outage, GitHub observation failure), keeping the active PR
-/// attached so a resume after the capability recovers picks up the same PR.
-/// Returns `Ok(())` — a clean stop, not an error — so the runner does not also
-/// record an unhandled failure.
+/// Stop the body and record an infrastructure failure (provider outage, GitHub
+/// observation failure), keeping the active PR attached so a resume after the
+/// capability recovers picks up the same PR. Returns `Ok(())` after the atomic
+/// Task failure receipt settles the Run, so the outer boundary does not record
+/// the same failure twice.
 async fn finish_infra_blocked(
     store: &SharedStore,
     task: &mut Task,
@@ -1535,9 +1585,8 @@ async fn finish_infra_blocked(
             .mark_ci_incidents_blocked(&pr.id, time::OffsetDateTime::now_utc(), &reason)
             .await?;
     }
-    store
-        .finish_task_run(task, lease, crate::durable::BoundaryState::Failed)
-        .await?;
+    store.update_task_for_run(task, lease).await?;
+    store.fail_task_run(&task.id, lease, &reason).await?;
     Ok(())
 }
 
@@ -1733,11 +1782,19 @@ async fn finish_command_stop(
         capture,
         match stop {
             CommandStop::Interrupted => "interrupted",
+            CommandStop::Quiesced => "completed",
             _ => "completed",
         },
     );
     match stop {
         CommandStop::Interrupted => {
+            let _ = harness.stop().await;
+            store
+                .finish_task_run(task, lease, crate::durable::BoundaryState::Interrupted)
+                .await?;
+            Ok(())
+        }
+        CommandStop::Quiesced => {
             let _ = harness.stop().await;
             store
                 .finish_task_run(task, lease, crate::durable::BoundaryState::Interrupted)
@@ -1933,7 +1990,7 @@ fn task_seed(
         })
         .unwrap_or_else(|| "Gate proposal: none".to_string());
     format!(
-        "Advance Linear task {identifier}: {title}\n\n{description}\n\nLinear Project: {project} ({project_id})\n{project_context}\n\n{direction}\n\nTask directive snapshot synced at: {task_snapshot_synced_at}\nProject definition snapshot synced at: {project_snapshot_synced_at}\nWave: {wave}\nTask: {task_id}\nLifecycle phase: {lifecycle_phase} (epoch {phase_epoch}, gate cycle {gate_cycle})\n{gate_proposal}\nWorktree: {worktree}\nPR {pr_sequence}: {pr_branch}\nBase commit: {base_commit}\n{placement}\n\nThis PR owns one serial branch. The pinned finally flow owns landing and Task completion. `lf pr abandon` discards only this PR. If this PR already merged out of band and follow-up work remains, `lf pr next [slug]` rotates to the next serial PR, carrying committed and uncommitted follow-up forward. The runner owns branch rotation between PRs.",
+        "Advance Linear task {identifier}: {title}\n\n{description}\n\nLinear Project: {project} ({project_id})\n{project_context}\n\n{direction}\n\nTask directive snapshot synced at: {task_snapshot_synced_at}\nProject definition snapshot synced at: {project_snapshot_synced_at}\nWave: {wave}\nTask: {task_id}\nLifecycle phase: {lifecycle_phase} (epoch {phase_epoch}, iteration {phase_iteration}, gate cycle {gate_cycle})\n{gate_proposal}\nWorktree: {worktree}\nPR {pr_sequence}: {pr_branch}\nBase commit: {base_commit}\n{placement}\n\nThis PR owns one serial branch. The pinned finally flow owns landing and Task completion. `lf pr abandon` discards only this PR. If this PR already merged out of band and follow-up work remains, `lf pr next [slug]` rotates to the next serial PR, carrying committed and uncommitted follow-up forward. The runner owns branch rotation between PRs.",
         identifier = task.plan.identifier,
         title = task.plan.title,
         description = task.plan.description,
@@ -1947,6 +2004,7 @@ fn task_seed(
         task_id = task.id,
         lifecycle_phase = task.lifecycle_phase.as_str(),
         phase_epoch = task.phase_epoch,
+        phase_iteration = task.phase_iteration,
         gate_cycle = task.gate_cycle,
         gate_proposal = gate_proposal,
         worktree = task.worktree.display(),
@@ -1954,6 +2012,78 @@ fn task_seed(
         pr_branch = pr.branch,
         base_commit = pr.base_commit,
         placement = placement,
+    )
+}
+
+pub(crate) async fn flow_step_ask_prompt(
+    store: &SharedStore,
+    ask: &crate::durable::Ask,
+) -> Result<String> {
+    let crate::durable::AskBody::FlowStep {
+        flow,
+        node_id,
+        skill,
+        iteration,
+    } = &ask.request
+    else {
+        anyhow::bail!("Ask {} is not a flow-step request", ask.id);
+    };
+    let crate::durable::WorkRef::Task(task_id) = &ask.origin.work else {
+        anyhow::bail!("flow-step Ask {} does not belong to a Task", ask.id);
+    };
+    let task = store
+        .get_task(task_id)
+        .await?
+        .ok_or_else(|| anyhow!("Task {task_id} disappeared"))?;
+    if task.phase_plan().flow != *flow {
+        anyhow::bail!(
+            "flow-step Ask {} names flow {:?}, but Task {} is at {:?}",
+            ask.id,
+            flow,
+            task.id,
+            task.phase_plan().flow
+        );
+    }
+    let definition = crate::engine::load_flow(flow, &task.worktree)?;
+    let items = crate::engine::expand_flow(&definition, &task.worktree)?;
+    let step = items
+        .get(task.phase_cursor as usize)
+        .and_then(|item| match item {
+            crate::engine::ConcreteStep::Skill(step) => Some(step),
+            _ => None,
+        })
+        .ok_or_else(|| anyhow!("Task {} is not at a skill node", task.id))?;
+    if !step.policy.human
+        || step.policy.id.as_deref() != Some(node_id)
+        || step.skill.name != *skill
+        || task.phase_iteration != *iteration
+    {
+        anyhow::bail!(
+            "flow-step Ask {} no longer matches the Task playhead",
+            ask.id
+        );
+    }
+    let boundary = store.boundary_seed(&ask.origin.work).await?;
+    let pr = store
+        .active_task_pr(&task.id)
+        .await?
+        .ok_or_else(|| anyhow!("Task {} has no active PR", task.id))?;
+    let project = owning_project(store, &task).await?;
+    let wave = owning_wave(store, &task).await?;
+    let seed = task_seed(&task, &project.plan, &pr, wave.name(), &boundary);
+    let prepared =
+        crate::lf::commands::run::prepare_interactive_harness_turn(skill, &seed, wave.name())?;
+    Ok(human_flow_ask_prompt(
+        &prepared.input,
+        skill,
+        node_id,
+        &ask.id,
+    ))
+}
+
+fn human_flow_ask_prompt(input: &str, skill: &str, node_id: &str, ask_id: &AskId) -> String {
+    format!(
+        "{input}\n\n<lf:human-flow-node>\nThis is the actual writable `{skill}` Task step at human node `{node_id}`, not an advisory review. Work only in the origin Task and settle explicitly before leaving:\n- `lf ask resolve {ask_id} \"<concise verified summary>\"` accepts the step\n- `lf ask decline {ask_id} \"<reason>\"` returns to the preceding autonomous step\n- `lf ask release {ask_id} \"<reason>\"` leaves the node waiting\nA final response, clean exit, Ctrl-D, or window close never advances the flow.\n</lf:human-flow-node>"
     )
 }
 
@@ -1969,29 +2099,922 @@ fn progress_summary(text: &str) -> String {
 }
 
 #[cfg(test)]
+mod shipping_lifecycle_tests;
+
+#[cfg(test)]
 mod planning_tests {
-    use super::{demo_handback_status, task_seed};
+    use super::{human_flow_ask_prompt, preceding_autonomous_step, sync_task_state, task_seed};
     use crate::chat::types::Lifecycle;
-    use crate::durable::{Basis, BoundarySeed, BoundaryState, EpochId};
-    use crate::planning::{LinearIssueId, LinearProjectId, ProjectPlan, TaskPlan};
-    use crate::task::{
-        Observation, PmWritebackState, Task, TaskId, TaskLifecyclePhase, TaskLifecyclePlan, TaskPr,
-        TaskPrId,
+    use crate::durable::{
+        AskBody, AskId, AskResult, AskTarget, AuthenticatedRequest, Basis, BoundarySeed,
+        Containment, ControlCtx, EpochId, InvocationRoute, RunAdvance, RunLease, RunTrigger,
     };
+    use crate::engine::agent::AgentConfig;
+    use crate::engine::OccurrencePolicy;
+    use crate::harness::{Harness, SendCurrentOutcome};
+    use crate::planning::{LinearIssueId, LinearProjectId, ProjectPlan, TaskPlan};
+    use crate::project::{Project, ProjectId};
+    use crate::store::{open_store, SharedStore, StorageConfig};
+    use crate::task::{
+        Observation, PmWritebackState, Task, TaskEventKind, TaskGateProposal, TaskId,
+        TaskLifecyclePhase, TaskLifecyclePlan, TaskPr, TaskPrId,
+    };
+    use crate::wave::playhead::{Playhead, QueuedInvocation, StepKind, StepPlan};
+    use crate::wave::Wave;
+
+    struct UnusedHarness;
+
+    fn step(name: &str, id: Option<&str>, human: bool) -> StepPlan {
+        StepPlan {
+            name: name.to_string(),
+            kind: StepKind::Skill,
+            policy: OccurrencePolicy {
+                id: id.map(str::to_string),
+                human,
+            },
+        }
+    }
 
     #[test]
-    fn only_successful_demo_handback_completes_the_step() {
-        assert_eq!(
-            demo_handback_status(BoundaryState::Succeeded),
-            Lifecycle::Completed
-        );
-        for outcome in [
-            BoundaryState::Failed,
-            BoundaryState::Interrupted,
-            BoundaryState::Unknown,
-        ] {
-            assert_eq!(demo_handback_status(outcome), Lifecycle::Interrupted);
+    fn decline_skips_prior_human_nodes_when_returning_to_autonomous_work() {
+        let (flow, _) = Playhead::new(QueuedInvocation {
+            id: "human-decline-proof".to_string(),
+            flow: "proof".to_string(),
+            steps: vec![
+                step("kickoff", None, false),
+                step("first-review", Some("first_review"), true),
+                step("second-review", Some("second_review"), true),
+            ],
+        });
+
+        assert_eq!(preceding_autonomous_step(&flow, 2).unwrap(), 0);
+    }
+
+    #[async_trait::async_trait]
+    impl Harness for UnusedHarness {
+        async fn start(&mut self, _config: &AgentConfig) -> anyhow::Result<()> {
+            anyhow::bail!("unused test harness must not start")
         }
+
+        async fn send_input(&mut self, _content: &str) -> anyhow::Result<()> {
+            anyhow::bail!("unused test harness must not receive input")
+        }
+
+        async fn send_current(&mut self, _content: &str) -> SendCurrentOutcome {
+            SendCurrentOutcome::NotSteerable
+        }
+
+        async fn interrupt(&mut self) -> anyhow::Result<()> {
+            Ok(())
+        }
+
+        async fn stop(&mut self) -> anyhow::Result<()> {
+            Ok(())
+        }
+
+        fn provider_session_id(&self) -> Option<String> {
+            None
+        }
+    }
+
+    async fn human_task_fixture() -> (SharedStore, Task, RunLease, Playhead) {
+        let repository =
+            std::fs::canonicalize(std::path::Path::new(env!("CARGO_MANIFEST_DIR")).join("../.."))
+                .unwrap();
+        // The Task worktree must never be the real checkout: parking at a
+        // human node checkpoint-commits the worktree, and a test must not
+        // commit or push the developer's repo.
+        let worktree = tempfile::tempdir().unwrap().keep();
+        let git = |args: &[&str]| {
+            assert!(std::process::Command::new("git")
+                .current_dir(&worktree)
+                .args(args)
+                .output()
+                .unwrap()
+                .status
+                .success());
+        };
+        git(&["init", "-q"]);
+        git(&[
+            "-c",
+            "user.email=test@loopflow.dev",
+            "-c",
+            "user.name=Loopflow Test",
+            "commit",
+            "--allow-empty",
+            "-q",
+            "-m",
+            "init",
+        ]);
+        let database = tempfile::tempdir().unwrap().keep();
+        let store = std::sync::Arc::new(
+            open_store(&StorageConfig::sqlite(database.join("registry.db")))
+                .await
+                .unwrap(),
+        );
+        let now = time::OffsetDateTime::now_utc();
+        let wave = Wave::new(
+            crate::id::WaveId::new(),
+            "human-task-proof".to_string(),
+            repository.display().to_string(),
+        );
+        let project = Project {
+            id: ProjectId::new(),
+            plan: ProjectPlan {
+                id: LinearProjectId::new("human-task-project").unwrap(),
+                slug: "human-task-proof".to_string(),
+                name: "Human Task proof".to_string(),
+                prompt_context: "Prove durable human flow nodes.".to_string(),
+                pm_snapshot_synced_at: now.unix_timestamp(),
+            },
+            wave_id: wave.id().clone(),
+            iteration: 0,
+            observation_cursor: 0,
+            last_state_fingerprint: None,
+            agent: "codex".to_string(),
+            provider: "codex".to_string(),
+            provider_session_id: None,
+            abandon_intent: None,
+            created_at: now,
+            updated_at: now,
+        };
+        let task = Task {
+            id: TaskId::new(),
+            plan: TaskPlan {
+                id: LinearIssueId::new("human-task-issue").unwrap(),
+                identifier: "TEST-1".to_string(),
+                title: "Human Task proof".to_string(),
+                description: "Stop at review_kickoff.".to_string(),
+                pm_snapshot_synced_at: now.unix_timestamp(),
+            },
+            pm_writeback: PmWritebackState::Current,
+            wave_id: wave.id().clone(),
+            project_id: project.id.clone(),
+            worktree: worktree.clone(),
+            workspace_slug: "human-task-proof".to_string(),
+            lifecycle: TaskLifecyclePlan::defaults(),
+            lifecycle_phase: TaskLifecyclePhase::First,
+            phase_epoch: 1,
+            phase_cursor: 1,
+            phase_iteration: 0,
+            gate_cycle: 0,
+            gate_proposal: None,
+            agent: "codex".to_string(),
+            provider: "codex".to_string(),
+            provider_session_id: None,
+            abandon_intent: None,
+            created_at: now,
+            updated_at: now,
+            observation: Observation::NotRequired,
+        };
+        let pr = TaskPr {
+            id: TaskPrId::new(),
+            task_id: task.id.clone(),
+            sequence: 1,
+            slug: task.workspace_slug.clone(),
+            branch: "test/human-task-proof".to_string(),
+            base_commit: "deadbeef".to_string(),
+            parent_pr_id: None,
+            publication: None,
+            merge_commit: None,
+            abandoned_at: None,
+            ci_observation: None,
+            github_observation: None,
+            linear_attachment_id: None,
+            linear_comment_id: None,
+            linear_link_error: None,
+            created_at: now,
+            updated_at: now,
+        };
+        store.create_wave(&wave).await.unwrap();
+        store.create_project(&project).await.unwrap();
+        store.create_task(&task, &pr).await.unwrap();
+        let work = store
+            .work_for_child(&crate::child::ChildRef::Task(task.id.clone()))
+            .await
+            .unwrap();
+        let (_, lease) = store.reserve_run(&work, RunTrigger::User).await.unwrap();
+        store
+            .advance_run(
+                &lease,
+                RunAdvance::RunStarting {
+                    containment: Containment::Tmux {
+                        name: "human-task-proof".to_string(),
+                    },
+                    cwd: worktree.clone(),
+                },
+            )
+            .await
+            .unwrap();
+        let flow = super::resume_task_phase(&task).unwrap();
+        (store, task, lease, flow)
+    }
+
+    #[test]
+    fn human_flow_settlement_contract_follows_the_authored_skill_handoff() {
+        let prompt = human_flow_ask_prompt(
+            "$review-design\n\n<lf:surface>human present</lf:surface>",
+            "review-design",
+            "review_kickoff",
+            &AskId::parse("ask_00000000000000000000000000000001").unwrap(),
+        );
+
+        assert!(prompt.starts_with("$review-design\n"));
+        assert!(prompt.contains("<lf:human-flow-node>"));
+        assert!(prompt.contains("lf ask resolve ask_00000000000000000000000000000001"));
+        assert!(prompt.contains("lf ask decline ask_00000000000000000000000000000001"));
+        assert!(prompt.contains("lf ask release ask_00000000000000000000000000000001"));
+    }
+
+    #[tokio::test]
+    async fn parked_task_supervisor_stays_alive_until_the_run_settles() {
+        let (store, task, lease, _) = human_task_fixture().await;
+        let waiting_store = store.clone();
+        let run_id = lease.run_id.clone();
+        let waiter =
+            tokio::spawn(async move { super::wait_for_parked_run(&waiting_store, &run_id).await });
+        tokio::time::sleep(std::time::Duration::from_millis(20)).await;
+        assert!(!waiter.is_finished());
+
+        store
+            .finish_task_run(&task, &lease, crate::durable::BoundaryState::Succeeded)
+            .await
+            .unwrap();
+        tokio::time::timeout(std::time::Duration::from_secs(1), waiter)
+            .await
+            .expect("parked supervisor exits after Run settlement")
+            .unwrap()
+            .unwrap();
+    }
+
+    #[allow(clippy::await_holding_lock)]
+    #[tokio::test]
+    async fn pre_provider_failure_ends_prompt_only_invocation_and_records_task_failure() {
+        let repository =
+            std::fs::canonicalize(std::path::Path::new(env!("CARGO_MANIFEST_DIR")).join("../.."))
+                .unwrap();
+        let database = tempfile::tempdir().unwrap();
+        let database_path = database.path().join("registry.db");
+        let store = std::sync::Arc::new(
+            open_store(&StorageConfig::sqlite(database_path.clone()))
+                .await
+                .unwrap(),
+        );
+        let now = time::OffsetDateTime::now_utc();
+        let wave = Wave::new(
+            crate::id::WaveId::new(),
+            "prompt-only-failure".to_string(),
+            repository.display().to_string(),
+        );
+        let project = Project {
+            id: ProjectId::new(),
+            plan: ProjectPlan {
+                id: LinearProjectId::new("prompt-only-project").unwrap(),
+                slug: "prompt-only-failure".to_string(),
+                name: "Prompt-only failure".to_string(),
+                prompt_context: "Preserve the exact terminal failure.".to_string(),
+                pm_snapshot_synced_at: now.unix_timestamp(),
+            },
+            wave_id: wave.id().clone(),
+            iteration: 0,
+            observation_cursor: 0,
+            last_state_fingerprint: None,
+            agent: "unsupported".to_string(),
+            provider: "unsupported".to_string(),
+            provider_session_id: None,
+            abandon_intent: None,
+            created_at: now,
+            updated_at: now,
+        };
+        let mut task = Task {
+            id: TaskId::new(),
+            plan: TaskPlan {
+                id: LinearIssueId::new("prompt-only-issue").unwrap(),
+                identifier: "TEST-PROMPT".to_string(),
+                title: "Prompt-only failure".to_string(),
+                description: String::new(),
+                pm_snapshot_synced_at: now.unix_timestamp(),
+            },
+            pm_writeback: PmWritebackState::Current,
+            wave_id: wave.id().clone(),
+            project_id: project.id.clone(),
+            worktree: repository.clone(),
+            workspace_slug: "prompt-only-failure".to_string(),
+            lifecycle: TaskLifecyclePlan::defaults(),
+            lifecycle_phase: TaskLifecyclePhase::First,
+            phase_epoch: 1,
+            phase_cursor: 0,
+            phase_iteration: 0,
+            gate_cycle: 0,
+            gate_proposal: None,
+            agent: "unsupported".to_string(),
+            provider: "unsupported".to_string(),
+            provider_session_id: None,
+            abandon_intent: None,
+            created_at: now,
+            updated_at: now,
+            observation: Observation::NotRequired,
+        };
+        let pr = TaskPr {
+            id: TaskPrId::new(),
+            task_id: task.id.clone(),
+            sequence: 1,
+            slug: task.workspace_slug.clone(),
+            branch: "test/prompt-only-failure".to_string(),
+            base_commit: "deadbeef".to_string(),
+            parent_pr_id: None,
+            publication: None,
+            merge_commit: None,
+            abandoned_at: None,
+            ci_observation: None,
+            github_observation: None,
+            linear_attachment_id: None,
+            linear_comment_id: None,
+            linear_link_error: None,
+            created_at: now,
+            updated_at: now,
+        };
+        store.create_wave(&wave).await.unwrap();
+        store.create_project(&project).await.unwrap();
+        store.create_task(&task, &pr).await.unwrap();
+        let work = store
+            .work_for_child(&crate::child::ChildRef::Task(task.id.clone()))
+            .await
+            .unwrap();
+        let (run, lease) = store.reserve_run(&work, RunTrigger::User).await.unwrap();
+        store
+            .advance_run(
+                &lease,
+                RunAdvance::RunStarting {
+                    containment: Containment::Tmux {
+                        name: "prompt-only-failure".to_string(),
+                    },
+                    cwd: repository.clone(),
+                },
+            )
+            .await
+            .unwrap();
+        let invocation = store
+            .advance_run(
+                &lease,
+                RunAdvance::InvocationStarting {
+                    route: InvocationRoute {
+                        provider: "unsupported".to_string(),
+                        model: None,
+                        account_id: None,
+                    },
+                    surface: "headless".to_string(),
+                    resume_token: None,
+                    answer_ask_id: None,
+                },
+            )
+            .await
+            .unwrap();
+        let crate::durable::AdvanceReceipt::Invocation(invocation) = invocation else {
+            unreachable!("InvocationStarting returns an Invocation receipt")
+        };
+        let connection = rusqlite::Connection::open(&database_path).unwrap();
+        connection
+            .execute_batch(
+                "CREATE TRIGGER reject_test_task_failure
+                 BEFORE INSERT ON task_events
+                 WHEN json_extract(NEW.kind_json, '$.kind') = 'failed'
+                 BEGIN
+                     SELECT RAISE(ABORT, 'injected Task failure write');
+                 END;",
+            )
+            .unwrap();
+
+        let _env_lock = crate::journal::test_env_lock();
+        let inherited_invocation = std::env::var_os(crate::durable::AGENT_INVOCATION_ENV);
+        std::env::set_var(crate::durable::AGENT_INVOCATION_ENV, invocation.id.as_str());
+        let result = super::run(store.clone(), task.id.clone(), &lease).await;
+        match inherited_invocation {
+            Some(value) => std::env::set_var(crate::durable::AGENT_INVOCATION_ENV, value),
+            None => std::env::remove_var(crate::durable::AGENT_INVOCATION_ENV),
+        }
+        let error = result.expect_err("unsupported provider must fail before its first event");
+        assert!(
+            error
+                .to_string()
+                .contains("unsupported session harness: unsupported"),
+            "unexpected startup failure: {error:#}"
+        );
+
+        let events = store.recent_task_events(&task.id, 10).await.unwrap();
+        assert_eq!(events.len(), 1);
+        assert_eq!(events[0].kind, TaskEventKind::Started);
+        assert!(store.current_run(&work).await.unwrap().is_some());
+        let unsettled: (String, bool) = connection
+            .query_row(
+                "SELECT outcome, ended_at IS NOT NULL
+                 FROM agent_invocations WHERE supervising_run_id=?1",
+                [run.id.as_str()],
+                |row| Ok((row.get(0)?, row.get(1)?)),
+            )
+            .unwrap();
+        assert_eq!(unsettled, ("running".into(), false));
+
+        connection
+            .execute_batch("DROP TRIGGER reject_test_task_failure;")
+            .unwrap();
+        super::record_unhandled_failure(&store, &task.id, &lease, &error).await;
+
+        let events = store.recent_task_events(&task.id, 10).await.unwrap();
+        assert_eq!(events.len(), 2);
+        assert!(matches!(
+            &events[0].kind,
+            TaskEventKind::Failed { error, resumable: true }
+                if error.contains("task process failed: unsupported session harness: unsupported")
+        ));
+        assert_eq!(events[1].kind, TaskEventKind::Started);
+        assert!(store.current_run(&work).await.unwrap().is_none());
+
+        let invocation: (String, String, bool) = connection
+            .query_row(
+                "SELECT capture_status, outcome, ended_at IS NOT NULL
+                 FROM agent_invocations WHERE supervising_run_id=?1",
+                [run.id.as_str()],
+                |row| Ok((row.get(0)?, row.get(1)?, row.get(2)?)),
+            )
+            .unwrap();
+        assert_eq!(invocation, ("prompt_only".into(), "failed".into(), true));
+
+        let (run, lease) = store.reserve_run(&work, RunTrigger::User).await.unwrap();
+        store
+            .advance_run(
+                &lease,
+                RunAdvance::RunStarting {
+                    containment: Containment::Tmux {
+                        name: "handled-provider-failure".to_string(),
+                    },
+                    cwd: repository.clone(),
+                },
+            )
+            .await
+            .unwrap();
+        store
+            .advance_run(
+                &lease,
+                RunAdvance::InvocationStarting {
+                    route: InvocationRoute {
+                        provider: "unsupported".to_string(),
+                        model: None,
+                        account_id: None,
+                    },
+                    surface: "headless".to_string(),
+                    resume_token: None,
+                    answer_ask_id: None,
+                },
+            )
+            .await
+            .unwrap();
+        store
+            .append_task_event_for_run(&task.id, &lease, &TaskEventKind::Started)
+            .await
+            .unwrap();
+        connection
+            .execute_batch(
+                "CREATE TRIGGER reject_test_task_failure
+                 BEFORE INSERT ON task_events
+                 WHEN json_extract(NEW.kind_json, '$.kind') = 'failed'
+                 BEGIN
+                     SELECT RAISE(ABORT, 'injected Task failure write');
+                 END;",
+            )
+            .unwrap();
+
+        let mut harness = UnusedHarness;
+        super::finish_failed(
+            &store,
+            &mut task,
+            &lease,
+            &mut harness,
+            "provider stream closed",
+            None,
+        )
+        .await
+        .expect_err("the rejected receipt keeps the handled failure recoverable");
+        assert!(store.current_run(&work).await.unwrap().is_some());
+        let unsettled: (String, bool) = connection
+            .query_row(
+                "SELECT outcome, ended_at IS NOT NULL
+                 FROM agent_invocations WHERE supervising_run_id=?1",
+                [run.id.as_str()],
+                |row| Ok((row.get(0)?, row.get(1)?)),
+            )
+            .unwrap();
+        assert_eq!(unsettled, ("running".into(), false));
+
+        connection
+            .execute_batch("DROP TRIGGER reject_test_task_failure;")
+            .unwrap();
+        let handled_error = super::finish_failed(
+            &store,
+            &mut task,
+            &lease,
+            &mut harness,
+            "provider stream closed",
+            None,
+        )
+        .await
+        .expect_err("a handled failure returns its reason after settlement");
+        let event_count = store.recent_task_events(&task.id, 10).await.unwrap().len();
+        super::record_unhandled_failure(&store, &task.id, &lease, &handled_error).await;
+        let events = store.recent_task_events(&task.id, 10).await.unwrap();
+        assert_eq!(events.len(), event_count);
+        assert!(matches!(
+            &events[0].kind,
+            TaskEventKind::Failed { error, resumable: true }
+                if error == "provider stream closed"
+        ));
+        assert!(store.current_run(&work).await.unwrap().is_none());
+        let invocation: (String, String, bool) = connection
+            .query_row(
+                "SELECT capture_status, outcome, ended_at IS NOT NULL
+                 FROM agent_invocations WHERE supervising_run_id=?1",
+                [run.id.as_str()],
+                |row| Ok((row.get(0)?, row.get(1)?, row.get(2)?)),
+            )
+            .unwrap();
+        assert_eq!(invocation, ("prompt_only".into(), "failed".into(), true));
+    }
+
+    async fn settle_human_task(
+        store: &SharedStore,
+        result: AskResult,
+    ) -> (crate::durable::Ask, RunLease) {
+        let user = AuthenticatedRequest::cli();
+        let ask = store
+            .pending_asks(&ControlCtx::User(&user), &AskTarget::User)
+            .await
+            .unwrap()
+            .into_iter()
+            .next()
+            .unwrap();
+        let claim = store
+            .claim_test_ask(&ControlCtx::User(&user), &ask.id)
+            .await
+            .unwrap();
+        assert!(claim.needs_launch);
+        let run_lease = store
+            .claim_flow_step_run_lease(&ask.id, &claim.invocation_id)
+            .await
+            .unwrap()
+            .unwrap();
+        store
+            .mark_ask_ready(&ask.id, &claim.invocation_id)
+            .await
+            .unwrap();
+        store
+            .mark_ask_presented(&ask.id, &claim.invocation_id)
+            .await
+            .unwrap();
+        let ask = store
+            .settle_ask(&ask.id, &claim.invocation_id, result)
+            .await
+            .unwrap();
+        assert!(store.validate_run_lease(&run_lease).await.is_err());
+        assert!(store.current_run(&ask.origin.work).await.unwrap().is_none());
+        let (_, successor) = store
+            .reserve_run(&ask.origin.work, RunTrigger::User)
+            .await
+            .unwrap();
+        store
+            .advance_run(
+                &successor,
+                RunAdvance::RunStarting {
+                    containment: Containment::Tmux {
+                        name: "human-task-successor".to_string(),
+                    },
+                    cwd: ask.origin.cwd.clone(),
+                },
+            )
+            .await
+            .unwrap();
+        (ask, successor)
+    }
+
+    #[tokio::test]
+    async fn released_human_task_attempt_keeps_the_same_node_parked() {
+        let (store, mut task, lease, mut flow) = human_task_fixture().await;
+        assert!(super::prepare_task_flow_step(
+            &store,
+            &mut task,
+            &lease,
+            "human-task-proof",
+            &mut flow,
+            None,
+        )
+        .await
+        .unwrap()
+        .is_none());
+        let user = AuthenticatedRequest::cli();
+        let ask = store
+            .pending_asks(&ControlCtx::User(&user), &AskTarget::User)
+            .await
+            .unwrap()
+            .remove(0);
+        let claim = store
+            .claim_test_ask(&ControlCtx::User(&user), &ask.id)
+            .await
+            .unwrap();
+        assert!(claim.needs_launch);
+        let flow_writer = store
+            .claim_flow_step_run_lease(&ask.id, &claim.invocation_id)
+            .await
+            .unwrap()
+            .unwrap();
+        store
+            .release_ask(&ask.id, &claim.invocation_id, Some("not finished"))
+            .await
+            .unwrap();
+
+        assert!(super::prepare_task_flow_step(
+            &store,
+            &mut task,
+            &flow_writer,
+            "human-task-proof",
+            &mut flow,
+            None,
+        )
+        .await
+        .unwrap()
+        .is_none());
+        let queued = store
+            .pending_asks(&ControlCtx::User(&user), &AskTarget::User)
+            .await
+            .unwrap();
+        assert_eq!(queued.len(), 1);
+        assert_eq!(queued[0].id, ask.id);
+        assert_eq!(task.phase_cursor, 1);
+    }
+
+    #[tokio::test]
+    async fn restarted_human_task_reuses_the_queued_ask_with_current_run_authority() {
+        let (store, mut task, lease, mut flow) = human_task_fixture().await;
+        assert!(super::prepare_task_flow_step(
+            &store,
+            &mut task,
+            &lease,
+            "human-task-proof",
+            &mut flow,
+            None,
+        )
+        .await
+        .unwrap()
+        .is_none());
+        let user = AuthenticatedRequest::cli();
+        let original = store
+            .pending_asks(&ControlCtx::User(&user), &AskTarget::User)
+            .await
+            .unwrap()
+            .remove(0);
+        store
+            .finish_task_run(&task, &lease, crate::durable::BoundaryState::Succeeded)
+            .await
+            .unwrap();
+        let (_, successor) = store
+            .reserve_run(&original.origin.work, RunTrigger::User)
+            .await
+            .unwrap();
+        store
+            .advance_run(
+                &successor,
+                RunAdvance::RunStarting {
+                    containment: Containment::Tmux {
+                        name: "human-task-restart".to_string(),
+                    },
+                    cwd: task.worktree.clone(),
+                },
+            )
+            .await
+            .unwrap();
+        let mut restarted_flow = super::resume_task_phase(&task).unwrap();
+
+        assert!(super::prepare_task_flow_step(
+            &store,
+            &mut task,
+            &successor,
+            "human-task-proof",
+            &mut restarted_flow,
+            None,
+        )
+        .await
+        .unwrap()
+        .is_none());
+        let recovered = store
+            .pending_asks(&ControlCtx::User(&user), &AskTarget::User)
+            .await
+            .unwrap();
+        assert_eq!(recovered.len(), 1);
+        assert_eq!(recovered[0].id, original.id);
+        assert_eq!(recovered[0].origin, original.origin);
+        let claim = store
+            .claim_test_ask(&ControlCtx::User(&user), &recovered[0].id)
+            .await
+            .unwrap();
+        let flow_writer = store
+            .claim_flow_step_run_lease(&recovered[0].id, &claim.invocation_id)
+            .await
+            .unwrap()
+            .expect("recovered flow Ask receives current writer authority");
+        store.validate_run_lease(&flow_writer).await.unwrap();
+        let invocation = store
+            .ask_invocations(&recovered[0].id)
+            .await
+            .unwrap()
+            .into_iter()
+            .find(|invocation| invocation.id == claim.invocation_id)
+            .unwrap();
+        assert_eq!(
+            invocation.supervising_run_id.as_ref(),
+            Some(&successor.run_id)
+        );
+    }
+
+    #[tokio::test]
+    async fn human_task_node_queues_without_starting_a_provider_and_resolve_advances() {
+        let (store, mut task, lease, mut flow) = human_task_fixture().await;
+        let prepared = super::prepare_task_flow_step(
+            &store,
+            &mut task,
+            &lease,
+            "human-task-proof",
+            &mut flow,
+            None,
+        )
+        .await
+        .unwrap();
+        assert!(prepared.is_none());
+        let user = AuthenticatedRequest::cli();
+        let queued = store
+            .pending_asks(&ControlCtx::User(&user), &AskTarget::User)
+            .await
+            .unwrap();
+        assert_eq!(queued.len(), 1);
+        assert!(matches!(
+            &queued[0].request,
+            AskBody::FlowStep { node_id, skill, .. }
+                if node_id == "review_kickoff" && skill == "review-design"
+        ));
+        assert!(store
+            .invocations_for_run(&lease.run_id)
+            .await
+            .unwrap()
+            .is_empty());
+
+        let (_, flow_writer) = settle_human_task(
+            &store,
+            AskResult::Resolved {
+                summary: "design accepted".to_string(),
+            },
+        )
+        .await;
+        let prepared = super::prepare_task_flow_step(
+            &store,
+            &mut task,
+            &flow_writer,
+            "human-task-proof",
+            &mut flow,
+            None,
+        )
+        .await
+        .unwrap()
+        .expect("resolved human node advances to autonomous work");
+        assert!(!prepared.position.human);
+        assert_eq!(task.lifecycle_phase, TaskLifecyclePhase::Loop);
+    }
+
+    #[tokio::test]
+    async fn declined_human_task_node_returns_to_preceding_autonomous_step_with_reason() {
+        let (store, mut task, lease, mut flow) = human_task_fixture().await;
+        assert!(super::prepare_task_flow_step(
+            &store,
+            &mut task,
+            &lease,
+            "human-task-proof",
+            &mut flow,
+            None,
+        )
+        .await
+        .unwrap()
+        .is_none());
+        let (declined, flow_writer) = settle_human_task(
+            &store,
+            AskResult::Declined {
+                reason: "narrow the design".to_string(),
+            },
+        )
+        .await;
+
+        let prepared = super::prepare_task_flow_step(
+            &store,
+            &mut task,
+            &flow_writer,
+            "human-task-proof",
+            &mut flow,
+            None,
+        )
+        .await
+        .unwrap()
+        .expect("decline returns to autonomous kickoff");
+        assert_eq!(prepared.position.step, "kickoff");
+        assert_eq!(task.phase_cursor, 0);
+        assert_eq!(task.phase_iteration, 1);
+        let boundary = store.boundary_seed(&flow_writer.work).await.unwrap();
+        assert!(boundary
+            .steers
+            .iter()
+            .any(|steer| steer.text.contains("narrow the design")));
+
+        super::open_task_flow_body(&mut flow, &task).unwrap();
+        assert!(!super::finish_task_flow_turn(&mut flow, Lifecycle::Completed).unwrap());
+        super::record_task_flow_position(&mut task, &flow).unwrap();
+        store
+            .update_task_for_run(&task, &flow_writer)
+            .await
+            .unwrap();
+        assert!(super::prepare_task_flow_step(
+            &store,
+            &mut task,
+            &flow_writer,
+            "human-task-proof",
+            &mut flow,
+            None,
+        )
+        .await
+        .unwrap()
+        .is_none());
+        let user = AuthenticatedRequest::cli();
+        let queued = store
+            .pending_asks(&ControlCtx::User(&user), &AskTarget::User)
+            .await
+            .unwrap();
+        assert_eq!(queued.len(), 1);
+        assert_ne!(queued[0].id, declined.id);
+    }
+
+    #[test]
+    fn task_state_sync_keeps_gate_proposals_scoped_to_finally_epoch() {
+        let now = time::OffsetDateTime::now_utc();
+        let first = Task {
+            id: TaskId::new(),
+            plan: TaskPlan {
+                id: LinearIssueId::new("incident-issue").unwrap(),
+                identifier: "ENG-125".to_string(),
+                title: "Incident".to_string(),
+                description: String::new(),
+                pm_snapshot_synced_at: 1,
+            },
+            pm_writeback: PmWritebackState::Current,
+            wave_id: crate::id::WaveId::new(),
+            project_id: ProjectId::new(),
+            worktree: "/tmp/incident".into(),
+            workspace_slug: "incident".to_string(),
+            lifecycle: TaskLifecyclePlan::standard("incident", "ship-5whys", "ship"),
+            lifecycle_phase: TaskLifecyclePhase::First,
+            phase_epoch: 1,
+            phase_cursor: 0,
+            phase_iteration: 0,
+            gate_cycle: 0,
+            gate_proposal: None,
+            agent: "codex".to_string(),
+            provider: "codex".to_string(),
+            provider_session_id: None,
+            abandon_intent: None,
+            created_at: now,
+            updated_at: now,
+            observation: Observation::NotRequired,
+        };
+        let mut finally = first.clone();
+        finally.enter_loop().unwrap();
+        finally
+            .enter_finally(TaskGateProposal {
+                done: true,
+                reason: "pull request merged".to_string(),
+            })
+            .unwrap();
+
+        let mut first_body = first.clone();
+        sync_task_state(&mut first_body, &finally);
+        assert!(first_body.gate_proposal.is_none());
+        first_body.validate().unwrap();
+
+        let mut loop_body = first;
+        loop_body.enter_loop().unwrap();
+        sync_task_state(&mut loop_body, &finally);
+        assert!(loop_body.gate_proposal.is_none());
+        loop_body.validate().unwrap();
+
+        let mut finally_body = finally.clone();
+        finally.gate_proposal = Some(TaskGateProposal {
+            done: false,
+            reason: "another prevention remains".to_string(),
+        });
+        sync_task_state(&mut finally_body, &finally);
+        assert_eq!(finally_body.gate_proposal, finally.gate_proposal);
+        finally_body.validate().unwrap();
     }
 
     #[test]

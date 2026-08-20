@@ -14,15 +14,58 @@ use std::collections::{BTreeMap, BTreeSet, HashMap, HashSet};
 use std::path::Path;
 
 use anyhow::{anyhow, Result};
-use time::{Duration, OffsetDateTime};
+use time::{format_description::well_known::Rfc3339, Duration, OffsetDateTime};
 
 use crate::lf::output::Colors;
 use crate::store::RunEventRow;
+use crate::trace::AgentInvocationRow;
 
 /// A node value the current binary understands. `step` is the pre-054 spelling
 /// of `skill`; rows carrying it are history the readers silently drop.
 const NODES: [&str; 3] = ["run", "flow", "skill"];
 const EVENTS: [&str; 4] = ["started", "completed", "errored", "escalated"];
+const CAPTURE_RECOVERY_WINDOW_HOURS: i64 = 48;
+const ORPHAN_PUBLICATION_GRACE_SECONDS: i64 = 5 * 60;
+const MAX_CAPTURE_LOSS_DETAILS: usize = 4;
+
+#[derive(Debug, Clone, PartialEq, Eq)]
+enum CaptureLossKind {
+    Partial,
+    Orphan,
+}
+
+#[derive(Debug, Clone, PartialEq, Eq)]
+struct CaptureLoss {
+    kind: CaptureLossKind,
+    at: i64,
+    id: String,
+    owner: String,
+    provider: Option<String>,
+    reason: String,
+}
+
+#[derive(Debug, Clone, PartialEq, Eq)]
+enum CaptureEpisode {
+    Healthy,
+    ActiveLoss {
+        latest_loss_at: i64,
+    },
+    Recovering {
+        latest_loss_at: i64,
+        recovery_started_at: i64,
+    },
+    Recovered {
+        latest_loss_at: i64,
+        recovery_started_at: i64,
+    },
+}
+
+#[derive(Debug, Clone, PartialEq, Eq)]
+struct CaptureStorage {
+    available_bytes: Option<u64>,
+    home_bytes: Option<u64>,
+    trace_bytes: Option<u64>,
+}
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq, serde::Serialize)]
 #[serde(rename_all = "snake_case")]
@@ -249,6 +292,20 @@ fn check_capture(
     store: &crate::store::sqlite::SqliteStore,
     events: &[RunEventRow],
 ) -> Result<Check> {
+    check_capture_at(
+        store,
+        events,
+        OffsetDateTime::now_utc().unix_timestamp(),
+        &_capture_storage,
+    )
+}
+
+fn check_capture_at(
+    store: &crate::store::sqlite::SqliteStore,
+    events: &[RunEventRow],
+    now: i64,
+    storage: &dyn Fn() -> CaptureStorage,
+) -> Result<Check> {
     let invocations = store.agent_invocations_since(0)?;
     let invocation_ids = invocations
         .iter()
@@ -259,11 +316,19 @@ fn check_capture(
     let assets = store.context_assets_for_turns(&turn_ids)?;
 
     let mut failures = Vec::new();
+    let mut losses = Vec::new();
     let mut prompt_only = 0;
     let mut pruned = 0;
     let mut interrupted = 0;
     let mut lost = 0;
     for invocation in &invocations {
+        if invocation.capture_status == "prompt_only" {
+            // A durable supervised Invocation is reserved before its provider
+            // starts. It deliberately owns no trace paths yet, so empty paths
+            // are part of this state rather than unsafe capture evidence.
+            prompt_only += 1;
+            continue;
+        }
         if invocation.capture_status == "pruned" {
             // Tombstoned by `lf runs reconcile`: the artifact is known-absent
             // and the absence is acknowledged. Counted, never a failure — must
@@ -289,15 +354,22 @@ fn check_capture(
         if artifact_dir.is_err() || conversation_path.is_err() || provider_events_path.is_err() {
             failures.push(format!("{} has an unsafe artifact path", invocation.id));
         }
-        if invocation.capture_status == "prompt_only" {
-            prompt_only += 1;
-        }
         if invocation.capture_status == "partial" {
             let reason = invocation
                 .incomplete_reason
                 .as_deref()
                 .unwrap_or("reason unknown");
-            failures.push(format!("{} is partial: {reason}", invocation.id));
+            if reason.trim().is_empty() {
+                failures.push(format!("{} is partial without a reason", invocation.id));
+            }
+            losses.push(CaptureLoss {
+                kind: CaptureLossKind::Partial,
+                at: invocation.ended_at.unwrap_or(invocation.started_at),
+                id: invocation.id.clone(),
+                owner: _capture_owner(invocation),
+                provider: Some(invocation.provider.clone()),
+                reason: reason.to_string(),
+            });
         }
         if matches!(invocation.capture_status.as_str(), "interrupted" | "lost") {
             if invocation.capture_status == "interrupted" {
@@ -399,14 +471,21 @@ fn check_capture(
         .iter()
         .map(|invocation| invocation.artifact_dir.as_str())
         .collect();
-    let orphan_guard =
-        OffsetDateTime::now_utc().unix_timestamp() - super::runs::RECONCILE_AGE_GUARD_HOURS * 3600;
+    let orphan_guard = now - ORPHAN_PUBLICATION_GRACE_SECONDS;
     for artifact in crate::trace::list_invocation_artifact_dirs()? {
         if !known_artifacts.contains(artifact.as_str()) {
             let path = crate::trace::resolve_artifact(&artifact)?;
             let (_, modified) = super::runs::directory_size_and_mtime(&path);
+            let modified = _artifact_modified_at(&path, modified);
             if modified < orphan_guard {
-                failures.push(format!("orphan trace artifact {artifact}"));
+                losses.push(CaptureLoss {
+                    kind: CaptureLossKind::Orphan,
+                    at: modified,
+                    id: artifact.clone(),
+                    owner: _orphan_owner(&artifact, events),
+                    provider: None,
+                    reason: "unclaimed trace artifact".to_string(),
+                });
             }
         }
     }
@@ -463,45 +542,298 @@ fn check_capture(
     } else {
         format!(", {}", terminal_counts.join(", "))
     };
+    let metrics = format!(
+        "{} invocations, {} turns, {} assets, {} bytes{terminal_clause}",
+        invocations.len(),
+        turns.len(),
+        assets.len(),
+        invocations
+            .iter()
+            .map(|invocation| invocation.conversation_bytes)
+            .sum::<i64>()
+    );
+    let episode = _classify_capture_episode(&losses, &invocations, now);
     if !failures.is_empty() {
+        let mut detail = format!(
+            "{} integrity failure(s): {}",
+            failures.len(),
+            failures
+                .into_iter()
+                .take(MAX_CAPTURE_LOSS_DETAILS)
+                .collect::<Vec<_>>()
+                .join("; ")
+        );
+        if episode != CaptureEpisode::Healthy {
+            detail.push_str("; ");
+            detail.push_str(&_format_capture_episode(
+                &episode,
+                &losses,
+                matches!(
+                    episode,
+                    CaptureEpisode::ActiveLoss { .. } | CaptureEpisode::Recovering { .. }
+                )
+                .then(storage),
+            ));
+        }
+        detail.push_str(&format!("; {metrics}"));
+        return Ok(Check::fail("capture", detail));
+    }
+    if matches!(
+        episode,
+        CaptureEpisode::ActiveLoss { .. } | CaptureEpisode::Recovering { .. }
+    ) {
         return Ok(Check::fail(
             "capture",
             format!(
-                "{} failure(s); {} invocations, {} turns, {} bytes{terminal_clause}: {}",
-                failures.len(),
-                invocations.len(),
-                turns.len(),
-                invocations
-                    .iter()
-                    .map(|invocation| invocation.conversation_bytes)
-                    .sum::<i64>(),
-                failures.into_iter().take(4).collect::<Vec<_>>().join("; ")
+                "{}; {metrics}",
+                _format_capture_episode(&episode, &losses, Some(storage()))
             ),
         ));
+    }
+    if let CaptureEpisode::Recovered { .. } = episode {
+        let detail = format!(
+            "{}; {metrics}",
+            _format_capture_episode(&episode, &losses, None)
+        );
+        return if prompt_only > 0 {
+            Ok(Check::warn(
+                "capture",
+                format!("{detail}; {prompt_only} invocation(s) are prompt-only"),
+            ))
+        } else {
+            Ok(Check::ok("capture", detail))
+        };
     }
     if prompt_only > 0 {
         return Ok(Check::warn(
             "capture",
-            format!(
-                "{} invocations and {} turns are consistent; {prompt_only} interactive invocation(es) are prompt-only{terminal_clause}",
-                invocations.len(),
-                turns.len()
-            ),
+            format!("{metrics}; {prompt_only} invocation(s) are prompt-only"),
         ));
     }
-    Ok(Check::ok(
-        "capture",
-        format!(
-            "{} invocations, {} turns, {} assets, {} bytes{terminal_clause}",
-            invocations.len(),
-            turns.len(),
-            assets.len(),
-            invocations
-                .iter()
-                .map(|invocation| invocation.conversation_bytes)
-                .sum::<i64>()
+    Ok(Check::ok("capture", metrics))
+}
+
+fn _classify_capture_episode(
+    losses: &[CaptureLoss],
+    invocations: &[AgentInvocationRow],
+    now: i64,
+) -> CaptureEpisode {
+    let Some(latest_loss_at) = losses.iter().map(|loss| loss.at).max() else {
+        return CaptureEpisode::Healthy;
+    };
+    let recovery_started_at = invocations
+        .iter()
+        .filter(|invocation| invocation.capture_status == "complete")
+        .filter_map(|invocation| invocation.ended_at)
+        .filter(|ended_at| *ended_at > latest_loss_at)
+        .min();
+    let Some(recovery_started_at) = recovery_started_at else {
+        return CaptureEpisode::ActiveLoss { latest_loss_at };
+    };
+    if now < recovery_started_at + CAPTURE_RECOVERY_WINDOW_HOURS * 3600 {
+        return CaptureEpisode::Recovering {
+            latest_loss_at,
+            recovery_started_at,
+        };
+    }
+    CaptureEpisode::Recovered {
+        latest_loss_at,
+        recovery_started_at,
+    }
+}
+
+fn _format_capture_episode(
+    episode: &CaptureEpisode,
+    losses: &[CaptureLoss],
+    storage: Option<CaptureStorage>,
+) -> String {
+    let partial_count = losses
+        .iter()
+        .filter(|loss| loss.kind == CaptureLossKind::Partial)
+        .count();
+    let orphan_count = losses
+        .iter()
+        .filter(|loss| loss.kind == CaptureLossKind::Orphan)
+        .count();
+    let counts = format!(
+        "{partial_count} partial capture(s), {orphan_count} unclaimed artifact(s) retained"
+    );
+    let mut detail = match episode {
+        CaptureEpisode::Healthy => "capture healthy".to_string(),
+        CaptureEpisode::ActiveLoss { latest_loss_at } => format!(
+            "capture active loss: {counts}; latest {}; no complete capture after it",
+            _format_timestamp(*latest_loss_at)
         ),
-    ))
+        CaptureEpisode::Recovering {
+            latest_loss_at,
+            recovery_started_at,
+        } => format!(
+            "capture recovering: {counts}; latest loss {}; complete capture {}; requires loss-free through {}",
+            _format_timestamp(*latest_loss_at),
+            _format_timestamp(*recovery_started_at),
+            _format_timestamp(
+                *recovery_started_at + CAPTURE_RECOVERY_WINDOW_HOURS * 3600
+            )
+        ),
+        CaptureEpisode::Recovered {
+            latest_loss_at,
+            recovery_started_at,
+        } => format!(
+            "capture recovered: {counts}; latest loss {}; complete capture {}; {CAPTURE_RECOVERY_WINDOW_HOURS}h loss-free",
+            _format_timestamp(*latest_loss_at),
+            _format_timestamp(*recovery_started_at)
+        ),
+    };
+    if matches!(
+        episode,
+        CaptureEpisode::ActiveLoss { .. } | CaptureEpisode::Recovering { .. }
+    ) {
+        let mut newest = losses.iter().collect::<Vec<_>>();
+        newest.sort_by(|left, right| (right.at, &right.id).cmp(&(left.at, &left.id)));
+        let observations = newest
+            .into_iter()
+            .take(MAX_CAPTURE_LOSS_DETAILS)
+            .map(_format_capture_loss)
+            .collect::<Vec<_>>()
+            .join("; ");
+        if !observations.is_empty() {
+            detail.push_str(&format!("; {observations}"));
+        }
+    }
+    if let Some(storage) = storage {
+        detail.push_str(&format!("; {}", _format_capture_storage(&storage)));
+    }
+    detail
+}
+
+fn _format_capture_loss(loss: &CaptureLoss) -> String {
+    let provider = loss
+        .provider
+        .as_deref()
+        .map(|provider| format!(" via {provider}"))
+        .unwrap_or_default();
+    format!(
+        "{} {} {}{provider}: {}",
+        _format_timestamp(loss.at),
+        loss.owner,
+        loss.id,
+        loss.reason
+    )
+}
+
+fn _capture_owner(invocation: &AgentInvocationRow) -> String {
+    if let Some(task) = invocation.task.as_deref() {
+        return format!("task {task}");
+    }
+    if let Some(project) = invocation.project.as_deref() {
+        return format!("project {project}");
+    }
+    if let Some(wave) = invocation.wave.as_deref() {
+        return format!("wave {wave}");
+    }
+    if !invocation.worktree.is_empty() {
+        return format!("worktree {}", invocation.worktree);
+    }
+    format!("repo {}", invocation.repo)
+}
+
+fn _orphan_owner(artifact: &str, events: &[RunEventRow]) -> String {
+    let Some(run_id) =
+        Path::new(artifact)
+            .components()
+            .next()
+            .and_then(|component| match component {
+                std::path::Component::Normal(value) => value.to_str(),
+                _ => None,
+            })
+    else {
+        return "owner unknown".to_string();
+    };
+    if let Some(wave) = events
+        .iter()
+        .filter(|event| event.run_id == run_id)
+        .find_map(|event| event.wave.as_deref())
+    {
+        return format!("wave {wave}");
+    }
+    if let Some(worktree) = events
+        .iter()
+        .filter(|event| event.run_id == run_id)
+        .find_map(|event| event.worktree.as_deref())
+    {
+        return format!("worktree {worktree}");
+    }
+    if let Some(repo) = events
+        .iter()
+        .filter(|event| event.run_id == run_id)
+        .find_map(|event| event.repo.as_deref())
+    {
+        return format!("repo {repo}");
+    }
+    format!("run {run_id} owner unknown")
+}
+
+fn _artifact_modified_at(path: &Path, newest_file: i64) -> i64 {
+    if newest_file > 0 {
+        return newest_file;
+    }
+    std::fs::metadata(path)
+        .and_then(|metadata| metadata.modified())
+        .ok()
+        .and_then(|modified| modified.duration_since(std::time::UNIX_EPOCH).ok())
+        .map_or(0, |duration| duration.as_secs() as i64)
+}
+
+fn _capture_storage() -> CaptureStorage {
+    let home = crate::store::lf_home_dir();
+    let traces = crate::trace::trace_root();
+    CaptureStorage {
+        available_bytes: fs2::available_space(&home).ok(),
+        home_bytes: _capture_directory_bytes(&home),
+        trace_bytes: _capture_directory_bytes(&traces),
+    }
+}
+
+fn _capture_directory_bytes(path: &Path) -> Option<u64> {
+    std::fs::read_dir(path).ok()?;
+    Some(super::runs::directory_size_and_mtime(path).0)
+}
+
+fn _format_capture_storage(storage: &CaptureStorage) -> String {
+    let available = _format_optional_bytes(storage.available_bytes);
+    format!(
+        "storage {available} available, .lf {}, .lf/traces {}",
+        _format_optional_bytes(storage.home_bytes),
+        _format_optional_bytes(storage.trace_bytes)
+    )
+}
+
+fn _format_optional_bytes(bytes: Option<u64>) -> String {
+    bytes
+        .map(_format_bytes)
+        .unwrap_or_else(|| "unknown".to_string())
+}
+
+fn _format_bytes(bytes: u64) -> String {
+    const UNITS: [&str; 5] = ["B", "KiB", "MiB", "GiB", "TiB"];
+    let mut value = bytes as f64;
+    let mut unit = 0;
+    while value >= 1024.0 && unit < UNITS.len() - 1 {
+        value /= 1024.0;
+        unit += 1;
+    }
+    if unit == 0 {
+        format!("{bytes} B")
+    } else {
+        format!("{value:.1} {}", UNITS[unit])
+    }
+}
+
+fn _format_timestamp(timestamp: i64) -> String {
+    OffsetDateTime::from_unix_timestamp(timestamp)
+        .ok()
+        .and_then(|value| value.format(&Rfc3339).ok())
+        .unwrap_or_else(|| timestamp.to_string())
 }
 
 pub fn audit(events: &[RunEventRow]) -> Vec<Check> {
@@ -543,12 +875,7 @@ fn check_usage_coverage(store: &crate::store::sqlite::SqliteStore) -> Result<Che
     let measured: HashSet<String> = store
         .agent_turns_for_invocations(&invocation_ids)?
         .into_iter()
-        .filter(|turn| {
-            turn.provider_input_tokens.is_some()
-                || turn.provider_output_tokens.is_some()
-                || turn.cache_read_tokens.is_some()
-                || turn.cost_usd.is_some()
-        })
+        .filter(|turn| turn.usage.is_some())
         .map(|turn| turn.invocation_id)
         .collect();
 
@@ -802,9 +1129,12 @@ fn print_checks(store: &StoreReport, checks: &[Check], rows: usize) {
 #[cfg(test)]
 mod tests {
     use super::{
-        audit, check_capture, check_continuity, check_usage_coverage, inspect_store, Status,
+        _artifact_modified_at, _classify_capture_episode, _format_capture_storage, audit,
+        check_capture, check_capture_at, check_continuity, check_usage_coverage, inspect_store,
+        CaptureEpisode, CaptureLoss, CaptureLossKind, CaptureStorage, Status,
     };
     use crate::store::RunEventRow;
+    use crate::trace::AgentInvocationRow;
 
     const DAY: i64 = 86_400;
 
@@ -952,15 +1282,237 @@ mod tests {
             },
         )
         .unwrap();
-        capture.record_conversation(crate::chat::types::ConversationEvent::TurnUsage {
+        capture.record_conversation(crate::chat::types::ConversationEvent::UsageCheckpoint {
             turn_id: "turn-1".to_string(),
             usage: crate::chat::types::TurnUsage {
-                input_tokens: 40,
-                output_tokens: 5_197,
+                input_tokens: Some(40),
+                output_tokens: Some(5_197),
                 ..Default::default()
             },
+            final_receipt: true,
         });
         capture.finish("completed", false).unwrap();
+    }
+
+    fn invocation_at(id: &str, capture_status: &str, ended_at: Option<i64>) -> AgentInvocationRow {
+        AgentInvocationRow {
+            id: id.to_string(),
+            run_id: format!("run-{id}"),
+            answer_ask_id: None,
+            process_id: format!("process-{id}"),
+            started_at: ended_at.unwrap_or(0).saturating_sub(1),
+            ended_at,
+            repo: "/src/loopflow".to_string(),
+            worktree: "/src/loopflow.task".to_string(),
+            wave: Some("infrastructure".to_string()),
+            flow: None,
+            skill: Some("implement".to_string()),
+            project: Some("stability-security".to_string()),
+            task: Some("LOO-219".to_string()),
+            provider: "codex".to_string(),
+            model: Some("gpt-5".to_string()),
+            surface: "headless".to_string(),
+            capture_status: capture_status.to_string(),
+            incomplete_reason: None,
+            outcome: "completed".to_string(),
+            artifact_dir: format!("run-{id}/process-{id}/{id}"),
+            conversation_path: format!("run-{id}/process-{id}/{id}/conversation.jsonl"),
+            provider_events_path: None,
+            provider_session_id: None,
+            provider_session_path: None,
+            conversation_event_count: 0,
+            conversation_bytes: 0,
+            supervision: None,
+        }
+    }
+
+    fn partial_loss(id: &str, at: i64) -> CaptureLoss {
+        CaptureLoss {
+            kind: CaptureLossKind::Partial,
+            at,
+            id: id.to_string(),
+            owner: "task LOO-219".to_string(),
+            provider: Some("codex".to_string()),
+            reason: "No space left on device".to_string(),
+        }
+    }
+
+    fn fixed_storage() -> CaptureStorage {
+        CaptureStorage {
+            available_bytes: Some(170 * 1024 * 1024 * 1024),
+            home_bytes: Some(23 * 1024 * 1024 * 1024),
+            trace_bytes: Some(11 * 1024 * 1024 * 1024),
+        }
+    }
+
+    #[test]
+    fn missing_storage_context_is_unknown_not_zero() {
+        let detail = _format_capture_storage(&CaptureStorage {
+            available_bytes: None,
+            home_bytes: None,
+            trace_bytes: None,
+        });
+
+        assert_eq!(
+            detail,
+            "storage unknown available, .lf unknown, .lf/traces unknown"
+        );
+    }
+
+    #[test]
+    fn recovery_requires_a_later_complete_capture_and_the_full_window() {
+        let losses = vec![partial_loss("loss", 100)];
+
+        assert_eq!(
+            _classify_capture_episode(&losses, &[], 100 + 10 * DAY),
+            CaptureEpisode::ActiveLoss {
+                latest_loss_at: 100
+            }
+        );
+
+        let invocations = vec![invocation_at("recovery", "complete", Some(200))];
+        assert_eq!(
+            _classify_capture_episode(&losses, &invocations, 200 + 48 * 3600 - 1),
+            CaptureEpisode::Recovering {
+                latest_loss_at: 100,
+                recovery_started_at: 200,
+            }
+        );
+        assert_eq!(
+            _classify_capture_episode(&losses, &invocations, 200 + 48 * 3600),
+            CaptureEpisode::Recovered {
+                latest_loss_at: 100,
+                recovery_started_at: 200,
+            }
+        );
+    }
+
+    #[test]
+    fn historical_partial_is_immutable_and_a_recurrence_is_actionable() {
+        let guard = crate::journal::TestLedgerGuard::new();
+        let (historical_id, historical_file) = captured_invocation(&guard, "kickoff");
+        let (recovery_id, _) = captured_invocation(&guard, "implement");
+        let connection = rusqlite::Connection::open(guard.home().join("loopflow.db")).unwrap();
+        connection
+            .execute(
+                "UPDATE agent_invocations
+                 SET started_at = 90, ended_at = 100, capture_status = 'partial',
+                     incomplete_reason = 'No space left on device'
+                 WHERE id = ?1",
+                [&historical_id],
+            )
+            .unwrap();
+        connection
+            .execute(
+                "UPDATE agent_invocations SET started_at = 190, ended_at = 200 WHERE id = ?1",
+                [&recovery_id],
+            )
+            .unwrap();
+        drop(connection);
+        let store = crate::journal::open_ledger().unwrap();
+        let before = store
+            .agent_invocations_since(0)
+            .unwrap()
+            .into_iter()
+            .find(|invocation| invocation.id == historical_id)
+            .unwrap();
+        let artifact_before = std::fs::read(&historical_file).unwrap();
+
+        let recovering =
+            check_capture_at(&store, &[], 200 + 48 * 3600 - 1, &fixed_storage).unwrap();
+        assert_eq!(recovering.status, Status::Fail, "{}", recovering.detail);
+        assert!(recovering.detail.contains("capture recovering"));
+
+        let recovered = check_capture_at(&store, &[], 200 + 48 * 3600, &fixed_storage).unwrap();
+        assert_eq!(recovered.status, Status::Ok, "{}", recovered.detail);
+        assert!(recovered.detail.contains("capture recovered"));
+        assert!(recovered.detail.contains("1 partial capture(s)"));
+        let after = store
+            .agent_invocations_since(0)
+            .unwrap()
+            .into_iter()
+            .find(|invocation| invocation.id == historical_id)
+            .unwrap();
+        assert_eq!(after, before);
+        assert_eq!(std::fs::read(&historical_file).unwrap(), artifact_before);
+
+        let (recurrence_id, _) = captured_invocation(&guard, "review");
+        let connection = rusqlite::Connection::open(guard.home().join("loopflow.db")).unwrap();
+        connection
+            .execute(
+                "UPDATE agent_invocations
+                 SET started_at = 499990, ended_at = 500000, capture_status = 'partial',
+                     incomplete_reason = 'No space left on device'
+                 WHERE id = ?1",
+                [&recurrence_id],
+            )
+            .unwrap();
+        drop(connection);
+
+        let recurring = check_capture_at(&store, &[], 500010, &fixed_storage).unwrap();
+        assert_eq!(recurring.status, Status::Fail, "{}", recurring.detail);
+        for expected in [
+            "capture active loss",
+            "1970-01-06T18:53:20Z",
+            "task W2-235",
+            recurrence_id.as_str(),
+            "via codex",
+            "No space left on device",
+            "170.0 GiB available",
+            ".lf 23.0 GiB",
+            "traces 11.0 GiB",
+        ] {
+            assert!(
+                recurring.detail.contains(expected),
+                "missing {expected:?}: {}",
+                recurring.detail
+            );
+        }
+    }
+
+    #[test]
+    fn prompt_only_reservation_does_not_claim_trace_paths() {
+        let guard = crate::journal::TestLedgerGuard::new();
+        let (invocation_id, _) = captured_invocation(&guard, "kickoff");
+        let connection = rusqlite::Connection::open(guard.home().join("loopflow.db")).unwrap();
+        connection
+            .execute(
+                "UPDATE agent_invocations
+                 SET capture_status = 'prompt_only', artifact_dir = '',
+                     conversation_path = '', provider_events_path = NULL
+                 WHERE id = ?1",
+                [&invocation_id],
+            )
+            .unwrap();
+        drop(connection);
+        let store = crate::journal::open_ledger().unwrap();
+
+        let check = check_capture_at(&store, &[], 1, &fixed_storage).unwrap();
+
+        assert_eq!(check.status, Status::Warn, "{}", check.detail);
+        assert!(check.detail.contains("1 invocation(s) are prompt-only"));
+        assert!(!check.detail.contains("unsafe artifact path"));
+    }
+
+    #[test]
+    fn an_unclaimed_artifact_has_only_a_bounded_publication_grace() {
+        let guard = crate::journal::TestLedgerGuard::new();
+        let artifact = guard.home().join("traces/run/process/invocation");
+        std::fs::create_dir_all(&artifact).unwrap();
+        std::fs::write(artifact.join("conversation.jsonl"), "{}\n").unwrap();
+        let modified = _artifact_modified_at(
+            &artifact,
+            super::super::runs::directory_size_and_mtime(&artifact).1,
+        );
+        let store = crate::journal::open_ledger().unwrap();
+
+        let publishing = check_capture_at(&store, &[], modified + 299, &fixed_storage).unwrap();
+        assert_eq!(publishing.status, Status::Ok, "{}", publishing.detail);
+
+        let orphaned = check_capture_at(&store, &[], modified + 301, &fixed_storage).unwrap();
+        assert_eq!(orphaned.status, Status::Fail, "{}", orphaned.detail);
+        assert!(orphaned.detail.contains("unclaimed trace artifact"));
+        assert!(orphaned.detail.contains("run run owner unknown"));
     }
 
     /// Spend lives only on turns now, so a invocation that reported nothing is
@@ -1033,7 +1585,11 @@ mod tests {
         std::fs::remove_file(&historical_file).unwrap();
         let check = check_capture(&store, &[]).unwrap();
         assert_eq!(check.status, Status::Fail, "{}", check.detail);
-        assert!(check.detail.contains("1 failure(s)"), "{}", check.detail);
+        assert!(
+            check.detail.contains("1 integrity failure(s)"),
+            "{}",
+            check.detail
+        );
 
         // Acknowledge it the way `lf runs reconcile --apply` does.
         store
@@ -1053,7 +1609,11 @@ mod tests {
         std::fs::remove_file(&fresh_file).unwrap();
         let check = check_capture(&store, &[]).unwrap();
         assert_eq!(check.status, Status::Fail, "{}", check.detail);
-        assert!(check.detail.contains("1 failure(s)"), "{}", check.detail);
+        assert!(
+            check.detail.contains("1 integrity failure(s)"),
+            "{}",
+            check.detail
+        );
         assert!(check.detail.contains("1 pruned"), "{}", check.detail);
     }
 
@@ -1116,7 +1676,12 @@ mod tests {
         let check = check_capture(&store, &[]).unwrap();
         assert_eq!(check.status, Status::Fail, "{}", check.detail);
         assert!(
-            check.detail.contains("is partial: ENOSPC"),
+            check.detail.contains("1 partial capture(s)"),
+            "{}",
+            check.detail
+        );
+        assert!(
+            check.detail.contains("ENOSPC while syncing"),
             "{}",
             check.detail
         );

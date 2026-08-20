@@ -11,8 +11,8 @@ struct RegistryQueryTests {
     func wavesDecodeAndScope() async throws {
         let json = """
         [
-          {"id":"goals","name":"goals","status":{"running":{"run_id":"run_00000000000000000000000000000001"}},"goal":"ship the roadmap","repo":"/tmp/repo-a","active_tasks":1,"active_projects":1,"live":true,"endpoint":"127.0.0.1:5678","created_at":null,"parent_wave_id":null,"home":{"id":"home_00000000000000000000000000000001","route":"local","created_at":"1970-01-01T00:00:00Z","observed_at":"1970-01-01T00:00:00Z"}},
-          {"id":"other","name":"other","status":"ready","goal":"g","repo":"/tmp/repo-b","active_tasks":0,"active_projects":0,"live":false,"endpoint":null,"created_at":null,"parent_wave_id":null,"home":{"id":"home_00000000000000000000000000000001","route":"local","created_at":"1970-01-01T00:00:00Z","observed_at":"1970-01-01T00:00:00Z"}}
+          {"id":"goals","name":"goals","status":{"running":{"run_id":"run_00000000000000000000000000000001"}},"goal":"ship the roadmap","repo":"/tmp/repo-a","active_tasks":1,"active_projects":1,"live":true,"paused":true,"enabled":true,"endpoint":"127.0.0.1:5678","created_at":null,"parent_wave_id":null,"home":{"id":"home_00000000000000000000000000000001","route":"local","created_at":"1970-01-01T00:00:00Z","observed_at":"1970-01-01T00:00:00Z"}},
+          {"id":"other","name":"other","status":"ready","goal":"g","repo":"/tmp/repo-b","active_tasks":0,"active_projects":0,"live":false,"paused":false,"enabled":false,"endpoint":null,"created_at":null,"parent_wave_id":null,"home":{"id":"home_00000000000000000000000000000001","route":"local","created_at":"1970-01-01T00:00:00Z","observed_at":"1970-01-01T00:00:00Z"}}
         ]
         """
         let query = RegistryQuery { args, _ in
@@ -24,14 +24,16 @@ struct RegistryQueryTests {
         #expect(waves.map(\.id) == ["goals"])
         #expect(waves[0].status.isRunning)
         #expect(waves[0].repo == "/tmp/repo-a")
+        #expect(waves[0].paused)
+        #expect(waves[0].enabled)
     }
 
     @Test("lf ls can be decoded once for every repo")
     func allWavesDecode() async throws {
         let json = """
         [
-          {"id":"goals","name":"goals","status":{"running":{"run_id":"run_00000000000000000000000000000001"}},"goal":"ship the roadmap","repo":"/tmp/repo-a","active_tasks":1,"active_projects":1,"live":true,"endpoint":"127.0.0.1:5678","created_at":null,"parent_wave_id":null,"home":{"id":"home_00000000000000000000000000000001","route":"local","created_at":"1970-01-01T00:00:00Z","observed_at":"1970-01-01T00:00:00Z"}},
-          {"id":"other","name":"other","status":"ready","goal":"g","repo":"/tmp/repo-b","active_tasks":0,"active_projects":0,"live":false,"endpoint":null,"created_at":null,"parent_wave_id":null,"home":{"id":"home_00000000000000000000000000000001","route":"local","created_at":"1970-01-01T00:00:00Z","observed_at":"1970-01-01T00:00:00Z"}}
+          {"id":"goals","name":"goals","status":{"running":{"run_id":"run_00000000000000000000000000000001"}},"goal":"ship the roadmap","repo":"/tmp/repo-a","active_tasks":1,"active_projects":1,"live":true,"paused":true,"enabled":true,"endpoint":"127.0.0.1:5678","created_at":null,"parent_wave_id":null,"home":{"id":"home_00000000000000000000000000000001","route":"local","created_at":"1970-01-01T00:00:00Z","observed_at":"1970-01-01T00:00:00Z"}},
+          {"id":"other","name":"other","status":"ready","goal":"g","repo":"/tmp/repo-b","active_tasks":0,"active_projects":0,"live":false,"paused":false,"enabled":false,"endpoint":null,"created_at":null,"parent_wave_id":null,"home":{"id":"home_00000000000000000000000000000001","route":"local","created_at":"1970-01-01T00:00:00Z","observed_at":"1970-01-01T00:00:00Z"}}
         ]
         """
         let counter = CallCounter()
@@ -44,6 +46,7 @@ struct RegistryQueryTests {
         let waves = try await query.allWaves()
         #expect(await counter.value == 1)
         #expect(waves.map(\.id) == ["goals", "other"])
+        #expect(waves.map(\.enabled) == [true, false])
     }
 
 
@@ -51,7 +54,7 @@ struct RegistryQueryTests {
     func statusMapsWork() async throws {
         let json = """
         {
-          "wave":{"id":"goals","name":"goals","status":"ready","goal":"g","repo":"/tmp/repo-a","active_tasks":1,"active_projects":1,"live":false,"endpoint":null,"created_at":null,"parent_wave_id":null,"home":{"id":"home_00000000000000000000000000000001","route":"local","created_at":"1970-01-01T00:00:00Z","observed_at":"1970-01-01T00:00:00Z"}},
+          "wave":{"id":"goals","name":"goals","status":"ready","goal":"g","repo":"/tmp/repo-a","active_tasks":1,"active_projects":1,"live":false,"paused":false,"enabled":true,"endpoint":null,"created_at":null,"parent_wave_id":null,"home":{"id":"home_00000000000000000000000000000001","route":"local","created_at":"1970-01-01T00:00:00Z","observed_at":"1970-01-01T00:00:00Z"}},
           "loop_state":"turning",
           "projects":[{
             "project":{"id":"project-1","slug":"developer-efficiency","name":"Developer efficiency","summary":"Keep flow.","definition":"Remove friction.","flows":{"first":"task-design","loop":"slice","finally":"ship"},"krs":[{"text":"Fast loops","holds":false}]},
@@ -69,7 +72,8 @@ struct RegistryQueryTests {
               "active_pr":null
             }]
           }],
-          "runs":{"state":"ok","truncated":false,"items":[{"id":"invocation-1","trace_id":"abc","exec_id":"span-1","parent_exec_id":null,"repo":"/src/loopflow","worktree":"/src/loopflow.task","wave":"goals","flow":"task","skill":"task_pursue","status":"ok","started":100,"ended":110,"turns":1,"system_tokens":100,"task_tokens":50,"supplied_context_tokens":150,"input_tokens":1000,"output_tokens":200,"reasoning_tokens":null,"cache_read_tokens":800,"cache_write_tokens":null,"cost_usd":0.25,"duration_secs":10.0,"provider":"claude","model":"opus","surface":"headless","capture_status":"complete"}]},
+          "unavailable_projects":[],
+          "runs":{"state":"ok","truncated":false,"items":[{"id":"invocation-1","trace_id":"abc","exec_id":"span-1","parent_exec_id":null,"repo":"/src/loopflow","worktree":"/src/loopflow.task","wave":"goals","flow":"task","skill":"task/pursue","status":"ok","started":100,"ended":110,"turns":1,"system_tokens":100,"task_tokens":50,"supplied_context_tokens":150,"input_tokens":1000,"output_tokens":200,"reasoning_tokens":null,"cache_read_tokens":800,"cache_write_tokens":null,"cost_usd":0.25,"duration_secs":10.0,"provider":"claude","model":"opus","surface":"headless","capture_status":"complete"}]},
           "attention":{"state":"ok","truncated":false,"items":[{"kind":"task","id":"ts_2","subject":"INF-124","owner":"user","reason":"User merge requested","since":"2026-07-06T00:00:00Z","age_secs":7200}]},
           "home_runtime":{"home":{"id":"home_00000000000000000000000000000001","route":"local","created_at":"1970-01-01T00:00:00Z","observed_at":"1970-01-01T00:00:00Z"},"state":"stopped","reason":"no resident is serving","endpoint":null,"action":{"kind":"start","home_id":"home_00000000000000000000000000000001"}}
         }
@@ -95,7 +99,7 @@ struct RegistryQueryTests {
         #expect(result.workMap.projects[0].tasks[0].reference.workspace?.slug == "wire-it")
         #expect(result.workMap.projects[0].tasks[0].reference.workspace?.worktree == "/task-wt")
         #expect(result.workMap.projects[0].tasks[0].reference.workspace?.branch == "jack/inf-123")
-        #expect(result.runs.items[0].skill == "task_pursue")
+        #expect(result.runs.items[0].skill == "task/pursue")
         #expect(result.runs.items[0].suppliedContextTokens == 150)
         #expect(result.attention.items[0].subject == "INF-124")
         #expect(result.attention.items[0].owner == .user)
@@ -115,14 +119,35 @@ struct RegistryQueryTests {
         #expect(result.waves.isEmpty)
     }
 
-    @Test("Wave Chat history is a bounded local query")
-    func chatHistoryUsesLocalJournalQuery() async throws {
+    @Test("lf activity composes Work filters before the bounded result")
+    func workActivityUsesOneFilteredQuery() async throws {
+        let json = try String(contentsOf: workActivityFixtureURL(), encoding: .utf8)
+        let query = RegistryQuery { args, cwd in
+            #expect(args == [
+                "activity", "--since", "7d", "--limit", "50",
+                "--wave", "product", "--project", "mac-surface-ux",
+                "--task", "W2-144", "--json",
+            ])
+            #expect(cwd == nil)
+            return json
+        }
+
+        let result = try await query.workActivity(
+            wave: "product",
+            project: "mac-surface-ux",
+            task: "W2-144"
+        )
+        #expect(result.items[0].subject == "W2-144")
+    }
+
+    @Test("Wave Chat history uses the backing-aware DTO")
+    func chatHistoryUsesBackingAwareDTO() async throws {
         let query = RegistryQuery { args, cwd in
             #expect(args == [
                 "chat", "--history", "--json", "--limit", "12", "--wave", "product",
             ])
             #expect(cwd == "/tmp/repo")
-            return #"{"state":"missing","detail":"No durable Wave Chat history exists yet.","turns":[],"truncated":false}"#
+            return #"{"epochs":[],"selected_epoch_id":null,"state":"missing","detail":"No durable Wave Chat history exists yet.","messages":[],"truncated":false}"#
         }
 
         let snapshot = try await query.chatHistory(
@@ -131,7 +156,7 @@ struct RegistryQueryTests {
             cwd: "/tmp/repo"
         )
         #expect(snapshot.state == .missing)
-        #expect(snapshot.turns.isEmpty)
+        #expect(snapshot.messages.isEmpty)
         #expect(!snapshot.truncated)
     }
 
@@ -158,7 +183,7 @@ struct RegistryQueryTests {
     func startReturnsWaveStatus() async throws {
         let json = #"""
         [{"id":"wave-1","name":"product","status":"ready","goal":"Ship product",
-          "repo":"/tmp/repo","active_tasks":1,"active_projects":1,"live":true,
+          "repo":"/tmp/repo","active_tasks":1,"active_projects":1,"live":true,"paused":false,"enabled":true,
           "endpoint":"127.0.0.1:7777","created_at":"2026-07-17T00:00:00Z",
           "parent_wave_id":null,"home":{"id":"home_00000000000000000000000000000001",
           "route":"local","created_at":"2026-07-17T00:00:00Z",
@@ -176,15 +201,76 @@ struct RegistryQueryTests {
         #expect(result[0].home.id == "home_00000000000000000000000000000001")
     }
 
+    @Test("lf start rejects a non-live receipt")
+    func startRejectsNonLiveReceipt() async {
+        let json = #"""
+        [{"id":"wave-1","name":"product","status":"ready","goal":"Ship product",
+          "repo":"/tmp/repo","active_tasks":1,"active_projects":1,"live":false,"paused":false,"enabled":true,
+          "endpoint":null,"created_at":"2026-07-17T00:00:00Z","parent_wave_id":null,
+          "home":{"id":"home_00000000000000000000000000000001","route":"local",
+          "created_at":"2026-07-17T00:00:00Z","observed_at":"2026-07-17T00:00:00Z"}}]
+        """#
+        let query = RegistryQuery { _, _ in json }
+
+        await #expect(throws: RegistryQueryError.self) {
+            try await query.start(wave: "product", cwd: "/tmp/repo")
+        }
+    }
+
+    @Test("lf start surfaces an actionable preflight failure")
+    func startSurfacesPreflightFailure() async {
+        let query = RegistryQuery { _, _ in
+            throw RegistryQueryError("Wave broken failed preflight: invalid chat policy")
+        }
+
+        do {
+            _ = try await query.start(wave: "broken", cwd: "/tmp/repo")
+            Issue.record("expected the preflight failure")
+        } catch {
+            #expect(error.localizedDescription.contains("failed preflight"))
+            #expect(error.localizedDescription.contains("invalid chat policy"))
+        }
+    }
+
+    @Test("lf pause and resume return the authored turn intent")
+    func setWavePausedUsesIntentVerbs() async throws {
+        let query = RegistryQuery { args, cwd in
+            #expect(cwd == "/tmp/repo")
+            switch args {
+            case ["pause", "product", "--json"]:
+                return #"{"wave":"product","paused":true}"#
+            case ["resume", "product", "--json"]:
+                return #"{"wave":"product","paused":false}"#
+            default:
+                throw RegistryQueryError("unexpected argv: \(args)")
+            }
+        }
+
+        let paused = try await query.setWavePaused(
+            wave: "product",
+            paused: true,
+            cwd: "/tmp/repo"
+        )
+        #expect(paused == WaveIntentReceipt(wave: "product", paused: true))
+
+        let resumed = try await query.setWavePaused(
+            wave: "product",
+            paused: false,
+            cwd: "/tmp/repo"
+        )
+        #expect(resumed == WaveIntentReceipt(wave: "product", paused: false))
+    }
+
     /// Unreadable evidence must reach the surface as its reason, never as an
     /// empty list — a broken ledger is not a quiet wave.
     @Test("lf status keeps unavailable evidence unavailable")
     func statusKeepsUnavailableEvidence() async throws {
         let json = """
         {
-          "wave":{"id":"goals","name":"goals","status":"ready","goal":"g","repo":"/tmp/repo-a","active_tasks":0,"active_projects":0,"live":false,"endpoint":null,"created_at":null,"parent_wave_id":null,"home":{"id":"home_00000000000000000000000000000001","route":"local","created_at":"1970-01-01T00:00:00Z","observed_at":"1970-01-01T00:00:00Z"}},
+          "wave":{"id":"goals","name":"goals","status":"ready","goal":"g","repo":"/tmp/repo-a","active_tasks":0,"active_projects":0,"live":false,"paused":false,"enabled":true,"endpoint":null,"created_at":null,"parent_wave_id":null,"home":{"id":"home_00000000000000000000000000000001","route":"local","created_at":"1970-01-01T00:00:00Z","observed_at":"1970-01-01T00:00:00Z"}},
           "loop_state":null,
           "projects":[],
+          "unavailable_projects":[],
           "runs":{"state":"unavailable","reason":"run ledger unavailable: disk is gone"},
           "attention":{"state":"ok","truncated":false,"items":[]},
           "home_runtime":{"home":{"id":"home_00000000000000000000000000000001","route":"local","created_at":"1970-01-01T00:00:00Z","observed_at":"1970-01-01T00:00:00Z"},"state":"stopped","reason":"no resident is serving","endpoint":null,"action":{"kind":"start","home_id":"home_00000000000000000000000000000001"}}
@@ -237,49 +323,120 @@ struct RegistryQueryTests {
         #expect(file.sizeBytes == 14)
     }
 
-    @Test("lf runs decodes the ledger window")
-    func runsDecode() async throws {
-        let json = """
-        [{"id":"invocation-1","trace_id":"abc","exec_id":"span-1","parent_exec_id":null,"repo":"/src/loopflow","worktree":"/src/loopflow","wave":"goals","project":"auditability","task":"W2-122","flow":"build","skill":"gate","status":"ok","started":100,"ended":110,"turns":1,"system_tokens":100,"task_tokens":50,"supplied_context_tokens":150,"input_tokens":1000,"output_tokens":200,"reasoning_tokens":null,"cache_read_tokens":800,"cache_write_tokens":null,"cost_usd":0.25,"duration_secs":10.0,"provider":"claude","model":"opus","surface":"headless","capture_status":"complete"},
-         {"id":"invocation-2","trace_id":"def","exec_id":"span-2","parent_exec_id":null,"repo":"/src/loopflow","worktree":"/src/loopflow","wave":"goals","project":null,"task":null,"flow":null,"skill":"debug","status":"running","started":120,"ended":null,"turns":0,"system_tokens":0,"task_tokens":0,"supplied_context_tokens":0,"input_tokens":null,"output_tokens":null,"reasoning_tokens":null,"cache_read_tokens":null,"cache_write_tokens":null,"cost_usd":null,"duration_secs":null,"provider":"claude","model":null,"surface":"headless","capture_status":"pending"}]
-        """
-        let query = RegistryQuery { _, _ in json }
-
-        let runs = try await query.recentRuns()
-        #expect(runs.count == 2)
-        #expect(runs[0].id == "invocation-1")
-        #expect(runs[0].traceId == "abc")
-        #expect(runs[0].wave == "goals")
-        #expect(runs[0].status == "ok")
-        #expect(runs[0].ended == 110)
-        #expect(runs[0].cacheReadTokens == 800)
-        #expect(runs[0].suppliedContextTokens == 150)
-        #expect(runs[0].model == "opus")
-        // The drill foreign key: a run declares the roadmap Project/Task it owns,
-        // or nil when it was launched outside a Task Work.
-        #expect(runs[0].project == "auditability")
-        #expect(runs[0].task == "W2-122")
-        #expect(runs[1].project == nil)
-        #expect(runs[1].task == nil)
-    }
-
-    @Test("lf usage --json decodes one additive Turn row")
-    func spendDecodes() async throws {
-        let json = """
-        [{"turn_id":"turn-1","invocation_id":"invocation-1","trace_id":"abc","exec_id":"child","repo":"/src/loopflow","wave":null,"flow":"build","skill":"gate","provider":"claude","model":"opus","at":100,"input_tokens":1000,"output_tokens":200,"cache_read_tokens":800,"cost_usd":0.25}]
+    @Test("A durable Activity Run opens its exact latest captured turn")
+    func activityRunResolvesLatestTraceAddress() async throws {
+        let traceJSON = """
+        {"trace_id":"trace-1","spans":[],"invocations":[],"turns":[
+          {"id":"turn-new","invocation_id":"invocation-1","ordinal":2},
+          {"id":"turn-other","invocation_id":"invocation-2","ordinal":9},
+          {"id":"turn-old","invocation_id":"invocation-1","ordinal":1}
+        ],"asks":[],"assets":[],"decisions":[]}
         """
         let query = RegistryQuery { args, _ in
-            #expect(args == ["usage", "--json", "--days", "30"])
+            #expect(args == ["trace", "invocation-1", "--json"])
+            return traceJSON
+        }
+
+        let address = try await query.traceAddress(invocationId: "invocation-1")
+
+        #expect(address == TraceAddress(
+            runId: "trace-1",
+            invocationId: "invocation-1",
+            turnId: "turn-new"
+        ))
+    }
+
+    @Test("User Ask attention prepares and confirms the exact Invocation")
+    func userAskAttentionUsesDurableCliHandshake() async throws {
+        let attentionJSON = try String(
+            contentsOf: askAttentionFixtureURL(),
+            encoding: .utf8
+        )
+        let attention = try JSONDecoder().decode(
+            [AskAttentionRecord].self,
+            from: Data(attentionJSON.utf8)
+        )
+        let surfaceData = try Data(contentsOf: invocationSurfaceFixtureURL())
+        let surface = try JSONDecoder().decode(InvocationSurfaceRecord.self, from: surfaceData)
+        let ask = try #require(attention.first?.ask)
+        let surfaceJSON = String(
+            data: try JSONEncoder().encode(surface),
+            encoding: .utf8
+        )!
+        let invocationJSON = String(
+            data: try JSONEncoder().encode(surface.invocation),
+            encoding: .utf8
+        )!
+        let query = RegistryQuery { args, cwd in
+            #expect(cwd == nil)
+            switch args {
+            case ["ask", "list", "--user", "--json"]:
+                return attentionJSON
+            case ["ask", "open", ask.id, "--prepare", "--json"]:
+                return surfaceJSON
+            case ["ask", "presented", ask.id, surface.invocation.id, "--json"]:
+                return invocationJSON
+            default:
+                throw RegistryQueryError("unexpected argv: \(args)")
+            }
+        }
+
+        let listed = try await query.userAskAttention()
+        let opened = try await query.prepareAskOpen(askId: ask.id)
+        let presented = try await query.confirmAskPresented(
+            askId: ask.id,
+            invocationId: surface.invocation.id
+        )
+
+        #expect(listed == attention)
+        #expect(opened == surface)
+        #expect(presented.id == surface.invocation.id)
+    }
+
+    @Test("A Run without a captured turn stays explicitly unavailable")
+    func runWithoutTurnHasNoTraceAddress() async throws {
+        let query = RegistryQuery { args, _ in
+            #expect(args == ["trace", "invocation-1", "--json"])
+            return #"{"trace_id":"trace-1","turns":[]}"#
+        }
+
+        await #expect(throws: RegistryQueryError.self) {
+            _ = try await query.traceAddress(invocationId: "invocation-1")
+        }
+    }
+
+    @Test("lf ps decodes the shared live activity snapshot")
+    func activityDecodes() async throws {
+        let fixture = try String(contentsOf: activityFixtureURL(), encoding: .utf8)
+        let query = RegistryQuery { args, cwd in
+            #expect(args == ["ps", "--json"])
+            #expect(cwd == nil)
+            return fixture
+        }
+
+        let snapshot = try await query.processActivity()
+
+        #expect(snapshot.nodes.count == 3)
+        #expect(snapshot.usage.global?.interval(seconds: 5)?.outputTokensPerSecond == 4.0)
+        #expect(snapshot.providerProcesses[0].claim == .orphaned)
+    }
+
+    @Test("lf usage --json decodes the canonical usage snapshot")
+    func usageDecodes() async throws {
+        let activityData = try Data(contentsOf: activityFixtureURL())
+        let activity = try #require(
+            JSONSerialization.jsonObject(with: activityData) as? [String: Any]
+        )
+        let usageData = try JSONSerialization.data(withJSONObject: #require(activity["usage"]))
+        let json = try #require(String(data: usageData, encoding: .utf8))
+        let query = RegistryQuery { args, _ in
+            #expect(args == ["usage", "--json"])
             return json
         }
 
-        let turns = try await query.spend()
-        #expect(turns[0].id == "turn-1")
-        #expect(turns[0].invocationId == "invocation-1")
-        #expect(turns[0].traceId == "abc")
-        #expect(turns[0].execId == "child")
-        #expect(turns[0].totalTokens == 1200)
-        #expect(turns[0].agent == "claude:opus")
+        let snapshot = try await query.usage()
+        #expect(snapshot.global?.interval(seconds: 86_400)?.outputTokens == 48_200)
+        #expect(snapshot.globalHistory.count == 2)
     }
 
     @Test("lf doctor decodes every check")
@@ -365,8 +522,8 @@ struct RegistryQueryTests {
     func planDecodesProjects() async throws {
         let json = """
         {"wave":"goals","provider":"linear","initiative":"init-1","project":null,"synced_at":1,"projects":[
-          {"id":"project-1","slug":"runtime","name":"Runtime","summary":"Run reliably.","definition":"Run reliably.","flows":{"first":null,"loop":null,"finally":null},"krs":[{"text":"Survives restart","holds":true}],"initiative_ids":["init-1"]}
-        ],"items":[]}
+          {"id":"project-1","slug":"runtime","name":"Runtime","summary":"Run reliably.","definition":"Run reliably.","flows":{"first":null,"loop":null,"finally":null},"krs":[{"text":"Survives restart","holds":true}],"initiative_ids":["init-1"],"team_ids":["team-loo"]}
+        ],"items":[{"id":"issue-1","identifier":"LOO-1","url":null,"name":"Wire runtime","description":"","rank":1,"completed":false,"project_id":"project-1","project":"runtime","team_id":"team-loo","assignee":null}]}
         """
         let query = RegistryQuery { args, cwd in
             #expect(args == ["pm", "show", "--wave", "goals", "--json", "--no-sync"])
@@ -414,6 +571,38 @@ private func contextLabFixtureURL(sourceFile: String = #filePath) -> URL {
         .deletingLastPathComponent()
         .deletingLastPathComponent()
         .appendingPathComponent("tests/fixtures/dto/context_lab_snapshot.json")
+}
+
+private func activityFixtureURL(sourceFile: String = #filePath) -> URL {
+    URL(fileURLWithPath: sourceFile)
+        .deletingLastPathComponent()
+        .deletingLastPathComponent()
+        .deletingLastPathComponent()
+        .appendingPathComponent("tests/fixtures/dto/activity_snapshot.json")
+}
+
+private func workActivityFixtureURL(sourceFile: String = #filePath) -> URL {
+    URL(fileURLWithPath: sourceFile)
+        .deletingLastPathComponent()
+        .deletingLastPathComponent()
+        .deletingLastPathComponent()
+        .appendingPathComponent("tests/fixtures/dto/work_activity_snapshot.json")
+}
+
+private func askAttentionFixtureURL(sourceFile: String = #filePath) -> URL {
+    URL(fileURLWithPath: sourceFile)
+        .deletingLastPathComponent()
+        .deletingLastPathComponent()
+        .deletingLastPathComponent()
+        .appendingPathComponent("tests/fixtures/dto/ask_attention.json")
+}
+
+private func invocationSurfaceFixtureURL(sourceFile: String = #filePath) -> URL {
+    URL(fileURLWithPath: sourceFile)
+        .deletingLastPathComponent()
+        .deletingLastPathComponent()
+        .deletingLastPathComponent()
+        .appendingPathComponent("tests/fixtures/dto/invocation_surface.json")
 }
 
 private actor CallCounter {

@@ -6,6 +6,7 @@ use std::fs::OpenOptions;
 use std::path::{Path, PathBuf};
 use std::time::Duration;
 
+use crate::store::sqlite::SQLITE_WRITE_BUSY_TIMEOUT;
 use crate::store::{StoreError, StoreResult};
 use fs2::FileExt;
 use rusqlite::OptionalExtension;
@@ -489,7 +490,89 @@ const MIGRATIONS: &[Migration] = &[
         name: "release",
         sql: include_str!("migrations/0.12.3.001_release.sql"),
     },
+    Migration {
+        id: MigrationId {
+            major: 0,
+            minor: 12,
+            patch: Some(4),
+            ordinal: 1,
+        },
+        name: "release",
+        sql: include_str!("migrations/0.12.4.001_release.sql"),
+    },
+    Migration {
+        id: MigrationId {
+            major: 0,
+            minor: 12,
+            patch: Some(5),
+            ordinal: 1,
+        },
+        name: "release",
+        sql: include_str!("migrations/0.12.5.001_release.sql"),
+    },
+    Migration {
+        id: MigrationId {
+            major: 0,
+            minor: 12,
+            patch: Some(7),
+            ordinal: 1,
+        },
+        name: "release",
+        sql: include_str!("migrations/0.12.7.001_release.sql"),
+    },
+    Migration {
+        id: MigrationId {
+            major: 0,
+            minor: 12,
+            patch: Some(8),
+            ordinal: 1,
+        },
+        name: "release",
+        sql: include_str!("migrations/0.12.8.001_release.sql"),
+    },
 ];
+
+#[cfg(test)]
+pub(crate) fn migration_sql_for_test(name: &str) -> String {
+    let marker = format!("-- draft: {name}");
+    if let Some(migration) = MIGRATIONS
+        .iter()
+        .find(|migration| migration.sql.lines().any(|line| line == marker))
+    {
+        return migration.sql.to_string();
+    }
+
+    let drafts =
+        std::path::Path::new(env!("CARGO_MANIFEST_DIR")).join("src/store/migrations/drafts");
+    let prefix = format!("{name}__");
+    let path = std::fs::read_dir(drafts)
+        .expect("migration draft directory")
+        .map(|entry| entry.expect("migration draft entry").path())
+        .find(|path| {
+            path.file_name()
+                .and_then(|name| name.to_str())
+                .is_some_and(|name| name.starts_with(&prefix) && name.ends_with(".sql"))
+        })
+        .expect("migration is canonical or present as an ordinal-free draft");
+    std::fs::read_to_string(path).expect("migration SQL")
+}
+
+#[cfg(test)]
+pub(crate) fn migration_is_applied_for_test(
+    conn: &rusqlite::Connection,
+    name: &str,
+) -> StoreResult<bool> {
+    let marker = format!("-- draft: {name}");
+    let Some(migration) = MIGRATIONS
+        .iter()
+        .find(|migration| migration.sql.lines().any(|line| line == marker))
+    else {
+        return Ok(false);
+    };
+    Ok(applied_versions(conn)?
+        .iter()
+        .any(|version| version == &migration.version()))
+}
 
 /// The exact branch-local history that reached one production ledger before
 /// main established `0.11.008_interactive_handoffs`. These ids were never
@@ -755,7 +838,8 @@ pub(crate) fn apply_sqlite_with_backup(
     conn: &rusqlite::Connection,
     path: &Path,
 ) -> StoreResult<()> {
-    conn.execute_batch("PRAGMA journal_mode = WAL; PRAGMA busy_timeout = 5000;")?;
+    conn.busy_timeout(SQLITE_WRITE_BUSY_TIMEOUT)?;
+    conn.execute_batch("PRAGMA journal_mode = WAL;")?;
     let lock_path = path.with_file_name(format!(
         "{}.migration.lock",
         path.file_name()
@@ -1551,7 +1635,6 @@ fn incompatible() -> StoreError {
 
 #[cfg(test)]
 mod tests {
-    use std::fs;
     use std::sync::mpsc::sync_channel;
     use std::time::Duration;
 
@@ -1560,13 +1643,16 @@ mod tests {
     use super::{
         active_namespace, applied_versions, apply_set, apply_sqlite, apply_sqlite_transaction,
         apply_sqlite_with_backup, backup_before_migration, latest_applied_version_sqlite,
-        latest_known_version, latest_version_sqlite, pending_migrations, product_schema,
-        validate_foreign_keys, validate_persisted_json, validate_set, validate_sqlite, Migration,
-        MigrationId, DIVERGENT_MIGRATIONS, MIGRATIONS,
+        latest_known_version, latest_version_sqlite, migration_checksum, migration_sql_for_test,
+        pending_migrations, product_schema, validate_foreign_keys, validate_persisted_json,
+        validate_set, validate_sqlite, Migration, MigrationId, DIVERGENT_MIGRATIONS, MIGRATIONS,
     };
 
     const REOPEN_REPAIR_NAME: &str = "retire_obsolete_pm_reopen_writebacks";
     const GATE_PROPOSAL_REPAIR_NAME: &str = "repair_legacy_task_gate_proposals";
+    const LEGACY_TASK_FLOW_REPAIR_NAME: &str = "repair_legacy_task_flow";
+    const TURN_USAGE_SAMPLES_NAME: &str = "add_turn_usage_samples";
+    const REPOSITORY_OWNED_WAVES_NAME: &str = "repository_owned_waves";
 
     fn _draft_is_canonical(name: &str) -> bool {
         let marker = format!("-- draft: {name}");
@@ -1620,22 +1706,6 @@ mod tests {
             )
             .unwrap();
         }
-    }
-
-    fn _repair_sql(name: &str) -> String {
-        let drafts =
-            std::path::Path::new(env!("CARGO_MANIFEST_DIR")).join("src/store/migrations/drafts");
-        let prefix = format!("{name}__");
-        let repair = fs::read_dir(&drafts)
-            .unwrap()
-            .map(|entry| entry.unwrap().path())
-            .find(|path| {
-                path.file_name()
-                    .and_then(|name| name.to_str())
-                    .is_some_and(|name| name.starts_with(&prefix) && name.ends_with(".sql"))
-            })
-            .expect("repair is canonical or present as an ordinal-free draft");
-        fs::read_to_string(repair).unwrap()
     }
 
     fn apply_permuted_history(conn: &rusqlite::Connection) {
@@ -1909,6 +1979,294 @@ mod tests {
             .map(|offset| body_start + offset)
             .unwrap_or(sql.len());
         conn.execute_batch(&sql[body_start..body_end]).unwrap();
+    }
+
+    fn apply_before_current_draft(conn: &rusqlite::Connection, name: &str) {
+        if _draft_is_canonical(name) {
+            apply_before_draft(conn, name);
+        } else {
+            apply_set(conn, MIGRATIONS).unwrap();
+        }
+    }
+
+    fn current_draft_sql(name: &str) -> String {
+        if !_draft_is_canonical(name) {
+            return migration_sql_for_test(name);
+        }
+        let (_, sql, draft_offset) = draft_location(name);
+        let body_start = sql[draft_offset..]
+            .find('\n')
+            .map(|offset| draft_offset + offset + 1)
+            .unwrap_or(sql.len());
+        let body_end = sql[body_start..]
+            .find("\n-- draft: ")
+            .map(|offset| body_start + offset)
+            .unwrap_or(sql.len());
+        sql[body_start..body_end].to_string()
+    }
+
+    #[test]
+    fn turn_usage_samples_move_provider_receipts_out_of_turn_lifecycle() {
+        let conn = open();
+        apply_before_current_draft(&conn, TURN_USAGE_SAMPLES_NAME);
+        conn.execute_batch(
+            "INSERT INTO agent_invocations (
+                id, run_id, process_id, started_at, ended_at, repo, worktree,
+                provider, model, surface, capture_status, outcome, artifact_dir,
+                conversation_path, conversation_event_count, conversation_bytes
+             ) VALUES (
+                'invocation-measured', 'run-measured', 'process-measured', 90, 110,
+                '/repo', '/repo', 'codex', 'gpt-5', 'headless', 'complete',
+                'completed', 'artifact', 'conversation.jsonl', 2, 100
+             );
+             INSERT INTO agent_turns (
+                id, invocation_id, ordinal, started_at, ended_at, status, input_op,
+                context_coverage, tokenizer, task_prompt_path, system_tokens,
+                task_tokens, supplied_context_tokens, provider_input_tokens,
+                provider_total_input_tokens, peak_input_tokens, context_window_tokens,
+                provider_output_tokens, reasoning_tokens, cache_read_tokens,
+                cache_write_tokens, cost_usd, context_gather_ms, context_render_ms,
+                context_persist_ms, root_output
+             ) VALUES (
+                'turn-measured', 'invocation-measured', 1, 100, 110, 'completed',
+                'initial', 'assembled', 'provider', 'task.md', 11, 12, 13,
+                101, 401, 390, 1000000, 202, 88, 303, 17, 1.25, 2, 3, 4,
+                'done'
+             );
+             INSERT INTO agent_turns (
+                id, invocation_id, ordinal, started_at, ended_at, status, input_op,
+                context_coverage, tokenizer, task_prompt_path, system_tokens,
+                task_tokens, supplied_context_tokens, context_gather_ms,
+                context_render_ms, context_persist_ms
+             ) VALUES (
+                'turn-unmeasured', 'invocation-measured', 2, 111, 112, 'completed',
+                'message', 'unknown', 'provider', 'task.md', 0, 0, 0, 0, 0, 0
+             );
+             INSERT INTO context_assets (
+                turn_id, position, channel, kind, scope, label, source_path,
+                included_by, content_sha256, byte_start, byte_end, bytes,
+                isolated_tokens, attributed_tokens
+             ) VALUES (
+                'turn-measured', 0, 'task', 'repo_instructions', 'repo',
+                'AGENTS.md', 'AGENTS.md', 'test', 'hash', 0, 12, 12, 3, 3
+             );",
+        )
+        .unwrap();
+
+        conn.pragma_update(None, "foreign_keys", "OFF").unwrap();
+        conn.execute_batch(&current_draft_sql(TURN_USAGE_SAMPLES_NAME))
+            .unwrap();
+        validate_foreign_keys(&conn).unwrap();
+        conn.pragma_update(None, "foreign_keys", "ON").unwrap();
+
+        let turn_columns = columns(&conn, "agent_turns");
+        for removed in [
+            "provider_input_tokens",
+            "provider_total_input_tokens",
+            "peak_input_tokens",
+            "context_window_tokens",
+            "provider_output_tokens",
+            "reasoning_tokens",
+            "cache_read_tokens",
+            "cache_write_tokens",
+            "cost_usd",
+        ] {
+            assert!(!turn_columns.contains(&removed.to_string()));
+        }
+        assert_eq!(
+            conn.query_row(
+                "SELECT turn_id, observed_at, final_receipt, input_tokens,
+                        total_input_tokens, peak_input_tokens, context_window_tokens,
+                        output_tokens, reasoning_tokens, cache_read_tokens,
+                        cache_write_tokens, model, cost_usd
+                 FROM turn_usage_samples",
+                [],
+                |row| {
+                    Ok((
+                        (
+                            row.get::<_, String>(0)?,
+                            row.get::<_, i64>(1)?,
+                            row.get::<_, bool>(2)?,
+                            row.get::<_, i64>(3)?,
+                            row.get::<_, i64>(4)?,
+                            row.get::<_, i64>(5)?,
+                            row.get::<_, i64>(6)?,
+                        ),
+                        (
+                            row.get::<_, i64>(7)?,
+                            row.get::<_, i64>(8)?,
+                            row.get::<_, i64>(9)?,
+                            row.get::<_, i64>(10)?,
+                            row.get::<_, String>(11)?,
+                            row.get::<_, f64>(12)?,
+                        ),
+                    ))
+                },
+            )
+            .unwrap(),
+            (
+                (
+                    "turn-measured".to_string(),
+                    110,
+                    true,
+                    101,
+                    401,
+                    390,
+                    1_000_000,
+                ),
+                (202, 88, 303, 17, "gpt-5".to_string(), 1.25),
+            )
+        );
+        assert_eq!(
+            conn.query_row("SELECT COUNT(*) FROM agent_turns", [], |row| row
+                .get::<_, i64>(0))
+                .unwrap(),
+            2
+        );
+        assert_eq!(
+            conn.query_row(
+                "SELECT root_output FROM agent_turns WHERE id='turn-measured'",
+                [],
+                |row| { row.get::<_, String>(0) }
+            )
+            .unwrap(),
+            "done"
+        );
+        assert_eq!(
+            conn.query_row(
+                "SELECT turn_id, label, attributed_tokens FROM context_assets",
+                [],
+                |row| Ok((
+                    row.get::<_, String>(0)?,
+                    row.get::<_, String>(1)?,
+                    row.get::<_, i64>(2)?,
+                ))
+            )
+            .unwrap(),
+            ("turn-measured".to_string(), "AGENTS.md".to_string(), 3),
+            "Turn-owned context evidence survives the table rebuild"
+        );
+    }
+
+    #[test]
+    fn repository_owned_waves_preserve_uuid_projection_and_allow_duplicate_slugs() {
+        let conn = open();
+        apply_before_current_draft(&conn, REPOSITORY_OWNED_WAVES_NAME);
+        conn.execute(
+            "INSERT INTO waves (id, name, repo, created_at) VALUES ('wave-a', 'infrastructure', '/repo/a', 1)",
+            [],
+        )
+        .unwrap();
+        conn.execute(
+            "INSERT INTO pm_snapshots (repo, wave, provider, initiative, synced_at, payload)
+             VALUES ('/repo/a', 'infrastructure', 'linear', 'initiative-a', 2, '{}')",
+            [],
+        )
+        .unwrap();
+        conn.execute_batch(
+            "INSERT INTO projects (id, wave_id, external_project_id, created_at)
+             VALUES ('project-a', 'wave-a', 'linear-project-a', 3);
+             INSERT INTO tasks (id, project_id, external_issue_id, issue_identifier, created_at)
+             VALUES ('task-a', 'project-a', 'linear-task-a', 'LOO-127', 4);
+             INSERT INTO epochs (
+                 id, number, task_id, state, current_rev, created_at, terminal_at
+             ) VALUES ('epoch-a', 1, 'task-a', 'done', 0, 5, 6);
+             INSERT INTO runs (
+                 id, epoch_id, home_id, state, trigger_json, source_kind,
+                 source_id, created_at, ended_at
+             ) VALUES (
+                 'run-a', 'epoch-a', (SELECT id FROM homes LIMIT 1), 'ended',
+                 '{\"kind\":\"migration\"}', 'task', 'task-a', 5, 6
+             );
+             INSERT INTO work_placements (task_id, home_id, placed_at)
+             VALUES ('task-a', (SELECT id FROM homes LIMIT 1), 4);",
+        )
+        .unwrap();
+
+        conn.pragma_update(None, "foreign_keys", "OFF").unwrap();
+        conn.execute_batch(&current_draft_sql(REPOSITORY_OWNED_WAVES_NAME))
+            .unwrap();
+        validate_foreign_keys(&conn).unwrap();
+        conn.pragma_update(None, "foreign_keys", "ON").unwrap();
+        conn.execute(
+            "INSERT INTO waves (id, name, repo, created_at) VALUES ('wave-b', 'infrastructure', '/repo/b', 3)",
+            [],
+        )
+        .unwrap();
+
+        assert_eq!(
+            conn.query_row(
+                "SELECT wave_id || ':' || initiative FROM pm_snapshots",
+                [],
+                |row| row.get::<_, String>(0),
+            )
+            .unwrap(),
+            "wave-a:initiative-a"
+        );
+        assert_eq!(
+            conn.query_row(
+                "SELECT COUNT(*) FROM waves WHERE name = 'infrastructure'",
+                [],
+                |row| row.get::<_, i64>(0),
+            )
+            .unwrap(),
+            2
+        );
+        assert_eq!(
+            conn.query_row(
+                "SELECT waves.id || ':' || projects.id || ':' || tasks.id || ':' || runs.id
+                 FROM runs
+                 JOIN epochs ON epochs.id = runs.epoch_id
+                 JOIN tasks ON tasks.id = epochs.task_id
+                 JOIN projects ON projects.id = tasks.project_id
+                 JOIN waves ON waves.id = projects.wave_id
+                 WHERE runs.id = 'run-a'",
+                [],
+                |row| row.get::<_, String>(0),
+            )
+            .unwrap(),
+            "wave-a:project-a:task-a:run-a"
+        );
+        assert_eq!(
+            conn.query_row(
+                "SELECT COUNT(*) FROM work_placements WHERE task_id = 'task-a'",
+                [],
+                |row| row.get::<_, i64>(0),
+            )
+            .unwrap(),
+            1
+        );
+    }
+
+    #[test]
+    fn repository_owned_waves_abort_on_an_unmatched_pm_projection() {
+        let mut conn = open();
+        apply_before_current_draft(&conn, REPOSITORY_OWNED_WAVES_NAME);
+        conn.execute(
+            "INSERT INTO waves (id, name, repo, created_at) VALUES ('wave-a', 'infrastructure', '/repo/a', 1)",
+            [],
+        )
+        .unwrap();
+        conn.execute(
+            "INSERT INTO pm_snapshots (repo, wave, provider, initiative, synced_at, payload)
+             VALUES ('/missing', 'infrastructure', 'linear', 'orphan', 2, '{}')",
+            [],
+        )
+        .unwrap();
+
+        let transaction = conn.transaction().unwrap();
+        let error = transaction
+            .execute_batch(&current_draft_sql(REPOSITORY_OWNED_WAVES_NAME))
+            .unwrap_err();
+        assert!(error.to_string().contains("NOT NULL"));
+        transaction.rollback().unwrap();
+
+        assert_eq!(columns(&conn, "pm_snapshots")[..2], ["repo", "wave"]);
+        assert_eq!(
+            conn.query_row("SELECT COUNT(*) FROM waves", [], |row| row.get::<_, i64>(0))
+                .unwrap(),
+            1
+        );
     }
 
     #[test]
@@ -2337,6 +2695,19 @@ mod tests {
         let error = validate_sqlite(&conn).unwrap_err();
 
         assert!(error.to_string().contains("checksum does not match"));
+    }
+
+    #[test]
+    fn released_0_12_4_frontier_is_reconstructible() {
+        let migration = MIGRATIONS
+            .iter()
+            .find(|migration| migration.version() == "0.12.4.001_release")
+            .expect("the production frontier remains in source history");
+
+        assert_eq!(
+            migration_checksum(migration),
+            "6aa0076adfd1f115c8a473fd0403ede22d97d59d03a14bf234fad8170669a999"
+        );
     }
 
     #[test]
@@ -2975,7 +3346,9 @@ mod tests {
         )
         .unwrap();
 
+        conn.execute_batch("BEGIN EXCLUSIVE").unwrap();
         apply_set(&conn, MIGRATIONS).unwrap();
+        conn.execute_batch("COMMIT").unwrap();
         let stale: String = conn
             .query_row(
                 "SELECT pm_writeback_json FROM tasks WHERE external_issue_id='issue-reopen'",
@@ -2985,11 +3358,11 @@ mod tests {
             .unwrap();
         if !_draft_is_canonical(REOPEN_REPAIR_NAME) {
             assert!(stale.contains("reopen_task"));
-            conn.execute_batch(&_repair_sql(REOPEN_REPAIR_NAME))
+            conn.execute_batch(&migration_sql_for_test(REOPEN_REPAIR_NAME))
                 .unwrap();
         }
         if !_draft_is_canonical(GATE_PROPOSAL_REPAIR_NAME) {
-            conn.execute_batch(&_repair_sql(GATE_PROPOSAL_REPAIR_NAME))
+            conn.execute_batch(&migration_sql_for_test(GATE_PROPOSAL_REPAIR_NAME))
                 .unwrap();
         }
         assert_eq!(
@@ -3311,9 +3684,10 @@ mod tests {
         );
         assert!(MIGRATIONS.len() > 2, "need a tail beyond the fixture");
 
-        // The generated tail advances it, and applying it again is a no-op.
-        apply_set(&conn, MIGRATIONS).unwrap();
-        apply_set(&conn, MIGRATIONS).unwrap();
+        // The generated tail advances it through the production transaction,
+        // and applying it again is a no-op.
+        apply_sqlite(&conn).unwrap();
+        apply_sqlite(&conn).unwrap();
 
         assert_eq!(applied_versions(&conn).unwrap().len(), MIGRATIONS.len());
         assert_eq!(
@@ -3691,7 +4065,7 @@ mod tests {
     }
 
     #[test]
-    fn durable_asks_enforce_complete_answers_and_one_pending_exchange() {
+    fn durable_ask_invocations_enforce_complete_results_and_allow_plural_pending_turns() {
         let conn = open();
         apply_sqlite(&conn).unwrap();
 
@@ -3709,45 +4083,517 @@ mod tests {
             assert!(!task_columns.contains(&deleted.to_string()));
         }
         assert!(!columns(&conn, "work_flow_positions").contains(&"interactive".to_string()));
+        assert!(columns(&conn, "work_flow_positions").contains(&"node_id".to_string()));
+        assert!(columns(&conn, "work_flow_positions").contains(&"human".to_string()));
 
         conn.execute_batch("PRAGMA foreign_keys=OFF").unwrap();
+        assert!(conn
+            .execute(
+                "INSERT INTO work_flow_positions (
+                    epoch_id, flow, step, node_id, human,
+                    step_index, iteration, updated_at
+                 ) VALUES ('epoch_human', 'task-design', 'review-design',
+                           NULL, 1, 1, 0, 1)",
+                [],
+            )
+            .is_err());
         conn.execute(
             "INSERT INTO ask_exchanges (
-                id, turn_id, route_kind, route_work_kind, route_work_id,
-                question, asked_at
-             ) VALUES ('ask_one', 'turn_one', 'parent', 'project', 'ps_parent',
-                       'Which proof?', 1)",
+                id, epoch_id, origin_work_kind, origin_work_id, origin_run_id,
+                origin_turn_id, origin_invocation_id, origin_home_id, origin_cwd,
+                target_kind, target_work_kind, target_work_id,
+                request_kind, request_prompt, state, asked_at
+             ) VALUES (
+                'ask_one', 'epoch_one', 'task', 'task_one', 'run_one',
+                'turn_one', 'invocation_one', 'home_one', '/repo',
+                'parent', 'project', 'proj_parent',
+                'intervention', 'Which proof?', 'queued', 1
+             )",
+            [],
+        )
+        .unwrap();
+        conn.execute(
+            "INSERT INTO ask_exchanges (
+                id, epoch_id, origin_work_kind, origin_work_id, origin_run_id,
+                origin_turn_id, origin_invocation_id, origin_home_id, origin_cwd,
+                target_kind, request_kind, request_prompt, state, asked_at
+             ) VALUES (
+                'ask_two', 'epoch_one', 'task', 'task_one', 'run_one',
+                'turn_one', 'invocation_one', 'home_one', '/repo',
+                'user', 'intervention', 'Which proof?', 'queued', 2
+             )",
             [],
         )
         .unwrap();
         assert!(conn
             .execute(
-                "INSERT INTO ask_exchanges (
-                    id, turn_id, route_kind, question, asked_at
-                 ) VALUES ('ask_two', 'turn_one', 'user', 'Another?', 2)",
-                [],
-            )
-            .is_err());
-        assert!(conn
-            .execute(
-                "UPDATE ask_exchanges SET answer_text='partial' WHERE id='ask_one'",
+                "UPDATE ask_exchanges
+                 SET result_text='partial' WHERE id='ask_one'",
                 [],
             )
             .is_err());
         conn.execute(
             "UPDATE ask_exchanges
-             SET answer_author_kind='user', answer_text='This proof', answered_at=3
+             SET state='resolved', result_kind='resolved', result_text='This proof',
+                 terminal_author_kind='user', terminal_at=3
              WHERE id='ask_one'",
             [],
         )
         .unwrap();
         conn.execute(
             "INSERT INTO ask_exchanges (
-                id, turn_id, route_kind, question, asked_at
-             ) VALUES ('ask_two', 'turn_one', 'user', 'Another?', 4)",
+                id, epoch_id, origin_work_kind, origin_work_id, origin_run_id,
+                origin_turn_id, origin_invocation_id, origin_home_id, origin_cwd,
+                target_kind, request_kind, request_prompt, state, asked_at
+             ) VALUES (
+                'ask_three', 'epoch_one', 'task', 'task_one', 'run_one',
+                'turn_one', 'invocation_one', 'home_one', '/repo',
+                'user', 'intervention', 'Another?', 'queued', 4
+             )",
             [],
         )
         .unwrap();
+        let invocation_columns = columns(&conn, "agent_invocations");
+        for column in ["answer_ask_id", "ask_ready_at", "ask_presented_at"] {
+            assert!(invocation_columns.contains(&column.to_string()));
+        }
+    }
+
+    #[test]
+    fn durable_ask_invocations_migrate_pending_and_answered_history() {
+        let conn = open();
+        apply_before_draft(&conn, "durable_ask_invocations");
+        conn.execute_batch(
+            "PRAGMA foreign_keys=OFF;
+             INSERT INTO waves (id, name, repo, created_at)
+             VALUES ('wave_migration', 'migration', '/repo', 10);
+             INSERT INTO epochs (
+                 id, number, wave_id, project_id, task_id, state, current_rev,
+                 created_at, terminal_at
+             ) VALUES (
+                 'epoch_00000000000000000000000000000001', 1, 'wave_migration',
+                 NULL, NULL, 'open', 0, 10, NULL
+             );
+             INSERT INTO runs (
+                 id, epoch_id, home_id, state, trigger_json, retry_of,
+                 lease_hash, lease_generation, source_kind, source_id,
+                 created_at, ended_at, stop_reason, containment_kind,
+                 containment_id, cwd, started_at
+             ) VALUES (
+                 'run_00000000000000000000000000000001',
+                 'epoch_00000000000000000000000000000001',
+                 (SELECT id FROM homes LIMIT 1), 'active', '{\"kind\":\"user\"}',
+                 NULL, 'lease', 1, 'wave', 'wave_migration', 11, NULL, NULL,
+                 'tmux', 'migration', '/repo/worktree', 11
+             );
+             INSERT INTO agent_invocations (
+                 id, run_id, process_id, started_at, ended_at, repo, worktree,
+                 wave, flow, skill, provider, model, surface, capture_status,
+                 incomplete_reason, outcome, artifact_dir, conversation_path,
+                 provider_events_path, provider_session_id, provider_session_path,
+                 conversation_event_count, conversation_bytes, project, task,
+                 supervising_run_id, account_id, resume_token, handback_state,
+                 answer_ask_id
+             ) VALUES (
+                 'invocation_00000000000000000000000000000001', 'trace', 'process',
+                 12, NULL, '/repo', '/repo/worktree', 'migration', NULL, NULL,
+                 'codex', NULL, 'headless', 'capturing', NULL, 'running',
+                 '/tmp/artifacts', '/tmp/conversation', NULL, NULL, NULL,
+                 0, 0, NULL, NULL, 'run_00000000000000000000000000000001',
+                 NULL, NULL, NULL, 'ask_00000000000000000000000000000001'
+             );
+             INSERT INTO agent_turns (
+                 id, invocation_id, ordinal, provider_turn_id, started_at,
+                 ended_at, status, input_op, context_coverage, tokenizer,
+                 system_prompt_path, task_prompt_path, system_tokens, task_tokens,
+                 supplied_context_tokens, context_gather_ms, context_render_ms,
+                 context_persist_ms, first_event_seq, last_event_seq, root_output,
+                 epoch_id, basis_rev
+             ) VALUES
+                 ('turn_00000000000000000000000000000001',
+                  'invocation_00000000000000000000000000000001', 1, NULL, 13,
+                  NULL, 'running', 'initial', 'assembled', 'o200k_base', NULL,
+                  '/tmp/task', 0, 0, 0, 0, 0, 0, NULL, NULL, NULL,
+                  'epoch_00000000000000000000000000000001', 0),
+                 ('turn_00000000000000000000000000000002',
+                  'invocation_00000000000000000000000000000001', 2, NULL, 14,
+                  NULL, 'running', 'message', 'assembled', 'o200k_base', NULL,
+                  '/tmp/task', 0, 0, 0, 0, 0, 0, NULL, NULL, NULL,
+                  'epoch_00000000000000000000000000000001', 0);
+             INSERT INTO ask_exchanges (
+                 id, turn_id, route_kind, route_work_kind, route_work_id,
+                 question, asked_at, answer_author_kind, answer_author_id,
+                 answer_text, answered_at
+             ) VALUES
+                 ('ask_00000000000000000000000000000001',
+                  'turn_00000000000000000000000000000001', 'parent', 'project',
+                  'proj_00000000000000000000000000000001', 'Pending?', 20,
+                  NULL, NULL, NULL, NULL),
+                 ('ask_00000000000000000000000000000002',
+                 'turn_00000000000000000000000000000002', 'user', NULL, NULL,
+                  'Answered?', 21, 'run',
+                  'run_00000000000000000000000000000001', 'The answer', 22);
+             INSERT INTO ask_linear_comment_outbox (
+                 ask_id, transition, task_id, issue_id, body, created_at,
+                 attempt_count, attempt_started_at, last_error,
+                 linear_comment_id, delivered_at
+             ) VALUES (
+                 'ask_00000000000000000000000000000002', 'answer',
+                 'task_00000000000000000000000000000001', 'ENG-1',
+                 'historical task answer attribution', 22, 1, NULL, NULL,
+                 'comment-1', 23
+             );",
+        )
+        .unwrap();
+
+        apply_draft(&conn, "durable_ask_invocations");
+
+        let pending: (
+            String,
+            String,
+            String,
+            String,
+            String,
+            String,
+            i64,
+            Option<i64>,
+        ) = conn
+            .query_row(
+                "SELECT state, target_kind, request_prompt, origin_cwd,
+                        origin_turn_id, origin_invocation_id, asked_at, terminal_at
+                 FROM ask_exchanges
+                 WHERE id='ask_00000000000000000000000000000001'",
+                [],
+                |row| {
+                    Ok((
+                        row.get(0)?,
+                        row.get(1)?,
+                        row.get(2)?,
+                        row.get(3)?,
+                        row.get(4)?,
+                        row.get(5)?,
+                        row.get(6)?,
+                        row.get(7)?,
+                    ))
+                },
+            )
+            .unwrap();
+        assert_eq!(
+            pending,
+            (
+                "queued".into(),
+                "parent".into(),
+                "Pending?".into(),
+                "/repo/worktree".into(),
+                "turn_00000000000000000000000000000001".into(),
+                "invocation_00000000000000000000000000000001".into(),
+                20,
+                None,
+            )
+        );
+        let answered: (
+            String,
+            String,
+            String,
+            String,
+            String,
+            Option<String>,
+            String,
+            String,
+            i64,
+            i64,
+        ) = conn
+            .query_row(
+                "SELECT state, target_kind, result_kind, result_text,
+                        terminal_author_kind, terminal_author_id,
+                        origin_turn_id, origin_invocation_id, asked_at, terminal_at
+                 FROM ask_exchanges
+                 WHERE id='ask_00000000000000000000000000000002'",
+                [],
+                |row| {
+                    Ok((
+                        row.get(0)?,
+                        row.get(1)?,
+                        row.get(2)?,
+                        row.get(3)?,
+                        row.get(4)?,
+                        row.get(5)?,
+                        row.get(6)?,
+                        row.get(7)?,
+                        row.get(8)?,
+                        row.get(9)?,
+                    ))
+                },
+            )
+            .unwrap();
+        assert_eq!(
+            answered,
+            (
+                "resolved".into(),
+                "user".into(),
+                "resolved".into(),
+                "The answer".into(),
+                "run".into(),
+                Some("run_00000000000000000000000000000001".into()),
+                "turn_00000000000000000000000000000002".into(),
+                "invocation_00000000000000000000000000000001".into(),
+                21,
+                22,
+            )
+        );
+        assert_eq!(
+            conn.query_row(
+                "SELECT issue_id || ':' || body FROM ask_linear_comment_outbox
+                 WHERE ask_id='ask_00000000000000000000000000000002'",
+                [],
+                |row| row.get::<_, String>(0),
+            )
+            .unwrap(),
+            "ENG-1:historical task answer attribution"
+        );
+        assert_eq!(
+            conn.query_row(
+                "SELECT answer_ask_id FROM agent_invocations
+                 WHERE id='invocation_00000000000000000000000000000001'",
+                [],
+                |row| row.get::<_, Option<String>>(0),
+            )
+            .unwrap(),
+            None
+        );
+    }
+
+    #[test]
+    fn legacy_task_flow_repair_restores_existing_tasks_without_moving_their_work() {
+        let conn = open();
+        if _draft_is_canonical(LEGACY_TASK_FLOW_REPAIR_NAME) {
+            apply_before_draft(&conn, LEGACY_TASK_FLOW_REPAIR_NAME);
+        } else {
+            apply_set(&conn, MIGRATIONS).unwrap();
+        }
+        conn.execute_batch(
+            "INSERT INTO waves (id, name, repo, created_at)
+                 VALUES ('wave_restore', 'restore', '/repo', 100);
+             INSERT INTO projects (id, wave_id, external_project_id, created_at)
+                 VALUES ('proj_restore', 'wave_restore', 'linear_project', 100);
+             INSERT INTO tasks (
+                 id, project_id, external_issue_id, issue_identifier, created_at,
+                 issue_title, issue_description, pm_snapshot_synced_at,
+                 pm_writeback_json, worktree, workspace_slug, agent, provider,
+                 iterate_flow, phase_cursor, phase_iteration, kickoff_flow,
+                 gate_flow, lifecycle_phase, phase_epoch, gate_cycle, updated_at
+             ) VALUES
+                 ('task_legacy_a', 'proj_restore', 'issue_a', 'LOO-193', 101,
+                  'Legacy A', '', 101, '{\"state\":\"current\"}', '/repo.a',
+                  'legacy-a', 'codex', 'codex', 'task', 3, 4,
+                  'task-design', 'ship', 'iterate', 7, 2, 111),
+                 ('task_legacy_b', 'proj_restore', 'issue_b', 'LOO-195', 102,
+                  'Legacy B', '', 102, '{\"state\":\"current\"}', '/repo.b',
+                  'legacy-b', 'codex', 'codex', 'task', 5, 6,
+                  'incident', 'ship', 'iterate', 8, 3, 112),
+                 ('task_explicit', 'proj_restore', 'issue_c', 'LOO-206', 103,
+                  'Explicit', '', 103, '{\"state\":\"current\"}', '/repo.c',
+                  'explicit-c', 'codex', 'codex', 'ship-5whys', 1, 2,
+                  'incident', 'ship', 'iterate', 9, 4, 113);
+             INSERT INTO epochs (
+                 id, number, task_id, state, current_rev, created_at
+             ) VALUES
+                 ('epoch_a', 1, 'task_legacy_a', 'open', 0, 101),
+                 ('epoch_b', 1, 'task_legacy_b', 'open', 0, 102),
+                 ('epoch_c', 1, 'task_explicit', 'open', 0, 103);
+             INSERT INTO task_prs (
+                 id, task_id, sequence, slug, branch, base_commit,
+                 created_at, updated_at
+             ) VALUES
+                 ('pr_a', 'task_legacy_a', 1, 'legacy-a', 'jack/legacy-a', 'base-a', 101, 111),
+                 ('pr_b', 'task_legacy_b', 1, 'legacy-b', 'jack/legacy-b', 'base-b', 102, 112),
+                 ('pr_c', 'task_explicit', 1, 'explicit-c', 'jack/explicit-c', 'base-c', 103, 113);",
+        )
+        .unwrap();
+
+        if _draft_is_canonical(LEGACY_TASK_FLOW_REPAIR_NAME) {
+            apply_draft(&conn, LEGACY_TASK_FLOW_REPAIR_NAME);
+        } else {
+            conn.execute_batch(&migration_sql_for_test(LEGACY_TASK_FLOW_REPAIR_NAME))
+                .unwrap();
+        }
+
+        let tasks = conn
+            .prepare(
+                "SELECT id, iterate_flow, kickoff_flow, gate_flow, lifecycle_phase,
+                        phase_epoch, phase_cursor, phase_iteration, gate_cycle,
+                        worktree, updated_at
+                 FROM tasks ORDER BY id",
+            )
+            .unwrap()
+            .query_map([], |row| {
+                Ok((
+                    row.get::<_, String>(0)?,
+                    row.get::<_, String>(1)?,
+                    row.get::<_, String>(2)?,
+                    row.get::<_, String>(3)?,
+                    row.get::<_, String>(4)?,
+                    row.get::<_, i64>(5)?,
+                    row.get::<_, i64>(6)?,
+                    row.get::<_, i64>(7)?,
+                    row.get::<_, i64>(8)?,
+                    row.get::<_, String>(9)?,
+                    row.get::<_, i64>(10)?,
+                ))
+            })
+            .unwrap()
+            .collect::<Result<Vec<_>, _>>()
+            .unwrap();
+        assert_eq!(
+            tasks,
+            vec![
+                (
+                    "task_explicit".into(),
+                    "ship-5whys".into(),
+                    "incident".into(),
+                    "ship".into(),
+                    "iterate".into(),
+                    9,
+                    1,
+                    2,
+                    4,
+                    "/repo.c".into(),
+                    113,
+                ),
+                (
+                    "task_legacy_a".into(),
+                    "slice".into(),
+                    "task-design".into(),
+                    "ship".into(),
+                    "iterate".into(),
+                    7,
+                    3,
+                    4,
+                    2,
+                    "/repo.a".into(),
+                    111,
+                ),
+                (
+                    "task_legacy_b".into(),
+                    "slice".into(),
+                    "incident".into(),
+                    "ship".into(),
+                    "iterate".into(),
+                    8,
+                    5,
+                    6,
+                    3,
+                    "/repo.b".into(),
+                    112,
+                ),
+            ]
+        );
+        assert_eq!(
+            conn.query_row("SELECT COUNT(*) FROM epochs", [], |row| row
+                .get::<_, i64>(0))
+                .unwrap(),
+            3
+        );
+        assert_eq!(
+            conn.query_row("SELECT COUNT(*) FROM task_prs", [], |row| row
+                .get::<_, i64>(0))
+                .unwrap(),
+            3
+        );
+
+        let repo = std::path::Path::new(env!("CARGO_MANIFEST_DIR")).join("../..");
+        for flow in ["slice", "slice", "ship-5whys"] {
+            let invocation = crate::wave::playhead::QueuedInvocation::load(&repo, flow)
+                .expect("every repaired persisted loop flow resolves");
+            assert_eq!(invocation.flow, flow);
+        }
+    }
+
+    #[test]
+    fn repair_durable_input_timestamp_units_preserves_rows_and_seconds() {
+        const LEGACY_NANOS: i64 = 1_784_521_517_123_456_789;
+        const EXPECTED_SECONDS: i64 = 1_784_521_517;
+        const EARLIEST_VALID_SECOND: i64 = -377_705_116_800;
+        const LATEST_VALID_SECOND: i64 = 253_402_300_799;
+
+        assert!(time::OffsetDateTime::from_unix_timestamp(EARLIEST_VALID_SECOND).is_ok());
+        assert!(time::OffsetDateTime::from_unix_timestamp(EARLIEST_VALID_SECOND - 1).is_err());
+        assert!(time::OffsetDateTime::from_unix_timestamp(LATEST_VALID_SECOND).is_ok());
+        assert!(time::OffsetDateTime::from_unix_timestamp(LATEST_VALID_SECOND + 1).is_err());
+
+        let conn = open();
+        apply_before_draft(&conn, "repair_durable_input_timestamp_units");
+        conn.execute_batch(&format!(
+            "PRAGMA foreign_keys = OFF;
+             INSERT INTO epoch_revisions (epoch_id, rev, kind, source_id, created_at)
+             VALUES
+                 ('epoch_legacy', 0, 'steer', 'steer_legacy', {LEGACY_NANOS}),
+                 ('epoch_legacy', 1, 'tool_response', 'response_legacy', {LEGACY_NANOS}),
+                 ('epoch_seconds', 0, 'steer', 'steer_seconds', {EXPECTED_SECONDS}),
+                 ('epoch_seconds', 1, 'tool_response', 'response_seconds', {EXPECTED_SECONDS}),
+                 ('epoch_seconds', 2, 'evidence', 'latest_valid', {LATEST_VALID_SECOND});
+             INSERT INTO steers (
+                 id, epoch_id, rev, author_kind, author_run_id, text, issued_at
+             ) VALUES
+                 ('steer_legacy', 'epoch_legacy', 0, 'user', NULL, 'legacy', {LEGACY_NANOS}),
+                 ('steer_seconds', 'epoch_seconds', 0, 'user', NULL, 'seconds', {EXPECTED_SECONDS});
+             INSERT INTO tool_responses (
+                 id, epoch_id, rev, request_id, choice, responded_at
+             ) VALUES
+                 ('response_legacy', 'epoch_legacy', 1, 'request_legacy', 'legacy', {LEGACY_NANOS}),
+                 ('response_seconds', 'epoch_seconds', 1, 'request_seconds', 'seconds', {EXPECTED_SECONDS});"
+        ))
+        .unwrap();
+
+        apply_draft(&conn, "repair_durable_input_timestamp_units");
+
+        let timestamp = |table: &str, column: &str, id_column: &str, id: &str| -> i64 {
+            conn.query_row(
+                &format!("SELECT {column} FROM {table} WHERE {id_column}=?1"),
+                [id],
+                |row| row.get(0),
+            )
+            .unwrap()
+        };
+        assert_eq!(
+            timestamp("epoch_revisions", "created_at", "source_id", "steer_legacy"),
+            EXPECTED_SECONDS
+        );
+        assert_eq!(
+            timestamp("steers", "issued_at", "id", "steer_legacy"),
+            EXPECTED_SECONDS
+        );
+        assert_eq!(
+            timestamp("tool_responses", "responded_at", "id", "response_legacy"),
+            EXPECTED_SECONDS
+        );
+        assert_eq!(
+            timestamp("epoch_revisions", "created_at", "source_id", "latest_valid"),
+            LATEST_VALID_SECOND,
+            "an already valid second at the OffsetDateTime boundary is untouched"
+        );
+        assert_eq!(
+            timestamp("steers", "issued_at", "id", "steer_seconds"),
+            EXPECTED_SECONDS
+        );
+        assert_eq!(
+            timestamp("tool_responses", "responded_at", "id", "response_seconds"),
+            EXPECTED_SECONDS
+        );
+        for (table, expected) in [
+            ("epoch_revisions", 5_i64),
+            ("steers", 2_i64),
+            ("tool_responses", 2_i64),
+        ] {
+            assert_eq!(
+                conn.query_row(&format!("SELECT COUNT(*) FROM {table}"), [], |row| {
+                    row.get::<_, i64>(0)
+                })
+                .unwrap(),
+                expected,
+                "the repair must preserve every {table} row"
+            );
+        }
     }
 
     #[test]

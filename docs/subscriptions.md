@@ -84,7 +84,8 @@ same account ID so fallback and resume do not silently change identities.
 lf auth status                   # every connected service
 lf auth accounts claude          # cached subscription state
 lf auth accounts --verify        # compare every credential with its provider
-lf usage                         # subscription windows and process token spend
+lf usage                         # subscription windows plus provider usage
+lf telemetry-daily               # repository maintainer health and budget report
 ```
 
 `auth accounts --verify` records a revoked credential as missing and prints

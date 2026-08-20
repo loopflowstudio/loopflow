@@ -61,7 +61,7 @@ enum MockWaveFixture {
             Wave(id: "wave-2", name: "intelligence", repo: repoPath, status: .ready,
                  live: false, activeTasks: 2, activeProjects: 1),
             Wave(id: "wave-3", name: "feedback", repo: repoPath, status: .ready,
-                 live: false, activeTasks: 0, activeProjects: 0),
+                 live: false, enabled: false, activeTasks: 0, activeProjects: 0),
             Wave(id: "wave-4", name: "cadenza", repo: repoPath,
                  status: .running(runID: "run_cadenza"),
                  live: true, activeTasks: 0, activeProjects: 0, parentWaveId: "wave-1"),
@@ -131,6 +131,8 @@ enum MockWaveFixture {
         "active_tasks": 1,
         "active_projects": 1,
         "live": true,
+        "paused": false,
+        "enabled": true,
         "endpoint": "127.0.0.1:7777",
         "created_at": "2026-07-01T00:00:00Z",
         "parent_wave_id": null,
@@ -289,6 +291,7 @@ enum MockWaveFixture {
           ]
         }
       ],
+      "unavailable_projects": [],
       "runs": {
         "state": "ok",
         "truncated": false,
@@ -302,7 +305,7 @@ enum MockWaveFixture {
             "worktree": "/src/loopflow.task",
             "wave": "infrastructure",
             "flow": "task",
-            "skill": "task_pursue",
+            "skill": "task/pursue",
             "status": "ok",
             "started": 1784052000,
             "ended": 1784052600,

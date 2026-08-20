@@ -1,3 +1,5 @@
+use std::fs::{self, File, OpenOptions};
+use std::io::Write;
 use std::path::{Path, PathBuf};
 use std::process::{Command, Output};
 use std::thread;
@@ -33,6 +35,12 @@ pub enum LandStrategy {
 pub struct LandResult {
     pub merged_commit: String,
     pub branch_deleted: bool,
+}
+
+#[derive(Debug)]
+pub(crate) struct WorktreeLease {
+    path: PathBuf,
+    _file: File,
 }
 
 fn run_git(repo: &Path, args: &[&str]) -> Result<Output, GitError> {
@@ -398,10 +406,21 @@ pub fn get_default_branch(repo: &Path) -> Result<String, GitError> {
 
 /// Return true if working tree is clean.
 pub fn is_clean(repo: &Path) -> Result<bool, GitError> {
-    let output = run_git(repo, &["status", "--porcelain"])?;
+    is_clean_for_pathspec(repo, &[])
+}
+
+/// Return true when only gate artifacts under `scratch/` are dirty.
+pub fn is_materially_clean(repo: &Path) -> Result<bool, GitError> {
+    is_clean_for_pathspec(repo, &[".", ":(exclude)scratch", ":(exclude)scratch/**"])
+}
+
+fn is_clean_for_pathspec(repo: &Path, pathspec: &[&str]) -> Result<bool, GitError> {
+    let mut args = vec!["status", "--porcelain"];
+    args.extend_from_slice(pathspec);
+    let output = run_git(repo, &args)?;
     if !output.status.success() {
         return Err(GitError::CommandFailed {
-            command: "git status --porcelain".to_string(),
+            command: format!("git {}", args.join(" ")),
             stderr: String::from_utf8_lossy(&output.stderr).to_string(),
         });
     }
@@ -689,7 +708,79 @@ fn unquote_path(raw: &str) -> String {
         .to_string()
 }
 
-pub fn worktree_remove(repo: &Path, path: &Path) -> Result<(), GitError> {
+fn normalized_worktree_path(repo: &Path, path: &Path) -> PathBuf {
+    if let Ok(path) = path.canonicalize() {
+        return path;
+    }
+    let absolute = if path.is_absolute() {
+        path.to_path_buf()
+    } else {
+        repo.join(path)
+    };
+    let Some(name) = absolute.file_name() else {
+        return absolute;
+    };
+    absolute
+        .parent()
+        .and_then(|parent| parent.canonicalize().ok())
+        .map(|parent| parent.join(name))
+        .unwrap_or(absolute)
+}
+
+fn worktree_lease_path(repo: &Path, path: &Path) -> Result<PathBuf, GitError> {
+    let common_dir = git_stdout(
+        repo,
+        &["rev-parse", "--path-format=absolute", "--git-common-dir"],
+    )?;
+    let lock_dir = PathBuf::from(common_dir.trim())
+        .join("loopflow")
+        .join("worktree-locks");
+    fs::create_dir_all(&lock_dir)?;
+    let path = normalized_worktree_path(repo, path);
+    let digest = hex::encode(Sha256::digest(path.as_os_str().as_encoded_bytes()));
+    Ok(lock_dir.join(format!("{digest}.lock")))
+}
+
+pub(crate) fn acquire_worktree_lease(
+    repo: &Path,
+    path: &Path,
+    owner: &str,
+) -> Result<WorktreeLease, GitError> {
+    let lock_path = worktree_lease_path(repo, path)?;
+    let mut file = OpenOptions::new()
+        .create(true)
+        .read(true)
+        .write(true)
+        .truncate(false)
+        .open(&lock_path)?;
+    if let Err(error) = fs2::FileExt::try_lock_exclusive(&file) {
+        if error.kind() == std::io::ErrorKind::WouldBlock {
+            let active_owner = fs::read_to_string(&lock_path)
+                .ok()
+                .map(|value| value.trim().to_string())
+                .filter(|value| !value.is_empty())
+                .unwrap_or_else(|| "another active operation".to_string());
+            return Err(GitError::CommandFailed {
+                command: "acquire worktree lease".to_string(),
+                stderr: format!(
+                    "{} is owned by {active_owner}",
+                    normalized_worktree_path(repo, path).display()
+                ),
+            });
+        }
+        return Err(error.into());
+    }
+    file.set_len(0)?;
+    file.write_all(owner.as_bytes())?;
+    file.write_all(b"\n")?;
+    file.flush()?;
+    Ok(WorktreeLease {
+        path: normalized_worktree_path(repo, path),
+        _file: file,
+    })
+}
+
+fn remove_worktree_unchecked(repo: &Path, path: &Path) -> Result<(), GitError> {
     let path_str = path.to_string_lossy();
     let output = run_git(repo, &["worktree", "remove", "--force", path_str.as_ref()])?;
     if !output.status.success() {
@@ -699,6 +790,26 @@ pub fn worktree_remove(repo: &Path, path: &Path) -> Result<(), GitError> {
         });
     }
     Ok(())
+}
+
+pub fn worktree_remove(repo: &Path, path: &Path) -> Result<(), GitError> {
+    let _lease = acquire_worktree_lease(repo, path, "worktree removal")?;
+    remove_worktree_unchecked(repo, path)
+}
+
+pub(crate) fn worktree_remove_owned(
+    repo: &Path,
+    path: &Path,
+    lease: &WorktreeLease,
+) -> Result<(), GitError> {
+    let path = normalized_worktree_path(repo, path);
+    if lease.path != path {
+        return Err(GitError::CommandFailed {
+            command: "remove owned worktree".to_string(),
+            stderr: format!("lease does not own {}", path.display()),
+        });
+    }
+    remove_worktree_unchecked(repo, &path)
 }
 
 /// Move a worktree to a new path.
@@ -1455,6 +1566,7 @@ mod tests {
         let repo = init_repo();
         commit_file(repo.path(), "README.md", "tracked");
         let initial = material_worktree_state(repo.path()).expect("initial state");
+        assert!(is_materially_clean(repo.path()).expect("initially clean"));
 
         fs::create_dir(repo.path().join("scratch")).expect("create scratch");
         fs::write(repo.path().join("scratch/review.md"), "gate evidence")
@@ -1463,12 +1575,14 @@ mod tests {
             material_worktree_state(repo.path()).expect("scratch-only state"),
             initial
         );
+        assert!(is_materially_clean(repo.path()).expect("scratch-only clean"));
 
         fs::write(repo.path().join("src.txt"), "material repair").expect("write repair");
         assert_ne!(
             material_worktree_state(repo.path()).expect("material state"),
             initial
         );
+        assert!(!is_materially_clean(repo.path()).expect("materially dirty"));
     }
 
     #[test]

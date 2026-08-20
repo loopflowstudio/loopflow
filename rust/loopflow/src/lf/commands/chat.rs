@@ -2,9 +2,10 @@
 //!
 //! One door, `POST /messages` on the wave's server. `--steer` uses the `steer`
 //! op, reaching a live steer-capable turn and otherwise queueing for the next
-//! one. The default `message` op queues for the loop, unattributed — the same
-//! human act journals the same way on every surface (the Mac composer sends
-//! the identical op).
+//! one. The default `message` op queues for the loop. Local chat commits it to
+//! the journal; Discord chat posts the same op through its provider-backed
+//! composer and queues the canonical provider echo. The Mac composer uses the
+//! identical door.
 //!
 //! # Targeting
 //! - default: the invoking context's wave from `LF_WAVE_ID`.
@@ -28,63 +29,53 @@ use std::io::BufRead;
 use std::path::{Path, PathBuf};
 use std::sync::Arc;
 
-use anyhow::{anyhow, bail, Result};
-use serde::{Deserialize, Serialize};
-
-use crate::chat::turns::ChatTurn;
 use crate::engine::wave_context::{
-    read_endpoint_pointer, resolve_managed_wave_name, wave_origin, WaveResolveError,
+    read_endpoint_pointer, resolve_managed_wave, wave_origin, WaveResolveError,
 };
 use crate::lf::commands::thread;
 use crate::lf::commands::util::{find_repo_root, message_text};
 use crate::lf::WaveTargetArgs;
 use crate::store::{open_existing_store, SharedStore};
+use crate::wave::chat::{
+    ChatAction, ChatBacking, ChatHistorySnapshot, ChatHistoryState, ChatMessageSource,
+    PostMessageErrorResponse, WaveChatMessage,
+};
 use crate::wave::journal::{
     fold_thread, journal_path, read_events_with_state, MessageOp, ReadOnlyJournalState,
 };
 use crate::wave::server::HUMAN_THREAD_REPLAY_LIMIT;
 use crate::wave::Wave;
+use anyhow::{anyhow, bail, Result};
 
-/// Evidence state for a bounded read of the durable Wave thread.
-#[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize)]
-#[serde(rename_all = "snake_case")]
-pub enum ChatHistoryState {
-    Available,
-    Missing,
-    Partial,
-    Unavailable,
+#[derive(Debug, Clone, Copy)]
+pub struct ChatOptions<'a> {
+    pub follow: bool,
+    pub steer: bool,
+    pub history: bool,
+    pub json: bool,
+    pub limit: Option<usize>,
+    pub epoch: Option<&'a str>,
 }
 
-/// Stable `lf chat --history --json` response, mirrored by Swift.
-#[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
-pub struct ChatHistorySnapshot {
-    pub state: ChatHistoryState,
-    pub detail: Option<String>,
-    pub turns: Vec<ChatTurn>,
-    pub truncated: bool,
-}
-
-pub fn run(
-    text_args: &[String],
-    follow: bool,
-    steer: bool,
-    history: bool,
-    json: bool,
-    limit: Option<usize>,
-    target: &WaveTargetArgs,
-) -> Result<()> {
+pub fn run(text_args: &[String], options: ChatOptions<'_>, target: &WaveTargetArgs) -> Result<()> {
     let rt = tokio::runtime::Runtime::new()?;
     rt.block_on(async {
         let context = CliContext::detect().await;
-        if history {
-            if !json {
+        if options.history {
+            if !options.json {
                 bail!("--history currently requires --json");
             }
-            history_with_context(&context, target, limit.unwrap_or(HUMAN_THREAD_REPLAY_LIMIT)).await
-        } else if follow {
-            follow_with_context(&context, steer, target).await
+            history_with_context(
+                &context,
+                target,
+                options.limit.unwrap_or(HUMAN_THREAD_REPLAY_LIMIT),
+                options.epoch,
+            )
+            .await
+        } else if options.follow {
+            follow_with_context(&context, options.steer, target).await
         } else {
-            run_with_context(&context, text_args, steer, target).await
+            run_with_context(&context, text_args, options.steer, target).await
         }
     })
 }
@@ -94,6 +85,7 @@ async fn history_with_context(
     context: &CliContext,
     target: &WaveTargetArgs,
     limit: usize,
+    epoch: Option<&str>,
 ) -> Result<()> {
     if limit == 0 {
         bail!("--limit must be at least 1");
@@ -108,18 +100,35 @@ async fn history_with_context(
     else {
         bail!("no wave here — name one with `lf chat --history --json -w <wave>`");
     };
+    if let Some(endpoint) = resolved.endpoint.as_deref() {
+        let mut path = format!("/conversation?limit={limit}");
+        if let Some(epoch) = epoch {
+            path.push_str("&epoch=");
+            path.push_str(epoch);
+        }
+        let value = get_json(endpoint, &path).await?;
+        let snapshot: ChatHistorySnapshot = serde_json::from_value(value)
+            .map_err(|error| anyhow!("bad Wave Chat history response: {error}"))?;
+        println!("{}", serde_json::to_string(&snapshot)?);
+        return Ok(());
+    }
     let repo_root = resolved.repo_root.ok_or_else(|| {
         anyhow!(
             "wave '{}' has no local origin repository for durable history",
             resolved.name
         )
     })?;
-    let snapshot = history_snapshot(&repo_root, &resolved.name, limit);
+    let snapshot = history_snapshot(&repo_root, &resolved.name, limit, epoch);
     println!("{}", serde_json::to_string(&snapshot)?);
     Ok(())
 }
 
-fn history_snapshot(repo_root: &Path, wave: &str, limit: usize) -> ChatHistorySnapshot {
+fn history_snapshot(
+    repo_root: &Path,
+    wave: &str,
+    limit: usize,
+    selected_epoch_id: Option<&str>,
+) -> ChatHistorySnapshot {
     let read = read_events_with_state(&journal_path(repo_root, wave));
     let state = match read.state {
         ReadOnlyJournalState::Available => ChatHistoryState::Available,
@@ -129,13 +138,65 @@ fn history_snapshot(repo_root: &Path, wave: &str, limit: usize) -> ChatHistorySn
     };
     let mut fold = fold_thread(&read.events);
     fold.turns.append(&mut fold.open);
-    let truncated = fold.turns.len() > limit;
-    let keep_from = fold.turns.len().saturating_sub(limit);
-    let turns = fold.turns.split_off(keep_from);
+    let epochs = fold.conversation_epochs.clone();
+    let active_epoch = epochs.last().cloned();
+    let selected_epoch = match selected_epoch_id {
+        Some(id) => epochs.iter().find(|epoch| epoch.id == id).cloned(),
+        None => active_epoch.clone(),
+    };
+    let mut messages = selected_epoch
+        .as_ref()
+        .filter(|epoch| matches!(epoch.backing, ChatBacking::Local))
+        .map(|epoch| {
+            let imported_turns = fold.conversation_epoch_turns.get(&epoch.id).cloned();
+            let end_seq = epochs
+                .iter()
+                .find(|candidate| candidate.number == epoch.number + 1)
+                .map(|candidate| candidate.journal_seq)
+                .unwrap_or(u64::MAX);
+            fold.turns
+                .into_iter()
+                .filter_map(|turn| {
+                    let journal_seq = turn.id.strip_prefix("turn-")?.parse::<u64>().ok()?;
+                    let belongs = imported_turns.as_ref().map_or_else(
+                        || journal_seq > epoch.journal_seq && journal_seq < end_seq,
+                        |turn_ids| turn_ids.contains(&turn.id),
+                    );
+                    belongs.then(|| WaveChatMessage {
+                        epoch_id: epoch.id.clone(),
+                        source: ChatMessageSource::Local { journal_seq },
+                        turn,
+                    })
+                })
+                .collect::<Vec<_>>()
+        })
+        .unwrap_or_default();
+    let truncated = messages.len() > limit;
+    let keep_from = messages.len().saturating_sub(limit);
+    messages = messages.split_off(keep_from);
+    let (state, detail) =
+        if let Some(missing_epoch) = selected_epoch_id.filter(|_| selected_epoch.is_none()) {
+            (
+                ChatHistoryState::Unavailable,
+                Some(format!("Unknown Wave Chat epoch '{missing_epoch}'.")),
+            )
+        } else if selected_epoch
+            .as_ref()
+            .is_some_and(|epoch| matches!(epoch.backing, ChatBacking::Discord { .. }))
+        {
+            (
+                ChatHistoryState::Unavailable,
+                Some("Discord history requires the active Wave listener.".to_string()),
+            )
+        } else {
+            (state, read.detail)
+        };
     ChatHistorySnapshot {
+        epochs,
+        selected_epoch_id: selected_epoch.map(|epoch| epoch.id),
         state,
-        detail: read.detail,
-        turns,
+        detail,
+        messages,
         truncated,
     }
 }
@@ -283,7 +344,11 @@ async fn post_message(endpoint: &str, text: &str, steer: bool) -> Result<()> {
     } else {
         MessageOp::Message
     };
-    let body = serde_json::json!({ "op": op, "text": text });
+    let body = serde_json::json!({
+        "id": uuid::Uuid::new_v4().to_string(),
+        "op": op,
+        "text": text,
+    });
     post_json(endpoint, "/messages", &body).await?;
     Ok(())
 }
@@ -372,21 +437,20 @@ pub(crate) async fn resolve_target(
     // is the ambient wave (default or `--parent`); an explicit `--wave` always
     // wins, so its stale/mis-set env is never consulted.
     let mut own_row: Option<Wave> = None;
-    let mut own_name: Option<String> = None;
     if args.wave.is_none() {
         if let Some(id) = env_wave_id {
-            // The shared ambient-Wave rule: `LF_WAVE_ID` as a durable UUID
-            // maps to its registry name, else a hand-set name is used
-            // directly. A UUID the registry has never seen is a loud
-            // `StaleIdentity` error, never a silent drop.
-            let name = resolve_managed_wave_name(store.map(|store| &**store), None, Some(id))
-                .await
-                .map_err(|err| anyhow!("{err}"))?;
-            own_row = match store {
-                Some(store) => store.get_wave_by_name(&name).await?,
-                None => None,
-            };
-            own_name = Some(name);
+            // The shared ambient-Wave rule: a durable UUID maps through the
+            // registry; a hand-set name resolves inside this repository. Stale
+            // context is a loud error, never a silent drop.
+            let row = resolve_managed_wave(
+                store.map(|store| &**store),
+                main_repo.as_deref(),
+                None,
+                Some(id),
+            )
+            .await
+            .map_err(|err| anyhow!("{err}"))?;
+            own_row = Some(row);
         }
     }
 
@@ -398,11 +462,9 @@ pub(crate) async fn resolve_target(
                 WaveResolveError::Registry("no wave registry on this machine".to_string())
             )
         })?;
-        let row = store
-            .get_wave_by_name(&name)
+        let row = resolve_managed_wave(Some(&**store), main_repo.as_deref(), Some(&name), None)
             .await
-            .map_err(|err| anyhow!("failed to read wave registry: {err}"))?
-            .ok_or_else(|| anyhow!("{}", WaveResolveError::UnknownExplicit(name.clone())))?;
+            .map_err(|err| anyhow!("{err}"))?;
         (Some(row), name)
     } else if args.parent {
         let store = store.ok_or_else(|| {
@@ -424,13 +486,7 @@ pub(crate) async fn resolve_target(
                 let name = row.name().to_string();
                 (Some(row), name)
             }
-            None => {
-                // No wave context anywhere: the publish has no subscriber.
-                let Some(name) = own_name.clone() else {
-                    return Ok(None);
-                };
-                (None, name)
-            }
+            None => return Ok(None),
         }
     };
 
@@ -492,6 +548,15 @@ pub(crate) async fn post_json(
     let status = response.status();
     let text = response.text().await.unwrap_or_default();
     if !status.is_success() {
+        if let Ok(rejection) = serde_json::from_str::<PostMessageErrorResponse>(&text) {
+            if let ChatBacking::Discord {
+                open: ChatAction::OpenDiscord { label, url },
+                ..
+            } = rejection.epoch.backing
+            {
+                bail!("{label}: {url}");
+            }
+        }
         bail!("wave server rejected the request ({status}): {text}");
     }
     Ok(serde_json::from_str(&text).unwrap_or(serde_json::Value::Null))
@@ -534,22 +599,104 @@ mod tests {
                 .expect("append message");
         }
 
-        let snapshot = history_snapshot(tmp.path(), "ship", 12);
+        let snapshot = history_snapshot(tmp.path(), "ship", 12, None);
         assert_eq!(snapshot.state, ChatHistoryState::Available);
-        assert_eq!(snapshot.turns.len(), 12);
+        assert_eq!(snapshot.messages.len(), 12);
         assert!(snapshot.truncated);
-        assert_eq!(snapshot.turns.first().unwrap().text, "message 3");
-        assert_eq!(snapshot.turns.last().unwrap().text, "message 14");
+        assert_eq!(snapshot.messages.first().unwrap().turn.text, "message 3");
+        assert_eq!(snapshot.messages.last().unwrap().turn.text, "message 14");
     }
 
     #[test]
     fn durable_history_distinguishes_missing_evidence_from_an_empty_thread() {
         let tmp = tempfile::tempdir().expect("tempdir");
-        let snapshot = history_snapshot(tmp.path(), "ship", 12);
+        let snapshot = history_snapshot(tmp.path(), "ship", 12, None);
         assert_eq!(snapshot.state, ChatHistoryState::Missing);
-        assert!(snapshot.turns.is_empty());
+        assert!(snapshot.messages.is_empty());
         assert!(!snapshot.truncated);
         assert!(snapshot.detail.is_some());
+    }
+
+    #[test]
+    fn serverless_history_keeps_the_imported_local_epoch() {
+        let tmp = tempfile::tempdir().expect("tempdir");
+        let path = journal_path(tmp.path(), "ship");
+        let (mut journal, _) = crate::wave::journal::Journal::open(&path).expect("legacy journal");
+        journal.append(|_| EventKind::UserMessage {
+            id: crate::wave::journal::MessageId("legacy-message".into()),
+            op: MessageOp::Message,
+            text: "read me after migration".into(),
+        });
+        drop(journal);
+        drop(
+            crate::wave::runtime::WaveRuntime::open("ship".into(), tmp.path().to_path_buf())
+                .expect("migrate journal"),
+        );
+
+        let snapshot = history_snapshot(tmp.path(), "ship", 12, Some("chat-epoch-legacy-1"));
+        assert_eq!(snapshot.state, ChatHistoryState::Available);
+        assert_eq!(snapshot.messages.len(), 1);
+        assert_eq!(snapshot.messages[0].turn.text, "read me after migration");
+        assert!(matches!(
+            snapshot.messages[0].source,
+            ChatMessageSource::Local { .. }
+        ));
+    }
+
+    #[test]
+    fn serverless_history_keeps_discord_epoch_without_shadow_transcript() {
+        let tmp = tempfile::tempdir().expect("tempdir");
+        let local =
+            crate::wave::runtime::WaveRuntime::open("ship".into(), tmp.path().to_path_buf())
+                .expect("open local epoch");
+        local
+            .try_deliver_authored(MessageOp::Message, "local history".into())
+            .expect("write local message");
+        drop(local);
+
+        let binding = crate::wave::journal::DiscordChatBinding {
+            guild_id: "guild".into(),
+            channel_id: "channel".into(),
+        };
+        let discord = crate::wave::runtime::WaveRuntime::open_with_backing(
+            "ship".into(),
+            tmp.path().to_path_buf(),
+            ChatBacking::discord(&binding),
+        )
+        .expect("open Discord epoch");
+        let discord_epoch = discord.active_conversation_epoch();
+        drop(discord);
+
+        let local_again =
+            crate::wave::runtime::WaveRuntime::open("ship".into(), tmp.path().to_path_buf())
+                .expect("open next local epoch");
+        assert_eq!(local_again.active_conversation_epoch().number, 3);
+        drop(local_again);
+
+        let snapshot = history_snapshot(tmp.path(), "ship", 12, Some(&discord_epoch.id));
+        assert_eq!(snapshot.state, ChatHistoryState::Unavailable);
+        assert_eq!(snapshot.epochs.len(), 3);
+        assert_eq!(
+            snapshot.selected_epoch_id.as_deref(),
+            Some(discord_epoch.id.as_str())
+        );
+        let selected = snapshot
+            .epochs
+            .iter()
+            .find(|epoch| epoch.id == discord_epoch.id)
+            .expect("selected Discord epoch");
+        assert_eq!(selected.id, discord_epoch.id);
+        assert_eq!(selected.backing, discord_epoch.backing);
+        assert!(selected.ended_at.is_some());
+        assert!(matches!(
+            snapshot.epochs.last().map(|epoch| &epoch.backing),
+            Some(&ChatBacking::Local)
+        ));
+        assert!(snapshot.messages.is_empty());
+        assert_eq!(
+            snapshot.detail.as_deref(),
+            Some("Discord history requires the active Wave listener.")
+        );
     }
 
     #[test]
@@ -561,12 +708,44 @@ mod tests {
         let snapshot: ChatHistorySnapshot =
             serde_json::from_str(fixture).expect("decode chat history fixture");
         assert_eq!(snapshot.state, ChatHistoryState::Partial);
-        assert_eq!(snapshot.turns.len(), 1);
+        assert_eq!(snapshot.messages.len(), 1);
         assert!(snapshot.truncated);
         let encoded = serde_json::to_string(&snapshot).expect("encode chat history fixture");
         let decoded: ChatHistorySnapshot =
             serde_json::from_str(&encoded).expect("re-decode chat history fixture");
         assert_eq!(decoded, snapshot);
+    }
+
+    #[tokio::test]
+    async fn discord_chat_cli_surfaces_the_open_action() {
+        let listener = tokio::net::TcpListener::bind("127.0.0.1:0")
+            .await
+            .expect("bind");
+        let address = listener.local_addr().expect("address");
+        let rejection: PostMessageErrorResponse = serde_json::from_str(include_str!(concat!(
+            env!("CARGO_MANIFEST_DIR"),
+            "/../../tests/fixtures/dto/post_message_error_response.json"
+        )))
+        .expect("decode rejection fixture");
+        let app = axum::Router::new().route(
+            "/messages",
+            axum::routing::post(move || {
+                let rejection = rejection.clone();
+                async move { (reqwest::StatusCode::CONFLICT, axum::Json(rejection)) }
+            }),
+        );
+        let server = tokio::spawn(async move {
+            axum::serve(listener, app).await.ok();
+        });
+
+        let error = post_message(&address.to_string(), "shadow", false)
+            .await
+            .expect_err("Discord mode rejects CLI compose");
+        assert_eq!(
+            error.to_string(),
+            "Open in Discord: https://discord.com/channels/guild-1/channel-1"
+        );
+        server.abort();
     }
 
     #[test]
@@ -816,13 +995,13 @@ mod tests {
             &origin, "goals",
         ))
         .expect("journal");
-        assert!(matches!(
-            &events[0].kind,
+        assert!(events.iter().any(|event| matches!(
+            &event.kind,
             EventKind::UserMessage {
                 op: MessageOp::Message,
                 ..
             }
-        ));
+        )));
     }
 
     #[tokio::test]

@@ -116,7 +116,9 @@ Make the change easy to review.
    - `scratch/pr-body.md` — markdown PR body
    - `scratch/.pr-copy-ref` — current `HEAD` SHA (`git rev-parse HEAD`)
 
-   `lf pr land` consumes these files.
+   `lf pr publish`, `lf pr submit`, and `lf pr land` consume these files.
+   Publication removes these files and `scratch/<branch>-review.md` before its
+   first commit or push, so gate handoff state never becomes a PR head.
 
 4. **Update README and docs**
    - If user-facing behavior changed, docs must reflect it

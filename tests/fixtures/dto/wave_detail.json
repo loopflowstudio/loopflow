@@ -12,6 +12,8 @@
     "active_tasks": 1,
     "active_projects": 1,
     "live": true,
+    "paused": false,
+    "enabled": true,
     "endpoint": "127.0.0.1:7777",
     "created_at": "2026-07-01T00:00:00Z",
     "parent_wave_id": null,
@@ -240,6 +242,28 @@
       ]
     }
   ],
+  "unavailable_projects": [
+    {
+      "work_id": "proj_e972b70272fbb5e91c096ebe657f9f9b",
+      "project_id": "f56c583c-c360-4dc4-ba12-4b5a02268623",
+      "project_slug": "technical-architecture",
+      "status": "abandoned",
+      "owner": "wave",
+      "reason": "Project is absent from the current PM snapshot",
+      "recovery": "Settle the listed Tasks; Project Work is already abandoned",
+      "tasks": [
+        {
+          "work_id": "task_40fbeeaadfbca5367aa7391432ae84ff",
+          "task_id": "linear-task-w2-127",
+          "task_identifier": "W2-127",
+          "status": "ready",
+          "owner": "wave",
+          "reason": "Task's owning Project is absent from the current PM snapshot",
+          "recovery": "lf work abandon task task_40fbeeaadfbca5367aa7391432ae84ff --reason \"Project is absent from the current PM snapshot\""
+        }
+      ]
+    }
+  ],
   "runs": {
     "state": "ok",
     "truncated": false,
@@ -253,7 +277,7 @@
         "worktree": "/src/loopflow.task",
         "wave": "infrastructure",
         "flow": "task",
-        "skill": "task_pursue",
+        "skill": "task/pursue",
         "status": "ok",
         "started": 1784052000,
         "ended": 1784052600,

@@ -2,12 +2,41 @@ use anyhow::{anyhow, bail, Result};
 use std::io::Read;
 use std::path::{Path, PathBuf};
 use std::process::Command;
+use time::{format_description::well_known::Rfc3339, Duration, OffsetDateTime};
 
 use crate::engine::{check_cli_available, codex_permission_args, workspace_add_dirs, LaunchTarget};
 use crate::provider_auth::Provider;
 
 pub fn find_repo_root() -> Result<PathBuf> {
     crate::engine::repo::find_repo_root()
+}
+
+pub(crate) fn parse_since(value: &str, now: OffsetDateTime) -> Result<OffsetDateTime> {
+    if let Ok(timestamp) = OffsetDateTime::parse(value, &Rfc3339) {
+        return Ok(timestamp);
+    }
+    let (amount, unit) = value.split_at(value.len().saturating_sub(1));
+    let amount: i64 = amount
+        .parse()
+        .map_err(|_| anyhow!("invalid --since '{value}'; use 7d, 24h, 30m, or RFC3339"))?;
+    if amount < 0 {
+        return Err(anyhow!("--since duration must be non-negative"));
+    }
+    let seconds_per_unit = match unit {
+        "d" => 86_400,
+        "h" => 3_600,
+        "m" => 60,
+        _ => {
+            return Err(anyhow!(
+                "invalid --since '{value}'; use 7d, 24h, 30m, or RFC3339"
+            ));
+        }
+    };
+    let seconds = amount
+        .checked_mul(seconds_per_unit)
+        .ok_or_else(|| anyhow!("--since duration is too large"))?;
+    now.checked_sub(Duration::seconds(seconds))
+        .ok_or_else(|| anyhow!("--since duration is too large"))
 }
 
 /// Message text from the args (joined) or stdin (heredoc-friendly). The
@@ -159,7 +188,16 @@ pub(crate) fn build_session_command(
     }
 }
 
-fn spawn_session_command(command: &SessionCommand) -> Result<()> {
+pub(crate) fn spawn_session_command(command: &SessionCommand) -> Result<()> {
+    let status = session_command_status(command)?;
+    if status.success() {
+        Ok(())
+    } else {
+        Err(anyhow!("session launcher exited with status {status}"))
+    }
+}
+
+pub(crate) fn session_command_status(command: &SessionCommand) -> Result<std::process::ExitStatus> {
     if !check_cli_available(&command.program) {
         return Err(anyhow!(
             "'{}' CLI not found. Install it and rerun `lf init`.",
@@ -195,13 +233,7 @@ fn spawn_session_command(command: &SessionCommand) -> Result<()> {
         tracing::info!(provider = %command.program, "selected managed provider account");
         route.apply(&mut process);
     }
-    let status = process.status()?;
-
-    if status.success() {
-        Ok(())
-    } else {
-        Err(anyhow!("session launcher exited with status {status}"))
-    }
+    process.status().map_err(Into::into)
 }
 
 fn absolute_path(path: &Path) -> PathBuf {
@@ -236,6 +268,7 @@ mod tests {
     use crate::provider_account::new_account;
     use crate::store::{
         open_store, CredentialType, ProviderAccountId, ProviderToken, StorageConfig,
+        CONTROL_DB_PATH_ENV, CONTROL_HOME_ENV,
     };
     use std::ffi::OsString;
 
@@ -430,6 +463,8 @@ mod tests {
         let _restore = EnvRestore::capture(&[
             "LF_HOME",
             "LF_DB_PATH",
+            CONTROL_HOME_ENV,
+            CONTROL_DB_PATH_ENV,
             "LF_ACCOUNT_LEASE",
             "LF_TEST_SESSION_ENV",
             "CLAUDE_CONFIG_DIR",
@@ -437,6 +472,8 @@ mod tests {
         ]);
         std::env::set_var("LF_HOME", temp.path());
         std::env::remove_var("LF_DB_PATH");
+        std::env::remove_var(CONTROL_HOME_ENV);
+        std::env::remove_var(CONTROL_DB_PATH_ENV);
         std::env::remove_var("LF_ACCOUNT_LEASE");
         std::env::set_var("CLAUDE_CONFIG_DIR", "ambient");
 
@@ -492,6 +529,8 @@ mod tests {
         let _restore = EnvRestore::capture(&[
             "LF_HOME",
             "LF_DB_PATH",
+            CONTROL_HOME_ENV,
+            CONTROL_DB_PATH_ENV,
             "LF_ACCOUNT_LEASE",
             "LF_TEST_SESSION_ENV",
             "OPENCODE_API_KEY",
@@ -499,6 +538,8 @@ mod tests {
         ]);
         std::env::set_var("LF_HOME", temp.path());
         std::env::remove_var("LF_DB_PATH");
+        std::env::remove_var(CONTROL_HOME_ENV);
+        std::env::remove_var(CONTROL_DB_PATH_ENV);
         std::env::remove_var("LF_ACCOUNT_LEASE");
         std::env::set_var("OPENCODE_API_KEY", "ambient-key");
 

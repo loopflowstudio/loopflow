@@ -35,6 +35,9 @@ use crate::store::{
 
 const AUTH_STATUS_POLL_TIMEOUT: Duration = Duration::from_secs(180);
 const AUTH_STATUS_POLL_INTERVAL: Duration = Duration::from_secs(1);
+// Authorization-code flows wait on a human finishing a browser login; give
+// them the ~10 minutes the OAuth authorization itself stays valid.
+const AUTH_CODE_FLOW_TIMEOUT_SECS: u64 = 600;
 #[cfg(test)]
 static TEST_OPENED_CHROME_PROFILES: LazyLock<Mutex<Vec<String>>> =
     LazyLock::new(|| Mutex::new(Vec::new()));
@@ -60,7 +63,12 @@ struct AccountLifecycleUpdate<'a> {
 
 pub fn run(cmd: &AuthCommand) -> Result<()> {
     let rt = tokio::runtime::Runtime::new().context("failed to create async runtime")?;
-    rt.block_on(run_async(cmd))
+    let result = rt.block_on(run_async(cmd));
+    // Don't wait for lingering blocking tasks: when the browser handoff
+    // completes a login, the backup stdin prompt is still mid-read and would
+    // otherwise hold the process open until the user presses Enter.
+    rt.shutdown_background();
+    result
 }
 
 async fn run_async(cmd: &AuthCommand) -> Result<()> {
@@ -187,9 +195,50 @@ async fn connect(raw_provider: &str) -> Result<()> {
         provider.display_name()
     );
     open_url(&verification_url);
-    println!("Complete authorization in the browser.");
 
-    wait_for_active_status(&service, provider, flow.expires_in).await
+    if service.pending_requires_authorization_code(provider).await {
+        // The browser normally hands the code back to the provider CLI's
+        // localhost listener on approval; the pasted code is the backup for
+        // when that handoff can't reach this machine.
+        println!("Approve authorization in the browser; login completes automatically.");
+        println!("If the browser shows a one-time code instead, paste it here.");
+        let timeout = flow.expires_in.or(Some(AUTH_CODE_FLOW_TIMEOUT_SECS));
+        tokio::select! {
+            result = wait_for_active_status(&service, provider, timeout) => result,
+            code = read_authorization_code_line() => {
+                if let Some(code) = code? {
+                    service.complete_auth(provider, &code).await?;
+                }
+                wait_for_active_status(&service, provider, timeout).await
+            }
+        }
+    } else {
+        println!("Complete authorization in the browser.");
+        wait_for_active_status(&service, provider, flow.expires_in).await
+    }
+}
+
+/// Read a pasted authorization code from stdin; None when stdin closes
+/// without one (headless runs fall back to the browser handoff alone).
+async fn read_authorization_code_line() -> Result<Option<String>> {
+    tokio::task::spawn_blocking(|| {
+        let stdin = std::io::stdin();
+        loop {
+            let mut line = String::new();
+            let read = stdin
+                .read_line(&mut line)
+                .context("read authorization code")?;
+            if read == 0 {
+                return Ok(None);
+            }
+            let code = line.trim();
+            if !code.is_empty() {
+                return Ok(Some(code.to_string()));
+            }
+        }
+    })
+    .await
+    .context("authorization code prompt task failed")?
 }
 
 async fn connect_account(
@@ -1539,11 +1588,29 @@ mod tests {
         let _lock = crate::journal::test_env_lock();
         let home = tempfile::tempdir().unwrap();
         let previous = std::env::var_os("LF_HOME");
+        let previous_db_path = std::env::var_os("LF_DB_PATH");
+        let previous_control_home = std::env::var_os(crate::store::CONTROL_HOME_ENV);
+        let previous_control_db_path = std::env::var_os(crate::store::CONTROL_DB_PATH_ENV);
         std::env::set_var("LF_HOME", home.path());
+        std::env::remove_var("LF_DB_PATH");
+        std::env::remove_var(crate::store::CONTROL_HOME_ENV);
+        std::env::remove_var(crate::store::CONTROL_DB_PATH_ENV);
         let result = import_account("codex", "engineering@example.com", None).await;
         match previous {
             Some(value) => std::env::set_var("LF_HOME", value),
             None => std::env::remove_var("LF_HOME"),
+        }
+        match previous_db_path {
+            Some(value) => std::env::set_var("LF_DB_PATH", value),
+            None => std::env::remove_var("LF_DB_PATH"),
+        }
+        match previous_control_home {
+            Some(value) => std::env::set_var(crate::store::CONTROL_HOME_ENV, value),
+            None => std::env::remove_var(crate::store::CONTROL_HOME_ENV),
+        }
+        match previous_control_db_path {
+            Some(value) => std::env::set_var(crate::store::CONTROL_DB_PATH_ENV, value),
+            None => std::env::remove_var(crate::store::CONTROL_DB_PATH_ENV),
         }
 
         let error = result.expect_err("Codex imports must require a stored login");
@@ -1622,8 +1689,25 @@ mod account_first_tests {
     use crate::provider_account::lease::ACCOUNT_LEASE_ENV;
     use crate::provider_account::{account_home_path, parse_account_id};
     use crate::provider_auth::Provider;
-    use crate::store::{open_store, CredentialState, ProviderAccount, RoutingState, StorageConfig};
+    use crate::store::{
+        open_store, CredentialState, ProviderAccount, RoutingState, StorageConfig,
+        CONTROL_DB_PATH_ENV, CONTROL_HOME_ENV,
+    };
     use tempfile::tempdir;
+
+    const CONNECT_ENV: &[&str] = &[
+        "HOME",
+        "LF_HOME",
+        "LF_DB_PATH",
+        CONTROL_HOME_ENV,
+        CONTROL_DB_PATH_ENV,
+        "PATH",
+        ACCOUNT_LEASE_ENV,
+        "LF_TEST_CODEX_AUTH_JSON",
+        "LF_TEST_CODEX_COUNT",
+        "LF_TEST_CODEX_HOMES",
+        "LF_TEST_CODEX_FAIL_FIRST",
+    ];
 
     struct EnvRestore(Vec<(&'static str, Option<OsString>)>);
 
@@ -1697,6 +1781,8 @@ cp "$LF_TEST_CODEX_AUTH_JSON" "$CODEX_HOME/auth.json"
         std::env::set_var("HOME", temp);
         std::env::set_var("LF_HOME", temp);
         std::env::remove_var("LF_DB_PATH");
+        std::env::remove_var(CONTROL_HOME_ENV);
+        std::env::remove_var(CONTROL_DB_PATH_ENV);
         std::env::remove_var(ACCOUNT_LEASE_ENV);
         std::env::set_var("LF_TEST_CODEX_AUTH_JSON", auth_json);
         std::env::set_var("LF_TEST_CODEX_COUNT", temp.join("codex-count"));
@@ -1766,17 +1852,7 @@ cp "$LF_TEST_CODEX_AUTH_JSON" "$CODEX_HOME/auth.json"
     async fn connect_tries_access_profiles_in_configured_order() {
         let _lock = crate::journal::test_env_lock();
         let temp = tempdir().unwrap();
-        let _restore = EnvRestore::capture(&[
-            "HOME",
-            "LF_HOME",
-            "LF_DB_PATH",
-            "PATH",
-            ACCOUNT_LEASE_ENV,
-            "LF_TEST_CODEX_AUTH_JSON",
-            "LF_TEST_CODEX_COUNT",
-            "LF_TEST_CODEX_HOMES",
-            "LF_TEST_CODEX_FAIL_FIRST",
-        ]);
+        let _restore = EnvRestore::capture(CONNECT_ENV);
         configure_connect_test(temp.path(), "operator@example.com", true);
         write_chrome_profiles(
             temp.path(),
@@ -1825,17 +1901,7 @@ cp "$LF_TEST_CODEX_AUTH_JSON" "$CODEX_HOME/auth.json"
     async fn connect_skips_drifted_venue_and_names_both_logins() {
         let _lock = crate::journal::test_env_lock();
         let temp = tempdir().unwrap();
-        let _restore = EnvRestore::capture(&[
-            "HOME",
-            "LF_HOME",
-            "LF_DB_PATH",
-            "PATH",
-            ACCOUNT_LEASE_ENV,
-            "LF_TEST_CODEX_AUTH_JSON",
-            "LF_TEST_CODEX_COUNT",
-            "LF_TEST_CODEX_HOMES",
-            "LF_TEST_CODEX_FAIL_FIRST",
-        ]);
+        let _restore = EnvRestore::capture(CONNECT_ENV);
         configure_connect_test(temp.path(), "operator@example.com", false);
         write_chrome_profiles(
             temp.path(),
@@ -1886,17 +1952,7 @@ cp "$LF_TEST_CODEX_AUTH_JSON" "$CODEX_HOME/auth.json"
     async fn connect_identity_mismatch_preserves_account_and_removes_staged_home() {
         let _lock = crate::journal::test_env_lock();
         let temp = tempdir().unwrap();
-        let _restore = EnvRestore::capture(&[
-            "HOME",
-            "LF_HOME",
-            "LF_DB_PATH",
-            "PATH",
-            ACCOUNT_LEASE_ENV,
-            "LF_TEST_CODEX_AUTH_JSON",
-            "LF_TEST_CODEX_COUNT",
-            "LF_TEST_CODEX_HOMES",
-            "LF_TEST_CODEX_FAIL_FIRST",
-        ]);
+        let _restore = EnvRestore::capture(CONNECT_ENV);
         configure_connect_test(temp.path(), "other@example.com", false);
         write_chrome_profiles(
             temp.path(),

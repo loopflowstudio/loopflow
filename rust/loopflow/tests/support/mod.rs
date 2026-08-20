@@ -14,9 +14,11 @@ use time::OffsetDateTime;
 
 /// Ambient authority a live agent process exports. Tests must never inherit the
 /// real Run that invoked the suite.
-const AMBIENT_AGENT_ENV: [&str; 4] = [
+const AMBIENT_AGENT_ENV: [&str; 6] = [
     "LF_RUN_CONTEXT",
+    "LF_RUN_ID",
     "LF_RUN_LEASE",
+    "LF_AGENT_INVOCATION_ID",
     "LF_WAVE_ID",
     "LF_ACCOUNT_LEASE",
 ];
@@ -82,6 +84,29 @@ pub fn with_clean_home<T>(f: impl FnOnce() -> T) -> T {
     let _lock = env_lock().lock().unwrap_or_else(|err| err.into_inner());
     let _home = HomeOverride::new_temp();
     f()
+}
+
+#[allow(dead_code)] // Shared provider mock compiled into multiple test crates.
+pub fn codex_app_server_script(output: &str, setup: &str) -> String {
+    let output = serde_json::to_string(output)
+        .expect("encode mock Codex output")
+        .replace('\'', r#"'"'"'"#);
+    r#"#!/bin/sh
+__SETUP__
+read -r initialize
+echo '{"jsonrpc":"2.0","id":1,"result":{}}'
+read -r initialized
+read -r thread_start
+echo '{"jsonrpc":"2.0","id":2,"result":{"thread":{"id":"thread-test"}}}'
+read -r turn_start
+echo '{"jsonrpc":"2.0","id":3,"result":{"turn":{"id":"turn-test"}}}'
+echo '{"jsonrpc":"2.0","method":"turn/started","params":{"threadId":"thread-test","turn":{"id":"turn-test","status":"inProgress"}}}'
+printf '%s\n' '{"jsonrpc":"2.0","method":"item/agentMessage/delta","params":{"threadId":"thread-test","turnId":"turn-test","itemId":"message-test","delta":__OUTPUT__}}'
+echo '{"jsonrpc":"2.0","method":"turn/completed","params":{"threadId":"thread-test","turn":{"id":"turn-test","status":"completed"}}}'
+while read -r line; do :; done
+"#
+    .replace("__SETUP__", setup)
+    .replace("__OUTPUT__", &output)
 }
 
 pub struct EnvGuard {
@@ -229,7 +254,17 @@ pub fn register_task(
     branch: &str,
     base_commit: &str,
 ) -> RegisteredTask {
-    register_task_with_process(home, worktree, branch, base_commit, false)
+    register_task_with_process(home, worktree, branch, base_commit, true, false)
+}
+
+#[allow(dead_code)] // Shared helper compiled into integration tests without this incident shape.
+pub fn register_unrun_task(
+    home: &Path,
+    worktree: &Path,
+    branch: &str,
+    base_commit: &str,
+) -> RegisteredTask {
+    register_task_with_process(home, worktree, branch, base_commit, false, false)
 }
 
 #[allow(dead_code)] // Shared helper compiled into integration tests that do not need Task state.
@@ -239,7 +274,7 @@ pub fn register_active_task(
     branch: &str,
     base_commit: &str,
 ) -> RegisteredTask {
-    register_task_with_process(home, worktree, branch, base_commit, true)
+    register_task_with_process(home, worktree, branch, base_commit, true, true)
 }
 
 fn register_task_with_process(
@@ -247,6 +282,7 @@ fn register_task_with_process(
     worktree: &Path,
     branch: &str,
     base_commit: &str,
+    completed_boundary: bool,
     active: bool,
 ) -> RegisteredTask {
     let runtime = tokio::runtime::Runtime::new().expect("task test runtime");
@@ -341,6 +377,9 @@ fn register_task_with_process(
             .work_for_child(&loopflow::child::ChildRef::Task(task.id.clone()))
             .await
             .expect("resolve test Task Work");
+        if !completed_boundary {
+            return;
+        }
         let (_, lease) = store
             .reserve_run(&work, loopflow::durable::RunTrigger::User)
             .await

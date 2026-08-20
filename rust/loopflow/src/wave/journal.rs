@@ -32,6 +32,7 @@ use crate::chat::turns::{ChatRole, ChatTurn};
 use crate::chat::types::{ConversationItem, Lifecycle};
 use crate::project::ProjectObservation;
 use crate::task::TaskObservation;
+use crate::wave::chat::{ChatBacking, ConversationEpoch};
 use crate::wave::playhead::{BodyProvenance, Playhead, PlayheadEvent};
 use crate::wave::state::LoopState;
 use crate::wave::PromotionWake;
@@ -68,29 +69,6 @@ pub enum MessageOp {
     Interrupt,
 }
 
-/// Token usage accrued over one turn. Providers report different subsets, so
-/// every field is explicitly optional.
-#[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
-pub struct Usage {
-    pub input_tokens: Option<u64>,
-    pub output_tokens: Option<u64>,
-    pub cache_read_tokens: Option<u64>,
-    pub cost_usd: Option<f64>,
-}
-
-impl Usage {
-    /// Explicitly-empty usage (nothing reported), e.g. for janitor-finalized
-    /// turns. Not a serde default — absent fields are still a parse error.
-    pub fn empty() -> Self {
-        Self {
-            input_tokens: None,
-            output_tokens: None,
-            cache_read_tokens: None,
-            cost_usd: None,
-        }
-    }
-}
-
 /// How an observed worker ended.
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize)]
 #[serde(rename_all = "snake_case")]
@@ -114,6 +92,104 @@ pub struct PendingMessage {
     pub id: MessageId,
     pub op: MessageOp,
     pub text: String,
+    pub source: Option<DiscordMessageSource>,
+}
+
+impl PendingMessage {
+    pub fn destination(&self) -> MessageDestination {
+        self.source
+            .as_ref()
+            .map(|source| MessageDestination::Discord(source.binding.clone()))
+            .unwrap_or(MessageDestination::Local)
+    }
+}
+
+/// The authored-chat destination a resident pass is allowed to answer.
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub enum MessageDestination {
+    Local,
+    Discord(DiscordChatBinding),
+}
+
+/// One configured Discord guild text channel.
+#[derive(Debug, Clone, PartialEq, Eq, Hash, Serialize, Deserialize)]
+pub struct DiscordChatBinding {
+    pub guild_id: String,
+    pub channel_id: String,
+}
+
+impl DiscordChatBinding {
+    pub fn channel_url(&self) -> String {
+        format!(
+            "https://discord.com/channels/{}/{}",
+            self.guild_id, self.channel_id
+        )
+    }
+
+    pub fn message_url(&self, message_id: &str) -> String {
+        format!("{}/{}", self.channel_url(), message_id)
+    }
+}
+
+/// Provider identity retained with one imported human message.
+#[derive(Debug, Clone, PartialEq, Eq, Hash, Serialize, Deserialize)]
+pub struct DiscordMessageSource {
+    pub binding: DiscordChatBinding,
+    pub message_id: String,
+    pub author_id: String,
+}
+
+/// architecture-shim: legacy-chat-import
+/// One legacy epoch imported atomically when an old journal first adopts the
+/// explicit backing model. `turn_ids` keeps local projection exact even when
+/// the old journal alternated between local and Discord speech.
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
+pub struct ConversationEpochImport {
+    pub epoch: ConversationEpoch,
+    pub turn_ids: Vec<String>,
+}
+
+impl DiscordMessageSource {
+    pub fn uri(&self) -> String {
+        format!(
+            "discord://{}/{}/{}",
+            self.binding.guild_id, self.binding.channel_id, self.message_id
+        )
+    }
+}
+
+/// One deterministic Discord message part recorded before delivery.
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
+pub struct DiscordMessagePart {
+    pub part_id: String,
+    pub nonce: String,
+    pub content: String,
+}
+
+/// One journal-folded outbound delivery and its provider receipts.
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub struct DiscordDelivery {
+    pub delivery_id: String,
+    pub turn_id: String,
+    pub binding: DiscordChatBinding,
+    pub sources: Vec<DiscordMessageSource>,
+    pub parts: Vec<DiscordMessagePart>,
+    pub confirmed: HashMap<String, String>,
+}
+
+impl DiscordDelivery {
+    /// Discord replies target the newest authored source claimed by the turn.
+    pub fn reply_to(&self) -> Option<&DiscordMessageSource> {
+        self.sources.last()
+    }
+}
+
+/// The last committed binding attachment.
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub struct DiscordAttachment {
+    pub binding: DiscordChatBinding,
+    pub bot_user_id: String,
+    pub cursor: Option<String>,
 }
 
 /// One journal row.
@@ -143,10 +219,53 @@ impl Event {
 #[serde(tag = "type", rename_all = "snake_case")]
 pub enum EventKind {
     // -- conversation --
+    ConversationEpochsImported {
+        epochs: Vec<ConversationEpochImport>,
+    },
+    ConversationEpochStarted {
+        epoch_id: String,
+        number: u64,
+        backing: ChatBacking,
+    },
     UserMessage {
         id: MessageId,
         op: MessageOp,
         text: String,
+    },
+    DiscordChatAttached {
+        binding: DiscordChatBinding,
+        bot_user_id: String,
+        cursor: Option<String>,
+    },
+    DiscordUserMessage {
+        id: MessageId,
+        text: String,
+        source: DiscordMessageSource,
+    },
+    DiscordAuthoredMessage {
+        id: MessageId,
+        op: MessageOp,
+        text: String,
+        source: DiscordMessageSource,
+    },
+    DiscordChatCursorAdvanced {
+        binding: DiscordChatBinding,
+        message_id: String,
+    },
+    DiscordChatSendPlanned {
+        delivery_id: String,
+        turn_id: String,
+        /// Added after the first sourced-reply format. Old events derive it
+        /// from `sources`; every new event writes it explicitly.
+        #[serde(default, skip_serializing_if = "Option::is_none")]
+        binding: Option<DiscordChatBinding>,
+        sources: Vec<DiscordMessageSource>,
+        parts: Vec<DiscordMessagePart>,
+    },
+    DiscordChatSendConfirmed {
+        delivery_id: String,
+        part_id: String,
+        provider_message_id: String,
     },
     TurnStarted {
         turn_id: String,
@@ -183,7 +302,6 @@ pub enum EventKind {
     TurnFinished {
         turn_id: String,
         status: Lifecycle,
-        usage: Usage,
         termination_reason: Option<String>,
     },
     // -- loop lifecycle --
@@ -397,6 +515,12 @@ impl Narrator {
     /// console.
     fn render(&mut self, kind: &EventKind) -> Narration {
         match kind {
+            EventKind::ConversationEpochsImported { epochs } => {
+                info(format!("{} legacy chat epoch(s) imported", epochs.len()))
+            }
+            EventKind::ConversationEpochStarted {
+                number, backing, ..
+            } => info(format!("chat epoch {number} started · {backing:?}")),
             EventKind::UserMessage { id, op, text } => {
                 let op_tag = match op {
                     MessageOp::Message => "",
@@ -405,6 +529,44 @@ impl Narrator {
                 };
                 info(format!("chat ← {op_tag}\"{}\" ({id})", ellipsize(text, 60)))
             }
+            EventKind::DiscordChatAttached {
+                binding, cursor, ..
+            } => info(format!(
+                "discord attached · channel {} · cursor {}",
+                binding.channel_id,
+                cursor.as_deref().unwrap_or("empty")
+            )),
+            EventKind::DiscordUserMessage { id, text, source } => info(format!(
+                "discord ← \"{}\" ({id}, {})",
+                ellipsize(text, 60),
+                source.message_id
+            )),
+            EventKind::DiscordAuthoredMessage {
+                id,
+                op,
+                text,
+                source,
+            } => info(format!(
+                "discord app ← ({op:?}) \"{}\" ({id}, {})",
+                ellipsize(text, 60),
+                source.message_id
+            )),
+            EventKind::DiscordChatCursorAdvanced { message_id, .. } => {
+                debug(format!("discord cursor → {message_id}"))
+            }
+            EventKind::DiscordChatSendPlanned {
+                delivery_id, parts, ..
+            } => info(format!(
+                "discord send planned · {delivery_id} · {} part(s)",
+                parts.len()
+            )),
+            EventKind::DiscordChatSendConfirmed {
+                delivery_id,
+                part_id,
+                provider_message_id,
+            } => info(format!(
+                "discord send confirmed · {delivery_id}/{part_id} → {provider_message_id}"
+            )),
             EventKind::TurnStarted {
                 turn_id, answers, ..
             } => {
@@ -458,17 +620,13 @@ impl Narrator {
                 info(format!("messages requeued: {}", ids.join(", ")))
             }
             EventKind::TurnFinished {
-                turn_id,
-                status,
-                usage,
-                ..
+                turn_id, status, ..
             } => {
                 let items = self.finish_turn(turn_id);
                 let plural = if items == 1 { "" } else { "s" };
                 info(format!(
-                    "turn {turn_id} {} · {items} item{plural}{}",
-                    status.name(),
-                    usage_segment(usage)
+                    "turn {turn_id} {} · {items} item{plural}",
+                    status.name()
                 ))
             }
             EventKind::LoopState { from, to, reason } => {
@@ -576,43 +734,12 @@ pub(crate) fn ellipsize(text: &str, max: usize) -> String {
     cut
 }
 
-/// Humanized token count: `812`, `1.4k`, `192k`.
-fn fmt_tokens(n: u64) -> String {
-    if n < 1000 {
-        return n.to_string();
-    }
-    let k = n as f64 / 1000.0;
-    if k < 10.0 {
-        format!("{k:.1}k")
-    } else {
-        format!("{k:.0}k")
-    }
-}
-
 fn answers_segment(answers: &[MessageId]) -> String {
     if answers.is_empty() {
         return String::new();
     }
     let ids: Vec<&str> = answers.iter().map(|id| id.0.as_str()).collect();
     format!(" (answers: {})", ids.join(", "))
-}
-
-fn usage_segment(usage: &Usage) -> String {
-    let mut parts = Vec::new();
-    if let Some(input) = usage.input_tokens {
-        parts.push(format!("{} in", fmt_tokens(input)));
-    }
-    if let Some(output) = usage.output_tokens {
-        parts.push(format!("{} out", fmt_tokens(output)));
-    }
-    if parts.is_empty() {
-        return String::new();
-    }
-    let mut segment = format!(" · {}", parts.join(" / "));
-    if let Some(cached) = usage.cache_read_tokens {
-        segment.push_str(&format!(" ({} cached)", fmt_tokens(cached)));
-    }
-    segment
 }
 
 /// A ledger identity shortened for the console (ids correlate by prefix).
@@ -848,6 +975,12 @@ pub struct ThreadFold {
     /// User turns and finalized assistant turns, in commit order (user turns
     /// at their `UserMessage` event; assistant turns at their `TurnFinished`).
     pub turns: Vec<ChatTurn>,
+    /// Immutable conversation authority intervals, oldest first.
+    pub conversation_epochs: Vec<ConversationEpoch>,
+    /// Exact turn membership for imported legacy epochs.
+    pub conversation_epoch_turns: HashMap<String, Vec<String>>,
+    /// Provider backing for legacy turns with confirmed Discord provenance.
+    pub discord_turn_bindings: HashMap<String, DiscordChatBinding>,
     /// Turns started but never finished — the crash tail. The boot janitor
     /// finalizes these as `Failed`.
     pub open: Vec<ChatTurn>,
@@ -863,6 +996,12 @@ pub struct ThreadFold {
     /// Every journaled input by id — `MessagesRequeued` restores pending
     /// entries from it.
     pub messages: HashMap<MessageId, PendingMessage>,
+    /// The attached Discord channel and its committed cursor.
+    pub discord: Option<DiscordAttachment>,
+    /// Outbound intents and receipts, keyed by deterministic delivery id.
+    pub discord_deliveries: HashMap<String, DiscordDelivery>,
+    /// Completed assistant turns and the authored inputs they answered.
+    pub completed_claims: HashMap<String, Vec<MessageId>>,
     /// Typed Task observations indexed by their synthetic consumption id.
     pub tasks: HashMap<MessageId, TaskObservation>,
     /// Typed Project observations indexed by their synthetic consumption id.
@@ -929,12 +1068,18 @@ pub fn restore_pending(
 /// items land in `ChatTurn.items`.
 pub fn fold_thread(events: &[Event]) -> ThreadFold {
     let mut turns: Vec<ChatTurn> = Vec::new();
+    let mut conversation_epochs: Vec<ConversationEpoch> = Vec::new();
+    let mut conversation_epoch_turns: HashMap<String, Vec<String>> = HashMap::new();
+    let mut discord_turn_bindings: HashMap<String, DiscordChatBinding> = HashMap::new();
     // In-order list, not a map: the crash tail keeps its start order.
     let mut open: Vec<ChatTurn> = Vec::new();
     let mut state = LoopState::Idle;
     let mut playhead: Option<Playhead> = None;
     let mut pending_messages: Vec<PendingMessage> = Vec::new();
     let mut messages: HashMap<MessageId, PendingMessage> = HashMap::new();
+    let mut discord: Option<DiscordAttachment> = None;
+    let mut discord_deliveries: HashMap<String, DiscordDelivery> = HashMap::new();
+    let mut completed_claims: HashMap<String, Vec<MessageId>> = HashMap::new();
     let mut tasks: HashMap<MessageId, TaskObservation> = HashMap::new();
     let mut projects: HashMap<MessageId, ProjectObservation> = HashMap::new();
     let mut promotions: HashMap<MessageId, PromotionWake> = HashMap::new();
@@ -945,6 +1090,34 @@ pub fn fold_thread(events: &[Event]) -> ThreadFold {
 
     for event in events {
         match &event.kind {
+            EventKind::ConversationEpochsImported { epochs } => {
+                for imported in epochs {
+                    if let Some(active) = conversation_epochs.last_mut() {
+                        active.ended_at = Some(imported.epoch.started_at.clone());
+                    }
+                    conversation_epoch_turns
+                        .insert(imported.epoch.id.clone(), imported.turn_ids.clone());
+                    conversation_epochs.push(imported.epoch.clone());
+                }
+            }
+            EventKind::ConversationEpochStarted {
+                epoch_id,
+                number,
+                backing,
+            } => {
+                let at = event.at_rfc3339();
+                if let Some(active) = conversation_epochs.last_mut() {
+                    active.ended_at = Some(at.clone());
+                }
+                conversation_epochs.push(ConversationEpoch {
+                    id: epoch_id.clone(),
+                    number: *number,
+                    backing: backing.clone(),
+                    journal_seq: event.seq,
+                    started_at: at,
+                    ended_at: None,
+                });
+            }
             EventKind::UserMessage { id, op, text } => {
                 let mut turn = ChatTurn::user(format!("turn-{}", event.seq), text.clone());
                 turn.created_at = event.at_rfc3339();
@@ -953,11 +1126,108 @@ pub fn fold_thread(events: &[Event]) -> ThreadFold {
                     id: id.clone(),
                     op: *op,
                     text: text.clone(),
+                    source: None,
                 };
                 if !consumed_messages.contains(id) {
                     pending_messages.push(message.clone());
                 }
                 messages.insert(id.clone(), message);
+            }
+            EventKind::DiscordChatAttached {
+                binding,
+                bot_user_id,
+                cursor,
+            } => {
+                discord = Some(DiscordAttachment {
+                    binding: binding.clone(),
+                    bot_user_id: bot_user_id.clone(),
+                    cursor: cursor.clone(),
+                });
+            }
+            EventKind::DiscordUserMessage { id, text, source } => {
+                let turn_id = format!("turn-{}", event.seq);
+                let mut turn = ChatTurn::user(turn_id.clone(), text.clone());
+                turn.created_at = event.at_rfc3339();
+                turns.push(turn);
+                discord_turn_bindings.insert(turn_id, source.binding.clone());
+                let message = PendingMessage {
+                    id: id.clone(),
+                    op: MessageOp::Message,
+                    text: format!("[{}]\n{}", source.uri(), text),
+                    source: Some(source.clone()),
+                };
+                if !consumed_messages.contains(id) {
+                    pending_messages.push(message.clone());
+                }
+                messages.insert(id.clone(), message);
+            }
+            EventKind::DiscordAuthoredMessage {
+                id,
+                op,
+                text,
+                source,
+            } => {
+                let turn_id = format!("turn-{}", event.seq);
+                let mut turn = ChatTurn::user(turn_id.clone(), text.clone());
+                turn.created_at = event.at_rfc3339();
+                turns.push(turn);
+                discord_turn_bindings.insert(turn_id, source.binding.clone());
+                let message = PendingMessage {
+                    id: id.clone(),
+                    op: *op,
+                    text: format!("[{}]\n{}", source.uri(), text),
+                    source: Some(source.clone()),
+                };
+                if !consumed_messages.contains(id) {
+                    pending_messages.push(message.clone());
+                }
+                messages.insert(id.clone(), message);
+            }
+            EventKind::DiscordChatCursorAdvanced {
+                binding,
+                message_id,
+            } => {
+                if let Some(attached) = discord.as_mut() {
+                    if &attached.binding == binding {
+                        attached.cursor = Some(message_id.clone());
+                    }
+                }
+            }
+            EventKind::DiscordChatSendPlanned {
+                delivery_id,
+                turn_id,
+                binding,
+                sources,
+                parts,
+            } => {
+                let destination = binding
+                    .clone()
+                    .or_else(|| sources.first().map(|source| source.binding.clone()));
+                if let Some(binding) = destination {
+                    discord_deliveries
+                        .entry(delivery_id.clone())
+                        .or_insert_with(|| DiscordDelivery {
+                            delivery_id: delivery_id.clone(),
+                            turn_id: turn_id.clone(),
+                            binding,
+                            sources: sources.clone(),
+                            parts: parts.clone(),
+                            confirmed: HashMap::new(),
+                        });
+                } else {
+                    tracing::warn!(%delivery_id, "Discord delivery has no destination; ignoring it");
+                }
+            }
+            EventKind::DiscordChatSendConfirmed {
+                delivery_id,
+                part_id,
+                provider_message_id,
+            } => {
+                if let Some(delivery) = discord_deliveries.get_mut(delivery_id) {
+                    delivery
+                        .confirmed
+                        .insert(part_id.clone(), provider_message_id.clone());
+                }
             }
             EventKind::TaskObserved { observation } => {
                 let message = task_observation_message(observation);
@@ -1048,7 +1318,10 @@ pub fn fold_thread(events: &[Event]) -> ThreadFold {
                 let mut turn = open.remove(pos);
                 turn.status = *status;
                 turn.close_body(event.at_rfc3339(), termination_reason.clone());
-                claims_by_open_turn.remove(turn_id);
+                let claims = claims_by_open_turn.remove(turn_id).unwrap_or_default();
+                if *status == Lifecycle::Completed {
+                    completed_claims.insert(turn_id.clone(), claims);
+                }
                 turns.push(turn);
             }
             EventKind::LoopState { to, .. } => {
@@ -1106,13 +1379,25 @@ pub fn fold_thread(events: &[Event]) -> ThreadFold {
         .flatten()
         .collect();
 
+    for delivery in discord_deliveries.values() {
+        if !delivery.confirmed.is_empty() {
+            discord_turn_bindings.insert(delivery.turn_id.clone(), delivery.binding.clone());
+        }
+    }
+
     ThreadFold {
         turns,
+        conversation_epochs,
+        conversation_epoch_turns,
+        discord_turn_bindings,
         open,
         state,
         playhead,
         pending_messages,
         messages,
+        discord,
+        discord_deliveries,
+        completed_claims,
         tasks,
         projects,
         promotions,
@@ -1125,6 +1410,7 @@ pub fn task_observation_message(observation: &TaskObservation) -> PendingMessage
         id: MessageId(observation.inbox_id()),
         op: MessageOp::Message,
         text: observation.prompt(),
+        source: None,
     }
 }
 
@@ -1133,6 +1419,7 @@ pub fn project_observation_message(observation: &ProjectObservation) -> PendingM
         id: MessageId(observation.inbox_id()),
         op: MessageOp::Message,
         text: observation.prompt(),
+        source: None,
     }
 }
 
@@ -1141,6 +1428,7 @@ pub(crate) fn promotion_wake_message(wake: &PromotionWake) -> PendingMessage {
         id: MessageId(wake.inbox_id()),
         op: MessageOp::Message,
         text: wake.prompt(),
+        source: None,
     }
 }
 
@@ -1186,6 +1474,40 @@ mod tests {
                 resumable: true,
             },
         }
+    }
+
+    fn discord_binding() -> DiscordChatBinding {
+        DiscordChatBinding {
+            guild_id: "guild".into(),
+            channel_id: "channel".into(),
+        }
+    }
+
+    fn local_epoch() -> ConversationEpoch {
+        ConversationEpoch {
+            id: "chat-epoch-legacy-1".into(),
+            number: 1,
+            backing: ChatBacking::Local,
+            journal_seq: 0,
+            started_at: "2026-07-04T00:00:00Z".into(),
+            ended_at: None,
+        }
+    }
+
+    fn discord_source() -> DiscordMessageSource {
+        DiscordMessageSource {
+            binding: discord_binding(),
+            message_id: "101".into(),
+            author_id: "human".into(),
+        }
+    }
+
+    fn discord_parts() -> Vec<DiscordMessagePart> {
+        vec![DiscordMessagePart {
+            part_id: "part-1".into(),
+            nonce: "lf-nonce-1".into(),
+            content: "answer".into(),
+        }]
     }
 
     #[test]
@@ -1271,6 +1593,49 @@ mod tests {
     fn event_round_trips_every_kind() {
         let kinds = vec![
             user_message(1, "hi"),
+            EventKind::ConversationEpochsImported {
+                epochs: vec![ConversationEpochImport {
+                    epoch: local_epoch(),
+                    turn_ids: vec!["turn-1".into()],
+                }],
+            },
+            EventKind::ConversationEpochStarted {
+                epoch_id: "chat-epoch-2".into(),
+                number: 2,
+                backing: ChatBacking::Local,
+            },
+            EventKind::DiscordChatAttached {
+                binding: discord_binding(),
+                bot_user_id: "bot".into(),
+                cursor: Some("100".into()),
+            },
+            EventKind::DiscordUserMessage {
+                id: MessageId("msg-2".into()),
+                text: "question".into(),
+                source: discord_source(),
+            },
+            EventKind::DiscordAuthoredMessage {
+                id: MessageId("msg-3".into()),
+                op: MessageOp::Steer,
+                text: "change course".into(),
+                source: discord_source(),
+            },
+            EventKind::DiscordChatCursorAdvanced {
+                binding: discord_binding(),
+                message_id: "101".into(),
+            },
+            EventKind::DiscordChatSendPlanned {
+                delivery_id: "delivery-1".into(),
+                turn_id: "turn-3".into(),
+                binding: None,
+                sources: vec![discord_source()],
+                parts: discord_parts(),
+            },
+            EventKind::DiscordChatSendConfirmed {
+                delivery_id: "delivery-1".into(),
+                part_id: "part-1".into(),
+                provider_message_id: "102".into(),
+            },
             EventKind::TurnStarted {
                 turn_id: "turn-2".into(),
                 answers: vec![MessageId("msg-1".into())],
@@ -1291,12 +1656,6 @@ mod tests {
             EventKind::TurnFinished {
                 turn_id: "turn-2".into(),
                 status: Lifecycle::Completed,
-                usage: Usage {
-                    input_tokens: Some(10),
-                    output_tokens: Some(5),
-                    cache_read_tokens: None,
-                    cost_usd: Some(0.01),
-                },
                 termination_reason: None,
             },
             EventKind::LoopState {
@@ -1338,6 +1697,28 @@ mod tests {
         }
     }
 
+    #[test]
+    fn historical_sourced_delivery_derives_its_destination() {
+        let event = Event {
+            v: FORMAT_VERSION,
+            seq: 1,
+            at: OffsetDateTime::now_utc(),
+            kind: EventKind::DiscordChatSendPlanned {
+                delivery_id: "delivery-1".into(),
+                turn_id: "turn-1".into(),
+                binding: None,
+                sources: vec![discord_source()],
+                parts: discord_parts(),
+            },
+        };
+
+        let delivery = fold_thread(&[event])
+            .discord_deliveries
+            .remove("delivery-1")
+            .expect("historical delivery");
+        assert_eq!(delivery.binding, discord_binding());
+    }
+
     /// New appends carry the post-rename kind names on disk — a run completion
     /// serializes as `run_completed`, never the retired `worker_finished`.
     #[test]
@@ -1365,6 +1746,49 @@ mod tests {
     fn narration_renders_every_event_kind() {
         let kinds = vec![
             user_message(1, "hi"),
+            EventKind::ConversationEpochsImported {
+                epochs: vec![ConversationEpochImport {
+                    epoch: local_epoch(),
+                    turn_ids: vec!["turn-1".into()],
+                }],
+            },
+            EventKind::ConversationEpochStarted {
+                epoch_id: "chat-epoch-2".into(),
+                number: 2,
+                backing: ChatBacking::Local,
+            },
+            EventKind::DiscordChatAttached {
+                binding: discord_binding(),
+                bot_user_id: "bot".into(),
+                cursor: Some("100".into()),
+            },
+            EventKind::DiscordUserMessage {
+                id: MessageId("msg-2".into()),
+                text: "question".into(),
+                source: discord_source(),
+            },
+            EventKind::DiscordAuthoredMessage {
+                id: MessageId("msg-3".into()),
+                op: MessageOp::Steer,
+                text: "change course".into(),
+                source: discord_source(),
+            },
+            EventKind::DiscordChatCursorAdvanced {
+                binding: discord_binding(),
+                message_id: "101".into(),
+            },
+            EventKind::DiscordChatSendPlanned {
+                delivery_id: "delivery-1".into(),
+                turn_id: "turn-3".into(),
+                binding: Some(discord_binding()),
+                sources: vec![discord_source()],
+                parts: discord_parts(),
+            },
+            EventKind::DiscordChatSendConfirmed {
+                delivery_id: "delivery-1".into(),
+                part_id: "part-1".into(),
+                provider_message_id: "102".into(),
+            },
             EventKind::TurnStarted {
                 turn_id: "turn-2".into(),
                 answers: vec![],
@@ -1422,7 +1846,6 @@ mod tests {
             EventKind::TurnFinished {
                 turn_id: "turn-2".into(),
                 status: Lifecycle::Completed,
-                usage: Usage::empty(),
                 termination_reason: None,
             },
             EventKind::LoopState {
@@ -1610,18 +2033,9 @@ mod tests {
         let n = render(EventKind::TurnFinished {
             turn_id: "turn-4".into(),
             status: Lifecycle::Completed,
-            usage: Usage {
-                input_tokens: Some(192_400),
-                output_tokens: Some(1_400),
-                cache_read_tokens: Some(182_000),
-                cost_usd: Some(0.42),
-            },
             termination_reason: None,
         });
-        assert_eq!(
-            n.line,
-            "turn turn-4 completed · 4 items · 192k in / 1.4k out (182k cached)"
-        );
+        assert_eq!(n.line, "turn turn-4 completed · 4 items");
 
         let n = render(EventKind::RunObserved {
             run_id: "run-8c1d2e3f4a".into(),
@@ -1681,7 +2095,6 @@ mod tests {
             narrator.render(&EventKind::TurnFinished {
                 turn_id: turn.into(),
                 status: Lifecycle::Completed,
-                usage: Usage::empty(),
                 termination_reason: None,
             });
         }
@@ -1735,7 +2148,6 @@ mod tests {
         events.push(journal.append(|_| EventKind::TurnFinished {
             turn_id: turn_id.clone(),
             status: Lifecycle::Completed,
-            usage: Usage::empty(),
             termination_reason: None,
         }));
 

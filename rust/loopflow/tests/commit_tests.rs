@@ -1,7 +1,10 @@
+mod support;
+
 use std::process::Command;
 
 use loopflow::ops::{commit_workflow, CommitOptions, NullProgress};
 use loopflow_test_support::TestRepo;
+use support::EnvGuard;
 
 fn last_commit_message(repo: &TestRepo) -> String {
     let output = Command::new("git")
@@ -34,6 +37,7 @@ fn commit_stages_and_commits() {
 
 #[test]
 fn commit_with_push() {
+    let _env = EnvGuard::new(&[]);
     let repo = TestRepo::new();
     repo.create_file("push.txt", "hello");
 

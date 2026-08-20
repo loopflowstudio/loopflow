@@ -2,27 +2,64 @@
 //! promises must be the JSON it emits, and the wave you are standing in must be
 //! the wave it reports. Drives the real binary against a seeded `LF_HOME`.
 
+use std::os::unix::fs::PermissionsExt;
 use std::path::Path;
 use std::process::Command;
 
+use loopflow::chat::types::TurnUsage;
+use loopflow::child::ChildRef;
+use loopflow::durable::{
+    Containment, ContainmentObservation, RunAdvance, RunTrigger, StopCause, WorkRef,
+};
 use loopflow::id::WaveId;
+use loopflow::planning::{LinearIssueId, LinearProjectId, ProjectPlan, TaskPlan};
+use loopflow::project::{Project, ProjectId};
 use loopflow::store::sqlite::SqliteStore;
-use loopflow::store::RunEventRow;
-use loopflow::trace::{AgentInvocationRow, AgentTurnRow};
+use loopflow::store::{PmSnapshotRow, RunEventRow, TurnUsageSample};
+use loopflow::task::{
+    Observation, PmWritebackState, Task, TaskId, TaskLifecyclePhase, TaskLifecyclePlan, TaskPr,
+    TaskPrId,
+};
+use loopflow::trace::{AgentInvocationRow, AgentTurnRow, SupervisedInvocation};
 use loopflow::wave::Wave;
+use time::OffsetDateTime;
+
+const INVOCATION_ID: &str = "invocation_00000000000000000000000000000001";
 
 /// A machine home holding one wave with lookup noise, a flow, and a skill. The
 /// registry and the ledgers are the same database.
 fn seed(home: &Path, wave_name: &str) -> Wave {
     std::fs::create_dir_all(home).expect("home");
+    let repo = home.join("repo");
+    std::fs::create_dir_all(&repo).expect("repo");
     let db = home.join("loopflow.db");
     let store = SqliteStore::new(&db).expect("open store");
     let wave = Wave::new(
         WaveId::new(),
         wave_name.to_string(),
-        home.join("repo").display().to_string(),
+        repo.display().to_string(),
     );
     store.create_wave(&wave).expect("register wave");
+    let work = WorkRef::Wave(wave.id().clone());
+    let (_, lease) = store
+        .reserve_run(&work, &RunTrigger::User)
+        .expect("reserve Run");
+    store
+        .advance_run(
+            &lease,
+            &RunAdvance::RunStarting {
+                containment: Containment::ProcessGroup { id: 1 },
+                cwd: repo.clone(),
+            },
+        )
+        .expect("start Run");
+    store
+        .stop_run(
+            &lease,
+            &StopCause::Requested,
+            ContainmentObservation::Absent,
+        )
+        .expect("stop Run");
 
     let now = chrono::Utc::now().timestamp();
     let event = |seq: i64, ts: i64, event: &str| RunEventRow {
@@ -82,7 +119,7 @@ fn seed(home: &Path, wave_name: &str) -> Wave {
         .expect("seed resident end");
 
     let invocation = AgentInvocationRow {
-        id: "invocation-wave-mutate".to_string(),
+        id: INVOCATION_ID.to_string(),
         run_id: "run-resident".to_string(),
         answer_ask_id: None,
         process_id: "proc-resident".to_string(),
@@ -92,7 +129,7 @@ fn seed(home: &Path, wave_name: &str) -> Wave {
         worktree: home.join("repo").display().to_string(),
         wave: Some(wave_name.to_string()),
         flow: Some("wave".to_string()),
-        skill: Some("wave_mutate".to_string()),
+        skill: Some("wave/mutate".to_string()),
         project: Some("auditability".to_string()),
         task: Some("W2-122".to_string()),
         provider: "codex".to_string(),
@@ -108,7 +145,13 @@ fn seed(home: &Path, wave_name: &str) -> Wave {
         provider_session_path: None,
         conversation_event_count: 2,
         conversation_bytes: 10,
-        supervision: None,
+        supervision: Some(SupervisedInvocation {
+            invocation_id: loopflow::durable::AgentInvocationId::parse(INVOCATION_ID)
+                .expect("invocation id"),
+            supervising_run_id: lease.run_id,
+            account_id: None,
+            resume_token: None,
+        }),
     };
     let turn = AgentTurnRow {
         id: "turn-wave-mutate".to_string(),
@@ -126,15 +169,7 @@ fn seed(home: &Path, wave_name: &str) -> Wave {
         system_tokens: 0,
         task_tokens: 10,
         supplied_context_tokens: 10,
-        provider_input_tokens: Some(10),
-        provider_total_input_tokens: Some(10),
-        peak_input_tokens: Some(10),
-        context_window_tokens: Some(100),
-        provider_output_tokens: Some(5),
-        reasoning_tokens: None,
-        cache_read_tokens: Some(0),
-        cache_write_tokens: None,
-        cost_usd: Some(0.01),
+        usage: None,
         context_gather_ms: 1,
         context_render_ms: 1,
         context_persist_ms: 1,
@@ -146,6 +181,23 @@ fn seed(home: &Path, wave_name: &str) -> Wave {
     store
         .insert_trace_capture(&invocation, &turn, &[], &[])
         .expect("seed skill invocation");
+    store
+        .record_turn_usage_sample(&TurnUsageSample {
+            turn_id: turn.id,
+            observed_at: now - 20,
+            final_receipt: true,
+            usage: TurnUsage {
+                input_tokens: Some(10),
+                total_input_tokens: Some(10),
+                peak_input_tokens: Some(10),
+                context_window_tokens: Some(100),
+                output_tokens: Some(5),
+                cache_read_tokens: Some(0),
+                cost_usd: Some(0.01),
+                ..TurnUsage::default()
+            },
+        })
+        .expect("seed provider usage");
     wave
 }
 
@@ -161,10 +213,12 @@ fn status_json(home: &Path, args: &[&str], ambient_wave_id: Option<&str>) -> ser
         .env_remove("LF_CONTROL_HOME")
         .env_remove("LF_CONTROL_DB_PATH")
         .env_remove("LF_TRACE_ID")
-        .env_remove("LF_WAVE_ID");
+        .env_remove("LF_WAVE_ID")
+        .current_dir(home.join("repo"));
     if let Some(id) = ambient_wave_id {
         command.env("LF_WAVE_ID", id);
     }
+    prepend_test_bin(&mut command, home);
     let output = command.output().expect("lf status runs");
     assert!(
         output.status.success(),
@@ -180,6 +234,9 @@ fn status_human(home: &Path, wave: &str) -> String {
         .args(["status", wave])
         .env("LF_HOME", home)
         .env_remove("LF_DB_PATH")
+        .env_remove("LF_CONTROL_HOME")
+        .env_remove("LF_CONTROL_DB_PATH")
+        .current_dir(home.join("repo"))
         .output()
         .expect("lf status runs");
     assert!(
@@ -190,11 +247,234 @@ fn status_human(home: &Path, wave: &str) -> String {
     String::from_utf8(output.stdout).expect("status is utf8")
 }
 
+fn roadmap_json(home: &Path, wave: &str) -> serde_json::Value {
+    let mut command = Command::new(env!("CARGO_BIN_EXE_lf"));
+    command
+        .args(["roadmap", "--wave", wave, "--json"])
+        .env("LF_HOME", home)
+        .env_remove("LF_DB_PATH")
+        .env_remove("LF_CONTROL_HOME")
+        .env_remove("LF_CONTROL_DB_PATH")
+        .env_remove("LF_TRACE_ID")
+        .env_remove("LF_WAVE_ID")
+        .current_dir(home.join("repo"));
+    prepend_test_bin(&mut command, home);
+    let output = command.output().expect("lf roadmap runs");
+    assert!(
+        output.status.success(),
+        "lf roadmap failed: {}",
+        String::from_utf8_lossy(&output.stderr)
+    );
+    serde_json::from_slice(&output.stdout).expect("lf roadmap emits JSON")
+}
+
+fn prepend_test_bin(command: &mut Command, home: &Path) {
+    let bin = home.join("bin");
+    if !bin.is_dir() {
+        return;
+    }
+    let inherited = std::env::var_os("PATH").unwrap_or_default();
+    let paths = std::iter::once(bin).chain(std::env::split_paths(&inherited));
+    command.env("PATH", std::env::join_paths(paths).expect("test PATH"));
+}
+
+fn seed_stale_project_work(home: &Path, abandon_stale_project: bool) {
+    const STALE_WORK_ID: &str = "proj_e972b70272fbb5e91c096ebe657f9f9b";
+    const STALE_PROJECT_ID: &str = "f56c583c-c360-4dc4-ba12-4b5a02268623";
+    const STALE_TASK_WORK_ID: &str = "task_40fbeeaadfbca5367aa7391432ae84ff";
+
+    let wave = seed(home, "product");
+    let repo = home.join("repo");
+    std::fs::create_dir_all(&repo).expect("repo");
+    let store = SqliteStore::new(&home.join("loopflow.db")).expect("open store");
+    let now = OffsetDateTime::now_utc();
+    let stale = Project {
+        id: ProjectId::parse(STALE_WORK_ID).expect("recorded Project Work id"),
+        plan: ProjectPlan {
+            id: LinearProjectId::new(STALE_PROJECT_ID).expect("recorded PM Project id"),
+            slug: "technical-architecture".to_string(),
+            name: "Technical Architecture".to_string(),
+            prompt_context: "Keep the system legible and minimally simple.".to_string(),
+            pm_snapshot_synced_at: now.unix_timestamp() - 1,
+        },
+        wave_id: wave.id().clone(),
+        iteration: 1,
+        observation_cursor: 0,
+        last_state_fingerprint: None,
+        agent: "codex".to_string(),
+        provider: "codex".to_string(),
+        provider_session_id: None,
+        abandon_intent: None,
+        created_at: now,
+        updated_at: now,
+    };
+    store.insert_project(&stale).expect("seed stale Project");
+    let stale_task = Task {
+        id: TaskId::parse(STALE_TASK_WORK_ID).expect("recorded Task Work id"),
+        plan: TaskPlan {
+            id: LinearIssueId::new("linear-task-w2-127").expect("recorded PM Task id"),
+            identifier: "W2-127".to_string(),
+            title: "Preserve historical architecture evidence".to_string(),
+            description: "This Task outlived its retired Linear Project.".to_string(),
+            pm_snapshot_synced_at: now.unix_timestamp() - 1,
+        },
+        pm_writeback: PmWritebackState::Current,
+        wave_id: wave.id().clone(),
+        project_id: stale.id.clone(),
+        worktree: home.join("repo.w2-127"),
+        workspace_slug: "w2-127".to_string(),
+        lifecycle: TaskLifecyclePlan::defaults(),
+        lifecycle_phase: TaskLifecyclePhase::Loop,
+        phase_epoch: 1,
+        phase_cursor: 0,
+        phase_iteration: 0,
+        gate_cycle: 0,
+        gate_proposal: None,
+        agent: "codex".to_string(),
+        provider: "codex".to_string(),
+        provider_session_id: None,
+        abandon_intent: None,
+        created_at: now,
+        updated_at: now,
+        observation: Observation::NotRequired,
+    };
+    let stale_pr = TaskPr {
+        id: TaskPrId::new(),
+        task_id: stale_task.id.clone(),
+        sequence: 1,
+        slug: stale_task.workspace_slug.clone(),
+        branch: "jack-heart/w2-127".to_string(),
+        base_commit: "deadbeef".to_string(),
+        parent_pr_id: None,
+        publication: None,
+        merge_commit: None,
+        abandoned_at: None,
+        ci_observation: None,
+        github_observation: None,
+        linear_attachment_id: None,
+        linear_comment_id: None,
+        linear_link_error: None,
+        created_at: now,
+        updated_at: now,
+    };
+    store
+        .insert_task(&stale_task, &stale_pr)
+        .expect("seed orphaned Task");
+    if abandon_stale_project {
+        let stale_work = store
+            .work_for_child(&ChildRef::Project(stale.id.clone()))
+            .expect("resolve stale Project Work");
+        let stale_basis = store
+            .current_epoch(&stale_work)
+            .expect("read stale Project epoch")
+            .current_basis;
+        store
+            .abandon(
+                &stale_work,
+                "Project is absent from the current PM snapshot",
+                &stale_basis,
+            )
+            .expect("retire stale Project Work");
+    }
+
+    let current = Project {
+        id: ProjectId::new(),
+        plan: ProjectPlan {
+            id: LinearProjectId::new("95159066-9098-4d0b-8903-01459dc7ec14")
+                .expect("current PM Project id"),
+            slug: "auditability".to_string(),
+            name: "Auditability".to_string(),
+            prompt_context: "Every claim points to its receipt.".to_string(),
+            pm_snapshot_synced_at: now.unix_timestamp(),
+        },
+        wave_id: wave.id().clone(),
+        iteration: 1,
+        observation_cursor: 0,
+        last_state_fingerprint: None,
+        agent: "codex".to_string(),
+        provider: "codex".to_string(),
+        provider_session_id: None,
+        abandon_intent: None,
+        created_at: now,
+        updated_at: now,
+    };
+    store
+        .insert_project(&current)
+        .expect("seed current Project");
+
+    let work = store
+        .work_for_child(&ChildRef::Project(current.id.clone()))
+        .expect("resolve current Project Work");
+    let (_, lease) = store
+        .reserve_run(&work, &RunTrigger::User)
+        .expect("reserve current Project Run");
+    store
+        .advance_run(
+            &lease,
+            &RunAdvance::RunStarting {
+                containment: Containment::Tmux {
+                    name: "missing-current-project".to_string(),
+                },
+                cwd: repo.clone(),
+            },
+        )
+        .expect("start current Project Run");
+
+    let bin = home.join("bin");
+    std::fs::create_dir_all(&bin).expect("test bin");
+    let tmux = bin.join("tmux");
+    std::fs::write(&tmux, "#!/bin/sh\nexit 0\n").expect("fake tmux");
+    std::fs::set_permissions(&tmux, std::fs::Permissions::from_mode(0o755))
+        .expect("make fake tmux executable");
+
+    let payload = serde_json::json!({
+        "projects": [
+            {
+                "id": "95159066-9098-4d0b-8903-01459dc7ec14",
+                "slug": "auditability",
+                "name": "Auditability",
+                "summary": "Every claim points to its receipt.",
+                "definition": "Every product surface shows enough truth to trust the system.",
+                "flows": {"first": null, "loop": null, "finally": null},
+                "krs": [{"text": "Every visible state carries its reason", "holds": false}],
+                "initiative_ids": ["initiative-product"],
+                "team_ids": ["team-product"]
+            }
+        ],
+        "items": [
+            {
+                "id": "task-prd-52",
+                "identifier": "PRD-52",
+                "url": "https://linear.app/loopflow/issue/PRD-52",
+                "name": "Expose one fleet snapshot from Wave to raw trace",
+                "description": "Keep focused reads useful through stale Work.",
+                "rank": 1,
+                "completed": false,
+                "project_id": "95159066-9098-4d0b-8903-01459dc7ec14",
+                "project": "auditability",
+                "team_id": "team-product",
+                "assignee": null
+            }
+        ]
+    });
+    store
+        .put_pm_snapshot(&PmSnapshotRow {
+            wave_id: wave.id().clone(),
+            provider: "linear".to_string(),
+            initiative: "initiative-product".to_string(),
+            synced_at: now.unix_timestamp(),
+            payload: serde_json::to_string(&payload).expect("serialize PM snapshot"),
+        })
+        .expect("seed PM snapshot");
+}
+
 fn execs_json(home: &Path) -> serde_json::Value {
     let output = Command::new(env!("CARGO_BIN_EXE_lf"))
         .args(["execs", "--json"])
         .env("LF_HOME", home)
         .env_remove("LF_DB_PATH")
+        .env_remove("LF_CONTROL_HOME")
+        .env_remove("LF_CONTROL_DB_PATH")
         .output()
         .expect("lf execs runs");
     assert!(
@@ -210,6 +490,8 @@ fn runs_json(home: &Path) -> serde_json::Value {
         .args(["runs", "--json"])
         .env("LF_HOME", home)
         .env_remove("LF_DB_PATH")
+        .env_remove("LF_CONTROL_HOME")
+        .env_remove("LF_CONTROL_DB_PATH")
         .output()
         .expect("lf runs runs");
     assert!(
@@ -227,6 +509,8 @@ fn runs_json_filtered(home: &Path, filter: &[&str]) -> serde_json::Value {
         .arg("--json")
         .env("LF_HOME", home)
         .env_remove("LF_DB_PATH")
+        .env_remove("LF_CONTROL_HOME")
+        .env_remove("LF_CONTROL_DB_PATH")
         .output()
         .expect("lf runs runs");
     assert!(
@@ -242,6 +526,8 @@ fn trace_json(home: &Path, exec_id: &str) -> serde_json::Value {
         .args(["trace", exec_id, "--json"])
         .env("LF_HOME", home)
         .env_remove("LF_DB_PATH")
+        .env_remove("LF_CONTROL_HOME")
+        .env_remove("LF_CONTROL_DB_PATH")
         .output()
         .expect("lf trace runs");
     assert!(
@@ -265,7 +551,7 @@ fn status_reports_skill_runs_without_lookup_or_flow_processes() {
     assert_eq!(runs.len(), 1);
     let skill = runs
         .iter()
-        .find(|run| run["skill"] == "wave_mutate")
+        .find(|run| run["skill"] == "wave/mutate")
         .expect("the wave's skill is in its status");
     assert_eq!(skill["flow"], "wave");
     assert_eq!(skill["provider"], "codex");
@@ -274,7 +560,7 @@ fn status_reports_skill_runs_without_lookup_or_flow_processes() {
     assert_eq!(skill["output_tokens"], 5);
 
     let human = status_human(home.path(), "audit-a");
-    assert!(human.contains("wave/wave_mutate"));
+    assert!(human.contains("wave/wave/mutate"));
     assert!(human.contains("ctx      10"));
     assert!(human.contains("tok      15"));
     assert!(!human.contains("pm sync"));
@@ -312,10 +598,10 @@ fn runs_are_skill_invocations_with_context_and_token_evidence() {
     let runs = runs.as_array().expect("run array");
     assert_eq!(runs.len(), 1);
     let run = &runs[0];
-    assert_eq!(run["id"], "invocation-wave-mutate");
+    assert_eq!(run["id"], INVOCATION_ID);
     assert_eq!(run["trace_id"], "run-resident");
     assert_eq!(run["exec_id"], "proc-resident");
-    assert_eq!(run["skill"], "wave_mutate");
+    assert_eq!(run["skill"], "wave/mutate");
     assert_eq!(run["supplied_context_tokens"], 10);
     assert_eq!(run["input_tokens"], 10);
     assert_eq!(run["output_tokens"], 5);
@@ -343,6 +629,22 @@ fn runs_drill_to_one_task_by_issue_identifier() {
     assert_eq!(missed.as_array().expect("run array").len(), 0);
 }
 
+/// Project drill applies before the result cap, using the slug carried by the
+/// invocation rather than inferring ownership from its Wave or Task.
+#[test]
+fn runs_drill_to_one_project_by_slug() {
+    let home = tempfile::tempdir().expect("tempdir");
+    seed(home.path(), "audit-project-drill");
+
+    let matched = runs_json_filtered(home.path(), &["--project", "auditability"]);
+    let matched = matched.as_array().expect("run array");
+    assert_eq!(matched.len(), 1);
+    assert_eq!(matched[0]["project"], "auditability");
+
+    let missed = runs_json_filtered(home.path(), &["--project", "no-such-project"]);
+    assert_eq!(missed.as_array().expect("run array").len(), 0);
+}
+
 /// The wave drill mirrors the internal scoping `lf status` uses.
 #[test]
 fn runs_drill_to_one_wave_by_name() {
@@ -363,7 +665,7 @@ fn trace_opens_from_the_invocation_id_lf_runs_prints() {
     let home = tempfile::tempdir().expect("tempdir");
     seed(home.path(), "audit-trace-invocation");
 
-    let trace = trace_json(home.path(), "invocation-wave-mutate");
+    let trace = trace_json(home.path(), INVOCATION_ID);
     assert_eq!(trace["trace_id"], "run-resident");
     let spans = trace["spans"].as_array().expect("span array");
     assert!(spans
@@ -392,6 +694,7 @@ fn a_wave_with_no_runs_reports_an_empty_reading_not_a_missing_one() {
     let home = tempfile::tempdir().expect("tempdir");
     std::fs::create_dir_all(home.path()).expect("home");
     let store = SqliteStore::new(&home.path().join("loopflow.db")).expect("open store");
+    std::fs::create_dir_all(home.path().join("repo")).expect("repo");
     let wave = Wave::new(
         WaveId::new(),
         "audit-c".to_string(),
@@ -405,4 +708,119 @@ fn a_wave_with_no_runs_reports_an_empty_reading_not_a_missing_one() {
     assert_eq!(status["runs"]["state"], "ok");
     assert_eq!(status["runs"]["items"], serde_json::json!([]));
     assert_eq!(status["runs"]["truncated"], false);
+}
+
+#[test]
+fn orphaned_task_work_preserves_status_and_roadmap_evidence() {
+    let home = tempfile::tempdir().expect("tempdir");
+    seed_stale_project_work(home.path(), true);
+
+    let status = status_json(home.path(), &["product"], None);
+    let status_projects = status["projects"].as_array().expect("status projects");
+    assert_eq!(status_projects.len(), 1);
+    assert_eq!(status_projects[0]["project"]["slug"], "auditability");
+    assert_eq!(
+        status_projects[0]["tasks"][0]["task"]["identifier"],
+        "PRD-52"
+    );
+    assert_eq!(status["runs"]["state"], "ok");
+    assert_eq!(status["runs"]["items"].as_array().expect("runs").len(), 1);
+    assert_eq!(status["attention"]["state"], "ok");
+    let attention = status["attention"]["items"]
+        .as_array()
+        .expect("attention items");
+    assert_eq!(attention.len(), 1);
+    assert_eq!(attention[0]["subject"], "auditability");
+    assert_eq!(attention[0]["owner"], "wave");
+    assert_eq!(
+        attention[0]["reason"],
+        "process is gone but the Work still records 'running'"
+    );
+
+    let unavailable = status["unavailable_projects"]
+        .as_array()
+        .expect("status unavailable Projects");
+    assert_eq!(unavailable.len(), 1);
+    assert_eq!(
+        unavailable[0]["work_id"],
+        "proj_e972b70272fbb5e91c096ebe657f9f9b"
+    );
+    assert_eq!(
+        unavailable[0]["project_id"],
+        "f56c583c-c360-4dc4-ba12-4b5a02268623"
+    );
+    assert_eq!(unavailable[0]["project_slug"], "technical-architecture");
+    assert_eq!(unavailable[0]["status"], "abandoned");
+    assert_eq!(unavailable[0]["owner"], "wave");
+    assert_eq!(
+        unavailable[0]["reason"],
+        "Project is absent from the current PM snapshot"
+    );
+    assert_eq!(
+        unavailable[0]["recovery"],
+        "Settle the listed Tasks; Project Work is already abandoned"
+    );
+    let orphaned_tasks = unavailable[0]["tasks"].as_array().expect("orphaned Tasks");
+    assert_eq!(orphaned_tasks.len(), 1);
+    assert_eq!(
+        orphaned_tasks[0]["work_id"],
+        "task_40fbeeaadfbca5367aa7391432ae84ff"
+    );
+    assert_eq!(orphaned_tasks[0]["task_id"], "linear-task-w2-127");
+    assert_eq!(orphaned_tasks[0]["task_identifier"], "W2-127");
+    assert_eq!(orphaned_tasks[0]["status"], "ready");
+    assert_eq!(orphaned_tasks[0]["owner"], "wave");
+    assert_eq!(
+        orphaned_tasks[0]["reason"],
+        "Task's owning Project is absent from the current PM snapshot"
+    );
+    assert_eq!(
+        orphaned_tasks[0]["recovery"],
+        "lf work abandon task task_40fbeeaadfbca5367aa7391432ae84ff --reason \"Project is absent from the current PM snapshot\""
+    );
+
+    let roadmap = roadmap_json(home.path(), "product");
+    let wave = &roadmap["waves"][0];
+    assert_eq!(wave["projects"]["state"], "ok");
+    let roadmap_projects = wave["projects"]["items"]
+        .as_array()
+        .expect("roadmap projects");
+    assert_eq!(roadmap_projects.len(), 1);
+    assert_eq!(roadmap_projects[0]["project"]["slug"], "auditability");
+    assert_eq!(
+        roadmap_projects[0]["tasks"][0]["task"]["identifier"],
+        "PRD-52"
+    );
+    assert_eq!(wave["unavailable_projects"], status["unavailable_projects"]);
+}
+
+#[test]
+fn active_project_removed_from_planning_reports_truthful_recovery() {
+    let home = tempfile::tempdir().expect("tempdir");
+    seed_stale_project_work(home.path(), false);
+
+    let status = status_json(home.path(), &["product"], None);
+    let unavailable = status["unavailable_projects"]
+        .as_array()
+        .expect("status unavailable Projects");
+
+    assert_eq!(unavailable.len(), 1);
+    assert_eq!(unavailable[0]["project_slug"], "technical-architecture");
+    assert_eq!(unavailable[0]["status"], "ready");
+    assert_eq!(unavailable[0]["owner"], "wave");
+    assert_eq!(
+        unavailable[0]["reason"],
+        "Project is absent from the current PM snapshot"
+    );
+    assert_eq!(
+        unavailable[0]["recovery"],
+        "lf project abandon technical-architecture --reason \"Project is absent from the current PM snapshot\""
+    );
+    assert_eq!(
+        unavailable[0]["tasks"]
+            .as_array()
+            .expect("preserved Task evidence")
+            .len(),
+        1
+    );
 }

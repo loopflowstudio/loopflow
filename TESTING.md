@@ -7,10 +7,12 @@ proof that can change the next decision.
 
 ```bash
 uv run pytest python/tests/test_gate_bounded.py        # one Python behavior
-uv run pytest python/tests/test_test_time.py           # trace timing toolkit
+uv run python scripts/resource_envelope.py             # attribute local disk pressure
+uv run python scripts/check_architecture.py            # architecture owners and vocabulary
 uv run python scripts/test.py --list                   # affected-suite plan
 uv run python scripts/test.py --reuse-passing          # affected suites once per exact tree
-uv run python scripts/test_time.py --days 7            # where agent verification time went
+uv run pytest python/tests/test_lifecycle_scorecard.py # scorecard behavior
+lf telemetry-daily                                     # maintainer report
 ```
 
 Escalate from a focused behavior to affected suites when crossing a component
@@ -42,8 +44,23 @@ uv run python scripts/test.py --base HEAD~5  # diff against a different ref
 
 ### Bounded and honest
 
+```bash
+uv run python scripts/resource_envelope.py
+uv run python scripts/resource_envelope.py --recover
+```
+
+The resource preflight names the owner and budget for every worktree build,
+gate-artifact root, the Loopflow trace store, uv cache, Cargo cache, and free
+disk. Budgets live in `performance/budgets.json`: 64 GiB free, 12 GiB per
+worktree build, 128 GiB across builds, 16 GiB each for traces and uv, and four
+low-priority verification workers. Recovery removes only allowlisted build
+roots from inactive worktrees, old disposable gate output, and entries accepted
+by `uv cache prune`. It never removes source, a worktree, trace evidence, gate
+receipts, or SQLite state. Unresolved pressure stops before product tests run
+and prints the supported next action.
+
 Every phase runs under a printed wall-clock limit. A phase that overruns is
-killed—process group and all—and reported as `TIMEOUT <phase> (budget Ns)`, so
+killed—process group and all—and reported as `VERIFICATION BUDGET`, so
 **no phase can hang the
 gate**. The plan and summary print each phase's `elapsed / budget`; later
 phases remain visible as `not_run` after an earlier failure. On failure the
@@ -60,18 +77,22 @@ Git common directory:
 This evidence is shared by linked worktrees and survives `.lf/tmp` cleanup.
 Records contain operational identity, exact-tree and plan fingerprints,
 phase status, and elapsed time—not commands or output. Persistence failure is
-a warning and never replaces the underlying test result.
+a warning and never replaces the underlying test result. Schema-3 records also
+carry child CPU, minimum observed free disk, build bytes, and source-attributed
+growth. A product assertion remains a product failure; a stopped phase under
+sustained macOS `syspolicyd`/`trustd`/`amfid`/`taskgated` pressure is reported as
+host-security pressure with the product result explicitly unproven.
 
-Use the trace ledger for time analysis:
+Read the same gate evidence through the daily operator flow:
 
 ```bash
-uv run python scripts/test_time.py --days 7
-uv run python scripts/test_time.py --days 7 --repo /path/to/main/repo
-uv run python scripts/test_time.py --days 7 --worktree /path/to/exact/worktree
+lf telemetry-daily
 ```
 
-The report merges parallel intervals per launch and prints only aggregate
-categories and skills. It never prints commands, prompts, or output.
+The scorecard joins accepted provider Turn usage with pre-land phase records. It
+prints aggregate values and coverage only—never commands, prompts, output, or
+task ids. Missing evidence is `UNKNOWN`, reported zero remains measured, and
+small samples stay `COLLECTING` until 20 observations support p95.
 
 The summary states **what each suite proves**. The `loopflow` suite compiles
 the app and UI-test runners; it does **not** run hosted UI behavior. That real
@@ -89,8 +110,8 @@ Path → suite mapping:
 
 | Changed | Suite | Runs |
 |---------|-------|------|
-| `rust/`, `Cargo.toml/lock` | rust | `cargo fmt`, `cargo clippy`, then `cargo nextest run --all` (falls back to `cargo test --all`) |
-| `python/`, top-level `*.py`, `pyproject.toml` | python | `uv run pytest python/tests/` (scoped to changed `test_*.py` when no source moved) |
+| `rust/`, `Cargo.toml/lock` | rust | `cargo fmt`, `cargo clippy --all-targets`, then draft materialization in a disposable exact-tree worktree and `cargo nextest run --all` (falls back to `cargo test --all`) |
+| `python/`, `scripts/*.py`, top-level `*.py`, `pyproject.toml` | python | `uv run pytest python/tests/` (scoped to changed `test_*.py` when no source moved) |
 | `website/`, `docs/` | website | `cd website && uv run python dev.py test` |
 | `swift/` | swift | `swift test --package-path swift -Xswiftc -gnone`, then the multiplatform boundary check |
 | `swift/LoopflowMac/`, `swift/project.yml` | loopflow *(slow)* | xcodegen + xcodebuild |
@@ -153,13 +174,14 @@ See `release/UI_HOST_GATE.md`.
 
 ## What CI Runs
 
-See `.github/workflows/ci.yml`. Nine proof jobs run in parallel and feed the
+See `.github/workflows/ci.yml`. Ten proof jobs run in parallel and feed the
 aggregate `tests-result` check:
 
 | Job | Runner | Command |
 |-----|--------|---------|
+| `architecture-check` | ubuntu-latest | map every durable owner, public boundary, provider edge, and named shim; reject stale control vocabulary |
 | `scratch-clear` | ubuntu-latest | reject landing-only scratch artifacts |
-| `rust-lint` | ubuntu-latest | `cargo fmt`, `cargo clippy` |
+| `rust-lint` | ubuntu-latest | `cargo fmt`, `cargo clippy --all-targets -- -D warnings` |
 | `rust-test` | ubuntu-latest | `cargo nextest run --all` |
 | `migration-check` | ubuntu-latest | verify migration namespaces/history |
 | `python-test` | ubuntu-latest | `uv run pytest python/tests/` |
@@ -168,7 +190,9 @@ aggregate `tests-result` check:
 | `swift-test` | macos-15 | package tests, boundary check, Wave-state render proof |
 | `loopflow-ui-test` | macos-15 | xcodegen + app/test-runner compile |
 
-All nine must pass for `tests-result` to pass.
+All ten must pass for `tests-result` to pass. `.github/workflows/architecture-drift.yml`
+runs the same architecture command every Monday and retains its JSON report for
+90 days; four consecutive runs are the time-based architecture KR evidence.
 
 ## Dependabot workflow
 

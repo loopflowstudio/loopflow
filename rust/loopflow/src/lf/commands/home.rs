@@ -9,7 +9,7 @@ use std::path::Path;
 
 use anyhow::anyhow;
 
-use crate::engine::wave_context::resolve_managed_wave_name_sync;
+use crate::engine::wave_context::resolve_managed_wave_sync;
 use crate::engine::wave_home::{HomeActionDto, HomeRuntimeDto, HomeState};
 use crate::lf::HomeCommand;
 
@@ -70,17 +70,18 @@ fn observe_cmd(home_id: &crate::durable::HomeId, route: &str, json: bool) -> any
     Ok(())
 }
 
-fn probe_cmd(wave: Option<&str>, json: bool, _repo: &Path) -> anyhow::Result<()> {
-    let name = resolve_managed_wave_name_sync(wave).map_err(|err| anyhow!("{err}"))?;
+fn probe_cmd(wave: Option<&str>, json: bool, repo: &Path) -> anyhow::Result<()> {
+    let selected = resolve_managed_wave_sync(Some(repo), wave).map_err(|err| anyhow!("{err}"))?;
+    let wave_id = selected.id().clone();
     let rt = tokio::runtime::Runtime::new()?;
-    let runtime = rt.block_on(async {
+    let (wave, runtime) = rt.block_on(async {
         let store = crate::store::open_existing_store()
             .await
             .ok_or_else(|| anyhow!("lf home probe needs an initialized local store"))?;
         let wave = store
-            .get_wave_by_name(&name)
+            .get_wave(&wave_id)
             .await?
-            .ok_or_else(|| anyhow!("Wave '{name}' was not found"))?;
+            .ok_or_else(|| anyhow!("Wave {wave_id} was not found"))?;
         let placement = store
             .placement(&crate::durable::WorkRef::Wave(wave.id().clone()))
             .await?;
@@ -88,14 +89,14 @@ fn probe_cmd(wave: Option<&str>, json: bool, _repo: &Path) -> anyhow::Result<()>
             .home_by_id(&placement.home_id)
             .await?
             .ok_or_else(|| anyhow!("Home {} was not found", placement.home_id))?;
-        Ok::<_, anyhow::Error>(
-            crate::ops::home::probe_home(&name, &home, Path::new(wave.repo())).await,
-        )
+        let runtime =
+            crate::ops::home::probe_home(wave.name(), &home, Path::new(wave.repo())).await;
+        Ok::<_, anyhow::Error>((wave, runtime))
     })?;
     if json {
         println!("{}", serde_json::to_string(&runtime)?);
     } else {
-        print_runtime(&name, &runtime);
+        print_runtime(wave.name(), &runtime);
     }
     Ok(())
 }
@@ -114,24 +115,39 @@ pub fn start(waves: &[String], wave_ids: &[String], json: bool, repo: &Path) -> 
     Ok(())
 }
 
-pub fn stop(name: &str, _repo: &Path) -> anyhow::Result<()> {
+pub fn stop(name: &str, repo: &Path) -> anyhow::Result<()> {
     let name = crate::ops::util::normalize_wave_name(name)
         .ok_or_else(|| anyhow!("invalid wave name: '{name}'"))?;
+    let locator = crate::wave::WaveLocator::discover(repo, &name)?;
     let runtime = tokio::runtime::Runtime::new()?;
     let stopped = runtime.block_on(async {
-        let Some(store) = crate::store::open_existing_store().await else {
-            return Ok::<_, anyhow::Error>(None);
-        };
-        let Some(wave) = store.get_wave_by_name(&name).await? else {
-            return Ok(None);
-        };
+        let store = crate::store::open_existing_store()
+            .await
+            .ok_or_else(|| anyhow!("lf stop needs an initialized local store"))?;
+        let wave = store
+            .get_wave_at(&locator)
+            .await?
+            .ok_or_else(|| anyhow!("Wave '{name}' was not found"))?;
         let local = store.local_home().await?;
-        crate::lfd::stop_wave(&local.id, wave.id()).await
+        let work = crate::durable::WorkRef::Wave(wave.id().clone());
+        let placement = store.placement(&work).await?;
+        if placement.home_id != local.id {
+            return Err(anyhow!(
+                "Wave {name} is placed on {}, not local Home {}",
+                placement.home_id,
+                local.id
+            ));
+        }
+        if let Some(stopped) = crate::lfd::stop_wave(&local.id, wave.id()).await? {
+            return Ok(stopped);
+        }
+        store.set_work_enabled(&work, false).await?;
+        crate::wave::request_stop(Path::new(wave.repo()), wave.name()).await
     })?;
-    match stopped {
-        Some(true) => println!("stopped wave {name}"),
-        Some(false) => println!("wave {name} is already stopped"),
-        None => return crate::wave::stop(&name),
+    if stopped {
+        println!("stopped wave {name}");
+    } else {
+        println!("wave {name} is already stopped");
     }
     Ok(())
 }
@@ -142,45 +158,102 @@ async fn start_inner(
     repo: &Path,
 ) -> anyhow::Result<Vec<crate::lf::commands::waves::WaveSnapshot>> {
     let store = std::sync::Arc::new(
-        crate::store::open_existing_store()
+        crate::store::open_store(&crate::store::storage_config_from_env()?)
             .await
-            .ok_or_else(|| anyhow!("lf start needs an initialized local store"))?,
+            .map_err(|error| anyhow!("lf start cannot open this Home registry: {error}"))?,
     );
     let local = store.local_home().await?;
     validate_expected_home(&local.id)?;
-    let repo =
-        crate::engine::worktrees::main_repo_root(repo).unwrap_or_else(|_| repo.to_path_buf());
+    let repo = crate::repository::CanonicalRepo::discover(repo)?;
     let wave_ids = parse_wave_ids(raw_wave_ids)?;
+    let normalized_names = names
+        .iter()
+        .map(|raw| {
+            crate::ops::util::normalize_wave_name(raw)
+                .ok_or_else(|| anyhow!("invalid wave name: '{raw}'"))
+        })
+        .collect::<anyhow::Result<Vec<_>>>()?;
+    let unique_names = normalized_names
+        .iter()
+        .collect::<std::collections::BTreeSet<_>>();
+    if unique_names.len() != normalized_names.len() {
+        return Err(anyhow!("duplicate Wave name in start request"));
+    }
+    for name in wave_ids.keys() {
+        if !normalized_names.contains(name) {
+            return Err(anyhow!("--wave-id names unselected Wave '{name}'"));
+        }
+    }
+    crate::lfd::ensure(&local.id, repo.as_path()).await?;
     let selected = if names.is_empty() {
         if !wave_ids.is_empty() {
             return Err(anyhow!("--wave-id requires explicit Wave names"));
         }
-        let repo_name = repo.display().to_string();
+        let repo_name = repo.to_string();
         let known = store.list_waves(Some(&repo_name)).await?;
         if known.is_empty() {
             return Err(anyhow!(
                 "no Waves found in {}; create one with `lf wave create <name>`",
-                repo.display()
+                repo
             ));
         }
-        crate::wave_host::waves_for_home(&store, &local.id, Some(&repo_name)).await?
+        crate::wave_host::waves_for_home(&store, &local.id, Some(&repo_name))
+            .await?
+            .into_iter()
+            .map(|wave| StartSelection {
+                wave,
+                created: false,
+                prior_home: Some(local.id.clone()),
+            })
+            .collect()
     } else {
-        let mut selected = Vec::with_capacity(names.len());
-        for raw in names {
-            let name = crate::ops::util::normalize_wave_name(raw)
-                .ok_or_else(|| anyhow!("invalid wave name: '{raw}'"))?;
-            let wave = match wave_ids.get(&name) {
-                Some(id) => {
-                    crate::wave::registry::ensure_wave_row_with_id(&store, &repo, &name, id).await?
-                }
-                None => crate::wave::registry::ensure_wave_row(&store, &repo, &name).await?,
+        let mut candidates = Vec::with_capacity(normalized_names.len());
+        for name in &normalized_names {
+            let locator = crate::wave::WaveLocator::new(repo.clone(), name)?;
+            let existing_wave = store.get_wave_at(&locator).await?;
+            let prior_home = match existing_wave.as_ref() {
+                Some(wave) => Some(
+                    store
+                        .placement(&crate::durable::WorkRef::Wave(wave.id().clone()))
+                        .await?
+                        .home_id,
+                ),
+                None => None,
             };
-            selected.push(wave);
+            candidates.push((name.clone(), existing_wave, prior_home));
         }
-        for name in wave_ids.keys() {
-            if !selected.iter().any(|wave| wave.name() == name) {
-                return Err(anyhow!("--wave-id names unselected Wave '{name}'"));
-            }
+        let mut selected = Vec::with_capacity(candidates.len());
+        for (name, existing_wave, prior_home) in candidates {
+            let created = existing_wave.is_none();
+            let wave_result = match wave_ids.get(&name) {
+                Some(id) => {
+                    crate::wave::registry::ensure_wave_row_with_id(
+                        &store,
+                        repo.as_path(),
+                        &name,
+                        id,
+                    )
+                    .await
+                }
+                None => crate::wave::registry::ensure_wave_row(&store, repo.as_path(), &name).await,
+            };
+            let wave = match wave_result {
+                Ok(wave) => wave,
+                Err(error) => {
+                    let rollback = rollback_selections(&store, &selected).await;
+                    return match rollback {
+                        Ok(()) => Err(error.into()),
+                        Err(rollback) => Err(anyhow!(
+                            "Wave registration failed: {error}; registry rollback failed: {rollback}"
+                        )),
+                    };
+                }
+            };
+            selected.push(StartSelection {
+                wave,
+                created,
+                prior_home,
+            });
         }
         selected
     };
@@ -190,25 +263,140 @@ async fn start_inner(
 
     let wave_ids = selected
         .iter()
-        .map(|wave| wave.id().clone())
+        .map(|selection| selection.wave.id().clone())
         .collect::<Vec<_>>();
-    for wave in &selected {
-        store
-            .place_work(&crate::durable::WorkRef::Wave(wave.id().clone()), &local.id)
-            .await?;
+    for selection in &selected {
+        if let Err(error) = store
+            .place_work(
+                &crate::durable::WorkRef::Wave(selection.wave.id().clone()),
+                &local.id,
+            )
+            .await
+        {
+            let rollback = rollback_selections(&store, &selected).await;
+            return match rollback {
+                Ok(()) => Err(error.into()),
+                Err(rollback) => Err(anyhow!(
+                    "Wave placement failed: {error}; registry rollback failed: {rollback}"
+                )),
+            };
+        }
     }
-    crate::lfd::ensure(&local.id, &repo).await?;
-    crate::lfd::start_waves(&local.id, wave_ids).await?;
+    let outcomes = match crate::lfd::start_waves(&local.id, wave_ids).await {
+        Ok(outcomes) => outcomes,
+        Err(error) => {
+            let mut outcomes = Vec::with_capacity(selected.len());
+            for selection in &selected {
+                let state = match crate::wave::server::live_endpoint(
+                    Path::new(selection.wave.repo()),
+                    selection.wave.name(),
+                )
+                .await
+                {
+                    Some(endpoint) => crate::wave_host::WaveStartState::Live { endpoint },
+                    None => crate::wave_host::WaveStartState::Failed {
+                        reason: error.to_string(),
+                    },
+                };
+                outcomes.push(crate::wave_host::WaveStartOutcome {
+                    wave_id: selection.wave.id().clone(),
+                    state,
+                });
+            }
+            outcomes
+        }
+    };
 
+    let mut failures = Vec::new();
+    for selection in &selected {
+        let outcome = outcomes
+            .iter()
+            .find(|outcome| outcome.wave_id == *selection.wave.id());
+        let reason = match outcome.map(|outcome| &outcome.state) {
+            Some(crate::wave_host::WaveStartState::Live { .. }) => continue,
+            Some(crate::wave_host::WaveStartState::Failed { reason }) => reason.clone(),
+            None => "lfd returned no startup outcome".to_string(),
+        };
+        if let Err(rollback) = rollback_selection(&store, selection).await {
+            failures.push(format!(
+                "Wave {} failed to start: {reason}; registry rollback failed: {rollback}",
+                selection.wave.name()
+            ));
+        } else {
+            failures.push(format!(
+                "Wave {} failed to start: {reason}",
+                selection.wave.name()
+            ));
+        }
+    }
+    if !failures.is_empty() {
+        return Err(anyhow!(failures.join("; ")));
+    }
     let mut responses = Vec::with_capacity(selected.len());
-    for selected_wave in selected {
+    for selection in &selected {
         let wave = store
-            .get_wave_by_name(selected_wave.name())
+            .get_wave(selection.wave.id())
             .await?
-            .ok_or_else(|| anyhow!("Wave '{}' disappeared after start", selected_wave.name()))?;
-        responses.push(crate::lf::commands::waves::snapshot_wave(&store, &wave).await?);
+            .ok_or_else(|| anyhow!("Wave '{}' disappeared after start", selection.wave.name()))?;
+        let snapshot = crate::lf::commands::waves::snapshot_wave(&store, &wave).await?;
+        if !snapshot.live {
+            let reason = format!(
+                "Wave {} reported a live startup outcome but its endpoint is not answering",
+                wave.name()
+            );
+            if let Err(rollback) = rollback_selection(&store, selection).await {
+                failures.push(format!("{reason}; registry rollback failed: {rollback}"));
+            } else {
+                failures.push(reason);
+            }
+            continue;
+        }
+        responses.push(snapshot);
+    }
+    if !failures.is_empty() {
+        return Err(anyhow!(failures.join("; ")));
     }
     Ok(responses)
+}
+
+struct StartSelection {
+    wave: crate::wave::Wave,
+    created: bool,
+    prior_home: Option<crate::durable::HomeId>,
+}
+
+async fn rollback_selection(
+    store: &crate::store::Store,
+    selection: &StartSelection,
+) -> anyhow::Result<()> {
+    if selection.created {
+        store.delete_wave(selection.wave.id()).await?;
+    } else if let Some(home_id) = &selection.prior_home {
+        store
+            .place_work(
+                &crate::durable::WorkRef::Wave(selection.wave.id().clone()),
+                home_id,
+            )
+            .await?;
+    }
+    Ok(())
+}
+
+async fn rollback_selections(
+    store: &crate::store::Store,
+    selections: &[StartSelection],
+) -> anyhow::Result<()> {
+    let mut failures = Vec::new();
+    for selection in selections.iter().rev() {
+        if let Err(error) = rollback_selection(store, selection).await {
+            failures.push(format!("{}: {error}", selection.wave.name()));
+        }
+    }
+    if failures.is_empty() {
+        Ok(())
+    } else {
+        Err(anyhow!(failures.join("; ")))
+    }
 }
 
 fn parse_wave_ids(

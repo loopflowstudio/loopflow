@@ -137,7 +137,7 @@ struct ContractTests {
         // a discrete item so `turnPresentation` can fold it behind a disclosure;
         // the conclusion stays the prose.
         let withStep = try opened.absorbing(
-            .message(id: "m-0", text: "Using `wave_clarify` to audit the plan.", phase: "commentary")
+            .message(id: "m-0", text: "Using `wave/clarify` to audit the plan.", phase: "commentary")
         )
         let withConclusion = try withStep.absorbing(
             .message(id: "m-1", text: "Clarification complete.", phase: "final_answer")
@@ -150,7 +150,7 @@ struct ContractTests {
             return
         }
         #expect(phase == "commentary")
-        #expect(stepText.contains("wave_clarify"))
+        #expect(stepText.contains("wave/clarify"))
 
         // And it curates: the conclusion leads, the narration folds into a step.
         let view = turnPresentation(withConclusion)
@@ -180,25 +180,47 @@ struct ContractTests {
 
     @Test("post_message_response.json decodes through PostMessageResponse")
     func postMessageResponseFixtureParses() throws {
-        // Pins `POST /messages` → `{turn, state}` for the Mac client.
+        // Pins the source-bearing `POST /messages` response for the Mac client.
         let data = try fixtureData("dto/post_message_response.json")
         let posted = try JSONDecoder().decode(PostMessageResponse.self, from: data)
 
-        let turn = try #require(posted.turn)
+        let message = try #require(posted.message)
+        let turn = message.turn
         #expect(turn.id == "turn-4")
         #expect(turn.role == .user)
         #expect(turn.status == .completed)
         #expect(turn.items.isEmpty)
+        #expect(message.source == .local(journalSeq: 4))
+        #expect(posted.epoch.backing == .local)
         #expect(WaveLoopState(rawValue: posted.state) == .turning)
 
-        // `turn` is explicitly Optional: null for a bare interrupt.
+        // `message` is explicitly Optional: null for a bare interrupt.
         var json = try #require(JSONSerialization.jsonObject(with: data) as? [String: Any])
-        json["turn"] = NSNull()
+        json["message"] = NSNull()
         let bareInterrupt = try JSONDecoder().decode(
             PostMessageResponse.self,
             from: JSONSerialization.data(withJSONObject: json)
         )
-        #expect(bareInterrupt.turn == nil)
+        #expect(bareInterrupt.message == nil)
+    }
+
+    @Test("post_message_error_response.json decodes through PostMessageErrorResponse")
+    func postMessageErrorResponseFixtureParses() throws {
+        let data = try fixtureData("dto/post_message_error_response.json")
+        let rejection = try JSONDecoder().decode(PostMessageErrorResponse.self, from: data)
+
+        #expect(rejection.error.contains("backed by Discord"))
+        #expect(rejection.epoch.number == 2)
+        if case let .discord(guildId, channelId, open) = rejection.epoch.backing {
+            #expect(guildId == "guild-1")
+            #expect(channelId == "channel-1")
+            #expect(open == .openDiscord(
+                label: "Open in Discord",
+                url: "https://discord.com/channels/guild-1/channel-1"
+            ))
+        } else {
+            Issue.record("expected Discord epoch")
+        }
     }
 
     @Test("chat_history.json decodes through the durable history models")
@@ -208,7 +230,7 @@ struct ContractTests {
 
         #expect(snapshot.state == .partial)
         #expect(snapshot.detail?.contains("line 8") == true)
-        #expect(snapshot.turns.map(\.id) == ["turn-7"])
+        #expect(snapshot.messages.map(\.turn.id) == ["turn-7"])
         #expect(snapshot.truncated)
 
         let reencoded = try JSONEncoder().encode(snapshot)

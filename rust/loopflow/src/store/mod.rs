@@ -4,12 +4,13 @@ use std::ffi::OsString;
 use std::path::{Component, Path, PathBuf};
 use std::sync::Arc;
 
+use crate::chat::types::TurnUsage;
 use crate::id::WaveId;
 use crate::profile::{
     AccessProfile, AccountAccessProfile, EmailAddress, ProfileId, ProviderRoute, RouteScope,
 };
 use crate::provider_auth::Provider;
-use crate::wave::Wave;
+use crate::wave::{Wave, WaveLocator};
 mod children;
 pub(crate) mod ci_incidents;
 mod durable;
@@ -23,9 +24,9 @@ mod token_crypto;
 /// One row of the machine-grain run ledger (`run_events`): a lifecycle event
 /// for a run, flow, or skill, written directly by `lf` into the local store.
 ///
-/// Lineage only. Spend lives on `agent_turns`, the grain the provider actually
-/// measures; readers join `run_events -> agent_invocations -> agent_turns` rather
-/// than reading tokens from here.
+/// Lineage only. Usage lives in `turn_usage_samples`, the grain the provider
+/// actually measures; readers join through the Turn rather than reading tokens
+/// from here.
 #[derive(Debug, Clone, PartialEq)]
 pub struct RunEventRow {
     pub run_id: String,
@@ -45,45 +46,89 @@ pub struct RunEventRow {
     pub error: Option<String>,
 }
 
-/// One provider-measured Turn's spend, joined to the invocation that names where it
-/// was spent. This is the only additive usage grain: `lf usage`, `lf top`, and
-/// the trace tree all sum these rows, and every total is a grouping of them.
+/// One provider-measured Turn's latest cumulative usage, joined to the
+/// invocation that names where it ran.
 ///
 /// Token fields stay `Option`: a provider can report one measurement and omit
 /// another, and omission is not zero. Turns with no usage report at all do not
-/// materialize in this additive view. `lf usage --json` emits this shape, so
-/// every field is required or explicitly optional — no wire defaults.
-#[derive(Debug, Clone, PartialEq, serde::Serialize, serde::Deserialize)]
-pub struct TurnSpendRow {
+/// materialize in this internal additive view. Public consumers use
+/// `UsageSnapshot` instead.
+#[derive(Debug, Clone, PartialEq)]
+pub(crate) struct AttributedTurnUsage {
     pub turn_id: String,
     pub invocation_id: String,
-    pub trace_id: String,
     pub exec_id: String,
     pub repo: String,
     pub wave: Option<String>,
     pub flow: Option<String>,
     pub skill: Option<String>,
     pub provider: String,
-    pub model: Option<String>,
     /// When the provider finished measuring. Falls back to the start for a turn
     /// still running, so a live turn still lands in a time bucket.
     pub at: i64,
-    pub input_tokens: Option<i64>,
-    pub output_tokens: Option<i64>,
-    pub cache_read_tokens: Option<i64>,
-    pub cost_usd: Option<f64>,
+    pub usage: TurnUsage,
+}
+
+#[derive(Debug, Clone, PartialEq, Eq)]
+#[cfg(test)]
+pub(crate) struct TaskFirstProgressEvidenceRow {
+    pub worktree: String,
+    pub started_at: i64,
+    pub ended_at: i64,
+    pub first_material_at: Option<i64>,
+}
+
+#[derive(Debug, Clone, PartialEq, Eq)]
+#[cfg(test)]
+pub(crate) struct TaskPrPerformanceEvidenceRow {
+    pub worktree: String,
+    pub requested_at: i64,
+    pub merged_at: Option<i64>,
+    pub merge_tracking_complete: bool,
+    pub repair_tracking_complete: bool,
+    pub merge_observation_complete: bool,
+    pub avoidable_rebase_agent: bool,
+    pub manual_git_repair: bool,
+}
+
+#[derive(Debug, Clone, PartialEq, Eq)]
+#[cfg(test)]
+pub(crate) struct PerformanceEvidenceSnapshot {
+    pub authority_started_at: i64,
+    pub task_runs: Vec<TaskFirstProgressEvidenceRow>,
+    pub task_prs: Vec<TaskPrPerformanceEvidenceRow>,
+}
+
+/// One provider-reported cumulative observation for a Turn.
+///
+/// Checkpoints are cumulative so a lost observation cannot corrupt later
+/// totals. `output_tokens` is the provider's inclusive billed output total;
+/// `reasoning_tokens` is only its optional breakdown.
+#[derive(Debug, Clone, PartialEq, serde::Serialize, serde::Deserialize)]
+pub struct TurnUsageSample {
+    pub turn_id: String,
+    pub observed_at: i64,
+    pub final_receipt: bool,
+    pub usage: TurnUsage,
 }
 
 /// One wave's locally readable PM projection. Linear owns the payload; sync
 /// replaces this row atomically so readers never observe a partial refresh.
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub struct PmSnapshotRow {
-    pub repo: String,
-    pub wave: String,
+    pub wave_id: WaveId,
     pub provider: String,
     pub initiative: String,
     pub synced_at: i64,
     pub payload: String,
+}
+
+#[derive(Debug, Clone)]
+pub(crate) struct WaveLocatorUpdate {
+    pub wave_id: WaveId,
+    pub expected_repo: String,
+    pub expected_slug: String,
+    pub target: WaveLocator,
 }
 
 #[derive(Debug, thiserror::Error)]
@@ -96,6 +141,19 @@ pub enum StoreError {
     NotFound,
     #[error("invalid data: {0}")]
     InvalidData(String),
+    #[error("cannot reserve {target} while Run {run_id} is {state:?}")]
+    RunFenced {
+        target: String,
+        run_id: crate::durable::RunId,
+        state: crate::durable::RunState,
+    },
+    #[error(
+        "Home upgrade {upgrade_id} fences Run reservation for runtime generation {runtime_generation:?}"
+    )]
+    HomeUpgradeFenced {
+        upgrade_id: String,
+        runtime_generation: Option<u64>,
+    },
     #[error("{target} generation {generation} no longer holds its write lease")]
     LeaseRevoked { target: String, generation: u32 },
     #[error("stale Basis: expected {expected}, current {current}")]
@@ -105,6 +163,19 @@ pub enum StoreError {
 }
 
 pub type StoreResult<T> = Result<T, StoreError>;
+
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub(crate) enum TaskPrMergeEvidenceOutcome {
+    Accepted,
+    Repeated,
+    Missing,
+    Conflict { accepted_at: i64 },
+    SchemaUnavailable,
+}
+
+/// Keep live checkpoints at one-second precision for the longest public usage
+/// window. Older Turns retain only their final or latest receipt.
+pub const TURN_USAGE_LIVE_RETENTION_SECONDS: i64 = 86_400;
 
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub enum StorageConfig {
@@ -127,6 +198,49 @@ fn machine_home_dir() -> PathBuf {
 
 pub(crate) fn production_database_path() -> PathBuf {
     machine_home_dir().join(".lf/loopflow.db")
+}
+
+/// Resolve the live Home evidence store for read-only operator surfaces.
+///
+/// Development builds normally isolate writes under `.lf-dev/worktrees`.
+/// Observability is different: it must describe the Home that launched the
+/// process, and opening it through `open_run_ledger_read_only` cannot migrate
+/// or otherwise mutate its schema. Explicit control authority wins, followed
+/// by an ordinary override, then the installed Home.
+pub(crate) fn authority_home_dir() -> PathBuf {
+    std::env::var_os(CONTROL_HOME_ENV)
+        .or_else(|| std::env::var_os("LF_HOME"))
+        .filter(|value| !value.is_empty())
+        .map(PathBuf::from)
+        .unwrap_or_else(|| machine_home_dir().join(".lf"))
+}
+
+pub(crate) fn observability_home_dir() -> PathBuf {
+    authority_home_dir()
+}
+
+pub(crate) fn observability_database_path() -> Result<PathBuf, std::io::Error> {
+    let home = observability_home_dir();
+    let candidate = std::env::var_os(CONTROL_DB_PATH_ENV)
+        .or_else(|| std::env::var_os("LF_DB_PATH"))
+        .filter(|value| !value.is_empty())
+        .map(PathBuf::from)
+        .unwrap_or_else(|| home.join("loopflow.db"));
+    if candidate.is_absolute() {
+        return Ok(candidate);
+    }
+    if candidate.components().any(|component| {
+        matches!(
+            component,
+            Component::ParentDir | Component::RootDir | Component::Prefix(_)
+        )
+    }) {
+        return Err(std::io::Error::new(
+            std::io::ErrorKind::InvalidInput,
+            "observability database path must not escape its Home",
+        ));
+    }
+    Ok(home.join(candidate))
 }
 
 pub(crate) fn read_nonterminal_task_worktrees(path: &Path) -> StoreResult<Vec<PathBuf>> {
@@ -375,17 +489,42 @@ impl Store {
         run_sqlite(&self.sqlite, move |store| store.put_pm_snapshot(&snapshot)).await
     }
 
-    pub async fn pm_snapshot(
-        &self,
-        repo: String,
-        wave: String,
-    ) -> StoreResult<Option<PmSnapshotRow>> {
-        run_sqlite(&self.sqlite, move |store| store.pm_snapshot(&repo, &wave)).await
+    pub async fn pm_snapshot(&self, wave_id: &WaveId) -> StoreResult<Option<PmSnapshotRow>> {
+        let wave_id = wave_id.clone();
+        run_sqlite(&self.sqlite, move |store| store.pm_snapshot(&wave_id)).await
     }
 
     pub async fn list_waves(&self, repo: Option<&str>) -> StoreResult<Vec<Wave>> {
-        let repo = repo.map(str::to_string);
-        run_sqlite(&self.sqlite, move |store| store.list_waves(repo.as_deref())).await
+        let Some(repo) = repo else {
+            return run_sqlite(&self.sqlite, move |store| store.list_waves(None)).await;
+        };
+        let canonical = match crate::repository::CanonicalRepo::discover(Path::new(repo)) {
+            Ok(canonical) => canonical,
+            Err(_) => {
+                let repo = repo.to_string();
+                return run_sqlite(&self.sqlite, move |store| store.list_waves(Some(&repo))).await;
+            }
+        };
+        let all = run_sqlite(&self.sqlite, move |store| store.list_waves(None)).await?;
+        for wave in all {
+            if wave.repo() == canonical.to_string() {
+                continue;
+            }
+            let equivalent = crate::repository::CanonicalRepo::discover(Path::new(wave.repo()))
+                .is_ok_and(|stored| stored == canonical);
+            if !equivalent {
+                continue;
+            }
+            let wave_id = wave.id().clone();
+            let expected_repo = wave.repo().to_string();
+            let target_repo = canonical.to_string();
+            run_sqlite(&self.sqlite, move |store| {
+                store.repair_wave_repo(&wave_id, &expected_repo, &target_repo)
+            })
+            .await?;
+        }
+        let repo = canonical.to_string();
+        run_sqlite(&self.sqlite, move |store| store.list_waves(Some(&repo))).await
     }
 
     /// A chord's contents: the waves whose `parent_wave_id` is `parent`,
@@ -400,9 +539,48 @@ impl Store {
         run_sqlite(&self.sqlite, move |store| store.get_wave(&wave_id)).await
     }
 
-    pub async fn get_wave_by_name(&self, name: &str) -> StoreResult<Option<Wave>> {
-        let name = name.to_string();
-        run_sqlite(&self.sqlite, move |store| store.get_wave_by_name(&name)).await
+    pub async fn get_wave_at(&self, locator: &WaveLocator) -> StoreResult<Option<Wave>> {
+        let locator = locator.clone();
+        if let Some(wave) = run_sqlite(&self.sqlite, {
+            let locator = locator.clone();
+            move |store| store.get_wave_at(&locator)
+        })
+        .await?
+        {
+            return Ok(Some(wave));
+        }
+
+        let candidates = self.find_waves_by_slug(locator.slug()).await?;
+        let equivalent = candidates
+            .into_iter()
+            .filter(|wave| {
+                crate::repository::CanonicalRepo::discover(Path::new(wave.repo()))
+                    .is_ok_and(|repo| &repo == locator.repo())
+            })
+            .collect::<Vec<_>>();
+        let [wave] = equivalent.as_slice() else {
+            if equivalent.len() > 1 {
+                return Err(StoreError::InvalidData(format!(
+                    "multiple stored Wave locators canonicalize to {}/{}",
+                    locator.repo(),
+                    locator.slug()
+                )));
+            }
+            return Ok(None);
+        };
+        let wave_id = wave.id().clone();
+        let expected_repo = wave.repo().to_string();
+        let target_repo = locator.repo().to_string();
+        run_sqlite(&self.sqlite, move |store| {
+            store.repair_wave_repo(&wave_id, &expected_repo, &target_repo)
+        })
+        .await?;
+        self.get_wave(wave.id()).await
+    }
+
+    pub async fn find_waves_by_slug(&self, slug: &str) -> StoreResult<Vec<Wave>> {
+        let slug = slug.to_string();
+        run_sqlite(&self.sqlite, move |store| store.find_waves_by_slug(&slug)).await
     }
 
     pub async fn create_wave(&self, wave: &Wave) -> StoreResult<()> {
@@ -413,6 +591,10 @@ impl Store {
     pub async fn update_wave(&self, wave: &Wave) -> StoreResult<()> {
         let wave = wave.clone();
         run_sqlite(&self.sqlite, move |store| store.update_wave(&wave)).await
+    }
+
+    pub(crate) async fn relocate_waves(&self, updates: Vec<WaveLocatorUpdate>) -> StoreResult<()> {
+        run_sqlite(&self.sqlite, move |store| store.relocate_waves(&updates)).await
     }
 
     pub async fn delete_wave(&self, wave_id: &WaveId) -> StoreResult<()> {
@@ -953,16 +1135,23 @@ mod tests {
         default_lf_home_dir_for, guard_development_database, may_apply_migrations, open_store,
         read_nonterminal_task_worktrees, select_store_env_value, CredentialState, PmSnapshotRow,
         ProviderAccount, ProviderAccountId, RoutingState, RunEventRow, StorageConfig,
+        TaskPrMergeEvidenceOutcome,
     };
     use crate::build_info::{BuildProvenance, MigrationAuthority};
     use crate::child::ChildRef;
-    use crate::durable::{Author, ContainmentObservation, ControlCtx, StopCause, WorkStatus};
+    use crate::durable::{
+        AdvanceReceipt, AgentInvocation, AuthenticatedRequest, Author, Basis, BoundaryState,
+        Containment, ContainmentObservation, ControlCtx, EpochState, InvocationRoute, RunAdvance,
+        RunLease, RunTrigger, StopCause, Turn, WorkRef, WorkStatus,
+    };
     use crate::id::WaveId;
     use crate::planning::{LinearIssueId, LinearProjectId, ProjectPlan, TaskPlan};
     use crate::profile::EmailAddress;
     use crate::project::{Project, ProjectId};
     use crate::task::{
-        GithubPr, PmWritebackState, PrPhase, PrPublication, Task, TaskId, TaskPr, TaskPrId,
+        AfterMerge, GithubObservation, GithubObservationResult, GithubPr, PmWritebackState,
+        PrMergeMode, PrMergeRequest, PrPhase, PrPublication, Task, TaskEventKind, TaskId, TaskPr,
+        TaskPrId, TaskPrRepairKind,
     };
     use crate::wave::Wave;
     use std::env;
@@ -1210,6 +1399,409 @@ mod tests {
         }
     }
 
+    async fn start_project_turn(
+        store: &super::Store,
+        work: &WorkRef,
+        basis: Basis,
+        containment: &str,
+    ) -> (RunLease, AgentInvocation, Turn) {
+        let (_run, lease) = store
+            .reserve_run(
+                work,
+                RunTrigger::Input {
+                    basis: basis.clone(),
+                },
+            )
+            .await
+            .unwrap();
+        store
+            .advance_run(
+                &lease,
+                RunAdvance::RunStarting {
+                    containment: Containment::Tmux {
+                        name: containment.to_string(),
+                    },
+                    cwd: PathBuf::from("/repo"),
+                },
+            )
+            .await
+            .unwrap();
+        let crate::durable::AdvanceReceipt::Invocation(invocation) = store
+            .advance_run(
+                &lease,
+                RunAdvance::InvocationStarting {
+                    route: InvocationRoute {
+                        provider: "codex".to_string(),
+                        model: None,
+                        account_id: None,
+                    },
+                    surface: "headless".to_string(),
+                    resume_token: None,
+                    answer_ask_id: None,
+                },
+            )
+            .await
+            .unwrap()
+        else {
+            panic!("expected Invocation receipt")
+        };
+        let crate::durable::AdvanceReceipt::Turn(turn) = store
+            .advance_run(
+                &lease,
+                RunAdvance::TurnStarting {
+                    invocation_id: invocation.id.clone(),
+                },
+            )
+            .await
+            .unwrap()
+        else {
+            panic!("expected Turn receipt")
+        };
+        (lease, invocation, turn)
+    }
+
+    #[tokio::test]
+    async fn performance_authority_restart_preserves_missing_zero_and_incident() {
+        let directory = tempfile::tempdir().unwrap();
+        let database = directory.path().join("registry.db");
+        let store = open_store(&StorageConfig::sqlite(database.clone()))
+            .await
+            .unwrap();
+        let wave = make_wave("/repo");
+        store.create_wave(&wave).await.unwrap();
+        let project = make_project(&wave);
+        store.create_project(&project).await.unwrap();
+        let mut legacy_task = make_task(&wave, &project);
+        legacy_task.plan.id = LinearIssueId::new("issue-legacy").unwrap();
+        legacy_task.plan.identifier = "INF-200".to_string();
+        legacy_task.worktree = PathBuf::from("/repo.legacy");
+        legacy_task.workspace_slug = "legacy-landing".to_string();
+        let legacy_pr = make_task_pr(&legacy_task);
+        store.create_task(&legacy_task, &legacy_pr).await.unwrap();
+        if store
+            .sqlite
+            .performance_evidence_since(0)
+            .unwrap()
+            .is_none()
+        {
+            store
+                .sqlite
+                .apply_migration_for_test("task_performance_authority")
+                .unwrap();
+        }
+
+        let mut clean_task = make_task(&wave, &project);
+        clean_task.plan.id = LinearIssueId::new("issue-clean").unwrap();
+        clean_task.plan.identifier = "INF-201".to_string();
+        clean_task.worktree = PathBuf::from("/repo.clean");
+        clean_task.workspace_slug = "clean-landing".to_string();
+        let clean_pr = make_task_pr(&clean_task);
+        store.create_task(&clean_task, &clean_pr).await.unwrap();
+
+        let mut repaired_task = make_task(&wave, &project);
+        repaired_task.plan.id = LinearIssueId::new("issue-repaired").unwrap();
+        repaired_task.plan.identifier = "INF-202".to_string();
+        repaired_task.worktree = PathBuf::from("/repo.repaired");
+        repaired_task.workspace_slug = "repaired-landing".to_string();
+        let repaired_pr = make_task_pr(&repaired_task);
+        store
+            .create_task(&repaired_task, &repaired_pr)
+            .await
+            .unwrap();
+
+        let mut missing_merge_task = make_task(&wave, &project);
+        missing_merge_task.plan.id = LinearIssueId::new("issue-missing-merge").unwrap();
+        missing_merge_task.plan.identifier = "INF-203".to_string();
+        missing_merge_task.worktree = PathBuf::from("/repo.missing-merge");
+        missing_merge_task.workspace_slug = "missing-merge-authority".to_string();
+        let missing_merge_pr = make_task_pr(&missing_merge_task);
+        store
+            .create_task(&missing_merge_task, &missing_merge_pr)
+            .await
+            .unwrap();
+
+        let connection = rusqlite::Connection::open(&database).unwrap();
+        connection
+            .execute(
+                "UPDATE task_prs SET repair_tracking_complete=0 WHERE id=?1",
+                [legacy_pr.id.as_str()],
+            )
+            .unwrap();
+        assert_eq!(
+            connection
+                .query_row(
+                    "SELECT repair_tracking_complete FROM task_prs WHERE id=?1",
+                    [legacy_pr.id.as_str()],
+                    |row| row.get::<_, i64>(0),
+                )
+                .unwrap(),
+            0
+        );
+        assert_eq!(
+            connection
+                .query_row(
+                    "SELECT merge_tracking_complete FROM task_prs WHERE id=?1",
+                    [legacy_pr.id.as_str()],
+                    |row| row.get::<_, i64>(0),
+                )
+                .unwrap(),
+            1,
+            "an active cutover PR has complete future merge instrumentation"
+        );
+        assert_eq!(
+            connection
+                .query_row(
+                    "SELECT repair_tracking_complete FROM task_prs WHERE id=?1",
+                    [clean_pr.id.as_str()],
+                    |row| row.get::<_, i64>(0),
+                )
+                .unwrap(),
+            1
+        );
+        drop(connection);
+
+        let clean_work = store
+            .work_for_child(&ChildRef::Task(clean_task.id.clone()))
+            .await
+            .unwrap();
+        let (_, clean_lease) = store
+            .reserve_run(&clean_work, RunTrigger::User)
+            .await
+            .unwrap();
+        let AdvanceReceipt::Run(clean_run) = store
+            .advance_run(
+                &clean_lease,
+                RunAdvance::RunStarting {
+                    containment: Containment::Tmux {
+                        name: "clean-progress".to_string(),
+                    },
+                    cwd: clean_task.worktree.clone(),
+                },
+            )
+            .await
+            .unwrap()
+        else {
+            panic!("expected a started Run")
+        };
+        let first = clean_run.started_at.unwrap();
+        assert_eq!(
+            store
+                .record_first_material_at(&clean_lease, first)
+                .await
+                .unwrap(),
+            first
+        );
+        assert_eq!(
+            store
+                .record_first_material_at(&clean_lease, first + time::Duration::seconds(5))
+                .await
+                .unwrap(),
+            first,
+            "the first accepted material receipt is immutable"
+        );
+        store
+            .stop_run(
+                &clean_lease,
+                StopCause::Requested,
+                ContainmentObservation::Absent,
+            )
+            .await
+            .unwrap();
+
+        let repaired_work = store
+            .work_for_child(&ChildRef::Task(repaired_task.id.clone()))
+            .await
+            .unwrap();
+        let (_, missing_lease) = store
+            .reserve_run(&repaired_work, RunTrigger::User)
+            .await
+            .unwrap();
+        store
+            .advance_run(
+                &missing_lease,
+                RunAdvance::RunStarting {
+                    containment: Containment::Tmux {
+                        name: "missing-progress".to_string(),
+                    },
+                    cwd: repaired_task.worktree.clone(),
+                },
+            )
+            .await
+            .unwrap();
+        store
+            .stop_run(
+                &missing_lease,
+                StopCause::Requested,
+                ContainmentObservation::Absent,
+            )
+            .await
+            .unwrap();
+
+        let merge_time = OffsetDateTime::now_utc() + time::Duration::seconds(30);
+        let prepare_pr = |mut pr: TaskPr, number: u32| {
+            let requested_at = merge_time - time::Duration::seconds(10);
+            let head = format!("head-{number}");
+            pr.publication = Some(PrPublication {
+                requested_at: requested_at - time::Duration::seconds(5),
+                github: Some(GithubPr {
+                    number,
+                    url: format!("https://github.com/loopflow/loopflow/pull/{number}"),
+                    head_sha: Some(head.clone()),
+                }),
+                merge: Some(PrMergeRequest {
+                    mode: PrMergeMode::Auto,
+                    requested_at,
+                    head_sha: head,
+                    after_merge: AfterMerge::CompleteTask,
+                    next_slug: None,
+                }),
+            });
+            pr.github_observation = Some(GithubObservation {
+                checked_at: merge_time,
+                result: GithubObservationResult::Fresh,
+            });
+            pr.updated_at = requested_at;
+            pr
+        };
+
+        let mut clean_pr = prepare_pr(clean_pr, 201);
+        store.update_task_pr(&clean_pr).await.unwrap();
+        clean_pr.merge_commit = Some("merge-clean".to_string());
+        clean_pr.updated_at = merge_time;
+        assert_eq!(
+            store
+                .settle_task_pr_merged(&clean_pr, Some(merge_time))
+                .await
+                .unwrap(),
+            TaskPrMergeEvidenceOutcome::Accepted
+        );
+        assert!(
+            store
+                .record_task_pr_repair_incident(
+                    &clean_pr.id,
+                    TaskPrRepairKind::ManualGitRepair,
+                    merge_time + time::Duration::seconds(1),
+                )
+                .await
+                .is_err(),
+            "a completed zero cannot become a later repair incident"
+        );
+
+        let mut repaired_pr = prepare_pr(repaired_pr, 202);
+        store.update_task_pr(&repaired_pr).await.unwrap();
+        assert!(store
+            .record_task_pr_repair_incident(
+                &repaired_pr.id,
+                TaskPrRepairKind::AvoidableRebaseAgent,
+                merge_time - time::Duration::seconds(2),
+            )
+            .await
+            .unwrap());
+        assert!(!store
+            .record_task_pr_repair_incident(
+                &repaired_pr.id,
+                TaskPrRepairKind::AvoidableRebaseAgent,
+                merge_time - time::Duration::seconds(1),
+            )
+            .await
+            .unwrap());
+        repaired_pr.merge_commit = Some("merge-repaired".to_string());
+        repaired_pr.updated_at = merge_time;
+        store
+            .settle_task_pr_merged(&repaired_pr, Some(merge_time))
+            .await
+            .unwrap();
+        repaired_pr = store.get_task_pr(&repaired_pr.id).await.unwrap().unwrap();
+        assert_eq!(
+            store
+                .settle_task_pr_merged(&repaired_pr, Some(merge_time + time::Duration::seconds(5)),)
+                .await
+                .unwrap(),
+            TaskPrMergeEvidenceOutcome::Conflict {
+                accepted_at: merge_time.unix_timestamp(),
+            },
+            "a conflicting replay preserves the first merge instant"
+        );
+
+        let mut missing_merge_pr = prepare_pr(missing_merge_pr, 203);
+        missing_merge_pr.github_observation = Some(GithubObservation {
+            checked_at: merge_time,
+            result: GithubObservationResult::Partial {
+                reason: "GitHub merged_at missing".to_string(),
+            },
+        });
+        store.update_task_pr(&missing_merge_pr).await.unwrap();
+        missing_merge_pr.merge_commit = Some("merge-without-time".to_string());
+        missing_merge_pr.updated_at = merge_time;
+        assert_eq!(
+            store
+                .settle_task_pr_merged(&missing_merge_pr, None)
+                .await
+                .unwrap(),
+            TaskPrMergeEvidenceOutcome::Missing,
+            "correctness settles even when timing authority is absent"
+        );
+
+        drop(store);
+        let reader = SqliteStore::open_run_ledger_read_only(&database).unwrap();
+        let evidence = reader
+            .performance_evidence_since(0)
+            .unwrap()
+            .expect("authority schema survives restart");
+
+        assert_eq!(evidence.task_runs.len(), 2);
+        assert_eq!(
+            evidence
+                .task_runs
+                .iter()
+                .filter(|run| run.first_material_at.is_some())
+                .count(),
+            1
+        );
+        assert_eq!(evidence.task_prs.len(), 3);
+        assert_eq!(
+            evidence
+                .task_prs
+                .iter()
+                .filter(|pr| pr.merge_observation_complete)
+                .count(),
+            1,
+            "the conflicting merge receipt remains durable partial evidence"
+        );
+        assert!(evidence
+            .task_prs
+            .iter()
+            .all(|pr| pr.merge_tracking_complete));
+        assert!(evidence
+            .task_prs
+            .iter()
+            .all(|pr| pr.repair_tracking_complete));
+        assert_eq!(
+            evidence
+                .task_prs
+                .iter()
+                .find(|pr| pr.worktree == repaired_task.worktree.to_string_lossy())
+                .unwrap()
+                .merged_at,
+            Some(merge_time.unix_timestamp())
+        );
+        let missing_merge = evidence
+            .task_prs
+            .iter()
+            .find(|pr| pr.worktree == missing_merge_task.worktree.to_string_lossy())
+            .unwrap();
+        assert_eq!(missing_merge.merged_at, None);
+        assert!(!missing_merge.merge_observation_complete);
+        assert_eq!(
+            evidence
+                .task_prs
+                .iter()
+                .filter(|pr| pr.avoidable_rebase_agent)
+                .count(),
+            1
+        );
+    }
+
     #[tokio::test]
     async fn task_run_reservation_refuses_remote_placement() {
         let directory = tempfile::tempdir().unwrap();
@@ -1332,6 +1924,31 @@ mod tests {
             .await
             .unwrap();
 
+        let error = store
+            .steer(
+                &ControlCtx::Run(&parent_lease),
+                &task_work,
+                "unproven parent Turn",
+                None,
+            )
+            .await
+            .expect_err("child control requires a durable parent Turn Basis");
+        assert!(matches!(error, super::StoreError::InvalidAuthority(_)));
+        let invocation = store
+            .open_invocation_for_run(&parent_lease.run_id)
+            .await
+            .unwrap()
+            .unwrap();
+        store
+            .advance_run(
+                &parent_lease,
+                RunAdvance::TurnStarting {
+                    invocation_id: invocation.id,
+                },
+            )
+            .await
+            .unwrap();
+
         let receipt = store
             .steer(
                 &ControlCtx::Run(&parent_lease),
@@ -1369,6 +1986,643 @@ mod tests {
             Err(super::StoreError::InvalidAuthority(_))
         ));
         assert!(crate::durable::RunLeaseToken::parse("run_not-a-capability").is_err());
+    }
+
+    #[tokio::test]
+    async fn newer_parent_steer_fences_stale_child_run_reservation() {
+        let directory = tempfile::tempdir().unwrap();
+        let store = open_store(&StorageConfig::sqlite(directory.path().join("registry.db")))
+            .await
+            .unwrap();
+        let wave = make_wave("/repo");
+        store.create_wave(&wave).await.unwrap();
+        let project = make_project(&wave);
+        store.create_project(&project).await.unwrap();
+        let task = make_task(&wave, &project);
+        store
+            .create_task(&task, &make_task_pr(&task))
+            .await
+            .unwrap();
+        let project_work = WorkRef::Project(project.id.clone());
+        let task_work = WorkRef::Task(task.id.clone());
+
+        let selected = store
+            .append_steer(&project_work, Author::User, "proceed with the Task", None)
+            .await
+            .unwrap();
+        let (_run, project_lease) = store
+            .reserve_run(
+                &project_work,
+                RunTrigger::Input {
+                    basis: selected.steer.basis.clone(),
+                },
+            )
+            .await
+            .unwrap();
+        store
+            .advance_run(
+                &project_lease,
+                RunAdvance::RunStarting {
+                    containment: Containment::Tmux {
+                        name: "project-race".to_string(),
+                    },
+                    cwd: PathBuf::from("/repo"),
+                },
+            )
+            .await
+            .unwrap();
+        let crate::durable::AdvanceReceipt::Invocation(invocation) = store
+            .advance_run(
+                &project_lease,
+                RunAdvance::InvocationStarting {
+                    route: InvocationRoute {
+                        provider: "codex".to_string(),
+                        model: None,
+                        account_id: None,
+                    },
+                    surface: "headless".to_string(),
+                    resume_token: None,
+                    answer_ask_id: None,
+                },
+            )
+            .await
+            .unwrap()
+        else {
+            panic!("expected Invocation receipt")
+        };
+        let crate::durable::AdvanceReceipt::Turn(stale_turn) = store
+            .advance_run(
+                &project_lease,
+                RunAdvance::TurnStarting {
+                    invocation_id: invocation.id.clone(),
+                },
+            )
+            .await
+            .unwrap()
+        else {
+            panic!("expected Turn receipt")
+        };
+        assert_eq!(stale_turn.basis, selected.steer.basis);
+
+        let hold = store
+            .append_steer(
+                &project_work,
+                Author::User,
+                "hold this Task",
+                Some(&selected.steer.basis),
+            )
+            .await
+            .unwrap();
+        let task_basis = store.current_epoch(&task_work).await.unwrap().current_basis;
+        let error = store
+            .reserve_child_run(
+                &project_lease,
+                &task_work,
+                RunTrigger::Input { basis: task_basis },
+            )
+            .await
+            .expect_err("revision N cannot launch after hold N+1");
+
+        assert!(matches!(error, super::StoreError::StaleBasis { .. }));
+        assert!(store.current_run(&task_work).await.unwrap().is_none());
+        let seed = store.boundary_seed(&project_work).await.unwrap();
+        assert_eq!(seed.basis, hold.steer.basis);
+        assert_eq!(
+            seed.steers
+                .iter()
+                .map(|steer| steer.text.as_str())
+                .collect::<Vec<_>>(),
+            ["proceed with the Task", "hold this Task"]
+        );
+
+        store
+            .advance_run(
+                &project_lease,
+                RunAdvance::TurnEnded {
+                    turn_id: stale_turn.id,
+                    outcome: BoundaryState::Succeeded,
+                },
+            )
+            .await
+            .unwrap();
+        let crate::durable::AdvanceReceipt::Turn(next_turn) = store
+            .advance_run(
+                &project_lease,
+                RunAdvance::TurnStarting {
+                    invocation_id: invocation.id,
+                },
+            )
+            .await
+            .unwrap()
+        else {
+            panic!("expected next Turn receipt")
+        };
+        assert_eq!(next_turn.basis, hold.steer.basis);
+        assert!(store.current_run(&task_work).await.unwrap().is_none());
+    }
+
+    #[tokio::test]
+    async fn newer_parent_steer_rolls_back_initial_child_creation_before_files_exist() {
+        let directory = tempfile::tempdir().unwrap();
+        let database_path = directory.path().join("registry.db");
+        let store = open_store(&StorageConfig::sqlite(database_path.clone()))
+            .await
+            .unwrap();
+        let wave = make_wave("/repo");
+        store.create_wave(&wave).await.unwrap();
+        let project = make_project(&wave);
+        store.create_project(&project).await.unwrap();
+        let project_work = WorkRef::Project(project.id.clone());
+        let selected = store
+            .append_steer(&project_work, Author::User, "run the child", None)
+            .await
+            .unwrap();
+        let (project_lease, invocation, stale_turn) = start_project_turn(
+            &store,
+            &project_work,
+            selected.steer.basis.clone(),
+            "project-create-race",
+        )
+        .await;
+        let hold = store
+            .append_steer(
+                &project_work,
+                Author::User,
+                "hold every dependent child",
+                Some(&selected.steer.basis),
+            )
+            .await
+            .unwrap();
+        let mut task = make_task(&wave, &project);
+        task.worktree = directory.path().join("uncreated-child-worktree");
+        let pr = make_task_pr(&task);
+
+        let error = store
+            .create_task_run(
+                &ControlCtx::Run(&project_lease),
+                &task,
+                &pr,
+                "a sibling completed; begin file-writing work",
+            )
+            .await
+            .expect_err("revision N cannot create a child after hold N+1");
+
+        assert!(matches!(error, super::StoreError::StaleBasis { .. }));
+        assert!(store.get_task(&task.id).await.unwrap().is_none());
+        assert!(store.task_prs(&task.id).await.unwrap().is_empty());
+        assert!(!task.worktree.exists());
+        let durable_child_rows = |path: &std::path::Path| {
+            rusqlite::Connection::open(path)
+                .unwrap()
+                .query_row(
+                    "SELECT
+                        (SELECT COUNT(*) FROM tasks WHERE id=?1),
+                        (SELECT COUNT(*) FROM epochs WHERE task_id=?1),
+                        (SELECT COUNT(*) FROM steers
+                         WHERE epoch_id IN (SELECT id FROM epochs WHERE task_id=?1)),
+                        (SELECT COUNT(*) FROM task_prs WHERE task_id=?1),
+                        (SELECT COUNT(*) FROM runs
+                         WHERE epoch_id IN (SELECT id FROM epochs WHERE task_id=?1))",
+                    [task.id.as_str()],
+                    |row| {
+                        Ok((
+                            row.get::<_, i64>(0)?,
+                            row.get::<_, i64>(1)?,
+                            row.get::<_, i64>(2)?,
+                            row.get::<_, i64>(3)?,
+                            row.get::<_, i64>(4)?,
+                        ))
+                    },
+                )
+                .unwrap()
+        };
+        assert_eq!(durable_child_rows(&database_path), (0, 0, 0, 0, 0));
+        let seed = store.boundary_seed(&project_work).await.unwrap();
+        assert_eq!(seed.basis, hold.steer.basis);
+        assert_eq!(
+            seed.steers
+                .iter()
+                .map(|steer| steer.text.as_str())
+                .collect::<Vec<_>>(),
+            ["run the child", "hold every dependent child"]
+        );
+
+        store
+            .advance_run(
+                &project_lease,
+                RunAdvance::TurnEnded {
+                    turn_id: stale_turn.id,
+                    outcome: BoundaryState::Succeeded,
+                },
+            )
+            .await
+            .unwrap();
+        let crate::durable::AdvanceReceipt::Turn(current_turn) = store
+            .advance_run(
+                &project_lease,
+                RunAdvance::TurnStarting {
+                    invocation_id: invocation.id,
+                },
+            )
+            .await
+            .unwrap()
+        else {
+            panic!("expected current Turn receipt")
+        };
+        assert_eq!(current_turn.basis, hold.steer.basis);
+
+        let (child_run, _child_lease) = store
+            .create_task_run(
+                &ControlCtx::Run(&project_lease),
+                &task,
+                &pr,
+                "create a different child under current direction",
+            )
+            .await
+            .expect("the current parent Turn can create its immediate child");
+
+        let task_work = WorkRef::Task(task.id.clone());
+        let child_seed = store.boundary_seed(&task_work).await.unwrap();
+        assert_eq!(
+            child_seed.steers[0].author,
+            Author::Run(project_lease.run_id.clone())
+        );
+        assert_eq!(
+            store.current_run(&task_work).await.unwrap().unwrap().id,
+            child_run.id
+        );
+        assert_eq!(
+            store
+                .latest_task_event(&task.id)
+                .await
+                .unwrap()
+                .expect("initial Task publication records placement")
+                .kind,
+            TaskEventKind::WorktreeInitializing {
+                pr_id: pr.id.clone(),
+                sequence: pr.sequence,
+                branch: pr.branch.clone(),
+                path: task.worktree.display().to_string(),
+                base_commit: pr.base_commit.clone(),
+            }
+        );
+        assert_eq!(durable_child_rows(&database_path), (1, 1, 1, 1, 1));
+        assert!(!task.worktree.exists());
+    }
+
+    #[tokio::test]
+    async fn historical_project_route_cannot_authorize_automated_task_settlement() {
+        let directory = tempfile::tempdir().unwrap();
+        let store = open_store(&StorageConfig::sqlite(directory.path().join("registry.db")))
+            .await
+            .unwrap();
+        let wave = make_wave("/repo");
+        store.create_wave(&wave).await.unwrap();
+        let historical_project = make_project(&wave);
+        store.create_project(&historical_project).await.unwrap();
+        let task = make_task(&wave, &historical_project);
+        let pr = make_task_pr(&task);
+        store.create_task(&task, &pr).await.unwrap();
+        let task_work = WorkRef::Task(task.id.clone());
+        let task_direction = store
+            .append_steer(
+                &task_work,
+                Author::User,
+                "historical successor direction",
+                None,
+            )
+            .await
+            .unwrap();
+        let (_task_run, task_lease) = store
+            .reserve_run(
+                &task_work,
+                RunTrigger::Input {
+                    basis: task_direction.steer.basis.clone(),
+                },
+            )
+            .await
+            .unwrap();
+
+        store
+            .validate_task_run_route(&task, &task_lease, historical_project.plan.id.as_str())
+            .await
+            .expect("the launch Project is initially the current PM route");
+
+        let mut current_project = make_project(&wave);
+        current_project.plan.id = LinearProjectId::new("current-project-uuid").unwrap();
+        current_project.plan.slug = "performance-efficiency".to_string();
+        current_project.plan.name = "Performance and Efficiency".to_string();
+        store.create_project(&current_project).await.unwrap();
+        let current_project_work = WorkRef::Project(current_project.id.clone());
+        let hold = store
+            .append_steer(
+                &current_project_work,
+                Author::User,
+                "hold the historically routed Task",
+                None,
+            )
+            .await
+            .unwrap();
+        let route_error = store
+            .validate_task_run_route(&task, &task_lease, current_project.plan.id.as_str())
+            .await
+            .expect_err("historical Project identity cannot cross a current PM move");
+        assert!(matches!(
+            route_error,
+            super::StoreError::InvalidAuthority(_)
+        ));
+        assert!(route_error.to_string().contains("current PM routing names"));
+        assert_eq!(store.task_prs(&task.id).await.unwrap(), [pr]);
+        assert_eq!(
+            store.current_epoch(&task_work).await.unwrap().state,
+            EpochState::Open
+        );
+        assert_eq!(
+            store.boundary_seed(&task_work).await.unwrap().basis,
+            task_direction.steer.basis
+        );
+        assert_eq!(
+            store.current_run(&task_work).await.unwrap().unwrap().id,
+            task_lease.run_id
+        );
+        assert_eq!(
+            store
+                .boundary_seed(&current_project_work)
+                .await
+                .unwrap()
+                .basis,
+            hold.steer.basis
+        );
+    }
+
+    #[tokio::test]
+    async fn abandoned_task_recovery_requires_user_after_parent_freshness() {
+        let directory = tempfile::tempdir().unwrap();
+        let database_path = directory.path().join("registry.db");
+        let store = open_store(&StorageConfig::sqlite(database_path.clone()))
+            .await
+            .unwrap();
+        let wave = make_wave("/repo");
+        store.create_wave(&wave).await.unwrap();
+        let project = make_project(&wave);
+        store.create_project(&project).await.unwrap();
+        let mut task = make_task(&wave, &project);
+        task.worktree = directory.path().join("preserved-task-worktree");
+        let pr = make_task_pr(&task);
+        let request = AuthenticatedRequest::cli();
+        store.create_task(&task, &pr).await.unwrap();
+        let task_work = WorkRef::Task(task.id.clone());
+        store
+            .append_steer(&task_work, Author::User, "initial Task direction", None)
+            .await
+            .unwrap();
+        let task_basis = store.current_epoch(&task_work).await.unwrap().current_basis;
+        let (historical_run, task_lease) = store
+            .reserve_run(
+                &task_work,
+                RunTrigger::Input {
+                    basis: task_basis.clone(),
+                },
+            )
+            .await
+            .unwrap();
+        store
+            .advance_run(
+                &task_lease,
+                RunAdvance::RunStarting {
+                    containment: Containment::Tmux {
+                        name: "abandoned-task".to_string(),
+                    },
+                    cwd: task.worktree.clone(),
+                },
+            )
+            .await
+            .unwrap();
+        let crate::durable::AdvanceReceipt::Invocation(task_invocation) = store
+            .advance_run(
+                &task_lease,
+                RunAdvance::InvocationStarting {
+                    route: InvocationRoute {
+                        provider: "codex".to_string(),
+                        model: None,
+                        account_id: None,
+                    },
+                    surface: "headless".to_string(),
+                    resume_token: None,
+                    answer_ask_id: None,
+                },
+            )
+            .await
+            .unwrap()
+        else {
+            panic!("expected Task Invocation receipt")
+        };
+        let abandoned = store
+            .abandon(&task_work, "hold this Task", &task_basis)
+            .await
+            .unwrap()
+            .epoch;
+        assert_eq!(abandoned.state, EpochState::Abandoned);
+        let historical_prs = store.task_prs(&task.id).await.unwrap();
+        let historical_task_run = store.run_by_id(&historical_run.id).await.unwrap();
+        let historical_invocations = store.invocations_for_run(&historical_run.id).await.unwrap();
+        assert_eq!(historical_invocations.len(), 1);
+        assert_eq!(historical_invocations[0].id, task_invocation.id);
+
+        let project_work = WorkRef::Project(project.id.clone());
+        let selected = store
+            .append_steer(&project_work, Author::User, "dependency pending", None)
+            .await
+            .unwrap();
+        let (project_lease, invocation, stale_turn) = start_project_turn(
+            &store,
+            &project_work,
+            selected.steer.basis.clone(),
+            "project-recovery-race",
+        )
+        .await;
+        let hold = store
+            .append_steer(
+                &project_work,
+                Author::User,
+                "do not recover this Task",
+                Some(&selected.steer.basis),
+            )
+            .await
+            .unwrap();
+        let mut recovered = task.clone();
+        recovered.phase_epoch += 1;
+        recovered.updated_at = time::OffsetDateTime::now_utc();
+
+        let stale = store
+            .reopen_task(
+                &ControlCtx::Run(&project_lease),
+                &recovered,
+                None,
+                "a sibling completed; recover the Task",
+            )
+            .await
+            .expect_err("stale Project direction cannot reopen terminal Task Work");
+        assert!(matches!(stale, super::StoreError::StaleBasis { .. }));
+        assert!(matches!(
+            store.current_epoch(&task_work).await,
+            Err(super::StoreError::NotFound)
+        ));
+        assert_eq!(store.task_prs(&task.id).await.unwrap(), historical_prs);
+        assert_eq!(
+            store.run_by_id(&historical_run.id).await.unwrap(),
+            historical_task_run
+        );
+        assert_eq!(
+            store.invocations_for_run(&historical_run.id).await.unwrap(),
+            historical_invocations
+        );
+        assert!(!task.worktree.exists());
+
+        store
+            .advance_run(
+                &project_lease,
+                RunAdvance::TurnEnded {
+                    turn_id: stale_turn.id,
+                    outcome: BoundaryState::Succeeded,
+                },
+            )
+            .await
+            .unwrap();
+        let crate::durable::AdvanceReceipt::Turn(current_turn) = store
+            .advance_run(
+                &project_lease,
+                RunAdvance::TurnStarting {
+                    invocation_id: invocation.id,
+                },
+            )
+            .await
+            .unwrap()
+        else {
+            panic!("expected current Turn receipt")
+        };
+        assert_eq!(current_turn.basis, hold.steer.basis);
+        let dependency_only = store
+            .reopen_task(
+                &ControlCtx::Run(&project_lease),
+                &recovered,
+                None,
+                "the dependency is complete",
+            )
+            .await
+            .expect_err("current Project direction is not User recovery authority");
+        assert!(matches!(
+            dependency_only,
+            super::StoreError::InvalidAuthority(_)
+        ));
+        assert!(dependency_only
+            .to_string()
+            .contains("explicit User recovery is required"));
+        assert!(matches!(
+            store.current_epoch(&task_work).await,
+            Err(super::StoreError::NotFound)
+        ));
+        assert_eq!(store.task_prs(&task.id).await.unwrap(), historical_prs);
+        assert!(!task.worktree.exists());
+
+        store
+            .reopen_task(
+                &ControlCtx::User(&request),
+                &recovered,
+                None,
+                "explicit User recovery",
+            )
+            .await
+            .expect("User direction opens exactly one successor Epoch");
+
+        let successor = store.current_epoch(&task_work).await.unwrap();
+        assert_eq!(successor.number, abandoned.number + 1);
+        assert_eq!(successor.state, EpochState::Open);
+        assert_eq!(store.task_prs(&task.id).await.unwrap(), historical_prs);
+        assert_eq!(
+            store.run_by_id(&historical_run.id).await.unwrap(),
+            historical_task_run
+        );
+        assert_eq!(
+            store.invocations_for_run(&historical_run.id).await.unwrap(),
+            historical_invocations
+        );
+        assert!(store.current_run(&task_work).await.unwrap().is_none());
+        let successor_seed = store.boundary_seed(&task_work).await.unwrap();
+        assert_eq!(successor_seed.steers.len(), 1);
+        assert_eq!(successor_seed.steers[0].author, Author::User);
+        assert_eq!(successor_seed.steers[0].text, "explicit User recovery");
+        let steers = SqliteStore::new(&database_path)
+            .unwrap()
+            .list_steers_since(0)
+            .unwrap();
+        assert!(steers
+            .iter()
+            .any(|steer| steer.text == "initial Task direction"));
+        assert!(steers
+            .iter()
+            .any(|steer| steer.text == "explicit User recovery"));
+        assert!(!task.worktree.exists());
+    }
+
+    #[tokio::test]
+    async fn sibling_completion_is_observation_not_task_recovery_authority() {
+        let directory = tempfile::tempdir().unwrap();
+        let store = open_store(&StorageConfig::sqlite(directory.path().join("registry.db")))
+            .await
+            .unwrap();
+        let wave = make_wave("/repo");
+        store.create_wave(&wave).await.unwrap();
+        let project = make_project(&wave);
+        store.create_project(&project).await.unwrap();
+        let target = make_task(&wave, &project);
+        store
+            .create_task(&target, &make_task_pr(&target))
+            .await
+            .unwrap();
+        let target_work = WorkRef::Task(target.id.clone());
+        let target_epoch = store.current_epoch(&target_work).await.unwrap();
+        let target_prs = store.task_prs(&target.id).await.unwrap();
+
+        let mut sibling = make_task(&wave, &project);
+        sibling.plan.id = LinearIssueId::new("sibling-issue-uuid").unwrap();
+        sibling.plan.identifier = "INF-124".to_string();
+        sibling.worktree = PathBuf::from("/repo.inf-124");
+        store
+            .create_task(&sibling, &make_task_pr(&sibling))
+            .await
+            .unwrap();
+        store
+            .append_task_event(
+                &sibling.id,
+                &TaskEventKind::Completed {
+                    summary: "dependency complete".to_string(),
+                },
+            )
+            .await
+            .unwrap();
+        let observations = store
+            .pending_project_observations(&project.id)
+            .await
+            .unwrap();
+        assert_eq!(observations.len(), 1);
+        assert!(store
+            .consume_task_observation_for_project(&project.id, &observations[0])
+            .await
+            .unwrap());
+
+        assert_eq!(
+            store.current_epoch(&target_work).await.unwrap(),
+            target_epoch
+        );
+        assert_eq!(store.task_prs(&target.id).await.unwrap(), target_prs);
+        assert!(store.current_run(&target_work).await.unwrap().is_none());
+        assert!(store
+            .boundary_seed(&target_work)
+            .await
+            .unwrap()
+            .steers
+            .is_empty());
     }
 
     #[tokio::test]
@@ -1947,7 +3201,12 @@ mod tests {
         store.create_wave(&wave).await.unwrap();
         let project = make_project(&wave);
         store.create_project(&project).await.unwrap();
-        let task = make_task(&wave, &project);
+        let mut task = make_task(&wave, &project);
+        task.enter_finally(crate::task::TaskGateProposal {
+            done: true,
+            reason: "empty Task is complete".to_string(),
+        })
+        .unwrap();
         let pr = make_task_pr(&task);
         store.create_task(&task, &pr).await.unwrap();
 
@@ -2004,13 +3263,32 @@ mod tests {
     }
 
     #[tokio::test(flavor = "multi_thread", worker_threads = 2)]
-    async fn task_and_project_reservations_wait_for_promotion() {
+    async fn task_and_project_reservations_defer_during_promotion() {
         let dir = tempfile::tempdir().unwrap();
+        let database = dir.path().join("registry.db");
         let store = Arc::new(
-            super::open_store(&StorageConfig::sqlite(dir.path().join("registry.db")))
+            super::open_store(&StorageConfig::sqlite(database.clone()))
                 .await
                 .unwrap(),
         );
+        let connection = rusqlite::Connection::open(&database).unwrap();
+        let enablement_is_materialized = connection
+            .query_row(
+                "SELECT EXISTS(
+                    SELECT 1 FROM pragma_table_info('work_placements') WHERE name='enabled'
+                 )",
+                [],
+                |row| row.get::<_, bool>(0),
+            )
+            .unwrap();
+        if !enablement_is_materialized {
+            connection
+                .execute_batch(&crate::store::migrations::migration_sql_for_test(
+                    "work_enablement",
+                ))
+                .unwrap();
+        }
+        drop(connection);
         let wave = make_wave("/repo");
         store.create_wave(&wave).await.unwrap();
         let project = make_project(&wave);
@@ -2023,55 +3301,30 @@ mod tests {
             .unwrap();
 
         let promotion = crate::promotion_lock::acquire_exclusive().unwrap();
-        let (started_tx, mut started_rx) = tokio::sync::mpsc::unbounded_channel();
-
-        let task_store = Arc::clone(&store);
-        let task_started = started_tx.clone();
-        let mut task_reservation = tokio::spawn(async move {
-            task_started.send(()).unwrap();
-            task_store
-                .reserve_task_process(&task, WorkStatus::Ready)
-                .await
-        });
-
-        let project_store = Arc::clone(&store);
-        let mut project_reservation = tokio::spawn(async move {
-            started_tx.send(()).unwrap();
-            project_store
-                .reserve_project_process(&project, WorkStatus::Ready)
-                .await
-        });
-
-        started_rx.recv().await.unwrap();
-        started_rx.recv().await.unwrap();
-        assert!(
-            tokio::time::timeout(std::time::Duration::from_millis(50), &mut task_reservation)
-                .await
-                .is_err(),
-            "Task reservation crossed the exclusive promotion fence"
-        );
-        assert!(
-            tokio::time::timeout(
-                std::time::Duration::from_millis(50),
-                &mut project_reservation
-            )
+        let task_error = store
+            .reserve_task_process(&task, WorkStatus::Ready)
             .await
-            .is_err(),
-            "Project reservation crossed the exclusive promotion fence"
-        );
+            .unwrap_err();
+        let project_error = store
+            .reserve_project_process(&project, WorkStatus::Ready)
+            .await
+            .unwrap_err();
+        for error in [task_error, project_error] {
+            assert!(
+                error.to_string().contains("promotion lock"),
+                "reservation returned the wrong promotion deferral: {error}"
+            );
+        }
 
         drop(promotion);
-        let task_lease = tokio::time::timeout(std::time::Duration::from_secs(2), task_reservation)
+        let task_lease = store
+            .reserve_task_process(&task, WorkStatus::Ready)
             .await
-            .unwrap()
-            .unwrap()
             .unwrap();
-        let project_lease =
-            tokio::time::timeout(std::time::Duration::from_secs(2), project_reservation)
-                .await
-                .unwrap()
-                .unwrap()
-                .unwrap();
+        let project_lease = store
+            .reserve_project_process(&project, WorkStatus::Ready)
+            .await
+            .unwrap();
         assert!(task_lease.is_some());
         assert!(project_lease.is_some());
     }
@@ -2083,7 +3336,7 @@ mod tests {
 
         let updated = Wave::new(
             wave.id().clone(),
-            wave.name().to_string(),
+            "renamed-without-relocation".to_string(),
             "/repo-updated".to_string(),
         );
         assert!(updated.promoted_at().is_none());
@@ -2093,7 +3346,12 @@ mod tests {
             .await
             .expect("get wave")
             .expect("wave exists");
-        assert_eq!(loaded.repo(), "/repo-updated");
+        assert_eq!(
+            loaded.repo(),
+            "/repo",
+            "ordinary Wave updates cannot bypass relocation"
+        );
+        assert_eq!(loaded.name(), wave.name());
 
         store.delete_wave(wave.id()).await.expect("delete wave");
         assert!(store
@@ -2189,9 +3447,10 @@ mod tests {
         let store = open_store(&StorageConfig::sqlite(db_path.clone()))
             .await
             .expect("store should open");
+        let wave = Wave::new(WaveId::new(), "product".to_string(), "/repo".to_string());
+        store.create_wave(&wave).await.expect("create Wave");
         let mut snapshot = PmSnapshotRow {
-            repo: "/repo".to_string(),
-            wave: "product".to_string(),
+            wave_id: wave.id().clone(),
             provider: "linear".to_string(),
             initiative: "initiative-1".to_string(),
             synced_at: 1,
@@ -2209,10 +3468,7 @@ mod tests {
             .expect("replace snapshot");
 
         assert_eq!(
-            store
-                .pm_snapshot("/repo".to_string(), "product".to_string())
-                .await
-                .expect("read snapshot"),
+            store.pm_snapshot(wave.id()).await.expect("read snapshot"),
             Some(snapshot)
         );
         let _ = std::fs::remove_file(db_path);

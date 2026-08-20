@@ -100,11 +100,17 @@ pub struct SuggestedActionPayload {
     pub description: Option<String>,
 }
 
-/// Token usage for a single agent turn.
+/// Cumulative provider usage for one agent Turn.
+///
+/// A Turn can contain many provider requests separated by tool calls. Provider
+/// adapters add those request receipts here rather than creating a second
+/// request-level accounting model.
 #[derive(Debug, Clone, Serialize, Deserialize, Default, PartialEq)]
 pub struct TurnUsage {
-    pub input_tokens: u64,
-    pub output_tokens: u64,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub input_tokens: Option<u64>,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub output_tokens: Option<u64>,
     /// Provider-normalized input processed across the reported agent turn or
     /// session snapshot. Cached input is included exactly once.
     #[serde(skip_serializing_if = "Option::is_none")]
@@ -125,6 +131,20 @@ pub struct TurnUsage {
     pub model: Option<String>,
     #[serde(skip_serializing_if = "Option::is_none")]
     pub cost_usd: Option<f64>,
+}
+
+impl TurnUsage {
+    pub fn is_reported(&self) -> bool {
+        self.input_tokens.is_some()
+            || self.output_tokens.is_some()
+            || self.total_input_tokens.is_some()
+            || self.peak_input_tokens.is_some()
+            || self.context_window_tokens.is_some()
+            || self.reasoning_tokens.is_some()
+            || self.cache_read_tokens.is_some()
+            || self.cache_write_tokens.is_some()
+            || self.cost_usd.is_some()
+    }
 }
 
 // -- Event stream --
@@ -189,10 +209,12 @@ pub enum ConversationEvent {
         turn_id: String,
         status: Lifecycle,
     },
-    /// Token usage for a completed turn. Emitted after TurnCompleted.
-    TurnUsage {
+    /// Provider-reported cumulative usage for a Turn. Provisional checkpoints
+    /// make live output measurable; the final checkpoint is the durable receipt.
+    UsageCheckpoint {
         turn_id: String,
         usage: TurnUsage,
+        final_receipt: bool,
     },
 
     // Item lifecycle
@@ -247,7 +269,7 @@ impl ConversationEvent {
         match self {
             Self::TurnStarted { .. } => "turn_started",
             Self::TurnCompleted { .. } => "turn_completed",
-            Self::TurnUsage { .. } => "turn_usage",
+            Self::UsageCheckpoint { .. } => "usage_checkpoint",
             Self::ItemStarted { .. } => "item_started",
             Self::ItemUpdated { .. } => "item_updated",
             Self::ItemCompleted { .. } => "item_completed",
@@ -259,6 +281,24 @@ impl ConversationEvent {
             Self::Error { .. } => "error",
         }
     }
+
+    pub(crate) fn is_material_progress(&self) -> bool {
+        match self {
+            Self::ItemStarted { .. } | Self::ItemUpdated { .. } | Self::ItemCompleted { .. } => {
+                true
+            }
+            Self::TextDelta { content, .. } | Self::ReasoningDelta { content, .. } => {
+                !content.is_empty()
+            }
+            Self::DiffUpdated { diff, .. } => !diff.is_empty(),
+            Self::SuggestedActions { actions, .. } => !actions.is_empty(),
+            Self::TurnStarted { .. }
+            | Self::TurnCompleted { .. }
+            | Self::UsageCheckpoint { .. }
+            | Self::StatusChanged { .. }
+            | Self::Error { .. } => false,
+        }
+    }
 }
 
 #[cfg(test)]
@@ -268,8 +308,8 @@ mod tests {
     #[test]
     fn turn_usage_round_trips_through_json() {
         let usage = TurnUsage {
-            input_tokens: 123,
-            output_tokens: 45,
+            input_tokens: Some(123),
+            output_tokens: Some(45),
             total_input_tokens: Some(149),
             peak_input_tokens: Some(80),
             context_window_tokens: Some(200),
@@ -283,5 +323,23 @@ mod tests {
         let value = serde_json::to_value(&usage).expect("serialize usage");
         let decoded: TurnUsage = serde_json::from_value(value).expect("deserialize usage");
         assert_eq!(decoded, usage);
+    }
+
+    #[test]
+    fn material_progress_excludes_boundaries_and_empty_deltas() {
+        assert!(!ConversationEvent::TurnStarted {
+            turn_id: "turn-1".to_string(),
+        }
+        .is_material_progress());
+        assert!(!ConversationEvent::TextDelta {
+            turn_id: "turn-1".to_string(),
+            content: String::new(),
+        }
+        .is_material_progress());
+        assert!(ConversationEvent::ReasoningDelta {
+            turn_id: "turn-1".to_string(),
+            content: "considering".to_string(),
+        }
+        .is_material_progress());
     }
 }

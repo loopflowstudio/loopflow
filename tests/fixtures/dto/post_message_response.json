@@ -1,13 +1,25 @@
 {
-  "turn": {
-    "id": "turn-4",
-    "role": "user",
-    "text": "Focus on the failing test first.",
-    "status": "completed",
-    "items": [],
-    "created_at": "2026-07-04T12:00:00Z",
-    "body": null,
-    "activity": null
+  "message": {
+    "epoch_id": "chat-epoch-1",
+    "source": { "kind": "local", "journal_seq": 4 },
+    "turn": {
+      "id": "turn-4",
+      "role": "user",
+      "text": "Focus on the failing test first.",
+      "status": "completed",
+      "items": [],
+      "created_at": "2026-07-04T12:00:00Z",
+      "body": null,
+      "activity": null
+    }
   },
-  "state": "turning"
+  "state": "turning",
+  "epoch": {
+    "id": "chat-epoch-1",
+    "number": 1,
+    "backing": { "kind": "local" },
+    "journal_seq": 1,
+    "started_at": "2026-07-04T11:59:00Z",
+    "ended_at": null
+  }
 }

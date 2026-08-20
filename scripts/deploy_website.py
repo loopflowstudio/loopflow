@@ -17,6 +17,7 @@ from typing import Literal, NoReturn
 
 APP = "loopflow-website"
 PRODUCTION_URL = "https://loopflow.studio"
+HEALTH_USER_AGENT = "loopflow-release-health/1"
 
 
 @dataclass(frozen=True)
@@ -46,7 +47,8 @@ def _run(
 
 def _fetch_json(url: str) -> dict[str, object] | None:
     try:
-        with urllib.request.urlopen(url, timeout=10) as response:
+        request = urllib.request.Request(url, headers={"User-Agent": HEALTH_USER_AGENT})
+        with urllib.request.urlopen(request, timeout=10) as response:
             if response.status != 200:
                 return None
             value = json.loads(response.read())
@@ -57,7 +59,10 @@ def _fetch_json(url: str) -> dict[str, object] | None:
 
 def _root_is_healthy() -> bool:
     try:
-        with urllib.request.urlopen(f"{PRODUCTION_URL}/", timeout=10) as response:
+        request = urllib.request.Request(
+            f"{PRODUCTION_URL}/", headers={"User-Agent": HEALTH_USER_AGENT}
+        )
+        with urllib.request.urlopen(request, timeout=10) as response:
             return response.status == 200
     except (OSError, urllib.error.HTTPError):
         return False
@@ -171,6 +176,7 @@ def deploy_website(tag: str, repo: Path) -> DeployReceipt:
     _run(["uv", "run", "python", "scripts/check_website_screens.py"], repo)
     previous_image = _current_image(repo)
 
+    deploy_failed = False
     try:
         _run(
             [
@@ -187,14 +193,7 @@ def deploy_website(tag: str, repo: Path) -> DeployReceipt:
             repo / "website",
         )
     except subprocess.CalledProcessError:
-        _rollback(
-            repo,
-            tag,
-            source_commit,
-            previous_image,
-            None,
-            f"Fly deployment failed for {tag}",
-        )
+        deploy_failed = True
 
     deployed_image = _current_image(repo)
     if _wait_for_release(tag):
@@ -202,21 +201,29 @@ def deploy_website(tag: str, repo: Path) -> DeployReceipt:
         _write_receipt(repo, receipt)
         return receipt
 
+    reason = (
+        f"Fly deployment failed for {tag}" if deploy_failed else f"production did not report {tag}"
+    )
     _rollback(
         repo,
         tag,
         source_commit,
         previous_image,
         deployed_image,
-        f"production did not report {tag}",
+        reason,
     )
 
 
 def main() -> None:
     parser = argparse.ArgumentParser(description="Deploy one tagged Loopflow website release")
     parser.add_argument("--tag", required=True)
+    parser.add_argument(
+        "--repo",
+        type=Path,
+        default=Path(__file__).resolve().parent.parent,
+    )
     args = parser.parse_args()
-    repo = Path(__file__).resolve().parent.parent
+    repo = args.repo.resolve()
     main_repo = Path(os.environ.get("LF_RELEASE_MAIN_REPO", repo))
     lock_dir = main_repo / ".lf" / "locks"
     lock_dir.mkdir(parents=True, exist_ok=True)

@@ -11,6 +11,8 @@ import sys
 import time
 from pathlib import Path
 
+import pytest
+
 ROOT = Path(__file__).resolve().parents[2]
 SCRIPT = ROOT / "scripts/test.py"
 
@@ -19,6 +21,52 @@ assert _spec is not None and _spec.loader is not None
 gate = importlib.util.module_from_spec(_spec)
 sys.modules["gate_test_runner"] = gate
 _spec.loader.exec_module(gate)
+
+
+def _resource_report() -> dict[str, object]:
+    snapshot = {
+        "ok": True,
+        "filesystem": "/fixture",
+        "total_disk_bytes": 1_000_000,
+        "free_disk_bytes": 900_000,
+        "minimum_free_disk_bytes": 100_000,
+        "max_parallel_jobs": 4,
+        "process_nice": 10,
+        "sources": [
+            {
+                "id": "build:fixture",
+                "kind": "build",
+                "owner": "fixture",
+                "root": str(ROOT),
+                "paths": [str(ROOT / "target")],
+                "bytes": 0,
+                "budget_bytes": 1_000_000,
+                "disposable": True,
+                "active": True,
+                "action": "none",
+            }
+        ],
+        "issues": [],
+        "warnings": [],
+    }
+    return {
+        "schema": 1,
+        "ok": True,
+        "policy_path": "performance/budgets.json",
+        "before": snapshot,
+        "after": snapshot,
+        "recovery": [],
+    }
+
+
+@pytest.fixture(autouse=True)
+def _bounded_resource_fixture(monkeypatch: pytest.MonkeyPatch) -> None:
+    monkeypatch.setattr(gate, "_run_resource_check", lambda _recover: (_resource_report(), None))
+    monkeypatch.setattr(
+        gate,
+        "_free_disk_bytes",
+        lambda: int(gate.RESOURCE_ENVELOPE["minimum_free_disk_bytes"]) + 1,
+    )
 
 
 def _cmd(argv: list[str], label: str) -> "gate.Command":
@@ -50,7 +98,8 @@ def test_hanging_phase_is_killed_at_its_budget(tmp_path, monkeypatch):
     assert outcome.status == "timed_out"
     assert outcome.over_budget is True
     assert outcome.failure is not None
-    assert "TIMEOUT" in outcome.failure and "hang-probe" in outcome.failure
+    assert "VERIFICATION BUDGET" in outcome.failure and "hang-probe" in outcome.failure
+    assert outcome.failure_kind == "verification_budget"
     # Killed near its 1s budget plus the SIGTERM->SIGKILL grace, nowhere near 60s.
     assert elapsed < 20, f"phase took {elapsed:.1f}s; the budget did not bound it"
 
@@ -67,12 +116,54 @@ def test_child_process_dies_with_the_group(tmp_path, monkeypatch):
     assert not marker.exists(), "backgrounded child outlived the group-kill"
 
 
+def test_disk_floor_stops_the_phase_before_exhaustion(tmp_path, monkeypatch):
+    envelope = dict(gate.RESOURCE_ENVELOPE)
+    envelope.update(
+        {
+            "minimum_free_disk_bytes": 100,
+            "sample_interval_seconds": 0.05,
+        }
+    )
+    samples = iter([101, 99])
+    monkeypatch.setattr(gate, "RESOURCE_ENVELOPE", envelope)
+    monkeypatch.setattr(gate, "_free_disk_bytes", lambda: next(samples, 99))
+
+    outcome = gate._run_command(_cmd(["sleep", "60"], "disk-probe"), tmp_path, "probe")
+
+    assert outcome.status == "resource_exhausted"
+    assert outcome.failure_kind == "resource_pressure"
+    assert outcome.failure is not None and "Product result: unproven" in outcome.failure
+    assert "NEXT ACTION" in outcome.failure
+
+
+def test_sustained_syspolicyd_cpu_is_host_pressure_not_a_red_test(tmp_path, monkeypatch):
+    envelope = dict(gate.RESOURCE_ENVELOPE)
+    envelope.update(
+        {
+            "minimum_free_disk_bytes": 0,
+            "sample_interval_seconds": 0.05,
+            "host_security_cpu_percent": 200.0,
+            "host_security_samples": 2,
+        }
+    )
+    monkeypatch.setattr(gate, "RESOURCE_ENVELOPE", envelope)
+    monkeypatch.setattr(gate, "_host_security_pressure", lambda: ("syspolicyd", 350.0))
+
+    outcome = gate._run_command(_cmd(["sleep", "60"], "host-probe"), tmp_path, "probe")
+
+    assert outcome.status == "host_pressure"
+    assert outcome.failure_kind == "host_security_pressure"
+    assert outcome.failure is not None and "syspolicyd" in outcome.failure
+    assert "Product result: unproven" in outcome.failure
+
+
 def test_failing_phase_reports_actionable_failure(tmp_path):
     outcome = gate._run_command(_cmd(["bash", "-c", "exit 3"], "red-probe"), tmp_path, "probe")
     assert outcome.status == "failed"
     assert outcome.failure is not None
-    assert "FAILED" in outcome.failure and "red-probe" in outcome.failure
+    assert "PRODUCT FAILURE" in outcome.failure and "red-probe" in outcome.failure
     assert "exit 3" in outcome.failure
+    assert outcome.failure_kind == "product"
 
 
 def test_passing_phase_returns_measured_outcome(tmp_path):
@@ -81,6 +172,21 @@ def test_passing_phase_returns_measured_outcome(tmp_path):
     assert outcome.elapsed_s >= 0
     assert outcome.budget_s == gate.DEFAULT_BUDGET_S
     assert outcome.failure is None
+    assert outcome.cpu_s is not None
+    assert outcome.minimum_free_disk_bytes is not None
+
+
+def test_phase_runs_at_the_policy_niceness(tmp_path):
+    outcome = gate._run_command(
+        _cmd(["sh", "-c", "ps -o ni= -p $$"], "nice-probe"),
+        tmp_path,
+        "probe",
+    )
+
+    assert outcome.status == "passed"
+    assert int((tmp_path / "nice-probe.log").read_text().strip()) >= int(
+        gate.RESOURCE_ENVELOPE["process_nice"]
+    )
 
 
 def test_missing_tool_is_named_not_a_traceback(tmp_path):
@@ -177,6 +283,49 @@ def test_changed_measurement_warning_preserves_a_failing_result(tmp_path, monkey
 
     assert result == 1
     assert capsys.readouterr().err.count("MEASUREMENT WARNING") == 1
+
+
+def test_resource_preflight_blocks_before_product_commands(tmp_path, monkeypatch, capsys):
+    evidence_root = tmp_path / "evidence"
+    marker = tmp_path / "product-ran"
+    report = _resource_report()
+    report["ok"] = False
+    after = report["after"]
+    assert isinstance(after, dict)
+    after["ok"] = False
+    after["issues"] = [
+        {
+            "code": "disk:free",
+            "owner": "fixture host",
+            "detail": "5 GiB free / 64 GiB floor",
+            "action": "recover fixture builds",
+            "recoverable": True,
+        }
+    ]
+    monkeypatch.setattr(gate, "_gate_evidence_root", lambda: evidence_root)
+    monkeypatch.setattr(gate, "_tree_fingerprint", lambda: "tree")
+    monkeypatch.setattr(
+        gate,
+        "_run_resource_check",
+        lambda _recover: (
+            report,
+            "RESOURCE PRESSURE: disk:free (fixture host)\nNEXT ACTION: recover fixture builds",
+        ),
+    )
+
+    result = gate.run_plans(
+        [_plan(_cmd(["bash", "-c", f"touch {marker}"], "probe"))],
+        kind="full",
+    )
+
+    assert result == 1
+    assert not marker.exists()
+    record = json.loads(next((evidence_root / "full").glob("*.json")).read_text())
+    assert record["status"] == "resource_blocked"
+    assert all(phase["status"] == "not_run" for phase in record["phases"])
+    output = capsys.readouterr().out
+    assert "product suites not run" in output
+    assert "NEXT ACTION" in output
 
 
 def test_identical_tree_and_plan_reuse_a_passing_run(tmp_path, monkeypatch, capsys):
@@ -302,6 +451,7 @@ def test_persisted_schema_contains_only_operational_facts():
         "finished_at",
         "status",
         "phases",
+        "resources",
     }
     assert set(record["phases"][0]) == {
         "suite",
@@ -310,6 +460,9 @@ def test_persisted_schema_contains_only_operational_facts():
         "elapsed_s",
         "status",
         "over_budget",
+        "failure_kind",
+        "cpu_s",
+        "minimum_free_disk_bytes",
     }
     forbidden = {"argv", "output", "environment", "prompt", "diff"}
     assert forbidden.isdisjoint(json.dumps(record).lower().split('"'))
@@ -325,11 +478,46 @@ def test_full_and_host_gates_reject_reuse():
             raise AssertionError(f"reuse unexpectedly accepted for {args}")
 
 
+def test_deleted_python_test_falls_back_to_the_full_suite():
+    command = gate._python_commands(["python/tests/test_removed.py"])[0]
+
+    assert command.argv == ["uv", "run", "pytest", "python/tests/"]
+
+
+def test_python_verifier_change_runs_the_full_python_suite():
+    changed = ["scripts/resource_envelope.py", "python/tests/test_resource_envelope.py"]
+
+    plan = next(
+        item
+        for item in gate.build_plan(changed=changed, run_all=False, forced=set())
+        if item.suite.name == "python"
+    )
+
+    assert plan.run is True
+    assert plan.commands[0].argv == ["uv", "run", "pytest", "python/tests/"]
+
+
 def test_all_never_runs_the_required_host_gate():
     plans = gate.build_plan(changed=[], run_all=True, forced=set())
     ui = next(p for p in plans if p.suite.name == "ui-host")
     assert ui.run is False
     assert "required host gate" in ui.reason
+
+
+def test_build_and_test_commands_share_the_four_worker_budget():
+    jobs = str(gate.MAX_PARALLEL_JOBS)
+    rust = gate._rust_commands([])
+    clippy = next(command for command in rust if command.label == "clippy")
+    tests = next(command for command in rust if command.label == "rust")
+    swift = gate._swift_commands([])
+    loopflow = gate._loopflow_commands([])
+
+    assert clippy.argv[clippy.argv.index("--jobs") + 1] == jobs
+    assert jobs in tests.argv
+    for command in (swift[0], swift[2]):
+        assert command.argv[command.argv.index("--jobs") + 1] == jobs
+    xcodebuild = next(command for command in loopflow if command.label == "xcodebuild")
+    assert xcodebuild.argv[xcodebuild.argv.index("-jobs") + 1] == jobs
 
 
 def test_ui_host_runs_only_when_named():
@@ -390,3 +578,72 @@ def test_loopflow_summary_says_it_does_not_run_hosted_ui():
     loopflow = next(s for s in gate.SUITES if s.name == "loopflow")
     assert loopflow.proves is not None
     assert "NOT run here" in loopflow.proves
+
+
+def test_machine_lock_is_exclusive_and_names_the_holder(tmp_path, monkeypatch):
+    # Two acquisitions must conflict (even in one process — flock is per open
+    # file description), and the loser gets an actionable message, not a queue.
+    monkeypatch.setattr(gate, "_MACHINE_LOCK_DIR", tmp_path)
+
+    first, first_msg = gate._acquire_machine_lock("probe")
+    assert first is not None and first_msg is None
+
+    second, second_msg = gate._acquire_machine_lock("probe")
+    assert second is None
+    assert second_msg is not None
+    assert "MACHINE LOCK HELD" in second_msg
+    assert str(gate.os.getpid()) in second_msg  # holder pid is named
+
+    first.close()  # releasing frees the lock for the next run
+    third, third_msg = gate._acquire_machine_lock("probe")
+    assert third is not None and third_msg is None
+    third.close()
+
+
+def test_ui_host_leak_is_named_with_the_repair(monkeypatch):
+    # Automation Mode still enabled after the settle window is a leak: the
+    # failure must name the state and the exact repair (killall testmanagerd +
+    # a clean rerun), because SIP blocks every other escape.
+    monkeypatch.setattr(gate.platform, "system", lambda: "Darwin")
+    monkeypatch.setattr(gate, "_automation_mode_enabled", lambda: True)
+    monkeypatch.setattr(gate, "_AUTOMATION_SETTLE_S", 0)
+
+    leak = gate._ui_host_postcheck()
+
+    assert leak is not None
+    assert "AUTOMATION MODE LEAKED" in leak
+    assert "killall testmanagerd" in leak
+    assert "UI_HOST_GATE.md" in leak
+
+
+def test_ui_host_postcheck_is_quiet_when_the_mode_released(monkeypatch):
+    monkeypatch.setattr(gate.platform, "system", lambda: "Darwin")
+    monkeypatch.setattr(gate, "_automation_mode_enabled", lambda: False)
+    assert gate._ui_host_postcheck() is None
+
+
+def test_suite_postcheck_fails_a_passing_run(tmp_path, monkeypatch, capsys):
+    # A suite whose commands all pass but whose postcheck reports leaked
+    # machine state must fail — a green gate that wedged the host is a lie.
+    monkeypatch.setattr(gate, "_gate_evidence_root", lambda: tmp_path / "evidence")
+    monkeypatch.setattr(gate, "_run_artifact_root", lambda: tmp_path / "artifacts")
+    monkeypatch.setattr(gate, "_tree_fingerprint", lambda: "tree")
+    command = _cmd(["bash", "-c", "exit 0"], "probe")
+    suite = gate.Suite(
+        name="probe",
+        slow=False,
+        trigger_desc="test fixture",
+        match=lambda _changed: True,
+        build=lambda _changed: [command],
+        postcheck=lambda: "AUTOMATION MODE LEAKED: fixture",
+    )
+    plan = gate.Plan(suite=suite, run=True, reason="test fixture", commands=[command])
+
+    assert gate.run_plans([plan], kind="changed") == 1
+    assert "AUTOMATION MODE LEAKED: fixture" in capsys.readouterr().out
+
+
+def test_ui_host_suite_serializes_and_checks_machine_state():
+    ui = next(s for s in gate.SUITES if s.name == "ui-host")
+    assert ui.machine_lock == "ui-host"
+    assert ui.postcheck is gate._ui_host_postcheck

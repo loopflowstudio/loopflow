@@ -10,6 +10,9 @@ pub const LOOPFLOW_DOC: &str = include_str!("builtins/LOOPFLOW.md");
 /// Headless preamble — the only surface that needs one (no user is present).
 pub const SURFACE_HEADLESS: &str = include_str!("builtins/surfaces/headless.md");
 
+/// Shared contract for every surface with a human in the current conversation.
+pub const SURFACE_HUMAN_PRESENT: &str = include_str!("builtins/surfaces/human-present.md");
+
 /// Returns the content of a built-in skill, if it exists.
 pub fn get_builtin_skill(name: &str) -> Option<&'static str> {
     BUILTIN_SKILLS.get(name).copied()
@@ -227,17 +230,40 @@ mod tests {
     }
 
     #[test]
-    fn interactive_skills_include_the_shared_runtime_contract() {
+    fn formerly_attended_skills_have_bounded_headless_contracts() {
+        let design = get_builtin_skill("design").expect("design skill");
+        for contract in [
+            "## Surface",
+            "**Human present:**",
+            "**Headless:**",
+            "without claiming User confirmation",
+        ] {
+            assert!(design.contains(contract), "design is missing {contract}");
+        }
+
+        let launch_plan = get_builtin_skill("launch-plan").expect("launch-plan skill");
+        for contract in [
+            "Do not create a manifest, receipt, marker, or new planning state",
+            "Keep that core in this Task",
+            "lf task start",
+            "--first slice",
+        ] {
+            assert!(
+                launch_plan.contains(contract),
+                "launch-plan is missing {contract}"
+            );
+        }
+
         for name in [
-            "design",
             "explore",
             "refine",
             "review-design",
+            "prompt",
             "review-open-work",
             "review",
             "init",
         ] {
-            let skill = get_builtin_skill(name).expect("interactive builtin skill");
+            let skill = get_builtin_skill(name).expect("builtin skill");
             assert!(
                 skill.contains("## Reviewer mode"),
                 "{name} does not define reviewer modes"
@@ -258,7 +284,6 @@ mod tests {
 
         let review_slice = get_builtin_skill("review-slice").expect("review-slice skill");
         for evidence in [
-            "interactive: false",
             "production-like path",
             "Done when",
             "Implemented behavior",
@@ -272,12 +297,18 @@ mod tests {
         }
         let demo = get_builtin_skill("demo").expect("demo skill");
         for contract in [
-            "interactive: true",
             "User explicitly confirms",
+            "headless surface",
             "run `lf ask`",
             "closing, detaching, provider exit, or lack of response",
         ] {
             assert!(demo.contains(contract), "demo omits {contract:?}");
+        }
+        for (name, skill) in BUILTIN_SKILLS.iter() {
+            assert!(
+                !skill.lines().any(|line| line.starts_with("interactive:")),
+                "{name} still carries retired interactive scheduling metadata"
+            );
         }
         assert!(get_builtin_skill("code-review").is_none());
     }
@@ -314,16 +345,16 @@ mod tests {
         assert!(!LOOPFLOW_DOC.contains("lf pm show"));
         assert!(!LOOPFLOW_DOC.contains("--detach"));
 
-        let wave = get_builtin_skill("wave_pursue").expect("wave pursue");
+        let wave = get_builtin_skill("wave/pursue").expect("wave pursue");
         assert!(wave.contains("lf task run <issue-id>"));
         assert!(wave.contains("lf task status"));
         assert!(wave.contains("stable worktree"));
 
-        let project = get_builtin_skill("project_pursue").expect("project pursue");
+        let project = get_builtin_skill("project/pursue").expect("project pursue");
         assert!(project.contains("lf task run <issue-id>"));
         assert!(!project.contains("lf loop"));
 
-        let task = get_builtin_skill("task_pursue").expect("task pursue");
+        let task = get_builtin_skill("task/pursue").expect("task pursue");
         assert!(task.contains("second Task"));
         assert!(task.contains("lf pr land"));
         assert!(task.contains("pinned final flow"));
@@ -331,10 +362,10 @@ mod tests {
         assert!(task.contains("lf pm task create"));
 
         for (flow, steps) in [
-            ("wave", ["wave_clarify", "wave_pursue", "wave_mutate"]),
+            ("wave", ["wave/clarify", "wave/pursue", "wave/mutate"]),
             (
                 "project",
-                ["project_clarify", "project_pursue", "project_mutate"],
+                ["project/clarify", "project/pursue", "project/mutate"],
             ),
         ] {
             let flow = get_builtin_flow(flow).expect("tier flow");
@@ -348,12 +379,42 @@ mod tests {
         assert!(get_builtin_flow("task-design")
             .expect("Task first flow")
             .contains("- kickoff"));
+        let first = get_builtin_flow("task-design").expect("Task first flow");
+        assert_eq!(first.matches("human: true").count(), 1);
+        assert!(first.contains("id: review_kickoff"));
+        assert!(!get_builtin_flow("incident")
+            .expect("incident first flow")
+            .contains("human:"));
         assert!(get_builtin_flow("slice")
             .expect("Task loop flow")
             .contains("- review-slice"));
         assert!(get_builtin_flow("ship")
             .expect("Task final flow")
             .contains("- op: pr land -c"));
+
+        let design = get_builtin_flow("design").expect("reviewed design flow");
+        assert!(design.contains("id: review_design"));
+        assert_eq!(design.matches("human: true").count(), 1);
+
+        let launch = get_builtin_flow("launch-plan").expect("launch flow");
+        for step in [
+            "name: launch-plan",
+            "- implement",
+            "- compress",
+            "- gate",
+            "id: review_keystone_demo",
+            "- op: pr land -c",
+        ] {
+            assert!(launch.contains(step), "missing {step}");
+        }
+        assert!(
+            launch.find("- implement").unwrap() < launch.find("- gate").unwrap(),
+            "implementation and compression precede gate"
+        );
+        assert!(
+            launch.find("review_keystone_demo").unwrap() < launch.find("- op: pr land -c").unwrap(),
+            "no keystone can ship before demo acceptance"
+        );
     }
 
     #[test]
@@ -386,7 +447,7 @@ mod tests {
 
     #[test]
     fn task_design_and_multi_task_outputs_share_the_machine_contract() {
-        let clarify = get_builtin_skill("task_clarify").expect("task clarify");
+        let clarify = get_builtin_skill("task/clarify").expect("task clarify");
         for requirement in [
             "User-visible outcome",
             "End-to-end proof",
@@ -401,8 +462,8 @@ mod tests {
         }
 
         for name in [
-            "wave_pursue",
-            "project_pursue",
+            "wave/pursue",
+            "project/pursue",
             "scan",
             "assess",
             "wave-report",

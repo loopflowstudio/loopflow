@@ -1,17 +1,13 @@
 #!/usr/bin/env bash
-# Prove the stable Wave surface (W2-178) renders the five Proof states —
-# selected, loading, error, empty, and future-child indentation — DISTINCTLY,
-# at both a narrow and a wide desktop width, on a host without UI-automation
-# permission.
+# Prove The Podium renders its four fixture states — populated,
+# loading, unavailable, and empty — DISTINCTLY at both a narrow and a wide
+# desktop width, on a host without UI-automation permission.
 #
-# The permissioned XCUITest (LoopflowUITests/WaveSurfaceStateTests) asserts each
-# state's unique affordance and row hittability; it runs on the maintained UI
-# host. This script is the run-here complement: it launches the built app in
-# each state, has the app render its own key window to a PNG (SnapshotService,
-# no Screen Recording permission), and asserts the states produce pairwise
-# distinct images. Together they catch a regression like PR #972's — where the
-# detail-state env never reached the app, so loading and error rendered as
-# selected (identical images here, failed affordance assertions there).
+# The permissioned XCUITest asserts each state's unique affordance and region
+# reachability; it runs on the maintained UI host. This script is the run-here
+# complement: it launches the built app in each state, has the app render its
+# own key window to a PNG (SnapshotService, no Screen Recording permission),
+# and asserts the states produce pairwise distinct images.
 #
 # Usage: scripts/prove_wave_surface_states.sh
 set -euo pipefail
@@ -28,11 +24,10 @@ trap 'rm -rf "$OUT"' EXIT
 
 # state|mode|detail_state|select_branch
 STATES=(
-  "selected|mock-waves||"
+  "populated|mock-waves||"
   "loading|mock-waves|loading|"
-  "error|mock-waves|error|"
+  "unavailable|mock-waves|error|"
   "empty|empty-workspaces||"
-  "child|mock-waves||cadenza"
 )
 WIDTHS=(900 1440)
 
@@ -54,7 +49,7 @@ capture() {
   wait "$pid" 2>/dev/null || true
 }
 
-echo "Capturing 5 states × 2 widths through the app's own renderer…"
+echo "Capturing 4 states × 2 widths through the app's own renderer…"
 declare -a HASHES=()
 declare -a LABELS=()
 fail=0
@@ -90,7 +85,7 @@ for ((i = 0; i < n; i++)); do
 done
 
 if [ "$fail" -ne 0 ]; then
-  echo "FAIL — the Wave surface did not render all states distinctly."
+  echo "FAIL — The Podium did not render all states distinctly."
   exit 1
 fi
-echo "PASS — all ${n} captures (5 states × 2 widths) are distinct and non-empty."
+echo "PASS — all ${n} captures (4 states × 2 widths) are distinct and non-empty."

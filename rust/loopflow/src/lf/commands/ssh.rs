@@ -182,6 +182,7 @@ fn bind_home_start_wave_ids(target: &SshTarget, lf_args: &[String]) -> anyhow::R
         .filter_map(|binding| binding.split_once('=').map(|(name, _)| name.to_string()))
         .collect::<std::collections::HashSet<_>>();
     let runtime = tokio::runtime::Runtime::new().context("failed to create async runtime")?;
+    let repo = crate::engine::repo::find_repo_root().ok();
     let bindings = runtime.block_on(async {
         let Some(store) = crate::store::open_existing_store().await else {
             return Ok::<_, anyhow::Error>(Vec::new());
@@ -194,8 +195,17 @@ fn bind_home_start_wave_ids(target: &SshTarget, lf_args: &[String]) -> anyhow::R
             if existing.contains(&name) {
                 continue;
             }
-            if let Some(wave) = store.get_wave_by_name(&name).await? {
-                bindings.push(format!("{}={}", wave.name(), wave.id()));
+            match crate::engine::wave_context::resolve_managed_wave(
+                Some(&store),
+                repo.as_deref(),
+                Some(&name),
+                None,
+            )
+            .await
+            {
+                Ok(wave) => bindings.push(format!("{}={}", wave.name(), wave.id())),
+                Err(crate::engine::wave_context::WaveResolveError::UnknownExplicit(_)) => {}
+                Err(error) => return Err(anyhow!(error)),
             }
         }
         Ok(bindings)
@@ -694,14 +704,6 @@ fn sh_quote(value: &str) -> String {
     quoted
 }
 
-/// Bound the connect handshake so an unreachable host fails fast instead of
-/// riding the OS TCP timeout (minutes).
-const CONNECT_TIMEOUT_SECS: u32 = 10;
-/// Keepalive probe cadence and tolerance — bounds a stalled *established*
-/// connection (dead network mid-session) to ~30s.
-const SERVER_ALIVE_INTERVAL_SECS: u32 = 10;
-const SERVER_ALIVE_COUNT_MAX: u32 = 3;
-
 /// What the remote process's exit status means for the caller.
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 enum SshOutcome {
@@ -727,13 +729,20 @@ fn ssh_args(
     forward_agent: bool,
     broker: Option<&AccountLeaseBroker>,
 ) -> Vec<String> {
+    let mut args = ssh_connection_args(dest, port, forward_agent, broker);
+    args.push("bash -s".to_string());
+    args
+}
+
+fn ssh_connection_args(
+    dest: &str,
+    port: Option<u16>,
+    forward_agent: bool,
+    broker: Option<&AccountLeaseBroker>,
+) -> Vec<String> {
     let mut args: Vec<String> = Vec::new();
     if forward_agent {
         args.push("-A".to_string());
-    }
-    if let Some(port) = port {
-        args.push("-p".to_string());
-        args.push(port.to_string());
     }
     if let Some(broker) = broker {
         args.push("-R".to_string());
@@ -749,16 +758,7 @@ fn ssh_args(
         args.push("-o".to_string());
         args.push("ExitOnForwardFailure=yes".to_string());
     }
-    args.push("-o".to_string());
-    args.push("BatchMode=yes".to_string());
-    args.push("-o".to_string());
-    args.push(format!("ConnectTimeout={CONNECT_TIMEOUT_SECS}"));
-    args.push("-o".to_string());
-    args.push(format!("ServerAliveInterval={SERVER_ALIVE_INTERVAL_SECS}"));
-    args.push("-o".to_string());
-    args.push(format!("ServerAliveCountMax={SERVER_ALIVE_COUNT_MAX}"));
-    args.push(dest.to_string());
-    args.push("bash -s".to_string());
+    args.extend(crate::engine::wave_home::bounded_ssh_args(dest, port));
     args
 }
 
@@ -778,8 +778,9 @@ fn classify_exit(code: Option<i32>) -> SshOutcome {
 fn connection_error(host: &str) -> anyhow::Error {
     anyhow!(
         "lf ssh could not reach '{host}': ssh failed during connection/transport \
-         (bounded by BatchMode + ConnectTimeout={CONNECT_TIMEOUT_SECS}s). See the ssh \
-         error above; check the host is reachable, its key is known, and key auth works."
+         (bounded by BatchMode + ConnectTimeout={}s). See the ssh error above; check \
+         the host is reachable, its key is known, and key auth works.",
+        crate::engine::wave_home::SSH_CONNECT_TIMEOUT_SECS
     )
 }
 
@@ -1078,6 +1079,16 @@ mod tests {
         let args = ssh_args("jack@host", Some(2222), false, None);
         let p = args.iter().position(|a| a == "-p").expect("-p present");
         assert_eq!(args[p + 1], "2222");
+    }
+
+    #[test]
+    fn ssh_probe_reuses_connection_bounds_without_a_stdin_command() {
+        let args = crate::engine::wave_home::bounded_ssh_args("jack@host", Some(2222));
+
+        assert!(args.iter().any(|arg| arg == "BatchMode=yes"));
+        assert!(args.iter().any(|arg| arg == "ConnectTimeout=10"));
+        assert_eq!(args.last().map(String::as_str), Some("jack@host"));
+        assert!(!args.iter().any(|arg| arg == "bash -s"));
     }
 
     #[test]

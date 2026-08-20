@@ -4,9 +4,10 @@
 // The wave model has no telemetry hub (see `scratch/eventing.md`): durable
 // facts — which waves exist (running and stopped) and their work
 // — are QUERIES against the shared SQLite ledger, served by the daemonless `lf`
-// CLI. Live motion is a per-wave SSE stream (`WaveChatConnection`), never this.
+// CLI. The Podium re-queries the bounded process snapshot for live output;
+// Wave conversation motion remains a per-wave SSE stream (`WaveChatConnection`).
 //
-// This runs `lf ls/status/roadmap/runs --json` as a subprocess and decodes the wire
+// This runs `lf ls/status/roadmap/ps/activity --json` as a subprocess and decodes the wire
 // snapshots (mirrors of the Rust types in `lf/commands/waves.rs` and
 // `lf/commands/runs.rs`) into the app models the stores hold. The subprocess
 // runner is injected: on macOS it resolves and execs a local `lf`. There is no
@@ -72,7 +73,27 @@ public struct RegistryQuery: Sendable {
     /// Idempotently start a Wave on its placed Home and return its status row.
     public func start(wave: String, cwd: String?) async throws -> [WaveSnapshot] {
         let stdout = try await run(["start", wave, "--json"], cwd)
-        return try Self.decode([WaveSnapshot].self, from: stdout)
+        let snapshots = try Self.decode([WaveSnapshot].self, from: stdout)
+        guard snapshots.count == 1,
+              let snapshot = snapshots.first,
+              snapshot.name == wave,
+              snapshot.live,
+              snapshot.endpoint != nil
+        else {
+            throw RegistryQueryError("lf start \(wave) returned no live Wave receipt")
+        }
+        return snapshots
+    }
+
+    /// Pause or resume new Wave turns without changing listener residency.
+    public func setWavePaused(
+        wave: String,
+        paused: Bool,
+        cwd: String?
+    ) async throws -> WaveIntentReceipt {
+        let verb = paused ? "pause" : "resume"
+        let stdout = try await run([verb, wave, "--json"], cwd)
+        return try Self.decode(WaveIntentReceipt.self, from: stdout)
     }
 
     /// Every durable plan row across the machine, joined to the same Task
@@ -88,16 +109,46 @@ public struct RegistryQuery: Sendable {
         return try Self.decode(RoadmapSnapshot.self, from: stdout)
     }
 
-    /// Latest durable Wave turns from the local journal. This read does not
-    /// require or start a Wave listener; Wave Chat installs it before SSE.
+    /// Live process trees, normalized output rates, and completed provider usage.
+    public func processActivity() async throws -> ActivitySnapshot {
+        let stdout = try await run(["ps", "--json"], nil)
+        return try Self.decode(ActivitySnapshot.self, from: stdout)
+    }
+
+    /// Durable Work facts across creation, Runs, PR lifecycle, and Steers.
+    /// Filters are composed by `lf` before its bounded presentation window.
+    public func workActivity(
+        since: String = "7d",
+        limit: Int = 50,
+        wave: String? = nil,
+        project: String? = nil,
+        task: String? = nil
+    ) async throws -> WorkActivitySnapshot {
+        var args = ["activity", "--since", since, "--limit", String(limit)]
+        if let wave { args.append(contentsOf: ["--wave", wave]) }
+        if let project { args.append(contentsOf: ["--project", project]) }
+        if let task { args.append(contentsOf: ["--task", task]) }
+        args.append("--json")
+        let stdout = try await run(args, nil)
+        return try Self.decode(WorkActivitySnapshot.self, from: stdout)
+    }
+
+    /// Bounded history for one conversation epoch. `lf` uses the live backing
+    /// when a listener exists and otherwise folds readable local epochs from
+    /// the journal; this query never starts a Wave listener.
     public func chatHistory(
         wave: String,
         limit: Int = 12,
+        epoch: String? = nil,
         cwd: String?
     ) async throws -> ChatHistorySnapshot {
-        let stdout = try await run([
+        var args = [
             "chat", "--history", "--json", "--limit", String(limit), "--wave", wave,
-        ], cwd)
+        ]
+        if let epoch {
+            args.append(contentsOf: ["--epoch", epoch])
+        }
+        let stdout = try await run(args, cwd)
         return try Self.decode(ChatHistorySnapshot.self, from: stdout)
     }
 
@@ -131,11 +182,49 @@ public struct RegistryQuery: Sendable {
         return try Self.decode(TaskFileSnapshot.self, from: stdout)
     }
 
-    /// Recent agent-backed skill calls across every Wave, with their context and
-    /// token evidence. Process diagnostics live in `lf execs`.
-    public func recentRuns() async throws -> [SkillRunEntry] {
-        let stdout = try await run(["runs", "--json"], nil)
-        return try Self.decode([SkillRunEntry].self, from: stdout)
+    /// Resolve one durable Activity Run fact to its latest captured turn.
+    public func traceAddress(invocationId: String) async throws -> TraceAddress {
+        let stdout = try await run(["trace", invocationId, "--json"], nil)
+        let trace = try Self.decode(TraceIndexSnapshot.self, from: stdout)
+        guard let turn = trace.turns
+            .filter({ $0.invocationId == invocationId })
+            .max(by: { $0.ordinal < $1.ordinal })
+        else {
+            throw RegistryQueryError("Run \(invocationId) has no captured trace turn")
+        }
+        return TraceAddress(
+            runId: trace.traceId,
+            invocationId: invocationId,
+            turnId: turn.id
+        )
+    }
+
+    /// User-targeted Ask sessions from the same durable queue as bare `lf`.
+    public func userAskAttention() async throws -> [AskAttentionRecord] {
+        let stdout = try await run(["ask", "list", "--user", "--json"], nil)
+        return try Self.decode([AskAttentionRecord].self, from: stdout)
+    }
+
+    /// Claim or recover one Ask session and return its exact attach descriptor.
+    /// Presentation remains the app's responsibility until `confirmAskPresented`.
+    public func prepareAskOpen(askId: String) async throws -> InvocationSurfaceRecord {
+        let stdout = try await run(
+            ["ask", "open", askId, "--prepare", "--json"],
+            nil
+        )
+        return try Self.decode(InvocationSurfaceRecord.self, from: stdout)
+    }
+
+    /// Confirm presentation only for the exact Invocation returned by prepare.
+    public func confirmAskPresented(
+        askId: String,
+        invocationId: String
+    ) async throws -> AgentInvocationRecord {
+        let stdout = try await run(
+            ["ask", "presented", askId, invocationId, "--json"],
+            nil
+        )
+        return try Self.decode(AgentInvocationRecord.self, from: stdout)
     }
 
     /// Every active normalized Invocation across the machine.
@@ -176,11 +265,11 @@ public struct RegistryQuery: Sendable {
         )
     }
 
-    /// Provider-measured Turn spend over a window. Rows are additive and sum
-    /// exactly to the totals `lf usage` prints.
-    public func spend(days: Int = 30) async throws -> [TurnSpend] {
-        let stdout = try await run(["usage", "--json", "--days", String(days)], nil)
-        return try Self.decode([TurnSpend].self, from: stdout)
+    /// The same provider-billed output snapshot rendered by `lf usage`,
+    /// `lf ps`, `lf top`, and the Podium.
+    public func usage() async throws -> UsageSnapshot {
+        let stdout = try await run(["usage", "--json"], nil)
+        return try Self.decode(UsageSnapshot.self, from: stdout)
     }
 
     /// The codebase on disk, as a tree of directories weighted by tokens.
@@ -269,9 +358,10 @@ private struct PmShowSnapshot: Decodable {
     let project: String?
     let syncedAt: Int64
     let projects: [PmProjectSnapshot]
+    let items: [PmItemSnapshot]
 
     enum CodingKeys: String, CodingKey {
-        case wave, provider, initiative, project, projects
+        case wave, provider, initiative, project, projects, items
         case syncedAt = "synced_at"
     }
 }
@@ -285,15 +375,32 @@ private struct PmProjectSnapshot: Decodable {
     let flows: ProjectFlowPlanSnapshot
     let krs: [PmKrSnapshot]
     let initiativeIds: [String]
-    // Stable ids of the Linear teams the Project belongs to. Optional: a snapshot
-    // written before the field existed decodes to nil. Mirrors Rust
-    // `PmProject.team_ids`.
-    let teamIds: [String]?
+    let teamIds: [String]
 
     enum CodingKeys: String, CodingKey {
         case id, slug, name, summary, definition, flows, krs
         case initiativeIds = "initiative_ids"
         case teamIds = "team_ids"
+    }
+}
+
+private struct PmItemSnapshot: Decodable {
+    let id: String
+    let identifier: String
+    let url: String?
+    let name: String
+    let description: String
+    let rank: Int
+    let completed: Bool
+    let projectId: String
+    let project: String
+    let teamId: String
+    let assignee: String?
+
+    enum CodingKeys: String, CodingKey {
+        case id, identifier, url, name, description, rank, completed, project, assignee
+        case projectId = "project_id"
+        case teamId = "team_id"
     }
 }
 
@@ -377,13 +484,15 @@ public struct WaveSnapshot: Decodable, Sendable, Hashable {
     public let activeTasks: Int
     public let activeProjects: Int
     public let live: Bool
+    public let paused: Bool
+    public let enabled: Bool
     public let endpoint: String?
     public let createdAt: String?
     public let parentWaveId: String?
     public let home: Home
 
     enum CodingKeys: String, CodingKey {
-        case id, name, status, goal, repo, live, endpoint, home
+        case id, name, status, goal, repo, live, paused, enabled, endpoint, home
         case activeTasks = "active_tasks"
         case activeProjects = "active_projects"
         case createdAt = "created_at"
@@ -392,18 +501,26 @@ public struct WaveSnapshot: Decodable, Sendable, Hashable {
 
     /// Map the registry snapshot to the app's Wave row, carrying the shared
     /// liveness, active-work, and ancestry facts the surface renders.
-    func toWave() -> Wave {
+    public func toWave() -> Wave {
         Wave(
             id: id,
             name: name,
             repo: repo,
             status: status,
             live: live,
+            paused: paused,
+            enabled: enabled,
             activeTasks: activeTasks,
             activeProjects: activeProjects,
             parentWaveId: parentWaveId
         )
     }
+}
+
+/// Receipt returned by `lf pause|resume <wave> --json`.
+public struct WaveIntentReceipt: Decodable, Sendable, Equatable {
+    public let wave: String
+    public let paused: Bool
 }
 
 public struct RoadmapSnapshot: Decodable, Sendable, Hashable {
@@ -419,6 +536,51 @@ public struct RoadmapSnapshot: Decodable, Sendable, Hashable {
 public struct WaveRoadmap: Decodable, Sendable, Hashable {
     public let wave: WaveSnapshot
     public let projects: WorkEvidence<RoadmapProject>
+    public let unavailableProjects: [UnavailableProjectEvidence]
+
+    enum CodingKeys: String, CodingKey {
+        case wave, projects
+        case unavailableProjects = "unavailable_projects"
+    }
+}
+
+/// Durable Project Work that cannot join the current PM plan, including
+/// non-terminal Tasks stranded under a terminal historical Project.
+public struct UnavailableProjectEvidence: Decodable, Sendable, Hashable {
+    public let workId: String
+    public let projectId: String
+    public let projectSlug: String
+    public let status: WorkStatus
+    public let owner: WorkNextMoveOwner
+    public let reason: String
+    public let recovery: String
+    public let tasks: [UnavailableTaskEvidence]
+
+    enum CodingKeys: String, CodingKey {
+        case status, owner, reason, recovery, tasks
+        case workId = "work_id"
+        case projectId = "project_id"
+        case projectSlug = "project_slug"
+    }
+}
+
+/// Non-terminal durable Task Work whose historical Project is absent from the
+/// current PM plan.
+public struct UnavailableTaskEvidence: Decodable, Sendable, Hashable {
+    public let workId: String
+    public let taskId: String
+    public let taskIdentifier: String
+    public let status: WorkStatus
+    public let owner: WorkNextMoveOwner
+    public let reason: String
+    public let recovery: String
+
+    enum CodingKeys: String, CodingKey {
+        case status, owner, reason, recovery
+        case workId = "work_id"
+        case taskId = "task_id"
+        case taskIdentifier = "task_identifier"
+    }
 }
 
 /// `lf status <wave>` snapshot. Mirrors Rust `WaveDetailSnapshot` without
@@ -427,6 +589,7 @@ public struct WaveDetailSnapshot: Decodable, Sendable {
     public let wave: WaveSnapshot
     public let loopState: String?
     public let projects: [WaveProjectWork]
+    public let unavailableProjects: [UnavailableProjectEvidence]
     public let runs: WorkEvidence<SkillRunEntry>
     public let attention: WorkEvidence<WaveAttentionItem>
     /// The focused Wave's Home probed for liveness and its one contextual action.
@@ -440,6 +603,7 @@ public struct WaveDetailSnapshot: Decodable, Sendable {
         case wave, projects, runs, attention
         case homeRuntime = "home_runtime"
         case loopState = "loop_state"
+        case unavailableProjects = "unavailable_projects"
     }
 }
 
@@ -499,47 +663,27 @@ public struct SkillRunEntry: Decodable, Sendable, Identifiable, Hashable {
     }
 }
 
-/// One provider-measured Turn from `lf usage --json`. Mirrors Rust
-/// `TurnSpendRow` exactly; every absent provider measurement remains `nil`.
-public struct TurnSpend: Codable, Equatable, Sendable, Identifiable {
-    public var id: String { turnId }
-
-    public let turnId: String
-    public let invocationId: String
+/// Narrow decoding view over `lf trace <run> --json`. Rust owns the full trace
+/// graph; The Podium needs only the immutable ids for an explicit content
+/// request.
+public struct TraceIndexSnapshot: Decodable, Sendable {
     public let traceId: String
-    public let execId: String
-    public let repo: String
-    public let wave: String?
-    public let flow: String?
-    public let skill: String?
-    public let provider: String
-    public let model: String?
-    public let at: Int
-    public let inputTokens: Int?
-    public let outputTokens: Int?
-    public let cacheReadTokens: Int?
-    public let costUsd: Double?
-
-    /// `provider:model` — the harness and the model it drove.
-    public var agent: String {
-        switch model {
-        case let model?: return "\(provider):\(model)"
-        case nil: return provider
-        }
-    }
-
-    public var totalTokens: Int { (inputTokens ?? 0) + (outputTokens ?? 0) }
+    public let turns: [TraceTurnIndex]
 
     enum CodingKeys: String, CodingKey {
-        case repo, wave, flow, skill, provider, model, at
-        case turnId = "turn_id"
-        case invocationId = "invocation_id"
+        case turns
         case traceId = "trace_id"
-        case execId = "exec_id"
-        case inputTokens = "input_tokens"
-        case outputTokens = "output_tokens"
-        case cacheReadTokens = "cache_read_tokens"
-        case costUsd = "cost_usd"
+    }
+}
+
+public struct TraceTurnIndex: Decodable, Sendable {
+    public let id: String
+    public let invocationId: String
+    public let ordinal: Int
+
+    enum CodingKeys: String, CodingKey {
+        case id, ordinal
+        case invocationId = "invocation_id"
     }
 }
 

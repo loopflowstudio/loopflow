@@ -34,6 +34,19 @@ they mean the Mac surface.
 
 ### Runtime boundary still open
 
+- **Missing lifecycle flows must settle, not retry** (dogfood 2026-07-21).
+  LOO-167, LOO-193, and LOO-195 repeatedly alternated between `ready` and a
+  short-lived Run while `task` was absent from the installed flow catalog,
+  producing hundreds of identical resumable failures. The shared action
+  surfaces still recommended `resume` or `no_action`, and no non-destructive
+  pause exists for ready Task Work. Flow resolution failure must become one
+  durable blocked/failed boundary with bounded retry and a legal next action.
+- **Containment liveness is not provider-progress proof** (dogfood 2026-07-21).
+  LOO-207 and its owning Project reported `process_alive: true` while no exact
+  `lf ps` receipt existed and `lf top` recorded no completed output; interrupt
+  receipts contained no Turn ids and the residents immediately relaunched.
+  Supervisors must distinguish a live containment from an owned provider
+  process and an advancing Turn before recommending wait, interrupt, or retry.
 - `lf ask` now wakes a stopped parent idempotently, and a live Project or Wave
   Run retains an answer lane while owned child Work can still ask. The broader
   Home server design remains open for automatic backlog dispatch, remote
@@ -52,6 +65,13 @@ they mean the Mac surface.
 
 - `lf` and durable store projections define the product API; Mac and iOS
   consume that model rather than inventing a parallel lifecycle.
+- **Terminal-only and agent-embedded Loopflow are normal primary modes.** Chat
+  is an optional shared steering and observation surface, never a prerequisite
+  for operating Loopflow or an onboarding funnel every user must enter.
+- **Wave Chat is asynchronous steering, not a low-latency support chat.**
+  Durable inputs preserve order and may wait behind existing Wave work; surfaces
+  show delivered, queued, and working state instead of implying an immediate
+  conversational reply.
 - App surfaces navigate, present, and Steer Work. A view, terminal, provider
   process, or listener is never the source of Work or Ask/Answer truth.
 - A provider session is AgentInvocation continuity, not Work identity.
@@ -94,11 +114,34 @@ they mean the Mac surface.
   tolerate failure — drop the PM section rather than block. The scheduled
   `lf pm sync` cron keeps the snapshot warm for cross-machine readers.
 - **task = one Linear issue** under a Project. Linear is the only roadmap.
-- The seven live bets (Linear Projects under the product Initiative): loopflow-api,
-  wave-chat, mac-surface-ux, ios-surface-ux, distributed-computing,
-  product-performance, auditability. The old Concerto project set
-  (session-lifecycle, attention-navigation, wave-conducting, remote-connection,
-  palette) was folded into these and deleted, not tombstoned.
+- **Linear Team ownership moves to repository scope in PRD-43 (capability branch,
+  2026-07-20).** Repo-only `.lf/config.yaml` owns `pm.provider` plus the stable
+  `pm.linear_team`; each `GOAL.md` retains only its Initiative. A managed Team's
+  description carries one canonical Git-origin claim marker, validated before
+  every networked mutation. This is a cross-machine collision detector, not a
+  distributed lock (Linear exposes no compare-and-swap update).
+- **PM ownership follows stable provider edges.** Required snapshot fields are
+  Project `initiative_ids` + `team_ids` and Task `project_id` + `team_id`.
+  Reads and mutations resolve Issue → exactly one Project → exactly one
+  Initiative → exactly one local Wave; shared Issue prefixes and
+  ancestry-qualified Project titles are presentation only. Rust and Swift pin
+  this in the shared `pm_show.json` fixture; legacy payloads invalidate rather
+  than silently default.
+- **Repository-wide `lf pm reteam` is the only migration path.** It preflights
+  every linked Wave before provider writes, expands Project Team sets, moves all
+  open and completed Issues by UUID, reconciles durable identifiers, narrows
+  Projects, verifies/refills every snapshot, then removes legacy sentinels and
+  commits. Any Wave-level Team/provider or repo `linear.team` sentinel blocks
+  normal PM/Work mutations while cache-only reads and diagnostics remain.
+  PRD-43 deliberately preserves Loopflow's checked-in/live legacy bindings;
+  PRD-44 must run the consequential LOO migration from merged main.
+- The cache-only product snapshot on 2026-07-21 contains three linked Projects:
+  loopflow-api, mac-surface-ux, and auditability. The previously listed
+  wave-chat, ios-surface-ux, distributed-computing, and product-performance bets
+  are absent; do not select or mutate them unless a later synced snapshot
+  reintroduces them. The old Concerto project set (session-lifecycle,
+  attention-navigation, wave-conducting, remote-connection, palette) was folded
+  into the product portfolio and deleted, not tombstoned.
 
 ### The `lf` / Home spine (server topology not yet settled)
 
@@ -107,9 +150,15 @@ they mean the Mac surface.
 - **There is no agent messaging substrate.** Radio commands, channel identity,
   bus tables, cursors, retention, and subscriptions are gone. Durable Steers and
   Work state replace message delivery as product truth.
-- **Human Wave Chat remains a presentation surface.** Its current HTTP/SSE
-  listener is not generalized into Project/Task communication and does not feed
-  ambient prompt context.
+- **Company Discord is the canonical human Wave Chat backing when configured
+  (settled 2026-07-21).** An inbound human message becomes one durable Wave
+  Steer and the Wave reply returns to the same channel. Restart catch-up,
+  deduplication, self-echo rejection, and outbound receipts preserve one
+  conversation. The active backing and conversation epoch are explicit: local
+  and Discord compose never operate simultaneously, and product surfaces must
+  not persist a second transcript. This listener is not generalized into
+  Project/Task communication and Discord history does not become ambient prompt
+  context.
 - **Home ownership is the next design.** Decide how Ready scanning, remote
   nudges, live deltas, and replaceable executors fit together before moving
   remaining lfd/Wave-listener behavior.

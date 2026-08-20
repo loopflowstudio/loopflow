@@ -6,6 +6,7 @@ use anyhow::{anyhow, Result};
 use serde::Serialize;
 use time::{format_description::well_known::Rfc3339, Duration, OffsetDateTime};
 
+use crate::lf::commands::util::parse_since;
 use crate::lf::output::truncate;
 use crate::store::ci_incidents::CiIncidentReportRow;
 use crate::store::open_existing_store;
@@ -95,34 +96,6 @@ pub fn run(since: &str, wave: Option<&str>, repo: Option<&str>, json: bool) -> R
         print_report(&report);
     }
     Ok(())
-}
-
-fn parse_since(value: &str, now: OffsetDateTime) -> Result<OffsetDateTime> {
-    if let Ok(timestamp) = OffsetDateTime::parse(value, &Rfc3339) {
-        return Ok(timestamp);
-    }
-    let (amount, unit) = value.split_at(value.len().saturating_sub(1));
-    let amount: i64 = amount
-        .parse()
-        .map_err(|_| anyhow!("invalid --since '{value}'; use 7d, 24h, 30m, or RFC3339"))?;
-    if amount < 0 {
-        return Err(anyhow!("--since duration must be non-negative"));
-    }
-    let seconds_per_unit = match unit {
-        "d" => 86_400,
-        "h" => 3_600,
-        "m" => 60,
-        _ => {
-            return Err(anyhow!(
-                "invalid --since '{value}'; use 7d, 24h, 30m, or RFC3339"
-            ));
-        }
-    };
-    let seconds = amount
-        .checked_mul(seconds_per_unit)
-        .ok_or_else(|| anyhow!("--since duration is too large"))?;
-    now.checked_sub(Duration::seconds(seconds))
-        .ok_or_else(|| anyhow!("--since duration is too large"))
 }
 
 fn build_report(
@@ -363,7 +336,7 @@ fn print_report(report: &CiReportDto) {
 #[cfg(test)]
 mod tests {
     use super::{parse_since, percentile, summarize, CiIncidentDto};
-    use time::{Duration, OffsetDateTime};
+    use time::OffsetDateTime;
 
     fn green_incident(trigger: Option<&str>, responded: Option<&str>) -> CiIncidentDto {
         CiIncidentDto {
@@ -459,11 +432,14 @@ mod tests {
 
     #[test]
     fn relative_and_absolute_since_values_parse() {
-        let now = OffsetDateTime::UNIX_EPOCH + Duration::days(10);
-        assert_eq!(parse_since("7d", now).unwrap(), now - Duration::days(7));
+        let now = OffsetDateTime::UNIX_EPOCH + time::Duration::days(10);
+        assert_eq!(
+            parse_since("7d", now).unwrap(),
+            now - time::Duration::days(7)
+        );
         assert_eq!(
             parse_since("1970-01-02T00:00:00Z", now).unwrap(),
-            OffsetDateTime::UNIX_EPOCH + Duration::days(1)
+            OffsetDateTime::UNIX_EPOCH + time::Duration::days(1)
         );
         assert!(parse_since("week", now).is_err());
     }

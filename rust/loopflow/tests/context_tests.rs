@@ -39,9 +39,9 @@ fn make_commit(dir: &Path, message: &str) {
 }
 
 fn write_skill(repo: &Path, name: &str, content: &str) {
-    let skills_dir = repo.join(".lf/skills");
-    fs::create_dir_all(&skills_dir).unwrap();
-    fs::write(skills_dir.join(format!("{name}.md")), content).unwrap();
+    let path = repo.join(".lf/skills").join(format!("{name}.md"));
+    fs::create_dir_all(path.parent().expect("skill path has parent")).unwrap();
+    fs::write(path, content).unwrap();
 }
 
 fn write_direction(repo: &Path, name: &str, content: &str) {
@@ -820,7 +820,6 @@ fn assert_work_prompt_omits_unselected_wave_turn(skill: &str) {
     journal.append(|_| EventKind::TurnFinished {
         turn_id: "turn-2".to_string(),
         status: Lifecycle::Completed,
-        usage: loopflow::wave::journal::Usage::empty(),
         termination_reason: None,
     });
 
@@ -842,12 +841,12 @@ fn assert_work_prompt_omits_unselected_wave_turn(skill: &str) {
 
 #[test]
 fn project_prompt_omits_unselected_wave_turn_but_keeps_memory() {
-    assert_work_prompt_omits_unselected_wave_turn("project_pursue");
+    assert_work_prompt_omits_unselected_wave_turn("project/pursue");
 }
 
 #[test]
 fn task_prompt_omits_unselected_wave_turn_but_keeps_memory() {
-    assert_work_prompt_omits_unselected_wave_turn("task_pursue");
+    assert_work_prompt_omits_unselected_wave_turn("task/pursue");
 }
 
 #[test]

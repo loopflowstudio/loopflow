@@ -109,15 +109,15 @@ lf task wait <issue-id> --until terminal
 Chain skills manually, or use a named flow (a flow is a sequence of steps; each step names a skill, an op, or a subflow):
 
 ```bash
-lf design && lf implement && lf compress # manual coding chain
-lf build                                 # one design → code → reviewable Task slice
+lf design                                # review one exact design artifact
+lf launch-plan                           # keep the core here; launch independent Tasks
+lf build                                 # one code → reviewable Task slice
 lf ship                                  # final Task gate → learnings → land
 ```
 
-Flows automate skills within one bounded pass. `build` runs kickoff →
-review-design → implement → compress → review-slice. `ship` and `deploy` own
-the shipping gate and delivery. Repetition belongs to Wave, Project, and Task
-runtimes.
+Flows automate skills within one bounded pass. Their YAML owns ordering and
+human gates; `ship` and `deploy` own the ordinary delivery steps. Repetition
+belongs to Wave, Project, and Task runtimes.
 
 ### Custom skills
 
@@ -182,8 +182,7 @@ tmux ls               # live agent sessions
 tmux attach -r -t <name> # inspect one; never mutate the session directly
 ```
 
-Use `lf work asks`, then `lf work answer <ask-id> <text>`, for questions that
-need you. Stop a running Wave with `lf stop <name>`.
+Use `lf ask list`, then `lf ask open <ask-id>`, for requested interventions that need an exact session.
 
 Use `lf prompt: draft wave/shipper/GOAL.md` to author the loop contract. Use
 `lf design` to explore an uncertain operating context, or write it by hand.

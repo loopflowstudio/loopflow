@@ -9,7 +9,7 @@
 use std::path::Path;
 use std::process::Command;
 
-use loopflow::engine::wave_context::{resolve_managed_wave_name, WaveResolveError};
+use loopflow::engine::wave_context::{resolve_managed_wave, WaveResolveError};
 use loopflow::id::WaveId;
 use loopflow::store::sqlite::SqliteStore;
 use loopflow::store::{open_store, PmSnapshotRow, StorageConfig};
@@ -24,10 +24,15 @@ async fn resolver_matrix_agrees_across_every_environment() {
     let store = open_store(&StorageConfig::sqlite(tmp.path().join("loopflow.db")))
         .await
         .expect("open store");
+    let repo = tmp.path().join("repo");
+    std::fs::create_dir_all(&repo).expect("repo");
     let wave = Wave::new(
         WaveId::new(),
         "product".to_string(),
-        tmp.path().join("repo").display().to_string(),
+        std::fs::canonicalize(&repo)
+            .expect("canonical repo")
+            .display()
+            .to_string(),
     );
     store.create_wave(&wave).await.expect("register wave");
     let uuid = wave.id().as_str();
@@ -36,79 +41,109 @@ async fn resolver_matrix_agrees_across_every_environment() {
     // Project/Task Work ids never touch Wave identity, so one cell covers
     // all three. UUID first: mapped to its registry name.
     assert_eq!(
-        resolve_managed_wave_name(Some(&store), None, Some(uuid))
+        resolve_managed_wave(Some(&store), Some(&repo), None, Some(uuid))
             .await
-            .expect("uuid resolves"),
-        "product"
+            .expect("uuid resolves")
+            .id(),
+        wave.id()
     );
 
     // Hand-set name: the intentional fallback. `LF_WAVE_ID=product` resolves
     // even though it is not a UUID.
     assert_eq!(
-        resolve_managed_wave_name(Some(&store), None, Some("product"))
+        resolve_managed_wave(Some(&store), Some(&repo), None, Some("product"))
             .await
-            .expect("hand-set name resolves"),
-        "product"
+            .expect("hand-set name resolves")
+            .id(),
+        wave.id()
     );
 
     // Explicit `--wave` always wins, even over a (wrong) ambient id.
     assert_eq!(
-        resolve_managed_wave_name(Some(&store), Some("product"), Some("something-else"))
-            .await
-            .expect("explicit wins"),
-        "product"
+        resolve_managed_wave(
+            Some(&store),
+            Some(&repo),
+            Some("product"),
+            Some("something-else"),
+        )
+        .await
+        .expect("explicit wins")
+        .id(),
+        wave.id()
     );
 
     // Stale identity: a real UUID the registry has never seen. Not silently
     // re-read as a name — a distinct, classified error.
     let stale = WaveId::new();
-    assert_eq!(
-        resolve_managed_wave_name(Some(&store), None, Some(stale.as_str())).await,
-        Err(WaveResolveError::StaleIdentity(stale.as_str().to_string()))
-    );
+    assert!(matches!(
+        resolve_managed_wave(Some(&store), Some(&repo), None, Some(stale.as_str())).await,
+        Err(WaveResolveError::StaleIdentity(value)) if value == stale.as_str()
+    ));
 
     // No context: neither `--wave` nor `LF_WAVE_ID` (empty counts as absent).
-    assert_eq!(
-        resolve_managed_wave_name(Some(&store), None, None).await,
+    assert!(matches!(
+        resolve_managed_wave(Some(&store), Some(&repo), None, None).await,
         Err(WaveResolveError::NoContext)
-    );
-    assert_eq!(
-        resolve_managed_wave_name(Some(&store), None, Some("   ")).await,
+    ));
+    assert!(matches!(
+        resolve_managed_wave(Some(&store), Some(&repo), None, Some("   ")).await,
         Err(WaveResolveError::NoContext)
-    );
+    ));
 
     // An empty `--wave` is an explicit-but-unusable request, not "no context".
-    assert_eq!(
-        resolve_managed_wave_name(Some(&store), Some("  "), None).await,
+    assert!(matches!(
+        resolve_managed_wave(Some(&store), Some(&repo), Some("  "), None).await,
         Err(WaveResolveError::EmptyExplicit)
-    );
+    ));
 
     // An explicit `--wave` naming a wave the registry has never seen is a
     // classified error — never a silent accept. The resolver owns this rule;
     // every consumer surfaces the same classification.
-    assert_eq!(
-        resolve_managed_wave_name(Some(&store), Some("definitely-unknown"), None).await,
-        Err(WaveResolveError::UnknownExplicit(
-            "definitely-unknown".to_string()
-        ))
-    );
+    assert!(matches!(
+        resolve_managed_wave(
+            Some(&store),
+            Some(&repo),
+            Some("definitely-unknown"),
+            None,
+        )
+        .await,
+        Err(WaveResolveError::UnknownExplicit(value)) if value == "definitely-unknown"
+    ));
 
     // No registry on this machine + an explicit name → error, not silent
     // accept. A machine with no registry has no valid wave names.
     assert!(matches!(
-        resolve_managed_wave_name(None, Some("product"), None).await,
+        resolve_managed_wave(None, Some(&repo), Some("product"), None).await,
         Err(WaveResolveError::Registry(_))
     ));
 
-    // A hand-set name for a wave with no registry row still resolves to that
-    // name — membership is each consumer's concern (PM keys files/snapshots by
-    // name; status then reports it has no row). The resolver stays consistent.
-    assert_eq!(
-        resolve_managed_wave_name(Some(&store), None, Some("ghost"))
-            .await
-            .expect("unregistered name resolves to itself"),
-        "ghost"
+    assert!(matches!(
+        resolve_managed_wave(Some(&store), Some(&repo), None, Some("ghost")).await,
+        Err(WaveResolveError::StaleIdentity(value)) if value == "ghost"
+    ));
+
+    let other_repo = tmp.path().join("other-repo");
+    std::fs::create_dir_all(&other_repo).expect("other repo");
+    let other = Wave::new(
+        WaveId::new(),
+        "product".to_string(),
+        std::fs::canonicalize(&other_repo)
+            .expect("canonical other repo")
+            .display()
+            .to_string(),
     );
+    store
+        .create_wave(&other)
+        .await
+        .expect("register other Wave");
+    assert!(matches!(
+        resolve_managed_wave(Some(&store), None, Some("product"), None).await,
+        Err(WaveResolveError::AmbiguousWave { .. })
+    ));
+    assert!(matches!(
+        resolve_managed_wave(Some(&store), Some(&repo), None, Some(other.id().as_str())).await,
+        Err(WaveResolveError::RepositoryMismatch { .. })
+    ));
 }
 
 /// Seed a machine home with one PM-linked wave and a fresh cache-only snapshot,
@@ -123,14 +158,9 @@ fn seed(home: &Path, repo: &Path, wave_name: &str) -> Wave {
         repo.display().to_string(),
     );
     store.create_wave(&wave).expect("register wave");
-    let repo_key = std::fs::canonicalize(repo)
-        .expect("canonicalize repo")
-        .display()
-        .to_string();
     store
         .put_pm_snapshot(&PmSnapshotRow {
-            repo: repo_key,
-            wave: wave_name.to_string(),
+            wave_id: wave.id().clone(),
             provider: "linear".to_string(),
             initiative: "initiative-1".to_string(),
             synced_at: chrono::Utc::now().timestamp(),

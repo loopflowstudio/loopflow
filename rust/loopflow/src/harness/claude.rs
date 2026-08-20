@@ -9,7 +9,7 @@ use tokio::process::{Child, Command};
 use tokio::sync::mpsc;
 use tokio::task::JoinHandle;
 
-use crate::chat::types::{ConversationEvent, Lifecycle, TurnUsage};
+use crate::chat::types::{ConversationEvent, Lifecycle};
 use crate::engine::agent::{build_claude_session_turn_args, AgentConfig};
 use crate::harness::claude_mapping::ReaderState;
 use crate::harness::common::{spawn_stderr_logger, TurnInProgressGuard};
@@ -121,6 +121,7 @@ impl Harness for ClaudeHarness {
         // Validate claude binary on PATH.
         let mut version_command = Command::new("claude");
         version_command.arg("--version");
+        super::configure_agent_env(&mut version_command, config);
         if let Some(route) = &self.account_route {
             route.apply_tokio(&mut version_command);
         }
@@ -185,6 +186,7 @@ impl Harness for ClaudeHarness {
         let args = build_claude_session_turn_args(&turn_content, config, resume_id.as_deref());
         let mut cmd = Command::new("claude");
         cmd.args(&args);
+        super::configure_agent_env(&mut cmd, config);
         if let Some(route) = &self.account_route {
             route.apply_tokio(&mut cmd);
         }
@@ -309,12 +311,8 @@ impl Harness for ClaudeHarness {
                     });
                 }
                 let _ = events.send(ConversationEvent::TurnCompleted {
-                    turn_id: reader_turn_id.clone(),
-                    status,
-                });
-                let _ = events.send(ConversationEvent::TurnUsage {
                     turn_id: reader_turn_id,
-                    usage: TurnUsage::default(),
+                    status,
                 });
             }
 
@@ -390,9 +388,11 @@ mod tests {
             max_turns: None,
             resume_token: None,
             authority: crate::engine::agent::AgentAuthority::Inherit,
+            write_scope: crate::engine::agent::AgentWriteScope::Configured,
             skip_permissions: false,
             structured_replies: Vec::new(),
             directive_relay: None,
+            env: Default::default(),
         });
 
         let first = harness

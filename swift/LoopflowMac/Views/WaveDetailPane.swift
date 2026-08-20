@@ -44,7 +44,6 @@ struct WaveDetailPane: View {
     @State private var selection: WaveWorkSelection?
     @State private var prefill: WaveComposerPrefill?
     @State private var workRefresh: UInt64 = 0
-    @State private var showsControl = false
     // A shared singleton is externally owned, so it observes as an @ObservedObject.
     // Wrapping it in @StateObject installs StateObject's create-and-own lifecycle
     // during the first body pass, which fires the singleton's publisher mid-eval —
@@ -111,18 +110,6 @@ struct WaveDetailPane: View {
             .accessibilityIdentifier("wave-context-lab")
 
             Button {
-                showsControl = true
-            } label: {
-                Image(systemName: "slider.horizontal.3")
-                    .font(Typography.caption())
-                    .foregroundStyle(palette.textSecondary)
-            }
-            .buttonStyle(.plain)
-            .help("Open Control")
-            .accessibilityLabel("Open Control")
-            .accessibilityIdentifier("wave-control-button")
-
-            Button {
                 onClose()
             } label: {
                 Image(systemName: "xmark")
@@ -135,9 +122,6 @@ struct WaveDetailPane: View {
         }
         .padding(.horizontal, Spacing.xl)
         .padding(.vertical, Spacing.md)
-        .sheet(isPresented: $showsControl) {
-            ControlView { showsControl = false }
-        }
     }
 }
 

@@ -7,17 +7,43 @@
 ./dev xcode        # regenerate and open the Xcode project
 ```
 
-Loopflow opens on a repository rail, a Wave list, and the machine-wide roadmap.
-The roadmap reads `lf roadmap --json` once, showing every Wave's durable
-Projects and Tasks even when its process is stopped. Select **All Repos** for
-the whole machine or a repository to filter that same snapshot locally.
+Loopflow opens on The Podium: a closable Wave hierarchy on the left, machine-wide
+Now/Roadmap Work in the center, and durable Activity on the right. Selecting a
+Wave, Project, or Task preserves the live view and scopes `lf activity --json`
+at the source. Disclose each branch from Wave → Project → Task → live Exec. Every
+level uses the same output meter and the existing `WorkReference`; Exec remains
+process evidence rather than a fourth Work kind. Run facts open their exact
+trace; PR facts open GitHub proof.
 
-Create a Wave with the `+` button. The app writes `GOAL.md` and `MEMORY.md`
-in the repository's main checkout. **Open chat** attaches to a live Wave;
-**Start & open** launches a stopped Wave through `lf wave` and opens its
-conversation while it connects. Wave Chat paints the bounded local journal
-tail before SSE, keeps it visible through reconnects, and rolls equivalent
-operational failures into one disclosed notice.
+The compact Podium bar reads live process evidence from `lf ps --json`. Its
+vertical signal meter shows normalized output over five seconds, with the
+60-second rate as a reference tick; completed provider usage stays the exact
+counter. The lamp stays independent from output: black is off, green
+is producing, blue is blocked, and amber is waiting or unknown. Wave count,
+active Runs, and Run-without-listener warnings come from `lf ls --json`.
+Its User-attention badge reads `lf ask list --user --json`; selecting a request
+claims or recovers the same Ask session used by the CLI, then attaches its exact
+Invocation in embedded Ghostty or an attach-capable external target.
+Repository scope filters the Work and Wave snapshots locally; live process
+evidence remains machine-wide.
+Each provider node retains its existing repository and Work attribution, so the
+hierarchy rolls one process reading up to Task, Project, and Wave without another
+telemetry store. Authored Waves count even before they have an active Run.
+
+Loading, empty, stale-last-good, and unavailable reads stay distinct. Wave and
+agent readings fail independently. A failed refresh keeps the last useful
+evidence visible with its failure reason rather than painting a healthy empty
+state.
+
+The previous Wave workspace remains available in repository and Portfolio
+windows while its proven inspectors and Chat surface move into the new root.
+Wave Chat loads the active backing's bounded history before SSE, keeps it visible
+through reconnects, and rolls equivalent operational failures into one
+disclosed notice. Cold launch does not start a chat transcript read.
+Local-backed conversations compose in the app. Discord-backed conversations
+mirror the same source-linked transcript and open Discord to reply; they never
+create a parallel local thread. Prior backing epochs remain selectable and
+read-only, and backing delivery trouble stays visible above the transcript.
 Commands, tools, file edits, and loop bookkeeping stay in the journal;
 decisions, deliveries, and human-level failures remain visible. The detail pane
 reads Projects, Tasks, decisions, PR delivery, and attention from
@@ -59,23 +85,26 @@ and observation spans.
   override. Waves and Projects remain control-plane processes in main.
 - **Task workspace presentation** reads `lf task changes/diff/file --json`.
   Lifecycle mutations remain `lf task run/resume/interrupt`; routed questions
-  are answered through the explicit `lf work asks/answer` CLI.
+  use the shared `lf ask` queue.
 - **Registry queries** own durable reads. `RegistryQuery` runs
-  `lf ls/status/roadmap/runs/usage/doctor/tokens/context/trace --json`; the app
+  `lf ls/status/roadmap/ps/activity/usage/doctor/tokens/context/trace --json`; the app
   does not maintain a second roadmap or lifecycle database. Unavailable per-Wave
   evidence renders its reason, and refresh failures leave the last successful
-  roadmap or selected Wave detail visible.
+  roadmap or Activity history visible. Prompt and conversation bodies load only
+  after **Open trace**.
 - **Per-Wave SSE** owns live motion. `WaveChatConnection` first reads
   `lf chat --history --json`, then connects only to the selected Wave's
   `/events` stream and upserts its replay before continuing live.
 
 ## Code map
 
-- `LoopflowMac/Views/WavesView.swift` — repository rail and Wave selection
+- `LoopflowMac/Views/PodiumView.swift` — primary Wave scope, Work, and live TOK/s signal
+- `LoopflowMac/Views/WorkActivityView.swift` — filtered durable Activity and proof links
+- `LoopflowMac/PodiumModel.swift` — shared readings, stable selection, and local scope
+- `LoopflowMac/Views/WavesView.swift` — previous Wave workspace during migration
 - `LoopflowMac/Views/RoadmapView.swift` — all-Wave roadmap and lifecycle controls
 - `LoopflowMac/Views/WaveDetailPane.swift` — Wave Chat plus Project/Task work
 - `LoopflowMac/Views/TaskWorkspaceView.swift` — Task diff, file, Ghostty, and Warp surface
-- `LoopflowMac/Views/WorkCensusView.swift` — machine-wide Work and Invocation census
 - `LoopflowMac/Views/ContextLabView.swift` — invocation-set filters, flames, lanes, and evidence
 - `LoopflowMac/Views/ContextLabHandoffView.swift` — explicit trace bodies and Task refinement handoff
 - `LoopflowMac/PortfolioRepoState.swift` — one repository's Wave projection
@@ -94,6 +123,12 @@ application target.
 so macOS permissions survive rebuilds. The app queries `lf` directly and starts
 only the selected Wave's `lf wave` process; it has no machine-wide service or
 remote-connection mode.
+
+The dev app bundles the current source `lf` with release Home selection and
+validation-only migration authority. Its operator views therefore read the
+real Home without allowing an unpromoted build to advance the shared database
+frontier. Ordinary source-built `lf` commands keep their isolated `.lf-dev`
+Home.
 
 | Command | What it does |
 | --- | --- |

@@ -149,8 +149,20 @@ fn claude_trace_normal_turn() {
     let event_types: Vec<_> = events.iter().map(ConversationEvent::event_type).collect();
     assert_eq!(
         event_types,
-        vec!["text_delta", "turn_completed", "turn_usage"]
+        vec!["text_delta", "usage_checkpoint", "turn_completed"]
     );
+    assert!(matches!(
+        events.get(1),
+        Some(ConversationEvent::UsageCheckpoint { usage, .. })
+            if usage.input_tokens == Some(321)
+                && usage.output_tokens == Some(123)
+                && usage.total_input_tokens == Some(337)
+                && usage.cache_read_tokens == Some(11)
+                && usage.cache_write_tokens == Some(5)
+                && usage.reasoning_tokens == Some(9)
+                && usage.model.as_deref() == Some("claude-sonnet-4")
+                && usage.cost_usd == Some(0.2)
+    ));
     assert!(matches!(
         events
             .iter()
@@ -223,10 +235,16 @@ fn codex_trace_normal_turn() {
     let events = replay_codex_trace("codex_normal_turn.jsonl");
     let event_types: Vec<_> = events.iter().map(ConversationEvent::event_type).collect();
     // User echoes, the completed copy of streamed agent prose, and status
-    // notifications produce no events; tokenUsage folds into turn_usage.
+    // notifications produce no events; tokenUsage folds into usage_checkpoint.
     assert_eq!(
         event_types,
-        vec!["turn_started", "text_delta", "turn_completed", "turn_usage",]
+        vec![
+            "turn_started",
+            "text_delta",
+            "usage_checkpoint",
+            "usage_checkpoint",
+            "turn_completed",
+        ]
     );
     assert!(matches!(
         events
@@ -245,12 +263,23 @@ fn codex_trace_normal_turn() {
     // reports the turn's own spend in Claude's shape: input net of cache,
     // gross in total_input_tokens.
     assert!(matches!(
-        events.last(),
-        Some(ConversationEvent::TurnUsage { usage, .. })
-            if usage.input_tokens == 6465
-                && usage.output_tokens == 5
+        events.get(2),
+        Some(ConversationEvent::UsageCheckpoint {
+            usage,
+            final_receipt: false,
+            ..
+        })
+            if usage.input_tokens == Some(6465)
+                && usage.output_tokens == Some(5)
                 && usage.cache_read_tokens == Some(9600)
                 && usage.total_input_tokens == Some(16065)
+    ));
+    assert!(matches!(
+        events.get(3),
+        Some(ConversationEvent::UsageCheckpoint {
+            final_receipt: true,
+            ..
+        })
     ));
 }
 
@@ -258,10 +287,7 @@ fn codex_trace_normal_turn() {
 fn codex_trace_error_turn() {
     let events = replay_codex_trace("codex_error.jsonl");
     let event_types: Vec<_> = events.iter().map(ConversationEvent::event_type).collect();
-    assert_eq!(
-        event_types,
-        vec!["turn_started", "error", "turn_completed", "turn_usage"]
-    );
+    assert_eq!(event_types, vec!["turn_started", "error", "turn_completed"]);
     assert!(matches!(
         events[1],
         ConversationEvent::Error { ref code, ref message, .. }
@@ -292,8 +318,9 @@ fn codex_trace_will_retry_error_does_not_end_the_turn() {
             "turn_started",
             "item_completed", // the retryable error, as a Thought
             "item_completed", // the real answer after the retry
+            "usage_checkpoint",
+            "usage_checkpoint",
             "turn_completed",
-            "turn_usage",
         ],
         "no terminal error event for a retryable error"
     );
@@ -367,13 +394,18 @@ fn opencode_trace_reports_the_tokens_the_provider_measured() {
     let event_types: Vec<_> = events.iter().map(ConversationEvent::event_type).collect();
     assert_eq!(
         event_types,
-        vec!["turn_started", "text_delta", "turn_completed", "turn_usage"]
+        vec![
+            "turn_started",
+            "text_delta",
+            "usage_checkpoint",
+            "turn_completed"
+        ]
     );
-    let Some(ConversationEvent::TurnUsage { usage, .. }) = events.last() else {
-        panic!("a reported idle usage should produce a turn_usage event");
+    let Some(ConversationEvent::UsageCheckpoint { usage, .. }) = events.get(2) else {
+        panic!("a reported idle usage should produce a usage_checkpoint event");
     };
-    assert_eq!(usage.input_tokens, 40);
-    assert_eq!(usage.output_tokens, 5197);
+    assert_eq!(usage.input_tokens, Some(40));
+    assert_eq!(usage.output_tokens, Some(5197));
     assert_eq!(usage.total_input_tokens, Some(40));
     assert_eq!(usage.model.as_deref(), Some("opencode/glm-5.2"));
     assert_eq!(usage.cost_usd, Some(0.985363));

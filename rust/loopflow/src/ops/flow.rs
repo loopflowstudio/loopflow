@@ -56,6 +56,7 @@ pub fn execute_flow_ops(repo: &Path, item: &Op, progress: &impl Progress) -> Ops
             push,
             no_add,
         }) => {
+            crate::ops::task::guard_task_mutation_authority(repo)?;
             commit_workflow(
                 repo,
                 &CommitOptions {
@@ -72,8 +73,40 @@ pub fn execute_flow_ops(repo: &Path, item: &Op, progress: &impl Progress) -> Ops
         Some(Commands::Release { cmd }) => execute_release(repo, cmd, progress),
         Some(Commands::Doctor { json }) => crate::lf::commands::doctor::run(json)
             .map_err(|error| OpsError::Message(error.to_string())),
+        Some(Commands::TelemetryScorecard { json }) => run_telemetry_scorecard(repo, json),
         _ => Err(unsupported()),
     }
+}
+
+fn run_telemetry_scorecard(repo: &Path, json: bool) -> OpsResult<()> {
+    let script = repo.join("scripts/lifecycle_scorecard.py");
+    if !script.is_file() {
+        return Err(OpsError::Message(format!(
+            "telemetry scorecard generator not found: {}",
+            script.display()
+        )));
+    }
+    let database = crate::store::database_path_from_env()
+        .map_err(|error| OpsError::Message(format!("resolve telemetry database: {error}")))?;
+    let mut command = std::process::Command::new("python3");
+    command
+        .arg(script)
+        .arg("--repo")
+        .arg(repo)
+        .arg("--database")
+        .arg(database);
+    if json {
+        command.arg("--json");
+    }
+    let status = command
+        .status()
+        .map_err(|error| OpsError::Message(format!("launch telemetry scorecard: {error}")))?;
+    if !status.success() {
+        return Err(OpsError::Message(format!(
+            "telemetry scorecard exited with {status}"
+        )));
+    }
+    Ok(())
 }
 
 fn execute_pr(repo: &Path, cmd: PrCommand, progress: &impl Progress) -> OpsResult<()> {
@@ -81,7 +114,6 @@ fn execute_pr(repo: &Path, cmd: PrCommand, progress: &impl Progress) -> OpsResul
         PrCommand::Land {
             strict,
             local,
-            create_pr,
             complete,
             next,
             worktree,
@@ -94,7 +126,7 @@ fn execute_pr(repo: &Path, cmd: PrCommand, progress: &impl Progress) -> OpsResul
                 &LandOptions {
                     strict,
                     local,
-                    create_pr,
+                    create_pr: true,
                     complete,
                     next_slug: next,
                     worktree,
@@ -223,7 +255,7 @@ fn execute_release(repo: &Path, cmd: ReleaseCommand, progress: &impl Progress) -
 /// agent, reads interactively, or manages waves has no place in a flow step.
 fn unsupported() -> OpsError {
     OpsError::Message(
-        "op item must be one of pr open, pr submit, pr land, pr abandon, rebase, commit, release, or doctor"
+        "op item must be one of pr open, pr submit, pr land, pr abandon, rebase, commit, release, doctor, or the internal telemetry scorecard"
             .to_string(),
     )
 }
@@ -243,5 +275,34 @@ mod tests {
         let error = execute_flow_ops(Path::new("."), &item, &NullProgress)
             .expect_err("removed evidence command must not dispatch");
         assert!(error.to_string().contains("op item must be one of"));
+    }
+
+    #[test]
+    fn telemetry_flow_op_runs_internal_scorecard() {
+        let repo = tempfile::tempdir().expect("temp repo");
+        let scripts = repo.path().join("scripts");
+        std::fs::create_dir(&scripts).expect("create scripts directory");
+        std::fs::write(
+            scripts.join("lifecycle_scorecard.py"),
+            r#"import pathlib
+import sys
+
+repo = pathlib.Path(sys.argv[2])
+repo.joinpath("scorecard-ran").write_text("json" if "--json" in sys.argv else "text")
+"#,
+        )
+        .expect("write scorecard fixture");
+        let item = Op {
+            command: "__telemetry-scorecard".to_string(),
+            args: vec!["--json".to_string()],
+        };
+
+        execute_flow_ops(repo.path(), &item, &NullProgress).expect("run telemetry scorecard");
+
+        assert_eq!(
+            std::fs::read_to_string(repo.path().join("scorecard-ran"))
+                .expect("read scorecard receipt"),
+            "json"
+        );
     }
 }

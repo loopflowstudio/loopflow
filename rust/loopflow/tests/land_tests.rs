@@ -10,7 +10,9 @@ use loopflow::ops::{
 };
 use loopflow::task::{AfterMerge, PrMergeMode, PrPhase};
 use loopflow_test_support::TestRepo;
-use support::{counting_open_script, presentation_attempts, register_task, EnvGuard};
+use support::{
+    codex_app_server_script, counting_open_script, presentation_attempts, register_task, EnvGuard,
+};
 
 fn push_branch(repo: &TestRepo, name: &str) {
     let _ = Command::new("git")
@@ -56,12 +58,13 @@ if [ "$1 $2" = "pr create" ]; then
   exit 0
 fi
 
+if [ "$1 $2" = "api graphql" ]; then
+  echo 'false'
+  exit 0
+fi
+
 if [ "$1 $2" = "pr view" ]; then
-  if [ "$4" = "--json" ] && [ "$5" = "autoMergeRequest" ]; then
-    echo 'false'
-  else
-    echo 'https://example.com/pr/1'
-  fi
+  echo 'https://example.com/pr/1'
   exit 0
 fi
 
@@ -96,11 +99,12 @@ if [ "$1 $2" = "pr create" ]; then
   exit 0
 fi
 
+if [ "$1 $2" = "api graphql" ]; then
+  if [ -f "$auto_state" ]; then echo 'true'; else echo 'false'; fi
+  exit 0
+fi
+
 if [ "$1 $2" = "pr view" ]; then
-  if [ "$4" = "--json" ] && [ "$5" = "autoMergeRequest" ]; then
-    if [ -f "$auto_state" ]; then echo 'true'; else echo 'false'; fi
-    exit 0
-  fi
   echo "https://example.com/pr/1"
   exit 0
 fi
@@ -119,6 +123,7 @@ fn gh_existing_pr_script(log_path: &str) -> String {
     format!(
         r#"#!/bin/sh
 auto_state="{log_path}.auto"
+queue_state="{log_path}.queued"
 if [ "$1" = "--version" ]; then
   exit 0
 fi
@@ -128,16 +133,16 @@ if [ "$1 $2" = "pr list" ]; then
   echo "[{{\"url\":\"https://example.com/pr/912\",\"state\":\"OPEN\",\"isDraft\":false,\"number\":912,\"mergeCommit\":null,\"headRefOid\":\"$head\"}}]"
   exit 0
 fi
+if [ "$1 $2" = "api graphql" ]; then
+  if [ -f "$auto_state" ] || [ -f "$queue_state" ]; then echo 'true'; else echo 'false'; fi
+  exit 0
+fi
 if [ "$1 $2" = "pr view" ]; then
-  if [ "$4" = "--json" ] && [ "$5" = "autoMergeRequest" ]; then
-    if [ -f "$auto_state" ]; then echo 'true'; else echo 'false'; fi
-    exit 0
-  fi
   echo 'https://example.com/pr/912'
   exit 0
 fi
-if [ "$1 $2 $3 $4" = "pr merge 912 --disable" ]; then
-  rm -f "$auto_state"
+if [ "$1 $2 $3 $4" = "pr merge 912 --disable-auto" ]; then
+  rm -f "$auto_state" "$queue_state"
   exit 0
 fi
 if [ "$1 $2" = "pr merge" ]; then
@@ -189,12 +194,12 @@ if [ "$1 $2" = "pr list" ]; then
   echo "[{{\"url\":\"https://example.com/pr/912\",\"state\":\"OPEN\",\"isDraft\":false,\"number\":912,\"mergeCommit\":null,\"headRefOid\":\"$head\"}}]"
   exit 0
 fi
+if [ "$1 $2" = "api graphql" ]; then
+  echo 'false'
+  exit 0
+fi
 if [ "$1 $2" = "pr view" ]; then
-  if [ "$4" = "--json" ] && [ "$5" = "autoMergeRequest" ]; then
-    echo 'false'
-  else
-    echo 'https://example.com/pr/912'
-  fi
+  echo 'https://example.com/pr/912'
   exit 0
 fi
 if [ "$1 $2" = "pr merge" ]; then
@@ -206,8 +211,8 @@ exit 0
     )
 }
 
-fn agent_script() -> &'static str {
-    "#!/bin/sh\necho '{\"title\":\"generated title\",\"body\":\"generated body\"}'\nexit 0\n"
+fn agent_script() -> String {
+    codex_app_server_script(r#"{"title":"generated title","body":"generated body"}"#, "")
 }
 
 #[test]
@@ -610,7 +615,7 @@ fn land_missing_pr_error_includes_branch_name() {
     let _env = EnvGuard::with_home(
         &[
             ("gh", gh_no_pr_script()),
-            ("codex", agent_script()),
+            ("codex", &agent_script()),
             ("open", noop_open_script()),
         ],
         Some(home.path()),
@@ -912,7 +917,7 @@ fn land_clears_the_durable_request_when_auto_arm_fails() {
         "a failed Auto handoff must not leave GitHub as a false owner"
     );
     let log = fs::read_to_string(log_path).expect("read gh log");
-    assert!(log.contains("pr merge --squash --auto --match-head-commit"));
+    assert!(log.contains("pr merge 912 --squash --auto --match-head-commit"));
 }
 
 #[test]
@@ -1023,20 +1028,20 @@ fn latest_land_disposition_wins_before_merge() {
     assert_eq!(merge.next_slug.as_deref(), Some("follow-up-proof"));
     let log = fs::read_to_string(&log_path).expect("read gh log");
     assert!(log.contains(&format!(
-        "pr merge --squash --auto --match-head-commit {revised_head}"
+        "pr merge 912 --squash --auto --match-head-commit {revised_head}"
     )));
     let first_disable = log
-        .find("pr merge 912 --disable")
+        .find("pr merge 912 --disable-auto")
         .expect("pre-existing Auto is replaced");
     let first_arm = log
-        .find("pr merge --squash --auto --match-head-commit")
+        .find("pr merge 912 --squash --auto --match-head-commit")
         .expect("land arms the exact prepared head");
     assert!(
         first_disable < first_arm,
         "external Auto must be replaced by the exact-head command:\n{log}"
     );
     let disable = log
-        .rfind("pr merge 912 --disable")
+        .rfind("pr merge 912 --disable-auto")
         .expect("second land revokes prior Auto request");
     if revised_head != head {
         let push = log
@@ -1080,8 +1085,140 @@ fn latest_land_disposition_wins_before_merge() {
     assert_eq!(request.mode, PrMergeMode::User);
     assert_eq!(request.head_sha, submitted_head);
     let log = fs::read_to_string(&log_path).expect("read gh log");
-    assert!(log.contains("pr merge 912 --disable"));
+    assert!(log.contains("pr merge 912 --disable-auto"));
     assert!(log.contains("pr edit --add-assignee @me"));
+}
+
+#[test]
+fn repeated_identical_land_preserves_the_armed_task_request() {
+    let home = tempfile::TempDir::new().expect("temp home");
+    let repo = TestRepo::new();
+    let log_path = home.path().join("gh.log");
+    let script = gh_existing_pr_script(log_path.to_string_lossy().as_ref());
+    let _env = EnvGuard::with_lf_home(
+        &[("gh", script.as_str()), ("open", noop_open_script())],
+        home.path(),
+    );
+    let base = repo.head_sha();
+    let branch = "jack/replay-safe-land";
+    repo.create_branch(branch);
+    repo.create_file("feature.txt", "feature");
+    repo.stage_all();
+    repo.commit("feature work");
+    repo.push_new_branch(branch);
+    let task = register_task(home.path(), repo.path(), branch, &base);
+    let options = LandOptions {
+        strict: true,
+        local: false,
+        create_pr: false,
+        complete: true,
+        next_slug: None,
+        worktree: None,
+        commit_message: None,
+        pr_title: Some("test title".to_string()),
+        pr_body: Some("test body".to_string()),
+        agent: None,
+    };
+
+    land(repo.path(), &options, &NullProgress).expect("first land arms the request");
+    let armed_head = repo.head_sha();
+    let first_log = fs::read_to_string(&log_path).expect("read first gh log");
+    let first_merge_calls = first_log
+        .lines()
+        .filter(|line| line.starts_with("pr merge"))
+        .count();
+
+    land(repo.path(), &options, &NullProgress).expect("identical land is replay-safe");
+
+    assert_eq!(
+        repo.head_sha(),
+        armed_head,
+        "replay must not rewrite the head"
+    );
+    let pr = tokio::runtime::Runtime::new()
+        .expect("task runtime")
+        .block_on(task.store.active_task_pr(&task.task.id))
+        .expect("read active PR")
+        .expect("active PR");
+    let request = pr.merge_request().expect("preserved merge request");
+    assert_eq!(request.mode, PrMergeMode::Auto);
+    assert_eq!(request.after_merge, AfterMerge::CompleteTask);
+    assert_eq!(request.head_sha, armed_head);
+    let replay_log = fs::read_to_string(&log_path).expect("read replay gh log");
+    assert_eq!(
+        replay_log
+            .lines()
+            .filter(|line| line.starts_with("pr merge"))
+            .count(),
+        first_merge_calls,
+        "replay must neither disable nor arm auto-merge again:\n{replay_log}"
+    );
+    assert!(!replay_log.contains("--disable-auto"));
+}
+
+#[test]
+fn non_task_land_leaves_the_merge_queue_before_pushing_a_new_head() {
+    let home = tempfile::TempDir::new().expect("temp home");
+    let repo = TestRepo::new();
+    let log_path = home.path().join("gh.log");
+    let script = gh_existing_pr_script(log_path.to_string_lossy().as_ref());
+    let _env = EnvGuard::with_lf_home(
+        &[("gh", script.as_str()), ("open", noop_open_script())],
+        home.path(),
+    );
+    let branch = "jack/wave-repair";
+    repo.create_branch(branch);
+    repo.create_file("feature.txt", "feature");
+    repo.stage_all();
+    repo.commit("feature work");
+    repo.push_new_branch(branch);
+    fs::write(format!("{}.queued", log_path.display()), "queued")
+        .expect("seed remote auto-merge state");
+    let hook = repo.bare_path().join("hooks/pre-receive");
+    fs::write(
+        &hook,
+        format!(
+            "#!/bin/sh\necho git-push >> '{}'\ncat >/dev/null\n",
+            log_path.display()
+        ),
+    )
+    .expect("write remote push hook");
+    let mut permissions = fs::metadata(&hook)
+        .expect("read hook metadata")
+        .permissions();
+    permissions.set_mode(0o755);
+    fs::set_permissions(&hook, permissions).expect("make push hook executable");
+
+    land(
+        repo.path(),
+        &LandOptions {
+            strict: true,
+            local: false,
+            create_pr: false,
+            complete: false,
+            next_slug: None,
+            worktree: None,
+            commit_message: None,
+            pr_title: Some("test title".to_string()),
+            pr_body: Some("test body".to_string()),
+            agent: None,
+        },
+        &NullProgress,
+    )
+    .expect("non-Task land");
+
+    let log = fs::read_to_string(&log_path).expect("read gh log");
+    let disable = log
+        .find("pr merge 912 --disable-auto")
+        .expect("queued Auto is revoked");
+    let push = log.find("git-push").expect("prepared head is pushed");
+    let arm = log
+        .rfind("pr merge 912 --squash --auto --match-head-commit")
+        .expect("prepared head is re-armed");
+    assert!(
+        disable < push && push < arm,
+        "unexpected settlement order:\n{log}"
+    );
 }
 
 #[test]
@@ -1135,7 +1272,7 @@ fn land_generates_copy_when_cached_pr_copy_is_stale() {
     let _env = EnvGuard::with_home(
         &[
             ("gh", gh_no_pr_script()),
-            ("codex", agent_script()),
+            ("codex", &agent_script()),
             ("open", noop_open_script()),
         ],
         Some(home.path()),
@@ -1189,29 +1326,32 @@ fn land_generates_copy_when_cached_pr_copy_is_stale() {
 }
 
 #[test]
-fn lf_ops_land_leaves_worktree_in_place() {
+fn lf_pr_land_publishes_without_create_flag_and_leaves_worktree_in_place() {
     let repo = TestRepo::new();
     let log_path = repo.bare_path().join("gh.log");
     let script = gh_land_script(log_path.to_string_lossy().as_ref());
     let _env = EnvGuard::new(&[("gh", script.as_str()), ("open", noop_open_script())]);
 
-    let worktree =
-        create_named_worktree(repo.path(), "land", None, false).expect("create worktree");
+    let worktree = repo.create_named_worktree("land");
+    let branch = "land";
 
-    fs::write(worktree.path.join("feature.txt"), "feature").expect("write feature file");
+    fs::write(worktree.join("feature.txt"), "feature").expect("write feature file");
     let status = Command::new("git")
         .args(["add", "."])
-        .current_dir(&worktree.path)
+        .current_dir(&worktree)
         .status()
         .expect("git add");
     assert!(status.success(), "git add should succeed");
     let status = Command::new("git")
         .args(["commit", "-m", "feature work"])
-        .current_dir(&worktree.path)
+        .current_dir(&worktree)
         .status()
         .expect("git commit");
     assert!(status.success(), "git commit should succeed");
-    push_branch(&repo, &worktree.branch);
+    assert!(
+        !remote_branch_exists(&repo, branch),
+        "the test must begin before publication"
+    );
 
     let directive_path = repo.path().join("directive.txt");
     let status = Command::new(env!("CARGO_BIN_EXE_lf"))
@@ -1219,21 +1359,29 @@ fn lf_ops_land_leaves_worktree_in_place() {
             "pr",
             "land",
             "--strict",
-            "--create-pr",
             "--title",
             "test title",
             "--body",
             "test body",
         ])
-        .current_dir(&worktree.path)
+        .current_dir(&worktree)
         .env("LOOPFLOW_DIRECTIVE_FILE", &directive_path)
         .status()
         .expect("run lf pr land");
     assert!(status.success(), "lf pr land should succeed");
+    assert!(
+        remote_branch_exists(&repo, branch),
+        "lf pr land should push its branch"
+    );
+    let gh_log = fs::read_to_string(&log_path).expect("read gh log");
+    assert!(
+        gh_log.lines().any(|line| line.starts_with("pr create ")),
+        "lf pr land should create its missing PR, got: {gh_log}"
+    );
 
     // The wave home is permanent: land never rotates the worktree or cds away.
     assert!(
-        worktree.path.exists(),
+        worktree.exists(),
         "worktree should stay in place after land"
     );
     let directive = fs::read_to_string(&directive_path).unwrap_or_default();

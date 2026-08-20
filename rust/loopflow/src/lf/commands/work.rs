@@ -1,9 +1,10 @@
 use anyhow::{anyhow, Context};
 use serde::Serialize;
+use std::path::Path;
 
 use crate::durable::{
-    Answer, AskExchange, AuthenticatedRequest, ControlCtx, EpochReceipt, InterruptReceipt,
-    Placement, ProjectId, Run, SteerReceipt, TaskId, WorkRef, WorkStatus,
+    AuthenticatedRequest, ControlCtx, EpochReceipt, InterruptReceipt, Placement, ProjectId, Run,
+    SteerReceipt, TaskId, WorkRef, WorkStatus,
 };
 use crate::id::WaveId;
 use crate::lf::WorkCommand;
@@ -13,6 +14,7 @@ use crate::store::{open_store, storage_config_from_env, Store};
 struct WorkProjection {
     work: WorkRef,
     basis: crate::durable::Basis,
+    placement: Placement,
     status: WorkStatus,
     run: Option<Run>,
 }
@@ -21,20 +23,24 @@ struct WorkProjection {
 #[serde(tag = "kind", rename_all = "snake_case")]
 enum WorkReceipt {
     Placed(Placement),
+    Relocated(crate::wave::relocate::WaveRelocationReceipt),
+    Enabled(Placement),
+    Disabled(Placement),
     Steer(SteerReceipt),
     Interrupted(InterruptReceipt),
     Abandoned(EpochReceipt),
 }
 
-pub fn run(command: &WorkCommand) -> anyhow::Result<()> {
-    tokio::runtime::Runtime::new()?.block_on(run_async(command))
+pub fn run(command: &WorkCommand, repo: &Path) -> anyhow::Result<()> {
+    tokio::runtime::Runtime::new()?.block_on(run_async(command, repo))
 }
 
-async fn run_async(command: &WorkCommand) -> anyhow::Result<()> {
+async fn run_async(command: &WorkCommand, repo: &Path) -> anyhow::Result<()> {
     let store = open_shared_store().await?;
     match command {
         WorkCommand::Status { kind, id, json } => {
             let work = parse_work(kind, id)?;
+            require_work_repository(&store, &work, repo).await?;
             let projection = projection(&store, &work).await?;
             print_projection(&projection, *json)?;
         }
@@ -45,6 +51,7 @@ async fn run_async(command: &WorkCommand) -> anyhow::Result<()> {
             json,
         } => {
             let work = parse_work(kind, id)?;
+            require_work_repository(&store, &work, repo).await?;
             if !matches!(work, WorkRef::Wave(_)) {
                 return Err(anyhow!(
                     "only Wave Work can move until Project and Task execution uses the shared Run supervisor"
@@ -53,6 +60,39 @@ async fn run_async(command: &WorkCommand) -> anyhow::Result<()> {
             let placement = store.place_work(&work, home_id).await?;
             print_receipt(&WorkReceipt::Placed(placement), *json)?;
         }
+        WorkCommand::Relocate {
+            kind,
+            id,
+            repo: target_repo,
+            name,
+            json,
+        } => {
+            if kind != "wave" {
+                return Err(anyhow!("only Wave Work has a repository locator"));
+            }
+            let wave_id = WaveId::parse(id)?;
+            let receipt = crate::wave::relocate::relocate_wave(
+                &store,
+                &wave_id,
+                repo,
+                target_repo.as_deref(),
+                name.as_deref(),
+            )
+            .await?;
+            print_receipt(&WorkReceipt::Relocated(receipt), *json)?;
+        }
+        WorkCommand::Enable { kind, id, json } => {
+            let work = parse_work(kind, id)?;
+            require_work_repository(&store, &work, repo).await?;
+            let placement = set_local_work_enabled(&store, &work, true).await?;
+            print_receipt(&WorkReceipt::Enabled(placement), *json)?;
+        }
+        WorkCommand::Disable { kind, id, json } => {
+            let work = parse_work(kind, id)?;
+            require_work_repository(&store, &work, repo).await?;
+            let placement = set_local_work_enabled(&store, &work, false).await?;
+            print_receipt(&WorkReceipt::Disabled(placement), *json)?;
+        }
         WorkCommand::Steer {
             kind,
             id,
@@ -60,7 +100,9 @@ async fn run_async(command: &WorkCommand) -> anyhow::Result<()> {
             json,
         } => {
             let work = parse_work(kind, id)?;
-            let receipt = if let Some(lease) = crate::ops::ambient_run_lease(&store).await? {
+            let lease = crate::ops::ambient_run_lease(&store).await?;
+            require_work_repository(&store, &work, repo).await?;
+            let receipt = if let Some(lease) = lease {
                 store
                     .steer(&ControlCtx::Run(&lease), &work, message, None)
                     .await?
@@ -72,48 +114,17 @@ async fn run_async(command: &WorkCommand) -> anyhow::Result<()> {
             };
             print_receipt(&WorkReceipt::Steer(receipt), *json)?;
         }
-        WorkCommand::Asks { kind, id, json } => {
-            let lease = crate::ops::ambient_run_lease(&store).await?;
-            let asks = match (lease.as_ref(), kind.as_deref(), id.as_deref()) {
-                (Some(lease), None, None) => store.pending_asks_for_parent(&lease.work).await?,
-                (Some(lease), Some(kind), Some(id)) => {
-                    let parent = parse_work(kind, id)?;
-                    if parent != lease.work {
-                        return Err(anyhow!(
-                            "ambient Run owns {} {}, not {} {}",
-                            lease.work.kind(),
-                            lease.work.id(),
-                            parent.kind(),
-                            parent.id()
-                        ));
-                    }
-                    store.pending_asks_for_parent(&parent).await?
-                }
-                (None, None, None) => store.pending_user_asks().await?,
-                (None, Some(_), Some(_)) => {
-                    return Err(anyhow!(
-                        "parent-routed Asks require that parent Work's active Run lease"
-                    ))
-                }
-                (_, _, _) => return Err(anyhow!("pass both Work kind and id, or neither")),
-            };
-            print_asks(&asks, *json)?;
+        WorkCommand::Asks { .. } => {
+            return Err(anyhow!("`lf work asks` retired; use `lf ask list`"));
         }
-        WorkCommand::Answer { ask_id, text, json } => {
-            let answer = if let Some(lease) = crate::ops::ambient_run_lease(&store).await? {
-                store
-                    .answer_ask(&ControlCtx::Run(&lease), ask_id, text)
-                    .await?
-            } else {
-                let request = AuthenticatedRequest::cli();
-                store
-                    .answer_ask(&ControlCtx::User(&request), ask_id, text)
-                    .await?
-            };
-            print_answer(&answer, *json)?;
+        WorkCommand::Answer { ask_id, .. } => {
+            return Err(anyhow!(
+                "`lf work answer` retired; use `lf ask open {ask_id}` and settle from the Ask session"
+            ));
         }
         WorkCommand::Interrupt { kind, id, json } => {
             let work = parse_work(kind, id)?;
+            require_work_repository(&store, &work, repo).await?;
             let run = store
                 .current_run(&work)
                 .await?
@@ -137,6 +148,7 @@ async fn run_async(command: &WorkCommand) -> anyhow::Result<()> {
             json,
         } => {
             let work = parse_work(kind, id)?;
+            require_work_repository(&store, &work, repo).await?;
             if crate::ops::ambient_run_lease(&store).await?.is_some() {
                 return Err(anyhow!(
                     "Run callers cannot abandon Work; use the authenticated User surface"
@@ -150,28 +162,6 @@ async fn run_async(command: &WorkCommand) -> anyhow::Result<()> {
     Ok(())
 }
 
-fn print_asks(asks: &[AskExchange], json: bool) -> anyhow::Result<()> {
-    if json {
-        println!("{}", serde_json::to_string_pretty(asks)?);
-    } else if asks.is_empty() {
-        println!("No pending Asks.");
-    } else {
-        for ask in asks {
-            println!("{}  {}", ask.id, ask.question);
-        }
-    }
-    Ok(())
-}
-
-fn print_answer(answer: &Answer, json: bool) -> anyhow::Result<()> {
-    if json {
-        println!("{}", serde_json::to_string_pretty(answer)?);
-    } else {
-        println!("answered {}", answer.ask_id);
-    }
-    Ok(())
-}
-
 async fn open_shared_store() -> anyhow::Result<Store> {
     let config = storage_config_from_env().context("resolve the shared Loopflow store")?;
     open_store(&config)
@@ -179,10 +169,32 @@ async fn open_shared_store() -> anyhow::Result<Store> {
         .context("open the shared Loopflow store")
 }
 
+async fn set_local_work_enabled(
+    store: &Store,
+    work: &WorkRef,
+    enabled: bool,
+) -> anyhow::Result<Placement> {
+    let placement = store.placement(work).await?;
+    let local = store.local_home().await?;
+    if placement.home_id != local.id {
+        return Err(anyhow!(
+            "{} {} is placed on {}; run this command through that Home",
+            work.kind(),
+            work.id(),
+            placement.home_id
+        ));
+    }
+    store
+        .set_work_enabled(work, enabled)
+        .await
+        .map_err(anyhow::Error::from)
+}
+
 async fn projection(store: &Store, work: &WorkRef) -> anyhow::Result<WorkProjection> {
     Ok(WorkProjection {
         work: work.clone(),
         basis: store.current_epoch(work).await?.current_basis,
+        placement: store.placement(work).await?,
         status: store.work_status(work).await?,
         run: store.current_run(work).await?,
     })
@@ -197,15 +209,53 @@ fn parse_work(kind: &str, id: &str) -> anyhow::Result<WorkRef> {
     }
 }
 
+async fn require_work_repository(store: &Store, work: &WorkRef, repo: &Path) -> anyhow::Result<()> {
+    let wave_id = match work {
+        WorkRef::Wave(wave_id) => wave_id.clone(),
+        WorkRef::Project(project_id) => {
+            store
+                .get_project(project_id)
+                .await?
+                .ok_or_else(|| anyhow!("Project {project_id} is not registered"))?
+                .wave_id
+        }
+        WorkRef::Task(task_id) => {
+            store
+                .get_task(task_id)
+                .await?
+                .ok_or_else(|| anyhow!("Task {task_id} is not registered"))?
+                .wave_id
+        }
+    };
+    let wave = store
+        .get_wave(&wave_id)
+        .await?
+        .ok_or_else(|| anyhow!("Wave {wave_id} is not registered"))?;
+    let locator = crate::wave::WaveLocator::discover(repo, wave.name())?;
+    let local = store.get_wave_at(&locator).await?;
+    if local.as_ref().map(crate::wave::Wave::id) != Some(&wave_id) {
+        return Err(anyhow!(
+            "{} {} belongs to repository {}, not invoking repository {}",
+            work.kind(),
+            work.id(),
+            wave.repo(),
+            locator.repo()
+        ));
+    }
+    Ok(())
+}
+
 fn print_projection(projection: &WorkProjection, json: bool) -> anyhow::Result<()> {
     if json {
         println!("{}", serde_json::to_string_pretty(projection)?);
     } else {
         println!(
-            "{} {}  {:?}\n  basis: {}:{}\n  run: {}",
+            "{} {}  {:?}\n  enabled: {}\n  home: {}\n  basis: {}:{}\n  run: {}",
             projection.work.kind(),
             projection.work.id(),
             projection.status,
+            projection.placement.enabled,
+            projection.placement.home_id,
             projection.basis.epoch_id,
             projection.basis.revision,
             projection
@@ -224,6 +274,26 @@ fn print_receipt(receipt: &WorkReceipt, json: bool) -> anyhow::Result<()> {
         match receipt {
             WorkReceipt::Placed(placement) => println!(
                 "{} {}  ->  {}",
+                placement.work.kind(),
+                placement.work.id(),
+                placement.home_id
+            ),
+            WorkReceipt::Relocated(relocation) => println!(
+                "Wave {}  {}/{}  ->  {}/{}",
+                relocation.wave_id,
+                relocation.from_repo,
+                relocation.from_name,
+                relocation.to_repo,
+                relocation.to_name
+            ),
+            WorkReceipt::Enabled(placement) => println!(
+                "enabled {} {} on {}",
+                placement.work.kind(),
+                placement.work.id(),
+                placement.home_id
+            ),
+            WorkReceipt::Disabled(placement) => println!(
+                "disabled {} {} on {}",
                 placement.work.kind(),
                 placement.work.id(),
                 placement.home_id

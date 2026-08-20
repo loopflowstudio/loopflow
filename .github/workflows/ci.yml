@@ -151,6 +151,11 @@ jobs:
     runs-on: macos-15
     steps:
       - uses: actions/checkout@v7
+      - uses: dtolnay/rust-toolchain@stable
+      - uses: Swatinem/rust-cache@v2
+        with:
+          key: loopflow-ui-test
+          workspaces: . -> target/dev-app-control
       - name: Install XcodeGen
         run: brew install xcodegen
       - name: Generate Xcode project

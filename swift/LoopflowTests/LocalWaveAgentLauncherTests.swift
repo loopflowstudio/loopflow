@@ -91,17 +91,6 @@ struct LocalWaveAgentLauncherTests {
         #expect(!command.contains { $0.hasPrefix("http") })
     }
 
-    private func loadFixtureData(_ name: String, sourceFile: String = #filePath) throws -> Data {
-        let testFile = URL(fileURLWithPath: sourceFile)
-        let fixtures = testFile
-            .deletingLastPathComponent()
-            .deletingLastPathComponent()
-            .deletingLastPathComponent()
-            .appendingPathComponent("tests/fixtures/dto")
-            .appendingPathComponent(name)
-        return try Data(contentsOf: fixtures)
-    }
-
     @Test("Task start uses the exact CLI receipt as workspace identity")
     func taskStartReceiptDecodes() throws {
         let receipt = try LocalWaveAgentLauncher.taskStartReceipt("""
@@ -119,99 +108,35 @@ struct LocalWaveAgentLauncherTests {
         ))
     }
 
-    // MARK: - Binary resolution + capability probe
+    // MARK: - Bundled binary boundary
 
-    @Test("candidate order: bundled, PATH hits in order, dev-tree build last")
-    func candidateOrder() {
-        let candidates = LocalWaveAgentLauncher.lfCandidates(
-            originRepo: "/Users/jack/src/loopflow",
-            bundled: URL(fileURLWithPath: "/Applications/Loopflow.app/Contents/MacOS/lf"),
-            pathEnv: "/missing/bin:/opt/homebrew/bin:/usr/local/bin",
-            isExecutableFile: { $0 != "/missing/bin/lf" }
-        )
-
-        #expect(candidates == [
-            "/Applications/Loopflow.app/Contents/MacOS/lf",
-            "/opt/homebrew/bin/lf",
-            "/usr/local/bin/lf",
-            "/Users/jack/src/loopflow/target/release/lf",
-        ])
-    }
-
-    @Test("probe passes: the first candidate wins")
-    func probePassesFirstCandidate() throws {
-        let resolved = try LocalWaveAgentLauncher.resolveWaveCapableLf(
-            originRepo: "/Users/jack/src/loopflow",
-            bundled: URL(fileURLWithPath: "/Applications/Loopflow.app/Contents/MacOS/lf"),
-            pathEnv: "/usr/local/bin",
-            isExecutableFile: { _ in true },
-            probe: { _ in true },
-            useCache: false
-        )
-
-        #expect(resolved == "/Applications/Loopflow.app/Contents/MacOS/lf")
-    }
-
-    @Test("a stale PATH lf is rejected by the probe; the dev-tree build wins")
-    func staleLfFallsThroughToDevBuild() throws {
-        var probed: [String] = []
-        let resolved = try LocalWaveAgentLauncher.resolveWaveCapableLf(
-            originRepo: "/Users/jack/src/loopflow",
-            bundled: nil,
-            pathEnv: "/Users/jack/.local/bin",
-            isExecutableFile: { _ in true },
-            probe: { candidate in
-                probed.append(candidate)
-                return candidate == "/Users/jack/src/loopflow/target/release/lf"
-            },
-            useCache: false
-        )
-
-        #expect(resolved == "/Users/jack/src/loopflow/target/release/lf")
-        #expect(probed == [
-            "/Users/jack/.local/bin/lf",
-            "/Users/jack/src/loopflow/target/release/lf",
-        ], "walks candidates in order, probing each")
-    }
-
-    @Test("every candidate rejected: the error names what was found and why")
-    func allCandidatesRejected() {
+    @Test("a missing bundled helper never falls through to PATH")
+    func missingBundledHelperFails() {
         #expect {
-            try LocalWaveAgentLauncher.resolveWaveCapableLf(
-                originRepo: "/Users/jack/src/loopflow",
-                bundled: nil,
-                pathEnv: "/Users/jack/.local/bin",
-                isExecutableFile: { _ in true },
-                probe: { _ in false },
-                useCache: false
-            )
+            try LocalWaveAgentLauncher.bundledLfPath(bundled: nil)
         } throws: { error in
-            guard case let WaveLaunchError.noUsableLf(detail) = error else { return false }
-            return detail.contains("/Users/jack/.local/bin/lf")
-                && detail.contains("/Users/jack/src/loopflow/target/release/lf")
-                && detail.contains("lf help start")
-                && detail.contains("lf help stop")
-                && detail.contains("lf help pause")
-                && detail.contains("lf help resume")
+            guard error is LocalLfError else { return false }
+            return error.localizedDescription.contains("missing its executable bundled lf helper")
+                && error.localizedDescription.contains("PATH fallback is disabled")
         }
     }
 
-    @Test("nothing bundled, nothing on PATH, no dev build: a clear error")
-    func nothingResolves() {
-        #expect {
-            try LocalWaveAgentLauncher.resolveWaveCapableLf(
-                originRepo: "/Users/jack/src/loopflow",
-                bundled: nil,
-                pathEnv: "/usr/local/bin:/usr/bin",
-                isExecutableFile: { _ in false },
-                probe: { _ in true },
-                useCache: false
-            )
-        } throws: { error in
-            guard case let WaveLaunchError.noUsableLf(detail) = error else { return false }
-            return detail.contains("not bundled") && detail.contains("not on PATH")
+    #if !SWIFT_PACKAGE
+    @Test("the hosted app executes and decodes its bundled process activity")
+    func hostedBundleProcessActivityDecodes() async throws {
+        let helper = try #require(Bundle.main.url(forAuxiliaryExecutable: "lf"))
+        #expect(FileManager.default.isExecutableFile(atPath: helper.path))
+        let query = RegistryQuery { args, cwd in
+            #expect(args == ["ps", "--json"])
+            #expect(cwd == nil)
+            return try LocalWaveAgentLauncher.queryLf(args, cwd: cwd)
         }
+
+        let snapshot = try await query.processActivity()
+        #expect(snapshot.schemaVersion == 1)
+        #expect(snapshot.usage.windows == [5, 300, 3_600, 86_400])
     }
+    #endif
 
     // MARK: - Not-running copy
 

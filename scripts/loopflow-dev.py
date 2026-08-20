@@ -22,6 +22,8 @@ Streaming logs (long-running commands):
     ~/.lf/logs/dev/<repo>.loopflow-run-debug.log
 """
 
+from __future__ import annotations
+
 import argparse
 import os
 import shutil
@@ -443,7 +445,7 @@ def _install_dev_app() -> None:
     _apply_dev_identity(app_dir / "Info.plist")
     shutil.copy(SWIFT_DIR / "LoopflowMac" / "Loopflow.sdef", app_dir / "Resources")
     shutil.copy(SWIFT_DIR / "LoopflowMac" / "AppIcon.icns", app_dir / "Resources")
-    _copy_bundled_tools(app_dir / "MacOS", profile="debug")
+    _copy_bundled_tools(app_dir / "MacOS")
 
     identity = _ensure_dev_signing_identity()
     entitlements = SWIFT_DIR / "LoopflowMac" / "Loopflow.entitlements"
@@ -461,40 +463,27 @@ def _apply_dev_identity(plist: Path) -> None:
     run(["plutil", "-replace", "CFBundleDisplayName", "-string", "Loopflow Dev", str(plist)])
 
 
-def _copy_bundled_tools(app_macos_dir: Path, profile: str) -> None:
-    if profile == "release":
-        cargo_cmd = [
-            "cargo",
-            "build",
-            "--locked",
-            "--release",
-            "--bin",
-            "lf",
-            "--bin",
-            "lfd",
-        ]
-        bin_dir = REPO_ROOT / "target" / "release"
-    else:
-        # The app is a live operator surface even when its Swift shell is a dev
-        # build. Compile its bundled control binary against the installed Home,
-        # but never grant it migration authority. Ordinary development binaries
-        # keep their isolated `.lf-dev` stores.
-        target_dir = REPO_ROOT / "target" / "dev-app-control"
-        cargo_cmd = [
-            "/usr/bin/env",
-            "LOOPFLOW_BUILD_PROVENANCE=release",
-            "LOOPFLOW_MIGRATION_AUTHORITY=validation_only",
-            "cargo",
-            "build",
-            "--locked",
-            "--bin",
-            "lf",
-            "--bin",
-            "lfd",
-            "--target-dir",
-            str(target_dir),
-        ]
-        bin_dir = target_dir / "debug"
+def _copy_bundled_tools(app_macos_dir: Path) -> None:
+    # The app is a live operator surface even when its Swift shell is a dev
+    # build. Compile its bundled control binary against the installed Home,
+    # but never grant it migration authority. Ordinary development binaries
+    # keep their isolated `.lf-dev` stores.
+    target_dir = REPO_ROOT / "target" / "dev-app-control"
+    cargo_cmd = [
+        "/usr/bin/env",
+        "LOOPFLOW_BUILD_PROVENANCE=release",
+        "LOOPFLOW_MIGRATION_AUTHORITY=validation_only",
+        "cargo",
+        "build",
+        "--locked",
+        "--bin",
+        "lf",
+        "--bin",
+        "lfd",
+        "--target-dir",
+        str(target_dir),
+    ]
+    bin_dir = target_dir / "debug"
 
     result = run(cargo_cmd, cwd=REPO_ROOT, check=False)
     if result.returncode != 0:
@@ -505,6 +494,13 @@ def _copy_bundled_tools(app_macos_dir: Path, profile: str) -> None:
         if not source.exists():
             raise RuntimeError(f"Missing built binary: {source}")
         shutil.copy(source, app_macos_dir / binary)
+
+
+def cmd_bundle_control_tools(output: Path) -> int:
+    """Build validation-only control tools into an Xcode app bundle."""
+    output.mkdir(parents=True, exist_ok=True)
+    _copy_bundled_tools(output)
+    return 0
 
 
 # --- Screenshots ---
@@ -530,6 +526,10 @@ COMMANDS = {
     "clean": (cmd_clean, "Remove dev app and reset permissions"),
     "xcode": (cmd_xcode, "Open in Xcode"),
     "logs": (cmd_logs, "Tail the app logs"),
+    "bundle-control-tools": (
+        cmd_bundle_control_tools,
+        "Build validation-only control tools into an app bundle",
+    ),
     "agent-image": (cmd_agent_image, "Build the Docker agent image"),
     "screenshots": (cmd_screenshots, "Generate app screenshots"),
 }
@@ -562,6 +562,13 @@ def main() -> int:
                 action="store_true",
                 help="print what would be installed",
             )
+        if name == "bundle-control-tools":
+            sub.add_argument(
+                "--output",
+                type=lambda p: Path(p).expanduser().resolve(),
+                required=True,
+                help="Contents/MacOS directory that receives lf and lfd",
+            )
     args = parser.parse_args()
 
     if not args.command:
@@ -573,6 +580,8 @@ def main() -> int:
         return func(repo=args.repo)
     if args.command == "setup":
         return func(install=args.install, dry_run=args.dry_run)
+    if args.command == "bundle-control-tools":
+        return func(output=args.output)
     return func()
 
 

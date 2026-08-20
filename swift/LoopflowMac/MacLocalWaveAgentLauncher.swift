@@ -7,18 +7,8 @@
 import Foundation
 import Loopflow
 
-enum WaveLaunchError: LocalizedError, Equatable {
-    case noUsableLf(String)
-    case launchFailed(String)
-
-    var errorDescription: String? {
-        switch self {
-        case .noUsableLf(let detail):
-            return detail
-        case .launchFailed(let detail):
-            return detail
-        }
-    }
+struct LocalLfError: LocalizedError {
+    let errorDescription: String?
 }
 
 struct TaskStartReceipt: Decodable, Sendable, Equatable {
@@ -28,13 +18,11 @@ struct TaskStartReceipt: Decodable, Sendable, Equatable {
 }
 
 enum LocalWaveAgentLauncher {
-    private static let resolutionCache = ResolvedLfCache()
-
     /// Stop the listener through the same `lf` lifecycle surface the CLI uses.
     /// The server performs resident, registry, and discovery-file cleanup.
     static func stopWave(repoPath: String, waveName: String) throws {
         let origin = WaveOrigin.resolve(repoPath)
-        let lfPath = try resolveWaveCapableLf(originRepo: origin)
+        let lfPath = try bundledLfPath()
         try runChecked(waveStopCommand(lfPath: lfPath, waveName: waveName), cwd: origin)
     }
 
@@ -47,7 +35,7 @@ enum LocalWaveAgentLauncher {
     /// Task process; the app does not reproduce any of those decisions.
     static func runTask(repoPath: String, issue: String) throws {
         let origin = WaveOrigin.resolve(repoPath)
-        let lfPath = try resolveWaveCapableLf(originRepo: origin)
+        let lfPath = try bundledLfPath()
         try runChecked(taskRunCommand(lfPath: lfPath, issue: issue), cwd: origin)
     }
 
@@ -59,7 +47,7 @@ enum LocalWaveAgentLauncher {
         directive: String
     ) throws -> TaskStartReceipt {
         let origin = WaveOrigin.resolve(repoPath)
-        let lfPath = try resolveWaveCapableLf(originRepo: origin)
+        let lfPath = try bundledLfPath()
         let stdout = try runCheckedOutput(
             taskStartCommand(
                 lfPath: lfPath,
@@ -76,7 +64,7 @@ enum LocalWaveAgentLauncher {
     /// status record.
     static func resumeTask(repoPath: String, issue: String) throws {
         let origin = WaveOrigin.resolve(repoPath)
-        let lfPath = try resolveWaveCapableLf(originRepo: origin)
+        let lfPath = try bundledLfPath()
         try runChecked(taskResumeCommand(lfPath: lfPath, issue: issue), cwd: origin)
     }
 
@@ -84,7 +72,7 @@ enum LocalWaveAgentLauncher {
     /// provider turn is stopped and records the receipt in the shared store.
     static func interruptTask(repoPath: String, issue: String) throws {
         let origin = WaveOrigin.resolve(repoPath)
-        let lfPath = try resolveWaveCapableLf(originRepo: origin)
+        let lfPath = try bundledLfPath()
         try runChecked(taskInterruptCommand(lfPath: lfPath, issue: issue), cwd: origin)
     }
 
@@ -94,8 +82,7 @@ enum LocalWaveAgentLauncher {
     /// honored in one place. Only an explicit user review action calls this;
     /// background app work publishes with `lf pr publish`.
     static func reviewPullRequest(worktree: String) throws {
-        let origin = WaveOrigin.resolve(worktree)
-        let lfPath = try resolveWaveCapableLf(originRepo: origin)
+        let lfPath = try bundledLfPath()
         try runChecked(pullRequestReviewCommand(lfPath: lfPath), cwd: worktree)
     }
 
@@ -126,8 +113,8 @@ enum LocalWaveAgentLauncher {
         do {
             return try decoder.decode(TaskStartReceipt.self, from: Data(stdout.utf8))
         } catch {
-            throw WaveLaunchError.launchFailed(
-                "lf task start returned an invalid receipt: \(error.localizedDescription)"
+            throw LocalLfError(
+                errorDescription: "lf task start returned an invalid receipt: \(error.localizedDescription)"
             )
         }
     }
@@ -140,99 +127,32 @@ enum LocalWaveAgentLauncher {
         [lfPath, "task", "interrupt", issue]
     }
 
-    /// Candidate lf binaries in trust order: the lf bundled inside Loopflow.app,
-    /// each `lf` on the enriched PATH, then
-    /// `<origin>/target/release/lf` — the dev-tree build, for a Loopflow pointed
-    /// at a loopflow checkout where the freshest lf is the one just compiled.
-    static func lfCandidates(
-        originRepo: String,
-        bundled: URL?,
-        pathEnv: String,
-        isExecutableFile: (String) -> Bool
-    ) -> [String] {
-        var candidates: [String] = []
-        if let bundled {
-            candidates.append(bundled.path)
-        }
-        for dir in pathEnv.split(separator: ":") where !dir.isEmpty {
-            let candidate = "\(dir)/lf"
-            if isExecutableFile(candidate), !candidates.contains(candidate) {
-                candidates.append(candidate)
-            }
-        }
-        let devBuild = "\(originRepo)/target/release/lf"
-        if isExecutableFile(devBuild), !candidates.contains(devBuild) {
-            candidates.append(devBuild)
-        }
-        return candidates
-    }
-
-    /// First candidate that has the Wave lifecycle and turn-intent commands. Resolving `lf`
-    /// from PATH can find a build that predates one of them; treating an
-    /// unknown lifecycle verb as a skill would launch the wrong work, so every
-    /// candidate is capability-probed before it's trusted.
+    /// Return the control binary shipped with this exact Mac client build.
     ///
-    /// The probes use `lf help <verb>`, not `<verb> --help`: lf's arg reorderer
-    /// may treat an unknown lifecycle verb as a skill name. Clap's help command
-    /// answers without touching wave state.
-    static func resolveWaveCapableLf(
-        originRepo: String,
-        bundled: URL? = Bundle.main.url(forAuxiliaryExecutable: "lf"),
-        pathEnv: String = GUIProcessEnvironment.enrichedPath(from: ProcessInfo.processInfo.environment["PATH"]),
-        isExecutableFile: (String) -> Bool = { FileManager.default.isExecutableFile(atPath: $0) },
-        probe: (String) -> Bool = hasWaveCommands,
-        useCache: Bool = true
+    /// A missing or stale bundled helper is a malformed app, not permission to
+    /// borrow a different wire contract from PATH or a checkout build.
+    static func bundledLfPath(
+        bundled: URL? = Bundle.main.url(forAuxiliaryExecutable: "lf")
     ) throws -> String {
-        let cacheKey = "\(originRepo)|\(bundled?.path ?? "")|\(pathEnv)"
-        if useCache,
-           let cached = resolutionCache.get(cacheKey),
-           isExecutableFile(cached) {
-            return cached
-        }
-
-        let candidates = lfCandidates(
-            originRepo: originRepo,
-            bundled: bundled,
-            pathEnv: pathEnv,
-            isExecutableFile: isExecutableFile
-        )
-        guard !candidates.isEmpty else {
-            throw WaveLaunchError.noUsableLf(
-                "Can't find an lf binary — not bundled with Loopflow and not on PATH."
+        guard let bundled, FileManager.default.isExecutableFile(atPath: bundled.path) else {
+            throw LocalLfError(
+                errorDescription: "Loopflow.app is missing its executable bundled lf helper at Contents/MacOS/lf. "
+                    + "Rebuild or reinstall Loopflow; PATH fallback is disabled."
             )
         }
-        for candidate in candidates where probe(candidate) {
-            if useCache {
-                resolutionCache.set(candidate, for: cacheKey)
-            }
-            return candidate
-        }
-        throw WaveLaunchError.noUsableLf(
-            "No lf with the Wave control commands. Rejected (each failed at least one of "
-                + "`lf help start`, `lf help stop`, `lf help pause`, or `lf help resume`): "
-                + candidates.joined(separator: ", ")
-        )
-    }
-
-    /// Help probes parse without touching wave state.
-    static func hasWaveCommands(lfPath: String) -> Bool {
-        run([lfPath, "help", "start"])?.status == 0
-            && run([lfPath, "help", "stop"])?.status == 0
-            && run([lfPath, "help", "pause"])?.status == 0
-            && run([lfPath, "help", "resume"])?.status == 0
+        return bundled.path
     }
 
     /// Run an `lf` query verb (`ls`, `status`, `runs`, …) and return its
     /// stdout. Backs `RegistryQuery` on macOS: the wave dashboard reads durable
-    /// facts by shelling the daemonless `lf` over the local store, not by streaming
-    /// a center. Resolves the same wave-capable `lf` the launcher trusts (a build
-    /// old enough to lack `lf start` also lacks these verbs), then execs it with
-    /// the enriched GUI PATH. Throws on a spawn failure or a non-zero exit.
+    /// facts by shelling the daemonless bundled `lf` over the local store, not
+    /// by streaming a center. Throws on a spawn failure or a non-zero exit.
     static func queryLf(_ subargs: [String], cwd: String?) throws -> String {
-        let origin = cwd.map(WaveOrigin.resolve) ?? FileManager.default.currentDirectoryPath
-        let lfPath = try resolveWaveCapableLf(originRepo: origin)
+        let lfPath = try bundledLfPath()
         guard let result = run([lfPath] + subargs, cwd: cwd) else {
-            throw WaveLaunchError.launchFailed("Failed to spawn: lf \(subargs.joined(separator: " "))")
+            throw LocalLfError(
+                errorDescription: "Failed to spawn: lf \(subargs.joined(separator: " "))"
+            )
         }
         // `lf doctor --json` exits 1 when a check fails, but its stdout is the
         // report the telemetry dashboard must show. A red monitor cannot hide
@@ -242,9 +162,10 @@ enum LocalWaveAgentLauncher {
         }
         guard result.status == 0 else {
             let detail = result.stderr.trimmingCharacters(in: .whitespacesAndNewlines)
-            throw WaveLaunchError.launchFailed(
-                detail.isEmpty ? "lf \(subargs.joined(separator: " ")) failed (\(result.status))" : detail
-            )
+            let message = detail.isEmpty
+                ? "lf \(subargs.joined(separator: " ")) failed (\(result.status))"
+                : detail
+            throw LocalLfError(errorDescription: message)
         }
         return result.stdout
     }
@@ -258,13 +179,16 @@ enum LocalWaveAgentLauncher {
     private static func runCheckedOutput(_ args: [String], cwd: String) throws -> String {
         let result = run(args, cwd: cwd)
         guard let result else {
-            throw WaveLaunchError.launchFailed("Failed to spawn: \(args.joined(separator: " "))")
+            throw LocalLfError(
+                errorDescription: "Failed to spawn: \(args.joined(separator: " "))"
+            )
         }
         guard result.status == 0 else {
             let detail = result.stderr.trimmingCharacters(in: .whitespacesAndNewlines)
-            throw WaveLaunchError.launchFailed(
-                detail.isEmpty ? "Command failed (\(result.status)): \(args.joined(separator: " "))" : detail
-            )
+            let message = detail.isEmpty
+                ? "Command failed (\(result.status)): \(args.joined(separator: " "))"
+                : detail
+            throw LocalLfError(errorDescription: message)
         }
         return result.stdout
     }
@@ -329,24 +253,4 @@ private final class OutputCollector: @unchecked Sendable {
     func setStderr(_ data: Data) { lock.withLock { err = data } }
 }
 
-private final class ResolvedLfCache: @unchecked Sendable {
-    private let lock = NSLock()
-    private var resolvedLfByKey: [String: String] = [:]
-
-    func get(_ key: String) -> String? {
-        withLock { resolvedLfByKey[key] }
-    }
-
-    func set(_ value: String, for key: String) {
-        withLock {
-            resolvedLfByKey[key] = value
-        }
-    }
-
-    private func withLock<T>(_ body: () -> T) -> T {
-        lock.lock()
-        defer { lock.unlock() }
-        return body()
-    }
-}
 #endif

@@ -42,6 +42,21 @@ targets:
           - Info.plist
     dependencies:
       - target: Loopflow
+    postBuildScripts:
+      - name: Bundle Loopflow control tools
+        script: |
+          set -eu
+          export PATH="$HOME/.cargo/bin:/opt/homebrew/bin:/usr/local/bin:$PATH"
+          /usr/bin/python3 "$SRCROOT/../scripts/loopflow-dev.py" bundle-control-tools \
+            --output "$TARGET_BUILD_DIR/$EXECUTABLE_FOLDER_PATH"
+          if [ "${CODE_SIGNING_ALLOWED:-NO}" = "YES" ]; then
+            signing_identity="${EXPANDED_CODE_SIGN_IDENTITY:--}"
+            for helper in lf lfd; do
+              /usr/bin/codesign --force --sign "$signing_identity" \
+                "$TARGET_BUILD_DIR/$EXECUTABLE_FOLDER_PATH/$helper"
+            done
+          fi
+        basedOnDependencyAnalysis: false
     settings:
       base:
         PRODUCT_NAME: Loopflow

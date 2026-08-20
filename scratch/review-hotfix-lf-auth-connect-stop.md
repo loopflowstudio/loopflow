@@ -39,9 +39,16 @@ Do not publish yet. Complete the two human-present demos above, then refresh
 this matrix with the observed account and focus results. If both pass, the Task
 PR is ready for `lf pr publish`; review does not land it.
 
+A headless victim-path attempt on 2026-08-19 ran
+`scripts/dev-lf auth connect codex manabot-eng@loopflow.studio`, but the sandbox
+failed before provider startup while resolving the provider account store
+(`Operation not permitted`). It proves neither success nor failure at the
+browser boundary; the host-authorized ceremony remains required.
+
 Repeated review/implement attempts on 2026-08-19 tried to open that intervention
 with `lf ask --user`, but Loopflow rejected every Ask because the
 AgentInvocations had no active Turn authority. `lf ps --json` could not inspect
-the receipt in this sandbox (`Operation not permitted`). A local `lf commit`
-checkpoint was also sandbox-blocked from the shared Git worktree index, so no
-raw Git workaround or PR publication was attempted around the missing evidence.
+the receipt in this sandbox (`Operation not permitted`). The auth implementation
+is now checkpointed and pushed; review still does not publish it without the
+missing human-present evidence. This note cleanup remains uncommitted because
+the sandbox cannot write the shared worktree index or runtime ledger.

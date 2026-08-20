@@ -136,6 +136,7 @@ A Work names one stable Home authority, whose SSH route may change without
 moving the Work.
 
 ```bash
+lf --as task:DES-123 implement                  # one skill in the Task worktree
 lf home id                                      # this machine's HomeId
 lf work place wave <wave-id> <home-id>          # only while no Run is live
 lf start <wave>                                 # start it on this machine
@@ -143,6 +144,11 @@ lf stop <wave>                                  # stop it on this machine
 lf ssh <home-id> status <wave> --json           # inspect it on that Home
 lf ssh <home-id> start <wave>                   # start it on that Home
 ```
+
+Use `--as task:...`, `--as project:...`, or `--as wave:...` only with one
+named skill. In a plain terminal it starts a supervised User Run at that
+Work's placement. Inside a Run it is an exact identity assertion; a mismatch
+fails. It never binds a multi-step flow.
 
 `lf ssh` runs only the target machine's `lf`; the inner `lf` and `--` separator
 are implicit. Foreground commands can choose from origin-forwarded and
@@ -152,8 +158,10 @@ on their machine.
 
 ## Speak
 
-Answer a human message in your turn text. Tasks, Projects, and Waves communicate
-through typed Work observations and targeted Ask/Answer exchanges.
+Answer a human message in your turn text. When a human is present, keep questions
+in that conversation. `lf ask` crosses to the immediate parent Work; headless
+`lf ask --user` requests genuine intervention from an absent User. An Ask is a
+durable Ask session, not a chat message or textual Answer.
 
 When the active skill calls for a durable Wave learning, edit
 `wave/<name>/MEMORY.md` through the ordinary repository workflow. Keep it
@@ -192,13 +200,21 @@ the work so they stay transparent and reviewable.
 
 </lf:loopflow>
 
-Run mode is headless. No user is present. Never ask questions or wait for input — no one will answer.
+Run mode is headless. No human is present in this conversation. Do not ask a
+conversational question or wait for turn text — no one will answer here.
 
-Do the work. Make executive decisions where needed — pick the simpler choice and keep moving. You can always be corrected in review.
+Make safe executive decisions and keep moving. When progress truly requires
+outside authority, `lf ask "<exact intervention>"` requests an Ask session from the
+parent Work and blocks this shell call without consuming model turns. Use
+`lf ask --user "<exact intervention>"` only for genuine absent-User action the
+parent cannot provide. Root Work never escalates silently. Use `--noblock` only
+while genuinely independent work remains, then join with `lf ask wait <id>`.
 
-If something is genuinely ambiguous, note your assumption in `scratch/questions.md` and proceed with your best judgment. Do not stop.
+If no outside authority is required, record a material assumption in
+`scratch/questions.md` and proceed with the simpler safe choice. Do not stop.
 
 No rendering environment. Output is logged, not displayed.
+
 
 The skill.
 

@@ -26,7 +26,73 @@ pub fn run(skill: Option<&str>, message: Option<&str>, cli: &Cli) -> Result<()> 
     let built = build_prompt(skill, message, cli)?;
 
     print_context_header(&built, cli);
-    launch_prompt(&built, cli)
+    launch_prompt(&built, cli, None)
+}
+
+#[doc(hidden)]
+pub fn run_bound(
+    skill: &str,
+    message: Option<&str>,
+    cli: &Cli,
+    store: crate::store::SharedStore,
+    binding: &crate::ops::WorkBinding,
+) -> Result<()> {
+    let message = match message.filter(|message| !message.trim().is_empty()) {
+        Some(message) => format!(
+            "<lf:work kind=\"{}\" id=\"{}\">\n{}\n</lf:work>\n\n{}",
+            binding.work.kind(),
+            binding.work.id(),
+            binding.context,
+            message,
+        ),
+        None => format!(
+            "<lf:work kind=\"{}\" id=\"{}\">\n{}\n</lf:work>",
+            binding.work.kind(),
+            binding.work.id(),
+            binding.context,
+        ),
+    };
+    let built = build_prompt(Some(skill), Some(&message), cli)?;
+    let surface = bound_surface(&built, cli)?;
+    let route = crate::durable::InvocationRoute {
+        provider: built.harness.clone(),
+        model: built.model.clone(),
+        account_id: None,
+    };
+    let runtime = tokio::runtime::Runtime::new()?;
+    let mut direct =
+        runtime.block_on(crate::ops::DirectRun::start(store, binding, route, surface))?;
+    let _environment = BoundEnvironment::enter(&direct, binding);
+    let control = CaptureControl {
+        basis: direct.lease().basis.clone(),
+        supervision: crate::trace::SupervisedInvocation {
+            invocation_id: direct.invocation().id.clone(),
+            supervising_run_id: direct.lease().run_id.clone(),
+            account_id: direct.invocation().route.account_id.clone(),
+            resume_token: direct.invocation().resume_token.clone(),
+        },
+    };
+
+    print_context_header(&built, cli);
+    let result = launch_prompt(&built, cli, Some(control));
+    let outcome = if result.is_ok() {
+        crate::durable::BoundaryState::Succeeded
+    } else {
+        crate::durable::BoundaryState::Failed
+    };
+    let cleanup = runtime.block_on(direct.finish(outcome));
+    match (result, cleanup) {
+        (Err(error), Err(cleanup)) => Err(error.context(format!(
+            "bound Run {} also failed to settle: {cleanup}",
+            direct.lease().run_id
+        ))),
+        (Err(error), Ok(())) => Err(error),
+        (Ok(()), Err(error)) => Err(anyhow!(
+            "bound skill completed but Run {} did not settle: {error}",
+            direct.lease().run_id
+        )),
+        (Ok(()), Ok(())) => Ok(()),
+    }
 }
 
 struct PromptBuild {
@@ -45,6 +111,51 @@ struct PromptBuild {
     log_name: String,
     context_gather_ms: u64,
     context_render_ms: u64,
+}
+
+#[derive(Debug, Clone)]
+struct CaptureControl {
+    basis: crate::durable::Basis,
+    supervision: crate::trace::SupervisedInvocation,
+}
+
+struct BoundEnvironment(Vec<(&'static str, Option<std::ffi::OsString>)>);
+
+impl BoundEnvironment {
+    fn enter(direct: &crate::ops::DirectRun, binding: &crate::ops::WorkBinding) -> Self {
+        let values = [
+            (crate::durable::RUN_CONTEXT_ENV, "agent"),
+            (crate::durable::RUN_LEASE_ENV, direct.lease().env_value()),
+            (
+                crate::durable::AGENT_INVOCATION_ENV,
+                direct.invocation().id.as_str(),
+            ),
+            (
+                crate::engine::wave_context::WAVE_ID_ENV,
+                binding.wave_id.as_str(),
+            ),
+        ];
+        let previous = values
+            .iter()
+            .map(|(key, value)| {
+                let previous = std::env::var_os(key);
+                std::env::set_var(key, value);
+                (*key, previous)
+            })
+            .collect();
+        Self(previous)
+    }
+}
+
+impl Drop for BoundEnvironment {
+    fn drop(&mut self) {
+        for (key, value) in self.0.drain(..).rev() {
+            match value {
+                Some(value) => std::env::set_var(key, value),
+                None => std::env::remove_var(key),
+            }
+        }
+    }
 }
 
 /// A skill turn ready for a runner-owned provider surface.
@@ -143,12 +254,7 @@ fn build_prompt(skill: Option<&str>, message: Option<&str>, cli: &Cli) -> Result
         "discovered skill"
     );
 
-    if let Some(ref s) = discovered_skill {
-        debug!(s.name, s.interactive, "discovered skill");
-    }
-
-    let is_interactive =
-        is_interactive_run(cli, &config, discovered_skill.as_ref(), skill, message);
+    let is_interactive = is_interactive_run(cli, skill, message);
 
     info!("preparing launch prompt");
     let prepare_start = Instant::now();
@@ -280,24 +386,25 @@ fn build_prompt(skill: Option<&str>, message: Option<&str>, cli: &Cli) -> Result
     })
 }
 
-fn is_interactive_run(
+pub(crate) fn is_interactive_run(cli: &Cli, skill: Option<&str>, message: Option<&str>) -> bool {
+    is_interactive_run_with_tty(
+        cli,
+        skill,
+        message,
+        std::io::stdin().is_terminal() || std::io::stdout().is_terminal(),
+    )
+}
+
+fn is_interactive_run_with_tty(
     cli: &Cli,
-    config: &Config,
-    discovered_skill: Option<&crate::engine::Skill>,
     skill: Option<&str>,
     message: Option<&str>,
+    attached_tty: bool,
 ) -> bool {
     cli.tui
         || cli.ide
         || cli.interactive
-        || (!cli.batch
-            && (discovered_skill
-                .and_then(|skill| skill.interactive)
-                .unwrap_or(false)
-                || skill
-                    .map(|skill_name| config.interactive.contains(&skill_name.to_string()))
-                    .unwrap_or(false)
-                || (skill.is_none() && message.is_none())))
+        || (!cli.batch && (attached_tty || (skill.is_none() && message.is_none())))
 }
 
 fn should_launch_via_skill(skill_name: &str) -> bool {
@@ -374,10 +481,31 @@ fn print_context_header(built: &PromptBuild, cli: &Cli) {
     );
 }
 
-fn launch_prompt(built: &PromptBuild, cli: &Cli) -> Result<()> {
-    // `--tui` / `--ide` force a handoff and override the repo default; an
-    // interactive skill with neither flag uses `session.launch`.
-    let forced_target = if cli.ide {
+fn bound_surface(built: &PromptBuild, cli: &Cli) -> Result<&'static str> {
+    if built.process.auto {
+        return Ok("headless");
+    }
+    let target = if cli.ide {
+        LaunchTarget::Ide
+    } else if cli.tui || built.skill_name.as_deref() == Some("loopflow") {
+        LaunchTarget::Tui
+    } else {
+        built.config.session.launch
+    };
+    if target == LaunchTarget::Ide {
+        return Err(anyhow!(
+            "`lf --as` cannot supervise a vendor-app handoff; use `--tui` or `--batch`"
+        ));
+    }
+    Ok("tui")
+}
+
+fn launch_prompt(built: &PromptBuild, cli: &Cli, control: Option<CaptureControl>) -> Result<()> {
+    // Bare terminal control always stays in the TUI. Other human-present skills
+    // use explicit flags first, then the configured launch target.
+    let forced_target = if built.skill_name.as_deref() == Some("loopflow") {
+        Some(LaunchTarget::Tui)
+    } else if cli.ide {
         Some(LaunchTarget::Ide)
     } else if cli.tui {
         Some(LaunchTarget::Tui)
@@ -387,7 +515,7 @@ fn launch_prompt(built: &PromptBuild, cli: &Cli) -> Result<()> {
 
     if forced_target.is_some() || !built.process.auto {
         info!("launching interactive vendor session");
-        let capture = begin_capture(built, if cli.ide { "ide" } else { "tui" })?;
+        let capture = begin_capture(built, if cli.ide { "ide" } else { "tui" }, control.clone())?;
         let result = launch_session(
             forced_target.unwrap_or(built.config.session.launch),
             &built.harness,
@@ -420,7 +548,7 @@ fn launch_prompt(built: &PromptBuild, cli: &Cli) -> Result<()> {
 
     let effective_system =
         crate::engine::agent::system_prompt_with_structured_replies(&built.agent_config);
-    let capture = begin_capture(built, "headless")?;
+    let capture = begin_capture(built, "headless", control)?;
 
     // Skill-launched skills clear the system prompt (the seed carries everything
     // in the task prompt). Don't write or pass a context file in that case: codex
@@ -498,7 +626,11 @@ fn launch_prompt(built: &PromptBuild, cli: &Cli) -> Result<()> {
     }
 }
 
-fn begin_capture(built: &PromptBuild, surface: &str) -> Result<crate::trace::CaptureHandle> {
+fn begin_capture(
+    built: &PromptBuild,
+    surface: &str,
+    control: Option<CaptureControl>,
+) -> Result<crate::trace::CaptureHandle> {
     let context =
         crate::journal::trace_capture_context(&built.repo_root, None, built.skill_name.clone())
             .ok_or_else(|| anyhow!("trace capture identity is unavailable before agent launch"))?;
@@ -513,8 +645,8 @@ fn begin_capture(built: &PromptBuild, surface: &str) -> Result<crate::trace::Cap
             gather_ms: built.context_gather_ms,
             render_ms: built.context_render_ms,
             raw_provider: surface == "headless",
-            basis: None,
-            supervision: None,
+            basis: control.as_ref().map(|control| control.basis.clone()),
+            supervision: control.map(|control| control.supervision),
         },
     )
     .map_err(|error| anyhow!("failed to establish trace capture before agent launch: {error}"))
@@ -829,36 +961,128 @@ pub fn split_skill_args(args: &[String]) -> Result<(String, Vec<String>)> {
 #[cfg(test)]
 mod tests {
     use super::{
-        attributed_context, is_interactive_run, should_launch_via_skill, skill_launch_seed,
-        split_skill_args,
+        attributed_context, is_interactive_run, is_interactive_run_with_tty,
+        should_launch_via_skill, skill_launch_seed, split_skill_args, BoundEnvironment,
     };
+    use crate::durable::{BoundaryState, InvocationRoute, WorkRef};
     use crate::engine::prompt::{Document, DocumentSource, PromptComponents};
-    use crate::engine::{Config, Skill, Surface};
+    use crate::engine::Surface;
+    use crate::id::WaveId;
     use crate::lf::Cli;
+    use crate::ops::{DirectRun, WorkBinding};
+    use crate::store::{open_store, StorageConfig};
     use crate::trace::{ContextAssetKind, ContextScope};
+    use crate::wave::Wave;
     use clap::Parser;
+    use std::sync::Arc;
+
+    #[tokio::test]
+    async fn bound_environment_exports_exact_run_identity_and_restores_ambient_values() {
+        let directory = tempfile::tempdir().unwrap();
+        let store = Arc::new(
+            open_store(&StorageConfig::sqlite(directory.path().join("registry.db")))
+                .await
+                .unwrap(),
+        );
+        let wave = Wave::new(
+            WaveId::new(),
+            "runtime".to_string(),
+            directory.path().display().to_string(),
+        );
+        store.create_wave(&wave).await.unwrap();
+        let binding = WorkBinding {
+            work: WorkRef::Wave(wave.id().clone()),
+            wave_id: wave.id().clone(),
+            wave_name: wave.name().to_string(),
+            cwd: directory.path().to_path_buf(),
+            context: "Wave runtime".to_string(),
+        };
+        let mut direct = DirectRun::start(
+            store,
+            &binding,
+            InvocationRoute {
+                provider: "codex".to_string(),
+                model: None,
+                account_id: None,
+            },
+            "headless",
+        )
+        .await
+        .unwrap();
+        let lock = crate::journal::test_env_lock();
+        let keys = [
+            crate::durable::RUN_CONTEXT_ENV,
+            crate::durable::RUN_LEASE_ENV,
+            crate::durable::AGENT_INVOCATION_ENV,
+            crate::engine::wave_context::WAVE_ID_ENV,
+        ];
+        let previous = keys
+            .iter()
+            .map(|key| (*key, std::env::var_os(key)))
+            .collect::<Vec<_>>();
+        for key in keys {
+            std::env::set_var(key, "ambient");
+        }
+
+        {
+            let _environment = BoundEnvironment::enter(&direct, &binding);
+            assert_eq!(
+                std::env::var(crate::durable::RUN_CONTEXT_ENV).unwrap(),
+                "agent"
+            );
+            assert_eq!(
+                std::env::var(crate::durable::RUN_LEASE_ENV).unwrap(),
+                direct.lease().env_value()
+            );
+            assert_eq!(
+                std::env::var(crate::durable::AGENT_INVOCATION_ENV).unwrap(),
+                direct.invocation().id.as_str()
+            );
+            assert_eq!(
+                std::env::var(crate::engine::wave_context::WAVE_ID_ENV).unwrap(),
+                binding.wave_id.as_str()
+            );
+        }
+        for key in keys {
+            assert_eq!(std::env::var(key).unwrap(), "ambient");
+        }
+        for (key, value) in previous {
+            match value {
+                Some(value) => std::env::set_var(key, value),
+                None => std::env::remove_var(key),
+            }
+        }
+        drop(lock);
+        direct.finish(BoundaryState::Succeeded).await.unwrap();
+    }
 
     #[test]
     fn forced_session_handoff_counts_as_interactive() {
         let cli = Cli::parse_from(["lf", "--ide", "gate"]);
-        let config = Config::default();
 
-        assert!(is_interactive_run(&cli, &config, None, Some("gate"), None));
+        assert!(is_interactive_run(&cli, Some("gate"), None));
     }
 
     #[test]
-    fn interactive_skill_counts_as_interactive_without_force_flag() {
-        let cli = Cli::parse_from(["lf", "design"]);
-        let config = Config::default();
-        let mut skill = Skill::named("design");
-        skill.interactive = Some(true);
+    fn batch_named_skill_is_headless() {
+        let cli = Cli::parse_from(["lf", "--batch", "design"]);
+        assert!(!is_interactive_run(&cli, Some("design"), None));
+    }
 
-        assert!(is_interactive_run(
+    #[test]
+    fn direct_tty_is_human_present_but_detached_named_launch_is_headless() {
+        let cli = Cli::parse_from(["lf", "design"]);
+        assert!(is_interactive_run_with_tty(
             &cli,
-            &config,
-            Some(&skill),
             Some("design"),
-            None
+            None,
+            true
+        ));
+        assert!(!is_interactive_run_with_tty(
+            &cli,
+            Some("design"),
+            None,
+            false
         ));
     }
 

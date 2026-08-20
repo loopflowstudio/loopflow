@@ -9,7 +9,7 @@ use crate::engine::git::{commit, current_branch, is_clean, push, push_with_upstr
 use crate::engine::load_skill;
 
 use crate::ops::error::{OpsError, OpsResult};
-use crate::ops::progress::Progress;
+use crate::ops::progress::{NullProgress, Progress};
 use crate::ops::trace::{MockResponses, Tracer};
 
 #[derive(Debug, Clone)]
@@ -35,6 +35,31 @@ impl CommitOptions {
             agent: None,
         }
     }
+}
+
+/// Stage, commit, and push a Task worktree so its state survives this
+/// machine. Runs off the async worker thread because commit_workflow drives
+/// its own runtime for the push settlement fence.
+pub(crate) async fn checkpoint_task_worktree(
+    worktree: std::path::PathBuf,
+    task_identifier: String,
+    message: String,
+) -> anyhow::Result<()> {
+    let outcome = tokio::task::spawn_blocking(move || {
+        let options = CommitOptions {
+            add: true,
+            push: true,
+            create_draft_pr: false,
+            task: task_identifier,
+            flow_parents: Vec::new(),
+            message: Some(message),
+            agent: None,
+        };
+        commit_workflow(&worktree, &options, &NullProgress).map(|_| ())
+    })
+    .await
+    .map_err(|join_error| anyhow::anyhow!("Task worktree checkpoint panicked: {join_error}"))?;
+    outcome.map_err(anyhow::Error::from)
 }
 
 pub fn commit_workflow(

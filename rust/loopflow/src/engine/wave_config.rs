@@ -46,7 +46,8 @@ pub struct WavePmConfig {
 
 /// One existing Discord guild text channel bound to this Wave's chat.
 #[derive(Debug, Clone, Deserialize, Serialize, PartialEq, Eq)]
-#[serde(tag = "provider", rename_all = "snake_case")]
+#[serde(tag = "provider", rename_all = "snake_case", deny_unknown_fields)]
+#[non_exhaustive]
 pub enum WaveChatConfig {
     Local,
     Discord {
@@ -124,6 +125,38 @@ pub(crate) fn try_read_wave_config(
             .map_err(|source| WaveConfigError::Parse { path, source })?,
         None => WaveConfig::default(),
     }))
+}
+
+/// Read only the external chat binding, so malformed unrelated Wave policy
+/// cannot turn listener startup into a new validation boundary.
+pub(crate) fn try_read_wave_chat_config(
+    repo: &Path,
+    name: &str,
+) -> Result<Option<WaveChatConfig>, WaveConfigError> {
+    let path = goal_path(repo, name);
+    let content = match std::fs::read_to_string(&path) {
+        Ok(content) => content,
+        Err(err) if err.kind() == std::io::ErrorKind::NotFound => return Ok(None),
+        Err(source) => return Err(WaveConfigError::Read { path, source }),
+    };
+    let Some((frontmatter, _)) = split_frontmatter(&content) else {
+        return Ok(None);
+    };
+    let value = serde_yaml_ng::from_str::<Value>(&frontmatter).map_err(|source| {
+        WaveConfigError::Parse {
+            path: path.clone(),
+            source,
+        }
+    })?;
+    let Some(chat) = value
+        .as_mapping()
+        .and_then(|mapping| mapping.get(Value::String("chat".to_string())))
+    else {
+        return Ok(None);
+    };
+    serde_yaml_ng::from_value(chat.clone())
+        .map(Some)
+        .map_err(|source| WaveConfigError::Parse { path, source })
 }
 
 /// One-line Wave objective for status, PM, and API projections.
@@ -387,9 +420,7 @@ mod tests {
             "---\nchat:\n  provider: discord\n  home_id: home_11111111111111111111111111111111\n  guild_id: guild\n  channel_id: channel\n---\nDrive the work.\n",
         )
         .expect("write");
-        let config = try_read_wave_config(temp.path(), "scan")
-            .expect("valid config")
-            .expect("config");
+        let config = read_wave_config(temp.path(), "scan").expect("config should parse");
         assert!(matches!(
             config.chat,
             Some(WaveChatConfig::Discord { home_id, guild_id, channel_id })
@@ -397,14 +428,21 @@ mod tests {
                     && guild_id == "guild"
                     && channel_id == "channel"
         ));
+        assert!(matches!(
+            try_read_wave_chat_config(temp.path(), "scan"),
+            Ok(Some(WaveChatConfig::Discord { home_id, guild_id, channel_id }))
+                if home_id.as_str() == "home_11111111111111111111111111111111"
+                    && guild_id == "guild"
+                    && channel_id == "channel"
+        ));
 
         fs::write(
             dir.join("GOAL.md"),
-            "---\nchat:\n  provider: discord\n  guild_id: guild\n---\nDrive the work.\n",
+            "---\nchat:\n  provider: discord\n  home_id: home_39860354aaca640c2ccb50bf6ca609d8\n  guild_id: guild\n---\nDrive the work.\n",
         )
         .expect("write invalid");
         assert!(matches!(
-            try_read_wave_config(temp.path(), "scan"),
+            try_read_wave_chat_config(temp.path(), "scan"),
             Err(WaveConfigError::Parse { .. })
         ));
 
@@ -426,8 +464,18 @@ mod tests {
         )
         .expect("write invalid HomeId");
         assert!(matches!(
-            try_read_wave_config(temp.path(), "scan"),
+            try_read_wave_chat_config(temp.path(), "scan"),
             Err(WaveConfigError::Parse { .. })
+        ));
+
+        fs::write(
+            dir.join("GOAL.md"),
+            "---\npaused: not-a-boolean\n---\nDrive the work.\n",
+        )
+        .expect("write unrelated invalid policy");
+        assert!(matches!(
+            try_read_wave_chat_config(temp.path(), "scan"),
+            Ok(None)
         ));
     }
 

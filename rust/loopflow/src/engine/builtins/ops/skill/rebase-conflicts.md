@@ -50,7 +50,10 @@ lf rebase --continue
 - **Files central to the branch's intent:** Preserve the branch's changes named by the conflict context and surrounding code.
 - **Files outside the branch's scope:** Accept main's version. The branch probably touched these incidentally.
 - **Both versions are valid:** Combine manually if both changes make sense.
-- **Ambiguous or high-risk conflicts:** Do not guess. In interactive runs, ask the user. In headless runs, write the ambiguity and options to `scratch/questions.md` and stop.
+- **Ambiguous or high-risk conflicts:** Do not guess. Ask a present human in
+  conversation. In a headless Run, record the ambiguity and use `lf ask` for
+  parent judgment; use `lf ask --user` only when genuine absent-User authority
+  is required.
 
 `lf rebase --continue` stages the resolved conflict paths and checks that this
 agent owns the operation. Repeat until it reports completion. Loopflow records
@@ -74,5 +77,7 @@ lf rebase --abort
 ```
 
 Then:
-- interactive: explain the failure and ask the user how to proceed
-- headless: note what went wrong in `scratch/questions.md` and stop
+- human-present: explain the failure and ask the present User how to proceed
+- headless: note what went wrong in `scratch/questions.md` and request the
+  exact parent intervention with `lf ask`; use `--user` only when no parent can
+  supply the required authority

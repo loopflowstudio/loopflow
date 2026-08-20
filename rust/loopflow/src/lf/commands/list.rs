@@ -1,8 +1,7 @@
 use crate::lf::commands::util::find_repo_root;
 use crate::lf::discovery::{
-    builtin_flow_infos, builtin_flows, builtin_skill_description, builtin_skills,
-    is_skill_interactive, list_all_skills, list_user_flows, FlowInfo, BUILTIN_FLOW_CATEGORIES,
-    BUILTIN_SKILL_CATEGORIES,
+    builtin_flow_infos, builtin_flows, builtin_skill_description, builtin_skills, list_all_skills,
+    list_user_flows, FlowInfo, BUILTIN_FLOW_CATEGORIES, BUILTIN_SKILL_CATEGORIES,
 };
 use crate::lf::output::Colors;
 use anyhow::Result;
@@ -17,7 +16,6 @@ const DESC_WIDTH: usize = 48;
 struct CatalogEntry {
     flow: Option<FlowInfo>,
     skill_description: Option<String>,
-    interactive: bool,
     customized: bool,
 }
 
@@ -68,7 +66,6 @@ fn render_all(repo_root: Option<&Path>, colors: Colors) -> String {
                 .entry((*name).to_string())
                 .or_insert_with(CatalogEntry::default);
             entry.skill_description = Some(builtin_skill_description(name));
-            entry.interactive = repo_root.is_some_and(|repo| is_skill_interactive(repo, name));
             entry.customized |= user_skill_set.contains(*name);
         }
 
@@ -95,14 +92,13 @@ fn render_all(repo_root: Option<&Path>, colors: Colors) -> String {
             .entry(name.clone())
             .or_insert_with(CatalogEntry::default);
         entry.skill_description = Some(String::new());
-        entry.interactive = repo_root.is_some_and(|repo| is_skill_interactive(repo, name));
     }
     if !user_entries.is_empty() {
         render_category(&mut output, "User", &user_entries, colors);
     }
 
     if !global_skills.is_empty() {
-        let entries = skill_only_entries(&global_skills, repo_root);
+        let entries = skill_only_entries(&global_skills);
         render_category(&mut output, "Global", &entries, colors);
     }
 
@@ -112,7 +108,7 @@ fn render_all(repo_root: Option<&Path>, colors: Colors) -> String {
     }
     for (source, mut skills) in external_by_source {
         skills.sort();
-        let entries = skill_only_entries(&skills, repo_root);
+        let entries = skill_only_entries(&skills);
         render_category(&mut output, &source, &entries, colors);
     }
 
@@ -149,10 +145,7 @@ fn category_members<'a>(categories: &'a [(&str, &[&str])], category: &str) -> &'
         .unwrap_or(&[])
 }
 
-fn skill_only_entries(
-    skills: &[String],
-    repo_root: Option<&Path>,
-) -> BTreeMap<String, CatalogEntry> {
+fn skill_only_entries(skills: &[String]) -> BTreeMap<String, CatalogEntry> {
     skills
         .iter()
         .map(|name| {
@@ -160,7 +153,6 @@ fn skill_only_entries(
                 name.clone(),
                 CatalogEntry {
                     skill_description: Some(String::new()),
-                    interactive: repo_root.is_some_and(|repo| is_skill_interactive(repo, name)),
                     ..CatalogEntry::default()
                 },
             )
@@ -199,15 +191,6 @@ fn render_category(
         } else {
             format!("{kind:<10} {description}")
         };
-        let interactive = if entry.interactive {
-            format!(
-                "  {yellow}interactive{reset}",
-                yellow = colors.yellow,
-                reset = colors.reset
-            )
-        } else {
-            String::new()
-        };
         let customized = if entry.customized {
             format!(
                 "  {dim}customized{reset}",
@@ -220,7 +203,7 @@ fn render_category(
 
         writeln!(
             output,
-            "  {bold}{name:<NAME_WIDTH$}{reset} {dim}{detail}{reset}{interactive}{customized}",
+            "  {bold}{name:<NAME_WIDTH$}{reset} {dim}{detail}{reset}{customized}",
             bold = colors.bold,
             reset = colors.reset,
             dim = colors.dim,

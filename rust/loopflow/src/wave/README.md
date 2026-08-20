@@ -50,8 +50,8 @@ preflights Discord before reserving a Run or opening the journal, then polls
 after the committed cursor, journals external inputs before advancing it, and
 journals deterministic send intents before posting. The resident receives only
 source-tagged authored input and never inherits `LF_DISCORD_TOKEN`. Binding
-ownership is explicit: the configured Home is the only Home allowed to attach,
-and an OS-held lease prevents concurrent listeners across its checkouts.
+ownership is explicit and must agree with the Wave's durable Home placement;
+an OS-held lease prevents concurrent listeners across its checkouts.
 
 The shared `~/.lf/loopflow.db` stores the Wave UUID, its repository-scoped
 locator, and typed Project and Task observations. Human commands resolve the

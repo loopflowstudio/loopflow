@@ -70,8 +70,8 @@ Reading is half; the system stays steerable while it runs.
 lf chat --steer "ship the parser fix first"   # reach the live wave body, else queue
 lf chat --follow                              # replay and tail the conversation
 lf task steer INF-123 "smaller PR"            # redirect one Task's active turn
-lf work asks                                  # questions waiting on you
-lf work answer ask_... "take the smaller PR"  # answer one exact question
+lf ask list --user --json                     # requested sessions needing attention
+lf ask open ask_...                            # open one Ask session
 lf invocation list --active                   # reopenable provider/TUI invocations
 ```
 
@@ -79,18 +79,20 @@ Steering is durable-first: `steer` appends direction before attempting a live
 send. Provider acceptance is only transport evidence; a later successful
 boundary Basis proves application — see [The Agent API](agent-api.md#steer).
 
-Ask/Answer is targeted tool I/O in one Turn. It neither advances the flow nor
-enters the Steer queue; the enclosing Turn advances only when it completes.
+An intervention Ask is targeted tool I/O in one Turn. It does not enter the
+Steer queue; the enclosing Turn advances only when it completes. A human Task
+node uses a `FlowStep` Ask between provider Invocations and advances only after
+explicit resolution.
 
 Genuinely terminal-shaped work (a login, an opaque TUI) stays on the owning
 AgentInvocation. `lf invocation present <id>` reopens its attach route, and `lf invocation
 handback <id> --outcome ...` records explicit terminal evidence without
 inventing a second Work identity.
 
-Interactive Task phases are different: they make one bounded launch attempt and
-advance immediately. Their read-only surfaces may remain in `invocation list
---active`; launch failure or missing handback is advisory and never becomes a
-human blocker. Use `lf ask` when the Task truly needs an answer before continuing.
+Human Task nodes park the playhead and appear in the same User Ask queue.
+Opening one runs the authored skill with fenced Task writer authority in its
+worktree. Release or ordinary exit requeues it; decline returns to autonomous
+work; presentation and handback never advance it.
 
 ## The Mac app
 
@@ -117,7 +119,7 @@ tmux ls                     # live agent processes
 tmux attach -r -t <name>    # read-only look inside one
 ```
 
-Use `lf work asks` and `lf work answer` when Work asks an exact question. Use
+Use `lf ask list` and `lf ask open` when Work asks an exact question. Use
 `lf chat --steer` or `lf task steer` for unsolicited durable direction.
 
 ## Next

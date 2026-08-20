@@ -1,0 +1,11 @@
+# Ship one coherent core in the current Task.
+- step:
+    name: launch-plan
+- implement
+- compress
+- gate
+- step:
+    id: review_keystone_demo
+    name: demo
+    human: true
+- op: pr land -c

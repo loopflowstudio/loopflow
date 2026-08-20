@@ -1,7 +1,6 @@
 ---
 requires: scratch/wave-mutate.md
 produces: scratch/wave-review.md
-interactive: true
 ---
 Review what the chord already played.
 

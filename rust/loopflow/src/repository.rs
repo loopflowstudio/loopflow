@@ -41,6 +41,21 @@ impl CanonicalRepo {
     pub fn as_path(&self) -> &Path {
         &self.0
     }
+
+    /// The repository scope of the current working directory, or `None` when the
+    /// cwd is outside any git checkout (nothing to scope to).
+    pub fn current() -> Option<Self> {
+        Self::discover(&std::env::current_dir().ok()?).ok()
+    }
+
+    /// Whether `path` resolves to this same repository, collapsing worktrees to
+    /// their main checkout. A path that no longer exists on disk is not "this
+    /// repo" and returns `false`.
+    pub fn contains(&self, path: &Path) -> bool {
+        Self::discover(path)
+            .map(|other| &other == self)
+            .unwrap_or(false)
+    }
 }
 
 impl fmt::Display for CanonicalRepo {
@@ -139,6 +154,56 @@ impl From<RepoId> for String {
 #[cfg(test)]
 mod tests {
     use super::*;
+    use std::process::Command;
+
+    fn git(dir: &Path, args: &[&str]) {
+        let output = Command::new("git")
+            .arg("-C")
+            .arg(dir)
+            .args(args)
+            .output()
+            .expect("run git");
+        assert!(output.status.success(), "git {args:?} failed");
+    }
+
+    fn init_repo() -> tempfile::TempDir {
+        let dir = tempfile::tempdir().expect("temp repo");
+        git(dir.path(), &["init", "-b", "main"]);
+        git(dir.path(), &["config", "user.name", "tester"]);
+        git(dir.path(), &["config", "user.email", "t@example.com"]);
+        std::fs::write(dir.path().join("README.md"), "base").expect("seed file");
+        git(dir.path(), &["add", "README.md"]);
+        git(dir.path(), &["commit", "-m", "base"]);
+        dir
+    }
+
+    #[test]
+    fn canonical_repo_collapses_worktree_and_separates_distinct_repo() {
+        let repo_a = init_repo();
+        let repo_b = init_repo();
+
+        // A linked worktree of A collapses to A's main checkout.
+        let wt_parent = tempfile::tempdir().expect("worktree parent");
+        let worktree = wt_parent.path().join("a.child");
+        git(
+            repo_a.path(),
+            &["worktree", "add", "-b", "child", worktree.to_str().unwrap()],
+        );
+
+        let scope_a = CanonicalRepo::discover(repo_a.path()).expect("discover A");
+        assert_eq!(
+            CanonicalRepo::discover(&worktree).expect("discover worktree"),
+            scope_a,
+            "worktree should resolve to its main checkout"
+        );
+        assert!(scope_a.contains(&worktree));
+
+        // A distinct repository is a different scope.
+        assert!(!scope_a.contains(repo_b.path()));
+
+        // A path outside any checkout is not this repo.
+        assert!(!scope_a.contains(Path::new("/nonexistent/path")));
+    }
 
     #[test]
     fn repo_id_name_returns_repo_portion() {

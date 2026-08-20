@@ -4,7 +4,7 @@ use std::fs;
 use std::path::Path;
 use std::process::Command;
 
-use loopflow::engine::flow::{ConcreteStep, Skill, Step};
+use loopflow::engine::flow::{ConcreteStep, Skill, SkillStep, Step};
 use loopflow::engine::{expand_flow, load_flow};
 use loopflow::store::sqlite::SqliteStore;
 use support::codex_app_server_script;
@@ -100,26 +100,30 @@ fn flow_parsing_parity() {
     assert_eq!(flow.items.len(), 2);
     assert_eq!(
         flow.items[0],
-        Step::Skill(Skill {
-            name: "implement".to_string(),
-            agent: None,
-            default_agent: None,
-            directions: vec![],
-            action_style: None,
-            interactive: None,
-            content: None,
+        Step::Skill(SkillStep {
+            skill: Skill {
+                name: "implement".to_string(),
+                agent: None,
+                default_agent: None,
+                directions: vec![],
+                action_style: None,
+                content: None,
+            },
+            policy: Default::default(),
         })
     );
     assert_eq!(
         flow.items[1],
-        Step::Skill(Skill {
-            name: "review".to_string(),
-            agent: None,
-            default_agent: None,
-            directions: vec!["ux".to_string(), "security".to_string()],
-            action_style: None,
-            interactive: None,
-            content: None,
+        Step::Skill(SkillStep {
+            skill: Skill {
+                name: "review".to_string(),
+                agent: None,
+                default_agent: None,
+                directions: vec!["ux".to_string(), "security".to_string()],
+                action_style: None,
+                content: None,
+            },
+            policy: Default::default(),
         })
     );
 }

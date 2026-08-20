@@ -52,6 +52,55 @@ pub struct TaskFlowOverrides {
     pub finally: Option<String>,
 }
 
+/// Named lifecycle presets: where the human gate sits, in one word.
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub enum TaskCycle {
+    /// Behavior is wrong. Opens with the incident cycle (restore → 5whys)
+    /// and the human gates at the demo, not a design doc.
+    Fix,
+    /// Behavior should change; the human shapes the design before code.
+    Feature,
+}
+
+impl TaskCycle {
+    pub fn parse(name: &str) -> Option<Self> {
+        match name {
+            "fix" => Some(Self::Fix),
+            "feature" | "feat" => Some(Self::Feature),
+            _ => None,
+        }
+    }
+
+    /// The (first, finally) flows this cycle stands for.
+    pub fn flows(self) -> (&'static str, &'static str) {
+        match self {
+            Self::Fix => ("incident", "ship-demo"),
+            Self::Feature => ("task-design", "ship"),
+        }
+    }
+}
+
+impl TaskFlowOverrides {
+    /// Expand a cycle preset into flow overrides. Explicit flow flags win
+    /// over the preset; both win over the Project's pinned flows.
+    pub fn for_cycle(
+        cycle: Option<TaskCycle>,
+        first: Option<String>,
+        loop_: Option<String>,
+        finally: Option<String>,
+    ) -> Self {
+        let (cycle_first, cycle_finally) = match cycle.map(TaskCycle::flows) {
+            Some((first, finally)) => (Some(first), Some(finally)),
+            None => (None, None),
+        };
+        Self {
+            first: first.or_else(|| cycle_first.map(str::to_string)),
+            loop_,
+            finally: finally.or_else(|| cycle_finally.map(str::to_string)),
+        }
+    }
+}
+
 #[derive(Debug, Clone, Default, PartialEq, Eq)]
 pub struct TaskLaunchOptions {
     pub name: Option<String>,
@@ -664,6 +713,20 @@ pub fn task_run(repo: &Path, issue: &str, options: TaskLaunchOptions) -> OpsResu
             Err(error) => return Err(task_error(format!("failed to reserve task: {error}"))),
         };
 
+        if let Err(error) = create_from_placement_plan(&main_repo, &plan) {
+            store
+                .fail_task_run(&task.id, &lease, &error.to_string())
+                .await
+                .map_err(|settle_error| {
+                    task_error(format!(
+                        "worktree creation failed ({error}); failed to settle reserved Run: {settle_error}"
+                    ))
+                })?;
+            return Err(task_error(format!(
+                "failed to create task worktree: {error}"
+            )));
+        }
+
         if let Err(error) = store
             .append_task_event(
                 &task.id,
@@ -685,20 +748,6 @@ pub fn task_run(repo: &Path, issue: &str, options: TaskLaunchOptions) -> OpsResu
                     ))
                 })?;
             return Err(task_error(error.to_string()));
-        }
-
-        if let Err(error) = create_from_placement_plan(&main_repo, &plan) {
-            store
-                .fail_task_run(&task.id, &lease, &error.to_string())
-                .await
-                .map_err(|settle_error| {
-                    task_error(format!(
-                        "worktree creation failed ({error}); failed to settle reserved Run: {settle_error}"
-                    ))
-                })?;
-            return Err(task_error(format!(
-                "failed to create task worktree: {error}"
-            )));
         }
 
         launch_reserved_task_process(&store, &mut task, &run, &lease).await?;
@@ -872,6 +921,65 @@ fn validate_task_lifecycle(task: &Task) -> OpsResult<()> {
         })?;
     }
     Ok(())
+}
+
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub(crate) struct TaskWorktreeBlocker {
+    pub initializing: bool,
+    pub reason: String,
+}
+
+const TASK_WORKTREE_INITIALIZATION_GRACE: time::Duration = time::Duration::minutes(5);
+
+pub(crate) async fn task_worktree_blocker(
+    store: &SharedStore,
+    task: &Task,
+) -> OpsResult<Option<TaskWorktreeBlocker>> {
+    let event = store
+        .latest_task_event(&task.id)
+        .await
+        .map_err(|error| task_error(format!("failed to read Task worktree state: {error}")))?;
+    if let Some(event) = event {
+        if let TaskEventKind::WorktreeInitializing { branch, path, .. } = &event.kind {
+            let initializing = event.created_at + TASK_WORKTREE_INITIALIZATION_GRACE
+                > time::OffsetDateTime::now_utc();
+            let reason = if initializing {
+                format!(
+                    "Task {} is initializing worktree {path} on branch {branch:?}; no body is expected until placement completes",
+                    task.plan.identifier
+                )
+            } else {
+                format!(
+                    "Task {} worktree initialization did not complete at {path} on branch {branch:?}; finish or restore that exact path before `lf task resume {}`; Task identity and PR history are unchanged",
+                    task.plan.identifier, task.plan.identifier
+                )
+            };
+            return Ok(Some(TaskWorktreeBlocker {
+                initializing,
+                reason,
+            }));
+        }
+    }
+    if task.worktree.exists() {
+        return Ok(None);
+    }
+    let active = store
+        .active_task_pr(&task.id)
+        .await
+        .map_err(|error| task_error(format!("failed to read active Task PR: {error}")))?;
+    let branch = active
+        .as_ref()
+        .map(|pr| format!(" on branch {:?}", pr.branch))
+        .unwrap_or_default();
+    Ok(Some(TaskWorktreeBlocker {
+        initializing: false,
+        reason: format!(
+            "Task {} worktree {} is missing; restore that exact path{branch} before `lf task resume {}`; Task identity and PR history are unchanged",
+            task.plan.identifier,
+            task.worktree.display(),
+            task.plan.identifier,
+        ),
+    }))
 }
 
 fn resolve_task_flow(repo: &Path, requested: &str, allow_ops: bool) -> OpsResult<String> {
@@ -1539,7 +1647,7 @@ pub(crate) fn request_task_pr_merge(
         publication.merge = Some(PrMergeRequest {
             mode,
             requested_at,
-            head_sha,
+            head_sha: head_sha.clone(),
             after_merge,
             next_slug,
         });
@@ -2608,6 +2716,12 @@ pub(crate) async fn reconcile_project_tasks(
             task_work_status(store, task).await?,
             WorkStatus::Done | WorkStatus::Abandoned
         ) {
+            continue;
+        }
+        if task_worktree_blocker(store, task)
+            .await?
+            .is_some_and(|blocker| blocker.initializing)
+        {
             continue;
         }
         if let Err(error) = task_recovery_adoption(store, task).await {
@@ -3975,9 +4089,11 @@ pub fn task_status(issue: &str) -> OpsResult<Task> {
             .await
             .map_err(|error| task_error(format!("failed to read task status: {error}")))?
             .ok_or_else(|| task_error(format!("no Task exists for {issue:?}")))?;
-        reconcile_task_pr(&store, &mut task).await?;
-        reconcile_process_liveness(&store, &mut task).await?;
-        reconcile_task_completion(&store, &mut task, None).await?;
+        if task_worktree_blocker(&store, &task).await?.is_none() {
+            reconcile_task_pr(&store, &mut task).await?;
+            reconcile_process_liveness(&store, &mut task).await?;
+            reconcile_task_completion(&store, &mut task, None).await?;
+        }
         Ok(task)
     })
 }
@@ -4337,6 +4453,11 @@ pub(crate) async fn task_completion_gate(
         blockers: Vec::new(),
         discardable_successor: None,
     };
+    if let Some(blocker) = task_worktree_blocker(store, task).await? {
+        gate.satisfied = false;
+        gate.blockers.push(blocker.reason);
+        return Ok(gate);
+    }
     let work_done = task_work_status(store, task).await? == WorkStatus::Done;
 
     // Work committed past the tip GitHub merged is owned by no PR; completing
@@ -4566,7 +4687,11 @@ pub fn task_snapshot(task: &Task) -> OpsResult<TaskSnapshot> {
         };
         let completion_gate = task_completion_gate(&store, &task).await?;
         let completion_refusal = completion_gate.refusal(&task.plan.identifier);
-        let resume_refusal = no_active_pr_resume_refusal(&task.plan.identifier, active, latest);
+        let worktree_blocker = task_worktree_blocker(&store, &task).await?;
+        let resume_refusal = worktree_blocker
+            .as_ref()
+            .map(|blocker| blocker.reason.clone())
+            .or_else(|| no_active_pr_resume_refusal(&task.plan.identifier, active, latest));
         let work_status = store
             .work_status(&work)
             .await
@@ -5329,6 +5454,101 @@ mod tests {
         assert_eq!(plan.first.flow, "incident");
         assert_eq!(plan.loop_.flow, "slice");
         assert_eq!(plan.finally.flow, "ship");
+    }
+
+    #[test]
+    fn default_task_has_one_human_gate_and_incident_lifecycle_has_none() {
+        let repo = tempfile::tempdir().expect("temp repo");
+        let defaults = resolve_task_lifecycle(
+            repo.path(),
+            &ProjectFlowPlan::empty(),
+            &TaskFlowOverrides::default(),
+        )
+        .expect("resolve default lifecycle");
+        let default_human = [
+            &defaults.first.flow,
+            &defaults.loop_.flow,
+            &defaults.finally.flow,
+        ]
+        .into_iter()
+        .flat_map(|flow| {
+            let flow = crate::engine::load_flow(flow, repo.path()).unwrap();
+            crate::engine::expand_flow(&flow, repo.path()).unwrap()
+        })
+        .filter(
+            |step| matches!(step, crate::engine::ConcreteStep::Skill(skill) if skill.policy.human),
+        )
+        .collect::<Vec<_>>();
+        assert_eq!(default_human.len(), 1);
+        assert!(matches!(
+            &default_human[0],
+            crate::engine::ConcreteStep::Skill(skill)
+                if skill.policy.id.as_deref() == Some("review_kickoff")
+        ));
+
+        let incident = resolve_task_lifecycle(
+            repo.path(),
+            &ProjectFlowPlan {
+                first: Some("incident".to_string()),
+                loop_: Some("ship-5whys".to_string()),
+                finally: Some("ship".to_string()),
+            },
+            &TaskFlowOverrides::default(),
+        )
+        .expect("resolve incident lifecycle");
+        assert!([
+            &incident.first.flow,
+            &incident.loop_.flow,
+            &incident.finally.flow
+        ]
+        .into_iter()
+        .flat_map(|flow| {
+            let flow = crate::engine::load_flow(flow, repo.path()).unwrap();
+            crate::engine::expand_flow(&flow, repo.path()).unwrap()
+        })
+        .all(|step| {
+            !matches!(step, crate::engine::ConcreteStep::Skill(skill) if skill.policy.human)
+        }));
+    }
+
+    #[test]
+    fn fix_cycle_moves_the_only_human_gate_to_the_demo() {
+        let repo = tempfile::tempdir().expect("temp repo");
+        let plan = resolve_task_lifecycle(
+            repo.path(),
+            &ProjectFlowPlan::empty(),
+            &TaskFlowOverrides::for_cycle(Some(super::TaskCycle::Fix), None, None, None),
+        )
+        .expect("resolve fix lifecycle");
+        assert_eq!(plan.first.flow, "incident");
+        assert_eq!(plan.loop_.flow, "slice");
+        assert_eq!(plan.finally.flow, "ship-demo");
+
+        let human = [&plan.first.flow, &plan.loop_.flow, &plan.finally.flow]
+            .into_iter()
+            .flat_map(|flow| {
+                let flow = crate::engine::load_flow(flow, repo.path()).unwrap();
+                crate::engine::expand_flow(&flow, repo.path()).unwrap()
+            })
+            .filter(
+                |step| matches!(step, crate::engine::ConcreteStep::Skill(skill) if skill.policy.human),
+            )
+            .collect::<Vec<_>>();
+        assert_eq!(human.len(), 1);
+        assert!(matches!(
+            &human[0],
+            crate::engine::ConcreteStep::Skill(skill)
+                if skill.policy.id.as_deref() == Some("review_demo")
+        ));
+
+        let explicit_wins = TaskFlowOverrides::for_cycle(
+            Some(super::TaskCycle::Fix),
+            Some("task-design".to_string()),
+            None,
+            None,
+        );
+        assert_eq!(explicit_wins.first.as_deref(), Some("task-design"));
+        assert_eq!(explicit_wins.finally.as_deref(), Some("ship-demo"));
     }
 
     #[test]

@@ -13,7 +13,6 @@ final class PodiumStateTests: XCTestCase {
     func testPopulatedPodiumKeepsScopeWorkAndActivityVisible() {
         forEachWidth { app in
             assertPodiumRegions(app)
-            XCTAssertTrue(waitFor(app, id: "podium-wave-list"))
             XCTAssertTrue(waitFor(app, id: "podium-now-readyForReview"))
             XCTAssertTrue(waitFor(app, id: "podium-now-working"))
             XCTAssertTrue(waitFor(app, id: "podium-token-meter"))
@@ -33,13 +32,14 @@ final class PodiumStateTests: XCTestCase {
     }
 
     @MainActor
-    func testRoadmapSelectionScopesTheActivityLedger() {
+    func testConsoleSelectionScopesTheActivityLedger() {
         forEachWidth { app in
-            let roadmap = app.buttons["Roadmap"]
-            XCTAssertTrue(roadmap.waitForExistence(timeout: 8))
-            roadmap.click()
+            app.descendants(matching: .any)["podium-path-root"].click()
+            let wave = app.descendants(matching: .any)["podium-console-wave-wave-1"]
+            XCTAssertTrue(wave.waitForExistence(timeout: 8))
+            wave.click()
 
-            let project = app.descendants(matching: .any)["podium-project-project-1"]
+            let project = app.descendants(matching: .any)["podium-console-project-project-1"]
             XCTAssertTrue(project.waitForExistence(timeout: 8))
             project.click()
             XCTAssertEqual(
@@ -47,78 +47,84 @@ final class PodiumStateTests: XCTestCase {
                 "Project · Loopflow API"
             )
 
-            let task = app.descendants(matching: .any)["podium-task-issue-available"]
+            // The Project detail lists its Tasks flat; selecting one from the
+            // open drawer commits and retracts.
+            let task = app.descendants(matching: .any)["podium-console-task-issue-available"]
             XCTAssertTrue(task.waitForExistence(timeout: 8))
             task.click()
+            XCTAssertTrue(waitForAbsence(app, id: "podium-drawer-waves"))
             XCTAssertEqual(
                 app.descendants(matching: .any)["podium-activity-scope"].label,
                 "Task · W2-156"
             )
+            XCTAssertTrue(waitFor(app, id: "podium-detail-task"))
             assertPodiumRegions(app)
         }
     }
 
     @MainActor
-    func testWavesDiscloseWorkHierarchyWithOneOutputLanguage() {
+    func testConsoleDrawersDiscloseWorkWithOneOutputLanguage() {
         forEachWidth { app in
-            let wave = app.descendants(matching: .any)["podium-waves-wave-wave-1"]
+            app.descendants(matching: .any)["podium-path-root"].click()
+            let wave = app.descendants(matching: .any)["podium-console-wave-wave-1"]
             XCTAssertTrue(wave.waitForExistence(timeout: 8))
             XCTAssertTrue(String(describing: wave.value).contains("tokens per second"))
 
-            app.descendants(matching: .any)["podium-waves-wave-wave-1-disclosure"].click()
-            let project = app.descendants(matching: .any)["podium-waves-project-project-1"]
+            wave.click()
+            let project = app.descendants(matching: .any)["podium-console-project-project-1"]
             XCTAssertTrue(project.waitForExistence(timeout: 8))
             XCTAssertTrue(String(describing: project.value).contains("tokens per second"))
 
-            app.descendants(matching: .any)["podium-waves-project-project-1-disclosure"].click()
-            let task = app.descendants(matching: .any)["podium-waves-task-issue-now"]
+            project.click()
+            let task = app.descendants(matching: .any)["podium-console-task-issue-now"]
             XCTAssertTrue(task.waitForExistence(timeout: 8))
             XCTAssertTrue(String(describing: task.value).contains("tokens per second"))
 
-            app.descendants(matching: .any)["podium-waves-task-issue-now-disclosure"].click()
-            let exec = app.descendants(matching: .any)["podium-waves-exec-exec:exec-podium"]
-            XCTAssertTrue(exec.waitForExistence(timeout: 8))
-            XCTAssertTrue(String(describing: exec.value).contains("tokens per second"))
-        }
-    }
-
-    @MainActor
-    func testWavesCloseWithoutRemovingTheLiveSurface() {
-        forEachWidth { app in
-            ensureWavesOpen(app)
-            app.descendants(matching: .any)["podium-waves-toggle"].click()
-
-            XCTAssertFalse(exists(app, id: "podium-waves"))
-            XCTAssertTrue(exists(app, id: "podium-work"))
-            XCTAssertTrue(exists(app, id: "podium-activity"))
-
-            app.descendants(matching: .any)["podium-waves-toggle"].click()
-            XCTAssertTrue(waitFor(app, id: "podium-waves"))
+            // Picking the leaf commits the selection and retracts the cascade.
+            task.click()
+            XCTAssertTrue(waitForAbsence(app, id: "podium-drawer-waves"))
+            let scope = app.descendants(matching: .any)["podium-activity-scope"]
+            XCTAssertTrue(scope.waitForExistence(timeout: 8))
+            XCTAssertEqual(scope.label, "Task · W2-144")
         }
     }
 
     @MainActor
     func testWaveProjectAndTaskSelectionsZoomTheWorkPane() {
         forEachWidth { app in
-            let wave = app.descendants(matching: .any)["podium-waves-wave-wave-1"]
+            app.descendants(matching: .any)["podium-path-root"].click()
+            let wave = app.descendants(matching: .any)["podium-console-wave-wave-1"]
             XCTAssertTrue(wave.waitForExistence(timeout: 8))
             wave.click()
-            XCTAssertTrue(waitFor(app, id: "podium-wave-wave-1"))
-            XCTAssertFalse(exists(app, id: "podium-wave-wave-2"))
+            XCTAssertTrue(waitFor(app, id: "podium-detail-wave"))
+            XCTAssertFalse(exists(app, id: "work-now"))
 
-            app.descendants(matching: .any)["podium-waves-wave-wave-1-disclosure"].click()
-            let project = app.descendants(matching: .any)["podium-waves-project-project-1"]
+            let project = app.descendants(matching: .any)["podium-console-project-project-1"]
             XCTAssertTrue(project.waitForExistence(timeout: 8))
             project.click()
-            XCTAssertTrue(waitFor(app, id: "podium-project-project-1"))
-            XCTAssertFalse(exists(app, id: "podium-wave-wave-1"))
+            XCTAssertTrue(waitFor(app, id: "podium-detail-project"))
+            XCTAssertFalse(exists(app, id: "podium-detail-wave"))
 
-            app.descendants(matching: .any)["podium-waves-project-project-1-disclosure"].click()
-            let task = app.descendants(matching: .any)["podium-waves-task-issue-now"]
+            let task = app.descendants(matching: .any)["podium-console-task-issue-now"]
             XCTAssertTrue(task.waitForExistence(timeout: 8))
             task.click()
-            XCTAssertTrue(waitFor(app, id: "podium-task-issue-now"))
-            XCTAssertFalse(exists(app, id: "podium-project-project-1"))
+            XCTAssertTrue(waitFor(app, id: "podium-detail-task"))
+            XCTAssertFalse(exists(app, id: "podium-detail-project"))
+        }
+    }
+
+    @MainActor
+    func testConsoleDrawerClosesWithoutRemovingTheLiveSurface() {
+        forEachWidth { app in
+            let root = app.descendants(matching: .any)["podium-path-root"]
+            XCTAssertTrue(root.waitForExistence(timeout: 8))
+            root.click()
+            XCTAssertTrue(waitFor(app, id: "podium-drawer-waves"))
+
+            root.click()
+            XCTAssertTrue(waitForAbsence(app, id: "podium-drawer-waves"))
+            XCTAssertTrue(exists(app, id: "podium-work"))
+            XCTAssertTrue(exists(app, id: "podium-activity"))
         }
     }
 
@@ -126,7 +132,7 @@ final class PodiumStateTests: XCTestCase {
     func testLoadingKeepsWaveScopeVisible() {
         forEachWidth(detailState: "loading") { app in
             XCTAssertTrue(waitFor(app, id: "podium-work-loading"))
-            XCTAssertTrue(exists(app, id: "podium-wave-list"))
+            XCTAssertTrue(exists(app, id: "podium-console-path"))
             XCTAssertTrue(exists(app, id: "podium-activity-loading"))
             XCTAssertFalse(exists(app, id: "podium-work-unavailable"))
         }
@@ -136,7 +142,7 @@ final class PodiumStateTests: XCTestCase {
     func testUnavailableIsNotRenderedAsEmpty() {
         forEachWidth(detailState: "error") { app in
             XCTAssertTrue(waitFor(app, id: "podium-work-unavailable"))
-            XCTAssertTrue(exists(app, id: "podium-wave-list"))
+            XCTAssertTrue(exists(app, id: "podium-console-path"))
             XCTAssertFalse(exists(app, id: "podium-work-empty"))
             XCTAssertFalse(exists(app, id: "podium-activity-empty"))
         }
@@ -145,7 +151,7 @@ final class PodiumStateTests: XCTestCase {
     @MainActor
     func testEmptyPodiumKeepsDistinctWaveWorkAndActivityStates() {
         forEachWidth(mode: "empty-workspaces") { app in
-            XCTAssertTrue(waitFor(app, id: "podium-waves-empty"))
+            XCTAssertTrue(waitFor(app, id: "podium-console-empty"))
             XCTAssertTrue(waitFor(app, id: "podium-work-empty"))
             XCTAssertTrue(waitFor(app, id: "podium-activity-empty"))
             XCTAssertTrue(
@@ -169,20 +175,8 @@ final class PodiumStateTests: XCTestCase {
             let app = launch.makeApp()
             app.launch()
             XCTAssertTrue(app.windows.element(boundBy: 0).waitForExistence(timeout: 10))
-            ensureWavesOpen(app)
             assertions(app)
             app.terminate()
-        }
-    }
-
-    @MainActor
-    private func ensureWavesOpen(_ app: XCUIApplication) {
-        let waves = app.descendants(matching: .any)["podium-waves"]
-        if !waves.waitForExistence(timeout: 1) {
-            let toggle = app.descendants(matching: .any)["podium-waves-toggle"]
-            XCTAssertTrue(toggle.waitForExistence(timeout: 8))
-            toggle.click()
-            XCTAssertTrue(waves.waitForExistence(timeout: 8))
         }
     }
 
@@ -190,7 +184,7 @@ final class PodiumStateTests: XCTestCase {
     private func assertPodiumRegions(_ app: XCUIApplication) {
         let podium = app.descendants(matching: .any)["podium"]
         XCTAssertTrue(podium.waitForExistence(timeout: 8))
-        XCTAssertTrue(waitFor(app, id: "podium-waves"))
+        XCTAssertTrue(waitFor(app, id: "podium-console-path"))
         XCTAssertTrue(waitFor(app, id: "podium-repo-scope"))
         XCTAssertTrue(waitFor(app, id: "podium-work"))
         XCTAssertTrue(waitFor(app, id: "podium-activity"))
@@ -199,24 +193,38 @@ final class PodiumStateTests: XCTestCase {
             app.windows.element(boundBy: 0).frame.height * 0.75,
             "The Podium must fill the window instead of centering an intrinsic-height strip"
         )
-        let bar = app.descendants(matching: .any)["podium-bar"]
+        let path = app.descendants(matching: .any)["podium-console-path"]
         let work = app.descendants(matching: .any)["podium-work"]
         let activity = app.descendants(matching: .any)["podium-activity"]
         XCTAssertLessThan(
-            abs(work.frame.minY - bar.frame.maxY),
+            abs(work.frame.minY - path.frame.maxY),
             12,
-            "Work must begin directly below the Podium bar"
+            "Work must begin directly below the console path bar"
         )
         XCTAssertLessThan(
-            abs(activity.frame.minY - bar.frame.maxY),
+            abs(activity.frame.minY - path.frame.maxY),
             12,
-            "Activity must begin directly below the Podium bar"
+            "Activity must begin directly below the console path bar"
         )
     }
 
     @MainActor
     private func waitFor(_ app: XCUIApplication, id: String, timeout: TimeInterval = 8) -> Bool {
         app.descendants(matching: .any)[id].waitForExistence(timeout: timeout)
+    }
+
+    @MainActor
+    private func waitForAbsence(
+        _ app: XCUIApplication,
+        id: String,
+        timeout: TimeInterval = 8
+    ) -> Bool {
+        let deadline = Date().addingTimeInterval(timeout)
+        while Date() < deadline {
+            if !app.descendants(matching: .any)[id].exists { return true }
+            RunLoop.current.run(until: Date().addingTimeInterval(0.2))
+        }
+        return false
     }
 
     @MainActor

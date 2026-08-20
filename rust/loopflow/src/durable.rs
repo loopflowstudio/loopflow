@@ -78,6 +78,8 @@ pub enum DurableDataError {
     InvalidInvocationState(String),
     #[error("invalid boundary state: {0}")]
     InvalidBoundaryState(String),
+    #[error("invalid Ask state: {0}")]
+    InvalidAskState(String),
 }
 
 durable_id!(ProjectId, "proj_");
@@ -447,43 +449,143 @@ pub struct Turn {
 
 #[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
 #[serde(tag = "kind", content = "work", rename_all = "snake_case")]
-pub enum AnswerRoute {
+pub enum AskTarget {
     User,
     Parent(WorkRef),
 }
 
-#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
-pub struct Answer {
-    pub ask_id: AskId,
-    pub author: Author,
-    pub text: String,
-    #[serde(with = "time::serde::rfc3339")]
-    pub answered_at: OffsetDateTime,
+impl std::fmt::Display for AskTarget {
+    fn fmt(&self, formatter: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+        match self {
+            Self::User => formatter.write_str("user"),
+            Self::Parent(work) => {
+                write!(formatter, "parent:{}:{}", work.kind(), work.id())
+            }
+        }
+    }
+}
+
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize)]
+#[serde(rename_all = "snake_case")]
+pub enum AskState {
+    Queued,
+    Claimed,
+    Resolved,
+    Declined,
+    Cancelled,
+}
+
+impl AskState {
+    pub fn is_terminal(self) -> bool {
+        matches!(self, Self::Resolved | Self::Declined | Self::Cancelled)
+    }
+
+    pub(crate) fn as_str(self) -> &'static str {
+        match self {
+            Self::Queued => "queued",
+            Self::Claimed => "claimed",
+            Self::Resolved => "resolved",
+            Self::Declined => "declined",
+            Self::Cancelled => "cancelled",
+        }
+    }
+
+    pub(crate) fn parse(value: &str) -> Result<Self, DurableDataError> {
+        match value {
+            "queued" => Ok(Self::Queued),
+            "claimed" => Ok(Self::Claimed),
+            "resolved" => Ok(Self::Resolved),
+            "declined" => Ok(Self::Declined),
+            "cancelled" => Ok(Self::Cancelled),
+            value => Err(DurableDataError::InvalidAskState(value.to_string())),
+        }
+    }
 }
 
 #[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
-pub struct AskExchange {
+pub struct AskOrigin {
+    pub work: WorkRef,
+    pub run_id: RunId,
+    pub turn_id: Option<TurnId>,
+    pub invocation_id: Option<AgentInvocationId>,
+    pub home_id: HomeId,
+    pub cwd: PathBuf,
+}
+
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
+#[serde(tag = "kind", rename_all = "snake_case")]
+pub enum AskBody {
+    Intervention {
+        prompt: String,
+    },
+    FlowStep {
+        flow: String,
+        node_id: String,
+        skill: String,
+        iteration: u32,
+    },
+}
+
+impl std::fmt::Display for AskBody {
+    fn fmt(&self, formatter: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+        match self {
+            Self::Intervention { prompt } => formatter.write_str(prompt),
+            Self::FlowStep {
+                flow,
+                node_id,
+                skill,
+                ..
+            } => write!(formatter, "{flow}:{node_id} ({skill})"),
+        }
+    }
+}
+
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
+#[serde(tag = "kind", rename_all = "snake_case")]
+pub enum AskResult {
+    Resolved { summary: String },
+    Declined { reason: String },
+    Cancelled { reason: String },
+}
+
+impl AskResult {
+    pub(crate) fn state(&self) -> AskState {
+        match self {
+            Self::Resolved { .. } => AskState::Resolved,
+            Self::Declined { .. } => AskState::Declined,
+            Self::Cancelled { .. } => AskState::Cancelled,
+        }
+    }
+
+    pub fn text(&self) -> &str {
+        match self {
+            Self::Resolved { summary } => summary,
+            Self::Declined { reason } | Self::Cancelled { reason } => reason,
+        }
+    }
+}
+
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
+pub struct Ask {
     pub id: AskId,
-    pub turn_id: TurnId,
-    pub route: AnswerRoute,
-    pub question: String,
+    pub origin: AskOrigin,
+    pub target: AskTarget,
+    pub request: AskBody,
+    pub state: AskState,
+    pub active_invocation_id: Option<AgentInvocationId>,
+    pub result: Option<AskResult>,
+    pub terminal_author: Option<Author>,
     #[serde(with = "time::serde::rfc3339")]
     pub asked_at: OffsetDateTime,
-    pub answer: Option<Answer>,
+    #[serde(with = "time::serde::rfc3339::option")]
+    pub terminal_at: Option<OffsetDateTime>,
 }
 
-#[derive(Debug, Clone, PartialEq, Eq)]
-pub struct AnswerContext {
-    pub ask: AskExchange,
-    pub child: WorkRef,
-    pub epoch_id: EpochId,
-    pub prior_exchanges: Vec<AskExchange>,
-}
-
-#[derive(Debug, Clone, PartialEq, Eq)]
-pub struct AnswerAttemptHistory {
-    pub failed_attempts: u32,
-    pub last_failed_at: Option<OffsetDateTime>,
+/// One target-authorized Ask claim.
+#[derive(Debug)]
+pub struct AskClaim {
+    pub invocation_id: AgentInvocationId,
+    pub needs_launch: bool,
 }
 
 #[derive(Debug, Clone, PartialEq, Eq)]
@@ -765,6 +867,8 @@ pub struct FlowPosition {
     pub epoch_id: EpochId,
     pub flow: String,
     pub step: String,
+    pub node_id: Option<String>,
+    pub human: bool,
     pub step_index: u32,
     pub iteration: u32,
     #[serde(with = "time::serde::rfc3339")]

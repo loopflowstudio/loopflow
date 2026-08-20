@@ -104,7 +104,8 @@ mod tests {
 
     use super::publish_claimed_ask_comment;
     use crate::durable::{
-        AdvanceReceipt, Containment, ControlCtx, InvocationRoute, RunAdvance, RunTrigger, WorkRef,
+        AdvanceReceipt, AskResult, Containment, ControlCtx, InvocationRoute, RunAdvance,
+        RunTrigger, WorkRef,
     };
     use crate::id::WaveId;
     use crate::planning::{LinearIssueId, LinearProjectId, ProjectPlan, TaskPlan};
@@ -157,7 +158,7 @@ mod tests {
     }
 
     #[tokio::test]
-    async fn ask_and_answer_comments_commit_first_and_retry_without_duplicates() {
+    async fn ask_request_and_result_comments_commit_first_and_retry_without_duplicates() {
         let directory = tempfile::tempdir().unwrap();
         let store = open_store(&StorageConfig::sqlite(directory.path().join("registry.db")))
             .await
@@ -175,7 +176,7 @@ mod tests {
                 id: LinearProjectId::new("linear-project").unwrap(),
                 slug: "runtime-project".to_string(),
                 name: "Runtime Project".to_string(),
-                prompt_context: "Answer child questions.".to_string(),
+                prompt_context: "Resolve child requests.".to_string(),
                 pm_snapshot_synced_at: now.unix_timestamp(),
             },
             wave_id: wave.id().clone(),
@@ -254,10 +255,11 @@ mod tests {
             .await
             .unwrap();
         let ask = store
-            .open_ask(
+            .request_intervention(
                 &child_lease,
                 &child_invocation.id,
                 "Which durable proof matters?",
+                false,
             )
             .await
             .unwrap();
@@ -312,17 +314,31 @@ mod tests {
         assert!(recovery_requests[0].body.contains("IssueComments"));
         drop(recovery_requests);
 
-        let answer = store
-            .answer_ask(
-                &ControlCtx::Run(&parent_lease),
+        let claim = store
+            .claim_test_ask(&ControlCtx::Run(&parent_lease), &ask.id)
+            .await
+            .unwrap();
+        store
+            .mark_ask_ready(&ask.id, &claim.invocation_id)
+            .await
+            .unwrap();
+        store
+            .mark_ask_presented(&ask.id, &claim.invocation_id)
+            .await
+            .unwrap();
+        let settled = store
+            .settle_ask(
                 &ask.id,
-                "The committed exchange.",
+                &claim.invocation_id,
+                AskResult::Resolved {
+                    summary: "The committed exchange.".to_string(),
+                },
             )
             .await
             .unwrap();
-        let answer_write = store.pending_ask_comment_writes().await.unwrap().remove(0);
-        assert!(answer_write.body.contains("The committed exchange."));
-        assert!(answer_write
+        let result_write = store.pending_ask_comment_writes().await.unwrap().remove(0);
+        assert!(result_write.body.contains("The committed exchange."));
+        assert!(result_write
             .body
             .contains(&format!("Run `{}`", parent_lease.run_id)));
 
@@ -333,7 +349,7 @@ mod tests {
         .await;
         let client = LinearClient::with_base_url("token".to_string(), None, base_url);
         let claimed = store
-            .claim_ask_comment_write(&ask.id, answer_write.transition, 600, 600)
+            .claim_ask_comment_write(&ask.id, result_write.transition, 600, 600)
             .await
             .unwrap()
             .unwrap();
@@ -345,12 +361,14 @@ mod tests {
         assert!(failed[0].last_error.is_some());
         assert_eq!(
             store
-                .current_ask(&child_lease, &child_invocation.id, Some(&ask.id))
+                .asks_for_work_epoch(&child_lease)
                 .await
                 .unwrap()
-                .answer,
-            Some(answer),
-            "provider failure cannot roll back the committed Answer"
+                .into_iter()
+                .find(|candidate| candidate.id == ask.id)
+                .unwrap(),
+            settled,
+            "provider failure cannot roll back the committed Ask result"
         );
 
         let (base_url, retry_requests) = test_server::spawn(vec![
@@ -363,7 +381,7 @@ mod tests {
             ),
             json_response(
                 StatusCode::OK,
-                json!({ "data": { "commentCreate": { "comment": { "id": "comment-answer" } } } }),
+                json!({ "data": { "commentCreate": { "comment": { "id": "comment-result" } } } }),
             ),
         ])
         .await;

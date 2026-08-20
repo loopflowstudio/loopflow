@@ -1,5 +1,6 @@
 # Establish the Task design once before autonomous iteration begins.
 - kickoff
 - step:
+    id: review_kickoff
     name: review-design
-    feedback: true
+    human: true

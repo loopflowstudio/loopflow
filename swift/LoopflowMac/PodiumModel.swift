@@ -49,6 +49,7 @@ final class PodiumModel {
     private(set) var roadmap: PodiumReading<RoadmapSnapshot> = .loading
     private(set) var waves: PodiumReading<[Wave]> = .loading
     private(set) var processActivity: PodiumReading<ActivitySnapshot> = .loading
+    private(set) var userAskAttention: PodiumReading<[AskAttentionRecord]> = .loading
     private(set) var workActivity: PodiumReading<WorkActivitySnapshot> = .loading
     private(set) var workActivityScope = WorkActivityScope(
         wave: nil,
@@ -140,12 +141,15 @@ final class PodiumModel {
         let previousRoadmap = roadmap.value
         let previousWaves = waves.value
         let previousProcessActivity = processActivity.value
+        let previousUserAskAttention = userAskAttention.value
         if previousRoadmap == nil { roadmap = .loading }
         if previousWaves == nil { waves = .loading }
         if previousProcessActivity == nil { processActivity = .loading }
+        if previousUserAskAttention == nil { userAskAttention = .loading }
 
         async let roadmapResult = readRoadmap()
         async let wavesResult = readWaves()
+        async let userAskAttentionResult = readUserAskAttention()
         if !processActivityRefreshInFlight {
             processActivityRefreshInFlight = true
             processActivity = reading(
@@ -156,6 +160,10 @@ final class PodiumModel {
         }
         roadmap = reading(from: await roadmapResult, lastGood: previousRoadmap)
         waves = reading(from: await wavesResult, lastGood: previousWaves)
+        userAskAttention = reading(
+            from: await userAskAttentionResult,
+            lastGood: previousUserAskAttention
+        )
         selectRequestedWaveIfNeeded()
         clearSelectionIfOutsideScope()
         await refreshWorkActivity()
@@ -246,6 +254,14 @@ final class PodiumModel {
 
     func traceAddress(invocationId: String) async throws -> TraceAddress {
         try await query.traceAddress(invocationId: invocationId)
+    }
+
+    func refreshUserAskAttention() async {
+        guard !usesFixedFixture else { return }
+        userAskAttention = reading(
+            from: await readUserAskAttention(),
+            lastGood: userAskAttention.value
+        )
     }
 
     func wave(id: String) -> WaveRoadmap? {
@@ -429,6 +445,14 @@ final class PodiumModel {
             let snapshot = try await query.processActivity()
             await Self.resolveRepoOrigins(snapshot.nodes.compactMap(\.repo))
             return .success(snapshot)
+        } catch {
+            return .failure(error)
+        }
+    }
+
+    private func readUserAskAttention() async -> Result<[AskAttentionRecord], Error> {
+        do {
+            return .success(try await query.userAskAttention())
         } catch {
             return .failure(error)
         }

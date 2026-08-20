@@ -29,7 +29,7 @@ selection. Follow the repo style guide.
 - Run the narrowest verification that covers the touched code.
 - When progress requires supervisor judgment, run `lf ask "<exact question>"`.
   The command blocks without spending model tokens and returns the parent's
-  Answer to this Turn. Do not invent a provider-specific decision command or
+  resolution to this Turn. Do not invent a provider-specific decision command or
   start unrelated work while it is pending.
 - Use `lf pr publish` when the branch has a reviewable PR-shaped change; it
   pushes and creates or refreshes the PR without opening a browser. Reach for

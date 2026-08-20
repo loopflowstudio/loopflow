@@ -269,6 +269,11 @@ struct ActivityFields {
 
 fn task_activity_fields(event: &TaskEventKind) -> ActivityFields {
     match event {
+        TaskEventKind::WorktreeInitializing { path, branch, .. } => activity(
+            ChildActivityKind::StateChanged,
+            "Task worktree initializing",
+            &format!("{path} on {branch}"),
+        ),
         TaskEventKind::Started => activity(ChildActivityKind::StateChanged, "Task started", ""),
         TaskEventKind::BodyHandedOff { handoff } => activity(
             ChildActivityKind::StateChanged,

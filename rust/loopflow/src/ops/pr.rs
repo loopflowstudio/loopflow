@@ -1679,6 +1679,29 @@ mod tests {
     }
 
     #[test]
+    fn authored_task_title_prefix_is_not_duplicated() {
+        let identity = TaskPrIdentity {
+            title: "Remove semantic lifecycle validation".to_string(),
+            identifier: "LOO-230".to_string(),
+            url: "https://linear.app/loopflow/issue/LOO-230/remove-validation".to_string(),
+        };
+
+        let copy = normalize_task_pr_copy(
+            PrCopy {
+                title: "Remove semantic lifecycle validation: final cleanup".to_string(),
+                body: "proof".to_string(),
+            },
+            Some(&identity),
+        )
+        .expect("normalize already-anchored title");
+
+        assert_eq!(
+            copy.title,
+            "Remove semantic lifecycle validation: final cleanup"
+        );
+    }
+
+    #[test]
     fn parse_generated_pr_copy_accepts_plain_json() {
         let raw = r###"{"title":"docs: tighten wave docs","body":"## Try it!"}"###;
         assert_eq!(

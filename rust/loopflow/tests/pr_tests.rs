@@ -564,10 +564,10 @@ fn task_pr_missing_cached_linear_url_refuses_before_remote_mutation() {
         .arg("--git-dir")
         .arg(repo.bare_path())
         .args(["rev-parse", "--verify", &format!("refs/heads/{branch}")])
-        .status()
+        .output()
         .expect("inspect remote branch");
     assert!(
-        !remote_branch.success(),
+        !remote_branch.status.success(),
         "identity refusal must happen before push"
     );
 }

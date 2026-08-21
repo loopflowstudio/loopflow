@@ -6061,7 +6061,7 @@ mod tests {
     }
 
     #[test]
-    fn task_settlement_must_be_the_terminal_finally_step() {
+    fn task_lifecycle_settlement_must_be_the_terminal_finally_step() {
         let repo = tempfile::tempdir().expect("temp repo");
         let flows = repo.path().join(".lf/flows");
         std::fs::create_dir_all(&flows).expect("create flow directory");
@@ -6081,7 +6081,7 @@ mod tests {
 
         assert!(error
             .to_string()
-            .contains("missing capability `autonomous_task_settlement` at its terminal step"));
+            .contains("does not end with `op: pr land -c`"));
     }
 
     #[test]

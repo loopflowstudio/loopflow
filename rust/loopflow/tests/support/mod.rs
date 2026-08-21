@@ -6,7 +6,9 @@ use std::sync::{Mutex, OnceLock};
 use loopflow::id::WaveId;
 use loopflow::planning::{LinearIssueId, LinearProjectId, ProjectPlan, TaskPlan};
 use loopflow::project::{Project, ProjectId};
-use loopflow::store::{open_store, StorageConfig, Store, CONTROL_DB_PATH_ENV, CONTROL_HOME_ENV};
+use loopflow::store::{
+    open_store, PmSnapshotRow, StorageConfig, Store, CONTROL_DB_PATH_ENV, CONTROL_HOME_ENV,
+};
 use loopflow::task::{PmWritebackState, Task, TaskId, TaskPr, TaskPrId};
 use loopflow::wave::Wave;
 use tempfile::TempDir;
@@ -365,6 +367,43 @@ fn register_task_with_process(
     };
     runtime.block_on(async {
         store.create_wave(&wave).await.expect("create test wave");
+        let pm_payload = serde_json::json!({
+            "projects": [{
+                "id": project.plan.id.as_str(),
+                "slug": project.plan.slug.as_str(),
+                "name": project.plan.name.as_str(),
+                "summary": "",
+                "definition": project.plan.prompt_context.as_str(),
+                "flows": null,
+                "krs": [],
+                "initiative_ids": ["initiative-task-pr-tests"],
+                "team_ids": ["team-task-pr-tests"]
+            }],
+            "items": [{
+                "id": task.plan.id.as_str(),
+                "identifier": task.plan.identifier.as_str(),
+                "url": "https://linear.app/loopflow/issue/INF-123/prove-task-pr-transitions",
+                "name": task.plan.title.as_str(),
+                "description": task.plan.description.as_str(),
+                "rank": 1,
+                "completed": false,
+                "project_id": project.plan.id.as_str(),
+                "project": project.plan.slug.as_str(),
+                "team_id": "team-task-pr-tests",
+                "assignee": null
+            }]
+        })
+        .to_string();
+        store
+            .put_pm_snapshot(PmSnapshotRow {
+                wave_id: wave.id().clone(),
+                provider: "linear".to_string(),
+                initiative: "initiative-task-pr-tests".to_string(),
+                synced_at: now.unix_timestamp(),
+                payload: pm_payload,
+            })
+            .await
+            .expect("cache Task PR identity");
         store
             .create_project(&project)
             .await

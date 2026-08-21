@@ -31,20 +31,6 @@ is. One skill, one job: `design` writes the spec, `implement` builds from
 it, `gate` judges ship-readiness. Chain them rather than writing one skill
 that does everything.
 
-Declare capabilities in frontmatter when Task lifecycle validation needs to
-reason about what the skill can deliver:
-
-```markdown
----
-capabilities: [task_implementation]
----
-Implement the reviewed design and prove the changed behavior.
-```
-
-`task_implementation` means the skill materially implements delivery work.
-Use the capability for custom implementation skills; Loopflow does not infer it
-from the skill name or prose.
-
 Direct invocation from a TTY runs with a present human. `--batch` and automated
 flow execution run the same skill headlessly, so write a bounded contract for
 both surfaces when the work involves judgment or conversation:

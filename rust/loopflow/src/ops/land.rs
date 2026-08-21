@@ -9,7 +9,9 @@ use crate::engine::worktrees::{main_repo_root, worktree_path};
 use crate::engine::command::run_command;
 use crate::ops::commit::{commit_workflow, CommitOptions};
 use crate::ops::error::{OpsError, OpsResult};
-use crate::ops::pr::{generate_pr_copy, read_cached_pr_copy, PrInfo};
+use crate::ops::pr::{
+    generate_pr_copy, normalize_task_pr_copy, read_cached_pr_copy, PrCopy, PrInfo,
+};
 
 use crate::ops::progress::Progress;
 
@@ -86,6 +88,11 @@ fn prepare_pr(
     if !options.local && !crate::ops::pr::gh_available() {
         return Err(OpsError::Message("gh CLI not found".to_string()));
     }
+    let task_identity = if options.local {
+        None
+    } else {
+        crate::ops::task::task_pr_identity(&repo_root)?
+    };
     let feature_branch = current_branch(&repo_root)?
         .ok_or_else(|| OpsError::Message("not on a branch".to_string()))?;
     // Prove the Task PR range before preparing the exact local tree. Submit and
@@ -160,6 +167,29 @@ fn prepare_pr(
     let copy_head = crate::engine::git::rev_parse(&repo_root, "HEAD")?;
     let copy_state = read_worktree_state(&repo_root)?;
     let (pr_title, pr_body) = resolve_pr_copy(&repo_root, options, progress)?;
+    let (pr_title, pr_body) = match (pr_title, pr_body) {
+        (Some(title), body) => {
+            let copy = normalize_task_pr_copy(
+                PrCopy {
+                    title,
+                    body: body.unwrap_or_default(),
+                },
+                task_identity.as_ref(),
+            )?;
+            (Some(copy.title), Some(copy.body))
+        }
+        (None, body) if task_identity.is_none() => (None, body),
+        (None, body) => {
+            let copy = normalize_task_pr_copy(
+                PrCopy {
+                    title: String::new(),
+                    body: body.unwrap_or_default(),
+                },
+                task_identity.as_ref(),
+            )?;
+            (Some(copy.title), Some(copy.body))
+        }
+    };
     let current_head = crate::engine::git::rev_parse(&repo_root, "HEAD")?;
     if current_head != copy_head || read_worktree_state(&repo_root)? != copy_state {
         return Err(OpsError::Message(

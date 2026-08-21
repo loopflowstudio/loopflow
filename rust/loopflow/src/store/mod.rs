@@ -2648,12 +2648,8 @@ mod tests {
         let project = make_project(&wave);
         store.create_project(&project).await.unwrap();
         let mut task = make_task(&wave, &project);
-        task.lifecycle = crate::task::TaskLifecyclePlan::new(
-            crate::task::TaskOutcome::DesignOnly,
-            "task-design",
-            "code",
-            "ship",
-        );
+        task.lifecycle =
+            crate::task::TaskLifecyclePlan::standard("task-design", "code", "ship-demo");
         task.phase_cursor = 2;
         task.phase_iteration = 4;
         store
@@ -2664,11 +2660,7 @@ mod tests {
         let persisted = store.get_task(&task.id).await.unwrap().unwrap();
         assert_eq!(persisted.lifecycle.loop_.flow, "code");
         assert_eq!(persisted.lifecycle.first.flow, "task-design");
-        assert_eq!(persisted.lifecycle.finally.flow, "ship");
-        assert_eq!(
-            persisted.lifecycle.outcome,
-            crate::task::TaskOutcome::DesignOnly
-        );
+        assert_eq!(persisted.lifecycle.finally.flow, "ship-demo");
         assert_eq!(persisted.phase_cursor, 2);
         assert_eq!(persisted.phase_iteration, 4);
 

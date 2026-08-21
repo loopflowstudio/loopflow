@@ -173,12 +173,7 @@ async fn registry(
         project_id: project.id.clone(),
         worktree: fixture.worktree.clone(),
         workspace_slug: "shipping-proof".to_string(),
-        lifecycle: TaskLifecyclePlan::new(
-            crate::task::TaskOutcome::Delivery,
-            "task-kickoff",
-            "slice",
-            "ship",
-        ),
+        lifecycle: TaskLifecyclePlan::standard("task-kickoff", "slice", "ship"),
         lifecycle_phase: TaskLifecyclePhase::First,
         phase_epoch: 1,
         phase_cursor: 0,

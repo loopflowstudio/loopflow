@@ -281,7 +281,6 @@ impl<E: SkillExecutor> FlowEngine<E> {
                     default_agent: Some("claude:sonnet".to_string()),
                     directions: Vec::new(),
                     action_style: None,
-                    capabilities: Vec::new(),
                     content: Some(prompt.clone()),
                 },
                 policy: crate::engine::OccurrencePolicy::default(),

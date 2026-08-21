@@ -39,33 +39,6 @@ pub enum TaskLifecyclePhase {
     Finally,
 }
 
-#[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize)]
-#[serde(rename_all = "snake_case")]
-#[non_exhaustive]
-pub enum TaskOutcome {
-    Delivery,
-    DesignOnly,
-}
-
-impl TaskOutcome {
-    pub fn as_str(self) -> &'static str {
-        match self {
-            Self::Delivery => "delivery",
-            Self::DesignOnly => "design_only",
-        }
-    }
-
-    pub(crate) fn from_storage_str(value: &str) -> Result<Self, TaskDataError> {
-        match value {
-            "delivery" => Ok(Self::Delivery),
-            "design_only" => Ok(Self::DesignOnly),
-            _ => Err(TaskDataError::InvalidInvariant(format!(
-                "invalid stored Task outcome: {value}"
-            ))),
-        }
-    }
-}
-
 impl TaskLifecyclePhase {
     pub fn as_str(self) -> &'static str {
         match self {
@@ -114,7 +87,6 @@ impl TaskPhasePlan {
 
 #[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
 pub struct TaskLifecyclePlan {
-    pub outcome: TaskOutcome,
     pub first: TaskPhasePlan,
     #[serde(rename = "loop")]
     pub loop_: TaskPhasePlan,
@@ -122,14 +94,12 @@ pub struct TaskLifecyclePlan {
 }
 
 impl TaskLifecyclePlan {
-    pub fn new(
-        outcome: TaskOutcome,
+    pub fn standard(
         first_flow: impl Into<String>,
         loop_flow: impl Into<String>,
         finally_flow: impl Into<String>,
     ) -> Self {
         Self {
-            outcome,
             first: TaskPhasePlan {
                 flow: first_flow.into(),
             },
@@ -143,7 +113,7 @@ impl TaskLifecyclePlan {
     }
 
     pub fn defaults() -> Self {
-        Self::new(TaskOutcome::Delivery, "task-design", "slice", "ship")
+        Self::standard("task-design", "slice", "ship-demo")
     }
     pub fn phase(&self, phase: TaskLifecyclePhase) -> &TaskPhasePlan {
         match phase {
@@ -1151,8 +1121,8 @@ pub struct LinearObservationOutcome {
 mod tests {
     use super::{
         AfterMerge, GithubPr, PmWritebackOperation, PmWritebackState, PrPhase, PrPublication, Task,
-        TaskGateProposal, TaskId, TaskLifecyclePhase, TaskLifecyclePlan, TaskObservation,
-        TaskOutcome, TaskPr, TaskPrId,
+        TaskGateProposal, TaskId, TaskLifecyclePhase, TaskLifecyclePlan, TaskObservation, TaskPr,
+        TaskPrId,
     };
     use crate::planning::{LinearIssueId, TaskPlan};
 
@@ -1685,11 +1655,10 @@ mod tests {
     }
 
     #[test]
-    fn lifecycle_pins_outcome_and_each_phase_flow() {
-        let plan = TaskLifecyclePlan::new(TaskOutcome::Delivery, "task-design", "code", "ship");
-        assert_eq!(plan.outcome, TaskOutcome::Delivery);
+    fn lifecycle_pins_each_phase_flow() {
+        let plan = TaskLifecyclePlan::standard("task-design", "code", "ship-demo");
         assert_eq!(plan.first.flow, "task-design");
         assert_eq!(plan.loop_.flow, "code");
-        assert_eq!(plan.finally.flow, "ship");
+        assert_eq!(plan.finally.flow, "ship-demo");
     }
 }

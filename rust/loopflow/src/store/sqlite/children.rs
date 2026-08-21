@@ -1849,10 +1849,10 @@ const TASK_INSERT: &str = "INSERT INTO tasks (
     iterate_flow, phase_cursor, phase_iteration,
     kickoff_flow, gate_flow,
     lifecycle_phase, phase_epoch, gate_cycle, gate_proposal_json,
-    created_at, updated_at, lifecycle_outcome
+    created_at, updated_at
 ) VALUES (
     ?1, ?2, ?3, ?4, ?5, ?6, ?7, ?8, ?9, ?10, ?11, ?12, ?13, ?14, ?15, ?16,
-    ?17, ?18, ?19, ?20, ?21, ?22, ?23, ?24, ?25, ?26, ?27
+    ?17, ?18, ?19, ?20, ?21, ?22, ?23, ?24, ?25, ?26
 )";
 const TASK_COLUMNS: &str = "SELECT
     t.id, t.external_issue_id, t.issue_identifier, t.issue_title, t.issue_description,
@@ -1862,8 +1862,7 @@ const TASK_COLUMNS: &str = "SELECT
     t.abandon_requested_at, t.abandon_reason,
     t.iterate_flow, t.phase_cursor, t.phase_iteration,
     t.kickoff_flow, t.gate_flow,
-    t.lifecycle_phase, t.phase_epoch, t.gate_cycle, t.gate_proposal_json,
-    t.lifecycle_outcome
+    t.lifecycle_phase, t.phase_epoch, t.gate_cycle, t.gate_proposal_json
     FROM tasks t JOIN projects p ON p.id=t.project_id";
 pub(super) const TASK_SELECT: &str = "SELECT
     t.id, t.external_issue_id, t.issue_identifier, t.issue_title, t.issue_description,
@@ -1873,8 +1872,7 @@ pub(super) const TASK_SELECT: &str = "SELECT
     t.abandon_requested_at, t.abandon_reason,
     t.iterate_flow, t.phase_cursor, t.phase_iteration,
     t.kickoff_flow, t.gate_flow,
-    t.lifecycle_phase, t.phase_epoch, t.gate_cycle, t.gate_proposal_json,
-    t.lifecycle_outcome
+    t.lifecycle_phase, t.phase_epoch, t.gate_cycle, t.gate_proposal_json
     FROM tasks t JOIN projects p ON p.id=t.project_id WHERE t.id=?1";
 const TASK_UPDATE: &str = "UPDATE tasks SET
     project_id=?2, external_issue_id=?3, issue_identifier=?4,
@@ -1882,7 +1880,7 @@ const TASK_UPDATE: &str = "UPDATE tasks SET
     pm_writeback_json=?8, worktree=?9, workspace_slug=?10, agent=?11, provider=?12,
     provider_session_id=?13, abandon_requested_at=?14, abandon_reason=?15,
     iterate_flow=?16, kickoff_flow=?19, gate_flow=?20,
-    created_at=?25, updated_at=?26, lifecycle_outcome=?27
+    created_at=?25, updated_at=?26
     WHERE id=?1";
 const TASK_LIFECYCLE_UPDATE: &str = "UPDATE tasks SET
     project_id=?2, external_issue_id=?3, issue_identifier=?4,
@@ -1893,7 +1891,7 @@ const TASK_LIFECYCLE_UPDATE: &str = "UPDATE tasks SET
     phase_iteration=?18, kickoff_flow=?19,
     gate_flow=?20, lifecycle_phase=?21,
     phase_epoch=?22, gate_cycle=?23, gate_proposal_json=?24,
-    created_at=?25, updated_at=?26, lifecycle_outcome=?27
+    created_at=?25, updated_at=?26
     WHERE id=?1";
 const TASK_RUN_UPDATE: &str = "UPDATE tasks SET
     project_id=?2, external_issue_id=?3, issue_identifier=?4,
@@ -1917,7 +1915,7 @@ const TASK_RUN_UPDATE: &str = "UPDATE tasks SET
     phase_epoch=MAX(phase_epoch, ?22),
     gate_cycle=CASE WHEN ?22>=phase_epoch THEN ?23 ELSE gate_cycle END,
     gate_proposal_json=CASE WHEN ?22>=phase_epoch THEN ?24 ELSE gate_proposal_json END,
-    created_at=?25, updated_at=?26, lifecycle_outcome=?27
+    created_at=?25, updated_at=?26
     WHERE id=?1";
 const TASK_PR_COLUMNS: &str = "SELECT
     id, task_id, sequence, slug, branch, base_commit,
@@ -2004,7 +2002,6 @@ fn task_params(task: &Task) -> Vec<Box<dyn ToSql>> {
         })),
         Box::new(task.created_at.unix_timestamp()),
         Box::new(task.updated_at.unix_timestamp()),
-        Box::new(task.lifecycle.outcome.as_str().to_string()),
     ]
 }
 
@@ -2408,8 +2405,6 @@ pub(super) fn map_task_row(row: &rusqlite::Row<'_>) -> rusqlite::Result<Task> {
         worktree: PathBuf::from(row.get::<_, String>(6)?),
         workspace_slug: row.get(7)?,
         lifecycle: TaskLifecyclePlan {
-            outcome: crate::task::TaskOutcome::from_storage_str(&row.get::<_, String>(27)?)
-                .map_err(|error| invalid_column(27, error))?,
             first: TaskPhasePlan { flow: row.get(21)? },
             loop_: TaskPhasePlan { flow: row.get(18)? },
             finally: TaskPhasePlan { flow: row.get(22)? },

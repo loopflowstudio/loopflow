@@ -285,7 +285,7 @@ lf task start <linear-project-id> "fix the flaky chord-timeout test"
 pbpaste | lf task start incident-management
 lf task run DES-123 --directive "fix the parser before the docs"
 lf task run DES-124 --stack-on DES-123
-lf task run DES-125 --design-only --loop gate --finally ship
+lf task run DES-125 --loop gate --finally ship
 lf task status DES-123
 lf ask list                                           # parent Ask queue
 lf ask list --outgoing                                # this Work's unresolved requests
@@ -337,11 +337,18 @@ invoking repository; a UUID from another repository is not a capability.
 Every Task runs `first → loop N → finally`. Its Project supplies those three
 flows; Task launch pins their resolved names. `--first`, `--loop`, and
 `--finally` override them only while creating the Task. Task launch expands the
-three flows as one lifecycle: the loop must make autonomous progress, delivery
-must include a skill with `task_implementation` in first or loop, and the final
-flow must end with `op: pr land -c`. `--design-only` explicitly waives only the
-implementation requirement. Invalid persisted lifecycles remain visible in
-status with `no_action`; abandon and replace them with a valid selection.
+three flows as one lifecycle: the loop must contain an autonomous skill step,
+and the final flow must end with `op: pr land -c`. The default and feature
+lifecycles ask a human to review the design before implementation, then review
+the configured-path demo before settlement. The fix lifecycle keeps only the
+demo review. Invalid persisted lifecycles remain visible in status with
+`no_action`; abandon and replace them with a valid selection.
+
+Every Task-owned PR keeps the Linear Task name at the start of its title and a
+direct `Linear Task: [KEY](URL)` link in its body. Loopflow restores those
+anchors whenever it publishes, refreshes, submits, or lands a serial PR. If the
+cached PM snapshot has no provider URL, run `lf pm sync --wave <wave>` before
+publishing.
 
 Task launch also resolves the exact execution boundary the lifecycle needs:
 the linked worktree's shared Git metadata, Loopflow's pinned control store, and
@@ -950,9 +957,9 @@ lf pm show --wave designer                  # read; refresh when stale
 lf pm show --wave designer --no-sync        # cache-only agent/app read
 lf pm show --wave designer --project ui     # filter to one project
 lf pm project create --wave designer --title "..." --definition "..." \
-  --first task-design --loop slice --finally ship --kr "..."
+  --first task-design --loop slice --finally ship-demo --kr "..."
 lf pm project update --wave designer --project ui --first incident \
-  --loop ship-5whys --finally ship
+  --loop ship-5whys --finally ship-demo
 lf pm project archive --wave designer --project retired-bet
 lf pm task create --wave designer --project ui --title "Dark mode"
 lf pm task update --id 1207... --title "Refine dark mode"

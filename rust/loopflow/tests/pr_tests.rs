@@ -488,8 +488,78 @@ fn github_failure_leaves_publication_intent_observable() {
         .expect("active PR");
     assert_eq!(pr.phase(), PrPhase::Publishing);
     let publication = pr.publication.expect("durable publication request");
+    let presentation = publication
+        .presentation
+        .as_ref()
+        .expect("reviewer-facing Task identity");
+    assert_eq!(
+        presentation.title,
+        "Prove Task PR transitions — Persist publication first"
+    );
+    assert_eq!(
+        presentation.body,
+        "Linear Task: [INF-123](https://linear.app/loopflow/issue/INF-123/prove-task-pr-transitions)\n\nThe GitHub call will fail."
+    );
     assert!(publication.github.is_none());
     assert!(publication.merge.is_none());
+}
+
+#[test]
+fn task_pr_missing_cached_linear_url_refuses_before_remote_mutation() {
+    let markers = tempfile::TempDir::new().expect("markers");
+    let github_marker = markers.path().join("github");
+    let gh = format!(
+        "#!/bin/sh\nif [ \"$1\" = \"--version\" ]; then exit 0; fi\nprintf called > '{}'\nexit 1\n",
+        github_marker.display()
+    );
+    let home = tempfile::TempDir::new().expect("temp home");
+    let _env = EnvGuard::with_lf_home(&[("gh", gh.as_str())], home.path());
+    let repo = TestRepo::new();
+    let base = repo.head_sha();
+    let branch = "jack/task-pr-proof";
+    repo.create_branch(branch);
+    repo.create_file("proof.txt", "identity preflight\n");
+    repo.stage_all();
+    repo.commit("add identity proof");
+    let task = register_task(home.path(), repo.path(), branch, &base);
+    let runtime = tokio::runtime::Runtime::new().expect("task runtime");
+    let mut snapshot = runtime
+        .block_on(task.store.pm_snapshot(&task.task.wave_id))
+        .expect("read PM snapshot")
+        .expect("PM snapshot");
+    let mut payload: serde_json::Value =
+        serde_json::from_str(&snapshot.payload).expect("decode PM snapshot");
+    payload["items"][0]["url"] = serde_json::Value::Null;
+    snapshot.payload = serde_json::to_string(&payload).expect("encode PM snapshot");
+    runtime
+        .block_on(task.store.put_pm_snapshot(snapshot))
+        .expect("remove cached Task URL");
+
+    let result = create_or_update_pr(
+        repo.path(),
+        &PrOptions {
+            title: Some("Reviewer context".to_string()),
+            body: Some("Proof".to_string()),
+            agent: None,
+        },
+        &NullProgress,
+    );
+
+    assert!(
+        matches!(result, Err(OpsError::Message(ref message)) if message.contains("no valid provider URL") && message.contains("lf pm sync")),
+        "missing provider identity should be actionable: {result:?}"
+    );
+    assert!(!github_marker.exists(), "GitHub must not mutate");
+    let remote_branch = Command::new("git")
+        .arg("--git-dir")
+        .arg(repo.bare_path())
+        .args(["rev-parse", "--verify", &format!("refs/heads/{branch}")])
+        .status()
+        .expect("inspect remote branch");
+    assert!(
+        !remote_branch.success(),
+        "identity refusal must happen before push"
+    );
 }
 
 #[test]

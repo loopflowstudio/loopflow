@@ -633,7 +633,7 @@ fn begin_capture(
 ) -> Result<crate::trace::CaptureHandle> {
     let context =
         crate::journal::trace_capture_context(&built.repo_root, None, built.skill_name.clone())
-            .ok_or_else(|| anyhow!("trace capture identity is unavailable before agent launch"))?;
+            .map_err(|_| anyhow!("trace capture identity is unavailable before agent launch"))?;
     crate::trace::CaptureHandle::begin(
         context,
         built.context.clone(),

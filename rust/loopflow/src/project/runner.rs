@@ -160,11 +160,17 @@ async fn run_project_inner(
         return Err(error.into());
     }
     let capture = flow.current().and_then(|step| {
-        let context = crate::journal::trace_capture_context(
+        let context = match crate::journal::trace_capture_context(
             Path::new(wave.repo()),
             Some(step.flow.clone()),
             Some(step.step.clone()),
-        )?;
+        ) {
+            Ok(context) => context,
+            Err(error) => {
+                tracing::warn!(%error, "failed to establish Project trace capture");
+                return None;
+            }
+        };
         match crate::trace::CaptureHandle::begin(
             context,
             prepared.turn.context.clone(),

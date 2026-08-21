@@ -825,11 +825,11 @@ LOO-249: Make Task PR copy explain intent and lifecycle
 
 > [!NOTE]
 > **Task:** [LOO-249 — Make Task PR copy explain intent and lifecycle](https://linear.app/...)
-> **Task flow:** `incident` → `slice` → `ship-demo`
+> **Task cycle:** fix
 > **PR lifecycle:** Merging PR 1 completes the Task.
 ```
 
-The exact identifier, name, provider link, pinned flows, PR sequence, and merge
+The exact identifier, name, provider link, Task cycle, PR sequence, and merge
 disposition come from durable Task state. Generated or gate-authored prose adds
 the evaluation path, importance, and implementation-specific scope without
 repeating that context. Ordinary non-Task PR copy keeps its authored title and

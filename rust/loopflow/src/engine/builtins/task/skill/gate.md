@@ -99,7 +99,7 @@ Make the change easy to review.
 3. **Write PR copy for ops handoff**
 
    The PR body is written for an engineer picking this up cold. Loopflow adds
-   the canonical Task title, Linear link, Task flow, PR sequence, and merge
+   the canonical Task title, Linear link, Task cycle, PR sequence, and merge
    disposition at publication; do not repeat or guess them in the handoff copy.
 
    Structure:

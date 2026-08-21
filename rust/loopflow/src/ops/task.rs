@@ -82,6 +82,20 @@ impl TaskCycle {
             Self::Feature => ("task-design", "ship-demo"),
         }
     }
+
+    pub fn for_lifecycle(lifecycle: &crate::task::TaskLifecyclePlan) -> Self {
+        [Self::Fix, Self::Feature]
+            .into_iter()
+            .find(|cycle| lifecycle.first.flow == cycle.flows().0)
+            .unwrap_or(Self::Feature)
+    }
+
+    pub fn as_str(self) -> &'static str {
+        match self {
+            Self::Fix => "fix",
+            Self::Feature => "feature",
+        }
+    }
 }
 
 impl TaskFlowOverrides {
@@ -1709,6 +1723,10 @@ impl TaskPrContext {
             _markdown_link_text(self.title.trim()),
             self.url
         )
+    }
+
+    pub(crate) fn cycle(&self) -> TaskCycle {
+        TaskCycle::for_lifecycle(&self.lifecycle)
     }
 }
 

@@ -15,7 +15,7 @@ use loopflow::provider_auth::Provider;
 use loopflow::store::{CredentialState, ProviderAccount, ProviderAccountId, RoutingState};
 use loopflow::task::{
     AfterMerge, GithubPr, PrMergeMode, PrMergeRequest, PrPhase, PrPresentation, PrPublication,
-    TaskGateProposal,
+    TaskGateProposal, TaskLifecyclePlan,
 };
 use loopflow_test_support::TestRepo;
 use support::{
@@ -506,9 +506,7 @@ fn github_failure_leaves_publication_intent_observable() {
     assert!(presentation.body.contains(
         "> **Task:** [INF-123 — Prove Task PR transitions](https://linear.app/loopflow/issue/INF-123/prove-task-pr-transitions)"
     ));
-    assert!(presentation
-        .body
-        .contains("> **Task flow:** `task-design` → `slice` → `ship-demo`"));
+    assert!(presentation.body.contains("> **Task cycle:** feature"));
     assert!(presentation.body.contains(
         "> **PR lifecycle:** PR 1 is published for review; no Task settlement is requested."
     ));
@@ -518,7 +516,7 @@ fn github_failure_leaves_publication_intent_observable() {
 }
 
 #[test]
-fn configured_generation_adds_task_intent_and_lifecycle_to_pr_copy() {
+fn configured_feature_generation_adds_task_intent_and_lifecycle_to_pr_copy() {
     let home = tempfile::TempDir::new().expect("temp home");
     let gh = write_gh_script("[]", None);
     let agent = codex_script(
@@ -565,7 +563,7 @@ fn configured_generation_adds_task_intent_and_lifecycle_to_pr_copy() {
         "<!-- loopflow:task-pr-context:start -->\n\
 > [!NOTE]\n\
 > **Task:** [INF-123 — Prove Task PR transitions](https://linear.app/loopflow/issue/INF-123/prove-task-pr-transitions)\n\
-> **Task flow:** `task-design` → `slice` → `ship-demo`\n\
+> **Task cycle:** feature\n\
 > **PR lifecycle:** PR 1 is published for review; no Task settlement is requested.\n\
 <!-- loopflow:task-pr-context:end -->\n\n\
 ## Evaluate\n\n\
@@ -577,6 +575,60 @@ Reviewers can recover purpose and settlement behavior without reconstructing Tas
 Task publication now combines generated review guidance with durable Task context."
     );
     assert!(!presentation.title.contains("explain review contract"));
+}
+
+#[test]
+fn configured_fix_generation_names_the_task_cycle() {
+    let home = tempfile::TempDir::new().expect("temp home");
+    let gh = write_gh_script("[]", None);
+    let agent = codex_script(
+        r###"{"title":"generated title","body":"## Evaluate\n\nRun the configured fix proof."}"###,
+    );
+    let _env = EnvGuard::with_lf_home(
+        &[("gh", gh.as_str()), ("codex", agent.as_str())],
+        home.path(),
+    );
+    let repo = TestRepo::new();
+    let base = repo.head_sha();
+    let branch = "jack/task-fix-copy-proof";
+    repo.create_branch(branch);
+    repo.create_file("proof.txt", "configured fix generation\n");
+    repo.stage_all();
+    repo.commit("add configured fix generation proof");
+    repo.push_new_branch(branch);
+    let mut registered = register_task(home.path(), repo.path(), branch, &base);
+    registered.task.lifecycle = TaskLifecyclePlan::standard("incident", "slice", "ship-demo");
+    let runtime = tokio::runtime::Runtime::new().expect("update Task runtime");
+    runtime
+        .block_on(registered.store.update_task(&registered.task))
+        .expect("persist fix lifecycle");
+
+    create_or_update_pr(
+        repo.path(),
+        &PrOptions {
+            title: None,
+            body: None,
+            agent: Some("codex".to_string()),
+        },
+        &NullProgress,
+    )
+    .expect("generate and publish fix Task PR copy");
+
+    let pr = runtime
+        .block_on(registered.store.active_task_pr(&registered.task.id))
+        .expect("read active PR")
+        .expect("active PR");
+    let presentation = pr
+        .publication
+        .as_ref()
+        .and_then(|publication| publication.presentation.as_ref())
+        .expect("generated fix Task PR copy");
+    assert_eq!(presentation.title, "INF-123: Prove Task PR transitions");
+    assert!(presentation.body.contains("> **Task cycle:** fix"));
+    assert!(!presentation.body.contains("Task flow:"));
+    assert!(presentation.body.contains(
+        "> **PR lifecycle:** PR 1 is published for review; no Task settlement is requested."
+    ));
 }
 
 #[test]
@@ -776,6 +828,7 @@ fn serial_task_pr_publication_restores_task_context() {
     assert!(presentation.body.starts_with(
         "<!-- loopflow:task-pr-context:start -->\n> [!NOTE]\n> **Task:** [INF-123 — Prove Task PR transitions](https://linear.app/loopflow/issue/INF-123/prove-task-pr-transitions)"
     ));
+    assert!(presentation.body.contains("> **Task cycle:** feature"));
     assert!(presentation.body.contains(
         "> **PR lifecycle:** PR 2 is published for review; no Task settlement is requested."
     ));

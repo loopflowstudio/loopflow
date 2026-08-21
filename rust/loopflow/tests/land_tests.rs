@@ -1028,6 +1028,7 @@ fn latest_land_disposition_wins_before_merge() {
     assert!(presentation.body.starts_with(
         "<!-- loopflow:task-pr-context:start -->\n> [!NOTE]\n> **Task:** [INF-123 — Prove Task PR transitions](https://linear.app/loopflow/issue/INF-123/prove-task-pr-transitions)"
     ));
+    assert!(presentation.body.contains("> **Task cycle:** feature"));
     assert!(presentation.body.contains(
         "> **PR lifecycle:** Merging PR 1 leaves the Task open and names `follow-up-proof` as the next serial PR."
     ));

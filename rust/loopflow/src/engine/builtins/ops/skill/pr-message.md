@@ -4,7 +4,7 @@ Review the diff against the PR base. Make the purpose, why it matters, meaningfu
 scope, and evaluation path obvious to a reviewer arriving cold.
 
 When Loopflow supplies Task context, it adds the canonical Task title, Linear
-link, Task flow, PR sequence, and merge disposition after generation. Do not
+link, Task cycle, PR sequence, and merge disposition after generation. Do not
 invent or repeat those facts from branch names or commit messages.
 
 Do not ask questions. If anything is unclear, make the best assumption and proceed.

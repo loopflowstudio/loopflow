@@ -220,13 +220,7 @@ pub(crate) fn normalize_task_pr_copy(
     }
 
     let task_link = context.task_link();
-    let lifecycle_plan = &context.lifecycle;
-    let task_flow = format!(
-        "{} → {} → {}",
-        _markdown_code(&lifecycle_plan.first.flow),
-        _markdown_code(&lifecycle_plan.loop_.flow),
-        _markdown_code(&lifecycle_plan.finally.flow),
-    );
+    let task_cycle = context.cycle().as_str();
     let pr_lifecycle = match lifecycle {
         TaskPrCopyLifecycle::Published => format!(
             "PR {} is published for review; no Task settlement is requested.",
@@ -248,7 +242,7 @@ pub(crate) fn normalize_task_pr_copy(
         }
     };
     let managed = format!(
-        "{TASK_PR_CONTEXT_START}\n> [!NOTE]\n> **Task:** {task_link}\n> **Task flow:** {task_flow}\n> **PR lifecycle:** {pr_lifecycle}\n{TASK_PR_CONTEXT_END}"
+        "{TASK_PR_CONTEXT_START}\n> [!NOTE]\n> **Task:** {task_link}\n> **Task cycle:** {task_cycle}\n> **PR lifecycle:** {pr_lifecycle}\n{TASK_PR_CONTEXT_END}"
     );
     let reviewer_context = _strip_managed_task_context(&copy.body);
     let body = if reviewer_context.is_empty() {
@@ -1656,11 +1650,9 @@ mod tests {
         assert_eq!(pr_number_from_url("https://example.com/not-a-pr"), None);
     }
 
-    fn task_pr_context() -> TaskPrContext {
+    fn task_pr_context(first_flow: &str) -> TaskPrContext {
         let mut lifecycle = TaskLifecyclePlan::defaults();
-        lifecycle.first.flow = "incident".to_string();
-        lifecycle.loop_.flow = "slice".to_string();
-        lifecycle.finally.flow = "ship-demo".to_string();
+        lifecycle.first.flow = first_flow.to_string();
         TaskPrContext {
             title: "Make Task PR copy explain intent and lifecycle".to_string(),
             identifier: "LOO-249".to_string(),
@@ -1671,13 +1663,13 @@ mod tests {
     }
 
     #[test]
-    fn task_pr_copy_uses_one_canonical_title_and_durable_context() {
+    fn fix_task_pr_copy_uses_one_canonical_title_and_durable_context() {
         let copy = normalize_task_pr_copy(
             PrCopy {
                 title: "pr copy: explain the review contract".to_string(),
                 body: "## Evaluate\n\n`cargo test -p loopflow task_pr_copy`".to_string(),
             },
-            Some(&task_pr_context()),
+            Some(&task_pr_context("incident")),
             &TaskPrCopyLifecycle::Completes,
         )
         .expect("normalize Task PR copy");
@@ -1691,7 +1683,7 @@ mod tests {
             "<!-- loopflow:task-pr-context:start -->\n\
 > [!NOTE]\n\
 > **Task:** [LOO-249 — Make Task PR copy explain intent and lifecycle](https://linear.app/loopflow/issue/LOO-249/task-pr-copy)\n\
-> **Task flow:** `incident` → `slice` → `ship-demo`\n\
+> **Task cycle:** fix\n\
 > **PR lifecycle:** Merging PR 1 completes the Task.\n\
 <!-- loopflow:task-pr-context:end -->\n\n\
 ## Evaluate\n\n`cargo test -p loopflow task_pr_copy`"
@@ -1699,20 +1691,20 @@ mod tests {
     }
 
     #[test]
-    fn task_pr_copy_refreshes_lifecycle_without_duplicating_context() {
+    fn feature_task_pr_copy_refreshes_lifecycle_without_duplicating_context() {
         let published = normalize_task_pr_copy(
             PrCopy {
                 title: "ignored".to_string(),
                 body: "Linear Task: [OLD-1](https://example.com/old)\n\nReviewer proof."
                     .to_string(),
             },
-            Some(&task_pr_context()),
+            Some(&task_pr_context("task-design")),
             &TaskPrCopyLifecycle::Published,
         )
         .expect("publish Task PR copy");
         let continued = normalize_task_pr_copy(
             published,
-            Some(&task_pr_context()),
+            Some(&task_pr_context("task-design")),
             &TaskPrCopyLifecycle::Continues {
                 next_slug: Some("follow-up-proof".to_string()),
             },
@@ -1729,6 +1721,7 @@ mod tests {
         assert!(continued.body.contains(
             "Merging PR 1 leaves the Task open and names `follow-up-proof` as the next serial PR."
         ));
+        assert!(continued.body.contains("> **Task cycle:** feature"));
         assert!(continued.body.ends_with("Reviewer proof."));
         assert!(!continued.body.contains("Linear Task: [OLD-1]"));
     }

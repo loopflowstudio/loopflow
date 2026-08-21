@@ -226,6 +226,8 @@ struct LoopflowApp: App {
             openWindow(id: "repo", value: repoURL)
         case "portfolio":
             openWindow(id: "portfolio")
+        case "asks":
+            NotificationCenter.default.post(name: .openSessions, object: nil)
         default:
             break
         }

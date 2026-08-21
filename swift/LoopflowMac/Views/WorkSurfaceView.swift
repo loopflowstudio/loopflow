@@ -41,14 +41,6 @@ struct WorkSurfaceView: View {
             content
         }
         .background(palette.background)
-        .task(id: model.repoPath) {
-            await model.refresh()
-            while !Task.isCancelled {
-                try? await Task.sleep(for: .seconds(15))
-                if Task.isCancelled { return }
-                await model.refresh()
-            }
-        }
         .sheet(item: $workspaceSelection) { selection in
             TaskWorkspaceView(
                 task: selection.task.task,

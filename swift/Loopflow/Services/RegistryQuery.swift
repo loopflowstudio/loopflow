@@ -200,17 +200,24 @@ public struct RegistryQuery: Sendable {
     }
 
     /// User-targeted Ask sessions from the same durable queue as bare `lf`.
-    public func userAskAttention() async throws -> [AskAttentionRecord] {
-        let stdout = try await run(["ask", "list", "--user", "--json"], nil)
+    public func userAskAttention(cwd: String? = nil) async throws -> [AskAttentionRecord] {
+        // Repo-scoped: the sessions surface shows the sessions for the repository
+        // the app is opened to, never a cross-repo aggregate. To see another
+        // repo's queue you open Loopflow to that repo (the direct-navigation
+        // route), not `--all`.
+        let stdout = try await run(["ask", "list", "--user", "--json"], cwd)
         return try Self.decode([AskAttentionRecord].self, from: stdout)
     }
 
     /// Claim or recover one Ask session and return its exact attach descriptor.
     /// Presentation remains the app's responsibility until `confirmAskPresented`.
-    public func prepareAskOpen(askId: String) async throws -> InvocationSurfaceRecord {
+    public func prepareAskOpen(
+        askId: String,
+        cwd: String? = nil
+    ) async throws -> InvocationSurfaceRecord {
         let stdout = try await run(
             ["ask", "open", askId, "--prepare", "--json"],
-            nil
+            cwd
         )
         return try Self.decode(InvocationSurfaceRecord.self, from: stdout)
     }
@@ -218,11 +225,12 @@ public struct RegistryQuery: Sendable {
     /// Confirm presentation only for the exact Invocation returned by prepare.
     public func confirmAskPresented(
         askId: String,
-        invocationId: String
+        invocationId: String,
+        cwd: String? = nil
     ) async throws -> AgentInvocationRecord {
         let stdout = try await run(
             ["ask", "presented", askId, invocationId, "--json"],
-            nil
+            cwd
         )
         return try Self.decode(AgentInvocationRecord.self, from: stdout)
     }

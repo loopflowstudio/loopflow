@@ -1,5 +1,6 @@
 use loopflow::lf::commands::waves::WaveDetailSnapshot;
 use loopflow::ops::pm::PmShowResult;
+use loopflow::{child::CurrentWorkState, durable::WorkStatus};
 
 const PM_SHOW: &str = include_str!("../../../tests/fixtures/dto/pm_show.json");
 const WAVE_DETAIL: &str = include_str!("../../../tests/fixtures/dto/wave_detail.json");
@@ -61,4 +62,35 @@ fn wave_detail_requires_machine_and_turn_controls() {
         .remove("enabled");
     let error = serde_json::from_value::<WaveDetailSnapshot>(missing_enabled).unwrap_err();
     assert!(error.to_string().contains("enabled"));
+}
+
+#[test]
+fn status_surfaces_keep_last_failure_out_of_current_truth() {
+    let snapshot: WaveDetailSnapshot = serde_json::from_str(WAVE_DETAIL).unwrap();
+    let project = &snapshot.projects[0];
+    let runtime = project.runtime.as_ref().unwrap();
+    let failure = runtime.last_failure.as_ref().unwrap();
+
+    assert_eq!(runtime.status, WorkStatus::Ready);
+    assert_eq!(runtime.current.state, CurrentWorkState::Ready);
+    assert_eq!(runtime.reason, runtime.current.reason);
+    assert_eq!(runtime.current.reason, "ready");
+    assert!(!runtime.current.reason.contains("credential"));
+    assert_eq!(
+        failure.message,
+        "project runner failed: credential is missing"
+    );
+    assert!(failure.run_id.is_some());
+    assert!(failure.occurred_at < time::OffsetDateTime::now_utc());
+    assert_eq!(
+        snapshot.unavailable_projects[0].current.state,
+        CurrentWorkState::Abandoned
+    );
+    assert_eq!(
+        snapshot.unavailable_projects[0].tasks[0].current.state,
+        CurrentWorkState::Ready
+    );
+    let task_runtime = snapshot.projects[0].tasks[0].runtime.as_ref().unwrap();
+    assert_eq!(task_runtime.reason, task_runtime.current.reason);
+    assert_eq!(task_runtime.current.reason, "ready");
 }

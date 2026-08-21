@@ -1222,6 +1222,7 @@ impl SqliteStore {
                 error: error.to_string(),
                 resumable: true,
             },
+            Some(&lease.run_id),
         )?;
         end_run_for_lease(&transaction, lease, crate::durable::BoundaryState::Failed)?;
         transaction.commit()?;
@@ -1261,6 +1262,7 @@ impl SqliteStore {
             &ProjectEventKind::Completed {
                 summary: summary.to_string(),
             },
+            Some(&lease.run_id),
         )?;
         if transaction.execute(
             "UPDATE epochs SET state='done', terminal_at=?2
@@ -1322,6 +1324,7 @@ impl SqliteStore {
             &transaction,
             &project,
             &ProjectEventKind::BodyHandedOff { handoff },
+            None,
         )?;
         transaction.commit()?;
         Ok(project)
@@ -1390,7 +1393,7 @@ impl SqliteStore {
             params![project_id.as_str()],
             map_project_row,
         )?;
-        let event = insert_project_event_in(&transaction, &project, kind)?;
+        let event = insert_project_event_in(&transaction, &project, kind, None)?;
         transaction.commit()?;
         Ok(event)
     }
@@ -1409,7 +1412,7 @@ impl SqliteStore {
             params![project_id.as_str()],
             map_project_row,
         )?;
-        let event = insert_project_event_in(&transaction, &project, kind)?;
+        let event = insert_project_event_in(&transaction, &project, kind, Some(&lease.run_id))?;
         transaction.commit()?;
         Ok(event)
     }
@@ -1421,7 +1424,7 @@ impl SqliteStore {
     ) -> StoreResult<Vec<ProjectEvent>> {
         let conn = self.conn.lock().expect("store mutex poisoned");
         let mut statement = conn.prepare(
-            "SELECT id, project_id, kind_json, created_at
+            "SELECT id, project_id, kind_json, run_id, created_at
              FROM project_events WHERE project_id=?1 AND id>?2 ORDER BY id",
         )?;
         let rows =
@@ -1454,13 +1457,33 @@ impl SqliteStore {
     ) -> StoreResult<Option<ProjectEvent>> {
         let conn = self.conn.lock().expect("store mutex poisoned");
         conn.query_row(
-            "SELECT id, project_id, kind_json, created_at
+            "SELECT id, project_id, kind_json, run_id, created_at
              FROM project_events WHERE project_id=?1 ORDER BY id DESC LIMIT 1",
             params![project_id.as_str()],
             map_project_event_row,
         )
         .optional()
         .map_err(StoreError::from)
+    }
+
+    pub fn latest_project_failure(
+        &self,
+        project_id: &ProjectId,
+    ) -> StoreResult<Option<crate::project::HistoricalFailure>> {
+        let conn = self.conn.lock().expect("store mutex poisoned");
+        let event = conn
+            .query_row(
+                "SELECT id, project_id, kind_json, run_id, created_at
+                 FROM project_events
+                 WHERE project_id=?1 AND json_extract(kind_json, '$.kind')='failed'
+                 ORDER BY id DESC LIMIT 1",
+                params![project_id.as_str()],
+                map_project_event_row,
+            )
+            .optional()?;
+        Ok(event
+            .as_ref()
+            .and_then(crate::project::HistoricalFailure::from_event))
     }
 
     pub fn pending_observations(
@@ -1587,14 +1610,16 @@ impl SqliteStore {
                 task_event_id: observation.event_id,
                 event: Box::new(event.clone()),
             };
-            transaction.execute(
-                "INSERT INTO project_events (project_id, kind_json, created_at)
-                 VALUES (?1, ?2, ?3)",
-                params![
-                    project_id.as_str(),
-                    serde_json::to_string(&kind)?,
-                    now_unix(),
-                ],
+            let project = transaction.query_row(
+                PROJECT_SELECT,
+                params![project_id.as_str()],
+                map_project_row,
+            )?;
+            insert_project_event_in(
+                &transaction,
+                &project,
+                &kind,
+                run_lease.map(|lease| &lease.run_id),
             )?;
         }
         let now = now_unix();
@@ -2725,7 +2750,12 @@ fn map_project_event_row(row: &rusqlite::Row<'_>) -> rusqlite::Result<ProjectEve
         id: row.get(0)?,
         project_id: ProjectId::from_raw(row.get::<_, String>(1)?),
         kind,
-        created_at: crate::store::rows::unix_to_datetime(row.get(3)?),
+        run_id: row
+            .get::<_, Option<String>>(3)?
+            .map(|id| crate::durable::RunId::parse(&id))
+            .transpose()
+            .map_err(|error| invalid_column(3, error))?,
+        created_at: crate::store::rows::unix_to_datetime(row.get(4)?),
     })
 }
 
@@ -2796,13 +2826,16 @@ fn insert_project_event_in(
     conn: &Connection,
     project: &Project,
     kind: &ProjectEventKind,
+    run_id: Option<&crate::durable::RunId>,
 ) -> StoreResult<ProjectEvent> {
     let created_at = now_unix();
     conn.execute(
-        "INSERT INTO project_events (project_id, kind_json, created_at) VALUES (?1, ?2, ?3)",
+        "INSERT INTO project_events (project_id, kind_json, run_id, created_at)
+         VALUES (?1, ?2, ?3, ?4)",
         params![
             project.id.as_str(),
             serde_json::to_string(kind)?,
+            run_id.map(crate::durable::RunId::as_str),
             created_at
         ],
     )?;
@@ -2825,6 +2858,7 @@ fn insert_project_event_in(
         id: event_id,
         project_id: project.id.clone(),
         kind: kind.clone(),
+        run_id: run_id.cloned(),
         created_at: crate::store::rows::unix_to_datetime(created_at),
     })
 }

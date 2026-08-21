@@ -18,10 +18,10 @@ use anyhow::{anyhow, Result};
 use serde::{Deserialize, Serialize};
 
 use crate::child::{
-    body_progress_age, observe, BodyEvidence, BodyIntent, BodyObservation, ChildRef,
-    ObservationRecipient, DEFAULT_STALL_AFTER,
+    observe_current_work, work_status_reason, ChildRef, CurrentWorkObservation, CurrentWorkState,
+    ObservationRecipient,
 };
-use crate::durable::{Containment, Home, WorkRef, WorkStatus};
+use crate::durable::{Home, RunLivenessState, WorkRef, WorkStatus};
 use crate::engine::wave_home::{HomeActionDto, HomeRuntimeDto, HomeState};
 use crate::lf::commands::runs::{format_tokens, SkillRunEntry};
 use crate::lf::output::Colors;
@@ -43,6 +43,7 @@ pub struct WaveSnapshot {
     pub name: String,
     /// Current Work lifecycle derived from Epoch, Run, and Wait facts.
     pub status: WorkStatus,
+    pub current: CurrentWorkObservation,
     pub goal: String,
     /// Primary repo path.
     pub repo: String,
@@ -62,6 +63,10 @@ pub struct WaveSnapshot {
     pub created_at: Option<String>,
     /// Parent wave id in the chord tree, `null` for a root wave.
     pub parent_wave_id: Option<String>,
+    /// Tombstone time for stable-id history; active locator reads exclude it.
+    pub retired_at: Option<String>,
+    pub superseded_by_wave_id: Option<String>,
+    pub retirement_reason: Option<String>,
     /// Stable execution authority and its currently observed route.
     pub home: Home,
 }
@@ -208,10 +213,8 @@ pub struct ProjectRuntimeSnapshot {
     pub iteration: u32,
     pub pending_observations: u32,
     pub provider: String,
-    pub process_alive: bool,
-    /// The observed state of this Project's current body: durable intent
-    /// (`status`) and body observation are separate evidence, never one string.
-    pub observation: BodyObservation,
+    pub current: CurrentWorkObservation,
+    pub last_failure: Option<crate::project::HistoricalFailure>,
 }
 
 #[derive(Debug, Clone, Serialize, Deserialize)]
@@ -226,10 +229,7 @@ pub struct TaskRuntimeSnapshot {
     pub reason: String,
     pub updated_at: String,
     pub provider: String,
-    pub process_alive: bool,
-    /// The observed state of this Task's current body, derived from durable
-    /// intent, body liveness, and how long since its last durable event.
-    pub observation: BodyObservation,
+    pub current: CurrentWorkObservation,
 }
 
 /// The compact Task attention signal shared by terminal and app surfaces. The
@@ -451,6 +451,7 @@ pub struct UnavailableProjectEvidence {
     pub project_id: String,
     pub project_slug: String,
     pub status: WorkStatus,
+    pub current: CurrentWorkObservation,
     pub owner: NextMoveOwner,
     pub reason: String,
     pub recovery: String,
@@ -465,6 +466,7 @@ pub struct UnavailableTaskEvidence {
     pub task_id: String,
     pub task_identifier: String,
     pub status: WorkStatus,
+    pub current: CurrentWorkObservation,
     pub owner: NextMoveOwner,
     pub reason: String,
     pub recovery: String,
@@ -618,27 +620,15 @@ pub fn status(wave: Option<&str>, json: bool) -> Result<()> {
             .list_tasks(Some(wave.id()))
             .await
             .map_err(|err| anyhow!("failed to read Tasks: {err}"))?;
-        let liveness = TmuxLiveness::snapshot().await;
         let planning = read_pm_planning(&store, &wave)
             .await?
             .unwrap_or(PmSnapshot {
                 projects: Vec::new(),
                 items: Vec::new(),
             });
-        let project_snapshots = snapshot_projects(
-            &store,
-            stored_projects,
-            stored_tasks,
-            planning,
-            &liveness,
-            true,
-        )
-        .await?;
-        let attention = Evidence::complete(attention(
-            &project_snapshots.projects,
-            now(),
-            liveness.liveness(),
-        ));
+        let project_snapshots =
+            snapshot_projects(&store, stored_projects, stored_tasks, planning, true).await?;
+        let attention = Evidence::complete(attention(&project_snapshots.projects, now()));
         // Probe the focused Wave's Home once so the detail carries live evidence
         // and the single contextual action (Open/Attach, Start, or reason).
         let home_runtime =
@@ -706,8 +696,6 @@ pub fn roadmap(wave: Option<&str>, json: bool, all: bool) -> Result<()> {
             }
             Err(other) => return Err(anyhow!(other)),
         };
-        // One tmux reading for every Work process on the machine, taken once.
-        let liveness = TmuxLiveness::snapshot().await;
         // A Wave filter narrows presentation, not repository ownership checks.
         let ownership_waves = if waves.len() == 1 {
             store
@@ -721,7 +709,7 @@ pub fn roadmap(wave: Option<&str>, json: bool, all: bool) -> Result<()> {
         let mut roadmaps = Vec::with_capacity(waves.len());
         for wave in &waves {
             let snapshot = snapshot_wave(&store, wave).await?;
-            let project_snapshots = wave_roadmap_projects(&store, wave, &liveness).await;
+            let project_snapshots = wave_roadmap_projects(&store, wave).await;
             roadmaps.push(WaveRoadmap {
                 wave: snapshot,
                 projects: project_snapshots.projects,
@@ -745,11 +733,7 @@ pub fn roadmap(wave: Option<&str>, json: bool, all: bool) -> Result<()> {
 /// Build one Wave's roadmap projects, or the reason there are none. A missing PM
 /// snapshot is `Unavailable` ("run `lf pm sync`"), never an empty plan; a read
 /// that fails carries its error rather than reading as emptiness.
-async fn wave_roadmap_projects(
-    store: &SharedStore,
-    wave: &Wave,
-    liveness: &TmuxLiveness,
-) -> RoadmapProjectSnapshots {
+async fn wave_roadmap_projects(store: &SharedStore, wave: &Wave) -> RoadmapProjectSnapshots {
     let planning = match read_pm_planning(store, wave).await {
         Ok(Some(planning)) => planning,
         Ok(None) => {
@@ -796,13 +780,13 @@ async fn wave_roadmap_projects(
     };
     // `probe_pr_empty: false` — PR emptiness is `lf status`'s execution detail.
     // Roadmap's bounded Git reads belong only to the shared attention evidence.
-    match snapshot_projects(store, projects, tasks, planning, liveness, false).await {
+    match snapshot_projects(store, projects, tasks, planning, false).await {
         Ok(snapshots) => RoadmapProjectSnapshots {
             projects: Evidence::complete(
                 snapshots
                     .projects
                     .into_iter()
-                    .map(|detail| roadmap_project(detail, liveness.liveness()))
+                    .map(roadmap_project)
                     .collect(),
             ),
             unavailable_projects: snapshots.unavailable_projects,
@@ -818,13 +802,9 @@ async fn wave_roadmap_projects(
 
 /// Project a `lf status` project detail into its roadmap row, deriving the
 /// section for it and each of its Tasks.
-fn roadmap_project(detail: ProjectDetailSnapshot, liveness: Liveness) -> RoadmapProject {
-    let section = project_section(&detail, liveness);
-    let tasks = detail
-        .tasks
-        .into_iter()
-        .map(|task| roadmap_task(task, liveness))
-        .collect();
+fn roadmap_project(detail: ProjectDetailSnapshot) -> RoadmapProject {
+    let section = project_section(&detail);
+    let tasks = detail.tasks.into_iter().map(roadmap_task).collect();
     RoadmapProject {
         project: detail.project,
         runtime: detail.runtime,
@@ -834,8 +814,8 @@ fn roadmap_project(detail: ProjectDetailSnapshot, liveness: Liveness) -> Roadmap
     }
 }
 
-fn roadmap_task(detail: TaskDetailSnapshot, liveness: Liveness) -> RoadmapTask {
-    let section = task_section(&detail, liveness);
+fn roadmap_task(detail: TaskDetailSnapshot) -> RoadmapTask {
+    let section = task_section(&detail);
     let active_pr = detail
         .active_pr
         .as_ref()
@@ -854,7 +834,7 @@ fn roadmap_task(detail: TaskDetailSnapshot, liveness: Liveness) -> RoadmapTask {
 /// A Task's section, from the same primitives the row already carries. Order is
 /// load-bearing: a dead process outranks a terminal record (an audit finding),
 /// and terminal Work is `Later` before its owner is consulted.
-fn task_section(task: &TaskDetailSnapshot, liveness: Liveness) -> RoadmapSection {
+fn task_section(task: &TaskDetailSnapshot) -> RoadmapSection {
     let Some(runtime) = &task.runtime else {
         return if task.task.completed {
             RoadmapSection::Later
@@ -862,9 +842,9 @@ fn task_section(task: &TaskDetailSnapshot, liveness: Liveness) -> RoadmapSection
             RoadmapSection::Available
         };
     };
-    if liveness.is_gone(
-        work_status_is_running(&runtime.status),
-        runtime.process_alive,
+    if matches!(
+        runtime.current.state,
+        CurrentWorkState::Stalled | CurrentWorkState::Stopped | CurrentWorkState::Unobservable
     ) {
         return RoadmapSection::NeedsAttention;
     }
@@ -879,7 +859,7 @@ fn task_section(task: &TaskDetailSnapshot, liveness: Liveness) -> RoadmapSection
 
 /// A Project's section. An unstarted Project (no loop) is `Available` — the Wave
 /// could start it — unless the plan says it is already done.
-fn project_section(project: &ProjectDetailSnapshot, liveness: Liveness) -> RoadmapSection {
+fn project_section(project: &ProjectDetailSnapshot) -> RoadmapSection {
     let Some(runtime) = &project.runtime else {
         let all_krs_hold =
             !project.project.krs.is_empty() && project.project.krs.iter().all(|kr| kr.holds);
@@ -889,9 +869,9 @@ fn project_section(project: &ProjectDetailSnapshot, liveness: Liveness) -> Roadm
             RoadmapSection::Available
         };
     };
-    if liveness.is_gone(
-        work_status_is_running(&runtime.status),
-        runtime.process_alive,
+    if matches!(
+        runtime.current.state,
+        CurrentWorkState::Stalled | CurrentWorkState::Stopped | CurrentWorkState::Unobservable
     ) {
         return RoadmapSection::NeedsAttention;
     }
@@ -921,64 +901,6 @@ async fn resolve_status_wave(store: &SharedStore, requested: Option<&str>) -> Re
     .map_err(|err| anyhow!("{err}"))
 }
 
-/// One tmux reading for the whole command. `lf status` checks a handful of tmux
-/// sessions and `lf roadmap` checks every tmux session on the machine; both take
-/// a single `tmux list-sessions` snapshot here and look each name up in the set,
-/// never a `has-session` fork per name. `installed` is kept distinct from an
-/// empty `live` set: no tmux means liveness is *unknowable*, not *nothing alive*.
-#[derive(Debug, Clone)]
-struct TmuxLiveness {
-    installed: bool,
-    live: std::collections::HashSet<String>,
-}
-
-impl TmuxLiveness {
-    async fn snapshot() -> Self {
-        let installed = crate::engine::process::tmux_installed();
-        let live = if installed {
-            crate::engine::process::tmux_live_sessions()
-                .await
-                .unwrap_or_default()
-        } else {
-            std::collections::HashSet::new()
-        };
-        Self { installed, live }
-    }
-
-    fn is_alive(&self, tmux_name: &str) -> bool {
-        self.installed && self.live.contains(tmux_name)
-    }
-
-    fn liveness(&self) -> Liveness {
-        Liveness::probe(self.installed)
-    }
-}
-
-/// Whether this machine can tell a live Work process from a dead one. Without
-/// tmux there is no way to look, and `process_alive: false` means "unknown", not
-/// "gone" — a surface that reports the difference as a finding is inventing one.
-#[derive(Debug, Clone, Copy, PartialEq, Eq)]
-enum Liveness {
-    Observable,
-    Unknowable,
-}
-
-impl Liveness {
-    fn probe(tmux_installed: bool) -> Self {
-        if tmux_installed {
-            Self::Observable
-        } else {
-            Self::Unknowable
-        }
-    }
-
-    /// Work that records a live process the machine looked for and did not
-    /// find.
-    fn is_gone(self, claims_process: bool, process_alive: bool) -> bool {
-        self == Self::Observable && claims_process && !process_alive
-    }
-}
-
 /// What in this wave is waiting on somebody. Two rules, both read from Work:
 ///
 /// 1. Work's next move belongs to someone other than itself, or
@@ -987,34 +909,32 @@ impl Liveness {
 ///
 /// Plan rows with no active Work are not attention: an unstarted backlog item is not
 /// waiting on you.
-fn attention(
-    projects: &[ProjectDetailSnapshot],
-    now: time::OffsetDateTime,
-    liveness: Liveness,
-) -> Vec<AttentionItem> {
+fn attention(projects: &[ProjectDetailSnapshot], now: time::OffsetDateTime) -> Vec<AttentionItem> {
     let mut items = Vec::new();
     for project in projects {
         if let Some(runtime) = &project.runtime {
-            let dead = liveness.is_gone(
-                work_status_is_running(&runtime.status),
-                runtime.process_alive,
+            let unhealthy = matches!(
+                runtime.current.state,
+                CurrentWorkState::Stalled
+                    | CurrentWorkState::Stopped
+                    | CurrentWorkState::Unobservable
             );
             let self_owned = matches!(project.next_move.owner, NextMoveOwner::Project);
-            if dead || !(self_owned || work_status_is_terminal(&runtime.status)) {
+            if unhealthy || !(self_owned || work_status_is_terminal(&runtime.status)) {
                 items.push(AttentionItem {
                     kind: AttentionKind::Project,
                     id: runtime.work_id.clone(),
                     subject: project.project.slug.clone(),
-                    owner: if dead {
+                    owner: if unhealthy {
                         NextMoveOwner::Wave
                     } else {
                         project.next_move.owner
                     },
-                    reason: attention_reason(
-                        dead,
-                        work_status_label(&runtime.status),
-                        &runtime.reason,
-                    ),
+                    reason: if unhealthy {
+                        runtime.current.reason.clone()
+                    } else {
+                        runtime.reason.clone()
+                    },
                     since: runtime.updated_at.clone(),
                     age_secs: age_secs(&runtime.updated_at, now),
                 });
@@ -1024,26 +944,32 @@ fn attention(
             let Some(runtime) = &task.runtime else {
                 continue;
             };
-            let dead = liveness.is_gone(
-                work_status_is_running(&runtime.status),
-                runtime.process_alive,
+            let unhealthy = matches!(
+                runtime.current.state,
+                CurrentWorkState::Stalled
+                    | CurrentWorkState::Stopped
+                    | CurrentWorkState::Unobservable
             );
-            if !dead && matches!(task.next_move.owner, NextMoveOwner::Task) {
+            if !unhealthy && matches!(task.next_move.owner, NextMoveOwner::Task) {
                 continue;
             }
-            if !dead && work_status_is_terminal(&runtime.status) {
+            if !unhealthy && work_status_is_terminal(&runtime.status) {
                 continue;
             }
             items.push(AttentionItem {
                 kind: AttentionKind::Task,
                 id: runtime.work_id.clone(),
                 subject: task.task.identifier.clone(),
-                owner: if dead {
+                owner: if unhealthy {
                     NextMoveOwner::Wave
                 } else {
                     task.next_move.owner
                 },
-                reason: attention_reason(dead, work_status_label(&runtime.status), &runtime.reason),
+                reason: if unhealthy {
+                    runtime.current.reason.clone()
+                } else {
+                    runtime.reason.clone()
+                },
                 since: runtime.updated_at.clone(),
                 age_secs: age_secs(&runtime.updated_at, now),
             });
@@ -1051,14 +977,6 @@ fn attention(
     }
     items.sort_by_key(|item| std::cmp::Reverse(item.age_secs));
     items
-}
-
-fn attention_reason(dead: bool, status: &str, recorded: &str) -> String {
-    if dead {
-        format!("process is gone but the Work still records '{status}'")
-    } else {
-        recorded.to_string()
-    }
 }
 
 fn age_secs(since: &str, now: time::OffsetDateTime) -> Option<i64> {
@@ -1077,14 +995,18 @@ pub(crate) async fn snapshot_wave(store: &SharedStore, wave: &Wave) -> Result<Wa
     let repo = wave.repo().to_string();
     let goal_repo = crate::engine::worktrees::main_repo_root(Path::new(&repo))
         .unwrap_or_else(|_| Path::new(&repo).to_path_buf());
-    let paused = match crate::engine::wave_config::try_read_wave_config(&goal_repo, wave.name()) {
-        Ok(config) => config.and_then(|config| config.paused).unwrap_or(false),
-        Err(error) => {
-            tracing::warn!(wave = wave.name(), %error, "Wave policy is unavailable");
-            false
+    let paused = if wave.is_retired() {
+        false
+    } else {
+        match crate::engine::wave_config::try_read_wave_config(&goal_repo, wave.name()) {
+            Ok(config) => config.and_then(|config| config.paused).unwrap_or(false),
+            Err(error) => {
+                tracing::warn!(wave = wave.name(), %error, "Wave policy is unavailable");
+                false
+            }
         }
     };
-    let endpoint = if repo.is_empty() {
+    let endpoint = if repo.is_empty() || wave.is_retired() {
         None
     } else {
         live_endpoint(Path::new(&repo), wave.name()).await
@@ -1120,12 +1042,19 @@ pub(crate) async fn snapshot_wave(store: &SharedStore, wave: &Wave) -> Result<Wa
         .work_status(&WorkRef::Wave(wave.id().clone()))
         .await
         .map_err(|error| anyhow!("failed to read Wave Work status: {error}"))?;
+    let work = WorkRef::Wave(wave.id().clone());
+    let current = observe_current_work(store, &work, &status, now()).await?;
     Ok(WaveSnapshot {
         id: wave.id().to_string(),
         name: wave.name().to_string(),
         status,
-        goal: crate::engine::wave_config::read_wave_summary(&goal_repo, wave.name())
-            .unwrap_or_else(|_| wave.name().to_string()),
+        current,
+        goal: if wave.is_retired() {
+            wave.name().to_string()
+        } else {
+            crate::engine::wave_config::read_wave_summary(&goal_repo, wave.name())
+                .unwrap_or_else(|_| wave.name().to_string())
+        },
         repo,
         active_tasks,
         active_projects,
@@ -1135,6 +1064,9 @@ pub(crate) async fn snapshot_wave(store: &SharedStore, wave: &Wave) -> Result<Wa
         endpoint,
         created_at: wave.created_at().and_then(format_time),
         parent_wave_id: wave.parent_wave_id().map(ToString::to_string),
+        retired_at: wave.retired_at().and_then(format_time),
+        superseded_by_wave_id: wave.superseded_by_wave_id().map(ToString::to_string),
+        retirement_reason: wave.retirement_reason().map(str::to_string),
         home,
     })
 }
@@ -1143,34 +1075,23 @@ async fn snapshot_task_runtime(
     store: &SharedStore,
     task: &Task,
     status: WorkStatus,
-    liveness: &TmuxLiveness,
     now: time::OffsetDateTime,
 ) -> Result<TaskRuntimeSnapshot> {
-    let process_alive = work_status_is_running(&status)
-        && child_run_alive(store, &ChildRef::Task(task.id.clone()), liveness).await?;
-    let latest_event_at = store
-        .latest_task_event_at(&task.id)
+    let work = store
+        .work_for_child(&ChildRef::Task(task.id.clone()))
         .await
-        .map_err(|err| anyhow!("failed to read Task event log: {err}"))?;
-    let evidence = BodyEvidence {
-        intent: work_status_body_intent(&status),
-        observable: liveness.liveness() == Liveness::Observable,
-        process_alive,
-        progress_age: body_progress_age(latest_event_at, task.updated_at, now),
-        step: Some(task.lifecycle_phase.as_str().to_string()),
-        reason: work_status_reason(&status),
-    };
+        .map_err(|error| anyhow!("failed to resolve Task Work: {error}"))?;
+    let current = observe_current_work(store, &work, &status, now).await?;
     let routing_project_id = Some(task.project_id.to_string());
     Ok(TaskRuntimeSnapshot {
         work_id: task.id.to_string(),
         project_id: task.project_id.to_string(),
         routing_project_id,
-        reason: work_status_reason(&status),
+        reason: current.reason.clone(),
         status,
         updated_at: format_time(task.updated_at).unwrap_or_default(),
         provider: task.provider.clone(),
-        process_alive,
-        observation: observe(&evidence, DEFAULT_STALL_AFTER),
+        current,
     })
 }
 
@@ -1178,11 +1099,8 @@ async fn snapshot_project_runtime(
     store: &SharedStore,
     project: &Project,
     status: WorkStatus,
-    liveness: &TmuxLiveness,
     now: time::OffsetDateTime,
 ) -> Result<ProjectRuntimeSnapshot> {
-    let process_alive = work_status_is_running(&status)
-        && child_run_alive(store, &ChildRef::Project(project.id.clone()), liveness).await?;
     let pending_observations = if work_status_is_terminal(&status) {
         store
             .pending_observations(&ObservationRecipient::Project {
@@ -1198,54 +1116,24 @@ async fn snapshot_project_runtime(
             .map_err(|err| anyhow!("failed to read Project observation outbox: {err}"))?
             .len() as u32
     };
-    let latest_event = store
-        .latest_project_event(&project.id)
+    let work = store
+        .work_for_child(&ChildRef::Project(project.id.clone()))
         .await
-        .map_err(|err| anyhow!("failed to read Project event log: {err}"))?;
-    let latest_event_at = latest_event.as_ref().map(|event| event.created_at);
-    let reason =
-        crate::project::status_reason(&status, latest_event.as_ref().map(|event| &event.kind));
-    let evidence = BodyEvidence {
-        intent: work_status_body_intent(&status),
-        observable: liveness.liveness() == Liveness::Observable,
-        process_alive,
-        progress_age: body_progress_age(latest_event_at, project.updated_at, now),
-        step: Some(format!("iteration {}", project.iteration)),
-        reason: reason.clone(),
-    };
+        .map_err(|error| anyhow!("failed to resolve Project Work: {error}"))?;
+    let current = observe_current_work(store, &work, &status, now).await?;
     Ok(ProjectRuntimeSnapshot {
         work_id: project.id.to_string(),
-        reason,
+        reason: current.reason.clone(),
         status,
         updated_at: format_time(project.updated_at).unwrap_or_default(),
         iteration: project.iteration,
         pending_observations,
         provider: project.provider.clone(),
-        process_alive,
-        observation: observe(&evidence, DEFAULT_STALL_AFTER),
-    })
-}
-
-async fn child_run_alive(
-    store: &SharedStore,
-    child: &ChildRef,
-    liveness: &TmuxLiveness,
-) -> Result<bool> {
-    let work = store
-        .work_for_child(child)
-        .await
-        .map_err(|error| anyhow!("failed to resolve child Work: {error}"))?;
-    let Some(run) = store
-        .current_run(&work)
-        .await
-        .map_err(|error| anyhow!("failed to read child Run: {error}"))?
-    else {
-        return Ok(false);
-    };
-    Ok(match run.containment {
-        None => false,
-        Some(Containment::Tmux { name }) => liveness.is_alive(&name),
-        Some(Containment::ProcessGroup { .. }) => true,
+        current,
+        last_failure: store
+            .latest_project_failure(&project.id)
+            .await
+            .map_err(|err| anyhow!("failed to read Project failure history: {err}"))?,
     })
 }
 
@@ -1309,7 +1197,6 @@ async fn snapshot_projects(
     projects: Vec<Project>,
     tasks: Vec<Task>,
     planning: PmSnapshot,
-    liveness: &TmuxLiveness,
     probe_pr_empty: bool,
 ) -> Result<ProjectSnapshots> {
     let mut details = planning
@@ -1331,7 +1218,7 @@ async fn snapshot_projects(
             find_project_index(&details, project.plan.id.as_str(), &project.plan.slug)
         else {
             if !work_status_is_terminal(&status) {
-                unavailable_projects.push(unavailable_project(project, status));
+                unavailable_projects.push(unavailable_project(store, project, status).await?);
             }
             continue;
         };
@@ -1340,7 +1227,7 @@ async fn snapshot_projects(
         }
         details[index].next_move = next_move_for_project(&status);
         details[index].runtime =
-            Some(snapshot_project_runtime(store, project, status, liveness, now()).await?);
+            Some(snapshot_project_runtime(store, project, status, now()).await?);
         details[index].direction =
             current_direction(store, ChildRef::Project(project.id.clone())).await?;
     }
@@ -1352,7 +1239,7 @@ async fn snapshot_projects(
         });
         details[index]
             .tasks
-            .push(snapshot_task_detail(store, item, runtime_task, liveness, probe_pr_empty).await?);
+            .push(snapshot_task_detail(store, item, runtime_task, probe_pr_empty).await?);
     }
 
     for runtime_task in &tasks {
@@ -1381,13 +1268,14 @@ async fn snapshot_projects(
                 None => {
                     let parent_status =
                         child_work_status(store, &ChildRef::Project(parent.id.clone())).await?;
-                    unavailable_projects.push(unavailable_project(parent, parent_status));
+                    unavailable_projects
+                        .push(unavailable_project(store, parent, parent_status).await?);
                     unavailable_projects.len() - 1
                 }
             };
             unavailable_projects[unavailable_index]
                 .tasks
-                .push(unavailable_task(runtime_task, status));
+                .push(unavailable_task(store, runtime_task, status).await?);
             continue;
         };
         if details[project_index].tasks.iter().any(|detail| {
@@ -1409,9 +1297,9 @@ async fn snapshot_projects(
             team_id: String::new(),
             assignee: None,
         };
-        details[project_index].tasks.push(
-            snapshot_task_detail(store, item, Some(runtime_task), liveness, probe_pr_empty).await?,
-        );
+        details[project_index]
+            .tasks
+            .push(snapshot_task_detail(store, item, Some(runtime_task), probe_pr_empty).await?);
     }
 
     for project in &mut details {
@@ -1441,7 +1329,11 @@ async fn snapshot_projects(
     })
 }
 
-fn unavailable_project(project: &Project, status: WorkStatus) -> UnavailableProjectEvidence {
+async fn unavailable_project(
+    store: &SharedStore,
+    project: &Project,
+    status: WorkStatus,
+) -> Result<UnavailableProjectEvidence> {
     const REASON: &str = "Project is absent from the current PM snapshot";
     let recovery = if work_status_is_terminal(&status) {
         format!(
@@ -1454,32 +1346,44 @@ fn unavailable_project(project: &Project, status: WorkStatus) -> UnavailableProj
             project.plan.slug
         )
     };
-    UnavailableProjectEvidence {
+    let current = snapshot_project_runtime(store, project, status.clone(), now())
+        .await?
+        .current;
+    Ok(UnavailableProjectEvidence {
         work_id: project.id.to_string(),
         project_id: project.plan.id.as_str().to_string(),
         project_slug: project.plan.slug.clone(),
         status,
+        current,
         owner: NextMoveOwner::Wave,
         reason: REASON.to_string(),
         recovery,
         tasks: Vec::new(),
-    }
+    })
 }
 
-fn unavailable_task(task: &Task, status: WorkStatus) -> UnavailableTaskEvidence {
+async fn unavailable_task(
+    store: &SharedStore,
+    task: &Task,
+    status: WorkStatus,
+) -> Result<UnavailableTaskEvidence> {
     const REASON: &str = "Task's owning Project is absent from the current PM snapshot";
-    UnavailableTaskEvidence {
+    let current = snapshot_task_runtime(store, task, status.clone(), now())
+        .await?
+        .current;
+    Ok(UnavailableTaskEvidence {
         work_id: task.id.to_string(),
         task_id: task.plan.id.as_str().to_string(),
         task_identifier: task.plan.identifier.clone(),
         status,
+        current,
         owner: NextMoveOwner::Wave,
         reason: REASON.to_string(),
         recovery: format!(
             "lf work abandon task {} --reason \"Project is absent from the current PM snapshot\"",
             task.id
         ),
-    }
+    })
 }
 
 fn project_index(projects: &[ProjectDetailSnapshot], id: &str, slug: &str) -> Result<usize> {
@@ -1501,7 +1405,6 @@ async fn snapshot_task_detail(
     store: &SharedStore,
     item: PmItem,
     task: Option<&Task>,
-    liveness: &TmuxLiveness,
     probe_pr_empty: bool,
 ) -> Result<TaskDetailSnapshot> {
     let prs = match task {
@@ -1514,7 +1417,7 @@ async fn snapshot_task_detail(
     let runtime = match task {
         Some(task) => {
             let status = child_work_status(store, &ChildRef::Task(task.id.clone())).await?;
-            Some(snapshot_task_runtime(store, task, status, liveness, observed_at).await?)
+            Some(snapshot_task_runtime(store, task, status, observed_at).await?)
         }
         None => None,
     };
@@ -1553,7 +1456,7 @@ async fn snapshot_task_detail(
             reason: "Task is ready to start".to_string(),
         },
     };
-    let process = task_process_evidence(runtime.as_ref(), liveness);
+    let process = task_process_evidence(runtime.as_ref());
     let local_progress = task_local_progress(
         task,
         runtime.as_ref(),
@@ -1602,7 +1505,11 @@ async fn snapshot_task_detail(
                     completion_refusal: completion_refusal.as_deref(),
                     resume_refusal: resume_refusal.as_deref(),
                     ci: active.and_then(|pr| pr.fresh_ci()),
-                    process_alive: process.alive,
+                    current_state: runtime
+                        .as_ref()
+                        .expect("Task runtime exists when action evidence is derived")
+                        .current
+                        .state,
                     predecessor_phase,
                     abandon_intent: task.abandon_intent.is_some(),
                     local_progress_unsettled: local_progress.unsettled,
@@ -1655,10 +1562,7 @@ async fn snapshot_task_detail(
     })
 }
 
-fn task_process_evidence(
-    runtime: Option<&TaskRuntimeSnapshot>,
-    liveness: &TmuxLiveness,
-) -> TaskProcessEvidence {
+fn task_process_evidence(runtime: Option<&TaskRuntimeSnapshot>) -> TaskProcessEvidence {
     let Some(runtime) = runtime else {
         return TaskProcessEvidence {
             state: TaskProcessEvidenceState::NotApplicable,
@@ -1673,17 +1577,26 @@ fn task_process_evidence(
             reason: None,
         };
     }
-    if !liveness.installed {
-        return TaskProcessEvidence {
+    match runtime.current.liveness.as_ref() {
+        Some(liveness) if liveness.fresh && liveness.state == RunLivenessState::Present => {
+            TaskProcessEvidence {
+                state: TaskProcessEvidenceState::Observed,
+                alive: Some(true),
+                reason: None,
+            }
+        }
+        Some(liveness) if liveness.fresh && liveness.state == RunLivenessState::Absent => {
+            TaskProcessEvidence {
+                state: TaskProcessEvidenceState::Observed,
+                alive: Some(false),
+                reason: Some("the owning Home proved the Task process is gone".into()),
+            }
+        }
+        _ => TaskProcessEvidence {
             state: TaskProcessEvidenceState::Unavailable,
             alive: None,
-            reason: Some("tmux is unavailable; this machine cannot observe the Task body".into()),
-        };
-    }
-    TaskProcessEvidence {
-        state: TaskProcessEvidenceState::Observed,
-        alive: Some(runtime.process_alive),
-        reason: None,
+            reason: Some("the owning Home has no fresh Task liveness evidence".into()),
+        },
     }
 }
 
@@ -2127,6 +2040,14 @@ fn format_time(ts: time::OffsetDateTime) -> Option<String> {
         .ok()
 }
 
+fn historical_failure_line(failure: &crate::project::HistoricalFailure) -> String {
+    format!(
+        "last failure at {}: {}",
+        format_time(failure.occurred_at).unwrap_or_else(|| failure.occurred_at.to_string()),
+        failure.message
+    )
+}
+
 /// With no registry on this machine, `lf ls`/`status` have nothing to read —
 /// emit the empty snapshot (`[]`/`null`) or a User note, and succeed.
 fn no_registry(json: bool, empty: &str) -> Result<()> {
@@ -2163,7 +2084,7 @@ fn print_wave_table(snapshots: &[WaveSnapshot]) {
             "{name:<16}  {repo:<28}  {status:<8}  {enabled:<7}  {turns:<7}  {live:<5}  {tasks:>5}  {projects:>8}  {home:<16}  {endpoint}",
             name = truncate(&wave.name, 16),
             repo = truncate_start(&wave.repo, 28),
-            status = work_status_label(&wave.status),
+            status = current_work_label(wave.current.state),
             enabled = if wave.enabled { "yes" } else { "no" },
             turns = if wave.paused { "paused" } else { "enabled" },
             live = if wave.live { "yes" } else { "no" },
@@ -2185,28 +2106,25 @@ fn work_status_label(status: &WorkStatus) -> &'static str {
     }
 }
 
+fn current_work_label(state: CurrentWorkState) -> &'static str {
+    match state {
+        CurrentWorkState::Working => "working",
+        CurrentWorkState::Stalled => "stalled",
+        CurrentWorkState::Stopped => "stopped",
+        CurrentWorkState::Unobservable => "unobservable",
+        CurrentWorkState::Ready => "ready",
+        CurrentWorkState::Waiting => "waiting",
+        CurrentWorkState::Done => "done",
+        CurrentWorkState::Abandoned => "abandoned",
+    }
+}
+
 fn work_status_is_running(status: &WorkStatus) -> bool {
     matches!(status, WorkStatus::Running { .. })
 }
 
 fn work_status_is_terminal(status: &WorkStatus) -> bool {
     matches!(status, WorkStatus::Done | WorkStatus::Abandoned)
-}
-
-fn work_status_body_intent(status: &WorkStatus) -> BodyIntent {
-    match status {
-        WorkStatus::Running { .. } => BodyIntent::Active,
-        WorkStatus::Ready | WorkStatus::Waiting { .. } => BodyIntent::Waiting,
-        WorkStatus::Done | WorkStatus::Abandoned => BodyIntent::Terminal,
-    }
-}
-
-fn work_status_reason(status: &WorkStatus) -> String {
-    match status {
-        WorkStatus::Running { run_id } => format!("Run {run_id} is active"),
-        WorkStatus::Waiting { .. } => "waiting for input or an event".to_string(),
-        other => work_status_label(other).to_string(),
-    }
 }
 
 async fn child_work_status(store: &SharedStore, child: &ChildRef) -> Result<WorkStatus> {
@@ -2246,13 +2164,24 @@ fn print_status(status: &WaveDetailSnapshot) {
         bold = colors.bold,
         reset = colors.reset,
         name = wave.name,
-        status = work_status_label(&wave.status),
+        status = if wave.retired_at.is_some() {
+            "retired"
+        } else {
+            current_work_label(wave.current.state)
+        },
         loop_state = status
             .loop_state
             .as_deref()
             .map(|m| format!("  loop:{m}"))
             .unwrap_or_default(),
     );
+    if let Some(retired_at) = &wave.retired_at {
+        println!(
+            "  history   retired at {retired_at}; superseded by {}: {}",
+            wave.superseded_by_wave_id.as_deref().unwrap_or("-"),
+            wave.retirement_reason.as_deref().unwrap_or("retired")
+        );
+    }
     println!("  goal      {}", wave.goal);
     println!(
         "  turns     {}",
@@ -2280,9 +2209,9 @@ fn print_status(status: &WaveDetailSnapshot) {
         for project in &status.projects {
             let (project_status, iteration, reason) = match &project.runtime {
                 Some(runtime) => (
-                    work_status_label(&runtime.status),
+                    current_work_label(runtime.current.state),
                     runtime.iteration,
-                    runtime.reason.as_str(),
+                    runtime.current.reason.as_str(),
                 ),
                 None => ("unstarted", 0, project.next_move.reason.as_str()),
             };
@@ -2293,9 +2222,19 @@ fn print_status(status: &WaveDetailSnapshot) {
                 iteration = iteration,
                 reason = reason,
             );
+            if let Some(failure) = project
+                .runtime
+                .as_ref()
+                .and_then(|runtime| runtime.last_failure.as_ref())
+            {
+                println!("      {}", historical_failure_line(failure));
+            }
             for task in &project.tasks {
                 let (task_status, reason) = match &task.runtime {
-                    Some(runtime) => (work_status_label(&runtime.status), runtime.reason.as_str()),
+                    Some(runtime) => (
+                        current_work_label(runtime.current.state),
+                        runtime.current.reason.as_str(),
+                    ),
                     None if task.task.completed => ("completed", task.next_move.reason.as_str()),
                     None => ("unstarted", task.next_move.reason.as_str()),
                 };
@@ -2336,7 +2275,7 @@ fn print_unavailable_projects(projects: &[UnavailableProjectEvidence]) {
         println!(
             "    {slug:<24}  {status:<10}  {owner:<8}  {work}  {reason}",
             slug = truncate(&project.project_slug, 24),
-            status = work_status_label(&project.status),
+            status = current_work_label(project.current.state),
             owner = owner_label(&project.owner),
             work = project.work_id,
             reason = project.reason,
@@ -2346,7 +2285,7 @@ fn print_unavailable_projects(projects: &[UnavailableProjectEvidence]) {
             println!(
                 "      {identifier:<12}  {status:<10}  {owner:<8}  {work}  {reason}",
                 identifier = truncate(&task.task_identifier, 12),
-                status = work_status_label(&task.status),
+                status = current_work_label(task.current.state),
                 owner = owner_label(&task.owner),
                 work = task.work_id,
                 reason = task.reason,
@@ -2514,7 +2453,7 @@ fn print_roadmap(roadmap: &RoadmapSnapshot) {
             bold = colors.bold,
             reset = colors.reset,
             name = wave.wave.name,
-            status = work_status_label(&wave.wave.status),
+            status = current_work_label(wave.wave.current.state),
         );
         print_unavailable_projects(&wave.unavailable_projects);
         let details = match &wave.projects {
@@ -2642,18 +2581,154 @@ fn truncate_start(value: &str, width: usize) -> String {
 
 #[cfg(test)]
 mod tests {
+    use std::path::PathBuf;
+    use std::sync::Arc;
     use std::time::Duration;
 
     use time::OffsetDateTime;
 
     use super::{
-        derive_task_attention, next_move_for_task, truncate_start, LocalProgressEvidence,
+        derive_task_attention, historical_failure_line, next_move_for_task,
+        snapshot_project_runtime, truncate_start, LocalProgressEvidence,
         LocalProgressEvidenceState, NextMove, NextMoveOwner, TaskAttentionEvidence,
         TaskAttentionLevel, TaskProcessEvidence, TaskProcessEvidenceState, TaskRuntimeSnapshot,
     };
-    use crate::child::{observe, BodyEvidence, BodyIntent};
-    use crate::durable::WorkStatus;
+    use crate::child::{observe, CurrentWorkEvidence, CurrentWorkIntent};
+    use crate::durable::{
+        BoundaryState, Containment, RunAdvance, RunLivenessEvidence, RunLivenessState, RunTrigger,
+        WorkStatus,
+    };
+    use crate::planning::{LinearProjectId, ProjectPlan};
+    use crate::project::{Project, ProjectEventKind, ProjectId};
+    use crate::store::sqlite::SqliteStore;
+    use crate::store::Store;
     use crate::task::{CiObservation, CiState, PrMergeMode, PrMergeRequest, PrPhase};
+    use crate::wave::Wave;
+
+    #[tokio::test]
+    async fn status_surfaces_keep_credential_failure_in_history() {
+        let directory = tempfile::tempdir().unwrap();
+        let path = directory.path().join("registry.db");
+        let sqlite = SqliteStore::new(&path).unwrap();
+        let connection = rusqlite::Connection::open(&path).unwrap();
+        let status_truth_is_materialized = connection
+            .query_row(
+                "SELECT EXISTS(
+                    SELECT 1 FROM sqlite_master
+                    WHERE type='table' AND name='run_liveness'
+                 )",
+                [],
+                |row| row.get::<_, bool>(0),
+            )
+            .unwrap();
+        if !status_truth_is_materialized {
+            connection
+                .execute_batch(&crate::store::migrations::migration_sql_for_test(
+                    "status_truth",
+                ))
+                .unwrap();
+        }
+        drop(connection);
+        let now = OffsetDateTime::now_utc();
+        let wave = Wave::new(
+            crate::id::WaveId::new(),
+            "infrastructure".to_string(),
+            directory.path().display().to_string(),
+        );
+        sqlite.create_wave(&wave).unwrap();
+        let project = Project {
+            id: ProjectId::new(),
+            plan: ProjectPlan {
+                id: LinearProjectId::new("stability-security").unwrap(),
+                slug: "stability-security".to_string(),
+                name: "Stability and security".to_string(),
+                prompt_context: "Keep status truthful.".to_string(),
+                pm_snapshot_synced_at: now.unix_timestamp(),
+            },
+            wave_id: wave.id().clone(),
+            iteration: 2,
+            observation_cursor: 0,
+            last_state_fingerprint: None,
+            agent: "codex".to_string(),
+            provider: "codex".to_string(),
+            provider_session_id: None,
+            abandon_intent: None,
+            created_at: now,
+            updated_at: now,
+        };
+        sqlite.insert_project(&project).unwrap();
+        let work = sqlite
+            .work_for_child(&crate::child::ChildRef::Project(project.id.clone()))
+            .unwrap();
+        let (_, failed_lease) = sqlite.reserve_run(&work, &RunTrigger::User).unwrap();
+        sqlite
+            .advance_run(
+                &failed_lease,
+                &RunAdvance::RunStarting {
+                    containment: Containment::Tmux {
+                        name: "credential-ghost".to_string(),
+                    },
+                    cwd: PathBuf::from("/repo"),
+                },
+            )
+            .unwrap();
+        let failure = sqlite
+            .append_project_event_for_run(
+                &project.id,
+                &failed_lease,
+                &ProjectEventKind::Failed {
+                    error: "project runner failed: credential is missing".to_string(),
+                    resumable: true,
+                },
+            )
+            .unwrap();
+        sqlite
+            .finish_run(&failed_lease, BoundaryState::Failed)
+            .unwrap();
+        rusqlite::Connection::open(&path)
+            .unwrap()
+            .execute(
+                "UPDATE project_events SET created_at=created_at-60 WHERE id=?1",
+                [failure.id],
+            )
+            .unwrap();
+
+        let (_, successful_lease) = sqlite.reserve_run(&work, &RunTrigger::User).unwrap();
+        sqlite
+            .advance_run(
+                &successful_lease,
+                &RunAdvance::RunStarting {
+                    containment: Containment::Tmux {
+                        name: "healthy-successor".to_string(),
+                    },
+                    cwd: PathBuf::from("/repo"),
+                },
+            )
+            .unwrap();
+        sqlite
+            .finish_run(&successful_lease, BoundaryState::Succeeded)
+            .unwrap();
+        let successful_run = sqlite.run_by_id(&successful_lease.run_id).unwrap();
+
+        let store = Arc::new(Store::from_sqlite_for_test(sqlite));
+        let status = store.work_status(&work).await.unwrap();
+        let runtime = snapshot_project_runtime(&store, &project, status, now)
+            .await
+            .unwrap();
+        let historical = runtime.last_failure.unwrap();
+
+        assert_eq!(runtime.status, WorkStatus::Ready);
+        assert_eq!(runtime.current.state, crate::child::CurrentWorkState::Ready);
+        assert_eq!(runtime.current.reason, "ready");
+        assert!(!runtime.current.reason.contains("credential"));
+        assert_eq!(historical.run_id, Some(failed_lease.run_id));
+        assert_eq!(
+            historical.message,
+            "project runner failed: credential is missing"
+        );
+        assert!(historical.occurred_at < successful_run.created_at);
+        assert!(historical_failure_line(&historical).starts_with("last failure at "));
+    }
 
     #[test]
     fn repository_columns_keep_the_distinguishing_path_tail() {
@@ -2691,12 +2766,14 @@ mod tests {
             reason: "Run is active".to_string(),
             updated_at: "2026-07-21T00:00:00Z".to_string(),
             provider: "codex".to_string(),
-            process_alive: true,
-            observation: observe(
-                &BodyEvidence {
-                    intent: BodyIntent::Active,
-                    observable: true,
-                    process_alive: true,
+            current: observe(
+                &CurrentWorkEvidence {
+                    intent: CurrentWorkIntent::Active,
+                    liveness: Some(RunLivenessEvidence {
+                        state: RunLivenessState::Present,
+                        observed_at: Some(OffsetDateTime::UNIX_EPOCH),
+                        fresh: true,
+                    }),
                     progress_age: Duration::ZERO,
                     step: Some("demo".to_string()),
                     reason: "Run is active".to_string(),

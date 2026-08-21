@@ -3,7 +3,7 @@ use std::process::Command;
 
 use loopflow::durable::{
     AdvanceReceipt, Containment, ContainmentObservation, HomeId, InvocationRoute, RunAdvance,
-    RunTrigger, StopCause, WorkRef,
+    RunTrigger, StopCause, WorkRef, WorkStatus,
 };
 use loopflow::engine::wave_context::{resolve_managed_wave, WaveResolveError};
 use loopflow::id::WaveId;
@@ -47,6 +47,25 @@ fn registered_wave(repo: &Path, slug: &str) -> Wave {
         locator.slug().to_string(),
         locator.repo().to_string(),
     )
+}
+
+fn apply_status_truth(database: &Path) {
+    let connection = rusqlite::Connection::open(database).unwrap();
+    let has_retirement = connection
+        .prepare("PRAGMA table_info(waves)")
+        .unwrap()
+        .query_map([], |row| row.get::<_, String>(1))
+        .unwrap()
+        .any(|column| column.is_ok_and(|column| column == "retired_at"));
+    if has_retirement {
+        return;
+    }
+    connection
+        .execute_batch(&loopflow_test_support::migration_sql_for_test(
+            Path::new(env!("CARGO_MANIFEST_DIR")),
+            "status_truth",
+        ))
+        .unwrap();
 }
 
 fn project(wave: &Wave) -> Project {
@@ -269,6 +288,7 @@ async fn repositories_own_same_named_waves_and_relocation_preserves_identity() {
     let store = open_store(&StorageConfig::sqlite(database.clone()))
         .await
         .unwrap();
+    apply_status_truth(&database);
     let alpha = registered_wave(&repo_a, "infrastructure");
     let beta = registered_wave(&repo_b, "infrastructure");
     store.create_wave(&alpha).await.unwrap();
@@ -510,10 +530,22 @@ async fn repositories_own_same_named_waves_and_relocation_preserves_identity() {
 
     let occupied = registered_wave(&repo_a, "occupied");
     store.create_wave(&occupied).await.unwrap();
+    store
+        .put_pm_snapshot(PmSnapshotRow {
+            wave_id: occupied.id().clone(),
+            provider: "linear".to_string(),
+            initiative: "initiative-occupied".to_string(),
+            synced_at: 1,
+            payload: r#"{"projects":[],"items":[]}"#.to_string(),
+        })
+        .await
+        .unwrap();
     let collision = relocate_wave(&store, alpha.id(), &repo_a, None, Some("occupied"))
         .await
         .unwrap_err();
-    assert!(collision.to_string().contains("already belongs"));
+    assert!(collision.to_string().contains(alpha.id().as_str()));
+    assert!(collision.to_string().contains(occupied.id().as_str()));
+    assert!(collision.to_string().contains("PM snapshot"));
 
     author_wave(&repo_a, "platform", "divergent");
     let divergence = relocate_wave(&store, alpha.id(), &repo_a, None, Some("platform"))
@@ -663,5 +695,340 @@ async fn repositories_own_same_named_waves_and_relocation_preserves_identity() {
             .unwrap()
             .id(),
         beta.id()
+    );
+}
+
+#[tokio::test]
+async fn missing_repository_wave_can_be_disabled_and_relocated_from_its_target() {
+    let tmp = tempfile::tempdir().unwrap();
+    let home = tmp.path().join("home");
+    let source = tmp.path().join("missing-source");
+    let target = tmp.path().join("surviving-target");
+    repository(&source);
+    repository(&target);
+    author_wave(&source, "feedback", "feedback");
+    author_wave(&target, "feedback", "feedback");
+    std::fs::create_dir_all(&home).unwrap();
+    let database = home.join("loopflow.db");
+    let store = open_store(&StorageConfig::sqlite(database.clone()))
+        .await
+        .unwrap();
+    apply_status_truth(&database);
+    let wave = registered_wave(&source, "feedback");
+    store.create_wave(&wave).await.unwrap();
+
+    std::fs::remove_dir_all(&source).unwrap();
+    let disabled = lf(
+        &home,
+        &target,
+        &["work", "disable", "wave", wave.id().as_str(), "--json"],
+    );
+    assert_eq!(disabled["kind"], "disabled");
+    assert!(!disabled["enabled"].as_bool().unwrap());
+
+    let relocated = lf(
+        &home,
+        &target,
+        &[
+            "work",
+            "relocate",
+            "wave",
+            wave.id().as_str(),
+            "--repo",
+            target.to_str().unwrap(),
+            "--json",
+        ],
+    );
+    assert_eq!(relocated["wave_id"], wave.id().as_str());
+    let repaired = store.get_wave(wave.id()).await.unwrap().unwrap();
+    assert_eq!(
+        repaired.repo(),
+        std::fs::canonicalize(&target)
+            .unwrap()
+            .display()
+            .to_string()
+    );
+    assert!(
+        !store
+            .placement(&WorkRef::Wave(wave.id().clone()))
+            .await
+            .unwrap()
+            .enabled
+    );
+}
+
+#[tokio::test]
+async fn relocation_retires_an_empty_destination_shadow_without_losing_identity() {
+    let tmp = tempfile::tempdir().unwrap();
+    let source = tmp.path().join("cadenza");
+    let target = tmp.path().join("kata");
+    repository(&source);
+    repository(&target);
+    for slug in ["core", "ear", "theory"] {
+        author_wave(&source, slug, slug);
+        author_wave(&target, slug, slug);
+    }
+    author_wave(&target, "scores", "scores");
+    let home = tmp.path().join("home");
+    std::fs::create_dir_all(&home).unwrap();
+    let database = home.join("loopflow.db");
+    let store = open_store(&StorageConfig::sqlite(database.clone()))
+        .await
+        .unwrap();
+    apply_status_truth(&database);
+    let identities = ["core", "ear", "theory"].map(|slug| {
+        (
+            registered_wave(&source, slug),
+            registered_wave(&target, slug),
+        )
+    });
+    let scores = registered_wave(&target, "scores");
+    for (established, shadow) in &identities {
+        store.create_wave(established).await.unwrap();
+        store.create_wave(shadow).await.unwrap();
+    }
+    store.create_wave(&scores).await.unwrap();
+    let initial_wave_count: i64 = rusqlite::Connection::open(&database)
+        .unwrap()
+        .query_row("SELECT COUNT(*) FROM waves", [], |row| row.get(0))
+        .unwrap();
+
+    for (established, shadow) in &identities {
+        let receipt = relocate_wave(&store, established.id(), &source, Some(&target), None)
+            .await
+            .unwrap();
+        assert_eq!(receipt.wave_id, established.id().as_str());
+
+        let active = store
+            .get_wave_at(&WaveLocator::discover(&target, established.name()).unwrap())
+            .await
+            .unwrap()
+            .unwrap();
+        assert_eq!(active.id(), established.id());
+        let retired = store.get_wave(shadow.id()).await.unwrap().unwrap();
+        assert!(retired.is_retired());
+        assert_eq!(retired.superseded_by_wave_id(), Some(established.id()));
+        assert!(retired
+            .retirement_reason()
+            .unwrap()
+            .contains("registration-only"));
+        assert_eq!(
+            store
+                .work_status(&WorkRef::Wave(shadow.id().clone()))
+                .await
+                .unwrap(),
+            WorkStatus::Abandoned
+        );
+        assert!(
+            !store
+                .placement(&WorkRef::Wave(shadow.id().clone()))
+                .await
+                .unwrap()
+                .enabled
+        );
+
+        let historical = resolve_managed_wave(
+            Some(&store),
+            Some(&target),
+            Some(shadow.id().as_str()),
+            None,
+        )
+        .await
+        .unwrap();
+        assert_eq!(historical.id(), shadow.id());
+        assert!(historical.is_retired());
+        let historical_status =
+            String::from_utf8(lf_output(&home, &target, &["status", shadow.id().as_str()]).stdout)
+                .unwrap();
+        assert!(historical_status.contains("retired at"));
+        assert!(historical_status.contains(established.id().as_str()));
+    }
+    assert_eq!(
+        rusqlite::Connection::open(&database)
+            .unwrap()
+            .query_row("SELECT COUNT(*) FROM waves", [], |row| row.get::<_, i64>(0))
+            .unwrap(),
+        initial_wave_count,
+        "relocation must not mint another Wave identity"
+    );
+    assert_eq!(
+        store
+            .get_wave_at(&WaveLocator::discover(&target, "scores").unwrap())
+            .await
+            .unwrap()
+            .unwrap()
+            .id(),
+        scores.id()
+    );
+    assert_eq!(store.list_waves(None).await.unwrap().len(), 4);
+
+    let reopened = open_store(&StorageConfig::sqlite(database)).await.unwrap();
+    assert_eq!(reopened.list_waves(None).await.unwrap().len(), 4);
+    for (established, _) in &identities {
+        assert_eq!(
+            reopened
+                .get_wave_at(&WaveLocator::discover(&target, established.name()).unwrap())
+                .await
+                .unwrap()
+                .unwrap()
+                .id(),
+            established.id()
+        );
+    }
+}
+
+#[tokio::test]
+async fn relocation_refuses_every_meaningful_destination_history() {
+    let tmp = tempfile::tempdir().unwrap();
+    let source = tmp.path().join("source");
+    let target = tmp.path().join("target");
+    repository(&source);
+    repository(&target);
+    author_wave(&source, "core", "core");
+    let database = tmp.path().join("loopflow.db");
+    let store = open_store(&StorageConfig::sqlite(database.clone()))
+        .await
+        .unwrap();
+    apply_status_truth(&database);
+    let established = registered_wave(&source, "core");
+    store.create_wave(&established).await.unwrap();
+
+    let run_shadow = registered_wave(&target, "with-run");
+    store.create_wave(&run_shadow).await.unwrap();
+    store
+        .reserve_run(&WorkRef::Wave(run_shadow.id().clone()), RunTrigger::User)
+        .await
+        .unwrap();
+
+    let project_shadow = registered_wave(&target, "with-task");
+    store.create_wave(&project_shadow).await.unwrap();
+    let owned_project = project(&project_shadow);
+    store.create_project(&owned_project).await.unwrap();
+    let (owned_task, owned_pr) = task(&project_shadow, &owned_project, &target);
+    store.create_task(&owned_task, &owned_pr).await.unwrap();
+
+    let child_shadow = registered_wave(&target, "with-child");
+    store.create_wave(&child_shadow).await.unwrap();
+    let child =
+        registered_wave(&target, "with-child/nested").with_parent(child_shadow.id().clone());
+    store.create_wave(&child).await.unwrap();
+
+    let pm_shadow = registered_wave(&target, "with-pm");
+    store.create_wave(&pm_shadow).await.unwrap();
+    store
+        .put_pm_snapshot(PmSnapshotRow {
+            wave_id: pm_shadow.id().clone(),
+            provider: "linear".to_string(),
+            initiative: "initiative-pm".to_string(),
+            synced_at: 1,
+            payload: r#"{"projects":[],"items":[]}"#.to_string(),
+        })
+        .await
+        .unwrap();
+
+    let steer_shadow = registered_wave(&target, "with-steer");
+    store.create_wave(&steer_shadow).await.unwrap();
+    let connection = rusqlite::Connection::open(&database).unwrap();
+    let steer_epoch: String = connection
+        .query_row(
+            "SELECT id FROM epochs WHERE wave_id = ?1 AND state = 'open'",
+            [steer_shadow.id().as_str()],
+            |row| row.get(0),
+        )
+        .unwrap();
+    connection
+        .execute(
+            "INSERT INTO epoch_revisions (epoch_id, rev, kind, source_id, created_at)
+             VALUES (?1, 1, 'steer', 'steer_11111111111111111111111111111111', 2)",
+            [&steer_epoch],
+        )
+        .unwrap();
+    connection
+        .execute(
+            "INSERT INTO steers (
+                 id, epoch_id, rev, author_kind, author_run_id, text, issued_at
+             ) VALUES (
+                 'steer_11111111111111111111111111111111', ?1, 1,
+                 'user', NULL, 'authored direction', 2
+             )",
+            [&steer_epoch],
+        )
+        .unwrap();
+    connection
+        .execute(
+            "UPDATE epochs SET current_rev = 1 WHERE id = ?1",
+            [&steer_epoch],
+        )
+        .unwrap();
+
+    let epoch_shadow = registered_wave(&target, "with-epoch");
+    store.create_wave(&epoch_shadow).await.unwrap();
+    connection
+        .execute(
+            "UPDATE epochs
+             SET state = 'abandoned', terminal_at = 2
+             WHERE wave_id = ?1 AND state = 'open'",
+            [epoch_shadow.id().as_str()],
+        )
+        .unwrap();
+    let second_epoch = "epoch_22222222222222222222222222222222";
+    connection
+        .execute(
+            "INSERT INTO epochs (
+                 id, number, wave_id, project_id, task_id, state, current_rev,
+                 created_at, terminal_at
+             ) VALUES (?1, 2, ?2, NULL, NULL, 'open', 0, 3, NULL)",
+            [second_epoch, epoch_shadow.id().as_str()],
+        )
+        .unwrap();
+    connection
+        .execute(
+            "INSERT INTO epoch_revisions (epoch_id, rev, kind, source_id, created_at)
+             VALUES (?1, 0, 'truth', ?2, 3)",
+            [second_epoch, "truth:epoch-2:0"],
+        )
+        .unwrap();
+    connection
+        .execute(
+            "INSERT INTO work_truth (epoch_id, rev, payload_json, created_at)
+             VALUES (?1, 0, '{\"name\":\"with-epoch\"}', 3)",
+            [second_epoch],
+        )
+        .unwrap();
+
+    let receipt_shadow = registered_wave(&target, "with-receipt");
+    store.create_wave(&receipt_shadow).await.unwrap();
+    let receipt_path = target
+        .join(".lf/tmp/wave-relocations")
+        .join(format!("{}.json", receipt_shadow.id()));
+    std::fs::create_dir_all(receipt_path.parent().unwrap()).unwrap();
+    std::fs::write(&receipt_path, "{}\n").unwrap();
+
+    for (slug, shadow, evidence) in [
+        ("with-run", &run_shadow, "Runs"),
+        ("with-task", &project_shadow, "Tasks"),
+        ("with-child", &child_shadow, "child Waves"),
+        ("with-pm", &pm_shadow, "PM snapshot"),
+        ("with-steer", &steer_shadow, "authored Steers"),
+        ("with-epoch", &epoch_shadow, "Wave Epochs"),
+        ("with-receipt", &receipt_shadow, "relocation receipt"),
+    ] {
+        let error = relocate_wave(&store, established.id(), &source, Some(&target), Some(slug))
+            .await
+            .unwrap_err()
+            .to_string();
+        assert!(error.contains(established.id().as_str()), "{error}");
+        assert!(error.contains(shadow.id().as_str()), "{error}");
+        assert!(error.contains(evidence), "{error}");
+    }
+
+    assert_eq!(
+        store
+            .get_wave(established.id())
+            .await
+            .unwrap()
+            .unwrap()
+            .repo(),
+        established.repo()
     );
 }

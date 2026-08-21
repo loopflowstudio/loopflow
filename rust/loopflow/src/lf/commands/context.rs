@@ -76,6 +76,7 @@ pub struct InvocationSetTotals {
     pub failed_invocations: u64,
     pub interrupted_invocations: u64,
     pub running_invocations: u64,
+    pub unverified_invocations: u64,
     pub steering_turns: u64,
     pub steered_invocations: u64,
 }
@@ -269,11 +270,15 @@ pub fn run(options: ContextQueryOptions) -> Result<()> {
     validate_query(&query)?;
 
     let store = open_ledger().map_err(|error| anyhow!("run ledger unavailable: {error}"))?;
-    let invocations = store
+    let mut invocations = store
         .agent_invocations_since(query.started_after)
         .map_err(|error| anyhow!("failed to read context invocations: {error}"))?
         .into_iter()
         .filter(|invocation| invocation.started_at < query.started_before)
+        .collect::<Vec<_>>();
+    crate::lf::commands::runs::project_invocation_outcomes(&store, &mut invocations);
+    let invocations = invocations
+        .into_iter()
         .filter(|invocation| invocation_matches(invocation, &query))
         .collect::<Vec<_>>();
     let invocation_ids = invocations
@@ -297,7 +302,7 @@ fn validate_query(query: &InvocationSetQuery) -> Result<()> {
     validate_values(
         "outcome",
         &query.outcomes,
-        &["running", "completed", "failed", "interrupted"],
+        &["running", "completed", "failed", "interrupted", "unknown"],
     )?;
     validate_values(
         "capture state",
@@ -674,6 +679,7 @@ fn build_totals(
         failed_invocations: count_outcomes(invocations, "failed"),
         interrupted_invocations: count_outcomes(invocations, "interrupted"),
         running_invocations: count_outcomes(invocations, "running"),
+        unverified_invocations: count_outcomes(invocations, "unknown"),
         steering_turns: turns.iter().filter(|turn| turn.input_op == "steer").count() as u64,
         steered_invocations,
     }
@@ -1915,6 +1921,18 @@ mod tests {
             None
         );
         assert!(snapshot.invocations[0].turns[1].assets.is_empty());
+    }
+
+    #[test]
+    fn status_surfaces_context_counts_unknown_capture_as_unverified() {
+        let mut stale = invocation("invocation-stale", "run-stale", "unknown", "partial", 100);
+        stale.ended_at = None;
+
+        let snapshot = aggregate(query(), vec![stale], Vec::new(), Vec::new());
+
+        assert_eq!(snapshot.totals.running_invocations, 0);
+        assert_eq!(snapshot.totals.unverified_invocations, 1);
+        assert_eq!(snapshot.invocations[0].outcome, "unknown");
     }
 
     #[test]

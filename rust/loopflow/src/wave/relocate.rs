@@ -61,6 +61,7 @@ impl WaveLocatorLock {
 struct PlannedWaveMove {
     wave: Wave,
     target: WaveLocator,
+    retire_collision: Option<WaveId>,
 }
 
 #[derive(Debug, Clone, Serialize, Deserialize, PartialEq, Eq)]
@@ -108,6 +109,14 @@ pub async fn relocate_wave(
         .get_wave(wave_id)
         .await?
         .ok_or_else(|| anyhow!("Wave {wave_id} is not registered"))?;
+    if let Some(retired_at) = original_wave.retired_at() {
+        return Err(anyhow!(
+            "Wave {wave_id} retired at {retired_at}; it was superseded by {}",
+            original_wave
+                .superseded_by_wave_id()
+                .map_or("-", WaveId::as_str)
+        ));
+    }
     let invoking_repo = CanonicalRepo::discover(invoking_repo)?;
     let mut wave = original_wave.clone();
     if CanonicalRepo::discover(Path::new(wave.repo())).is_ok_and(|repo| repo == invoking_repo) {
@@ -183,10 +192,11 @@ pub async fn relocate_wave(
     }
     ensure_repository_team_compatible(&wave, &target)?;
 
-    let moves = plan_moves(store, wave, target).await?;
-    preflight(store, &moves).await?;
+    let mut moves = plan_moves(store, wave, target).await?;
+    preflight(store, &mut moves).await?;
     let recovery = relocation_recovery(&moves);
     let _locks = acquire_locks(&recovery.paths)?;
+    ensure_no_shadow_relocation_receipts(&moves)?;
     ensure_no_live_endpoints(&recovery.paths).await?;
     write_recovery(&recovery)?;
 
@@ -201,6 +211,7 @@ pub async fn relocate_wave(
             expected_repo: planned.wave.repo().to_string(),
             expected_slug: planned.wave.name().to_string(),
             target: planned.target.clone(),
+            retire_collision: planned.retire_collision.clone(),
         })
         .collect();
     store.relocate_waves(updates).await?;
@@ -267,6 +278,7 @@ async fn plan_moves(
     let mut moves = vec![PlannedWaveMove {
         wave: root.clone(),
         target,
+        retire_collision: None,
     }];
     if !rehome && !rename {
         return Ok(moves);
@@ -287,6 +299,7 @@ async fn plan_moves(
                     target_slug.as_deref().unwrap_or(child.name()),
                 )?,
                 wave: child,
+                retire_collision: None,
             });
         }
     }
@@ -304,7 +317,7 @@ fn relocated_descendant_slug(root: &str, target: &str, candidate: &str) -> Optio
         .map(str::to_string)
 }
 
-async fn preflight(store: &Store, moves: &[PlannedWaveMove]) -> Result<()> {
+async fn preflight(store: &Store, moves: &mut [PlannedWaveMove]) -> Result<()> {
     let moved_ids = moves
         .iter()
         .map(|planned| planned.wave.id().to_string())
@@ -314,12 +327,22 @@ async fn preflight(store: &Store, moves: &[PlannedWaveMove]) -> Result<()> {
         ensure_move_paths_do_not_overlap(planned)?;
         if let Some(existing) = store.get_wave_at(&planned.target).await? {
             if existing.id() != planned.wave.id() {
-                return Err(anyhow!(
-                    "target {}/{} already belongs to Wave {}",
-                    planned.target.repo(),
-                    planned.target.slug(),
-                    existing.id()
-                ));
+                let blockers = store.wave_retirement_blockers(existing.id()).await?;
+                let mut blockers = blockers;
+                if recovery_path_at(planned.target.repo().as_path(), existing.id()).exists() {
+                    blockers.push("relocation receipt".to_string());
+                }
+                if !blockers.is_empty() {
+                    return Err(anyhow!(
+                        "cannot relocate established Wave {} over destination Wave {} at {}/{}: {}",
+                        planned.wave.id(),
+                        existing.id(),
+                        planned.target.repo(),
+                        planned.target.slug(),
+                        blockers.join(", ")
+                    ));
+                }
+                planned.retire_collision = Some(existing.id().clone());
             }
         }
         let source_repo = CanonicalRepo::discover(Path::new(planned.wave.repo())).ok();
@@ -347,6 +370,20 @@ async fn preflight(store: &Store, moves: &[PlannedWaveMove]) -> Result<()> {
             }
         }
         ensure_wave_stopped(store, planned.wave.id()).await?;
+    }
+    Ok(())
+}
+
+fn ensure_no_shadow_relocation_receipts(moves: &[PlannedWaveMove]) -> Result<()> {
+    for planned in moves {
+        let Some(shadow) = &planned.retire_collision else {
+            continue;
+        };
+        if recovery_path_at(planned.target.repo().as_path(), shadow).exists() {
+            return Err(anyhow!(
+                "cannot retire destination Wave {shadow}: relocation receipt"
+            ));
+        }
     }
     Ok(())
 }
@@ -685,6 +722,11 @@ fn recovery_path(recovery: &RelocationRecovery) -> PathBuf {
         .join(format!("{}.json", recovery.receipt.wave_id))
 }
 
+fn recovery_path_at(repo: &Path, wave_id: &WaveId) -> PathBuf {
+    repo.join(".lf/tmp/wave-relocations")
+        .join(format!("{wave_id}.json"))
+}
+
 fn recovery_path_for_wave(wave: &Wave) -> PathBuf {
     Path::new(wave.repo())
         .join(".lf/tmp/wave-relocations")
@@ -882,6 +924,7 @@ mod tests {
         let planned = PlannedWaveMove {
             wave: wave.clone(),
             target: target.clone(),
+            retire_collision: None,
         };
         super::stage_wave_paths(&planned).unwrap();
         let recovery = relocation_recovery(std::slice::from_ref(&planned));
@@ -892,6 +935,7 @@ mod tests {
                 expected_repo: wave.repo().to_string(),
                 expected_slug: wave.name().to_string(),
                 target,
+                retire_collision: None,
             }])
             .await
             .unwrap();

@@ -2545,7 +2545,8 @@ fn map_task_pr_row(row: &rusqlite::Row<'_>) -> rusqlite::Result<TaskPr> {
         created_at: crate::store::rows::unix_to_datetime(row.get(13)?),
         updated_at: crate::store::rows::unix_to_datetime(row.get(14)?),
     };
-    pr.validate().map_err(|error| invalid_column(6, error))?;
+    pr.validate_persisted()
+        .map_err(|error| invalid_column(6, error))?;
     Ok(pr)
 }
 

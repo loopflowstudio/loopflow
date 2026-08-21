@@ -17,14 +17,16 @@ use loopflow::project::{Project, ProjectId};
 use loopflow::store::sqlite::SqliteStore;
 use loopflow::store::{PmSnapshotRow, RunEventRow, TurnUsageSample};
 use loopflow::task::{
-    Observation, PmWritebackState, Task, TaskId, TaskLifecyclePhase, TaskLifecyclePlan, TaskPr,
-    TaskPrId,
+    Observation, PmWritebackState, PrMergeMode, Task, TaskId, TaskLifecyclePhase,
+    TaskLifecyclePlan, TaskPr, TaskPrId,
 };
 use loopflow::trace::{AgentInvocationRow, AgentTurnRow, SupervisedInvocation};
 use loopflow::wave::Wave;
 use time::OffsetDateTime;
 
 const INVOCATION_ID: &str = "invocation_00000000000000000000000000000001";
+const PREVIOUS_RELEASE_TASK_PR_FIXTURE: &str = include_str!("fixtures/store_0_12_8_task_pr.sql");
+const PERSISTED_TASK_ID: &str = "task_40fbeeaadfbca5367aa7391432ae84ff";
 
 /// A machine home holding one wave with lookup noise, a flow, and a skill. The
 /// registry and the ledgers are the same database.
@@ -468,6 +470,80 @@ fn seed_stale_project_work(home: &Path, abandon_stale_project: bool) {
         .expect("seed PM snapshot");
 }
 
+fn seed_persisted_merge_request_without_copy(home: &Path) {
+    seed_stale_project_work(home, true);
+    let connection =
+        rusqlite::Connection::open(home.join("loopflow.db")).expect("open seeded Task registry");
+    let now = OffsetDateTime::now_utc().unix_timestamp();
+    connection
+        .execute(
+            "UPDATE tasks SET
+                project_id=(SELECT id FROM projects WHERE project_slug='auditability'),
+                external_issue_id='task-prd-52', issue_identifier='PRD-52',
+                issue_title='Expose one fleet snapshot from Wave to raw trace'
+             WHERE id=?1",
+            [PERSISTED_TASK_ID],
+        )
+        .expect("move persisted Task into the current PM Project");
+    connection
+        .execute(
+            "UPDATE task_prs SET
+                publication_requested_at=?2,
+                after_merge='continue_task',
+                github_number=240,
+                github_url='https://github.com/loopflowstudio/loopflow/pull/240',
+                github_head_sha='head-240',
+                merge_mode='user',
+                merge_requested_at=?2,
+                merge_head_sha='head-240'
+             WHERE task_id=?1",
+            rusqlite::params![PERSISTED_TASK_ID, now],
+        )
+        .expect("seed pre-copy merge request");
+}
+
+fn seed_previous_release_task_pr(home: &Path) {
+    std::fs::create_dir_all(home.join("repo")).expect("fixture repo");
+    let fixture = PREVIOUS_RELEASE_TASK_PR_FIXTURE.replace(
+        "__LF_HOME__",
+        home.to_str().expect("fixture Home path is utf8"),
+    );
+    let database = home.join("loopflow.db");
+    let connection = rusqlite::Connection::open(&database).expect("open previous release store");
+    connection
+        .execute_batch(&fixture)
+        .expect("load previous release fixture");
+    let frontier: String = connection
+        .query_row(
+            "SELECT version FROM schema_migrations ORDER BY rowid DESC LIMIT 1",
+            [],
+            |row| row.get(0),
+        )
+        .expect("read previous release frontier");
+    assert_eq!(frontier, "0.12.8.001_release");
+    drop(connection);
+
+    let store = SqliteStore::new(&database).expect("migrate previous release store");
+    let task_id = TaskId::parse(PERSISTED_TASK_ID).expect("recorded Task id");
+    let pr = store
+        .active_task_pr(&task_id)
+        .expect("decode migrated Task PR")
+        .expect("fixture has active Task PR");
+    assert!(pr.presentation().is_none());
+    assert_eq!(
+        pr.merge_request().expect("explicit merge request").mode,
+        PrMergeMode::User
+    );
+    drop(store);
+
+    let connection = rusqlite::Connection::open(database).expect("reopen migrated store");
+    assert_eq!(
+        loopflow::store::migrations::latest_version_sqlite(&connection)
+            .expect("current migration frontier"),
+        loopflow::store::migrations::latest_known_version()
+    );
+}
+
 fn execs_json(home: &Path) -> serde_json::Value {
     let output = Command::new(env!("CARGO_BIN_EXE_lf"))
         .args(["execs", "--json"])
@@ -792,6 +868,70 @@ fn orphaned_task_work_preserves_status_and_roadmap_evidence() {
         "PRD-52"
     );
     assert_eq!(wave["unavailable_projects"], status["unavailable_projects"]);
+}
+
+#[test]
+fn persisted_merge_request_without_copy_keeps_status_and_roadmap_readable() {
+    let home = tempfile::tempdir().expect("tempdir");
+    seed_persisted_merge_request_without_copy(home.path());
+
+    let status = status_json(home.path(), &["product"], None);
+    let status_task = &status["projects"][0]["tasks"][0];
+    assert_eq!(status_task["task"]["identifier"], "PRD-52");
+    assert_eq!(
+        status_task["prs"][0]["publication"]["presentation"],
+        serde_json::Value::Null
+    );
+    assert_eq!(
+        status_task["prs"][0]["publication"]["merge"]["mode"],
+        "user"
+    );
+
+    let roadmap = roadmap_json(home.path(), "product");
+    let wave = &roadmap["waves"][0];
+    assert_eq!(wave["projects"]["state"], "ok");
+    let roadmap_task = &wave["projects"]["items"][0]["tasks"][0];
+    assert_eq!(roadmap_task["task"]["identifier"], "PRD-52");
+    assert_eq!(
+        roadmap_task["active_pr"]["publication"]["presentation"],
+        serde_json::Value::Null
+    );
+    assert_eq!(
+        roadmap_task["active_pr"]["publication"]["merge"]["mode"],
+        "user"
+    );
+}
+
+#[test]
+fn previous_release_merge_request_migrates_into_readable_status_and_roadmap() {
+    let home = tempfile::tempdir().expect("tempdir");
+    seed_previous_release_task_pr(home.path());
+
+    let status = status_json(home.path(), &["product"], None);
+    let status_task = &status["projects"][0]["tasks"][0];
+    assert_eq!(status_task["task"]["identifier"], "PRD-52");
+    assert_eq!(
+        status_task["prs"][0]["publication"]["presentation"],
+        serde_json::Value::Null
+    );
+    assert_eq!(
+        status_task["prs"][0]["publication"]["merge"]["mode"],
+        "user"
+    );
+
+    let roadmap = roadmap_json(home.path(), "product");
+    let wave = &roadmap["waves"][0];
+    assert_eq!(wave["projects"]["state"], "ok");
+    let roadmap_task = &wave["projects"]["items"][0]["tasks"][0];
+    assert_eq!(roadmap_task["task"]["identifier"], "PRD-52");
+    assert_eq!(
+        roadmap_task["active_pr"]["publication"]["presentation"],
+        serde_json::Value::Null
+    );
+    assert_eq!(
+        roadmap_task["active_pr"]["publication"]["merge"]["mode"],
+        "user"
+    );
 }
 
 #[test]

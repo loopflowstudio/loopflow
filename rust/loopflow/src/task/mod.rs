@@ -589,6 +589,15 @@ impl TaskPr {
     }
 
     pub fn validate(&self) -> Result<(), TaskDataError> {
+        self._validate(true)
+    }
+
+    /// Accept historical rows whose reviewer copy was never persisted.
+    pub(crate) fn validate_persisted(&self) -> Result<(), TaskDataError> {
+        self._validate(false)
+    }
+
+    fn _validate(&self, require_presentation: bool) -> Result<(), TaskDataError> {
         if self.sequence == 0 {
             return Err(TaskDataError::InvalidInvariant(
                 "task pull request sequence starts at 1".to_string(),
@@ -627,15 +636,18 @@ impl TaskPr {
                 }
             }
             if let Some(request) = &publication.merge {
-                let presentation = publication.presentation.as_ref().ok_or_else(|| {
-                    TaskDataError::InvalidInvariant(
-                        "merge request requires reviewer-facing PR copy".to_string(),
-                    )
-                })?;
-                if presentation.head_sha != request.head_sha {
-                    return Err(TaskDataError::InvalidInvariant(
-                        "merge request and PR copy must name the same head".to_string(),
-                    ));
+                match publication.presentation.as_ref() {
+                    Some(presentation) if presentation.head_sha != request.head_sha => {
+                        return Err(TaskDataError::InvalidInvariant(
+                            "merge request and PR copy must name the same head".to_string(),
+                        ));
+                    }
+                    None if require_presentation => {
+                        return Err(TaskDataError::InvalidInvariant(
+                            "merge request requires reviewer-facing PR copy".to_string(),
+                        ));
+                    }
+                    Some(_) | None => {}
                 }
                 if request.next_slug.as_deref().is_some_and(|slug| {
                     slug.split('-').any(|word| {
@@ -1296,6 +1308,11 @@ mod tests {
         merge.next_slug = Some("released-upgrade".to_string());
         assert!(pr.validate().is_ok());
         assert!(pr.presentation().is_some());
+
+        let mut persisted = pr.clone();
+        persisted.publication.as_mut().unwrap().presentation = None;
+        assert!(persisted.validate().is_err());
+        assert!(persisted.validate_persisted().is_ok());
 
         pr.publication
             .as_mut()

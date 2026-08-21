@@ -818,6 +818,23 @@ does a PR whose auto-merge settlement is not armed. Only a current-head Auto
 merge request with Complete disposition records the terminal `lf pr land -c`
 intent.
 
+Task PR copy carries the Task contract before its reviewer-authored detail:
+
+```markdown
+LOO-249: Make Task PR copy explain intent and lifecycle
+
+> [!NOTE]
+> **Task:** [LOO-249 — Make Task PR copy explain intent and lifecycle](https://linear.app/...)
+> **Task flow:** `incident` → `slice` → `ship-demo`
+> **PR lifecycle:** Merging PR 1 completes the Task.
+```
+
+The exact identifier, name, provider link, pinned flows, PR sequence, and merge
+disposition come from durable Task state. Generated or gate-authored prose adds
+the evaluation path, importance, and implementation-specific scope without
+repeating that context. Ordinary non-Task PR copy keeps its authored title and
+body unchanged.
+
 If a Task reaches `finally` after its work already merged and rotation left a
 provably empty unpublished successor, `lf pr land -c` completes over the merged
 PR without creating another one. Earlier lifecycle phases still refuse the

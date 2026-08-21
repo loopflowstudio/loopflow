@@ -404,7 +404,7 @@ fn register_task_with_process(
                 payload: pm_payload,
             })
             .await
-            .expect("cache Task PR identity");
+            .expect("cache Task PR context");
         store
             .create_project(&project)
             .await

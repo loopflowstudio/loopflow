@@ -98,18 +98,15 @@ Make the change easy to review.
 
 3. **Write PR copy for ops handoff**
 
-   The PR body is written for an engineer picking this up cold. They're asking:
-   - What is the intention of this change?
-   - What assumptions does it make?
-   - What does it accomplish?
-   - How can I tinker with it and evaluate it myself?
+   The PR body is written for an engineer picking this up cold. Loopflow adds
+   the canonical Task title, Linear link, Task flow, PR sequence, and merge
+   disposition at publication; do not repeat or guess them in the handoff copy.
 
    Structure:
-   - **Try it!** — lead with this. Concrete commands to run, what the reviewer will see. Make it easy to tinker. If there are metrics, show them here: "Before: X, After: Y."
-   - **Intent** — one paragraph. Why this change exists and what it accomplishes. Not a file-by-file changelog.
-   - **Assumptions** — what this relies on being true. Environmental, architectural, or domain assumptions the reviewer should validate.
-   - **Key decisions** — choices that weren't obvious. What you picked and why.
-   - **Not included** — intentional omissions, if any.
+   - **Evaluate** — lead with concrete commands or steps and the observable result. If there are metrics, show "Before: X, After: Y."
+   - **Why it matters** — one paragraph connecting the behavior to its user or operational consequence.
+   - **What changed** — meaningful scope and decisions, not a file-by-file changelog.
+   - **Risks / Not included** — assumptions and intentional boundaries, when they help review.
 
    Write to:
    - `scratch/pr-title.txt` — one-line PR title

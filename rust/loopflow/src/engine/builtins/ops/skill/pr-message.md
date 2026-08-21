@@ -1,6 +1,11 @@
 Generate a PR title and body for the changes on this branch.
 
-Review the diff against the PR base and summarize what changed and why.
+Review the diff against the PR base. Make the purpose, why it matters, meaningful
+scope, and evaluation path obvious to a reviewer arriving cold.
+
+When Loopflow supplies Task context, it adds the canonical Task title, Linear
+link, Task flow, PR sequence, and merge disposition after generation. Do not
+invent or repeat those facts from branch names or commit messages.
 
 Do not ask questions. If anything is unclear, make the best assumption and proceed.
 
@@ -21,28 +26,36 @@ Examples:
 
 ## Body style
 
-Use markdown headers to organize the body. Open with a "Usage" or "Try it" section showing commands in code blocks. Then explain what changed.
+Use markdown headers to organize the body. Lead with concrete evaluation, then
+explain why the change matters and the meaningful implementation scope.
 
 Structure:
-1. **Usage section** (header + code block) - how to try it, run it, or see it in action
-2. **Summary** - one paragraph explaining what this PR does and why
-3. **Changes** (optional) - bullet list of notable changes if helpful
+1. **Evaluate** — commands or steps plus the observable result that proves the change
+2. **Why it matters** — one paragraph connecting the behavior to its user or operational consequence
+3. **What changed** — the important scope, decisions, or investment; do not enumerate files
+4. **Risks / Not included** (optional) — boundaries a reviewer should understand
 
-Keep it medium length. Stay high-level; don't enumerate every file.
+Keep it medium length. Prefer evidence over claims. Do not manufacture a demo
+when the diff only supports a test or inspection path.
 
 Example body:
 ```
-## Usage
+## Evaluate
 
 \`\`\`bash
 lf code
 lf ship
 \`\`\`
 
-Coding and shipping now have separate flows. `code` stops after implementation
-and compression; `ship` owns the gate and PR lifecycle.
+Observe that `lf code` stops after implementation and compression, while
+`lf ship` owns the gate and PR lifecycle.
 
-## Changes
+## Why it matters
+
+Separating implementation from settlement lets a reviewer inspect a stable
+change before any merge operation owns it.
+
+## What changed
 
 - Removed the standalone lint skill
 - Moved gate into shipping flows

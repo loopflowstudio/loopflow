@@ -40,7 +40,7 @@ Do not generalize this investigation into a public evidence product.
 
 ### Evidence contract
 
-The refreshed batch ends at `2026-08-21T17:40:26Z`. The installed CLI and signed
+The refreshed batch ends at `2026-08-21T18:51:45Z`. The installed CLI and signed
 app are v0.12.12 at source revision
 `631d623667f3dbe8e025cd0585f1ddb7d87d962f`. The build is one merged commit
 behind `origin/main`; the missing commit is LOO-240's status containment repair.
@@ -63,7 +63,7 @@ proof.
 | Question | Finding | Impact on design |
 |---|---|---|
 | Are the observations tied to the executable users are running? | Both installed `lf` binaries report v0.12.12 and revision `631d62366…`; `doctor --json` names the exact one-commit freshness gap. | Producer identity and freshness belong in every frozen batch. A merged fix does not turn the installed behavior green. |
-| Does an empty Ask queue prove handoff works? | No. The durable row for `ask_30ec04624a1f4e7c9e3b0b424da576ff` does: it resolved to User answer, and its origin Turn continued until `2026-08-21T03:29:27Z`. | Assess exact Ask lifecycle receipts; use the mutable queue only for current attention. One success is not a seven-day reliability claim. |
+| Does an empty Ask queue prove handoff works? | No. Historical Ask `ask_30ec04624a1f4e7c9e3b0b424da576ff` completed through requester continuation. The current review Ask `ask_d04c0a6fe1664391a278fd4cb2b1ffb3` durably resolved, but `lf ask resolve` then exited 1 because it could not push the Task checkpoint under the Run lease. | Assess settlement and requester/control continuation separately. A durable Answer can coexist with a failed reviewer command and unproven flow advancement. |
 | Can one malformed Task erase an entire view? | Yes on the installed build: focused status and activity abort, while roadmap degrades the Product Project collection to unavailable. LOO-240 has merged but is not installed. | Evidence failure must stay row-local, and delivered code must remain separate from active runtime behavior. |
 | Does Discord transport health imply a good agent experience? | No. After one correct answer, the Wave published 49 more responses; 44/50 opened with process narration. | Keep authored Red judgment distinct from delivery and factual-accuracy measurements. Silence is a valid result. |
 | Should the board own a new evidence store? | No existing evidence requires copied transcripts or a second planning truth. | Store stable references to existing authorities and render missing or stale sources explicitly. |
@@ -74,7 +74,7 @@ proof.
 |---|---|---|---|
 | Terminal-control launch options | **Works for option preservation and provider selection.** Installed `lf -m claude` ran against an isolated fake provider, assembled `lf loopflow -m claude`, selected the Claude managed account, and exited 0. | CLI SHA-256 `543d8ec3ad5233079c81631695dc4d652be4568918dd80b491b36981edb0bf75`, source revision above, probe at the reviewed boundary; shipped PR #1200. | This did not exercise a real interactive vendor handoff. The temporary probe has no shared Exec receipt, so drill-down is incomplete even though the behavior reproduced. |
 | Repository-scoped reads | **Works.** The linked Task worktree returns five Wave ids; `--all` returns 24 machine-wide Waves. | `lf ls --json` and `lf ls --all --json` at `2026-08-21T17:37:14Z`; shipped commit `3feade2ef` (#1201). | A single-repository fixture would not prove filtering. The live multi-repository ledger did. |
-| Ask handoff | **Works once through requester continuation; current-build reliability is unknown.** User Ask `ask_30ec04624a1f4e7c9e3b0b424da576ff` resolved, its Ask Invocation exited successfully, and its origin Turn continued for more than six hours after settlement before ending partial. | Origin Run `run_1b8d52377e64488f8bd069f01d608b77`; origin Turn `turn_98d059b754144ba885c7cfeedc42e17f`; Ask Invocation `invocation_2896ba2ede8845a3a490e346ced26408`; current unresolved queue `[]`. | The exact proof required a raw `ask_exchanges` read because `lf ask list` exposes attention, not history. One success does not establish the seven-day N/N reliability target, and the partial origin Turn plus earlier abbreviated failure leads remain evidence debt. |
+| Ask handoff | **Mixed historically; fails at the current reviewer-facing completion boundary.** Historical User Ask `ask_30ec04624a1f4e7c9e3b0b424da576ff` resolved and its origin Turn continued. The current review Ask durably changed to `resolved`, then installed `lf ask resolve` exited 1: `invalid control authority: Run lease is malformed, stale, stopped, or unknown`. | Historical origin Run `run_1b8d52377e64488f8bd069f01d608b77`, Turn `turn_98d059b754144ba885c7cfeedc42e17f`, and Ask Invocation `invocation_2896ba2ede8845a3a490e346ced26408`. Current Ask `ask_d04c0a6fe1664391a278fd4cb2b1ffb3`, origin Run `run_800eb037082341ea9243c5ac4dfff408`, terminal at `2026-08-21T18:51:45Z`; installed CLI SHA-256 `543d8ec3…`. | The current row has no origin Turn or Invocation, and requester continuation is not yet observed. The Answer is durable, but the command failure means the human cannot trust that accepting the review advanced the flow. Do not retry a first-writer-wins settlement merely to clear the error. |
 | Status and roadmap truth | **Fails on the installed build; roadmap contains the damage.** `lf status product --json` and scoped activity abort on LOO-225. Roadmap preserves Product but marks its Project collection unavailable. | Exact error: `invalid Task: merge request requires reviewer-facing PR copy`. `lf doctor --json` says revision `631d62366…` is one commit behind merged repair `6de5fd727` (#1219 / LOO-240). | Delivery and runtime are separate: LOO-240 is complete, but the installed v0.12.12 binaries do not contain it. Roadmap retains the reason but still cannot answer “what is Product doing?” |
 | Run execution and child control | **Fails at two distinct boundaries.** LOO-237 still reports that an active Turn has no Run execution context. Separate Project Runs have also lacked durable child-control Basis; LOO-237 does not own that second repair. | LOO-237 Task `task_21b193b0ee3b4c70afd1dcb025dc6589`, Run `run_a185cb1e4fe2462d8d3a80fa6a38a5d7`, event `64821`; published PR #1214. Product Discord receipt `1540224185048104970` preserves the separate Basis counterexample. | A live containment, allocated worktree/PR, or repaired RunContext does not prove Project-to-child Basis. The latest recorded PR #1214 CI observation fails only `scratch-clear`, consistent with settlement not running. |
 | Installed-build provenance | **Works as a structured diagnostic.** Both installed binaries are v0.12.12 at the release revision above; `doctor --json` emits a parseable provenance and freshness snapshot even though the overall audit exits 1. | CLI SHA-256 `543d8ec3ad5233079c81631695dc4d652be4568918dd80b491b36981edb0bf75`; app `lf` SHA-256 `84632c70aa7fa7ad00cf43b197413e421e869d2532a93107148fb46cc843af3c`; Developer ID signature; `doctor --json` from both binaries. | Ordinary status, roadmap, Ask, and chat receipts still omit producer provenance. A successful provenance probe does not make the separate ledger audit healthy. |
@@ -259,7 +259,9 @@ Capture before and after against one source revision and explicit time window:
 
 The refreshed baseline is mixed: terminal option preservation and repository
 scoping work; usable focused status/activity is 0/2 on the installed build; one
-historical Ask handoff is proven but the seven-day denominator is absent;
+historical Ask handoff is proven, while the current review Answer settled but
+its command failed before checkpoint completion and requester continuation is
+unproven; the seven-day denominator is absent;
 structured provenance probes return receipts 2/2 even though the wider ledger
 audit fails; LOO-237 still reports missing Run context; and the Product Wave
 sent 50 responses after the latest User question, 44 process-narrated.
@@ -286,4 +288,6 @@ lf chat --history -w product --limit 200 --json
 lf runs --task LOO-234 --json
 sqlite3 -readonly ~/.lf/loopflow.db \
   "SELECT id, origin_run_id, origin_turn_id, state, terminal_at FROM ask_exchanges WHERE id = 'ask_30ec04624a1f4e7c9e3b0b424da576ff';"
+sqlite3 -readonly ~/.lf/loopflow.db \
+  "SELECT id, origin_run_id, origin_turn_id, origin_invocation_id, state, result_kind, terminal_at FROM ask_exchanges WHERE id = 'ask_d04c0a6fe1664391a278fd4cb2b1ffb3';"
 ```

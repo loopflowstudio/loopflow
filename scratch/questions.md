@@ -14,6 +14,12 @@
   continuation, but finding that proof required a raw `ask_exchanges` read.
   Earlier abbreviated failure leads remain unresolved, and one success does not
   establish current-build or seven-day reliability.
+- Resolving this human review produced a fresh split result: Ask
+  `ask_d04c0a6fe1664391a278fd4cb2b1ffb3` is durably `resolved`, but installed
+  `lf ask resolve` exited 1 because its Run lease could not authorize the Task
+  checkpoint. The row has no origin Turn or Invocation, and requester
+  continuation has not been observed. Preserve the Answer and the failure; do
+  not retry the first-writer-wins settlement.
 - LOO-240 merged after the original evidence batch. The installed v0.12.12
   release is one commit behind it, so the current status failure and the
   delivered containment repair must remain visible at the same time.

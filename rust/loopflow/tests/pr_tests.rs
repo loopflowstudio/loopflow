@@ -104,18 +104,28 @@ exit 0
 "#
 }
 
-fn gh_merged_pr_without_time_script() -> &'static str {
+fn gh_merged_pr_without_time_script(log_path: &str) -> String {
     r#"#!/bin/sh
 if [ "$1" = "--version" ]; then
   exit 0
 fi
+echo "$@" >> "__LOG_PATH__"
 if [ "$1" = "api" ]; then
   head=$(git rev-parse HEAD)
   printf '{"merged":true,"state":"closed","draft":false,"merge_commit_sha":"merge-912","number":912,"html_url":"https://example.com/pr/912","head":{"sha":"%s"}}\n' "$head"
   exit 0
 fi
+if [ "$1 $2" = "pr list" ]; then
+  echo '[]'
+  exit 0
+fi
+if [ "$1 $2" = "pr create" ]; then
+  echo 'https://example.com/pr/1'
+  exit 0
+fi
 exit 0
 "#
+    .replace("__LOG_PATH__", log_path)
 }
 
 fn gh_merged_pr_logging_script(log_path: &str) -> String {
@@ -488,14 +498,86 @@ fn github_failure_leaves_publication_intent_observable() {
         .expect("active PR");
     assert_eq!(pr.phase(), PrPhase::Publishing);
     let publication = pr.publication.expect("durable publication request");
+    let presentation = publication
+        .presentation
+        .as_ref()
+        .expect("reviewer-facing Task identity");
+    assert_eq!(
+        presentation.title,
+        "Prove Task PR transitions — Persist publication first"
+    );
+    assert_eq!(
+        presentation.body,
+        "Linear Task: [INF-123](https://linear.app/loopflow/issue/INF-123/prove-task-pr-transitions)\n\nThe GitHub call will fail."
+    );
     assert!(publication.github.is_none());
     assert!(publication.merge.is_none());
 }
 
 #[test]
-fn merged_continue_task_rotates_to_a_working_pr_without_review_state() {
+fn task_pr_missing_cached_linear_url_refuses_before_remote_mutation() {
+    let markers = tempfile::TempDir::new().expect("markers");
+    let github_marker = markers.path().join("github");
+    let gh = format!(
+        "#!/bin/sh\nif [ \"$1\" = \"--version\" ]; then exit 0; fi\nprintf called > '{}'\nexit 1\n",
+        github_marker.display()
+    );
     let home = tempfile::TempDir::new().expect("temp home");
-    let _env = EnvGuard::with_lf_home(&[("gh", gh_merged_pr_without_time_script())], home.path());
+    let _env = EnvGuard::with_lf_home(&[("gh", gh.as_str())], home.path());
+    let repo = TestRepo::new();
+    let base = repo.head_sha();
+    let branch = "jack/task-pr-proof";
+    repo.create_branch(branch);
+    repo.create_file("proof.txt", "identity preflight\n");
+    repo.stage_all();
+    repo.commit("add identity proof");
+    let task = register_task(home.path(), repo.path(), branch, &base);
+    let runtime = tokio::runtime::Runtime::new().expect("task runtime");
+    let mut snapshot = runtime
+        .block_on(task.store.pm_snapshot(&task.task.wave_id))
+        .expect("read PM snapshot")
+        .expect("PM snapshot");
+    let mut payload: serde_json::Value =
+        serde_json::from_str(&snapshot.payload).expect("decode PM snapshot");
+    payload["items"][0]["url"] = serde_json::Value::Null;
+    snapshot.payload = serde_json::to_string(&payload).expect("encode PM snapshot");
+    runtime
+        .block_on(task.store.put_pm_snapshot(snapshot))
+        .expect("remove cached Task URL");
+
+    let result = create_or_update_pr(
+        repo.path(),
+        &PrOptions {
+            title: Some("Reviewer context".to_string()),
+            body: Some("Proof".to_string()),
+            agent: None,
+        },
+        &NullProgress,
+    );
+
+    assert!(
+        matches!(result, Err(OpsError::Message(ref message)) if message.contains("no valid provider URL") && message.contains("lf pm sync")),
+        "missing provider identity should be actionable: {result:?}"
+    );
+    assert!(!github_marker.exists(), "GitHub must not mutate");
+    let remote_branch = Command::new("git")
+        .arg("--git-dir")
+        .arg(repo.bare_path())
+        .args(["rev-parse", "--verify", &format!("refs/heads/{branch}")])
+        .output()
+        .expect("inspect remote branch");
+    assert!(
+        !remote_branch.status.success(),
+        "identity refusal must happen before push"
+    );
+}
+
+#[test]
+fn serial_task_pr_publication_restores_linear_identity_anchors() {
+    let home = tempfile::TempDir::new().expect("temp home");
+    let gh_log = home.path().join("gh.log");
+    let gh = gh_merged_pr_without_time_script(gh_log.to_string_lossy().as_ref());
+    let _env = EnvGuard::with_lf_home(&[("gh", gh.as_str())], home.path());
     let repo = TestRepo::new();
     let base = repo.head_sha();
     let branch = "jack/task-pr-proof";
@@ -600,6 +682,42 @@ fn merged_continue_task_rotates_to_a_working_pr_without_review_state() {
     assert!(!matches!(
         runtime.block_on(task.store.work_status(&work)).unwrap(),
         WorkStatus::Done
+    ));
+
+    repo.create_file("serial-proof.txt", "second PR\n");
+    repo.stage_all();
+    repo.commit("add serial proof");
+    create_or_update_pr(
+        repo.path(),
+        &PrOptions {
+            title: Some("Second delivery slice".to_string()),
+            body: Some("Serial reviewer context".to_string()),
+            agent: None,
+        },
+        &NullProgress,
+    )
+    .expect("publish serial Task PR");
+    let serial = runtime
+        .block_on(task.store.active_task_pr(&task.task.id))
+        .expect("read serial PR")
+        .expect("active serial PR");
+    assert_eq!(serial.sequence, 2);
+    let presentation = serial
+        .publication
+        .as_ref()
+        .and_then(|publication| publication.presentation.as_ref())
+        .expect("serial reviewer copy");
+    assert_eq!(
+        presentation.title,
+        "Prove Task PR transitions — Second delivery slice"
+    );
+    assert!(presentation.body.starts_with(
+        "Linear Task: [INF-123](https://linear.app/loopflow/issue/INF-123/prove-task-pr-transitions)\n\n"
+    ));
+    let gh_calls = fs::read_to_string(gh_log).expect("read GitHub calls");
+    assert!(gh_calls.contains("--title Prove Task PR transitions — Second delivery slice"));
+    assert!(gh_calls.contains(
+        "--body Linear Task: [INF-123](https://linear.app/loopflow/issue/INF-123/prove-task-pr-transitions)"
     ));
 }
 

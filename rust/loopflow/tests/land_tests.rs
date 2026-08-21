@@ -1020,6 +1020,14 @@ fn latest_land_disposition_wins_before_merge() {
         .expect("active PR");
     assert_eq!(pr.phase(), PrPhase::Open);
     let publication = pr.publication.expect("publication");
+    let presentation = publication
+        .presentation
+        .as_ref()
+        .expect("Task identity survives refresh and land");
+    assert_eq!(presentation.title, "Prove Task PR transitions — test title");
+    assert!(presentation.body.starts_with(
+        "Linear Task: [INF-123](https://linear.app/loopflow/issue/INF-123/prove-task-pr-transitions)\n\n"
+    ));
     assert_eq!(publication.github.map(|pr| pr.number), Some(912));
     let merge = publication.merge.expect("explicit merge request");
     assert_eq!(merge.mode, PrMergeMode::Auto);

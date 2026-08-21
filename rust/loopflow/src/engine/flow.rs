@@ -21,8 +21,6 @@ pub struct Skill {
     pub directions: Vec<String>,
     #[serde(skip_serializing_if = "Option::is_none")]
     pub action_style: Option<String>,
-    #[serde(default, skip_serializing_if = "Vec::is_empty")]
-    pub capabilities: Vec<String>,
     #[serde(skip_serializing_if = "Option::is_none")]
     pub content: Option<String>,
 }
@@ -35,7 +33,6 @@ impl Skill {
             default_agent: None,
             directions: Vec::new(),
             action_style: None,
-            capabilities: Vec::new(),
             content: None,
         }
     }
@@ -444,7 +441,6 @@ struct SkillFrontmatter {
     default_agent: Option<String>,
     directions: Vec<String>,
     action_style: Option<String>,
-    capabilities: Vec<String>,
 }
 
 fn parse_skill_frontmatter(content: &str) -> Result<(SkillFrontmatter, String), LoadError> {
@@ -465,7 +461,6 @@ fn skill_from_content(name: &str, content: &str) -> Result<Skill, LoadError> {
         default_agent: frontmatter.default_agent,
         directions: frontmatter.directions,
         action_style: frontmatter.action_style,
-        capabilities: frontmatter.capabilities,
         content: Some(body),
     })
 }
@@ -496,7 +491,6 @@ fn parse_frontmatter_value(value: &Value) -> SkillFrontmatter {
         default_agent,
         directions: parse_directions_field(map),
         action_style,
-        capabilities: parse_string_list(map.get(key("capabilities"))),
     }
 }
 
@@ -883,11 +877,6 @@ fn parse_skill_value(value: &Value) -> Result<SkillStep, LoadError> {
                 return Err(LoadError::InvalidFlow(
                     "feedback and interactive flow metadata are retired; use stable id plus human"
                         .to_string(),
-                ));
-            }
-            if map.contains_key(key("capabilities")) {
-                return Err(LoadError::InvalidFlow(
-                    "skill capabilities belong in skill frontmatter, not flow steps".to_string(),
                 ));
             }
             let mut step: SkillStep =
@@ -1338,7 +1327,7 @@ mod tests {
     }
 
     #[test]
-    fn flow_steps_cannot_declare_skill_capabilities() {
+    fn flow_steps_ignore_retired_skill_capabilities() {
         let tmp = TempDir::new().unwrap();
         let flows = tmp.path().join(".lf/flows");
         fs::create_dir_all(&flows).unwrap();
@@ -1348,11 +1337,13 @@ mod tests {
         )
         .unwrap();
 
-        let error = load_flow("fake-implementation", tmp.path()).unwrap_err();
+        let flow = load_flow("fake-implementation", tmp.path()).expect("load flow");
+        let steps = expand_flow(&flow, tmp.path()).expect("expand flow");
 
-        assert!(error
-            .to_string()
-            .contains("skill capabilities belong in skill frontmatter"));
+        assert!(matches!(
+            &steps[0],
+            ConcreteStep::Skill(skill) if skill.skill.name == "design"
+        ));
     }
 
     #[test]
@@ -1568,7 +1559,7 @@ Design the feature.
     }
 
     #[test]
-    fn load_skill_parses_frontmatter_execution_contract() {
+    fn load_skill_ignores_retired_capabilities_frontmatter() {
         let tmp = TempDir::new().unwrap();
         let skills_dir = tmp.path().join(".lf/skills");
         fs::create_dir_all(&skills_dir).unwrap();
@@ -1586,7 +1577,7 @@ Design the feature.
 
         let skill = load_skill("design", tmp.path()).unwrap();
         assert_eq!(skill.action_style.as_deref(), Some("exploratory"));
-        assert_eq!(skill.capabilities, vec!["task_implementation"]);
+        assert!(skill.content.unwrap().contains("Design the feature."));
     }
 
     #[test]

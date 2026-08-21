@@ -25,6 +25,7 @@ use crate::engine::worktrees::{
 use crate::engine::{expand_flow, load_flow, AgentExecutionBoundary, ConcreteStep};
 use crate::ops::error::{OpsError, OpsResult};
 use crate::planning::{LinearIssueId, TaskPlan};
+use crate::pm::PmSnapshot;
 use crate::provider_auth::Provider;
 use crate::store::{
     open_existing_store, open_registry_for_authority, ProviderAccountId, RegistryUnavailable,
@@ -53,7 +54,6 @@ pub struct TaskFlowOverrides {
     pub first: Option<String>,
     pub loop_: Option<String>,
     pub finally: Option<String>,
-    pub outcome: Option<crate::task::TaskOutcome>,
 }
 
 /// Named lifecycle presets: where the human gate sits, in one word.
@@ -79,7 +79,7 @@ impl TaskCycle {
     pub fn flows(self) -> (&'static str, &'static str) {
         match self {
             Self::Fix => ("incident", "ship-demo"),
-            Self::Feature => ("task-design", "ship"),
+            Self::Feature => ("task-design", "ship-demo"),
         }
     }
 }
@@ -101,7 +101,6 @@ impl TaskFlowOverrides {
             first: first.or_else(|| cycle_first.map(str::to_string)),
             loop_,
             finally: finally.or_else(|| cycle_finally.map(str::to_string)),
-            outcome: None,
         }
     }
 }
@@ -454,16 +453,6 @@ pub fn task_run(repo: &Path, issue: &str, options: TaskLaunchOptions) -> OpsResu
                 flows.finally.as_deref(),
                 &task.lifecycle.finally.flow,
             )?;
-            if flows
-                .outcome
-                .is_some_and(|outcome| outcome != task.lifecycle.outcome)
-            {
-                return Err(task_error(format!(
-                    "Task {} already pins {} outcome",
-                    task.plan.identifier,
-                    task.lifecycle.outcome.as_str()
-                )));
-            }
             if let Some(requested) = stack_on.as_deref() {
                 let active = store
                     .active_task_pr(&task.id)
@@ -920,33 +909,21 @@ fn resolve_task_lifecycle(
     let (finally, finally_source) = select_task_flow(
         overrides.finally.as_deref(),
         project.finally.as_deref(),
-        "ship",
+        "ship-demo",
         "finally",
     );
-    let outcome = overrides
-        .outcome
-        .unwrap_or(crate::task::TaskOutcome::Delivery);
-    let outcome_source = if overrides.outcome.is_some() {
-        "Task launch `--design-only`"
-    } else {
-        "default Task outcome"
-    };
     let (first, first_steps) = load_task_flow(repo, first, crate::task::TaskLifecyclePhase::First)?;
     let (loop_flow, loop_steps) =
         load_task_flow(repo, loop_flow, crate::task::TaskLifecyclePhase::Loop)?;
     let (finally, finally_steps) =
         load_task_flow(repo, finally, crate::task::TaskLifecyclePhase::Finally)?;
-    validate_task_lifecycle_facts(
-        outcome,
-        outcome_source,
-        [
-            (&first, &first_source, &first_steps),
-            (&loop_flow, &loop_source, &loop_steps),
-            (&finally, &finally_source, &finally_steps),
-        ],
-    )?;
-    Ok(crate::task::TaskLifecyclePlan::new(
-        outcome, first, loop_flow, finally,
+    validate_task_lifecycle_facts([
+        (&first, &first_source, &first_steps),
+        (&loop_flow, &loop_source, &loop_steps),
+        (&finally, &finally_source, &finally_steps),
+    ])?;
+    Ok(crate::task::TaskLifecyclePlan::standard(
+        first, loop_flow, finally,
     ))
 }
 
@@ -973,8 +950,6 @@ fn validate_task_lifecycle(task: &Task) -> OpsResult<()> {
         &task.lifecycle.finally.flow,
     )?;
     validate_task_lifecycle_facts(
-        task.lifecycle.outcome,
-        "persisted Task lifecycle outcome",
         [
             (
                 &first,
@@ -995,7 +970,7 @@ fn validate_task_lifecycle(task: &Task) -> OpsResult<()> {
     )
     .map_err(|error| {
         task_error(format!(
-            "Task {} cannot launch: {error}\nPersisted Task lifecycle selection is immutable; abandon {} and start a replacement Task with the corrected flows and outcome",
+            "Task {} cannot launch: {error}\nPersisted Task lifecycle selection is immutable; abandon {} and start a replacement Task with the corrected flows",
             task.plan.identifier, task.plan.identifier
         ))
     })
@@ -1141,14 +1116,8 @@ fn select_task_flow<'a>(
     (default, format!("built-in Task `{phase}` default"))
 }
 
-const TASK_IMPLEMENTATION_CAPABILITY: &str = "task_implementation";
-
-fn validate_task_lifecycle_facts(
-    outcome: crate::task::TaskOutcome,
-    outcome_source: &str,
-    phases: [(&str, &str, &[ConcreteStep]); 3],
-) -> OpsResult<()> {
-    let [(first_flow, first_source, first_steps), (loop_flow, loop_source, loop_steps), (finally_flow, finally_source, finally_steps)] =
+fn validate_task_lifecycle_facts(phases: [(&str, &str, &[ConcreteStep]); 3]) -> OpsResult<()> {
+    let [(_, _, _), (loop_flow, loop_source, loop_steps), (finally_flow, finally_source, finally_steps)] =
         phases;
     let mut violations = Vec::new();
     if loop_steps
@@ -1156,31 +1125,8 @@ fn validate_task_lifecycle_facts(
         .all(|step| matches!(step, ConcreteStep::Skill(skill) if skill.policy.human))
     {
         violations.push(format!(
-            "loop phase flow {:?} from {} is human-only; missing capability `autonomous_progress`. Move the human review to `first` or `finally`, or select an autonomous loop such as `slice`",
+            "loop phase flow {:?} from {} is human-only and has no autonomous skill step. Move the human review to `first` or `finally`, or select an autonomous loop such as `slice`",
             loop_flow, loop_source,
-        ));
-    }
-
-    let implements = |steps: &[ConcreteStep]| {
-        steps.iter().any(|step| {
-            matches!(
-                step,
-                ConcreteStep::Skill(skill)
-                    if skill
-                        .skill
-                        .capabilities
-                        .iter()
-                        .any(|capability| capability == TASK_IMPLEMENTATION_CAPABILITY)
-            )
-        })
-    };
-    if outcome == crate::task::TaskOutcome::Delivery
-        && !implements(first_steps)
-        && !implements(loop_steps)
-    {
-        violations.push(format!(
-            "loop phase flow {:?} from {} has no `{TASK_IMPLEMENTATION_CAPABILITY}` capability, and first phase flow {:?} from {} provides none for the delivery outcome from {}; select an implementation flow such as `slice`, declare that capability on the implementing skill, or launch intentional design work with `--design-only`",
-            loop_flow, loop_source, first_flow, first_source, outcome_source,
         ));
     }
 
@@ -1199,7 +1145,7 @@ fn validate_task_lifecycle_facts(
     });
     if !settles {
         violations.push(format!(
-            "finally phase flow {:?} from {} is missing capability `autonomous_task_settlement` at its terminal step; end the flow with `op: pr land -c` or select `ship`",
+            "finally phase flow {:?} from {} does not end with `op: pr land -c`; add terminal Task settlement or select `ship-demo`",
             finally_flow, finally_source,
         ));
     }
@@ -1690,6 +1636,8 @@ pub(crate) fn request_task_pr_publication(repo: &Path, title: &str, body: &str) 
         else {
             return Ok(false);
         };
+        let identity = task_pr_identity_from_store(&store, &task).await?;
+        validate_task_pr_copy(&identity, title, body)?;
         let mut pr = store
             .active_task_pr(&task.id)
             .await
@@ -1737,6 +1685,89 @@ pub(crate) fn request_task_pr_publication(repo: &Path, title: &str, body: &str) 
         .map_err(|error| task_error(format!("failed to request PR publication: {error}")))?;
         Ok(true)
     })
+}
+
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub(crate) struct TaskPrIdentity {
+    pub(crate) title: String,
+    pub(crate) identifier: String,
+    pub(crate) url: String,
+}
+
+pub(crate) fn task_pr_identity(repo: &Path) -> OpsResult<Option<TaskPrIdentity>> {
+    block_on_task(async move {
+        let TaskAuthority::Authority { store, task, .. } = resolve_task_authority(repo).await?
+        else {
+            return Ok(None);
+        };
+        task_pr_identity_from_store(&store, &task).await.map(Some)
+    })
+}
+
+async fn task_pr_identity_from_store(
+    store: &SharedStore,
+    task: &Task,
+) -> OpsResult<TaskPrIdentity> {
+    let wave = owning_wave(store, task).await?;
+    let snapshot = store
+        .pm_snapshot(&task.wave_id)
+        .await
+        .map_err(|error| task_error(format!("failed to read cached PM snapshot: {error}")))?
+        .ok_or_else(|| missing_task_pr_url(task, wave.name()))?;
+    let snapshot: PmSnapshot = serde_json::from_str(&snapshot.payload).map_err(|error| {
+        task_error(format!(
+            "cached PM snapshot for Wave {:?} is invalid: {error}. Run `lf pm sync --wave {}` before publishing this Task PR",
+            wave.name(),
+            wave.name(),
+        ))
+    })?;
+    let item = snapshot
+        .items
+        .iter()
+        .find(|item| item.id == task.plan.id.as_str())
+        .ok_or_else(|| missing_task_pr_url(task, wave.name()))?;
+    let url = item
+        .url
+        .as_deref()
+        .filter(|url| valid_task_url(url))
+        .ok_or_else(|| missing_task_pr_url(task, wave.name()))?;
+    Ok(TaskPrIdentity {
+        title: task.plan.title.clone(),
+        identifier: task.plan.identifier.clone(),
+        url: url.to_string(),
+    })
+}
+
+fn valid_task_url(value: &str) -> bool {
+    let Ok(url) = reqwest::Url::parse(value) else {
+        return false;
+    };
+    matches!(url.scheme(), "http" | "https")
+        && url.host_str().is_some()
+        && !value.chars().any(char::is_control)
+}
+
+fn missing_task_pr_url(task: &Task, wave: &str) -> OpsError {
+    task_error(format!(
+        "Task {} has no valid provider URL in the cached PM snapshot. Run `lf pm sync --wave {wave}` before publishing this Task PR",
+        task.plan.identifier,
+    ))
+}
+
+fn validate_task_pr_copy(identity: &TaskPrIdentity, title: &str, body: &str) -> OpsResult<()> {
+    if !title.starts_with(identity.title.trim()) {
+        return Err(task_error(format!(
+            "Task PR title must start with the Linear Task name {:?}",
+            identity.title,
+        )));
+    }
+    let anchor = format!("Linear Task: [{}]({})", identity.identifier, identity.url);
+    if !body.lines().any(|line| line.trim() == anchor) {
+        return Err(task_error(format!(
+            "Task PR body must include the owning Linear Task link: {anchor}"
+        )));
+    }
+    Ok(())
 }
 
 /// The exact clean Task settlement already represented by local HEAD and the
@@ -5687,7 +5718,7 @@ mod tests {
     use crate::store::{open_store, SharedStore, StorageConfig};
     use crate::task::{
         Observation, PmWritebackState, Task, TaskEventKind, TaskId, TaskLifecyclePhase,
-        TaskLifecyclePlan, TaskOutcome, TaskPr, TaskPrId,
+        TaskLifecyclePlan, TaskPr, TaskPrId,
     };
     use crate::wave::Wave;
     use std::ffi::OsString;
@@ -5775,12 +5806,7 @@ mod tests {
             project_id: project.id.clone(),
             worktree: repository,
             workspace_slug: "task-recovery-fixture".to_string(),
-            lifecycle: TaskLifecyclePlan::new(
-                TaskOutcome::Delivery,
-                "task-design",
-                loop_flow,
-                "ship",
-            ),
+            lifecycle: TaskLifecyclePlan::standard("task-design", loop_flow, "ship"),
             lifecycle_phase: TaskLifecyclePhase::Loop,
             phase_epoch: 4,
             phase_cursor: 0,
@@ -5864,7 +5890,7 @@ mod tests {
     }
 
     #[test]
-    fn int_10_lifecycle_names_every_missing_capability_and_correction() {
+    fn task_lifecycle_rejects_structural_dead_ends() {
         let repo = tempfile::tempdir().expect("temp repo");
         let project = ProjectFlowPlan {
             first: Some("task-kickoff".to_string()),
@@ -5879,40 +5905,42 @@ mod tests {
         assert!(message.contains(
             "loop phase flow \"design\" from Linear Project `## Flows` `loop` configuration is human-only"
         ));
-        assert!(message.contains("missing capability `autonomous_progress`"));
-        assert!(message.contains(
-            "loop phase flow \"design\" from Linear Project `## Flows` `loop` configuration has no `task_implementation` capability"
-        ));
-        assert!(message.contains(
-            "first phase flow \"task-kickoff\" from Linear Project `## Flows` `first` configuration provides none"
-        ));
-        assert!(message.contains("launch intentional design work with `--design-only`"));
+        assert!(message.contains("has no autonomous skill step"));
         assert!(message.contains(
             "finally phase flow \"task-gate\" from Linear Project `## Flows` `finally` configuration"
         ));
-        assert!(message.contains("missing capability `autonomous_task_settlement`"));
+        assert!(message.contains("does not end with `op: pr land -c`"));
         assert!(message.contains("`op: pr land -c`"));
     }
 
     #[test]
-    fn explicit_design_only_lifecycle_can_settle_without_implementation() {
+    fn repo_local_task_flow_needs_no_capability_frontmatter() {
         let repo = tempfile::tempdir().expect("temp repo");
+        let skills = repo.path().join(".lf/skills");
+        let flows = repo.path().join(".lf/flows");
+        std::fs::create_dir_all(&skills).expect("create skill directory");
+        std::fs::create_dir_all(&flows).expect("create flow directory");
+        std::fs::write(
+            skills.join("write-artifact.md"),
+            "Produce the Task artifact and prove it works.\n",
+        )
+        .expect("write repo-local skill");
+        std::fs::write(flows.join("custom-loop.yaml"), "- write-artifact\n")
+            .expect("write repo-local flow");
         let overrides = TaskFlowOverrides {
-            loop_: Some("gate".to_string()),
-            outcome: Some(TaskOutcome::DesignOnly),
+            loop_: Some("custom-loop".to_string()),
             ..TaskFlowOverrides::default()
         };
 
         let plan = resolve_task_lifecycle(repo.path(), &ProjectFlowPlan::empty(), &overrides)
-            .expect("explicit design-only lifecycle");
+            .expect("structurally valid repo-local lifecycle");
 
-        assert_eq!(plan.outcome, TaskOutcome::DesignOnly);
-        assert_eq!(plan.loop_.flow, "gate");
-        assert_eq!(plan.finally.flow, "ship");
+        assert_eq!(plan.loop_.flow, "custom-loop");
+        assert_eq!(plan.finally.flow, "ship-demo");
     }
 
     #[test]
-    fn default_task_has_one_human_gate_and_incident_lifecycle_has_none() {
+    fn default_and_feature_tasks_gate_at_design_and_demo() {
         let repo = tempfile::tempdir().expect("temp repo");
         let defaults = resolve_task_lifecycle(
             repo.path(),
@@ -5934,36 +5962,38 @@ mod tests {
             |step| matches!(step, crate::engine::ConcreteStep::Skill(skill) if skill.policy.human),
         )
         .collect::<Vec<_>>();
-        assert_eq!(default_human.len(), 1);
-        assert!(matches!(
-            &default_human[0],
-            crate::engine::ConcreteStep::Skill(skill)
-                if skill.policy.id.as_deref() == Some("review_kickoff")
-        ));
+        assert_eq!(default_human.len(), 2);
+        assert_eq!(
+            default_human
+                .iter()
+                .filter_map(|step| match step {
+                    crate::engine::ConcreteStep::Skill(skill) => skill.policy.id.as_deref(),
+                    _ => None,
+                })
+                .collect::<Vec<_>>(),
+            ["review_kickoff", "review_demo"]
+        );
 
-        let incident = resolve_task_lifecycle(
+        let feature = resolve_task_lifecycle(
             repo.path(),
-            &ProjectFlowPlan {
-                first: Some("incident".to_string()),
-                loop_: Some("ship-5whys".to_string()),
-                finally: Some("ship".to_string()),
-            },
-            &TaskFlowOverrides::default(),
+            &ProjectFlowPlan::empty(),
+            &TaskFlowOverrides::for_cycle(Some(super::TaskCycle::Feature), None, None, None),
         )
-        .expect("resolve incident lifecycle");
-        assert!([
-            &incident.first.flow,
-            &incident.loop_.flow,
-            &incident.finally.flow
+        .expect("resolve feature lifecycle");
+        assert_eq!(feature.first.flow, "task-design");
+        assert_eq!(feature.finally.flow, "ship-demo");
+        assert_eq!([
+            &feature.first.flow,
+            &feature.loop_.flow,
+            &feature.finally.flow
         ]
         .into_iter()
         .flat_map(|flow| {
             let flow = crate::engine::load_flow(flow, repo.path()).unwrap();
             crate::engine::expand_flow(&flow, repo.path()).unwrap()
         })
-        .all(|step| {
-            !matches!(step, crate::engine::ConcreteStep::Skill(skill) if skill.policy.human)
-        }));
+        .filter(|step| matches!(step, crate::engine::ConcreteStep::Skill(skill) if skill.policy.human))
+        .count(), 2);
     }
 
     #[test]
@@ -6031,7 +6061,7 @@ mod tests {
     }
 
     #[test]
-    fn task_settlement_must_be_the_terminal_finally_step() {
+    fn task_lifecycle_settlement_must_be_the_terminal_finally_step() {
         let repo = tempfile::tempdir().expect("temp repo");
         let flows = repo.path().join(".lf/flows");
         std::fs::create_dir_all(&flows).expect("create flow directory");
@@ -6051,7 +6081,7 @@ mod tests {
 
         assert!(error
             .to_string()
-            .contains("missing capability `autonomous_task_settlement` at its terminal step"));
+            .contains("does not end with `op: pr land -c`"));
     }
 
     #[test]
@@ -6224,8 +6254,7 @@ mod tests {
         let TaskFixture {
             store, mut task, ..
         } = task_fixture("INT-10", "slice").await;
-        task.lifecycle =
-            TaskLifecyclePlan::new(TaskOutcome::Delivery, "task-kickoff", "design", "task-gate");
+        task.lifecycle = TaskLifecyclePlan::standard("task-kickoff", "design", "task-gate");
         store.update_task(&task).await.unwrap();
         let mut pr = store.active_task_pr(&task.id).await.unwrap().unwrap();
         pr.abandoned_at = Some(time::OffsetDateTime::now_utc());
@@ -6239,7 +6268,7 @@ mod tests {
             .to_string()
             .contains("Task INT-10 cannot launch: Task lifecycle cannot converge"));
         assert!(error.to_string().contains(
-            "Persisted Task lifecycle selection is immutable; abandon INT-10 and start a replacement Task with the corrected flows and outcome"
+            "Persisted Task lifecycle selection is immutable; abandon INT-10 and start a replacement Task with the corrected flows"
         ));
         assert_eq!(store.task_prs(&task.id).await.unwrap().len(), 1);
         assert!(store.active_task_pr(&task.id).await.unwrap().is_none());

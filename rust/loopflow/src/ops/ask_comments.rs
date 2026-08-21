@@ -205,12 +205,7 @@ mod tests {
             project_id: project.id.clone(),
             worktree: directory.path().join("task"),
             workspace_slug: "ask-comments".to_string(),
-            lifecycle: TaskLifecyclePlan::new(
-                crate::task::TaskOutcome::Delivery,
-                "task-design",
-                "task",
-                "ship",
-            ),
+            lifecycle: TaskLifecyclePlan::standard("task-design", "task", "ship"),
             lifecycle_phase: TaskLifecyclePhase::Loop,
             phase_epoch: 1,
             phase_cursor: 0,

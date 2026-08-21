@@ -1098,10 +1098,10 @@ pub enum TaskCommand {
         issue: String,
         #[arg(long)]
         name: Option<String>,
-        /// Fix cycle: first task-fix, finally ship-demo (human gates at the demo)
+        /// Fix cycle: first incident, finally ship-demo (human gates at the demo)
         #[arg(long, conflicts_with = "feature")]
         fix: bool,
-        /// Feature cycle: first task-design, finally ship (human gates at the design)
+        /// Feature cycle: design review first, configured-path demo before settlement
         #[arg(long, alias = "feat", conflicts_with = "fix")]
         feature: bool,
         /// Override the Project's first flow for a new Task
@@ -1113,9 +1113,6 @@ pub enum TaskCommand {
         /// Override the Project's finally flow for a new Task
         #[arg(long, value_name = "FLOW")]
         finally: Option<String>,
-        /// Finish one design artifact without requiring implementation
-        #[arg(long)]
-        design_only: bool,
         /// Fork this Task's worktree from another Task's active PR
         #[arg(long = "stack-on", value_name = "PARENT_TASK")]
         stack_on: Option<String>,
@@ -1132,10 +1129,10 @@ pub enum TaskCommand {
         title: Option<String>,
         #[arg(long)]
         name: Option<String>,
-        /// Fix cycle: first task-fix, finally ship-demo (human gates at the demo)
+        /// Fix cycle: first incident, finally ship-demo (human gates at the demo)
         #[arg(long, conflicts_with = "feature")]
         fix: bool,
-        /// Feature cycle: first task-design, finally ship (human gates at the design)
+        /// Feature cycle: design review first, configured-path demo before settlement
         #[arg(long, alias = "feat", conflicts_with = "fix")]
         feature: bool,
         /// Override the Project's first flow
@@ -1147,9 +1144,6 @@ pub enum TaskCommand {
         /// Override the Project's finally flow
         #[arg(long, value_name = "FLOW")]
         finally: Option<String>,
-        /// Finish one design artifact without requiring implementation
-        #[arg(long)]
-        design_only: bool,
         /// Fork this Task's worktree from another Task's active PR
         #[arg(long = "stack-on", value_name = "PARENT_TASK")]
         stack_on: Option<String>,
@@ -2523,7 +2517,6 @@ mod tests {
             "ship-5whys",
             "--finally",
             "ship",
-            "--design-only",
         ])
         .expect("parse task lifecycle overrides");
         let Some(Commands::Task {
@@ -2532,7 +2525,6 @@ mod tests {
                     first,
                     loop_,
                     finally,
-                    design_only,
                     ..
                 },
         }) = cli.command
@@ -2542,7 +2534,11 @@ mod tests {
         assert_eq!(first.as_deref(), Some("incident"));
         assert_eq!(loop_.as_deref(), Some("ship-5whys"));
         assert_eq!(finally.as_deref(), Some("ship"));
-        assert!(design_only);
+    }
+
+    #[test]
+    fn task_run_rejects_design_only_outcome() {
+        assert!(Cli::try_parse_from(["lf", "task", "run", "INF-123", "--design-only"]).is_err());
     }
 
     #[test]

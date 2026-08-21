@@ -305,7 +305,7 @@ Linear Project content — not in a repo file, a status table, or its own memory
 ```bash
 lf pm project create --wave infra --title "Technical Architecture" \
   --definition "Loopflow's architecture is legible from the top down." \
-  --first task-design --loop slice --finally ship \
+  --first task-design --loop slice --finally ship-demo \
   --kr "Top-down architecture documentation is complete and published."
 ```
 
@@ -346,7 +346,7 @@ lf task start <linear-project-id> "add retry to token refresh"
 pbpaste | lf task start incident-management
 lf task run INF-123
 lf task run INF-124 --stack-on INF-123     # dependent work before the parent merges
-lf task run INF-125 --design-only --loop gate --finally ship
+lf task run INF-125 --first incident --loop ship-5whys --finally ship-demo
 ```
 
 Task Work advances through zero or more serial PRs to `main`. Its Project
@@ -358,9 +358,13 @@ Loopflow rotates the worktree onto the next branch. The Task inherits the wave's
 `GOAL.md` and `MEMORY.md` plus its Project definition and KRs.
 
 Loopflow expands the selected lifecycle before launch and refuses a composition
-that cannot make its promised outcome or settle the Task. The
-[`lf` reference](lf.md#running-waves-projects-and-tasks) defines the capability
+without an autonomous loop or a terminal `pr land -c` operation. The
+[`lf` reference](lf.md#running-waves-projects-and-tasks) defines the lifecycle
 contract and recovery behavior.
+
+Each Task PR title starts with its Linear Task name, and its body links directly
+to the Linear issue. The anchors survive publication refreshes and serial PR
+rotation.
 
 The wave stays steerable while several independent tasks run — task events
 enter its inbox as typed observations and wake it once. Steering, status,

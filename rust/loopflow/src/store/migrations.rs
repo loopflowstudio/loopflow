@@ -1663,6 +1663,7 @@ mod tests {
     const LEGACY_TASK_FLOW_REPAIR_NAME: &str = "repair_legacy_task_flow";
     const TURN_USAGE_SAMPLES_NAME: &str = "add_turn_usage_samples";
     const REPOSITORY_OWNED_WAVES_NAME: &str = "repository_owned_waves";
+    const REMOVE_TASK_LIFECYCLE_OUTCOME_NAME: &str = "remove_task_lifecycle_outcome";
 
     fn _draft_is_canonical(name: &str) -> bool {
         let marker = format!("-- draft: {name}");
@@ -2013,6 +2014,25 @@ mod tests {
             .map(|offset| body_start + offset)
             .unwrap_or(sql.len());
         sql[body_start..body_end].to_string()
+    }
+
+    #[test]
+    fn task_lifecycle_outcome_is_removed_from_the_persisted_model() {
+        let conn = open();
+        apply_before_current_draft(&conn, REMOVE_TASK_LIFECYCLE_OUTCOME_NAME);
+        assert!(columns(&conn, "tasks")
+            .iter()
+            .any(|column| column == "lifecycle_outcome"));
+
+        conn.execute_batch(&current_draft_sql(REMOVE_TASK_LIFECYCLE_OUTCOME_NAME))
+            .unwrap();
+
+        assert!(!columns(&conn, "tasks")
+            .iter()
+            .any(|column| column == "lifecycle_outcome"));
+        for column in ["pr_title", "pr_body", "pr_copy_head_sha"] {
+            assert!(columns(&conn, "task_prs").iter().any(|name| name == column));
+        }
     }
 
     #[test]

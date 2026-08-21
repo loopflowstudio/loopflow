@@ -1584,10 +1584,21 @@ async fn record_unhandled_failure(
 }
 
 fn unhandled_failure_receipt(detail: &str) -> (String, bool) {
+    if let Some(reason) = trace_capture_blocker(detail) {
+        return (reason, false);
+    }
     match provider_credential_blocker(detail) {
         Some(message) => (message, false),
         None => (format!("task process failed: {detail}"), true),
     }
+}
+
+fn trace_capture_blocker(detail: &str) -> Option<String> {
+    let (_, reason) = detail.split_once("trace capture is already partial:")?;
+    Some(format!(
+        "Task trace capture could not continue:{} The partial trace, Task worktree, and active pull request remain preserved. Repair local ledger write contention before starting a new Run.",
+        reason
+    ))
 }
 
 fn provider_credential_blocker(detail: &str) -> Option<String> {

@@ -368,7 +368,7 @@ struct RegistryQueryTests {
             encoding: .utf8
         )!
         let query = RegistryQuery { args, cwd in
-            #expect(cwd == nil)
+            #expect(cwd == "/tmp/repo")
             switch args {
             case ["ask", "list", "--user", "--json"]:
                 return attentionJSON
@@ -381,11 +381,12 @@ struct RegistryQueryTests {
             }
         }
 
-        let listed = try await query.userAskAttention()
-        let opened = try await query.prepareAskOpen(askId: ask.id)
+        let listed = try await query.userAskAttention(cwd: "/tmp/repo")
+        let opened = try await query.prepareAskOpen(askId: ask.id, cwd: "/tmp/repo")
         let presented = try await query.confirmAskPresented(
             askId: ask.id,
-            invocationId: surface.invocation.id
+            invocationId: surface.invocation.id,
+            cwd: "/tmp/repo"
         )
 
         #expect(listed == attention)

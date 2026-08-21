@@ -2,13 +2,18 @@ import Foundation
 import Loopflow
 import SwiftUI
 
+private enum PodiumSurface {
+    case sessions
+    case work
+}
+
 struct PodiumView: View {
     let portfolioService: PortfolioService
     let initialRepoPath: String?
 
     @Environment(\.palette) private var palette
     @State private var model: PodiumModel
-    @State private var openAsk: AskAttentionRecord?
+    @State private var surface: PodiumSurface
 
     init(
         portfolioService: PortfolioService,
@@ -20,9 +25,13 @@ struct PodiumView: View {
         let restoredRepoPath = initialRepoPath == nil && !AppTestMode.shouldBypassRegistry
             ? loadLoopflowState()?.selectedRepoPath
             : nil
-        let model = PodiumModel(query: query, repoPath: restoredRepoPath)
+        let startingRepoPath = initialRepoPath
+            .map { PortfolioDiscovery.resolveLaunchRepo($0).path }
+            ?? restoredRepoPath
+        let model = PodiumModel(query: query, repoPath: startingRepoPath)
         PodiumFixture.applyIfRequested(to: model)
         _model = State(initialValue: model)
+        _surface = State(initialValue: model.repoPath == nil ? .work : .sessions)
     }
 
     var body: some View {
@@ -30,31 +39,43 @@ struct PodiumView: View {
         VStack(spacing: 0) {
             PodiumBar(
                 model: model,
-                onOpenAsk: { openAsk = $0 }
+                onOpenSessions: {
+                    if model.repoPath != nil { surface = .sessions }
+                }
             )
             Divider()
             PodiumConsole(model: model) {
-                HSplitView {
-                    WorkSurfaceView(model: model)
-                    .frame(
-                        minWidth: 350,
-                        idealWidth: 660,
-                        maxWidth: .infinity,
-                        maxHeight: .infinity,
-                        alignment: .top
+                if surface == .sessions, let repoPath = model.repoPath {
+                    SessionsView(
+                        scope: .repo(repoPath),
+                        initialRecords: model.userAskAttention.value,
+                        onQueueChanged: { await model.refreshUserAskAttention() },
+                        onShowWork: { surface = .work }
                     )
-                    .accessibilityIdentifier("podium-work")
-
-                    WorkActivityView(model: model)
+                    .id(repoPath.normalizedFilePath)
+                } else {
+                    HSplitView {
+                        WorkSurfaceView(model: model)
                         .frame(
-                            minWidth: 265,
-                            idealWidth: 390,
-                            maxWidth: 520,
+                            minWidth: 350,
+                            idealWidth: 660,
+                            maxWidth: .infinity,
                             maxHeight: .infinity,
                             alignment: .top
                         )
+                        .accessibilityIdentifier("podium-work")
+
+                        WorkActivityView(model: model)
+                            .frame(
+                                minWidth: 265,
+                                idealWidth: 390,
+                                maxWidth: 520,
+                                maxHeight: .infinity,
+                                alignment: .top
+                            )
+                    }
+                    .frame(maxWidth: .infinity, maxHeight: .infinity, alignment: .top)
                 }
-                .frame(maxWidth: .infinity, maxHeight: .infinity, alignment: .top)
             }
             .frame(maxWidth: .infinity, maxHeight: .infinity, alignment: .topLeading)
         }
@@ -79,6 +100,17 @@ struct PodiumView: View {
                 }
             }
         }
+        .task(id: model.repoPath) {
+            await model.refresh()
+            while !Task.isCancelled {
+                do {
+                    try await Task.sleep(for: .seconds(15))
+                } catch {
+                    return
+                }
+                await model.refresh()
+            }
+        }
         .onChange(of: portfolioService.repos.map(\.path)) { _, _ in
             Task {
                 await model.refreshPortfolio(
@@ -87,17 +119,18 @@ struct PodiumView: View {
                 )
             }
         }
-        .sheet(item: $openAsk) { ask in
-            AskSessionView(initialAsk: ask) {
-                await model.refreshUserAskAttention()
-            }
+        .onChange(of: model.repoPath) { _, repoPath in
+            surface = repoPath == nil ? .work : .sessions
+        }
+        .onReceive(NotificationCenter.default.publisher(for: .openSessions)) { _ in
+            if model.repoPath != nil { surface = .sessions }
         }
     }
 }
 
 private struct PodiumBar: View {
     @Bindable var model: PodiumModel
-    let onOpenAsk: (AskAttentionRecord) -> Void
+    let onOpenSessions: () -> Void
 
     private var repoTitle: String {
         guard let repoPath = model.repoPath else { return "All repositories" }
@@ -133,7 +166,7 @@ private struct PodiumBar: View {
 
             Spacer(minLength: Spacing.sm)
 
-            UserAskAttentionButton(model: model, onOpen: onOpenAsk)
+            UserAskAttentionButton(model: model, onOpen: onOpenSessions)
 
             TokenOutputInstrument(reading: model.processActivity)
                 .accessibilityIdentifier("podium-token-meter")

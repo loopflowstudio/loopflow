@@ -2238,12 +2238,23 @@ pub(crate) async fn flow_step_ask_prompt(
         skill,
         node_id,
         &ask.id,
+        &ask.target,
     ))
 }
 
-fn human_flow_ask_prompt(input: &str, skill: &str, node_id: &str, ask_id: &AskId) -> String {
+fn human_flow_ask_prompt(
+    input: &str,
+    skill: &str,
+    node_id: &str,
+    ask_id: &AskId,
+    target: &crate::durable::AskTarget,
+) -> String {
+    let reviewer_mode = match target {
+        crate::durable::AskTarget::User => "Reviewer mode: Human reviewer. The authenticated User is present in this Ask session and owns the review decisions.\n\n",
+        crate::durable::AskTarget::Parent(_) => "",
+    };
     format!(
-        "{input}\n\n<lf:human-flow-node>\nThis is the actual writable `{skill}` Task step at human node `{node_id}`, not an advisory review. Work only in the origin Task and settle explicitly before leaving:\n- `lf ask resolve {ask_id} \"<concise verified summary>\"` accepts the step\n- `lf ask decline {ask_id} \"<reason>\"` returns to the preceding autonomous step\n- `lf ask release {ask_id} \"<reason>\"` leaves the node waiting\nA final response, clean exit, Ctrl-D, or window close never advances the flow.\n</lf:human-flow-node>"
+        "{input}\n\n<lf:human-flow-node>\n{reviewer_mode}This is the actual writable `{skill}` Task step at human node `{node_id}`, not an advisory review. Work only in the origin Task and settle explicitly before leaving:\n- `lf ask resolve {ask_id} \"<concise verified summary>\"` accepts the step\n- `lf ask decline {ask_id} \"<reason>\"` returns to the preceding autonomous step\n- `lf ask release {ask_id} \"<reason>\"` leaves the node waiting\nA final response, clean exit, Ctrl-D, or window close never advances the flow.\n</lf:human-flow-node>"
     )
 }
 
@@ -2509,10 +2520,12 @@ mod planning_tests {
             "review-design",
             "review_kickoff",
             &AskId::parse("ask_00000000000000000000000000000001").unwrap(),
+            &AskTarget::User,
         );
 
         assert!(prompt.starts_with("$review-design\n"));
         assert!(prompt.contains("<lf:human-flow-node>"));
+        assert!(prompt.contains("Reviewer mode: Human reviewer"));
         assert!(prompt.contains("lf ask resolve ask_00000000000000000000000000000001"));
         assert!(prompt.contains("lf ask decline ask_00000000000000000000000000000001"));
         assert!(prompt.contains("lf ask release ask_00000000000000000000000000000001"));
@@ -3111,6 +3124,10 @@ mod planning_tests {
             AskBody::FlowStep { node_id, skill, .. }
                 if node_id == "review_kickoff" && skill == "review-design"
         ));
+        let prompt = super::flow_step_ask_prompt(&store, &queued[0])
+            .await
+            .unwrap();
+        assert!(prompt.contains("Reviewer mode: Human reviewer"));
         assert!(store
             .invocations_for_run(&lease.run_id)
             .await

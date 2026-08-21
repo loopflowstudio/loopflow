@@ -67,12 +67,13 @@ A Task may deliver code, investigation, documentation, or a design artifact.
 Its Linear directive and selected flows express that work; there is no second
 durable outcome label and no compatibility alias.
 
-The outcome column was introduced in the still-draft
-`task_lifecycle_contract` migration. Remove it from that draft and from all
-explicit Task SQL columns and parameters. Keep the PR presentation columns from
-the same draft. Do not add a compensating migration or retain reads for local
-databases that happened to run the earlier draft; an orphaned draft column is
-ignored by the explicit column lists.
+The outcome column was introduced by `task_lifecycle_contract`, which became
+the immutable `0.12.10.001_release` migration on main while this Task waited at
+design review. Preserve that release byte-for-byte and add the forward
+`remove_task_lifecycle_outcome` draft. Remove the column from all explicit Task
+SQL columns and parameters. The PR presentation columns already shipped in the
+same release and remain in place. Retain no reads, aliases, or compatibility
+handling for the deleted outcome.
 
 ### Structural lifecycle validation only
 

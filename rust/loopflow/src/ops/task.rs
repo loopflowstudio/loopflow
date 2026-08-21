@@ -1755,8 +1755,7 @@ fn missing_task_pr_url(task: &Task, wave: &str) -> OpsError {
 }
 
 fn validate_task_pr_copy(identity: &TaskPrIdentity, title: &str, body: &str) -> OpsResult<()> {
-    let canonical_prefix = format!("{} — ", identity.title);
-    if title != identity.title && !title.starts_with(&canonical_prefix) {
+    if !title.starts_with(&identity.title) {
         return Err(task_error(format!(
             "Task PR title must start with the Linear Task name {:?}",
             identity.title,

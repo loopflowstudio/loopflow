@@ -104,18 +104,28 @@ exit 0
 "#
 }
 
-fn gh_merged_pr_without_time_script() -> &'static str {
+fn gh_merged_pr_without_time_script(log_path: &str) -> String {
     r#"#!/bin/sh
 if [ "$1" = "--version" ]; then
   exit 0
 fi
+echo "$@" >> "__LOG_PATH__"
 if [ "$1" = "api" ]; then
   head=$(git rev-parse HEAD)
   printf '{"merged":true,"state":"closed","draft":false,"merge_commit_sha":"merge-912","number":912,"html_url":"https://example.com/pr/912","head":{"sha":"%s"}}\n' "$head"
   exit 0
 fi
+if [ "$1 $2" = "pr list" ]; then
+  echo '[]'
+  exit 0
+fi
+if [ "$1 $2" = "pr create" ]; then
+  echo 'https://example.com/pr/1'
+  exit 0
+fi
 exit 0
 "#
+    .replace("__LOG_PATH__", log_path)
 }
 
 fn gh_merged_pr_logging_script(log_path: &str) -> String {
@@ -563,9 +573,11 @@ fn task_pr_missing_cached_linear_url_refuses_before_remote_mutation() {
 }
 
 #[test]
-fn merged_continue_task_rotates_to_a_working_pr_without_review_state() {
+fn serial_task_pr_publication_restores_linear_identity_anchors() {
     let home = tempfile::TempDir::new().expect("temp home");
-    let _env = EnvGuard::with_lf_home(&[("gh", gh_merged_pr_without_time_script())], home.path());
+    let gh_log = home.path().join("gh.log");
+    let gh = gh_merged_pr_without_time_script(gh_log.to_string_lossy().as_ref());
+    let _env = EnvGuard::with_lf_home(&[("gh", gh.as_str())], home.path());
     let repo = TestRepo::new();
     let base = repo.head_sha();
     let branch = "jack/task-pr-proof";
@@ -670,6 +682,42 @@ fn merged_continue_task_rotates_to_a_working_pr_without_review_state() {
     assert!(!matches!(
         runtime.block_on(task.store.work_status(&work)).unwrap(),
         WorkStatus::Done
+    ));
+
+    repo.create_file("serial-proof.txt", "second PR\n");
+    repo.stage_all();
+    repo.commit("add serial proof");
+    create_or_update_pr(
+        repo.path(),
+        &PrOptions {
+            title: Some("Second delivery slice".to_string()),
+            body: Some("Serial reviewer context".to_string()),
+            agent: None,
+        },
+        &NullProgress,
+    )
+    .expect("publish serial Task PR");
+    let serial = runtime
+        .block_on(task.store.active_task_pr(&task.task.id))
+        .expect("read serial PR")
+        .expect("active serial PR");
+    assert_eq!(serial.sequence, 2);
+    let presentation = serial
+        .publication
+        .as_ref()
+        .and_then(|publication| publication.presentation.as_ref())
+        .expect("serial reviewer copy");
+    assert_eq!(
+        presentation.title,
+        "Prove Task PR transitions — Second delivery slice"
+    );
+    assert!(presentation.body.starts_with(
+        "Linear Task: [INF-123](https://linear.app/loopflow/issue/INF-123/prove-task-pr-transitions)\n\n"
+    ));
+    let gh_calls = fs::read_to_string(gh_log).expect("read GitHub calls");
+    assert!(gh_calls.contains("--title Prove Task PR transitions — Second delivery slice"));
+    assert!(gh_calls.contains(
+        "--body Linear Task: [INF-123](https://linear.app/loopflow/issue/INF-123/prove-task-pr-transitions)"
     ));
 }
 

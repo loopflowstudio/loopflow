@@ -250,6 +250,7 @@ Flows are defined in `.lf/flows/`. See [Configuration](config.md).
 | `task-design` | kickoff → review-design |
 | `slice` | code → review-slice → publish/refresh Task PR |
 | `ship` | task-gate → record-learnings → op: pr land -c |
+| `ship-demo` | task-gate → human demo review → record-learnings → op: pr land -c |
 | `deploy` | gate → op: pr land |
 | `design-and-ship` | design → implement → reduce → polish → deploy |
 | `incident` | restore → 5whys |
@@ -285,7 +286,7 @@ lf task start <linear-project-id> "fix the flaky chord-timeout test"
 pbpaste | lf task start incident-management
 lf task run DES-123 --directive "fix the parser before the docs"
 lf task run DES-124 --stack-on DES-123
-lf task run DES-125 --loop gate --finally ship
+lf task run DES-125 --first incident --loop ship-5whys --finally ship-demo
 lf task status DES-123
 lf ask list                                           # parent Ask queue
 lf ask list --outgoing                                # this Work's unresolved requests

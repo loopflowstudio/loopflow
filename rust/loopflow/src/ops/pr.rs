@@ -202,19 +202,29 @@ pub(crate) fn normalize_task_pr_copy(
 
     let authored_title = copy.title.split_whitespace().collect::<Vec<_>>().join(" ");
     let canonical_prefix = format!("{task_title} — ");
-    let title = if authored_title == task_title || authored_title.starts_with(&canonical_prefix) {
+    let title = if authored_title.starts_with(task_title) {
         authored_title
-    } else if authored_title.is_empty() {
-        task_title.to_string()
+            .chars()
+            .take(GITHUB_PR_TITLE_MAX_CHARS)
+            .collect::<String>()
+            .trim_end()
+            .to_string()
     } else {
-        format!("{canonical_prefix}{authored_title}")
+        let separator_chars = " — ".chars().count();
+        let suffix_chars =
+            GITHUB_PR_TITLE_MAX_CHARS.saturating_sub(task_title.chars().count() + separator_chars);
+        let suffix = authored_title
+            .chars()
+            .take(suffix_chars)
+            .collect::<String>()
+            .trim_end()
+            .to_string();
+        if suffix.is_empty() {
+            task_title.to_string()
+        } else {
+            format!("{canonical_prefix}{suffix}")
+        }
     };
-    let title = title
-        .chars()
-        .take(GITHUB_PR_TITLE_MAX_CHARS)
-        .collect::<String>()
-        .trim_end()
-        .to_string();
 
     let anchor = format!("Linear Task: [{}]({})", identity.identifier, identity.url);
     let reviewer_context = copy
@@ -1644,6 +1654,28 @@ mod tests {
             normalize_task_pr_copy(copy.clone(), None).expect("normalize ordinary PR"),
             copy
         );
+    }
+
+    #[test]
+    fn task_title_anchor_is_never_partially_truncated() {
+        let task_title = "T".repeat(254);
+        let identity = TaskPrIdentity {
+            title: task_title.clone(),
+            identifier: "LOO-230".to_string(),
+            url: "https://linear.app/loopflow/issue/LOO-230/remove-validation".to_string(),
+        };
+
+        let copy = normalize_task_pr_copy(
+            PrCopy {
+                title: "context".to_string(),
+                body: "proof".to_string(),
+            },
+            Some(&identity),
+        )
+        .expect("normalize long Task title");
+
+        assert_eq!(copy.title, task_title);
+        assert_eq!(copy.title.chars().count(), 254);
     }
 
     #[test]

@@ -1660,5 +1660,14 @@ mod tests {
         assert_eq!(plan.first.flow, "task-design");
         assert_eq!(plan.loop_.flow, "code");
         assert_eq!(plan.finally.flow, "ship-demo");
+        let json = serde_json::to_value(&plan).expect("serialize lifecycle plan");
+        assert_eq!(
+            json.as_object()
+                .expect("lifecycle object")
+                .keys()
+                .map(String::as_str)
+                .collect::<std::collections::BTreeSet<_>>(),
+            ["finally", "first", "loop"].into_iter().collect()
+        );
     }
 }

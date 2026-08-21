@@ -346,7 +346,7 @@ lf task start <linear-project-id> "add retry to token refresh"
 pbpaste | lf task start incident-management
 lf task run INF-123
 lf task run INF-124 --stack-on INF-123     # dependent work before the parent merges
-lf task run INF-125 --loop gate --finally ship
+lf task run INF-125 --first incident --loop ship-5whys --finally ship-demo
 ```
 
 Task Work advances through zero or more serial PRs to `main`. Its Project

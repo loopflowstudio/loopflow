@@ -268,7 +268,7 @@ struct ContextLabView: View {
                 ContextStat(
                     label: "Outcomes",
                     value: "\(totals.completedInvocations) done · \(totals.failedInvocations) failed",
-                    denominator: "\(totals.runningInvocations) running · \(totals.interruptedInvocations) interrupted"
+                    denominator: "\(totals.runningInvocations) running · \(totals.unverifiedInvocations) unverified · \(totals.interruptedInvocations) interrupted"
                 )
                 ContextStat(
                     label: "Steering",
@@ -313,7 +313,7 @@ struct ContextLabView: View {
                 Divider()
                 railTitle("Outcome")
                 ForEach(InvocationOutcome.allCases, id: \.self) { value in
-                    filterToggle(value.rawValue.capitalized, selected: query.outcomes.contains(value)) {
+                    filterToggle(contextOutcomeLabel(value).capitalized, selected: query.outcomes.contains(value)) {
                         toggle(value, in: &query.outcomes)
                         query.outcomes.sort { $0.rawValue < $1.rawValue }
                     }
@@ -687,7 +687,7 @@ struct ContextLabView: View {
                                 Text(shortHash(trace.address.runId))
                                     .font(Typography.code(9))
                             }
-                            Text("\(trace.outcome.rawValue) · \(optionalTokens(trace.suppliedContextTokens)) context · \(trace.selectedSourceTokens) selected")
+                            Text("\(contextOutcomeLabel(trace.outcome)) · \(optionalTokens(trace.suppliedContextTokens)) context · \(trace.selectedSourceTokens) selected")
                                 .font(Typography.caption(9))
                                 .foregroundStyle(palette.textSecondary)
                             HStack {
@@ -1543,7 +1543,7 @@ private struct InvocationLaneView: View {
                 Text("peak \(optionalPercent(invocation.peakContextPercent))")
                     .font(Typography.code(9))
                     .foregroundStyle(palette.textSecondary)
-                Text(invocation.outcome.rawValue)
+                Text(contextOutcomeLabel(invocation.outcome))
                     .font(Typography.caption(9))
                     .foregroundStyle(outcomeColor(invocation.outcome))
             }
@@ -1641,9 +1641,14 @@ private func outcomeRank(_ outcome: InvocationOutcome) -> Int {
     switch outcome {
     case .failed: 4
     case .interrupted: 3
+    case .unknown: 2
     case .running: 2
     case .completed: 1
     }
+}
+
+func contextOutcomeLabel(_ outcome: InvocationOutcome) -> String {
+    outcome == .unknown ? "unverified" : outcome.rawValue
 }
 
 private func outcomeColor(_ outcome: InvocationOutcome) -> Color {
@@ -1651,6 +1656,7 @@ private func outcomeColor(_ outcome: InvocationOutcome) -> Color {
     case .completed: .statusSuccess
     case .failed: .statusError
     case .interrupted: .statusWarning
+    case .unknown: .statusNeutral
     case .running: .blue
     }
 }

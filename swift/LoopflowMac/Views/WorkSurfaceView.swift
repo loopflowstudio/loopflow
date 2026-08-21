@@ -163,7 +163,7 @@ struct WorkSurfaceView: View {
             scrollingDetail(identifier: "podium-detail-wave") {
                 HStack(alignment: .top, spacing: Spacing.md) {
                     VStack(alignment: .leading, spacing: Spacing.xxs) {
-                        surfaceHeader(roadmap.wave.name, subtitle: roadmap.wave.status.label)
+                        surfaceHeader(roadmap.wave.name, subtitle: roadmap.wave.current.state.label)
                         if roadmap.wave.paused {
                             pausedChip(roadmap.wave.id)
                         }

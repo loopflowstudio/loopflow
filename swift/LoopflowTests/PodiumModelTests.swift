@@ -150,6 +150,7 @@ struct PodiumModelTests {
                 name: wave.name,
                 repo: wave.repo,
                 status: wave.status,
+                current: wave.current,
                 live: false,
                 paused: wave.paused,
                 activeTasks: wave.activeTasks,

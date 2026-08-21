@@ -576,11 +576,13 @@ impl SqliteStore {
     fn read_waves(&self, repo: Option<&str>) -> StoreResult<Vec<Wave>> {
         let conn = self.conn.lock().expect("store mutex poisoned");
         let query = if repo.is_some() {
-            "SELECT id, name, repo, created_at, parent_wave_id, promoted_at
-             FROM waves WHERE repo = ?1 ORDER BY created_at DESC"
+            "SELECT id, name, repo, created_at, parent_wave_id, promoted_at,
+                    retired_at, superseded_by_wave_id, retirement_reason
+             FROM waves WHERE repo = ?1 AND retired_at IS NULL ORDER BY created_at DESC"
         } else {
-            "SELECT id, name, repo, created_at, parent_wave_id, promoted_at
-             FROM waves ORDER BY created_at DESC"
+            "SELECT id, name, repo, created_at, parent_wave_id, promoted_at,
+                    retired_at, superseded_by_wave_id, retirement_reason
+             FROM waves WHERE retired_at IS NULL ORDER BY created_at DESC"
         };
         let params: Vec<Box<dyn ToSql>> = if let Some(repo) = repo {
             vec![Box::new(repo.to_string())]
@@ -609,8 +611,11 @@ impl SqliteStore {
             .unwrap_or_else(now_unix);
 
         tx.execute(
-            "INSERT INTO waves (id, name, repo, created_at, parent_wave_id, promoted_at)
-             VALUES (?1, ?2, ?3, ?4, ?5, ?6)
+            "INSERT INTO waves (
+                 id, name, repo, created_at, parent_wave_id, promoted_at,
+                 retired_at, superseded_by_wave_id, retirement_reason
+             )
+             VALUES (?1, ?2, ?3, ?4, ?5, ?6, ?7, ?8, ?9)
              ON CONFLICT(id) DO UPDATE SET
                parent_wave_id = COALESCE(waves.parent_wave_id, excluded.parent_wave_id),
                promoted_at = COALESCE(waves.promoted_at, excluded.promoted_at)",
@@ -621,6 +626,9 @@ impl SqliteStore {
                 created_at,
                 wave.parent_wave_id(),
                 wave.promoted_at().map(|at| at.unix_timestamp()),
+                wave.retired_at().map(|at| at.unix_timestamp()),
+                wave.superseded_by_wave_id(),
+                wave.retirement_reason(),
             ],
         )?;
         durable::create_wave_spine(&tx, wave.id(), wave.name(), wave.repo(), created_at)?;
@@ -1341,8 +1349,11 @@ impl SqliteStore {
     pub fn list_child_waves(&self, parent: &WaveId) -> StoreResult<Vec<Wave>> {
         let conn = self.conn.lock().expect("store mutex poisoned");
         let mut stmt = conn.prepare(
-            "SELECT id, name, repo, created_at, parent_wave_id, promoted_at
-             FROM waves WHERE parent_wave_id = ?1 ORDER BY created_at ASC",
+            "SELECT id, name, repo, created_at, parent_wave_id, promoted_at,
+                    retired_at, superseded_by_wave_id, retirement_reason
+             FROM waves
+             WHERE parent_wave_id = ?1 AND retired_at IS NULL
+             ORDER BY created_at ASC",
         )?;
         let rows = stmt.query_map(params![parent], |row| Ok(map_wave_row(row)))?;
         let mut waves = Vec::new();
@@ -1355,7 +1366,8 @@ impl SqliteStore {
     pub fn get_wave(&self, wave_id: &WaveId) -> StoreResult<Option<Wave>> {
         let conn = self.conn.lock().expect("store mutex poisoned");
         let mut stmt = conn.prepare(
-            "SELECT id, name, repo, created_at, parent_wave_id, promoted_at
+            "SELECT id, name, repo, created_at, parent_wave_id, promoted_at,
+                    retired_at, superseded_by_wave_id, retirement_reason
              FROM waves WHERE id = ?1",
         )?;
         let wave = stmt
@@ -1367,8 +1379,10 @@ impl SqliteStore {
     pub fn get_wave_at(&self, locator: &WaveLocator) -> StoreResult<Option<Wave>> {
         let conn = self.conn.lock().expect("store mutex poisoned");
         let mut stmt = conn.prepare(
-            "SELECT id, name, repo, created_at, parent_wave_id, promoted_at
-             FROM waves WHERE repo = ?1 AND name = ?2",
+            "SELECT id, name, repo, created_at, parent_wave_id, promoted_at,
+                    retired_at, superseded_by_wave_id, retirement_reason
+             FROM waves
+             WHERE repo = ?1 AND name = ?2 AND retired_at IS NULL",
         )?;
         let wave = stmt
             .query_row(params![locator.repo().to_string(), locator.slug()], |row| {
@@ -1405,7 +1419,8 @@ impl SqliteStore {
         }
         let collision = tx
             .query_row(
-                "SELECT id FROM waves WHERE repo = ?1 AND name = ?2 AND id != ?3",
+                "SELECT id FROM waves
+                 WHERE repo = ?1 AND name = ?2 AND id != ?3 AND retired_at IS NULL",
                 params![target_repo, current.1, wave_id],
                 |row| row.get::<_, String>(0),
             )
@@ -1426,8 +1441,11 @@ impl SqliteStore {
     pub fn find_waves_by_slug(&self, slug: &str) -> StoreResult<Vec<Wave>> {
         let conn = self.conn.lock().expect("store mutex poisoned");
         let mut stmt = conn.prepare(
-            "SELECT id, name, repo, created_at, parent_wave_id, promoted_at
-             FROM waves WHERE name = ?1 ORDER BY repo",
+            "SELECT id, name, repo, created_at, parent_wave_id, promoted_at,
+                    retired_at, superseded_by_wave_id, retirement_reason
+             FROM waves
+             WHERE name = ?1 AND retired_at IS NULL
+             ORDER BY repo",
         )?;
         let rows = stmt.query_map(params![slug], |row| Ok(map_wave_row(row)))?;
         let mut waves = Vec::new();
@@ -1451,7 +1469,7 @@ impl SqliteStore {
         for update in updates {
             let current = tx
                 .query_row(
-                    "SELECT repo, name FROM waves WHERE id = ?1",
+                    "SELECT repo, name FROM waves WHERE id = ?1 AND retired_at IS NULL",
                     params![update.wave_id],
                     |row| Ok((row.get::<_, String>(0)?, row.get::<_, String>(1)?)),
                 )
@@ -1469,7 +1487,8 @@ impl SqliteStore {
             let collision = tx
                 .query_row(
                     "SELECT id FROM waves
-                     WHERE repo = ?1 AND name = ?2 AND id != ?3",
+                     WHERE repo = ?1 AND name = ?2 AND id != ?3
+                       AND retired_at IS NULL",
                     params![
                         update.target.repo().to_string(),
                         update.target.slug(),
@@ -1478,12 +1497,26 @@ impl SqliteStore {
                     |row| row.get::<_, String>(0),
                 )
                 .optional()?;
-            if let Some(collision) = collision {
+            if collision.as_deref()
+                != update
+                    .retire_collision
+                    .as_ref()
+                    .map(crate::id::WaveId::as_str)
+            {
                 return Err(StoreError::InvalidData(format!(
-                    "target {}/{} already belongs to Wave {collision}",
+                    "target {}/{} collision changed while relocation was staged",
                     update.target.repo(),
                     update.target.slug()
                 )));
+            }
+            if let Some(collision) = &update.retire_collision {
+                let blockers = Self::wave_retirement_blockers_in(&tx, collision)?;
+                if !blockers.is_empty() {
+                    return Err(StoreError::InvalidData(format!(
+                        "cannot retire destination Wave {collision}: {}",
+                        blockers.join(", ")
+                    )));
+                }
             }
 
             let active_run = tx
@@ -1510,6 +1543,32 @@ impl SqliteStore {
         }
 
         for update in updates {
+            if let Some(collision) = &update.retire_collision {
+                let retired_at = now_unix();
+                tx.execute(
+                    "UPDATE epochs
+                     SET state = 'abandoned', terminal_at = ?2
+                     WHERE wave_id = ?1 AND state = 'open'",
+                    params![collision, retired_at],
+                )?;
+                tx.execute(
+                    "UPDATE work_placements SET enabled = 0 WHERE wave_id = ?1",
+                    params![collision],
+                )?;
+                tx.execute(
+                    "UPDATE waves
+                     SET retired_at = ?2,
+                         superseded_by_wave_id = ?3,
+                         retirement_reason = ?4
+                     WHERE id = ?1 AND retired_at IS NULL",
+                    params![
+                        collision,
+                        retired_at,
+                        update.wave_id,
+                        "registration-only destination shadow retired during relocation"
+                    ],
+                )?;
+            }
             tx.execute(
                 "UPDATE waves SET repo = ?2, name = ?3 WHERE id = ?1",
                 params![
@@ -1521,6 +1580,114 @@ impl SqliteStore {
         }
         tx.commit()?;
         Ok(())
+    }
+
+    pub(crate) fn wave_retirement_blockers(&self, wave_id: &WaveId) -> StoreResult<Vec<String>> {
+        let conn = self.conn.lock().expect("store mutex poisoned");
+        Self::wave_retirement_blockers_in(&conn, wave_id)
+    }
+
+    fn wave_retirement_blockers_in(
+        conn: &Connection,
+        wave_id: &WaveId,
+    ) -> StoreResult<Vec<String>> {
+        let mut blockers = Vec::new();
+        let epochs = conn
+            .prepare(
+                "SELECT id, number, state, current_rev
+                 FROM epochs WHERE wave_id = ?1 ORDER BY number",
+            )?
+            .query_map(params![wave_id], |row| {
+                Ok((
+                    row.get::<_, String>(0)?,
+                    row.get::<_, i64>(1)?,
+                    row.get::<_, String>(2)?,
+                    row.get::<_, i64>(3)?,
+                ))
+            })?
+            .collect::<Result<Vec<_>, _>>()?;
+        if epochs.len() != 1 {
+            blockers.push(format!("{} Wave Epochs", epochs.len()));
+        }
+        if let Some((epoch_id, number, state, revision)) = epochs.first() {
+            if *number != 1 || state != "open" {
+                blockers.push(format!("Epoch {number} is {state}"));
+            }
+            if *revision != 0 {
+                blockers.push(format!("Truth revision is {revision}"));
+            }
+            let steers: i64 = conn.query_row(
+                "SELECT COUNT(*) FROM steers WHERE epoch_id = ?1",
+                params![epoch_id],
+                |row| row.get(0),
+            )?;
+            if steers > 0 {
+                blockers.push(format!("{steers} authored Steers"));
+            }
+            let truths: i64 = conn.query_row(
+                "SELECT COUNT(*) FROM work_truth WHERE epoch_id = ?1",
+                params![epoch_id],
+                |row| row.get(0),
+            )?;
+            if truths != 1 {
+                blockers.push(format!("{truths} Truth revisions"));
+            }
+            let runs: i64 = conn.query_row(
+                "SELECT COUNT(*) FROM runs WHERE epoch_id = ?1",
+                params![epoch_id],
+                |row| row.get(0),
+            )?;
+            if runs > 0 {
+                blockers.push(format!("{runs} Runs"));
+            }
+        }
+        let projects: i64 = conn.query_row(
+            "SELECT COUNT(*) FROM projects WHERE wave_id = ?1",
+            params![wave_id],
+            |row| row.get(0),
+        )?;
+        if projects > 0 {
+            blockers.push(format!("{projects} Projects"));
+        }
+        let tasks: i64 = conn.query_row(
+            "SELECT COUNT(*)
+             FROM tasks JOIN projects ON projects.id = tasks.project_id
+             WHERE projects.wave_id = ?1",
+            params![wave_id],
+            |row| row.get(0),
+        )?;
+        if tasks > 0 {
+            blockers.push(format!("{tasks} Tasks"));
+        }
+        let children: i64 = conn.query_row(
+            "SELECT COUNT(*) FROM waves
+             WHERE parent_wave_id = ?1 AND retired_at IS NULL",
+            params![wave_id],
+            |row| row.get(0),
+        )?;
+        if children > 0 {
+            blockers.push(format!("{children} child Waves"));
+        }
+        let snapshots: i64 = conn.query_row(
+            "SELECT COUNT(*) FROM pm_snapshots WHERE wave_id = ?1",
+            params![wave_id],
+            |row| row.get(0),
+        )?;
+        if snapshots > 0 {
+            blockers.push("PM snapshot".to_string());
+        }
+        let promoted = conn
+            .query_row(
+                "SELECT promoted_at FROM waves WHERE id = ?1",
+                params![wave_id],
+                |row| row.get::<_, Option<i64>>(0),
+            )
+            .optional()?
+            .flatten();
+        if promoted.is_some() {
+            blockers.push("promotion receipt".to_string());
+        }
+        Ok(blockers)
     }
 
     pub fn delete_wave(&self, wave_id: &WaveId) -> StoreResult<()> {

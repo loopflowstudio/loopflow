@@ -11,7 +11,7 @@ use secrecy::SecretString;
 use serde::{Deserialize, Serialize};
 use tokio::sync::{watch, Mutex};
 
-use crate::durable::{Containment, ContainmentObservation, HomeId, WorkRef};
+use crate::durable::{ContainmentObservation, HomeId, WorkRef};
 use crate::id::WaveId;
 use crate::store::SharedStore;
 use crate::wave::{self, registry, Wave};
@@ -349,11 +349,9 @@ impl WaveHost {
         let Some(run) = self.store.current_run(&work).await? else {
             return Ok(());
         };
+        self.store.ensure_local_run(&run).await?;
         let observation = match &run.containment {
-            Some(Containment::ProcessGroup { id }) => {
-                crate::engine::process::process_group_observation(*id)
-            }
-            Some(Containment::Tmux { .. }) => ContainmentObservation::Unprovable,
+            Some(containment) => crate::engine::process::containment_observation(containment).await,
             None => ContainmentObservation::Unprovable,
         };
         if observation != ContainmentObservation::Absent {

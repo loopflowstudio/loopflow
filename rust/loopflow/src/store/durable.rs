@@ -3,9 +3,9 @@ use crate::durable::{
     AdvanceReceipt, AgentInvocation, AgentInvocationId, Ask, AskBody, AskClaim, AskId, AskOrigin,
     AskResult, AskTarget, Author, Basis, BoundarySeed, ContainmentObservation, ControlCtx,
     DoneProposal, EpochReceipt, FlowPosition, Home, HomeId, InterruptReceipt, InvocationRoute,
-    InvocationSurface, Placement, Run, RunAdvance, RunControl, RunLease, RunTrigger, Send, SendId,
-    SendState, SteerId, SteerReceipt, StopCause, StopReceipt, ToolResponseReceipt,
-    ToolResponseWrite, WorkRef, WorkStatus,
+    InvocationSurface, Placement, Run, RunAdvance, RunControl, RunLease, RunLivenessEvidence,
+    RunTrigger, Send, SendId, SendState, SteerId, SteerReceipt, StopCause, StopReceipt,
+    ToolResponseReceipt, ToolResponseWrite, WorkRef, WorkStatus,
 };
 
 use super::{run_sqlite, Store, StoreError, StoreResult};
@@ -173,6 +173,49 @@ impl Store {
     pub(crate) async fn run_by_id(&self, run_id: &crate::durable::RunId) -> StoreResult<Run> {
         let run_id = run_id.clone();
         run_sqlite(&self.sqlite, move |store| store.run_by_id(&run_id)).await
+    }
+
+    pub(crate) async fn nonterminal_runs_for_home(
+        &self,
+        home_id: &HomeId,
+    ) -> StoreResult<Vec<Run>> {
+        let home_id = home_id.clone();
+        run_sqlite(&self.sqlite, move |store| {
+            store.nonterminal_runs_for_home(&home_id)
+        })
+        .await
+    }
+
+    pub(crate) async fn run_liveness_evidence(
+        &self,
+        run: &Run,
+    ) -> StoreResult<RunLivenessEvidence> {
+        let run = run.clone();
+        run_sqlite(&self.sqlite, move |store| {
+            store.run_liveness_evidence(&run, time::OffsetDateTime::now_utc())
+        })
+        .await
+    }
+
+    pub(crate) async fn ensure_local_run(&self, run: &Run) -> StoreResult<()> {
+        let run = run.clone();
+        run_sqlite(&self.sqlite, move |store| store.ensure_local_run(&run)).await
+    }
+
+    pub(crate) async fn record_run_liveness(
+        &self,
+        run_id: &crate::durable::RunId,
+        observation: ContainmentObservation,
+    ) -> StoreResult<RunLivenessEvidence> {
+        let run_id = run_id.clone();
+        run_sqlite(&self.sqlite, move |store| {
+            store.record_run_liveness(&run_id, observation)
+        })
+        .await
+    }
+
+    pub(crate) async fn repair_stranded_asks(&self) -> StoreResult<usize> {
+        run_sqlite(&self.sqlite, move |store| store.repair_stranded_asks()).await
     }
 
     pub(crate) async fn latest_run(&self, work: &WorkRef) -> StoreResult<Option<Run>> {
@@ -601,6 +644,17 @@ impl Store {
         .await
     }
 
+    pub(crate) async fn resolve_invocation_id(
+        &self,
+        selector: &str,
+    ) -> StoreResult<Option<AgentInvocationId>> {
+        let selector = selector.to_string();
+        run_sqlite(&self.sqlite, move |store| {
+            store.resolve_invocation_id(&selector)
+        })
+        .await
+    }
+
     pub(crate) async fn open_invocation(
         &self,
         lease: &RunLease,
@@ -926,12 +980,31 @@ mod tests {
         }
     }
 
-    async fn wave_work() -> (super::Store, WorkRef) {
-        let directory = tempfile::tempdir().unwrap().keep();
-        let database = directory.join("registry.db");
+    async fn _open_status_truth_store(database: PathBuf) -> super::Store {
         let store = open_store(&StorageConfig::sqlite(database.clone()))
             .await
             .unwrap();
+        let connection = rusqlite::Connection::open(database).unwrap();
+        let applied = connection
+            .query_row(
+                "SELECT EXISTS(SELECT 1 FROM sqlite_master WHERE type = 'table' AND name = 'run_liveness')",
+                [],
+                |row| row.get::<_, bool>(0),
+            )
+            .unwrap();
+        if !applied {
+            connection
+                .execute_batch(&crate::store::migrations::migration_sql_for_test(
+                    "status_truth",
+                ))
+                .unwrap();
+        }
+        store
+    }
+
+    async fn wave_work() -> (super::Store, WorkRef) {
+        let directory = tempfile::tempdir().unwrap().keep();
+        let store = _open_status_truth_store(directory.join("registry.db")).await;
         let wave = Wave::new(
             WaveId::new(),
             "runtime".to_string(),
@@ -1015,9 +1088,7 @@ mod tests {
 
     async fn ask_fixture() -> AskFixture {
         let directory = tempfile::tempdir().unwrap().keep();
-        let store = open_store(&StorageConfig::sqlite(directory.join("registry.db")))
-            .await
-            .unwrap();
+        let store = _open_status_truth_store(directory.join("registry.db")).await;
         let wave = Wave::new(
             WaveId::new(),
             "runtime".to_string(),

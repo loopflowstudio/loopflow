@@ -1569,8 +1569,8 @@ mod tests {
                 if error == "project runner failed: Project plan refresh blocked before the next phase: Linear Project was archived; restore it before restarting Project Work"
         ));
         assert_eq!(
-            crate::project::status_reason(&WorkStatus::Ready, Some(&events[0].kind)),
-            "project runner failed: Project plan refresh blocked before the next phase: Linear Project was archived; restore it before restarting Project Work"
+            crate::child::work_status_reason(&WorkStatus::Ready),
+            "ready"
         );
 
         let connection = rusqlite::Connection::open(database).unwrap();

@@ -205,7 +205,16 @@ private func surfaceJSON(invId: String) -> String {
       "wave_id": "00000000-0000-4000-8000-000000000006",
       "home_route": "jack@local",
       "handback": null,
-      "attach_argv": ["tmux", "attach-session", "-t", "lf-task"]
+      "attach_argv": ["tmux", "attach-session", "-t", "lf-task"],
+      "current": {
+        "state": "live",
+        "reason": "the owning Home verified the supervising Run",
+        "liveness": {
+          "state": "present",
+          "observed_at": "2026-07-17T12:00:01Z",
+          "fresh": true
+        }
+      }
     }
     """
 }

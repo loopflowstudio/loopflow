@@ -6,11 +6,12 @@ use crate::durable::{
     AdvanceReceipt, AgentInvocation, AgentInvocationId, Ask, AskBody, AskClaim, AskId, AskOrigin,
     AskResult, AskState, AskTarget, Author, Basis, BoundarySeed, BoundaryState, Containment,
     ContainmentObservation, DoneProposal, DoneProposalId, Epoch, EpochId, EpochReceipt, EpochState,
-    FlowPosition, Home, HomeId, InterruptReceipt, InvocationRoute, InvocationSurface, Placement,
-    ProjectId, Run, RunAdvance, RunId, RunLease, RunLeaseToken, RunState, RunTrigger, Send, SendId,
-    SendState, SendVia, Steer, SteerId, SteerReceipt, StopCause, StopReceipt, TaskId,
-    ToolResponseId, ToolResponseReceipt, ToolResponseWrite, Turn, TurnId, Wait, WaitId, WaitOn,
-    WorkRef, WorkStatus,
+    FlowPosition, Home, HomeId, InterruptReceipt, InvocationObservation,
+    InvocationObservationState, InvocationRoute, InvocationSurface, Placement, ProjectId, Run,
+    RunAdvance, RunId, RunLease, RunLeaseToken, RunLivenessEvidence, RunLivenessReceipt,
+    RunLivenessState, RunState, RunTrigger, Send, SendId, SendState, SendVia, Steer, SteerId,
+    SteerReceipt, StopCause, StopReceipt, TaskId, ToolResponseId, ToolResponseReceipt,
+    ToolResponseWrite, Turn, TurnId, Wait, WaitId, WaitOn, WorkRef, WorkStatus,
 };
 use crate::id::WaveId;
 use crate::project::Project;
@@ -301,6 +302,72 @@ impl SqliteStore {
         run_by_id_in(&conn, run_id)
     }
 
+    pub(crate) fn nonterminal_runs_for_home(&self, home_id: &HomeId) -> StoreResult<Vec<Run>> {
+        let conn = self.conn.lock().expect("store mutex poisoned");
+        let mut statement = conn.prepare(
+            "SELECT id FROM runs
+             WHERE home_id=?1 AND state != 'ended'
+             ORDER BY created_at, rowid",
+        )?;
+        let ids = statement
+            .query_map([home_id.as_str()], |row| row.get::<_, String>(0))?
+            .collect::<Result<Vec<_>, _>>()?;
+        ids.into_iter()
+            .map(|id| {
+                let id = RunId::parse(&id).map_err(invalid_durable)?;
+                run_by_id_in(&conn, &id)
+            })
+            .collect()
+    }
+
+    pub(crate) fn run_liveness_evidence(
+        &self,
+        run: &Run,
+        now: OffsetDateTime,
+    ) -> StoreResult<RunLivenessEvidence> {
+        let conn = self.conn.lock().expect("store mutex poisoned");
+        run_liveness_evidence_in(&conn, run, now)
+    }
+
+    pub(crate) fn ensure_local_run(&self, run: &Run) -> StoreResult<()> {
+        let conn = self.conn.lock().expect("store mutex poisoned");
+        ensure_local_run_in(&conn, run)
+    }
+
+    pub(crate) fn record_run_liveness(
+        &self,
+        run_id: &RunId,
+        observation: ContainmentObservation,
+    ) -> StoreResult<RunLivenessEvidence> {
+        let mut conn = self.conn.lock().expect("store mutex poisoned");
+        let tx = conn.transaction_with_behavior(TransactionBehavior::Immediate)?;
+        let run = run_by_id_in(&tx, run_id)?;
+        ensure_local_run_in(&tx, &run)?;
+        record_run_liveness_in(&tx, &run, observation, now_unix())?;
+        let evidence = run_liveness_evidence_in(&tx, &run, OffsetDateTime::now_utc())?;
+        tx.commit()?;
+        Ok(evidence)
+    }
+
+    pub(crate) fn repair_stranded_asks(&self) -> StoreResult<usize> {
+        let conn = self.conn.lock().expect("store mutex poisoned");
+        let repaired = conn.execute(
+            "UPDATE ask_exchanges
+             SET state='queued', active_invocation_id=NULL
+             WHERE state='claimed'
+               AND active_invocation_id IN (
+                   SELECT invocation.id
+                   FROM agent_invocations invocation
+                   LEFT JOIN runs run ON run.id=invocation.supervising_run_id
+                   WHERE invocation.ended_at IS NOT NULL
+                      OR run.id IS NULL
+                      OR run.state='ended'
+               )",
+            [],
+        )?;
+        Ok(repaired)
+    }
+
     pub(crate) fn latest_run(&self, work: &WorkRef) -> StoreResult<Option<Run>> {
         let conn = self.conn.lock().expect("store mutex poisoned");
         let epoch = current_epoch_in(&conn, work)?;
@@ -412,6 +479,7 @@ impl SqliteStore {
                     ],
                 )?;
                 run = run_by_id_in(&tx, &run.id)?;
+                record_run_liveness_in(&tx, &run, ContainmentObservation::Present, started_at)?;
                 AdvanceReceipt::Run(run.clone())
             }
             RunAdvance::InvocationStarting {
@@ -1458,6 +1526,31 @@ impl SqliteStore {
         invocation_surface_in(&conn, invocation_id)
     }
 
+    pub(crate) fn resolve_invocation_id(
+        &self,
+        selector: &str,
+    ) -> StoreResult<Option<AgentInvocationId>> {
+        let conn = self.conn.lock().expect("store mutex poisoned");
+        let mut statement = conn.prepare(
+            "SELECT id FROM agent_invocations
+             WHERE id=?1 OR substr(id, 1, length(?1))=?1
+             ORDER BY id=?1 DESC, id
+             LIMIT 2",
+        )?;
+        let ids = statement
+            .query_map([selector], |row| row.get::<_, String>(0))?
+            .collect::<Result<Vec<_>, _>>()?;
+        match ids.as_slice() {
+            [] => Ok(None),
+            [id] => AgentInvocationId::parse(id)
+                .map(Some)
+                .map_err(invalid_durable),
+            _ => Err(StoreError::InvalidData(format!(
+                "AgentInvocation selector {selector:?} is ambiguous"
+            ))),
+        }
+    }
+
     pub(crate) fn open_invocation_for_run(
         &self,
         run_id: &RunId,
@@ -1511,6 +1604,8 @@ impl SqliteStore {
         let mut conn = self.conn.lock().expect("store mutex poisoned");
         let tx = conn.transaction_with_behavior(TransactionBehavior::Immediate)?;
         let run = run_by_id_in(&tx, run_id)?;
+        ensure_local_run_in(&tx, &run)?;
+        record_run_liveness_in(&tx, &run, containment, now_unix())?;
         if run.state == RunState::Ended {
             tx.commit()?;
             return Ok(StopReceipt { run, containment });
@@ -1519,11 +1614,21 @@ impl SqliteStore {
         match containment {
             ContainmentObservation::Absent => {
                 let now = now_unix();
-                end_open_turns_for_run(&tx, run_id, now, "failed")?;
+                end_open_turns_for_run(&tx, run_id, now, "partial")?;
+                tx.execute(
+                    "UPDATE ask_exchanges
+                     SET state='queued', active_invocation_id=NULL
+                     WHERE state='claimed'
+                       AND active_invocation_id IN (
+                           SELECT id FROM agent_invocations
+                           WHERE supervising_run_id=?1
+                       )",
+                    [run_id.as_str()],
+                )?;
                 tx.execute(
                     "UPDATE agent_invocations
                      SET ended_at=COALESCE(ended_at, ?2),
-                         outcome=CASE WHEN outcome='running' THEN 'failed' ELSE outcome END,
+                         outcome=CASE WHEN outcome='running' THEN 'unknown' ELSE outcome END,
                          handback_state=COALESCE(handback_state, 'unknown')
                      WHERE supervising_run_id=?1 AND ended_at IS NULL",
                     params![run_id.as_str(), now],
@@ -1534,15 +1639,7 @@ impl SqliteStore {
                     params![run_id.as_str(), now, cause],
                 )?;
             }
-            ContainmentObservation::Present | ContainmentObservation::Unprovable => {
-                tx.execute(
-                    "UPDATE runs
-                     SET state=CASE WHEN state='reserved' THEN 'reserved' ELSE 'stopping' END,
-                         stop_reason=?2
-                     WHERE id=?1 AND state IN ('reserved', 'active', 'stopping')",
-                    params![run_id.as_str(), cause],
-                )?;
-            }
+            ContainmentObservation::Present | ContainmentObservation::Unprovable => {}
         }
         let run = run_by_id_in(&tx, run_id)?;
         tx.commit()?;
@@ -2346,6 +2443,144 @@ fn has_runtime_generations(conn: &Connection) -> StoreResult<bool> {
     .map_err(StoreError::from)
 }
 
+fn has_run_liveness(conn: &Connection) -> StoreResult<bool> {
+    conn.query_row(
+        "SELECT EXISTS (
+            SELECT 1 FROM sqlite_master
+            WHERE type='table' AND name='run_liveness'
+         )",
+        [],
+        |row| row.get::<_, bool>(0),
+    )
+    .map_err(StoreError::from)
+}
+
+const RUN_LIVENESS_FRESH_SECS: i64 = 60;
+
+fn ensure_local_run_in(conn: &Connection, run: &Run) -> StoreResult<()> {
+    let local = map_local_home(conn)?.id;
+    if run.home_id == local {
+        return Ok(());
+    }
+    Err(StoreError::InvalidAuthority(format!(
+        "Run {} is owned by Home {}, not local Home {local}",
+        run.id, run.home_id
+    )))
+}
+
+fn record_run_liveness_in(
+    conn: &Connection,
+    run: &Run,
+    observation: ContainmentObservation,
+    observed_at: i64,
+) -> StoreResult<Option<RunLivenessReceipt>> {
+    if !has_run_liveness(conn)? {
+        return Ok(None);
+    }
+    let Some(runtime_generation) = runtime_generation_in(conn, &run.home_id)? else {
+        return Ok(None);
+    };
+    let state = RunLivenessState::from(observation);
+    conn.execute(
+        "INSERT INTO run_liveness (
+            run_id, home_id, observation, observed_at, runtime_generation
+         ) VALUES (?1, ?2, ?3, ?4, ?5)
+         ON CONFLICT(run_id) DO UPDATE SET
+            home_id=excluded.home_id,
+            observation=excluded.observation,
+            observed_at=excluded.observed_at,
+            runtime_generation=excluded.runtime_generation",
+        params![
+            run.id.as_str(),
+            run.home_id.as_str(),
+            run_liveness_state_sql(state),
+            observed_at,
+            i64::try_from(runtime_generation).map_err(|_| {
+                StoreError::InvalidData(format!(
+                    "runtime generation {runtime_generation} exceeds SQLite"
+                ))
+            })?,
+        ],
+    )?;
+    Ok(Some(RunLivenessReceipt {
+        run_id: run.id.clone(),
+        home_id: run.home_id.clone(),
+        state,
+        observed_at: OffsetDateTime::from_unix_timestamp(observed_at).map_err(invalid_durable)?,
+        runtime_generation,
+    }))
+}
+
+fn run_liveness_evidence_in(
+    conn: &Connection,
+    run: &Run,
+    now: OffsetDateTime,
+) -> StoreResult<RunLivenessEvidence> {
+    if !has_run_liveness(conn)? {
+        return Ok(unprovable_liveness());
+    }
+    let row = conn
+        .query_row(
+            "SELECT home_id, observation, observed_at, runtime_generation
+             FROM run_liveness WHERE run_id=?1",
+            [run.id.as_str()],
+            |row| {
+                Ok((
+                    row.get::<_, String>(0)?,
+                    row.get::<_, String>(1)?,
+                    row.get::<_, i64>(2)?,
+                    row.get::<_, i64>(3)?,
+                ))
+            },
+        )
+        .optional()?;
+    let Some((home_id, state, observed_at, receipt_generation)) = row else {
+        return Ok(unprovable_liveness());
+    };
+    let state = parse_run_liveness_state(&state)?;
+    let observed_at = OffsetDateTime::from_unix_timestamp(observed_at).map_err(invalid_durable)?;
+    let current_generation = runtime_generation_in(conn, &run.home_id)?;
+    let fresh = home_id == run.home_id.as_str()
+        && current_generation
+            == u64::try_from(receipt_generation)
+                .ok()
+                .filter(|generation| *generation > 0)
+        && observed_at <= now
+        && (now - observed_at).whole_seconds().max(0) <= RUN_LIVENESS_FRESH_SECS;
+    Ok(RunLivenessEvidence {
+        state,
+        observed_at: Some(observed_at),
+        fresh,
+    })
+}
+
+fn unprovable_liveness() -> RunLivenessEvidence {
+    RunLivenessEvidence {
+        state: RunLivenessState::Unprovable,
+        observed_at: None,
+        fresh: false,
+    }
+}
+
+fn run_liveness_state_sql(state: RunLivenessState) -> &'static str {
+    match state {
+        RunLivenessState::Present => "present",
+        RunLivenessState::Absent => "absent",
+        RunLivenessState::Unprovable => "unprovable",
+    }
+}
+
+fn parse_run_liveness_state(value: &str) -> StoreResult<RunLivenessState> {
+    match value {
+        "present" => Ok(RunLivenessState::Present),
+        "absent" => Ok(RunLivenessState::Absent),
+        "unprovable" => Ok(RunLivenessState::Unprovable),
+        value => Err(StoreError::InvalidData(format!(
+            "invalid Run liveness state {value:?}"
+        ))),
+    }
+}
+
 fn runtime_generation_in(conn: &Connection, home_id: &HomeId) -> StoreResult<Option<u64>> {
     if !has_runtime_generations(conn)? {
         return Ok(None);
@@ -3071,6 +3306,31 @@ fn invocation_surface_in(
             WaveId::parse(&value).map_err(invalid_durable)?
         }
     };
+    let current = if run.state == RunState::Ended || invocation.ended_at.is_some() {
+        InvocationObservation {
+            state: InvocationObservationState::History,
+            reason: "Invocation has ended".to_string(),
+            liveness: None,
+        }
+    } else {
+        let liveness = run_liveness_evidence_in(conn, &run, OffsetDateTime::now_utc())?;
+        let (state, reason) = if liveness.fresh && liveness.state == RunLivenessState::Present {
+            (
+                InvocationObservationState::Live,
+                "the owning Home verified the supervising Run".to_string(),
+            )
+        } else {
+            (
+                InvocationObservationState::Unverified,
+                "the supervising Run has no fresh present liveness evidence".to_string(),
+            )
+        };
+        InvocationObservation {
+            state,
+            reason,
+            liveness: Some(liveness),
+        }
+    };
     Ok(Some(InvocationSurface {
         invocation,
         run,
@@ -3079,6 +3339,7 @@ fn invocation_surface_in(
         home_route: row.4,
         handback,
         attach_argv,
+        current,
     }))
 }
 
@@ -5072,17 +5333,20 @@ fn to_sql_error(error: impl std::fmt::Display) -> rusqlite::Error {
 mod durable_store_tests {
     use crate::durable::{
         AdvanceReceipt, Ask, AskBody, AskId, AskOrigin, AskState, AskTarget, Author, BoundaryState,
-        Containment, ContainmentObservation, EpochId, InvocationRoute, RunAdvance, RunControl,
-        RunState, RunTrigger, StopCause, WorkRef,
+        Containment, ContainmentObservation, EpochId, HomeId, InvocationRoute, RunAdvance,
+        RunControl, RunState, RunTrigger, StopCause, WorkRef, WorkStatus,
     };
     use crate::id::WaveId;
     use crate::project::ProjectId;
     use crate::store::sqlite::SqliteStore;
-    use crate::store::StoreError;
+    use crate::store::{Store, StoreError};
     use crate::task::TaskId;
+    #[cfg(unix)]
+    use std::os::unix::process::CommandExt;
     use std::path::{Path, PathBuf};
+    #[cfg(unix)]
+    use std::process::Command;
     use time::OffsetDateTime;
-
     fn table_exists(conn: &rusqlite::Connection, table: &str) -> bool {
         conn.query_row(
             "SELECT EXISTS(
@@ -5107,7 +5371,7 @@ mod durable_store_tests {
 
     /// A registered Wave is the cheapest real Work: `upsert_wave` is the only
     /// public path that mints an Epoch, and Wave Work needs no PM binding.
-    fn store_with_wave() -> (tempfile::TempDir, SqliteStore, WorkRef) {
+    fn _store_with_wave(apply_status_truth: bool) -> (tempfile::TempDir, SqliteStore, WorkRef) {
         let dir = tempfile::tempdir().unwrap();
         let path = dir.path().join("loopflow.db");
         let store = SqliteStore::new(&path).expect("open a fresh store");
@@ -5116,6 +5380,12 @@ mod durable_store_tests {
         if !column_exists(&conn, "work_placements", "enabled") {
             conn.execute_batch(&crate::store::migrations::migration_sql_for_test(
                 "work_enablement",
+            ))
+            .unwrap();
+        }
+        if apply_status_truth && !table_exists(&conn, "run_liveness") {
+            conn.execute_batch(&crate::store::migrations::migration_sql_for_test(
+                "status_truth",
             ))
             .unwrap();
         }
@@ -5135,6 +5405,23 @@ mod durable_store_tests {
         }
         let work = WorkRef::Wave(wave_id);
         (dir, store, work)
+    }
+
+    fn store_with_wave() -> (tempfile::TempDir, SqliteStore, WorkRef) {
+        _store_with_wave(true)
+    }
+
+    fn activate_runtime_generation(path: &Path, store: &SqliteStore) {
+        let home_id = store.local_home().unwrap().id;
+        let conn = rusqlite::Connection::open(path).unwrap();
+        conn.execute(
+            "INSERT INTO home_runtime_generations (
+                home_id, generation, build_version, source_revision,
+                migration_frontier, activated_at
+             ) VALUES (?1, 1, 'test', 'test', 'status_truth', ?2)",
+            rusqlite::params![home_id.as_str(), OffsetDateTime::now_utc().unix_timestamp()],
+        )
+        .unwrap();
     }
 
     #[test]
@@ -5734,8 +6021,9 @@ mod durable_store_tests {
     }
 
     #[test]
-    fn proven_runner_loss_ends_its_incomplete_turns() {
+    fn reconcile_home_runs_proven_loss_ends_incomplete_turns_as_unknown() {
         let (dir, store, work) = store_with_wave();
+        activate_runtime_generation(&dir.path().join("loopflow.db"), &store);
         let (lease, _) = start_invocation(&store, &work);
         let invocation_id = live_invocation_id(&store, &dir.path().join("loopflow.db"));
         let receipt = store
@@ -5765,7 +6053,388 @@ mod durable_store_tests {
                 |row| Ok((row.get(0)?, row.get(1)?)),
             )
             .unwrap();
-        assert_eq!(status, "failed");
+        assert_eq!(status, "partial");
         assert!(ended_at.is_some());
+        let (outcome, handback, invocation_ended_at): (String, Option<String>, Option<i64>) = conn
+            .query_row(
+                "SELECT outcome, handback_state, ended_at
+                 FROM agent_invocations WHERE id=?1",
+                [invocation_id.as_str()],
+                |row| Ok((row.get(0)?, row.get(1)?, row.get(2)?)),
+            )
+            .unwrap();
+        assert_eq!(outcome, "unknown");
+        assert_eq!(handback.as_deref(), Some("unknown"));
+        assert!(invocation_ended_at.is_some());
+        assert_eq!(store.work_status(&work).unwrap(), WorkStatus::Ready);
+        let run = store.run_by_id(&lease.run_id).unwrap();
+        assert_eq!(run.state, RunState::Ended);
+        assert_eq!(
+            store
+                .run_liveness_evidence(&run, OffsetDateTime::now_utc())
+                .unwrap()
+                .state,
+            crate::durable::RunLivenessState::Absent
+        );
+    }
+
+    #[test]
+    fn reconcile_home_runs_preserves_present_and_unprovable_runs() {
+        for observation in [
+            ContainmentObservation::Present,
+            ContainmentObservation::Unprovable,
+        ] {
+            let (directory, store, work) = store_with_wave();
+            activate_runtime_generation(&directory.path().join("loopflow.db"), &store);
+            let (lease, _) = start_invocation(&store, &work);
+
+            store.recover_run(&lease.run_id, observation).unwrap();
+
+            let run = store.run_by_id(&lease.run_id).unwrap();
+            assert_ne!(run.state, RunState::Ended, "{observation:?}");
+            assert!(store
+                .open_invocation_for_run(&lease.run_id)
+                .unwrap()
+                .is_some());
+            assert_eq!(
+                store
+                    .run_liveness_evidence(&run, OffsetDateTime::now_utc())
+                    .unwrap()
+                    .state,
+                crate::durable::RunLivenessState::from(observation)
+            );
+        }
+    }
+
+    #[test]
+    fn status_surfaces_future_run_liveness_receipt_is_not_fresh() {
+        let (directory, store, work) = store_with_wave();
+        let path = directory.path().join("loopflow.db");
+        activate_runtime_generation(&path, &store);
+        let (lease, _) = start_invocation(&store, &work);
+        let now = OffsetDateTime::now_utc();
+        let observed_at =
+            OffsetDateTime::from_unix_timestamp(now.unix_timestamp() + 86_400).unwrap();
+        rusqlite::Connection::open(&path)
+            .unwrap()
+            .execute(
+                "UPDATE run_liveness SET observed_at=?2 WHERE run_id=?1",
+                rusqlite::params![lease.run_id.as_str(), observed_at.unix_timestamp()],
+            )
+            .unwrap();
+        let run = store.run_by_id(&lease.run_id).unwrap();
+
+        let evidence = store.run_liveness_evidence(&run, now).unwrap();
+
+        assert_eq!(evidence.state, crate::durable::RunLivenessState::Present);
+        assert_eq!(evidence.observed_at, Some(observed_at));
+        assert!(!evidence.fresh);
+    }
+
+    #[test]
+    fn status_surfaces_non_owning_home_cannot_record_or_recover_run_liveness() {
+        let (directory, store, work) = store_with_wave();
+        let path = directory.path().join("loopflow.db");
+        activate_runtime_generation(&path, &store);
+        let (lease, _) = start_invocation(&store, &work);
+        let local_home = store.local_home().unwrap().id;
+        let remote_home = HomeId::new();
+        store
+            .observe_home(&remote_home, "ssh://operator@remote-home")
+            .unwrap();
+        rusqlite::Connection::open(&path)
+            .unwrap()
+            .execute(
+                "UPDATE runs SET home_id=?2 WHERE id=?1",
+                rusqlite::params![lease.run_id.as_str(), remote_home.as_str()],
+            )
+            .unwrap();
+        let run = store.run_by_id(&lease.run_id).unwrap();
+
+        assert!(matches!(
+            store.ensure_local_run(&run),
+            Err(StoreError::InvalidAuthority(_))
+        ));
+        assert!(matches!(
+            store.record_run_liveness(&run.id, ContainmentObservation::Absent),
+            Err(StoreError::InvalidAuthority(_))
+        ));
+        assert!(matches!(
+            store.recover_run(&run.id, ContainmentObservation::Absent),
+            Err(StoreError::InvalidAuthority(_))
+        ));
+
+        assert_ne!(store.run_by_id(&run.id).unwrap().state, RunState::Ended);
+        let (receipt_home, observation): (String, String) = rusqlite::Connection::open(&path)
+            .unwrap()
+            .query_row(
+                "SELECT home_id, observation FROM run_liveness WHERE run_id=?1",
+                [run.id.as_str()],
+                |row| Ok((row.get(0)?, row.get(1)?)),
+            )
+            .unwrap();
+        assert_eq!(receipt_home, local_home.as_str());
+        assert_eq!(observation, "present");
+    }
+
+    #[cfg(unix)]
+    #[tokio::test]
+    async fn reconcile_home_runs_settles_wave_project_and_task_runs() {
+        let (directory, store, work_routes) = store_with_work_hierarchy();
+        activate_runtime_generation(&directory.path().join("loopflow.db"), &store);
+        let home_id = store.local_home().unwrap().id;
+        let mut runs = Vec::new();
+
+        for (work, _) in &work_routes {
+            let mut process = Command::new("/usr/bin/true");
+            process.process_group(0);
+            let mut process = process.spawn().unwrap();
+            let process_group = i64::from(process.id());
+            assert!(process.wait().unwrap().success());
+            let (_, lease) = store.reserve_run(work, &RunTrigger::User).unwrap();
+            store
+                .advance_run(
+                    &lease,
+                    &RunAdvance::RunStarting {
+                        containment: Containment::ProcessGroup { id: process_group },
+                        cwd: PathBuf::from("/repo"),
+                    },
+                )
+                .unwrap();
+            let receipt = store
+                .advance_run(
+                    &lease,
+                    &RunAdvance::InvocationStarting {
+                        route: InvocationRoute {
+                            provider: "codex".to_string(),
+                            model: None,
+                            account_id: None,
+                        },
+                        surface: "headless".to_string(),
+                        resume_token: None,
+                        answer_ask_id: None,
+                    },
+                )
+                .unwrap();
+            assert!(matches!(receipt, AdvanceReceipt::Invocation(_)));
+            runs.push((work.clone(), lease.run_id));
+        }
+
+        let store = Store::from_sqlite_for_test(store);
+        let summary = crate::lfd::reconcile_home_runs_once(&store, &home_id).await;
+
+        assert_eq!(summary.absent, 3);
+        assert_eq!(summary.errors, 0);
+        for (work, run_id) in runs {
+            assert_eq!(store.work_status(&work).await.unwrap(), WorkStatus::Ready);
+            assert_eq!(
+                store.run_by_id(&run_id).await.unwrap().state,
+                RunState::Ended
+            );
+            assert!(store
+                .open_invocation_for_run(&run_id)
+                .await
+                .unwrap()
+                .is_none());
+        }
+    }
+
+    #[test]
+    fn reconcile_home_runs_requeues_claimed_ask_with_ended_owner() {
+        let (directory, store, work) = store_with_wave();
+        activate_runtime_generation(&directory.path().join("loopflow.db"), &store);
+        let (lease, invocation, turn) = start_turn(&store, &work);
+        let run = store.run_by_id(&lease.run_id).unwrap();
+        let ask = Ask {
+            id: AskId::new(),
+            origin: AskOrigin {
+                work: work.clone(),
+                run_id: run.id.clone(),
+                turn_id: Some(turn.id),
+                invocation_id: Some(invocation.id.clone()),
+                home_id: run.home_id,
+                cwd: run.cwd.unwrap(),
+            },
+            target: AskTarget::User,
+            request: AskBody::Intervention {
+                prompt: "recover this claim".to_string(),
+            },
+            state: AskState::Claimed,
+            active_invocation_id: Some(invocation.id),
+            result: None,
+            terminal_author: None,
+            asked_at: OffsetDateTime::now_utc(),
+            terminal_at: None,
+        };
+        let conn = rusqlite::Connection::open(directory.path().join("loopflow.db")).unwrap();
+        super::insert_ask(&conn, &lease.basis.epoch_id, &ask).unwrap();
+
+        store
+            .recover_run(&lease.run_id, ContainmentObservation::Absent)
+            .unwrap();
+
+        let repaired = store.ask_by_id(&ask.id).unwrap();
+        assert_eq!(repaired.state, AskState::Queued);
+        assert!(repaired.active_invocation_id.is_none());
+    }
+
+    #[test]
+    fn reconcile_home_runs_repairs_legacy_ask_claims() {
+        let (directory, store, work) = store_with_wave();
+        let (lease, invocation, turn) = start_turn(&store, &work);
+        let run = store.run_by_id(&lease.run_id).unwrap();
+        let ask = Ask {
+            id: AskId::new(),
+            origin: AskOrigin {
+                work,
+                run_id: run.id.clone(),
+                turn_id: Some(turn.id),
+                invocation_id: Some(invocation.id.clone()),
+                home_id: run.home_id,
+                cwd: run.cwd.unwrap(),
+            },
+            target: AskTarget::User,
+            request: AskBody::Intervention {
+                prompt: "repair a legacy claim".to_string(),
+            },
+            state: AskState::Claimed,
+            active_invocation_id: Some(invocation.id.clone()),
+            result: None,
+            terminal_author: None,
+            asked_at: OffsetDateTime::now_utc(),
+            terminal_at: None,
+        };
+        let conn = rusqlite::Connection::open(directory.path().join("loopflow.db")).unwrap();
+        super::insert_ask(&conn, &lease.basis.epoch_id, &ask).unwrap();
+        conn.execute(
+            "UPDATE agent_invocations
+             SET ended_at=?2, outcome='unknown', handback_state='unknown'
+             WHERE id=?1",
+            rusqlite::params![
+                invocation.id.as_str(),
+                OffsetDateTime::now_utc().unix_timestamp()
+            ],
+        )
+        .unwrap();
+        conn.execute(
+            "UPDATE runs SET state='ended', ended_at=?2 WHERE id=?1",
+            rusqlite::params![run.id.as_str(), OffsetDateTime::now_utc().unix_timestamp()],
+        )
+        .unwrap();
+
+        assert_eq!(store.repair_stranded_asks().unwrap(), 1);
+
+        let repaired = store.ask_by_id(&ask.id).unwrap();
+        assert_eq!(repaired.state, AskState::Queued);
+        assert!(repaired.active_invocation_id.is_none());
+    }
+
+    #[test]
+    fn legacy_invocation_id_migration_preserves_turn_and_ask_references() {
+        let (directory, store, work) = _store_with_wave(false);
+        let (lease, invocation, turn) = start_turn(&store, &work);
+        let run = store.run_by_id(&lease.run_id).unwrap();
+        let ask = Ask {
+            id: AskId::new(),
+            origin: AskOrigin {
+                work,
+                run_id: run.id,
+                turn_id: Some(turn.id.clone()),
+                invocation_id: Some(invocation.id.clone()),
+                home_id: run.home_id,
+                cwd: run.cwd.unwrap(),
+            },
+            target: AskTarget::User,
+            request: AskBody::Intervention {
+                prompt: "preserve my owner".to_string(),
+            },
+            state: AskState::Claimed,
+            active_invocation_id: Some(invocation.id.clone()),
+            result: None,
+            terminal_author: None,
+            asked_at: OffsetDateTime::now_utc(),
+            terminal_at: None,
+        };
+        let path = directory.path().join("loopflow.db");
+        let conn = rusqlite::Connection::open(&path).unwrap();
+        let status_truth_is_materialized = table_exists(&conn, "run_liveness");
+        super::insert_ask(&conn, &lease.basis.epoch_id, &ask).unwrap();
+        let legacy = "invocation_74115449";
+        let canonical = "invocation_74115449000000000000000000000000";
+        let stored_id = if status_truth_is_materialized {
+            canonical
+        } else {
+            legacy
+        };
+        conn.execute("PRAGMA foreign_keys=OFF", []).unwrap();
+        conn.execute(
+            "UPDATE agent_turns SET invocation_id=?1 WHERE invocation_id=?2",
+            rusqlite::params![stored_id, invocation.id.as_str()],
+        )
+        .unwrap();
+        conn.execute(
+            "UPDATE ask_exchanges
+             SET origin_invocation_id=?1, active_invocation_id=?1
+             WHERE id=?2",
+            rusqlite::params![stored_id, ask.id.as_str()],
+        )
+        .unwrap();
+        conn.execute(
+            "UPDATE agent_invocations SET id=?1 WHERE id=?2",
+            rusqlite::params![stored_id, invocation.id.as_str()],
+        )
+        .unwrap();
+        conn.execute(
+            "UPDATE agent_invocations
+             SET ended_at=1700000010, outcome='completed', handback_state='succeeded'
+             WHERE id=?1",
+            [stored_id],
+        )
+        .unwrap();
+        if !status_truth_is_materialized {
+            conn.execute_batch(&crate::store::migrations::migration_sql_for_test(
+                "status_truth",
+            ))
+            .unwrap();
+        }
+
+        assert_eq!(
+            conn.query_row(
+                "SELECT invocation_id FROM agent_turns WHERE id=?1",
+                [turn.id.as_str()],
+                |row| row.get::<_, String>(0),
+            )
+            .unwrap(),
+            canonical
+        );
+        assert_eq!(
+            conn.query_row(
+                "SELECT origin_invocation_id || ':' || active_invocation_id
+                 FROM ask_exchanges WHERE id=?1",
+                [ask.id.as_str()],
+                |row| row.get::<_, String>(0),
+            )
+            .unwrap(),
+            format!("{canonical}:{canonical}")
+        );
+        drop(conn);
+        assert_eq!(
+            store
+                .resolve_invocation_id(legacy)
+                .unwrap()
+                .unwrap()
+                .as_str(),
+            canonical
+        );
+        let canonical = crate::durable::AgentInvocationId::parse(canonical).unwrap();
+        assert_eq!(
+            store
+                .invocation_surface(&canonical)
+                .unwrap()
+                .unwrap()
+                .current
+                .state,
+            crate::durable::InvocationObservationState::History
+        );
     }
 }

@@ -1,7 +1,7 @@
 import Foundation
 
 public enum InvocationOutcome: String, Codable, Sendable, CaseIterable, Hashable {
-    case running, completed, failed, interrupted
+    case running, completed, failed, interrupted, unknown
 }
 
 public enum CaptureState: String, Codable, Sendable, CaseIterable, Hashable {
@@ -143,6 +143,7 @@ public struct InvocationSetTotals: Decodable, Sendable {
     public let failedInvocations: UInt64
     public let interruptedInvocations: UInt64
     public let runningInvocations: UInt64
+    public let unverifiedInvocations: UInt64
     public let steeringTurns: UInt64
     public let steeredInvocations: UInt64
 
@@ -165,6 +166,7 @@ public struct InvocationSetTotals: Decodable, Sendable {
         case failedInvocations = "failed_invocations"
         case interruptedInvocations = "interrupted_invocations"
         case runningInvocations = "running_invocations"
+        case unverifiedInvocations = "unverified_invocations"
         case steeringTurns = "steering_turns"
         case steeredInvocations = "steered_invocations"
     }

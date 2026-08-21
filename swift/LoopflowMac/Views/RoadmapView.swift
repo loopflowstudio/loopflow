@@ -38,11 +38,11 @@ func roadmapTaskAction(_ task: RoadmapTask) -> RoadmapTaskAction? {
     case .startNextPr, .complete, .noAction, .none:
         break
     }
-    return runtime.observation.controls.contains(.attach) ? .attach : nil
+    return runtime.current.controls.contains(.attach) ? .attach : nil
 }
 
 func roadmapTaskCanInterrupt(_ task: RoadmapTask) -> Bool {
-    task.runtime?.observation.controls.contains(.interrupt) ?? false
+    task.runtime?.current.controls.contains(.interrupt) ?? false
 }
 
 private struct RoadmapTaskSelection: Identifiable {
@@ -789,7 +789,7 @@ private struct RoadmapWaveCard: View {
                         Text(roadmap.wave.name)
                             .font(Typography.sectionTitle(18))
                             .foregroundStyle(palette.text)
-                        Text(roadmap.wave.status.label)
+                        Text(roadmap.wave.current.state.label)
                             .font(Typography.caption(10))
                             .foregroundStyle(palette.textSecondary)
                         if roadmap.wave.paused {
@@ -1028,7 +1028,7 @@ struct WorkChannelChips: View {
             channel("PM", task.task.completed ? "done" : "open",
                     task.task.completed ? Color.statusSuccess : palette.textSecondary)
             if let runtime = task.runtime {
-                channel("Work", runtime.status.label, workColor(runtime.status))
+                channel("Current", runtime.current.state.label, currentColor(runtime.current.state))
                 processChannel
             } else {
                 channel("Work", "none", palette.textSecondary)
@@ -1064,9 +1064,11 @@ struct WorkChannelChips: View {
         .clipShape(Capsule())
     }
 
-    private func workColor(_ status: WorkStatus) -> Color {
-        switch status {
-        case .running: .statusSuccess
+    private func currentColor(_ state: CurrentWorkState) -> Color {
+        switch state {
+        case .working: .statusSuccess
+        case .stalled, .stopped: .statusError
+        case .unobservable: .statusWarning
         case .waiting: .statusWarning
         case .done, .abandoned: .statusNeutral
         case .ready: .statusInfo

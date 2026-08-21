@@ -453,7 +453,7 @@ struct PodiumConsole<Content: View>: View {
         let usage = usageReading(kind: .task, wave: entry.vm, project: project, task: task)
         let phase = ConsoleSignal.phase(
             humanStop: task.attention.level == .red,
-            agentRunning: task.runtime?.status.isRunning == true,
+            agentRunning: task.runtime?.current.state.hasPresentProcess == true,
             signal: signal(nodes, usage: usage)
         )
         let action: (() -> Void)?
@@ -572,7 +572,8 @@ struct PodiumConsole<Content: View>: View {
                 // the press that just started it.
                 phase: ConsoleSignal.phase(
                     humanStop: hasRedTask,
-                    agentRunning: vm.isRegistered && (vm.api.status.isRunning || vm.api.live),
+                    agentRunning: vm.isRegistered
+                        && (vm.api.current?.state.hasPresentProcess == true || vm.api.live),
                     signal: signal(nodes, usage: usage)
                 )
             )

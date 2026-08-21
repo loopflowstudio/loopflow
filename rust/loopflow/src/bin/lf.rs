@@ -832,7 +832,7 @@ fn print_task(task: &loopflow::task::Task, json: bool) -> anyhow::Result<()> {
         println!(
             "{}  {}\n  task: {}\n  phase: {} cycle {}\n  flow: {} (iteration {}, step {})\n  body: {}\n  worktree: {}\n  branch: {}\n  PM writeback: {}\n  reason: {}",
             task.plan.identifier,
-            work_status_label(&snapshot.status),
+            snapshot.current.state,
             task.id,
             task.lifecycle_phase.as_str(),
             task.lifecycle_cycle(),
@@ -843,7 +843,7 @@ fn print_task(task: &loopflow::task::Task, json: bool) -> anyhow::Result<()> {
             task.worktree.display(),
             branch,
             pm_writeback,
-            work_status_label(&snapshot.status),
+            snapshot.current.reason,
         );
         println!("  project: {}", task.project_id);
         for pr in &snapshot.prs {
@@ -871,16 +871,6 @@ fn print_task(task: &loopflow::task::Task, json: bool) -> anyhow::Result<()> {
         }
     }
     Ok(())
-}
-
-fn work_status_label(status: &loopflow::durable::WorkStatus) -> &'static str {
-    match status {
-        loopflow::durable::WorkStatus::Ready => "ready",
-        loopflow::durable::WorkStatus::Running { .. } => "running",
-        loopflow::durable::WorkStatus::Waiting { .. } => "waiting",
-        loopflow::durable::WorkStatus::Done => "done",
-        loopflow::durable::WorkStatus::Abandoned => "abandoned",
-    }
 }
 
 fn print_task_control(
@@ -929,12 +919,18 @@ fn print_project(project: &loopflow::project::Project, json: bool) -> anyhow::Re
         println!(
             "{}  {}\n  project: {}\n  body: {}\n  iteration: {}\n  reason: {}",
             project.plan.slug,
-            work_status_label(&snapshot.status),
+            snapshot.current.state,
             project.id,
             body,
             project.iteration,
             snapshot.reason,
         );
+        if let Some(failure) = &snapshot.last_failure {
+            println!(
+                "  last failure at {}: {}",
+                failure.occurred_at, failure.message
+            );
+        }
     }
     Ok(())
 }

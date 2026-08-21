@@ -7,8 +7,8 @@ use std::time::{Duration, Instant};
 
 use crate::child::ChildRef;
 use crate::durable::{
-    AgentInvocation, AuthenticatedRequest, Containment, ContainmentObservation, ControlCtx, Run,
-    RunLease, RunState, RunTrigger, WaitOn, WorkRef, WorkStatus,
+    AgentInvocation, AuthenticatedRequest, ContainmentObservation, ControlCtx, Run, RunLease,
+    RunState, RunTrigger, WaitOn, WorkRef, WorkStatus,
 };
 use crate::engine::config::{load_config_or_default, parse_agent};
 use crate::engine::git::{
@@ -17,7 +17,7 @@ use crate::engine::git::{
     push_with_upstream, ref_exists, rev_parse, stash_including_untracked, stash_pop,
 };
 use crate::engine::naming::sanitize_for_branch;
-use crate::engine::process::{tmux_session_exists, tmux_session_slug};
+use crate::engine::process::tmux_session_slug;
 use crate::engine::worktrees::{
     create_from_placement_plan, git_common_dir, main_repo_root, plan_placement, PlacementStrategy,
     WorktreeSegment,
@@ -153,6 +153,7 @@ pub struct TaskSnapshot {
     pub wave: String,
     pub project_id: String,
     pub status: WorkStatus,
+    pub current: crate::child::CurrentWorkObservation,
     pub worktree: String,
     pub workspace_slug: String,
     pub lifecycle: crate::task::TaskLifecyclePlan,
@@ -167,7 +168,6 @@ pub struct TaskSnapshot {
     pub agent: String,
     pub provider: String,
     pub provider_session_id: Option<String>,
-    pub process_alive: bool,
     pub invocation: Option<AgentInvocation>,
     pub latest_event: Option<crate::task::TaskEvent>,
     pub created_at: time::OffsetDateTime,
@@ -3094,6 +3094,10 @@ pub(crate) async fn reconcile_process_liveness(
     else {
         return Ok(());
     };
+    store
+        .ensure_local_run(&run)
+        .await
+        .map_err(|error| task_error(error.to_string()))?;
     if run.state == RunState::Reserved {
         let still_starting =
             run.created_at + time::Duration::seconds(10) > time::OffsetDateTime::now_utc();
@@ -3101,24 +3105,26 @@ pub(crate) async fn reconcile_process_liveness(
             return Ok(());
         }
     }
-    if let Some(containment) = &run.containment {
-        let alive = match containment {
-            Containment::Tmux { name } => tmux_session_exists(name)
-                .await
-                .map_err(|error| task_error(error.to_string()))?,
-            Containment::ProcessGroup { .. } => true,
-        };
-        if alive {
-            return Ok(());
-        }
-        if run.started_at.is_some_and(|started_at| {
+    let observation = match run.containment.as_ref() {
+        Some(containment) => crate::engine::process::containment_observation(containment).await,
+        None => ContainmentObservation::Unprovable,
+    };
+    if observation != ContainmentObservation::Absent {
+        store
+            .record_run_liveness(&run.id, observation)
+            .await
+            .map_err(|error| task_error(error.to_string()))?;
+        return Ok(());
+    }
+    if run.containment.is_some()
+        && run.started_at.is_some_and(|started_at| {
             started_at + time::Duration::seconds(10) > time::OffsetDateTime::now_utc()
-        }) {
-            return Ok(());
-        }
+        })
+    {
+        return Ok(());
     }
     store
-        .recover_run(&run.id, ContainmentObservation::Absent)
+        .recover_run(&run.id, observation)
         .await
         .map_err(|error| task_error(error.to_string()))?;
     mark_task_body_lost(store, task).await
@@ -4619,7 +4625,6 @@ pub fn task_status(issue: &str) -> OpsResult<Task> {
             .map_err(|error| task_error(format!("failed to read Task blocker: {error}")))?;
         if launch_refusal.is_none() && task_worktree_blocker(&store, &task).await?.is_none() {
             reconcile_task_pr(&store, &mut task).await?;
-            reconcile_process_liveness(&store, &mut task).await?;
             reconcile_task_completion(&store, &mut task, None).await?;
         }
         Ok(task)
@@ -5185,13 +5190,6 @@ pub fn task_snapshot(task: &Task) -> OpsResult<TaskSnapshot> {
                 .map_err(|error| task_error(error.to_string()))?,
             None => None,
         };
-        let process_alive = match run.as_ref().and_then(|run| run.containment.as_ref()) {
-            Some(Containment::Tmux { name }) => tmux_session_exists(name)
-                .await
-                .map_err(|error| task_error(error.to_string()))?,
-            Some(Containment::ProcessGroup { .. }) => true,
-            None => false,
-        };
         let latest_event = store
             .task_events_after(&task.id, 0)
             .await
@@ -5230,6 +5228,14 @@ pub fn task_snapshot(task: &Task) -> OpsResult<TaskSnapshot> {
             task_configuration_refusal(&task)
                 .or_else(|| task_event_launch_refusal(latest_event.as_ref()).map(str::to_string))
         };
+        let current = crate::child::observe_current_work(
+            &store,
+            &work,
+            &work_status,
+            time::OffsetDateTime::now_utc(),
+        )
+        .await
+        .map_err(|error| task_error(error.to_string()))?;
         let action_evidence = TaskActionEvidence {
             status: work_status.clone(),
             latest_pr_phase: latest.map(|pr| pr.phase()),
@@ -5243,11 +5249,7 @@ pub fn task_snapshot(task: &Task) -> OpsResult<TaskSnapshot> {
             completion_refusal: completion_refusal.as_deref(),
             resume_refusal: resume_refusal.as_deref(),
             ci: active.and_then(|pr| pr.fresh_ci()),
-            process_alive: if matches!(work_status, WorkStatus::Running { .. }) {
-                Some(process_alive)
-            } else {
-                None
-            },
+            current_state: current.state,
             predecessor_phase,
             abandon_intent: task.abandon_intent.is_some(),
             local_progress_unsettled: None,
@@ -5265,6 +5267,7 @@ pub fn task_snapshot(task: &Task) -> OpsResult<TaskSnapshot> {
             wave: wave.name().to_string(),
             project_id: task.project_id.to_string(),
             status: work_status,
+            current,
             worktree: task.worktree.display().to_string(),
             workspace_slug: task.workspace_slug,
             lifecycle: task.lifecycle,
@@ -5279,7 +5282,6 @@ pub fn task_snapshot(task: &Task) -> OpsResult<TaskSnapshot> {
             agent: task.agent,
             provider: task.provider,
             provider_session_id: task.provider_session_id,
-            process_alive,
             invocation,
             latest_event,
             created_at: task.created_at,

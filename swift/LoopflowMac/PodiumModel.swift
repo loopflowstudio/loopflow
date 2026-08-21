@@ -109,8 +109,10 @@ final class PodiumModel {
         let registered = visibleWaves.filter(\.isRegistered).map(\.api)
         return WaveSummary(
             waves: visibleWaves.count,
-            activeRuns: registered.count { $0.status.isRunning },
-            unservedRuns: registered.count { $0.status.isRunning && !$0.live }
+            activeRuns: registered.count { $0.current?.state.hasPresentProcess == true },
+            unservedRuns: registered.count {
+                $0.current?.state.hasPresentProcess == true && !$0.live
+            }
         )
     }
 

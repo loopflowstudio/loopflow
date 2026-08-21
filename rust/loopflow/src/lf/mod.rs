@@ -1098,7 +1098,7 @@ pub enum TaskCommand {
         issue: String,
         #[arg(long)]
         name: Option<String>,
-        /// Fix cycle: first task-fix, finally ship-demo (human gates at the demo)
+        /// Fix cycle: first incident, finally ship-demo (human gates at the demo)
         #[arg(long, conflicts_with = "feature")]
         fix: bool,
         /// Feature cycle: design review first, configured-path demo before settlement
@@ -1129,7 +1129,7 @@ pub enum TaskCommand {
         title: Option<String>,
         #[arg(long)]
         name: Option<String>,
-        /// Fix cycle: first task-fix, finally ship-demo (human gates at the demo)
+        /// Fix cycle: first incident, finally ship-demo (human gates at the demo)
         #[arg(long, conflicts_with = "feature")]
         fix: bool,
         /// Feature cycle: design review first, configured-path demo before settlement

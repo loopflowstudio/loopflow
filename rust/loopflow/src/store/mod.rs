@@ -1156,16 +1156,9 @@ mod tests {
     use crate::profile::EmailAddress;
     use crate::project::{Project, ProjectId};
     use crate::task::{
-<<<<<<< HEAD
         AfterMerge, GithubObservation, GithubObservationResult, GithubPr, PmWritebackState,
         PrMergeMode, PrMergeRequest, PrPhase, PrPresentation, PrPublication, Task, TaskEventKind,
         TaskId, TaskPr, TaskPrId, TaskPrRepairKind,
-||||||| parent of 5c54f526e (checkpoint: managed Task initialization prototype)
-        GithubPr, PmWritebackState, PrPhase, PrPublication, Task, TaskId, TaskPr, TaskPrId,
-=======
-        GithubPr, PmWritebackState, PrPhase, PrPublication, Task, TaskEventKind, TaskId, TaskPr,
-        TaskPrId,
->>>>>>> 5c54f526e (checkpoint: managed Task initialization prototype)
     };
     use crate::wave::Wave;
     use std::env;
@@ -1852,47 +1845,6 @@ mod tests {
             .unwrap_err();
 
         assert!(error.to_string().contains("cannot reserve task"));
-        assert!(store.current_run(&work).await.unwrap().is_none());
-    }
-
-    #[tokio::test]
-    async fn initial_task_publication_includes_worktree_initialization() {
-        let directory = tempfile::tempdir().unwrap();
-        let store = open_store(&StorageConfig::sqlite(directory.path().join("registry.db")))
-            .await
-            .unwrap();
-        let wave = make_wave("/repo");
-        store.create_wave(&wave).await.unwrap();
-        let project = make_project(&wave);
-        store.create_project(&project).await.unwrap();
-        let task = make_task(&wave, &project);
-        let pr = make_task_pr(&task);
-
-        store
-            .create_task_with_steer(&task, &pr, Author::User, "start the Task")
-            .await
-            .unwrap();
-
-        let event = store
-            .latest_task_event(&task.id)
-            .await
-            .unwrap()
-            .expect("Task publication carries an initialization event");
-        assert_eq!(
-            event.kind,
-            TaskEventKind::WorktreeInitializing {
-                pr_id: pr.id,
-                sequence: pr.sequence,
-                branch: pr.branch,
-                path: task.worktree.display().to_string(),
-                base_commit: pr.base_commit,
-            }
-        );
-        let work = store
-            .work_for_child(&ChildRef::Task(task.id))
-            .await
-            .unwrap();
-        assert_eq!(store.work_status(&work).await.unwrap(), WorkStatus::Ready);
         assert!(store.current_run(&work).await.unwrap().is_none());
     }
 

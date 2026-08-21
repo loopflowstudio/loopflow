@@ -46,20 +46,9 @@ agent. It refuses while another executor is still writing; interrupt that
 boundary first. A Steer is durable before live delivery is attempted. Provider
 acceptance is not incorporation; the Basis of a later successful boundary is.
 
-<<<<<<< HEAD
 During new-Task placement, status reports the declared worktree as initializing.
 If creation does not finish, status keeps the Task identity and names the exact
 path and branch to restore before resuming.
-||||||| parent of 5c54f526e (checkpoint: managed Task initialization prototype)
-=======
-Status may name a lifecycle repair before resume. A historical loop pin of
-`task` migrates explicitly to `slice` when `lf task resume` runs; other missing
-flow names remain parked until that flow is restored or the Task lifecycle is
-migrated deliberately. Residents record that non-convergence once and do not
-reserve retry Runs. During new-Task placement, status reports the declared
-worktree as initializing; if creation does not finish, it changes to the exact
-path and branch recovery instead of disappearing from Wave reads.
->>>>>>> 5c54f526e (checkpoint: managed Task initialization prototype)
 
 ## Rate limits
 

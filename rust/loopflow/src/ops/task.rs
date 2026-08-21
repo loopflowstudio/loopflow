@@ -1002,6 +1002,12 @@ fn task_configuration_refusal(task: &Task) -> Option<String> {
         .map(|error| error.to_string())
 }
 
+fn task_execution_refusal(task: &Task) -> Option<String> {
+    task_execution_boundary(&task.worktree, &task.agent)
+        .err()
+        .map(|error| error.to_string())
+}
+
 pub(crate) async fn task_launch_refusal(
     store: &SharedStore,
     task: &Task,
@@ -1009,6 +1015,23 @@ pub(crate) async fn task_launch_refusal(
     if let Some(refusal) = task_configuration_refusal(task) {
         return Ok(Some(refusal));
     }
+    persisted_task_launch_refusal(store, task).await
+}
+
+async fn task_launch_refusal_after_lifecycle_validation(
+    store: &SharedStore,
+    task: &Task,
+) -> crate::store::StoreResult<Option<String>> {
+    if let Some(refusal) = task_execution_refusal(task) {
+        return Ok(Some(refusal));
+    }
+    persisted_task_launch_refusal(store, task).await
+}
+
+async fn persisted_task_launch_refusal(
+    store: &SharedStore,
+    task: &Task,
+) -> crate::store::StoreResult<Option<String>> {
     let event = store.latest_task_event(&task.id).await?;
     Ok(task_event_launch_refusal(event.as_ref()).map(str::to_string))
 }
@@ -3102,10 +3125,10 @@ pub(crate) async fn reconcile_process_liveness(
 }
 
 async fn mark_task_body_lost(store: &SharedStore, task: &mut Task) -> OpsResult<()> {
-    if record_invalid_lifecycle_once(store, task).await? {
+    if park_invalid_lifecycle(store, task).await? {
         return Ok(());
     }
-    if task_launch_refusal(store, task)
+    if task_launch_refusal_after_lifecycle_validation(store, task)
         .await
         .map_err(|error| task_error(format!("failed to read Task blocker: {error}")))?
         .is_some()
@@ -3139,7 +3162,7 @@ async fn mark_task_body_lost(store: &SharedStore, task: &mut Task) -> OpsResult<
     relaunch_inactive_process_automatically(store, task).await
 }
 
-async fn record_invalid_lifecycle_once(store: &SharedStore, task: &Task) -> OpsResult<bool> {
+async fn park_invalid_lifecycle(store: &SharedStore, task: &Task) -> OpsResult<bool> {
     let Some(error) = validate_task_lifecycle(task)
         .err()
         .map(|error| error.to_string())
@@ -3170,13 +3193,12 @@ async fn record_invalid_lifecycle_once(store: &SharedStore, task: &Task) -> OpsR
             )
             .await
             .map_err(|store_error| task_error(store_error.to_string()))?;
+        tracing::warn!(
+            task = %task.plan.identifier,
+            %error,
+            "Task lifecycle is invalid; resident recovery is parked"
+        );
     }
-    tracing::warn!(
-        task = %task.plan.identifier,
-        %error,
-        recorded = !already_recorded,
-        "Task lifecycle is invalid; resident recovery is parked"
-    );
     Ok(true)
 }
 
@@ -3209,10 +3231,10 @@ pub(crate) async fn reconcile_project_tasks(
         ) {
             continue;
         }
-        if record_invalid_lifecycle_once(store, task).await? {
+        if park_invalid_lifecycle(store, task).await? {
             continue;
         }
-        if task_launch_refusal(store, task)
+        if task_launch_refusal_after_lifecycle_validation(store, task)
             .await
             .map_err(|error| task_error(format!("failed to read Task blocker: {error}")))?
             .is_some()
@@ -5803,10 +5825,11 @@ pub fn task_wait(issue: &str, until: TaskWaitUntil, timeout: Option<Duration>) -
 mod tests {
     use super::{
         ensure_task_flow_override, ensure_working_pr, launch_task_process, lock_task_pr_mutation,
-        preflight_task_execution, prepare_automatic_task_relaunch, probe_task_execution_boundary,
-        reconcile_process_liveness, reconcile_project_tasks, resolve_task_lifecycle,
-        resolve_task_start_input, task_event_launch_refusal, task_execution_boundary,
-        validate_task_lifecycle, TaskFlowOverrides, MAX_AUTOMATIC_TASK_RECOVERY_RUNS,
+        mark_task_body_lost, preflight_task_execution, prepare_automatic_task_relaunch,
+        probe_task_execution_boundary, reconcile_process_liveness, reconcile_project_tasks,
+        resolve_task_lifecycle, resolve_task_start_input, task_event_launch_refusal,
+        task_execution_boundary, validate_task_lifecycle, TaskFlowOverrides,
+        MAX_AUTOMATIC_TASK_RECOVERY_RUNS,
     };
     use crate::child::ChildRef;
     use crate::durable::{RunTrigger, WorkRef, WorkStatus};
@@ -6363,6 +6386,29 @@ mod tests {
         assert_eq!(events.len(), 1);
         assert!(matches!(
             &events[0].kind,
+            TaskEventKind::Failed {
+                error,
+                resumable: true,
+            } if error.contains("retired-task-flow")
+        ));
+        assert!(store.current_run(&work).await.unwrap().is_none());
+        assert_eq!(store.task_prs(&task.id).await.unwrap().len(), 1);
+    }
+
+    #[tokio::test]
+    async fn lost_body_parks_an_invalid_lifecycle_without_relaunching() {
+        let TaskFixture {
+            store,
+            mut task,
+            work,
+            ..
+        } = task_fixture("TEST-STALE-BODY", "retired-task-flow").await;
+
+        mark_task_body_lost(&store, &mut task).await.unwrap();
+
+        let event = store.latest_task_event(&task.id).await.unwrap().unwrap();
+        assert!(matches!(
+            event.kind,
             TaskEventKind::Failed {
                 error,
                 resumable: true,

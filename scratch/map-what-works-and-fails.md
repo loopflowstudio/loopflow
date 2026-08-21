@@ -9,9 +9,10 @@ experience still felt untrustworthy.
 
 The User asked for four things: map the seven named surfaces, preserve their
 explicit **Red** judgment of the Product Discord agent, choose the gap that
-matters most, and explore an internal evidence-board shape. This Task ends with
-that map and priority decision. It does not select or implement a new command,
-DTO, dashboard, or repair.
+matters most, and build enough internal evidence tooling to answer the question
+for this observed period. This Task ends with the answered map, its receipts,
+and the smallest tooling needed to reproduce the batch. It does not select a
+public command, stable DTO, dashboard contract, or runtime repair.
 
 The Product Wave objective promises that a user can understand and steer work
 without caring which process owns it. Auditability sharpens that promise: every
@@ -21,20 +22,21 @@ of review is the user's path across the seven surfaces, not the commit list.
 
 ## The demo
 
-Run the reproduction block, then read one frozen evidence batch. The mixed truth
-is immediate: launch options and repository scoping work; Ask has one durable
-successful handoff but no reliability window; status and activity still fail on
-the installed build; and Discord remains Red even though its transport and
-first factual answer worked. Every conclusion names the executable, time
+Run the task-scoped audit helper, then read one frozen evidence batch. The mixed
+truth is immediate: launch options and repository scoping work; Ask has one
+durable successful handoff but no reliability window; status and activity still
+fail on the installed build; and Discord remains Red even though its transport
+and first factual answer worked. Every conclusion names the executable, time
 window, and exact receipt—or stays unknown.
 
 ## Approach
 
 Freeze one installed-build batch, assess each named surface independently, and
-keep authored judgment separate from measurements. Choose the highest-impact
-user experience gap from that map. Explore a shared evidence projection only
-far enough to test whether the same map could remain live; do not turn the
-exploration into implementation scope.
+keep authored judgment separate from measurements. Build only the read-only
+collection and analysis helpers needed to answer this batch, following the
+existing `lifecycle_scorecard.py` pattern for repository scoping and explicit
+unknown evidence. Choose the highest-impact user experience gap from the map.
+Do not generalize this investigation into a public evidence product.
 
 ### Evidence contract
 
@@ -80,31 +82,39 @@ proof.
 
 ## Priority decision
 
-The most important **experience gap** is the Product Wave publication boundary.
-The User asked for shipped outcomes, received the correct answer—zero—and then
-received 49 more scheduler-shaped messages. Raw Runs should retain every phase;
-Discord should publish only a new user-relevant boundary: the requested answer,
-a decision, completed work, a changed blocker, or an Ask. No-op
-clarify/pursue/mutate passes should be silent.
+The most important **experience gap** is operational closure: the system must
+reliably carry authority through Wave → Project → Task control and advance real
+work to delivery. Reporting surfaces depend on that path; a clearer UI cannot
+make a stalled or unauthorized control loop work.
 
-The immediate **execution blocker** is narrower: LOO-237 must carry one exact
-Run execution context across User, Wave, Project, and Task runner thread changes.
-PR #1214 contains that repair but remains unsettled. LOO-240 is no longer blocked:
-its containment repair merged as #1219, while the installed release remains one
-commit behind it. LOO-233 is complete and explicitly absorbed into LOO-240; do
-not retry or rebuild it. Project-to-child durable Basis remains a separate
-control problem and must not be claimed fixed by LOO-237.
+The current map exposes two independent proof boundaries inside that priority.
+LOO-237 must carry one exact Run execution context across User, Wave, Project,
+and Task runner thread changes. Project-to-child durable Basis is a separate
+control contract, owned by LOO-227, and must not be claimed fixed by LOO-237.
+The product outcome joins them—a Task advances and settles—but each boundary
+needs its own receipt so one repair cannot hide the other failure.
+
+Discord is a symptom and a useful observation lens, not the priority. The User
+asked for shipped outcomes, received the correct answer—zero—and then received
+49 more scheduler-shaped messages. That publication pattern makes
+non-convergence visible: the system narrated internal motion because it was not
+producing a new outcome. A future publication contract may make the surface
+quieter, but suppressing narration would not repair execution.
 
 This ordering keeps the product decision honest:
 
-1. Settle LOO-237 through an authorized release path; do not treat another
-   parent Run as recovery or fold child-control Basis into it.
-2. Install a release containing #1219, then rerun status and activity before
-   calling the containment repair active.
-3. Design and validate the Discord publication/yield contract against a fresh
-   User conversation.
+1. Settle and verify LOO-237's Run execution-context propagation without
+   treating another parent Run as recovery.
+2. Separately prove Project-to-child Basis at the LOO-227 boundary, then prove
+   one real Wave → Project → Task path advances and settles with exact receipts.
+3. Install a release containing #1219 and rerun status and activity so the
+   reporting surfaces can observe operational truth without one malformed Task
+   erasing the view.
+4. Use Discord's narration, repetition, and outcome counts as evidence of
+   convergence quality; design publication suppression only after the working
+   execution boundary is established.
 
-## Discord diagnosis
+## Discord as symptom and lens
 
 The Red verdict is authored judgment; the counts explain it without replacing
 it.
@@ -118,62 +128,62 @@ it.
 - **Cliche voice:** repeated openings such as “I’m using …” make internal
   orchestration the conversational subject.
 
-Silence is a valid successful publication result when no user-relevant boundary
-changed.
+Silence may be the right publication result when no user-relevant boundary
+changed, but that is a downstream presentation policy. The first proof is that
+the system can produce or truthfully fail to produce the boundary at all.
 
-## Evidence-board candidate
+## Current-period audit tooling
 
-The useful follow-up is a frozen evidence batch, not a synthetic Wave-health
-score. `lf` should own one repository-scoped projection; the Podium may render
-the same fixture using its existing `PodiumReading` states
-(`loading`, `available`, `unavailable(lastGood, reason)`). The command boundary
-is deliberately unsettled: extending `status`, `roadmap`, or `activity` may be
-truer than adding `lf evidence`.
+The tool serves this investigation rather than defining a product surface. Add
+one read-only helper under `scripts/` that captures the seven probes for an
+explicit cutoff, records the exact executable and observation time for each,
+and emits a raw machine-readable bundle. It may use the specific Tasks, Ask,
+Discord interval, and installed binary paths named by this batch. Generalizing
+those inputs is not a success criterion.
 
-The smallest candidate shape follows the seven surfaces rather than inventing
-KR evidence architecture:
+The helper must preserve:
 
-```text
-ExperienceEvidenceSnapshot
-  observed_at, repo, wave
-  producer { version, source_revision, binary_identity, home_id, state, reason? }
-  surfaces[] {
-    id, finding, state, reason
-    assessment? { verdict, author, authored_at, source_ref }
-    measurements[] { value, unit, window, observed_at, stale_after, verdict }
-    evidence_refs[]
-  }
-  failures[] { subject, reason, evidence_refs[] }
-```
+- command, executable identity, observation time, exit status, and unmodified
+  output for each live probe;
+- bounded references for historical Ask, Run, Turn, Task-event, and Discord
+  evidence;
+- an independent failure result per probe so one malformed Task does not erase
+  successful evidence from other surfaces;
+- `unknown` when the available records do not prove the claim.
 
-An `EvidenceRef` points to an existing authority—Run, Invocation, Turn, Ask,
-Task event, Steer, Discord message, Linear item, command receipt, or commit. It
-does not copy a transcript into another store. One invalid record damages one
-surface row; it does not abort the snapshot. Missing or expired samples render
-`unknown`, never pass.
+The reviewed Markdown map remains the interpretation layer. The tool collects
+and checks evidence; it does not automatically convert measurements into a
+single health judgment, copy transcripts into another authority, or establish
+a stable wire format. Reuse the repository-scoped, read-only SQLite approach in
+`scripts/lifecycle_scorecard.py` and the real-path proof style in
+`scripts/prove_product_wave_surface.sh` where useful.
 
-Project-owned KR metrics, KR identity, and fingerprinting belong to LOO-235.
-They are not part of this Task's agent-experience map.
+The earlier `ExperienceEvidenceSnapshot`, new `lf evidence` command, and Podium
+rendering proposal are explicitly deferred. Project-owned KR metric identity
+and fingerprinting remain LOO-235's scope.
 
 ## Success and failure test
 
-Wild success is quieter than a dashboard launch. The same frozen batch renders
-in terminal and Podium; a user sees that Discord is Red while transport is up,
-opens the exact authored judgment and message window, and sees no update at all
-when the next scheduler pass changes nothing user-relevant.
+Wild success for this Task is an honest answer, not a dashboard launch. The
+current-period tool reproduces the mixed evidence without losing failures, the
+map identifies operational closure as the priority, and each conclusion opens
+onto the exact record that supports it. Discord helps expose non-convergence
+without becoming the root-cause claim.
 
-Wild failure is a polished second truth: a score averages Red conversation with
-green transport, stale samples look current, one invalid Task blanks the board,
-and copied Discord prose can no longer reach its source. Suppression can also
-fail by hiding a genuinely changed blocker. The publication rule therefore
-filters on changed user-relevant boundaries, not on message type or lifecycle
-phase alone.
+Wild failure is premature infrastructure or a polished second truth: a public
+DTO or dashboard is designed before this period is understood, a score averages
+Red conversation with green transport, stale samples look current, one invalid
+Task blanks the batch, or quieter Discord output hides the same non-converging
+control loop.
 
 ## Key decisions
 
 Evidence-backed decisions:
 
-- This Task ends at the reviewed map and priority order.
+- This Task ends at the answered current-period map, its receipts, and the
+  minimal tooling needed to reproduce it.
+- Reliable execution and control closure precede reporting UI work.
+- Discord is a symptom and diagnostic lens on convergence, not the primary gap.
 - Authored judgment and measured observations remain separate.
 - Unknown and stale remain visible; neither becomes healthy zero.
 - Every non-unknown claim needs an exact, resolvable reference.
@@ -182,18 +192,19 @@ Evidence-backed decisions:
   publication policy are distinct failures with distinct owners.
 - Merged, installed, and observed behavior remain separate states.
 
-Candidate assumptions, not User-confirmed implementation scope:
+Deferred questions, not implementation scope:
 
-- A shared `lf` projection should precede Podium rendering.
-- The existing Podium unavailable/last-good pattern fits an evidence board.
-- Discord should suppress no-op phase publications after the requested boundary
-  has been answered.
+- Whether a future shared projection extends `status`, `roadmap`, or `activity`,
+  or becomes another command.
+- Whether Podium should render a durable evidence board.
+- The exact future Discord publication policy once execution can reliably
+  produce or fail a user-relevant boundary.
 
 ## Alternatives considered
 
 | Approach | Tradeoff | Why not |
 |---|---|---|
-| Keep a manually updated Markdown scorecard | Fast, readable, easy to annotate. | It stales immediately and cannot enforce freshness or exact references. Keep this document as the seed, not the live surface. |
+| Write the current-period Markdown map without a collection helper | Fast, readable, easy to annotate. | The conclusions cannot be reproduced and will drift away from their exact executable, window, and receipts. |
 | Add a Mac-only dashboard fed by several subprocess calls | Strong visual scan. | It creates a Swift-owned join and leaves terminal agents unable to inspect the same truth. |
 | Derive one automatic health score | Compact and sortable. | It would average hard failures, narrow successes, missing evidence, and an authored Red verdict into false precision. |
 | Put assessments in Linear Project prose | Keeps prose near KRs. | Linear owns the plan, not local Run freshness or Discord/command receipts. |
@@ -201,35 +212,35 @@ Candidate assumptions, not User-confirmed implementation scope:
 ## Scope
 
 - In scope: seven agent surfaces, installed provenance, evidence freshness, the
-  authored Discord Red verdict, one priority decision, and a bounded board
-  candidate.
-- Out of scope: implementing the candidate; repairing LOO-225 or LOO-237;
-  rebuilding the installed release to activate LOO-240; changing Linear KRs;
-  designing KR metric identity; adding a second transcript; or treating
-  transport health as conversation quality.
+  authored Discord Red verdict, one priority decision, and task-scoped tools
+  that collect and verify this period's evidence.
+- Out of scope: a public evidence command or stable DTO; Podium implementation;
+  repairing LOO-225, LOO-227, or LOO-237; rebuilding the installed release to
+  activate LOO-240; changing Linear KRs; designing KR metric identity; adding a
+  second transcript; or treating transport health as conversation quality.
 
 ## Done when
 
-This design-only Task is done when each finding either resolves to the named
-command, timestamped record, exact Discord boundary, Task event, source revision,
-or commit—or is explicitly marked unknown because that proof is missing. The
-map must preserve the mixed result and make one priority decision without
-turning the dashboard exploration into implementation scope.
+This Task is done when the read-only helper reproduces the current-period batch
+and each finding resolves to the named command, timestamped record, exact
+Discord boundary, Task event, source revision, or commit—or is explicitly marked
+unknown because that proof is missing. The map must preserve the mixed result
+and make one priority decision without turning the investigation into product
+infrastructure.
 
 This advances Auditability's “what is this wave doing?” and “curation always
 points back” KRs by naming every drop to raw evidence and binding every reviewed
 claim to a receipt. It does not claim the one-week or one-month reliability
 windows complete.
 
-If the evidence-board candidate is selected later, its provisional proof is:
+The tool's focused proof is:
 
-1. One shared JSON fixture carries producer state, authored assessment,
-   timestamped measurements, exact references, and per-row failures.
-2. One invalid Task leaves unrelated rows readable and marks only affected rows
-   unavailable with a reason.
-3. Missing, stale, or insufficient windows render `unknown` or `collecting`.
-4. CLI and Podium present the same verdict, reason, freshness, and drill target.
-5. Every non-unknown row resolves at least one exact evidence reference.
+1. It records producer identity, timestamps, exit status, raw evidence, and
+   exact references for the reviewed probes.
+2. One failing probe leaves unrelated evidence readable and names its reason.
+3. Missing, stale, or insufficient evidence remains `unknown`.
+4. Re-running against the frozen cutoff reproduces the measurements used by
+   the map without contacting or mutating an external authority.
 
 ## Measure
 

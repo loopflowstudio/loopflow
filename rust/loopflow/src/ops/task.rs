@@ -1795,7 +1795,7 @@ fn _validate_task_pr_copy(context: &TaskPrContext, title: &str, body: &str) -> O
         line.trim()
             .strip_prefix('>')
             .map(str::trim)
-             .is_some_and(|line| line == anchor)
+            .is_some_and(|line| line == anchor)
     }) {
         return Err(task_error(format!(
             "Task PR body must include the owning Linear Task link: {anchor}"

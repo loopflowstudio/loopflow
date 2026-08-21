@@ -782,9 +782,7 @@ fn serial_task_pr_publication_restores_task_context() {
     assert!(presentation.body.ends_with("Serial reviewer context"));
     let gh_calls = fs::read_to_string(gh_log).expect("read GitHub calls");
     assert!(gh_calls.contains("--title INF-123: Prove Task PR transitions"));
-    assert!(gh_calls.contains(
-        "--body <!-- loopflow:task-pr-context:start -->"
-    ));
+    assert!(gh_calls.contains("--body <!-- loopflow:task-pr-context:start -->"));
 }
 
 #[test]

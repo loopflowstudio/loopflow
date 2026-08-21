@@ -1,20 +1,18 @@
-# v0.12.11
+# v0.12.12
 
-<!-- loopflow:release-notes=narrative;gate=safe -->
+v0.12.12 makes Task workflow correctness part of the lifecycle itself instead of metadata that each skill must declare. Default feature work now has explicit design-review and configured-path demo gates, while Linear Task identity remains intact throughout PR operations. The result is a more reliable path from design through shipping, especially when one Task spans serial PRs.
 
-v0.12.11 makes local Ask review feel native in Ghostty without changing the session model underneath. On macOS, `lf ask open` now gathers Asks into one dedicated Ghostty window, reuses named tabs, and focuses the requested session instead of presenting a tmux-linked Ask hub. Other terminals and remote presentation paths keep their existing behavior.
+## Task workflows enforce their own lifecycle
 
-## Review local Asks in one Ghostty window
+Lifecycle validity is now structural, removing skill capability frontmatter as a second source of truth. The default feature path also makes its proof points explicit before work advances.
 
-Ghostty now owns the presentation layer while tmux continues to preserve each Ask as a distinct session. Reopening or concurrently presenting Asks therefore converges on the existing window and tabs rather than creating duplicate review surfaces.
+- Task lifecycle validation no longer depends on capability declarations in skill frontmatter.
+- Default feature work is gated at design review and at a demo through the configured user path.
+- The built-in Task implementation and incident-prevention flows follow the structural lifecycle model.
 
-- Set `LF_EXTERNAL_TERMINAL=Ghostty` and run `lf ask open ask_...` to open or reattach an Ask in its named tab.
-- Loopflow remembers a dedicated Ghostty Ask window and focuses the requested tab when it already exists.
-- Concurrent presentations are serialized so they do not create duplicate windows or tabs.
-- Reattaching an existing Ask removes launcher scripts that are no longer needed.
-- Each Ask retains its own tmux session; only its local macOS presentation changes.
+## Task identity survives PR operations
 
-## Operational notes
+PR mechanics now preserve the owning Linear Task consistently, so publishing and landing do not sever orchestration state or lose continuity between serial changes.
 
-- Native Ghostty tab control depends on macOS Automation permission. If access is denied, `lf ask open` reports guidance for enabling it.
-- The new routing applies only when Ghostty is selected as the external terminal. Other terminal integrations and remote Ask presentation are unchanged.
+- Task identity is retained when a PR is published, refreshed, or landed.
+- Starting the next serial PR keeps the same Task identity instead of requiring it to be reconstructed.

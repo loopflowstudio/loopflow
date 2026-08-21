@@ -478,6 +478,22 @@ fn in_repo_runtime<T>(
     with_runtime(&repo_root, command, || run(&repo_root))
 }
 
+fn run_work_runner_entrypoint<T>(
+    command: &[String],
+    kind: &str,
+    work_id: &str,
+    run: impl FnOnce(loopflow::durable::WorkRef) -> anyhow::Result<T>,
+) -> anyhow::Result<T> {
+    in_repo_runtime(command, |_| {
+        let work = match kind {
+            "project" => loopflow::durable::WorkRef::Project(work_id.parse()?),
+            "task" => loopflow::durable::WorkRef::Task(work_id.parse()?),
+            _ => anyhow::bail!("unsupported hidden Work kind: {kind}"),
+        };
+        run(work)
+    })
+}
+
 fn with_skill_runtime<T>(
     repo_root: &std::path::Path,
     skill_name: &str,
@@ -688,6 +704,13 @@ impl EnvGuard {
     fn set(key: &'static str, value: impl Into<String>) -> Self {
         let previous = std::env::var_os(key);
         std::env::set_var(key, value.into());
+        Self { key, previous }
+    }
+
+    #[cfg(test)]
+    fn clear(key: &'static str) -> Self {
+        let previous = std::env::var_os(key);
+        std::env::remove_var(key);
         Self { key, previous }
     }
 }
@@ -1532,12 +1555,9 @@ fn main() -> anyhow::Result<()> {
                 in_repo_runtime(&args, |repo| loopflow::lf::commands::work::run(cmd, repo))
             }
             Some(Commands::WorkRunner { kind, work_id }) => {
-                let work = match kind.as_str() {
-                    "project" => loopflow::durable::WorkRef::Project(work_id.parse()?),
-                    "task" => loopflow::durable::WorkRef::Task(work_id.parse()?),
-                    _ => unreachable!("clap validates Work kind"),
-                };
-                tokio::runtime::Runtime::new()?.block_on(loopflow::work_runner::run_work(work))
+                run_work_runner_entrypoint(&args, kind, work_id, |work| {
+                    tokio::runtime::Runtime::new()?.block_on(loopflow::work_runner::run_work(work))
+                })
             }
             Some(Commands::Tokens { json, days }) => {
                 loopflow::lf::commands::tokens::run(*json, *days)
@@ -1784,11 +1804,16 @@ fn main() -> anyhow::Result<()> {
 
 #[cfg(test)]
 mod tests {
-    use super::{arg_tables, format_task_pr_line, normalize_ssh_args, reorder_args, CwdGuard};
+    use super::{
+        arg_tables, format_task_pr_line, normalize_ssh_args, reorder_args,
+        run_work_runner_entrypoint, CwdGuard, EnvGuard,
+    };
 
     use clap::Parser;
     use loopflow::lf::{Cli, Commands, PmCommand, PmTaskCommand, PrCommand};
     use loopflow::task::{GithubPr, PrPublication, TaskId, TaskPr, TaskPrId};
+
+    static PROCESS_STATE_LOCK: std::sync::Mutex<()> = std::sync::Mutex::new(());
 
     fn published_pr() -> TaskPr {
         let now = time::OffsetDateTime::now_utc();
@@ -1952,8 +1977,7 @@ mod tests {
 
     #[test]
     fn bound_cwd_is_entered_for_the_invocation_and_restored_afterward() {
-        static CWD_LOCK: std::sync::Mutex<()> = std::sync::Mutex::new(());
-        let _lock = CWD_LOCK.lock().unwrap();
+        let _lock = PROCESS_STATE_LOCK.lock().unwrap();
         let previous = std::env::current_dir().unwrap();
         let directory = tempfile::tempdir().unwrap();
 
@@ -1965,6 +1989,52 @@ mod tests {
         drop(guard);
 
         assert_eq!(std::env::current_dir().unwrap(), previous);
+    }
+
+    #[test]
+    fn work_runner_entrypoint_initializes_trace_context_before_body() {
+        let _lock = PROCESS_STATE_LOCK.lock().unwrap();
+        let _env = [
+            loopflow::journal::LF_TRACE_ID_ENV,
+            loopflow::journal::LF_PROCESS_ID_ENV,
+            loopflow::durable::RUN_CONTEXT_ENV,
+            loopflow::durable::RUN_LEASE_ENV,
+            loopflow::durable::AGENT_INVOCATION_ENV,
+            loopflow::engine::wave_context::WAVE_ID_ENV,
+        ]
+        .into_iter()
+        .map(EnvGuard::clear)
+        .collect::<Vec<_>>();
+        let directory = tempfile::tempdir().unwrap();
+        let _cwd = CwdGuard::enter(directory.path()).unwrap();
+        let command = vec![
+            "lf".to_string(),
+            "__work".to_string(),
+            "task".to_string(),
+            "task_00000000000000000000000000000000".to_string(),
+        ];
+
+        let mut capture_context = None;
+        let result = run_work_runner_entrypoint(
+            &command,
+            "task",
+            "task_00000000000000000000000000000000",
+            |work| {
+                assert!(matches!(work, loopflow::durable::WorkRef::Task(_)));
+                capture_context = Some(loopflow::journal::trace_capture_context(
+                    directory.path(),
+                    Some("first".to_string()),
+                    Some("review-design".to_string()),
+                )?);
+                Ok(())
+            },
+        );
+
+        result.unwrap();
+        let context = capture_context.expect("WorkRunner body should have trace context");
+        assert_eq!(context.worktree, directory.path());
+        assert_eq!(context.flow.as_deref(), Some("first"));
+        assert_eq!(context.skill.as_deref(), Some("review-design"));
     }
 
     #[test]

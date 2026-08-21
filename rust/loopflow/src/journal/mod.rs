@@ -360,10 +360,10 @@ pub fn trace_capture_context(
     worktree: &Path,
     flow: Option<String>,
     skill: Option<String>,
-) -> Option<crate::trace::TraceCaptureContext> {
-    let context = current_context()?;
+) -> Result<crate::trace::TraceCaptureContext, TraceCaptureContextError> {
+    let context = current_context().ok_or(TraceCaptureContextError::MissingJournalRunContext)?;
     let (project, task) = child_work_attribution();
-    Some(crate::trace::TraceCaptureContext {
+    Ok(crate::trace::TraceCaptureContext {
         run_id: context.run_id,
         process_id: context.process_id,
         repo: context
@@ -377,6 +377,15 @@ pub fn trace_capture_context(
         flow,
         skill,
     })
+}
+
+#[derive(Debug, PartialEq, Eq, thiserror::Error)]
+#[non_exhaustive]
+pub enum TraceCaptureContextError {
+    #[error(
+        "journal Run context is missing; Work-owned provider entrypoints must enter repo runtime before trace capture starts"
+    )]
+    MissingJournalRunContext,
 }
 
 fn child_work_attribution() -> (Option<String>, Option<String>) {
@@ -921,6 +930,25 @@ mod tests {
         assert_ne!(resolved, ambient_home.path().join("loopflow.db"));
         assert!(!ambient_db.exists());
         assert!(!ambient_home.path().join("loopflow.db").exists());
+    }
+
+    #[test]
+    fn trace_capture_context_names_missing_journal_run_context() {
+        let _guard = journal_test_guard();
+        let repo = TestRepo::new();
+
+        let error = super::trace_capture_context(
+            repo.path(),
+            Some("task-design".to_string()),
+            Some("review-design".to_string()),
+        )
+        .expect_err("trace capture requires an active journal Run context");
+
+        assert_eq!(
+            error,
+            super::TraceCaptureContextError::MissingJournalRunContext
+        );
+        assert!(error.to_string().contains("journal Run context is missing"));
     }
 
     fn started_fields(

@@ -209,20 +209,23 @@ async fn run_task_with(
     // process, so no child `lf` records on its behalf.
     let capture = match flow.current() {
         Some(step) => {
-            let Some(context) = crate::journal::trace_capture_context(
+            let context = match crate::journal::trace_capture_context(
                 Path::new(&task.worktree),
                 Some(step.flow.clone()),
                 Some(step.step.clone()),
-            ) else {
-                return finish_execution_blocked(
-                    &store,
-                    &mut task,
-                    lease,
-                    harness.as_mut(),
-                    &["Loopflow active Turn authority has no Run execution context".to_string()],
-                    None,
-                )
-                .await;
+            ) {
+                Ok(context) => context,
+                Err(error) => {
+                    return finish_execution_blocked(
+                        &store,
+                        &mut task,
+                        lease,
+                        harness.as_mut(),
+                        &[format!("Task trace capture prerequisite missing: {error}")],
+                        None,
+                    )
+                    .await;
+                }
             };
             match crate::trace::CaptureHandle::begin(
                 context,

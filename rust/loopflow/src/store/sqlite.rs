@@ -1837,7 +1837,7 @@ impl SqliteStore {
         }
 
         let mut conn = self.conn.lock().expect("store mutex poisoned");
-        let transaction = conn.transaction()?;
+        let transaction = conn.transaction_with_behavior(TransactionBehavior::Immediate)?;
         let previous = latest_turn_usage_sample_in(&transaction, &sample.turn_id)?;
         if let Some(previous) = previous.as_ref() {
             validate_usage_progress(previous, sample)?;
@@ -2161,7 +2161,7 @@ impl SqliteStore {
         turn: &AgentTurnRow,
     ) -> StoreResult<()> {
         let mut conn = self.conn.lock().expect("store mutex poisoned");
-        let tx = conn.transaction()?;
+        let tx = conn.transaction_with_behavior(TransactionBehavior::Immediate)?;
         tx.execute(
             "UPDATE agent_invocations SET
                 ended_at = ?2, capture_status = ?3, incomplete_reason = ?4, outcome = ?5,
@@ -2202,7 +2202,7 @@ impl SqliteStore {
         ended_at_fallback: i64,
     ) -> StoreResult<()> {
         let mut conn = self.conn.lock().expect("store mutex poisoned");
-        let tx = conn.transaction()?;
+        let tx = conn.transaction_with_behavior(TransactionBehavior::Immediate)?;
         let updated = tx.execute(
             "UPDATE agent_invocations
              SET capture_status = 'pruned', incomplete_reason = ?2,
@@ -2234,7 +2234,7 @@ impl SqliteStore {
         ended_at_fallback: i64,
     ) -> StoreResult<()> {
         let mut conn = self.conn.lock().expect("store mutex poisoned");
-        let tx = conn.transaction()?;
+        let tx = conn.transaction_with_behavior(TransactionBehavior::Immediate)?;
         let updated = tx.execute(
             "UPDATE agent_invocations
              SET capture_status = 'interrupted', incomplete_reason = ?2,
@@ -2265,7 +2265,7 @@ impl SqliteStore {
         ended_at_fallback: i64,
     ) -> StoreResult<()> {
         let mut conn = self.conn.lock().expect("store mutex poisoned");
-        let tx = conn.transaction()?;
+        let tx = conn.transaction_with_behavior(TransactionBehavior::Immediate)?;
         let updated = tx.execute(
             "UPDATE agent_invocations
              SET capture_status = 'lost', ended_at = COALESCE(ended_at, ?2),
@@ -3118,6 +3118,197 @@ fn map_turn_usage(
         cost_usd: row.get(start + 8)?,
     };
     Ok(usage.is_reported().then_some(usage))
+}
+
+#[cfg(test)]
+mod contention_tests {
+    use super::{SqliteStore, SQLITE_WRITE_BUSY_TIMEOUT};
+    use crate::chat::types::TurnUsage;
+    use crate::store::{StoreResult, TurnUsageSample};
+    use crate::trace::{AgentInvocationRow, AgentTurnRow};
+    use std::path::Path;
+    use std::sync::atomic::{AtomicBool, Ordering};
+    use std::sync::mpsc;
+    use std::thread;
+    use std::time::{Duration, Instant};
+
+    static WRITE_CONTENDED: AtomicBool = AtomicBool::new(false);
+
+    fn signal_busy(_: i32) -> bool {
+        WRITE_CONTENDED.store(true, Ordering::Release);
+        true
+    }
+
+    fn while_wal_writer_holds_lock<T>(
+        store: &SqliteStore,
+        path: &Path,
+        operation: &str,
+        run: impl FnOnce() -> StoreResult<T>,
+    ) -> T {
+        WRITE_CONTENDED.store(false, Ordering::Release);
+        store
+            .conn
+            .lock()
+            .expect("store mutex poisoned")
+            .busy_handler(Some(signal_busy))
+            .unwrap();
+
+        let path = path.to_path_buf();
+        let writer_run_id = format!("holder-{operation}");
+        let (locked_tx, locked_rx) = mpsc::sync_channel(0);
+        let writer = thread::spawn(move || {
+            let mut connection = rusqlite::Connection::open(path).unwrap();
+            let transaction = connection
+                .transaction_with_behavior(rusqlite::TransactionBehavior::Immediate)
+                .unwrap();
+            transaction
+                .execute(
+                    "INSERT INTO run_events (run_id, process_id, seq, ts, node, event)
+                     VALUES (?1, 'holder', 0, 1, 'flow', 'started')",
+                    [writer_run_id],
+                )
+                .unwrap();
+            locked_tx.send(()).unwrap();
+            let deadline = Instant::now() + Duration::from_secs(1);
+            while !WRITE_CONTENDED.load(Ordering::Acquire) && Instant::now() < deadline {
+                thread::yield_now();
+            }
+            transaction.commit().unwrap();
+            WRITE_CONTENDED.load(Ordering::Acquire)
+        });
+
+        locked_rx.recv().unwrap();
+        let result = run();
+        let contended = writer.join().unwrap();
+        let connection = store.conn.lock().expect("store mutex poisoned");
+        connection.busy_handler(None).unwrap();
+        connection.busy_timeout(SQLITE_WRITE_BUSY_TIMEOUT).unwrap();
+        assert!(
+            contended,
+            "{operation} bypassed the busy handler instead of acquiring write authority first"
+        );
+        result.unwrap()
+    }
+
+    fn invocation() -> AgentInvocationRow {
+        AgentInvocationRow {
+            id: "invocation_contention".to_string(),
+            run_id: "run-contention".to_string(),
+            answer_ask_id: None,
+            process_id: "exec_contention".to_string(),
+            started_at: 1,
+            ended_at: None,
+            repo: "/repo".to_string(),
+            worktree: "/repo/task".to_string(),
+            wave: Some("product".to_string()),
+            flow: Some("task".to_string()),
+            skill: Some("ship-5whys".to_string()),
+            project: Some("loopflow-api".to_string()),
+            task: Some("LOO-238".to_string()),
+            provider: "codex".to_string(),
+            model: Some("gpt-5".to_string()),
+            surface: "headless".to_string(),
+            capture_status: "capturing".to_string(),
+            incomplete_reason: None,
+            outcome: "running".to_string(),
+            artifact_dir: "run/exec/invocation".to_string(),
+            conversation_path: "run/exec/invocation/conversation.jsonl".to_string(),
+            provider_events_path: None,
+            provider_session_id: None,
+            provider_session_path: None,
+            conversation_event_count: 1,
+            conversation_bytes: 10,
+            supervision: None,
+        }
+    }
+
+    fn turn(id: &str, ordinal: i64, status: &str) -> AgentTurnRow {
+        AgentTurnRow {
+            id: id.to_string(),
+            invocation_id: "invocation_contention".to_string(),
+            ordinal,
+            provider_turn_id: None,
+            started_at: ordinal,
+            ended_at: None,
+            status: status.to_string(),
+            input_op: if ordinal == 1 { "initial" } else { "message" }.to_string(),
+            context_coverage: "assembled".to_string(),
+            tokenizer: "cl100k_base".to_string(),
+            system_prompt_path: None,
+            task_prompt_path: format!("run/exec/invocation/turns/{ordinal:04}-task.md"),
+            system_tokens: 0,
+            task_tokens: 2,
+            supplied_context_tokens: 2,
+            usage: None,
+            context_gather_ms: 1,
+            context_render_ms: 1,
+            context_persist_ms: 1,
+            first_event_seq: Some(ordinal - 1),
+            last_event_seq: None,
+            root_output: None,
+            basis: None,
+        }
+    }
+
+    #[test]
+    fn multi_turn_capture_waits_for_concurrent_wal_writers() {
+        let directory = tempfile::tempdir().unwrap();
+        let path = directory.path().join("loopflow.db");
+        let store = SqliteStore::new(&path).expect("materialize the schema");
+        let mut invocation = invocation();
+        let mut first_turn = turn("turn_contention_1", 1, "running");
+
+        while_wal_writer_holds_lock(&store, &path, "capture start", || {
+            store.insert_trace_capture(&invocation, &first_turn, &[], &[])
+        });
+        while_wal_writer_holds_lock(&store, &path, "usage checkpoint", || {
+            store.record_turn_usage_sample(&TurnUsageSample {
+                turn_id: first_turn.id.clone(),
+                observed_at: 2,
+                final_receipt: false,
+                usage: TurnUsage {
+                    input_tokens: Some(10),
+                    output_tokens: Some(1),
+                    ..Default::default()
+                },
+            })
+        });
+
+        first_turn.ended_at = Some(3);
+        first_turn.status = "partial".to_string();
+        let second_turn = turn("turn_contention_2", 2, "running");
+        while_wal_writer_holds_lock(&store, &path, "turn transition", || {
+            store.finish_agent_turn_capture(&first_turn)?;
+            store.insert_agent_turn_capture(&second_turn, &[], &[])
+        });
+
+        invocation.ended_at = Some(4);
+        invocation.capture_status = "complete".to_string();
+        invocation.outcome = "completed".to_string();
+        let mut second_turn = second_turn;
+        second_turn.ended_at = Some(4);
+        second_turn.status = "completed".to_string();
+        while_wal_writer_holds_lock(&store, &path, "capture finish", || {
+            store.finish_trace_capture(&invocation, &second_turn)
+        });
+
+        let invocations = store
+            .agent_invocations_matching(&invocation.run_id)
+            .unwrap();
+        assert_eq!(invocations.len(), 1);
+        assert_eq!(invocations[0].capture_status, "complete");
+        assert_eq!(invocations[0].outcome, "completed");
+        let turns = store
+            .agent_turns_for_invocations(&[invocation.id.clone()])
+            .unwrap();
+        assert_eq!(turns.len(), 2);
+        assert_eq!(turns[0].status, "partial");
+        assert_eq!(turns[1].status, "completed");
+        assert_eq!(
+            turns[0].usage.as_ref().and_then(|usage| usage.input_tokens),
+            Some(10)
+        );
+    }
 }
 
 #[cfg(test)]

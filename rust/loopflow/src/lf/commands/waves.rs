@@ -1554,31 +1554,12 @@ async fn snapshot_task_detail(
         },
     };
     let process = task_process_evidence(runtime.as_ref(), liveness);
-<<<<<<< HEAD
     let local_progress = task_local_progress(
         task,
         runtime.as_ref(),
         active,
         &process,
         worktree_blocker.as_ref(),
-||||||| parent of 5c54f526e (checkpoint: managed Task initialization prototype)
-    let local_progress = task_local_progress(task, runtime.as_ref(), active, &process);
-=======
-    let resume_preflight = match task {
-        Some(task) => crate::ops::task::task_resume_preflight(store, task).await?,
-        None => crate::ops::task::TaskResumePreflight::default(),
-    };
-    let initialization_reason = resume_preflight
-        .initializing
-        .then_some(resume_preflight.refusal.as_deref())
-        .flatten();
-    let local_progress = task_local_progress(
-        task,
-        runtime.as_ref(),
-        active,
-        &process,
-        initialization_reason,
->>>>>>> 5c54f526e (checkpoint: managed Task initialization prototype)
     );
     let completion_refusal = match (task, runtime.as_ref()) {
         (Some(task), Some(runtime)) if !work_status_is_terminal(&runtime.status) => {
@@ -1588,7 +1569,6 @@ async fn snapshot_task_detail(
         }
         _ => None,
     };
-<<<<<<< HEAD
     let resume_refusal = worktree_blocker
         .as_ref()
         .map(|blocker| blocker.reason.clone())
@@ -1597,17 +1577,6 @@ async fn snapshot_task_detail(
                 crate::ops::task::no_active_pr_resume_refusal(&task.plan.identifier, active, latest)
             })
         });
-||||||| parent of 5c54f526e (checkpoint: managed Task initialization prototype)
-    let resume_refusal = task.and_then(|task| {
-        crate::ops::task::no_active_pr_resume_refusal(&task.plan.identifier, active, latest)
-    });
-=======
-    let resume_refusal = resume_preflight.refusal.clone().or_else(|| {
-        task.and_then(|task| {
-            crate::ops::task::no_active_pr_resume_refusal(&task.plan.identifier, active, latest)
-        })
-    });
->>>>>>> 5c54f526e (checkpoint: managed Task initialization prototype)
     let (action_evidence, user_ask) = match task {
         Some(task) => {
             let predecessor_phase = match active.and_then(|pr| pr.parent_pr_id.as_ref()) {
@@ -1632,7 +1601,6 @@ async fn snapshot_task_detail(
                         .map(|pr| pr.presentation().is_some()),
                     completion_refusal: completion_refusal.as_deref(),
                     resume_refusal: resume_refusal.as_deref(),
-                    resume_migration: resume_preflight.migration.as_deref(),
                     ci: active.and_then(|pr| pr.fresh_ci()),
                     process_alive: process.alive,
                     predecessor_phase,
@@ -1724,12 +1692,7 @@ fn task_local_progress(
     runtime: Option<&TaskRuntimeSnapshot>,
     active_pr: Option<&TaskPr>,
     process: &TaskProcessEvidence,
-<<<<<<< HEAD
     worktree_blocker: Option<&crate::ops::task::TaskWorktreeBlocker>,
-||||||| parent of 5c54f526e (checkpoint: managed Task initialization prototype)
-=======
-    initialization_reason: Option<&str>,
->>>>>>> 5c54f526e (checkpoint: managed Task initialization prototype)
 ) -> LocalProgressEvidence {
     let Some(task) = task else {
         return LocalProgressEvidence {
@@ -1748,12 +1711,7 @@ fn task_local_progress(
         &task.worktree,
         active_pr.map(|pr| pr.base_commit.as_str()),
         process,
-<<<<<<< HEAD
         worktree_blocker,
-||||||| parent of 5c54f526e (checkpoint: managed Task initialization prototype)
-=======
-        initialization_reason,
->>>>>>> 5c54f526e (checkpoint: managed Task initialization prototype)
     )
 }
 
@@ -1762,12 +1720,7 @@ fn inspect_task_local_progress(
     worktree: &Path,
     active_pr_base: Option<&str>,
     process: &TaskProcessEvidence,
-<<<<<<< HEAD
     worktree_blocker: Option<&crate::ops::task::TaskWorktreeBlocker>,
-||||||| parent of 5c54f526e (checkpoint: managed Task initialization prototype)
-=======
-    initialization_reason: Option<&str>,
->>>>>>> 5c54f526e (checkpoint: managed Task initialization prototype)
 ) -> LocalProgressEvidence {
     let recovery_required = if work_status_is_running(status) {
         process.alive.map(|alive| !alive)
@@ -1785,16 +1738,6 @@ fn inspect_task_local_progress(
         };
     }
     if !worktree.exists() {
-        if let Some(reason) = initialization_reason {
-            return LocalProgressEvidence {
-                state: LocalProgressEvidenceState::Missing,
-                unsettled: Some(false),
-                dirty: None,
-                authored_commits: None,
-                recovery_required: Some(false),
-                reason: Some(reason.to_string()),
-            };
-        }
         if work_status_is_terminal(status) && active_pr_base.is_none() {
             return LocalProgressEvidence {
                 state: LocalProgressEvidenceState::NotApplicable,

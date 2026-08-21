@@ -96,6 +96,7 @@ and every Run launch.
 | Is a schema draft enough for the live recovery? | Draft migrations are accumulated for the next release cut and are not applied by an ordinary development build. | Put the live repair at the explicit resume boundary. A later release migration may sweep untouched legacy rows, but is not required for legal status/resume agreement. |
 | Why did new-Task reads fail before the body existed? | Task/PR publication committed before `create_from_placement_plan`; no durable state distinguished that intended gap from a deleted worktree. Worktree creation eventually succeeded, proving this was initialization rather than loss. | Add a transactionally published initialization event and make all three read surfaces consume it. |
 | Can rejection still churn under a resident? | Yes. A log-only launch refusal is retried on every Project supervision tick, while recording a fresh generic body-loss event first creates durable noise. | Record the lifecycle refusal once before PR reconciliation and make the exact receipt idempotent across ticks. |
+| Does bounded automatic recovery make the lifecycle gate redundant? | No. Main's recovery planner bounds repeated failed Runs, but its post-rebase launch path could create a successor PR before discovering that the pinned flow was unavailable. | Validate lifecycle executability before both recovery planning and `ensure_working_pr`; an invalid plan changes neither the Run ledger nor PR sequence. |
 
 ## Alternatives considered
 
@@ -153,6 +154,8 @@ and every Run launch.
 - A Task launch request with an unavailable lifecycle flow persists no Task or
   PR.
 - Repeated automatic launch attempts with an invalid plan create no Runs.
+- Automatic recovery of an invalid Task with a settled PR creates no successor
+  PR and reserves no Run.
 - Two resident ticks over copied LOO-167, LOO-193, and LOO-195 missing-flow
   shapes produce one actionable failure event each, zero Runs, and no PR
   mutation.

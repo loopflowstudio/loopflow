@@ -35,16 +35,8 @@ use crate::task::actions::{derive_task_actions, TaskActionEvidence, TaskActionMo
 use crate::task::{
     AfterMerge, CiCheck, CiIncident, CiObservation, CiState, GithubObservation,
     GithubObservationResult, GithubPr, Observation, PmWritebackOperation, PmWritebackState,
-<<<<<<< HEAD
     PrMergeMode, PrMergeRequest, PrPhase, PrPresentation, PrPublication, Task, TaskEventKind,
     TaskPr, TaskPrId,
-||||||| parent of 5c54f526e (checkpoint: managed Task initialization prototype)
-    PrMergeMode, PrMergeRequest, PrPhase, PrPublication, Task, TaskEventKind, TaskId, TaskPr,
-    TaskPrId,
-=======
-    PrMergeMode, PrMergeRequest, PrPhase, PrPublication, Task, TaskEventKind, TaskId,
-    TaskLifecyclePlan, TaskPr, TaskPrId,
->>>>>>> 5c54f526e (checkpoint: managed Task initialization prototype)
 };
 use crate::wave::Wave;
 use fs2::FileExt;
@@ -755,7 +747,6 @@ pub fn task_run(repo: &Path, issue: &str, options: TaskLaunchOptions) -> OpsResu
             )));
         }
 
-<<<<<<< HEAD
         if let Err(error) = store
             .append_task_event(
                 &task.id,
@@ -777,66 +768,9 @@ pub fn task_run(repo: &Path, issue: &str, options: TaskLaunchOptions) -> OpsResu
                     ))
                 })?;
             return Err(task_error(error.to_string()));
-||||||| parent of 5c54f526e (checkpoint: managed Task initialization prototype)
-        store
-            .append_task_event(
-                &task.id,
-                &TaskEventKind::PrStarted {
-                    pr_id: pr.id,
-                    sequence: pr.sequence,
-                    branch: pr.branch,
-                    base_commit: pr.base_commit,
-                },
-            )
-            .await
-            .map_err(|error| task_error(error.to_string()))?;
-
-        if let Err(error) = create_from_placement_plan(&main_repo, &plan) {
-            record_task_failure(
-                &store,
-                &mut task,
-                format!("worktree creation failed: {error}"),
-                error.to_string(),
-            )
-            .await?;
-            return Err(task_error(format!(
-                "failed to create task worktree: {error}"
-            )));
-=======
-        if let Err(error) = create_from_placement_plan(&main_repo, &plan) {
-            record_task_failure(
-                &store,
-                &mut task,
-                format!("worktree creation failed: {error}"),
-                error.to_string(),
-            )
-            .await?;
-            return Err(task_error(format!(
-                "failed to create task worktree: {error}"
-            )));
->>>>>>> 5c54f526e (checkpoint: managed Task initialization prototype)
         }
 
-<<<<<<< HEAD
         launch_reserved_task_process(&store, &mut task, &run, &lease, account_id).await?;
-||||||| parent of 5c54f526e (checkpoint: managed Task initialization prototype)
-        launch_task_process(&store, &mut task, None).await?;
-=======
-        store
-            .append_task_event(
-                &task.id,
-                &TaskEventKind::PrStarted {
-                    pr_id: pr.id,
-                    sequence: pr.sequence,
-                    branch: pr.branch,
-                    base_commit: pr.base_commit,
-                },
-            )
-            .await
-            .map_err(|error| task_error(error.to_string()))?;
-
-        launch_task_process(&store, &mut task, None).await?;
->>>>>>> 5c54f526e (checkpoint: managed Task initialization prototype)
         wait_until_running(&store, &task.id).await
     })
 }
@@ -1007,95 +941,9 @@ fn resolve_task_lifecycle(
     ))
 }
 
-<<<<<<< HEAD
 fn validate_task_lifecycle(task: &Task) -> OpsResult<()> {
     let resolve = |phase: crate::task::TaskLifecyclePhase, flow: &str| {
         load_task_flow(&task.worktree, flow, phase).map_err(|error| {
-||||||| parent of 5c54f526e (checkpoint: managed Task initialization prototype)
-fn validate_task_lifecycle(task: &Task) -> OpsResult<()> {
-    for (phase, flow, allow_ops) in [
-        ("first", &task.lifecycle.first.flow, false),
-        ("loop", &task.lifecycle.loop_.flow, false),
-        ("finally", &task.lifecycle.finally.flow, true),
-    ] {
-        resolve_task_flow(&task.worktree, flow, allow_ops).map_err(|error| {
-=======
-#[derive(Debug, Clone, PartialEq, Eq)]
-enum TaskLifecyclePreflight {
-    Ready,
-    Migration {
-        plan: TaskLifecyclePlan,
-        reason: String,
-    },
-}
-
-#[derive(Debug, Clone, Default, PartialEq, Eq)]
-pub(crate) struct TaskResumePreflight {
-    pub refusal: Option<String>,
-    pub migration: Option<String>,
-    pub initializing: bool,
-}
-
-const TASK_WORKTREE_INITIALIZATION_GRACE: time::Duration = time::Duration::minutes(5);
-
-async fn task_worktree_initialization(
-    store: &SharedStore,
-    task: &Task,
-) -> OpsResult<Option<(bool, String)>> {
-    if task.worktree.exists() {
-        return Ok(None);
-    }
-    let Some(event) = store
-        .latest_task_event(&task.id)
-        .await
-        .map_err(|error| task_error(format!("failed to read Task initialization: {error}")))?
-    else {
-        return Ok(None);
-    };
-    let TaskEventKind::WorktreeInitializing { branch, path, .. } = event.kind else {
-        return Ok(None);
-    };
-    let recent =
-        event.created_at + TASK_WORKTREE_INITIALIZATION_GRACE > time::OffsetDateTime::now_utc();
-    let reason = if recent {
-        format!(
-            "Task {} is initializing worktree {path} on branch {branch:?}; no body is expected until creation completes",
-            task.plan.identifier
-        )
-    } else {
-        format!(
-            "Task {} worktree initialization did not complete at {path} on branch {branch:?}; restore that exact path before `lf task resume {}`; Task identity and PR history are unchanged",
-            task.plan.identifier, task.plan.identifier
-        )
-    };
-    Ok(Some((recent, reason)))
-}
-
-fn task_lifecycle_preflight(task: &Task) -> OpsResult<TaskLifecyclePreflight> {
-    match validate_task_lifecycle_plan(task, &task.lifecycle) {
-        Ok(()) => return Ok(TaskLifecyclePreflight::Ready),
-        Err(error) if task.lifecycle.loop_.flow != "task" => return Err(error),
-        Err(_) => {}
-    }
-
-    let mut plan = task.lifecycle.clone();
-    plan.loop_.flow = "slice".to_string();
-    validate_task_lifecycle_plan(task, &plan)?;
-    Ok(TaskLifecyclePreflight::Migration {
-        plan,
-        reason: "resume the same Task after migrating retired loop flow \"task\" to \"slice\""
-            .to_string(),
-    })
-}
-
-fn validate_task_lifecycle_plan(task: &Task, plan: &TaskLifecyclePlan) -> OpsResult<()> {
-    for (phase, flow, allow_ops) in [
-        ("first", &plan.first.flow, false),
-        ("loop", &plan.loop_.flow, false),
-        ("finally", &plan.finally.flow, true),
-    ] {
-        resolve_task_flow(&task.worktree, flow, allow_ops).map_err(|error| {
->>>>>>> 5c54f526e (checkpoint: managed Task initialization prototype)
             task_error(format!(
                 "Task {} cannot launch: pinned {} flow {flow:?} is invalid: {error}",
                 task.plan.identifier,
@@ -1233,7 +1081,6 @@ fn probe_task_execution_boundary(boundary: &AgentExecutionBoundary) -> OpsResult
     Ok(())
 }
 
-<<<<<<< HEAD
 async fn preflight_task_execution(repo: &Path, agent: &str) -> OpsResult<ProviderAccountId> {
     let boundary = task_execution_boundary(repo, agent)?;
     probe_task_execution_boundary(&boundary)?;
@@ -1390,131 +1237,6 @@ fn load_task_flow(
     requested: &str,
     phase: crate::task::TaskLifecyclePhase,
 ) -> OpsResult<(String, Vec<ConcreteStep>)> {
-||||||| parent of 5c54f526e (checkpoint: managed Task initialization prototype)
-fn resolve_task_flow(repo: &Path, requested: &str, allow_ops: bool) -> OpsResult<String> {
-=======
-fn validate_task_lifecycle(task: &Task) -> OpsResult<()> {
-    match task_lifecycle_launch_refusal(task) {
-        None => Ok(()),
-        Some(refusal) => Err(task_error(refusal)),
-    }
-}
-
-fn task_lifecycle_launch_refusal(task: &Task) -> Option<String> {
-    match task_lifecycle_preflight(task) {
-        Ok(TaskLifecyclePreflight::Ready) => None,
-        Ok(TaskLifecyclePreflight::Migration { .. }) => Some(format!(
-            "Task {} cannot launch automatically while loop flow \"task\" is retired; run `lf task resume {}` to migrate it to \"slice\"",
-            task.plan.identifier, task.plan.identifier
-        )),
-        Err(error) => Some(format!(
-            "{error}; restore the pinned flow or explicitly migrate this Task lifecycle before resuming"
-        )),
-    }
-}
-
-async fn record_lifecycle_non_convergence(store: &SharedStore, task: &Task) -> OpsResult<bool> {
-    let Some(error) = task_lifecycle_launch_refusal(task) else {
-        return Ok(false);
-    };
-    let already_recorded = store
-        .latest_task_event(&task.id)
-        .await
-        .map_err(|store_error| task_error(store_error.to_string()))?
-        .is_some_and(|event| {
-            matches!(
-                event.kind,
-                TaskEventKind::Failed {
-                    error: recorded,
-                    resumable: true,
-                } if recorded == error
-            )
-        });
-    if !already_recorded {
-        store
-            .append_task_event(
-                &task.id,
-                &TaskEventKind::Failed {
-                    error: error.clone(),
-                    resumable: true,
-                },
-            )
-            .await
-            .map_err(|store_error| task_error(store_error.to_string()))?;
-    }
-    tracing::warn!(
-        task = %task.plan.identifier,
-        %error,
-        recorded = !already_recorded,
-        "Task lifecycle is not executable; resident recovery is parked"
-    );
-    Ok(true)
-}
-
-async fn prepare_task_lifecycle(store: &SharedStore, task: &mut Task) -> OpsResult<()> {
-    let TaskLifecyclePreflight::Migration { plan, reason } = task_lifecycle_preflight(task)? else {
-        return Ok(());
-    };
-    if matches!(
-        task_work_status(store, task).await?,
-        WorkStatus::Running { .. }
-    ) {
-        return Err(task_error(format!(
-            "Task {} is already running; wait for it to park before lifecycle migration",
-            task.plan.identifier
-        )));
-    }
-    tracing::info!(
-        task = %task.plan.identifier,
-        from = "task",
-        to = "slice",
-        "migrating retired Task lifecycle flow before resume"
-    );
-    task.lifecycle = plan;
-    task.updated_at = time::OffsetDateTime::now_utc();
-    store
-        .update_task(task)
-        .await
-        .map_err(|error| task_error(format!("failed to {reason}: {error}")))
-}
-
-pub(crate) async fn task_resume_preflight(
-    store: &SharedStore,
-    task: &Task,
-) -> OpsResult<TaskResumePreflight> {
-    if let Some((initializing, reason)) = task_worktree_initialization(store, task).await? {
-        return Ok(TaskResumePreflight {
-            refusal: Some(reason),
-            migration: None,
-            initializing,
-        });
-    }
-    if let Err(error) = task_recovery_adoption(store, task).await {
-        return Ok(TaskResumePreflight {
-            refusal: Some(error.to_string()),
-            migration: None,
-            initializing: false,
-        });
-    }
-    match task_lifecycle_preflight(task) {
-        Ok(TaskLifecyclePreflight::Ready) => Ok(TaskResumePreflight::default()),
-        Ok(TaskLifecyclePreflight::Migration { reason, .. }) => Ok(TaskResumePreflight {
-            refusal: None,
-            migration: Some(reason),
-            initializing: false,
-        }),
-        Err(error) => Ok(TaskResumePreflight {
-            refusal: Some(format!(
-                "{error}; restore the pinned flow or migrate this Task lifecycle before resuming"
-            )),
-            migration: None,
-            initializing: false,
-        }),
-    }
-}
-
-fn resolve_task_flow(repo: &Path, requested: &str, allow_ops: bool) -> OpsResult<String> {
->>>>>>> 5c54f526e (checkpoint: managed Task initialization prototype)
     let definition = load_flow(requested, repo)
         .map_err(|error| task_error(format!("failed to load Task flow {requested:?}: {error}")))?;
     let steps = expand_flow(&definition, repo).map_err(|error| {
@@ -2984,7 +2706,6 @@ pub(crate) async fn relaunch_inactive_process_with_trigger(
     task: &mut Task,
     trigger: Option<RunTrigger>,
 ) -> OpsResult<()> {
-    validate_task_lifecycle(task)?;
     let Some(_) = ensure_working_pr(store, task).await? else {
         return Err(task_error(format!(
             "Task {} is terminal and cannot start a Run",
@@ -3184,7 +2905,6 @@ async fn relaunch_for_ci_incident(
     task: &mut Task,
     incident_id: String,
 ) -> OpsResult<()> {
-    validate_task_lifecycle(task)?;
     let Some(_) = ensure_working_pr(store, task).await? else {
         return Err(task_error(format!(
             "Task {} is terminal and cannot repair CI",
@@ -3199,7 +2919,6 @@ async fn launch_task_process(
     task: &mut Task,
     trigger: Option<RunTrigger>,
 ) -> OpsResult<()> {
-    validate_task_lifecycle(task)?;
     let work = store
         .work_for_child(&ChildRef::Task(task.id.clone()))
         .await
@@ -3212,7 +2931,6 @@ async fn launch_task_process(
     {
         return Ok(());
     }
-<<<<<<< HEAD
     validate_task_launch(task)?;
     let account_id = match preflight_task_execution(&task.worktree, &task.agent).await {
         Ok(account_id) => account_id,
@@ -3248,10 +2966,6 @@ async fn launch_task_process(
             return Err(task_error(error));
         }
     };
-||||||| parent of 5c54f526e (checkpoint: managed Task initialization prototype)
-    validate_task_lifecycle(task)?;
-=======
->>>>>>> 5c54f526e (checkpoint: managed Task initialization prototype)
     let trigger = match trigger {
         Some(trigger) => trigger,
         None => RunTrigger::Input {
@@ -3388,6 +3102,9 @@ pub(crate) async fn reconcile_process_liveness(
 }
 
 async fn mark_task_body_lost(store: &SharedStore, task: &mut Task) -> OpsResult<()> {
+    if record_invalid_lifecycle_once(store, task).await? {
+        return Ok(());
+    }
     if task_launch_refusal(store, task)
         .await
         .map_err(|error| task_error(format!("failed to read Task blocker: {error}")))?
@@ -3405,16 +3122,6 @@ async fn mark_task_body_lost(store: &SharedStore, task: &mut Task) -> OpsResult<
     {
         return Ok(());
     }
-    if let Err(error) = task_recovery_adoption(store, task).await {
-        tracing::info!(
-            task = %task.plan.identifier,
-            "not recovering missing Task body: {error}"
-        );
-        return Ok(());
-    }
-    if record_lifecycle_non_convergence(store, task).await? {
-        return Ok(());
-    }
     // Do not write a human instruction into a durable field and stop. This line
     // was the strand: it told a person to type `lf task resume` and nothing ever
     // read it, so 13 Tasks sat frozen until someone swept them by hand. The
@@ -3422,7 +3129,55 @@ async fn mark_task_body_lost(store: &SharedStore, task: &mut Task) -> OpsResult<
     // the ordinary adoption safety check.
     let reason = "task process is missing; Loopflow will recover this Task";
     record_task_failure(store, task, reason, reason.to_string()).await?;
+    if let Err(error) = task_recovery_adoption(store, task).await {
+        tracing::info!(
+            task = %task.plan.identifier,
+            "not recovering missing Task body: {error}"
+        );
+        return Ok(());
+    }
     relaunch_inactive_process_automatically(store, task).await
+}
+
+async fn record_invalid_lifecycle_once(store: &SharedStore, task: &Task) -> OpsResult<bool> {
+    let Some(error) = validate_task_lifecycle(task)
+        .err()
+        .map(|error| error.to_string())
+    else {
+        return Ok(false);
+    };
+    let already_recorded = store
+        .latest_task_event(&task.id)
+        .await
+        .map_err(|store_error| task_error(store_error.to_string()))?
+        .is_some_and(|event| {
+            matches!(
+                event.kind,
+                TaskEventKind::Failed {
+                    error: recorded,
+                    resumable: true,
+                } if recorded == error
+            )
+        });
+    if !already_recorded {
+        store
+            .append_task_event(
+                &task.id,
+                &TaskEventKind::Failed {
+                    error: error.clone(),
+                    resumable: true,
+                },
+            )
+            .await
+            .map_err(|store_error| task_error(store_error.to_string()))?;
+    }
+    tracing::warn!(
+        task = %task.plan.identifier,
+        %error,
+        recorded = !already_recorded,
+        "Task lifecycle is invalid; resident recovery is parked"
+    );
+    Ok(true)
 }
 
 /// Let one live Project body supervise the progress leases of its Task bodies.
@@ -3454,7 +3209,9 @@ pub(crate) async fn reconcile_project_tasks(
         ) {
             continue;
         }
-<<<<<<< HEAD
+        if record_invalid_lifecycle_once(store, task).await? {
+            continue;
+        }
         if task_launch_refusal(store, task)
             .await
             .map_err(|error| task_error(format!("failed to read Task blocker: {error}")))?
@@ -3465,12 +3222,6 @@ pub(crate) async fn reconcile_project_tasks(
         if task_worktree_blocker(store, task)
             .await?
             .is_some_and(|blocker| blocker.initializing)
-||||||| parent of 5c54f526e (checkpoint: managed Task initialization prototype)
-=======
-        if task_worktree_initialization(store, task)
-            .await?
-            .is_some_and(|(initializing, _)| initializing)
->>>>>>> 5c54f526e (checkpoint: managed Task initialization prototype)
         {
             continue;
         }
@@ -3482,12 +3233,9 @@ pub(crate) async fn reconcile_project_tasks(
             );
             continue;
         }
-        reconcile_process_liveness(store, task).await?;
-        if record_lifecycle_non_convergence(store, task).await? {
-            continue;
-        }
         let observed = reconcile_task_pr(store, task).await?;
         refuse_dirty_between_prs(store, task).await?;
+        reconcile_process_liveness(store, task).await?;
         reconcile_task_completion(store, task, None).await?;
         if matches!(
             task_work_status(store, task).await?,
@@ -4210,19 +3958,10 @@ pub(crate) async fn task_recovery_adoption(
 ) -> OpsResult<TaskRecoveryAdoption> {
     let worktree = &task.worktree;
     let identifier = &task.plan.identifier;
-    let active = store
-        .active_task_pr(&task.id)
-        .await
-        .map_err(|error| task_error(format!("failed to read active PR: {error}")))?;
     if !worktree.exists() {
-        let branch = active
-            .as_ref()
-            .map(|pr| format!(" on recorded active PR branch {:?}", pr.branch))
-            .unwrap_or_default();
         return Err(task_error(format!(
-            "Task {identifier} worktree {} is missing; restore that exact path{branch} before \
-             `lf task resume {identifier}`; Task identity and PR history are unchanged",
-            worktree.display(),
+            "Task {identifier} worktree {} is missing; recovery refused before moving any ownership",
+            worktree.display()
         )));
     }
     if let Some(state) = crate::engine::git::intervention_state(worktree)
@@ -4251,7 +3990,11 @@ pub(crate) async fn task_recovery_adoption(
             worktree.display()
         )));
     }
-    if let Some(active) = active {
+    if let Some(active) = store
+        .active_task_pr(&task.id)
+        .await
+        .map_err(|error| task_error(format!("failed to read active PR: {error}")))?
+    {
         if current != active.branch {
             return Err(task_error(format!(
                 "Task {identifier} active PR expects branch {:?}, but the worktree is on \
@@ -4849,18 +4592,10 @@ pub fn task_status(issue: &str) -> OpsResult<Task> {
             .await
             .map_err(|error| task_error(format!("failed to read task status: {error}")))?
             .ok_or_else(|| task_error(format!("no Task exists for {issue:?}")))?;
-<<<<<<< HEAD
         let launch_refusal = task_launch_refusal(&store, &task)
             .await
             .map_err(|error| task_error(format!("failed to read Task blocker: {error}")))?;
         if launch_refusal.is_none() && task_worktree_blocker(&store, &task).await?.is_none() {
-||||||| parent of 5c54f526e (checkpoint: managed Task initialization prototype)
-        reconcile_task_pr(&store, &mut task).await?;
-        reconcile_process_liveness(&store, &mut task).await?;
-        reconcile_task_completion(&store, &mut task, None).await?;
-=======
-        if task.worktree.exists() {
->>>>>>> 5c54f526e (checkpoint: managed Task initialization prototype)
             reconcile_task_pr(&store, &mut task).await?;
             reconcile_process_liveness(&store, &mut task).await?;
             reconcile_task_completion(&store, &mut task, None).await?;
@@ -5224,19 +4959,9 @@ pub(crate) async fn task_completion_gate(
         blockers: Vec::new(),
         discardable_successor: None,
     };
-<<<<<<< HEAD
     if let Some(blocker) = task_worktree_blocker(store, task).await? {
         gate.satisfied = false;
         gate.blockers.push(blocker.reason);
-||||||| parent of 5c54f526e (checkpoint: managed Task initialization prototype)
-=======
-    if !task.worktree.exists() {
-        gate.satisfied = false;
-        gate.blockers.push(format!(
-            "worktree {} is missing; restore the recorded Task worktree before completing",
-            task.worktree.display()
-        ));
->>>>>>> 5c54f526e (checkpoint: managed Task initialization prototype)
         return Ok(gate);
     }
     let work_done = task_work_status(store, task).await? == WorkStatus::Done;
@@ -5468,19 +5193,10 @@ pub fn task_snapshot(task: &Task) -> OpsResult<TaskSnapshot> {
         };
         let completion_gate = task_completion_gate(&store, &task).await?;
         let completion_refusal = completion_gate.refusal(&task.plan.identifier);
-<<<<<<< HEAD
         let worktree_blocker = task_worktree_blocker(&store, &task).await?;
         let resume_refusal = worktree_blocker
             .as_ref()
             .map(|blocker| blocker.reason.clone())
-||||||| parent of 5c54f526e (checkpoint: managed Task initialization prototype)
-        let resume_refusal = no_active_pr_resume_refusal(&task.plan.identifier, active, latest);
-=======
-        let preflight = task_resume_preflight(&store, &task).await?;
-        let resume_refusal = preflight
-            .refusal
-            .clone()
->>>>>>> 5c54f526e (checkpoint: managed Task initialization prototype)
             .or_else(|| no_active_pr_resume_refusal(&task.plan.identifier, active, latest));
         let work_status = store
             .work_status(&work)
@@ -5504,7 +5220,6 @@ pub fn task_snapshot(task: &Task) -> OpsResult<TaskSnapshot> {
                 .map(|pr| pr.presentation().is_some()),
             completion_refusal: completion_refusal.as_deref(),
             resume_refusal: resume_refusal.as_deref(),
-            resume_migration: preflight.migration.as_deref(),
             ci: active.and_then(|pr| pr.fresh_ci()),
             process_alive: if matches!(work_status, WorkStatus::Running { .. }) {
                 Some(process_alive)
@@ -5988,7 +5703,6 @@ pub(crate) async fn resume_task_async(
     // durable ownership — a no-active-PR recovery must not commit the successor
     // before PR rotation rejects an unrelated branch.
     task_recovery_adoption(&store, &task).await?;
-    prepare_task_lifecycle(&store, &mut task).await?;
     reconcile_task_pr(&store, &mut task).await?;
     let prs = store
         .task_prs(&task.id)
@@ -6088,21 +5802,11 @@ pub fn task_wait(issue: &str, until: TaskWaitUntil, timeout: Option<Duration>) -
 #[cfg(test)]
 mod tests {
     use super::{
-<<<<<<< HEAD
         ensure_task_flow_override, ensure_working_pr, launch_task_process, lock_task_pr_mutation,
         preflight_task_execution, prepare_automatic_task_relaunch, probe_task_execution_boundary,
-        reconcile_process_liveness, resolve_task_lifecycle, resolve_task_start_input,
-        task_event_launch_refusal, task_execution_boundary, validate_task_lifecycle,
-        TaskFlowOverrides, MAX_AUTOMATIC_TASK_RECOVERY_RUNS,
-||||||| parent of 5c54f526e (checkpoint: managed Task initialization prototype)
-        ensure_task_flow_override, launch_task_process, lock_task_pr_mutation,
-        prepare_automatic_task_relaunch, resolve_task_lifecycle, resolve_task_start_input,
-        TaskFlowOverrides, MAX_AUTOMATIC_TASK_RECOVERY_RUNS,
-=======
-        ensure_task_flow_override, launch_task_process, lock_task_pr_mutation,
-        prepare_automatic_task_relaunch, reconcile_project_tasks, resolve_task_lifecycle,
-        resolve_task_start_input, TaskFlowOverrides, MAX_AUTOMATIC_TASK_RECOVERY_RUNS,
->>>>>>> 5c54f526e (checkpoint: managed Task initialization prototype)
+        reconcile_process_liveness, reconcile_project_tasks, resolve_task_lifecycle,
+        resolve_task_start_input, task_event_launch_refusal, task_execution_boundary,
+        validate_task_lifecycle, TaskFlowOverrides, MAX_AUTOMATIC_TASK_RECOVERY_RUNS,
     };
     use crate::child::ChildRef;
     use crate::durable::{RunTrigger, WorkRef, WorkStatus};
@@ -6251,117 +5955,6 @@ mod tests {
         }
     }
 
-    struct SupervisedTaskFixture {
-        _database: tempfile::TempDir,
-        database_path: std::path::PathBuf,
-        store: SharedStore,
-        project: Project,
-        task: Task,
-    }
-
-    async fn supervised_task_fixture(identifier: &str) -> SupervisedTaskFixture {
-        let repository =
-            std::fs::canonicalize(std::path::Path::new(env!("CARGO_MANIFEST_DIR")).join("../.."))
-                .expect("canonical repository");
-        let branch = crate::engine::git::current_branch(&repository)
-            .expect("read fixture branch")
-            .expect("fixture repository is on a branch");
-        let database = tempfile::tempdir().expect("temporary Task database");
-        let database_path = database.path().join("registry.db");
-        let store = std::sync::Arc::new(
-            open_store(&StorageConfig::sqlite(database_path.clone()))
-                .await
-                .expect("open Task store"),
-        );
-        let now = time::OffsetDateTime::now_utc();
-        let wave = Wave::new(
-            crate::id::WaveId::new(),
-            "missing-task-flow".to_string(),
-            repository.display().to_string(),
-        );
-        let project = Project {
-            id: ProjectId::new(),
-            plan: ProjectPlan {
-                id: LinearProjectId::new(format!("{identifier}-project")).expect("Project id"),
-                slug: format!("{identifier}-project").to_lowercase(),
-                name: format!("{identifier} project"),
-                prompt_context: "Stop invalid Task lifecycle retries.".to_string(),
-                pm_snapshot_synced_at: now.unix_timestamp(),
-            },
-            wave_id: wave.id().clone(),
-            iteration: 0,
-            observation_cursor: 0,
-            last_state_fingerprint: None,
-            agent: "codex".to_string(),
-            provider: "codex".to_string(),
-            provider_session_id: None,
-            abandon_intent: None,
-            created_at: now,
-            updated_at: now,
-        };
-        let task = Task {
-            id: TaskId::new(),
-            plan: TaskPlan {
-                id: LinearIssueId::new(format!("{identifier}-issue")).expect("Task issue id"),
-                identifier: identifier.to_string(),
-                title: "Missing lifecycle flow".to_string(),
-                description: String::new(),
-                pm_snapshot_synced_at: now.unix_timestamp(),
-            },
-            pm_writeback: PmWritebackState::Current,
-            wave_id: wave.id().clone(),
-            project_id: project.id.clone(),
-            worktree: repository,
-            workspace_slug: format!("{}-fixture", identifier.to_lowercase()),
-            lifecycle: TaskLifecyclePlan::standard("task-design", "task", "ship"),
-            lifecycle_phase: TaskLifecyclePhase::Loop,
-            phase_epoch: 2,
-            phase_cursor: 3,
-            phase_iteration: 4,
-            gate_cycle: 1,
-            gate_proposal: None,
-            agent: "codex".to_string(),
-            provider: "codex".to_string(),
-            provider_session_id: Some(format!("{identifier}-provider-session")),
-            abandon_intent: None,
-            created_at: now,
-            updated_at: now,
-            observation: Observation::NotRequired,
-        };
-        let pr = TaskPr {
-            id: TaskPrId::new(),
-            task_id: task.id.clone(),
-            sequence: 1,
-            slug: task.workspace_slug.clone(),
-            branch,
-            base_commit: "recorded-base".to_string(),
-            parent_pr_id: None,
-            publication: None,
-            merge_commit: None,
-            abandoned_at: None,
-            ci_observation: None,
-            github_observation: None,
-            linear_attachment_id: None,
-            linear_comment_id: None,
-            linear_link_error: None,
-            created_at: now,
-            updated_at: now,
-        };
-        store.create_wave(&wave).await.expect("create Wave");
-        store
-            .create_project(&project)
-            .await
-            .expect("create Project");
-        store.create_task(&task, &pr).await.expect("create Task");
-        SupervisedTaskFixture {
-            _database: database,
-            database_path,
-            store,
-            project,
-            task,
-        }
-    }
-
     #[test]
     fn piped_report_supplies_title_and_preserves_full_description() {
         let report = "\n  lf status rejects stored timestamp  \n\nstack trace\nmore evidence\n";
@@ -6396,7 +5989,6 @@ mod tests {
     }
 
     #[test]
-<<<<<<< HEAD
     fn task_lifecycle_rejects_structural_dead_ends() {
         let repo = tempfile::tempdir().expect("temp repo");
         let project = ProjectFlowPlan {
@@ -6541,97 +6133,6 @@ mod tests {
         );
         assert_eq!(explicit_wins.first.as_deref(), Some("task-design"));
         assert_eq!(explicit_wins.finally.as_deref(), Some("ship-demo"));
-||||||| parent of 5c54f526e (checkpoint: managed Task initialization prototype)
-=======
-    fn new_task_lifecycle_rejects_an_unavailable_flow_before_persistence() {
-        let repo = tempfile::tempdir().expect("temp repo");
-        let project = ProjectFlowPlan::empty();
-        let overrides = TaskFlowOverrides {
-            loop_: Some("removed-task-flow".to_string()),
-            ..TaskFlowOverrides::default()
-        };
-
-        let error = resolve_task_lifecycle(repo.path(), &project, &overrides)
-            .expect_err("an unavailable flow cannot produce a new Task plan");
-
-        assert!(error.to_string().contains("removed-task-flow"));
-        assert!(error.to_string().contains("flow not found"));
-    }
-
-    #[tokio::test]
-    async fn resident_records_missing_lifecycle_flow_once_without_retrying() {
-        for identifier in ["LOO-167", "LOO-193", "LOO-195"] {
-            let fixture = supervised_task_fixture(identifier).await;
-            let work = fixture
-                .store
-                .work_for_child(&ChildRef::Task(fixture.task.id.clone()))
-                .await
-                .expect("resolve Task Work");
-            let original_prs = fixture
-                .store
-                .task_prs(&fixture.task.id)
-                .await
-                .expect("read original PR chain");
-            let original_task = fixture
-                .store
-                .get_task(&fixture.task.id)
-                .await
-                .expect("read original Task")
-                .expect("Task exists before supervision");
-
-            for _ in 0..2 {
-                reconcile_project_tasks(&fixture.store, &fixture.project)
-                    .await
-                    .expect("resident supervision converges");
-            }
-
-            assert!(fixture
-                .store
-                .current_run(&work)
-                .await
-                .expect("read current Run")
-                .is_none());
-            let database = rusqlite::Connection::open(&fixture.database_path)
-                .expect("open supervised Task store");
-            let run_count: i64 = database
-                .query_row(
-                    "SELECT count(*) FROM runs r JOIN epochs e ON e.id=r.epoch_id WHERE e.task_id=?1",
-                    [fixture.task.id.as_str()],
-                    |row| row.get(0),
-                )
-                .expect("count supervised Task Runs");
-            assert_eq!(run_count, 0, "resident never reserves a retry Run");
-            let events = fixture
-                .store
-                .recent_task_events(&fixture.task.id, 10)
-                .await
-                .expect("read non-convergence evidence");
-            assert_eq!(events.len(), 1, "resident ticks write one receipt");
-            let TaskEventKind::Failed { error, resumable } = &events[0].kind else {
-                panic!("missing flow records a failed non-convergence event")
-            };
-            assert!(*resumable);
-            assert!(error.contains("cannot launch automatically"));
-            assert!(error.contains(&format!("lf task resume {identifier}")));
-            assert_eq!(
-                fixture
-                    .store
-                    .get_task(&fixture.task.id)
-                    .await
-                    .expect("reread Task after supervision")
-                    .expect("Task identity survives supervision"),
-                original_task
-            );
-            assert_eq!(
-                fixture
-                    .store
-                    .task_prs(&fixture.task.id)
-                    .await
-                    .expect("read preserved PR chain"),
-                original_prs
-            );
-        }
->>>>>>> 5c54f526e (checkpoint: managed Task initialization prototype)
     }
 
     #[test]
@@ -6845,6 +6346,30 @@ mod tests {
             .await
             .unwrap()
             .is_empty());
+    }
+
+    #[tokio::test]
+    async fn resident_records_an_invalid_lifecycle_once_without_retrying() {
+        let TaskFixture {
+            store, task, work, ..
+        } = task_fixture("TEST-STALE-RESIDENT", "retired-task-flow").await;
+        let project = store.get_project(&task.project_id).await.unwrap().unwrap();
+
+        for _ in 0..2 {
+            reconcile_project_tasks(&store, &project).await.unwrap();
+        }
+
+        let events = store.recent_task_events(&task.id, 10).await.unwrap();
+        assert_eq!(events.len(), 1);
+        assert!(matches!(
+            &events[0].kind,
+            TaskEventKind::Failed {
+                error,
+                resumable: true,
+            } if error.contains("retired-task-flow")
+        ));
+        assert!(store.current_run(&work).await.unwrap().is_none());
+        assert_eq!(store.task_prs(&task.id).await.unwrap().len(), 1);
     }
 
     #[tokio::test]

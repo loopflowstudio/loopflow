@@ -56,10 +56,10 @@ pub struct TaskFlowOverrides {
     pub finally: Option<String>,
 }
 
-/// Named lifecycle presets: where the human gate sits, in one word.
+/// Named cycle presets: where the human gate sits, in one word.
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub enum TaskCycle {
-    /// Behavior is wrong. Opens with the incident cycle (restore → 5whys)
+    /// Behavior is wrong. Opens with the incident flow (restore → 5whys)
     /// and the human gates at the demo, not a design doc.
     Fix,
     /// Behavior should change; the human shapes the design before code.

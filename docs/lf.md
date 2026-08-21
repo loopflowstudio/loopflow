@@ -339,10 +339,10 @@ Every Task runs `first → loop N → finally`. Its Project supplies those three
 flows; Task launch pins their resolved names. `--first`, `--loop`, and
 `--finally` override them only while creating the Task. Task launch expands the
 three flows as one lifecycle: the loop must contain an autonomous skill step,
-and the final flow must end with `op: pr land -c`. The default and feature
-lifecycles ask a human to review the design before implementation, then review
-the configured-path demo before settlement. The fix lifecycle keeps only the
-demo review. Invalid persisted lifecycles remain visible in status with
+and the final flow must end with `op: pr land -c`. The default feature cycle
+asks a human to review the design before implementation, then review the
+configured-path demo before settlement. The fix cycle keeps only the demo
+review. Invalid persisted lifecycles remain visible in status with
 `no_action`; abandon and replace them with a valid selection.
 
 Every Task-owned PR keeps the Linear Task name at the start of its title and a

@@ -56,10 +56,10 @@ pub struct TaskFlowOverrides {
     pub finally: Option<String>,
 }
 
-/// Named lifecycle presets: where the human gate sits, in one word.
+/// Named cycle presets: where the human gate sits, in one word.
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub enum TaskCycle {
-    /// Behavior is wrong. Opens with the incident cycle (restore → 5whys)
+    /// Behavior is wrong. Opens with the incident flow (restore → 5whys)
     /// and the human gates at the demo, not a design doc.
     Fix,
     /// Behavior should change; the human shapes the design before code.
@@ -80,6 +80,20 @@ impl TaskCycle {
         match self {
             Self::Fix => ("incident", "ship-demo"),
             Self::Feature => ("task-design", "ship-demo"),
+        }
+    }
+
+    pub fn for_lifecycle(lifecycle: &crate::task::TaskLifecyclePlan) -> Self {
+        [Self::Fix, Self::Feature]
+            .into_iter()
+            .find(|cycle| lifecycle.first.flow == cycle.flows().0)
+            .unwrap_or(Self::Feature)
+    }
+
+    pub fn as_str(self) -> &'static str {
+        match self {
+            Self::Fix => "fix",
+            Self::Feature => "feature",
         }
     }
 }
@@ -1572,11 +1586,12 @@ async fn validate_automated_task_authority(
     lease: &RunLease,
 ) -> OpsResult<()> {
     let main_repo = main_repo_root(repo)?;
-    let current = crate::ops::task_pm::resolve_task(
+    let current = Box::pin(crate::ops::task_pm::resolve_task_async(
         &main_repo,
         task.plan.id.as_str(),
         crate::ops::pm::PmRefresh::Never,
-    )
+    ))
+    .await
     .map_err(|error| {
         task_error(format!(
             "Task {} current PM authority refused: {error}",
@@ -1636,8 +1651,8 @@ pub(crate) fn request_task_pr_publication(repo: &Path, title: &str, body: &str) 
         else {
             return Ok(false);
         };
-        let identity = task_pr_identity_from_store(&store, &task).await?;
-        validate_task_pr_copy(&identity, title, body)?;
+        let context = _task_pr_context_from_store(&store, &task).await?;
+        _validate_task_pr_copy(&context, title, body)?;
         let mut pr = store
             .active_task_pr(&task.id)
             .await
@@ -1688,32 +1703,57 @@ pub(crate) fn request_task_pr_publication(repo: &Path, title: &str, body: &str) 
 }
 
 #[derive(Debug, Clone, PartialEq, Eq)]
-pub(crate) struct TaskPrIdentity {
+pub(crate) struct TaskPrContext {
     pub(crate) title: String,
     pub(crate) identifier: String,
     pub(crate) url: String,
+    pub(crate) lifecycle: crate::task::TaskLifecyclePlan,
+    pub(crate) sequence: u32,
 }
 
-pub(crate) fn task_pr_identity(repo: &Path) -> OpsResult<Option<TaskPrIdentity>> {
+impl TaskPrContext {
+    pub(crate) fn pr_title(&self) -> String {
+        format!("{}: {}", self.identifier.trim(), self.title.trim())
+    }
+
+    pub(crate) fn task_link(&self) -> String {
+        format!(
+            "[{} — {}]({})",
+            _markdown_link_text(self.identifier.trim()),
+            _markdown_link_text(self.title.trim()),
+            self.url
+        )
+    }
+
+    pub(crate) fn cycle(&self) -> TaskCycle {
+        TaskCycle::for_lifecycle(&self.lifecycle)
+    }
+}
+
+fn _markdown_link_text(value: &str) -> String {
+    value
+        .replace('\\', "\\\\")
+        .replace('[', "\\[")
+        .replace(']', "\\]")
+}
+
+pub(crate) fn task_pr_context(repo: &Path) -> OpsResult<Option<TaskPrContext>> {
     block_on_task(async move {
         let TaskAuthority::Authority { store, task, .. } = resolve_task_authority(repo).await?
         else {
             return Ok(None);
         };
-        task_pr_identity_from_store(&store, &task).await.map(Some)
+        _task_pr_context_from_store(&store, &task).await.map(Some)
     })
 }
 
-async fn task_pr_identity_from_store(
-    store: &SharedStore,
-    task: &Task,
-) -> OpsResult<TaskPrIdentity> {
+async fn _task_pr_context_from_store(store: &SharedStore, task: &Task) -> OpsResult<TaskPrContext> {
     let wave = owning_wave(store, task).await?;
     let snapshot = store
         .pm_snapshot(&task.wave_id)
         .await
         .map_err(|error| task_error(format!("failed to read cached PM snapshot: {error}")))?
-        .ok_or_else(|| missing_task_pr_url(task, wave.name()))?;
+        .ok_or_else(|| _missing_task_pr_url(task, wave.name()))?;
     let snapshot: PmSnapshot = serde_json::from_str(&snapshot.payload).map_err(|error| {
         task_error(format!(
             "cached PM snapshot for Wave {:?} is invalid: {error}. Run `lf pm sync --wave {}` before publishing this Task PR",
@@ -1725,20 +1765,27 @@ async fn task_pr_identity_from_store(
         .items
         .iter()
         .find(|item| item.id == task.plan.id.as_str())
-        .ok_or_else(|| missing_task_pr_url(task, wave.name()))?;
+        .ok_or_else(|| _missing_task_pr_url(task, wave.name()))?;
     let url = item
         .url
         .as_deref()
-        .filter(|url| valid_task_url(url))
-        .ok_or_else(|| missing_task_pr_url(task, wave.name()))?;
-    Ok(TaskPrIdentity {
+        .filter(|url| _valid_task_url(url))
+        .ok_or_else(|| _missing_task_pr_url(task, wave.name()))?;
+    let pr = store
+        .active_task_pr(&task.id)
+        .await
+        .map_err(|error| task_error(format!("failed to read active PR: {error}")))?
+        .ok_or_else(|| task_error(format!("Task {} has no active PR", task.plan.identifier)))?;
+    Ok(TaskPrContext {
         title: task.plan.title.clone(),
         identifier: task.plan.identifier.clone(),
         url: url.to_string(),
+        lifecycle: task.lifecycle.clone(),
+        sequence: pr.sequence,
     })
 }
 
-fn valid_task_url(value: &str) -> bool {
+fn _valid_task_url(value: &str) -> bool {
     let Ok(url) = reqwest::Url::parse(value) else {
         return false;
     };
@@ -1747,22 +1794,27 @@ fn valid_task_url(value: &str) -> bool {
         && !value.chars().any(char::is_control)
 }
 
-fn missing_task_pr_url(task: &Task, wave: &str) -> OpsError {
+fn _missing_task_pr_url(task: &Task, wave: &str) -> OpsError {
     task_error(format!(
         "Task {} has no valid provider URL in the cached PM snapshot. Run `lf pm sync --wave {wave}` before publishing this Task PR",
         task.plan.identifier,
     ))
 }
 
-fn validate_task_pr_copy(identity: &TaskPrIdentity, title: &str, body: &str) -> OpsResult<()> {
-    if !title.starts_with(identity.title.trim()) {
+fn _validate_task_pr_copy(context: &TaskPrContext, title: &str, body: &str) -> OpsResult<()> {
+    let expected_title = context.pr_title();
+    if title != expected_title {
         return Err(task_error(format!(
-            "Task PR title must start with the Linear Task name {:?}",
-            identity.title,
+            "Task PR title must be {expected_title:?}"
         )));
     }
-    let anchor = format!("Linear Task: [{}]({})", identity.identifier, identity.url);
-    if !body.lines().any(|line| line.trim() == anchor) {
+    let anchor = format!("**Task:** {}", context.task_link());
+    if !body.lines().any(|line| {
+        line.trim()
+            .strip_prefix('>')
+            .map(str::trim)
+            .is_some_and(|line| line == anchor)
+    }) {
         return Err(task_error(format!(
             "Task PR body must include the owning Linear Task link: {anchor}"
         )));

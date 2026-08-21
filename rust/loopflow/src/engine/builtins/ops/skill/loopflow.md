@@ -38,7 +38,7 @@ When the User asks to file or launch a Task, there are two kinds of work,
 distinguished by where the human gate sits:
 
 - **Fix** — behavior is wrong: a bug, a regression, live breakage. The Task
-  opens with the incident cycle (restore stops the bleeding, 5whys finds the
+  opens with the incident flow (restore stops the bleeding, 5whys finds the
   cause), fix work proceeds in the loop, and the human gates at a working
   demo — never a design doc:
 

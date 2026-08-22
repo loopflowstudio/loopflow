@@ -39,14 +39,20 @@ four publish the PR headlessly and open no browser:
   Stops there: no auto-merge. Your merge click on GitHub is the one required
   gate — the button unlocks once checks pass. (GitHub blocks approving your own
   PR, so the gate is the merge click, not a review approval.) Use this as the
-  default finish for anything a person should land by hand.
+  default finish for anything a person should land by hand. **A managed Task
+  rejects `submit`:** a Task already has exactly one shipping decision — its
+  `finally` review — so a GitHub merge click would be a competing second gate.
+  Ship a Task with `lf pr land` instead.
 - **`lf pr arm`** — prepare the exact head, request auto-merge, and return. Task
   disposition is recorded but is never applied before an authoritative merge.
 - **`lf pr land`** — run the same arm step, then join the one durable watcher for
   the PR. It observes GitHub, repairs failing required checks once per failed
   head, re-arms material repairs, and returns only after merge or an actionable
-  durable block. Inside a Task, bare `land` leaves the Task open; `-c` completes
-  it after merge and `--next <slug>` rotates it after merge.
+  durable block. Inside a managed Task, `lf pr land` is the one shipping
+  declaration: its `finally` review is the sole human shipping decision, and
+  Loopflow arms the exact reviewed head after approval instead of adding a human
+  merge click. Bare `land` leaves the Task open; `-c` completes it after merge,
+  and `--next <slug>` rotates it after merge.
 
 **`lf pr open`** is the one command that *presents* — it publishes, then opens
 the PR for review (the GitHub page in the browser). It is a human-initiated

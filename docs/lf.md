@@ -790,15 +790,17 @@ fails — the PR is already published and its URL printed.
 ### lf pr submit
 
 Prepare the exact PR head, assign it to you, and stop for your merge click.
-Nothing merges automatically.
+Nothing merges automatically. `submit` is for ordinary non-Task PRs.
 
 ```bash
 lf pr submit
 ```
 
-On Task PRs, submit records one User merge request containing the exact head
-and Continue/Complete disposition. A later Task resume or head-changing
-Loopflow operation clears it.
+A managed Task worktree **rejects `submit`** before any push: a Task already has
+exactly one shipping decision — its `finally` review — so a GitHub merge click
+would be a competing second gate. Ship a Task with `lf pr land` (`-c` to
+complete, `--next <slug>` to rotate), which arms the merge mechanically once the
+gate approves.
 
 ### lf pr arm
 

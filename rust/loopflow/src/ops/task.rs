@@ -1599,6 +1599,28 @@ pub(crate) fn guard_task_mutation_authority(repo: &Path) -> OpsResult<()> {
     })
 }
 
+/// Refuse `lf pr submit` inside a managed Task worktree, before any mutation.
+///
+/// `submit` marks a PR ready and assigns it for a human merge click. A managed
+/// Task already carries exactly one shipping judgment — its `finally`/`ship`
+/// gate, reviewed in the provider-backed conversation and declared with
+/// `lf pr land`. A second GitHub-side merge click would be a competing gate,
+/// so it is rejected rather than layered on top. Ordinary non-Task PRs are an
+/// explicit no-op and keep `submit` unchanged.
+pub(crate) fn reject_managed_task_submit(repo: &Path) -> OpsResult<()> {
+    block_on_task(async move {
+        let TaskAuthority::Authority { task, .. } = resolve_task_authority(repo).await? else {
+            return Ok(());
+        };
+        Err(task_error(format!(
+            "`lf pr submit` would add a second shipping gate, and managed Task {} already has one: its `finally` review. \
+             Declare the reviewed outcome with `lf pr land -c` (merge completes the Task) or `lf pr land --next <slug>` (another serial PR follows); \
+             Loopflow arms the merge mechanically once required checks pass.",
+            task.plan.identifier
+        )))
+    })
+}
+
 async fn validate_automated_task_authority(
     repo: &Path,
     store: &SharedStore,

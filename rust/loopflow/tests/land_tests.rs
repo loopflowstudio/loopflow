@@ -881,12 +881,16 @@ fn submit_assigns_reviewer_and_skips_auto_merge() {
     assert!(!log.contains("merge --auto"));
 }
 
+/// LOO-162 — `submit` (assign for a human merge click) is a competing second
+/// shipping gate, so a managed Task rejects it before any push, gh mutation, or
+/// durable merge request. The Task's one shipping decision is its `finally`
+/// review, declared with `lf pr land`.
 #[test]
-fn submit_surfaces_ready_failure_before_assignment() {
+fn submit_refuses_a_managed_task_before_any_mutation() {
     let home = tempfile::TempDir::new().expect("temp home");
     let repo = TestRepo::new();
     let base = repo.head_sha();
-    let branch = "jack/task-ready-failure";
+    let branch = "jack/task-managed-submit";
     repo.create_branch(branch);
     repo.create_file("feature.txt", "feature");
     repo.stage_all();
@@ -918,7 +922,15 @@ fn submit_surfaces_ready_failure_before_assignment() {
         &NullProgress,
     );
 
-    assert!(matches!(result, Err(OpsError::CommandFailed { .. })));
+    match result {
+        Err(OpsError::Message(message)) => {
+            assert!(
+                message.contains("second shipping gate") && message.contains("lf pr land"),
+                "refusal must explain the competing gate and name land: {message}"
+            );
+        }
+        other => panic!("managed Task submit must refuse with a message, got: {other:?}"),
+    }
     let runtime = tokio::runtime::Runtime::new().expect("task runtime");
     let pr = runtime
         .block_on(task.store.active_task_pr(&task.task.id))
@@ -926,10 +938,14 @@ fn submit_surfaces_ready_failure_before_assignment() {
         .expect("active PR");
     assert!(
         pr.merge_request().is_none(),
-        "failed remote finalization must not leave a false settlement owner"
+        "a refused submit must not leave a settlement owner"
     );
-    let log = fs::read_to_string(&log_path).expect("read gh log");
-    assert!(log.contains("pr ready"));
+    // Refused before any gh mutation: no ready, no assignment.
+    let log = fs::read_to_string(&log_path).unwrap_or_default();
+    assert!(
+        !log.contains("pr ready"),
+        "no gh mutation before refusal: {log}"
+    );
     assert!(!log.contains("pr edit --add-assignee @me"));
 }
 
@@ -1133,36 +1149,6 @@ fn latest_land_disposition_wins_before_merge() {
             "an unchanged head needs no replacement push:\n{log}"
         );
     }
-
-    submit(
-        repo.path(),
-        &LandOptions {
-            strict: true,
-            local: false,
-            create_pr: false,
-            complete: false,
-            next_slug: None,
-            worktree: None,
-            commit_message: None,
-            pr_title: Some("test title".to_string()),
-            pr_body: Some("test body".to_string()),
-            agent: None,
-        },
-        &NullProgress,
-    )
-    .expect("replace auto merge with user merge request");
-    let submitted_head = repo.head_sha();
-
-    let pr = runtime
-        .block_on(task.store.active_task_pr(&task.task.id))
-        .expect("read active PR")
-        .expect("active PR");
-    let request = pr.merge_request().expect("user merge request");
-    assert_eq!(request.mode, PrMergeMode::User);
-    assert_eq!(request.head_sha, submitted_head);
-    let log = fs::read_to_string(&log_path).expect("read gh log");
-    assert!(log.contains("pr merge 912 --disable-auto"));
-    assert!(log.contains("pr edit --add-assignee @me"));
 }
 
 #[test]

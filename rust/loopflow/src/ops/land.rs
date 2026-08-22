@@ -161,6 +161,15 @@ fn prepare_pr(
     // Refuse an already-empty Task before scratch cleanup can manufacture a
     // bookkeeping-only `.gitkeep` commit or any GitHub command observes it.
     crate::ops::task::require_task_pr_range_nonempty(&repo_root)?;
+    // A managed Task ships on one judgment: its `finally` review, declared with
+    // `lf pr land`. `submit` (assign for a human merge click) would be a second
+    // gate. Refuse it now — after the shared authority/range proofs, so a
+    // contaminated or empty range still reports that deeper problem first, but
+    // before the first push, any `gh pr` mutation, or PR-copy generation. Non-
+    // Task PRs are an explicit no-op and keep `submit` unchanged.
+    if matches!(finalize, Finalize::UserMerge) {
+        crate::ops::task::reject_managed_task_submit(&repo_root)?;
+    }
     let pr_exists = if options.local {
         false
     } else {

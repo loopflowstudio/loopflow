@@ -83,37 +83,65 @@ public struct TaskPlanningSnapshot: Decodable, Sendable, Identifiable, Hashable 
     public let assignee: String?
 }
 
-/// The observed state of a Work item's current body, distinct from durable intent.
-/// `status` records intent; `BodyObservation` records what the current body is
-/// observed doing. Working versus Stalled is exactly the difference between a
-/// live body that advanced recently and one silent past its deadline.
-public enum BodyCategory: String, Decodable, Sendable, Hashable {
-    case working, stalled, recovering
-    case needsInput = "needs_input"
-    case stopped, terminal, unobservable
+public enum RunLivenessState: String, Codable, Sendable, Hashable {
+    case present, absent, unprovable
 }
 
-public enum BodyOwner: String, Decodable, Sendable, Hashable {
+public struct RunLivenessEvidence: Codable, Sendable, Hashable {
+    public let state: RunLivenessState
+    public let observedAt: String?
+    public let fresh: Bool
+
+    enum CodingKeys: String, CodingKey {
+        case state, fresh
+        case observedAt = "observed_at"
+    }
+}
+
+public enum CurrentWorkState: String, Codable, Sendable, Hashable {
+    case working, stalled, stopped, unobservable, ready, waiting, done, abandoned
+
+    public var label: String { rawValue }
+
+    public var hasPresentProcess: Bool {
+        self == .working || self == .stalled
+    }
+}
+
+public enum CurrentWorkOwner: String, Codable, Sendable, Hashable {
     case work, loopflow, user, nobody, unknown
 }
 
-public enum BodyControl: String, Decodable, Sendable, Hashable {
+public enum CurrentWorkControl: String, Codable, Sendable, Hashable {
     case steer, interrupt, stop, extend, resume, decide, abandon, attach
 }
 
-public struct BodyObservation: Decodable, Sendable, Hashable {
-    public let category: BodyCategory
+public struct CurrentWorkObservation: Codable, Sendable, Hashable {
+    public let state: CurrentWorkState
     public let reason: String
-    public let owner: BodyOwner
-    public let controls: [BodyControl]
+    public let owner: CurrentWorkOwner
+    public let controls: [CurrentWorkControl]
     public let progressAgeSeconds: UInt64?
     public let deadlineInSeconds: Int64?
     public let step: String?
+    public let liveness: RunLivenessEvidence?
 
     enum CodingKeys: String, CodingKey {
-        case category, reason, owner, controls, step
+        case state, reason, owner, controls, step, liveness
         case progressAgeSeconds = "progress_age_secs"
         case deadlineInSeconds = "deadline_in_secs"
+    }
+}
+
+public struct HistoricalFailure: Codable, Sendable, Hashable {
+    public let message: String
+    public let occurredAt: String
+    public let runId: String?
+
+    enum CodingKeys: String, CodingKey {
+        case message
+        case occurredAt = "occurred_at"
+        case runId = "run_id"
     }
 }
 
@@ -125,15 +153,15 @@ public struct ProjectRuntimeSnapshot: Decodable, Sendable, Hashable {
     public let iteration: UInt32
     public let pendingObservations: UInt32
     public let provider: String
-    public let processAlive: Bool
-    public let observation: BodyObservation
+    public let current: CurrentWorkObservation
+    public let lastFailure: HistoricalFailure?
 
     enum CodingKeys: String, CodingKey {
-        case status, reason, iteration, provider, observation
+        case status, reason, iteration, provider, current
         case workId = "work_id"
         case updatedAt = "updated_at"
         case pendingObservations = "pending_observations"
-        case processAlive = "process_alive"
+        case lastFailure = "last_failure"
     }
 }
 
@@ -145,16 +173,14 @@ public struct TaskRuntimeSnapshot: Decodable, Sendable, Hashable {
     public let reason: String
     public let updatedAt: String
     public let provider: String
-    public let processAlive: Bool
-    public let observation: BodyObservation
+    public let current: CurrentWorkObservation
 
     enum CodingKeys: String, CodingKey {
-        case status, reason, provider, observation
+        case status, reason, provider, current
         case workId = "work_id"
         case projectId = "project_id"
         case routingProjectId = "routing_project_id"
         case updatedAt = "updated_at"
-        case processAlive = "process_alive"
     }
 }
 

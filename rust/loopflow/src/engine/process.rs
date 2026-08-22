@@ -57,6 +57,8 @@ fn terminate_process_group(pid: u32) {
     crate::engine::platform::kill_process(pid);
 }
 
+const TMUX_LIVENESS_TIMEOUT: std::time::Duration = std::time::Duration::from_secs(2);
+
 pub(crate) fn current_process_group_id() -> Option<u32> {
     // SAFETY: getpgrp has no preconditions and does not dereference memory.
     let process_group = unsafe { libc::getpgrp() };
@@ -101,6 +103,17 @@ pub(crate) fn process_group_observation(
     {
         let _ = process_group;
         ContainmentObservation::Unprovable
+    }
+}
+
+pub(crate) async fn containment_observation(
+    containment: &crate::durable::Containment,
+) -> crate::durable::ContainmentObservation {
+    use crate::durable::Containment;
+
+    match containment {
+        Containment::ProcessGroup { id } => process_group_observation(*id),
+        Containment::Tmux { name } => tmux_session_observation(name).await,
     }
 }
 
@@ -383,50 +396,54 @@ pub(crate) fn shell_escape(value: &str) -> String {
     format!("'{escaped}'")
 }
 
-/// Whether this machine can look for tmux sessions at all.
-///
-/// Ask PATH, not the binary. A generic `--version` probe reports tmux as absent
-/// on every machine — tmux only accepts `-V` — which silently downgrades Work
-/// process liveness to "unknowable" and hides processes that are actually gone.
-pub(crate) fn tmux_installed() -> bool {
-    which_on_path(Path::new("tmux")).is_some()
-}
-
 pub(crate) async fn tmux_session_exists(session_name: &str) -> Result<bool> {
-    // A missing session is the answer, not an error: tmux's "can't find session"
-    // on stderr would otherwise scribble over a caller's own output.
-    let status = tokio::process::Command::new("tmux")
-        .args(["has-session", "-t", session_name])
-        .stdout(std::process::Stdio::null())
-        .stderr(std::process::Stdio::null())
-        .status()
-        .await
-        .map_err(|err| anyhow!("tmux session probe failed: {err}"))?;
-    Ok(status.success())
+    match tmux_session_observation(session_name).await {
+        crate::durable::ContainmentObservation::Present => Ok(true),
+        crate::durable::ContainmentObservation::Absent => Ok(false),
+        crate::durable::ContainmentObservation::Unprovable => {
+            Err(anyhow!("tmux session liveness could not be verified"))
+        }
+    }
 }
 
-/// Every live tmux session name, in one subprocess. The batched form of
-/// [`tmux_session_exists`]: a caller checking many sessions looks each up in the
-/// returned set instead of paying a `has-session` fork per name. No server
-/// running means no sessions, which tmux reports as a non-zero exit — that is an
-/// empty set, not an error.
-pub(crate) async fn tmux_live_sessions() -> Result<std::collections::HashSet<String>> {
-    let output = tokio::process::Command::new("tmux")
-        .args(["list-sessions", "-F", "#{session_name}"])
-        .stderr(std::process::Stdio::null())
-        .output()
-        .await
-        .map_err(|err| anyhow!("tmux session list failed: {err}"))?;
-    if !output.status.success() {
-        // "no server running" / "no sessions" — nothing is live.
-        return Ok(std::collections::HashSet::new());
+async fn tmux_session_observation(session_name: &str) -> crate::durable::ContainmentObservation {
+    let target = format!("={session_name}");
+    let mut command = tokio::process::Command::new("tmux");
+    command.args(["has-session", "-t", &target]);
+    tmux_session_observation_with_timeout(&mut command, TMUX_LIVENESS_TIMEOUT).await
+}
+
+async fn tmux_session_observation_with_timeout(
+    command: &mut tokio::process::Command,
+    timeout: std::time::Duration,
+) -> crate::durable::ContainmentObservation {
+    use crate::durable::ContainmentObservation;
+
+    command
+        .stdout(std::process::Stdio::null())
+        .kill_on_drop(true);
+    let output = match tokio::time::timeout(timeout, command.output()).await {
+        Ok(Ok(output)) => output,
+        Ok(Err(_)) | Err(_) => return ContainmentObservation::Unprovable,
+    };
+    if output.status.success() {
+        return ContainmentObservation::Present;
     }
-    Ok(String::from_utf8_lossy(&output.stdout)
-        .lines()
-        .map(str::trim)
-        .filter(|line| !line.is_empty())
-        .map(str::to_string)
-        .collect())
+    let stderr = String::from_utf8_lossy(&output.stderr);
+    failed_tmux_session_observation(&stderr)
+}
+
+fn failed_tmux_session_observation(stderr: &str) -> crate::durable::ContainmentObservation {
+    use crate::durable::ContainmentObservation;
+
+    if stderr.contains("can't find session")
+        || stderr.contains("no server running")
+        || stderr.contains("no sessions")
+    {
+        ContainmentObservation::Absent
+    } else {
+        ContainmentObservation::Unprovable
+    }
 }
 
 pub(crate) async fn start_lf_session(session: &str, cwd: &Path, argv: &[String]) -> Result<()> {
@@ -622,12 +639,46 @@ mod tests {
     use std::path::PathBuf;
 
     use super::{
-        extend_session_control_context, forwarded_authority_env_names, lf_session_shell_command,
-        pin_control_binary, select_binary_override, select_current_home_binary, select_lfd_binary,
-        tmux_installed,
+        extend_session_control_context, failed_tmux_session_observation,
+        forwarded_authority_env_names, lf_session_shell_command, pin_control_binary,
+        select_binary_override, select_current_home_binary, select_lfd_binary,
+        tmux_session_observation_with_timeout,
     };
     use crate::build_info::BuildProvenance;
     use crate::child::ChildExecutionContext;
+    use crate::durable::ContainmentObservation;
+
+    #[test]
+    fn tmux_probe_failures_are_not_session_absence() {
+        assert_eq!(
+            failed_tmux_session_observation("can't find session: probe"),
+            ContainmentObservation::Absent
+        );
+        assert_eq!(
+            failed_tmux_session_observation("permission denied while opening socket"),
+            ContainmentObservation::Unprovable
+        );
+        assert_eq!(
+            failed_tmux_session_observation("malformed tmux response"),
+            ContainmentObservation::Unprovable
+        );
+    }
+
+    #[tokio::test]
+    async fn status_surfaces_hanging_tmux_probe_is_bounded_and_unprovable() {
+        let mut command = tokio::process::Command::new("/bin/sh");
+        command.args(["-c", "sleep 5"]);
+
+        let started = tokio::time::Instant::now();
+        let observation = tmux_session_observation_with_timeout(
+            &mut command,
+            std::time::Duration::from_millis(20),
+        )
+        .await;
+
+        assert_eq!(observation, ContainmentObservation::Unprovable);
+        assert!(started.elapsed() < std::time::Duration::from_secs(1));
+    }
 
     #[test]
     fn a_body_generation_keeps_one_binary_across_a_global_repoint() {
@@ -745,23 +796,6 @@ mod tests {
         assert!(!environment
             .iter()
             .any(|(key, value)| { key == crate::store::CONTROL_BIN_ENV && value == "/caller/lf" }));
-    }
-
-    /// The probe must agree with whether tmux can actually be run. The previous
-    /// `--version` probe disagreed on every machine that has tmux, which pinned
-    /// Work-process liveness to "unknowable" and let gone processes read as running.
-    #[test]
-    fn tmux_probe_agrees_with_running_tmux() {
-        // Both sides of this comparison resolve through `PATH`.
-        let _env_lock = crate::journal::test_env_lock();
-        let runnable = std::process::Command::new("tmux")
-            .arg("-V")
-            .stdout(std::process::Stdio::null())
-            .stderr(std::process::Stdio::null())
-            .status()
-            .map(|status| status.success())
-            .unwrap_or(false);
-        assert_eq!(tmux_installed(), runnable);
     }
 
     #[test]

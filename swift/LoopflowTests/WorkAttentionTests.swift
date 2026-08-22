@@ -100,7 +100,7 @@ struct WorkAttentionTests {
             {
               "task": {"id":"\(identifier)","identifier":"\(identifier)","name":"n","description":"","rank":1,"completed":false,"assignee":null},
               "reference": {"issue_url":null,"workspace":null},
-              "runtime": {"work_id":"\(identifier)","project_id":"p","status":{"running":{"run_id":"run_00000000000000000000000000000004"}},"reason":"working","updated_at":"\(updatedAt)","provider":"claude","process_alive":true,"observation":{"category":"working","reason":"working","owner":"work","controls":["attach","steer","interrupt","stop"],"progress_age_secs":60,"deadline_in_secs":1740,"step":"iterate"}},
+              "runtime": {"work_id":"\(identifier)","project_id":"p","routing_project_id":"p","status":{"running":{"run_id":"run_00000000000000000000000000000004"}},"reason":"working","updated_at":"\(updatedAt)","provider":"claude","current":{"state":"working","reason":"working","owner":"work","controls":["attach","steer","interrupt","stop"],"progress_age_secs":60,"deadline_in_secs":1740,"step":"iterate","liveness":{"state":"present","observed_at":"\(updatedAt)","fresh":true}}},
               "next_move": {"owner":"task","reason":"working"},
               "attention": {"level":"green","reason":"working","observed_at":"2026-07-15T00:00:00Z","evidence_age_secs":60,"next_owner":"task","actions":{"recommended":"no_action","reason":"Task body is working"},"pm_completed":false,"work_status":{"running":{"run_id":"run_00000000000000000000000000000004"}},"process":{"state":"observed","alive":true,"reason":null},"local_progress":{"state":"observed","unsettled":false,"dirty":false,"authored_commits":false,"recovery_required":false,"reason":null},"active_pr_phase":null},
               "active_pr": null,
@@ -110,7 +110,7 @@ struct WorkAttentionTests {
         }.joined(separator: ",")
         let json = """
         {
-          "wave": {"id":"w","name":"product","status":{"running":{"run_id":"run_00000000000000000000000000000003"}},"goal":"g","repo":"/src/loopflow","active_tasks":\(workingTasks.count),"active_projects":1,"live":true,"paused":false,"enabled":true,"endpoint":null,"created_at":null,"parent_wave_id":null,"home":{"id":"home_00000000000000000000000000000001","route":"local","created_at":"1970-01-01T00:00:00Z","observed_at":"1970-01-01T00:00:00Z"}},
+          "wave": {"id":"w","name":"product","status":{"running":{"run_id":"run_00000000000000000000000000000003"}},"current":{"state":"working","reason":"working","owner":"work","controls":["attach","steer","interrupt","stop"],"progress_age_secs":60,"deadline_in_secs":1740,"step":null,"liveness":{"state":"present","observed_at":"1970-01-01T00:00:00Z","fresh":true}},"goal":"g","repo":"/src/loopflow","active_tasks":\(workingTasks.count),"active_projects":1,"live":true,"paused":false,"enabled":true,"endpoint":null,"created_at":null,"parent_wave_id":null,"home":{"id":"home_00000000000000000000000000000001","route":"local","created_at":"1970-01-01T00:00:00Z","observed_at":"1970-01-01T00:00:00Z"}},
           "projects": {"state":"ok","truncated":false,"items":[
             {"project":{"id":"p","slug":"api","name":"API","summary":"s","definition":"d","flows":{"first":null,"loop":null,"finally":null},"krs":[]},"runtime":null,"next_move":{"owner":"project","reason":"r"},"section":"now","tasks":[\(tasks)]}
           ]},

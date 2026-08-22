@@ -7,6 +7,20 @@
         "run_id": "run_00000000000000000000000000000001"
       }
     },
+    "current": {
+      "state": "working",
+      "reason": "Run run_00000000000000000000000000000001 is active",
+      "owner": "work",
+      "controls": ["attach", "steer", "interrupt", "stop"],
+      "progress_age_secs": 60,
+      "deadline_in_secs": 1740,
+      "step": null,
+      "liveness": {
+        "state": "present",
+        "observed_at": "2026-07-13T21:00:00Z",
+        "fresh": true
+      }
+    },
     "goal": "Make releases boring.",
     "repo": "/src/loopflow",
     "active_tasks": 1,
@@ -17,6 +31,9 @@
     "endpoint": "127.0.0.1:7777",
     "created_at": "2026-07-01T00:00:00Z",
     "parent_wave_id": null,
+    "retired_at": null,
+    "superseded_by_wave_id": null,
+    "retirement_reason": null,
     "home": {
       "id": "home_00000000000000000000000000000001",
       "route": "ssh://jack@mini-heart",
@@ -48,24 +65,28 @@
       "runtime": {
         "work_id": "ps_11111111111111111111111111111111",
         "status": "ready",
-        "reason": "supervised Tasks are active",
+        "reason": "ready",
         "updated_at": "2026-07-13T18:00:00Z",
         "iteration": 2,
         "pending_observations": 0,
         "provider": "codex",
-        "process_alive": false,
-        "observation": {
-          "category": "needs_input",
-          "reason": "supervised Tasks are active",
-          "owner": "user",
+        "current": {
+          "state": "ready",
+          "reason": "ready",
+          "owner": "loopflow",
           "controls": [
-            "decide",
             "resume",
             "abandon"
           ],
           "progress_age_secs": null,
           "deadline_in_secs": null,
-          "step": "iteration 2"
+          "step": "iteration 2",
+          "liveness": null
+        },
+        "last_failure": {
+          "message": "project runner failed: credential is missing",
+          "occurred_at": "2026-07-12T18:00:00Z",
+          "run_id": "run_00000000000000000000000000000009"
         }
       },
       "directive": {
@@ -102,23 +123,23 @@
           "runtime": {
             "work_id": "ts_22222222222222222222222222222222",
             "project_id": "ps_11111111111111111111111111111111",
+            "routing_project_id": "ps_11111111111111111111111111111111",
             "status": "ready",
-            "reason": "waiting for user merge",
+            "reason": "ready",
             "updated_at": "2026-07-13T19:00:00Z",
             "provider": "codex",
-            "process_alive": false,
-            "observation": {
-              "category": "needs_input",
-              "reason": "waiting for user merge",
-              "owner": "user",
+            "current": {
+              "state": "ready",
+              "reason": "ready",
+              "owner": "loopflow",
               "controls": [
-                "decide",
                 "resume",
                 "abandon"
               ],
               "progress_age_secs": null,
               "deadline_in_secs": null,
-              "step": "iterate"
+              "step": "iterate",
+              "liveness": null
             }
           },
           "directive": {
@@ -253,6 +274,16 @@
       "project_id": "f56c583c-c360-4dc4-ba12-4b5a02268623",
       "project_slug": "technical-architecture",
       "status": "abandoned",
+      "current": {
+        "state": "abandoned",
+        "reason": "abandoned",
+        "owner": "nobody",
+        "controls": [],
+        "progress_age_secs": null,
+        "deadline_in_secs": null,
+        "step": "iteration 2",
+        "liveness": null
+      },
       "owner": "wave",
       "reason": "Project is absent from the current PM snapshot",
       "recovery": "Settle the listed Tasks; Project Work is already abandoned",
@@ -262,6 +293,16 @@
           "task_id": "linear-task-w2-127",
           "task_identifier": "W2-127",
           "status": "ready",
+          "current": {
+            "state": "ready",
+            "reason": "ready",
+            "owner": "loopflow",
+            "controls": ["resume", "abandon"],
+            "progress_age_secs": null,
+            "deadline_in_secs": null,
+            "step": "loop",
+            "liveness": null
+          },
           "owner": "wave",
           "reason": "Task's owning Project is absent from the current PM snapshot",
           "recovery": "lf work abandon task task_40fbeeaadfbca5367aa7391432ae84ff --reason \"Project is absent from the current PM snapshot\""

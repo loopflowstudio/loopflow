@@ -44,7 +44,7 @@ async fn run_async(command: &InvocationCommand) -> anyhow::Result<()> {
             outcome,
             json,
         } => {
-            let invocation_id = parse_invocation_id(invocation_id)?;
+            let invocation_id = resolve_invocation_id(&store, invocation_id).await?;
             let outcome = parse_outcome(outcome)?;
             let surface = store.handback_invocation(&invocation_id, outcome).await?;
             print_surface(&surface, *json)?;
@@ -65,15 +65,18 @@ async fn open_shared_store() -> anyhow::Result<Store> {
 }
 
 async fn load_surface(store: &Store, invocation_id: &str) -> anyhow::Result<InvocationSurface> {
-    let invocation_id = parse_invocation_id(invocation_id)?;
+    let invocation_id = resolve_invocation_id(store, invocation_id).await?;
     store
         .invocation_surface(&invocation_id)
         .await?
         .ok_or_else(|| anyhow!("AgentInvocation {invocation_id} not found"))
 }
 
-fn parse_invocation_id(value: &str) -> anyhow::Result<AgentInvocationId> {
-    AgentInvocationId::parse(value).map_err(Into::into)
+async fn resolve_invocation_id(store: &Store, selector: &str) -> anyhow::Result<AgentInvocationId> {
+    store
+        .resolve_invocation_id(selector)
+        .await?
+        .ok_or_else(|| anyhow!("AgentInvocation {selector} not found"))
 }
 
 fn parse_outcome(value: &str) -> anyhow::Result<BoundaryState> {
@@ -93,9 +96,9 @@ fn print_surface(surface: &InvocationSurface, json: bool) -> anyhow::Result<()> 
         println!("{}", serde_json::to_string_pretty(surface)?);
     } else {
         println!(
-            "{}  {:?}\n  work: {}:{}\n  provider: {}\n  home: {}\n  cwd: {}",
+            "{}  {}\n  work: {}:{}\n  provider: {}\n  home: {}\n  cwd: {}",
             surface.invocation.id,
-            surface.run.state,
+            surface.current.state,
             surface.work.kind(),
             surface.work.id(),
             surface.invocation.route.provider,

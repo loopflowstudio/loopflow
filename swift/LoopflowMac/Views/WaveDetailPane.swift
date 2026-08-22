@@ -366,7 +366,7 @@ private struct WaveProjectWorkView: View {
 
                 Spacer()
 
-                if let status = project.runtime?.status.label {
+                if let status = project.runtime?.current.state.label {
                     Text(status)
                         .font(Typography.caption(10))
                         .foregroundStyle(palette.textSecondary)
@@ -396,6 +396,10 @@ private struct WaveProjectWorkView: View {
                         selection: $selection
                     )
                 }
+            }
+
+            if let failure = project.runtime?.lastFailure {
+                ProjectFailureHistoryView(failure: failure)
             }
 
             Text("Next: \(project.nextMove.owner.rawValue) · \(project.nextMove.reason)")
@@ -459,6 +463,20 @@ private struct WaveProjectWorkView: View {
     }
 }
 
+struct ProjectFailureHistoryView: View {
+    let failure: HistoricalFailure
+
+    @Environment(\.palette) private var palette
+
+    var body: some View {
+        Text("Last failure at \(failure.occurredAt): \(failure.message)")
+            .font(Typography.caption(10))
+            .foregroundStyle(palette.textSecondary)
+            .textSelection(.enabled)
+            .accessibilityIdentifier("project-last-failure")
+    }
+}
+
 private struct WaveTaskWorkView: View {
     let task: WaveTaskWork
     @Binding var selection: WaveWorkSelection?
@@ -480,7 +498,7 @@ private struct WaveTaskWorkView: View {
                         .foregroundStyle(palette.text)
                         .lineLimit(2)
                 }
-                Text("\(task.runtime?.status.label ?? "unstarted") · next: \(task.nextMove.owner.rawValue)")
+                Text("\(task.runtime?.current.state.label ?? "unstarted") · next: \(task.nextMove.owner.rawValue)")
                     .font(Typography.caption(10))
                     .foregroundStyle(palette.textSecondary)
                 if let directive = task.directive {
@@ -540,7 +558,7 @@ private struct WaveWorkInspector: View {
                     .foregroundStyle(palette.text)
                 details(
                     directive: project.directive,
-                    status: project.runtime?.status.label ?? "unstarted",
+                    status: project.runtime?.current.state.label ?? "unstarted",
                     reason: project.nextMove.reason,
                     provider: project.runtime?.provider,
                     location: nil,
@@ -552,7 +570,7 @@ private struct WaveWorkInspector: View {
                     .foregroundStyle(palette.text)
                 details(
                     directive: task.directive,
-                    status: task.runtime?.status.label ?? "unstarted",
+                    status: task.runtime?.current.state.label ?? "unstarted",
                     reason: task.attention.reason,
                     provider: task.runtime?.provider,
                     location: taskLocation,

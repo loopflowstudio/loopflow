@@ -576,11 +576,13 @@ impl SqliteStore {
     fn read_waves(&self, repo: Option<&str>) -> StoreResult<Vec<Wave>> {
         let conn = self.conn.lock().expect("store mutex poisoned");
         let query = if repo.is_some() {
-            "SELECT id, name, repo, created_at, parent_wave_id, promoted_at
-             FROM waves WHERE repo = ?1 ORDER BY created_at DESC"
+            "SELECT id, name, repo, created_at, parent_wave_id, promoted_at,
+                    retired_at, superseded_by_wave_id, retirement_reason
+             FROM waves WHERE repo = ?1 AND retired_at IS NULL ORDER BY created_at DESC"
         } else {
-            "SELECT id, name, repo, created_at, parent_wave_id, promoted_at
-             FROM waves ORDER BY created_at DESC"
+            "SELECT id, name, repo, created_at, parent_wave_id, promoted_at,
+                    retired_at, superseded_by_wave_id, retirement_reason
+             FROM waves WHERE retired_at IS NULL ORDER BY created_at DESC"
         };
         let params: Vec<Box<dyn ToSql>> = if let Some(repo) = repo {
             vec![Box::new(repo.to_string())]
@@ -609,8 +611,11 @@ impl SqliteStore {
             .unwrap_or_else(now_unix);
 
         tx.execute(
-            "INSERT INTO waves (id, name, repo, created_at, parent_wave_id, promoted_at)
-             VALUES (?1, ?2, ?3, ?4, ?5, ?6)
+            "INSERT INTO waves (
+                 id, name, repo, created_at, parent_wave_id, promoted_at,
+                 retired_at, superseded_by_wave_id, retirement_reason
+             )
+             VALUES (?1, ?2, ?3, ?4, ?5, ?6, ?7, ?8, ?9)
              ON CONFLICT(id) DO UPDATE SET
                parent_wave_id = COALESCE(waves.parent_wave_id, excluded.parent_wave_id),
                promoted_at = COALESCE(waves.promoted_at, excluded.promoted_at)",
@@ -621,6 +626,9 @@ impl SqliteStore {
                 created_at,
                 wave.parent_wave_id(),
                 wave.promoted_at().map(|at| at.unix_timestamp()),
+                wave.retired_at().map(|at| at.unix_timestamp()),
+                wave.superseded_by_wave_id(),
+                wave.retirement_reason(),
             ],
         )?;
         durable::create_wave_spine(&tx, wave.id(), wave.name(), wave.repo(), created_at)?;
@@ -1341,8 +1349,11 @@ impl SqliteStore {
     pub fn list_child_waves(&self, parent: &WaveId) -> StoreResult<Vec<Wave>> {
         let conn = self.conn.lock().expect("store mutex poisoned");
         let mut stmt = conn.prepare(
-            "SELECT id, name, repo, created_at, parent_wave_id, promoted_at
-             FROM waves WHERE parent_wave_id = ?1 ORDER BY created_at ASC",
+            "SELECT id, name, repo, created_at, parent_wave_id, promoted_at,
+                    retired_at, superseded_by_wave_id, retirement_reason
+             FROM waves
+             WHERE parent_wave_id = ?1 AND retired_at IS NULL
+             ORDER BY created_at ASC",
         )?;
         let rows = stmt.query_map(params![parent], |row| Ok(map_wave_row(row)))?;
         let mut waves = Vec::new();
@@ -1355,7 +1366,8 @@ impl SqliteStore {
     pub fn get_wave(&self, wave_id: &WaveId) -> StoreResult<Option<Wave>> {
         let conn = self.conn.lock().expect("store mutex poisoned");
         let mut stmt = conn.prepare(
-            "SELECT id, name, repo, created_at, parent_wave_id, promoted_at
+            "SELECT id, name, repo, created_at, parent_wave_id, promoted_at,
+                    retired_at, superseded_by_wave_id, retirement_reason
              FROM waves WHERE id = ?1",
         )?;
         let wave = stmt
@@ -1367,8 +1379,10 @@ impl SqliteStore {
     pub fn get_wave_at(&self, locator: &WaveLocator) -> StoreResult<Option<Wave>> {
         let conn = self.conn.lock().expect("store mutex poisoned");
         let mut stmt = conn.prepare(
-            "SELECT id, name, repo, created_at, parent_wave_id, promoted_at
-             FROM waves WHERE repo = ?1 AND name = ?2",
+            "SELECT id, name, repo, created_at, parent_wave_id, promoted_at,
+                    retired_at, superseded_by_wave_id, retirement_reason
+             FROM waves
+             WHERE repo = ?1 AND name = ?2 AND retired_at IS NULL",
         )?;
         let wave = stmt
             .query_row(params![locator.repo().to_string(), locator.slug()], |row| {
@@ -1405,7 +1419,8 @@ impl SqliteStore {
         }
         let collision = tx
             .query_row(
-                "SELECT id FROM waves WHERE repo = ?1 AND name = ?2 AND id != ?3",
+                "SELECT id FROM waves
+                 WHERE repo = ?1 AND name = ?2 AND id != ?3 AND retired_at IS NULL",
                 params![target_repo, current.1, wave_id],
                 |row| row.get::<_, String>(0),
             )
@@ -1426,8 +1441,11 @@ impl SqliteStore {
     pub fn find_waves_by_slug(&self, slug: &str) -> StoreResult<Vec<Wave>> {
         let conn = self.conn.lock().expect("store mutex poisoned");
         let mut stmt = conn.prepare(
-            "SELECT id, name, repo, created_at, parent_wave_id, promoted_at
-             FROM waves WHERE name = ?1 ORDER BY repo",
+            "SELECT id, name, repo, created_at, parent_wave_id, promoted_at,
+                    retired_at, superseded_by_wave_id, retirement_reason
+             FROM waves
+             WHERE name = ?1 AND retired_at IS NULL
+             ORDER BY repo",
         )?;
         let rows = stmt.query_map(params![slug], |row| Ok(map_wave_row(row)))?;
         let mut waves = Vec::new();
@@ -1451,7 +1469,7 @@ impl SqliteStore {
         for update in updates {
             let current = tx
                 .query_row(
-                    "SELECT repo, name FROM waves WHERE id = ?1",
+                    "SELECT repo, name FROM waves WHERE id = ?1 AND retired_at IS NULL",
                     params![update.wave_id],
                     |row| Ok((row.get::<_, String>(0)?, row.get::<_, String>(1)?)),
                 )
@@ -1469,7 +1487,8 @@ impl SqliteStore {
             let collision = tx
                 .query_row(
                     "SELECT id FROM waves
-                     WHERE repo = ?1 AND name = ?2 AND id != ?3",
+                     WHERE repo = ?1 AND name = ?2 AND id != ?3
+                       AND retired_at IS NULL",
                     params![
                         update.target.repo().to_string(),
                         update.target.slug(),
@@ -1478,12 +1497,26 @@ impl SqliteStore {
                     |row| row.get::<_, String>(0),
                 )
                 .optional()?;
-            if let Some(collision) = collision {
+            if collision.as_deref()
+                != update
+                    .retire_collision
+                    .as_ref()
+                    .map(crate::id::WaveId::as_str)
+            {
                 return Err(StoreError::InvalidData(format!(
-                    "target {}/{} already belongs to Wave {collision}",
+                    "target {}/{} collision changed while relocation was staged",
                     update.target.repo(),
                     update.target.slug()
                 )));
+            }
+            if let Some(collision) = &update.retire_collision {
+                let blockers = Self::wave_retirement_blockers_in(&tx, collision)?;
+                if !blockers.is_empty() {
+                    return Err(StoreError::InvalidData(format!(
+                        "cannot retire destination Wave {collision}: {}",
+                        blockers.join(", ")
+                    )));
+                }
             }
 
             let active_run = tx
@@ -1510,6 +1543,32 @@ impl SqliteStore {
         }
 
         for update in updates {
+            if let Some(collision) = &update.retire_collision {
+                let retired_at = now_unix();
+                tx.execute(
+                    "UPDATE epochs
+                     SET state = 'abandoned', terminal_at = ?2
+                     WHERE wave_id = ?1 AND state = 'open'",
+                    params![collision, retired_at],
+                )?;
+                tx.execute(
+                    "UPDATE work_placements SET enabled = 0 WHERE wave_id = ?1",
+                    params![collision],
+                )?;
+                tx.execute(
+                    "UPDATE waves
+                     SET retired_at = ?2,
+                         superseded_by_wave_id = ?3,
+                         retirement_reason = ?4
+                     WHERE id = ?1 AND retired_at IS NULL",
+                    params![
+                        collision,
+                        retired_at,
+                        update.wave_id,
+                        "registration-only destination shadow retired during relocation"
+                    ],
+                )?;
+            }
             tx.execute(
                 "UPDATE waves SET repo = ?2, name = ?3 WHERE id = ?1",
                 params![
@@ -1521,6 +1580,114 @@ impl SqliteStore {
         }
         tx.commit()?;
         Ok(())
+    }
+
+    pub(crate) fn wave_retirement_blockers(&self, wave_id: &WaveId) -> StoreResult<Vec<String>> {
+        let conn = self.conn.lock().expect("store mutex poisoned");
+        Self::wave_retirement_blockers_in(&conn, wave_id)
+    }
+
+    fn wave_retirement_blockers_in(
+        conn: &Connection,
+        wave_id: &WaveId,
+    ) -> StoreResult<Vec<String>> {
+        let mut blockers = Vec::new();
+        let epochs = conn
+            .prepare(
+                "SELECT id, number, state, current_rev
+                 FROM epochs WHERE wave_id = ?1 ORDER BY number",
+            )?
+            .query_map(params![wave_id], |row| {
+                Ok((
+                    row.get::<_, String>(0)?,
+                    row.get::<_, i64>(1)?,
+                    row.get::<_, String>(2)?,
+                    row.get::<_, i64>(3)?,
+                ))
+            })?
+            .collect::<Result<Vec<_>, _>>()?;
+        if epochs.len() != 1 {
+            blockers.push(format!("{} Wave Epochs", epochs.len()));
+        }
+        if let Some((epoch_id, number, state, revision)) = epochs.first() {
+            if *number != 1 || state != "open" {
+                blockers.push(format!("Epoch {number} is {state}"));
+            }
+            if *revision != 0 {
+                blockers.push(format!("Truth revision is {revision}"));
+            }
+            let steers: i64 = conn.query_row(
+                "SELECT COUNT(*) FROM steers WHERE epoch_id = ?1",
+                params![epoch_id],
+                |row| row.get(0),
+            )?;
+            if steers > 0 {
+                blockers.push(format!("{steers} authored Steers"));
+            }
+            let truths: i64 = conn.query_row(
+                "SELECT COUNT(*) FROM work_truth WHERE epoch_id = ?1",
+                params![epoch_id],
+                |row| row.get(0),
+            )?;
+            if truths != 1 {
+                blockers.push(format!("{truths} Truth revisions"));
+            }
+            let runs: i64 = conn.query_row(
+                "SELECT COUNT(*) FROM runs WHERE epoch_id = ?1",
+                params![epoch_id],
+                |row| row.get(0),
+            )?;
+            if runs > 0 {
+                blockers.push(format!("{runs} Runs"));
+            }
+        }
+        let projects: i64 = conn.query_row(
+            "SELECT COUNT(*) FROM projects WHERE wave_id = ?1",
+            params![wave_id],
+            |row| row.get(0),
+        )?;
+        if projects > 0 {
+            blockers.push(format!("{projects} Projects"));
+        }
+        let tasks: i64 = conn.query_row(
+            "SELECT COUNT(*)
+             FROM tasks JOIN projects ON projects.id = tasks.project_id
+             WHERE projects.wave_id = ?1",
+            params![wave_id],
+            |row| row.get(0),
+        )?;
+        if tasks > 0 {
+            blockers.push(format!("{tasks} Tasks"));
+        }
+        let children: i64 = conn.query_row(
+            "SELECT COUNT(*) FROM waves
+             WHERE parent_wave_id = ?1 AND retired_at IS NULL",
+            params![wave_id],
+            |row| row.get(0),
+        )?;
+        if children > 0 {
+            blockers.push(format!("{children} child Waves"));
+        }
+        let snapshots: i64 = conn.query_row(
+            "SELECT COUNT(*) FROM pm_snapshots WHERE wave_id = ?1",
+            params![wave_id],
+            |row| row.get(0),
+        )?;
+        if snapshots > 0 {
+            blockers.push("PM snapshot".to_string());
+        }
+        let promoted = conn
+            .query_row(
+                "SELECT promoted_at FROM waves WHERE id = ?1",
+                params![wave_id],
+                |row| row.get::<_, Option<i64>>(0),
+            )
+            .optional()?
+            .flatten();
+        if promoted.is_some() {
+            blockers.push("promotion receipt".to_string());
+        }
+        Ok(blockers)
     }
 
     pub fn delete_wave(&self, wave_id: &WaveId) -> StoreResult<()> {
@@ -1670,7 +1837,7 @@ impl SqliteStore {
         }
 
         let mut conn = self.conn.lock().expect("store mutex poisoned");
-        let transaction = conn.transaction()?;
+        let transaction = conn.transaction_with_behavior(TransactionBehavior::Immediate)?;
         let previous = latest_turn_usage_sample_in(&transaction, &sample.turn_id)?;
         if let Some(previous) = previous.as_ref() {
             validate_usage_progress(previous, sample)?;
@@ -1994,7 +2161,7 @@ impl SqliteStore {
         turn: &AgentTurnRow,
     ) -> StoreResult<()> {
         let mut conn = self.conn.lock().expect("store mutex poisoned");
-        let tx = conn.transaction()?;
+        let tx = conn.transaction_with_behavior(TransactionBehavior::Immediate)?;
         tx.execute(
             "UPDATE agent_invocations SET
                 ended_at = ?2, capture_status = ?3, incomplete_reason = ?4, outcome = ?5,
@@ -2035,7 +2202,7 @@ impl SqliteStore {
         ended_at_fallback: i64,
     ) -> StoreResult<()> {
         let mut conn = self.conn.lock().expect("store mutex poisoned");
-        let tx = conn.transaction()?;
+        let tx = conn.transaction_with_behavior(TransactionBehavior::Immediate)?;
         let updated = tx.execute(
             "UPDATE agent_invocations
              SET capture_status = 'pruned', incomplete_reason = ?2,
@@ -2067,7 +2234,7 @@ impl SqliteStore {
         ended_at_fallback: i64,
     ) -> StoreResult<()> {
         let mut conn = self.conn.lock().expect("store mutex poisoned");
-        let tx = conn.transaction()?;
+        let tx = conn.transaction_with_behavior(TransactionBehavior::Immediate)?;
         let updated = tx.execute(
             "UPDATE agent_invocations
              SET capture_status = 'interrupted', incomplete_reason = ?2,
@@ -2098,7 +2265,7 @@ impl SqliteStore {
         ended_at_fallback: i64,
     ) -> StoreResult<()> {
         let mut conn = self.conn.lock().expect("store mutex poisoned");
-        let tx = conn.transaction()?;
+        let tx = conn.transaction_with_behavior(TransactionBehavior::Immediate)?;
         let updated = tx.execute(
             "UPDATE agent_invocations
              SET capture_status = 'lost', ended_at = COALESCE(ended_at, ?2),
@@ -2951,6 +3118,197 @@ fn map_turn_usage(
         cost_usd: row.get(start + 8)?,
     };
     Ok(usage.is_reported().then_some(usage))
+}
+
+#[cfg(test)]
+mod contention_tests {
+    use super::{SqliteStore, SQLITE_WRITE_BUSY_TIMEOUT};
+    use crate::chat::types::TurnUsage;
+    use crate::store::{StoreResult, TurnUsageSample};
+    use crate::trace::{AgentInvocationRow, AgentTurnRow};
+    use std::path::Path;
+    use std::sync::atomic::{AtomicBool, Ordering};
+    use std::sync::mpsc;
+    use std::thread;
+    use std::time::{Duration, Instant};
+
+    static WRITE_CONTENDED: AtomicBool = AtomicBool::new(false);
+
+    fn signal_busy(_: i32) -> bool {
+        WRITE_CONTENDED.store(true, Ordering::Release);
+        true
+    }
+
+    fn while_wal_writer_holds_lock<T>(
+        store: &SqliteStore,
+        path: &Path,
+        operation: &str,
+        run: impl FnOnce() -> StoreResult<T>,
+    ) -> T {
+        WRITE_CONTENDED.store(false, Ordering::Release);
+        store
+            .conn
+            .lock()
+            .expect("store mutex poisoned")
+            .busy_handler(Some(signal_busy))
+            .unwrap();
+
+        let path = path.to_path_buf();
+        let writer_run_id = format!("holder-{operation}");
+        let (locked_tx, locked_rx) = mpsc::sync_channel(0);
+        let writer = thread::spawn(move || {
+            let mut connection = rusqlite::Connection::open(path).unwrap();
+            let transaction = connection
+                .transaction_with_behavior(rusqlite::TransactionBehavior::Immediate)
+                .unwrap();
+            transaction
+                .execute(
+                    "INSERT INTO run_events (run_id, process_id, seq, ts, node, event)
+                     VALUES (?1, 'holder', 0, 1, 'flow', 'started')",
+                    [writer_run_id],
+                )
+                .unwrap();
+            locked_tx.send(()).unwrap();
+            let deadline = Instant::now() + Duration::from_secs(1);
+            while !WRITE_CONTENDED.load(Ordering::Acquire) && Instant::now() < deadline {
+                thread::yield_now();
+            }
+            transaction.commit().unwrap();
+            WRITE_CONTENDED.load(Ordering::Acquire)
+        });
+
+        locked_rx.recv().unwrap();
+        let result = run();
+        let contended = writer.join().unwrap();
+        let connection = store.conn.lock().expect("store mutex poisoned");
+        connection.busy_handler(None).unwrap();
+        connection.busy_timeout(SQLITE_WRITE_BUSY_TIMEOUT).unwrap();
+        assert!(
+            contended,
+            "{operation} bypassed the busy handler instead of acquiring write authority first"
+        );
+        result.unwrap()
+    }
+
+    fn invocation() -> AgentInvocationRow {
+        AgentInvocationRow {
+            id: "invocation_contention".to_string(),
+            run_id: "run-contention".to_string(),
+            answer_ask_id: None,
+            process_id: "exec_contention".to_string(),
+            started_at: 1,
+            ended_at: None,
+            repo: "/repo".to_string(),
+            worktree: "/repo/task".to_string(),
+            wave: Some("product".to_string()),
+            flow: Some("task".to_string()),
+            skill: Some("ship-5whys".to_string()),
+            project: Some("loopflow-api".to_string()),
+            task: Some("LOO-238".to_string()),
+            provider: "codex".to_string(),
+            model: Some("gpt-5".to_string()),
+            surface: "headless".to_string(),
+            capture_status: "capturing".to_string(),
+            incomplete_reason: None,
+            outcome: "running".to_string(),
+            artifact_dir: "run/exec/invocation".to_string(),
+            conversation_path: "run/exec/invocation/conversation.jsonl".to_string(),
+            provider_events_path: None,
+            provider_session_id: None,
+            provider_session_path: None,
+            conversation_event_count: 1,
+            conversation_bytes: 10,
+            supervision: None,
+        }
+    }
+
+    fn turn(id: &str, ordinal: i64, status: &str) -> AgentTurnRow {
+        AgentTurnRow {
+            id: id.to_string(),
+            invocation_id: "invocation_contention".to_string(),
+            ordinal,
+            provider_turn_id: None,
+            started_at: ordinal,
+            ended_at: None,
+            status: status.to_string(),
+            input_op: if ordinal == 1 { "initial" } else { "message" }.to_string(),
+            context_coverage: "assembled".to_string(),
+            tokenizer: "cl100k_base".to_string(),
+            system_prompt_path: None,
+            task_prompt_path: format!("run/exec/invocation/turns/{ordinal:04}-task.md"),
+            system_tokens: 0,
+            task_tokens: 2,
+            supplied_context_tokens: 2,
+            usage: None,
+            context_gather_ms: 1,
+            context_render_ms: 1,
+            context_persist_ms: 1,
+            first_event_seq: Some(ordinal - 1),
+            last_event_seq: None,
+            root_output: None,
+            basis: None,
+        }
+    }
+
+    #[test]
+    fn multi_turn_capture_waits_for_concurrent_wal_writers() {
+        let directory = tempfile::tempdir().unwrap();
+        let path = directory.path().join("loopflow.db");
+        let store = SqliteStore::new(&path).expect("materialize the schema");
+        let mut invocation = invocation();
+        let mut first_turn = turn("turn_contention_1", 1, "running");
+
+        while_wal_writer_holds_lock(&store, &path, "capture start", || {
+            store.insert_trace_capture(&invocation, &first_turn, &[], &[])
+        });
+        while_wal_writer_holds_lock(&store, &path, "usage checkpoint", || {
+            store.record_turn_usage_sample(&TurnUsageSample {
+                turn_id: first_turn.id.clone(),
+                observed_at: 2,
+                final_receipt: false,
+                usage: TurnUsage {
+                    input_tokens: Some(10),
+                    output_tokens: Some(1),
+                    ..Default::default()
+                },
+            })
+        });
+
+        first_turn.ended_at = Some(3);
+        first_turn.status = "partial".to_string();
+        let second_turn = turn("turn_contention_2", 2, "running");
+        while_wal_writer_holds_lock(&store, &path, "turn transition", || {
+            store.finish_agent_turn_capture(&first_turn)?;
+            store.insert_agent_turn_capture(&second_turn, &[], &[])
+        });
+
+        invocation.ended_at = Some(4);
+        invocation.capture_status = "complete".to_string();
+        invocation.outcome = "completed".to_string();
+        let mut second_turn = second_turn;
+        second_turn.ended_at = Some(4);
+        second_turn.status = "completed".to_string();
+        while_wal_writer_holds_lock(&store, &path, "capture finish", || {
+            store.finish_trace_capture(&invocation, &second_turn)
+        });
+
+        let invocations = store
+            .agent_invocations_matching(&invocation.run_id)
+            .unwrap();
+        assert_eq!(invocations.len(), 1);
+        assert_eq!(invocations[0].capture_status, "complete");
+        assert_eq!(invocations[0].outcome, "completed");
+        let turns = store
+            .agent_turns_for_invocations(&[invocation.id.clone()])
+            .unwrap();
+        assert_eq!(turns.len(), 2);
+        assert_eq!(turns[0].status, "partial");
+        assert_eq!(turns[1].status, "completed");
+        assert_eq!(
+            turns[0].usage.as_ref().and_then(|usage| usage.input_tokens),
+            Some(10)
+        );
+    }
 }
 
 #[cfg(test)]

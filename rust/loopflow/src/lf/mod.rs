@@ -1031,7 +1031,7 @@ pub enum ProjectCommand {
         #[arg(long)]
         json: bool,
     },
-    /// Show durable Project state and reconcile process liveness
+    /// Show durable Project state and Home-owned liveness evidence
     Status {
         /// Linear Project UUID, unique slug, or historical Project id
         project_id: String,
@@ -1152,7 +1152,7 @@ pub enum TaskCommand {
         #[arg(long)]
         json: bool,
     },
-    /// Show durable state and reconcile process liveness
+    /// Show durable state and Home-owned liveness evidence
     Status {
         issue: String,
         #[arg(long)]

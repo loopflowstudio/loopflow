@@ -6,6 +6,12 @@ import Testing
 
 @Suite("Context Lab")
 struct ContextLabTests {
+    @Test("unknown capture outcome is presented as unverified")
+    func unknownOutcomeIsUnverified() {
+        #expect(contextOutcomeLabel(.unknown) == "unverified")
+        #expect(contextOutcomeLabel(.running) == "running")
+    }
+
     @Test("Wave routes bind Context Lab to one repo and Wave over 30 days")
     func waveContextLabRouteIsExplicit() {
         let route = ContextLabRoute.wave(

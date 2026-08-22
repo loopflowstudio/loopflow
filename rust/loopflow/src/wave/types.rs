@@ -84,6 +84,10 @@ pub struct Wave {
     /// absent so an older parent link cannot manufacture a new wake.
     #[serde(with = "time::serde::rfc3339::option")]
     promoted_at: Option<OffsetDateTime>,
+    #[serde(with = "time::serde::rfc3339::option")]
+    retired_at: Option<OffsetDateTime>,
+    superseded_by_wave_id: Option<WaveId>,
+    retirement_reason: Option<String>,
 }
 
 impl Wave {
@@ -95,6 +99,9 @@ impl Wave {
             created_at: Some(OffsetDateTime::now_utc()),
             parent_wave_id: None,
             promoted_at: None,
+            retired_at: None,
+            superseded_by_wave_id: None,
+            retirement_reason: None,
         }
     }
 
@@ -105,6 +112,7 @@ impl Wave {
         self
     }
 
+    #[allow(clippy::too_many_arguments)] // Exact Wave row shape; named accessors expose the domain API.
     pub(crate) fn from_stored_parts(
         id: WaveId,
         name: String,
@@ -112,6 +120,9 @@ impl Wave {
         created_at: OffsetDateTime,
         parent_wave_id: Option<WaveId>,
         promoted_at: Option<OffsetDateTime>,
+        retired_at: Option<OffsetDateTime>,
+        superseded_by_wave_id: Option<WaveId>,
+        retirement_reason: Option<String>,
     ) -> Self {
         Self {
             id,
@@ -120,6 +131,9 @@ impl Wave {
             created_at: Some(created_at),
             parent_wave_id,
             promoted_at,
+            retired_at,
+            superseded_by_wave_id,
+            retirement_reason,
         }
     }
 
@@ -156,6 +170,22 @@ impl Wave {
     /// The first completed promotion occurrence, distinct from ancestry.
     pub fn promoted_at(&self) -> Option<OffsetDateTime> {
         self.promoted_at
+    }
+
+    pub fn retired_at(&self) -> Option<OffsetDateTime> {
+        self.retired_at
+    }
+
+    pub fn superseded_by_wave_id(&self) -> Option<&WaveId> {
+        self.superseded_by_wave_id.as_ref()
+    }
+
+    pub fn retirement_reason(&self) -> Option<&str> {
+        self.retirement_reason.as_deref()
+    }
+
+    pub fn is_retired(&self) -> bool {
+        self.retired_at.is_some()
     }
 
     pub fn name(&self) -> &str {

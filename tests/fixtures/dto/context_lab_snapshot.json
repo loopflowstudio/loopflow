@@ -68,6 +68,7 @@
     "failed_invocations": 0,
     "interrupted_invocations": 0,
     "running_invocations": 0,
+    "unverified_invocations": 0,
     "steering_turns": 0,
     "steered_invocations": 0
   },

@@ -322,18 +322,21 @@ pub(crate) async fn serve(
     if ask.state.is_terminal() {
         return Ok(());
     }
-    let prompt = ask_prompt(&store, &ask).await?;
-    let config = crate::engine::load_config_or_default(Some(&ask.origin.cwd));
-    let agent = config.agent().to_string();
-    let result = run_provider(
-        &ask.origin.cwd,
-        &agent,
-        &prompt,
-        &invocation_id,
-        headless,
-        matches!(ask.request, crate::durable::AskBody::FlowStep { .. }),
-    )
-    .await;
+    // Two cases, two launches. A FlowStep gate runs the skill's REAL harness
+    // (the `lf <skill>` turn), so the session IS the skill — no generic agent to
+    // freelance an approval. An Intervention is a free-text thread with the User.
+    let result = match &ask.request {
+        crate::durable::AskBody::FlowStep { .. } => {
+            let turn = crate::task::runner::flow_step_harness_turn(&store, &ask).await?;
+            run_flow_step_harness(&ask.origin.cwd, turn, &invocation_id, headless).await
+        }
+        crate::durable::AskBody::Intervention { .. } => {
+            let prompt = ask_prompt(&store, &ask).await?;
+            let config = crate::engine::load_config_or_default(Some(&ask.origin.cwd));
+            let agent = config.agent().to_string();
+            run_provider(&ask.origin.cwd, &agent, &prompt, &invocation_id, headless).await
+        }
+    };
     let current = store.ask_by_id(&ask.id).await?;
     if current.state == AskState::Claimed
         && current.active_invocation_id.as_ref() == Some(&invocation_id)
@@ -405,13 +408,14 @@ async fn wait_until_presented(
     }
 }
 
+/// An Intervention thread: a detached free-text agent that must not adopt the
+/// originating Work. FlowStep gates never use this path.
 async fn run_provider(
     cwd: &Path,
     agent: &str,
     prompt: &str,
     invocation_id: &AgentInvocationId,
     headless: bool,
-    flow_step: bool,
 ) -> Result<ExitStatus> {
     let mut launch = crate::engine::AgentConfig {
         system_prompt: if headless {
@@ -426,11 +430,7 @@ async fn run_provider(
         task_prompt: prompt.to_string(),
         agent: Some(agent.to_string()),
         cwd: Some(cwd.to_path_buf()),
-        authority: if flow_step {
-            crate::engine::agent::AgentAuthority::Inherit
-        } else {
-            crate::engine::agent::AgentAuthority::Detached
-        },
+        authority: crate::engine::agent::AgentAuthority::Detached,
         ..Default::default()
     };
     launch.env.insert(
@@ -450,10 +450,39 @@ async fn run_provider(
     Ok(ExitStatus::from_raw(result.exit_code << 8))
 }
 
+/// Launch a human FlowStep gate as the skill's real harness turn — its own
+/// system prompt, context, and config (the `lf <skill>` launch), writing into
+/// the origin Task. No generic agent sits between the human and the skill.
+async fn run_flow_step_harness(
+    cwd: &Path,
+    turn: crate::lf::commands::run::PreparedHarnessTurn,
+    invocation_id: &AgentInvocationId,
+    headless: bool,
+) -> Result<ExitStatus> {
+    let mut launch = turn.config;
+    launch.task_prompt = turn.input;
+    launch.cwd = Some(cwd.to_path_buf());
+    launch.authority = crate::engine::agent::AgentAuthority::Inherit;
+    launch.env.insert(
+        crate::durable::AGENT_INVOCATION_ENV.to_string(),
+        invocation_id.as_str().to_string(),
+    );
+    let process = crate::engine::ProcessConfig {
+        auto: headless,
+        stream: false,
+        ..Default::default()
+    };
+    let capabilities = crate::engine::AgentCapabilities::default();
+    let result = tokio::task::spawn_blocking(move || {
+        crate::engine::launch_agent(&launch, &process, &capabilities)
+    })
+    .await??;
+    Ok(ExitStatus::from_raw(result.exit_code << 8))
+}
+
+/// The prompt for an Intervention (free-text thread with the User). FlowStep
+/// gates never reach here — they run the skill's harness via `flow_step_harness_turn`.
 async fn ask_prompt(store: &SharedStore, ask: &Ask) -> Result<String> {
-    if matches!(ask.request, crate::durable::AskBody::FlowStep { .. }) {
-        return crate::task::runner::flow_step_ask_prompt(store, ask).await;
-    }
     let invocations = store.ask_invocations(&ask.id).await?;
     let mut history = Vec::with_capacity(invocations.len());
     for invocation in invocations {

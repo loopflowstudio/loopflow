@@ -9,7 +9,7 @@ use time::OffsetDateTime;
 
 use crate::child::{AbandonIntent, ChildRef, ObservationRecipient};
 pub use crate::durable::ProjectId;
-use crate::durable::WorkStatus;
+use crate::durable::RunId;
 use crate::id::WaveId;
 use crate::planning::ProjectPlan;
 use crate::task::{TaskEventKind, TaskId};
@@ -93,29 +93,11 @@ impl ProjectEventKind {
         !matches!(self, Self::Started | Self::TaskObserved { .. })
     }
 
-    fn resumable_failure_reason(&self) -> Option<&str> {
+    fn failure_reason(&self) -> Option<&str> {
         match self {
-            Self::Failed {
-                error,
-                resumable: true,
-            } => Some(error),
+            Self::Failed { error, .. } => Some(error),
             _ => None,
         }
-    }
-}
-
-pub(crate) fn status_reason(status: &WorkStatus, latest: Option<&ProjectEventKind>) -> String {
-    if matches!(status, WorkStatus::Ready | WorkStatus::Waiting { .. }) {
-        if let Some(reason) = latest.and_then(ProjectEventKind::resumable_failure_reason) {
-            return reason.to_string();
-        }
-    }
-    match status {
-        WorkStatus::Running { run_id } => format!("Run {run_id} is active"),
-        WorkStatus::Waiting { .. } => "waiting for input or an event".to_string(),
-        WorkStatus::Ready => "ready".to_string(),
-        WorkStatus::Done => "done".to_string(),
-        WorkStatus::Abandoned => "abandoned".to_string(),
     }
 }
 
@@ -124,7 +106,26 @@ pub struct ProjectEvent {
     pub id: i64,
     pub project_id: ProjectId,
     pub kind: ProjectEventKind,
+    pub run_id: Option<RunId>,
     pub created_at: OffsetDateTime,
+}
+
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
+pub struct HistoricalFailure {
+    pub message: String,
+    #[serde(with = "time::serde::rfc3339")]
+    pub occurred_at: OffsetDateTime,
+    pub run_id: Option<RunId>,
+}
+
+impl HistoricalFailure {
+    pub(crate) fn from_event(event: &ProjectEvent) -> Option<Self> {
+        Some(Self {
+            message: event.kind.failure_reason()?.to_string(),
+            occurred_at: event.created_at,
+            run_id: event.run_id.clone(),
+        })
+    }
 }
 
 #[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]

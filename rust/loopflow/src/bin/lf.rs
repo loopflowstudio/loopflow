@@ -478,6 +478,23 @@ fn in_repo_runtime<T>(
     with_runtime(&repo_root, command, || run(&repo_root))
 }
 
+fn run_default_agent(cli: &Cli, command: &[String]) -> anyhow::Result<()> {
+    let repo_root = loopflow::lf::commands::util::find_repo_root()?;
+    let moved = loopflow::engine::worktrees::move_default_agent_to_worktree(&repo_root)?;
+    match moved {
+        Some(worktree) => {
+            eprintln!("moved to `{}`", worktree.path.display());
+            let _cwd = CwdGuard::enter(&worktree.path)?;
+            with_runtime(&worktree.path, command, || {
+                loopflow::lf::commands::run::run(Some("loopflow"), None, cli)
+            })
+        }
+        None => with_runtime(&repo_root, command, || {
+            loopflow::lf::commands::run::run(Some("loopflow"), None, cli)
+        }),
+    }
+}
+
 fn run_work_runner_entrypoint<T>(
     command: &[String],
     kind: &str,
@@ -1789,9 +1806,7 @@ fn main() -> anyhow::Result<()> {
                     Err(err) => Err(err),
                 }
             }
-            None => in_repo_runtime(&args, |_| {
-                loopflow::lf::commands::run::run(Some("loopflow"), None, &cli)
-            }),
+            None => run_default_agent(&cli, &args),
         }
     };
 
@@ -1841,6 +1856,18 @@ mod tests {
             created_at: now,
             updated_at: now,
         }
+    }
+
+    #[test]
+    fn only_bare_lf_selects_the_default_agent_surface() {
+        let bare = Cli::try_parse_from(["lf"]).unwrap();
+        assert!(bare.command.is_none());
+
+        let code = Cli::try_parse_from(["lf", "code"]).unwrap();
+        assert!(matches!(
+            code.command,
+            Some(Commands::External(parts)) if parts == ["code"]
+        ));
     }
 
     /// A healthy linkage says nothing: silence on the happy path keeps the status

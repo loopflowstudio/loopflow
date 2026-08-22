@@ -140,11 +140,14 @@ struct DTOFixtureTests {
         #expect(detail.projects[0].tasks[0].reference.workspace?.slug == "infrastructure-task")
         #expect(detail.projects[0].tasks[0].reference.workspace?.worktree == "/src/loopflow.infrastructure.task")
         #expect(detail.projects[0].tasks[0].reference.issueUrl?.host == "linear.app")
-        // The leased body observation rides the runtime snapshot on the wire. A
-        // Task waiting on review reads NeedsInput, owned by a human.
-        #expect(detail.projects[0].tasks[0].runtime?.observation.category == .needsInput)
-        #expect(detail.projects[0].tasks[0].runtime?.observation.owner == .user)
-        #expect(detail.projects[0].runtime?.observation.category == .needsInput)
+        // Ready is durable current intent. Historical failure evidence stays
+        // visible without replacing that present-tense state.
+        #expect(detail.projects[0].tasks[0].runtime?.current.state == .ready)
+        #expect(detail.projects[0].tasks[0].runtime?.current.owner == .loopflow)
+        #expect(detail.projects[0].tasks[0].runtime?.current.reason == "ready")
+        #expect(detail.projects[0].runtime?.current.state == .ready)
+        #expect(detail.projects[0].runtime?.current.reason == "ready")
+        #expect(detail.projects[0].runtime?.lastFailure?.message.contains("credential") == true)
         #expect(detail.projects[0].tasks[1].runtime == nil)
         #expect(detail.projects[0].tasks[1].reference.issueUrl == nil)
         #expect(detail.projects[0].tasks[1].reference.workspace == nil)
@@ -191,7 +194,9 @@ struct DTOFixtureTests {
         #expect(product.wave.enabled)
         #expect(product.unavailableProjects[0].workId == "proj_e972b70272fbb5e91c096ebe657f9f9b")
         #expect(product.unavailableProjects[0].projectSlug == "technical-architecture")
+        #expect(product.unavailableProjects[0].current.state == .abandoned)
         #expect(product.unavailableProjects[0].tasks[0].taskIdentifier == "W2-127")
+        #expect(product.unavailableProjects[0].tasks[0].current.state == .ready)
         #expect(product.unavailableProjects[0].tasks[0].recovery.contains("lf work abandon task task_40fbeea"))
         let project = try #require(product.projects.items.first)
         #expect(project.tasks.map(\.section) == [.now, .needsAttention, .available, .later])
@@ -222,7 +227,8 @@ struct DTOFixtureTests {
 
         #expect(surface.id == "invocation_00000000000000000000000000000001")
         #expect(surface.work.kind == .task)
-        #expect(surface.status == .active)
+        #expect(surface.status == .live)
+        #expect(surface.current.liveness?.state == .present)
         #expect(surface.run.runtimeGeneration == 8)
         #expect(surface.run.containment == .tmux(name: "lf-task"))
         #expect(

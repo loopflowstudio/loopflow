@@ -25,13 +25,12 @@
           "run_id": "run_00000000000000000000000000000005"
         }
       },
-      "reason": "implementing the projection",
+      "reason": "Run run_00000000000000000000000000000005 is active",
       "updated_at": "2026-07-15T00:00:00Z",
       "provider": "codex",
-      "process_alive": true,
-      "observation": {
-        "category": "working",
-        "reason": "implementing the projection",
+      "current": {
+        "state": "working",
+        "reason": "Run run_00000000000000000000000000000005 is active",
         "owner": "work",
         "controls": [
           "attach",
@@ -41,8 +40,14 @@
         ],
         "progress_age_secs": 60,
         "deadline_in_secs": 1740,
-        "step": "iterate"
-      }
+        "step": "iterate",
+        "liveness": {
+          "state": "present",
+          "observed_at": "2026-07-15T00:00:00Z",
+          "fresh": true
+        }
+      },
+      "routing_project_id": "ps_1"
     },
     "next_move": {
       "owner": "task",
@@ -108,12 +113,11 @@
           "run_id": "run_00000000000000000000000000000005"
         }
       },
-      "reason": "waiting for a recovery decision",
+      "reason": "alive but no meaningful progress past the deadline",
       "updated_at": "2026-07-14T23:59:00Z",
       "provider": "codex",
-      "process_alive": true,
-      "observation": {
-        "category": "stalled",
+      "current": {
+        "state": "stalled",
         "reason": "alive but no meaningful progress past the deadline",
         "owner": "loopflow",
         "controls": [
@@ -124,8 +128,14 @@
         ],
         "progress_age_secs": 2400,
         "deadline_in_secs": -600,
-        "step": "iterate"
-      }
+        "step": "iterate",
+        "liveness": {
+          "state": "present",
+          "observed_at": "2026-07-14T23:59:00Z",
+          "fresh": true
+        }
+      },
+      "routing_project_id": "ps_1"
     },
     "next_move": {
       "owner": "user",
@@ -191,13 +201,12 @@
           "run_id": "run_00000000000000000000000000000005"
         }
       },
-      "reason": "implementing",
+      "reason": "the owning Home proved the Run process is gone",
       "updated_at": "2026-07-14T23:50:00Z",
       "provider": "codex",
-      "process_alive": false,
-      "observation": {
-        "category": "stopped",
-        "reason": "no live body for active intent; a wake will adopt or start one",
+      "current": {
+        "state": "stopped",
+        "reason": "the owning Home proved the Run process is gone",
         "owner": "loopflow",
         "controls": [
           "resume",
@@ -205,8 +214,14 @@
         ],
         "progress_age_secs": null,
         "deadline_in_secs": null,
-        "step": "iterate"
-      }
+        "step": "iterate",
+        "liveness": {
+          "state": "absent",
+          "observed_at": "2026-07-14T23:50:00Z",
+          "fresh": true
+        }
+      },
+      "routing_project_id": "ps_1"
     },
     "next_move": {
       "owner": "task",
@@ -268,23 +283,23 @@
       "work_id": "ts_commits",
       "project_id": "ps_1",
       "status": "ready",
-      "reason": "User merge requested",
+      "reason": "ready",
       "updated_at": "2026-07-14T22:00:00Z",
       "provider": "codex",
-      "process_alive": false,
-      "observation": {
-        "category": "needs_input",
-        "reason": "User merge requested",
-        "owner": "user",
+      "current": {
+        "state": "ready",
+        "reason": "ready",
+        "owner": "loopflow",
         "controls": [
-          "decide",
           "resume",
           "abandon"
         ],
         "progress_age_secs": null,
         "deadline_in_secs": null,
-        "step": "iterate"
-      }
+        "step": "iterate",
+        "liveness": null
+      },
+      "routing_project_id": "ps_1"
     },
     "next_move": {
       "owner": "user",
@@ -420,19 +435,20 @@
       "work_id": "ts_completed",
       "project_id": "ps_1",
       "status": "done",
-      "reason": "merged",
+      "reason": "done",
       "updated_at": "2026-07-14T20:00:00Z",
       "provider": "codex",
-      "process_alive": false,
-      "observation": {
-        "category": "terminal",
-        "reason": "merged",
+      "current": {
+        "state": "done",
+        "reason": "done",
         "owner": "nobody",
         "controls": [],
         "progress_age_secs": null,
         "deadline_in_secs": null,
-        "step": "iterate"
-      }
+        "step": "iterate",
+        "liveness": null
+      },
+      "routing_project_id": "ps_1"
     },
     "next_move": {
       "owner": "project",
@@ -494,13 +510,12 @@
           "run_id": "run_00000000000000000000000000000005"
         }
       },
-      "reason": "implementing",
+      "reason": "the owning Home proved the Run process is gone",
       "updated_at": "2026-07-14T18:00:00Z",
       "provider": "codex",
-      "process_alive": false,
-      "observation": {
-        "category": "stopped",
-        "reason": "no live body for active intent; a wake will adopt or start one",
+      "current": {
+        "state": "stopped",
+        "reason": "the owning Home proved the Run process is gone",
         "owner": "loopflow",
         "controls": [
           "resume",
@@ -508,8 +523,14 @@
         ],
         "progress_age_secs": null,
         "deadline_in_secs": null,
-        "step": "iterate"
-      }
+        "step": "iterate",
+        "liveness": {
+          "state": "absent",
+          "observed_at": "2026-07-14T18:00:00Z",
+          "fresh": true
+        }
+      },
+      "routing_project_id": "ps_1"
     },
     "next_move": {
       "owner": "task",
@@ -575,13 +596,12 @@
           "run_id": "run_00000000000000000000000000000005"
         }
       },
-      "reason": "implementing",
+      "reason": "the owning Home proved the Run process is gone",
       "updated_at": "2026-07-14T23:00:00Z",
       "provider": "codex",
-      "process_alive": false,
-      "observation": {
-        "category": "stopped",
-        "reason": "no live body for active intent; a wake will adopt or start one",
+      "current": {
+        "state": "stopped",
+        "reason": "the owning Home proved the Run process is gone",
         "owner": "loopflow",
         "controls": [
           "resume",
@@ -589,8 +609,14 @@
         ],
         "progress_age_secs": null,
         "deadline_in_secs": null,
-        "step": "iterate"
-      }
+        "step": "iterate",
+        "liveness": {
+          "state": "absent",
+          "observed_at": "2026-07-14T23:00:00Z",
+          "fresh": true
+        }
+      },
+      "routing_project_id": "ps_1"
     },
     "next_move": {
       "owner": "task",

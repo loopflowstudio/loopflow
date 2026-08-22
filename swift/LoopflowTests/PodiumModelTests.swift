@@ -150,6 +150,7 @@ struct PodiumModelTests {
                 name: wave.name,
                 repo: wave.repo,
                 status: wave.status,
+                current: wave.current,
                 live: false,
                 paused: wave.paused,
                 activeTasks: wave.activeTasks,
@@ -281,17 +282,69 @@ struct PodiumModelTests {
             contentsOf: fixtures.appendingPathComponent("ask_attention.json"),
             encoding: .utf8
         )
-        let query = RegistryQuery { args, _ in
+        let query = RegistryQuery { args, cwd in
             #expect(args == ["ask", "list", "--user", "--json"])
+            #expect(cwd == "/src/loopflow")
             return json
         }
-        let model = PodiumModel(query: query)
+        let model = PodiumModel(query: query, repoPath: "/src/loopflow")
 
         await model.refreshUserAskAttention()
 
         #expect(model.userAskAttention.value?.map(\.id) == [
             "ask_00000000000000000000000000000001",
         ])
+    }
+
+    @Test("Changing repository clears cached Ask attention")
+    func changingRepositoryClearsCachedAskAttention() async throws {
+        let fixtures = URL(fileURLWithPath: #filePath)
+            .deletingLastPathComponent()
+            .deletingLastPathComponent()
+            .deletingLastPathComponent()
+            .appendingPathComponent("tests/fixtures/dto")
+        let json = try String(
+            contentsOf: fixtures.appendingPathComponent("ask_attention.json"),
+            encoding: .utf8
+        )
+        let query = RegistryQuery { args, _ in
+            #expect(args == ["ask", "list", "--user", "--json"])
+            return json
+        }
+        let model = PodiumModel(query: query, repoPath: "/src/first")
+        await model.refreshUserAskAttention()
+        #expect(model.userAskAttention.value?.count == 1)
+
+        model.setRepoPath("/src/second")
+
+        #expect(model.userAskAttention.value == nil)
+    }
+
+    @Test("A late Ask refresh cannot cross repository scope")
+    func staleAskRefreshDoesNotReplaceNewRepository() async throws {
+        let fixtures = URL(fileURLWithPath: #filePath)
+            .deletingLastPathComponent()
+            .deletingLastPathComponent()
+            .deletingLastPathComponent()
+            .appendingPathComponent("tests/fixtures/dto")
+        let json = try String(
+            contentsOf: fixtures.appendingPathComponent("ask_attention.json"),
+            encoding: .utf8
+        )
+        let deferred = DeferredActivityResponse()
+        let query = RegistryQuery { args, _ in
+            #expect(args == ["ask", "list", "--user", "--json"])
+            return await deferred.response()
+        }
+        let model = PodiumModel(query: query, repoPath: "/src/first")
+        let refresh = Task { await model.refreshUserAskAttention() }
+        await deferred.waitUntilRequested()
+
+        model.setRepoPath("/src/second")
+        await deferred.release(json)
+        await refresh.value
+
+        #expect(model.userAskAttention.value == nil)
     }
 }
 

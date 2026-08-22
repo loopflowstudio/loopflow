@@ -5,6 +5,16 @@ import Foundation
 import SwiftUI
 import AppKit
 
+extension Notification.Name {
+    static let ghosttySessionBell = Notification.Name("loopflow.ghosttySessionBell")
+    static let ghosttySessionTitle = Notification.Name("loopflow.ghosttySessionTitle")
+}
+
+struct GhosttySessionTitle {
+    let sessionId: String
+    let title: String
+}
+
 #if GHOSTTY_ENABLED
 import GhosttyKit
 
@@ -71,15 +81,23 @@ final class GhosttyManager: ObservableObject {
     palette = 15=#F5F1EA
 
     font-size = 13
+
+    """
+
+    // Agent output can be enormous. These limits load after user defaults so
+    // every embedded surface stays bounded when many panes are live at once.
+    private static let resourceLimitsConfig = """
+    scrollback-limit = 10000000
+    image-storage-limit = 67108864
     """
 
     private init() {}
 
-    private func writeLoopflowConfig() -> String? {
+    private func writeConfig(_ contents: String, named name: String) -> String? {
         let tempDir = FileManager.default.temporaryDirectory
-        let configPath = tempDir.appendingPathComponent("loopflow-ghostty-config")
+        let configPath = tempDir.appendingPathComponent(name)
         do {
-            try Self.loopflowConfig.write(to: configPath, atomically: true, encoding: .utf8)
+            try contents.write(to: configPath, atomically: true, encoding: .utf8)
             return configPath.path
         } catch {
             print("[GhosttyManager] Failed to write config: \(error)")
@@ -105,10 +123,13 @@ final class GhosttyManager: ObservableObject {
         }
 
         // Load Loopflow theme first, then user defaults
-        if let path = writeLoopflowConfig() {
+        if let path = writeConfig(Self.loopflowConfig, named: "loopflow-ghostty-theme") {
             path.withCString { ghostty_config_load_file(cfg, $0) }
         }
         ghostty_config_load_default_files(cfg)
+        if let path = writeConfig(Self.resourceLimitsConfig, named: "loopflow-ghostty-limits") {
+            path.withCString { ghostty_config_load_file(cfg, $0) }
+        }
         ghostty_config_finalize(cfg)
         self.config = cfg
 
@@ -123,7 +144,25 @@ final class GhosttyManager: ObservableObject {
                 manager.tick()
             }
         }
-        runtimeConfig.action_cb = { _, _, _ in false }
+        runtimeConfig.action_cb = { _, target, action in
+            guard target.tag == GHOSTTY_TARGET_SURFACE else { return false }
+            let surface = target.target.surface
+            if action.tag == GHOSTTY_ACTION_RING_BELL {
+                Task { @MainActor in
+                    GhosttyManager.shared.handleBell(surface)
+                }
+                return true
+            }
+            if action.tag == GHOSTTY_ACTION_SET_TITLE,
+               let title = action.action.set_title.title {
+                let value = String(cString: title)
+                Task { @MainActor in
+                    GhosttyManager.shared.handleTitle(value, surface: surface)
+                }
+                return true
+            }
+            return false
+        }
         runtimeConfig.read_clipboard_cb = { _, _, _ in }
         runtimeConfig.confirm_read_clipboard_cb = { _, _, _, _ in }
         runtimeConfig.write_clipboard_cb = { _, _, content, len, _ in
@@ -207,6 +246,24 @@ final class GhosttyManager: ObservableObject {
         } else {
             ghostty_surface_free(handle.surface)
         }
+    }
+
+    func handleBell(_ surface: ghostty_surface_t?) {
+        guard let sessionId = sessionId(for: surface) else { return }
+        NotificationCenter.default.post(name: .ghosttySessionBell, object: sessionId)
+    }
+
+    func handleTitle(_ title: String, surface: ghostty_surface_t?) {
+        guard let sessionId = sessionId(for: surface) else { return }
+        NotificationCenter.default.post(
+            name: .ghosttySessionTitle,
+            object: GhosttySessionTitle(sessionId: sessionId, title: title)
+        )
+    }
+
+    private func sessionId(for surface: ghostty_surface_t?) -> String? {
+        guard let surface else { return nil }
+        return surfaces.first(where: { $0.value.surface == surface })?.key
     }
 
     func sendText(_ text: String, sessionId: String) {

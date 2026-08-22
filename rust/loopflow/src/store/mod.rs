@@ -129,6 +129,7 @@ pub(crate) struct WaveLocatorUpdate {
     pub expected_repo: String,
     pub expected_slug: String,
     pub target: WaveLocator,
+    pub retire_collision: Option<WaveId>,
 }
 
 #[derive(Debug, thiserror::Error)]
@@ -492,6 +493,11 @@ where
 }
 
 impl Store {
+    #[cfg(test)]
+    pub(crate) fn from_sqlite_for_test(sqlite: sqlite::SqliteStore) -> Self {
+        Self { sqlite }
+    }
+
     pub async fn put_pm_snapshot(&self, snapshot: PmSnapshotRow) -> StoreResult<()> {
         run_sqlite(&self.sqlite, move |store| store.put_pm_snapshot(&snapshot)).await
     }
@@ -602,6 +608,17 @@ impl Store {
 
     pub(crate) async fn relocate_waves(&self, updates: Vec<WaveLocatorUpdate>) -> StoreResult<()> {
         run_sqlite(&self.sqlite, move |store| store.relocate_waves(&updates)).await
+    }
+
+    pub(crate) async fn wave_retirement_blockers(
+        &self,
+        wave_id: &WaveId,
+    ) -> StoreResult<Vec<String>> {
+        let wave_id = wave_id.clone();
+        run_sqlite(&self.sqlite, move |store| {
+            store.wave_retirement_blockers(&wave_id)
+        })
+        .await
     }
 
     pub async fn delete_wave(&self, wave_id: &WaveId) -> StoreResult<()> {

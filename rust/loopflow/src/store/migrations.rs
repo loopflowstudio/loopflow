@@ -4660,4 +4660,138 @@ mod tests {
             .unwrap();
         assert_eq!(promoted_at, None, "ancestry is not a promotion occurrence");
     }
+
+    #[test]
+    fn status_surfaces_migration_attributes_only_uniquely_contained_project_failures() {
+        let conn = open();
+        apply_before_current_draft(&conn, "status_truth");
+        conn.execute_batch(
+            "PRAGMA foreign_keys=OFF;
+             INSERT INTO waves (id, name, repo, created_at)
+             VALUES ('wave_status', 'status', '/repo', 1);
+             INSERT INTO projects (id, wave_id, external_project_id, created_at)
+             VALUES ('project_status', 'wave_status', 'linear-status', 2);
+             INSERT INTO epochs (
+                 id, number, wave_id, project_id, task_id, state, current_rev,
+                 created_at, terminal_at
+             ) VALUES
+                 ('epoch_status', 1, NULL, 'project_status', NULL, 'open', 0, 100, NULL);
+             INSERT INTO runs (
+                 id, epoch_id, home_id, state, trigger_json, retry_of,
+                 lease_hash, lease_generation, source_kind, source_id,
+                 created_at, ended_at, stop_reason,
+                 containment_kind, containment_id, cwd, started_at
+             ) VALUES
+                 ('run_unique', 'epoch_status', (SELECT id FROM homes LIMIT 1),
+                  'ended', '{\"kind\":\"user\"}', NULL, NULL, NULL,
+                  'project', 'project_status', 100, 130, '{\"kind\":\"recovery\"}',
+                  NULL, NULL, NULL, NULL),
+                 ('run_overlap_a', 'epoch_status', (SELECT id FROM homes LIMIT 1),
+                  'ended', '{\"kind\":\"user\"}', NULL, NULL, NULL,
+                  'project', 'project_status', 200, 240, 'historical import',
+                  NULL, NULL, NULL, NULL),
+                 ('run_overlap_b', 'epoch_status', (SELECT id FROM homes LIMIT 1),
+                  'ended', '{\"kind\":\"user\"}', NULL, NULL, NULL,
+                  'project', 'project_status', 200, 240, NULL, NULL, NULL, NULL, NULL);
+             INSERT INTO project_events (project_id, kind_json, created_at) VALUES
+                 ('project_status',
+                  '{\"kind\":\"failed\",\"error\":\"credential\",\"resumable\":true}',
+                  120),
+                 ('project_status',
+                  '{\"kind\":\"failed\",\"error\":\"controller\",\"resumable\":true}',
+                  90),
+                 ('project_status',
+                  '{\"kind\":\"failed\",\"error\":\"ambiguous\",\"resumable\":true}',
+                  220);
+             INSERT INTO agent_invocations (
+                 id, run_id, process_id, started_at, ended_at, repo, worktree,
+                 provider, surface, capture_status, outcome, artifact_dir,
+                 conversation_path, conversation_event_count, conversation_bytes,
+                 supervising_run_id
+             ) VALUES (
+                 'invocation_74115449', 'trace-status', 'process-status', 110, 125,
+                 '/repo', '/repo', 'codex', 'headless', 'complete', 'completed',
+                 '/tmp/artifact', '/tmp/conversation', 1, 1, 'run_unique'
+             ), (
+                 'invocation_11111111111111111111111111111111',
+                 'trace-stale', 'process-stale', 115, NULL,
+                 '/repo', '/repo', 'codex', 'headless', 'capturing', 'running',
+                 '/tmp/stale-artifact', '/tmp/stale-conversation', 0, 0, 'run_unique'
+             );
+             INSERT INTO agent_turns (
+                 id, invocation_id, ordinal, started_at, ended_at, status,
+                 input_op, context_coverage, tokenizer, task_prompt_path,
+                 system_tokens, task_tokens, supplied_context_tokens,
+                 context_gather_ms, context_render_ms, context_persist_ms
+             ) VALUES (
+                 'turn_status', 'invocation_74115449', 0, 111, 124, 'completed',
+                 'initial', 'assembled', 'none', '/tmp/prompt', 0, 0, 0, 0, 0, 0
+             );
+             INSERT INTO ask_exchanges (
+                 id, epoch_id, origin_work_kind, origin_work_id, origin_run_id,
+                 origin_turn_id, origin_invocation_id, origin_home_id, origin_cwd,
+                 target_kind, request_kind, request_prompt, state,
+                 active_invocation_id, asked_at
+             ) VALUES (
+                 'ask_status', 'epoch_status', 'project', 'project_status',
+                 'run_unique', 'turn_status', 'invocation_74115449',
+                 (SELECT id FROM homes LIMIT 1), '/repo', 'user', 'intervention',
+                 'preserve invocation ownership', 'claimed',
+                 'invocation_74115449', 112
+             );",
+        )
+        .unwrap();
+
+        conn.execute_batch(&current_draft_sql("status_truth"))
+            .unwrap();
+
+        let rows = conn
+            .prepare("SELECT run_id FROM project_events ORDER BY id")
+            .unwrap()
+            .query_map([], |row| row.get::<_, Option<String>>(0))
+            .unwrap()
+            .collect::<Result<Vec<_>, _>>()
+            .unwrap();
+        assert_eq!(rows, vec![Some("run_unique".to_string()), None, None]);
+        assert_eq!(
+            conn.query_row(
+                "SELECT stop_reason FROM runs WHERE id='run_overlap_a'",
+                [],
+                |row| row.get::<_, String>(0),
+            )
+            .unwrap(),
+            "historical import"
+        );
+        let canonical = "invocation_74115449000000000000000000000000";
+        assert_eq!(
+            conn.query_row(
+                "SELECT invocation_id FROM agent_turns WHERE id='turn_status'",
+                [],
+                |row| row.get::<_, String>(0),
+            )
+            .unwrap(),
+            canonical
+        );
+        assert_eq!(
+            conn.query_row(
+                "SELECT origin_invocation_id || ':' || active_invocation_id
+                 FROM ask_exchanges WHERE id='ask_status'",
+                [],
+                |row| row.get::<_, String>(0),
+            )
+            .unwrap(),
+            format!("{canonical}:{canonical}")
+        );
+        assert_eq!(
+            conn.query_row(
+                "SELECT ended_at || ':' || outcome || ':' || handback_state
+                 FROM agent_invocations
+                 WHERE id='invocation_11111111111111111111111111111111'",
+                [],
+                |row| row.get::<_, String>(0),
+            )
+            .unwrap(),
+            "130:unknown:unknown"
+        );
+    }
 }

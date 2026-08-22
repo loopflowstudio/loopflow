@@ -209,20 +209,23 @@ async fn run_task_with(
     // process, so no child `lf` records on its behalf.
     let capture = match flow.current() {
         Some(step) => {
-            let Some(context) = crate::journal::trace_capture_context(
+            let context = match crate::journal::trace_capture_context(
                 Path::new(&task.worktree),
                 Some(step.flow.clone()),
                 Some(step.step.clone()),
-            ) else {
-                return finish_execution_blocked(
-                    &store,
-                    &mut task,
-                    lease,
-                    harness.as_mut(),
-                    &["Loopflow active Turn authority has no Run execution context".to_string()],
-                    None,
-                )
-                .await;
+            ) {
+                Ok(context) => context,
+                Err(error) => {
+                    return finish_execution_blocked(
+                        &store,
+                        &mut task,
+                        lease,
+                        harness.as_mut(),
+                        &[format!("Task trace capture prerequisite missing: {error}")],
+                        None,
+                    )
+                    .await;
+                }
             };
             match crate::trace::CaptureHandle::begin(
                 context,
@@ -1581,10 +1584,21 @@ async fn record_unhandled_failure(
 }
 
 fn unhandled_failure_receipt(detail: &str) -> (String, bool) {
+    if let Some(reason) = trace_capture_blocker(detail) {
+        return (reason, false);
+    }
     match provider_credential_blocker(detail) {
         Some(message) => (message, false),
         None => (format!("task process failed: {detail}"), true),
     }
+}
+
+fn trace_capture_blocker(detail: &str) -> Option<String> {
+    let (_, reason) = detail.split_once("trace capture is already partial:")?;
+    Some(format!(
+        "Task trace capture could not continue:{} The partial trace, Task worktree, and active pull request remain preserved. Repair local ledger write contention before starting a new Run.",
+        reason
+    ))
 }
 
 fn provider_credential_blocker(detail: &str) -> Option<String> {
@@ -2172,10 +2186,14 @@ fn task_seed(
     )
 }
 
-pub(crate) async fn flow_step_ask_prompt(
+/// Prepare the skill's REAL harness turn for a human flow gate — the same turn
+/// `lf <skill>` builds (its system prompt, context, config), with only the
+/// settlement contract appended to the input. The Ask session then IS the skill
+/// run, not a generic agent handed the skill's task text (which self-approved).
+pub(crate) async fn flow_step_harness_turn(
     store: &SharedStore,
     ask: &crate::durable::Ask,
-) -> Result<String> {
+) -> Result<crate::lf::commands::run::PreparedHarnessTurn> {
     let crate::durable::AskBody::FlowStep {
         flow,
         node_id,
@@ -2228,19 +2246,17 @@ pub(crate) async fn flow_step_ask_prompt(
     let project = owning_project(store, &task).await?;
     let wave = owning_wave(store, &task).await?;
     let seed = task_seed(&task, &project.plan, &pr, wave.name(), &boundary);
-    let prepared =
+    let mut prepared =
         crate::lf::commands::run::prepare_interactive_harness_turn(skill, &seed, wave.name())?;
-    Ok(human_flow_ask_prompt(
-        &prepared.input,
-        skill,
-        node_id,
-        &ask.id,
-    ))
+    prepared.input = human_flow_settlement(&prepared.input, skill, node_id, &ask.id);
+    Ok(prepared)
 }
 
-fn human_flow_ask_prompt(input: &str, skill: &str, node_id: &str, ask_id: &AskId) -> String {
+/// Append only the settlement contract to the skill's real input. The skill's
+/// own harness governs the review; the ask system owns just how the flow advances.
+fn human_flow_settlement(input: &str, skill: &str, node_id: &str, ask_id: &AskId) -> String {
     format!(
-        "{input}\n\n<lf:human-flow-node>\nThis is the actual writable `{skill}` Task step at human node `{node_id}`, not an advisory review. Work only in the origin Task and settle explicitly before leaving:\n- `lf ask resolve {ask_id} \"<concise verified summary>\"` accepts the step\n- `lf ask decline {ask_id} \"<reason>\"` returns to the preceding autonomous step\n- `lf ask release {ask_id} \"<reason>\"` leaves the node waiting\nA final response, clean exit, Ctrl-D, or window close never advances the flow.\n</lf:human-flow-node>"
+        "{input}\n\n<lf:human-flow-node>\nThis `{skill}` run is the actual writable Task step at human node `{node_id}`, not an advisory review. Settle explicitly before leaving:\n- `lf ask resolve {ask_id} \"<concise verified summary>\"` accepts the step\n- `lf ask decline {ask_id} \"<reason>\"` returns to the preceding autonomous step\n- `lf ask release {ask_id} \"<reason>\"` leaves the node waiting\nA final response, clean exit, Ctrl-D, or window close never advances the flow.\n</lf:human-flow-node>"
     )
 }
 
@@ -2290,7 +2306,7 @@ mod shipping_lifecycle_tests;
 #[cfg(test)]
 mod planning_tests {
     use super::{
-        completed_boundary_failure, execution_blocker_at_handoff, human_flow_ask_prompt,
+        completed_boundary_failure, execution_blocker_at_handoff, human_flow_settlement,
         preceding_autonomous_step, sync_task_state, task_seed, unhandled_failure_receipt,
     };
     use crate::chat::types::Lifecycle;
@@ -2500,15 +2516,16 @@ mod planning_tests {
     }
 
     #[test]
-    fn human_flow_settlement_contract_follows_the_authored_skill_handoff() {
-        let prompt = human_flow_ask_prompt(
-            "$review-design\n\n<lf:surface>human present</lf:surface>",
+    fn human_flow_settlement_wraps_the_skill_input() {
+        let prompt = human_flow_settlement(
+            "the real review-design harness input",
             "review-design",
             "review_kickoff",
             &AskId::parse("ask_00000000000000000000000000000001").unwrap(),
         );
 
-        assert!(prompt.starts_with("$review-design\n"));
+        // The skill's own input is preserved verbatim; only settlement is appended.
+        assert!(prompt.starts_with("the real review-design harness input"));
         assert!(prompt.contains("<lf:human-flow-node>"));
         assert!(prompt.contains("lf ask resolve ask_00000000000000000000000000000001"));
         assert!(prompt.contains("lf ask decline ask_00000000000000000000000000000001"));
@@ -3108,6 +3125,13 @@ mod planning_tests {
             AskBody::FlowStep { node_id, skill, .. }
                 if node_id == "review_kickoff" && skill == "review-design"
         ));
+        let turn = super::flow_step_harness_turn(&store, &queued[0])
+            .await
+            .unwrap();
+        // The session runs the skill's real harness turn; only the settlement
+        // contract is appended — no generic-agent reviewer-mode injection.
+        assert!(turn.input.contains("<lf:human-flow-node>"));
+        assert!(turn.input.contains("lf ask resolve"));
         assert!(store
             .invocations_for_run(&lease.run_id)
             .await

@@ -438,14 +438,13 @@ fn run_skill_with_journal(
 }
 
 /// Commit any uncommitted changes left by the previous skill.
-pub(crate) fn commit_skill_work(repo: &Path, skill_name: &str) -> Result<()> {
+pub(crate) fn commit_skill_work(repo: &Path, skill_name: &str) -> Result<bool> {
     let options = CommitOptions {
         add: true,
         message: Some(format!("lf commit: {skill_name}")),
         ..CommitOptions::for_task(skill_name)
     };
-    commit_workflow(repo, &options, &NullProgress)?;
-    Ok(())
+    commit_workflow(repo, &options, &NullProgress).map_err(Into::into)
 }
 fn write_temp_skill(repo: &Path, name: &str, prompt: &str) -> Result<TempSkillGuard> {
     let tmp_skill_dir = repo.join(".lf/skills");

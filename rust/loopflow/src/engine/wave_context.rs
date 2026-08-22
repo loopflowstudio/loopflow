@@ -350,8 +350,18 @@ pub fn wave_origin(repo_root: &Path) -> PathBuf {
 /// The Wave's prompt memory, read directly from applicable `MEMORY.md` files.
 pub fn gather_wave_memory(repo_root: &Path, wave: &str) -> Option<String> {
     let origin = wave_origin(repo_root);
-    let chain = memory_wave_chain(&origin, wave).unwrap_or_else(|| vec![wave.to_string()]);
-    gather_memory_chain(&origin, &chain)
+    gather_wave_memory_from(&origin, &origin, wave)
+}
+
+/// Resolve inherited Wave scope from the canonical registry while reading the
+/// mutable memory files from the resident's execution checkout.
+pub(crate) fn gather_wave_memory_from(
+    origin: &Path,
+    content_repo: &Path,
+    wave: &str,
+) -> Option<String> {
+    let chain = memory_wave_chain(origin, wave).unwrap_or_else(|| vec![wave.to_string()]);
+    gather_memory_chain(content_repo, &chain)
 }
 
 /// Resolve lexical memory scope through the registry.

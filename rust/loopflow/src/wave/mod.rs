@@ -12,16 +12,15 @@
 //! - supervises the resident ([`supervisor`]): process liveness, the respawn
 //!   ladder, the interrupt janitor.
 //!
-//! The resident ([`resident`]) owns the pass scheduler, runs from the clean
-//! canonical main checkout as a read-and-coordinate control plane, consumes
-//! its own wave's `/events?inbox=true` subscription, and publishes ordered
-//! turn deltas back through the resident door. The wire between them is
-//! [`wire`].
+//! The resident ([`resident`]) owns the pass scheduler, runs from a dedicated
+//! sibling worktree, consumes its own wave's `/events?inbox=true`
+//! subscription, and publishes ordered turn deltas back through the resident
+//! door. The wire between them is [`wire`].
 //!
 //! ```text
 //!   lf wave <name>                      lf __resident <name>
 //!   ┌───────────────────────┐  spawns   ┌──────────────────────────┐
-//!   │ LISTENER (origin repo)│──────────▶│ RESIDENT (clean main)    │
+//!   │ LISTENER (origin repo)│──────────▶│ RESIDENT (worktree)      │
 //!   │ pens · folds · doors  │           │ pass scheduler           │
 //!   │ observer · supervisor │◀──deltas──│ seed · queue             │
 //!   └──────────┬────────────┘           └────────────▲─────────────┘
@@ -33,8 +32,8 @@
 //! not a second product surface.
 //!
 //! Truth is the per-wave append-only [`journal`] (JSONL under `.lf/journal/
-//! waves/<name>/` in the ORIGIN repo — the listener serves from the origin
-//! and no longer creates worktrees); the in-process state
+//! waves/<name>/` in the ORIGIN repo — the listener serves from the origin,
+//! while its resident writes only in the sibling worktree); the in-process state
 //! ([`runtime::WaveRuntime`]) is a fold of it, rebuilt on boot so a restart
 //! keeps the whole conversation. The journal is listener-owned persistence;
 //! the resident never touches journal files. The only coordination files are
@@ -77,7 +76,9 @@ use secrecy::SecretString;
 
 use crate::engine::repo::find_repo_root;
 use crate::engine::wave_config::{try_read_wave_chat_config, WaveChatConfig};
-use crate::engine::worktrees::main_repo_root;
+use crate::engine::worktrees::{
+    ensure_agent_worktree, main_repo_root, wave_agent_segment, AgentWorktree,
+};
 use crate::ops::util::normalize_wave_name;
 use crate::store::{open_existing_store, SharedStore};
 use crate::wave::chat::ChatBacking;
@@ -87,6 +88,11 @@ use crate::wave::runtime::WaveRuntime;
 /// here so the spawner and the CLI cannot drift apart silently.
 pub(crate) const RESIDENT_SUBCOMMAND: &str = "__resident";
 pub(crate) const WAVE_SERVER_ENDPOINT_ENV: &str = "LF_WAVE_SERVER_ENDPOINT";
+
+pub(crate) fn resolve_resident_worktree(main_repo: &Path, wave: &str) -> Result<AgentWorktree> {
+    let segment = wave_agent_segment(wave)?;
+    ensure_agent_worktree(main_repo, segment).map_err(Into::into)
+}
 
 #[derive(Debug)]
 pub(crate) struct ListenerSignals<F> {
@@ -252,14 +258,20 @@ impl Drop for WaveRunGuard {
 fn resident_spawner(
     lf_bin: PathBuf,
     wave: String,
-    repo_root: PathBuf,
+    resident_repo: PathBuf,
     endpoint: String,
     token: String,
     resident_env: Vec<(String, String)>,
 ) -> supervisor::SpawnResident {
     Box::new(move || {
-        let mut command =
-            resident_command(&lf_bin, &wave, &repo_root, &endpoint, &token, &resident_env);
+        let mut command = resident_command(
+            &lf_bin,
+            &wave,
+            &resident_repo,
+            &endpoint,
+            &token,
+            &resident_env,
+        );
         // No kill_on_drop: shutdown stops the supervisor FIRST (so a TERM'd
         // resident's exit isn't journaled as a failure), then SIGTERMs the
         // resident by pid — its hooks stop the vendor process group. A
@@ -273,7 +285,7 @@ fn resident_spawner(
 fn resident_command(
     lf_bin: &Path,
     wave: &str,
-    repo_root: &Path,
+    resident_repo: &Path,
     endpoint: &str,
     token: &str,
     resident_env: &[(String, String)],
@@ -282,7 +294,7 @@ fn resident_command(
     command
         .arg(RESIDENT_SUBCOMMAND)
         .arg(wave)
-        .current_dir(repo_root)
+        .current_dir(resident_repo)
         .env(WAVE_SERVER_ENDPOINT_ENV, endpoint)
         .env(wire::RESIDENT_TOKEN_ENV, token)
         // The resident's children must resolve `lf` to this binary.
@@ -403,6 +415,10 @@ where
         );
     }
 
+    let resident_worktree = spawn_resident
+        .then(|| resolve_resident_worktree(&repo_root, &wave))
+        .transpose()?;
+
     // Bind before opening the journal for writing: the registry pre-flight
     // needs this boot's endpoint, and a refused start must scribble NOTHING —
     // no journal opened, no ServerStarted appended. Binding a loopback port
@@ -520,7 +536,11 @@ where
         resident_spawner(
             lf_bin,
             wave.clone(),
-            repo_root.clone(),
+            resident_worktree
+                .as_ref()
+                .expect("a spawned resident has an isolated worktree")
+                .path
+                .clone(),
             addr.to_string(),
             token.clone(),
             resident_env,
@@ -598,7 +618,11 @@ where
             .map(|(store, lease)| server::WaveRunAttach {
                 store: Arc::clone(store),
                 lease: lease.clone(),
-                cwd: repo_root.clone(),
+                cwd: resident_worktree
+                    .as_ref()
+                    .expect("a Wave Run has a spawned resident worktree")
+                    .path
+                    .clone(),
             }),
     );
     let result = axum::serve(listener, app)
@@ -692,6 +716,7 @@ mod tests {
             &[(discord::TOKEN_ENV.to_string(), "must-not-pass".to_string())],
         );
         assert_eq!(command.as_std().get_program(), "/paired/bin/lf");
+        assert_eq!(command.as_std().get_current_dir(), Some(Path::new("/tmp")));
         assert!(command
             .as_std()
             .get_envs()

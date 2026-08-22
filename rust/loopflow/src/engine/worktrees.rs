@@ -1,7 +1,8 @@
 use crate::engine::error::GitError;
 use crate::engine::git::{
-    delete_local_branch, get_default_branch, has_commits_beyond, is_ancestor, is_clean,
-    is_squash_merged, rev_parse, sync_main, worktree_add, worktree_remove, WorktreeBranch,
+    current_branch, delete_local_branch, fetch, get_default_branch, has_commits_beyond, has_origin,
+    is_ancestor, is_clean, is_squash_merged, rev_parse, stash_including_untracked, stash_pop,
+    sync_main, worktree_add, worktree_remove, WorktreeBranch,
 };
 use crate::engine::identity::WorktreeName;
 use crate::engine::naming::git_user;
@@ -161,6 +162,13 @@ pub struct CreateWorktreeResult {
     pub base_commit: Option<String>,
 }
 
+/// One main agent's isolated execution checkout.
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub struct AgentWorktree {
+    pub path: PathBuf,
+    pub branch: String,
+}
+
 pub fn git_common_dir(repo: &Path) -> Result<PathBuf, GitError> {
     let output = Command::new("git")
         .arg("-C")
@@ -244,6 +252,19 @@ fn short_hash(value: &str, chars: usize) -> String {
     let mut hash = hex::encode(digest);
     hash.truncate(chars);
     hash
+}
+
+/// Stable flat placement name for a Wave resident. Nested locators keep a
+/// readable prefix and a hash of the complete slug so sanitization cannot
+/// collapse distinct Waves onto one checkout.
+pub fn wave_agent_segment(wave: &str) -> Result<WorktreeSegment, PlacementError> {
+    let readable = crate::engine::naming::sanitize_for_branch(wave).replace('.', "-");
+    let name = if wave.contains('/') {
+        format!("wave-{readable}-{}", short_hash(wave, 8))
+    } else {
+        format!("wave-{readable}")
+    };
+    WorktreeSegment::parse(&name)
 }
 
 /// Extract the suffix from a named sibling worktree directory.
@@ -1152,6 +1173,230 @@ pub fn create_from_placement_plan(
     }
 }
 
+/// Resolve or create an author-scoped sibling worktree for a main agent.
+///
+/// New worktrees start from the fetched default branch when `origin` exists,
+/// and from the local default branch otherwise. Existing placements are
+/// reused only at their deterministic sibling path.
+pub fn ensure_agent_worktree(
+    main_repo: &Path,
+    segment: WorktreeSegment,
+) -> Result<AgentWorktree, GitError> {
+    let main_repo = canonical_default_checkout(main_repo)?;
+    let mut plan = deterministic_agent_plan(&main_repo, segment)?;
+    if plan.strategy == PlacementStrategy::Create {
+        plan.base_ref = agent_base_ref(&main_repo, true)?;
+    }
+    create_agent_worktree(&main_repo, &plan)
+}
+
+pub(crate) fn existing_agent_worktree(
+    main_repo: &Path,
+    segment: WorktreeSegment,
+) -> Result<Option<AgentWorktree>, GitError> {
+    let plan = deterministic_agent_plan(main_repo, segment)?;
+    match plan.strategy {
+        PlacementStrategy::UseExistingWorktree => Ok(Some(AgentWorktree {
+            path: plan.worktree_path,
+            branch: plan.branch,
+        })),
+        PlacementStrategy::Create | PlacementStrategy::CheckoutExisting => Ok(None),
+    }
+}
+
+/// Move a bare/default `lf` session off canonical main while preserving both
+/// local commits and uncommitted files. A deliberate non-default checkout and
+/// an existing linked worktree are left alone.
+pub fn move_default_agent_to_worktree(repo: &Path) -> Result<Option<AgentWorktree>, GitError> {
+    let main_repo = main_repo_root(repo)?;
+    let checkout = std::fs::canonicalize(repo).unwrap_or_else(|_| repo.to_path_buf());
+    let canonical = std::fs::canonicalize(&main_repo).unwrap_or_else(|_| main_repo.clone());
+    if checkout != canonical {
+        return Ok(None);
+    }
+
+    let default_branch = get_default_branch(&main_repo)?;
+    if current_branch(&main_repo)?.as_deref() != Some(default_branch.as_str()) {
+        return Ok(None);
+    }
+
+    let base_ref = agent_base_ref(&main_repo, false)?;
+    let head = rev_parse(&main_repo, "HEAD")?;
+    let dirty = !is_clean(&main_repo)?;
+    let carries_state = dirty || has_commits_beyond(&main_repo, &default_branch, &base_ref)?;
+    let stable = WorktreeSegment::parse("agent").map_err(placement_git_error)?;
+    let expected_stable = worktree_path(&main_repo, stable.as_str());
+    let stable_plan = plan_placement(&main_repo, stable)?;
+    let stable_collision = match stable_plan.strategy {
+        PlacementStrategy::UseExistingWorktree => {
+            normalized_path(&stable_plan.worktree_path) != normalized_path(&expected_stable)
+        }
+        PlacementStrategy::Create | PlacementStrategy::CheckoutExisting => expected_stable.exists(),
+    };
+    let mut plan = if stable_collision
+        || (carries_state && stable_plan.strategy != PlacementStrategy::Create)
+    {
+        unique_agent_plan(&main_repo, &head)?
+    } else {
+        stable_plan
+    };
+    if plan.strategy == PlacementStrategy::Create {
+        plan.base_ref = if carries_state { "HEAD" } else { &base_ref }.to_string();
+    }
+
+    let stashed = stash_including_untracked(&main_repo)?;
+    let worktree = match create_agent_worktree(&main_repo, &plan) {
+        Ok(worktree) => worktree,
+        Err(error) => {
+            if stashed {
+                let _ = stash_pop(&main_repo);
+            }
+            return Err(error);
+        }
+    };
+
+    if let Err(error) = reset_checkout_to(&main_repo, &base_ref) {
+        if stashed {
+            let _ = stash_pop(&main_repo);
+        }
+        return Err(error);
+    }
+    if stashed {
+        stash_pop(&worktree.path).map_err(|error| GitError::CommandFailed {
+            command: "move default lf state".to_string(),
+            stderr: format!(
+                "canonical main is clean and the moved state remains recoverable in the latest stash, but applying it in {} failed: {error}",
+                worktree.path.display()
+            ),
+        })?;
+    }
+
+    Ok(Some(worktree))
+}
+
+fn deterministic_agent_plan(
+    main_repo: &Path,
+    segment: WorktreeSegment,
+) -> Result<PlacementPlan, GitError> {
+    let expected_path = worktree_path(main_repo, segment.as_str());
+    let plan = plan_placement(main_repo, segment)?;
+    if plan.strategy == PlacementStrategy::UseExistingWorktree
+        && normalized_path(&plan.worktree_path) != normalized_path(&expected_path)
+    {
+        return Err(GitError::CommandFailed {
+            command: "resolve agent worktree".to_string(),
+            stderr: format!(
+                "branch {} is checked out at {}, expected {}",
+                plan.branch,
+                plan.worktree_path.display(),
+                expected_path.display()
+            ),
+        });
+    }
+    if plan.strategy != PlacementStrategy::UseExistingWorktree && expected_path.exists() {
+        return Err(GitError::CommandFailed {
+            command: "resolve agent worktree".to_string(),
+            stderr: format!(
+                "expected agent worktree path is occupied: {}",
+                expected_path.display()
+            ),
+        });
+    }
+    Ok(plan)
+}
+
+fn create_agent_worktree(
+    main_repo: &Path,
+    plan: &PlacementPlan,
+) -> Result<AgentWorktree, GitError> {
+    let created = create_from_placement_plan(main_repo, plan)?;
+    Ok(AgentWorktree {
+        path: created.path,
+        branch: created.branch,
+    })
+}
+
+fn canonical_default_checkout(main_repo: &Path) -> Result<PathBuf, GitError> {
+    let main = main_repo_root(main_repo)?;
+    let main = std::fs::canonicalize(&main).unwrap_or(main);
+    let default_branch = get_default_branch(&main)?;
+    let branch = current_branch(&main)?;
+    if branch.as_deref() != Some(default_branch.as_str()) {
+        return Err(GitError::CommandFailed {
+            command: "resolve agent worktree".to_string(),
+            stderr: format!(
+                "canonical checkout is on {}, expected {default_branch}",
+                branch.as_deref().unwrap_or("detached HEAD")
+            ),
+        });
+    }
+    Ok(main)
+}
+
+fn agent_base_ref(main_repo: &Path, require_fetch: bool) -> Result<String, GitError> {
+    let default_branch = get_default_branch(main_repo)?;
+    if !has_origin(main_repo)? {
+        return Ok(default_branch);
+    }
+    match fetch(main_repo, "origin", &default_branch) {
+        Ok(()) => Ok(format!("origin/{default_branch}")),
+        Err(error) if require_fetch => Err(error),
+        Err(_) if rev_parse(main_repo, &format!("origin/{default_branch}")).is_ok() => {
+            Ok(format!("origin/{default_branch}"))
+        }
+        Err(_) => Ok(default_branch),
+    }
+}
+
+fn unique_agent_plan(repo: &Path, head: &str) -> Result<PlacementPlan, GitError> {
+    for attempt in 0_u32..100 {
+        let nonce = format!(
+            "{head}-{}-{}-{attempt}",
+            std::process::id(),
+            SystemTime::now()
+                .duration_since(SystemTime::UNIX_EPOCH)
+                .unwrap_or_default()
+                .as_nanos()
+        );
+        let name = format!("agent-{}", short_hash(&nonce, 8));
+        let segment = WorktreeSegment::parse(&name).map_err(placement_git_error)?;
+        let plan = plan_placement(repo, segment)?;
+        if plan.strategy == PlacementStrategy::Create && !plan.worktree_path.exists() {
+            return Ok(plan);
+        }
+    }
+    Err(GitError::CommandFailed {
+        command: "resolve agent worktree".to_string(),
+        stderr: "could not allocate a unique default-agent worktree".to_string(),
+    })
+}
+
+fn reset_checkout_to(repo: &Path, target: &str) -> Result<(), GitError> {
+    let output = Command::new("git")
+        .arg("-C")
+        .arg(repo)
+        .args(["reset", "--hard", target])
+        .output()?;
+    if output.status.success() {
+        return Ok(());
+    }
+    Err(GitError::CommandFailed {
+        command: format!("git reset --hard {target}"),
+        stderr: String::from_utf8_lossy(&output.stderr).to_string(),
+    })
+}
+
+fn normalized_path(path: &Path) -> PathBuf {
+    path.canonicalize().unwrap_or_else(|_| path.to_path_buf())
+}
+
+fn placement_git_error(error: PlacementError) -> GitError {
+    GitError::CommandFailed {
+        command: "resolve agent worktree".to_string(),
+        stderr: error.to_string(),
+    }
+}
+
 pub fn schedule_upstream_sync(worktree: PathBuf, branch: String) {
     thread::spawn(move || {
         // Don't block the caller on network/auth issues. Retry in the background.
@@ -1189,8 +1434,9 @@ pub fn push_branch_with_upstream(worktree: &Path, branch: &str) -> Result<(), Gi
 #[cfg(test)]
 mod tests {
     use super::{
-        abandoned_prune_reason, apply_network_enrichment, parse_pull_request_states,
-        plan_placement, prune_abandoned_prompt_logs, prune_branch_worktree, worktree_path,
+        abandoned_prune_reason, apply_network_enrichment, ensure_agent_worktree,
+        move_default_agent_to_worktree, parse_pull_request_states, plan_placement,
+        prune_abandoned_prompt_logs, prune_branch_worktree, wave_agent_segment, worktree_path,
         worktree_prune_reason, PlacementError, PlacementStrategy, PullRequestState,
         TargetedPruneOutcome, WorktreePruneReason, WorktreeSegment, WorktreeState,
     };
@@ -1219,6 +1465,43 @@ mod tests {
                 .expect("git config");
         }
         dir
+    }
+
+    fn git(repo: &Path, args: &[&str]) {
+        let output = Command::new("git")
+            .arg("-C")
+            .arg(repo)
+            .args(args)
+            .output()
+            .expect("run git");
+        assert!(
+            output.status.success(),
+            "git {}: {}",
+            args.join(" "),
+            String::from_utf8_lossy(&output.stderr)
+        );
+    }
+
+    fn repo_with_origin() -> (tempfile::TempDir, std::path::PathBuf) {
+        let root = tempfile::tempdir().expect("temp root");
+        let repo = root.path().join("repo");
+        let origin = root.path().join("origin.git");
+        std::fs::create_dir_all(&repo).unwrap();
+        std::fs::create_dir_all(&origin).unwrap();
+        git(&repo, &["init", "-b", "main"]);
+        git(&repo, &["config", "user.name", "tester"]);
+        git(&repo, &["config", "user.email", "t@example.com"]);
+        std::fs::write(repo.join("tracked.txt"), "base\n").unwrap();
+        git(&repo, &["add", "."]);
+        git(&repo, &["commit", "-m", "base"]);
+        git(&origin, &["init", "--bare"]);
+        git(
+            &repo,
+            &["remote", "add", "origin", origin.to_str().unwrap()],
+        );
+        git(&repo, &["push", "-u", "origin", "main"]);
+        git(&origin, &["symbolic-ref", "HEAD", "refs/heads/main"]);
+        (root, repo)
     }
 
     #[test]
@@ -1498,5 +1781,112 @@ mod tests {
         assert_eq!(plan.branch, "tester/child");
         assert_eq!(plan.base_ref, "main");
         assert_eq!(plan.strategy, PlacementStrategy::Create);
+    }
+
+    #[test]
+    fn wave_agent_worktree_is_fetched_isolated_and_reused() {
+        let (_root, repo) = repo_with_origin();
+        std::fs::write(repo.join("upstream.txt"), "new upstream\n").unwrap();
+        git(&repo, &["add", "."]);
+        git(&repo, &["commit", "-m", "upstream"]);
+        git(&repo, &["push", "origin", "main"]);
+        git(&repo, &["reset", "--hard", "HEAD^"]);
+
+        let segment = wave_agent_segment("ship").unwrap();
+        let first = ensure_agent_worktree(&repo, segment.clone()).unwrap();
+        let second = ensure_agent_worktree(&repo, segment).unwrap();
+
+        assert_eq!(first, second);
+        assert_eq!(first.branch, "tester/wave-ship");
+        assert_eq!(
+            super::rev_parse(&first.path, "HEAD").unwrap(),
+            super::rev_parse(&repo, "origin/main").unwrap()
+        );
+        assert!(super::is_clean(&repo).unwrap());
+        assert!(!super::has_commits_beyond(&repo, "main", "origin/main").unwrap());
+    }
+
+    #[test]
+    fn wave_agent_worktree_refuses_a_branch_checked_out_elsewhere() {
+        let (root, repo) = repo_with_origin();
+        let segment = wave_agent_segment("ship").unwrap();
+        let resident = ensure_agent_worktree(&repo, segment.clone()).unwrap();
+        let displaced = root.path().join("displaced");
+        git(
+            &repo,
+            &[
+                "worktree",
+                "move",
+                resident.path.to_str().unwrap(),
+                displaced.to_str().unwrap(),
+            ],
+        );
+
+        let error =
+            ensure_agent_worktree(&repo, segment).expect_err("resident placement is deterministic");
+
+        assert!(error.to_string().contains(displaced.to_str().unwrap()));
+        assert!(error.to_string().contains("expected"));
+        assert!(super::is_clean(&repo).unwrap());
+    }
+
+    #[test]
+    fn nested_wave_segments_cannot_collapse_into_flat_slugs() {
+        let nested = wave_agent_segment("platform/security").unwrap();
+        let flat = wave_agent_segment("platform-security").unwrap();
+
+        assert_ne!(nested, flat);
+        assert!(nested.as_str().starts_with("wave-platform-security-"));
+    }
+
+    #[test]
+    fn default_agent_carries_commits_and_uncommitted_files_off_main() {
+        let (_root, repo) = repo_with_origin();
+        std::fs::write(repo.join("ahead.txt"), "committed ahead\n").unwrap();
+        git(&repo, &["add", "."]);
+        git(&repo, &["commit", "-m", "ahead"]);
+        std::fs::write(repo.join("tracked.txt"), "edited\n").unwrap();
+        std::fs::write(repo.join("untracked.txt"), "untracked\n").unwrap();
+
+        let moved = move_default_agent_to_worktree(&repo)
+            .unwrap()
+            .expect("canonical main moves");
+
+        assert!(super::is_clean(&repo).unwrap());
+        assert_eq!(
+            super::rev_parse(&repo, "HEAD").unwrap(),
+            super::rev_parse(&repo, "origin/main").unwrap()
+        );
+        assert_eq!(
+            std::fs::read_to_string(moved.path.join("tracked.txt")).unwrap(),
+            "edited\n"
+        );
+        assert_eq!(
+            std::fs::read_to_string(moved.path.join("untracked.txt")).unwrap(),
+            "untracked\n"
+        );
+        assert!(moved.path.join("ahead.txt").is_file());
+        assert!(move_default_agent_to_worktree(&moved.path)
+            .unwrap()
+            .is_none());
+    }
+
+    #[test]
+    fn default_agent_starts_from_origin_when_clean_main_is_behind() {
+        let (_root, repo) = repo_with_origin();
+        std::fs::write(repo.join("upstream.txt"), "new upstream\n").unwrap();
+        git(&repo, &["add", "."]);
+        git(&repo, &["commit", "-m", "upstream"]);
+        git(&repo, &["push", "origin", "main"]);
+        git(&repo, &["reset", "--hard", "HEAD^"]);
+
+        let moved = move_default_agent_to_worktree(&repo)
+            .unwrap()
+            .expect("canonical main moves");
+
+        let upstream = super::rev_parse(&repo, "origin/main").unwrap();
+        assert_eq!(super::rev_parse(&repo, "HEAD").unwrap(), upstream);
+        assert_eq!(super::rev_parse(&moved.path, "HEAD").unwrap(), upstream);
+        assert!(moved.path.join("upstream.txt").is_file());
     }
 }

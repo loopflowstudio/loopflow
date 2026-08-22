@@ -7,6 +7,11 @@ use fs2::FileExt;
 use serde::{Deserialize, Serialize};
 
 use crate::durable::WorkRef;
+use crate::engine::git::{
+    current_branch, fetch, get_default_branch, has_origin, is_ancestor, is_clean, is_squash_merged,
+    sync_main,
+};
+use crate::engine::worktrees::{existing_agent_worktree, github_repo_nwo, wave_agent_segment};
 use crate::id::WaveId;
 use crate::repository::CanonicalRepo;
 use crate::store::{Store, WaveLocatorUpdate};
@@ -370,6 +375,77 @@ async fn preflight(store: &Store, moves: &mut [PlannedWaveMove]) -> Result<()> {
             }
         }
         ensure_wave_stopped(store, planned.wave.id()).await?;
+        prepare_source_for_relocation(planned)?;
+    }
+    Ok(())
+}
+
+fn prepare_source_for_relocation(planned: &PlannedWaveMove) -> Result<()> {
+    let Ok(source_repo) = CanonicalRepo::discover(Path::new(planned.wave.repo())) else {
+        return Ok(());
+    };
+    let source_repo = source_repo.as_path();
+    let default_branch = get_default_branch(source_repo)?;
+    let branch = current_branch(source_repo)?;
+    if branch.as_deref() != Some(default_branch.as_str()) {
+        return Err(anyhow!(
+            "cannot relocate Wave {} while canonical checkout {} is on {}, expected {default_branch}",
+            planned.wave.id(),
+            source_repo.display(),
+            branch.as_deref().unwrap_or("detached HEAD")
+        ));
+    }
+    if !is_clean(source_repo)? {
+        return Err(anyhow!(
+            "cannot relocate Wave {} while canonical checkout {} is dirty",
+            planned.wave.id(),
+            source_repo.display()
+        ));
+    }
+
+    let origin_exists = has_origin(source_repo)?;
+    let merge_target = if origin_exists {
+        fetch(source_repo, "origin", &default_branch)?;
+        format!("origin/{default_branch}")
+    } else {
+        default_branch.clone()
+    };
+
+    let segment = wave_agent_segment(planned.wave.name())?;
+    if let Some(resident) = existing_agent_worktree(source_repo, segment)? {
+        if !is_clean(&resident.path)? {
+            return Err(anyhow!(
+                "cannot relocate Wave {} while resident worktree {} is dirty",
+                planned.wave.id(),
+                resident.path.display()
+            ));
+        }
+        if github_repo_nwo(source_repo).is_some()
+            && crate::ops::current_pr(&resident.path)?.is_some()
+        {
+            return Err(anyhow!(
+                "cannot relocate Wave {} while resident branch {} has an open pull request",
+                planned.wave.id(),
+                resident.branch
+            ));
+        }
+        let integrated = is_ancestor(&resident.path, &resident.branch, &merge_target)?
+            || is_squash_merged(&resident.path, &resident.branch, &merge_target)?;
+        if !integrated {
+            return Err(anyhow!(
+                "cannot relocate Wave {} while resident branch {} has changes absent from {merge_target}",
+                planned.wave.id(),
+                resident.branch
+            ));
+        }
+    }
+
+    if origin_exists && !sync_main(source_repo, &default_branch)? {
+        return Err(anyhow!(
+            "cannot fast-forward canonical checkout {} to origin/{default_branch} before relocating Wave {}",
+            source_repo.display(),
+            planned.wave.id()
+        ));
     }
     Ok(())
 }
@@ -839,12 +915,68 @@ async fn recover_committed_relocation(
 #[cfg(test)]
 mod tests {
     use super::{
-        recovery_path, relocate_wave, relocation_recovery, remove_old_paths, stage_tree,
-        write_recovery, PlannedWaveMove, RelocationPath,
+        prepare_source_for_relocation, recovery_path, relocate_wave, relocation_recovery,
+        remove_old_paths, stage_tree, write_recovery, PlannedWaveMove, RelocationPath,
     };
     use crate::id::WaveId;
     use crate::store::{open_store, StorageConfig, WaveLocatorUpdate};
     use crate::wave::{Wave, WaveLocator};
+    use std::path::{Path, PathBuf};
+    use std::process::Command;
+
+    fn git(repo: &Path, args: &[&str]) {
+        let output = Command::new("git")
+            .arg("-C")
+            .arg(repo)
+            .args(args)
+            .output()
+            .unwrap();
+        assert!(
+            output.status.success(),
+            "git {}: {}",
+            args.join(" "),
+            String::from_utf8_lossy(&output.stderr)
+        );
+    }
+
+    fn relocation_repo() -> (tempfile::TempDir, PathBuf, PlannedWaveMove) {
+        let root = tempfile::tempdir().unwrap();
+        let repo = root.path().join("repo");
+        let origin = root.path().join("origin.git");
+        std::fs::create_dir_all(repo.join("wave/infrastructure")).unwrap();
+        std::fs::create_dir_all(&origin).unwrap();
+        git(&repo, &["init", "-b", "main"]);
+        git(&repo, &["config", "user.name", "tester"]);
+        git(&repo, &["config", "user.email", "t@example.com"]);
+        std::fs::write(
+            repo.join("wave/infrastructure/GOAL.md"),
+            "# Infrastructure\n",
+        )
+        .unwrap();
+        std::fs::write(repo.join("wave/infrastructure/MEMORY.md"), "Initial.\n").unwrap();
+        git(&repo, &["add", "."]);
+        git(&repo, &["commit", "-m", "base"]);
+        git(&origin, &["init", "--bare"]);
+        git(
+            &repo,
+            &["remote", "add", "origin", origin.to_str().unwrap()],
+        );
+        git(&repo, &["push", "-u", "origin", "main"]);
+        git(&origin, &["symbolic-ref", "HEAD", "refs/heads/main"]);
+        let canonical = std::fs::canonicalize(&repo).unwrap();
+        let wave = Wave::new(
+            WaveId::new(),
+            "infrastructure".to_string(),
+            canonical.display().to_string(),
+        );
+        let target = WaveLocator::discover(&repo, "platform").unwrap();
+        let planned = PlannedWaveMove {
+            wave,
+            target,
+            retire_collision: None,
+        };
+        (root, repo, planned)
+    }
 
     #[test]
     fn committed_cleanup_preserves_a_source_that_changed_after_staging() {
@@ -893,6 +1025,52 @@ mod tests {
         assert_eq!(
             std::fs::read_to_string(target.join("events.jsonl")).unwrap(),
             "unrelated\n"
+        );
+    }
+
+    #[test]
+    fn relocation_waits_for_resident_state_then_syncs_the_merged_bytes() {
+        let (root, repo, planned) = relocation_repo();
+        let resident = crate::wave::resolve_resident_worktree(&repo, "infrastructure").unwrap();
+        std::fs::write(
+            resident.path.join("wave/infrastructure/MEMORY.md"),
+            "Curated.\n",
+        )
+        .unwrap();
+        git(&resident.path, &["add", "."]);
+        git(&resident.path, &["commit", "-m", "curate memory"]);
+
+        let pending = prepare_source_for_relocation(&planned)
+            .expect_err("unmerged resident state blocks relocation");
+        assert!(pending.to_string().contains("absent from origin/main"));
+
+        let integration = root.path().join("integration");
+        git(
+            root.path(),
+            &[
+                "clone",
+                repo.join("../origin.git").to_str().unwrap(),
+                integration.to_str().unwrap(),
+            ],
+        );
+        git(&integration, &["config", "user.name", "integrator"]);
+        git(&integration, &["config", "user.email", "i@example.com"]);
+        let resident_head = crate::engine::git::rev_parse(&resident.path, "HEAD").unwrap();
+        git(
+            &integration,
+            &[
+                "fetch",
+                &resident.path.display().to_string(),
+                &resident_head,
+            ],
+        );
+        git(&integration, &["cherry-pick", &resident_head]);
+        git(&integration, &["push", "origin", "main"]);
+
+        prepare_source_for_relocation(&planned).expect("merged resident state may relocate");
+        assert_eq!(
+            std::fs::read_to_string(repo.join("wave/infrastructure/MEMORY.md")).unwrap(),
+            "Curated.\n"
         );
     }
 

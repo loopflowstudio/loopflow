@@ -11,9 +11,9 @@
 //!   on connect;
 //! - **output**: ordered wire deltas through the token-gated resident door.
 //!
-//! The resident runs from a clean canonical main checkout. Wave turns read and
-//! coordinate there; file-writing work must first become a Task with
-//! its own worktree.
+//! The resident runs from a dedicated sibling worktree. The canonical checkout
+//! remains the listener-owned control plane; inline Wave state curation is
+//! delivered from the resident branch through a pull request.
 //!
 //! # Lifecycle
 //! Spawned by the listener with the endpoint and
@@ -72,7 +72,7 @@ pub fn run(name: &str) -> Result<()> {
         &wave,
     )?;
 
-    let loop_cwd = wave_main_checkout(&main_repo)?;
+    let loop_cwd = crate::wave::resolve_resident_worktree(&main_repo, &wave)?.path;
     if std::env::current_dir().ok().as_deref() != Some(loop_cwd.as_path()) {
         std::env::set_current_dir(&loop_cwd)?;
     }
@@ -83,7 +83,7 @@ pub fn run(name: &str) -> Result<()> {
 
     println!(
         "lf wave · {wave} · resident · listener http://{endpoint} \
-         · control plane {}",
+         · worktree {}",
         loop_cwd.display()
     );
 
@@ -103,7 +103,7 @@ pub fn run(name: &str) -> Result<()> {
 /// listener's supervisor takes it from there).
 pub async fn drive(
     client: ListenerClient,
-    cwd: PathBuf,
+    resident_repo: PathBuf,
     origin_repo: PathBuf,
     wave: String,
     config: LoopConfig,
@@ -121,22 +121,9 @@ pub async fn drive(
     }
     let (inbox_tx, inbox_rx) = mpsc::unbounded_channel();
     let subscription = tokio::spawn(follow_inbox(client.endpoint().to_string(), inbox_tx));
-    let result = run_loop(client, inbox_rx, cwd, origin_repo, wave, config).await;
+    let result = run_loop(client, inbox_rx, resident_repo, origin_repo, wave, config).await;
     subscription.abort();
     result
-}
-
-fn wave_main_checkout(main_repo: &Path) -> Result<PathBuf> {
-    let main = std::fs::canonicalize(main_repo).unwrap_or_else(|_| main_repo.to_path_buf());
-    let default_branch = crate::engine::git::get_default_branch(&main)?;
-    let branch = crate::engine::git::current_branch(&main)?;
-    if branch.as_deref() != Some(default_branch.as_str()) {
-        bail!(
-            "cannot start Wave resident: canonical checkout is on {}, expected {default_branch}",
-            branch.as_deref().unwrap_or("detached HEAD")
-        );
-    }
-    Ok(main)
 }
 
 /// Where the listener is and how to prove we belong at its resident door:
@@ -523,21 +510,24 @@ mod tests {
     }
 
     #[test]
-    fn wave_resident_uses_main_without_claiming_its_dirty_state() {
+    fn wave_resident_reuses_its_worktree_without_claiming_dirty_main_state() {
         let repo = loopflow_test_support::TestRepo::new();
         repo.create_file(".gitignore", "**/.wave-endpoint\n**/.wave-resident-token\n");
         repo.stage_all();
         repo.commit("ignore wave discovery files");
         repo.create_file("wave/infrastructure/.wave-endpoint", "127.0.0.1:50123");
         repo.create_file("wave/infrastructure/.wave-resident-token", "test-token");
-        assert_eq!(
-            wave_main_checkout(repo.path()).expect("clean main"),
+        let first = crate::wave::resolve_resident_worktree(repo.path(), "infrastructure")
+            .expect("clean main");
+        assert_ne!(
+            first.path.canonicalize().unwrap(),
             std::fs::canonicalize(repo.path()).expect("canonical repo")
         );
         std::fs::write(repo.path().join("dirty.txt"), "dirty\n").expect("dirty main");
-        assert_eq!(
-            wave_main_checkout(repo.path()).expect("dirty main remains readable"),
-            std::fs::canonicalize(repo.path()).expect("canonical repo")
-        );
+        let second = crate::wave::resolve_resident_worktree(repo.path(), "infrastructure")
+            .expect("dirty main does not enter the resident worktree");
+        assert_eq!(first, second);
+        assert!(!second.path.join("dirty.txt").exists());
+        assert!(repo.path().join("dirty.txt").exists());
     }
 }

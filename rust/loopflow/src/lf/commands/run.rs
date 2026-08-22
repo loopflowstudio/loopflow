@@ -185,6 +185,25 @@ pub(crate) fn prepare_harness_turn(
     prepare_runner_turn(skill, message, &cli)
 }
 
+pub(crate) fn prepare_wave_harness_turn(
+    skill: &str,
+    message: &str,
+    wave: &str,
+    max_turns: Option<u32>,
+    origin_repo: &std::path::Path,
+    resident_repo: &std::path::Path,
+) -> Result<PreparedHarnessTurn> {
+    let cli = Cli {
+        batch: true,
+        wave: Some(wave.to_string()),
+        max_turns,
+        ..Cli::default()
+    };
+    let mut prepared = prepare_runner_turn_at(skill, message, &cli, origin_repo.to_path_buf())?;
+    prepared.config.cwd = Some(resident_repo.to_path_buf());
+    Ok(prepared)
+}
+
 pub(crate) fn prepare_interactive_harness_turn(
     skill: &str,
     message: &str,
@@ -199,7 +218,17 @@ pub(crate) fn prepare_interactive_harness_turn(
 }
 
 fn prepare_runner_turn(skill: &str, message: &str, cli: &Cli) -> Result<PreparedHarnessTurn> {
-    let mut built = build_prompt(Some(skill), Some(message), cli)?;
+    let repo_root = find_repo_root()?;
+    prepare_runner_turn_at(skill, message, cli, repo_root)
+}
+
+fn prepare_runner_turn_at(
+    skill: &str,
+    message: &str,
+    cli: &Cli,
+    repo_root: PathBuf,
+) -> Result<PreparedHarnessTurn> {
+    let mut built = build_prompt_at(Some(skill), Some(message), cli, repo_root)?;
     built.components.message_context = Some((
         crate::trace::ContextAssetKind::Goal,
         crate::trace::ContextScope::Step,
@@ -228,7 +257,15 @@ fn build_prompt(skill: Option<&str>, message: Option<&str>, cli: &Cli) -> Result
     let start = Instant::now();
     let repo_root = find_repo_root()?;
     debug!(elapsed_ms = start.elapsed().as_millis(), "found repo root");
+    build_prompt_at(skill, message, cli, repo_root)
+}
 
+fn build_prompt_at(
+    skill: Option<&str>,
+    message: Option<&str>,
+    cli: &Cli,
+    repo_root: PathBuf,
+) -> Result<PromptBuild> {
     let config_start = Instant::now();
     let config = load_config_or_default(Some(&repo_root));
     debug!(
@@ -962,7 +999,8 @@ pub fn split_skill_args(args: &[String]) -> Result<(String, Vec<String>)> {
 mod tests {
     use super::{
         attributed_context, is_interactive_run, is_interactive_run_with_tty,
-        should_launch_via_skill, skill_launch_seed, split_skill_args, BoundEnvironment,
+        prepare_wave_harness_turn, should_launch_via_skill, skill_launch_seed, split_skill_args,
+        BoundEnvironment,
     };
     use crate::durable::{BoundaryState, InvocationRoute, WorkRef};
     use crate::engine::prompt::{Document, DocumentSource, PromptComponents};
@@ -975,6 +1013,32 @@ mod tests {
     use crate::wave::Wave;
     use clap::Parser;
     use std::sync::Arc;
+
+    #[test]
+    fn wave_harness_loads_canonical_skill_and_executes_in_resident_worktree() {
+        let origin = loopflow_test_support::TestRepo::new();
+        origin.create_file(".lf/skills/proof.md", "canonical skill instructions");
+        origin.stage_all();
+        origin.commit("canonical skill");
+        let resident = loopflow_test_support::TestRepo::new();
+        resident.create_file(".lf/skills/proof.md", "stale resident skill instructions");
+        resident.stage_all();
+        resident.commit("stale resident skill");
+
+        let prepared = prepare_wave_harness_turn(
+            "proof",
+            "continue",
+            "ship",
+            Some(4),
+            origin.path(),
+            resident.path(),
+        )
+        .unwrap();
+
+        assert_eq!(prepared.config.cwd.as_deref(), Some(resident.path()));
+        assert!(prepared.input.contains("canonical skill instructions"));
+        assert!(!prepared.input.contains("stale resident skill instructions"));
+    }
 
     #[tokio::test]
     async fn bound_environment_exports_exact_run_identity_and_restores_ambient_values() {

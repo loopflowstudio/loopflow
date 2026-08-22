@@ -1,6 +1,7 @@
 //! Release-scoped schema migrations. See `MIGRATIONS.md` next to this file for
 //! the convention; the one rule is that a shipped migration is never edited.
 
+use std::collections::HashSet;
 use std::fmt;
 use std::fs::OpenOptions;
 use std::path::{Path, PathBuf};
@@ -676,6 +677,7 @@ const LEGACY_BASELINE_VERSION: &str = "001_initial";
 
 const RECREATE_MESSAGE: &str =
     "incompatible Loopflow database; delete loopflow.db and rerun the command";
+const DEVELOPMENT_MIGRATIONS_TABLE: &str = "development_migrations";
 
 /// The package version a migration release cut belongs to, from the single
 /// source of truth (the workspace `Cargo.toml`, via Cargo).
@@ -700,6 +702,239 @@ pub fn active_namespace() -> (u32, u32, u32) {
 
 pub fn apply_sqlite(conn: &rusqlite::Connection) -> StoreResult<()> {
     apply_sqlite_transaction(conn, |_| Ok(()))
+}
+
+/// Apply the exact draft manifest embedded in an installed development build.
+///
+/// Drafts are durable only in the disposable installed-development store. The
+/// release ledger remains untouched, and reuse accepts only an exact applied
+/// prefix so edited, removed, or reordered SQL requires an explicit fresh fork.
+pub(crate) fn apply_installed_development_sqlite(
+    conn: &rusqlite::Connection,
+    drafts: &[crate::build_info::MigrationDraft],
+) -> StoreResult<()> {
+    _validate_draft_manifest(drafts)?;
+    let has_draft_ledger = user_tables(conn)?
+        .iter()
+        .any(|table| table == DEVELOPMENT_MIGRATIONS_TABLE);
+    if has_draft_ledger {
+        _validate_canonical_history_for_development(conn)?;
+    } else {
+        apply_sqlite(conn)?;
+    }
+
+    let applied = _applied_development_migrations(conn)?;
+    _validate_applied_draft_prefix(&applied, drafts)?;
+    _validate_development_schema(conn, &drafts[..applied.len()])?;
+    if applied.len() == drafts.len() {
+        return Ok(());
+    }
+
+    let foreign_keys_enabled: bool =
+        conn.pragma_query_value(None, "foreign_keys", |row| row.get(0))?;
+    conn.pragma_update(None, "foreign_keys", "OFF")?;
+    let result = match conn.execute_batch("BEGIN EXCLUSIVE") {
+        Ok(()) => {
+            let result = (|| {
+                conn.execute_batch(
+                    "CREATE TABLE IF NOT EXISTS development_migrations (
+                         position INTEGER NOT NULL UNIQUE,
+                         id TEXT PRIMARY KEY,
+                         name TEXT NOT NULL UNIQUE,
+                         checksum TEXT NOT NULL,
+                         applied_at INTEGER NOT NULL
+                     );",
+                )?;
+                for (position, draft) in drafts.iter().enumerate().skip(applied.len()) {
+                    conn.execute_batch(draft.sql)?;
+                    conn.execute(
+                        "INSERT INTO development_migrations (
+                             position, id, name, checksum, applied_at
+                         ) VALUES (?1, ?2, ?3, ?4, unixepoch())",
+                        (position as i64, draft.id, draft.name, draft.checksum),
+                    )?;
+                }
+                validate_foreign_keys(conn)?;
+                _validate_development_schema(conn, drafts)
+            })();
+            match result {
+                Ok(()) => conn.execute_batch("COMMIT").map_err(StoreError::from),
+                Err(error) => {
+                    let _ = conn.execute_batch("ROLLBACK");
+                    Err(error)
+                }
+            }
+        }
+        Err(error) => Err(StoreError::from(error)),
+    };
+    let restore = if foreign_keys_enabled {
+        conn.pragma_update(None, "foreign_keys", "ON")
+            .map_err(StoreError::from)
+    } else {
+        Ok(())
+    };
+    match result {
+        Err(error) => Err(error),
+        Ok(()) => restore,
+    }
+}
+
+pub(crate) fn validate_installed_development_sqlite(
+    conn: &rusqlite::Connection,
+    drafts: &[crate::build_info::MigrationDraft],
+) -> StoreResult<()> {
+    _validate_draft_manifest(drafts)?;
+    _validate_canonical_history_for_development(conn)?;
+    let applied = _applied_development_migrations(conn)?;
+    _validate_applied_draft_prefix(&applied, drafts)?;
+    if applied.len() != drafts.len() {
+        return Err(_incompatible_development_store(format!(
+            "store has {} applied draft(s), candidate requires {}",
+            applied.len(),
+            drafts.len()
+        )));
+    }
+    _validate_development_schema(conn, drafts)?;
+    validate_foreign_keys(conn)
+}
+
+#[derive(Debug, Clone, PartialEq, Eq)]
+struct AppliedDevelopmentMigration {
+    id: String,
+    name: String,
+    checksum: String,
+}
+
+fn _validate_draft_manifest(drafts: &[crate::build_info::MigrationDraft]) -> StoreResult<()> {
+    let mut ids = HashSet::new();
+    let mut names = HashSet::new();
+    let draft_names = drafts
+        .iter()
+        .map(|draft| draft.name)
+        .collect::<HashSet<_>>();
+    for draft in drafts {
+        if !ids.insert(draft.id) || !names.insert(draft.name) {
+            return Err(StoreError::InvalidData(format!(
+                "installed development draft manifest repeats {}",
+                draft.name
+            )));
+        }
+        for dependency in draft.dependencies {
+            if draft_names.contains(dependency) && !names.contains(dependency) {
+                return Err(StoreError::InvalidData(format!(
+                    "installed development draft {} precedes dependency {}",
+                    draft.name, dependency
+                )));
+            }
+        }
+        let checksum = hex::encode(Sha256::digest(draft.sql.as_bytes()));
+        if checksum != draft.checksum {
+            return Err(StoreError::InvalidData(format!(
+                "installed development draft {} checksum does not match its SQL",
+                draft.name
+            )));
+        }
+    }
+    Ok(())
+}
+
+fn _validate_canonical_history_for_development(conn: &rusqlite::Connection) -> StoreResult<()> {
+    validate_set(MIGRATIONS).map_err(StoreError::InvalidData)?;
+    if !user_tables(conn)?
+        .iter()
+        .any(|table| table == "schema_migrations")
+    {
+        return Err(_incompatible_development_store(
+            "canonical migration ledger is missing".to_string(),
+        ));
+    }
+    let applied = applied_versions(conn)?;
+    let pending = pending_migrations(&applied, MIGRATIONS)?;
+    if let Some(next) = pending.first() {
+        return Err(_incompatible_development_store(format!(
+            "canonical frontier changed before {}",
+            next.version()
+        )));
+    }
+    validate_applied_checksums(conn, MIGRATIONS)
+}
+
+fn _applied_development_migrations(
+    conn: &rusqlite::Connection,
+) -> StoreResult<Vec<AppliedDevelopmentMigration>> {
+    if !user_tables(conn)?
+        .iter()
+        .any(|table| table == DEVELOPMENT_MIGRATIONS_TABLE)
+    {
+        return Ok(Vec::new());
+    }
+    let mut statement = conn.prepare(
+        "SELECT id, name, checksum
+         FROM development_migrations
+         ORDER BY position",
+    )?;
+    let rows = statement.query_map([], |row| {
+        Ok(AppliedDevelopmentMigration {
+            id: row.get(0)?,
+            name: row.get(1)?,
+            checksum: row.get(2)?,
+        })
+    })?;
+    Ok(rows.collect::<Result<Vec<_>, _>>()?)
+}
+
+fn _validate_applied_draft_prefix(
+    applied: &[AppliedDevelopmentMigration],
+    drafts: &[crate::build_info::MigrationDraft],
+) -> StoreResult<()> {
+    if applied.len() > drafts.len() {
+        return Err(_incompatible_development_store(
+            "candidate removed or canonicalized an applied draft".to_string(),
+        ));
+    }
+    for (position, (applied, draft)) in applied.iter().zip(drafts).enumerate() {
+        if applied.id != draft.id
+            || applied.name != draft.name
+            || applied.checksum != draft.checksum
+        {
+            return Err(_incompatible_development_store(format!(
+                "applied draft at position {position} no longer matches {}",
+                draft.name
+            )));
+        }
+    }
+    Ok(())
+}
+
+fn _validate_development_schema(
+    conn: &rusqlite::Connection,
+    drafts: &[crate::build_info::MigrationDraft],
+) -> StoreResult<()> {
+    let expected = rusqlite::Connection::open_in_memory()?;
+    expected.execute_batch(
+        "CREATE TABLE schema_migrations (
+             version TEXT PRIMARY KEY,
+             applied_at INTEGER NOT NULL
+         );",
+    )?;
+    for migration in MIGRATIONS {
+        expected.execute_batch(migration.sql)?;
+    }
+    for draft in drafts {
+        expected.execute_batch(draft.sql)?;
+    }
+    if product_schema(conn)? != product_schema(&expected)? {
+        return Err(_incompatible_development_store(
+            "schema does not match the applied draft prefix".to_string(),
+        ));
+    }
+    Ok(())
+}
+
+fn _incompatible_development_store(reason: String) -> StoreError {
+    StoreError::InvalidData(format!(
+        "installed development store is incompatible ({reason}); rerun local promotion with --fresh"
+    ))
 }
 
 /// Stage a fresh connection one migration behind the binary's known head. The
@@ -1549,7 +1784,7 @@ fn product_schema(conn: &rusqlite::Connection) -> StoreResult<Vec<ProductSchemaO
          FROM sqlite_master
          WHERE type IN ('table', 'index', 'trigger')
            AND name NOT LIKE 'sqlite_%'
-           AND name != 'schema_migrations'
+           AND name NOT IN ('schema_migrations', 'development_migrations')
          ORDER BY type, name",
     )?;
     let rows = statement.query_map([], |row| {
@@ -1681,10 +1916,11 @@ mod tests {
     use rusqlite::OptionalExtension;
 
     use super::{
-        active_namespace, applied_versions, apply_set, apply_sqlite, apply_sqlite_transaction,
-        apply_sqlite_with_backup, backup_before_migration, latest_applied_version_sqlite,
-        latest_known_version, latest_version_sqlite, migration_checksum, migration_sql_for_test,
-        pending_migrations, product_schema, validate_foreign_keys, validate_persisted_json,
+        active_namespace, applied_versions, apply_installed_development_sqlite, apply_set,
+        apply_sqlite, apply_sqlite_transaction, apply_sqlite_with_backup, backup_before_migration,
+        latest_applied_version_sqlite, latest_known_version, latest_version_sqlite,
+        migration_checksum, migration_sql_for_test, pending_migrations, product_schema,
+        validate_foreign_keys, validate_installed_development_sqlite, validate_persisted_json,
         validate_set, validate_sqlite, Migration, MigrationId, DIVERGENT_MIGRATIONS, MIGRATIONS,
     };
 
@@ -1728,6 +1964,73 @@ mod tests {
 
     fn open() -> rusqlite::Connection {
         rusqlite::Connection::open_in_memory().unwrap()
+    }
+
+    fn development_draft(
+        id: &'static str,
+        name: &'static str,
+        dependencies: &'static [&'static str],
+        sql: &'static str,
+    ) -> crate::build_info::MigrationDraft {
+        use sha2::{Digest, Sha256};
+
+        crate::build_info::MigrationDraft {
+            id,
+            name,
+            dependencies,
+            sql,
+            checksum: Box::leak(hex::encode(Sha256::digest(sql.as_bytes())).into_boxed_str()),
+        }
+    }
+
+    #[test]
+    fn installed_development_store_appends_only_an_exact_draft_prefix() {
+        let conn = open();
+        let first = development_draft(
+            "11111111111111111111111111111111",
+            "local_feature",
+            &[],
+            "CREATE TABLE local_feature (id TEXT PRIMARY KEY);",
+        );
+        apply_installed_development_sqlite(&conn, std::slice::from_ref(&first)).unwrap();
+        validate_installed_development_sqlite(&conn, std::slice::from_ref(&first)).unwrap();
+
+        let second = development_draft(
+            "22222222222222222222222222222222",
+            "extend_local_feature",
+            &["local_feature"],
+            "ALTER TABLE local_feature ADD COLUMN note TEXT;",
+        );
+        apply_installed_development_sqlite(&conn, &[first.clone(), second.clone()]).unwrap();
+        validate_installed_development_sqlite(&conn, &[first.clone(), second]).unwrap();
+        let applied: i64 = conn
+            .query_row("SELECT COUNT(*) FROM development_migrations", [], |row| {
+                row.get(0)
+            })
+            .unwrap();
+        assert_eq!(applied, 2);
+
+        let changed = development_draft(
+            first.id,
+            first.name,
+            &[],
+            "CREATE TABLE local_feature (id TEXT PRIMARY KEY, changed TEXT);",
+        );
+        let error = apply_installed_development_sqlite(&conn, &[changed]).unwrap_err();
+        assert!(error.to_string().contains("--fresh"));
+    }
+
+    #[test]
+    fn installed_development_draft_accepts_a_released_dependency() {
+        let conn = open();
+        let draft = development_draft(
+            "33333333333333333333333333333333",
+            "local_after_released",
+            &[REOPEN_REPAIR_NAME],
+            "CREATE TABLE local_after_released (id TEXT PRIMARY KEY);",
+        );
+
+        apply_installed_development_sqlite(&conn, &[draft]).unwrap();
     }
 
     fn baseline() -> Migration {

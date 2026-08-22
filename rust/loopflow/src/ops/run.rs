@@ -349,18 +349,36 @@ pub(crate) async fn launch_in_run(
     let invocation_id = invocation.id.as_str().to_string();
     let db_path = execution.db_path.to_string_lossy().to_string();
     let lf_home = execution.lf_home.to_string_lossy().to_string();
-    let environment = [
+    let mut environment = vec![
         (
-            crate::engine::wave_context::WAVE_ID_ENV,
-            request.wave_id.as_str(),
+            crate::engine::wave_context::WAVE_ID_ENV.to_string(),
+            request.wave_id.as_str().to_string(),
         ),
-        (crate::durable::RUN_CONTEXT_ENV, "agent"),
-        (crate::durable::RUN_ID_ENV, run_context.as_str()),
-        (crate::durable::AGENT_INVOCATION_ENV, invocation_id.as_str()),
-        (crate::store::CONTROL_BIN_ENV, control_bin.as_str()),
-        (crate::store::CONTROL_DB_PATH_ENV, db_path.as_str()),
-        (crate::store::CONTROL_HOME_ENV, lf_home.as_str()),
+        (
+            crate::durable::RUN_CONTEXT_ENV.to_string(),
+            "agent".to_string(),
+        ),
+        (crate::durable::RUN_ID_ENV.to_string(), run_context),
+        (
+            crate::durable::AGENT_INVOCATION_ENV.to_string(),
+            invocation_id,
+        ),
+        (crate::store::CONTROL_BIN_ENV.to_string(), control_bin),
+        (crate::store::CONTROL_DB_PATH_ENV.to_string(), db_path),
+        (crate::store::CONTROL_HOME_ENV.to_string(), lf_home),
     ];
+    if let Some(switch_id) = std::env::var_os(crate::machine_install::INSTALL_SWITCH_ENV)
+        .filter(|value| !value.is_empty())
+    {
+        environment.push((
+            crate::machine_install::INSTALL_SWITCH_ENV.to_string(),
+            switch_id.to_string_lossy().into_owned(),
+        ));
+    }
+    let environment = environment
+        .iter()
+        .map(|(key, value)| (key.as_str(), value.as_str()))
+        .collect::<Vec<_>>();
     if let Err(error) =
         start_lf_session_with_env(&tmux_name, &request.cwd, &argv, &environment).await
     {

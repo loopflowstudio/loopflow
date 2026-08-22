@@ -27,6 +27,20 @@ pub(crate) async fn acquire_shared() -> io::Result<PromotionLock> {
     let path = lock_path();
     tokio::task::spawn_blocking(move || {
         let lock = _acquire(&path, LockMode::Shared)?;
+        if let crate::machine_install::MachineInstallState::Switching(receipt) =
+            crate::machine_install::read_state(
+                &crate::machine_install::root().map_err(io::Error::other)?,
+            )
+            .map_err(io::Error::other)?
+        {
+            return Err(io::Error::new(
+                io::ErrorKind::WouldBlock,
+                format!(
+                    "install switch {} fences Run reservation until settlement",
+                    receipt.id
+                ),
+            ));
+        }
         ensure_current_binary_may_reserve(&active_upgrade_path())?;
         Ok(lock)
     })
@@ -35,15 +49,35 @@ pub(crate) async fn acquire_shared() -> io::Result<PromotionLock> {
 }
 
 fn lock_path() -> PathBuf {
-    dirs::home_dir()
-        .unwrap_or_else(|| PathBuf::from("."))
+    crate::machine_install::account_home()
+        .expect("resolve OS account home directory for promotion lock")
         .join(".lf/promotion.lock")
 }
 
 fn active_upgrade_path() -> PathBuf {
-    dirs::home_dir()
-        .unwrap_or_else(|| PathBuf::from("."))
+    crate::machine_install::account_home()
+        .expect("resolve OS account home directory for promotion fence")
         .join(".lf/upgrades/active.json")
+}
+
+pub(crate) fn require_exclusive_holder() -> io::Result<()> {
+    let path = lock_path();
+    let file = OpenOptions::new()
+        .create(true)
+        .truncate(false)
+        .read(true)
+        .write(true)
+        .open(path)?;
+    match FileExt::try_lock_shared(&file) {
+        Err(error) if error.kind() == io::ErrorKind::WouldBlock => Ok(()),
+        Ok(()) => {
+            FileExt::unlock(&file)?;
+            Err(io::Error::other(
+                "receipt-scoped candidate operation requires an exclusive promotion coordinator",
+            ))
+        }
+        Err(error) => Err(error),
+    }
 }
 
 #[derive(Debug, Deserialize)]

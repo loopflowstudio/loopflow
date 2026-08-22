@@ -7,6 +7,11 @@ use std::fs;
 use std::path::{Path, PathBuf};
 use std::process::Command;
 
+// The shared module also declares the runtime view constructed by generated code.
+#[allow(dead_code)]
+#[path = "src/migration_drafts.rs"]
+mod migration_drafts;
+
 /// Category directories whose skill/flow names are registered flat (no prefix).
 /// Everything else is a namespaced category: names are stored as `<cat>/<name>`.
 /// Core categories share one flat namespace and must not collide with each other.
@@ -17,9 +22,9 @@ const CORE_CATEGORIES: &[&str] = &["task", "project", "wave", "ops"];
 fn main() {
     let manifest_dir =
         PathBuf::from(env::var("CARGO_MANIFEST_DIR").expect("CARGO_MANIFEST_DIR not set"));
-    emit_build_provenance(&manifest_dir);
-    let builtins_dir = manifest_dir.join("src/engine/builtins");
     let out_dir = PathBuf::from(env::var("OUT_DIR").expect("OUT_DIR not set"));
+    emit_build_provenance(&manifest_dir, &out_dir);
+    let builtins_dir = manifest_dir.join("src/engine/builtins");
 
     // Builtins live at `<cat>/<kind>/*.ext`. Skills and flows from CORE_CATEGORIES
     // are registered flat; skills and flows from other categories are registered
@@ -81,7 +86,7 @@ fn main() {
     }
 }
 
-fn emit_build_provenance(manifest_dir: &Path) {
+fn emit_build_provenance(manifest_dir: &Path, out_dir: &Path) {
     let package_version =
         env::var("CARGO_PKG_VERSION").expect("CARGO_PKG_VERSION not set by Cargo");
     let git_root = manifest_dir
@@ -117,7 +122,7 @@ fn emit_build_provenance(manifest_dir: &Path) {
             "LOOPFLOW_MIGRATION_AUTHORITY must be `published` or `validation_only`, got `{migration_authority}`"
         );
     }
-    let pending_migration_drafts = pending_migration_drafts(manifest_dir);
+    emit_migration_draft_manifest(manifest_dir, out_dir);
     let source_revision = git_root
         .and_then(|root| {
             Command::new("git")
@@ -166,10 +171,6 @@ fn emit_build_provenance(manifest_dir: &Path) {
     println!("cargo:rustc-env=LOOPFLOW_BUILD_PROVENANCE={provenance}");
     println!("cargo:rustc-env=LOOPFLOW_BUILD_SOURCE_ROOT={}", source_root);
     println!("cargo:rustc-env=LOOPFLOW_MIGRATION_AUTHORITY={migration_authority}");
-    println!(
-        "cargo:rustc-env=LOOPFLOW_PENDING_MIGRATION_DRAFTS={}",
-        pending_migration_drafts.join(",")
-    );
     println!("cargo:rustc-env=LOOPFLOW_BUILD_SOURCE_REVISION={source_revision}");
     println!("cargo:rustc-env=LOOPFLOW_BUILD_VERSION={build_version}");
     println!("cargo:rerun-if-env-changed=LOOPFLOW_BUILD_PROVENANCE");
@@ -200,42 +201,34 @@ fn emit_build_provenance(manifest_dir: &Path) {
     }
 }
 
-fn pending_migration_drafts(manifest_dir: &Path) -> Vec<String> {
+fn emit_migration_draft_manifest(manifest_dir: &Path, out_dir: &Path) {
+    use migration_drafts::{read_draft_manifest, read_released_names};
+
+    let migrations_dir = manifest_dir.join("src/store/migrations");
     let drafts_dir = manifest_dir.join("src/store/migrations/drafts");
     println!("cargo:rerun-if-changed={}", drafts_dir.display());
-    let entries = match fs::read_dir(&drafts_dir) {
-        Ok(entries) => entries,
-        Err(error) if error.kind() == std::io::ErrorKind::NotFound => return Vec::new(),
-        Err(error) => panic!(
-            "read migration drafts from {}: {error}",
-            drafts_dir.display()
-        ),
-    };
-    let mut drafts = entries
-        .map(|entry| {
-            entry
-                .unwrap_or_else(|error| {
-                    panic!(
-                        "read migration draft entry from {}: {error}",
-                        drafts_dir.display()
-                    )
-                })
-                .path()
-        })
-        .filter(|path| path.extension().is_some_and(|extension| extension == "sql"))
-        .map(|path| {
-            println!("cargo:rerun-if-changed={}", path.display());
-            let stem = path
-                .file_stem()
-                .and_then(|stem| stem.to_str())
-                .unwrap_or("unreadable_draft");
-            stem.rsplit_once("__")
-                .map_or(stem, |(name, _)| name)
-                .to_string()
-        })
-        .collect::<Vec<_>>();
-    drafts.sort();
-    drafts
+    println!("cargo:rerun-if-changed={}", migrations_dir.display());
+    let released_names = read_released_names(&migrations_dir)
+        .unwrap_or_else(|error| panic!("embed migration draft manifest: {error}"));
+    let drafts = read_draft_manifest(&drafts_dir, &released_names)
+        .unwrap_or_else(|error| panic!("embed migration draft manifest: {error}"));
+    let mut code = String::from("static MIGRATION_DRAFT_MANIFEST: &[MigrationDraft] = &[\n");
+    for draft in drafts {
+        writeln!(code, "    MigrationDraft {{").expect("write draft manifest");
+        writeln!(code, "        id: {:?},", draft.id).expect("write draft manifest");
+        writeln!(code, "        name: {:?},", draft.name).expect("write draft manifest");
+        code.push_str("        dependencies: &[");
+        for dependency in draft.dependencies {
+            write!(code, "{dependency:?},").expect("write draft manifest");
+        }
+        code.push_str("],\n");
+        writeln!(code, "        sql: {:?},", draft.sql).expect("write draft manifest");
+        writeln!(code, "        checksum: {:?},", draft.checksum).expect("write draft manifest");
+        code.push_str("    },\n");
+    }
+    code.push_str("];\n");
+    fs::write(out_dir.join("migration_draft_manifest.rs"), code)
+        .expect("write embedded migration draft manifest");
 }
 
 fn generate_map(dir: &Path, extension: &str, map_name: &str, out_path: &Path) {

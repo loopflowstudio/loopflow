@@ -194,7 +194,8 @@ pub const CONTROL_HOME_ENV: &str = "LF_CONTROL_HOME";
 pub const CONTROL_DB_PATH_ENV: &str = "LF_CONTROL_DB_PATH";
 
 fn machine_home_dir() -> PathBuf {
-    dirs::home_dir().unwrap_or_else(|| PathBuf::from("."))
+    crate::machine_install::account_home()
+        .expect("resolve OS account home directory for the production store guard")
 }
 
 pub(crate) fn production_database_path() -> PathBuf {
@@ -256,6 +257,11 @@ pub(crate) fn writer_invocation_is_authoritative(
 }
 
 fn default_lf_home_dir() -> PathBuf {
+    if let Ok(Some(selection)) = crate::machine_install::selection_for_current_executable() {
+        if let Some(parent) = selection.store.parent() {
+            return parent.to_path_buf();
+        }
+    }
     default_lf_home_dir_for(
         &machine_home_dir(),
         crate::build_info::provenance(),
@@ -290,6 +296,16 @@ pub fn default_db_path() -> PathBuf {
 }
 
 pub fn database_path_from_env() -> Result<PathBuf, std::io::Error> {
+    if let Some(selection) = crate::machine_install::selection_for_current_executable()
+        .map_err(|error| std::io::Error::other(error.to_string()))?
+    {
+        guard_development_database(
+            &selection.store,
+            crate::build_info::provenance(),
+            &machine_home_dir(),
+        )?;
+        return Ok(selection.store);
+    }
     resolve_database_path(
         select_store_env_value(
             crate::build_info::provenance(),
@@ -306,6 +322,11 @@ pub fn database_path_from_env() -> Result<PathBuf, std::io::Error> {
 /// legacy body carries in `LF_CONTROL_HOME`. Only `LF_HOME` (or the built-in
 /// default) is honored here — the control-plane selection is deliberately not.
 pub(crate) fn current_home_lf_home_dir() -> PathBuf {
+    if let Ok(Some(selection)) = crate::machine_install::selection_for_current_executable() {
+        if let Some(parent) = selection.store.parent() {
+            return parent.to_path_buf();
+        }
+    }
     std::env::var_os("LF_HOME")
         .filter(|value| !value.is_empty())
         .map(PathBuf::from)
@@ -317,6 +338,16 @@ pub(crate) fn current_home_lf_home_dir() -> PathBuf {
 /// The companion to [`current_home_lf_home_dir`]: a relaunch resolves the
 /// current store, never the launching body's pinned control database.
 pub(crate) fn current_home_database_path() -> Result<PathBuf, std::io::Error> {
+    if let Some(selection) = crate::machine_install::selection_for_current_executable()
+        .map_err(|error| std::io::Error::other(error.to_string()))?
+    {
+        guard_development_database(
+            &selection.store,
+            crate::build_info::provenance(),
+            &machine_home_dir(),
+        )?;
+        return Ok(selection.store);
+    }
     resolve_database_path(std::env::var_os("LF_DB_PATH"), current_home_lf_home_dir())
 }
 
@@ -438,7 +469,7 @@ fn same_database_file(left: &Path, right: &Path) -> Result<bool, std::io::Error>
     Ok(false)
 }
 
-fn canonicalize_with_missing_tail(path: &Path) -> Result<PathBuf, std::io::Error> {
+pub(crate) fn canonicalize_with_missing_tail(path: &Path) -> Result<PathBuf, std::io::Error> {
     let absolute = if path.is_absolute() {
         path.to_path_buf()
     } else {

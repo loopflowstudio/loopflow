@@ -78,6 +78,10 @@ def _fail(message: str) -> None:
     raise SystemExit(1)
 
 
+def _draft_fail(category: str, message: str) -> None:
+    _fail(f"draft manifest [{category}]: {message}")
+
+
 def _released_names() -> set[str]:
     """Draft identities already published, including names inside release batches."""
     if not MIGRATIONS_DIR.is_dir():
@@ -110,30 +114,41 @@ def _read_drafts() -> list[Draft]:
             continue
         match = DRAFT_FILE.match(path.name)
         if not match:
-            _fail(
+            _draft_fail(
+                "invalid_filename",
                 f"draft {path.name} is not `<snake_case_name>__<id>.sql` "
                 "— run scripts/new_migration.py"
             )
         name, file_id = match.group(1), match.group(2)
         text = path.read_text()
         if DRAFT_MARKER.search(text):
-            _fail(f"draft {path.name} uses reserved `-- draft:` release provenance")
+            _draft_fail(
+                "reserved_marker",
+                f"draft {path.name} uses reserved `-- draft:` release provenance",
+            )
         header = DRAFT_HEADER_NAME.search(text)
         if not header:
-            _fail(f"draft {path.name} has no `-- name:` header")
+            _draft_fail("missing_name", f"draft {path.name} has no `-- name:` header")
         if header.group(1) != name:
-            _fail(f"draft {path.name} header names {header.group(1)!r}, not {name!r}")
+            _draft_fail(
+                "name_mismatch",
+                f"draft {path.name} header names {header.group(1)!r}, not {name!r}",
+            )
         id_header = DRAFT_HEADER_ID.search(text)
         if not id_header:
-            _fail(f"draft {path.name} has no `-- id:` header")
+            _draft_fail("missing_id", f"draft {path.name} has no `-- id:` header")
         header_id = id_header.group(1).strip()
         if not DRAFT_ID.fullmatch(header_id):
-            _fail(
+            _draft_fail(
+                "invalid_id",
                 f"draft {path.name} id {header_id!r} is not a 128-bit token "
                 "(32 hex chars) — run scripts/new_migration.py"
             )
         if header_id != file_id:
-            _fail(f"draft {path.name} header id {header_id!r} disagrees with its filename")
+            _draft_fail(
+                "id_mismatch",
+                f"draft {path.name} header id {header_id!r} disagrees with its filename",
+            )
         depends = DRAFT_HEADER_DEPENDS.search(text)
         dependencies: list[str] = []
         if depends:
@@ -154,7 +169,8 @@ def _order(drafts: list[Draft]) -> list[Draft]:
     by_name: dict[str, Draft] = {}
     for draft in drafts:
         if draft.name in by_name:
-            _fail(
+            _draft_fail(
+                "duplicate_name",
                 f"two drafts share the readable name {draft.name!r} in this cut "
                 "— rename one before releasing"
             )
@@ -163,13 +179,17 @@ def _order(drafts: list[Draft]) -> list[Draft]:
     released = _released_names()
     for draft in drafts:
         if draft.name in released:
-            _fail(f"draft {draft.name} collides with a released migration of the same name")
+            _draft_fail(
+                "released_name_collision",
+                f"draft {draft.name} collides with a released migration of the same name",
+            )
         for dependency in draft.depends_on:
             if dependency == draft.name:
-                _fail(f"draft {draft.name} depends on itself")
+                _draft_fail("self_dependency", f"draft {draft.name} depends on itself")
             if dependency in by_name or dependency in released:
                 continue
-            _fail(
+            _draft_fail(
+                "missing_dependency",
                 f"draft {draft.name} depends on {dependency!r}, which is neither a "
                 "draft in this cut nor an already-released migration"
             )
@@ -196,7 +216,9 @@ def _order(drafts: list[Draft]) -> list[Draft]:
 
     if len(order) != len(drafts):
         stuck = sorted(set(by_name) - set(order))
-        _fail(f"draft dependencies form a cycle among: {', '.join(stuck)}")
+        _draft_fail(
+            "cycle", f"draft dependencies form a cycle among: {', '.join(stuck)}"
+        )
     return [by_name[name] for name in order]
 
 

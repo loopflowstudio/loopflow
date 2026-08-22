@@ -1251,6 +1251,7 @@ fn piped_task_report() -> anyhow::Result<Option<String>> {
 }
 
 fn main() -> anyhow::Result<()> {
+    loopflow::machine_install::dispatch_entry_gate(&loopflow::machine_install::ArtifactRole::Cli)?;
     // Ensure Ctrl+C terminates lf and the child agent. Without this,
     // child.wait() retries on EINTR and hangs while the agent catches
     // SIGINT and keeps running. SIGTERM the agent first so it doesn't
@@ -1272,6 +1273,26 @@ fn main() -> anyhow::Result<()> {
     let args = reorder_args(normalize_ssh_args(std::env::args().collect()));
 
     let mut cli = Cli::parse_from(args.clone());
+    let bypasses_machine_startup_gate = matches!(
+        &cli.command,
+        Some(Commands::Install {
+            cmd: InstallCommand::RecoverSwitch { .. }
+                | InstallCommand::Recover { .. }
+                | InstallCommand::AdvanceSwitch { .. }
+                | InstallCommand::ReconcileSwitch { .. }
+                | InstallCommand::LocalPreflight { .. }
+                | InstallCommand::Promote { .. }
+        })
+    );
+    if !bypasses_machine_startup_gate {
+        let switch_id = std::env::var(loopflow::machine_install::INSTALL_SWITCH_ENV)
+            .ok()
+            .filter(|value| !value.is_empty());
+        loopflow::machine_install::authorize_current_for_switch(
+            &loopflow::machine_install::ArtifactRole::Cli,
+            switch_id.as_deref(),
+        )?;
+    }
     ctrlc::set_handler(|| {
         loopflow::engine::agent::run_interrupt_cleanups();
         loopflow::engine::agent::kill_child_if_running();
@@ -1349,13 +1370,28 @@ fn main() -> anyhow::Result<()> {
     // its own preflight.
     if let Some(Commands::Install { cmd }) = &cli.command {
         return match cmd {
+            InstallCommand::RecoverSwitch { switch } => {
+                loopflow::lf::commands::install::recover_switch(switch)
+            }
             InstallCommand::Recover {
                 upgrade,
                 parent_pid,
                 parent_started_at,
             } => loopflow::lf::commands::install::recover(upgrade, *parent_pid, *parent_started_at),
             InstallCommand::Preflight { json } => loopflow::lf::commands::install::preflight(*json),
+            InstallCommand::LocalPreflight { store, json } => {
+                loopflow::lf::commands::install::local_preflight(store, *json)
+            }
+            InstallCommand::AdvanceSwitch { switch } => {
+                loopflow::lf::commands::install::advance_switch(switch)
+            }
+            InstallCommand::ReconcileSwitch { switch } => {
+                loopflow::lf::commands::install::reconcile_switch(switch)
+            }
             InstallCommand::Promote {
+                from_build,
+                coordinated_build,
+                fresh,
                 cli_target,
                 daemon_source,
                 daemon_target,
@@ -1375,6 +1411,9 @@ fn main() -> anyhow::Result<()> {
                 },
                 *sync_skills,
                 *preview,
+                from_build.as_deref(),
+                coordinated_build.as_deref(),
+                *fresh,
             ),
             InstallCommand::Rollback {
                 cli_target,

@@ -125,6 +125,48 @@ impl Store {
         .await
     }
 
+    /// Reserve replacement Work while the promotion coordinator still owns
+    /// the exclusive machine fence. The unsettled switch is itself the public
+    /// reservation fence; only its receipt-pinned candidate reaches this path.
+    pub(crate) async fn reserve_run_for_install_switch(
+        &self,
+        work: &WorkRef,
+        trigger: RunTrigger,
+        switch_id: &str,
+    ) -> StoreResult<(Run, RunContext)> {
+        crate::promotion_lock::require_exclusive_holder().map_err(|error| {
+            StoreError::InvalidData(format!(
+                "verify promotion coordinator before switch Run reservation: {error}"
+            ))
+        })?;
+        match crate::machine_install::read_state(&crate::machine_install::root().map_err(
+            |error| StoreError::InvalidData(format!("resolve machine install authority: {error}")),
+        )?)
+        .map_err(|error| StoreError::InvalidData(error.to_string()))?
+        {
+            crate::machine_install::MachineInstallState::Switching(receipt)
+                if receipt.id == switch_id
+                    && receipt.target_store_advanced
+                    && receipt.phase == crate::machine_install::SwitchPhase::Reconciling => {}
+            crate::machine_install::MachineInstallState::Switching(receipt) => {
+                return Err(StoreError::InvalidData(format!(
+                    "install switch {} is not reconciling as {switch_id}",
+                    receipt.id
+                )))
+            }
+            _ => {
+                return Err(StoreError::InvalidData(format!(
+                    "install switch {switch_id} is no longer active"
+                )))
+            }
+        }
+        let work = work.clone();
+        run_sqlite(&self.sqlite, move |store| {
+            store.reserve_run(&work, &trigger)
+        })
+        .await
+    }
+
     pub(crate) async fn reserve_recovery_run(
         &self,
         lease: &RunContext,

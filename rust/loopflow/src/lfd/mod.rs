@@ -199,16 +199,27 @@ pub fn router(state: LfdState) -> Router {
 struct HealthBody {
     status: String,
     home_id: HomeId,
+    store: String,
     runtime_generation: Option<u64>,
     build_version: Option<String>,
     source_revision: Option<String>,
     migration_frontier: Option<String>,
 }
 
+#[derive(Debug, Deserialize)]
+struct LivenessHealthBody {
+    status: String,
+    home_id: HomeId,
+}
+
 async fn health_handler(State(state): State<LfdState>) -> Json<HealthBody> {
     Json(HealthBody {
         status: "ok".to_string(),
         home_id: state.wave_host.home_id().clone(),
+        store: crate::store::database_path_from_env()
+            .expect("running lfd already opened its selected store")
+            .display()
+            .to_string(),
         runtime_generation: Some(crate::lf::commands::install::current_runtime_generation()),
         build_version: Some(crate::build_info::BUILD_VERSION.to_string()),
         source_revision: Some(crate::build_info::source_revision().to_string()),
@@ -1249,16 +1260,77 @@ async fn shutdown_signal() {
 }
 
 pub(crate) async fn ensure(home_id: &HomeId, repo: &Path) -> anyhow::Result<()> {
-    if live_endpoint(home_id).await.is_some() {
+    ensure_with_selection(home_id, repo, None, None).await
+}
+
+pub(crate) async fn ensure_for_switch(
+    home_id: &HomeId,
+    repo: &Path,
+    switch_id: &str,
+) -> anyhow::Result<()> {
+    let selection = install_switch_selection(switch_id)?;
+    ensure_with_selection(home_id, repo, Some(&selection), Some(switch_id)).await
+}
+
+pub(crate) async fn ensure_install_selection(
+    home_id: &HomeId,
+    repo: &Path,
+    selection: &crate::machine_install::InstallSelection,
+) -> anyhow::Result<()> {
+    ensure_with_selection(home_id, repo, Some(selection), None).await
+}
+
+fn install_switch_selection(
+    switch_id: &str,
+) -> anyhow::Result<crate::machine_install::InstallSelection> {
+    match crate::machine_install::read_state(&crate::machine_install::root()?)? {
+        crate::machine_install::MachineInstallState::Switching(receipt)
+            if receipt.id == switch_id
+                && receipt.phase == crate::machine_install::SwitchPhase::Reconciling
+                && receipt.target_store_advanced =>
+        {
+            Ok(receipt.target.clone())
+        }
+        crate::machine_install::MachineInstallState::Switching(receipt) => {
+            anyhow::bail!(
+                "install switch {} is not reconciling as {switch_id}",
+                receipt.id
+            )
+        }
+        _ => anyhow::bail!("install switch {switch_id} is no longer active"),
+    }
+}
+
+async fn ensure_with_selection(
+    home_id: &HomeId,
+    repo: &Path,
+    selection: Option<&crate::machine_install::InstallSelection>,
+    switch_id: Option<&str>,
+) -> anyhow::Result<()> {
+    let lf_home = selection
+        .and_then(|selection| selection.store.parent().map(Path::to_path_buf))
+        .unwrap_or_else(crate::store::lf_home_dir);
+    let endpoints = lf_home.join("lfd");
+    if live_endpoint_at(home_id, &endpoints).await.is_some() {
         return Ok(());
     }
-    let _launch_lock = lock_start(home_id).await?;
-    if live_endpoint(home_id).await.is_some() {
+    let _launch_lock = lock_start_at(home_id, &endpoints).await?;
+    if live_endpoint_at(home_id, &endpoints).await.is_some() {
         return Ok(());
     }
-    let lfd = crate::engine::process::resolve_lfd_binary_checked()?;
+    let lfd = match selection {
+        Some(selection) => {
+            let daemon = selection
+                .artifact_set
+                .artifact(&crate::machine_install::ArtifactRole::Daemon)
+                .ok_or_else(|| anyhow::anyhow!("install selection has no daemon"))?;
+            daemon.verify()?;
+            daemon.path.clone()
+        }
+        None => crate::engine::process::resolve_lfd_binary_checked()?,
+    };
     let attempt_id = uuid::Uuid::new_v4().simple().to_string();
-    let startup_dir = endpoint_dir().join("startup");
+    let startup_dir = endpoints.join("startup");
     std::fs::create_dir_all(&startup_dir)?;
     let socket_id = &attempt_id[..12];
     let socket_dir = std::env::temp_dir().join(format!("lfd-{socket_id}"));
@@ -1276,7 +1348,7 @@ pub(crate) async fn ensure(home_id: &HomeId, repo: &Path) -> anyhow::Result<()> 
     };
     let receipt_path = startup_dir.join(format!("{attempt_id}.json"));
     let listener = tokio::net::UnixListener::bind(&socket_path)?;
-    let argv = vec![
+    let mut argv = vec![
         lfd.to_string_lossy().to_string(),
         "serve".to_string(),
         "--addr".to_string(),
@@ -1290,15 +1362,22 @@ pub(crate) async fn ensure(home_id: &HomeId, repo: &Path) -> anyhow::Result<()> 
         "--startup-socket".to_string(),
         socket_path.display().to_string(),
     ];
-    let launch = crate::engine::process::start_home_session(
-        &format!(
-            "lfd-{}",
-            crate::engine::process::tmux_session_slug(home_id.as_str())
-        ),
-        repo,
-        &argv,
-    )
-    .await;
+    if let Some(switch_id) = switch_id {
+        argv.extend(["--install-switch".to_string(), switch_id.to_string()]);
+    }
+    let session = format!(
+        "lfd-{}",
+        crate::engine::process::tmux_session_slug(home_id.as_str())
+    );
+    let launch = match selection {
+        Some(selection) => {
+            crate::engine::process::start_home_session_for_install_selection(
+                &session, repo, &argv, selection, switch_id,
+            )
+            .await
+        }
+        _ => crate::engine::process::start_home_session(&session, repo, &argv).await,
+    };
     if let Err(error) = launch {
         return Err(anyhow::anyhow!(
             "failed to start lfd for Home {home_id}: {error}"
@@ -1312,24 +1391,27 @@ pub(crate) async fn ensure(home_id: &HomeId, repo: &Path) -> anyhow::Result<()> 
     .map_err(|_| {
         anyhow::anyhow!(
             "lfd did not publish a live or failed startup receipt for Home {home_id} within 10s; inspect {}",
-            crate::store::lf_home_dir().join("logs/lfd.log").display()
+            lf_home.join("logs/lfd.log").display()
         )
     })??;
     match receipt.state {
         StartupState::Live {
             home_id: reported, ..
-        } if reported == *home_id => live_endpoint(home_id).await.map(|_| ()).ok_or_else(|| {
-            anyhow::anyhow!(
-                "lfd reported live for Home {home_id}, but its endpoint is not answering"
-            )
-        }),
+        } if reported == *home_id => live_endpoint_at(home_id, &endpoints)
+            .await
+            .map(|_| ())
+            .ok_or_else(|| {
+                anyhow::anyhow!(
+                    "lfd reported live for Home {home_id}, but its endpoint is not answering"
+                )
+            }),
         StartupState::Live {
             home_id: reported, ..
         } => Err(anyhow::anyhow!(
             "lfd startup reached Home {reported}, not requested Home {home_id}"
         )),
         StartupState::Failed { reason } => {
-            if live_endpoint(home_id).await.is_some() {
+            if live_endpoint_at(home_id, &endpoints).await.is_some() {
                 Ok(())
             } else {
                 Err(anyhow::anyhow!(
@@ -1451,14 +1533,18 @@ struct LfdClientEndpoint {
 }
 
 async fn live_endpoint(home_id: &HomeId) -> Option<LfdClientEndpoint> {
-    let client = read_endpoint(home_id)?;
+    live_endpoint_at(home_id, &endpoint_dir()).await
+}
+
+async fn live_endpoint_at(home_id: &HomeId, endpoints: &Path) -> Option<LfdClientEndpoint> {
+    let client = read_endpoint_at(home_id, endpoints)?;
     let health = reqwest::Client::new()
         .get(format!("http://{}/health", client.endpoint))
         .timeout(Duration::from_millis(500))
         .send()
         .await
         .ok()?
-        .json::<HealthBody>()
+        .json::<LivenessHealthBody>()
         .await
         .ok()?;
     (health.home_id == *home_id && health.status == "ok").then_some(client)
@@ -1468,8 +1554,15 @@ pub(crate) async fn home_is_live(home_id: &HomeId) -> bool {
     live_endpoint(home_id).await.is_some()
 }
 
+pub(crate) async fn home_is_live_at(home_id: &HomeId, lf_home: &Path) -> bool {
+    live_endpoint_at(home_id, &lf_home.join("lfd"))
+        .await
+        .is_some()
+}
+
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub(crate) struct HomeHealthIdentity {
+    pub store: PathBuf,
     pub runtime_generation: u64,
     pub build_version: String,
     pub source_revision: String,
@@ -1477,7 +1570,14 @@ pub(crate) struct HomeHealthIdentity {
 }
 
 pub(crate) async fn home_health_identity(home_id: &HomeId) -> Option<HomeHealthIdentity> {
-    let client = read_endpoint(home_id)?;
+    home_health_identity_at(home_id, &crate::store::lf_home_dir()).await
+}
+
+pub(crate) async fn home_health_identity_at(
+    home_id: &HomeId,
+    lf_home: &Path,
+) -> Option<HomeHealthIdentity> {
+    let client = read_endpoint_at(home_id, &lf_home.join("lfd"))?;
     let health = reqwest::Client::new()
         .get(format!("http://{}/health", client.endpoint))
         .timeout(Duration::from_millis(500))
@@ -1491,6 +1591,7 @@ pub(crate) async fn home_health_identity(home_id: &HomeId) -> Option<HomeHealthI
         return None;
     }
     Some(HomeHealthIdentity {
+        store: PathBuf::from(health.store),
         runtime_generation: health.runtime_generation?,
         build_version: health.build_version?,
         source_revision: health.source_revision?,
@@ -1499,7 +1600,11 @@ pub(crate) async fn home_health_identity(home_id: &HomeId) -> Option<HomeHealthI
 }
 
 fn endpoint_path(home_id: &HomeId) -> PathBuf {
-    endpoint_dir().join(format!("{}.endpoint", home_id.as_str()))
+    endpoint_path_at(home_id, &endpoint_dir())
+}
+
+fn endpoint_path_at(home_id: &HomeId, endpoints: &Path) -> PathBuf {
+    endpoints.join(format!("{}.endpoint", home_id.as_str()))
 }
 
 fn endpoint_dir() -> PathBuf {
@@ -1521,8 +1626,8 @@ fn lock_home(home_id: &HomeId) -> anyhow::Result<File> {
     Ok(file)
 }
 
-async fn lock_start(home_id: &HomeId) -> anyhow::Result<File> {
-    let path = endpoint_dir().join(format!("{}.start.lock", home_id.as_str()));
+async fn lock_start_at(home_id: &HomeId, endpoints: &Path) -> anyhow::Result<File> {
+    let path = endpoints.join(format!("{}.start.lock", home_id.as_str()));
     tokio::task::spawn_blocking(move || {
         if let Some(parent) = path.parent() {
             std::fs::create_dir_all(parent)?;
@@ -1579,7 +1684,11 @@ fn write_startup_receipt(path: &Path, receipt: &StartupReceipt) -> anyhow::Resul
 }
 
 fn read_endpoint(home_id: &HomeId) -> Option<LfdClientEndpoint> {
-    let bytes = std::fs::read(endpoint_path(home_id)).ok()?;
+    read_endpoint_at(home_id, &endpoint_dir())
+}
+
+fn read_endpoint_at(home_id: &HomeId, endpoints: &Path) -> Option<LfdClientEndpoint> {
+    let bytes = std::fs::read(endpoint_path_at(home_id, endpoints)).ok()?;
     serde_json::from_slice(&bytes).ok()
 }
 
@@ -1881,6 +1990,7 @@ mod tests {
         let body: serde_json::Value = resp.json().await.unwrap();
         assert_eq!(body["status"], "ok");
         assert_eq!(body["home_id"], home_id.as_str());
+        assert!(body["store"].as_str().is_some());
         assert!(body["runtime_generation"].is_number());
         assert_eq!(body["build_version"], crate::build_info::BUILD_VERSION);
         assert_eq!(
@@ -1891,6 +2001,24 @@ mod tests {
             body["migration_frontier"],
             crate::store::migrations::latest_known_version()
         );
+    }
+
+    #[test]
+    fn liveness_probe_accepts_health_from_a_pre_store_identity_daemon() {
+        let home_id = HomeId::new();
+        let body = serde_json::json!({
+            "status": "ok",
+            "home_id": home_id.as_str(),
+            "runtime_generation": 1,
+            "build_version": "0.12.8",
+            "source_revision": "published",
+            "migration_frontier": "0.12.8.001_release"
+        });
+
+        let health: LivenessHealthBody = serde_json::from_value(body).unwrap();
+
+        assert_eq!(health.status, "ok");
+        assert_eq!(health.home_id, home_id);
     }
 
     #[tokio::test]

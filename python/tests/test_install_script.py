@@ -10,6 +10,7 @@ import sys
 from pathlib import Path
 
 import pytest
+import typer
 
 SCRIPTS_DIR = Path(__file__).resolve().parents[2] / "scripts"
 SCRIPT_PATH = SCRIPTS_DIR / "install.py"
@@ -289,3 +290,79 @@ def test_local_dry_run_has_no_production_activation_path(
     output = capsys.readouterr().out
     assert "validation-only build under local-bin" in output
     assert "promote" not in output.lower()
+
+
+def test_local_promotion_uses_the_complete_staged_artifact_set(
+    monkeypatch: pytest.MonkeyPatch, tmp_path: Path
+) -> None:
+    root = tmp_path / "repo"
+    local_bin = root / "local-bin"
+    spec = install.default_bundle_spec(root)
+    calls: list[list[str]] = []
+    monkeypatch.setattr(install, "LOCAL_BIN", local_bin)
+    monkeypatch.setattr(install.platform, "system", lambda: "Linux")
+    monkeypatch.setattr(
+        install,
+        "_run_or_raise",
+        lambda command, _label, cwd=None, env=None: calls.append(command),
+    )
+
+    install._promote_local_build(spec, tmp_path / "installed", fresh=True)
+
+    command = calls.pop()
+    assert command[:5] == [
+        str(local_bin / "lf"),
+        "install",
+        "promote",
+        "--from-build",
+        str(local_bin / "lf"),
+    ]
+    assert command[command.index("--daemon-source") + 1] == str(local_bin / "lfd")
+    assert command[command.index("--cli-target") + 1] == str(tmp_path / "installed/lf")
+    assert "--fresh" in command
+
+
+def test_local_promotion_refuses_an_incomplete_swift_artifact_set(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    monkeypatch.setattr(install.platform, "system", lambda: "Darwin")
+    with pytest.raises(typer.BadParameter, match="cannot skip the swift artifact set"):
+        install.local(use_install=True, skip=["swift"])
+
+
+def test_local_promotion_uses_only_the_control_pair_off_macos(
+    monkeypatch: pytest.MonkeyPatch, tmp_path: Path
+) -> None:
+    root = tmp_path / "repo"
+    local_bin = root / "local-bin"
+    spec = install.default_bundle_spec(root)
+    skipped: list[set[str]] = []
+    promoted: list[tuple[Path, Path, bool]] = []
+    monkeypatch.setattr(install, "ROOT", root)
+    monkeypatch.setattr(install, "LOCAL_BIN", local_bin)
+    monkeypatch.setattr(install, "default_bundle_spec", lambda: spec)
+    monkeypatch.setattr(install.platform, "system", lambda: "Linux")
+    monkeypatch.setattr(install, "read_release_version", lambda _root: "9.9.9")
+    monkeypatch.setattr(install, "_run_parallel_builds", lambda skip: skipped.append(skip))
+    monkeypatch.setattr(install, "_stage_binaries", lambda _target: None)
+    monkeypatch.setattr(
+        install,
+        "_install_loopflow",
+        lambda _spec, _version: pytest.fail("non-macOS promotion built the app"),
+    )
+    monkeypatch.setattr(
+        install,
+        "_promote_local_build",
+        lambda bundle, target, fresh: promoted.append((bundle.app_path, target, fresh)),
+    )
+
+    install.local(
+        dry_run=False,
+        use_install=True,
+        fresh=True,
+        install_dir=tmp_path / "installed",
+        skip=[],
+    )
+
+    assert skipped == [{"swift"}]
+    assert promoted == [(spec.app_path, tmp_path / "installed", True)]

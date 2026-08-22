@@ -1,0 +1,6 @@
+[test-groups]
+machine-promotion = { max-threads = 1 }
+
+[[profile.default.overrides]]
+filter = 'test(local_promotion_controller_bootstraps_reuses_dev_and_returns_to_published) | test(switch_recovery_obeys_every_persisted_phase_owner)'
+test-group = 'machine-promotion'

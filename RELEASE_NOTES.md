@@ -1,44 +1,27 @@
-# v0.12.13
+# v0.12.14
 
 <!-- loopflow:release-notes=narrative;gate=safe -->
 
-v0.12.13 makes Loopflow's operational surfaces describe current truth, then gives agents safer places to act on it. Status, roadmap, prompts, and the Mac app now share fresh liveness and reviewed metric evidence; Task execution and review survive several recovery and concurrency failures; and default and Wave agents leave canonical main clean. Upgrade when long-lived, multi-session work needs trustworthy health reporting without sacrificing working context.
+v0.12.14 makes PR landing a completion lifecycle instead of an auto-merge request. `lf pr land` now owns an exact PR head through CI repair, confirmed merge, and Task settlement, preventing completion or branch rotation from racing ahead of GitHub. Upgrade when automated shipping needs to recover from CI failures and finish against authoritative merge state; use `lf pr arm` when request-and-return behavior is still the right fit.
 
-## Know what is happening now
+## Finish only after the PR merges
 
-Status no longer lets historical receipts impersonate live state. Project-owned metrics add reviewed evidence for KR judgment, while unknown or unavailable evidence remains explicit instead of being guessed.
+Landing now follows the PR until GitHub reports a merge or an actionable blocker. Task state changes happen after that confirmation, so the repository and Loopflow no longer disagree about whether work has shipped.
 
-- `lf status` reports Work as `working`, `stalled`, `stopped`, or `unobservable` from fresh Home-owned evidence. Earlier failures remain separately labeled as `last failure`, and invocations without verified liveness appear as `unverified`.
-- Reviewed metric contracts define meaning, targets, windows, and freshness. One Rust-derived portfolio supplies `lf status`, roadmap, agent context, and the Mac Wave detail view with `Met`, `Missed`, `Unknown`, or `Unavailable` readings.
-- Metrics inform KR decisions but do not complete KRs automatically.
-- Status and roadmap remain readable for released Tasks that predate reviewer-facing PR copy, while retired Waves, unavailable Projects, and orphaned Tasks remain visible instead of disappearing.
+- `lf pr land` watches the exact PR head through merge instead of returning after it requests auto-merge.
+- Task completion and serial PR rotation occur only after GitHub confirms the merge.
+- If the head changes during landing, Loopflow re-arms the new head rather than treating the earlier request as sufficient.
+- `lf pr land -c` completes the owning Task after the watched merge succeeds.
 
-## Keep Task work moving through failures and review gates
+## Repair CI under one durable owner
 
-The Task lifecycle now carries the right runtime and reviewer context from User control turns through Ask settlement and PR review. Recovery converges on an actionable state instead of repeatedly launching the same doomed work.
+CI recovery is now part of the landing lifecycle itself. Persisted landing generations and incident records let supervision resume safely after interruption without launching competing repair paths.
 
-- Tasks and Projects launched from User control enter repository runtime before their Work body runs, restoring journal trace capture without changing their existing failure policies.
-- Human flow gates run the actual skill harness with its system prompt, context, configuration, and writable Task authority. User-targeted Task Asks preserve Human reviewer mode and still require explicit resolution, decline, or release.
-- Machine-authored Task PR copy identifies the owning Task, feature or fix cycle, PR sequence, and merge disposition; publish and land transitions refresh that block idempotently.
-- Trace persistence now waits for concurrent SQLite WAL writers. A remaining capture failure is finalized as partial and reported as actionable and non-resumable while preserving the Task worktree and PR.
-- A Task whose persisted lifecycle names a missing flow records one resumable failure and parks before reserving a Run, rotating a PR, or launching a provider. Later supervision ticks stay quiet until the flow is valid again.
-
-## Work in parallel without dirtying shared main
-
-Default terminal agents and long-running Wave residents now run from sibling worktrees, keeping canonical main as a stable control plane. The Mac app's new repo-scoped Sessions surface keeps concurrent human attention in the same boundary.
-
-- Starting bare `lf` from canonical main carries local commits, tracked edits, and untracked files into an author-scoped agent worktree, then restores main to the fetched default branch. Deliberate non-default checkouts and existing linked worktrees remain unchanged.
-- Each Wave resident uses a deterministic sibling worktree. Resident writes are limited to that Wave's goal and memory and leave through a CI-gated PR; relocation waits while changes are dirty, unpublished, or under review.
-- Sessions is now the default repository surface in the Mac app. Its native Ghostty multiplexer supports split panes, spatial focus, zoom, close and undo, and one pane per Ask or shell session.
-- The attention queue groups sessions by Wave, Project, and Task, opens them serially, removes settled sessions, and prevents preparation or presentation from crossing repository boundaries.
+- A failed head can launch one bounded `ci-fix` repair for that failure identity.
+- Fenced supervisor claims, heartbeats, and Home daemon recovery preserve ownership across process restarts.
+- The Task runner's separate CI repair flow has been removed, leaving landing responsible for repair and post-merge settlement.
 
 ## Operational notes
 
-- The status DTOs replace previous body and process fields with required current-state and liveness fields. Rust and Swift ship together; external JSON consumers must migrate to the new shape.
-- The metric-storage migration remains a release draft in source builds. Until it is materialized, reviewed contracts are visible but their readings remain `Unknown`.
-- Launching from canonical main now relocates agent activity to a sibling worktree. Scripts that assumed the agent would continue running in the canonical checkout should use the reported worktree path.
-
-## Small changes
-
-- Updated Rust dependencies `base64` from 0.22.1 to 0.23.1 and `fancy-regex` from 0.18.0 to 0.19.0.
-- Updated the Python development dependency Ruff from 0.16.0 to 0.16.3.
+- `lf pr land` is now a watched command. Use `lf pr arm` for the previous one-shot behavior that requests exact-head auto-merge and returns.
+- Submit, arm, and land preparation collapse authored history into one tree-identical commit before publishing. Expect the prepared PR head and authored commit history to change while the resulting tree remains the same.

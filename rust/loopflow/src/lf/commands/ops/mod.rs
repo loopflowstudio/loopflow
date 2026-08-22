@@ -2371,7 +2371,7 @@ fn launch_skill_agent(
     let (provider, model) = crate::engine::parse_agent(agent);
     let capture_context =
         crate::journal::trace_capture_context(repo_root, None, Some(skill_name.to_string()))
-            .ok_or_else(|| anyhow!("trace capture identity is unavailable before agent launch"))?;
+            .map_err(|_| anyhow!("trace capture identity is unavailable before agent launch"))?;
     let capture = crate::trace::CaptureHandle::begin(
         capture_context,
         context,

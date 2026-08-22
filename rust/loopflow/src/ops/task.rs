@@ -7,8 +7,8 @@ use std::time::{Duration, Instant};
 
 use crate::child::ChildRef;
 use crate::durable::{
-    AgentInvocation, AuthenticatedRequest, Containment, ContainmentObservation, ControlCtx, Run,
-    RunLease, RunState, RunTrigger, WaitOn, WorkRef, WorkStatus,
+    AgentInvocation, AuthenticatedRequest, ContainmentObservation, ControlCtx, Run, RunLease,
+    RunState, RunTrigger, WaitOn, WorkRef, WorkStatus,
 };
 use crate::engine::config::{load_config_or_default, parse_agent};
 use crate::engine::git::{
@@ -17,7 +17,7 @@ use crate::engine::git::{
     push_with_upstream, ref_exists, rev_parse, stash_including_untracked, stash_pop,
 };
 use crate::engine::naming::sanitize_for_branch;
-use crate::engine::process::{tmux_session_exists, tmux_session_slug};
+use crate::engine::process::tmux_session_slug;
 use crate::engine::worktrees::{
     create_from_placement_plan, git_common_dir, main_repo_root, plan_placement, PlacementStrategy,
     WorktreeSegment,
@@ -56,10 +56,10 @@ pub struct TaskFlowOverrides {
     pub finally: Option<String>,
 }
 
-/// Named lifecycle presets: where the human gate sits, in one word.
+/// Named cycle presets: where the human gate sits, in one word.
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub enum TaskCycle {
-    /// Behavior is wrong. Opens with the incident cycle (restore → 5whys)
+    /// Behavior is wrong. Opens with the incident flow (restore → 5whys)
     /// and the human gates at the demo, not a design doc.
     Fix,
     /// Behavior should change; the human shapes the design before code.
@@ -80,6 +80,20 @@ impl TaskCycle {
         match self {
             Self::Fix => ("incident", "ship-demo"),
             Self::Feature => ("task-design", "ship-demo"),
+        }
+    }
+
+    pub fn for_lifecycle(lifecycle: &crate::task::TaskLifecyclePlan) -> Self {
+        [Self::Fix, Self::Feature]
+            .into_iter()
+            .find(|cycle| lifecycle.first.flow == cycle.flows().0)
+            .unwrap_or(Self::Feature)
+    }
+
+    pub fn as_str(self) -> &'static str {
+        match self {
+            Self::Fix => "fix",
+            Self::Feature => "feature",
         }
     }
 }
@@ -139,6 +153,7 @@ pub struct TaskSnapshot {
     pub wave: String,
     pub project_id: String,
     pub status: WorkStatus,
+    pub current: crate::child::CurrentWorkObservation,
     pub worktree: String,
     pub workspace_slug: String,
     pub lifecycle: crate::task::TaskLifecyclePlan,
@@ -153,7 +168,6 @@ pub struct TaskSnapshot {
     pub agent: String,
     pub provider: String,
     pub provider_session_id: Option<String>,
-    pub process_alive: bool,
     pub invocation: Option<AgentInvocation>,
     pub latest_event: Option<crate::task::TaskEvent>,
     pub created_at: time::OffsetDateTime,
@@ -988,6 +1002,12 @@ fn task_configuration_refusal(task: &Task) -> Option<String> {
         .map(|error| error.to_string())
 }
 
+fn task_execution_refusal(task: &Task) -> Option<String> {
+    task_execution_boundary(&task.worktree, &task.agent)
+        .err()
+        .map(|error| error.to_string())
+}
+
 pub(crate) async fn task_launch_refusal(
     store: &SharedStore,
     task: &Task,
@@ -995,6 +1015,23 @@ pub(crate) async fn task_launch_refusal(
     if let Some(refusal) = task_configuration_refusal(task) {
         return Ok(Some(refusal));
     }
+    persisted_task_launch_refusal(store, task).await
+}
+
+async fn task_launch_refusal_after_lifecycle_validation(
+    store: &SharedStore,
+    task: &Task,
+) -> crate::store::StoreResult<Option<String>> {
+    if let Some(refusal) = task_execution_refusal(task) {
+        return Ok(Some(refusal));
+    }
+    persisted_task_launch_refusal(store, task).await
+}
+
+async fn persisted_task_launch_refusal(
+    store: &SharedStore,
+    task: &Task,
+) -> crate::store::StoreResult<Option<String>> {
     let event = store.latest_task_event(&task.id).await?;
     Ok(task_event_launch_refusal(event.as_ref()).map(str::to_string))
 }
@@ -1572,11 +1609,12 @@ async fn validate_automated_task_authority(
     lease: &RunLease,
 ) -> OpsResult<()> {
     let main_repo = main_repo_root(repo)?;
-    let current = crate::ops::task_pm::resolve_task(
+    let current = Box::pin(crate::ops::task_pm::resolve_task_async(
         &main_repo,
         task.plan.id.as_str(),
         crate::ops::pm::PmRefresh::Never,
-    )
+    ))
+    .await
     .map_err(|error| {
         task_error(format!(
             "Task {} current PM authority refused: {error}",
@@ -1636,8 +1674,8 @@ pub(crate) fn request_task_pr_publication(repo: &Path, title: &str, body: &str) 
         else {
             return Ok(false);
         };
-        let identity = task_pr_identity_from_store(&store, &task).await?;
-        validate_task_pr_copy(&identity, title, body)?;
+        let context = _task_pr_context_from_store(&store, &task).await?;
+        _validate_task_pr_copy(&context, title, body)?;
         let mut pr = store
             .active_task_pr(&task.id)
             .await
@@ -1688,32 +1726,57 @@ pub(crate) fn request_task_pr_publication(repo: &Path, title: &str, body: &str) 
 }
 
 #[derive(Debug, Clone, PartialEq, Eq)]
-pub(crate) struct TaskPrIdentity {
+pub(crate) struct TaskPrContext {
     pub(crate) title: String,
     pub(crate) identifier: String,
     pub(crate) url: String,
+    pub(crate) lifecycle: crate::task::TaskLifecyclePlan,
+    pub(crate) sequence: u32,
 }
 
-pub(crate) fn task_pr_identity(repo: &Path) -> OpsResult<Option<TaskPrIdentity>> {
+impl TaskPrContext {
+    pub(crate) fn pr_title(&self) -> String {
+        format!("{}: {}", self.identifier.trim(), self.title.trim())
+    }
+
+    pub(crate) fn task_link(&self) -> String {
+        format!(
+            "[{} — {}]({})",
+            _markdown_link_text(self.identifier.trim()),
+            _markdown_link_text(self.title.trim()),
+            self.url
+        )
+    }
+
+    pub(crate) fn cycle(&self) -> TaskCycle {
+        TaskCycle::for_lifecycle(&self.lifecycle)
+    }
+}
+
+fn _markdown_link_text(value: &str) -> String {
+    value
+        .replace('\\', "\\\\")
+        .replace('[', "\\[")
+        .replace(']', "\\]")
+}
+
+pub(crate) fn task_pr_context(repo: &Path) -> OpsResult<Option<TaskPrContext>> {
     block_on_task(async move {
         let TaskAuthority::Authority { store, task, .. } = resolve_task_authority(repo).await?
         else {
             return Ok(None);
         };
-        task_pr_identity_from_store(&store, &task).await.map(Some)
+        _task_pr_context_from_store(&store, &task).await.map(Some)
     })
 }
 
-async fn task_pr_identity_from_store(
-    store: &SharedStore,
-    task: &Task,
-) -> OpsResult<TaskPrIdentity> {
+async fn _task_pr_context_from_store(store: &SharedStore, task: &Task) -> OpsResult<TaskPrContext> {
     let wave = owning_wave(store, task).await?;
     let snapshot = store
         .pm_snapshot(&task.wave_id)
         .await
         .map_err(|error| task_error(format!("failed to read cached PM snapshot: {error}")))?
-        .ok_or_else(|| missing_task_pr_url(task, wave.name()))?;
+        .ok_or_else(|| _missing_task_pr_url(task, wave.name()))?;
     let snapshot: PmSnapshot = serde_json::from_str(&snapshot.payload).map_err(|error| {
         task_error(format!(
             "cached PM snapshot for Wave {:?} is invalid: {error}. Run `lf pm sync --wave {}` before publishing this Task PR",
@@ -1725,20 +1788,27 @@ async fn task_pr_identity_from_store(
         .items
         .iter()
         .find(|item| item.id == task.plan.id.as_str())
-        .ok_or_else(|| missing_task_pr_url(task, wave.name()))?;
+        .ok_or_else(|| _missing_task_pr_url(task, wave.name()))?;
     let url = item
         .url
         .as_deref()
-        .filter(|url| valid_task_url(url))
-        .ok_or_else(|| missing_task_pr_url(task, wave.name()))?;
-    Ok(TaskPrIdentity {
+        .filter(|url| _valid_task_url(url))
+        .ok_or_else(|| _missing_task_pr_url(task, wave.name()))?;
+    let pr = store
+        .active_task_pr(&task.id)
+        .await
+        .map_err(|error| task_error(format!("failed to read active PR: {error}")))?
+        .ok_or_else(|| task_error(format!("Task {} has no active PR", task.plan.identifier)))?;
+    Ok(TaskPrContext {
         title: task.plan.title.clone(),
         identifier: task.plan.identifier.clone(),
         url: url.to_string(),
+        lifecycle: task.lifecycle.clone(),
+        sequence: pr.sequence,
     })
 }
 
-fn valid_task_url(value: &str) -> bool {
+fn _valid_task_url(value: &str) -> bool {
     let Ok(url) = reqwest::Url::parse(value) else {
         return false;
     };
@@ -1747,22 +1817,27 @@ fn valid_task_url(value: &str) -> bool {
         && !value.chars().any(char::is_control)
 }
 
-fn missing_task_pr_url(task: &Task, wave: &str) -> OpsError {
+fn _missing_task_pr_url(task: &Task, wave: &str) -> OpsError {
     task_error(format!(
         "Task {} has no valid provider URL in the cached PM snapshot. Run `lf pm sync --wave {wave}` before publishing this Task PR",
         task.plan.identifier,
     ))
 }
 
-fn validate_task_pr_copy(identity: &TaskPrIdentity, title: &str, body: &str) -> OpsResult<()> {
-    if !title.starts_with(identity.title.trim()) {
+fn _validate_task_pr_copy(context: &TaskPrContext, title: &str, body: &str) -> OpsResult<()> {
+    let expected_title = context.pr_title();
+    if title != expected_title {
         return Err(task_error(format!(
-            "Task PR title must start with the Linear Task name {:?}",
-            identity.title,
+            "Task PR title must be {expected_title:?}"
         )));
     }
-    let anchor = format!("Linear Task: [{}]({})", identity.identifier, identity.url);
-    if !body.lines().any(|line| line.trim() == anchor) {
+    let anchor = format!("**Task:** {}", context.task_link());
+    if !body.lines().any(|line| {
+        line.trim()
+            .strip_prefix('>')
+            .map(str::trim)
+            .is_some_and(|line| line == anchor)
+    }) {
         return Err(task_error(format!(
             "Task PR body must include the owning Linear Task link: {anchor}"
         )));
@@ -3019,6 +3094,10 @@ pub(crate) async fn reconcile_process_liveness(
     else {
         return Ok(());
     };
+    store
+        .ensure_local_run(&run)
+        .await
+        .map_err(|error| task_error(error.to_string()))?;
     if run.state == RunState::Reserved {
         let still_starting =
             run.created_at + time::Duration::seconds(10) > time::OffsetDateTime::now_utc();
@@ -3026,31 +3105,36 @@ pub(crate) async fn reconcile_process_liveness(
             return Ok(());
         }
     }
-    if let Some(containment) = &run.containment {
-        let alive = match containment {
-            Containment::Tmux { name } => tmux_session_exists(name)
-                .await
-                .map_err(|error| task_error(error.to_string()))?,
-            Containment::ProcessGroup { .. } => true,
-        };
-        if alive {
-            return Ok(());
-        }
-        if run.started_at.is_some_and(|started_at| {
+    let observation = match run.containment.as_ref() {
+        Some(containment) => crate::engine::process::containment_observation(containment).await,
+        None => ContainmentObservation::Unprovable,
+    };
+    if observation != ContainmentObservation::Absent {
+        store
+            .record_run_liveness(&run.id, observation)
+            .await
+            .map_err(|error| task_error(error.to_string()))?;
+        return Ok(());
+    }
+    if run.containment.is_some()
+        && run.started_at.is_some_and(|started_at| {
             started_at + time::Duration::seconds(10) > time::OffsetDateTime::now_utc()
-        }) {
-            return Ok(());
-        }
+        })
+    {
+        return Ok(());
     }
     store
-        .recover_run(&run.id, ContainmentObservation::Absent)
+        .recover_run(&run.id, observation)
         .await
         .map_err(|error| task_error(error.to_string()))?;
     mark_task_body_lost(store, task).await
 }
 
 async fn mark_task_body_lost(store: &SharedStore, task: &mut Task) -> OpsResult<()> {
-    if task_launch_refusal(store, task)
+    if park_invalid_lifecycle(store, task).await? {
+        return Ok(());
+    }
+    if task_launch_refusal_after_lifecycle_validation(store, task)
         .await
         .map_err(|error| task_error(format!("failed to read Task blocker: {error}")))?
         .is_some()
@@ -3084,6 +3168,46 @@ async fn mark_task_body_lost(store: &SharedStore, task: &mut Task) -> OpsResult<
     relaunch_inactive_process_automatically(store, task).await
 }
 
+async fn park_invalid_lifecycle(store: &SharedStore, task: &Task) -> OpsResult<bool> {
+    let Some(error) = validate_task_lifecycle(task)
+        .err()
+        .map(|error| error.to_string())
+    else {
+        return Ok(false);
+    };
+    let already_recorded = store
+        .latest_task_event(&task.id)
+        .await
+        .map_err(|store_error| task_error(store_error.to_string()))?
+        .is_some_and(|event| {
+            matches!(
+                event.kind,
+                TaskEventKind::Failed {
+                    error: recorded,
+                    resumable: true,
+                } if recorded == error
+            )
+        });
+    if !already_recorded {
+        store
+            .append_task_event(
+                &task.id,
+                &TaskEventKind::Failed {
+                    error: error.clone(),
+                    resumable: true,
+                },
+            )
+            .await
+            .map_err(|store_error| task_error(store_error.to_string()))?;
+        tracing::warn!(
+            task = %task.plan.identifier,
+            %error,
+            "Task lifecycle is invalid; resident recovery is parked"
+        );
+    }
+    Ok(true)
+}
+
 /// Let one live Project body supervise the progress leases of its Task bodies.
 ///
 /// This is deliberately parent-driven: Project and Tasks do not grow a
@@ -3113,7 +3237,10 @@ pub(crate) async fn reconcile_project_tasks(
         ) {
             continue;
         }
-        if task_launch_refusal(store, task)
+        if park_invalid_lifecycle(store, task).await? {
+            continue;
+        }
+        if task_launch_refusal_after_lifecycle_validation(store, task)
             .await
             .map_err(|error| task_error(format!("failed to read Task blocker: {error}")))?
             .is_some()
@@ -4498,7 +4625,6 @@ pub fn task_status(issue: &str) -> OpsResult<Task> {
             .map_err(|error| task_error(format!("failed to read Task blocker: {error}")))?;
         if launch_refusal.is_none() && task_worktree_blocker(&store, &task).await?.is_none() {
             reconcile_task_pr(&store, &mut task).await?;
-            reconcile_process_liveness(&store, &mut task).await?;
             reconcile_task_completion(&store, &mut task, None).await?;
         }
         Ok(task)
@@ -5064,13 +5190,6 @@ pub fn task_snapshot(task: &Task) -> OpsResult<TaskSnapshot> {
                 .map_err(|error| task_error(error.to_string()))?,
             None => None,
         };
-        let process_alive = match run.as_ref().and_then(|run| run.containment.as_ref()) {
-            Some(Containment::Tmux { name }) => tmux_session_exists(name)
-                .await
-                .map_err(|error| task_error(error.to_string()))?,
-            Some(Containment::ProcessGroup { .. }) => true,
-            None => false,
-        };
         let latest_event = store
             .task_events_after(&task.id, 0)
             .await
@@ -5109,6 +5228,14 @@ pub fn task_snapshot(task: &Task) -> OpsResult<TaskSnapshot> {
             task_configuration_refusal(&task)
                 .or_else(|| task_event_launch_refusal(latest_event.as_ref()).map(str::to_string))
         };
+        let current = crate::child::observe_current_work(
+            &store,
+            &work,
+            &work_status,
+            time::OffsetDateTime::now_utc(),
+        )
+        .await
+        .map_err(|error| task_error(error.to_string()))?;
         let action_evidence = TaskActionEvidence {
             status: work_status.clone(),
             latest_pr_phase: latest.map(|pr| pr.phase()),
@@ -5122,11 +5249,7 @@ pub fn task_snapshot(task: &Task) -> OpsResult<TaskSnapshot> {
             completion_refusal: completion_refusal.as_deref(),
             resume_refusal: resume_refusal.as_deref(),
             ci: active.and_then(|pr| pr.fresh_ci()),
-            process_alive: if matches!(work_status, WorkStatus::Running { .. }) {
-                Some(process_alive)
-            } else {
-                None
-            },
+            current_state: current.state,
             predecessor_phase,
             abandon_intent: task.abandon_intent.is_some(),
             local_progress_unsettled: None,
@@ -5144,6 +5267,7 @@ pub fn task_snapshot(task: &Task) -> OpsResult<TaskSnapshot> {
             wave: wave.name().to_string(),
             project_id: task.project_id.to_string(),
             status: work_status,
+            current,
             worktree: task.worktree.display().to_string(),
             workspace_slug: task.workspace_slug,
             lifecycle: task.lifecycle,
@@ -5158,7 +5282,6 @@ pub fn task_snapshot(task: &Task) -> OpsResult<TaskSnapshot> {
             agent: task.agent,
             provider: task.provider,
             provider_session_id: task.provider_session_id,
-            process_alive,
             invocation,
             latest_event,
             created_at: task.created_at,
@@ -5704,10 +5827,11 @@ pub fn task_wait(issue: &str, until: TaskWaitUntil, timeout: Option<Duration>) -
 mod tests {
     use super::{
         ensure_task_flow_override, ensure_working_pr, launch_task_process, lock_task_pr_mutation,
-        preflight_task_execution, prepare_automatic_task_relaunch, probe_task_execution_boundary,
-        reconcile_process_liveness, resolve_task_lifecycle, resolve_task_start_input,
-        task_event_launch_refusal, task_execution_boundary, validate_task_lifecycle,
-        TaskFlowOverrides, MAX_AUTOMATIC_TASK_RECOVERY_RUNS,
+        mark_task_body_lost, preflight_task_execution, prepare_automatic_task_relaunch,
+        probe_task_execution_boundary, reconcile_process_liveness, reconcile_project_tasks,
+        resolve_task_lifecycle, resolve_task_start_input, task_event_launch_refusal,
+        task_execution_boundary, validate_task_lifecycle, TaskFlowOverrides,
+        MAX_AUTOMATIC_TASK_RECOVERY_RUNS,
     };
     use crate::child::ChildRef;
     use crate::durable::{RunTrigger, WorkRef, WorkStatus};
@@ -6247,6 +6371,53 @@ mod tests {
             .await
             .unwrap()
             .is_empty());
+    }
+
+    #[tokio::test]
+    async fn resident_records_an_invalid_lifecycle_once_without_retrying() {
+        let TaskFixture {
+            store, task, work, ..
+        } = task_fixture("TEST-STALE-RESIDENT", "retired-task-flow").await;
+        let project = store.get_project(&task.project_id).await.unwrap().unwrap();
+
+        for _ in 0..2 {
+            reconcile_project_tasks(&store, &project).await.unwrap();
+        }
+
+        let events = store.recent_task_events(&task.id, 10).await.unwrap();
+        assert_eq!(events.len(), 1);
+        assert!(matches!(
+            &events[0].kind,
+            TaskEventKind::Failed {
+                error,
+                resumable: true,
+            } if error.contains("retired-task-flow")
+        ));
+        assert!(store.current_run(&work).await.unwrap().is_none());
+        assert_eq!(store.task_prs(&task.id).await.unwrap().len(), 1);
+    }
+
+    #[tokio::test]
+    async fn lost_body_parks_an_invalid_lifecycle_without_relaunching() {
+        let TaskFixture {
+            store,
+            mut task,
+            work,
+            ..
+        } = task_fixture("TEST-STALE-BODY", "retired-task-flow").await;
+
+        mark_task_body_lost(&store, &mut task).await.unwrap();
+
+        let event = store.latest_task_event(&task.id).await.unwrap().unwrap();
+        assert!(matches!(
+            event.kind,
+            TaskEventKind::Failed {
+                error,
+                resumable: true,
+            } if error.contains("retired-task-flow")
+        ));
+        assert!(store.current_run(&work).await.unwrap().is_none());
+        assert_eq!(store.task_prs(&task.id).await.unwrap().len(), 1);
     }
 
     #[tokio::test]

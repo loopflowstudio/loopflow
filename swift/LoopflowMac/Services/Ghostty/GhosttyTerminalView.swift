@@ -13,7 +13,9 @@ struct GhosttyTerminalView: View {
     let argv: [String]
     let env: [String: String]
     let sessionId: String?
+    let isFocused: Bool
     let onSurfaceCreated: () -> Void
+    let onFocus: () -> Void
     @ObservedObject var manager: GhosttyManager
 
     init(
@@ -21,14 +23,18 @@ struct GhosttyTerminalView: View {
         argv: [String] = [],
         env: [String: String] = [:],
         sessionId: String? = nil,
+        isFocused: Bool = false,
         onSurfaceCreated: @escaping () -> Void = {},
+        onFocus: @escaping () -> Void = {},
         manager: GhosttyManager = .shared
     ) {
         self.workingDirectory = workingDirectory
         self.argv = argv
         self.env = env
         self.sessionId = sessionId
+        self.isFocused = isFocused
         self.onSurfaceCreated = onSurfaceCreated
+        self.onFocus = onFocus
         self.manager = manager
     }
 
@@ -38,7 +44,9 @@ struct GhosttyTerminalView: View {
                 workingDirectory: workingDirectory,
                 command: shellCommand,
                 sessionId: sessionId,
+                isFocused: isFocused,
                 onSurfaceCreated: onSurfaceCreated,
+                onFocus: onFocus,
                 size: geo.size,
                 manager: manager
             )
@@ -54,7 +62,9 @@ struct GhosttyTerminalRepresentable: NSViewRepresentable {
     let workingDirectory: String
     let command: String?
     let sessionId: String?
+    let isFocused: Bool
     let onSurfaceCreated: () -> Void
+    let onFocus: () -> Void
     let size: CGSize
     @ObservedObject var manager: GhosttyManager
 
@@ -64,6 +74,7 @@ struct GhosttyTerminalRepresentable: NSViewRepresentable {
         view.command = command
         view.sessionId = sessionId
         view.onSurfaceCreated = onSurfaceCreated
+        view.onFocus = onFocus
 
         if case .uninitialized = manager.state {
             manager.initialize()
@@ -73,10 +84,14 @@ struct GhosttyTerminalRepresentable: NSViewRepresentable {
     }
 
     func updateNSView(_ nsView: GhosttyMetalView, context: Context) {
+        nsView.onFocus = onFocus
         nsView.sizeDidChange(size)
 
         if case .ready = manager.state, nsView.surface == nil, size.width > 0, size.height > 0 {
             nsView.createSurface(manager: manager)
+        }
+        if isFocused, nsView.window?.firstResponder !== nsView {
+            nsView.window?.makeFirstResponder(nsView)
         }
     }
 }
@@ -89,6 +104,7 @@ final class GhosttyMetalView: NSView, GhosttySessionSurfaceOwner, @preconcurrenc
     var command: String?
     var sessionId: String?
     var onSurfaceCreated: () -> Void = {}
+    var onFocus: () -> Void = {}
     nonisolated(unsafe) var surface: ghostty_surface_t?
 
     private nonisolated(unsafe) var displayLink: CADisplayLink?
@@ -170,7 +186,10 @@ final class GhosttyMetalView: NSView, GhosttySessionSurfaceOwner, @preconcurrenc
     }
 
     @objc private func displayLinkFired(_ link: CADisplayLink) {
-        guard let surface else { return }
+        guard let surface,
+              !isHiddenOrHasHiddenAncestor,
+              window?.occlusionState.contains(.visible) != false
+        else { return }
         ghostty_surface_draw(surface)
     }
 
@@ -199,6 +218,7 @@ final class GhosttyMetalView: NSView, GhosttySessionSurfaceOwner, @preconcurrenc
         if let surface {
             ghostty_surface_set_focus(surface, true)
         }
+        onFocus()
         return super.becomeFirstResponder()
     }
 
@@ -640,7 +660,9 @@ struct GhosttyTerminalView: View {
     let argv: [String]
     let env: [String: String]
     let sessionId: String?
+    let isFocused: Bool
     let onSurfaceCreated: () -> Void
+    let onFocus: () -> Void
     @ObservedObject var manager: GhosttyManager
 
     init(
@@ -648,14 +670,18 @@ struct GhosttyTerminalView: View {
         argv: [String] = [],
         env: [String: String] = [:],
         sessionId: String? = nil,
+        isFocused: Bool = false,
         onSurfaceCreated: @escaping () -> Void = {},
+        onFocus: @escaping () -> Void = {},
         manager: GhosttyManager = .shared
     ) {
         self.workingDirectory = workingDirectory
         self.argv = argv
         self.env = env
         self.sessionId = sessionId
+        self.isFocused = isFocused
         self.onSurfaceCreated = onSurfaceCreated
+        self.onFocus = onFocus
         self.manager = manager
     }
 

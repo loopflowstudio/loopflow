@@ -388,6 +388,17 @@ impl Store {
         .await
     }
 
+    pub async fn latest_project_failure(
+        &self,
+        project_id: &ProjectId,
+    ) -> StoreResult<Option<crate::project::HistoricalFailure>> {
+        let project_id = project_id.clone();
+        run_sqlite(&self.sqlite, move |store| {
+            store.latest_project_failure(&project_id)
+        })
+        .await
+    }
+
     pub async fn get_task_pr(&self, pr_id: &TaskPrId) -> StoreResult<Option<TaskPr>> {
         let pr_id = pr_id.clone();
         run_sqlite(&self.sqlite, move |store| store.task_pr(&pr_id)).await

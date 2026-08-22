@@ -406,8 +406,9 @@ impl BoundaryState {
         match self {
             Self::Starting | Self::Active => "running",
             Self::Succeeded => "completed",
-            Self::Failed | Self::Unknown => "failed",
+            Self::Failed => "failed",
             Self::Interrupted => "interrupted",
+            Self::Unknown => "unknown",
         }
     }
 
@@ -886,6 +887,7 @@ pub struct InvocationSurface {
     pub home_route: String,
     pub handback: Option<BoundaryState>,
     pub attach_argv: Option<Vec<String>>,
+    pub current: InvocationObservation,
 }
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize)]
@@ -894,6 +896,76 @@ pub enum ContainmentObservation {
     Absent,
     Present,
     Unprovable,
+}
+
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize)]
+#[serde(rename_all = "snake_case")]
+pub enum RunLivenessState {
+    Present,
+    Absent,
+    Unprovable,
+}
+
+impl From<ContainmentObservation> for RunLivenessState {
+    fn from(value: ContainmentObservation) -> Self {
+        match value {
+            ContainmentObservation::Present => Self::Present,
+            ContainmentObservation::Absent => Self::Absent,
+            ContainmentObservation::Unprovable => Self::Unprovable,
+        }
+    }
+}
+
+impl From<RunLivenessState> for ContainmentObservation {
+    fn from(value: RunLivenessState) -> Self {
+        match value {
+            RunLivenessState::Present => Self::Present,
+            RunLivenessState::Absent => Self::Absent,
+            RunLivenessState::Unprovable => Self::Unprovable,
+        }
+    }
+}
+
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub struct RunLivenessReceipt {
+    pub run_id: RunId,
+    pub home_id: HomeId,
+    pub state: RunLivenessState,
+    pub observed_at: OffsetDateTime,
+    pub runtime_generation: u64,
+}
+
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
+pub struct RunLivenessEvidence {
+    pub state: RunLivenessState,
+    #[serde(with = "time::serde::rfc3339::option")]
+    pub observed_at: Option<OffsetDateTime>,
+    pub fresh: bool,
+}
+
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize)]
+#[serde(rename_all = "snake_case")]
+pub enum InvocationObservationState {
+    Live,
+    Unverified,
+    History,
+}
+
+impl std::fmt::Display for InvocationObservationState {
+    fn fmt(&self, formatter: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+        formatter.write_str(match self {
+            Self::Live => "live",
+            Self::Unverified => "unverified",
+            Self::History => "history",
+        })
+    }
+}
+
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
+pub struct InvocationObservation {
+    pub state: InvocationObservationState,
+    pub reason: String,
+    pub liveness: Option<RunLivenessEvidence>,
 }
 
 #[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]

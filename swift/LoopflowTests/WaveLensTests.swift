@@ -8,26 +8,62 @@ struct WaveLensTests {
 
     @Test("green when a body is live")
     func greenWhenLive() {
-        let lens = WaveLens.forWave(live: true, status: .ready, activeTasks: 0, activeProjects: 0)
+        let lens = WaveLens.forWave(live: true, activeTasks: 0, activeProjects: 0)
         #expect(lens.color == .green)
         #expect(lens.reason.contains("listener answered"))
     }
 
-    @Test("an active Run without a listener is red, not invented green")
+    @Test("a verified Run without a listener is red, not invented green")
     func activeRunWithoutListenerIsRed() {
         let lens = WaveLens.forWave(
             live: false,
-            status: .running(runID: "run_test"),
+            current: current(.working, reason: "Run process answered"),
             activeTasks: 0,
             activeProjects: 0
         )
         #expect(lens.color == .red)
-        #expect(lens.reason == "Run active · Wave listener did not answer")
+        #expect(lens.reason == "Run process answered")
+    }
+
+    @Test("a live listener cannot erase canonically stopped Work")
+    func liveListenerPreservesStoppedWork() {
+        let lens = WaveLens.forWave(
+            live: true,
+            current: current(.stopped, reason: "the owning Home proved the Run is gone"),
+            activeTasks: 0,
+            activeProjects: 0
+        )
+        #expect(lens.color == .red)
+        #expect(lens.reason == "the owning Home proved the Run is gone · Wave listener still answered")
+    }
+
+    @Test("a live listener cannot make unobservable Work green")
+    func liveListenerPreservesUnobservableWork() {
+        let lens = WaveLens.forWave(
+            live: true,
+            current: current(.unobservable, reason: "the owning Home could not verify the Run"),
+            activeTasks: 0,
+            activeProjects: 0
+        )
+        #expect(lens.color == .unknown)
+        #expect(lens.reason == "the owning Home could not verify the Run · Wave listener answered")
+    }
+
+    @Test("a recorded running status is not live evidence")
+    func recordedRunningStatusIsNotLiveEvidence() {
+        let lens = WaveLens.forWave(
+            live: false,
+            current: nil,
+            activeTasks: 0,
+            activeProjects: 0
+        )
+        #expect(lens.color == .red)
+        #expect(lens.reason == "Expected live · Wave listener did not answer")
     }
 
     @Test("red when stopped with outstanding work")
     func redWhenOutstanding() {
-        let lens = WaveLens.forWave(live: false, status: .ready, activeTasks: 2, activeProjects: 1)
+        let lens = WaveLens.forWave(live: false, activeTasks: 2, activeProjects: 1)
         #expect(lens.color == .red)
         #expect(lens.reason.contains("3"))
     }
@@ -37,7 +73,6 @@ struct WaveLensTests {
         let lens = WaveLens.forWave(
             live: false,
             enabled: false,
-            status: .ready,
             activeTasks: 0,
             activeProjects: 0
         )
@@ -46,11 +81,26 @@ struct WaveLensTests {
         #expect(!lens.color.isLit)
     }
 
+    @Test("retired Wave renders history rather than disabled current state")
+    func retiredWaveIsHistorical() {
+        let wave = Wave(
+            id: "wave_old",
+            name: "infra",
+            repo: "/tmp/old",
+            status: .abandoned,
+            retiredAt: "2026-08-20T12:00:00Z",
+            supersededByWaveId: "wave_current"
+        )
+        let lens = WaveViewModel(api: wave).lens
+
+        #expect(lens.color == .black)
+        #expect(lens.reason == "Retired at 2026-08-20T12:00:00Z · superseded by wave_current")
+    }
+
     @Test("default-on without a listener is red")
     func runningWithoutListenerIsRed() {
         let lens = WaveLens.forWave(
             live: false,
-            status: .ready,
             activeTasks: 0,
             activeProjects: 0
         )
@@ -63,7 +113,6 @@ struct WaveLensTests {
         let serving = WaveLens.forWave(
             live: true,
             paused: true,
-            status: .running(runID: "run_test"),
             activeTasks: 1,
             activeProjects: 1
         )
@@ -73,7 +122,6 @@ struct WaveLensTests {
         let stopped = WaveLens.forWave(
             live: false,
             paused: true,
-            status: .ready,
             activeTasks: 0,
             activeProjects: 0
         )
@@ -217,12 +265,11 @@ struct WaveLensTests {
         let lenses = [
             WaveLens.forWave(
                 live: true,
-                status: .running(runID: "run_test"),
                 activeTasks: 0,
                 activeProjects: 0
             ),
-            WaveLens.forWave(live: false, status: .ready, activeTasks: 1, activeProjects: 0),
-            WaveLens.forWave(live: false, status: .ready, activeTasks: 0, activeProjects: 0),
+            WaveLens.forWave(live: false, activeTasks: 1, activeProjects: 0),
+            WaveLens.forWave(live: false, activeTasks: 0, activeProjects: 0),
             WaveLens.forTask(try makeAttention(level: "unknown", reason: "unread")),
             WaveLens.forProject(runtime: nil, tasks: []),
         ]
@@ -232,6 +279,26 @@ struct WaveLensTests {
     }
 
     // MARK: - Fixtures
+
+    private func current(
+        _ state: CurrentWorkState,
+        reason: String
+    ) -> CurrentWorkObservation {
+        CurrentWorkObservation(
+            state: state,
+            reason: reason,
+            owner: .work,
+            controls: [],
+            progressAgeSeconds: 0,
+            deadlineInSeconds: 30,
+            step: nil,
+            liveness: RunLivenessEvidence(
+                state: .present,
+                observedAt: "2026-07-15T00:00:00Z",
+                fresh: true
+            )
+        )
+    }
 
     private func loadAttentionFixture(sourceFile: String = #filePath) throws -> [String: RoadmapTask] {
         let fixture = URL(fileURLWithPath: sourceFile)
@@ -265,7 +332,7 @@ struct WaveLensTests {
 
     private func makeRuntime(alive: Bool, reason: String) throws -> ProjectRuntimeSnapshot {
         let json = """
-        {"work_id":"project-1","status":{"running":{"run_id":"run_00000000000000000000000000000006"}},"reason":"\(reason)","updated_at":"2026-07-15T00:00:00Z","iteration":1,"pending_observations":0,"provider":"codex","process_alive":\(alive),"observation":{"category":"working","reason":"\(reason)","owner":"work","controls":["attach","steer","interrupt","stop"],"progress_age_secs":60,"deadline_in_secs":1740,"step":"iteration 1"}}
+        {"work_id":"project-1","status":{"running":{"run_id":"run_00000000000000000000000000000006"}},"reason":"\(reason)","updated_at":"2026-07-15T00:00:00Z","iteration":1,"pending_observations":0,"provider":"codex","current":{"state":"\(alive ? "working" : "stopped")","reason":"\(reason)","owner":"\(alive ? "work" : "loopflow")","controls":\(alive ? "[\"attach\",\"steer\",\"interrupt\",\"stop\"]" : "[\"resume\",\"stop\"]"),"progress_age_secs":\(alive ? "60" : "null"),"deadline_in_secs":\(alive ? "1740" : "null"),"step":"iteration 1","liveness":{"state":"\(alive ? "present" : "absent")","observed_at":"2026-07-15T00:00:00Z","fresh":true}},"last_failure":null}
         """
         return try JSONDecoder().decode(ProjectRuntimeSnapshot.self, from: Data(json.utf8))
     }

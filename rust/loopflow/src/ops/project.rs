@@ -9,9 +9,7 @@ use crate::durable::{
 };
 use crate::engine::config::{load_config_or_default, parse_agent};
 use crate::engine::git::{current_branch, get_default_branch, is_clean, worktree_root};
-use crate::engine::process::{
-    resolve_lf_binary, start_lf_session, tmux_session_exists, tmux_session_slug,
-};
+use crate::engine::process::{resolve_lf_binary, start_lf_session, tmux_session_slug};
 use crate::id::WaveId;
 use crate::ops::{OpsError, OpsResult};
 use crate::planning::{LinearProjectId, ProjectPlan};
@@ -28,6 +26,7 @@ pub struct ProjectSnapshot {
     pub project_name: String,
     pub wave: String,
     pub status: WorkStatus,
+    pub current: crate::child::CurrentWorkObservation,
     pub reason: String,
     pub iteration: u32,
     pub observation_cursor: i64,
@@ -35,9 +34,9 @@ pub struct ProjectSnapshot {
     pub agent: String,
     pub provider: String,
     pub provider_session_id: Option<String>,
-    pub process_alive: bool,
     pub invocation: Option<AgentInvocation>,
     pub latest_event: Option<crate::project::ProjectEvent>,
+    pub last_failure: Option<crate::project::HistoricalFailure>,
     pub created_at: time::OffsetDateTime,
     pub updated_at: time::OffsetDateTime,
 }
@@ -452,6 +451,10 @@ async fn reconcile_project_liveness(store: &SharedStore, project: &mut Project) 
     else {
         return Ok(());
     };
+    store
+        .ensure_local_run(&run)
+        .await
+        .map_err(|error| project_error(error.to_string()))?;
     if run.state == RunState::Reserved {
         let still_starting =
             run.created_at + time::Duration::seconds(10) > time::OffsetDateTime::now_utc();
@@ -459,24 +462,26 @@ async fn reconcile_project_liveness(store: &SharedStore, project: &mut Project) 
             return Ok(());
         }
     }
-    if let Some(containment) = &run.containment {
-        let alive = match containment {
-            Containment::Tmux { name } => tmux_session_exists(name)
-                .await
-                .map_err(|error| project_error(error.to_string()))?,
-            Containment::ProcessGroup { .. } => true,
-        };
-        if alive {
-            return Ok(());
-        }
-        if run.started_at.is_some_and(|started_at| {
+    let observation = match run.containment.as_ref() {
+        Some(containment) => crate::engine::process::containment_observation(containment).await,
+        None => ContainmentObservation::Unprovable,
+    };
+    if observation != ContainmentObservation::Absent {
+        store
+            .record_run_liveness(&run.id, observation)
+            .await
+            .map_err(|error| project_error(error.to_string()))?;
+        return Ok(());
+    }
+    if run.containment.is_some()
+        && run.started_at.is_some_and(|started_at| {
             started_at + time::Duration::seconds(10) > time::OffsetDateTime::now_utc()
-        }) {
-            return Ok(());
-        }
+        })
+    {
+        return Ok(());
     }
     store
-        .recover_run(&run.id, ContainmentObservation::Absent)
+        .recover_run(&run.id, observation)
         .await
         .map_err(|error| project_error(error.to_string()))?;
     Ok(())
@@ -485,12 +490,11 @@ async fn reconcile_project_liveness(store: &SharedStore, project: &mut Project) 
 pub fn project_status(project: &str) -> OpsResult<Project> {
     block_on_project(async move {
         let store = project_store().await?;
-        let mut project = store
+        let project = store
             .get_project_by_project(project)
             .await
             .map_err(|error| project_error(error.to_string()))?
             .ok_or_else(|| project_error(format!("no Project exists for {project:?}")))?;
-        reconcile_project_liveness(&store, &mut project).await?;
         Ok(project)
     })
 }
@@ -515,13 +519,6 @@ pub fn project_snapshot(project: &Project) -> OpsResult<ProjectSnapshot> {
                 .map_err(|error| project_error(error.to_string()))?,
             None => None,
         };
-        let process_alive = match run.as_ref().and_then(|run| run.containment.as_ref()) {
-            Some(Containment::Tmux { name }) => tmux_session_exists(name)
-                .await
-                .map_err(|error| project_error(error.to_string()))?,
-            Some(Containment::ProcessGroup { .. }) => true,
-            None => false,
-        };
         let latest_event = store
             .latest_project_event(&project.id)
             .await
@@ -535,8 +532,15 @@ pub fn project_snapshot(project: &Project) -> OpsResult<ProjectSnapshot> {
             .work_status(&work)
             .await
             .map_err(|error| project_error(error.to_string()))?;
-        let reason =
-            crate::project::status_reason(&status, latest_event.as_ref().map(|event| &event.kind));
+        let current = crate::child::observe_current_work(
+            &store,
+            &work,
+            &status,
+            time::OffsetDateTime::now_utc(),
+        )
+        .await
+        .map_err(|error| project_error(error.to_string()))?;
+        let reason = current.reason.clone();
         Ok(ProjectSnapshot {
             id: project.id.to_string(),
             external_project_id: project.plan.id.as_str().to_string(),
@@ -544,6 +548,7 @@ pub fn project_snapshot(project: &Project) -> OpsResult<ProjectSnapshot> {
             project_name: project.plan.name,
             wave: wave.name().to_string(),
             status,
+            current,
             reason,
             iteration: project.iteration,
             observation_cursor: project.observation_cursor,
@@ -551,9 +556,12 @@ pub fn project_snapshot(project: &Project) -> OpsResult<ProjectSnapshot> {
             agent: project.agent,
             provider: project.provider,
             provider_session_id: project.provider_session_id,
-            process_alive,
             invocation,
             latest_event,
+            last_failure: store
+                .latest_project_failure(&project.id)
+                .await
+                .map_err(|error| project_error(error.to_string()))?,
             created_at: project.created_at,
             updated_at: project.updated_at,
         })

@@ -170,6 +170,35 @@ pub async fn resolve_managed_wave(
     env_wave_id: Option<&str>,
 ) -> Result<Wave, WaveResolveError> {
     if let Some(raw) = explicit {
+        if let Ok(id) = raw.trim().parse::<WaveId>() {
+            let store = store.ok_or_else(|| {
+                WaveResolveError::Registry("no wave registry on this machine".to_string())
+            })?;
+            let wave = store
+                .get_wave(&id)
+                .await
+                .map_err(|error| WaveResolveError::Registry(error.to_string()))?
+                .ok_or_else(|| WaveResolveError::UnknownExplicit(raw.to_string()))?;
+            if wave.is_retired() {
+                return Ok(wave);
+            }
+            if let Some(repo) = repo {
+                let locator = WaveLocator::discover(repo, wave.name())
+                    .map_err(|error| WaveResolveError::Registry(error.to_string()))?;
+                let scoped = store
+                    .get_wave_at(&locator)
+                    .await
+                    .map_err(|error| WaveResolveError::Registry(error.to_string()))?;
+                if scoped.as_ref().map(Wave::id) != Some(&id) {
+                    return Err(WaveResolveError::RepositoryMismatch {
+                        wave_id: id,
+                        expected: locator.repo().to_string(),
+                        actual: wave.repo().to_string(),
+                    });
+                }
+            }
+            return Ok(wave);
+        }
         let slug =
             crate::ops::util::normalize_wave_name(raw).ok_or(WaveResolveError::EmptyExplicit)?;
         let store = store.ok_or_else(|| {
@@ -189,6 +218,9 @@ pub async fn resolve_managed_wave(
             .await
             .map_err(|error| WaveResolveError::Registry(error.to_string()))?
             .ok_or_else(|| WaveResolveError::StaleIdentity(raw.to_string()))?;
+        if wave.is_retired() {
+            return Ok(wave);
+        }
         if let Some(repo) = repo {
             let locator = WaveLocator::discover(repo, wave.name())
                 .map_err(|error| WaveResolveError::Registry(error.to_string()))?;

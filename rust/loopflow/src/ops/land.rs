@@ -11,6 +11,7 @@ use crate::ops::commit::{commit_workflow, CommitOptions};
 use crate::ops::error::{OpsError, OpsResult};
 use crate::ops::pr::{
     generate_pr_copy, normalize_task_pr_copy, read_cached_pr_copy, PrCopy, PrInfo,
+    TaskPrCopyLifecycle,
 };
 
 use crate::ops::progress::Progress;
@@ -88,10 +89,17 @@ fn prepare_pr(
     if !options.local && !crate::ops::pr::gh_available() {
         return Err(OpsError::Message("gh CLI not found".to_string()));
     }
-    let task_identity = if options.local {
+    let task_context = if options.local {
         None
     } else {
-        crate::ops::task::task_pr_identity(&repo_root)?
+        crate::ops::task::task_pr_context(&repo_root)?
+    };
+    let copy_lifecycle = if options.complete {
+        TaskPrCopyLifecycle::Completes
+    } else {
+        TaskPrCopyLifecycle::Continues {
+            next_slug: options.next_slug.clone(),
+        }
     };
     let feature_branch = current_branch(&repo_root)?
         .ok_or_else(|| OpsError::Message("not on a branch".to_string()))?;
@@ -174,18 +182,20 @@ fn prepare_pr(
                     title,
                     body: body.unwrap_or_default(),
                 },
-                task_identity.as_ref(),
+                task_context.as_ref(),
+                &copy_lifecycle,
             )?;
             (Some(copy.title), Some(copy.body))
         }
-        (None, body) if task_identity.is_none() => (None, body),
+        (None, body) if task_context.is_none() => (None, body),
         (None, body) => {
             let copy = normalize_task_pr_copy(
                 PrCopy {
                     title: String::new(),
                     body: body.unwrap_or_default(),
                 },
-                task_identity.as_ref(),
+                task_context.as_ref(),
+                &copy_lifecycle,
             )?;
             (Some(copy.title), Some(copy.body))
         }

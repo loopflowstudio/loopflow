@@ -82,8 +82,9 @@ pub(crate) fn collect_run_activity_since(
 fn summarize_filtered_runs(
     store: &SqliteStore,
     events: Vec<RunEventRow>,
-    invocations: Vec<crate::trace::AgentInvocationRow>,
+    mut invocations: Vec<crate::trace::AgentInvocationRow>,
 ) -> Result<Vec<SkillRunEntry>> {
+    project_invocation_outcomes(store, &mut invocations);
     let invocation_ids = invocations
         .iter()
         .map(|invocation| invocation.id.clone())
@@ -427,6 +428,13 @@ fn plan_reconcile(
 
     let mut plan = ReconcilePlan::default();
     for invocation in invocations {
+        // The owning Home is the only authority allowed to settle an open,
+        // supervised Invocation. Run reconciliation will either end it from
+        // proven absence or leave it unverified; capture age and trace events
+        // must not manufacture absence from a weaker reader.
+        if invocation.ended_at.is_none() && invocation.supervision.is_some() {
+            continue;
+        }
         let process_ended = events.iter().any(|event| {
             event.process_id == invocation.process_id
                 && event.node == "run"
@@ -1080,7 +1088,7 @@ impl SkillRunEntry {
     }
 
     fn is_active(&self) -> bool {
-        self.ended.is_none()
+        self.ended.is_none() && self.status == "running"
     }
 }
 
@@ -1409,8 +1417,46 @@ fn invocation_status_label(outcome: &str) -> &'static str {
     match outcome {
         "completed" => "ok",
         "failed" | "interrupted" => "error",
-        _ => "running",
+        "running" => "running",
+        _ => "unverified",
     }
+}
+
+/// Replace a capture-ledger `running` claim with `unknown` unless the durable
+/// supervising Run has fresh Home-owned presence evidence. Capture rows are
+/// history; an absent final receipt cannot by itself prove a live body.
+pub(crate) fn project_invocation_outcomes(
+    store: &SqliteStore,
+    invocations: &mut [crate::trace::AgentInvocationRow],
+) {
+    for invocation in invocations {
+        if invocation.outcome != "running" {
+            continue;
+        }
+        let verified = invocation
+            .supervision
+            .as_ref()
+            .and_then(|supervision| store.run_by_id(&supervision.supervising_run_id).ok())
+            .filter(|run| run.state != crate::durable::RunState::Ended)
+            .and_then(|run| {
+                store
+                    .run_liveness_evidence(&run, time::OffsetDateTime::now_utc())
+                    .ok()
+            })
+            .is_some_and(|evidence| running_invocation_is_verified(invocation.ended_at, &evidence));
+        if !verified {
+            invocation.outcome = "unknown".to_string();
+        }
+    }
+}
+
+fn running_invocation_is_verified(
+    ended_at: Option<i64>,
+    evidence: &crate::durable::RunLivenessEvidence,
+) -> bool {
+    ended_at.is_none()
+        && evidence.fresh
+        && evidence.state == crate::durable::RunLivenessState::Present
 }
 
 fn print_span_tree(spans: &[SpanDto]) {
@@ -1524,15 +1570,57 @@ pub(crate) fn format_tokens(value: i64) -> String {
 #[cfg(test)]
 mod tests {
     use super::{
-        format_duration, format_tokens, plan_orphans, plan_reconcile, summarize_execs,
+        format_duration, format_tokens, invocation_status_label, plan_orphans, plan_reconcile,
+        project_invocation_outcomes, running_invocation_is_verified, summarize_execs,
         trace_id_for_address, trace_spans, ArtifactState,
     };
     use crate::chat::types::TurnUsage;
+    use crate::durable::{RunLivenessEvidence, RunLivenessState};
     use crate::store::{AttributedTurnUsage, RunEventRow};
-    use crate::trace::AgentInvocationRow;
+    use crate::trace::{AgentInvocationRow, SupervisedInvocation};
 
     const NOW: i64 = 1_800_000_000;
     const HOUR: i64 = 3_600;
+
+    #[test]
+    fn status_surfaces_capture_running_requires_fresh_home_presence() {
+        let evidence = |state, fresh| RunLivenessEvidence {
+            state,
+            observed_at: None,
+            fresh,
+        };
+
+        assert!(running_invocation_is_verified(
+            None,
+            &evidence(RunLivenessState::Present, true)
+        ));
+        assert!(!running_invocation_is_verified(
+            None,
+            &evidence(RunLivenessState::Present, false)
+        ));
+        assert!(!running_invocation_is_verified(
+            None,
+            &evidence(RunLivenessState::Unprovable, true)
+        ));
+        assert!(!running_invocation_is_verified(
+            Some(NOW),
+            &evidence(RunLivenessState::Present, true)
+        ));
+        assert_eq!(invocation_status_label("unknown"), "unverified");
+    }
+
+    #[test]
+    fn status_surfaces_open_capture_row_without_liveness_projects_as_unknown() {
+        let directory = tempfile::tempdir().unwrap();
+        let store =
+            crate::store::sqlite::SqliteStore::new(&directory.path().join("ledger.db")).unwrap();
+        let mut rows = vec![invocation("stale", "capturing", NOW, None)];
+        rows[0].outcome = "running".to_string();
+
+        project_invocation_outcomes(&store, &mut rows);
+
+        assert_eq!(rows[0].outcome, "unknown");
+    }
 
     /// A invocation whose conversation artifact is named but whose presence the
     /// test decides via the `artifact_present` closure.
@@ -1676,6 +1764,26 @@ mod tests {
             plan.interrupted[0].reason
         );
         assert!(plan.pruned.is_empty(), "{plan:?}");
+    }
+
+    #[test]
+    fn status_surfaces_open_supervised_capture_is_left_to_home_reconciliation() {
+        let mut supervised = invocation("supervised", "capturing", NOW - 100 * HOUR, None);
+        supervised.outcome = "running".to_string();
+        supervised.supervision = Some(SupervisedInvocation {
+            invocation_id: crate::durable::AgentInvocationId::new(),
+            supervising_run_id: crate::durable::RunId::new(),
+            account_id: None,
+            resume_token: None,
+        });
+        let events = vec![row("supervised", 1, NOW - 100 * HOUR, "run", "completed")];
+
+        let plan = plan_reconcile(&[supervised], &events, NOW, true, &absent);
+
+        assert!(plan.pruned.is_empty(), "{plan:?}");
+        assert!(plan.recent_missing.is_empty(), "{plan:?}");
+        assert!(plan.interrupted.is_empty(), "{plan:?}");
+        assert!(plan.lost.is_empty(), "{plan:?}");
     }
 
     #[test]

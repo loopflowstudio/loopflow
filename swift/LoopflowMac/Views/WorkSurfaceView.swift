@@ -41,14 +41,6 @@ struct WorkSurfaceView: View {
             content
         }
         .background(palette.background)
-        .task(id: model.repoPath) {
-            await model.refresh()
-            while !Task.isCancelled {
-                try? await Task.sleep(for: .seconds(15))
-                if Task.isCancelled { return }
-                await model.refresh()
-            }
-        }
         .sheet(item: $workspaceSelection) { selection in
             TaskWorkspaceView(
                 task: selection.task.task,
@@ -171,7 +163,7 @@ struct WorkSurfaceView: View {
             scrollingDetail(identifier: "podium-detail-wave") {
                 HStack(alignment: .top, spacing: Spacing.md) {
                     VStack(alignment: .leading, spacing: Spacing.xxs) {
-                        surfaceHeader(roadmap.wave.name, subtitle: roadmap.wave.status.label)
+                        surfaceHeader(roadmap.wave.name, subtitle: roadmap.wave.current.state.label)
                         if roadmap.wave.paused {
                             pausedChip(roadmap.wave.id)
                         }

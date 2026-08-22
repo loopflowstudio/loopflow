@@ -16,6 +16,7 @@ struct WorkProjection {
     basis: crate::durable::Basis,
     placement: Placement,
     status: WorkStatus,
+    current: crate::child::CurrentWorkObservation,
     run: Option<Run>,
 }
 
@@ -89,7 +90,7 @@ async fn run_async(command: &WorkCommand, repo: &Path) -> anyhow::Result<()> {
         }
         WorkCommand::Disable { kind, id, json } => {
             let work = parse_work(kind, id)?;
-            require_work_repository(&store, &work, repo).await?;
+            require_disable_repository(&store, &work, repo).await?;
             let placement = set_local_work_enabled(&store, &work, false).await?;
             print_receipt(&WorkReceipt::Disabled(placement), *json)?;
         }
@@ -191,12 +192,18 @@ async fn set_local_work_enabled(
 }
 
 async fn projection(store: &Store, work: &WorkRef) -> anyhow::Result<WorkProjection> {
+    let status = store.work_status(work).await?;
+    let run = store.current_run(work).await?;
+    let current =
+        crate::child::observe_current_work(store, work, &status, time::OffsetDateTime::now_utc())
+            .await?;
     Ok(WorkProjection {
         work: work.clone(),
         basis: store.current_epoch(work).await?.current_basis,
         placement: store.placement(work).await?,
-        status: store.work_status(work).await?,
-        run: store.current_run(work).await?,
+        status,
+        current,
+        run,
     })
 }
 
@@ -245,15 +252,33 @@ async fn require_work_repository(store: &Store, work: &WorkRef, repo: &Path) -> 
     Ok(())
 }
 
+async fn require_disable_repository(
+    store: &Store,
+    work: &WorkRef,
+    repo: &Path,
+) -> anyhow::Result<()> {
+    if let WorkRef::Wave(wave_id) = work {
+        let wave = store
+            .get_wave(wave_id)
+            .await?
+            .ok_or_else(|| anyhow!("Wave {wave_id} is not registered"))?;
+        if crate::repository::CanonicalRepo::discover(Path::new(wave.repo())).is_err() {
+            crate::repository::CanonicalRepo::discover(repo)?;
+            return Ok(());
+        }
+    }
+    require_work_repository(store, work, repo).await
+}
+
 fn print_projection(projection: &WorkProjection, json: bool) -> anyhow::Result<()> {
     if json {
         println!("{}", serde_json::to_string_pretty(projection)?);
     } else {
         println!(
-            "{} {}  {:?}\n  enabled: {}\n  home: {}\n  basis: {}:{}\n  run: {}",
+            "{} {}  {}\n  enabled: {}\n  home: {}\n  basis: {}:{}\n  run: {}",
             projection.work.kind(),
             projection.work.id(),
-            projection.status,
+            projection.current.state,
             projection.placement.enabled,
             projection.placement.home_id,
             projection.basis.epoch_id,

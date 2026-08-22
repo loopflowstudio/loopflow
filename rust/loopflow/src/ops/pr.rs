@@ -47,6 +47,15 @@ pub struct PrCopy {
 }
 
 const GITHUB_PR_TITLE_MAX_CHARS: usize = 256;
+const TASK_PR_CONTEXT_START: &str = "<!-- loopflow:task-pr-context:start -->";
+const TASK_PR_CONTEXT_END: &str = "<!-- loopflow:task-pr-context:end -->";
+
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub(crate) enum TaskPrCopyLifecycle {
+    Published,
+    Continues { next_slug: Option<String> },
+    Completes,
+}
 
 #[derive(Debug, Deserialize)]
 struct GhPr {
@@ -75,7 +84,7 @@ pub fn create_or_update_pr(
     if !gh_available() {
         return Err(OpsError::Message("gh CLI not found".to_string()));
     }
-    let task_identity = crate::ops::task::task_pr_identity(repo)?;
+    let task_context = crate::ops::task::task_pr_context(repo)?;
 
     let main_repo = resolve_main_repo(repo);
     let default_branch = get_default_branch(&main_repo)?;
@@ -115,7 +124,8 @@ pub fn create_or_update_pr(
 
     let copy = normalize_task_pr_copy(
         resolve_pr_copy(repo, options, cached_copy, progress)?,
-        task_identity.as_ref(),
+        task_context.as_ref(),
+        &TaskPrCopyLifecycle::Published,
     )?;
     let current_branch_state = current_branch(repo)?;
     let current_head = rev_parse(repo, "HEAD")?;
@@ -183,63 +193,88 @@ pub fn create_or_update_pr(
 
 pub(crate) fn normalize_task_pr_copy(
     copy: PrCopy,
-    identity: Option<&crate::ops::task::TaskPrIdentity>,
+    context: Option<&crate::ops::task::TaskPrContext>,
+    lifecycle: &TaskPrCopyLifecycle,
 ) -> OpsResult<PrCopy> {
-    let Some(identity) = identity else {
+    let Some(context) = context else {
         return Ok(copy);
     };
-    let task_title = identity.title.trim();
-    if task_title.is_empty() || task_title.chars().any(|character| character.is_control()) {
+    let task_title = context.title.trim();
+    let task_identifier = context.identifier.trim();
+    if task_title.is_empty()
+        || task_identifier.is_empty()
+        || task_title.chars().any(char::is_control)
+        || task_identifier.chars().any(char::is_control)
+    {
         return Err(OpsError::Message(
-            "Task PR identity requires a non-empty, single-line Linear Task name".to_string(),
+            "Task PR context requires a non-empty, single-line Task identifier and name"
+                .to_string(),
         ));
     }
-    if task_title.chars().count() > GITHUB_PR_TITLE_MAX_CHARS {
+
+    let title = context.pr_title();
+    if title.chars().count() > GITHUB_PR_TITLE_MAX_CHARS {
         return Err(OpsError::Message(format!(
-            "Linear Task name exceeds GitHub's {GITHUB_PR_TITLE_MAX_CHARS}-character PR title limit"
+            "Task identifier and name exceed GitHub's {GITHUB_PR_TITLE_MAX_CHARS}-character PR title limit"
         )));
     }
 
-    let authored_title = copy.title.split_whitespace().collect::<Vec<_>>().join(" ");
-    let canonical_prefix = format!("{task_title} — ");
-    let title = if authored_title.starts_with(task_title) {
-        authored_title
-            .chars()
-            .take(GITHUB_PR_TITLE_MAX_CHARS)
-            .collect::<String>()
-            .trim_end()
-            .to_string()
-    } else {
-        let separator_chars = " — ".chars().count();
-        let suffix_chars =
-            GITHUB_PR_TITLE_MAX_CHARS.saturating_sub(task_title.chars().count() + separator_chars);
-        let suffix = authored_title
-            .chars()
-            .take(suffix_chars)
-            .collect::<String>()
-            .trim_end()
-            .to_string();
-        if suffix.is_empty() {
-            task_title.to_string()
-        } else {
-            format!("{canonical_prefix}{suffix}")
+    let task_link = context.task_link();
+    let task_cycle = context.cycle().as_str();
+    let pr_lifecycle = match lifecycle {
+        TaskPrCopyLifecycle::Published => format!(
+            "PR {} is published for review; no Task settlement is requested.",
+            context.sequence
+        ),
+        TaskPrCopyLifecycle::Continues {
+            next_slug: Some(next_slug),
+        } => format!(
+            "Merging PR {} leaves the Task open and names {} as the next serial PR.",
+            context.sequence,
+            _markdown_code(next_slug)
+        ),
+        TaskPrCopyLifecycle::Continues { next_slug: None } => format!(
+            "Merging PR {} leaves the Task open for another serial PR.",
+            context.sequence
+        ),
+        TaskPrCopyLifecycle::Completes => {
+            format!("Merging PR {} completes the Task.", context.sequence)
         }
     };
+    let managed = format!(
+        "{TASK_PR_CONTEXT_START}\n> [!NOTE]\n> **Task:** {task_link}\n> **Task cycle:** {task_cycle}\n> **PR lifecycle:** {pr_lifecycle}\n{TASK_PR_CONTEXT_END}"
+    );
+    let reviewer_context = _strip_managed_task_context(&copy.body);
+    let body = if reviewer_context.is_empty() {
+        managed
+    } else {
+        format!("{managed}\n\n{reviewer_context}")
+    };
+    Ok(PrCopy { title, body })
+}
 
-    let anchor = format!("Linear Task: [{}]({})", identity.identifier, identity.url);
-    let reviewer_context = copy
-        .body
+fn _markdown_code(value: &str) -> String {
+    format!("`{}`", value.replace('`', "\\`"))
+}
+
+fn _strip_managed_task_context(body: &str) -> String {
+    let without_block = match (
+        body.find(TASK_PR_CONTEXT_START),
+        body.find(TASK_PR_CONTEXT_END),
+    ) {
+        (Some(start), Some(end)) if start < end => {
+            let after = end + TASK_PR_CONTEXT_END.len();
+            format!("{}\n{}", &body[..start], &body[after..])
+        }
+        _ => body.to_string(),
+    };
+    without_block
         .lines()
         .filter(|line| !line.trim_start().starts_with("Linear Task:"))
         .collect::<Vec<_>>()
-        .join("\n");
-    let reviewer_context = reviewer_context.trim();
-    let body = if reviewer_context.is_empty() {
-        anchor
-    } else {
-        format!("{anchor}\n\n{reviewer_context}")
-    };
-    Ok(PrCopy { title, body })
+        .join("\n")
+        .trim()
+        .to_string()
 }
 
 fn pr_info(branch: &str, pr: GhPr) -> PrInfo {
@@ -1429,9 +1464,10 @@ mod tests {
     use super::{
         classify_pr_read_failure, is_missing_pr, normalize_task_pr_copy, parse_generated_pr_copy,
         pr_number_from_url, GhCheck, GhRestHead, GhRestPr, MergeGateReading, PrCopy,
-        RequiredChecks,
+        RequiredChecks, TaskPrCopyLifecycle,
     };
-    use crate::ops::task::TaskPrIdentity;
+    use crate::ops::task::TaskPrContext;
+    use crate::task::TaskLifecyclePlan;
 
     fn check(name: &str, bucket: &str) -> GhCheck {
         GhCheck {
@@ -1614,90 +1650,93 @@ mod tests {
         assert_eq!(pr_number_from_url("https://example.com/not-a-pr"), None);
     }
 
-    #[test]
-    fn task_pr_copy_keeps_context_behind_canonical_identity() {
-        let identity = TaskPrIdentity {
-            title: "Remove semantic lifecycle validation".to_string(),
-            identifier: "LOO-230".to_string(),
-            url: "https://linear.app/loopflow/issue/LOO-230/remove-validation".to_string(),
-        };
+    fn task_pr_context(first_flow: &str) -> TaskPrContext {
+        let mut lifecycle = TaskLifecyclePlan::defaults();
+        lifecycle.first.flow = first_flow.to_string();
+        TaskPrContext {
+            title: "Make Task PR copy explain intent and lifecycle".to_string(),
+            identifier: "LOO-249".to_string(),
+            url: "https://linear.app/loopflow/issue/LOO-249/task-pr-copy".to_string(),
+            lifecycle,
+            sequence: 1,
+        }
+    }
 
+    #[test]
+    fn fix_task_pr_copy_uses_one_canonical_title_and_durable_context() {
         let copy = normalize_task_pr_copy(
             PrCopy {
-                title: "Explain the structural contract".to_string(),
-                body:
-                    "Linear Task: [OLD-1](https://example.com/old)\n\n## Summary\n\nUseful context."
-                        .to_string(),
+                title: "pr copy: explain the review contract".to_string(),
+                body: "## Evaluate\n\n`cargo test -p loopflow task_pr_copy`".to_string(),
             },
-            Some(&identity),
+            Some(&task_pr_context("incident")),
+            &TaskPrCopyLifecycle::Completes,
         )
         .expect("normalize Task PR copy");
 
         assert_eq!(
             copy.title,
-            "Remove semantic lifecycle validation — Explain the structural contract"
+            "LOO-249: Make Task PR copy explain intent and lifecycle"
         );
         assert_eq!(
             copy.body,
-            "Linear Task: [LOO-230](https://linear.app/loopflow/issue/LOO-230/remove-validation)\n\n## Summary\n\nUseful context."
+            "<!-- loopflow:task-pr-context:start -->\n\
+> [!NOTE]\n\
+> **Task:** [LOO-249 — Make Task PR copy explain intent and lifecycle](https://linear.app/loopflow/issue/LOO-249/task-pr-copy)\n\
+> **Task cycle:** fix\n\
+> **PR lifecycle:** Merging PR 1 completes the Task.\n\
+<!-- loopflow:task-pr-context:end -->\n\n\
+## Evaluate\n\n`cargo test -p loopflow task_pr_copy`"
         );
+    }
+
+    #[test]
+    fn feature_task_pr_copy_refreshes_lifecycle_without_duplicating_context() {
+        let published = normalize_task_pr_copy(
+            PrCopy {
+                title: "ignored".to_string(),
+                body: "Linear Task: [OLD-1](https://example.com/old)\n\nReviewer proof."
+                    .to_string(),
+            },
+            Some(&task_pr_context("task-design")),
+            &TaskPrCopyLifecycle::Published,
+        )
+        .expect("publish Task PR copy");
+        let continued = normalize_task_pr_copy(
+            published,
+            Some(&task_pr_context("task-design")),
+            &TaskPrCopyLifecycle::Continues {
+                next_slug: Some("follow-up-proof".to_string()),
+            },
+        )
+        .expect("refresh Task PR copy");
+
+        assert_eq!(
+            continued
+                .body
+                .matches("loopflow:task-pr-context:start")
+                .count(),
+            1
+        );
+        assert!(continued.body.contains(
+            "Merging PR 1 leaves the Task open and names `follow-up-proof` as the next serial PR."
+        ));
+        assert!(continued.body.contains("> **Task cycle:** feature"));
+        assert!(continued.body.ends_with("Reviewer proof."));
+        assert!(!continued.body.contains("Linear Task: [OLD-1]"));
     }
 
     #[test]
     fn non_task_pr_copy_is_unchanged() {
         let copy = PrCopy {
-            title: "Authored title".to_string(),
-            body: "Authored body".to_string(),
+            title: "auth: keep refresh ownership explicit".to_string(),
+            body: "## Evaluate\n\nRun the auth smoke test.".to_string(),
         };
 
         assert_eq!(
-            normalize_task_pr_copy(copy.clone(), None).expect("normalize ordinary PR"),
+            normalize_task_pr_copy(copy.clone(), None, &TaskPrCopyLifecycle::Published)
+                .expect("normalize ordinary PR"),
             copy
-        );
-    }
-
-    #[test]
-    fn task_title_anchor_is_never_partially_truncated() {
-        let task_title = "T".repeat(254);
-        let identity = TaskPrIdentity {
-            title: task_title.clone(),
-            identifier: "LOO-230".to_string(),
-            url: "https://linear.app/loopflow/issue/LOO-230/remove-validation".to_string(),
-        };
-
-        let copy = normalize_task_pr_copy(
-            PrCopy {
-                title: "context".to_string(),
-                body: "proof".to_string(),
-            },
-            Some(&identity),
-        )
-        .expect("normalize long Task title");
-
-        assert_eq!(copy.title, task_title);
-        assert_eq!(copy.title.chars().count(), 254);
-    }
-
-    #[test]
-    fn authored_task_title_prefix_is_not_duplicated() {
-        let identity = TaskPrIdentity {
-            title: "Remove semantic lifecycle validation".to_string(),
-            identifier: "LOO-230".to_string(),
-            url: "https://linear.app/loopflow/issue/LOO-230/remove-validation".to_string(),
-        };
-
-        let copy = normalize_task_pr_copy(
-            PrCopy {
-                title: "Remove semantic lifecycle validation: final cleanup".to_string(),
-                body: "proof".to_string(),
-            },
-            Some(&identity),
-        )
-        .expect("normalize already-anchored title");
-
-        assert_eq!(
-            copy.title,
-            "Remove semantic lifecycle validation: final cleanup"
         );
     }
 

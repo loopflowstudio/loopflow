@@ -1024,9 +1024,13 @@ fn latest_land_disposition_wins_before_merge() {
         .presentation
         .as_ref()
         .expect("Task identity survives refresh and land");
-    assert_eq!(presentation.title, "Prove Task PR transitions — test title");
+    assert_eq!(presentation.title, "INF-123: Prove Task PR transitions");
     assert!(presentation.body.starts_with(
-        "Linear Task: [INF-123](https://linear.app/loopflow/issue/INF-123/prove-task-pr-transitions)\n\n"
+        "<!-- loopflow:task-pr-context:start -->\n> [!NOTE]\n> **Task:** [INF-123 — Prove Task PR transitions](https://linear.app/loopflow/issue/INF-123/prove-task-pr-transitions)"
+    ));
+    assert!(presentation.body.contains("> **Task cycle:** feature"));
+    assert!(presentation.body.contains(
+        "> **PR lifecycle:** Merging PR 1 leaves the Task open and names `follow-up-proof` as the next serial PR."
     ));
     assert_eq!(publication.github.map(|pr| pr.number), Some(912));
     let merge = publication.merge.expect("explicit merge request");

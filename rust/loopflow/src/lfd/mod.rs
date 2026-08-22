@@ -910,6 +910,118 @@ async fn ensure_github_subscriptions(state: &LfdState) {
 
 // -- Serve -------------------------------------------------------------------
 
+#[derive(Debug, Default, PartialEq, Eq)]
+pub(crate) struct HomeRunReconciliation {
+    pub present: usize,
+    pub absent: usize,
+    pub unprovable: usize,
+    pub asks_requeued: usize,
+    pub errors: usize,
+}
+
+pub(crate) async fn reconcile_home_runs_once(
+    store: &Store,
+    home_id: &HomeId,
+) -> HomeRunReconciliation {
+    use crate::durable::ContainmentObservation;
+
+    let mut summary = HomeRunReconciliation::default();
+    match store.local_home().await {
+        Ok(local) if local.id == *home_id => {}
+        Ok(local) => {
+            summary.errors += 1;
+            tracing::warn!(%home_id, local_home_id = %local.id, "refusing non-local Run reconciliation");
+            return summary;
+        }
+        Err(error) => {
+            summary.errors += 1;
+            tracing::warn!(%error, %home_id, "could not verify local Home for Run reconciliation");
+            return summary;
+        }
+    }
+    match store.repair_stranded_asks().await {
+        Ok(repaired) => summary.asks_requeued = repaired,
+        Err(error) => {
+            summary.errors += 1;
+            tracing::warn!(%error, %home_id, "could not repair stranded Ask claims");
+        }
+    }
+    let runs = match store.nonterminal_runs_for_home(home_id).await {
+        Ok(runs) => runs,
+        Err(error) => {
+            summary.errors += 1;
+            tracing::warn!(%error, %home_id, "could not list Home Runs for reconciliation");
+            return summary;
+        }
+    };
+    let observations = futures_util::future::join_all(runs.into_iter().map(|run| async move {
+        let observation = match run.containment.as_ref() {
+            Some(containment) => crate::engine::process::containment_observation(containment).await,
+            None => ContainmentObservation::Unprovable,
+        };
+        (run, observation)
+    }))
+    .await;
+    for (run, observation) in observations {
+        match store.recover_run(&run.id, observation).await {
+            Ok(_) => match observation {
+                ContainmentObservation::Present => summary.present += 1,
+                ContainmentObservation::Absent => summary.absent += 1,
+                ContainmentObservation::Unprovable => summary.unprovable += 1,
+            },
+            Err(error) => {
+                summary.errors += 1;
+                tracing::warn!(
+                    %error,
+                    run_id = %run.id,
+                    work_kind = run.work.kind(),
+                    work_id = run.work.id(),
+                    "Home Run reconciliation failed"
+                );
+            }
+        }
+    }
+    summary
+}
+
+async fn reconcile_home_runs_forever(store: Arc<Store>, home_id: HomeId) {
+    let mut interval = tokio::time::interval(Duration::from_secs(30));
+    interval.tick().await;
+    loop {
+        interval.tick().await;
+        reconcile_home_runs_once(&store, &home_id).await;
+    }
+}
+
+async fn reconcile_home_runs_before_startup_live(
+    store: &Store,
+    home_id: &HomeId,
+    startup: Option<&StartupSignal>,
+    client: &LfdClientEndpoint,
+) -> HomeRunReconciliation {
+    let summary = reconcile_home_runs_once(store, home_id).await;
+    tracing::info!(
+        present = summary.present,
+        absent = summary.absent,
+        unprovable = summary.unprovable,
+        asks_requeued = summary.asks_requeued,
+        errors = summary.errors,
+        "lfd startup Run reconciliation completed"
+    );
+    if let Some(startup) = startup {
+        if let Err(error) = startup
+            .report(StartupState::Live {
+                endpoint: client.endpoint.clone(),
+                home_id: home_id.clone(),
+            })
+            .await
+        {
+            tracing::warn!(%error, "could not publish lfd startup receipt");
+        }
+    }
+    summary
+}
+
 /// Bind and serve `lfd` until the process ends. The store is always open (the
 /// inbox lives there); Linear and GitHub config are optional — absent webhook
 /// credentials leave their corresponding route at 503.
@@ -946,11 +1058,29 @@ pub async fn serve(
     )
     .await?;
     let _home_lock = lock_home(state.wave_host.home_id())?;
+    let listener = tokio::net::TcpListener::bind(addr).await?;
+    let bound = listener.local_addr()?;
+    let client = LfdClientEndpoint {
+        endpoint: local_client_endpoint(bound),
+        token: state.control_token.as_ref().clone(),
+    };
+    write_endpoint(state.wave_host.home_id(), &client)?;
+    reconcile_home_runs_before_startup_live(
+        &state.store,
+        state.wave_host.home_id(),
+        startup.as_ref(),
+        &client,
+    )
+    .await;
     let wave_host = state.wave_host.clone();
     let reconciliation = tokio::spawn({
         let wave_host = wave_host.clone();
         async move { wave_host.reconcile_forever().await }
     });
+    let run_reconciliation = tokio::spawn(reconcile_home_runs_forever(
+        state.store.clone(),
+        wave_host.home_id().clone(),
+    ));
     let autoprune = load_config_or_default(Some(&repo_root)).autoprune;
     if autoprune.enabled {
         let maintenance_state = state.clone();
@@ -959,30 +1089,14 @@ pub async fn serve(
     }
     let subscription_state = state.clone();
     tokio::spawn(async move { ensure_github_subscriptions(&subscription_state).await });
-    let listener = tokio::net::TcpListener::bind(addr).await?;
-    let bound = listener.local_addr()?;
-    let client = LfdClientEndpoint {
-        endpoint: local_client_endpoint(bound),
-        token: state.control_token.as_ref().clone(),
-    };
-    write_endpoint(wave_host.home_id(), &client)?;
-    if let Some(startup) = startup {
-        if let Err(error) = startup
-            .report(StartupState::Live {
-                endpoint: client.endpoint.clone(),
-                home_id: wave_host.home_id().clone(),
-            })
-            .await
-        {
-            tracing::warn!(%error, "could not publish lfd startup receipt");
-        }
-    }
     tracing::info!(addr = %bound, home_id = %wave_host.home_id(), "lfd serving");
     let result = axum::serve(listener, router(state).into_make_service())
         .with_graceful_shutdown(shutdown_signal())
         .await;
     reconciliation.abort();
     let _ = reconciliation.await;
+    run_reconciliation.abort();
+    let _ = run_reconciliation.await;
     wave_host.shutdown().await;
     remove_endpoint(wave_host.home_id(), &client);
     result.map_err(anyhow::Error::from)
@@ -1374,9 +1488,16 @@ fn ensure_bind_allowed(addr: SocketAddr, allow_non_loopback: Option<&OsStr>) -> 
 #[cfg(test)]
 mod tests {
     use super::*;
+    use crate::durable::{
+        AdvanceReceipt, Containment, InvocationRoute, RunAdvance, RunTrigger, WorkRef, WorkStatus,
+    };
+    use crate::store::sqlite::SqliteStore;
     use crate::store::StorageConfig;
+    use crate::wave::Wave;
     use crate::webhook::WebhookEvent;
     use std::ffi::OsString;
+    #[cfg(unix)]
+    use std::os::unix::process::CommandExt;
     use std::path::Path;
 
     fn sign(secret: &[u8], body: &[u8]) -> String {
@@ -1397,6 +1518,183 @@ mod tests {
                 .await
                 .unwrap(),
         )
+    }
+
+    fn status_truth_store(dir: &Path) -> (Arc<Store>, HomeId) {
+        let path = dir.join("status-truth.db");
+        let sqlite = SqliteStore::new(&path).unwrap();
+        let connection = rusqlite::Connection::open(&path).unwrap();
+        let status_truth_is_materialized = connection
+            .query_row(
+                "SELECT EXISTS(
+                    SELECT 1 FROM sqlite_master
+                    WHERE type='table' AND name='run_liveness'
+                 )",
+                [],
+                |row| row.get::<_, bool>(0),
+            )
+            .unwrap();
+        if !status_truth_is_materialized {
+            connection
+                .execute_batch(&crate::store::migrations::migration_sql_for_test(
+                    "status_truth",
+                ))
+                .unwrap();
+        }
+        drop(connection);
+        let home_id = sqlite.local_home().unwrap().id;
+        rusqlite::Connection::open(&path)
+            .unwrap()
+            .execute(
+                "INSERT INTO home_runtime_generations (
+                    home_id, generation, build_version, source_revision,
+                    migration_frontier, activated_at
+                 ) VALUES (?1, 1, 'test', 'test', 'status_truth', ?2)",
+                rusqlite::params![home_id.as_str(), OffsetDateTime::now_utc().unix_timestamp()],
+            )
+            .unwrap();
+        (Arc::new(Store::from_sqlite_for_test(sqlite)), home_id)
+    }
+
+    #[cfg(unix)]
+    #[tokio::test]
+    async fn reconcile_home_runs_startup_cycle_settles_gone_invocation() {
+        let directory = tempfile::tempdir().unwrap();
+        let (store, home_id) = status_truth_store(directory.path());
+        let wave = Wave::new(
+            WaveId::new(),
+            "startup-reconcile".to_string(),
+            directory.path().display().to_string(),
+        );
+        store.create_wave(&wave).await.unwrap();
+        let work = WorkRef::Wave(wave.id().clone());
+        let (_, lease) = store.reserve_run(&work, RunTrigger::User).await.unwrap();
+        let mut process = std::process::Command::new("/usr/bin/true");
+        process.process_group(0);
+        let mut process = process.spawn().unwrap();
+        let process_group = i64::from(process.id());
+        assert!(process.wait().unwrap().success());
+        store
+            .advance_run(
+                &lease,
+                RunAdvance::RunStarting {
+                    containment: Containment::ProcessGroup { id: process_group },
+                    cwd: directory.path().to_path_buf(),
+                },
+            )
+            .await
+            .unwrap();
+        let invocation = store
+            .advance_run(
+                &lease,
+                RunAdvance::InvocationStarting {
+                    route: InvocationRoute {
+                        provider: "codex".to_string(),
+                        model: None,
+                        account_id: None,
+                    },
+                    surface: "headless".to_string(),
+                    resume_token: None,
+                    answer_ask_id: None,
+                },
+            )
+            .await
+            .unwrap();
+        let AdvanceReceipt::Invocation(invocation) = invocation else {
+            panic!("expected Invocation receipt")
+        };
+        let turn = store
+            .advance_run(
+                &lease,
+                RunAdvance::TurnStarting {
+                    invocation_id: invocation.id.clone(),
+                },
+            )
+            .await
+            .unwrap();
+        let AdvanceReceipt::Turn(turn) = turn else {
+            panic!("expected Turn receipt")
+        };
+
+        let socket_path = directory.path().join("startup.sock");
+        let receipt_path = directory.path().join("startup.json");
+        let listener = tokio::net::UnixListener::bind(&socket_path).unwrap();
+        let signal = StartupSignal {
+            attempt_id: "attempt-status-truth".to_string(),
+            receipt_path: receipt_path.clone(),
+            socket_path,
+        };
+        let client = LfdClientEndpoint {
+            endpoint: "127.0.0.1:4567".to_string(),
+            token: "test-token".to_string(),
+        };
+        let reconciliation_store = store.clone();
+        let reconciliation_home = home_id.clone();
+        let reconciliation_signal = signal.clone();
+        let reconciliation_client = client.clone();
+        let reconciliation = tokio::spawn(async move {
+            reconcile_home_runs_before_startup_live(
+                &reconciliation_store,
+                &reconciliation_home,
+                Some(&reconciliation_signal),
+                &reconciliation_client,
+            )
+            .await
+        });
+        let receipt = read_startup_signal(listener, &receipt_path, &signal.attempt_id)
+            .await
+            .unwrap();
+
+        assert_eq!(
+            receipt,
+            StartupReceipt {
+                attempt_id: signal.attempt_id,
+                state: StartupState::Live {
+                    endpoint: client.endpoint,
+                    home_id: home_id.clone(),
+                },
+            }
+        );
+        assert_eq!(store.work_status(&work).await.unwrap(), WorkStatus::Ready);
+        let current = crate::child::observe_current_work(
+            &store,
+            &work,
+            &WorkStatus::Ready,
+            OffsetDateTime::now_utc(),
+        )
+        .await
+        .unwrap();
+        assert_eq!(current.state, crate::child::CurrentWorkState::Ready);
+        assert_eq!(current.reason, "ready");
+        assert!(current.liveness.is_none());
+        assert!(store.invocation_surfaces(true).await.unwrap().is_empty());
+        let summary = reconciliation.await.unwrap();
+
+        assert_eq!(summary.absent, 1);
+        assert_eq!(summary.errors, 0);
+        let surface = store
+            .invocation_surface(&invocation.id)
+            .await
+            .unwrap()
+            .unwrap();
+        assert_eq!(
+            surface.current.state,
+            crate::durable::InvocationObservationState::History
+        );
+        assert_eq!(
+            surface.handback,
+            Some(crate::durable::BoundaryState::Unknown)
+        );
+        let turn_status: String =
+            rusqlite::Connection::open(directory.path().join("status-truth.db"))
+                .unwrap()
+                .query_row(
+                    "SELECT status FROM agent_turns WHERE id=?1",
+                    [turn.id.as_str()],
+                    |row| row.get(0),
+                )
+                .unwrap();
+        assert_eq!(turn_status, "partial");
     }
 
     #[tokio::test]

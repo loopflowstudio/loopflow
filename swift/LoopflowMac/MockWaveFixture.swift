@@ -126,6 +126,7 @@ enum MockWaveFixture {
         "id": "wave-1",
         "name": "infrastructure",
         "status": {"running":{"run_id":"run_00000000000000000000000000000004"}},
+        "current": {"state":"working","reason":"Run is active","owner":"work","controls":["attach","steer","interrupt","stop"],"progress_age_secs":60,"deadline_in_secs":1740,"step":null,"liveness":{"state":"present","observed_at":"2026-07-17T00:00:00Z","fresh":true}},
         "goal": "Make releases boring.",
         "repo": "/src/loopflow",
         "active_tasks": 1,
@@ -160,13 +161,17 @@ enum MockWaveFixture {
           "runtime": {
             "work_id": "ps_11111111111111111111111111111111",
             "status": "ready",
-            "reason": "supervised Tasks are active",
+            "reason": "ready",
             "updated_at": "2026-07-13T18:00:00Z",
             "iteration": 2,
             "pending_observations": 0,
             "provider": "codex",
-            "process_alive": false,
-            "observation": {"category": "needs_input", "reason": "supervised Tasks are active", "owner": "user", "controls": ["decide", "resume", "abandon"], "progress_age_secs": null, "deadline_in_secs": null, "step": "iteration 2"}
+            "current": {"state": "ready", "reason": "ready", "owner": "loopflow", "controls": ["resume", "abandon"], "progress_age_secs": null, "deadline_in_secs": null, "step": "iteration 2", "liveness": null},
+            "last_failure": {
+              "message": "project runner failed: credential is missing",
+              "occurred_at": "2026-07-22T09:30:00Z",
+              "run_id": "run_00000000000000000000000000000009"
+            }
           },
           "directive": {
             "version": 1,
@@ -199,12 +204,12 @@ enum MockWaveFixture {
               "runtime": {
                 "work_id": "ts_22222222222222222222222222222222",
                 "project_id": "ps_11111111111111111111111111111111",
+                "routing_project_id": "ps_11111111111111111111111111111111",
                 "status": "ready",
-                "reason": "waiting for user merge",
+                "reason": "ready",
                 "updated_at": "2026-07-13T19:00:00Z",
                 "provider": "codex",
-                "process_alive": false,
-                "observation": {"category": "needs_input", "reason": "waiting for user merge", "owner": "user", "controls": ["decide", "resume", "abandon"], "progress_age_secs": null, "deadline_in_secs": null, "step": "iterate"}
+                "current": {"state": "ready", "reason": "ready", "owner": "loopflow", "controls": ["resume", "abandon"], "progress_age_secs": null, "deadline_in_secs": null, "step": "iterate", "liveness": null}
               },
               "directive": {
                 "version": 2,

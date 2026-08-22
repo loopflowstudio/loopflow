@@ -72,7 +72,7 @@ lf chat --follow                              # replay and tail the conversation
 lf task steer INF-123 "smaller PR"            # redirect one Task's active turn
 lf ask list --user --json                     # requested sessions needing attention
 lf ask open ask_...                            # open one Ask session
-lf invocation list --active                   # reopenable provider/TUI invocations
+lf invocation list --active                   # live or explicitly unverified provider/TUI invocations
 ```
 
 Steering is durable-first: `steer` appends direction before attempting a live

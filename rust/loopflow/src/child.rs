@@ -6,8 +6,10 @@ use std::time::Duration;
 use serde::{Deserialize, Serialize};
 use time::OffsetDateTime;
 
+use crate::durable::{RunLivenessEvidence, WaitOn, WorkRef, WorkStatus};
 use crate::id::WaveId;
 use crate::project::ProjectId;
+use crate::store::{Store, StoreError, StoreResult};
 use crate::task::TaskId;
 
 macro_rules! prefixed_uuid_id {
@@ -141,38 +143,49 @@ impl ChildRef {
     }
 }
 
-// ── Body observation ────────────────────────────────────────────────────────
+// ── Current Work observation ────────────────────────────────────────────────
 //
-// Work is durable; a body is the disposable process acting for its Run.
-// `BodyObservation` combines derived Work intent with fresh process evidence.
-// It is never stored as a second lifecycle.
+// Work status is durable intent. A Run receipt is Home-owned process evidence.
+// `CurrentWorkObservation` is their one presentation projection, never another
+// stored lifecycle.
 
-/// The observed state of Work's current body.
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize)]
 #[serde(rename_all = "snake_case")]
 #[non_exhaustive]
-pub enum BodyCategory {
-    /// A body holds the Run and made meaningful progress recently.
+pub enum CurrentWorkState {
     Working,
-    /// A body is alive but has made no meaningful progress past its deadline.
     Stalled,
-    /// Loopflow revoked a lost/stalled body and is starting its successor.
-    Recovering,
-    /// User input is required; Loopflow will not proceed blindly.
-    NeedsInput,
-    /// No live body, intent not terminal; a wake will adopt or start one.
+    /// Active intent paired with fresh proof that its body is absent. Normal
+    /// Home reconciliation atomically settles this shape to `Ready`; this
+    /// variant keeps interrupted or inconsistent read evidence honest.
     Stopped,
-    /// Completed or Abandoned. Never restarts.
-    Terminal,
-    /// This machine cannot tell whether a body is alive. Never asserted as gone.
     Unobservable,
+    Ready,
+    Waiting,
+    Done,
+    Abandoned,
+}
+
+impl std::fmt::Display for CurrentWorkState {
+    fn fmt(&self, formatter: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+        formatter.write_str(match self {
+            Self::Working => "working",
+            Self::Stalled => "stalled",
+            Self::Stopped => "stopped",
+            Self::Unobservable => "unobservable",
+            Self::Ready => "ready",
+            Self::Waiting => "waiting",
+            Self::Done => "done",
+            Self::Abandoned => "abandoned",
+        })
+    }
 }
 
 /// Who must act next on the body. Separate from desired-intent ownership.
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize)]
 #[serde(rename_all = "snake_case")]
 #[non_exhaustive]
-pub enum BodyOwner {
+pub enum CurrentWorkOwner {
     /// Work's own running body advances it.
     Work,
     /// Loopflow supervision will recover or (re)start it.
@@ -189,7 +202,7 @@ pub enum BodyOwner {
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize)]
 #[serde(rename_all = "snake_case")]
 #[non_exhaustive]
-pub enum BodyControl {
+pub enum CurrentWorkControl {
     Attach,
     Steer,
     Interrupt,
@@ -203,13 +216,13 @@ pub enum BodyControl {
 /// The observed body state plus the evidence, owner, and legal controls behind
 /// it. Every surface (CLI, Mac, iOS, chat, Now/Roadmap) reads this one shape.
 #[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
-pub struct BodyObservation {
-    pub category: BodyCategory,
+pub struct CurrentWorkObservation {
+    pub state: CurrentWorkState,
     /// One-line evidence for this category.
     pub reason: String,
-    pub owner: BodyOwner,
+    pub owner: CurrentWorkOwner,
     /// Controls a surface may offer, ordered most to least routine.
-    pub controls: Vec<BodyControl>,
+    pub controls: Vec<CurrentWorkControl>,
     /// Seconds since the last durable mutation, when a live body is observed.
     pub progress_age_secs: Option<u64>,
     /// Seconds until the progress deadline; negative once overdue. Present only
@@ -217,28 +230,26 @@ pub struct BodyObservation {
     pub deadline_in_secs: Option<i64>,
     /// The flow step or command the body is on, when known.
     pub step: Option<String>,
+    /// Home-owned process evidence exists only while Work claims a Run.
+    pub liveness: Option<crate::durable::RunLivenessEvidence>,
 }
 
-/// Durable Work intent, coarsened to what the body projection needs.
+/// Durable Work intent, coarsened to what the current projection needs.
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
-pub enum BodyIntent {
-    /// Created / Starting / Running — a body should be advancing.
+pub enum CurrentWorkIntent {
     Active,
-    /// Waiting on a decision or input.
-    Waiting,
-    /// Completed or Abandoned.
-    Terminal,
+    Ready,
+    Waiting { user_owned: bool },
+    Done,
+    Abandoned,
 }
 
 /// The evidence a body observation is derived from, gathered by the caller so
 /// [`observe`] stays a pure, clock-free function.
 #[derive(Debug, Clone)]
-pub struct BodyEvidence {
-    pub intent: BodyIntent,
-    /// Whether this machine can observe body liveness at all (tmux present).
-    pub observable: bool,
-    /// Whether the active Run's body was found alive.
-    pub process_alive: bool,
+pub struct CurrentWorkEvidence {
+    pub intent: CurrentWorkIntent,
+    pub liveness: Option<crate::durable::RunLivenessEvidence>,
     /// Age of the last durable mutation (last event, else the last status change).
     pub progress_age: Duration,
     /// The step or command the body is on, if known.
@@ -264,55 +275,177 @@ pub(crate) fn body_progress_age(
     Duration::from_secs(seconds as u64)
 }
 
+pub(crate) fn work_status_reason(status: &WorkStatus) -> String {
+    match status {
+        WorkStatus::Running { run_id } => format!("Run {run_id} is active"),
+        WorkStatus::Waiting { .. } => "waiting for input or an event".to_string(),
+        WorkStatus::Ready => "ready".to_string(),
+        WorkStatus::Done => "done".to_string(),
+        WorkStatus::Abandoned => "abandoned".to_string(),
+    }
+}
+
+pub(crate) async fn observe_current_work(
+    store: &Store,
+    work: &WorkRef,
+    status: &WorkStatus,
+    now: OffsetDateTime,
+) -> StoreResult<CurrentWorkObservation> {
+    let run = if matches!(status, WorkStatus::Running { .. }) {
+        store.current_run(work).await?
+    } else {
+        None
+    };
+    let liveness = match run.as_ref() {
+        Some(run) => Some(store.run_liveness_evidence(run).await?),
+        None if matches!(status, WorkStatus::Running { .. }) => Some(RunLivenessEvidence {
+            state: crate::durable::RunLivenessState::Unprovable,
+            observed_at: None,
+            fresh: false,
+        }),
+        None => None,
+    };
+    let (progress_age, step) = match work {
+        WorkRef::Wave(_) => {
+            let progress_age = run.as_ref().map_or(Duration::ZERO, |run| {
+                let progress_at = liveness
+                    .as_ref()
+                    .and_then(|evidence| evidence.observed_at)
+                    .or(run.started_at)
+                    .unwrap_or(run.created_at);
+                body_progress_age(None, progress_at, now)
+            });
+            (progress_age, None)
+        }
+        WorkRef::Project(project_id) => {
+            let project = store.get_project(project_id).await?.ok_or_else(|| {
+                StoreError::InvalidData(format!("Project {project_id} is not registered"))
+            })?;
+            let latest_event_at = store.latest_project_event_at(project_id).await?;
+            (
+                body_progress_age(latest_event_at, project.updated_at, now),
+                Some(format!("iteration {}", project.iteration)),
+            )
+        }
+        WorkRef::Task(task_id) => {
+            let task = store.get_task(task_id).await?.ok_or_else(|| {
+                StoreError::InvalidData(format!("Task {task_id} is not registered"))
+            })?;
+            let latest_event_at = store.latest_task_event_at(task_id).await?;
+            (
+                body_progress_age(latest_event_at, task.updated_at, now),
+                Some(task.lifecycle_phase.as_str().to_string()),
+            )
+        }
+    };
+    let intent = match status {
+        WorkStatus::Running { .. } => CurrentWorkIntent::Active,
+        WorkStatus::Ready => CurrentWorkIntent::Ready,
+        WorkStatus::Waiting { wait } => CurrentWorkIntent::Waiting {
+            user_owned: matches!(wait.on, WaitOn::Input { .. }),
+        },
+        WorkStatus::Done => CurrentWorkIntent::Done,
+        WorkStatus::Abandoned => CurrentWorkIntent::Abandoned,
+    };
+    Ok(observe(
+        &CurrentWorkEvidence {
+            intent,
+            liveness,
+            progress_age,
+            step,
+            reason: work_status_reason(status),
+        },
+        DEFAULT_STALL_AFTER,
+    ))
+}
+
 /// Derive the visible body state from durable intent and liveness evidence.
-pub fn observe(evidence: &BodyEvidence, stall_after: Duration) -> BodyObservation {
-    let make = |category, reason: &str, owner, controls, progress, deadline| BodyObservation {
-        category,
+pub fn observe(evidence: &CurrentWorkEvidence, stall_after: Duration) -> CurrentWorkObservation {
+    let liveness = matches!(evidence.intent, CurrentWorkIntent::Active)
+        .then(|| evidence.liveness.clone())
+        .flatten();
+    let make = |state, reason: &str, owner, controls, progress, deadline| CurrentWorkObservation {
+        state,
         reason: reason.to_string(),
         owner,
         controls,
         progress_age_secs: progress,
         deadline_in_secs: deadline,
         step: evidence.step.clone(),
+        liveness: liveness.clone(),
     };
     match evidence.intent {
-        BodyIntent::Terminal => make(
-            BodyCategory::Terminal,
+        CurrentWorkIntent::Done => make(
+            CurrentWorkState::Done,
             &evidence.reason,
-            BodyOwner::Nobody,
+            CurrentWorkOwner::Nobody,
             vec![],
             None,
             None,
         ),
-        BodyIntent::Waiting => make(
-            BodyCategory::NeedsInput,
+        CurrentWorkIntent::Abandoned => make(
+            CurrentWorkState::Abandoned,
             &evidence.reason,
-            BodyOwner::User,
-            vec![
-                BodyControl::Decide,
-                BodyControl::Resume,
-                BodyControl::Abandon,
-            ],
+            CurrentWorkOwner::Nobody,
+            vec![],
             None,
             None,
         ),
-        BodyIntent::Active => {
-            if !evidence.observable {
+        CurrentWorkIntent::Ready => make(
+            CurrentWorkState::Ready,
+            &evidence.reason,
+            CurrentWorkOwner::Loopflow,
+            vec![CurrentWorkControl::Resume, CurrentWorkControl::Abandon],
+            None,
+            None,
+        ),
+        CurrentWorkIntent::Waiting { user_owned } => make(
+            CurrentWorkState::Waiting,
+            &evidence.reason,
+            if user_owned {
+                CurrentWorkOwner::User
+            } else {
+                CurrentWorkOwner::Loopflow
+            },
+            if user_owned {
+                vec![
+                    CurrentWorkControl::Decide,
+                    CurrentWorkControl::Resume,
+                    CurrentWorkControl::Abandon,
+                ]
+            } else {
+                vec![CurrentWorkControl::Resume, CurrentWorkControl::Abandon]
+            },
+            None,
+            None,
+        ),
+        CurrentWorkIntent::Active => {
+            let Some(liveness) = evidence.liveness.as_ref() else {
                 return make(
-                    BodyCategory::Unobservable,
-                    "this machine cannot observe the body",
-                    BodyOwner::Unknown,
+                    CurrentWorkState::Unobservable,
+                    "the owning Home has not recorded Run liveness",
+                    CurrentWorkOwner::Unknown,
+                    vec![],
+                    None,
+                    None,
+                );
+            };
+            if !liveness.fresh || liveness.state == crate::durable::RunLivenessState::Unprovable {
+                return make(
+                    CurrentWorkState::Unobservable,
+                    "the owning Home could not verify current Run liveness",
+                    CurrentWorkOwner::Unknown,
                     vec![],
                     None,
                     None,
                 );
             }
-            if !evidence.process_alive {
+            if liveness.state == crate::durable::RunLivenessState::Absent {
                 return make(
-                    BodyCategory::Stopped,
-                    "no live body for active intent; a wake will adopt or start one",
-                    BodyOwner::Loopflow,
-                    vec![BodyControl::Resume, BodyControl::Stop],
+                    CurrentWorkState::Stopped,
+                    "the owning Home proved the Run process is gone",
+                    CurrentWorkOwner::Loopflow,
+                    vec![CurrentWorkControl::Resume, CurrentWorkControl::Stop],
                     None,
                     None,
                 );
@@ -321,28 +454,28 @@ pub fn observe(evidence: &BodyEvidence, stall_after: Duration) -> BodyObservatio
             let remaining = stall_after.as_secs() as i64 - evidence.progress_age.as_secs() as i64;
             if evidence.progress_age > stall_after {
                 make(
-                    BodyCategory::Stalled,
+                    CurrentWorkState::Stalled,
                     "alive but no meaningful progress past the deadline",
-                    BodyOwner::Loopflow,
+                    CurrentWorkOwner::Loopflow,
                     vec![
-                        BodyControl::Attach,
-                        BodyControl::Extend,
-                        BodyControl::Interrupt,
-                        BodyControl::Stop,
+                        CurrentWorkControl::Attach,
+                        CurrentWorkControl::Extend,
+                        CurrentWorkControl::Interrupt,
+                        CurrentWorkControl::Stop,
                     ],
                     progress,
                     Some(remaining),
                 )
             } else {
                 make(
-                    BodyCategory::Working,
+                    CurrentWorkState::Working,
                     &evidence.reason,
-                    BodyOwner::Work,
+                    CurrentWorkOwner::Work,
                     vec![
-                        BodyControl::Attach,
-                        BodyControl::Steer,
-                        BodyControl::Interrupt,
-                        BodyControl::Stop,
+                        CurrentWorkControl::Attach,
+                        CurrentWorkControl::Steer,
+                        CurrentWorkControl::Interrupt,
+                        CurrentWorkControl::Stop,
                     ],
                     progress,
                     Some(remaining),
@@ -355,15 +488,23 @@ pub fn observe(evidence: &BodyEvidence, stall_after: Duration) -> BodyObservatio
 #[cfg(test)]
 mod tests {
     use super::{
-        body_progress_age, observe, BodyCategory, BodyControl, BodyEvidence, BodyIntent, BodyOwner,
-        Duration, DEFAULT_STALL_AFTER,
+        body_progress_age, observe, CurrentWorkControl, CurrentWorkEvidence, CurrentWorkIntent,
+        CurrentWorkOwner, CurrentWorkState, Duration, DEFAULT_STALL_AFTER,
     };
+    use crate::durable::{RunLivenessEvidence, RunLivenessState};
 
-    fn evidence(intent: BodyIntent, alive: bool, progress: Duration) -> BodyEvidence {
-        BodyEvidence {
+    fn evidence(
+        intent: CurrentWorkIntent,
+        liveness: RunLivenessState,
+        progress: Duration,
+    ) -> CurrentWorkEvidence {
+        CurrentWorkEvidence {
             intent,
-            observable: true,
-            process_alive: alive,
+            liveness: Some(RunLivenessEvidence {
+                state: liveness,
+                observed_at: Some(time::OffsetDateTime::UNIX_EPOCH),
+                fresh: true,
+            }),
             progress_age: progress,
             step: Some("task/pursue".to_string()),
             reason: "running".to_string(),
@@ -373,13 +514,17 @@ mod tests {
     #[test]
     fn a_live_body_that_just_progressed_is_working() {
         let obs = observe(
-            &evidence(BodyIntent::Active, true, Duration::from_secs(60)),
+            &evidence(
+                CurrentWorkIntent::Active,
+                RunLivenessState::Present,
+                Duration::from_secs(60),
+            ),
             DEFAULT_STALL_AFTER,
         );
-        assert_eq!(obs.category, BodyCategory::Working);
-        assert_eq!(obs.owner, BodyOwner::Work);
+        assert_eq!(obs.state, CurrentWorkState::Working);
+        assert_eq!(obs.owner, CurrentWorkOwner::Work);
         assert_eq!(obs.progress_age_secs, Some(60));
-        assert!(obs.controls.contains(&BodyControl::Steer));
+        assert!(obs.controls.contains(&CurrentWorkControl::Steer));
         // Deadline is still ahead while working.
         assert!(obs.deadline_in_secs.unwrap() > 0);
     }
@@ -387,15 +532,19 @@ mod tests {
     #[test]
     fn a_live_body_past_its_deadline_is_stalled() {
         let stalled = observe(
-            &evidence(BodyIntent::Active, true, Duration::from_secs(31 * 60)),
+            &evidence(
+                CurrentWorkIntent::Active,
+                RunLivenessState::Present,
+                Duration::from_secs(31 * 60),
+            ),
             DEFAULT_STALL_AFTER,
         );
-        assert_eq!(stalled.category, BodyCategory::Stalled);
-        assert_eq!(stalled.owner, BodyOwner::Loopflow);
+        assert_eq!(stalled.state, CurrentWorkState::Stalled);
+        assert_eq!(stalled.owner, CurrentWorkOwner::Loopflow);
         assert_eq!(stalled.progress_age_secs, Some(31 * 60));
         // Overdue: the deadline is behind us.
         assert!(stalled.deadline_in_secs.unwrap() < 0);
-        assert!(stalled.controls.contains(&BodyControl::Extend));
+        assert!(stalled.controls.contains(&CurrentWorkControl::Extend));
     }
 
     #[test]
@@ -403,16 +552,24 @@ mod tests {
         let clock = Duration::from_secs(10);
         // At the threshold: still Working. One tick past: Stalled.
         assert_eq!(
-            observe(&evidence(BodyIntent::Active, true, clock), clock).category,
-            BodyCategory::Working,
+            observe(
+                &evidence(CurrentWorkIntent::Active, RunLivenessState::Present, clock),
+                clock,
+            )
+            .state,
+            CurrentWorkState::Working,
         );
         assert_eq!(
             observe(
-                &evidence(BodyIntent::Active, true, clock + Duration::from_secs(1)),
+                &evidence(
+                    CurrentWorkIntent::Active,
+                    RunLivenessState::Present,
+                    clock + Duration::from_secs(1),
+                ),
                 clock,
             )
-            .category,
-            BodyCategory::Stalled,
+            .state,
+            CurrentWorkState::Stalled,
         );
     }
 
@@ -434,43 +591,76 @@ mod tests {
     #[test]
     fn active_intent_with_no_live_body_is_stopped_not_gone() {
         let obs = observe(
-            &evidence(BodyIntent::Active, false, Duration::from_secs(5)),
+            &evidence(
+                CurrentWorkIntent::Active,
+                RunLivenessState::Absent,
+                Duration::from_secs(5),
+            ),
             DEFAULT_STALL_AFTER,
         );
-        assert_eq!(obs.category, BodyCategory::Stopped);
-        assert_eq!(obs.owner, BodyOwner::Loopflow);
+        assert_eq!(obs.state, CurrentWorkState::Stopped);
+        assert_eq!(obs.owner, CurrentWorkOwner::Loopflow);
         assert_eq!(obs.progress_age_secs, None);
     }
 
     #[test]
     fn an_unobservable_body_is_never_asserted_gone() {
-        let mut ev = evidence(BodyIntent::Active, false, Duration::from_secs(5));
-        ev.observable = false;
+        let mut ev = evidence(
+            CurrentWorkIntent::Active,
+            RunLivenessState::Unprovable,
+            Duration::from_secs(5),
+        );
+        ev.liveness.as_mut().unwrap().fresh = false;
         let obs = observe(&ev, DEFAULT_STALL_AFTER);
-        assert_eq!(obs.category, BodyCategory::Unobservable);
-        assert_eq!(obs.owner, BodyOwner::Unknown);
+        assert_eq!(obs.state, CurrentWorkState::Unobservable);
+        assert_eq!(obs.owner, CurrentWorkOwner::Unknown);
+        assert!(obs.controls.is_empty());
+    }
+
+    #[test]
+    fn a_stale_present_receipt_is_unobservable() {
+        let mut ev = evidence(
+            CurrentWorkIntent::Active,
+            RunLivenessState::Present,
+            Duration::from_secs(5),
+        );
+        ev.liveness.as_mut().unwrap().fresh = false;
+
+        let obs = observe(&ev, DEFAULT_STALL_AFTER);
+
+        assert_eq!(obs.state, CurrentWorkState::Unobservable);
+        assert_eq!(obs.owner, CurrentWorkOwner::Unknown);
         assert!(obs.controls.is_empty());
     }
 
     #[test]
     fn waiting_intent_needs_user_input() {
         let obs = observe(
-            &evidence(BodyIntent::Waiting, false, Duration::from_secs(5)),
+            &evidence(
+                CurrentWorkIntent::Waiting { user_owned: true },
+                RunLivenessState::Unprovable,
+                Duration::from_secs(5),
+            ),
             DEFAULT_STALL_AFTER,
         );
-        assert_eq!(obs.category, BodyCategory::NeedsInput);
-        assert_eq!(obs.owner, BodyOwner::User);
-        assert!(obs.controls.contains(&BodyControl::Decide));
+        assert_eq!(obs.state, CurrentWorkState::Waiting);
+        assert_eq!(obs.owner, CurrentWorkOwner::User);
+        assert!(obs.controls.contains(&CurrentWorkControl::Decide));
     }
 
     #[test]
     fn terminal_intent_owns_nobody_and_offers_no_controls() {
         let obs = observe(
-            &evidence(BodyIntent::Terminal, false, Duration::from_secs(0)),
+            &evidence(
+                CurrentWorkIntent::Done,
+                RunLivenessState::Unprovable,
+                Duration::from_secs(0),
+            ),
             DEFAULT_STALL_AFTER,
         );
-        assert_eq!(obs.category, BodyCategory::Terminal);
-        assert_eq!(obs.owner, BodyOwner::Nobody);
+        assert_eq!(obs.state, CurrentWorkState::Done);
+        assert_eq!(obs.owner, CurrentWorkOwner::Nobody);
         assert!(obs.controls.is_empty());
+        assert!(obs.liveness.is_none());
     }
 }

@@ -11,34 +11,46 @@ public struct Wave: Sendable, Identifiable, Hashable {
     public let name: String
     public let repo: String
     public let status: WorkStatus
+    public let current: CurrentWorkObservation?
     public let live: Bool
     public let paused: Bool
     public let enabled: Bool
     public let activeTasks: Int
     public let activeProjects: Int
     public let parentWaveId: String?
+    public let retiredAt: String?
+    public let supersededByWaveId: String?
+    public let retirementReason: String?
 
     public init(
         id: String,
         name: String,
         repo: String,
         status: WorkStatus,
+        current: CurrentWorkObservation? = nil,
         live: Bool = false,
         paused: Bool = false,
         enabled: Bool = true,
         activeTasks: Int = 0,
         activeProjects: Int = 0,
-        parentWaveId: String? = nil
+        parentWaveId: String? = nil,
+        retiredAt: String? = nil,
+        supersededByWaveId: String? = nil,
+        retirementReason: String? = nil
     ) {
         self.id = id
         self.name = name
         self.repo = repo
         self.status = status
+        self.current = current
         self.live = live
         self.paused = paused
         self.enabled = enabled
         self.activeTasks = activeTasks
         self.activeProjects = activeProjects
         self.parentWaveId = parentWaveId
+        self.retiredAt = retiredAt
+        self.supersededByWaveId = supersededByWaveId
+        self.retirementReason = retirementReason
     }
 }

@@ -443,6 +443,9 @@ struct WavesView: View {
     /// and auto-selects a Wave into its full detail hierarchy. Idempotent.
     private func seedMockWaves() {
         let repo = PortfolioRepo(path: MockWaveFixture.repoPath, lastOpened: Date())
+        // A persisted production repo filter must not hide the deterministic
+        // fixture list while leaving its selected detail onscreen.
+        selection = .all
         if !portfolioService.repos.contains(where: { $0.path == repo.path }) {
             portfolioService.addRepo(repo.url)
         }

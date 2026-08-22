@@ -16,12 +16,13 @@ use loopflow::id::WaveId;
 use loopflow::planning::{LinearIssueId, LinearProjectId, ProjectPlan, TaskPlan};
 use loopflow::project::{Project, ProjectEventKind, ProjectId};
 use loopflow::store::sqlite::SqliteStore;
-use loopflow::store::{PmSnapshotRow, RunEventRow, TurnUsageSample};
+use loopflow::store::{open_store, PmSnapshotRow, RunEventRow, StorageConfig, TurnUsageSample};
 use loopflow::task::{
     Observation, PmWritebackState, PrMergeMode, Task, TaskId, TaskLifecyclePhase,
     TaskLifecyclePlan, TaskPr, TaskPrId,
 };
 use loopflow::trace::{AgentInvocationRow, AgentTurnRow, SupervisedInvocation};
+use loopflow::wave::metrics::{load_metric_contract, MetricObservation, ObservationAcceptance};
 use loopflow::wave::Wave;
 use time::OffsetDateTime;
 
@@ -1170,6 +1171,163 @@ fn ambient_wave_id_resolves_the_wave_it_names() {
     assert_eq!(status["wave"]["id"], wave.id().as_str());
     assert_eq!(status["wave"]["name"], "audit-b");
     assert_eq!(status["runs"]["state"], "ok");
+}
+
+#[test]
+fn accepted_metric_evidence_is_identical_in_status_roadmap_and_text() {
+    let home = tempfile::tempdir().expect("tempdir");
+    let wave = seed(home.path(), "product");
+    let repo = home.path().join("repo");
+    let metrics_dir = repo.join("wave/product/metrics");
+    std::fs::create_dir_all(&metrics_dir).expect("metrics directory");
+    let contract_path = metrics_dir.join("task-loop-trust.md");
+    std::fs::write(
+        &contract_path,
+        r#"---
+schema: 1
+id: task-loop-trust
+project_id: d19956b2-9955-437d-aea6-d91766231c77
+stage: graduated
+instrument: lifecycle-scorecard
+unit: ratio
+target:
+  at_least: 1
+window: 7d
+freshness: 6h
+---
+
+# Task loops earn trust
+
+Count dispatched Task loops that settle without rescue.
+"#,
+    )
+    .expect("metric contract");
+    let project_payload = serde_json::json!({
+        "projects": [{
+            "id": "d19956b2-9955-437d-aea6-d91766231c77",
+            "slug": "loopflow-api",
+            "name": "Loopflow API",
+            "summary": "One product contract.",
+            "definition": "Keep the API coherent across every surface.",
+            "flows": {"first": null, "loop": null, "finally": null},
+            "krs": [{"text": "Task loops earn trust for one week", "holds": false}],
+            "initiative_ids": ["initiative-product"],
+            "team_ids": ["team-product"]
+        }],
+        "items": []
+    });
+    let sqlite = SqliteStore::new(&home.path().join("loopflow.db")).expect("open store");
+    let now = OffsetDateTime::now_utc();
+    sqlite
+        .put_pm_snapshot(&PmSnapshotRow {
+            wave_id: wave.id().clone(),
+            provider: "linear".to_string(),
+            initiative: "initiative-product".to_string(),
+            synced_at: now.unix_timestamp(),
+            payload: serde_json::to_string(&project_payload).expect("serialize PM snapshot"),
+        })
+        .expect("seed PM snapshot");
+    drop(sqlite);
+    install_metric_schema_if_draft(&home.path().join("loopflow.db"));
+
+    let contract = load_metric_contract(&contract_path, wave.id().as_str()).expect("contract");
+    let mut observation = MetricObservation::Observed {
+        identity: contract.identity.clone(),
+        contract_revision: contract.contract_revision.clone(),
+        instrument: contract.instrument.clone(),
+        observation_id: String::new(),
+        value: 1.0,
+        source_window_start: now - time::Duration::days(7),
+        source_window_end: now,
+        complete: true,
+    };
+    let id = observation
+        .expected_observation_id()
+        .expect("observation digest");
+    let MetricObservation::Observed { observation_id, .. } = &mut observation else {
+        unreachable!()
+    };
+    *observation_id = id;
+    let runtime = tokio::runtime::Runtime::new().expect("metric runtime");
+    runtime.block_on(async {
+        let store = open_store(&StorageConfig::sqlite(home.path().join("loopflow.db")))
+            .await
+            .expect("open shared store");
+        store
+            .register_metric_instrument(&contract.identity, &contract.instrument, now)
+            .await
+            .expect("register instrument");
+        assert_eq!(
+            store
+                .accept_metric_observation(&contract, observation, now)
+                .await
+                .expect("accept observation"),
+            ObservationAcceptance::Accepted
+        );
+    });
+
+    let status = status_json(home.path(), &["product"], None);
+    let roadmap = roadmap_json(home.path(), "product");
+    let status_metric = &status["metric_portfolio"]["metrics"][0];
+    assert_eq!(status_metric["name"], "Task loops earn trust");
+    assert_eq!(
+        status_metric["project_id"],
+        "d19956b2-9955-437d-aea6-d91766231c77"
+    );
+    assert_eq!(
+        status_metric["target"],
+        serde_json::json!({"kind": "at_least", "value": 1.0})
+    );
+    assert_eq!(status_metric["window"], "7d");
+    assert_eq!(status_metric["freshness"]["kind"], "fresh");
+    assert_eq!(status_metric["evidence"]["kind"], "met");
+    assert_eq!(status_metric["evidence"]["value"], 1.0);
+    assert_eq!(status["projects"][0]["project"]["krs"][0]["holds"], false);
+    assert_eq!(
+        roadmap["waves"][0]["metric_portfolio"],
+        status["metric_portfolio"]
+    );
+
+    let human = status_human(home.path(), "product");
+    assert!(human.contains("Loopflow API\n      Task loops earn trust  [met]"));
+    assert!(
+        human.contains("Value 100.00% · Target >= 100.00% over 7d"),
+        "{human}"
+    );
+}
+
+fn install_metric_schema_if_draft(database: &Path) {
+    let connection = rusqlite::Connection::open(database).expect("open metric schema");
+    let installed = connection
+        .query_row(
+            "SELECT EXISTS(
+                SELECT 1 FROM sqlite_master
+                WHERE type='table' AND name='metric_observations'
+            )",
+            [],
+            |row| row.get::<_, bool>(0),
+        )
+        .expect("inspect metric schema");
+    if installed {
+        return;
+    }
+
+    let drafts = Path::new(env!("CARGO_MANIFEST_DIR")).join("src/store/migrations/drafts");
+    let migration = std::fs::read_dir(drafts)
+        .expect("metric migration drafts")
+        .map(|entry| entry.expect("metric migration draft").path())
+        .find(|path| {
+            path.file_name()
+                .and_then(|name| name.to_str())
+                .is_some_and(|name| {
+                    name.starts_with("project_metric_observations__") && name.ends_with(".sql")
+                })
+        })
+        .expect("project metric migration draft");
+    let sql = std::fs::read_to_string(migration).expect("read metric migration draft");
+    connection
+        .execute_batch(&sql)
+        .expect("install metric schema");
 }
 
 /// A wave that has done nothing reports an empty reading, not a missing one:

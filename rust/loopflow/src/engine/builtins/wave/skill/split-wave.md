@@ -27,7 +27,9 @@ The numeric argument controls how many children to create (default 2).
 Linear tasks move as-is — each one lands in exactly one child. But `GOAL.md` needs rewriting, not slicing:
 
 - **Intent**: written fresh for each child. Must be internally coherent, not a fragment of the parent's.
-- **Metrics**: preserved and distributed. A metric can appear in multiple children if it spans both.
+- **Metrics**: move each reviewed contract to exactly one child with its owning
+  Project. Cross-Wave consumption is explicit routing, never a duplicated
+  metric identity or observation stream.
 - **Memory**: carry forward the decisions in `MEMORY.md` that each child still needs.
 
 ## Workflow
@@ -45,8 +47,9 @@ Linear tasks move as-is — each one lands in exactly one child. But `GOAL.md` n
    - Assign each Linear issue to exactly one child — no orphans
 
 4. Create the new waves
-   - `wave/<child>/GOAL.md` — fresh intent, measures, and process judgment for each child; draw scope boundaries between siblings
+   - `wave/<child>/GOAL.md` — fresh intent and process judgment for each child; draw scope boundaries between siblings
    - `wave/<child>/MEMORY.md` — the decisions and context this child inherits
+   - `wave/<child>/metrics/*.md` — contracts whose owning Projects move to that child
    - `lf pm init --wave <child>` — create each child's Linear Initiative
    - recreate its allocated measured bets with `lf pm project create`
    - Move allocated tasks with `lf pm task move --id <task> --wave <child> --project <project>`. Archive the parent Projects after every task moved. Use `lf pm task done --id <task>` only for shipped work.
@@ -57,6 +60,7 @@ Linear tasks move as-is — each one lands in exactly one child. But `GOAL.md` n
 
 6. Verify
    - Each child has a `GOAL.md`, a `MEMORY.md`, and a connected Linear Initiative
+   - Every metric contract resolves to exactly one Project under exactly one child
    - No content from the parent is unaccounted for
 
 ## Guardrails

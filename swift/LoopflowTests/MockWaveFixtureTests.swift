@@ -42,6 +42,18 @@ struct MockWaveFixtureTests {
         #expect(project.project.krs.count == 1)
         #expect(project.tasks.filter { !$0.task.completed }.count == 2)
         #expect(project.runtime?.lastFailure?.message.contains("credential") == true)
+        let metric = try #require(detail.metricPortfolio.metrics.first)
+        #expect(metric.name == "Task loops earn trust")
+        #expect(metric.projectId == project.project.id)
+        #expect(metric.evidence == .met(
+            value: 1,
+            sourceWindowStart: "2026-08-13T18:00:00Z",
+            sourceWindowEnd: "2026-08-20T18:00:00Z"
+        ))
+        #expect(detail.metricPortfolio.metrics.count == 3)
+        #expect(detail.metricPortfolio.metrics.count { $0.stage == .graduated } == 2)
+        #expect(detail.metricPortfolio.metrics.count { $0.stage == .installed } == 1)
+        #expect(detail.metricPortfolio.contractIssues.count == 1)
 
         // Project row lens folds its Tasks' attention (runtime not running):
         // the red Task outranks the black one.
@@ -80,15 +92,15 @@ struct MockWaveFixtureTests {
         #expect(outcome.awaitingFirstRead)  // loading affordance stays on screen
     }
 
-    @Test("the error detail state preserves the last-good detail under a framed footer")
+    @Test("the error detail state discards volatile detail under a framed footer")
     func errorDetailState() {
         let outcome = MockWaveFixture.detailReading(
             waveName: MockWaveFixture.detailWaveName,
             state: .error
         )
-        // The cached detail survives the failed refresh (PR #932 behavior)...
-        #expect(outcome.reading.snapshot?.wave.name == "infrastructure")
-        // ...framed as a quiet footer reason, never a raw error dominating the pane.
+        #expect(outcome.reading.snapshot == nil)
+        // The cached authored plan remains outside the reading; the failure is
+        // framed as a quiet footer reason, never stale operational evidence.
         #expect(outcome.reading.errorMessage == "Wave status unavailable: the local registry is unreachable")
         #expect(outcome.awaitingFirstRead == false)
     }

@@ -1,6 +1,8 @@
 use std::path::Path;
 
 use clap::Parser;
+use serde::Deserialize;
+use time::OffsetDateTime;
 
 use crate::engine::flow::Op;
 use crate::engine::git::get_default_branch;
@@ -94,19 +96,76 @@ fn run_telemetry_scorecard(repo: &Path, json: bool) -> OpsResult<()> {
         .arg("--repo")
         .arg(repo)
         .arg("--database")
-        .arg(database);
-    if json {
-        command.arg("--json");
-    }
-    let status = command
-        .status()
+        .arg(database)
+        .arg("--envelope");
+    let output = command
+        .output()
         .map_err(|error| OpsError::Message(format!("launch telemetry scorecard: {error}")))?;
-    if !status.success() {
+    if !output.status.success() {
+        let stderr = String::from_utf8_lossy(&output.stderr).trim().to_string();
         return Err(OpsError::Message(format!(
-            "telemetry scorecard exited with {status}"
+            "telemetry scorecard exited with {}{}",
+            output.status,
+            if stderr.is_empty() {
+                String::new()
+            } else {
+                format!(": {stderr}")
+            }
         )));
     }
+    let envelope: TelemetryScorecardEnvelope = serde_json::from_slice(&output.stdout)
+        .map_err(|error| OpsError::Message(format!("decode telemetry scorecard: {error}")))?;
+    for result in persist_metric_observations(repo, envelope.metric_observations)? {
+        eprintln!("metric observation · {result}");
+    }
+    if json {
+        println!(
+            "{}",
+            serde_json::to_string_pretty(&envelope.report)
+                .expect("scorecard report JSON always re-serializes")
+        );
+    } else {
+        print!("{}", envelope.text);
+    }
     Ok(())
+}
+
+#[derive(Debug, Deserialize)]
+struct TelemetryScorecardEnvelope {
+    report: serde_json::Value,
+    metric_observations: Vec<crate::ops::metrics::MetricProducerObservation>,
+    text: String,
+}
+
+fn persist_metric_observations(
+    repo: &Path,
+    observations: Vec<crate::ops::metrics::MetricProducerObservation>,
+) -> OpsResult<Vec<String>> {
+    if observations.is_empty() {
+        return Ok(Vec::new());
+    }
+    let repo = repo.to_path_buf();
+    std::thread::spawn(move || {
+        tokio::runtime::Runtime::new()
+            .map_err(|error| OpsError::Message(format!("start metric writer: {error}")))?
+            .block_on(async move {
+                let Some(store) = crate::store::open_existing_store().await else {
+                    return Ok(vec![
+                        "no local Loopflow registry; observation was not persisted".to_string(),
+                    ]);
+                };
+                crate::ops::metrics::publish_metric_observations(
+                    &store,
+                    &repo,
+                    observations,
+                    OffsetDateTime::now_utc(),
+                )
+                .await
+                .map_err(|error| OpsError::Message(format!("publish metric observation: {error}")))
+            })
+    })
+    .join()
+    .map_err(|_| OpsError::Message("metric writer thread panicked".to_string()))?
 }
 
 fn execute_pr(repo: &Path, cmd: PrCommand, progress: &impl Progress) -> OpsResult<()> {
@@ -263,7 +322,12 @@ fn unsupported() -> OpsError {
 #[cfg(test)]
 mod tests {
     use super::*;
+    use crate::id::WaveId;
     use crate::ops::NullProgress;
+    use crate::pm::{PmKr, PmProject, ProjectFlowPlan};
+    use crate::store::{open_store, storage_config_from_env};
+    use crate::wave::metrics::MetricEvidenceDto;
+    use crate::wave::Wave;
 
     #[test]
     fn authored_flow_cannot_dispatch_evidence_receipt_command() {
@@ -279,16 +343,19 @@ mod tests {
 
     #[test]
     fn telemetry_flow_op_runs_internal_scorecard() {
+        let _ledger = crate::journal::TestLedgerGuard::new();
         let repo = tempfile::tempdir().expect("temp repo");
         let scripts = repo.path().join("scripts");
         std::fs::create_dir(&scripts).expect("create scripts directory");
         std::fs::write(
             scripts.join("lifecycle_scorecard.py"),
-            r#"import pathlib
+            r#"import json
+import pathlib
 import sys
 
 repo = pathlib.Path(sys.argv[2])
-repo.joinpath("scorecard-ran").write_text("json" if "--json" in sys.argv else "text")
+repo.joinpath("scorecard-ran").write_text("envelope" if "--envelope" in sys.argv else "direct")
+print(json.dumps({"report": {"ok": True}, "metric_observations": [], "text": "scorecard text\n"}))
 "#,
         )
         .expect("write scorecard fixture");
@@ -302,7 +369,145 @@ repo.joinpath("scorecard-ran").write_text("json" if "--json" in sys.argv else "t
         assert_eq!(
             std::fs::read_to_string(repo.path().join("scorecard-ran"))
                 .expect("read scorecard receipt"),
-            "json"
+            "envelope"
         );
+    }
+
+    #[test]
+    fn telemetry_envelope_decodes_project_metric_observation() {
+        let envelope: TelemetryScorecardEnvelope = serde_json::from_str(
+            r#"{
+                "report":{"schema_version":1},
+                "metric_observations":[{
+                    "wave":"product",
+                    "metric_id":"task-loop-trust",
+                    "instrument":"lifecycle-scorecard",
+                    "kind":"observed",
+                    "value":0.5,
+                    "source_window_start":"2026-08-14T09:00:00Z",
+                    "source_window_end":"2026-08-21T09:00:00Z",
+                    "complete":true,
+                    "eligible":4,
+                    "successful":2
+                }],
+                "text":"Lifecycle scorecard"
+            }"#,
+        )
+        .unwrap();
+
+        assert_eq!(envelope.metric_observations.len(), 1);
+    }
+
+    #[test]
+    fn telemetry_flow_persists_the_portfolio_reading() {
+        let _ledger = crate::journal::TestLedgerGuard::new();
+        let repo = tempfile::tempdir().expect("temp repo");
+        let scripts = repo.path().join("scripts");
+        let metrics = repo.path().join("wave/product/metrics");
+        std::fs::create_dir(&scripts).expect("create scripts directory");
+        std::fs::create_dir_all(&metrics).expect("create metrics directory");
+        std::fs::write(
+            metrics.join("task-loop-trust.md"),
+            "---\nschema: 1\nid: task-loop-trust\nproject_id: project-api\nstage: installed\ninstrument: lifecycle-scorecard\nunit: ratio\ntarget:\n  at_least: 1\nwindow: 7d\nfreshness: 30h\n---\n\n# Task loops earn trust\n\nCount settled Task loops.\n",
+        )
+        .expect("write metric contract");
+        std::fs::write(
+            scripts.join("lifecycle_scorecard.py"),
+            r#"import json
+from datetime import datetime, timedelta, timezone
+
+end = datetime.now(timezone.utc)
+start = end - timedelta(days=7)
+print(json.dumps({
+    "report": {"ok": True},
+    "metric_observations": [{
+        "wave": "product",
+        "metric_id": "task-loop-trust",
+        "instrument": "lifecycle-scorecard",
+        "kind": "observed",
+        "value": 1.0,
+        "source_window_start": start.isoformat(),
+        "source_window_end": end.isoformat(),
+        "complete": True,
+        "eligible": 1,
+        "successful": 1
+    }],
+    "text": "scorecard text\n"
+}))
+"#,
+        )
+        .expect("write scorecard fixture");
+        let wave = Wave::new(
+            WaveId::new(),
+            "product".to_string(),
+            repo.path().display().to_string(),
+        );
+        let runtime = tokio::runtime::Runtime::new().unwrap();
+        let store = runtime
+            .block_on(open_store(&storage_config_from_env().unwrap()))
+            .unwrap();
+        store
+            .apply_migration_for_test("project_metric_observations")
+            .unwrap();
+        runtime.block_on(store.create_wave(&wave)).unwrap();
+        drop(store);
+        drop(runtime);
+
+        execute_flow_ops(
+            repo.path(),
+            &Op {
+                command: "__telemetry-scorecard".to_string(),
+                args: Vec::new(),
+            },
+            &NullProgress,
+        )
+        .expect("publish telemetry metric");
+
+        let runtime = tokio::runtime::Runtime::new().unwrap();
+        let store = runtime
+            .block_on(open_store(&storage_config_from_env().unwrap()))
+            .unwrap();
+        let projects = vec![PmProject {
+            id: "project-api".to_string(),
+            slug: "loopflow-api".to_string(),
+            name: "Loopflow API".to_string(),
+            summary: String::new(),
+            definition: "Make Task loops trustworthy.".to_string(),
+            flows: Some(ProjectFlowPlan::empty()),
+            krs: vec![PmKr {
+                text: "Task loops settle without repair.".to_string(),
+                holds: false,
+            }],
+            initiative_ids: vec!["initiative-1".to_string()],
+            team_ids: vec!["team-1".to_string()],
+        }];
+        let portfolio = runtime
+            .block_on(crate::ops::metrics::wave_metric_portfolio(
+                &store,
+                &wave,
+                &projects,
+                OffsetDateTime::now_utc(),
+            ))
+            .unwrap();
+        let project_portfolio = runtime
+            .block_on(crate::ops::metrics::project_metric_portfolio(
+                &store,
+                &wave,
+                &projects,
+                "project-api",
+                OffsetDateTime::now_utc(),
+            ))
+            .unwrap();
+        let prompt = crate::ops::metrics::metric_prompt_section(
+            "project-owned-metrics",
+            Ok(project_portfolio),
+        );
+
+        assert!(portfolio.metrics[0].instrumented);
+        assert!(matches!(
+            portfolio.metrics[0].evidence,
+            MetricEvidenceDto::Met { value: 1.0, .. }
+        ));
+        assert!(prompt.contains("\"kind\":\"met\",\"value\":1.0"));
     }
 }

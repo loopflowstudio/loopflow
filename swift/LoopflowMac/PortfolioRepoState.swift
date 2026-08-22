@@ -91,7 +91,10 @@ final class PortfolioRepoState {
         }
 
         do {
-            let loaded = try await registryQuery.waves(repoPath: repo.url.path)
+            // Scope only after resolving worktrees to their origin. Asking
+            // RegistryQuery.waves(repoPath:) to exact-filter first discards the
+            // canonical registry rows a development worktree needs to see.
+            let loaded = try await registryQuery.allWaves()
             applyConnectedWaves(loaded, plans: plansByKey)
             isConnected = true
         } catch {

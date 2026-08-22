@@ -6,8 +6,8 @@ import Testing
 
 @Suite("Wave detail reading")
 struct WaveDetailReadingTests {
-    @Test("a failed refresh preserves the last successful Wave detail")
-    func failedRefreshPreservesLastGoodDetail() throws {
+    @Test("a failed refresh discards volatile status and metric evidence")
+    func failedRefreshDiscardsVolatileDetail() throws {
         let detail = try JSONDecoder().decode(
             WaveDetailSnapshot.self,
             from: loadFixtureData("wave_detail.json")
@@ -15,10 +15,14 @@ struct WaveDetailReadingTests {
         var reading = WaveDetailReading()
 
         reading.update(detail)
+        #expect(reading.snapshot?.metricPortfolio.metrics.first?.evidence == .met(
+            value: 1,
+            sourceWindowStart: "2026-08-13T18:00:00Z",
+            sourceWindowEnd: "2026-08-20T18:00:00Z"
+        ))
         reading.recordFailure(RegistryQueryError("registry busy"))
 
-        #expect(reading.snapshot?.wave.id == "wave-1")
-        #expect(reading.snapshot?.projects[0].project.slug == "release-feedback")
+        #expect(reading.snapshot == nil)
         #expect(reading.errorMessage == "Wave status unavailable: registry busy")
     }
 
@@ -35,6 +39,61 @@ struct WaveDetailReadingTests {
 
         #expect(reading.errorMessage == nil)
         #expect(reading.snapshot?.wave.id == "wave-1")
+    }
+
+    @Test("Mac metric rows render the shared DTO fields without recomputing evidence")
+    func metricRowPresentationUsesSharedEvidence() throws {
+        let detail = try JSONDecoder().decode(
+            WaveDetailSnapshot.self,
+            from: loadFixtureData("wave_detail.json")
+        )
+        let met = try #require(detail.metricPortfolio.metrics.first)
+        let metRow = WaveMetricRowPresentation(metric: met, owner: "Loopflow API")
+
+        #expect(metRow.name == "Task loops earn trust")
+        #expect(metRow.description == "Fraction of Task epochs settled during the trailing seven days that either completed with every PR landed through Loopflow auto-merge or stopped with a non-resumable failure receipt. Open epochs are excluded. A user-landed PR or manual Git repair inside the Task epoch fails the metric.")
+        #expect(metRow.state == "Met")
+        #expect(metRow.owner == "Loopflow API")
+        #expect(metRow.instrumentState == "Instrumented")
+        #expect(metRow.value == "100%")
+        #expect(metRow.target == "≥ 100%")
+        #expect(metRow.window == "7d")
+        #expect(metRow.freshness == "Fresh until 2026-08-22T00:00:00Z")
+        #expect(metRow.reason == nil)
+
+        let portfolio = try JSONDecoder().decode(
+            MetricPortfolio.self,
+            from: loadFixtureData("metric_portfolio.json")
+        )
+        let unavailable = try #require(portfolio.metrics.first {
+            if case .unavailable = $0.evidence { return true }
+            return false
+        })
+        let unavailableRow = WaveMetricRowPresentation(
+            metric: unavailable,
+            owner: "Loopflow API"
+        )
+        #expect(unavailableRow.state == "Unavailable")
+        #expect(unavailableRow.instrumentState == "Instrumented")
+        #expect(unavailableRow.value == "—")
+        #expect(unavailableRow.reason == "source timeout · source time 2026-08-20T18:00:00Z")
+    }
+
+    @Test("Mac metric summary distinguishes official health, candidates, and contract issues")
+    func metricPortfolioSummaryKeepsBoundariesVisible() throws {
+        let portfolio = try JSONDecoder().decode(
+            MetricPortfolio.self,
+            from: loadFixtureData("metric_portfolio.json")
+        )
+
+        let presentation = WaveMetricPortfolioPresentation(portfolio: portfolio)
+
+        #expect(presentation.officialCount == 3)
+        #expect(presentation.candidateCount == 6)
+        #expect(presentation.holdingCount == 1)
+        #expect(presentation.needsAttentionCount == 2)
+        #expect(presentation.contractIssueCount == 4)
+        #expect(presentation.headline == "1 of 3 official measures currently hold.")
     }
 
     // The populated detail-pane hierarchy can't be driven live in every

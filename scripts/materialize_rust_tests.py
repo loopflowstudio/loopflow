@@ -22,6 +22,7 @@ from typing import Iterator
 
 REPO_ROOT = Path(__file__).resolve().parent.parent
 AMBIENT_WORK_AUTHORITY = (
+    "LF_DB_PATH",
     "LF_AGENT_INVOCATION_ID",
     "LF_CONTROL_BIN",
     "LF_PROCESS_ID",

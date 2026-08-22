@@ -57,10 +57,11 @@ homepage:
           the concrete Task that closes it, and record what shipped in
           memory.
 
-          ## Measures
+          ## Process
 
-          - **Key Results**: one auth path across web and desktop.
-          - **Quality**: auth startup under 200ms.
+          Read current Projects, KR proof, and Project-owned metrics. Route
+          the most important gap to its owning Project; record only
+          strategy-changing learning in memory.
       - label: "A project"
         filename: "Linear · created via lf pm"
         content: |

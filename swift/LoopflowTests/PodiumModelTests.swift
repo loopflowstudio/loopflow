@@ -205,6 +205,90 @@ struct PodiumModelTests {
         #expect(model.waveSummary?.activeRuns == 0)
     }
 
+    @Test("A development worktree merges authored and registered Wave identity")
+    func developmentWorktreeMergesAuthoredAndRegisteredWave() async throws {
+        let fixture = try PodiumTestFixture.load()
+        let root = FileManager.default.temporaryDirectory
+            .appendingPathComponent("podium-worktree-\(UUID().uuidString)", isDirectory: true)
+        let origin = root.appendingPathComponent("repo", isDirectory: true)
+        let worktree = root.appendingPathComponent("repo.wt", isDirectory: true)
+        try FileManager.default.createDirectory(
+            at: origin.appendingPathComponent("wave/product", isDirectory: true),
+            withIntermediateDirectories: true
+        )
+        try Data("# product\n".utf8).write(
+            to: origin.appendingPathComponent("wave/product/GOAL.md")
+        )
+        defer { try? FileManager.default.removeItem(at: root) }
+
+        func git(_ args: [String], at directory: URL) throws {
+            let process = Process()
+            process.executableURL = URL(fileURLWithPath: "/usr/bin/env")
+            process.arguments = ["git", "-C", directory.path] + args
+            process.standardOutput = Pipe()
+            process.standardError = Pipe()
+            try process.run()
+            process.waitUntilExit()
+            try #require(
+                process.terminationStatus == 0,
+                "git \(args.joined(separator: " "))"
+            )
+        }
+
+        try git(["init", "-q"], at: origin)
+        try git(["add", "wave/product/GOAL.md"], at: origin)
+        try git(
+            ["-c", "user.email=t@t", "-c", "user.name=t", "commit", "-q", "-m", "init"],
+            at: origin
+        )
+        try git(["worktree", "add", "-q", worktree.path], at: origin)
+
+        let registered = Wave(
+            id: "product",
+            name: "product",
+            repo: origin.path,
+            status: .running(runID: "run_product"),
+            current: CurrentWorkObservation(
+                state: .working,
+                reason: "provider is producing output",
+                owner: .work,
+                controls: [.steer, .interrupt],
+                progressAgeSeconds: 0,
+                deadlineInSeconds: nil,
+                step: nil,
+                liveness: RunLivenessEvidence(
+                    state: .present,
+                    observedAt: "2026-08-21T22:00:00Z",
+                    fresh: true
+                )
+            ),
+            live: true
+        )
+        let model = PodiumModel(query: fixture.query, repoPath: worktree.path)
+        model.applyFixture(
+            roadmap: .available(fixture.roadmap),
+            waves: .available([registered]),
+            processActivity: .available(fixture.processActivity),
+            workActivity: .available(fixture.workActivity),
+            repos: []
+        )
+
+        await model.refreshPortfolio(
+            initialRepoPath: worktree.path,
+            persistedRepos: [
+                PortfolioRepo(path: origin.path, lastOpened: .distantPast),
+                PortfolioRepo(path: worktree.path, lastOpened: .distantPast),
+            ]
+        )
+
+        #expect(model.visibleRepos.count == 1)
+        #expect(model.visibleRepos[0].path.normalizedFilePath == worktree.path.normalizedFilePath)
+        #expect(model.repoIdentity(model.visibleRepos[0].path) == model.repoIdentity(worktree.path))
+        #expect(model.visibleWaves.map(\.displayName) == ["product"])
+        #expect(model.visibleWaves.map(\.isRegistered) == [true])
+        #expect(model.waveSummary == WaveSummary(waves: 1, activeRuns: 1, unservedRuns: 0))
+    }
+
     @Test("Work selection becomes one server-side Activity filter")
     func workActivityFollowsSelection() async throws {
         let fixture = try PodiumTestFixture.load()

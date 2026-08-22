@@ -10,6 +10,7 @@ pub(crate) mod git_operation;
 pub mod home;
 mod land;
 pub mod linear_observe;
+pub(crate) mod metrics;
 pub mod pm;
 mod pr;
 mod present;

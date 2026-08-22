@@ -31,6 +31,12 @@ website:
 
 # Stable Wave-surface proof, rendered offline from fixtures at both widths.
 wave-proof:
+  - name: metrics-portfolio-wide
+    mode: mock-waves
+    view: portfolio
+    wave: infrastructure
+    width: 1440
+
   - name: control-room-selected-narrow
     mode: mock-waves
     width: 900

@@ -225,14 +225,27 @@ pub async fn resolve_work_binding(
                 .await
                 .map_err(run_error)?
                 .ok_or_else(|| run_error(format!("Project {} has no owning Wave", project.id)))?;
+            let metric_context = crate::ops::metrics::metric_prompt_section(
+                "project-owned-metrics",
+                crate::ops::metrics::stored_project_metric_portfolio(
+                    store,
+                    &wave,
+                    project.plan.id.as_str(),
+                    time::OffsetDateTime::now_utc(),
+                )
+                .await,
+            );
             Ok(WorkBinding {
                 work: WorkRef::Project(project.id.clone()),
                 wave_id: project.wave_id,
                 wave_name: wave.name().to_string(),
                 cwd: PathBuf::from(wave.repo()),
                 context: format!(
-                    "Project {}: {}\n\n{}",
-                    project.plan.slug, project.plan.name, project.plan.prompt_context,
+                    "Project {}: {}\n\n{}\n\n{}\n\nOnly metrics owned by this Project appear above. Cross-owned evidence appears only when the Wave routes it through durable direction. Metrics inform KR judgment; they never check a KR automatically.",
+                    project.plan.slug,
+                    project.plan.name,
+                    project.plan.prompt_context,
+                    metric_context,
                 ),
             })
         }
@@ -244,12 +257,25 @@ pub async fn resolve_work_binding(
                 store.get_wave_at(&locator).await.map_err(run_error)?
             }
             .ok_or_else(|| run_error(format!("Wave {value:?} is not registered")))?;
+            let metric_context = crate::ops::metrics::metric_prompt_section(
+                "metric-portfolio",
+                crate::ops::metrics::stored_wave_metric_portfolio(
+                    store,
+                    &wave,
+                    time::OffsetDateTime::now_utc(),
+                )
+                .await,
+            );
             Ok(WorkBinding {
                 work: WorkRef::Wave(wave.id().clone()),
                 wave_id: wave.id().clone(),
                 wave_name: wave.name().to_string(),
                 cwd: PathBuf::from(wave.repo()),
-                context: format!("Wave {}", wave.name()),
+                context: format!(
+                    "Wave {}\n\n{}\n\nAnswer the executive loop from the objective, Project portfolio, Work state, and evidence:\n1. What is most important?\n2. What signals are arriving?\n3. What works?\n4. What does not?\n5. What is the current strategy?\n6. How should strategy adjust?\n\nMetrics are evidence, never automatic KR completion or a composite Wave score.",
+                    wave.name(),
+                    metric_context,
+                ),
             })
         }
         _ => Err(run_error(format!(
@@ -379,8 +405,9 @@ mod tests {
 
     use super::*;
     use crate::planning::{LinearProjectId, ProjectPlan};
+    use crate::pm::{PmKr, PmProject, PmSnapshot, ProjectFlowPlan};
     use crate::project::Project;
-    use crate::store::{open_store, StorageConfig};
+    use crate::store::{open_store, PmSnapshotRow, StorageConfig};
     use crate::wave::Wave;
 
     async fn test_store() -> (tempfile::TempDir, SharedStore) {
@@ -448,6 +475,67 @@ mod tests {
             .expect_err("ambiguous slug must not infer identity");
 
         assert!(error.to_string().contains("ambiguous"));
+    }
+
+    #[tokio::test]
+    async fn direct_wave_and_project_bindings_carry_the_shared_metric_context() {
+        let (directory, store) = test_store().await;
+        let repo = directory.path().join("repo");
+        std::fs::create_dir_all(repo.join("wave/runtime")).unwrap();
+        let wave = Wave::new(
+            WaveId::new(),
+            "runtime".to_string(),
+            repo.display().to_string(),
+        );
+        store.create_wave(&wave).await.unwrap();
+        store
+            .create_project(&project(&wave, "loopflow-api", "project-api"))
+            .await
+            .unwrap();
+        let snapshot = PmSnapshot {
+            projects: vec![PmProject {
+                id: "project-api".to_string(),
+                slug: "loopflow-api".to_string(),
+                name: "Loopflow API".to_string(),
+                summary: String::new(),
+                definition: "Keep one product model.".to_string(),
+                flows: Some(ProjectFlowPlan::empty()),
+                krs: vec![PmKr {
+                    text: "One model everywhere".to_string(),
+                    holds: false,
+                }],
+                initiative_ids: vec!["initiative-1".to_string()],
+                team_ids: vec!["team-1".to_string()],
+            }],
+            items: Vec::new(),
+        };
+        store
+            .put_pm_snapshot(PmSnapshotRow {
+                wave_id: wave.id().clone(),
+                provider: "linear".to_string(),
+                initiative: "initiative-1".to_string(),
+                synced_at: OffsetDateTime::now_utc().unix_timestamp(),
+                payload: serde_json::to_string(&snapshot).unwrap(),
+            })
+            .await
+            .unwrap();
+
+        let project_binding = resolve_work_binding(&store, &repo, "project:project-api")
+            .await
+            .unwrap();
+        assert!(project_binding
+            .context
+            .contains("<lf:project-owned-metrics>"));
+        assert!(project_binding.context.contains("\"metrics\":[]"));
+        assert!(!project_binding.context.contains("<lf:metric-portfolio>"));
+
+        let wave_binding =
+            resolve_work_binding(&store, &repo, &format!("wave:{}", wave.id().as_str()))
+                .await
+                .unwrap();
+        assert!(wave_binding.context.contains("<lf:metric-portfolio>"));
+        assert!(wave_binding.context.contains("What signals are arriving?"));
+        assert!(!wave_binding.context.contains("<lf:project-owned-metrics>"));
     }
 
     #[tokio::test]

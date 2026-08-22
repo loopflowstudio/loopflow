@@ -114,7 +114,8 @@ struct WorkAttentionTests {
           "projects": {"state":"ok","truncated":false,"items":[
             {"project":{"id":"p","slug":"api","name":"API","summary":"s","definition":"d","flows":{"first":null,"loop":null,"finally":null},"krs":[]},"runtime":null,"next_move":{"owner":"project","reason":"r"},"section":"now","tasks":[\(tasks)]}
           ]},
-          "unavailable_projects": []
+          "unavailable_projects": [],
+          "metric_portfolio":{"metrics":[],"contract_issues":[]}
         }
         """
         return try JSONDecoder().decode(WaveRoadmap.self, from: Data(json.utf8))

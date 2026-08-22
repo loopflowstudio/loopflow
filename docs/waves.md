@@ -5,12 +5,13 @@ coordinate; it remembers what it learns, works the next blocker, spins off
 durable Tasks when parallelism earns it, and stays steerable the whole
 time.
 
-Two files author a wave, both living in your repo and reviewed like code:
+Three reviewed surfaces author a wave:
 
-| File | Holds |
+| Path | Holds |
 |------|-------|
 | **`wave/<name>/GOAL.md`** | The wave's intent and loop prompt — what it's for, how it judges progress |
 | **`wave/<name>/MEMORY.md`** | What the wave remembers between loops — curated through reviewed file edits |
+| **`wave/<name>/metrics/*.md`** | Project-owned live metric contracts — meaning, target, window, and freshness |
 
 Waves live in **Loopflow** (macOS): open the repository, select the wave, and
 start it beside its conversation and work map. The same controls exist from
@@ -70,11 +71,6 @@ memory, pick the next useful move, resolve its local blocker, spin off
 independent work only when parallelism earns it, and fold what shipped into
 memory.
 
-## Measures
-
-- **Quality**: fresh-store tests cover every live persistence path.
-- **Done means**: a landed PR of real product code, Linear task closed and PR-linked.
-
 ## Process
 
 Make mechanical changes directly; write a scratch design first when the blast
@@ -110,6 +106,49 @@ lf wave s3            # the s3 (control) charter
 
 Writing a goal well — the weight of each section, frontmatter fields, KR
 craft — is covered in [Authoring → Goals](authoring.md#goals).
+
+### Live metrics
+
+```markdown
+---
+schema: 1
+id: task-loop-trust
+project_id: d19956b2-9955-437d-aea6-d91766231c77
+stage: installed
+instrument: lifecycle-scorecard
+unit: ratio
+target:
+  at_least: 1
+window: 7d
+freshness: 30h
+---
+
+# Task loops earn trust
+
+Fraction of Task epochs settled during the trailing seven days that either
+completed with every PR landed through Loopflow auto-merge or stopped with a
+non-resumable failure receipt. Open epochs are excluded. A user-landed PR or
+manual Git repair inside the Task epoch fails the metric.
+```
+
+Save this as `wave/<name>/metrics/task-loop-trust.md`. The filename and `id`
+must match; `project_id` is the stable Project id from `lf pm show --json`.
+Contracts define no command, query, schedule, secret, or KR copy. Product code
+registered as the named instrument pushes pre-aggregated, revision-bound
+observations into the local store.
+
+```bash
+lf status <wave>            # owner, value, target, window, freshness, reason
+lf status <wave> --json     # the shared metric_portfolio DTO
+lf roadmap --json           # the same DTO on every Wave row
+```
+
+`installed` metrics appear under Instrumenting. Promote a contract to
+`graduated` only after the current revision has produced a complete observation
+for the exact window. Graduation certifies collection, not success: a Missed
+metric can graduate. Later silence becomes Unknown, a current failed source
+read becomes Unavailable, and stale evidence never remains green. Metrics
+inform Project KR judgment but never check a KR automatically.
 
 ### Discord chat
 
@@ -434,10 +473,10 @@ To remove a wave, stop it, then delete `wave/<name>/`.
 ## Worked example
 
 A `wave/billing/` directory for a billing rewrite. `GOAL.md` sets the intent —
-"replace the legacy billing system with a metered usage model" — and the
-measures the loop re-judges each iteration: usage events recorded within 5
-seconds, invoices correct for all plan types, legacy endpoints unchanged
-during migration.
+"replace the legacy billing system with a metered usage model." Linear Projects
+hold the proof claims. Reviewed contracts under `wave/billing/metrics/` define
+live evidence such as usage-event latency and invoice correctness; the Wave
+re-judges strategy from their current readings each iteration.
 
 The backing Linear project holds the concrete Tasks:
 

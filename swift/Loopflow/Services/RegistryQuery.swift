@@ -38,7 +38,7 @@ public struct RegistryQuery: Sendable {
     /// Every wave the registry knows across the machine. Callers that need
     /// several repo slices should call this once and filter locally.
     public func allWaves() async throws -> [Wave] {
-        let stdout = try await run(["ls", "--json"], nil)
+        let stdout = try await run(["ls", "--all", "--json"], nil)
         let snapshots = try Self.decode([WaveSnapshot].self, from: stdout)
         return snapshots.map { $0.toWave() }
     }
@@ -103,6 +103,8 @@ public struct RegistryQuery: Sendable {
         var args = ["roadmap"]
         if let wave {
             args.append(contentsOf: ["--wave", wave])
+        } else {
+            args.append("--all")
         }
         args.append("--json")
         let stdout = try await run(args, nil)
@@ -554,11 +556,13 @@ public struct RoadmapSnapshot: Decodable, Sendable, Hashable {
 
 public struct WaveRoadmap: Decodable, Sendable, Hashable {
     public let wave: WaveSnapshot
+    public let metricPortfolio: MetricPortfolio
     public let projects: WorkEvidence<RoadmapProject>
     public let unavailableProjects: [UnavailableProjectEvidence]
 
     enum CodingKeys: String, CodingKey {
         case wave, projects
+        case metricPortfolio = "metric_portfolio"
         case unavailableProjects = "unavailable_projects"
     }
 }
@@ -610,6 +614,7 @@ public struct WaveDetailSnapshot: Decodable, Sendable {
     public let wave: WaveSnapshot
     public let loopState: String?
     public let projects: [WaveProjectWork]
+    public let metricPortfolio: MetricPortfolio
     public let unavailableProjects: [UnavailableProjectEvidence]
     public let runs: WorkEvidence<SkillRunEntry>
     public let attention: WorkEvidence<WaveAttentionItem>
@@ -622,6 +627,7 @@ public struct WaveDetailSnapshot: Decodable, Sendable {
 
     enum CodingKeys: String, CodingKey {
         case wave, projects, runs, attention
+        case metricPortfolio = "metric_portfolio"
         case homeRuntime = "home_runtime"
         case loopState = "loop_state"
         case unavailableProjects = "unavailable_projects"

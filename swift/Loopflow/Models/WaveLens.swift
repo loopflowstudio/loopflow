@@ -72,10 +72,23 @@ public struct WaveLens: Sendable, Hashable {
         tasks: [WaveTaskWork]
     ) -> WaveLens {
         let folded = fold(tasks.map(\.attention))
-        if let runtime, runtime.processAlive, runtime.status.isRunning {
-            // A live body is advancing — unless a Task is calling for attention.
-            if let folded, folded.color == .red || folded.color == .blue { return folded }
-            return WaveLens(color: .green, reason: runtime.reason)
+        if let runtime {
+            let own: WaveLens? = switch runtime.current.state {
+            case .working:
+                WaveLens(color: .green, reason: runtime.current.reason)
+            case .stalled, .stopped:
+                WaveLens(color: .red, reason: runtime.current.reason)
+            case .unobservable:
+                WaveLens(color: .unknown, reason: runtime.current.reason)
+            case .waiting where runtime.current.owner == .user:
+                WaveLens(color: .blue, reason: runtime.current.reason)
+            case .ready, .waiting, .done, .abandoned:
+                nil
+            }
+            if let own {
+                if let folded, folded.color == .red || folded.color == .blue { return folded }
+                return own
+            }
         }
         if let folded { return folded }
         return WaveLens(color: .black, reason: "Off · no active work")
@@ -88,7 +101,8 @@ public struct WaveLens: Sendable, Hashable {
     /// no such reading; see `WaveViewModel.lens`, which shows it as unknown rather
     /// than guessing from a local session probe.
     ///
-    /// - green: the Wave listener answered its health probe.
+    /// - green: canonical Work is advancing and the Wave listener answered, or
+    ///   the listener answered while Work claims no current body.
     /// - blue: authored policy pauses new turns; listener evidence stays in the reason.
     /// - red: enabled and observed liveness have not converged.
     /// - black: disabled and no listener remains.
@@ -96,7 +110,7 @@ public struct WaveLens: Sendable, Hashable {
         live: Bool,
         paused: Bool = false,
         enabled: Bool = true,
-        status: WorkStatus,
+        current: CurrentWorkObservation? = nil,
         activeTasks: Int,
         activeProjects: Int
     ) -> WaveLens {
@@ -113,11 +127,26 @@ public struct WaveLens: Sendable, Hashable {
                     : "Paused · listener is stopped"
             )
         }
+        if let current {
+            switch current.state {
+            case .working where live:
+                return WaveLens(color: .green, reason: current.reason)
+            case .working, .stalled:
+                return WaveLens(color: .red, reason: current.reason)
+            case .stopped:
+                let listener = live ? " · Wave listener still answered" : ""
+                return WaveLens(color: .red, reason: current.reason + listener)
+            case .unobservable:
+                let listener = live ? " · Wave listener answered" : ""
+                return WaveLens(color: .unknown, reason: current.reason + listener)
+            case .waiting where current.owner == .user:
+                return WaveLens(color: .blue, reason: current.reason)
+            case .ready, .waiting, .done, .abandoned:
+                break
+            }
+        }
         if live {
             return WaveLens(color: .green, reason: "Listening · Wave listener answered")
-        }
-        if status.isRunning {
-            return WaveLens(color: .red, reason: "Run active · Wave listener did not answer")
         }
         let outstanding = activeTasks + activeProjects
         if outstanding > 0 {

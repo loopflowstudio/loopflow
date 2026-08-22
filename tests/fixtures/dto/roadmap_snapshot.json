@@ -20,11 +20,33 @@
         "endpoint": "127.0.0.1:7777",
         "created_at": "2026-07-01T00:00:00Z",
         "parent_wave_id": null,
+        "retired_at": null,
+        "superseded_by_wave_id": null,
+        "retirement_reason": null,
         "home": {
           "id": "home_00000000000000000000000000000001",
           "route": "local",
           "created_at": "1970-01-01T00:00:00Z",
           "observed_at": "1970-01-01T00:00:00Z"
+        },
+        "current": {
+          "state": "working",
+          "reason": "Run is active",
+          "owner": "work",
+          "controls": [
+            "attach",
+            "steer",
+            "interrupt",
+            "stop"
+          ],
+          "progress_age_secs": 60,
+          "deadline_in_secs": 1740,
+          "step": null,
+          "liveness": {
+            "state": "present",
+            "observed_at": "1970-01-01T00:00:00Z",
+            "fresh": true
+          }
         }
       },
       "projects": {
@@ -53,25 +75,25 @@
             "runtime": {
               "work_id": "ps_11111111111111111111111111111111",
               "status": "ready",
-              "reason": "supervised Tasks are active",
+              "reason": "ready",
               "updated_at": "2026-07-14T20:00:00Z",
               "iteration": 2,
               "pending_observations": 0,
               "provider": "codex",
-              "process_alive": true,
-              "observation": {
-                "category": "needs_input",
-                "reason": "supervised Tasks are active",
-                "owner": "user",
+              "current": {
+                "state": "ready",
+                "reason": "ready",
+                "owner": "loopflow",
                 "controls": [
-                  "decide",
                   "resume",
                   "abandon"
                 ],
                 "progress_age_secs": null,
                 "deadline_in_secs": null,
-                "step": "iteration 2"
-              }
+                "step": "iteration 2",
+                "liveness": null
+              },
+              "last_failure": null
             },
             "next_move": {
               "owner": "project",
@@ -105,13 +127,12 @@
                       "run_id": "run_00000000000000000000000000000005"
                     }
                   },
-                  "reason": "Task flow iteration 1, step 2/3: task/pursue",
+                  "reason": "Run run_00000000000000000000000000000005 is active",
                   "updated_at": "2026-07-14T23:44:00Z",
                   "provider": "claude",
-                  "process_alive": true,
-                  "observation": {
-                    "category": "working",
-                    "reason": "Task flow iteration 1, step 2/3: task/pursue",
+                  "current": {
+                    "state": "working",
+                    "reason": "Run run_00000000000000000000000000000005 is active",
                     "owner": "work",
                     "controls": [
                       "attach",
@@ -121,8 +142,14 @@
                     ],
                     "progress_age_secs": 60,
                     "deadline_in_secs": 1740,
-                    "step": "iterate"
-                  }
+                    "step": "iterate",
+                    "liveness": {
+                      "state": "present",
+                      "observed_at": "2026-07-14T23:44:00Z",
+                      "fresh": true
+                    }
+                  },
+                  "routing_project_id": "ps_11111111111111111111111111111111"
                 },
                 "next_move": {
                   "owner": "task",
@@ -184,23 +211,23 @@
                   "work_id": "ts_review00000000000000000000000000",
                   "project_id": "ps_11111111111111111111111111111111",
                   "status": "ready",
-                  "reason": "User merge requested",
+                  "reason": "ready",
                   "updated_at": "2026-07-14T22:00:00Z",
                   "provider": "claude",
-                  "process_alive": false,
-                  "observation": {
-                    "category": "needs_input",
-                    "reason": "User merge requested",
-                    "owner": "user",
+                  "current": {
+                    "state": "ready",
+                    "reason": "ready",
+                    "owner": "loopflow",
                     "controls": [
-                      "decide",
                       "resume",
                       "abandon"
                     ],
                     "progress_age_secs": null,
                     "deadline_in_secs": null,
-                    "step": "iterate"
-                  }
+                    "step": "iterate",
+                    "liveness": null
+                  },
+                  "routing_project_id": "ps_11111111111111111111111111111111"
                 },
                 "next_move": {
                   "owner": "user",
@@ -336,19 +363,20 @@
                   "work_id": "ts_later000000000000000000000000000",
                   "project_id": "ps_11111111111111111111111111111111",
                   "status": "done",
-                  "reason": "Research delivered in merged PR",
+                  "reason": "done",
                   "updated_at": "2026-07-14T21:00:00Z",
                   "provider": "claude",
-                  "process_alive": false,
-                  "observation": {
-                    "category": "terminal",
-                    "reason": "Research delivered in merged PR",
+                  "current": {
+                    "state": "done",
+                    "reason": "done",
                     "owner": "nobody",
                     "controls": [],
                     "progress_age_secs": null,
                     "deadline_in_secs": null,
-                    "step": "iterate"
-                  }
+                    "step": "iterate",
+                    "liveness": null
+                  },
+                  "routing_project_id": "ps_11111111111111111111111111111111"
                 },
                 "next_move": {
                   "owner": "project",
@@ -394,6 +422,16 @@
           "project_id": "f56c583c-c360-4dc4-ba12-4b5a02268623",
           "project_slug": "technical-architecture",
           "status": "abandoned",
+          "current": {
+            "state": "abandoned",
+            "reason": "abandoned",
+            "owner": "nobody",
+            "controls": [],
+            "progress_age_secs": null,
+            "deadline_in_secs": null,
+            "step": "iteration 2",
+            "liveness": null
+          },
           "owner": "wave",
           "reason": "Project is absent from the current PM snapshot",
           "recovery": "Settle the listed Tasks; Project Work is already abandoned",
@@ -403,6 +441,16 @@
               "task_id": "linear-task-w2-127",
               "task_identifier": "W2-127",
               "status": "ready",
+              "current": {
+                "state": "ready",
+                "reason": "ready",
+                "owner": "loopflow",
+                "controls": ["resume", "abandon"],
+                "progress_age_secs": null,
+                "deadline_in_secs": null,
+                "step": "loop",
+                "liveness": null
+              },
               "owner": "wave",
               "reason": "Task's owning Project is absent from the current PM snapshot",
               "recovery": "lf work abandon task task_40fbeeaadfbca5367aa7391432ae84ff --reason \"Project is absent from the current PM snapshot\""
@@ -426,11 +474,27 @@
         "endpoint": null,
         "created_at": null,
         "parent_wave_id": null,
+        "retired_at": null,
+        "superseded_by_wave_id": null,
+        "retirement_reason": null,
         "home": {
           "id": "home_00000000000000000000000000000002",
           "route": "ssh://jack@mini-heart",
           "created_at": "1970-01-01T00:00:00Z",
           "observed_at": "1970-01-01T00:00:00Z"
+        },
+        "current": {
+          "state": "ready",
+          "reason": "ready",
+          "owner": "loopflow",
+          "controls": [
+            "resume",
+            "abandon"
+          ],
+          "progress_age_secs": null,
+          "deadline_in_secs": null,
+          "step": null,
+          "liveness": null
         }
       },
       "projects": {

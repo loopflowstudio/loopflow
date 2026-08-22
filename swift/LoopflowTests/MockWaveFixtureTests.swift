@@ -41,6 +41,7 @@ struct MockWaveFixtureTests {
         let project = try #require(workMap.projects.first)
         #expect(project.project.krs.count == 1)
         #expect(project.tasks.filter { !$0.task.completed }.count == 2)
+        #expect(project.runtime?.lastFailure?.message.contains("credential") == true)
 
         // Project row lens folds its Tasks' attention (runtime not running):
         // the red Task outranks the black one.

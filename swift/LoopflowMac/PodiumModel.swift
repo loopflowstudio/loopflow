@@ -62,6 +62,7 @@ final class PodiumModel {
 
     private let query: RegistryQuery
     private var usesFixedFixture = false
+    private var askAttentionGeneration = 0
     private var processActivityRefreshInFlight = false
     private var workActivityGeneration = 0
 
@@ -108,8 +109,10 @@ final class PodiumModel {
         let registered = visibleWaves.filter(\.isRegistered).map(\.api)
         return WaveSummary(
             waves: visibleWaves.count,
-            activeRuns: registered.count { $0.status.isRunning },
-            unservedRuns: registered.count { $0.status.isRunning && !$0.live }
+            activeRuns: registered.count { $0.current?.state.hasPresentProcess == true },
+            unservedRuns: registered.count {
+                $0.current?.state.hasPresentProcess == true && !$0.live
+            }
         )
     }
 
@@ -142,6 +145,8 @@ final class PodiumModel {
         let previousWaves = waves.value
         let previousProcessActivity = processActivity.value
         let previousUserAskAttention = userAskAttention.value
+        let userAskAttentionGeneration = askAttentionGeneration
+        let userAskAttentionRepoPath = repoPath
         if previousRoadmap == nil { roadmap = .loading }
         if previousWaves == nil { waves = .loading }
         if previousProcessActivity == nil { processActivity = .loading }
@@ -149,7 +154,9 @@ final class PodiumModel {
 
         async let roadmapResult = readRoadmap()
         async let wavesResult = readWaves()
-        async let userAskAttentionResult = readUserAskAttention()
+        async let userAskAttentionResult = readUserAskAttention(
+            repoPath: userAskAttentionRepoPath
+        )
         if !processActivityRefreshInFlight {
             processActivityRefreshInFlight = true
             processActivity = reading(
@@ -160,10 +167,13 @@ final class PodiumModel {
         }
         roadmap = reading(from: await roadmapResult, lastGood: previousRoadmap)
         waves = reading(from: await wavesResult, lastGood: previousWaves)
-        userAskAttention = reading(
-            from: await userAskAttentionResult,
-            lastGood: previousUserAskAttention
-        )
+        let nextUserAskAttention = await userAskAttentionResult
+        if askAttentionGeneration == userAskAttentionGeneration {
+            userAskAttention = reading(
+                from: nextUserAskAttention,
+                lastGood: previousUserAskAttention
+            )
+        }
         selectRequestedWaveIfNeeded()
         clearSelectionIfOutsideScope()
         await refreshWorkActivity()
@@ -201,6 +211,10 @@ final class PodiumModel {
     }
 
     func setRepoPath(_ path: String?) {
+        if repoPath?.normalizedFilePath != path?.normalizedFilePath {
+            askAttentionGeneration &+= 1
+            userAskAttention = .loading
+        }
         repoPath = path
         clearSelectionIfOutsideScope()
     }
@@ -258,10 +272,12 @@ final class PodiumModel {
 
     func refreshUserAskAttention() async {
         guard !usesFixedFixture else { return }
-        userAskAttention = reading(
-            from: await readUserAskAttention(),
-            lastGood: userAskAttention.value
-        )
+        let generation = askAttentionGeneration
+        let repoPath = repoPath
+        let previous = userAskAttention.value
+        let result = await readUserAskAttention(repoPath: repoPath)
+        guard askAttentionGeneration == generation else { return }
+        userAskAttention = reading(from: result, lastGood: previous)
     }
 
     func wave(id: String) -> WaveRoadmap? {
@@ -450,9 +466,12 @@ final class PodiumModel {
         }
     }
 
-    private func readUserAskAttention() async -> Result<[AskAttentionRecord], Error> {
+    private func readUserAskAttention(
+        repoPath: String?
+    ) async -> Result<[AskAttentionRecord], Error> {
+        guard let repoPath else { return .success([]) }
         do {
-            return .success(try await query.userAskAttention())
+            return .success(try await query.userAskAttention(cwd: repoPath))
         } catch {
             return .failure(error)
         }

@@ -361,6 +361,17 @@ where
                     config.wave.id()
                 )
             })?;
+        if current.is_retired() {
+            let successor = current
+                .superseded_by_wave_id()
+                .map(ToString::to_string)
+                .unwrap_or_else(|| "unknown Wave".to_string());
+            return Err(anyhow!(
+                "Wave {} was retired and superseded by {}; refusing listener start",
+                current.id(),
+                successor
+            ));
+        }
         let locator = WaveLocator::discover(&repo_root, &wave)?;
         if current.repo() != locator.repo().to_string() || current.name() != locator.slug() {
             return Err(anyhow!(

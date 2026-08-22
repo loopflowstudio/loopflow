@@ -7,8 +7,23 @@
 ./dev xcode        # regenerate and open the Xcode project
 ```
 
-Loopflow opens on The Podium: a closable Wave hierarchy on the left, machine-wide
-Now/Roadmap Work in the center, and durable Activity on the right. Selecting a
+```text
+⌘D          split right
+⌘⇧D         split down
+⌘⌥←/→/↑/↓   focus the visual neighbor
+⌘⇧Return    zoom the focused pane
+⌘W / ⌘Z     close / restore a pane
+```
+
+Opening Loopflow to a repository leads with its Sessions queue. Select a request
+to attach its exact Ask Invocation in the focused Ghostty pane; selecting it
+again jumps back to that pane. Each pane owns one native libghostty surface.
+Use **New shell** for a bare terminal and **Waves & roadmap** to return to Work.
+The queue, session preparation, and every `lf ask` mutation run in the opened
+repository rather than a machine-wide aggregate.
+
+The Podium keeps a closable Wave hierarchy above the Sessions and Work surfaces.
+Its Work surface shows machine-wide Now/Roadmap Work beside durable Activity. Selecting a
 Wave, Project, or Task preserves the live view and scopes `lf activity --json`
 at the source. Disclose each branch from Wave → Project → Task → live Exec. Every
 level uses the same output meter and the existing `WorkReference`; Exec remains
@@ -21,9 +36,8 @@ vertical signal meter shows normalized output over five seconds, with the
 counter. The lamp stays independent from output: black is off, green
 is producing, blue is blocked, and amber is waiting or unknown. Wave count,
 active Runs, and Run-without-listener warnings come from `lf ls --json`.
-Its User-attention badge reads `lf ask list --user --json`; selecting a request
-claims or recovers the same Ask session used by the CLI, then attaches its exact
-Invocation in embedded Ghostty or an attach-capable external target.
+Its User-attention badge reads repo-scoped `lf ask list --user --json` and returns
+to Sessions.
 Repository scope filters the Work and Wave snapshots locally; live process
 evidence remains machine-wide.
 Each provider node retains its existing repository and Work attribution, so the
@@ -99,6 +113,9 @@ and observation spans.
 ## Code map
 
 - `LoopflowMac/Views/PodiumView.swift` — primary Wave scope, Work, and live TOK/s signal
+- `LoopflowMac/Views/SessionsView.swift` — scoped Ask queue and native split multiplexer
+- `Loopflow/Models/MultiplexerLayout.swift` — immutable pane split tree
+- `Loopflow/Models/MultiplexerStore.swift` — reference-owned layout, focus, color, and undo
 - `LoopflowMac/Views/WorkActivityView.swift` — filtered durable Activity and proof links
 - `LoopflowMac/PodiumModel.swift` — shared readings, stable selection, and local scope
 - `LoopflowMac/Views/WavesView.swift` — previous Wave workspace during migration

@@ -43,9 +43,19 @@ async fn load_wave_async(repo: &Path, wave: &str, refresh: PmRefresh) -> OpsResu
 }
 
 pub fn resolve_task(repo: &Path, issue: &str, refresh: PmRefresh) -> OpsResult<ResolvedTask> {
+    let runtime = tokio::runtime::Runtime::new()
+        .map_err(|error| OpsError::Message(format!("failed to create async runtime: {error}")))?;
+    runtime.block_on(resolve_task_async(repo, issue, refresh))
+}
+
+pub(crate) async fn resolve_task_async(
+    repo: &Path,
+    issue: &str,
+    refresh: PmRefresh,
+) -> OpsResult<ResolvedTask> {
     let team_id = crate::ops::pm::repository_team_id(repo)?;
     let mut matches = Vec::new();
-    for snapshot in repository_snapshots(repo, &team_id)? {
+    for snapshot in repository_snapshots_async(repo, &team_id).await? {
         if let Some(item) = snapshot
             .items
             .iter()
@@ -67,7 +77,7 @@ pub fn resolve_task(repo: &Path, issue: &str, refresh: PmRefresh) -> OpsResult<R
             )))
         }
     };
-    let snapshot = load_wave(repo, &wave, refresh)?;
+    let snapshot = load_wave_async(repo, &wave, refresh).await?;
     let item = snapshot
         .items
         .iter()
@@ -158,6 +168,29 @@ fn repository_snapshots(repo: &Path, team_id: &str) -> OpsResult<Vec<PmShowResul
     let mut ownership = PmPortfolioValidator::default();
     for wave in crate::ops::pm::list_pm_waves(repo)? {
         let snapshot = match load_wave(repo, &wave, PmRefresh::Never) {
+            Ok(snapshot) => snapshot,
+            Err(error) if error.to_string().contains("has no local PM snapshot") => continue,
+            Err(error) => return Err(error),
+        };
+        ownership
+            .validate(
+                &snapshot.wave,
+                &snapshot.initiative,
+                Some(team_id),
+                &snapshot.projects,
+                &snapshot.items,
+            )
+            .map_err(|error| OpsError::Message(error.to_string()))?;
+        snapshots.push(snapshot);
+    }
+    Ok(snapshots)
+}
+
+async fn repository_snapshots_async(repo: &Path, team_id: &str) -> OpsResult<Vec<PmShowResult>> {
+    let mut snapshots = Vec::new();
+    let mut ownership = PmPortfolioValidator::default();
+    for wave in crate::ops::pm::list_pm_waves(repo)? {
+        let snapshot = match load_wave_async(repo, &wave, PmRefresh::Never).await {
             Ok(snapshot) => snapshot,
             Err(error) if error.to_string().contains("has no local PM snapshot") => continue,
             Err(error) => return Err(error),

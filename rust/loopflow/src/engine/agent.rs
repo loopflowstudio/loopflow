@@ -1374,31 +1374,33 @@ fn _begin_implicit_capture(
         .cwd
         .as_deref()
         .and_then(|cwd| {
-            crate::journal::trace_capture_context(cwd, None, None).map(|context| {
-                let system_prompt = process
-                    .context_file
-                    .as_deref()
-                    .and_then(|path| fs::read_to_string(path).ok())
-                    .unwrap_or_else(|| system_prompt_with_structured_replies(launch));
-                crate::trace::CaptureHandle::begin(
-                    context,
-                    crate::trace::PreparedTurnContext::from_prompts(
-                        &system_prompt,
-                        &launch.task_prompt,
-                    ),
-                    crate::trace::CaptureStart {
-                        provider: harness.to_string(),
-                        model,
-                        surface: if process.auto { "headless" } else { "tui" }.to_string(),
-                        input_op: "initial".to_string(),
-                        gather_ms: 0,
-                        render_ms: 0,
-                        raw_provider: process.auto,
-                        basis: None,
-                        supervision: None,
-                    },
-                )
-            })
+            crate::journal::trace_capture_context(cwd, None, None)
+                .ok()
+                .map(|context| {
+                    let system_prompt = process
+                        .context_file
+                        .as_deref()
+                        .and_then(|path| fs::read_to_string(path).ok())
+                        .unwrap_or_else(|| system_prompt_with_structured_replies(launch));
+                    crate::trace::CaptureHandle::begin(
+                        context,
+                        crate::trace::PreparedTurnContext::from_prompts(
+                            &system_prompt,
+                            &launch.task_prompt,
+                        ),
+                        crate::trace::CaptureStart {
+                            provider: harness.to_string(),
+                            model,
+                            surface: if process.auto { "headless" } else { "tui" }.to_string(),
+                            input_op: "initial".to_string(),
+                            gather_ms: 0,
+                            render_ms: 0,
+                            raw_provider: process.auto,
+                            basis: None,
+                            supervision: None,
+                        },
+                    )
+                })
         })
         .transpose()
         .map_err(|error| {

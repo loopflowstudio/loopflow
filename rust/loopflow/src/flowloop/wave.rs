@@ -879,7 +879,7 @@ impl WaveLoop {
             Some(step.flow.clone()),
             Some(step.step.clone()),
         ) {
-            Some(context) => match crate::trace::CaptureHandle::begin(
+            Ok(context) => match crate::trace::CaptureHandle::begin(
                 context,
                 prepared.context.clone(),
                 crate::trace::CaptureStart {
@@ -906,8 +906,8 @@ impl WaveLoop {
                     return;
                 }
             },
-            None if cfg!(test) => None,
-            None => {
+            Err(_) if cfg!(test) => None,
+            Err(_) => {
                 let body_id = body.body_id.clone();
                 self.open_body(body, answers).await;
                 self.finish_failed_pass(&body_id, "trace capture identity is unavailable")

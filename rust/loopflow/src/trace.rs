@@ -830,9 +830,13 @@ impl CaptureHandle {
         basis: Option<crate::durable::Basis>,
     ) -> StoreResult<()> {
         let mut capture = self.0.lock().expect("trace capture mutex poisoned");
-        if let Some(message) = &capture.failed {
+        if let Some(message) = capture.failed.clone() {
+            let finalization = capture.finish("failed", false).err();
+            let finalization = finalization
+                .map(|error| format!("; partial finalization also failed: {error}"))
+                .unwrap_or_default();
             return Err(StoreError::InvalidData(format!(
-                "trace capture is already partial: {message}"
+                "trace capture is already partial: {message}{finalization}"
             )));
         }
         let result = capture.begin_turn(

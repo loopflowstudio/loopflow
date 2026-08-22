@@ -9,22 +9,59 @@ use std::process::Command;
 use loopflow::chat::types::TurnUsage;
 use loopflow::child::ChildRef;
 use loopflow::durable::{
-    Containment, ContainmentObservation, RunAdvance, RunTrigger, StopCause, WorkRef,
+    AdvanceReceipt, BoundaryState, Containment, ContainmentObservation, InvocationRoute,
+    RunAdvance, RunTrigger, StopCause, WorkRef,
 };
 use loopflow::id::WaveId;
 use loopflow::planning::{LinearIssueId, LinearProjectId, ProjectPlan, TaskPlan};
-use loopflow::project::{Project, ProjectId};
+use loopflow::project::{Project, ProjectEventKind, ProjectId};
 use loopflow::store::sqlite::SqliteStore;
 use loopflow::store::{PmSnapshotRow, RunEventRow, TurnUsageSample};
 use loopflow::task::{
-    Observation, PmWritebackState, Task, TaskId, TaskLifecyclePhase, TaskLifecyclePlan, TaskPr,
-    TaskPrId,
+    Observation, PmWritebackState, PrMergeMode, Task, TaskId, TaskLifecyclePhase,
+    TaskLifecyclePlan, TaskPr, TaskPrId,
 };
 use loopflow::trace::{AgentInvocationRow, AgentTurnRow, SupervisedInvocation};
 use loopflow::wave::Wave;
 use time::OffsetDateTime;
 
-const INVOCATION_ID: &str = "invocation_00000000000000000000000000000001";
+const LEGACY_INVOCATION_ID: &str = "invocation_74115449";
+const INVOCATION_ID: &str = "invocation_74115449000000000000000000000000";
+const PREVIOUS_RELEASE_TASK_PR_FIXTURE: &str = include_str!("fixtures/store_0_12_8_task_pr.sql");
+const PERSISTED_TASK_ID: &str = "task_40fbeeaadfbca5367aa7391432ae84ff";
+
+fn apply_status_truth(database: &Path) {
+    let connection = rusqlite::Connection::open(database).expect("open status database");
+    let has_retirement = connection
+        .prepare("PRAGMA table_info(waves)")
+        .expect("inspect Wave schema")
+        .query_map([], |row| row.get::<_, String>(1))
+        .expect("read Wave columns")
+        .any(|column| column.is_ok_and(|column| column == "retired_at"));
+    if has_retirement {
+        return;
+    }
+    connection
+        .pragma_update(None, "foreign_keys", "OFF")
+        .expect("disable foreign keys for migration table rebuilds");
+    connection
+        .execute_batch(&loopflow_test_support::migration_sql_for_test(
+            Path::new(env!("CARGO_MANIFEST_DIR")),
+            "status_truth",
+        ))
+        .expect("apply status truth migration");
+    let violations = connection
+        .prepare("PRAGMA foreign_key_check")
+        .expect("prepare foreign key check")
+        .query_map([], |_| Ok(()))
+        .expect("check migrated foreign keys")
+        .collect::<Result<Vec<_>, _>>()
+        .expect("read foreign key violations");
+    assert!(
+        violations.is_empty(),
+        "status truth migration broke foreign keys"
+    );
+}
 
 /// A machine home holding one wave with lookup noise, a flow, and a skill. The
 /// registry and the ledgers are the same database.
@@ -34,6 +71,7 @@ fn seed(home: &Path, wave_name: &str) -> Wave {
     std::fs::create_dir_all(&repo).expect("repo");
     let db = home.join("loopflow.db");
     let store = SqliteStore::new(&db).expect("open store");
+    apply_status_truth(&db);
     let wave = Wave::new(
         WaveId::new(),
         wave_name.to_string(),
@@ -201,6 +239,228 @@ fn seed(home: &Path, wave_name: &str) -> Wave {
     wave
 }
 
+fn activate_runtime_generation(home: &Path, store: &SqliteStore) {
+    let home_id = store.local_home().expect("local Home").id;
+    rusqlite::Connection::open(home.join("loopflow.db"))
+        .expect("open status store")
+        .execute(
+            "INSERT INTO home_runtime_generations (
+                home_id, generation, build_version, source_revision,
+                migration_frontier, activated_at
+             ) VALUES (?1, 1, 'test', 'test', 'status_truth', ?2)",
+            rusqlite::params![home_id.as_str(), OffsetDateTime::now_utc().unix_timestamp()],
+        )
+        .expect("activate runtime generation");
+}
+
+fn test_project(wave: &Wave, slug: &str, updated_at: OffsetDateTime) -> Project {
+    Project {
+        id: ProjectId::new(),
+        plan: ProjectPlan {
+            id: LinearProjectId::new(format!("linear-{slug}")).expect("Linear Project id"),
+            slug: slug.to_string(),
+            name: slug.replace('-', " "),
+            prompt_context: "Keep status truthful.".to_string(),
+            pm_snapshot_synced_at: updated_at.unix_timestamp(),
+        },
+        wave_id: wave.id().clone(),
+        iteration: 2,
+        observation_cursor: 0,
+        last_state_fingerprint: None,
+        agent: "codex".to_string(),
+        provider: "codex".to_string(),
+        provider_session_id: None,
+        abandon_intent: None,
+        created_at: updated_at,
+        updated_at,
+    }
+}
+
+fn put_project_snapshot(home: &Path, wave: &Wave, project: &Project) {
+    let payload = serde_json::json!({
+        "projects": [{
+            "id": project.plan.id.as_str(),
+            "slug": project.plan.slug,
+            "name": project.plan.name,
+            "summary": "Keep status truthful.",
+            "definition": "Historical failures never impersonate current state.",
+            "flows": {"first": null, "loop": null, "finally": null},
+            "krs": [{"text": "Current state and history stay distinct", "holds": false}],
+            "initiative_ids": ["initiative-infrastructure"],
+            "team_ids": ["team-infrastructure"]
+        }],
+        "items": []
+    });
+    SqliteStore::new(&home.join("loopflow.db"))
+        .expect("open status store")
+        .put_pm_snapshot(&PmSnapshotRow {
+            wave_id: wave.id().clone(),
+            provider: "linear".to_string(),
+            initiative: "initiative-infrastructure".to_string(),
+            synced_at: OffsetDateTime::now_utc().unix_timestamp(),
+            payload: serde_json::to_string(&payload).expect("serialize PM snapshot"),
+        })
+        .expect("seed PM snapshot");
+}
+
+fn seed_credential_history(home: &Path) -> (Project, String) {
+    let wave = seed(home, "infrastructure");
+    let store = SqliteStore::new(&home.join("loopflow.db")).expect("open status store");
+    let now = OffsetDateTime::now_utc();
+    let project = test_project(&wave, "stability-security", now);
+    store.insert_project(&project).expect("seed Project");
+    let work = store
+        .work_for_child(&ChildRef::Project(project.id.clone()))
+        .expect("resolve Project Work");
+
+    let (_, failed_lease) = store
+        .reserve_run(&work, &RunTrigger::User)
+        .expect("reserve failed Run");
+    store
+        .advance_run(
+            &failed_lease,
+            &RunAdvance::RunStarting {
+                containment: Containment::Tmux {
+                    name: "credential-ghost".to_string(),
+                },
+                cwd: home.join("repo"),
+            },
+        )
+        .expect("start failed Run");
+    let failure = store
+        .append_project_event(
+            &project.id,
+            &ProjectEventKind::Failed {
+                error: "project runner failed: credential is missing".to_string(),
+                resumable: true,
+            },
+        )
+        .expect("record failure history");
+    let connection =
+        rusqlite::Connection::open(home.join("loopflow.db")).expect("open status store");
+    connection
+        .execute(
+            "UPDATE project_events SET run_id=?2, created_at=created_at-60 WHERE id=?1",
+            rusqlite::params![failure.id, failed_lease.run_id.as_str()],
+        )
+        .expect("attribute historical failure");
+    connection
+        .execute(
+            "UPDATE runs SET state='ended', ended_at=?2 WHERE id=?1",
+            rusqlite::params![failed_lease.run_id.as_str(), now.unix_timestamp() - 30],
+        )
+        .expect("end failed Run");
+
+    let (_, successful_lease) = store
+        .reserve_run(&work, &RunTrigger::User)
+        .expect("reserve successful Run");
+    store
+        .advance_run(
+            &successful_lease,
+            &RunAdvance::RunStarting {
+                containment: Containment::Tmux {
+                    name: "healthy-successor".to_string(),
+                },
+                cwd: home.join("repo"),
+            },
+        )
+        .expect("start successful Run");
+    let invocation = match store
+        .advance_run(
+            &successful_lease,
+            &RunAdvance::InvocationStarting {
+                route: InvocationRoute {
+                    provider: "codex".to_string(),
+                    model: Some("gpt-5".to_string()),
+                    account_id: None,
+                },
+                surface: "headless".to_string(),
+                resume_token: None,
+                answer_ask_id: None,
+            },
+        )
+        .expect("start successful Invocation")
+    {
+        AdvanceReceipt::Invocation(invocation) => invocation,
+        receipt => panic!("expected Invocation receipt, got {receipt:?}"),
+    };
+    store
+        .advance_run(
+            &successful_lease,
+            &RunAdvance::InvocationEnded {
+                invocation_id: invocation.id,
+                outcome: BoundaryState::Succeeded,
+            },
+        )
+        .expect("finish successful Invocation");
+    connection
+        .execute(
+            "UPDATE runs SET state='ended', ended_at=?2 WHERE id=?1",
+            rusqlite::params![successful_lease.run_id.as_str(), now.unix_timestamp()],
+        )
+        .expect("end successful Run");
+    put_project_snapshot(home, &wave, &project);
+    (project, failed_lease.run_id.to_string())
+}
+
+fn seed_running_project(home: &Path, observation: &str, stalled: bool) -> Project {
+    let wave = seed(home, "infrastructure");
+    let store = SqliteStore::new(&home.join("loopflow.db")).expect("open status store");
+    activate_runtime_generation(home, &store);
+    let now = OffsetDateTime::now_utc();
+    let updated_at = if stalled {
+        now - time::Duration::minutes(31)
+    } else {
+        now
+    };
+    let project = test_project(&wave, &format!("project-{observation}"), updated_at);
+    store.insert_project(&project).expect("seed Project");
+    let work = store
+        .work_for_child(&ChildRef::Project(project.id.clone()))
+        .expect("resolve Project Work");
+    let (_, lease) = store
+        .reserve_run(&work, &RunTrigger::User)
+        .expect("reserve Project Run");
+    store
+        .advance_run(
+            &lease,
+            &RunAdvance::RunStarting {
+                containment: Containment::Tmux {
+                    name: format!("project-{observation}"),
+                },
+                cwd: home.join("repo"),
+            },
+        )
+        .expect("start Project Run");
+    if stalled {
+        let event = store
+            .append_project_event(&project.id, &ProjectEventKind::Started)
+            .expect("record Project progress");
+        let connection =
+            rusqlite::Connection::open(home.join("loopflow.db")).expect("open status store");
+        connection
+            .execute(
+                "UPDATE project_events SET created_at=?2 WHERE id=?1",
+                rusqlite::params![event.id, updated_at.unix_timestamp()],
+            )
+            .expect("age Project event");
+        connection
+            .execute(
+                "UPDATE projects SET updated_at=?2 WHERE id=?1",
+                rusqlite::params![project.id.as_str(), updated_at.unix_timestamp()],
+            )
+            .expect("age Project state");
+    }
+    rusqlite::Connection::open(home.join("loopflow.db"))
+        .expect("open status store")
+        .execute(
+            "UPDATE run_liveness SET observation=?2, observed_at=?3 WHERE run_id=?1",
+            rusqlite::params![lease.run_id.as_str(), observation, now.unix_timestamp()],
+        )
+        .expect("set Run liveness");
+    project
+}
+
 /// `lf status --json` in a clean environment, optionally standing inside a wave.
 fn status_json(home: &Path, args: &[&str], ambient_wave_id: Option<&str>) -> serde_json::Value {
     let mut command = Command::new(env!("CARGO_BIN_EXE_lf"));
@@ -245,6 +505,45 @@ fn status_human(home: &Path, wave: &str) -> String {
         String::from_utf8_lossy(&output.stderr)
     );
     String::from_utf8(output.stdout).expect("status is utf8")
+}
+
+fn project_status(home: &Path, project: &str, json: bool) -> String {
+    let mut command = Command::new(env!("CARGO_BIN_EXE_lf"));
+    command
+        .args(["project", "status", project])
+        .env("LF_HOME", home)
+        .env_remove("LF_DB_PATH")
+        .env_remove("LF_CONTROL_HOME")
+        .env_remove("LF_CONTROL_DB_PATH")
+        .current_dir(home.join("repo"));
+    if json {
+        command.arg("--json");
+    }
+    let output = command.output().expect("lf project status runs");
+    assert!(
+        output.status.success(),
+        "lf project status failed: {}",
+        String::from_utf8_lossy(&output.stderr)
+    );
+    String::from_utf8(output.stdout).expect("Project status is utf8")
+}
+
+fn work_status_json(home: &Path, project_id: &str) -> serde_json::Value {
+    let output = Command::new(env!("CARGO_BIN_EXE_lf"))
+        .args(["work", "status", "project", project_id, "--json"])
+        .env("LF_HOME", home)
+        .env_remove("LF_DB_PATH")
+        .env_remove("LF_CONTROL_HOME")
+        .env_remove("LF_CONTROL_DB_PATH")
+        .current_dir(home.join("repo"))
+        .output()
+        .expect("lf work status runs");
+    assert!(
+        output.status.success(),
+        "lf work status failed: {}",
+        String::from_utf8_lossy(&output.stderr)
+    );
+    serde_json::from_slice(&output.stdout).expect("lf work status emits JSON")
 }
 
 fn roadmap_json(home: &Path, wave: &str) -> serde_json::Value {
@@ -468,6 +767,82 @@ fn seed_stale_project_work(home: &Path, abandon_stale_project: bool) {
         .expect("seed PM snapshot");
 }
 
+fn seed_persisted_merge_request_without_copy(home: &Path) {
+    seed_stale_project_work(home, true);
+    let connection =
+        rusqlite::Connection::open(home.join("loopflow.db")).expect("open seeded Task registry");
+    let now = OffsetDateTime::now_utc().unix_timestamp();
+    connection
+        .execute(
+            "UPDATE tasks SET
+                project_id=(SELECT id FROM projects WHERE project_slug='auditability'),
+                external_issue_id='task-prd-52', issue_identifier='PRD-52',
+                issue_title='Expose one fleet snapshot from Wave to raw trace'
+             WHERE id=?1",
+            [PERSISTED_TASK_ID],
+        )
+        .expect("move persisted Task into the current PM Project");
+    connection
+        .execute(
+            "UPDATE task_prs SET
+                publication_requested_at=?2,
+                after_merge='continue_task',
+                github_number=240,
+                github_url='https://github.com/loopflowstudio/loopflow/pull/240',
+                github_head_sha='head-240',
+                merge_mode='user',
+                merge_requested_at=?2,
+                merge_head_sha='head-240'
+             WHERE task_id=?1",
+            rusqlite::params![PERSISTED_TASK_ID, now],
+        )
+        .expect("seed pre-copy merge request");
+}
+
+fn seed_previous_release_task_pr(home: &Path) {
+    std::fs::create_dir_all(home.join("repo")).expect("fixture repo");
+    let fixture = PREVIOUS_RELEASE_TASK_PR_FIXTURE.replace(
+        "__LF_HOME__",
+        home.to_str().expect("fixture Home path is utf8"),
+    );
+    let database = home.join("loopflow.db");
+    let connection = rusqlite::Connection::open(&database).expect("open previous release store");
+    connection
+        .execute_batch(&fixture)
+        .expect("load previous release fixture");
+    let frontier: String = connection
+        .query_row(
+            "SELECT version FROM schema_migrations ORDER BY rowid DESC LIMIT 1",
+            [],
+            |row| row.get(0),
+        )
+        .expect("read previous release frontier");
+    assert_eq!(frontier, "0.12.8.001_release");
+    drop(connection);
+
+    let store = SqliteStore::new(&database).expect("migrate previous release store");
+    let task_id = TaskId::parse(PERSISTED_TASK_ID).expect("recorded Task id");
+    let pr = store
+        .active_task_pr(&task_id)
+        .expect("decode migrated Task PR")
+        .expect("fixture has active Task PR");
+    assert!(pr.presentation().is_none());
+    assert_eq!(
+        pr.merge_request().expect("explicit merge request").mode,
+        PrMergeMode::User
+    );
+    drop(store);
+
+    let connection = rusqlite::Connection::open(&database).expect("reopen migrated store");
+    assert_eq!(
+        loopflow::store::migrations::latest_version_sqlite(&connection)
+            .expect("current migration frontier"),
+        loopflow::store::migrations::latest_known_version()
+    );
+    drop(connection);
+    apply_status_truth(&database);
+}
+
 fn execs_json(home: &Path) -> serde_json::Value {
     let output = Command::new(env!("CARGO_BIN_EXE_lf"))
         .args(["execs", "--json"])
@@ -538,6 +913,34 @@ fn trace_json(home: &Path, exec_id: &str) -> serde_json::Value {
     serde_json::from_slice(&output.stdout).expect("lf trace emits JSON")
 }
 
+fn invocation_status_json(home: &Path, invocation_id: &str) -> serde_json::Value {
+    let output = Command::new(env!("CARGO_BIN_EXE_lf"))
+        .args(["invocation", "status", invocation_id, "--json"])
+        .env("LF_HOME", home)
+        .env_remove("LF_DB_PATH")
+        .env_remove("LF_CONTROL_HOME")
+        .env_remove("LF_CONTROL_DB_PATH")
+        .output()
+        .expect("lf invocation status runs");
+    assert!(
+        output.status.success(),
+        "lf invocation status failed: {}",
+        String::from_utf8_lossy(&output.stderr)
+    );
+    serde_json::from_slice(&output.stdout).expect("lf invocation status emits JSON")
+}
+
+#[test]
+fn legacy_invocation_id_selector_resolves_to_canonical_history() {
+    let home = tempfile::tempdir().expect("tempdir");
+    seed(home.path(), "audit-a");
+
+    let status = invocation_status_json(home.path(), LEGACY_INVOCATION_ID);
+
+    assert_eq!(status["invocation"]["id"], INVOCATION_ID);
+    assert_eq!(status["current"]["state"], "history");
+}
+
 #[test]
 fn status_reports_skill_runs_without_lookup_or_flow_processes() {
     let home = tempfile::tempdir().expect("tempdir");
@@ -569,6 +972,88 @@ fn status_reports_skill_runs_without_lookup_or_flow_processes() {
     // Nothing is waiting, and the snapshot says so — it does not omit the field.
     assert_eq!(status["attention"]["state"], "ok");
     assert_eq!(status["attention"]["items"], serde_json::json!([]));
+}
+
+#[test]
+fn status_surfaces_keep_credential_failure_in_history() {
+    let home = tempfile::tempdir().expect("tempdir");
+    let (project, failed_run_id) = seed_credential_history(home.path());
+
+    let status = status_json(home.path(), &["infrastructure"], None);
+    let runtime = &status["projects"][0]["runtime"];
+    assert_eq!(runtime["status"], "ready");
+    assert_eq!(runtime["current"]["state"], "ready");
+    assert_eq!(runtime["current"]["reason"], "ready");
+    assert_eq!(runtime["reason"], "ready");
+    assert_eq!(
+        runtime["last_failure"]["message"],
+        "project runner failed: credential is missing"
+    );
+    assert_eq!(runtime["last_failure"]["run_id"], failed_run_id);
+
+    let human = status_human(home.path(), "infrastructure");
+    let current_line = human
+        .lines()
+        .find(|line| line.contains(&project.plan.slug))
+        .expect("Project current-state line");
+    assert!(current_line.contains("ready"));
+    assert!(!current_line.contains("credential"));
+    assert!(human.contains("last failure at "));
+    assert!(human.contains("project runner failed: credential is missing"));
+}
+
+#[test]
+fn status_surfaces_defensively_render_absent_or_unobservable_active_truth() {
+    for (observation, state, reason) in [
+        (
+            "absent",
+            "stopped",
+            "the owning Home proved the Run process is gone",
+        ),
+        (
+            "unprovable",
+            "unobservable",
+            "the owning Home could not verify current Run liveness",
+        ),
+    ] {
+        let home = tempfile::tempdir().expect("tempdir");
+        let project = seed_running_project(home.path(), observation, false);
+
+        let json: serde_json::Value =
+            serde_json::from_str(&project_status(home.path(), &project.plan.slug, true))
+                .expect("lf project status emits JSON");
+        assert_eq!(json["current"]["state"], state);
+        assert_eq!(json["current"]["reason"], reason);
+        assert_eq!(json["reason"], reason);
+
+        let human = project_status(home.path(), &project.plan.slug, false);
+        assert!(human.contains(state));
+        assert!(human.contains(&format!("reason: {reason}")));
+        assert!(!human.contains(" is active"));
+    }
+}
+
+#[test]
+fn status_surfaces_generic_work_matches_project_progress() {
+    let home = tempfile::tempdir().expect("tempdir");
+    let project = seed_running_project(home.path(), "present", true);
+
+    let focused: serde_json::Value =
+        serde_json::from_str(&project_status(home.path(), &project.plan.slug, true))
+            .expect("lf project status emits JSON");
+    let generic = work_status_json(home.path(), project.id.as_str());
+
+    assert_eq!(focused["current"]["state"], "stalled");
+    assert_eq!(generic["current"]["state"], "stalled");
+    assert_eq!(focused["current"]["reason"], generic["current"]["reason"]);
+    assert_eq!(focused["current"]["step"], generic["current"]["step"]);
+    let focused_age = focused["current"]["progress_age_secs"]
+        .as_u64()
+        .expect("focused progress age");
+    let generic_age = generic["current"]["progress_age_secs"]
+        .as_u64()
+        .expect("generic progress age");
+    assert!(focused_age.abs_diff(generic_age) <= 2);
 }
 
 #[test]
@@ -693,7 +1178,9 @@ fn ambient_wave_id_resolves_the_wave_it_names() {
 fn a_wave_with_no_runs_reports_an_empty_reading_not_a_missing_one() {
     let home = tempfile::tempdir().expect("tempdir");
     std::fs::create_dir_all(home.path()).expect("home");
-    let store = SqliteStore::new(&home.path().join("loopflow.db")).expect("open store");
+    let database = home.path().join("loopflow.db");
+    let store = SqliteStore::new(&database).expect("open store");
+    apply_status_truth(&database);
     std::fs::create_dir_all(home.path().join("repo")).expect("repo");
     let wave = Wave::new(
         WaveId::new(),
@@ -734,7 +1221,7 @@ fn orphaned_task_work_preserves_status_and_roadmap_evidence() {
     assert_eq!(attention[0]["owner"], "wave");
     assert_eq!(
         attention[0]["reason"],
-        "process is gone but the Work still records 'running'"
+        "the owning Home could not verify current Run liveness"
     );
 
     let unavailable = status["unavailable_projects"]
@@ -792,6 +1279,70 @@ fn orphaned_task_work_preserves_status_and_roadmap_evidence() {
         "PRD-52"
     );
     assert_eq!(wave["unavailable_projects"], status["unavailable_projects"]);
+}
+
+#[test]
+fn persisted_merge_request_without_copy_keeps_status_and_roadmap_readable() {
+    let home = tempfile::tempdir().expect("tempdir");
+    seed_persisted_merge_request_without_copy(home.path());
+
+    let status = status_json(home.path(), &["product"], None);
+    let status_task = &status["projects"][0]["tasks"][0];
+    assert_eq!(status_task["task"]["identifier"], "PRD-52");
+    assert_eq!(
+        status_task["prs"][0]["publication"]["presentation"],
+        serde_json::Value::Null
+    );
+    assert_eq!(
+        status_task["prs"][0]["publication"]["merge"]["mode"],
+        "user"
+    );
+
+    let roadmap = roadmap_json(home.path(), "product");
+    let wave = &roadmap["waves"][0];
+    assert_eq!(wave["projects"]["state"], "ok");
+    let roadmap_task = &wave["projects"]["items"][0]["tasks"][0];
+    assert_eq!(roadmap_task["task"]["identifier"], "PRD-52");
+    assert_eq!(
+        roadmap_task["active_pr"]["publication"]["presentation"],
+        serde_json::Value::Null
+    );
+    assert_eq!(
+        roadmap_task["active_pr"]["publication"]["merge"]["mode"],
+        "user"
+    );
+}
+
+#[test]
+fn previous_release_merge_request_migrates_into_readable_status_and_roadmap() {
+    let home = tempfile::tempdir().expect("tempdir");
+    seed_previous_release_task_pr(home.path());
+
+    let status = status_json(home.path(), &["product"], None);
+    let status_task = &status["projects"][0]["tasks"][0];
+    assert_eq!(status_task["task"]["identifier"], "PRD-52");
+    assert_eq!(
+        status_task["prs"][0]["publication"]["presentation"],
+        serde_json::Value::Null
+    );
+    assert_eq!(
+        status_task["prs"][0]["publication"]["merge"]["mode"],
+        "user"
+    );
+
+    let roadmap = roadmap_json(home.path(), "product");
+    let wave = &roadmap["waves"][0];
+    assert_eq!(wave["projects"]["state"], "ok");
+    let roadmap_task = &wave["projects"]["items"][0]["tasks"][0];
+    assert_eq!(roadmap_task["task"]["identifier"], "PRD-52");
+    assert_eq!(
+        roadmap_task["active_pr"]["publication"]["presentation"],
+        serde_json::Value::Null
+    );
+    assert_eq!(
+        roadmap_task["active_pr"]["publication"]["merge"]["mode"],
+        "user"
+    );
 }
 
 #[test]

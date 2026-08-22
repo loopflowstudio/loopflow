@@ -200,17 +200,24 @@ public struct RegistryQuery: Sendable {
     }
 
     /// User-targeted Ask sessions from the same durable queue as bare `lf`.
-    public func userAskAttention() async throws -> [AskAttentionRecord] {
-        let stdout = try await run(["ask", "list", "--user", "--json"], nil)
+    public func userAskAttention(cwd: String? = nil) async throws -> [AskAttentionRecord] {
+        // Repo-scoped: the sessions surface shows the sessions for the repository
+        // the app is opened to, never a cross-repo aggregate. To see another
+        // repo's queue you open Loopflow to that repo (the direct-navigation
+        // route), not `--all`.
+        let stdout = try await run(["ask", "list", "--user", "--json"], cwd)
         return try Self.decode([AskAttentionRecord].self, from: stdout)
     }
 
     /// Claim or recover one Ask session and return its exact attach descriptor.
     /// Presentation remains the app's responsibility until `confirmAskPresented`.
-    public func prepareAskOpen(askId: String) async throws -> InvocationSurfaceRecord {
+    public func prepareAskOpen(
+        askId: String,
+        cwd: String? = nil
+    ) async throws -> InvocationSurfaceRecord {
         let stdout = try await run(
             ["ask", "open", askId, "--prepare", "--json"],
-            nil
+            cwd
         )
         return try Self.decode(InvocationSurfaceRecord.self, from: stdout)
     }
@@ -218,16 +225,17 @@ public struct RegistryQuery: Sendable {
     /// Confirm presentation only for the exact Invocation returned by prepare.
     public func confirmAskPresented(
         askId: String,
-        invocationId: String
+        invocationId: String,
+        cwd: String? = nil
     ) async throws -> AgentInvocationRecord {
         let stdout = try await run(
             ["ask", "presented", askId, invocationId, "--json"],
-            nil
+            cwd
         )
         return try Self.decode(AgentInvocationRecord.self, from: stdout)
     }
 
-    /// Every active normalized Invocation across the machine.
+    /// Every recorded non-ended Invocation, with its canonical liveness observation.
     public func activeInvocations() async throws -> [InvocationSurfaceRecord] {
         let stdout = try await run(["invocation", "list", "--active", "--json"], nil)
         return try Self.decode([InvocationSurfaceRecord].self, from: stdout)
@@ -479,6 +487,7 @@ public struct WaveSnapshot: Decodable, Sendable, Hashable {
     public let id: String
     public let name: String
     public let status: WorkStatus
+    public let current: CurrentWorkObservation
     public let goal: String
     public let repo: String
     public let activeTasks: Int
@@ -489,14 +498,20 @@ public struct WaveSnapshot: Decodable, Sendable, Hashable {
     public let endpoint: String?
     public let createdAt: String?
     public let parentWaveId: String?
+    public let retiredAt: String?
+    public let supersededByWaveId: String?
+    public let retirementReason: String?
     public let home: Home
 
     enum CodingKeys: String, CodingKey {
-        case id, name, status, goal, repo, live, paused, enabled, endpoint, home
+        case id, name, status, current, goal, repo, live, paused, enabled, endpoint, home
         case activeTasks = "active_tasks"
         case activeProjects = "active_projects"
         case createdAt = "created_at"
         case parentWaveId = "parent_wave_id"
+        case retiredAt = "retired_at"
+        case supersededByWaveId = "superseded_by_wave_id"
+        case retirementReason = "retirement_reason"
     }
 
     /// Map the registry snapshot to the app's Wave row, carrying the shared
@@ -507,12 +522,16 @@ public struct WaveSnapshot: Decodable, Sendable, Hashable {
             name: name,
             repo: repo,
             status: status,
+            current: current,
             live: live,
             paused: paused,
             enabled: enabled,
             activeTasks: activeTasks,
             activeProjects: activeProjects,
-            parentWaveId: parentWaveId
+            parentWaveId: parentWaveId,
+            retiredAt: retiredAt,
+            supersededByWaveId: supersededByWaveId,
+            retirementReason: retirementReason
         )
     }
 }
@@ -551,13 +570,14 @@ public struct UnavailableProjectEvidence: Decodable, Sendable, Hashable {
     public let projectId: String
     public let projectSlug: String
     public let status: WorkStatus
+    public let current: CurrentWorkObservation
     public let owner: WorkNextMoveOwner
     public let reason: String
     public let recovery: String
     public let tasks: [UnavailableTaskEvidence]
 
     enum CodingKeys: String, CodingKey {
-        case status, owner, reason, recovery, tasks
+        case status, current, owner, reason, recovery, tasks
         case workId = "work_id"
         case projectId = "project_id"
         case projectSlug = "project_slug"
@@ -571,12 +591,13 @@ public struct UnavailableTaskEvidence: Decodable, Sendable, Hashable {
     public let taskId: String
     public let taskIdentifier: String
     public let status: WorkStatus
+    public let current: CurrentWorkObservation
     public let owner: WorkNextMoveOwner
     public let reason: String
     public let recovery: String
 
     enum CodingKeys: String, CodingKey {
-        case status, owner, reason, recovery
+        case status, current, owner, reason, recovery
         case workId = "work_id"
         case taskId = "task_id"
         case taskIdentifier = "task_identifier"

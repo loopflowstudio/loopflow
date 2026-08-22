@@ -185,6 +185,16 @@ public struct AgentInvocationRecord: Codable, Sendable, Hashable {
     }
 }
 
+public enum InvocationObservationStateRecord: String, Codable, Sendable, Hashable {
+    case live, unverified, history
+}
+
+public struct InvocationObservationRecord: Codable, Sendable, Hashable {
+    public let state: InvocationObservationStateRecord
+    public let reason: String
+    public let liveness: RunLivenessEvidence?
+}
+
 /// `lf invocation list|attach --json`. Reopening reads this projection and does
 /// not mutate Run liveness; explicit handback remains a temporary Slice 1 API.
 public struct InvocationSurfaceRecord: Codable, Sendable, Hashable, Identifiable {
@@ -195,12 +205,13 @@ public struct InvocationSurfaceRecord: Codable, Sendable, Hashable, Identifiable
     public let homeRoute: String
     public let handback: InvocationBoundaryStateRecord?
     public let attachArgv: [String]?
+    public let current: InvocationObservationRecord
 
     public var id: String { invocation.id }
     public var invocationId: String { invocation.id }
     public var parentKind: String { work.kind.rawValue }
     public var parentId: String { work.id }
-    public var status: RunLifecycleStateRecord { run.state }
+    public var status: InvocationObservationStateRecord { current.state }
     public var provider: String { invocation.route.provider }
     public var providerSessionId: String? { invocation.resumeToken }
     public var home: String { homeRoute }
@@ -214,7 +225,7 @@ public struct InvocationSurfaceRecord: Codable, Sendable, Hashable, Identifiable
     public var argv: [String] { attachArgv ?? [] }
 
     enum CodingKeys: String, CodingKey {
-        case invocation, run, work, handback
+        case invocation, run, work, handback, current
         case waveId = "wave_id"
         case homeRoute = "home_route"
         case attachArgv = "attach_argv"

@@ -31,6 +31,10 @@ public struct WaveViewModel: Sendable, Identifiable, Hashable {
     /// Wave (authored on disk, never served) has no runtime reading, so it stays
     /// unknown-with-reason rather than a silent black or a local-session guess.
     public var lens: WaveLens {
+        if let retiredAt = api.retiredAt {
+            let successor = api.supersededByWaveId.map { " · superseded by \($0)" } ?? ""
+            return WaveLens(color: .black, reason: "Retired at \(retiredAt)\(successor)")
+        }
         guard isRegistered else {
             return WaveLens(
                 color: .unknown,
@@ -41,7 +45,7 @@ public struct WaveViewModel: Sendable, Identifiable, Hashable {
             live: api.live,
             paused: api.paused,
             enabled: api.enabled,
-            status: api.status,
+            current: api.current,
             activeTasks: api.activeTasks,
             activeProjects: api.activeProjects
         )

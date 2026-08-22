@@ -2622,6 +2622,11 @@ pub(super) fn reserve_run_in(
     work: &WorkRef,
     trigger: &RunTrigger,
 ) -> StoreResult<(Run, RunContext)> {
+    if let RunTrigger::Historical { trigger_kind, .. } = trigger {
+        return Err(StoreError::InvalidData(format!(
+            "historical Run trigger {trigger_kind:?} cannot reserve a new Run"
+        )));
+    }
     let epoch = current_epoch_in(tx, work)?;
     let home_id = reserving_home_in(tx, work)?;
     if let Some(run) = run_for_epoch_in(tx, &epoch.id)? {
@@ -2848,6 +2853,8 @@ fn run_by_id_in(conn: &Connection, run_id: &RunId) -> StoreResult<Run> {
         ))
     })?;
     let work = work_from_parts((row.7, row.8, row.9))?;
+    let state = RunState::parse(&row.2).map_err(invalid_durable)?;
+    let trigger = RunTrigger::parse_persisted(state, &row.3).map_err(invalid_durable)?;
     Ok(Run {
         id: run_id.clone(),
         work,
@@ -2858,8 +2865,8 @@ fn run_by_id_in(conn: &Connection, run_id: &RunId) -> StoreResult<Run> {
             .map(u64::try_from)
             .transpose()
             .map_err(|_| StoreError::InvalidData("Run has a negative runtime generation".into()))?,
-        state: RunState::parse(&row.2).map_err(invalid_durable)?,
-        trigger: serde_json::from_str(&row.3)?,
+        state,
+        trigger,
         retry_of: row
             .4
             .map(|id| RunId::parse(&id).map_err(invalid_durable))
@@ -5172,7 +5179,7 @@ mod durable_store_tests {
     use crate::durable::{
         AdvanceReceipt, Ask, AskBody, AskId, AskOrigin, AskState, AskTarget, Author, BoundaryState,
         Containment, ContainmentObservation, EpochId, HomeId, InvocationRoute, RunAdvance,
-        RunControl, RunState, RunTrigger, StopCause, WorkRef, WorkStatus,
+        RunControl, RunId, RunState, RunTrigger, StopCause, WorkRef, WorkStatus,
     };
     use crate::id::WaveId;
     use crate::project::ProjectId;
@@ -5247,6 +5254,148 @@ mod durable_store_tests {
 
     fn store_with_wave() -> (tempfile::TempDir, SqliteStore, WorkRef) {
         _store_with_wave(true)
+    }
+
+    fn _insert_run_with_trigger(
+        path: &Path,
+        work: &WorkRef,
+        state: RunState,
+        raw_json: &str,
+    ) -> RunId {
+        let conn = rusqlite::Connection::open(path).unwrap();
+        let epoch_id = conn
+            .query_row(
+                "SELECT id FROM epochs WHERE wave_id=?1 ORDER BY number DESC LIMIT 1",
+                [work.id()],
+                |row| row.get::<_, String>(0),
+            )
+            .unwrap();
+        let run_id = RunId::new();
+        let (state, containment_kind, containment_id, cwd, started_at, ended_at) = match state {
+            RunState::Reserved => ("reserved", None, None, None, None, None),
+            RunState::Active => (
+                "active",
+                Some("process_group"),
+                Some("42"),
+                Some("/repo"),
+                Some(1_700_000_010),
+                None,
+            ),
+            RunState::Stopping => (
+                "stopping",
+                Some("process_group"),
+                Some("42"),
+                Some("/repo"),
+                Some(1_700_000_010),
+                None,
+            ),
+            RunState::Ended => ("ended", None, None, None, None, Some(1_700_000_020)),
+        };
+        conn.execute(
+            "INSERT INTO runs (
+                id, epoch_id, home_id, state, trigger_json, source_kind,
+                source_id, created_at, ended_at, containment_kind,
+                containment_id, cwd, started_at
+             ) VALUES (
+                ?1, ?2, (SELECT id FROM homes WHERE route='local'), ?3,
+                ?4, 'wave', ?5, 1700000010, ?6, ?7, ?8, ?9, ?10
+             )",
+            rusqlite::params![
+                run_id.as_str(),
+                epoch_id,
+                state,
+                raw_json,
+                work.id(),
+                ended_at,
+                containment_kind,
+                containment_id,
+                cwd,
+                started_at,
+            ],
+        )
+        .unwrap();
+        run_id
+    }
+
+    #[test]
+    fn ended_run_reads_unknown_trigger_as_byte_exact_historical_evidence() {
+        let (dir, store, work) = store_with_wave();
+        let path = dir.path().join("loopflow.db");
+        let raw_json =
+            r#"{ "kind":"retired_controller", "opaque":[3,{"z":true}], "note":"keep spacing" }"#;
+        let run_id = _insert_run_with_trigger(&path, &work, RunState::Ended, raw_json);
+
+        let run = store.latest_run(&work).unwrap().unwrap();
+
+        assert_eq!(run.id, run_id);
+        assert_eq!(run.trigger.kind(), "retired_controller");
+        assert_eq!(
+            run.trigger,
+            RunTrigger::Historical {
+                trigger_kind: "retired_controller".to_string(),
+                raw_json: raw_json.to_string(),
+            }
+        );
+        let conn = rusqlite::Connection::open(path).unwrap();
+        assert_eq!(
+            conn.query_row(
+                "SELECT trigger_json FROM runs WHERE id=?1",
+                [run_id.as_str()],
+                |row| row.get::<_, String>(0),
+            )
+            .unwrap(),
+            raw_json
+        );
+    }
+
+    #[test]
+    fn nonterminal_run_rejects_the_same_unknown_trigger() {
+        let raw_json =
+            r#"{ "kind":"retired_controller", "opaque":[3,{"z":true}], "note":"keep spacing" }"#;
+
+        for state in [RunState::Reserved, RunState::Active, RunState::Stopping] {
+            let (dir, store, work) = store_with_wave();
+            let run_id =
+                _insert_run_with_trigger(&dir.path().join("loopflow.db"), &work, state, raw_json);
+
+            let error = store.run_by_id(&run_id).unwrap_err();
+
+            assert!(error
+                .to_string()
+                .contains("unknown kind \"retired_controller\""));
+            assert!(error.to_string().contains(&format!("{state:?} Run")));
+        }
+    }
+
+    #[test]
+    fn ended_run_rejects_malformed_current_trigger() {
+        let (dir, store, work) = store_with_wave();
+        let run_id = _insert_run_with_trigger(
+            &dir.path().join("loopflow.db"),
+            &work,
+            RunState::Ended,
+            r#"{"kind":"input"}"#,
+        );
+
+        let error = store.run_by_id(&run_id).unwrap_err();
+
+        assert!(error.to_string().contains("missing field `basis`"));
+    }
+
+    #[test]
+    fn historical_trigger_cannot_reserve_a_new_run() {
+        let (_dir, store, work) = store_with_wave();
+        let trigger = RunTrigger::Historical {
+            trigger_kind: "retired_controller".to_string(),
+            raw_json: r#"{"kind":"retired_controller"}"#.to_string(),
+        };
+
+        let error = store.reserve_run(&work, &trigger).unwrap_err();
+
+        assert!(error
+            .to_string()
+            .contains("historical Run trigger \"retired_controller\" cannot reserve a new Run"));
+        assert!(store.latest_run(&work).unwrap().is_none());
     }
 
     fn activate_runtime_generation(path: &Path, store: &SqliteStore) {

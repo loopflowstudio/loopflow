@@ -74,6 +74,8 @@ pub enum DurableDataError {
     InvalidSendState(String),
     #[error("invalid run state: {0}")]
     InvalidRunState(String),
+    #[error("invalid Run trigger: {0}")]
+    InvalidRunTrigger(String),
     #[error("invalid invocation state: {0}")]
     InvalidInvocationState(String),
     #[error("invalid boundary state: {0}")]
@@ -211,6 +213,12 @@ pub enum RunTrigger {
     Child {
         work: WorkRef,
     },
+    /// Opaque evidence from a retired controller. Only ended Runs may carry it.
+    #[serde(skip_deserializing)]
+    Historical {
+        trigger_kind: String,
+        raw_json: String,
+    },
     Recovery {
         prior_run_id: RunId,
     },
@@ -219,6 +227,65 @@ pub enum RunTrigger {
         prior_run_id: Option<RunId>,
     },
     User,
+}
+
+impl RunTrigger {
+    pub fn kind(&self) -> &str {
+        match self {
+            Self::Migration => "migration",
+            Self::Input { .. } => "input",
+            Self::Time { .. } => "time",
+            Self::Event { .. } => "event",
+            Self::Child { .. } => "child",
+            Self::Historical { trigger_kind, .. } => trigger_kind,
+            Self::Recovery { .. } => "recovery",
+            Self::HomeUpgrade { .. } => "home_upgrade",
+            Self::User => "user",
+        }
+    }
+
+    pub(crate) fn parse_persisted(
+        state: RunState,
+        raw_json: &str,
+    ) -> Result<Self, DurableDataError> {
+        let value: serde_json::Value = serde_json::from_str(raw_json)
+            .map_err(|error| DurableDataError::InvalidRunTrigger(error.to_string()))?;
+        let kind = value
+            .get("kind")
+            .and_then(serde_json::Value::as_str)
+            .ok_or_else(|| {
+                DurableDataError::InvalidRunTrigger(
+                    "expected an object with a string kind".to_string(),
+                )
+            })?;
+        if Self::_is_current_kind(kind) {
+            return serde_json::from_str(raw_json)
+                .map_err(|error| DurableDataError::InvalidRunTrigger(error.to_string()));
+        }
+        if state == RunState::Ended {
+            return Ok(Self::Historical {
+                trigger_kind: kind.to_string(),
+                raw_json: raw_json.to_string(),
+            });
+        }
+        Err(DurableDataError::InvalidRunTrigger(format!(
+            "unknown kind {kind:?} on {state:?} Run"
+        )))
+    }
+
+    fn _is_current_kind(kind: &str) -> bool {
+        matches!(
+            kind,
+            "migration"
+                | "input"
+                | "time"
+                | "event"
+                | "child"
+                | "recovery"
+                | "home_upgrade"
+                | "user"
+        )
+    }
 }
 
 #[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]

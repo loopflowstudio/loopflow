@@ -1067,12 +1067,7 @@ pub(crate) fn validate_persisted_json(conn: &rusqlite::Connection) -> StoreResul
         "identity",
         "failure_set_json",
     )?);
-    failures.extend(validate_json_column::<crate::durable::RunTrigger>(
-        conn,
-        "runs",
-        "id",
-        "trigger_json",
-    )?);
+    failures.extend(validate_run_triggers(conn)?);
     failures.extend(validate_json_column::<crate::durable::WaitOn>(
         conn, "waits", "id", "on_json",
     )?);
@@ -1104,6 +1099,34 @@ fn validate_json_column<T: DeserializeOwned>(
         let (row_key, json) = row?;
         if let Err(error) = serde_json::from_str::<T>(&json) {
             failures.push(format!("{table}.{column} row {row_key}: {error}"));
+        }
+    }
+    Ok(failures)
+}
+
+fn validate_run_triggers(conn: &rusqlite::Connection) -> StoreResult<Vec<String>> {
+    let mut statement = conn.prepare(
+        "SELECT CAST(id AS TEXT), state, trigger_json FROM runs WHERE trigger_json IS NOT NULL",
+    )?;
+    let rows = statement.query_map([], |row| {
+        Ok((
+            row.get::<_, String>(0)?,
+            row.get::<_, String>(1)?,
+            row.get::<_, String>(2)?,
+        ))
+    })?;
+    let mut failures = Vec::new();
+    for row in rows {
+        let (run_id, state, raw_json) = row?;
+        let state = match crate::durable::RunState::parse(&state) {
+            Ok(state) => state,
+            Err(error) => {
+                failures.push(format!("runs.trigger_json row {run_id}: {error}"));
+                continue;
+            }
+        };
+        if let Err(error) = crate::durable::RunTrigger::parse_persisted(state, &raw_json) {
+            failures.push(format!("runs.trigger_json row {run_id}: {error}"));
         }
     }
     Ok(failures)
@@ -2031,6 +2054,53 @@ mod tests {
         );
 
         apply_installed_development_sqlite(&conn, &[draft]).unwrap();
+    }
+
+    #[test]
+    fn installed_development_promotion_reads_arbitrary_historical_run_triggers() {
+        let conn = open();
+        apply_sqlite(&conn).unwrap();
+        conn.execute_batch(
+            "INSERT INTO waves (id, name, repo, created_at)
+             VALUES ('wave-ci-history', 'infrastructure', '/repo', 1);
+             INSERT INTO projects (id, wave_id, external_project_id, created_at)
+             VALUES ('project-ci-history', 'wave-ci-history', 'linear-project', 2);
+             INSERT INTO tasks (
+                 id, project_id, external_issue_id, issue_identifier, created_at
+             ) VALUES (
+                 'task-ci-history', 'project-ci-history', 'linear-task', 'LOO-262', 3
+             );
+             INSERT INTO epochs (
+                 id, number, task_id, state, current_rev, created_at, terminal_at
+             ) VALUES ('epoch-ci-history', 1, 'task-ci-history', 'done', 0, 4, 6);",
+        )
+        .unwrap();
+        let raw_json =
+            r#"{ "kind":"retired_controller", "opaque":[3,{"z":true}], "note":"keep spacing" }"#;
+        conn.execute(
+            "INSERT INTO runs (
+                id, epoch_id, home_id, state, trigger_json, source_kind,
+                source_id, created_at, ended_at
+             ) VALUES (
+                'run-ci-history', 'epoch-ci-history',
+                (SELECT id FROM homes WHERE route='local'), 'ended',
+                ?1, 'task', 'task-ci-history', 5, 6
+             )",
+            [raw_json],
+        )
+        .unwrap();
+
+        apply_installed_development_sqlite(&conn, &[]).unwrap();
+
+        assert_eq!(
+            conn.query_row(
+                "SELECT trigger_json FROM runs WHERE id='run-ci-history'",
+                [],
+                |row| row.get::<_, String>(0),
+            )
+            .unwrap(),
+            raw_json
+        );
     }
 
     fn baseline() -> Migration {

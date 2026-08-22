@@ -83,6 +83,10 @@ tempfile = "3.27"
 loopflow-test-support = { path = "../loopflow-test-support" }
 tokio = { version = "1", features = ["test-util"] }
 
+[build-dependencies]
+hex = "0.4"
+sha2 = "0.10"
+
 [[bench]]
 name = "wave_stream"
 harness = false

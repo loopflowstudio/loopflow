@@ -2757,6 +2757,21 @@ pub(crate) async fn relaunch_inactive_process_with_trigger(
     launch_task_process(store, task, trigger).await
 }
 
+pub(crate) async fn relaunch_inactive_process_for_install_switch(
+    store: &SharedStore,
+    task: &mut Task,
+    trigger: RunTrigger,
+    switch_id: &str,
+) -> OpsResult<()> {
+    let Some(_) = ensure_working_pr(store, task).await? else {
+        return Err(task_error(format!(
+            "Task {} is terminal and cannot start a Run",
+            task.plan.identifier
+        )));
+    };
+    launch_task_process_for_switch(store, task, Some(trigger), Some(switch_id)).await
+}
+
 const MAX_AUTOMATIC_TASK_RECOVERY_RUNS: usize = 3;
 
 #[derive(Debug, Clone, PartialEq, Eq)]
@@ -2947,6 +2962,15 @@ async fn launch_task_process(
     task: &mut Task,
     trigger: Option<RunTrigger>,
 ) -> OpsResult<()> {
+    launch_task_process_for_switch(store, task, trigger, None).await
+}
+
+async fn launch_task_process_for_switch(
+    store: &SharedStore,
+    task: &mut Task,
+    trigger: Option<RunTrigger>,
+    switch_id: Option<&str>,
+) -> OpsResult<()> {
     let work = store
         .work_for_child(&ChildRef::Task(task.id.clone()))
         .await
@@ -3004,7 +3028,14 @@ async fn launch_task_process(
                 .current_basis,
         },
     };
-    let reservation = store.reserve_run(&work, trigger).await;
+    let reservation = match switch_id {
+        Some(switch_id) => {
+            store
+                .reserve_run_for_install_switch(&work, trigger, switch_id)
+                .await
+        }
+        None => store.reserve_run(&work, trigger).await,
+    };
     let (run, lease) =
         reservation.map_err(|error| task_error(format!("failed to reserve Task Run: {error}")))?;
     launch_reserved_task_process(store, task, &run, &lease, account_id).await

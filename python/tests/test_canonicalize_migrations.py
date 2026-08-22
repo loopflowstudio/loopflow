@@ -1,13 +1,18 @@
 """The release cut: drafts become one ordered, release-scoped batch."""
 
+import hashlib
+import json
 import subprocess
 import sys
 from pathlib import Path
 
 import pytest
 
+from scripts import canonicalize_migrations
+
 ROOT = Path(__file__).resolve().parents[2]
 SCRIPT = ROOT / "scripts/canonicalize_migrations.py"
+MANIFEST_FIXTURE = ROOT / "tests/fixtures/migrations/draft_manifest.json"
 MIGRATIONS = Path("rust/loopflow/src/store/migrations")
 DRAFTS = MIGRATIONS / "drafts"
 MIGRATIONS_RS = Path("rust/loopflow/src/store/migrations.rs")
@@ -85,6 +90,43 @@ def run(repo: Path, *args: str) -> subprocess.CompletedProcess:
 
 def canonical_files(repo: Path) -> list[str]:
     return sorted(p.name for p in (repo / MIGRATIONS).glob("*.sql"))
+
+
+def test_draft_manifest_matches_shared_golden_cases(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch, capsys: pytest.CaptureFixture[str]
+) -> None:
+    fixture = json.loads(MANIFEST_FIXTURE.read_text())
+
+    for case in fixture["cases"]:
+        case_root = tmp_path / case["name"]
+        migrations = case_root / "migrations"
+        drafts = migrations / "drafts"
+        drafts.mkdir(parents=True)
+        for file in case["drafts"]:
+            (drafts / file["filename"]).write_text(file["text"])
+        for file in case.get("released", []):
+            (migrations / file["filename"]).write_text(file["text"])
+        monkeypatch.setattr(canonicalize_migrations, "MIGRATIONS_DIR", migrations)
+        monkeypatch.setattr(canonicalize_migrations, "DRAFTS_DIR", drafts)
+
+        if case["error"] is not None:
+            with pytest.raises(SystemExit):
+                canonicalize_migrations._order(canonicalize_migrations._read_drafts())
+            assert f"[{case['error']}]" in capsys.readouterr().err, case["name"]
+            continue
+
+        ordered = canonicalize_migrations._order(canonicalize_migrations._read_drafts())
+        actual = [
+            {
+                "id": draft.filename.rsplit("__", 1)[1].removesuffix(".sql"),
+                "name": draft.name,
+                "dependencies": draft.depends_on,
+                "sql": draft.sql,
+                "checksum": hashlib.sha256(draft.sql.encode()).hexdigest(),
+            }
+            for draft in ordered
+        ]
+        assert actual == case["expected"], case["name"]
 
 
 def test_empty_draft_set_is_a_noop(repo: Path) -> None:

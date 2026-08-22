@@ -147,6 +147,7 @@ pub fn run(json: bool) -> Result<()> {
         }
     };
     // Binary freshness remains useful when the store cannot open.
+    checks.extend(check_machine_install(&database_path));
     checks.push(check_binary_freshness());
     if json {
         println!(
@@ -264,7 +265,19 @@ fn inspect_store(path: &Path) -> StoreReport {
                     Ok(version) => latest_applied_migration = version,
                     Err(error) => migration_error = Some(error.to_string()),
                 }
-                if let Err(error) = crate::store::migrations::validate_sqlite(&connection) {
+                let validation = match crate::machine_install::selection_for_current_executable() {
+                    Ok(Some(selection))
+                        if selection.source
+                            == crate::machine_install::InstallSource::Development =>
+                    {
+                        crate::store::migrations::validate_installed_development_sqlite(
+                            &connection,
+                            crate::build_info::migration_draft_manifest(),
+                        )
+                    }
+                    _ => crate::store::migrations::validate_sqlite(&connection),
+                };
+                if let Err(error) = validation {
                     migration_error.get_or_insert_with(|| error.to_string());
                 }
             }
@@ -285,6 +298,144 @@ fn inspect_store(path: &Path) -> StoreReport {
         latest_known_migration: crate::store::migrations::latest_known_version(),
         latest_applied_migration,
         migration_error,
+    }
+}
+
+fn check_machine_install(database_path: &Path) -> Vec<Check> {
+    let root = match crate::machine_install::root() {
+        Ok(root) => root,
+        Err(error) => {
+            return vec![Check::fail(
+                "install-selection",
+                format!("cannot resolve machine install authority: {error}"),
+            )]
+        }
+    };
+    match crate::machine_install::read_state(&root) {
+        Ok(crate::machine_install::MachineInstallState::Legacy) => vec![
+            Check::warn(
+                "install-selection",
+                "no versioned machine install receipt; the next promotion will initialize it",
+            ),
+            Check::warn(
+                "install-fallback",
+                "published fallback has not been retained by the machine install path yet",
+            ),
+        ],
+        Ok(crate::machine_install::MachineInstallState::Switching(receipt)) => vec![Check::fail(
+            "install-switch",
+            format!(
+                "install switch {} is unsettled at {:?}; ordinary startup remains fenced",
+                receipt.id, receipt.phase
+            ),
+        )],
+        Ok(crate::machine_install::MachineInstallState::Settled(active)) => {
+            let selected = crate::machine_install::selection_for_current_executable();
+            let source_artifact = matches!(&selected, Ok(None));
+            let selection = match &selected {
+                Ok(Some(selection)) => Check::ok(
+                    "install-selection",
+                    format!(
+                        "{:?} installation {} selects {}",
+                        selection.source,
+                        selection.installation_id,
+                        selection.store.display()
+                    ),
+                ),
+                Ok(None) => Check::ok(
+                    "install-selection",
+                    "running source artifact is outside the pinned machine installation",
+                ),
+                Err(error) => Check::fail("install-selection", error.to_string()),
+            };
+            let store = if active.selection.store == database_path {
+                Check::ok(
+                    "install-store",
+                    format!("running store matches {}", database_path.display()),
+                )
+            } else if source_artifact {
+                Check::ok(
+                    "install-store",
+                    "source artifact keeps its own isolated store",
+                )
+            } else {
+                Check::fail(
+                    "install-store",
+                    format!(
+                        "receipt selects {}, running process opened {}",
+                        active.selection.store.display(),
+                        database_path.display()
+                    ),
+                )
+            };
+            let mut fallback_roles = vec![
+                crate::machine_install::ArtifactRole::Cli,
+                crate::machine_install::ArtifactRole::Daemon,
+            ];
+            if active
+                .selection
+                .artifact_set
+                .artifact(&crate::machine_install::ArtifactRole::App)
+                .is_some()
+            {
+                fallback_roles.extend([
+                    crate::machine_install::ArtifactRole::App,
+                    crate::machine_install::ArtifactRole::AppHelper("lf".to_string()),
+                    crate::machine_install::ArtifactRole::AppHelper("lfd".to_string()),
+                ]);
+            }
+            let fallback = match active.published_fallback.verify(&fallback_roles) {
+                Ok(()) => Check::ok(
+                    "install-fallback",
+                    format!(
+                        "published fallback {} is complete and verified",
+                        active.published_fallback.id
+                    ),
+                ),
+                Err(error) => Check::fail("install-fallback", error.to_string()),
+            };
+            let pending = active
+                .work_dispositions
+                .iter()
+                .filter(|receipt| {
+                    receipt.outcome == crate::machine_install::WorkDisposition::Pending
+                })
+                .count();
+            let work = if active.first_fork.is_none() {
+                Check::ok("install-work", "no development fork has captured Work")
+            } else if pending > 0
+                && active.selection.source == crate::machine_install::InstallSource::Published
+            {
+                Check::fail(
+                    "install-work",
+                    format!("{pending} first-fork Work disposition(s) remain pending after published return"),
+                )
+            } else if pending > 0 {
+                Check::ok(
+                    "install-work",
+                    format!(
+                        "{pending} first-fork Work disposition(s) remain active until published return or --fresh"
+                    ),
+                )
+            } else {
+                let disabled = active
+                    .work_dispositions
+                    .iter()
+                    .filter(|receipt| {
+                        receipt.outcome == crate::machine_install::WorkDisposition::Disabled
+                    })
+                    .count();
+                Check::ok(
+                    "install-work",
+                    format!(
+                        "{} first-fork Work disposition(s) recorded; {disabled} disabled for explicit recovery",
+                        active.work_dispositions.len()
+                    ),
+                )
+            };
+            vec![selection, store, fallback, work]
+        }
+        Err(error) => vec![Check::fail("install-selection", error.to_string())],
     }
 }
 

@@ -1,0 +1,172 @@
+{
+  "cases": [
+    {
+      "name": "dependency_order_body_and_checksum",
+      "drafts": [
+        {
+          "filename": "a_backfill__22222222222222222222222222222222.sql",
+          "text": "-- name: a_backfill\n-- id: 22222222222222222222222222222222\n-- depends_on: z_setup\nINSERT INTO example (id) VALUES ('seed');\n"
+        },
+        {
+          "filename": "b_independent__33333333333333333333333333333333.sql",
+          "text": "-- name: b_independent\n-- id: 33333333333333333333333333333333\n-- depends_on: none\nALTER TABLE example ADD COLUMN note TEXT;\n"
+        },
+        {
+          "filename": "z_setup__11111111111111111111111111111111.sql",
+          "text": "-- name: z_setup\n-- id: 11111111111111111111111111111111\n-- depends_on:\nCREATE TABLE example (\n    id TEXT PRIMARY KEY\n);\n"
+        }
+      ],
+      "expected": [
+        {
+          "id": "33333333333333333333333333333333",
+          "name": "b_independent",
+          "dependencies": [],
+          "sql": "ALTER TABLE example ADD COLUMN note TEXT;\n",
+          "checksum": "358d3eb0fa6177a18f9de1f156378ff0a4453fc426561a9119b137f0129241c9"
+        },
+        {
+          "id": "11111111111111111111111111111111",
+          "name": "z_setup",
+          "dependencies": [],
+          "sql": "CREATE TABLE example (\n    id TEXT PRIMARY KEY\n);\n",
+          "checksum": "0551e845cc2d517f2af1bf117cd1b462ef9bf802d2c0097c708392cd1223ba57"
+        },
+        {
+          "id": "22222222222222222222222222222222",
+          "name": "a_backfill",
+          "dependencies": ["z_setup"],
+          "sql": "INSERT INTO example (id) VALUES ('seed');\n",
+          "checksum": "a6c5987372593764e90e065565ea0cfc13a73ce7f60e13a21d9305b1404638be"
+        }
+      ],
+      "error": null
+    },
+    {
+      "name": "released_dependency",
+      "released": [
+        {
+          "filename": "0.12.8.001_released.sql",
+          "text": "-- draft: released_foundation\nSELECT 1;\n"
+        }
+      ],
+      "drafts": [
+        {
+          "filename": "local_after_released__44444444444444444444444444444444.sql",
+          "text": "-- name: local_after_released\n-- id: 44444444444444444444444444444444\n-- depends_on: released_foundation\nCREATE TABLE local_after_released (id TEXT PRIMARY KEY);\n"
+        }
+      ],
+      "expected": [
+        {
+          "id": "44444444444444444444444444444444",
+          "name": "local_after_released",
+          "dependencies": ["released_foundation"],
+          "sql": "CREATE TABLE local_after_released (id TEXT PRIMARY KEY);\n",
+          "checksum": "1966c1e82c7d72d207d8a77f57112c9338eda2b88bc95a5d4d899533c5e7e3c9"
+        }
+      ],
+      "error": null
+    },
+    {
+      "name": "missing_dependency",
+      "drafts": [
+        {
+          "filename": "child__11111111111111111111111111111111.sql",
+          "text": "-- name: child\n-- id: 11111111111111111111111111111111\n-- depends_on: absent\nSELECT 1;\n"
+        }
+      ],
+      "expected": null,
+      "error": "missing_dependency"
+    },
+    {
+      "name": "self_dependency",
+      "drafts": [
+        {
+          "filename": "selfish__11111111111111111111111111111111.sql",
+          "text": "-- name: selfish\n-- id: 11111111111111111111111111111111\n-- depends_on: selfish\nSELECT 1;\n"
+        }
+      ],
+      "expected": null,
+      "error": "self_dependency"
+    },
+    {
+      "name": "dependency_cycle",
+      "drafts": [
+        {
+          "filename": "first__11111111111111111111111111111111.sql",
+          "text": "-- name: first\n-- id: 11111111111111111111111111111111\n-- depends_on: second\nSELECT 1;\n"
+        },
+        {
+          "filename": "second__22222222222222222222222222222222.sql",
+          "text": "-- name: second\n-- id: 22222222222222222222222222222222\n-- depends_on: first\nSELECT 2;\n"
+        }
+      ],
+      "expected": null,
+      "error": "cycle"
+    },
+    {
+      "name": "duplicate_readable_name",
+      "drafts": [
+        {
+          "filename": "duplicate__11111111111111111111111111111111.sql",
+          "text": "-- name: duplicate\n-- id: 11111111111111111111111111111111\nSELECT 1;\n"
+        },
+        {
+          "filename": "duplicate__22222222222222222222222222222222.sql",
+          "text": "-- name: duplicate\n-- id: 22222222222222222222222222222222\nSELECT 2;\n"
+        }
+      ],
+      "expected": null,
+      "error": "duplicate_name"
+    },
+    {
+      "name": "released_name_collision",
+      "released": [
+        {
+          "filename": "0.12.8.001_custom.sql",
+          "text": "-- draft: published_name\nSELECT 1;\n"
+        }
+      ],
+      "drafts": [
+        {
+          "filename": "published_name__11111111111111111111111111111111.sql",
+          "text": "-- name: published_name\n-- id: 11111111111111111111111111111111\nSELECT 2;\n"
+        }
+      ],
+      "expected": null,
+      "error": "released_name_collision"
+    },
+    {
+      "name": "header_id_mismatch",
+      "drafts": [
+        {
+          "filename": "mismatch__11111111111111111111111111111111.sql",
+          "text": "-- name: mismatch\n-- id: 22222222222222222222222222222222\nSELECT 1;\n"
+        }
+      ],
+      "expected": null,
+      "error": "id_mismatch"
+    },
+    {
+      "name": "invalid_name_header",
+      "drafts": [
+        {
+          "filename": "valid_name__11111111111111111111111111111111.sql",
+          "text": "-- name: Invalid-Name\n-- id: 11111111111111111111111111111111\nSELECT 1;\n"
+        }
+      ],
+      "expected": null,
+      "error": "missing_name"
+    },
+    {
+      "name": "reserved_release_marker",
+      "drafts": [
+        {
+          "filename": "forged__11111111111111111111111111111111.sql",
+          "text": "-- name: forged\n-- id: 11111111111111111111111111111111\n-- draft: forged\nSELECT 1;\n"
+        }
+      ],
+      "expected": null,
+      "error": "reserved_marker"
+    }
+  ]
+}

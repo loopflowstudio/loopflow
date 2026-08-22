@@ -1,11 +1,11 @@
 use crate::child::ChildRef;
 use crate::durable::{
     AdvanceReceipt, AgentInvocation, AgentInvocationId, Ask, AskBody, AskClaim, AskId, AskOrigin,
-    AskResult, AskTarget, Author, Basis, BoundarySeed, ContainmentObservation, ControlCtx,
-    DoneProposal, EpochReceipt, FlowPosition, Home, HomeId, InterruptReceipt, InvocationRoute,
-    InvocationSurface, Placement, Run, RunAdvance, RunControl, RunLease, RunLivenessEvidence,
-    RunTrigger, Send, SendId, SendState, SteerId, SteerReceipt, StopCause, StopReceipt,
-    ToolResponseReceipt, ToolResponseWrite, WorkRef, WorkStatus,
+    AskResult, AskTarget, Author, Basis, BoundarySeed, ContainmentObservation, DoneProposal,
+    EpochReceipt, FlowPosition, Home, HomeId, InterruptReceipt, InvocationRoute, InvocationSurface,
+    Placement, Run, RunAdvance, RunContext, RunControl, RunLivenessEvidence, RunTrigger, Send,
+    SendId, SendState, SteerId, SteerReceipt, StopCause, StopReceipt, ToolResponseReceipt,
+    ToolResponseWrite, WorkRef, WorkStatus,
 };
 
 use super::{run_sqlite, Store, StoreError, StoreResult};
@@ -110,7 +110,7 @@ impl Store {
         &self,
         work: &WorkRef,
         trigger: RunTrigger,
-    ) -> StoreResult<(Run, RunLease)> {
+    ) -> StoreResult<(Run, RunContext)> {
         let _promotion_lock = crate::promotion_lock::acquire_shared()
             .await
             .map_err(|error| {
@@ -125,32 +125,10 @@ impl Store {
         .await
     }
 
-    /// Reserve an immediate child only if the caller's selected Turn Basis is current.
-    pub(crate) async fn reserve_child_run(
-        &self,
-        caller: &RunLease,
-        work: &WorkRef,
-        trigger: RunTrigger,
-    ) -> StoreResult<(Run, RunLease)> {
-        let _promotion_lock = crate::promotion_lock::acquire_shared()
-            .await
-            .map_err(|error| {
-                StoreError::InvalidData(format!(
-                    "acquire shared promotion lock before child Run reservation: {error}"
-                ))
-            })?;
-        let caller = caller.clone();
-        let work = work.clone();
-        run_sqlite(&self.sqlite, move |store| {
-            store.reserve_child_run(&caller, &work, &trigger)
-        })
-        .await
-    }
-
     pub(crate) async fn reserve_recovery_run(
         &self,
-        lease: &RunLease,
-    ) -> StoreResult<(Run, RunLease)> {
+        lease: &RunContext,
+    ) -> StoreResult<(Run, RunContext)> {
         let _promotion_lock = crate::promotion_lock::acquire_shared()
             .await
             .map_err(|error| {
@@ -223,21 +201,25 @@ impl Store {
         run_sqlite(&self.sqlite, move |store| store.latest_run(&work)).await
     }
 
-    pub(crate) async fn resolve_run_lease(
+    pub(crate) async fn run_context(
         &self,
-        token: crate::durable::RunLeaseToken,
-    ) -> StoreResult<RunLease> {
-        run_sqlite(&self.sqlite, move |store| store.resolve_run_lease(&token)).await
+        run_id: &crate::durable::RunId,
+    ) -> StoreResult<RunContext> {
+        let run_id = run_id.clone();
+        run_sqlite(&self.sqlite, move |store| store.run_context(&run_id)).await
     }
 
-    pub(crate) async fn validate_run_lease(&self, lease: &RunLease) -> StoreResult<()> {
+    pub(crate) async fn validate_run_context(&self, lease: &RunContext) -> StoreResult<()> {
         let lease = lease.clone();
-        run_sqlite(&self.sqlite, move |store| store.validate_run_lease(&lease)).await
+        run_sqlite(&self.sqlite, move |store| {
+            store.validate_run_context(&lease)
+        })
+        .await
     }
 
     pub(crate) async fn record_first_material_at(
         &self,
-        lease: &RunLease,
+        lease: &RunContext,
         observed_at: time::OffsetDateTime,
     ) -> StoreResult<time::OffsetDateTime> {
         let lease = lease.clone();
@@ -249,7 +231,7 @@ impl Store {
 
     pub async fn advance_run(
         &self,
-        lease: &RunLease,
+        lease: &RunContext,
         advance: RunAdvance,
     ) -> StoreResult<AdvanceReceipt> {
         let lease = lease.clone();
@@ -261,7 +243,7 @@ impl Store {
 
     pub async fn stop_run(
         &self,
-        lease: &RunLease,
+        lease: &RunContext,
         cause: StopCause,
         containment: ContainmentObservation,
     ) -> StoreResult<StopReceipt> {
@@ -274,7 +256,7 @@ impl Store {
 
     pub(crate) async fn finish_run(
         &self,
-        lease: &RunLease,
+        lease: &RunContext,
         outcome: crate::durable::BoundaryState,
     ) -> StoreResult<()> {
         let lease = lease.clone();
@@ -283,14 +265,14 @@ impl Store {
 
     /// Release Wave Run authority from the process interrupt handler, which
     /// exits before Tokio can drive the listener's async shutdown path.
-    pub(crate) fn stop_run_on_interrupt(&self, lease: &RunLease) -> StoreResult<StopReceipt> {
+    pub(crate) fn stop_run_on_interrupt(&self, lease: &RunContext) -> StoreResult<StopReceipt> {
         self.sqlite
             .stop_run(lease, &StopCause::Requested, ContainmentObservation::Absent)
     }
 
     pub(crate) async fn run_control(
         &self,
-        lease: &RunLease,
+        lease: &RunContext,
         active_turn_id: Option<&str>,
     ) -> StoreResult<Option<RunControl>> {
         let lease = lease.clone();
@@ -303,7 +285,7 @@ impl Store {
 
     pub async fn set_flow_position(
         &self,
-        lease: &RunLease,
+        lease: &RunContext,
         position: FlowPosition,
     ) -> StoreResult<FlowPosition> {
         let lease = lease.clone();
@@ -315,7 +297,7 @@ impl Store {
 
     pub async fn create_ask(
         &self,
-        lease: &RunLease,
+        lease: &RunContext,
         origin: AskOrigin,
         request: AskBody,
         target: AskTarget,
@@ -334,48 +316,42 @@ impl Store {
 
     pub async fn pending_asks(
         &self,
-        context: &ControlCtx<'_>,
+        actor: Option<&RunContext>,
         target: &AskTarget,
     ) -> StoreResult<Vec<Ask>> {
-        let lease = match context {
-            ControlCtx::User(_) => None,
-            ControlCtx::Run(lease) => Some((*lease).clone()),
-        };
+        let actor = actor.cloned();
         let target = target.clone();
         run_sqlite(&self.sqlite, move |store| {
-            store.pending_asks(lease.as_ref(), &target)
+            store.pending_asks(actor.as_ref(), &target)
         })
         .await
     }
 
     pub(crate) async fn claim_ask(
         &self,
-        context: &ControlCtx<'_>,
+        actor: Option<&RunContext>,
         ask_id: &AskId,
         route: InvocationRoute,
         surface: &str,
     ) -> StoreResult<AskClaim> {
-        let lease = match context {
-            ControlCtx::User(_) => None,
-            ControlCtx::Run(lease) => Some((*lease).clone()),
-        };
+        let actor = actor.cloned();
         let ask_id = ask_id.clone();
         let surface = surface.to_string();
         run_sqlite(&self.sqlite, move |store| {
-            store.claim_ask(lease.as_ref(), &ask_id, &route, &surface)
+            store.claim_ask(actor.as_ref(), &ask_id, &route, &surface)
         })
         .await
     }
 
-    pub(crate) async fn claim_flow_step_run_lease(
+    pub(crate) async fn claim_flow_step_run_context(
         &self,
         ask_id: &AskId,
         invocation_id: &AgentInvocationId,
-    ) -> StoreResult<Option<RunLease>> {
+    ) -> StoreResult<Option<RunContext>> {
         let ask_id = ask_id.clone();
         let invocation_id = invocation_id.clone();
         run_sqlite(&self.sqlite, move |store| {
-            store.claim_flow_step_run_lease(&ask_id, &invocation_id)
+            store.claim_flow_step_run_context(&ask_id, &invocation_id)
         })
         .await
     }
@@ -408,18 +384,15 @@ impl Store {
 
     pub async fn mark_presented_by_target(
         &self,
-        context: &ControlCtx<'_>,
+        actor: Option<&RunContext>,
         ask_id: &AskId,
         invocation_id: &AgentInvocationId,
     ) -> StoreResult<AgentInvocation> {
-        let caller = match context {
-            ControlCtx::User(_) => None,
-            ControlCtx::Run(lease) => Some((*lease).clone()),
-        };
+        let actor = actor.cloned();
         let ask_id = ask_id.clone();
         let invocation_id = invocation_id.clone();
         run_sqlite(&self.sqlite, move |store| {
-            store.mark_presented_by_target(caller.as_ref(), &ask_id, &invocation_id)
+            store.mark_presented_by_target(actor.as_ref(), &ask_id, &invocation_id)
         })
         .await
     }
@@ -494,34 +467,28 @@ impl Store {
 
     pub async fn escalate_queued_ask(
         &self,
-        context: &ControlCtx<'_>,
+        actor: Option<&RunContext>,
         ask_id: &AskId,
     ) -> StoreResult<Ask> {
-        let caller = match context {
-            ControlCtx::User(_) => None,
-            ControlCtx::Run(lease) => Some((*lease).clone()),
-        };
+        let actor = actor.cloned();
         let ask_id = ask_id.clone();
         run_sqlite(&self.sqlite, move |store| {
-            store.escalate_queued_ask(caller.as_ref(), &ask_id)
+            store.escalate_queued_ask(actor.as_ref(), &ask_id)
         })
         .await
     }
 
     pub async fn cancel_ask(
         &self,
-        context: &ControlCtx<'_>,
+        actor: Option<&RunContext>,
         ask_id: &AskId,
         reason: &str,
     ) -> StoreResult<Ask> {
-        let lease = match context {
-            ControlCtx::User(_) => None,
-            ControlCtx::Run(lease) => Some((*lease).clone()),
-        };
+        let actor = actor.cloned();
         let ask_id = ask_id.clone();
         let reason = reason.to_string();
         run_sqlite(&self.sqlite, move |store| {
-            store.cancel_ask(lease.as_ref(), &ask_id, &reason)
+            store.cancel_ask(actor.as_ref(), &ask_id, &reason)
         })
         .await
     }
@@ -556,7 +523,7 @@ impl Store {
 
     pub(crate) async fn request_intervention(
         &self,
-        lease: &RunLease,
+        lease: &RunContext,
         invocation_id: &AgentInvocationId,
         prompt: &str,
         user: bool,
@@ -570,7 +537,7 @@ impl Store {
         .await
     }
 
-    pub(crate) async fn asks_for_work_epoch(&self, lease: &RunLease) -> StoreResult<Vec<Ask>> {
+    pub(crate) async fn asks_for_work_epoch(&self, lease: &RunContext) -> StoreResult<Vec<Ask>> {
         let lease = lease.clone();
         run_sqlite(&self.sqlite, move |store| store.asks_for_work_epoch(&lease)).await
     }
@@ -657,7 +624,7 @@ impl Store {
 
     pub(crate) async fn open_invocation(
         &self,
-        lease: &RunLease,
+        lease: &RunContext,
     ) -> StoreResult<Option<AgentInvocation>> {
         let lease = lease.clone();
         let invocation_id = std::env::var_os(crate::durable::AGENT_INVOCATION_ENV)
@@ -670,7 +637,7 @@ impl Store {
             })
             .transpose()?;
         run_sqlite(&self.sqlite, move |store| {
-            store.validate_run_lease(&lease)?;
+            store.validate_run_context(&lease)?;
             match invocation_id {
                 Some(invocation_id) => {
                     store.open_invocation_for_run_by_id(&lease.run_id, &invocation_id)
@@ -731,7 +698,7 @@ impl Store {
 
     pub async fn observe_invocation_provider(
         &self,
-        lease: &RunLease,
+        lease: &RunContext,
         invocation_id: &AgentInvocationId,
         account_id: Option<crate::store::ProviderAccountId>,
         resume_token: Option<String>,
@@ -763,23 +730,20 @@ impl Store {
 
     pub async fn interrupt(
         &self,
-        context: &ControlCtx<'_>,
+        actor: Option<&RunContext>,
         work: &WorkRef,
         if_run: &crate::durable::RunId,
     ) -> StoreResult<InterruptReceipt> {
-        let context = match context {
-            ControlCtx::User(_) => None,
-            ControlCtx::Run(lease) => Some((*lease).clone()),
-        };
+        let actor = actor.cloned();
         let work = work.clone();
         let if_run = if_run.clone();
         run_sqlite(&self.sqlite, move |store| {
-            store.interrupt(context.as_ref(), &work, &if_run)
+            store.interrupt(actor.as_ref(), &work, &if_run)
         })
         .await
     }
 
-    pub async fn done(&self, lease: &RunLease, basis: &Basis) -> StoreResult<DoneProposal> {
+    pub async fn done(&self, lease: &RunContext, basis: &Basis) -> StoreResult<DoneProposal> {
         let lease = lease.clone();
         let basis = basis.clone();
         run_sqlite(&self.sqlite, move |store| store.done(&lease, &basis)).await
@@ -833,20 +797,17 @@ impl Store {
 
     pub async fn steer(
         &self,
-        context: &ControlCtx<'_>,
+        actor: Option<&RunContext>,
         work: &WorkRef,
         text: &str,
         if_basis: Option<&Basis>,
     ) -> StoreResult<SteerReceipt> {
-        let caller = match context {
-            ControlCtx::User(_) => None,
-            ControlCtx::Run(lease) => Some((*lease).clone()),
-        };
+        let actor = actor.cloned();
         let work = work.clone();
         let text = text.to_string();
         let if_basis = if_basis.cloned();
         run_sqlite(&self.sqlite, move |store| {
-            store.steer(caller.as_ref(), &work, &text, if_basis.as_ref())
+            store.steer(actor.as_ref(), &work, &text, if_basis.as_ref())
         })
         .await
     }
@@ -950,9 +911,9 @@ mod tests {
     use time::OffsetDateTime;
 
     use crate::durable::{
-        AskBody, AskOrigin, AskResult, AskState, AskTarget, AuthenticatedRequest, BoundaryState,
-        Containment, ContainmentObservation, ControlCtx, FlowPosition, InvocationRoute, RunAdvance,
-        RunState, RunTrigger, StopCause, WorkRef, WorkStatus,
+        AskBody, AskOrigin, AskResult, AskState, AskTarget, BoundaryState, Containment,
+        ContainmentObservation, FlowPosition, InvocationRoute, RunAdvance, RunContext, RunState,
+        RunTrigger, StopCause, WorkRef, WorkStatus,
     };
     use crate::id::WaveId;
     use crate::planning::{LinearProjectId, ProjectPlan};
@@ -963,11 +924,11 @@ mod tests {
     impl super::Store {
         pub(crate) async fn claim_test_ask(
             &self,
-            context: &ControlCtx<'_>,
+            actor: Option<&RunContext>,
             ask_id: &crate::durable::AskId,
         ) -> crate::store::StoreResult<crate::durable::AskClaim> {
             self.claim_ask(
-                context,
+                actor,
                 ask_id,
                 InvocationRoute {
                     provider: "codex".to_string(),
@@ -1041,7 +1002,7 @@ mod tests {
     async fn start_invocation(
         store: &super::Store,
         work: &WorkRef,
-    ) -> (crate::durable::RunLease, crate::durable::AgentInvocation) {
+    ) -> (crate::durable::RunContext, crate::durable::AgentInvocation) {
         let (_run, lease) = store.reserve_run(work, RunTrigger::User).await.unwrap();
         store
             .advance_run(
@@ -1080,8 +1041,8 @@ mod tests {
     struct AskFixture {
         store: super::Store,
         parent_work: WorkRef,
-        parent_lease: crate::durable::RunLease,
-        child_lease: crate::durable::RunLease,
+        parent_lease: crate::durable::RunContext,
+        child_lease: crate::durable::RunContext,
         child_invocation: crate::durable::AgentInvocation,
         turn: crate::durable::Turn,
     }
@@ -1170,7 +1131,7 @@ mod tests {
         fixture
             .store
             .cancel_ask(
-                &ControlCtx::Run(&fixture.child_lease),
+                Some(&fixture.child_lease),
                 &parent.id,
                 "route proof complete",
             )
@@ -1229,12 +1190,8 @@ mod tests {
     async fn interrupt_ends_a_reserved_run_before_containment_exists() {
         let (store, work) = wave_work().await;
         let (run, _lease) = store.reserve_run(&work, RunTrigger::User).await.unwrap();
-        let request = AuthenticatedRequest::cli();
 
-        let receipt = store
-            .interrupt(&ControlCtx::User(&request), &work, &run.id)
-            .await
-            .unwrap();
+        let receipt = store.interrupt(None, &work, &run.id).await.unwrap();
 
         assert_eq!(receipt.run_id, run.id);
         assert!(receipt.turn_ids.is_empty());
@@ -1377,10 +1334,7 @@ mod tests {
         );
         assert_eq!(
             store
-                .pending_asks(
-                    &ControlCtx::Run(&parent_lease),
-                    &AskTarget::Parent(parent_work.clone()),
-                )
+                .pending_asks(Some(&parent_lease), &AskTarget::Parent(parent_work.clone()),)
                 .await
                 .unwrap(),
             vec![ask.clone(), duplicate]
@@ -1395,9 +1349,7 @@ mod tests {
             .await
             .unwrap();
         assert!(matches!(
-            store
-                .claim_test_ask(&ControlCtx::Run(&parent_lease), &ask.id)
-                .await,
+            store.claim_test_ask(Some(&parent_lease), &ask.id).await,
             Err(StoreError::InvalidAuthority(_))
         ));
 
@@ -1418,7 +1370,7 @@ mod tests {
         let (replacement_lease, _replacement_invocation) =
             start_invocation(&store, &parent_work).await;
         let claim = store
-            .claim_test_ask(&ControlCtx::Run(&replacement_lease), &ask.id)
+            .claim_test_ask(Some(&replacement_lease), &ask.id)
             .await
             .unwrap();
         store
@@ -1494,24 +1446,12 @@ mod tests {
     async fn ask_claim_is_idempotent_and_first_terminal_result_wins() {
         let fixture = ask_fixture().await;
         let ask = create_parent_ask(&fixture, "Which proof matters?").await;
-        let request = AuthenticatedRequest::cli();
 
-        assert!(matches!(
-            fixture
-                .store
-                .claim_test_ask(&ControlCtx::User(&request), &ask.id)
-                .await,
-            Err(StoreError::InvalidAuthority(_))
-        ));
-        let first = fixture
-            .store
-            .claim_test_ask(&ControlCtx::Run(&fixture.parent_lease), &ask.id)
-            .await
-            .unwrap();
+        let first = fixture.store.claim_test_ask(None, &ask.id).await.unwrap();
         assert!(first.needs_launch);
         let reopened = fixture
             .store
-            .claim_test_ask(&ControlCtx::Run(&fixture.parent_lease), &ask.id)
+            .claim_test_ask(Some(&fixture.parent_lease), &ask.id)
             .await
             .unwrap();
         assert_eq!(reopened.invocation_id, first.invocation_id);
@@ -1593,7 +1533,7 @@ mod tests {
         assert!(fixture
             .store
             .pending_asks(
-                &ControlCtx::Run(&fixture.parent_lease),
+                Some(&fixture.parent_lease),
                 &AskTarget::Parent(fixture.parent_work),
             )
             .await
@@ -1608,7 +1548,7 @@ mod tests {
         let claim = fixture
             .store
             .claim_ask(
-                &ControlCtx::Run(&fixture.parent_lease),
+                Some(&fixture.parent_lease),
                 &ask.id,
                 InvocationRoute {
                     provider: "claude".to_string(),
@@ -1653,7 +1593,7 @@ mod tests {
         let ask = create_parent_ask(&fixture, "Fence stale Ask authority").await;
         let first = fixture
             .store
-            .claim_test_ask(&ControlCtx::Run(&fixture.parent_lease), &ask.id)
+            .claim_test_ask(Some(&fixture.parent_lease), &ask.id)
             .await
             .unwrap();
         fixture
@@ -1668,7 +1608,7 @@ mod tests {
 
         let second = fixture
             .store
-            .claim_test_ask(&ControlCtx::Run(&fixture.parent_lease), &ask.id)
+            .claim_test_ask(Some(&fixture.parent_lease), &ask.id)
             .await
             .unwrap();
         fixture
@@ -1705,7 +1645,7 @@ mod tests {
         let ask = create_parent_ask(&fixture, "Need User judgment").await;
         let claim = fixture
             .store
-            .claim_test_ask(&ControlCtx::Run(&fixture.parent_lease), &ask.id)
+            .claim_test_ask(Some(&fixture.parent_lease), &ask.id)
             .await
             .unwrap();
         let escalated = fixture
@@ -1723,27 +1663,18 @@ mod tests {
                 .await,
             Err(StoreError::InvalidAuthority(_))
         ));
-        assert!(matches!(
-            fixture
-                .store
-                .claim_test_ask(&ControlCtx::Run(&fixture.parent_lease), &ask.id)
-                .await,
-            Err(StoreError::InvalidAuthority(_))
-        ));
-
-        let request = AuthenticatedRequest::cli();
-        let user_claim = fixture
+        let retargeted = fixture
             .store
-            .claim_test_ask(&ControlCtx::User(&request), &ask.id)
+            .claim_test_ask(Some(&fixture.parent_lease), &ask.id)
             .await
             .unwrap();
+        assert!(retargeted.needs_launch);
+        let user_claim = fixture.store.claim_test_ask(None, &ask.id).await.unwrap();
+        assert_eq!(user_claim.invocation_id, retargeted.invocation_id);
+        assert!(!user_claim.needs_launch);
         let cancelled = fixture
             .store
-            .cancel_ask(
-                &ControlCtx::User(&request),
-                &ask.id,
-                "No intervention needed",
-            )
+            .cancel_ask(None, &ask.id, "No intervention needed")
             .await
             .unwrap();
         assert_eq!(cancelled.id, ask.id);
@@ -1780,7 +1711,7 @@ mod tests {
         let ask = create_parent_ask(&fixture, "Recover this Ask session").await;
         let claim = fixture
             .store
-            .claim_test_ask(&ControlCtx::Run(&fixture.parent_lease), &ask.id)
+            .claim_test_ask(Some(&fixture.parent_lease), &ask.id)
             .await
             .unwrap();
 
@@ -1818,7 +1749,7 @@ mod tests {
         );
         let retry = fixture
             .store
-            .claim_test_ask(&ControlCtx::Run(&fixture.parent_lease), &ask.id)
+            .claim_test_ask(Some(&fixture.parent_lease), &ask.id)
             .await
             .unwrap();
         assert_ne!(retry.invocation_id, claim.invocation_id);
@@ -1830,7 +1761,7 @@ mod tests {
         let ask = create_parent_ask(&fixture, "Keep the Ask pending").await;
         let first = fixture
             .store
-            .claim_test_ask(&ControlCtx::Run(&fixture.parent_lease), &ask.id)
+            .claim_test_ask(Some(&fixture.parent_lease), &ask.id)
             .await
             .unwrap();
         let released = fixture
@@ -1847,7 +1778,7 @@ mod tests {
 
         let second = fixture
             .store
-            .claim_test_ask(&ControlCtx::Run(&fixture.parent_lease), &ask.id)
+            .claim_test_ask(Some(&fixture.parent_lease), &ask.id)
             .await
             .unwrap();
         let interrupted = fixture
@@ -1886,7 +1817,7 @@ mod tests {
         let claimed = create_parent_ask(&fixture, "Keep this Ask session attached").await;
         fixture
             .store
-            .claim_test_ask(&ControlCtx::Run(&fixture.parent_lease), &claimed.id)
+            .claim_test_ask(Some(&fixture.parent_lease), &claimed.id)
             .await
             .unwrap();
         let run = fixture
@@ -1990,12 +1921,7 @@ mod tests {
             .unwrap();
         assert_eq!(replay.id, ask.id);
         assert_eq!(ask.origin.invocation_id, None);
-
-        let user = AuthenticatedRequest::cli();
-        let claim = store
-            .claim_test_ask(&ControlCtx::User(&user), &ask.id)
-            .await
-            .unwrap();
+        let claim = store.claim_test_ask(None, &ask.id).await.unwrap();
         store
             .set_flow_position(
                 &lease,
@@ -2015,7 +1941,7 @@ mod tests {
             .unwrap();
         assert!(matches!(
             store
-                .claim_flow_step_run_lease(&ask.id, &claim.invocation_id)
+                .claim_flow_step_run_context(&ask.id, &claim.invocation_id)
                 .await,
             Err(StoreError::InvalidAuthority(_))
         ));
@@ -2037,12 +1963,12 @@ mod tests {
             .await
             .unwrap();
         let flow_writer = store
-            .claim_flow_step_run_lease(&ask.id, &claim.invocation_id)
+            .claim_flow_step_run_context(&ask.id, &claim.invocation_id)
             .await
             .unwrap()
             .expect("flow-step Ask receives the current writer");
-        store.validate_run_lease(&flow_writer).await.unwrap();
-        assert!(store.validate_run_lease(&lease).await.is_err());
+        store.validate_run_context(&flow_writer).await.unwrap();
+        store.validate_run_context(&lease).await.unwrap();
         store
             .mark_ask_ready(&ask.id, &claim.invocation_id)
             .await
@@ -2150,7 +2076,7 @@ mod tests {
             .await
             .unwrap();
         assert_eq!(recovered.run.state, RunState::Ended);
-        assert!(store.validate_run_lease(&lease).await.is_err());
+        assert!(store.validate_run_context(&lease).await.is_err());
 
         let (next, _) = store
             .reserve_run(

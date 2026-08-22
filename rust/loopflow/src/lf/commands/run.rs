@@ -64,10 +64,10 @@ pub fn run_bound(
         runtime.block_on(crate::ops::DirectRun::start(store, binding, route, surface))?;
     let _environment = BoundEnvironment::enter(&direct, binding);
     let control = CaptureControl {
-        basis: direct.lease().basis.clone(),
+        basis: direct.context().basis.clone(),
         supervision: crate::trace::SupervisedInvocation {
             invocation_id: direct.invocation().id.clone(),
-            supervising_run_id: direct.lease().run_id.clone(),
+            supervising_run_id: direct.context().run_id.clone(),
             account_id: direct.invocation().route.account_id.clone(),
             resume_token: direct.invocation().resume_token.clone(),
         },
@@ -84,12 +84,12 @@ pub fn run_bound(
     match (result, cleanup) {
         (Err(error), Err(cleanup)) => Err(error.context(format!(
             "bound Run {} also failed to settle: {cleanup}",
-            direct.lease().run_id
+            direct.context().run_id
         ))),
         (Err(error), Ok(())) => Err(error),
         (Ok(()), Err(error)) => Err(anyhow!(
             "bound skill completed but Run {} did not settle: {error}",
-            direct.lease().run_id
+            direct.context().run_id
         )),
         (Ok(()), Ok(())) => Ok(()),
     }
@@ -125,7 +125,7 @@ impl BoundEnvironment {
     fn enter(direct: &crate::ops::DirectRun, binding: &crate::ops::WorkBinding) -> Self {
         let values = [
             (crate::durable::RUN_CONTEXT_ENV, "agent"),
-            (crate::durable::RUN_LEASE_ENV, direct.lease().env_value()),
+            (crate::durable::RUN_ID_ENV, direct.context().run_id.as_str()),
             (
                 crate::durable::AGENT_INVOCATION_ENV,
                 direct.invocation().id.as_str(),
@@ -1076,7 +1076,7 @@ mod tests {
         let lock = crate::journal::test_env_lock();
         let keys = [
             crate::durable::RUN_CONTEXT_ENV,
-            crate::durable::RUN_LEASE_ENV,
+            crate::durable::RUN_ID_ENV,
             crate::durable::AGENT_INVOCATION_ENV,
             crate::engine::wave_context::WAVE_ID_ENV,
         ];
@@ -1095,8 +1095,8 @@ mod tests {
                 "agent"
             );
             assert_eq!(
-                std::env::var(crate::durable::RUN_LEASE_ENV).unwrap(),
-                direct.lease().env_value()
+                std::env::var(crate::durable::RUN_ID_ENV).unwrap(),
+                direct.context().run_id.as_str()
             );
             assert_eq!(
                 std::env::var(crate::durable::AGENT_INVOCATION_ENV).unwrap(),

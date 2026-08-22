@@ -660,19 +660,16 @@ fn prepare_work_binding(
                 .await
                 .ok_or_else(|| anyhow::anyhow!("no Loopflow registry on this machine"))?,
         );
-        let ambient = loopflow::ops::ambient_run_lease(&store)
+        let ambient = loopflow::ops::ambient_run_context(&store)
             .await
             .map_err(|error| anyhow::anyhow!(error.to_string()))?;
         let binding = loopflow::ops::resolve_work_binding(&store, repo, selector)
             .await
             .map_err(|error| anyhow::anyhow!(error.to_string()))?;
-        if let Some(lease) = ambient {
-            binding
-                .assert_ambient(&lease)
-                .map_err(|error| anyhow::anyhow!(error.to_string()))?;
-            return Ok((store, binding, true));
-        }
-        Ok((store, binding, false))
+        let reuses_ambient_run = ambient
+            .as_ref()
+            .is_some_and(|context| binding.matches_run(context));
+        Ok((store, binding, reuses_ambient_run))
     })
 }
 
@@ -2021,7 +2018,7 @@ mod tests {
             loopflow::journal::LF_TRACE_ID_ENV,
             loopflow::journal::LF_PROCESS_ID_ENV,
             loopflow::durable::RUN_CONTEXT_ENV,
-            loopflow::durable::RUN_LEASE_ENV,
+            loopflow::durable::RUN_ID_ENV,
             loopflow::durable::AGENT_INVOCATION_ENV,
             loopflow::engine::wave_context::WAVE_ID_ENV,
         ]

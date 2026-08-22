@@ -259,7 +259,7 @@ pub struct CurrentWorkEvidence {
 }
 
 /// Default: a live body with no durable mutation for this long is Stalled. The
-/// precise, per-flow deadline arrives with the write lease (PR2/PR3); until then
+/// precise, per-flow deadline arrives with the Run context (PR2/PR3); until then
 /// this is the honest coarse bound the read model can prove.
 pub const DEFAULT_STALL_AFTER: Duration = Duration::from_secs(30 * 60);
 

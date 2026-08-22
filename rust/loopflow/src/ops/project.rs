@@ -4,8 +4,8 @@ use std::time::{Duration, Instant};
 
 use crate::child::ChildRef;
 use crate::durable::{
-    AgentInvocation, AuthenticatedRequest, Author, Containment, ContainmentObservation, ControlCtx,
-    RunState, RunTrigger, WorkRef, WorkStatus,
+    AgentInvocation, Author, Containment, ContainmentObservation, RunState, RunTrigger, WorkRef,
+    WorkStatus,
 };
 use crate::engine::config::{load_config_or_default, parse_agent};
 use crate::engine::git::{current_branch, get_default_branch, is_clean, worktree_root};
@@ -616,9 +616,8 @@ pub fn project_interrupt(project: &str) -> OpsResult<ProjectControlResult> {
             .await
             .map_err(|error| project_error(error.to_string()))?
             .ok_or_else(|| project_error("Project has no active Run to interrupt"))?;
-        let request = AuthenticatedRequest::cli();
         let receipt = store
-            .interrupt(&ControlCtx::User(&request), &work, &run.id)
+            .interrupt(None, &work, &run.id)
             .await
             .map_err(|error| project_error(error.to_string()))?;
         Ok(ProjectControlResult {

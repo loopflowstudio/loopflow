@@ -1,7 +1,7 @@
 //! Durable Project and Task compatibility rows and their observation outbox.
 
 use crate::child::{ChildBodyHandoffRequest, ObservationRecipient};
-use crate::durable::{Author, Basis, Run, RunLease};
+use crate::durable::{Author, Basis, Run, RunContext};
 use crate::id::WaveId;
 use crate::project::{ObservationOutboxRow, Project, ProjectEvent, ProjectEventKind, ProjectId};
 use crate::task::{
@@ -15,16 +15,15 @@ use super::{run_sqlite, Store, StoreError, StoreResult};
 #[cfg(test)]
 #[derive(Debug, Clone)]
 pub(crate) struct TestRunReservation {
-    pub(crate) run_token: crate::durable::RunLeaseToken,
-    lease: RunLease,
+    context: RunContext,
 }
 
 #[cfg(test)]
 impl std::ops::Deref for TestRunReservation {
-    type Target = RunLease;
+    type Target = RunContext;
 
     fn deref(&self) -> &Self::Target {
-        &self.lease
+        &self.context
     }
 }
 
@@ -37,11 +36,11 @@ impl Store {
 
     pub async fn create_task_run(
         &self,
-        context: &crate::durable::ControlCtx<'_>,
+        actor: Option<&RunContext>,
         task: &Task,
         pr: &TaskPr,
         text: &str,
-    ) -> StoreResult<(Run, RunLease)> {
+    ) -> StoreResult<(Run, RunContext)> {
         let _promotion_lock = crate::promotion_lock::acquire_shared()
             .await
             .map_err(|error| {
@@ -49,35 +48,29 @@ impl Store {
                     "acquire shared promotion lock before Task Run reservation: {error}"
                 ))
             })?;
-        let caller = match context {
-            crate::durable::ControlCtx::User(_) => None,
-            crate::durable::ControlCtx::Run(lease) => Some((*lease).clone()),
-        };
+        let actor = actor.cloned();
         let task = task.clone();
         let pr = pr.clone();
         let text = text.to_string();
         run_sqlite(&self.sqlite, move |store| {
-            store.insert_task_run(&task, &pr, caller.as_ref(), &text)
+            store.insert_task_run(&task, &pr, actor.as_ref(), &text)
         })
         .await
     }
 
     pub async fn reopen_task(
         &self,
-        context: &crate::durable::ControlCtx<'_>,
+        actor: Option<&RunContext>,
         task: &Task,
         pr: Option<&TaskPr>,
         text: &str,
     ) -> StoreResult<()> {
-        let caller = match context {
-            crate::durable::ControlCtx::User(_) => None,
-            crate::durable::ControlCtx::Run(lease) => Some((*lease).clone()),
-        };
+        let actor = actor.cloned();
         let task = task.clone();
         let pr = pr.cloned();
         let text = text.to_string();
         run_sqlite(&self.sqlite, move |store| {
-            store.reopen_task(&task, pr.as_ref(), caller.as_ref(), &text)
+            store.reopen_task(&task, pr.as_ref(), actor.as_ref(), &text)
         })
         .await
     }
@@ -90,7 +83,7 @@ impl Store {
     pub(crate) async fn validate_task_run_route(
         &self,
         task: &Task,
-        lease: &RunLease,
+        lease: &RunContext,
         current_external_project_id: &str,
     ) -> StoreResult<()> {
         let task = task.clone();
@@ -121,7 +114,7 @@ impl Store {
     pub(crate) async fn activate_task_process(
         &self,
         task: &Task,
-        lease: &RunLease,
+        lease: &RunContext,
     ) -> StoreResult<()> {
         self.update_task_for_run(task, lease).await
     }
@@ -129,7 +122,7 @@ impl Store {
     pub(crate) async fn update_task_for_run(
         &self,
         task: &Task,
-        lease: &RunLease,
+        lease: &RunContext,
     ) -> StoreResult<()> {
         let task = task.clone();
         let lease = lease.clone();
@@ -139,19 +132,10 @@ impl Store {
         .await
     }
 
-    #[cfg(test)]
-    pub(crate) async fn update_task_for_lease(
-        &self,
-        task: &Task,
-        lease: &RunLease,
-    ) -> StoreResult<()> {
-        self.update_task_for_run(task, lease).await
-    }
-
     pub(crate) async fn finish_task_run(
         &self,
         task: &Task,
-        lease: &RunLease,
+        lease: &RunContext,
         outcome: crate::durable::BoundaryState,
     ) -> StoreResult<()> {
         let task = task.clone();
@@ -175,7 +159,7 @@ impl Store {
         &self,
         task: &Task,
         skipped_pr: Option<&TaskPr>,
-        lease: &RunLease,
+        lease: &RunContext,
     ) -> StoreResult<()> {
         let task = task.clone();
         let skipped_pr = skipped_pr.cloned();
@@ -228,9 +212,7 @@ impl Store {
             },
         )
         .await?;
-        let run_token = crate::durable::RunLeaseToken::parse(lease.env_value())
-            .expect("a resolved Run lease has a valid token");
-        Ok(Some(TestRunReservation { run_token, lease }))
+        Ok(Some(TestRunReservation { context: lease }))
     }
 
     pub async fn handoff_task_body(
@@ -277,7 +259,7 @@ impl Store {
     pub(crate) async fn update_task_pr_for_run(
         &self,
         pr: &TaskPr,
-        lease: &RunLease,
+        lease: &RunContext,
     ) -> StoreResult<()> {
         let pr = pr.clone();
         let lease = lease.clone();
@@ -305,7 +287,7 @@ impl Store {
         pr_id: &TaskPrId,
         kind: crate::task::TaskPrRepairKind,
         occurred_at: OffsetDateTime,
-        lease: &RunLease,
+        lease: &RunContext,
     ) -> StoreResult<bool> {
         let pr_id = pr_id.clone();
         let lease = lease.clone();
@@ -323,7 +305,7 @@ impl Store {
     pub(crate) async fn heal_task_pr_base_for_run(
         &self,
         pr: &TaskPr,
-        lease: &RunLease,
+        lease: &RunContext,
     ) -> StoreResult<()> {
         let pr = pr.clone();
         let lease = lease.clone();
@@ -437,7 +419,7 @@ impl Store {
         &self,
         settled: &TaskPr,
         next: Option<&TaskPr>,
-        lease: &RunLease,
+        lease: &RunContext,
     ) -> StoreResult<()> {
         let settled = settled.clone();
         let next = next.cloned();
@@ -464,7 +446,7 @@ impl Store {
         &self,
         settled: &TaskPr,
         merged_at: Option<OffsetDateTime>,
-        lease: &RunLease,
+        lease: &RunContext,
     ) -> StoreResult<crate::store::TaskPrMergeEvidenceOutcome> {
         let settled = settled.clone();
         let lease = lease.clone();
@@ -487,7 +469,7 @@ impl Store {
         &self,
         task: &Task,
         pr: &TaskPr,
-        lease: &RunLease,
+        lease: &RunContext,
     ) -> StoreResult<()> {
         let task = task.clone();
         let pr = pr.clone();
@@ -565,7 +547,7 @@ impl Store {
     pub(crate) async fn append_task_event_for_run(
         &self,
         task_id: &TaskId,
-        lease: &RunLease,
+        lease: &RunContext,
         kind: &TaskEventKind,
     ) -> StoreResult<TaskEvent> {
         let task_id = task_id.clone();
@@ -584,7 +566,7 @@ impl Store {
     pub(crate) async fn fail_task_run(
         &self,
         task_id: &TaskId,
-        lease: &RunLease,
+        lease: &RunContext,
         error: &str,
         resumable: bool,
     ) -> StoreResult<TaskEvent> {
@@ -721,7 +703,7 @@ impl Store {
     pub(crate) async fn activate_project_process(
         &self,
         project: &Project,
-        lease: &RunLease,
+        lease: &RunContext,
     ) -> StoreResult<()> {
         self.update_project_for_run(project, lease).await
     }
@@ -729,7 +711,7 @@ impl Store {
     pub(crate) async fn update_project_for_run(
         &self,
         project: &Project,
-        lease: &RunLease,
+        lease: &RunContext,
     ) -> StoreResult<()> {
         let project = project.clone();
         let lease = lease.clone();
@@ -743,7 +725,7 @@ impl Store {
         &self,
         project_id: &ProjectId,
         plan: &crate::planning::ProjectPlan,
-        lease: &RunLease,
+        lease: &RunContext,
     ) -> StoreResult<(Project, bool)> {
         let project_id = project_id.clone();
         let plan = plan.clone();
@@ -757,7 +739,7 @@ impl Store {
     pub(crate) async fn finish_project_run(
         &self,
         project: &Project,
-        lease: &RunLease,
+        lease: &RunContext,
         outcome: crate::durable::BoundaryState,
     ) -> StoreResult<()> {
         let project = project.clone();
@@ -771,7 +753,7 @@ impl Store {
     pub(crate) async fn fail_project_run(
         &self,
         project: &Project,
-        lease: &RunLease,
+        lease: &RunContext,
         error: &str,
     ) -> StoreResult<ProjectEvent> {
         let project_id = project.id.clone();
@@ -791,7 +773,7 @@ impl Store {
     pub(crate) async fn complete_project_run(
         &self,
         project: &Project,
-        lease: &RunLease,
+        lease: &RunContext,
         basis: &Basis,
         summary: &str,
     ) -> StoreResult<ProjectEvent> {
@@ -876,9 +858,7 @@ impl Store {
             },
         )
         .await?;
-        let run_token = crate::durable::RunLeaseToken::parse(lease.env_value())
-            .expect("a resolved Run lease has a valid token");
-        Ok(Some(TestRunReservation { run_token, lease }))
+        Ok(Some(TestRunReservation { context: lease }))
     }
 
     pub async fn handoff_project_body(
@@ -958,7 +938,7 @@ impl Store {
     pub(crate) async fn append_project_event_for_run(
         &self,
         project_id: &ProjectId,
-        lease: &RunLease,
+        lease: &RunContext,
         kind: &ProjectEventKind,
     ) -> StoreResult<ProjectEvent> {
         let project_id = project_id.clone();
@@ -1047,7 +1027,7 @@ impl Store {
         &self,
         project_id: &ProjectId,
         observation: &ObservationOutboxRow,
-        lease: &RunLease,
+        lease: &RunContext,
     ) -> StoreResult<bool> {
         let project_id = project_id.clone();
         let observation = observation.clone();

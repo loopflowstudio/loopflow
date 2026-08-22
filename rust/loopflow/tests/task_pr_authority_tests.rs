@@ -13,7 +13,9 @@ use std::fs;
 use std::process::{Command, Stdio};
 
 use loopflow::ops::task::task_stack;
-use loopflow::ops::{create_or_update_pr, land, submit, LandOptions, NullProgress, PrOptions};
+use loopflow::ops::{
+    arm as land, create_or_update_pr, submit, LandOptions, NullProgress, PrOptions,
+};
 use loopflow_test_support::TestRepo;
 use support::{register_task, EnvGuard};
 

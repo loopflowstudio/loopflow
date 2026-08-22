@@ -7,8 +7,8 @@ use std::process::Command;
 use loopflow::durable::WorkStatus;
 use loopflow::ops::task::{pr_next, task_complete, task_resume, task_snapshot, task_status};
 use loopflow::ops::{
-    commit_workflow, create_or_update_pr, current_pr, land, present_pr_review, CommitOptions,
-    LandOptions, NullProgress, OpsError, PrOptions,
+    arm as land, commit_workflow, create_or_update_pr, current_pr, present_pr_review,
+    CommitOptions, LandOptions, NullProgress, OpsError, PrOptions,
 };
 use loopflow::profile::{ProviderRoute, RouteScope};
 use loopflow::provider_auth::Provider;
@@ -1282,6 +1282,49 @@ fn observed_merge_completes_a_pr_marked_to_complete_the_task() {
         .block_on(task.store.task_prs(&task.task.id))
         .expect("read completing PR");
     assert_eq!(prs.len(), 1);
+    assert_eq!(prs[0].phase(), PrPhase::Merged);
+}
+
+#[test]
+fn observed_auto_merge_waits_for_watched_landing_to_complete_the_task() {
+    let home = tempfile::TempDir::new().expect("temp home");
+    let _env = EnvGuard::with_lf_home(&[("gh", gh_merged_pr_script())], home.path());
+    let repo = TestRepo::new();
+    let base = repo.head_sha();
+    let branch = "jack/task-pr-proof";
+    repo.create_branch(branch);
+    point_origin_at_github(&repo);
+    let task = register_task(home.path(), repo.path(), branch, &base);
+    let head = repo.head_sha();
+    let now = time::OffsetDateTime::now_utc();
+    let mut pr = task.pr.clone();
+    pr.publication = Some(PrPublication {
+        requested_at: now,
+        presentation: Some(reviewer_copy(&head)),
+        github: Some(GithubPr {
+            number: 912,
+            url: "https://example.com/pr/912".to_string(),
+            head_sha: Some(head.clone()),
+        }),
+        merge: Some(PrMergeRequest {
+            mode: PrMergeMode::Auto,
+            requested_at: now,
+            head_sha: head,
+            after_merge: AfterMerge::CompleteTask,
+            next_slug: None,
+        }),
+    });
+    let runtime = tokio::runtime::Runtime::new().expect("task runtime");
+    runtime
+        .block_on(task.store.update_task_pr(&pr))
+        .expect("mark PR as completing");
+
+    let persisted_task = task_status("INF-123").expect("reconcile watched PR merge");
+    let snapshot = task_snapshot(&persisted_task).expect("snapshot Task");
+    assert!(!matches!(snapshot.status, WorkStatus::Done));
+    let prs = runtime
+        .block_on(task.store.task_prs(&task.task.id))
+        .expect("read completing PR");
     assert_eq!(prs[0].phase(), PrPhase::Merged);
 }
 

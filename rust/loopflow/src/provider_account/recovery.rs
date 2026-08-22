@@ -6,7 +6,7 @@ use thiserror::Error;
 
 use crate::durable::{
     AdvanceReceipt, AgentInvocationId, BoundaryState, CapabilityRef, ContainmentObservation,
-    InvocationRoute, RunAdvance, RunLease, StopCause, StopReceipt, Wait, WaitOn,
+    InvocationRoute, RunAdvance, RunContext, StopCause, StopReceipt, Wait, WaitOn,
 };
 use crate::engine::config::parse_agent;
 use crate::harness::Harness;
@@ -307,8 +307,13 @@ pub(crate) enum RunRouteRecoveryError {
 /// containment or effect judgment from its caller.
 #[derive(Debug)]
 pub(crate) enum RecoverySettlement {
-    RecoveryRun { lease: RunLease, route: ExactRoute },
-    AwaitCapability { wait: Wait },
+    RecoveryRun {
+        lease: RunContext,
+        route: ExactRoute,
+    },
+    AwaitCapability {
+        wait: Wait,
+    },
 }
 
 #[derive(Debug)]
@@ -331,7 +336,7 @@ pub(crate) struct StoppedInvocation {
 /// the pure same-provider-before-backup policy.
 pub(crate) async fn plan_run_route_recovery(
     store: &SharedStore,
-    lease: &RunLease,
+    lease: &RunContext,
     backup_agent: Option<&str>,
 ) -> Result<RecoveryChoice, RunRouteRecoveryError> {
     let mut invocation_generations = Vec::new();
@@ -548,7 +553,7 @@ fn auth_provider(agent: &AgentRoute) -> Option<Provider> {
 /// stopped the provider process and committed to exiting the old containment.
 pub(crate) async fn settle_route_recovery(
     store: &SharedStore,
-    lease: &RunLease,
+    lease: &RunContext,
     stopped: StoppedInvocation,
     choice: RecoveryChoice,
 ) -> Result<RecoverySettlement, RunRouteRecoveryError> {
@@ -596,7 +601,7 @@ pub(crate) async fn settle_route_recovery(
 /// exists, so a caller cannot allocate a Recovery Run through this seam.
 pub(crate) async fn stop_invocation_for_recovery(
     store: &SharedStore,
-    lease: &RunLease,
+    lease: &RunContext,
     invocation_id: &AgentInvocationId,
     harness: &mut dyn Harness,
 ) -> Result<RecoveryStopOutcome, RunRouteRecoveryError> {
@@ -779,14 +784,14 @@ mod tests {
         store: &SharedStore,
         work: &WorkRef,
         route: &ExactRoute,
-    ) -> (RunLease, AgentInvocation) {
+    ) -> (RunContext, AgentInvocation) {
         let (_run, lease) = store.reserve_run(work, RunTrigger::User).await.unwrap();
         start_run(store, &lease, route).await;
         let invocation = append_invocation(store, &lease, route).await;
         (lease, invocation)
     }
 
-    async fn start_run(store: &SharedStore, lease: &RunLease, route: &ExactRoute) {
+    async fn start_run(store: &SharedStore, lease: &RunContext, route: &ExactRoute) {
         store
             .advance_run(
                 lease,
@@ -803,7 +808,7 @@ mod tests {
 
     async fn append_invocation(
         store: &SharedStore,
-        lease: &RunLease,
+        lease: &RunContext,
         route: &ExactRoute,
     ) -> AgentInvocation {
         let receipt = store
@@ -1134,7 +1139,7 @@ mod tests {
             store.current_run(&work).await.unwrap().unwrap().state,
             RunState::Stopping
         );
-        assert!(store.validate_run_lease(&lease).await.is_err());
+        assert!(store.validate_run_context(&lease).await.is_err());
         assert!(store
             .advance_run(
                 &lease,
@@ -1201,7 +1206,7 @@ mod tests {
                 .retry_of,
             Some(run_id.clone())
         );
-        assert!(store.validate_run_lease(&first_lease).await.is_err());
+        assert!(store.validate_run_context(&first_lease).await.is_err());
         start_run(&store, &second_lease, &second_route).await;
         let second = append_invocation(&store, &second_lease, &second_route).await;
 
@@ -1232,7 +1237,7 @@ mod tests {
             store.run_by_id(&third_lease.run_id).await.unwrap().retry_of,
             Some(second_lease.run_id.clone())
         );
-        assert!(store.validate_run_lease(&second_lease).await.is_err());
+        assert!(store.validate_run_context(&second_lease).await.is_err());
         start_run(&store, &third_lease, &third_route).await;
         let third = append_invocation(&store, &third_lease, &third_route).await;
 

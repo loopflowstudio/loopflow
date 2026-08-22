@@ -57,11 +57,8 @@ pub struct CiIncidentDto {
     pub provider_completed_at: Option<String>,
     pub observed_at: String,
     pub observer: String,
-    /// The durable `ci-fix` wake this failure enqueued. `None` only before a wake
-    /// is linked — an incident holding `responded_at` without one means a body was
-    /// woken by something outside the ledger, which is the bypass this path
-    /// exists to prevent.
-    pub claimed_run_id: Option<String>,
+    pub landing_id: Option<String>,
+    pub claimed_landing_generation: Option<u64>,
     pub responded_at: Option<String>,
     pub green_at: Option<String>,
     pub merged_at: Option<String>,
@@ -105,10 +102,10 @@ fn build_report(
     wave: Option<&str>,
     repo: Option<&str>,
 ) -> Result<CiReportDto> {
-    let mut by_pr: BTreeMap<String, Vec<(OffsetDateTime, String)>> = BTreeMap::new();
+    let mut by_pr: BTreeMap<(String, u32), Vec<(OffsetDateTime, String)>> = BTreeMap::new();
     for row in &rows {
         by_pr
-            .entry(row.incident.pr_id.to_string())
+            .entry((row.incident.repo.clone(), row.incident.pr_number))
             .or_default()
             .push((row.incident.created_at, row.incident.identity.clone()));
     }
@@ -118,7 +115,7 @@ fn build_report(
 
     let mut incidents = Vec::with_capacity(rows.len());
     for row in rows {
-        let attempts = &by_pr[&row.incident.pr_id.to_string()];
+        let attempts = &by_pr[&(row.incident.repo.clone(), row.incident.pr_number)];
         let attempt = attempts
             .iter()
             .position(|(_, identity)| identity == &row.incident.identity)
@@ -163,9 +160,9 @@ fn incident_dto(
     Ok(CiIncidentDto {
         identity: incident.identity,
         repo: incident.repo,
-        wave: row.wave,
-        task: row.task,
-        task_status: row.task_status,
+        wave: row.wave.unwrap_or_else(|| "—".to_string()),
+        task: row.task.unwrap_or_else(|| "direct".to_string()),
+        task_status: row.task_status.unwrap_or_else(|| "landing".to_string()),
         pr_number: incident.pr_number,
         attempt,
         fixes_for_pr,
@@ -178,10 +175,11 @@ fn incident_dto(
             .transpose()?,
         observed_at: format_time(observed_at)?,
         observer: observer.to_string(),
-        claimed_run_id: incident
-            .claimed_run_id
+        landing_id: incident
+            .landing_id
             .as_ref()
             .map(|id| id.as_str().to_string()),
+        claimed_landing_generation: incident.claimed_landing_generation,
         responded_at: incident.responded_at.map(format_time).transpose()?,
         green_at: incident.green_at.map(format_time).transpose()?,
         merged_at: incident.merged_at.map(format_time).transpose()?,
@@ -193,7 +191,7 @@ fn incident_dto(
         response_seconds: elapsed(Some(observed_at), incident.responded_at),
         green_seconds: elapsed(Some(failure_at), incident.green_at),
         merge_seconds: elapsed(Some(failure_at), incident.merged_at),
-        task_cycle_seconds: elapsed(Some(row.task_started_at), incident.merged_at),
+        task_cycle_seconds: elapsed(row.task_started_at, incident.merged_at),
     })
 }
 
@@ -228,7 +226,8 @@ fn summarize(incidents: &[CiIncidentDto]) -> CiSummaryDto {
             .iter()
             .filter(|incident| {
                 matches!(incident.outcome.as_str(), "green" | "merged")
-                    && incident.claimed_run_id.is_some()
+                    && incident.landing_id.is_some()
+                    && incident.claimed_landing_generation.is_some()
                     && incident.responded_at.is_some()
                     && !incident.human_assisted
             })
@@ -338,7 +337,7 @@ mod tests {
     use super::{parse_since, percentile, summarize, CiIncidentDto};
     use time::OffsetDateTime;
 
-    fn green_incident(trigger: Option<&str>, responded: Option<&str>) -> CiIncidentDto {
+    fn green_incident(landing: Option<&str>, responded: Option<&str>) -> CiIncidentDto {
         CiIncidentDto {
             identity: "github:ci:loopflow:1034".to_string(),
             repo: "loopflow".to_string(),
@@ -354,7 +353,8 @@ mod tests {
             provider_completed_at: None,
             observed_at: "2026-07-16T00:00:00Z".to_string(),
             observer: "poll".to_string(),
-            claimed_run_id: trigger.map(str::to_string),
+            landing_id: landing.map(str::to_string),
+            claimed_landing_generation: landing.map(|_| 1),
             responded_at: responded.map(str::to_string),
             green_at: Some("2026-07-16T00:10:00Z".to_string()),
             merged_at: None,
@@ -395,9 +395,8 @@ mod tests {
     }
 
     /// The first row is PR #1034: a normal Task body pushed the fix, so no `ci-fix`
-    /// wake owned the repair. The second is a green answered by something outside
-    /// the ledger, and it is what pins the `claimed_run_id` clause — #1034 alone
-    /// is excluded by the `responded_at` clause too, so it would pass without it.
+    /// landing owned the repair. The second is a green answered by something
+    /// outside the ledger and pins the landing-generation clause.
     #[test]
     fn an_untriggered_green_is_not_autonomous() {
         let summary = summarize(&[

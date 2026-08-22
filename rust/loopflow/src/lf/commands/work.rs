@@ -3,8 +3,8 @@ use serde::Serialize;
 use std::path::Path;
 
 use crate::durable::{
-    AuthenticatedRequest, ControlCtx, EpochReceipt, InterruptReceipt, Placement, ProjectId, Run,
-    SteerReceipt, TaskId, WorkRef, WorkStatus,
+    EpochReceipt, InterruptReceipt, Placement, ProjectId, Run, SteerReceipt, TaskId, WorkRef,
+    WorkStatus,
 };
 use crate::id::WaveId;
 use crate::lf::WorkCommand;
@@ -101,17 +101,12 @@ async fn run_async(command: &WorkCommand, repo: &Path) -> anyhow::Result<()> {
             json,
         } => {
             let work = parse_work(kind, id)?;
-            let lease = crate::ops::ambient_run_lease(&store).await?;
+            let lease = crate::ops::ambient_run_context(&store).await?;
             require_work_repository(&store, &work, repo).await?;
             let receipt = if let Some(lease) = lease {
-                store
-                    .steer(&ControlCtx::Run(&lease), &work, message, None)
-                    .await?
+                store.steer(Some(&lease), &work, message, None).await?
             } else {
-                let request = AuthenticatedRequest::cli();
-                store
-                    .steer(&ControlCtx::User(&request), &work, message, None)
-                    .await?
+                store.steer(None, &work, message, None).await?
             };
             print_receipt(&WorkReceipt::Steer(receipt), *json)?;
         }
@@ -130,15 +125,10 @@ async fn run_async(command: &WorkCommand, repo: &Path) -> anyhow::Result<()> {
                 .current_run(&work)
                 .await?
                 .ok_or_else(|| anyhow!("{} {} has no active Run", work.kind(), work.id()))?;
-            let receipt = if let Some(lease) = crate::ops::ambient_run_lease(&store).await? {
-                store
-                    .interrupt(&ControlCtx::Run(&lease), &work, &run.id)
-                    .await?
+            let receipt = if let Some(lease) = crate::ops::ambient_run_context(&store).await? {
+                store.interrupt(Some(&lease), &work, &run.id).await?
             } else {
-                let request = AuthenticatedRequest::cli();
-                store
-                    .interrupt(&ControlCtx::User(&request), &work, &run.id)
-                    .await?
+                store.interrupt(None, &work, &run.id).await?
             };
             print_receipt(&WorkReceipt::Interrupted(receipt), *json)?;
         }
@@ -150,7 +140,7 @@ async fn run_async(command: &WorkCommand, repo: &Path) -> anyhow::Result<()> {
         } => {
             let work = parse_work(kind, id)?;
             require_work_repository(&store, &work, repo).await?;
-            if crate::ops::ambient_run_lease(&store).await?.is_some() {
+            if crate::ops::ambient_run_context(&store).await?.is_some() {
                 return Err(anyhow!(
                     "Run callers cannot abandon Work; use the authenticated User surface"
                 ));

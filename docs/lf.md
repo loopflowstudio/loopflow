@@ -406,8 +406,8 @@ lf ask cancel ask_... "Withdrawn" [--json]       # requester/User cancellation
 ```
 
 Ask Invocations start in the origin Run's captured cwd. An intervention
-Invocation receives no Run lease; a human flow-step Invocation also receives
-the active step's fenced writer lease so it runs the actual authored skill.
+Invocation receives no Run context; a human flow-step Invocation also receives
+the active step's Run id so it runs the actual authored skill.
 The explicit id selects the Ask; the ambient AgentInvocation id authorizes the
 mutation and must be that Ask's active Invocation. A clean exit, Ctrl-D,
 exiting Ctrl-C, TERM, HUP, or proven local
@@ -755,7 +755,7 @@ lf npx/explain-code                # already-cached skill (no network)
 
 ## PR Operations
 
-The publish/submit/land contract every launched agent receives is
+The publish/submit/arm/land contract every launched agent receives is
 `rust/loopflow/src/engine/builtins/LOOPFLOW.md` — that file is canonical for
 agent-facing semantics; this section is the human reference.
 
@@ -777,14 +777,14 @@ consumes it and removes the gate-owned copy/review files before its first
 commit or push. Other `scratch/` state remains untouched. Publication never
 fetches to integrate, rebases, rewrites Task stack metadata, or launches
 conflict recovery. A PR may remain behind its base until `lf rebase`, `lf gate`,
-`lf pr submit`, or `lf pr land` owns integration. Push or GitHub failure returns
+`lf pr submit`, `lf pr arm`, or `lf pr land` owns integration. Push or GitHub failure returns
 an error and presents nothing.
 
 ### lf pr open
 
 Publish (same as `lf pr publish`), then open the PR for review — the GitHub
 page in the browser. The explicit, human-initiated review action; agents use
-`publish`, `submit`, or `land`. If launching the browser fails, only `open`
+`publish`, `submit`, `arm`, or `land`. If launching the browser fails, only `open`
 fails — the PR is already published and its URL printed.
 
 ### lf pr submit
@@ -800,9 +800,24 @@ On Task PRs, submit records one User merge request containing the exact head
 and Continue/Complete disposition. A later Task resume or head-changing
 Loopflow operation clears it.
 
+### lf pr arm
+
+Prepare the exact PR head, request auto-merge, and return without watching.
+
+```bash
+lf pr arm
+lf pr arm -c
+lf pr arm --next parser-proof
+```
+
+Task disposition is recorded for the exact armed head, but completion and
+rotation wait for a later authoritative merged observation.
+
 ### lf pr land
 
-Arm auto-merge. GitHub merges when required checks and repository rules pass.
+Prepare and arm the PR, then watch GitHub until merged or actionably blocked.
+Failing required checks launch one bounded repair for the exact failed head;
+material repairs are published and re-armed before watching resumes.
 
 ```bash
 lf pr land                    # land one PR; the Task stays open
@@ -810,10 +825,12 @@ lf pr land -c                 # land, then complete the owning Task
 lf pr land --next parser-proof  # name the next serial Task PR
 ```
 
-On Task PRs, land records the same head-and-disposition request with Auto as
-the operator. `--match-head-commit` fences the arming command; Loopflow revokes
-Auto before its own later head mutation. Concurrent Loopflow finalization and
-push commands in one worktree are refused rather than interleaved.
+On Task PRs, arm and land record the same head-and-disposition request with Auto
+as the operator. `--match-head-commit` fences the arming command; Loopflow
+revokes Auto before its own later head mutation. Land applies completion or
+rotation only after GitHub reports the PR merged. Concurrent Loopflow
+finalization and push commands in one worktree are refused rather than
+interleaved.
 
 Task publication persists a non-empty reviewer-facing title and body for the
 current head. A published PR with missing or stale copy remains actionable, as
@@ -843,7 +860,7 @@ provably empty unpublished successor, `lf pr land -c` completes over the merged
 PR without creating another one. Earlier lifecycle phases still refuse the
 empty range.
 
-Submit and land clear `scratch/`, preserve a recovery ref, collapse the
+Submit, arm, and land clear `scratch/`, preserve a recovery ref, collapse the
 authored range to one tree-identical commit, replay that commit onto the pinned
 target, verify it, and push once. Ordinary `lf rebase` keeps commit history.
 

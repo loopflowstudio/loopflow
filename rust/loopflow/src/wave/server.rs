@@ -303,7 +303,7 @@ struct ServerState {
 #[derive(Debug, Clone)]
 pub(crate) struct WaveRunAttach {
     pub store: crate::store::SharedStore,
-    pub lease: crate::durable::RunLease,
+    pub context: crate::durable::RunContext,
     pub cwd: PathBuf,
 }
 
@@ -477,7 +477,7 @@ async fn resident_attach_handler(
             })?;
         let run = run_attach
             .store
-            .current_run(&run_attach.lease.work)
+            .current_run(&run_attach.context.work)
             .await
             .map_err(|error| (StatusCode::INTERNAL_SERVER_ERROR, error.to_string()))?
             .ok_or_else(|| {
@@ -490,7 +490,7 @@ async fn resident_attach_handler(
             run_attach
                 .store
                 .advance_run(
-                    &run_attach.lease,
+                    &run_attach.context,
                     crate::durable::RunAdvance::RunStarting {
                         containment: crate::durable::Containment::ProcessGroup {
                             id: i64::from(process_group),

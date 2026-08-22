@@ -59,7 +59,7 @@ use tokio::sync::mpsc;
 use tokio::time::Instant;
 
 use crate::chat::types::{ConversationEvent, Lifecycle};
-use crate::durable::{RunLease, WorkRef};
+use crate::durable::{RunContext, WorkRef};
 use crate::engine::flow::{available_flow_names, load_goal, render_goal, GoalRenderContext};
 use crate::engine::wave_config::{read_wave_config, WaveCronDef};
 use crate::harness::{default_create_harness, ApprovalPolicy, Harness, SendCurrentOutcome};
@@ -300,7 +300,7 @@ async fn wave_metric_context(
         };
         let wave = match control {
             Some(control) => {
-                let WorkRef::Wave(wave_id) = &control.lease.work else {
+                let WorkRef::Wave(wave_id) = &control.context.work else {
                     return Err(anyhow!("ambient Wave Run does not carry a Wave identity"));
                 };
                 store
@@ -513,21 +513,21 @@ pub async fn run_loop(
 
 struct WaveControl {
     store: Arc<Store>,
-    lease: RunLease,
+    context: RunContext,
 }
 
 async fn wave_control(wave: &str) -> Result<Option<WaveControl>> {
-    if std::env::var_os(crate::durable::RUN_LEASE_ENV).is_none()
+    if std::env::var_os(crate::durable::RUN_ID_ENV).is_none()
         && std::env::var_os(crate::durable::RUN_CONTEXT_ENV).is_none()
     {
         return Ok(None);
     }
     let store = Arc::new(open_store(&storage_config_from_env()?).await?);
-    let lease = crate::ops::required_run_lease(&store).await?;
-    let WorkRef::Wave(wave_id) = &lease.work else {
+    let context = crate::ops::required_run_context(&store).await?;
+    let WorkRef::Wave(wave_id) = &context.work else {
         return Err(anyhow!(
             "ambient Run {} does not own Wave Work",
-            lease.run_id
+            context.run_id
         ));
     };
     let registered = store
@@ -537,11 +537,11 @@ async fn wave_control(wave: &str) -> Result<Option<WaveControl>> {
     if registered.name() != wave {
         return Err(anyhow!(
             "ambient Run {} owns Wave '{}', not '{wave}'",
-            lease.run_id,
+            context.run_id,
             registered.name()
         ));
     }
-    Ok(Some(WaveControl { store, lease }))
+    Ok(Some(WaveControl { store, context }))
 }
 
 #[allow(clippy::too_many_arguments)]
@@ -556,7 +556,7 @@ async fn run_loop_with(
     control: Option<WaveControl>,
 ) -> Result<()> {
     let ask_lane = control.as_ref().map(|control| {
-        crate::ops::ask::AskLane::new(control.lease.work.clone(), control.lease.clone())
+        crate::ops::ask::AskLane::new(control.context.work.clone(), control.context.clone())
     });
     let mut wave_loop = WaveLoop {
         client,
@@ -775,16 +775,16 @@ impl WaveLoop {
         let Some(control) = &self.control else {
             return Ok((None, None));
         };
-        let epoch = control.store.current_epoch(&control.lease.work).await?;
+        let epoch = control.store.current_epoch(&control.context.work).await?;
         let mut run = control
             .store
-            .current_run(&control.lease.work)
+            .current_run(&control.context.work)
             .await?
             .ok_or_else(|| anyhow!("Wave Run authority disappeared before Invocation"))?;
-        if run.id != control.lease.run_id {
+        if run.id != control.context.run_id {
             anyhow::bail!(
                 "Wave Run {} was replaced before Invocation by {}",
-                control.lease.run_id,
+                control.context.run_id,
                 run.id
             );
         }
@@ -794,7 +794,7 @@ impl WaveLoop {
             let receipt = control
                 .store
                 .advance_run(
-                    &control.lease,
+                    &control.context,
                     crate::durable::RunAdvance::RunStarting {
                         containment: crate::durable::Containment::ProcessGroup {
                             id: i64::from(process_group),
@@ -811,7 +811,7 @@ impl WaveLoop {
         let receipt = control
             .store
             .advance_run(
-                &control.lease,
+                &control.context,
                 crate::durable::RunAdvance::InvocationStarting {
                     route: crate::durable::InvocationRoute {
                         provider: provider.to_string(),

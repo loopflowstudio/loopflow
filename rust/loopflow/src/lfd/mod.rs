@@ -21,6 +21,7 @@
 //!   │ /status          → wave count + delivery count │
 //!   │ /waves/start     → local capability → start    │
 //!   │ /waves/stop      → local capability → stop     │
+//!   │ /landings/claim  → claim watched PR generation │
 //!   │ /linear/webhook  → verify → inbox → ingest     │
 //!   │ /github/webhook  → verify → prune worktree     │
 //!   └────────────────────────────────────────────────┘
@@ -58,6 +59,9 @@ use crate::engine::worktrees::{
 };
 use crate::harness::opencode_runtime::reap_orphaned_opencode_servers_at;
 use crate::id::WaveId;
+use crate::pr_landing::{
+    LandingClaim, LandingPlacement, PrLanding, PrLandingId, SUPERVISOR_STALE_AFTER,
+};
 use crate::repository::RepoId;
 use crate::store::provider_deliveries::{DeliveryCompletion, DeliveryEventKind, DeliveryStatus};
 use crate::store::Store;
@@ -72,6 +76,8 @@ const GITHUB_SIGNATURE_HEADER: &str = "x-hub-signature-256";
 const GITHUB_EVENT_HEADER: &str = "x-github-event";
 const ABANDONED_LOG_AGE: Duration = Duration::from_secs(24 * 60 * 60);
 const STARTUP_TIMEOUT: Duration = Duration::from_secs(10);
+const LANDING_CLAIM_TIMEOUT: Duration = Duration::from_secs(2);
+const LANDING_RECOVERY_INTERVAL: Duration = Duration::from_secs(30);
 
 #[derive(Debug, Clone)]
 pub struct StartupSignal {
@@ -175,6 +181,7 @@ pub fn router(state: LfdState) -> Router {
         .route("/waves/start", post(start_waves_handler))
         .route("/waves/reconcile", post(reconcile_waves_handler))
         .route("/waves/stop", post(stop_wave_handler))
+        .route("/landings/claim", post(claim_landing_handler))
         .route(
             "/linear/webhook",
             post(webhook_handler).layer(DefaultBodyLimit::max(WEBHOOK_BODY_LIMIT)),
@@ -286,6 +293,113 @@ fn authorize_wave_control(
             StatusCode::UNAUTHORIZED,
             "Wave control requires the local lfd capability".to_string(),
         ))
+    }
+}
+
+#[derive(Debug, Serialize, Deserialize)]
+struct ClaimLandingRequest {
+    landing_id: PrLandingId,
+    generation: u64,
+}
+
+async fn claim_landing_handler(
+    State(state): State<LfdState>,
+    headers: HeaderMap,
+    Json(request): Json<ClaimLandingRequest>,
+) -> Result<StatusCode, (StatusCode, String)> {
+    authorize_wave_control(&state, &headers)?;
+    let now = OffsetDateTime::now_utc();
+    let claim = LandingClaim {
+        placement: LandingPlacement::Home {
+            home_id: state.wave_host.home_id().clone(),
+        },
+        process_id: std::process::id(),
+        heartbeat_at: now,
+    };
+    let claimed = state
+        .store
+        .claim_pr_landing(
+            &request.landing_id,
+            request.generation,
+            &claim,
+            now - SUPERVISOR_STALE_AFTER,
+        )
+        .await
+        .map_err(|error| (StatusCode::INTERNAL_SERVER_ERROR, error.to_string()))?;
+    let Some(claimed) = claimed else {
+        return Ok(StatusCode::CONFLICT);
+    };
+    spawn_claimed_landing(state.store.clone(), claimed);
+    Ok(StatusCode::ACCEPTED)
+}
+
+fn spawn_claimed_landing(store: Arc<Store>, landing: PrLanding) {
+    tokio::spawn(async move {
+        let driver = crate::ops::pr_landing::github_landing_driver();
+        if let Err(error) = crate::ops::supervise_pr_landing(
+            store,
+            landing.clone(),
+            driver,
+            Duration::from_secs(30),
+        )
+        .await
+        {
+            tracing::warn!(landing = %landing.id, %error, "watched PR landing stopped");
+        }
+    });
+}
+
+async fn claim_recoverable_pr_landings(state: &LfdState, now: OffsetDateTime) -> Vec<PrLanding> {
+    let recoverable = match state
+        .store
+        .recoverable_pr_landings(now - SUPERVISOR_STALE_AFTER)
+        .await
+    {
+        Ok(landings) => landings,
+        Err(error) => {
+            tracing::warn!(%error, "could not scan watched PR landings");
+            return Vec::new();
+        }
+    };
+    let mut claimed = Vec::new();
+    for landing in recoverable {
+        let claim = LandingClaim {
+            placement: LandingPlacement::Home {
+                home_id: state.wave_host.home_id().clone(),
+            },
+            process_id: std::process::id(),
+            heartbeat_at: now,
+        };
+        match state
+            .store
+            .claim_pr_landing(
+                &landing.id,
+                landing.generation,
+                &claim,
+                now - SUPERVISOR_STALE_AFTER,
+            )
+            .await
+        {
+            Ok(Some(landing)) => claimed.push(landing),
+            Ok(None) => {}
+            Err(error) => {
+                tracing::warn!(landing = %landing.id, %error, "could not recover watched PR landing")
+            }
+        }
+    }
+    claimed
+}
+
+async fn recover_pr_landings(state: &LfdState) {
+    for landing in claim_recoverable_pr_landings(state, OffsetDateTime::now_utc()).await {
+        spawn_claimed_landing(state.store.clone(), landing);
+    }
+}
+
+async fn recover_pr_landings_forever(state: LfdState) {
+    loop {
+        recover_pr_landings(&state).await;
+        tokio::time::sleep(LANDING_RECOVERY_INTERVAL).await;
     }
 }
 
@@ -1089,6 +1203,8 @@ pub async fn serve(
     }
     let subscription_state = state.clone();
     tokio::spawn(async move { ensure_github_subscriptions(&subscription_state).await });
+    let landing_state = state.clone();
+    tokio::spawn(recover_pr_landings_forever(landing_state));
     tracing::info!(addr = %bound, home_id = %wave_host.home_id(), "lfd serving");
     let result = axum::serve(listener, router(state).into_make_service())
         .with_graceful_shutdown(shutdown_signal())
@@ -1248,6 +1364,34 @@ pub(crate) async fn start_waves(
             "lfd refused Wave start with HTTP {status}: {}",
             response.text().await.unwrap_or_default()
         ))
+    }
+}
+
+pub(crate) async fn claim_pr_landing(
+    home_id: &HomeId,
+    landing_id: &PrLandingId,
+    generation: u64,
+) -> anyhow::Result<bool> {
+    let Some(client) = live_endpoint(home_id).await else {
+        return Ok(false);
+    };
+    let response = reqwest::Client::new()
+        .post(format!("http://{}/landings/claim", client.endpoint))
+        .bearer_auth(&client.token)
+        .json(&ClaimLandingRequest {
+            landing_id: landing_id.clone(),
+            generation,
+        })
+        .timeout(LANDING_CLAIM_TIMEOUT)
+        .send()
+        .await?;
+    match response.status() {
+        StatusCode::ACCEPTED => Ok(true),
+        StatusCode::CONFLICT | StatusCode::NOT_FOUND => Ok(false),
+        status => Err(anyhow::anyhow!(
+            "lfd refused landing claim with HTTP {status}: {}",
+            response.text().await.unwrap_or_default()
+        )),
     }
 }
 
@@ -1697,6 +1841,31 @@ mod tests {
         assert_eq!(turn_status, "partial");
     }
 
+    async fn open_landing_store(dir: &Path) -> Arc<Store> {
+        let path = dir.join("registry.db");
+        drop(open_store(dir).await);
+        let connection = rusqlite::Connection::open(&path).unwrap();
+        let migrated = connection
+            .query_row(
+                "SELECT EXISTS(SELECT 1 FROM sqlite_master WHERE type='table' AND name='pr_landings')",
+                [],
+                |row| row.get::<_, bool>(0),
+            )
+            .unwrap();
+        if !migrated {
+            connection
+                .execute_batch(&crate::store::migrations::migration_sql_for_test(
+                    "pr_landings",
+                ))
+                .unwrap();
+        }
+        Arc::new(
+            crate::store::open_store(&StorageConfig::sqlite(path))
+                .await
+                .unwrap(),
+        )
+    }
+
     #[tokio::test]
     async fn health_returns_ok() {
         let repo = tempfile::tempdir().unwrap();
@@ -1721,6 +1890,63 @@ mod tests {
         assert_eq!(
             body["migration_frontier"],
             crate::store::migrations::latest_known_version()
+        );
+    }
+
+    #[tokio::test]
+    async fn home_recovery_never_steals_a_live_landing_and_fences_a_stale_one() {
+        let repo = tempfile::tempdir().unwrap();
+        let store = open_landing_store(repo.path()).await;
+        let state = make_state(repo.path(), store.clone(), None).await;
+        let now = OffsetDateTime::now_utc();
+        let candidate = crate::pr_landing::PrLanding::new(
+            crate::pr_landing::NewPrLanding {
+                repo: "loopflowstudio/loopflow".to_string(),
+                pr_number: 248,
+                worktree: repo.path().to_path_buf(),
+                branch: "jack/watched-landing".to_string(),
+                task_id: None,
+                requested_head_sha: "head-a".to_string(),
+                after_merge: None,
+                next_slug: None,
+            },
+            now,
+        )
+        .unwrap();
+        let landing = store.start_or_join_pr_landing(&candidate).await.unwrap();
+        let local = store
+            .claim_pr_landing(
+                &landing.id,
+                landing.generation,
+                &LandingClaim {
+                    placement: LandingPlacement::Local,
+                    process_id: 41,
+                    heartbeat_at: now,
+                },
+                now - SUPERVISOR_STALE_AFTER,
+            )
+            .await
+            .unwrap()
+            .unwrap();
+
+        assert!(
+            claim_recoverable_pr_landings(&state, now + time::Duration::minutes(1))
+                .await
+                .is_empty()
+        );
+
+        let recovered =
+            claim_recoverable_pr_landings(&state, now + time::Duration::minutes(3)).await;
+        assert_eq!(recovered.len(), 1);
+        assert_eq!(recovered[0].generation, local.generation + 1);
+        assert_eq!(
+            recovered[0]
+                .supervisor
+                .as_ref()
+                .map(|owner| &owner.placement),
+            Some(&LandingPlacement::Home {
+                home_id: state.wave_host.home_id().clone(),
+            })
         );
     }
 

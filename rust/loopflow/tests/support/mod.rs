@@ -14,12 +14,11 @@ use loopflow::wave::Wave;
 use tempfile::TempDir;
 use time::OffsetDateTime;
 
-/// Ambient authority a live agent process exports. Tests must never inherit the
+/// Ambient execution identity a live agent process exports. Tests must never inherit the
 /// real Run that invoked the suite.
-const AMBIENT_AGENT_ENV: [&str; 7] = [
+const AMBIENT_AGENT_ENV: [&str; 6] = [
     "LF_RUN_CONTEXT",
     "LF_RUN_ID",
-    "LF_RUN_LEASE",
     "LF_AGENT_INVOCATION_ID",
     "LF_WAVE_ID",
     "LF_ACCOUNT_LEASE",
@@ -120,7 +119,7 @@ pub struct EnvGuard {
     previous_db_path: Option<OsString>,
     previous_control_home: Option<OsString>,
     previous_control_db_path: Option<OsString>,
-    previous_ambient_authority: Vec<(&'static str, Option<OsString>)>,
+    previous_ambient_context: Vec<(&'static str, Option<OsString>)>,
     _bin: TempDir,
     _lf_home: TempDir,
 }
@@ -165,7 +164,7 @@ impl EnvGuard {
         let previous_db_path = env::var_os("LF_DB_PATH");
         let previous_control_home = env::var_os(CONTROL_HOME_ENV);
         let previous_control_db_path = env::var_os(CONTROL_DB_PATH_ENV);
-        let previous_ambient_authority = AMBIENT_AGENT_ENV
+        let previous_ambient_context = AMBIENT_AGENT_ENV
             .iter()
             .map(|name| {
                 let prev = env::var_os(name);
@@ -192,7 +191,7 @@ impl EnvGuard {
             previous_db_path,
             previous_control_home,
             previous_control_db_path,
-            previous_ambient_authority,
+            previous_ambient_context,
             _bin: bin,
             _lf_home: lf_home,
         }
@@ -234,7 +233,7 @@ impl Drop for EnvGuard {
             Some(prev) => env::set_var(CONTROL_DB_PATH_ENV, prev),
             None => env::remove_var(CONTROL_DB_PATH_ENV),
         }
-        for (name, prev) in &self.previous_ambient_authority {
+        for (name, prev) in &self.previous_ambient_context {
             match prev {
                 Some(prev) => env::set_var(name, prev),
                 None => env::remove_var(name),

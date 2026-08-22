@@ -830,7 +830,6 @@ fn release_run_reintegrates_a_dirty_existing_pr() {
     let _env = EnvGuard::new(&[("gh", gh_script.as_str()), ("lf", lf_script)]);
     std::env::set_var("LF_RUN_CONTEXT", "agent");
     std::env::set_var("LF_RUN_ID", "run_stale");
-    std::env::set_var("LF_RUN_LEASE", "stale-lease");
     std::env::set_var("LF_AGENT_INVOCATION_ID", "invocation_stale");
     std::env::set_var("LF_WAVE_ID", "wave_stale");
 

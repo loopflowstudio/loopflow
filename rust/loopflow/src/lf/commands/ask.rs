@@ -4,10 +4,7 @@ use std::process::Command;
 use std::sync::Arc;
 use std::time::Duration;
 
-use crate::durable::{
-    AgentInvocationId, Ask, AskId, AskResult, AskTarget, AuthenticatedRequest, ControlCtx,
-    InvocationSurface,
-};
+use crate::durable::{AgentInvocationId, Ask, AskId, AskResult, AskTarget, InvocationSurface};
 use crate::engine::wave_home::HomeRoute;
 use crate::lf::{AskArgs, AskCommand};
 use crate::store::{open_store, storage_config_from_env, Store};
@@ -97,7 +94,7 @@ async fn create_and_maybe_wait(store: &Arc<Store>, args: &AskArgs) -> anyhow::Re
     if prompt.is_empty() {
         bail!("Ask request cannot be empty");
     }
-    let lease = crate::ops::required_run_lease(store)
+    let lease = crate::ops::required_run_context(store)
         .await
         .map_err(|error| anyhow!(error.to_string()))?;
     let invocation_id = ambient_invocation_id()?;
@@ -122,7 +119,7 @@ async fn wait_command(
     ask_id: Option<&AskId>,
     json: bool,
 ) -> anyhow::Result<()> {
-    let lease = crate::ops::required_run_lease(store)
+    let lease = crate::ops::required_run_context(store)
         .await
         .map_err(|error| anyhow!(error.to_string()))?;
     let invocation_id = if ask_id.is_none() {
@@ -138,7 +135,7 @@ async fn wait_command(
 
 async fn wait_for_terminal(
     store: &Arc<Store>,
-    lease: &crate::durable::RunLease,
+    lease: &crate::durable::RunContext,
     mut ask: Ask,
     json: bool,
 ) -> anyhow::Result<()> {
@@ -158,7 +155,7 @@ async fn wait_for_terminal(
 
 async fn ask_for_wait(
     store: &Arc<Store>,
-    lease: &crate::durable::RunLease,
+    lease: &crate::durable::RunContext,
     invocation_id: Option<&AgentInvocationId>,
     ask_id: Option<&AskId>,
 ) -> anyhow::Result<Ask> {
@@ -222,7 +219,7 @@ async fn list_command(
     all: bool,
 ) -> anyhow::Result<()> {
     if outgoing {
-        let lease = crate::ops::required_run_lease(store)
+        let lease = crate::ops::required_run_context(store)
             .await
             .map_err(|error| anyhow!(error.to_string()))?;
         let asks = store
@@ -252,21 +249,15 @@ async fn list_command(
         return Ok(());
     }
     let attention = if user {
-        let request = AuthenticatedRequest::cli();
-        let attention = crate::ops::ask::pending_attention(
-            store,
-            &ControlCtx::User(&request),
-            &AskTarget::User,
-        )
-        .await?;
+        let attention = crate::ops::ask::pending_attention(store, None, &AskTarget::User).await?;
         scope_attention_to_repo(attention, all)
     } else {
-        let lease = crate::ops::required_run_lease(store)
+        let lease = crate::ops::required_run_context(store)
             .await
             .map_err(|_| anyhow!("parent Ask listing requires an active Run; use `lf ask list --user` for User attention"))?;
         crate::ops::ask::pending_attention(
             store,
-            &ControlCtx::Run(&lease),
+            Some(&lease),
             &AskTarget::Parent(lease.work.clone()),
         )
         .await?
@@ -293,44 +284,13 @@ async fn open_command(
     json: bool,
 ) -> anyhow::Result<()> {
     let ask = store.ask_by_id(ask_id).await?;
-    let ambient = crate::ops::ambient_run_lease(store).await?;
-    let request = AuthenticatedRequest::cli();
-    let surface = match &ask.target {
-        AskTarget::User => {
-            crate::ops::ask::prepare_open(store, &ControlCtx::User(&request), ask_id).await?
-        }
-        AskTarget::Parent(_) => {
-            let lease = ambient.as_ref().ok_or_else(|| {
-                anyhow!("opening a parent Ask requires the active parent Work Run")
-            })?;
-            crate::ops::ask::prepare_open(store, &ControlCtx::Run(lease), ask_id).await?
-        }
-    };
+    let ambient = crate::ops::ambient_run_context(store).await?;
+    let surface = crate::ops::ask::prepare_open(store, ambient.as_ref(), ask_id).await?;
     if !prepare {
         present_in_external_terminal(&surface)?;
-        match &ask.target {
-            AskTarget::User => {
-                store
-                    .mark_presented_by_target(
-                        &ControlCtx::User(&request),
-                        ask_id,
-                        &surface.invocation.id,
-                    )
-                    .await?;
-            }
-            AskTarget::Parent(_) => {
-                let lease = ambient
-                    .as_ref()
-                    .expect("parent Ask open already required an ambient Run");
-                store
-                    .mark_presented_by_target(
-                        &ControlCtx::Run(lease),
-                        ask_id,
-                        &surface.invocation.id,
-                    )
-                    .await?;
-            }
-        }
+        store
+            .mark_presented_by_target(ambient.as_ref(), ask_id, &surface.invocation.id)
+            .await?;
     }
     if json {
         println!("{}", serde_json::to_string_pretty(&surface)?);
@@ -346,24 +306,10 @@ async fn presented_command(
     invocation_id: &AgentInvocationId,
     json: bool,
 ) -> anyhow::Result<()> {
-    let ask = store.ask_by_id(ask_id).await?;
-    let ambient = crate::ops::ambient_run_lease(store).await?;
-    let request = AuthenticatedRequest::cli();
-    let invocation = match &ask.target {
-        AskTarget::User => {
-            store
-                .mark_presented_by_target(&ControlCtx::User(&request), ask_id, invocation_id)
-                .await?
-        }
-        AskTarget::Parent(_) => {
-            let lease = ambient.as_ref().ok_or_else(|| {
-                anyhow!("presenting a parent Ask requires the active parent Work Run")
-            })?;
-            store
-                .mark_presented_by_target(&ControlCtx::Run(lease), ask_id, invocation_id)
-                .await?
-        }
-    };
+    let ambient = crate::ops::ambient_run_context(store).await?;
+    let invocation = store
+        .mark_presented_by_target(ambient.as_ref(), ask_id, invocation_id)
+        .await?;
     if json {
         println!("{}", serde_json::to_string_pretty(&invocation)?);
     }
@@ -408,12 +354,8 @@ async fn escalate_command(store: &Arc<Store>, ask_id: &AskId, json: bool) -> any
     let ask = if let Some(invocation_id) = active_invocation {
         store.escalate_ask(ask_id, invocation_id).await?
     } else {
-        let run = crate::ops::required_run_lease(store)
-            .await
-            .map_err(|error| anyhow!(error.to_string()))?;
-        store
-            .escalate_queued_ask(&ControlCtx::Run(&run), ask_id)
-            .await?
+        let ambient = crate::ops::ambient_run_context(store).await?;
+        store.escalate_queued_ask(ambient.as_ref(), ask_id).await?
     };
     print_ask_receipt(&ask, json)
 }
@@ -424,17 +366,8 @@ async fn cancel_command(
     reason: &str,
     json: bool,
 ) -> anyhow::Result<()> {
-    let current = store.ask_by_id(ask_id).await?;
-    let ambient = crate::ops::ambient_run_lease(store).await?;
-    let request = AuthenticatedRequest::cli();
-    let ask = match (&current.target, ambient.as_ref()) {
-        (AskTarget::User, _) | (_, None) => {
-            crate::ops::ask::cancel(store, &ControlCtx::User(&request), ask_id, reason).await?
-        }
-        (AskTarget::Parent(_), Some(lease)) => {
-            crate::ops::ask::cancel(store, &ControlCtx::Run(lease), ask_id, reason).await?
-        }
-    };
+    let ambient = crate::ops::ambient_run_context(store).await?;
+    let ask = crate::ops::ask::cancel(store, ambient.as_ref(), ask_id, reason).await?;
     publish_comments(store);
     print_ask_receipt(&ask, json)
 }
@@ -826,8 +759,7 @@ mod tests {
 
     use crate::durable::{
         AgentInvocationId, Ask, AskBody, AskId, AskOrigin, AskResult, AskState, AskTarget,
-        AuthenticatedRequest, Containment, ControlCtx, HomeId, InvocationRoute, RunAdvance, RunId,
-        RunTrigger, WorkRef,
+        Containment, HomeId, InvocationRoute, RunAdvance, RunId, RunTrigger, WorkRef,
     };
     use crate::id::WaveId;
     use crate::store::{open_store, StorageConfig};
@@ -1035,10 +967,10 @@ mod tests {
         );
         store.create_wave(&wave).await.unwrap();
         let work = WorkRef::Wave(wave.id().clone());
-        let (_, run_lease) = store.reserve_run(&work, RunTrigger::User).await.unwrap();
+        let (_, run_context) = store.reserve_run(&work, RunTrigger::User).await.unwrap();
         store
             .advance_run(
-                &run_lease,
+                &run_context,
                 RunAdvance::RunStarting {
                     containment: Containment::Tmux {
                         name: "lf-ask-cli".to_string(),
@@ -1050,7 +982,7 @@ mod tests {
             .unwrap();
         let crate::durable::AdvanceReceipt::Invocation(invocation) = store
             .advance_run(
-                &run_lease,
+                &run_context,
                 RunAdvance::InvocationStarting {
                     route: InvocationRoute {
                         provider: "codex".to_string(),
@@ -1069,7 +1001,7 @@ mod tests {
         };
         store
             .advance_run(
-                &run_lease,
+                &run_context,
                 RunAdvance::TurnStarting {
                     invocation_id: invocation.id.clone(),
                 },
@@ -1077,12 +1009,12 @@ mod tests {
             .await
             .unwrap();
         let ask = store
-            .request_intervention(&run_lease, &invocation.id, "Connect the account", true)
+            .request_intervention(&run_context, &invocation.id, "Connect the account", true)
             .await
             .unwrap();
 
         let wait_store = Arc::clone(&store);
-        let wait_lease = run_lease.clone();
+        let wait_lease = run_context.clone();
         let wait_ask = ask.clone();
         let abandoned_wait = tokio::spawn(async move {
             super::wait_for_terminal(&wait_store, &wait_lease, wait_ask, false).await
@@ -1095,19 +1027,15 @@ mod tests {
         );
 
         let wait_store = Arc::clone(&store);
-        let wait_lease = run_lease.clone();
+        let wait_lease = run_context.clone();
         let wait_ask = ask.clone();
         let resumed_wait = tokio::spawn(async move {
             super::wait_for_terminal(&wait_store, &wait_lease, wait_ask, false).await
         });
-        let user = AuthenticatedRequest::cli();
-        let claim = store
-            .claim_test_ask(&ControlCtx::User(&user), &ask.id)
-            .await
-            .unwrap();
+        let claim = store.claim_test_ask(None, &ask.id).await.unwrap();
         assert!(claim.needs_launch);
         let mismatched = store
-            .request_intervention(&run_lease, &invocation.id, "Different Ask", true)
+            .request_intervention(&run_context, &invocation.id, "Different Ask", true)
             .await
             .unwrap();
         let mismatch = store
@@ -1161,10 +1089,7 @@ mod tests {
             store.ask_by_id(&ask.id).await.unwrap().state,
             AskState::Claimed
         );
-        let reopened = store
-            .claim_test_ask(&ControlCtx::User(&user), &ask.id)
-            .await
-            .unwrap();
+        let reopened = store.claim_test_ask(None, &ask.id).await.unwrap();
         assert_eq!(reopened.invocation_id, claim.invocation_id);
         assert!(!reopened.needs_launch);
         assert_eq!(
@@ -1179,7 +1104,7 @@ mod tests {
         );
         let stale_invocation_id = AgentInvocationId::new();
         let stale_error = store
-            .mark_presented_by_target(&ControlCtx::User(&user), &ask.id, &stale_invocation_id)
+            .mark_presented_by_target(None, &ask.id, &stale_invocation_id)
             .await
             .unwrap_err();
         assert!(stale_error.to_string().contains("not"));
@@ -1188,7 +1113,7 @@ mod tests {
             (true, false)
         );
         store
-            .mark_presented_by_target(&ControlCtx::User(&user), &ask.id, &ask_invocation.id)
+            .mark_presented_by_target(None, &ask.id, &ask_invocation.id)
             .await
             .unwrap();
         store
@@ -1204,7 +1129,7 @@ mod tests {
         resumed_wait.await.unwrap().unwrap();
 
         let invocation = store
-            .invocations_for_run(&run_lease.run_id)
+            .invocations_for_run(&run_context.run_id)
             .await
             .unwrap()
             .into_iter()
@@ -1213,13 +1138,10 @@ mod tests {
         assert!(invocation.ended_at.is_none());
 
         let declined = store
-            .request_intervention(&run_lease, &invocation.id, "Unsafe action", true)
+            .request_intervention(&run_context, &invocation.id, "Unsafe action", true)
             .await
             .unwrap();
-        let claim = store
-            .claim_test_ask(&ControlCtx::User(&user), &declined.id)
-            .await
-            .unwrap();
+        let claim = store.claim_test_ask(None, &declined.id).await.unwrap();
         store
             .mark_ask_ready(&declined.id, &claim.invocation_id)
             .await
@@ -1244,11 +1166,11 @@ mod tests {
             .contains("declined"));
 
         let cancelled = store
-            .request_intervention(&run_lease, &invocation.id, "No longer needed", true)
+            .request_intervention(&run_context, &invocation.id, "No longer needed", true)
             .await
             .unwrap();
         let cancelled = store
-            .cancel_ask(&ControlCtx::Run(&run_lease), &cancelled.id, "Withdrawn")
+            .cancel_ask(Some(&run_context), &cancelled.id, "Withdrawn")
             .await
             .unwrap();
         assert!(super::print_terminal_ask(&cancelled, true)

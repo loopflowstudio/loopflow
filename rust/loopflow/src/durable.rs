@@ -7,13 +7,13 @@ use time::OffsetDateTime;
 
 use crate::id::WaveId;
 
-/// The one opaque capability inherited by every command inside an active Run.
-pub const RUN_LEASE_ENV: &str = "LF_RUN_LEASE";
+/// The exact active Run named by an in-Run process.
+pub const RUN_ID_ENV: &str = "LF_RUN_ID";
 
 /// The exact core invocation started for an in-Run agent entrypoint.
 pub const AGENT_INVOCATION_ENV: &str = "LF_AGENT_INVOCATION_ID";
 
-/// Marks a process as an in-Run agent entrypoint even if its capability was
+/// Marks a process as an in-Run agent entrypoint even if its Run id was
 /// accidentally stripped. That case must fail closed rather than become User.
 pub const RUN_CONTEXT_ENV: &str = "LF_RUN_CONTEXT";
 
@@ -210,9 +210,6 @@ pub enum RunTrigger {
     },
     Child {
         work: WorkRef,
-    },
-    CiIncident {
-        incident_id: String,
     },
     Recovery {
         prior_run_id: RunId,
@@ -756,25 +753,12 @@ pub struct ToolResponseReceipt {
     pub responded_at: OffsetDateTime,
 }
 
-/// Authenticated Home-local entrypoint. It is deliberately not serializable.
-#[derive(Debug)]
-pub struct AuthenticatedRequest {
-    _private: (),
-}
-
-impl AuthenticatedRequest {
-    pub(crate) fn cli() -> Self {
-        Self { _private: () }
-    }
-}
-
-/// An already-validated Run capability. Tokens never enter durable DTOs.
+/// The current Run identity and input basis used to fence writes.
 #[derive(Debug, Clone)]
-pub struct RunLease {
+pub struct RunContext {
     pub run_id: RunId,
     pub work: WorkRef,
     pub basis: Basis,
-    _token: RunLeaseToken,
 }
 
 /// Direct lifecycle control observed by the exact active Run.
@@ -788,58 +772,13 @@ pub enum RunControl {
     Abandon { reason: String },
 }
 
-impl RunLease {
-    pub(crate) fn new(run_id: RunId, work: WorkRef, basis: Basis, token: RunLeaseToken) -> Self {
+impl RunContext {
+    pub(crate) fn new(run_id: RunId, work: WorkRef, basis: Basis) -> Self {
         Self {
             run_id,
             work,
             basis,
-            _token: token,
         }
-    }
-
-    pub(crate) fn token_hash(&self) -> String {
-        self._token.hash()
-    }
-
-    pub(crate) fn env_value(&self) -> &str {
-        self._token.env_value()
-    }
-}
-
-/// Opaque capability for the one active Run. It is never serialized or shown.
-#[derive(Clone, PartialEq, Eq)]
-pub(crate) struct RunLeaseToken(String);
-
-impl RunLeaseToken {
-    pub(crate) fn new() -> Self {
-        Self(format!("rl_{}", uuid::Uuid::new_v4().simple()))
-    }
-
-    pub(crate) fn parse(value: &str) -> Result<Self, DurableDataError> {
-        let value = value.trim();
-        let suffix = value
-            .strip_prefix("rl_")
-            .ok_or_else(|| DurableDataError::InvalidId("expected opaque Run lease".to_string()))?;
-        uuid::Uuid::parse_str(suffix)
-            .map_err(|error| DurableDataError::InvalidId(error.to_string()))?;
-        Ok(Self(value.to_string()))
-    }
-
-    pub(crate) fn env_value(&self) -> &str {
-        &self.0
-    }
-
-    pub(crate) fn hash(&self) -> String {
-        use sha2::{Digest, Sha256};
-
-        format!("{:x}", Sha256::digest(self.0.as_bytes()))
-    }
-}
-
-impl std::fmt::Debug for RunLeaseToken {
-    fn fmt(&self, formatter: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
-        formatter.write_str("RunLeaseToken([REDACTED])")
     }
 }
 
@@ -993,12 +932,6 @@ pub struct InterruptReceipt {
 #[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
 pub struct EpochReceipt {
     pub epoch: Epoch,
-}
-
-#[derive(Debug)]
-pub enum ControlCtx<'a> {
-    User(&'a AuthenticatedRequest),
-    Run(&'a RunLease),
 }
 
 #[cfg(test)]

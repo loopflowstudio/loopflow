@@ -174,7 +174,7 @@ fn lf_command(home: &Path, repo: &Path, args: &[&str]) -> std::process::Output {
         .env_remove("LF_CONTROL_HOME")
         .env_remove("LF_CONTROL_DB_PATH")
         .env_remove("LF_RUN_CONTEXT")
-        .env_remove("LF_RUN_LEASE")
+        .env_remove("LF_RUN_ID")
         .env_remove("LF_AGENT_INVOCATION_ID")
         .env_remove("LF_ACCOUNT_LEASE")
         .output()

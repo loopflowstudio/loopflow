@@ -10,7 +10,7 @@ use crate::lf::{Cli, Commands, PrCommand, ReleaseCommand};
 use crate::ops::error::{OpsError, OpsResult};
 use crate::ops::progress::Progress;
 use crate::ops::{
-    abandon_branch, commit_workflow, create_or_update_pr, land, rebase_with_recovery, release_bump,
+    abandon_branch, arm, commit_workflow, create_or_update_pr, rebase_with_recovery, release_bump,
     release_check, release_notes, release_publish, release_run, release_status, release_tag,
     submit, AbandonOptions, CommitOptions, LandOptions, PrOptions, RebaseOptions,
 };
@@ -170,7 +170,7 @@ fn persist_metric_observations(
 
 fn execute_pr(repo: &Path, cmd: PrCommand, progress: &impl Progress) -> OpsResult<()> {
     match cmd {
-        PrCommand::Land {
+        PrCommand::Arm {
             strict,
             local,
             complete,
@@ -180,7 +180,7 @@ fn execute_pr(repo: &Path, cmd: PrCommand, progress: &impl Progress) -> OpsResul
             title,
             body,
         } => {
-            land(
+            arm(
                 repo,
                 &LandOptions {
                     strict,
@@ -196,6 +196,34 @@ fn execute_pr(repo: &Path, cmd: PrCommand, progress: &impl Progress) -> OpsResul
                 },
                 progress,
             )?;
+            Ok(())
+        }
+        PrCommand::Land {
+            strict,
+            local,
+            complete,
+            next,
+            worktree,
+            message,
+            title,
+            body,
+        } => {
+            let options = LandOptions {
+                strict,
+                local,
+                create_pr: true,
+                complete,
+                next_slug: next,
+                worktree,
+                commit_message: message,
+                pr_title: title,
+                pr_body: body,
+                agent: None,
+            };
+            let Some(pr) = arm(repo, &options, progress)? else {
+                return Ok(());
+            };
+            crate::ops::pr_landing::watch_armed_pr(repo, &options, pr, progress)?;
             Ok(())
         }
         PrCommand::Submit {
@@ -314,7 +342,7 @@ fn execute_release(repo: &Path, cmd: ReleaseCommand, progress: &impl Progress) -
 /// agent, reads interactively, or manages waves has no place in a flow step.
 fn unsupported() -> OpsError {
     OpsError::Message(
-        "op item must be one of pr open, pr submit, pr land, pr abandon, rebase, commit, release, doctor, or the internal telemetry scorecard"
+        "op item must be one of pr open, pr submit, pr arm, pr land, pr abandon, rebase, commit, release, doctor, or the internal telemetry scorecard"
             .to_string(),
     )
 }

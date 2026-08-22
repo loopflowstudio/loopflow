@@ -562,8 +562,8 @@ const MIGRATIONS: &[Migration] = &[
     },
 ];
 
-#[cfg(test)]
-pub(crate) fn migration_sql_for_test(name: &str) -> String {
+#[doc(hidden)]
+pub fn migration_sql_for_test(name: &str) -> String {
     let marker = format!("-- draft: {name}");
     if let Some(migration) = MIGRATIONS
         .iter()
@@ -1684,6 +1684,7 @@ mod tests {
     const TURN_USAGE_SAMPLES_NAME: &str = "add_turn_usage_samples";
     const REPOSITORY_OWNED_WAVES_NAME: &str = "repository_owned_waves";
     const REMOVE_TASK_LIFECYCLE_OUTCOME_NAME: &str = "remove_task_lifecycle_outcome";
+    const RUN_IDENTITY_NAME: &str = "run_identity";
 
     fn _draft_is_canonical(name: &str) -> bool {
         let marker = format!("-- draft: {name}");
@@ -2052,6 +2053,45 @@ mod tests {
             .any(|column| column == "lifecycle_outcome"));
         for column in ["pr_title", "pr_body", "pr_copy_head_sha"] {
             assert!(columns(&conn, "task_prs").iter().any(|name| name == column));
+        }
+    }
+
+    #[test]
+    fn run_identity_removes_secret_columns_and_preserves_run_invariants() {
+        let conn = open();
+        apply_before_current_draft(&conn, RUN_IDENTITY_NAME);
+        conn.pragma_update(None, "foreign_keys", "OFF").unwrap();
+        conn.execute_batch(&current_draft_sql(RUN_IDENTITY_NAME))
+            .unwrap();
+        validate_foreign_keys(&conn).unwrap();
+        conn.pragma_update(None, "foreign_keys", "ON").unwrap();
+
+        let run_columns = columns(&conn, "runs");
+        assert!(!run_columns.contains(&"lease_hash".to_string()));
+        assert!(!run_columns.contains(&"lease_generation".to_string()));
+        for object in [
+            "idx_runs_one_active_epoch",
+            "idx_runs_runtime_generation",
+            "runs_execution_shape_insert",
+            "runs_execution_shape_update",
+            "runs_preserve_first_material",
+        ] {
+            assert!(conn
+                .query_row(
+                    "SELECT EXISTS(SELECT 1 FROM sqlite_master WHERE name=?1)",
+                    [object],
+                    |row| row.get::<_, bool>(0),
+                )
+                .unwrap());
+        }
+        for removed in ["idx_runs_lease_hash", "idx_runs_source_generation"] {
+            assert!(!conn
+                .query_row(
+                    "SELECT EXISTS(SELECT 1 FROM sqlite_master WHERE name=?1)",
+                    [removed],
+                    |row| row.get::<_, bool>(0),
+                )
+                .unwrap());
         }
     }
 
@@ -4688,20 +4728,20 @@ mod tests {
                  ('epoch_status', 1, NULL, 'project_status', NULL, 'open', 0, 100, NULL);
              INSERT INTO runs (
                  id, epoch_id, home_id, state, trigger_json, retry_of,
-                 lease_hash, lease_generation, source_kind, source_id,
+                 runtime_generation, source_kind, source_id,
                  created_at, ended_at, stop_reason,
                  containment_kind, containment_id, cwd, started_at
              ) VALUES
                  ('run_unique', 'epoch_status', (SELECT id FROM homes LIMIT 1),
-                  'ended', '{\"kind\":\"user\"}', NULL, NULL, NULL,
+                  'ended', '{\"kind\":\"user\"}', NULL, NULL,
                   'project', 'project_status', 100, 130, '{\"kind\":\"recovery\"}',
                   NULL, NULL, NULL, NULL),
                  ('run_overlap_a', 'epoch_status', (SELECT id FROM homes LIMIT 1),
-                  'ended', '{\"kind\":\"user\"}', NULL, NULL, NULL,
+                  'ended', '{\"kind\":\"user\"}', NULL, NULL,
                   'project', 'project_status', 200, 240, 'historical import',
                   NULL, NULL, NULL, NULL),
                  ('run_overlap_b', 'epoch_status', (SELECT id FROM homes LIMIT 1),
-                  'ended', '{\"kind\":\"user\"}', NULL, NULL, NULL,
+                  'ended', '{\"kind\":\"user\"}', NULL, NULL,
                   'project', 'project_status', 200, 240, NULL, NULL, NULL, NULL, NULL);
              INSERT INTO project_events (project_id, kind_json, created_at) VALUES
                  ('project_status',

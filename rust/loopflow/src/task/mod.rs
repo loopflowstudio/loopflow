@@ -11,10 +11,10 @@ use serde::{Deserialize, Serialize};
 use time::OffsetDateTime;
 
 use crate::child::{prefixed_uuid_id, AbandonIntent};
-use crate::durable::RunId;
 pub use crate::durable::TaskId;
 use crate::id::WaveId;
 use crate::planning::TaskPlan;
+use crate::pr_landing::PrLandingId;
 use crate::project::ProjectId;
 
 pub mod actions;
@@ -216,7 +216,7 @@ impl CiCheck {
 }
 
 /// The required-check reading for one PR head. `head_sha` pins it: a reading is
-/// stale — and never wakes work — once the PR's head moves past it.
+/// stale — and never starts repair — once the PR's head moves past it.
 #[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
 pub struct CiObservation {
     pub head_sha: String,
@@ -239,27 +239,28 @@ impl CiObservation {
         names
     }
 
-    /// Whether this reading makes a `ci-fix` wake *legal*: the current head is
+    /// Whether this reading makes a `ci-fix` repair *legal*: the current head is
     /// failing a required check that a repair turn could actually act on.
     ///
-    /// This asks only about legality. Whether a wake has already fired for this
+    /// This asks only about legality. Whether a repair has already fired for this
     /// exact failure is a separate question with a separate owner — the durable
-    /// CI incident, keyed on the incident identity and claimed by one Run. Those
-    /// two questions used to be conflated in one mutable JSON marker on this
-    /// struct, which meant the wake was deduplicated by a value re-derived on
-    /// every reconcile and committed only once a body had already been born.
+    /// CI incident, keyed on the incident identity and claimed by one landing
+    /// generation. Those two questions used to be conflated in one mutable JSON
+    /// marker on this struct, which meant the wake was deduplicated by a value
+    /// re-derived on every reconcile and committed only once a body had already
+    /// been born.
     ///
     /// A head whose failures are *all* land-time preconditions is red and not
     /// repairable ([`CiCheck::land_time_precondition`]): waking a body there
     /// spends a full turn on work whose only successful action is destructive.
     /// The reading still reports the failure — this refuses the wake, it does not
     /// deny the red — so `lf ci` and `lf task status` are unchanged.
-    pub fn wake_legal(&self) -> bool {
+    pub fn repair_legal(&self) -> bool {
         if self.state != CiState::Failing {
             return false;
         }
         // An unnamed failure is one we could not classify, not one proven
-        // harmless, so it still wakes: a filter that swallows unknown failures is
+        // harmless, so it still repairs: a filter that swallows unknown failures is
         // a mute button. Only a non-empty set whose every member land resolves is
         // provably not a repair.
         self.failing_checks.is_empty()
@@ -273,7 +274,7 @@ impl CiObservation {
     /// at least one named failure, and every named failure one that
     /// [`CiCheck::land_time_precondition`] resolves at land.
     ///
-    /// This is the dual of [`CiObservation::wake_legal`] within the failing
+    /// This is the dual of [`CiObservation::repair_legal`] within the failing
     /// state: such a head holds nothing a Task body could repair (`lf pr land`
     /// greens it by clearing `scratch/`), so it does not belong to CI repair.
     /// The action model and Waves supervision read it to stop recommending a
@@ -281,7 +282,7 @@ impl CiObservation {
     ///
     /// False for a passing or pending head, and false the moment any failure is a
     /// real leaf or an unclassified one — the same anti-mute-button rule as
-    /// `wake_legal`: an unnamed failure keeps the head owned by CI.
+    /// `repair_legal`: an unnamed failure keeps the head owned by CI.
     pub fn only_land_time_preconditions(&self) -> bool {
         self.state == CiState::Failing
             && !self.failing_checks.is_empty()
@@ -297,8 +298,9 @@ impl CiObservation {
 #[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
 pub struct CiIncident {
     pub identity: String,
-    pub task_id: TaskId,
-    pub pr_id: TaskPrId,
+    pub landing_id: Option<PrLandingId>,
+    pub task_id: Option<TaskId>,
+    pub pr_id: Option<TaskPrId>,
     pub repo: String,
     pub pr_number: u32,
     pub failed_head_sha: String,
@@ -311,9 +313,8 @@ pub struct CiIncident {
     pub provider_completed_at: Option<OffsetDateTime>,
     pub poll_observed_at: Option<OffsetDateTime>,
     pub webhook_received_at: Option<OffsetDateTime>,
-    /// Active or most recent Run selected to repair this incident. A successor
-    /// may replace it only after the prior Run lost execution authority.
-    pub claimed_run_id: Option<RunId>,
+    /// Landing generation that won repair admission for this exact incident.
+    pub claimed_landing_generation: Option<u64>,
     pub responded_at: Option<OffsetDateTime>,
     pub green_at: Option<OffsetDateTime>,
     pub merged_at: Option<OffsetDateTime>,
@@ -812,37 +813,6 @@ impl Task {
         None
     }
 
-    /// The restart bar for an automated `ci-fix` wake. Identical to the supervisor
-    /// bar, except an `Open` PR is *permitted* when its current head carries a
-    /// failing required check ([`CiObservation::wake_legal`]). This is the one
-    /// automated path allowed to restart a submitted Task, and only on fresh
-    /// current-head failure evidence — never a blind wake over passing or pending
-    /// work, and never past the terminal, abandon, or publishing bars.
-    ///
-    /// The bar answers legality only. The incident's Run claim answers whether
-    /// this failure already owns execution.
-    pub fn ci_fix_restart_bar(&self, active_pr: Option<&TaskPr>) -> Option<String> {
-        if let Some(bar) = self.terminal_or_abandon_bar() {
-            return Some(bar);
-        }
-        if let Some(pr) = active_pr {
-            match pr.phase() {
-                PrPhase::Publishing => return Some(self.publishing_bar()),
-                // An open PR restarts only on a current-head required-check
-                // failure; otherwise it stays barred exactly as the supervisor
-                // bar leaves it.
-                PrPhase::Open
-                    if pr.merge_request().is_some()
-                        && !pr.fresh_ci().is_some_and(CiObservation::wake_legal) =>
-                {
-                    return Some(self.open_pr_bar(pr));
-                }
-                PrPhase::Open | PrPhase::Working | PrPhase::Merged | PrPhase::Abandoned => {}
-            }
-        }
-        None
-    }
-
     /// The product-level bar that holds for every automatic restart intent.
     /// Terminal execution state belongs to Work and is checked by the caller.
     pub(crate) fn terminal_or_abandon_bar(&self) -> Option<String> {
@@ -863,11 +833,8 @@ impl Task {
         )
     }
 
-    /// The open-PR restart refusal. Only a *supervisor* (`supervisor_restart_bar`
-    /// / a non-wake-legal `ci_fix_restart_bar`) ever reads this — an operator
-    /// resume takes the abandon-only `ExplicitResume` bar. The text names the
-    /// explicit settlement owner instead of recommending `lf task resume`, which
-    /// a supervisor re-running would only self-loop on.
+    /// The open-PR restart refusal. An operator resume takes the abandon-only
+    /// `ExplicitResume` bar; the supervisor must wait for settlement.
     fn open_pr_bar(&self, pr: &TaskPr) -> String {
         let number = pr.github().expect("open Task PR passed validation").number;
         let request = pr
@@ -1391,7 +1358,7 @@ mod tests {
             current.fresh_ci().map(|ci| ci.state),
             Some(super::CiState::Failing)
         );
-        // Head has moved on: the stale reading never surfaces (and never wakes work).
+        // Head has moved on: the stale reading never surfaces or starts repair.
         let moved = open_pr("new-head", Some(observation));
         assert!(moved.fresh_ci().is_none());
     }
@@ -1437,26 +1404,12 @@ mod tests {
         }
     }
 
-    fn with_merge_request(mut pr: TaskPr, mode: super::PrMergeMode) -> TaskPr {
-        let head_sha = pr.head_sha().expect("test PR has a head").to_string();
-        pr.publication.as_mut().unwrap().merge = Some(super::PrMergeRequest {
-            mode,
-            requested_at: time::OffsetDateTime::now_utc(),
-            head_sha,
-            after_merge: AfterMerge::ContinueTask,
-            next_slug: None,
-        });
-        pr
-    }
-
-    /// The observation answers legality — is this head failing *now* — and nothing
-    /// else. Whether a wake already fired for a failure is the command ledger's
-    /// question, keyed on the incident identity; it used to be a mutable marker on
-    /// this struct, which is what let a repeat poll race a body's birth.
+    /// The observation answers whether this head is repairable now. Admission is
+    /// keyed separately by the landing generation and incident identity.
     #[test]
-    fn ci_wake_legality_follows_only_the_current_reading() {
+    fn ci_repair_legality_follows_only_the_current_reading() {
         let obs = failing("h1", &["build", "lint"]);
-        assert!(obs.wake_legal());
+        assert!(obs.repair_legal());
 
         // The failing set is order-independent and deduplicated: it is the content
         // half of the incident identity, so two readings of one failure must hash
@@ -1477,10 +1430,10 @@ mod tests {
         // A passing or pending reading is never legal to wake on.
         let mut green = obs.clone();
         green.state = super::CiState::Passing;
-        assert!(!green.wake_legal());
+        assert!(!green.repair_legal());
         let mut pending = obs.clone();
         pending.state = super::CiState::Pending;
-        assert!(!pending.wake_legal());
+        assert!(!pending.repair_legal());
     }
 
     /// A head red *only* on a land-time precondition is not a repair a body can
@@ -1492,15 +1445,15 @@ mod tests {
     /// arms, and an *unnamed* failure still arms, because a filter that swallows
     /// failures it cannot classify is a mute button rather than a classifier.
     #[test]
-    fn a_head_red_only_on_a_land_time_precondition_is_not_wakeable() {
-        assert!(!failing("h1", &["scratch-clear"]).wake_legal());
+    fn a_head_red_only_on_a_land_time_precondition_is_not_repairable() {
+        assert!(!failing("h1", &["scratch-clear"]).repair_legal());
 
         // A real leaf alongside it is still a repair worth waking for.
-        assert!(failing("h1", &["scratch-clear", "rust-test"]).wake_legal());
-        assert!(failing("h1", &["rust-test"]).wake_legal());
+        assert!(failing("h1", &["scratch-clear", "rust-test"]).repair_legal());
+        assert!(failing("h1", &["rust-test"]).repair_legal());
 
         // Failing with nothing named: unclassified, not proven harmless.
-        assert!(failing("h1", &[]).wake_legal());
+        assert!(failing("h1", &[]).repair_legal());
 
         // The reading stays honest — this refuses the wake, it does not deny the
         // red. Status and `lf ci` still name the failure.
@@ -1509,14 +1462,14 @@ mod tests {
         assert_eq!(obs.failure_set(), vec!["scratch-clear".to_string()]);
     }
 
-    /// The land-resolved predicate is the exact dual of `wake_legal` within the
+    /// The land-resolved predicate is the exact dual of `repair_legal` within the
     /// failing state, so the two must never both refuse the same head.
     #[test]
-    fn only_land_time_preconditions_is_the_dual_of_wake_legal() {
+    fn only_land_time_preconditions_is_the_dual_of_repair_legal() {
         // Red only on scratch-clear: land-resolved, and no wake.
         let scratch = failing("h1", &["scratch-clear"]);
         assert!(scratch.only_land_time_preconditions());
-        assert!(!scratch.wake_legal());
+        assert!(!scratch.repair_legal());
 
         // A real leaf beside it (or alone): not land-resolved, wake arms.
         for obs in [
@@ -1524,13 +1477,13 @@ mod tests {
             failing("h1", &["rust-test"]),
         ] {
             assert!(!obs.only_land_time_preconditions());
-            assert!(obs.wake_legal());
+            assert!(obs.repair_legal());
         }
 
-        // Unclassified (empty) failure: not "only preconditions", still wakes.
+        // Unclassified (empty) failure: not "only preconditions", still repairs.
         let empty = failing("h1", &[]);
         assert!(!empty.only_land_time_preconditions());
-        assert!(empty.wake_legal());
+        assert!(empty.repair_legal());
 
         // Passing/pending is never "only preconditions".
         let mut green = scratch.clone();
@@ -1543,7 +1496,7 @@ mod tests {
 
     /// The one literal, pinned against the workflow that defines it. A rename of
     /// the CI job turns this red *at the const* instead of silently re-arming
-    /// wakes in production — the anti-rot guard for a name that cannot be derived.
+    /// repairs in production — the anti-rot guard for a name that cannot be derived.
     #[test]
     fn land_time_precondition_names_a_real_ci_job() {
         let workflow =
@@ -1553,62 +1506,10 @@ mod tests {
         let job = format!("\n  {}:", super::LAND_TIME_PRECONDITION_CHECK);
         assert!(
             yaml.contains(&job),
-            "no job named `{}` in {} — the const no longer names a real check, so \
-             every design-carrying PR is arming ci-fix wakes again",
+            "no job named `{}` in {} — the landing preflight classification drifted",
             super::LAND_TIME_PRECONDITION_CHECK,
             workflow.display()
         );
-    }
-
-    #[test]
-    fn ci_fix_restart_bar_permits_only_a_failing_open_pr_wake() {
-        let task = task(); // status Waiting, no abandon intent
-
-        // Publication alone is not a restart bar.
-        let published = open_pr("h1", None);
-        assert!(task.supervisor_restart_bar(Some(&published)).is_none());
-        assert!(task.ci_fix_restart_bar(Some(&published)).is_none());
-
-        // Open PR, fresh failing head: the ci-fix wake is permitted where the plain
-        // supervisor restart stays barred.
-        let legal = with_merge_request(
-            open_pr("h1", Some(failing("h1", &["build"]))),
-            super::PrMergeMode::Auto,
-        );
-        assert!(task.supervisor_restart_bar(Some(&legal)).is_some());
-        assert!(task.ci_fix_restart_bar(Some(&legal)).is_none());
-
-        // Passing head → not legal → barred.
-        let mut green_obs = failing("h1", &[]);
-        green_obs.state = super::CiState::Passing;
-        let green = with_merge_request(open_pr("h1", Some(green_obs)), super::PrMergeMode::Auto);
-        assert!(task.ci_fix_restart_bar(Some(&green)).is_some());
-
-        // Stale reading (observation head != PR head) → fresh_ci None → barred.
-        let stale = with_merge_request(
-            open_pr("h2", Some(failing("h1", &["build"]))),
-            super::PrMergeMode::Auto,
-        );
-        assert!(task.ci_fix_restart_bar(Some(&stale)).is_some());
-
-        // Red only on a land-time precondition → no repair exists → barred, and
-        // the automated restart is the one path that could have overridden the
-        // open-PR bar. A real leaf beside it still permits the wake.
-        let land_only = with_merge_request(
-            open_pr("h1", Some(failing("h1", &["scratch-clear"]))),
-            super::PrMergeMode::Auto,
-        );
-        assert!(task.ci_fix_restart_bar(Some(&land_only)).is_some());
-        let mixed = with_merge_request(
-            open_pr("h1", Some(failing("h1", &["scratch-clear", "rust-test"]))),
-            super::PrMergeMode::Auto,
-        );
-        assert!(task.ci_fix_restart_bar(Some(&mixed)).is_none());
-
-        // The bar does not deduplicate. A head that already woke a body still reads
-        // as legal here — refusing the second launch is the ledger's job, and
-        // asking the question twice is what let the two answers drift.
-        assert!(task.ci_fix_restart_bar(Some(&legal)).is_none());
     }
 
     #[test]

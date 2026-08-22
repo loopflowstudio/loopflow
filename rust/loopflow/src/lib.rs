@@ -13,6 +13,7 @@ pub mod lfd;
 pub mod ops;
 pub mod planning;
 pub mod pm;
+pub mod pr_landing;
 pub mod profile;
 pub mod project;
 pub(crate) mod promotion_lock;

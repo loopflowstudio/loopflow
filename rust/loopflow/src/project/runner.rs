@@ -13,7 +13,7 @@ use crate::child_control::{
     absorb_run_control, apply_input as apply_child_input, send_outstanding_steers,
     take_current_input as take_child_input, CommandStop, PendingInput,
 };
-use crate::durable::{Basis, BoundarySeed, RunLease, WorkStatus};
+use crate::durable::{Basis, BoundarySeed, RunContext, WorkStatus};
 use crate::engine::wave_config::read_wave_config;
 use crate::harness::{
     classify_disconnect_recovery, default_create_harness, drain_turn_failure_reason,
@@ -30,7 +30,7 @@ use crate::wave::playhead::{
 };
 use crate::wave::Wave;
 
-const TASK_SUPERVISION_INTERVAL: Duration = Duration::from_secs(5);
+const CONTROL_TICK_INTERVAL: Duration = Duration::from_secs(5);
 
 #[derive(Debug)]
 struct PreparedProjectStep {
@@ -39,7 +39,11 @@ struct PreparedProjectStep {
     planning: crate::ops::task_pm::ResolvedProject,
 }
 
-pub(crate) async fn run(store: SharedStore, project_id: ProjectId, lease: &RunLease) -> Result<()> {
+pub(crate) async fn run(
+    store: SharedStore,
+    project_id: ProjectId,
+    lease: &RunContext,
+) -> Result<()> {
     let result = run_project_inner(store.clone(), project_id.clone(), lease).await;
     if let Err(error) = &result {
         record_unhandled_failure(&store, &project_id, lease, error).await;
@@ -57,7 +61,7 @@ async fn owning_wave(store: &SharedStore, project: &Project) -> Result<Wave> {
 async fn spawn_failover(
     store: &SharedStore,
     project: &Project,
-    lease: &RunLease,
+    lease: &RunContext,
     wave: &Wave,
     route: &ExactRoute,
 ) -> Result<()> {
@@ -87,7 +91,7 @@ async fn spawn_failover(
 async fn run_project_inner(
     store: SharedStore,
     project_id: ProjectId,
-    lease: &RunLease,
+    lease: &RunContext,
 ) -> Result<()> {
     let mut project = store
         .get_project(&project_id)
@@ -100,9 +104,12 @@ async fn run_project_inner(
         .await?;
     let target = ChildRef::Project(project.id.clone());
     let work = store.work_for_child(&target).await?;
-    let run_lease = crate::ops::required_run_lease(&store).await?;
-    if run_lease.work != work {
-        anyhow::bail!("ambient Run lease does not own Project Work {}", work.id());
+    let run_context = crate::ops::required_run_context(&store).await?;
+    if run_context.work != work {
+        anyhow::bail!(
+            "ambient Run context does not own Project Work {}",
+            work.id()
+        );
     }
     let run = store
         .current_run(&work)
@@ -139,7 +146,7 @@ async fn run_project_inner(
         .transpose()
         .map_err(|reason| anyhow!("invalid Invocation account route: {reason}"))?;
     harness.set_provider_account_id(requested_account);
-    store.validate_run_lease(lease).await?;
+    store.validate_run_context(lease).await?;
     harness.start(&prepared.turn.config).await?;
     project.provider = harness_name;
     project.provider_session_id = harness.provider_session_id();
@@ -244,8 +251,8 @@ async fn run_project_inner(
     );
     let mut poll = tokio::time::interval(Duration::from_millis(200));
     poll.set_missed_tick_behavior(tokio::time::MissedTickBehavior::Delay);
-    let mut task_supervision = tokio::time::interval(TASK_SUPERVISION_INTERVAL);
-    task_supervision.set_missed_tick_behavior(tokio::time::MissedTickBehavior::Delay);
+    let mut control_tick = tokio::time::interval(CONTROL_TICK_INTERVAL);
+    control_tick.set_missed_tick_behavior(tokio::time::MissedTickBehavior::Delay);
     spawn_ask_comment_publication(store.clone());
     let mut last_text = String::new();
     let mut turn_had_durable_side_effect = false;
@@ -263,7 +270,7 @@ async fn run_project_inner(
                     .flatten();
                 if let Some(stop) = absorb_run_control(
                     &store,
-                    &run_lease,
+                    &run_context,
                     harness.as_mut(),
                     provider_turn_active,
                     active_turn_id.as_deref(),
@@ -282,7 +289,7 @@ async fn run_project_inner(
                     if let Some(capture) = &capture {
                         send_outstanding_steers(
                             &store,
-                            &run_lease,
+                            &run_context,
                             harness.as_mut(),
                             &capture.current_turn_id(),
                             &active_basis,
@@ -291,19 +298,7 @@ async fn run_project_inner(
                     }
                 }
             }
-            _ = task_supervision.tick() => {
-                spawn_ask_comment_publication(store.clone());
-                if let Err(error) = crate::ops::task::supervise_project_task_bodies(
-                    &store,
-                    &project,
-                ).await {
-                    tracing::warn!(
-                        project = %project.id,
-                        error = %error,
-                        "could not supervise Task progress leases"
-                    );
-                }
-            }
+            _ = control_tick.tick() => spawn_ask_comment_publication(store.clone()),
             event = event_rx.recv() => {
                 let Some(event) = event else {
                     return finish_failed(
@@ -505,7 +500,7 @@ async fn run_project_inner(
                                 &store,
                                 &mut project,
                                 lease,
-                                &run_lease,
+                                &run_context,
                                 &work,
                                 &active_basis,
                                 outcome.disposition,
@@ -593,8 +588,8 @@ async fn project_has_running_tasks(store: &SharedStore, project: &Project) -> Re
 async fn run_ask_only_supervisor(
     store: &SharedStore,
     project: &mut Project,
-    lease: &RunLease,
-    run_lease: &RunLease,
+    lease: &RunContext,
+    run_context: &RunContext,
     work: &crate::durable::WorkRef,
     settled_basis: &Basis,
     disposition: ProjectDisposition,
@@ -604,8 +599,8 @@ async fn run_ask_only_supervisor(
 ) -> Result<()> {
     let mut poll = tokio::time::interval(Duration::from_millis(200));
     poll.set_missed_tick_behavior(tokio::time::MissedTickBehavior::Delay);
-    let mut task_supervision = tokio::time::interval(TASK_SUPERVISION_INTERVAL);
-    task_supervision.set_missed_tick_behavior(tokio::time::MissedTickBehavior::Delay);
+    let mut control_tick = tokio::time::interval(CONTROL_TICK_INTERVAL);
+    control_tick.set_missed_tick_behavior(tokio::time::MissedTickBehavior::Delay);
     spawn_ask_comment_publication(store.clone());
     loop {
         tokio::select! {
@@ -615,7 +610,7 @@ async fn run_ask_only_supervisor(
                 }
             }
             _ = poll.tick() => {
-                match store.run_control(run_lease, None).await? {
+                match store.run_control(run_context, None).await? {
                     Some(crate::durable::RunControl::Interrupt)
                     | Some(crate::durable::RunControl::Quiesce { .. })
                     | Some(crate::durable::RunControl::Abandon { .. }) => {
@@ -659,16 +654,7 @@ async fn run_ask_only_supervisor(
                     return Ok(());
                 }
             }
-            _ = task_supervision.tick() => {
-                spawn_ask_comment_publication(store.clone());
-                if let Err(error) = crate::ops::task::supervise_project_task_bodies(store, project).await {
-                    tracing::warn!(
-                        project = %project.id,
-                        error = %error,
-                        "could not supervise Task progress leases"
-                    );
-                }
-            }
+            _ = control_tick.tick() => spawn_ask_comment_publication(store.clone()),
         }
     }
 }
@@ -676,7 +662,7 @@ async fn run_ask_only_supervisor(
 async fn finish_project_outcome(
     store: &SharedStore,
     project: &Project,
-    lease: &RunLease,
+    lease: &RunContext,
     basis: &Basis,
     disposition: ProjectDisposition,
     summary: String,
@@ -702,7 +688,7 @@ async fn finish_project_outcome(
 async fn prepare_project_flow_step(
     store: &SharedStore,
     project: &mut Project,
-    lease: &RunLease,
+    lease: &RunContext,
     wave: &Wave,
     flow: &Playhead,
     observations: &[String],
@@ -753,7 +739,7 @@ async fn prepare_project_flow_step(
 async fn refresh_project_plan(
     store: &SharedStore,
     project: &mut Project,
-    lease: &RunLease,
+    lease: &RunContext,
     wave: &Wave,
 ) -> Result<crate::ops::task_pm::ResolvedProject> {
     let planning = crate::ops::task_pm::refresh_project(
@@ -806,7 +792,7 @@ fn open_project_flow_body(flow: &mut Playhead, control_repo: &str) -> Result<()>
 async fn start_project_flow_turn(
     store: &SharedStore,
     project: &mut Project,
-    lease: &RunLease,
+    lease: &RunContext,
     harness: &mut dyn Harness,
     flow: &mut Playhead,
     capture: Option<&crate::trace::CaptureHandle>,
@@ -848,7 +834,7 @@ fn finish_project_flow_turn(flow: &mut Playhead, status: Lifecycle) -> Result<bo
 async fn handle_attachment(
     store: &SharedStore,
     project: &Project,
-    lease: &RunLease,
+    lease: &RunContext,
     line: String,
 ) -> Result<()> {
     let line = line.trim();
@@ -872,7 +858,7 @@ async fn handle_attachment(
             .status();
         return Ok(());
     }
-    store.validate_run_lease(lease).await?;
+    store.validate_run_context(lease).await?;
     let target = ChildRef::Project(project.id.clone());
     if line == "/interrupt" {
         let work = store.work_for_child(&target).await?;
@@ -880,10 +866,7 @@ async fn handle_attachment(
             .current_run(&work)
             .await?
             .ok_or_else(|| anyhow!("Project Work {} has no active Run", work.id()))?;
-        let request = crate::durable::AuthenticatedRequest::cli();
-        let receipt = store
-            .interrupt(&crate::durable::ControlCtx::User(&request), &work, &run.id)
-            .await?;
+        let receipt = store.interrupt(None, &work, &run.id).await?;
         println!("interrupted {}", receipt.run_id);
     } else {
         let work = store.work_for_child(&target).await?;
@@ -898,7 +881,7 @@ async fn handle_attachment(
 async fn take_current_input(
     _store: &SharedStore,
     _project: &Project,
-    _lease: &RunLease,
+    _lease: &RunContext,
     pending: &mut VecDeque<PendingInput>,
 ) -> Result<Option<PendingInput>> {
     take_child_input(pending).await
@@ -921,9 +904,12 @@ async fn inspect_outcome(
     project: &Project,
     planning: &crate::ops::task_pm::ResolvedProject,
 ) -> Result<ProjectOutcome> {
-    let tasks = crate::ops::task::reconcile_project_tasks(store, project)
-        .await
-        .map_err(|error| anyhow!(error.to_string()))?;
+    let tasks = store
+        .list_tasks(Some(&project.wave_id))
+        .await?
+        .into_iter()
+        .filter(|task| task.project_id == project.id)
+        .collect::<Vec<_>>();
     let pm_tasks = planning
         .snapshot
         .items
@@ -991,7 +977,7 @@ fn verify_control_plane_checkout(repo: &Path) -> Result<()> {
 async fn consume_task_observations(
     store: &SharedStore,
     project: &mut Project,
-    lease: &RunLease,
+    lease: &RunContext,
 ) -> Result<Vec<String>> {
     // The successor consumes the whole project chain: observations addressed to
     // a terminal predecessor the Task was born under are routed here, not
@@ -1019,12 +1005,12 @@ async fn consume_task_observations(
 async fn apply_input(
     store: &SharedStore,
     _project: &Project,
-    _lease: &RunLease,
+    _lease: &RunContext,
     harness: &mut dyn Harness,
     input: PendingInput,
 ) -> Result<()> {
-    let run_lease = crate::ops::required_run_lease(store).await?;
-    apply_child_input(store, &run_lease, harness, input).await
+    let run_context = crate::ops::required_run_context(store).await?;
+    apply_child_input(store, &run_context, harness, input).await
 }
 
 fn finish_capture(capture: Option<&crate::trace::CaptureHandle>, outcome: &str) {
@@ -1037,7 +1023,7 @@ fn finish_capture(capture: Option<&crate::trace::CaptureHandle>, outcome: &str) 
 async fn finish_failed(
     store: &SharedStore,
     project: &mut Project,
-    lease: &RunLease,
+    lease: &RunContext,
     harness: &mut dyn Harness,
     error: &str,
     capture: Option<&crate::trace::CaptureHandle>,
@@ -1054,14 +1040,14 @@ async fn finish_failed(
 async fn handle_body_failure(
     store: &SharedStore,
     project: &mut Project,
-    lease: &RunLease,
+    lease: &RunContext,
     invocation_id: &crate::durable::AgentInvocationId,
     invocation_route: &crate::durable::InvocationRoute,
     harness: &mut dyn Harness,
     wave: &Wave,
     reason: &str,
     turn_had_durable_side_effect: bool,
-) -> Result<Option<(RunLease, ExactRoute)>> {
+) -> Result<Option<(RunContext, ExactRoute)>> {
     let wave_config = read_wave_config(Path::new(wave.repo()), wave.name());
     let backup_agent = wave_config.as_ref().and_then(|c| c.backup_agent.as_deref());
     let decision = classify_disconnect_recovery(
@@ -1172,7 +1158,7 @@ async fn handle_body_failure(
 async fn fail_and_maybe_recover(
     store: &SharedStore,
     project: &mut Project,
-    lease: &RunLease,
+    lease: &RunContext,
     invocation_id: &crate::durable::AgentInvocationId,
     invocation_route: &crate::durable::InvocationRoute,
     harness: &mut dyn Harness,
@@ -1201,7 +1187,7 @@ async fn fail_and_maybe_recover(
 async fn finish_abandoned(
     store: &SharedStore,
     project: &mut Project,
-    lease: &RunLease,
+    lease: &RunContext,
     harness: &mut dyn Harness,
     _reason: String,
     capture: Option<&crate::trace::CaptureHandle>,
@@ -1218,7 +1204,7 @@ async fn finish_abandoned(
 async fn finish_command_stop(
     store: &SharedStore,
     project: &mut Project,
-    lease: &RunLease,
+    lease: &RunContext,
     harness: &mut dyn Harness,
     stop: CommandStop,
     capture: Option<&crate::trace::CaptureHandle>,
@@ -1249,7 +1235,7 @@ async fn finish_command_stop(
 async fn record_unhandled_failure(
     store: &SharedStore,
     project_id: &ProjectId,
-    lease: &RunLease,
+    lease: &RunContext,
     error: &anyhow::Error,
 ) {
     let Ok(Some(project)) = store.get_project(project_id).await else {
@@ -1313,7 +1299,7 @@ mod tests {
     use time::OffsetDateTime;
 
     use crate::child::ChildRef;
-    use crate::durable::{Author, BoundaryState, RunAdvance, RunLease, WorkStatus};
+    use crate::durable::{Author, BoundaryState, RunAdvance, RunContext, WorkStatus};
     use crate::id::WaveId;
     use crate::planning::{LinearProjectId, ProjectPlan};
     use crate::pm::{PmKr, PmProject, ProjectFlowPlan};
@@ -1326,7 +1312,7 @@ mod tests {
         PathBuf,
         SharedStore,
         Project,
-        RunLease,
+        RunContext,
         crate::durable::AgentInvocation,
     ) {
         let directory = tempfile::tempdir().unwrap();
@@ -1369,10 +1355,7 @@ mod tests {
             .await
             .unwrap()
             .unwrap();
-        let lease = store
-            .resolve_run_lease(reservation.run_token.clone())
-            .await
-            .unwrap();
+        let lease = store.run_context(&reservation.run_id).await.unwrap();
         let invocation = store
             .open_invocation_for_run(&lease.run_id)
             .await

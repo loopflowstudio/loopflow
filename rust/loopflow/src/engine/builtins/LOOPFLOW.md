@@ -14,18 +14,19 @@ lf commit -m "message" -p     # commit and push
 lf pr publish --title "..."        # push + create/update PR, print state+URL (no browser)
 lf pr open --title "..."           # publish, then open the PR for human review
 lf pr submit                     # prep + mark ready + assign to you; you click merge
-lf pr land                       # land one PR; Task remains open
-lf pr land -c                    # land and complete the owning Task after merge
-lf pr land --next parser-proof   # name the next serial Task PR
+lf pr arm                       # request exact-head auto-merge and return
+lf pr land                      # watch CI, repair, and finish after merge
+lf pr land -c                   # finish merged, then complete the owning Task
+lf pr land --next parser-proof  # finish merged, then rotate the Task PR
 lf rebase --plan              # show reset/rebase strategy
 lf rebase                     # apply the planned update
 lf task run CHILD --stack-on PARENT  # separate Task worktree based on PARENT's open PR
 ```
 
-### `publish` vs `submit` vs `land`
+### `publish` vs `submit` vs `arm` vs `land`
 
-Three commitment levels — pick by how done the work is and who lands it. All
-three publish the PR headlessly and open no browser:
+Four commitment levels — pick by how done the work is and who lands it. All
+four publish the PR headlessly and open no browser:
 
 - **`lf pr publish`** — push and create or refresh the PR while work is still in
   flight. Never rebases: a PR may honestly remain behind until an explicit
@@ -39,17 +40,18 @@ three publish the PR headlessly and open no browser:
   gate — the button unlocks once checks pass. (GitHub blocks approving your own
   PR, so the gate is the merge click, not a review approval.) Use this as the
   default finish for anything a person should land by hand.
-- **`lf pr land`** — the work is done and **loopflow** lands it hands-off. Does
-  everything `submit` does, then arms auto-merge so it merges when checks pass.
-  Use it in headless/auto runs where no human is gating. Inside a Task, bare
-  `land` settles one PR but leaves the Task open; `-c` completes the Task
-  after merge. `--next <slug>` names the following PR. The Task keeps its
-  worktree while Loopflow rotates serial branches from fetched main.
+- **`lf pr arm`** — prepare the exact head, request auto-merge, and return. Task
+  disposition is recorded but is never applied before an authoritative merge.
+- **`lf pr land`** — run the same arm step, then join the one durable watcher for
+  the PR. It observes GitHub, repairs failing required checks once per failed
+  head, re-arms material repairs, and returns only after merge or an actionable
+  durable block. Inside a Task, bare `land` leaves the Task open; `-c` completes
+  it after merge and `--next <slug>` rotates it after merge.
 
 **`lf pr open`** is the one command that *presents* — it publishes, then opens
 the PR for review (the GitHub page in the browser). It is a human-initiated
 review action; if launching the review surface fails, only `pr open` fails and
-the published PR is untouched. Agents publish/submit/land; reach for `pr open`
+the published PR is untouched. Agents publish/submit/arm/land; reach for `pr open`
 only when a human explicitly asked to see the PR.
 
 Stay in the worktree Loopflow placed for this run. If the assigned task is

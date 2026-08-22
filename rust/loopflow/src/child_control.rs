@@ -8,7 +8,7 @@ use std::collections::VecDeque;
 
 use anyhow::Result;
 
-use crate::durable::{Basis, BoundarySeed, RunLease, SendState};
+use crate::durable::{Basis, BoundarySeed, RunContext, SendState};
 use crate::harness::{Harness, SendCurrentOutcome};
 use crate::store::SharedStore;
 
@@ -33,12 +33,12 @@ pub(crate) enum CommandStop {
 /// Apply direct Run/Work control to the provider boundary owned by this body.
 pub(crate) async fn absorb_run_control(
     store: &SharedStore,
-    run_lease: &RunLease,
+    run_context: &RunContext,
     harness: &mut dyn Harness,
     turn_active: bool,
     active_turn_id: Option<&str>,
 ) -> Result<Option<CommandStop>> {
-    match store.run_control(run_lease, active_turn_id).await? {
+    match store.run_control(run_context, active_turn_id).await? {
         Some(crate::durable::RunControl::Interrupt) => {
             if turn_active {
                 harness.interrupt().await?;
@@ -78,13 +78,13 @@ pub(crate) async fn input_is_current(_input: &PendingInput) -> Result<bool> {
 /// A Send records transport evidence only; it never advances applied Basis.
 pub(crate) async fn send_outstanding_steers(
     store: &SharedStore,
-    run_lease: &RunLease,
+    run_context: &RunContext,
     harness: &mut dyn Harness,
     turn_id: &str,
     active_basis: &Basis,
 ) -> Result<BoundarySeed> {
-    store.validate_run_lease(run_lease).await?;
-    let seed = store.boundary_seed(&run_lease.work).await?;
+    store.validate_run_context(run_context).await?;
+    let seed = store.boundary_seed(&run_context.work).await?;
     for steer in seed
         .steers
         .iter()
@@ -122,10 +122,10 @@ pub(crate) async fn send_outstanding_steers(
 
 pub(crate) async fn apply_input(
     store: &SharedStore,
-    run_lease: &RunLease,
+    run_context: &RunContext,
     harness: &mut dyn Harness,
     input: PendingInput,
 ) -> Result<()> {
-    store.validate_run_lease(run_lease).await?;
+    store.validate_run_context(run_context).await?;
     harness.send_input(&input.text).await
 }

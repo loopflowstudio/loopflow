@@ -20,14 +20,14 @@ use crate::lf::{
 };
 use crate::ops::OpsError;
 use crate::ops::{
-    abandon_branch, abort_rebase_after_authorization, abort_rebase_for_resolution, commit_workflow,
-    continue_rebase_after_authorization, continue_rebase_for_resolution, create_or_update_pr,
-    current_pr, finish_land_after_rebase, finish_submit_after_rebase, land, plan_rebase,
-    rebase_class_name, rebase_strategy_name, rebase_with_recovery, recover_rebase, release_bump,
-    release_check, release_notes, release_publish, release_run, release_status, release_tag,
-    start_rebase_for_resolution, submit, AbandonOptions, CommitOptions, CronHost, CronOutcome,
-    CronSource, CronSpec, CronTargetKind, LandOptions, PrOptions, Progress, RebaseOptions,
-    SystemLaunchctl,
+    abandon_branch, abort_rebase_after_authorization, abort_rebase_for_resolution, arm,
+    commit_workflow, continue_rebase_after_authorization, continue_rebase_for_resolution,
+    create_or_update_pr, current_pr, finish_arm_after_rebase, finish_submit_after_rebase,
+    plan_rebase, rebase_class_name, rebase_strategy_name, rebase_with_recovery, recover_rebase,
+    release_bump, release_check, release_notes, release_publish, release_run, release_status,
+    release_tag, start_rebase_for_resolution, submit, AbandonOptions, CommitOptions, CronHost,
+    CronOutcome, CronSource, CronSpec, CronTargetKind, LandOptions, PrOptions, Progress,
+    RebaseOptions, SystemLaunchctl,
 };
 use crate::store::RegistryUnavailable;
 use anyhow::{anyhow, Result};
@@ -67,6 +67,30 @@ pub fn run_pr(cmd: Option<&PrCommand>, cli_model: Option<&str>) -> Result<()> {
                 strict: *strict,
                 local: false,
                 create_pr: *create_pr,
+                complete: *complete,
+                next_slug: next.clone(),
+                worktree: worktree.clone(),
+                commit_message: message.clone(),
+                pr_title: title.clone(),
+                pr_body: body.clone(),
+                agent: cli_model.map(str::to_string),
+            },
+            &progress,
+        ),
+        Some(PrCommand::Arm {
+            strict,
+            local,
+            complete,
+            next,
+            worktree,
+            message,
+            title,
+            body,
+        }) => arm_current(
+            &LandOptions {
+                strict: *strict,
+                local: *local,
+                create_pr: true,
                 complete: *complete,
                 next_slug: next.clone(),
                 worktree: worktree.clone(),
@@ -429,11 +453,26 @@ pub(crate) fn land_repo(
     progress: &impl Progress,
 ) -> Result<()> {
     // The wave home stays put on land — no rotation, no cd.
-    with_rebase_retry(repo_root, "land", progress, |repo, integrated| {
+    let pr = with_rebase_retry(repo_root, "land", progress, |repo, integrated| {
         if integrated {
-            finish_land_after_rebase(repo, options, progress)
+            finish_arm_after_rebase(repo, options, progress)
         } else {
-            land(repo, options, progress)
+            arm(repo, options, progress)
+        }
+    })?;
+    if let Some(pr) = pr {
+        crate::ops::pr_landing::watch_armed_pr(repo_root, options, pr, progress)?;
+    }
+    Ok(())
+}
+
+fn arm_current(options: &LandOptions, progress: &impl Progress) -> Result<()> {
+    let repo_root = find_repo_root()?;
+    with_rebase_retry(&repo_root, "arm", progress, |repo, integrated| {
+        if integrated {
+            finish_arm_after_rebase(repo, options, progress)
+        } else {
+            arm(repo, options, progress)
         }
     })?;
     Ok(())

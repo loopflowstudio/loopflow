@@ -4,8 +4,8 @@ use std::time::Duration;
 
 use crate::child::{ChildBodyHandoffRequest, ChildRef};
 use crate::durable::{
-    AuthenticatedRequest, ControlCtx, EpochReceipt, InterruptReceipt, Run, RunLease, RunLeaseToken,
-    SteerReceipt, RUN_CONTEXT_ENV, RUN_LEASE_ENV,
+    EpochReceipt, InterruptReceipt, Run, RunContext, RunId, SteerReceipt, RUN_CONTEXT_ENV,
+    RUN_ID_ENV,
 };
 use crate::project::Project;
 use crate::store::{SharedStore, Store};
@@ -154,57 +154,43 @@ pub(crate) async fn append_steer(
     text: &str,
 ) -> OpsResult<SteerReceipt> {
     let work = store.work_for_child(&target).await.map_err(child_error)?;
-    if let Some(lease) = ambient_run_lease(store).await? {
+    if let Some(lease) = ambient_run_context(store).await? {
         store
-            .steer(&ControlCtx::Run(&lease), &work, text, None)
+            .steer(Some(&lease), &work, text, None)
             .await
             .map_err(child_error)
     } else {
-        let request = AuthenticatedRequest::cli();
         store
-            .steer(&ControlCtx::User(&request), &work, text, None)
+            .steer(None, &work, text, None)
             .await
             .map_err(child_error)
     }
 }
 
-pub async fn ambient_run_lease(store: &Store) -> OpsResult<Option<RunLease>> {
-    if let Some(value) = std::env::var_os(RUN_LEASE_ENV) {
+pub async fn ambient_run_context(store: &Store) -> OpsResult<Option<RunContext>> {
+    if let Some(value) = std::env::var_os(RUN_ID_ENV) {
         let value = value
             .into_string()
-            .map_err(|_| child_error("LF_RUN_LEASE is not valid UTF-8"))?;
-        let token =
-            RunLeaseToken::parse(&value).map_err(|_| child_error("LF_RUN_LEASE is malformed"))?;
+            .map_err(|_| child_error("LF_RUN_ID is not valid UTF-8"))?;
+        let run_id = RunId::parse(&value).map_err(|_| child_error("LF_RUN_ID is malformed"))?;
         return store
-            .resolve_run_lease(token)
+            .run_context(&run_id)
             .await
             .map(Some)
             .map_err(child_error);
     }
-
-    // `LF_RUN_CONTEXT` is the sole positive marker that this process is an
-    // agent body rather than a person at a shell. It matters because User
-    // authority is the ambient fallback: `AuthenticatedRequest::cli()` treats
-    // local shell presence as the user, which is right for a local-first
-    // product but means a body that lost its lease would otherwise inherit
-    // full User rights. Every Run body sets this var, so its presence without a
-    // resolvable lease is a fenced or stale writer and must fail closed.
-    //
-    // This deliberately does not consult the deleted Task/Project executor env
-    // vars. They served as this sentinel before Run owned authority; keying on
-    // them now would make deleting them a silent privilege escalation.
     if std::env::var_os(RUN_CONTEXT_ENV).is_some() {
         return Err(child_error(
-            "in-Run agent process has no usable LF_RUN_LEASE; refusing User authority",
+            "in-Run agent process has no LF_RUN_ID; refusing an unattributed write",
         ));
     }
     Ok(None)
 }
 
-pub(crate) async fn required_run_lease(store: &Store) -> OpsResult<RunLease> {
-    ambient_run_lease(store).await?.ok_or_else(|| {
+pub(crate) async fn required_run_context(store: &Store) -> OpsResult<RunContext> {
+    ambient_run_context(store).await?.ok_or_else(|| {
         child_error(
-            "this Work-owned entrypoint requires a Run lease; launch a named skill with \
+            "this Work-owned entrypoint requires a Run id; launch a named skill with \
              `lf --as task:<selector> <skill>` (or project:/wave:)",
         )
     })
@@ -252,7 +238,7 @@ mod tests {
     use crate::store::{open_store, StorageConfig};
 
     #[test]
-    fn run_context_without_a_lease_fails_closed() {
+    fn agent_process_without_a_run_id_fails_provenance_validation() {
         let runtime = tokio::runtime::Runtime::new().unwrap();
         let directory = tempfile::tempdir().unwrap();
         let store = runtime
@@ -262,22 +248,22 @@ mod tests {
             .unwrap();
         let _lock = crate::journal::test_env_lock();
         let previous_context = std::env::var_os(RUN_CONTEXT_ENV);
-        let previous_lease = std::env::var_os(RUN_LEASE_ENV);
+        let previous_run_id = std::env::var_os(RUN_ID_ENV);
         std::env::set_var(RUN_CONTEXT_ENV, "agent");
-        std::env::remove_var(RUN_LEASE_ENV);
+        std::env::remove_var(RUN_ID_ENV);
 
         let error = runtime
-            .block_on(ambient_run_lease(&store))
-            .expect_err("stale agent context must not inherit User authority");
+            .block_on(ambient_run_context(&store))
+            .expect_err("an agent body must name its Run generation");
 
         match previous_context {
             Some(value) => std::env::set_var(RUN_CONTEXT_ENV, value),
             None => std::env::remove_var(RUN_CONTEXT_ENV),
         }
-        match previous_lease {
-            Some(value) => std::env::set_var(RUN_LEASE_ENV, value),
-            None => std::env::remove_var(RUN_LEASE_ENV),
+        match previous_run_id {
+            Some(value) => std::env::set_var(RUN_ID_ENV, value),
+            None => std::env::remove_var(RUN_ID_ENV),
         }
-        assert!(error.to_string().contains("refusing User authority"));
+        assert!(error.to_string().contains("refusing an unattributed write"));
     }
 }

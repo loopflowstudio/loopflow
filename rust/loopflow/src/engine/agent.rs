@@ -97,7 +97,7 @@ pub struct LaunchResult {
 
 /// Configuration for launching an agent.
 #[derive(Debug, Clone, Copy, Default, PartialEq, Eq)]
-pub enum AgentAuthority {
+pub enum AgentRunContext {
     #[default]
     Inherit,
     Detached,
@@ -116,8 +116,7 @@ pub enum AgentWriteScope {
 /// Roots that a managed delivery launch must prove writable before it starts.
 ///
 /// Presence marks a trusted Loopflow Task boundary: the provider receives full
-/// delivery access while the durable Run/Invocation lease remains the mutation
-/// authority.
+/// delivery access while the current Run and Invocation ids fence mutations.
 #[derive(Debug, Clone, Default, PartialEq, Eq)]
 pub struct AgentExecutionBoundary {
     pub writable_roots: Vec<PathBuf>,
@@ -137,8 +136,8 @@ pub struct AgentConfig {
     pub resume_token: Option<String>,
     /// Working directory.
     pub cwd: Option<std::path::PathBuf>,
-    /// Whether the provider process inherits ambient Work execution authority.
-    pub authority: AgentAuthority,
+    /// Whether the provider process inherits the ambient Run identity.
+    pub run_context: AgentRunContext,
     /// Maximum filesystem write scope granted to the provider.
     pub write_scope: AgentWriteScope,
     /// Exact roots and network access needed beyond `cwd`.
@@ -180,7 +179,7 @@ impl std::fmt::Debug for AgentConfig {
             .field("agent", &self.agent)
             .field("max_turns", &self.max_turns)
             .field("resume_token", &self.resume_token)
-            .field("authority", &self.authority)
+            .field("run_context", &self.run_context)
             .field("write_scope", &self.write_scope)
             .field("execution_boundary", &self.execution_boundary)
             .field("cwd", &self.cwd)
@@ -2845,7 +2844,7 @@ trust_level = "trusted"
             cwd: Some("/tmp".into()),
             max_turns: None,
             resume_token: None,
-            authority: AgentAuthority::Inherit,
+            run_context: AgentRunContext::Inherit,
             write_scope: AgentWriteScope::Configured,
             execution_boundary: None,
             skip_permissions: false,
@@ -2874,7 +2873,7 @@ trust_level = "trusted"
             cwd: Some("/tmp".into()),
             max_turns: Some(5),
             resume_token: None,
-            authority: AgentAuthority::Inherit,
+            run_context: AgentRunContext::Inherit,
             write_scope: AgentWriteScope::Configured,
             execution_boundary: None,
             skip_permissions: true,
@@ -2903,7 +2902,7 @@ trust_level = "trusted"
             cwd: Some("/tmp".into()),
             max_turns: None,
             resume_token: None,
-            authority: AgentAuthority::Inherit,
+            run_context: AgentRunContext::Inherit,
             write_scope: AgentWriteScope::Configured,
             execution_boundary: None,
             skip_permissions: false,

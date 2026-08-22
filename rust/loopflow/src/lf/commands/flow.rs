@@ -696,7 +696,7 @@ mod tests {
         let error = executor
             .run_skill(&skill, ExecutionContext { progress: None })
             .await
-            .expect_err("a detached direct flow has no User authority");
+            .expect_err("a detached direct flow has no User acceptance context");
 
         assert!(error.to_string().contains("durable Task Work"));
         assert!(!repo.path().join("scratch").exists());

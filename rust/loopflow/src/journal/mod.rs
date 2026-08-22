@@ -11,7 +11,7 @@ use serde::{Deserialize, Serialize};
 use time::OffsetDateTime;
 use tracing::{debug, warn};
 
-use crate::durable::{RunLeaseToken, WorkRef, RUN_LEASE_ENV};
+use crate::durable::{RunId, WorkRef, RUN_ID_ENV};
 use crate::engine::worktrees::main_repo_root;
 use crate::id::{ExecId, TraceId};
 use crate::store::sqlite::SqliteStore;
@@ -389,16 +389,16 @@ pub enum TraceCaptureContextError {
 }
 
 fn child_work_attribution() -> (Option<String>, Option<String>) {
-    let Some(value) = std::env::var_os(RUN_LEASE_ENV) else {
+    let Some(value) = std::env::var_os(RUN_ID_ENV) else {
         return (None, None);
     };
-    let Ok(token) = RunLeaseToken::parse(&value.to_string_lossy()) else {
+    let Ok(run_id) = RunId::parse(&value.to_string_lossy()) else {
         return (None, None);
     };
     let Ok(store) = open_ledger() else {
         return (None, None);
     };
-    let Ok(lease) = store.resolve_run_lease(&token) else {
+    let Ok(lease) = store.run_context(&run_id) else {
         return (None, None);
     };
     match lease.work {

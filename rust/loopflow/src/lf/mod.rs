@@ -367,7 +367,7 @@ pub enum Commands {
         #[command(subcommand)]
         cmd: WorkCommand,
     },
-    /// Internal: run a Project or Task body holding the ambient Run lease
+    /// Internal: run a Project or Task body under the ambient Run context
     #[command(name = "__work", hide = true)]
     WorkRunner {
         #[arg(value_parser = ["project", "task"])]
@@ -928,7 +928,7 @@ pub enum WorkCommand {
         #[arg(long)]
         json: bool,
     },
-    /// Append authored direction through User or active parent Run authority
+    /// Append authored direction with User or active Run provenance
     Steer {
         #[arg(value_parser = ["wave", "project", "task"])]
         kind: String,
@@ -1363,7 +1363,26 @@ pub enum PrCommand {
         #[arg(long = "body")]
         body: Option<String>,
     },
-    /// Land a PR hands-off: rebase, clear scratch, and arm auto-merge
+    /// Prepare a PR, request exact-head auto-merge, and return without watching.
+    Arm {
+        #[arg(long)]
+        strict: bool,
+        #[arg(long)]
+        local: bool,
+        #[arg(short = 'c', long)]
+        complete: bool,
+        #[arg(long = "next")]
+        next: Option<String>,
+        #[arg(short = 'w', long = "worktree")]
+        worktree: Option<String>,
+        #[arg(short = 'm', long = "message")]
+        message: Option<String>,
+        #[arg(long = "title")]
+        title: Option<String>,
+        #[arg(long = "body")]
+        body: Option<String>,
+    },
+    /// Arm and watch a PR through CI repair and authoritative merge.
     Land {
         #[arg(long)]
         strict: bool,

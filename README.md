@@ -80,7 +80,8 @@ Delegate durable work — the same verbs whether the caller is you or the wave:
 lf task run INF-123                                   # durable Task Work, own worktree
 lf task steer INF-123 "take the smaller approach"     # redirect the active turn
 lf task status INF-123 --json                         # inspect durable state
-lf pr land -c                                         # merge the PR, complete the Task
+lf pr arm -c                                          # request exact-head auto-merge and return
+lf pr land -c                                         # watch, repair CI, merge, then complete the Task
 ```
 
 Turn a reviewed design into work without another planning subsystem:

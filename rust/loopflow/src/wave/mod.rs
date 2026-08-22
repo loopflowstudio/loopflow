@@ -212,14 +212,14 @@ async fn resolve_registry(main_repo: &Path, wave: &str) -> Option<registry::Regi
     }
 }
 
-struct WaveRunGuard(Option<(SharedStore, crate::durable::RunLease)>);
+struct WaveRunGuard(Option<(SharedStore, crate::durable::RunContext)>);
 
 impl WaveRunGuard {
-    fn as_ref(&self) -> Option<&(SharedStore, crate::durable::RunLease)> {
+    fn as_ref(&self) -> Option<&(SharedStore, crate::durable::RunContext)> {
         self.0.as_ref()
     }
 
-    fn take(&mut self) -> Option<(SharedStore, crate::durable::RunLease)> {
+    fn take(&mut self) -> Option<(SharedStore, crate::durable::RunContext)> {
         self.0.take()
     }
 }
@@ -300,7 +300,7 @@ fn resident_command(
         // The resident's children must resolve `lf` to this binary.
         .env("PATH", crate::flowloop::wave::path_for_children())
         .env_remove(crate::durable::RUN_CONTEXT_ENV)
-        .env_remove(crate::durable::RUN_LEASE_ENV)
+        .env_remove(crate::durable::RUN_ID_ENV)
         .stdin(std::process::Stdio::null());
     for (key, value) in resident_env {
         command.env(key, value);
@@ -492,8 +492,8 @@ where
                 "agent".to_string(),
             ),
             (
-                crate::durable::RUN_LEASE_ENV.to_string(),
-                lease.env_value().to_string(),
+                crate::durable::RUN_ID_ENV.to_string(),
+                lease.run_id.to_string(),
             ),
         ]);
     }
@@ -615,9 +615,9 @@ where
         discord_projection,
         wave_run
             .as_ref()
-            .map(|(store, lease)| server::WaveRunAttach {
+            .map(|(store, context)| server::WaveRunAttach {
                 store: Arc::clone(store),
-                lease: lease.clone(),
+                context: context.clone(),
                 cwd: resident_worktree
                     .as_ref()
                     .expect("a Wave Run has a spawned resident worktree")

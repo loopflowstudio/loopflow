@@ -1096,7 +1096,7 @@ mod tests {
         assert!(content.contains("<key>LF_HOME</key>"));
         assert!(content.contains("<key>LF_DB_PATH</key>"));
         assert!(!content.contains("DOPPLER_TOKEN"));
-        assert!(!content.contains("LF_RUN_LEASE"));
+        assert!(!content.contains("LF_RUN_ID"));
 
         assert_eq!(
             list_crons(temp.path(), &launchctl).unwrap(),

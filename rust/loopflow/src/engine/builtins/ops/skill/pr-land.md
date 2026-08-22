@@ -2,7 +2,7 @@
 requires: code on branch
 produces: landed PR
 ---
-Land the current branch. Rebase, create/update the PR, and enable auto-merge.
+Land the current branch. Prepare the exact head, watch CI, repair, and finish merged.
 
 ## Orientation
 
@@ -21,13 +21,20 @@ re-derive what these already record.
 
 ## API
 
-`lf pr land` handles the entire mechanical workflow: staging uncommitted changes, rebasing, creating or updating the PR, and enabling auto-merge. In a Task worktree, bare land settles one PR and keeps the Task open.
+`lf pr land` stages uncommitted changes, rebases, creates or updates the PR,
+requests exact-head auto-merge, and watches GitHub. Failing required checks get
+one bounded `ci-fix` repair per failed head; a material repair is published and
+re-armed. The command returns only after merge or an actionable durable block.
+In a Task worktree, bare land settles one PR and keeps the Task open.
+
+Use `lf pr arm` for the one-shot prepare/request/return operation.
 
 ```
 lf pr land [--complete|-c] [--next <slug>] [-m "commit message"] [--title "..."] [--body "..."]
 ```
 
-**Do not run git commit, git push, gh pr create, or gh pr merge directly.** `lf pr land` does all of this. Running those commands manually means auto-merge never gets enabled.
+**Do not run git commit, git push, gh pr create, or gh pr merge directly.**
+`lf pr land` owns those mutations and the watched repair loop.
 
 ## Workflow
 
@@ -74,8 +81,8 @@ lf pr land --next released-upgrade-proof  # another serial PR follows
 lf pr land -c                             # this merge completes the Task
 ```
 
-Do not combine `--next` and `--complete`. A retry may change the disposition
-before merge; the last land or submit call wins.
+Do not combine `--next` and `--complete`. Task completion or rotation happens
+only after GitHub authoritatively reports the merge.
 
 If you wrote title/body manually, include them:
 

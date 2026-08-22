@@ -5,17 +5,17 @@ use anyhow::{anyhow, Result};
 use crate::durable::WorkRef;
 use crate::store::{open_existing_store, SharedStore};
 
-/// Run one Project or Task body under the exact ambient Run lease.
+/// Run one Project or Task body under the exact ambient Run context.
 pub async fn run_work(work: WorkRef) -> Result<()> {
     let store: SharedStore = Arc::new(
         open_existing_store()
             .await
             .ok_or_else(|| anyhow!("no Loopflow registry on this machine"))?,
     );
-    let lease = crate::ops::required_run_lease(&store).await?;
+    let lease = crate::ops::required_run_context(&store).await?;
     if lease.work != work {
         anyhow::bail!(
-            "ambient Run lease owns {} {}, not {} {}",
+            "ambient Run context owns {} {}, not {} {}",
             lease.work.kind(),
             lease.work.id(),
             work.kind(),

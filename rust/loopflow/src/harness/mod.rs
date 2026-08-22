@@ -21,7 +21,7 @@ use async_trait::async_trait;
 use tokio::sync::mpsc;
 
 use crate::chat::types::ConversationEvent;
-use crate::engine::agent::{AgentAuthority, AgentConfig};
+use crate::engine::agent::{AgentConfig, AgentRunContext};
 
 pub(crate) fn configure_vendor_std_env(command: &mut std::process::Command) -> Result<()> {
     let (control_bin, control_home, control_db) = vendor_control_context()?;
@@ -41,15 +41,15 @@ pub(crate) fn configure_vendor_tokio_env(command: &mut tokio::process::Command) 
     Ok(())
 }
 
-pub(crate) fn configure_agent_authority(
+pub(crate) fn configure_agent_run_context(
     command: &mut tokio::process::Command,
-    authority: AgentAuthority,
+    run_context: AgentRunContext,
 ) {
-    if authority != AgentAuthority::Detached {
+    if run_context != AgentRunContext::Detached {
         return;
     }
     command
-        .env_remove(crate::durable::RUN_LEASE_ENV)
+        .env_remove(crate::durable::RUN_ID_ENV)
         .env_remove(crate::durable::AGENT_INVOCATION_ENV);
 }
 
@@ -94,8 +94,8 @@ mod environment_tests {
     use std::ffi::OsString;
     use std::path::Path;
 
-    use super::{configure_agent_authority, set_vendor_std_env};
-    use crate::engine::agent::AgentAuthority;
+    use super::{configure_agent_run_context, set_vendor_std_env};
+    use crate::engine::agent::AgentRunContext;
 
     #[test]
     fn vendor_receives_control_context_but_not_ordinary_store_context() {
@@ -135,14 +135,14 @@ mod environment_tests {
     }
 
     #[test]
-    fn detached_agent_receives_no_work_authority() {
+    fn detached_agent_drops_run_identity() {
         let mut command = tokio::process::Command::new("vendor");
         command
             .env(crate::durable::RUN_CONTEXT_ENV, "agent")
-            .env(crate::durable::RUN_LEASE_ENV, "secret-lease")
+            .env(crate::durable::RUN_ID_ENV, "run_stale")
             .env(crate::durable::AGENT_INVOCATION_ENV, "invocation_core");
 
-        configure_agent_authority(&mut command, AgentAuthority::Detached);
+        configure_agent_run_context(&mut command, AgentRunContext::Detached);
 
         let environment = command
             .as_std()
@@ -153,7 +153,7 @@ mod environment_tests {
             environment[crate::durable::RUN_CONTEXT_ENV],
             Some(OsString::from("agent"))
         );
-        assert_eq!(environment[crate::durable::RUN_LEASE_ENV], None);
+        assert_eq!(environment[crate::durable::RUN_ID_ENV], None);
         assert_eq!(environment[crate::durable::AGENT_INVOCATION_ENV], None);
     }
 }

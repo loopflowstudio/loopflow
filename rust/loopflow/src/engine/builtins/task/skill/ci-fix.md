@@ -1,18 +1,19 @@
 ---
-requires: wave PR with failing CI checks (or CI failure message context)
+requires: watched PR landing with failing CI checks (or CI failure message context)
 produces: branch with CI failures fixed
 diff_files: false
 action_style: procedural
 ---
-Fix failing CI checks for the current wave PR.
+Fix failing CI checks for the watched PR landing.
 
 ## Goal
 
-Find the wave's current PR, identify the latest failing checks on its head commit, fix them, and leave the branch ready to push.
+Use the watched PR context, identify the failing checks on its exact head, fix
+them, and leave the branch ready for the landing supervisor to publish.
 
 ## Workflow
 
-1. **Resolve the PR for this wave**
+1. **Resolve the watched PR**
    - If the prompt message already includes check metadata (PR number, branch, commit SHA, logs URL), use it directly.
    - Otherwise, resolve the PR for the current branch with the GitHub CLI:
      ```bash
@@ -41,20 +42,17 @@ Find the wave's current PR, identify the latest failing checks on its head commi
    - If no failing checks remain, say so clearly.
    - If blocked (missing secrets, flaky upstream, infra outage), give exact
      blocker details and the next manual action. Name the failing capability
-     (provider, github-observation, secrets) — the Task runner independently
-     detects provider outages and GitHub observation failures and transitions
-     the Task to Blocked with that capability, so report it precisely. A PR
-     whose head is still Failing after you finish (you could not repair it)
-     also blocks the Task actionably rather than silently returning to Waiting.
+     (provider, github-observation, secrets); the landing supervisor records
+     that durable blocker.
 
 ## Guardrails
 
 - Stay scoped to CI failures on this PR.
 - Prefer targeted fixes over broad refactors.
 - Do not ignore failing tests to get green.
-- Do not fake progress. If you cannot repair the head, say so and stop — the
-  runner blocks the Task on the unchanged failing head. Pushing a real fix
-  (the head advances) is the only signal that another iteration should run.
+- Do not push, land, or merge. If you cannot repair the head, say so and stop. A
+  material tree change is the only signal that lets the landing supervisor
+  publish, re-arm a new head, and continue watching.
 
 ## Adaptation
 

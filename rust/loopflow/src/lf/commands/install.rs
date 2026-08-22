@@ -3876,7 +3876,7 @@ fn launch_prior_child(cli: &Path, target: &PriorChildLaunch) -> Result<()> {
     let output = command
         .current_dir(&target.repo)
         .env_remove(crate::durable::RUN_CONTEXT_ENV)
-        .env_remove(crate::durable::RUN_LEASE_ENV)
+        .env_remove(crate::durable::RUN_ID_ENV)
         .env_remove(crate::durable::AGENT_INVOCATION_ENV)
         .output()
         .with_context(|| {

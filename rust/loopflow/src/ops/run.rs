@@ -2,7 +2,7 @@ use std::path::{Path, PathBuf};
 
 use crate::durable::{
     AdvanceReceipt, AgentInvocation, BoundaryState, Containment, InvocationRoute, ProjectId,
-    RunAdvance, RunLease, RunTrigger, TaskId, WorkRef,
+    RunAdvance, RunContext, RunTrigger, TaskId, WorkRef,
 };
 use crate::engine::process::{
     current_home_execution_context, current_process_group_id, pin_control_binary,
@@ -23,24 +23,15 @@ pub struct WorkBinding {
 }
 
 impl WorkBinding {
-    pub fn assert_ambient(&self, lease: &RunLease) -> OpsResult<()> {
-        if lease.work == self.work {
-            return Ok(());
-        }
-        Err(run_error(format!(
-            "--as {}:{} does not match ambient {} {}",
-            self.work.kind(),
-            self.work.id(),
-            lease.work.kind(),
-            lease.work.id(),
-        )))
+    pub fn matches_run(&self, context: &RunContext) -> bool {
+        context.work == self.work
     }
 }
 
 #[derive(Debug)]
 pub(crate) struct DirectRun {
     store: SharedStore,
-    lease: RunLease,
+    context: RunContext,
     invocation: AgentInvocation,
     finished: bool,
 }
@@ -52,20 +43,20 @@ impl DirectRun {
         route: InvocationRoute,
         surface: &str,
     ) -> OpsResult<Self> {
-        let (_, lease) = store
+        let (_, context) = store
             .reserve_run(&binding.work, RunTrigger::User)
             .await
             .map_err(run_error)?;
         let process_group = match current_process_group_id() {
             Some(process_group) => process_group,
             None => {
-                let _ = store.stop_run_on_interrupt(&lease);
+                let _ = store.stop_run_on_interrupt(&context);
                 return Err(run_error("direct lf invocation has no process group"));
             }
         };
         if let Err(error) = store
             .advance_run(
-                &lease,
+                &context,
                 RunAdvance::RunStarting {
                     containment: Containment::ProcessGroup {
                         id: i64::from(process_group),
@@ -75,12 +66,12 @@ impl DirectRun {
             )
             .await
         {
-            let _ = store.stop_run_on_interrupt(&lease);
+            let _ = store.stop_run_on_interrupt(&context);
             return Err(run_error(error));
         }
         let invocation = match store
             .advance_run(
-                &lease,
+                &context,
                 RunAdvance::InvocationStarting {
                     route,
                     surface: surface.to_string(),
@@ -93,27 +84,27 @@ impl DirectRun {
             Ok(AdvanceReceipt::Invocation(invocation)) => invocation,
             Ok(_) => unreachable!("InvocationStarting returns an Invocation receipt"),
             Err(error) => {
-                let _ = store.stop_run_on_interrupt(&lease);
+                let _ = store.stop_run_on_interrupt(&context);
                 return Err(run_error(error));
             }
         };
 
         let cleanup_store = store.clone();
-        let cleanup_lease = lease.clone();
+        let cleanup_context = context.clone();
         crate::engine::agent::register_interrupt_cleanup(move || {
-            let _ = cleanup_store.stop_run_on_interrupt(&cleanup_lease);
+            let _ = cleanup_store.stop_run_on_interrupt(&cleanup_context);
         });
 
         Ok(Self {
             store,
-            lease,
+            context,
             invocation,
             finished: false,
         })
     }
 
-    pub(crate) fn lease(&self) -> &RunLease {
-        &self.lease
+    pub(crate) fn context(&self) -> &RunContext {
+        &self.context
     }
 
     pub(crate) fn invocation(&self) -> &AgentInvocation {
@@ -124,14 +115,14 @@ impl DirectRun {
         let invocation_result = self
             .store
             .advance_run(
-                &self.lease,
+                &self.context,
                 RunAdvance::InvocationEnded {
                     invocation_id: self.invocation.id.clone(),
                     outcome,
                 },
             )
             .await;
-        let run_result = self.store.finish_run(&self.lease, outcome).await;
+        let run_result = self.store.finish_run(&self.context, outcome).await;
         if run_result.is_ok() {
             self.finished = true;
         }
@@ -143,7 +134,7 @@ impl DirectRun {
 impl Drop for DirectRun {
     fn drop(&mut self) {
         if !self.finished {
-            let _ = self.store.stop_run_on_interrupt(&self.lease);
+            let _ = self.store.stop_run_on_interrupt(&self.context);
         }
     }
 }
@@ -301,7 +292,7 @@ pub(crate) struct RunLaunch {
 
 pub(crate) async fn launch_in_run(
     store: &SharedStore,
-    lease: &RunLease,
+    lease: &RunContext,
     request: RunLaunch,
 ) -> OpsResult<AgentInvocation> {
     let execution = current_home_execution_context()
@@ -354,7 +345,7 @@ pub(crate) async fn launch_in_run(
         request.work.kind().to_string(),
         request.work.id().to_string(),
     ];
-    let run_lease = lease.env_value().to_string();
+    let run_context = lease.run_id.to_string();
     let invocation_id = invocation.id.as_str().to_string();
     let db_path = execution.db_path.to_string_lossy().to_string();
     let lf_home = execution.lf_home.to_string_lossy().to_string();
@@ -364,7 +355,7 @@ pub(crate) async fn launch_in_run(
             request.wave_id.as_str(),
         ),
         (crate::durable::RUN_CONTEXT_ENV, "agent"),
-        (crate::durable::RUN_LEASE_ENV, run_lease.as_str()),
+        (crate::durable::RUN_ID_ENV, run_context.as_str()),
         (crate::durable::AGENT_INVOCATION_ENV, invocation_id.as_str()),
         (crate::store::CONTROL_BIN_ENV, control_bin.as_str()),
         (crate::store::CONTROL_DB_PATH_ENV, db_path.as_str()),
@@ -539,7 +530,7 @@ mod tests {
     }
 
     #[tokio::test]
-    async fn work_binding_is_an_exact_ambient_assertion() {
+    async fn work_binding_matches_only_its_run_identity() {
         let (directory, store) = test_store().await;
         let selected = Wave::new(
             WaveId::new(),
@@ -563,13 +554,8 @@ mod tests {
             .await
             .unwrap();
 
-        selected_binding
-            .assert_ambient(&selected_lease)
-            .expect("exact Work matches");
-        let error = selected_binding
-            .assert_ambient(&other_lease)
-            .expect_err("different Work must fail closed");
-        assert!(error.to_string().contains("does not match ambient"));
+        assert!(selected_binding.matches_run(&selected_lease));
+        assert!(!selected_binding.matches_run(&other_lease));
     }
 
     #[tokio::test]
@@ -603,7 +589,7 @@ mod tests {
         direct.finish(BoundaryState::Succeeded).await.unwrap();
         assert!(store.current_run(&binding.work).await.unwrap().is_none());
         let invocation = store
-            .invocations_for_run(&direct.lease().run_id)
+            .invocations_for_run(&direct.context().run_id)
             .await
             .unwrap()
             .pop()

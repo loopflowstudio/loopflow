@@ -185,6 +185,13 @@ struct WorkSurfaceView: View {
                     )
                 }
 
+                WaveMetricPortfolioView(
+                    portfolio: roadmap.metricPortfolio,
+                    projectNames: Dictionary(uniqueKeysWithValues:
+                        roadmap.projects.items.map { ($0.project.id, $0.project.name) }
+                    )
+                )
+
                 let sections = nowSections(from: [roadmap])
                 if sections.isEmpty {
                     Text("Nothing in this Wave can move right now.")

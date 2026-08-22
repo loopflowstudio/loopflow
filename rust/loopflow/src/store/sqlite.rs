@@ -30,6 +30,7 @@ use crate::wave::{Wave, WaveLocator};
 mod children;
 mod ci_incidents;
 mod durable;
+mod metrics;
 mod provider_deliveries;
 
 /// A fleet can legitimately queue longer than SQLite's common five-second

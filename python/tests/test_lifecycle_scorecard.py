@@ -35,11 +35,32 @@ def _performance_connection() -> sqlite3.Connection:
             merge_tracking_complete INTEGER NOT NULL,
             repair_tracking_complete INTEGER NOT NULL,
             github_observation TEXT,
-            merge_commit TEXT
+            merge_commit TEXT,
+            abandoned_at INTEGER
         );
         CREATE TABLE task_pr_repair_incidents (
             task_pr_id TEXT NOT NULL,
-            kind TEXT NOT NULL
+            kind TEXT NOT NULL,
+            occurred_at INTEGER NOT NULL
+        );
+        """
+    )
+    return connection
+
+
+def _task_loop_connection() -> sqlite3.Connection:
+    connection = _performance_connection()
+    connection.executescript(
+        """
+        ALTER TABLE epochs ADD COLUMN state TEXT;
+        ALTER TABLE epochs ADD COLUMN created_at INTEGER;
+        ALTER TABLE epochs ADD COLUMN terminal_at INTEGER;
+        ALTER TABLE task_prs ADD COLUMN merge_mode TEXT;
+        ALTER TABLE task_prs ADD COLUMN created_at INTEGER;
+        CREATE TABLE task_events (
+            task_id TEXT NOT NULL,
+            kind_json TEXT NOT NULL,
+            created_at INTEGER NOT NULL
         );
         """
     )
@@ -61,6 +82,70 @@ def test_measured_row_preserves_missing_and_explicit_zero() -> None:
     assert (breach["measured"], breach["verdict"]) == (1, "fail")
 
 
+def test_usage_loader_reads_latest_turn_sample_without_inventing_missing_values(
+    tmp_path: Path,
+) -> None:
+    repo = tmp_path / "loopflow"
+    repo.mkdir()
+    connection = sqlite3.connect(":memory:")
+    connection.row_factory = sqlite3.Row
+    connection.executescript(
+        """
+        CREATE TABLE agent_invocations (
+            id TEXT PRIMARY KEY,
+            repo TEXT NOT NULL,
+            provider TEXT NOT NULL
+        );
+        CREATE TABLE agent_turns (
+            id TEXT PRIMARY KEY,
+            invocation_id TEXT NOT NULL,
+            started_at INTEGER NOT NULL,
+            ended_at INTEGER
+        );
+        CREATE TABLE turn_usage_samples (
+            turn_id TEXT NOT NULL,
+            observed_at INTEGER NOT NULL,
+            total_input_tokens INTEGER,
+            output_tokens INTEGER,
+            cost_usd REAL
+        );
+        """
+    )
+    connection.execute(
+        "INSERT INTO agent_invocations VALUES ('invocation-1', ?, 'codex')",
+        (str(repo),),
+    )
+    connection.execute(
+        "INSERT INTO agent_turns VALUES ('turn-1', 'invocation-1', 100, 120)"
+    )
+    connection.execute(
+        "INSERT INTO agent_turns VALUES ('turn-2', 'invocation-1', 100, 130)"
+    )
+    connection.execute(
+        "INSERT INTO turn_usage_samples VALUES ('turn-1', 110, 10, 2, 0.1)"
+    )
+    connection.execute(
+        "INSERT INTO turn_usage_samples VALUES ('turn-1', 120, 20, 4, 0.2)"
+    )
+
+    usage = scorecard.load_usage(connection, repo, since=90)
+
+    assert usage == [
+        {
+            "provider": "codex",
+            "total_input_tokens": 20,
+            "output_tokens": 4,
+            "cost_usd": 0.2,
+        },
+        {
+            "provider": "codex",
+            "total_input_tokens": None,
+            "output_tokens": None,
+            "cost_usd": None,
+        },
+    ]
+
+
 def test_lifecycle_loader_reads_authoritative_owner_facts(tmp_path: Path) -> None:
     repo = tmp_path / "loopflow"
     repo.mkdir()
@@ -76,11 +161,13 @@ def test_lifecycle_loader_reads_authoritative_owner_facts(tmp_path: Path) -> Non
         """
         INSERT INTO task_prs VALUES (
             'pr-1', 'task-1', 120, 150, 1, 1,
-            '{"result":{"state":"fresh"}}', 'merge-sha'
+            '{"result":{"state":"fresh"}}', 'merge-sha', NULL
         )
         """
     )
-    connection.execute("INSERT INTO task_pr_repair_incidents VALUES ('pr-1', 'manual_git_repair')")
+    connection.execute(
+        "INSERT INTO task_pr_repair_incidents VALUES ('pr-1', 'manual_git_repair', 130)"
+    )
 
     evidence = scorecard.load_lifecycle(connection, repo, since=90)
 
@@ -127,7 +214,7 @@ def test_mixed_lifecycle_history_has_complete_json_coverage(tmp_path: Path) -> N
             ),
         )
         connection.execute(
-            "INSERT INTO task_prs VALUES (?, ?, ?, ?, 1, 1, ?, ?)",
+            "INSERT INTO task_prs VALUES (?, ?, ?, ?, 1, 1, ?, ?, NULL)",
             (
                 f"pr-{index}",
                 task_id,
@@ -139,7 +226,8 @@ def test_mixed_lifecycle_history_has_complete_json_coverage(tmp_path: Path) -> N
         )
     for kind in ("avoidable_rebase_agent", "manual_git_repair"):
         connection.execute(
-            "INSERT INTO task_pr_repair_incidents VALUES ('pr-2', ?)", (kind,)
+            "INSERT INTO task_pr_repair_incidents VALUES ('pr-2', ?, ?)",
+            (kind, window_started_at + 500),
         )
     lifecycle = scorecard.load_lifecycle(connection, repo, window_started_at)
 
@@ -167,6 +255,152 @@ def test_mixed_lifecycle_history_has_complete_json_coverage(tmp_path: Path) -> N
     assert rows["avoidable_repairs"]["p95"] == 1
     assert rows["manual_git_repairs"]["p50"] == 0
     assert rows["manual_git_repairs"]["p95"] == 1
+
+
+def test_task_loop_trust_emits_one_exact_window_observation(tmp_path: Path) -> None:
+    repo = tmp_path / "loopflow"
+    repo.mkdir()
+    connection = _task_loop_connection()
+    started = datetime(2026, 7, 15, tzinfo=timezone.utc)
+    ended = datetime(2026, 7, 22, tzinfo=timezone.utc)
+    connection.execute(
+        "INSERT INTO performance_evidence_authority VALUES (1, ?)",
+        (int(started.timestamp()) - 1,),
+    )
+    for index, state in enumerate(("done", "done", "abandoned", "done"), start=1):
+        task_id = f"task-{index}"
+        epoch_id = f"epoch-{index}"
+        connection.execute(
+            "INSERT INTO tasks (id, worktree) VALUES (?, ?)",
+            (task_id, str(repo)),
+        )
+        connection.execute(
+            "INSERT INTO epochs (id, task_id, state, created_at, terminal_at) VALUES (?, ?, ?, ?, ?)",
+            (
+                epoch_id,
+                task_id,
+                state,
+                int(started.timestamp()) + index,
+                int(ended.timestamp()) - index,
+            ),
+        )
+    connection.execute(
+        "INSERT INTO task_prs (id, task_id, merge_commit, merge_tracking_complete, repair_tracking_complete, merge_mode, created_at) VALUES ('pr-1', 'task-1', 'merge-1', 1, 1, 'auto', ?)",
+        (int(started.timestamp()) + 10,),
+    )
+    connection.execute(
+        "INSERT INTO task_prs (id, task_id, merge_commit, merge_tracking_complete, repair_tracking_complete, merge_mode, created_at) VALUES ('pr-2', 'task-2', 'merge-2', 1, 1, 'user', ?)",
+        (int(started.timestamp()) + 10,),
+    )
+    connection.execute(
+        "INSERT INTO task_events VALUES ('task-3', ?, ?)",
+        ('{"kind":"failed","error":"bounded attempts exhausted","resumable":false}', int(ended.timestamp()) - 4),
+    )
+    connection.execute(
+        "INSERT INTO task_prs (id, task_id, merge_commit, merge_tracking_complete, repair_tracking_complete, merge_mode, created_at) VALUES ('pr-4', 'task-4', 'merge-4', 1, 1, 'auto', ?)",
+        (int(started.timestamp()) + 10,),
+    )
+    connection.execute(
+        "INSERT INTO task_pr_repair_incidents VALUES ('pr-4', 'manual_git_repair', ?)",
+        (int(ended.timestamp()) - 5,),
+    )
+
+    observation = scorecard.task_loop_trust_observation(
+        connection, repo, started, ended
+    )
+
+    assert observation == {
+        "wave": "product",
+        "metric_id": "task-loop-trust",
+        "instrument": "lifecycle-scorecard",
+        "kind": "observed",
+        "value": 0.5,
+        "source_window_start": "2026-07-15T00:00:00Z",
+        "source_window_end": "2026-07-22T00:00:00Z",
+        "complete": True,
+        "eligible": 4,
+        "successful": 2,
+    }
+
+
+def test_task_loop_trust_counts_a_pr_that_settles_after_its_epoch_starts(
+    tmp_path: Path,
+) -> None:
+    repo = tmp_path / "loopflow"
+    repo.mkdir()
+    connection = _task_loop_connection()
+    started = datetime(2026, 7, 15, tzinfo=timezone.utc)
+    ended = datetime(2026, 7, 22, tzinfo=timezone.utc)
+    started_at = int(started.timestamp())
+    ended_at = int(ended.timestamp())
+    connection.execute(
+        "INSERT INTO performance_evidence_authority VALUES (1, ?)",
+        (started_at - 1,),
+    )
+    for index in (1, 2):
+        connection.execute(
+            "INSERT INTO tasks (id, worktree) VALUES (?, ?)",
+            (f"task-{index}", str(repo)),
+        )
+        connection.execute(
+            "INSERT INTO epochs (id, task_id, state, created_at, terminal_at) VALUES (?, ?, 'done', ?, ?)",
+            (f"epoch-{index}", f"task-{index}", started_at + 100, ended_at - 100),
+        )
+    connection.execute(
+        "INSERT INTO task_prs (id, task_id, merge_commit, merged_at, merge_tracking_complete, repair_tracking_complete, merge_mode, created_at) VALUES ('pr-1', 'task-1', 'merge-1', ?, 1, 1, 'auto', ?)",
+        (ended_at - 200, started_at + 10),
+    )
+    connection.execute(
+        "INSERT INTO task_prs (id, task_id, merge_commit, merged_at, merge_tracking_complete, repair_tracking_complete, merge_mode, created_at) VALUES ('pr-2', 'task-2', 'merge-2', ?, 1, 1, 'user', ?)",
+        (ended_at - 200, started_at + 10),
+    )
+
+    observation = scorecard.task_loop_trust_observation(
+        connection, repo, started, ended
+    )
+
+    assert observation["eligible"] == 2
+    assert observation["successful"] == 1
+    assert observation["value"] == 0.5
+
+
+def test_task_loop_trust_ignores_manual_repair_from_an_earlier_epoch(
+    tmp_path: Path,
+) -> None:
+    repo = tmp_path / "loopflow"
+    repo.mkdir()
+    connection = _task_loop_connection()
+    started = datetime(2026, 7, 15, tzinfo=timezone.utc)
+    ended = datetime(2026, 7, 22, tzinfo=timezone.utc)
+    started_at = int(started.timestamp())
+    ended_at = int(ended.timestamp())
+    epoch_started_at = started_at + 200
+    epoch_ended_at = ended_at - 100
+    connection.execute(
+        "INSERT INTO performance_evidence_authority VALUES (1, ?)",
+        (started_at - 1,),
+    )
+    connection.execute("INSERT INTO tasks VALUES ('task-1', ?)", (str(repo),))
+    connection.execute(
+        "INSERT INTO epochs (id, task_id, state, created_at, terminal_at) VALUES ('epoch-1', 'task-1', 'done', ?, ?)",
+        (epoch_started_at, epoch_ended_at),
+    )
+    connection.execute(
+        "INSERT INTO task_prs (id, task_id, merge_commit, merged_at, merge_tracking_complete, repair_tracking_complete, merge_mode, created_at) VALUES ('pr-1', 'task-1', 'merge-1', ?, 1, 1, 'auto', ?)",
+        (epoch_ended_at - 1, started_at + 10),
+    )
+    connection.execute(
+        "INSERT INTO task_pr_repair_incidents VALUES ('pr-1', 'manual_git_repair', ?)",
+        (epoch_started_at - 1,),
+    )
+
+    observation = scorecard.task_loop_trust_observation(
+        connection, repo, started, ended
+    )
+
+    assert observation["eligible"] == 1
+    assert observation["successful"] == 1
+    assert observation["value"] == 1.0
 
 
 def test_scorecard_is_owned_by_telemetry_flow_and_hidden_cli() -> None:

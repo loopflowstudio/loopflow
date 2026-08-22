@@ -39,6 +39,13 @@ def test_building_blocks(homepage: Page):
     assert section.locator(".code-block").count() >= 1
 
 
+def test_wave_building_block_does_not_define_measures(homepage: Page):
+    section = homepage.locator(".building-blocks-section")
+    wave = section.locator(".building-block-item", has_text="wave/auth/GOAL.md")
+    assert wave.count() == 1
+    assert "## Measures" not in wave.text_content()
+
+
 def test_screenshot_section_only_when_capture_exists(homepage: Page, base_url: str):
     """The demo section renders only when the capture file is present —
     a missing image never ships as a 404."""

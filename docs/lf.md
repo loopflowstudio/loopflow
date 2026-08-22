@@ -525,8 +525,8 @@ Waves sharing `main`.
 
 ```bash
 lf ls --json                    # every durable Wave and its Home/runtime evidence
-lf status <wave> --json         # one Wave's Work hierarchy, Runs, and attention
-lf roadmap --json               # current plan across Waves joined to runtime truth
+lf status <wave> --json         # Work, Runs, attention, and live metric_portfolio
+lf roadmap --json               # current plan plus that portfolio on every Wave
 lf activity                     # durable Work changes, newest first
 lf activity --task INF-123 --json # filter before the bounded typed snapshot
 lf runs                         # one row per skill call: context, tokens, cost
@@ -616,6 +616,9 @@ scorecard generator is deterministic internal code, not a general-user `lf`
 API. Missing provider usage never becomes zero; an explicit provider-reported
 zero remains a measured sample. Versioned policy lives in
 `performance/budgets.json`, while generated reports remain runtime evidence.
+The same run publishes the Product Project's exact-window Task-loop trust
+observation through the typed metric writer. Before the metric-storage draft is
+released, the scorecard still runs and names that persistence is pending.
 
 A run is one agent-backed skill invocation. It owns the context, model, token,
 cost, and outcome evidence. An exec is one `lf` process; nested execs share a

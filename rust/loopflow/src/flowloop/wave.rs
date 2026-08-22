@@ -183,13 +183,56 @@ pub fn path_for_children() -> OsString {
 /// Order is stable → volatile so providers can prefix-cache fresh sessions:
 /// the doctrine and discipline are byte-identical every pass, the goal seed
 /// ends with rewritten-every-pass memory, and the wake is unique per pass.
-fn wave_pass_seed(origin_repo: &Path, wave: &str, wake: &str) -> String {
+fn wave_pass_seed(origin_repo: &Path, wave: &str, wake: &str, metric_context: &str) -> String {
     let seed = build_goal_seed(origin_repo, wave);
     format!(
-        "{}\n\n{}\n\n{seed}\n\n<wake>\n{wake}\n</wake>",
+        "{}\n\n{}\n\n{seed}\n\n{metric_context}\n\n<lf:wave-executive-loop>\n1. What is most important?\n2. What signals are arriving?\n3. What works?\n4. What does not?\n5. What is the current strategy?\n6. How should strategy adjust?\n\nTreat metrics as evidence, never as automatic KR completion or a composite Wave score.\n</lf:wave-executive-loop>\n\n<wake>\n{wake}\n</wake>",
         crate::engine::prompt::loopflow_section(),
         orchestration_discipline(wave),
     )
+}
+
+async fn wave_metric_context(
+    control: Option<&WaveControl>,
+    origin_repo: &Path,
+    wave_name: &str,
+) -> String {
+    let result = async {
+        let store = match control {
+            Some(control) => control.store.clone(),
+            None => Arc::new(
+                crate::store::open_existing_store()
+                    .await
+                    .ok_or_else(|| anyhow!("local registry is unavailable"))?,
+            ),
+        };
+        let wave = match control {
+            Some(control) => {
+                let WorkRef::Wave(wave_id) = &control.lease.work else {
+                    return Err(anyhow!("ambient Wave Run does not carry a Wave identity"));
+                };
+                store
+                    .get_wave(wave_id)
+                    .await?
+                    .ok_or_else(|| anyhow!("ambient Wave is absent from the registry"))?
+            }
+            None => {
+                let locator = crate::wave::WaveLocator::discover(origin_repo, wave_name)?;
+                store
+                    .get_wave_at(&locator)
+                    .await?
+                    .ok_or_else(|| anyhow!("wave/{wave_name} is absent from the registry"))?
+            }
+        };
+        crate::ops::metrics::stored_wave_metric_portfolio(
+            &store,
+            &wave,
+            time::OffsetDateTime::now_utc(),
+        )
+        .await
+    }
+    .await;
+    crate::ops::metrics::metric_prompt_section("metric-portfolio", result)
 }
 
 /// The wave's rendered `GOAL.md` plus current memory, or a minimal-but-real
@@ -714,7 +757,9 @@ impl WaveLoop {
             }
             invocation.get_or_insert(key);
             let completed_index = step.index;
-            let seed = wave_pass_seed(&self.origin_repo, &self.wave, &wake);
+            let metric_context =
+                wave_metric_context(self.control.as_ref(), &self.origin_repo, &self.wave).await;
+            let seed = wave_pass_seed(&self.origin_repo, &self.wave, &wake, &metric_context);
             let live_skill = step.kind == StepKind::Skill
                 && matches!(&self.backend, BodyBackend::Harness { .. });
             if live_skill {
@@ -2216,10 +2261,18 @@ mod tests {
         std::fs::create_dir_all(&goal_dir).expect("goal dir");
         std::fs::write(goal_dir.join("GOAL.md"), "Ship the thing.").expect("goal");
 
-        let seed = wave_pass_seed(tmp.path(), "ship", "hello from chat");
+        let seed = wave_pass_seed(
+            tmp.path(),
+            "ship",
+            "hello from chat",
+            "<lf:metric-portfolio>\n{\"metrics\":[],\"contract_issues\":[]}\n</lf:metric-portfolio>",
+        );
 
         assert!(seed.contains("Ship the thing."));
         assert!(seed.contains("<lf:loopflow>"));
+        assert!(seed.contains("<lf:metric-portfolio>"));
+        assert!(seed.contains("What is most important?"));
+        assert!(seed.contains("How should strategy adjust?"));
         assert!(seed.contains("<wake>\nhello from chat\n</wake>"));
         // Stable → volatile: the byte-identical doctrine leads so fresh
         // sessions prefix-cache it; per-pass memory and wake trail it.

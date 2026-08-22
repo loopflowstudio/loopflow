@@ -110,7 +110,10 @@ One or two sentences, concrete enough to perform at the end of the build.>
 If `<lf:wave>` is present, check `wave/<wave>/GOAL.md` (and `MEMORY.md`) in docs:
 
 - **Intent** — design must serve the wave's north star, stated in GOAL.md.
-- **Metrics** — "Done when" must move the wave's metrics. Quote the specific ones you're advancing.
+- **Evidence** — derive "Done when" from Project KRs and user behavior. Use a
+  Project-owned signal when the direction names one. Leave room for feature work
+  to reveal a better metric proposal; a substantial new UI performance path is
+  a strong reason to capture one for Project sponsorship.
 - **Memory** — check `MEMORY.md` for known risks and prior decisions. If this design introduces a new risk, name it.
 - Scope must exclude what GOAL.md marks as out of scope.
 

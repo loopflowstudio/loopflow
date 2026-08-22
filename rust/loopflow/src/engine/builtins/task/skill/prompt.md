@@ -32,7 +32,7 @@ Put each instruction at the narrowest layer that exercises it:
 | Artifact | Use it for | Do not put here |
 | --- | --- | --- |
 | Skill | A repeatable task and its output contract | Repo-wide conventions or Wave portfolio policy |
-| Wave `GOAL.md` | Durable identity, measures, bounds, and selection judgment | Project KRs, task lists, implementation steps |
+| Wave `GOAL.md` | Durable identity, bounds, cadence, and selection judgment | Project KRs, live metric contracts, task lists, implementation steps |
 | Direction | A composable quality or user intent | A workflow tied to one skill or code area |
 | Inline prompt | One concrete request | Reusable doctrine that deserves a skill |
 | Repo agent doc | Conventions every task in this repository must follow | One feature's design or temporary context |
@@ -110,8 +110,9 @@ The body of `wave/<name>/GOAL.md` is the prompt a Wave runs repeatedly. Make it
 loop well:
 
 1. **Identity by contrast** — what this Wave owns and what a sibling owns.
-2. **Readable measures** — three to five observable signals, most important
-   first.
+2. **Selection signals** — the evidence that changes Project selection or
+   strategy. Reference Project-owned metrics when they exist; never copy them
+   into the Wave body.
 3. **Concrete moves** — the kinds of useful action it may select now.
 4. **Honest question** — the check a lazy loop cannot satisfy by gaming a proxy.
 5. **Stop discipline** — when to record a blocker instead of manufacturing

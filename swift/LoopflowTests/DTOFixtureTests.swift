@@ -161,6 +161,13 @@ struct DTOFixtureTests {
         #expect(detail.attention.items[0].ageSeconds == 7200)
         #expect(detail.projects[0].tasks[0].attention.level == .red)
         #expect(detail.projects[0].tasks[0].attention.reason == "merge pull request head 333333333333 on GitHub")
+        #expect(detail.metricPortfolio.metrics[0].identity.metricId == "task-loop-trust")
+        #expect(detail.metricPortfolio.metrics[0].projectId == detail.projects[0].project.id)
+        #expect(detail.metricPortfolio.metrics[0].evidence == .met(
+            value: 1,
+            sourceWindowStart: "2026-08-13T18:00:00Z",
+            sourceWindowEnd: "2026-08-20T18:00:00Z"
+        ))
 
         var legacy = try #require(JSONSerialization.jsonObject(with: data) as? [String: Any])
         var legacyWave = try #require(legacy["wave"] as? [String: Any])
@@ -191,6 +198,8 @@ struct DTOFixtureTests {
         let product = try #require(roadmap.waves.first)
         #expect(product.wave.name == "product")
         #expect(product.wave.paused)
+        #expect(product.metricPortfolio.metrics[0].identity.metricId == "task-loop-trust")
+        #expect(product.metricPortfolio.metrics[0].projectId == product.projects.items[0].project.id)
         #expect(product.wave.enabled)
         #expect(product.unavailableProjects[0].workId == "proj_e972b70272fbb5e91c096ebe657f9f9b")
         #expect(product.unavailableProjects[0].projectSlug == "technical-architecture")
@@ -207,6 +216,47 @@ struct DTOFixtureTests {
         #expect(project.tasks[3].reference.workspace?.branch == "jack-heart/now-available-research")
         #expect(roadmap.waves[1].projects.unavailableReason?.contains("lf pm sync") == true)
         #expect(!roadmap.waves[1].wave.enabled)
+    }
+
+    @Test("metric portfolio fixture preserves every closed evidence payload")
+    func metricPortfolioFixturePreservesEvidence() throws {
+        let data = try loadFixtureData("metric_portfolio.json")
+        let portfolio = try JSONDecoder().decode(MetricPortfolio.self, from: data)
+
+        #expect(portfolio.metrics.count == 9)
+        #expect(portfolio.contractIssues.count == 4)
+        #expect(
+            portfolio.metrics[0].description
+                == "Fraction of qualifying events that settled successfully."
+        )
+        #expect(portfolio.metrics.map(\.stage).contains(.graduated))
+        #expect(portfolio.metrics.map(\.stage).contains(.installed))
+        #expect(portfolio.metrics.contains { if case .atMost = $0.target { true } else { false } })
+        #expect(portfolio.metrics.contains { if case .never = $0.freshness { true } else { false } })
+        #expect(portfolio.metrics.contains { if case .stale = $0.freshness { true } else { false } })
+        #expect(portfolio.metrics.contains { if case .unavailable = $0.evidence { true } else { false } })
+        #expect(portfolio.metrics.contains {
+            if case .unknown(.revisionMismatch) = $0.evidence { true } else { false }
+        })
+        #expect(portfolio.metrics.contains {
+            if case .unknown(.staleUnavailable) = $0.evidence { true } else { false }
+        })
+
+        var missing = try #require(JSONSerialization.jsonObject(with: data) as? [String: Any])
+        var metrics = try #require(missing["metrics"] as? [[String: Any]])
+        metrics[0].removeValue(forKey: "description")
+        missing["metrics"] = metrics
+        let missingData = try JSONSerialization.data(withJSONObject: missing)
+        #expect(throws: DecodingError.self) {
+            try JSONDecoder().decode(MetricPortfolio.self, from: missingData)
+        }
+
+        var future = try #require(JSONSerialization.jsonObject(with: data) as? [String: Any])
+        var futureMetrics = try #require(future["metrics"] as? [[String: Any]])
+        futureMetrics[0]["future_field"] = true
+        future["metrics"] = futureMetrics
+        let futureData = try JSONSerialization.data(withJSONObject: future)
+        _ = try JSONDecoder().decode(MetricPortfolio.self, from: futureData)
     }
 
     @Test("child activity preserves typed delivery evidence")

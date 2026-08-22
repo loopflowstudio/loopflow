@@ -51,6 +51,7 @@ pub mod chat;
 pub(crate) mod discord;
 pub mod journal;
 pub(crate) mod memory;
+pub mod metrics;
 pub mod playhead;
 pub mod relocate;
 

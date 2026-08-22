@@ -722,7 +722,24 @@ async fn prepare_project_flow_step(
             step.kind
         );
     }
-    let seed = project_seed(project, wave.name(), &boundary, observations);
+    let metric_context = crate::ops::metrics::metric_prompt_section(
+        "project-owned-metrics",
+        crate::ops::metrics::project_metric_portfolio(
+            store,
+            wave,
+            &planning.snapshot.projects,
+            project.plan.id.as_str(),
+            time::OffsetDateTime::now_utc(),
+        )
+        .await,
+    );
+    let seed = project_seed(
+        project,
+        wave.name(),
+        &boundary,
+        observations,
+        &metric_context,
+    );
     let mut prepared =
         crate::lf::commands::run::prepare_harness_turn(&step.step, &seed, wave.name(), None)?;
     prepared.config.agent = Some(project.agent.clone());
@@ -1256,6 +1273,7 @@ fn project_seed(
     wave_name: &str,
     boundary: &BoundarySeed,
     observations: &[String],
+    metric_context: &str,
 ) -> String {
     let observations = if observations.is_empty() {
         "none".to_string()
@@ -1264,11 +1282,12 @@ fn project_seed(
     };
     let direction = boundary.render();
     format!(
-        "Advance Linear Project {name} ({project_id}) in wave/{wave}.\n\n{context}\n\n{direction}\n\nProject Work: {work_id}\nIteration: {iteration}\nPM snapshot synced at: {synced_at}\nSupervised Task observations:\n{observations}\n\nThe runner plays clarify, pursue, and mutate through this same provider session before it checks authoritative Project and Task state. Read and update only this Linear Project through `lf pm`. Create or select concrete Linear tasks, run file-writing work with `lf task run <issue-id>`, and supervise those Tasks. Do not edit repository files from the Wave home. Return concise phase evidence; the runner decides complete, wait, repeat, or block after the whole flow.",
+        "Advance Linear Project {name} ({project_id}) in wave/{wave}.\n\n{context}\n\n{metric_context}\n\nOnly metrics owned by this Project appear above. Cross-owned evidence appears only when the Wave routes it through durable direction. Metrics inform KR judgment; they never check a KR automatically.\n\n{direction}\n\nProject Work: {work_id}\nIteration: {iteration}\nPM snapshot synced at: {synced_at}\nSupervised Task observations:\n{observations}\n\nThe runner plays clarify, pursue, and mutate through this same provider session before it checks authoritative Project and Task state. Read and update only this Linear Project through `lf pm`. Create or select concrete Linear tasks, run file-writing work with `lf task run <issue-id>`, and supervise those Tasks. Do not edit repository files from the Wave home. Return concise phase evidence; the runner decides complete, wait, repeat, or block after the whole flow.",
         name = project.plan.name,
         project_id = project.plan.id.as_str(),
         wave = wave_name,
         context = project.plan.prompt_context,
+        metric_context = metric_context,
         work_id = project.id,
         iteration = project.iteration + 1,
         synced_at = project.plan.pm_snapshot_synced_at,
@@ -1446,10 +1465,17 @@ mod tests {
         assert_eq!(events.len(), 1);
         assert_eq!(events[0], prior_event);
 
-        let seed = super::project_seed(&adopted, "incident-management", &prior_basis, &[]);
+        let seed = super::project_seed(
+            &adopted,
+            "incident-management",
+            &prior_basis,
+            &[],
+            "<lf:project-owned-metrics>\n{\"metrics\":[],\"contract_issues\":[]}\n</lf:project-owned-metrics>",
+        );
         assert!(seed.contains("Prevent repeated incidents with evidence from production."));
         assert!(!seed.contains("Restore incidents before prevention."));
         assert!(seed.contains("Preserve this direction across planning refresh."));
+        assert!(seed.contains("<lf:project-owned-metrics>"));
         for number in 1..=6 {
             let line = format!(
                 "- [{}] proof {number} holds",

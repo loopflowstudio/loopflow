@@ -18,15 +18,16 @@ public enum WaveOrigin {
     nonisolated(unsafe) private static var cache: [String: String] = [:]
 
     public static func resolve(_ repoPath: String) -> String {
+        let key = cacheKey(repoPath)
         lock.lock()
-        if let cached = cache[repoPath] {
+        if let cached = cache[key] {
             lock.unlock()
             return cached
         }
         lock.unlock()
         let origin = resolveUncached(repoPath)
         lock.lock()
-        cache[repoPath] = origin
+        cache[key] = origin
         lock.unlock()
         return origin
     }
@@ -37,9 +38,16 @@ public enum WaveOrigin {
     /// a detached task. A cache miss stays at the supplied path; SwiftUI must
     /// never run `git` while evaluating its attribute graph.
     public static func cached(_ repoPath: String) -> String {
+        let key = cacheKey(repoPath)
         lock.lock()
         defer { lock.unlock() }
-        return cache[repoPath] ?? repoPath
+        return cache[key] ?? repoPath
+    }
+
+    private static func cacheKey(_ repoPath: String) -> String {
+        let normalized = URL(fileURLWithPath: repoPath).standardizedFileURL.path
+        guard normalized != "/" else { return normalized }
+        return normalized.trimmingCharacters(in: CharacterSet(charactersIn: "/"))
     }
 
     #if os(macOS)

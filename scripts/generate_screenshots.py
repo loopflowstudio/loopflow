@@ -46,6 +46,7 @@ class WaveProofShot:
     name: str
     mode: str
     width: int
+    view: str | None
     wave: str | None
     detail_state: str | None
 
@@ -57,6 +58,7 @@ def load_shots(path: Path = MANIFEST_PATH) -> list[WaveProofShot]:
             name=raw["name"],
             mode=raw["mode"],
             width=raw["width"],
+            view=raw.get("view"),
             wave=raw.get("wave"),
             detail_state=raw.get("detail_state"),
         )
@@ -74,6 +76,8 @@ def shot_environment(shot: WaveProofShot) -> dict[str, str]:
     }
     if shot.wave:
         env["LOOPFLOW_UI_TEST_SELECT_BRANCH"] = shot.wave
+    if shot.view:
+        env["LOOPFLOW_UI_TEST_VIEW"] = shot.view
     if shot.detail_state:
         env["LOOPFLOW_UI_TEST_DETAIL_STATE"] = shot.detail_state
     return env

@@ -14,6 +14,7 @@ use crate::wave::{Wave, WaveLocator};
 mod children;
 pub(crate) mod ci_incidents;
 mod durable;
+mod metrics;
 pub(crate) use durable::{AskCommentWrite, TaskWriterState};
 pub mod migrations;
 pub mod provider_deliveries;
@@ -496,6 +497,11 @@ impl Store {
     #[cfg(test)]
     pub(crate) fn from_sqlite_for_test(sqlite: sqlite::SqliteStore) -> Self {
         Self { sqlite }
+    }
+
+    #[cfg(test)]
+    pub(crate) fn apply_migration_for_test(&self, name: &str) -> StoreResult<()> {
+        self.sqlite.apply_migration_for_test(name)
     }
 
     pub async fn put_pm_snapshot(&self, snapshot: PmSnapshotRow) -> StoreResult<()> {

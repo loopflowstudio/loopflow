@@ -12,6 +12,11 @@ Inspect the worktree, focused verification, diff, PR, CI, and review state.
   operation to publish or refresh the active PR to `main`.
 - If CI or review has an obvious fix, make the bounded repair in this Task
   worktree, verify it, and update the same PR.
+- Report a consequential measured impact or important blind spot exposed by the
+  work. When feature implementation reveals a promising metric, propose its
+  outcome, measure, decision value, and cheapest credible producer to the
+  Project. A benchmark or passing test can support the proposal; neither becomes
+  a KR or sponsored live metric by itself.
 - Treat an open or approved PR as submitted, never complete. Do not land or
   complete from this loop; the pinned final flow owns that decision.
 - Use `lf pr abandon` only to discard an active PR that cannot advance.

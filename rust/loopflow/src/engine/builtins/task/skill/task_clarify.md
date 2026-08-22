@@ -7,6 +7,10 @@ Clarify the exact Task owned by the current Run.
 Read the Task seed, current durable direction, Project definition/KRs, repository
 instructions, current worktree, and any existing design note in `scratch/`.
 
+Use the Project's KRs and any metrics named in the direction to understand the
+outcome. Do not force the design to invent a metric before the work reveals the
+useful signal; feature implementation may expose a better proposal.
+
 - Honor every Steer included in the seed. The boundary Basis is fixed; do not
   invent an acknowledgement mutation or treat provider delivery as application.
 - Keep the design to this Task's one worktree and ordered serial PRs.

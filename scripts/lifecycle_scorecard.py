@@ -1,9 +1,10 @@
 #!/usr/bin/env python3
-"""Generate the read-only lifecycle scorecard used by telemetry-daily."""
+"""Generate the lifecycle scorecard and typed Project metric inputs."""
 
 from __future__ import annotations
 
 import argparse
+import io
 import json
 import math
 import sqlite3
@@ -11,7 +12,7 @@ import subprocess
 import sys
 from datetime import datetime, timedelta, timezone
 from pathlib import Path
-from typing import Any, Callable, Iterable, Mapping, Sequence
+from typing import Any, Callable, Iterable, Mapping, Sequence, TextIO
 from urllib.parse import quote
 
 SCHEMA_VERSION = 1
@@ -21,6 +22,11 @@ POLICY_PATH = Path("performance/budgets.json")
 def parse_args(argv: Sequence[str] | None = None) -> argparse.Namespace:
     parser = argparse.ArgumentParser(description=__doc__)
     parser.add_argument("--json", action="store_true", help="emit structured JSON")
+    parser.add_argument(
+        "--envelope",
+        action="store_true",
+        help=argparse.SUPPRESS,
+    )
     parser.add_argument(
         "--repo",
         type=Path,
@@ -90,11 +96,16 @@ def load_usage(connection: sqlite3.Connection, repo: Path, since: int) -> list[d
     rows = connection.execute(
         """
         SELECT invocation.repo, invocation.provider,
-               turn.provider_total_input_tokens, turn.provider_output_tokens,
-               turn.cost_usd
+               usage.total_input_tokens, usage.output_tokens, usage.cost_usd
           FROM agent_turns turn
           JOIN agent_invocations invocation ON invocation.id=turn.invocation_id
-         WHERE turn.ended_at >= ?
+          LEFT JOIN turn_usage_samples usage
+            ON usage.turn_id=turn.id
+           AND usage.observed_at=(
+               SELECT MAX(latest.observed_at) FROM turn_usage_samples latest
+               WHERE latest.turn_id=turn.id
+           )
+         WHERE COALESCE(turn.ended_at, turn.started_at) >= ?
          ORDER BY turn.ended_at, turn.rowid
         """,
         (since,),
@@ -102,8 +113,8 @@ def load_usage(connection: sqlite3.Connection, repo: Path, since: int) -> list[d
     return [
         {
             "provider": row["provider"],
-            "total_input_tokens": row["provider_total_input_tokens"],
-            "output_tokens": row["provider_output_tokens"],
+            "total_input_tokens": row["total_input_tokens"],
+            "output_tokens": row["output_tokens"],
             "cost_usd": row["cost_usd"],
         }
         for row in rows
@@ -208,6 +219,126 @@ def load_lifecycle(connection: sqlite3.Connection, repo: Path, since: int) -> di
         "authority_started_at": authority["started_at"],
         "task_runs": runs,
         "task_prs": prs,
+    }
+
+
+def task_loop_trust_schema_available(connection: sqlite3.Connection) -> bool:
+    return all(
+        [
+            lifecycle_schema_available(connection),
+            table_exists(connection, "task_events"),
+            column_exists(connection, "epochs", "terminal_at"),
+            column_exists(connection, "tasks", "worktree"),
+            column_exists(connection, "task_prs", "merge_mode"),
+            column_exists(connection, "task_prs", "created_at"),
+            column_exists(connection, "task_prs", "merged_at"),
+            column_exists(connection, "task_prs", "abandoned_at"),
+            column_exists(connection, "task_pr_repair_incidents", "occurred_at"),
+        ]
+    )
+
+
+def task_loop_trust_observation(
+    connection: sqlite3.Connection,
+    repo: Path,
+    window_started_at: datetime,
+    window_ended_at: datetime,
+) -> dict[str, Any]:
+    identity = {
+        "wave": "product",
+        "metric_id": "task-loop-trust",
+        "instrument": "lifecycle-scorecard",
+    }
+    source_window_start = window_started_at.isoformat().replace("+00:00", "Z")
+    source_window_end = window_ended_at.isoformat().replace("+00:00", "Z")
+    if not task_loop_trust_schema_available(connection):
+        return {
+            **identity,
+            "kind": "unavailable",
+            "source_as_of": source_window_end,
+            "reason": "Task loop evidence schema is not available",
+        }
+
+    authority = connection.execute(
+        "SELECT started_at FROM performance_evidence_authority WHERE singleton=1"
+    ).fetchone()
+    if authority is None or int(authority["started_at"]) > int(window_started_at.timestamp()):
+        return {
+            **identity,
+            "kind": "unavailable",
+            "source_as_of": source_window_end,
+            "reason": "Task loop evidence authority does not cover the complete window",
+        }
+
+    rows = connection.execute(
+        """
+        SELECT task.worktree, epoch.state,
+               NOT EXISTS (
+                   SELECT 1 FROM task_prs pr
+                   WHERE pr.task_id=task.id
+                     AND pr.created_at <= epoch.terminal_at
+                     AND (
+                         (pr.merged_at IS NULL AND pr.abandoned_at IS NULL)
+                         OR pr.merged_at >= epoch.created_at
+                         OR pr.abandoned_at >= epoch.created_at
+                     )
+                     AND (pr.merge_mode IS NOT 'auto' OR pr.merge_commit IS NULL)
+               ) AS all_prs_landed_unattended,
+               EXISTS (
+                   SELECT 1 FROM task_events event
+                   WHERE event.task_id=task.id
+                     AND event.created_at >= epoch.created_at
+                     AND event.created_at <= epoch.terminal_at
+                     AND json_extract(event.kind_json, '$.kind')='failed'
+                     AND json_extract(event.kind_json, '$.resumable')=0
+               ) AS actionable_non_convergence,
+               EXISTS (
+                   SELECT 1 FROM task_prs pr
+                   JOIN task_pr_repair_incidents incident ON incident.task_pr_id=pr.id
+                   WHERE pr.task_id=task.id
+                     AND pr.created_at <= epoch.terminal_at
+                     AND (
+                         (pr.merged_at IS NULL AND pr.abandoned_at IS NULL)
+                         OR pr.merged_at >= epoch.created_at
+                         OR pr.abandoned_at >= epoch.created_at
+                     )
+                     AND incident.kind='manual_git_repair'
+                     AND incident.occurred_at >= epoch.created_at
+                     AND incident.occurred_at <= epoch.terminal_at
+               ) AS manual_repair
+          FROM epochs epoch
+          JOIN tasks task ON task.id=epoch.task_id
+         WHERE epoch.task_id IS NOT NULL
+           AND epoch.state IN ('done', 'abandoned')
+           AND epoch.terminal_at >= ?
+           AND epoch.terminal_at <= ?
+         ORDER BY epoch.terminal_at, epoch.id
+        """,
+        (int(window_started_at.timestamp()), int(window_ended_at.timestamp())),
+    )
+    eligible = [
+        row
+        for row in rows
+        if row["worktree"] is not None and belongs_to_repo(row["worktree"], repo)
+    ]
+    successful = sum(
+        1
+        for row in eligible
+        if not row["manual_repair"]
+        and (
+            (row["state"] == "done" and row["all_prs_landed_unattended"])
+            or (row["state"] == "abandoned" and row["actionable_non_convergence"])
+        )
+    )
+    return {
+        **identity,
+        "kind": "observed",
+        "value": successful / len(eligible) if eligible else 0.0,
+        "source_window_start": source_window_start,
+        "source_window_end": source_window_end,
+        "complete": bool(eligible),
+        "eligible": len(eligible),
+        "successful": successful,
     }
 
 
@@ -647,14 +778,16 @@ def value_budget(value: float | None, budget: float | None, unit: str) -> str:
     return f"{left} / {right}"
 
 
-def print_report(report: Mapping[str, Any]) -> None:
+def print_report(report: Mapping[str, Any], output: TextIO = sys.stdout) -> None:
     print(
         f"Lifecycle scorecard · {report['repo']} · {report['window_days']} days "
-        f"through {report['window_ended_at']}\n"
+        f"through {report['window_ended_at']}\n",
+        file=output,
     )
     print(
         f"{'MEASURE':<38}  {'COVERAGE':>10}  {'P50 / BUDGET':>17}  "
-        f"{'P95 / BUDGET':>17}  {'VERDICT':>10}"
+        f"{'P95 / BUDGET':>17}  {'VERDICT':>10}",
+        file=output,
     )
     for row in report["rows"]:
         label = row["label"]
@@ -669,10 +802,17 @@ def print_report(report: Mapping[str, Any]) -> None:
             f"{label:<38}  {row['measured']}/{row['eligible']:>8}  "
             f"{value_budget(row['p50'], budget.get('p50'), budget['unit']):>17}  "
             f"{value_budget(row['p95'], upper_budget, budget['unit']):>17}  "
-            f"{row['verdict'].upper():>10}"
+            f"{row['verdict'].upper():>10}",
+            file=output,
         )
         if row["reason"]:
-            print(f"  {row['reason']}")
+            print(f"  {row['reason']}", file=output)
+
+
+def format_report(report: Mapping[str, Any]) -> str:
+    output = io.StringIO()
+    print_report(report, output)
+    return output.getvalue()
 
 
 def main(argv: Sequence[str] | None = None) -> int:
@@ -686,11 +826,28 @@ def main(argv: Sequence[str] | None = None) -> int:
         with open_read_only(database) as connection:
             usage = load_usage(connection, repo, since)
             lifecycle = load_lifecycle(connection, repo, since)
+            metric_observation = task_loop_trust_observation(
+                connection,
+                repo,
+                generated_at - timedelta(days=7),
+                generated_at,
+            )
         report = build_report(policy, repo, generated_at, usage, load_gates(repo), lifecycle)
     except (FileNotFoundError, OSError, ValueError, sqlite3.Error) as error:
         print(f"lifecycle-scorecard: {error}", file=sys.stderr)
         return 1
-    if args.json:
+    if args.envelope:
+        print(
+            json.dumps(
+                {
+                    "report": report,
+                    "metric_observations": [metric_observation],
+                    "text": format_report(report),
+                },
+                sort_keys=True,
+            )
+        )
+    elif args.json:
         print(json.dumps(report, indent=2, sort_keys=True))
     else:
         print_report(report)

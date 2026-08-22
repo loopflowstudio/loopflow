@@ -16,7 +16,7 @@ struct RegistryQueryTests {
         ]
         """
         let query = RegistryQuery { args, _ in
-            #expect(args == ["ls", "--json"])
+            #expect(args == ["ls", "--all", "--json"])
             return json
         }
 
@@ -39,7 +39,7 @@ struct RegistryQueryTests {
         let counter = CallCounter()
         let query = RegistryQuery { args, _ in
             await counter.increment()
-            #expect(args == ["ls", "--json"])
+            #expect(args == ["ls", "--all", "--json"])
             return json
         }
 
@@ -75,6 +75,7 @@ struct RegistryQueryTests {
           "unavailable_projects":[],
           "runs":{"state":"ok","truncated":false,"items":[{"id":"invocation-1","trace_id":"abc","exec_id":"span-1","parent_exec_id":null,"repo":"/src/loopflow","worktree":"/src/loopflow.task","wave":"goals","flow":"task","skill":"task/pursue","status":"ok","started":100,"ended":110,"turns":1,"system_tokens":100,"task_tokens":50,"supplied_context_tokens":150,"input_tokens":1000,"output_tokens":200,"reasoning_tokens":null,"cache_read_tokens":800,"cache_write_tokens":null,"cost_usd":0.25,"duration_secs":10.0,"provider":"claude","model":"opus","surface":"headless","capture_status":"complete"}]},
           "attention":{"state":"ok","truncated":false,"items":[{"kind":"task","id":"ts_2","subject":"INF-124","owner":"user","reason":"User merge requested","since":"2026-07-06T00:00:00Z","age_secs":7200}]},
+          "metric_portfolio":{"metrics":[],"contract_issues":[]},
           "home_runtime":{"home":{"id":"home_00000000000000000000000000000001","route":"local","created_at":"1970-01-01T00:00:00Z","observed_at":"1970-01-01T00:00:00Z"},"state":"stopped","reason":"no resident is serving","endpoint":null,"action":{"kind":"start","home_id":"home_00000000000000000000000000000001"}}
         }
         """
@@ -116,6 +117,18 @@ struct RegistryQueryTests {
 
         let result = try await query.roadmap(wave: "product")
         #expect(result.generatedAt == "2026-07-15T00:00:00Z")
+        #expect(result.waves.isEmpty)
+    }
+
+    @Test("lf roadmap requests every repository when no Wave narrows it")
+    func roadmapRequestsAllRepositories() async throws {
+        let query = RegistryQuery { args, cwd in
+            #expect(args == ["roadmap", "--all", "--json"])
+            #expect(cwd == nil)
+            return #"{"generated_at":"2026-07-15T00:00:00Z","waves":[]}"#
+        }
+
+        let result = try await query.roadmap()
         #expect(result.waves.isEmpty)
     }
 
@@ -273,6 +286,7 @@ struct RegistryQueryTests {
           "unavailable_projects":[],
           "runs":{"state":"unavailable","reason":"run ledger unavailable: disk is gone"},
           "attention":{"state":"ok","truncated":false,"items":[]},
+          "metric_portfolio":{"metrics":[],"contract_issues":[]},
           "home_runtime":{"home":{"id":"home_00000000000000000000000000000001","route":"local","created_at":"1970-01-01T00:00:00Z","observed_at":"1970-01-01T00:00:00Z"},"state":"stopped","reason":"no resident is serving","endpoint":null,"action":{"kind":"start","home_id":"home_00000000000000000000000000000001"}}
         }
         """

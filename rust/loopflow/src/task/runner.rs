@@ -3365,5 +3365,7 @@ mod planning_tests {
         assert!(seed.contains("Current project definition"));
         assert!(seed.contains("Task directive snapshot synced at: 11"));
         assert!(seed.contains("Project definition snapshot synced at: 22"));
+        assert!(!seed.contains("metric-portfolio"));
+        assert!(!seed.contains("project-owned-metrics"));
     }
 }

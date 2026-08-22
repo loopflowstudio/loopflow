@@ -25,6 +25,14 @@ selection. Follow the repo style guide.
 - Delegate only bounded, independent checks through the execution tools already
   available to this process, and keep responsibility for integrating the result.
 - Implement the smallest coherent slice described by the design doc.
+- Use a relevant Project metric when one already covers the outcome. While
+  building feature work, notice signals that could help the Project steer and
+  propose the useful ones back to it: name the outcome, the candidate measure,
+  why it would change a decision, and the cheapest credible producer. When the
+  first useful signal belongs naturally in this coherent change, ship it;
+  otherwise leave the proposal for Project sponsorship. A substantial new UI
+  performance path is a strong reason to look. Metric proposals are discoveries,
+  not a completion quota.
 - Add or update tests for user-visible behavior.
 - Run the narrowest verification that covers the touched code.
 - When progress requires supervisor judgment, run `lf ask "<exact question>"`.

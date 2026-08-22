@@ -1,9 +1,12 @@
-use loopflow::lf::commands::waves::WaveDetailSnapshot;
+use loopflow::lf::commands::waves::{RoadmapSnapshot, WaveDetailSnapshot};
 use loopflow::ops::pm::PmShowResult;
+use loopflow::wave::metrics::MetricPortfolioDto;
 use loopflow::{child::CurrentWorkState, durable::WorkStatus};
 
 const PM_SHOW: &str = include_str!("../../../tests/fixtures/dto/pm_show.json");
 const WAVE_DETAIL: &str = include_str!("../../../tests/fixtures/dto/wave_detail.json");
+const ROADMAP: &str = include_str!("../../../tests/fixtures/dto/roadmap_snapshot.json");
+const METRIC_PORTFOLIO: &str = include_str!("../../../tests/fixtures/dto/metric_portfolio.json");
 
 #[test]
 fn pm_show_preserves_repository_team_and_project_ownership() {
@@ -93,4 +96,84 @@ fn status_surfaces_keep_last_failure_out_of_current_truth() {
     let task_runtime = snapshot.projects[0].tasks[0].runtime.as_ref().unwrap();
     assert_eq!(task_runtime.reason, task_runtime.current.reason);
     assert_eq!(task_runtime.current.reason, "ready");
+}
+
+#[test]
+fn status_and_roadmap_require_the_shared_metric_portfolio() {
+    let detail: WaveDetailSnapshot = serde_json::from_str(WAVE_DETAIL).unwrap();
+    assert!(matches!(
+        detail.metric_portfolio.metrics.as_slice(),
+        [metric] if metric.identity.metric_id == "task-loop-trust"
+            && matches!(metric.evidence, loopflow::wave::metrics::MetricEvidenceDto::Met { .. })
+    ));
+
+    let roadmap: RoadmapSnapshot = serde_json::from_str(ROADMAP).unwrap();
+    assert_eq!(
+        roadmap.waves[0].metric_portfolio.metrics[0]
+            .identity
+            .metric_id,
+        "task-loop-trust"
+    );
+    assert!(roadmap.waves[1].metric_portfolio.metrics.is_empty());
+
+    let mut detail_without_metrics: serde_json::Value = serde_json::from_str(WAVE_DETAIL).unwrap();
+    detail_without_metrics
+        .as_object_mut()
+        .unwrap()
+        .remove("metric_portfolio");
+    let error = serde_json::from_value::<WaveDetailSnapshot>(detail_without_metrics).unwrap_err();
+    assert!(error.to_string().contains("metric_portfolio"));
+
+    let mut roadmap_without_metrics: serde_json::Value = serde_json::from_str(ROADMAP).unwrap();
+    roadmap_without_metrics["waves"][0]
+        .as_object_mut()
+        .unwrap()
+        .remove("metric_portfolio");
+    let error = serde_json::from_value::<RoadmapSnapshot>(roadmap_without_metrics).unwrap_err();
+    assert!(error.to_string().contains("metric_portfolio"));
+}
+
+#[test]
+fn metric_portfolio_fixture_locks_every_tagged_payload() {
+    let portfolio: MetricPortfolioDto = serde_json::from_str(METRIC_PORTFOLIO).unwrap();
+    assert_eq!(portfolio.metrics.len(), 9);
+    assert_eq!(portfolio.contract_issues.len(), 4);
+    assert_eq!(
+        portfolio.metrics[0].description,
+        "Fraction of qualifying events that settled successfully."
+    );
+
+    let value: serde_json::Value = serde_json::from_str(METRIC_PORTFOLIO).unwrap();
+    let evidence = value["metrics"]
+        .as_array()
+        .unwrap()
+        .iter()
+        .map(|metric| metric["evidence"]["kind"].as_str().unwrap())
+        .collect::<Vec<_>>();
+    assert_eq!(
+        evidence,
+        [
+            "met",
+            "missed",
+            "unknown",
+            "unknown",
+            "unknown",
+            "unknown",
+            "unknown",
+            "unknown",
+            "unavailable",
+        ]
+    );
+
+    let mut missing_required = value;
+    missing_required["metrics"][0]
+        .as_object_mut()
+        .unwrap()
+        .remove("description");
+    let error = serde_json::from_value::<MetricPortfolioDto>(missing_required).unwrap_err();
+    assert!(error.to_string().contains("description"));
+
+    let mut with_unknown_field: serde_json::Value = serde_json::from_str(METRIC_PORTFOLIO).unwrap();
+    with_unknown_field["metrics"][0]["future_field"] = serde_json::json!(true);
+    serde_json::from_value::<MetricPortfolioDto>(with_unknown_field).unwrap();
 }

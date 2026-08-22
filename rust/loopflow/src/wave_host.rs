@@ -487,6 +487,8 @@ pub(crate) async fn waves_for_home(
 #[cfg(test)]
 mod tests {
     use std::ffi::OsString;
+    use std::path::Path;
+    use std::process::Command;
     use std::sync::Arc;
 
     use crate::durable::{Containment, HomeId, RunAdvance, RunState, RunTrigger, WorkRef};
@@ -517,6 +519,29 @@ mod tests {
                     None => std::env::remove_var(name),
                 }
             }
+        }
+    }
+
+    fn init_test_git_repo(repo: &Path) {
+        for args in [
+            vec!["init", "-b", "main"],
+            vec!["config", "user.email", "test@example.com"],
+            vec!["config", "user.name", "Test User"],
+            vec!["add", "."],
+            vec!["commit", "-m", "initial"],
+        ] {
+            let output = Command::new("git")
+                .arg("-C")
+                .arg(repo)
+                .args(&args)
+                .output()
+                .expect("run git");
+            assert!(
+                output.status.success(),
+                "git {} failed: {}",
+                args.join(" "),
+                String::from_utf8_lossy(&output.stderr)
+            );
         }
     }
 
@@ -822,6 +847,7 @@ mod tests {
             ),
         )
         .expect("write Wave goal");
+        init_test_git_repo(&repo);
         let locator = WaveLocator::discover(&repo, "product").expect("discover Wave locator");
         let wave = Wave::new(
             WaveId::new(),

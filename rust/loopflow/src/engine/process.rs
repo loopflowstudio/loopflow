@@ -458,6 +458,36 @@ pub(crate) async fn start_home_session(session: &str, cwd: &Path, argv: &[String
     start_session_with_context(session, cwd, argv, &[("LF_BIN", &lf_bin)], context).await
 }
 
+pub(crate) async fn start_home_session_for_install_selection(
+    session: &str,
+    cwd: &Path,
+    argv: &[String],
+    selection: &crate::machine_install::InstallSelection,
+    switch_id: Option<&str>,
+) -> Result<()> {
+    let cli = selection
+        .artifact_set
+        .artifact(&crate::machine_install::ArtifactRole::Cli)
+        .ok_or_else(|| anyhow!("install switch target has no CLI"))?;
+    cli.verify()?;
+    let lf_home = selection
+        .store
+        .parent()
+        .ok_or_else(|| anyhow!("install switch target store has no Home directory"))?
+        .to_path_buf();
+    let context = crate::child::ChildExecutionContext {
+        lf_bin: cli.path.clone(),
+        db_path: selection.store.clone(),
+        lf_home,
+    };
+    let lf_bin = context.lf_bin.to_string_lossy().to_string();
+    let mut environment = vec![("LF_BIN", lf_bin.as_str())];
+    if let Some(switch_id) = switch_id {
+        environment.push((crate::machine_install::INSTALL_SWITCH_ENV, switch_id));
+    }
+    start_session_with_context(session, cwd, argv, &environment, context).await
+}
+
 pub(crate) async fn start_lf_session_with_env(
     session: &str,
     cwd: &Path,
@@ -552,7 +582,7 @@ pub(crate) fn lf_session_shell_command(argv: &[String], env: &[(&str, &str)]) ->
         .map(|(key, value)| format!("{}={}", shell_escape(key), shell_escape(value)))
         .collect::<Vec<_>>()
         .join(" ");
-    let clear_context = "if [ -n \"${LF_FORWARDED_SECRET_NAMES:-}\" ]; then unset $LF_FORWARDED_SECRET_NAMES; fi; unset LF_TRACE_ID LF_PROCESS_ID LF_WAVE_ID LF_RUN_CONTEXT LF_RUN_LEASE LF_AGENT_INVOCATION_ID LF_BIN LF_HOME LF_DB_PATH LF_CONTROL_BIN LF_CONTROL_HOME LF_CONTROL_DB_PATH LF_ACCOUNT_LEASE LF_ACCOUNT_SELECTION LF_FORWARDED_PM_TOKEN LF_FORWARDED_PM_PROVIDER LF_FORWARDED_SECRET_NAMES LF_SSH_TARGET LF_LINEAR_WEBHOOK_SECRET LF_LINEAR_VIEWER_ID LF_GITHUB_WEBHOOK_SECRET LF_GITHUB_WEBHOOK_URL LF_LFD_ALLOW_NON_LOOPBACK LF_DISCORD_TOKEN GH_TOKEN OPENCODE_API_KEY CLAUDE_CODE_OAUTH_TOKEN ANTHROPIC_API_KEY CODEX_ACCESS_TOKEN OPENAI_API_KEY";
+    let clear_context = "if [ -n \"${LF_FORWARDED_SECRET_NAMES:-}\" ]; then unset $LF_FORWARDED_SECRET_NAMES; fi; unset LF_TRACE_ID LF_PROCESS_ID LF_WAVE_ID LF_RUN_CONTEXT LF_RUN_ID LF_AGENT_INVOCATION_ID LF_INSTALL_SWITCH LF_BIN LF_HOME LF_DB_PATH LF_CONTROL_BIN LF_CONTROL_HOME LF_CONTROL_DB_PATH LF_ACCOUNT_LEASE LF_ACCOUNT_SELECTION LF_FORWARDED_PM_TOKEN LF_FORWARDED_PM_PROVIDER LF_FORWARDED_SECRET_NAMES LF_SSH_TARGET LF_LINEAR_WEBHOOK_SECRET LF_LINEAR_VIEWER_ID LF_GITHUB_WEBHOOK_SECRET LF_GITHUB_WEBHOOK_URL LF_LFD_ALLOW_NON_LOOPBACK LF_DISCORD_TOKEN GH_TOKEN OPENCODE_API_KEY CLAUDE_CODE_OAUTH_TOKEN ANTHROPIC_API_KEY CODEX_ACCESS_TOKEN OPENAI_API_KEY";
     if env.is_empty() {
         format!("{clear_context}; exec {command}")
     } else {
@@ -577,7 +607,7 @@ pub(crate) async fn start_tmux_session(
             session,
             "-c",
             cwd,
-            "/bin/zsh",
+            "/bin/sh",
             "-lc",
             shell_command,
         ])
@@ -814,7 +844,8 @@ mod tests {
         assert!(command.starts_with(
             "if [ -n \"${LF_FORWARDED_SECRET_NAMES:-}\" ]; then unset $LF_FORWARDED_SECRET_NAMES; fi; unset "
         ));
-        assert!(command.contains("LF_AGENT_INVOCATION_ID"));
+        assert!(command.contains("LF_RUN_CONTEXT LF_RUN_ID LF_AGENT_INVOCATION_ID"));
+        assert!(command.contains("LF_INSTALL_SWITCH LF_BIN"));
         assert!(command.contains("LF_ACCOUNT_LEASE LF_ACCOUNT_SELECTION"));
         assert!(command.contains("LF_DISCORD_TOKEN"));
         assert!(command.contains("GH_TOKEN OPENCODE_API_KEY"));

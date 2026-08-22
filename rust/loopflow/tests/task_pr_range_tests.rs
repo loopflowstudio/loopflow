@@ -17,8 +17,8 @@ use std::os::unix::fs::PermissionsExt;
 use std::process::{Command, Stdio};
 
 use loopflow::ops::{
-    create_or_update_pr, land, rebase_with_recovery, submit, LandOptions, NullProgress, PrOptions,
-    RebaseOptions,
+    arm as land, create_or_update_pr, rebase_with_recovery, submit, LandOptions, NullProgress,
+    PrOptions, RebaseOptions,
 };
 use loopflow::task::{
     AfterMerge, GithubPr, PrMergeMode, PrMergeRequest, PrPresentation, PrPublication,

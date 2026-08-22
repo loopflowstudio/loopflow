@@ -22,7 +22,7 @@ use crate::engine::naming::{git_user, sanitize_for_branch};
 use crate::engine::worktrees::{create_named_worktree, main_repo_root, worktree_path};
 use crate::ops::commit::{commit_workflow, CommitOptions};
 use crate::ops::error::{OpsError, OpsResult};
-use crate::ops::land::{finish_land_after_rebase, LandOptions};
+use crate::ops::land::{finish_arm_after_rebase, LandOptions};
 use crate::ops::pr::PrCopy;
 use crate::ops::progress::Progress;
 use crate::ops::util::command_exists;
@@ -43,10 +43,9 @@ const RELEASE_NOTES_MAX_BYTES: usize = 60 * 1024;
 const FALLBACK_NOTES_MAX_COMMITS: usize = 50;
 const FALLBACK_NOTES_MAX_PRS: usize = 50;
 const RELEASE_NOTES_STATUS_PREFIX: &str = "<!-- loopflow:release-notes=";
-const RELEASE_WORKTREE_CONTEXT_ENV: [&str; 5] = [
+const RELEASE_WORKTREE_CONTEXT_ENV: [&str; 4] = [
     crate::durable::RUN_CONTEXT_ENV,
-    "LF_RUN_ID",
-    crate::durable::RUN_LEASE_ENV,
+    crate::durable::RUN_ID_ENV,
     crate::durable::AGENT_INVOCATION_ENV,
     crate::engine::wave_context::WAVE_ID_ENV,
 ];
@@ -966,7 +965,7 @@ fn prepare_release_in_worktree(
         pr_body: Some(pr_copy.body),
         agent: None,
     };
-    let pr = finish_land_after_rebase(wt_path, &options, progress)?.ok_or_else(|| {
+    let pr = finish_arm_after_rebase(wt_path, &options, progress)?.ok_or_else(|| {
         OpsError::Message("release land completed without a pull request".to_string())
     })?;
     let head_sha = pr.head_sha.ok_or_else(|| {

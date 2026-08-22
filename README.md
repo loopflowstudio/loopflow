@@ -29,7 +29,10 @@ cargo install --git https://github.com/loopflowstudio/loopflow --bin lf
 
 The Mac app — wave chat, the machine-wide roadmap, every task's worktree — is
 [`Loopflow-latest.dmg`](https://downloads.loopflow.studio/Loopflow-latest.dmg).
-It bundles `lf`; open it explicitly with `lf desktop`. Bare `lf` starts the terminal control conversation.
+It bundles `lf`; open it explicitly with `lf desktop`. Bare `lf` starts the
+terminal control conversation. On canonical main, it first carries local
+commits and uncommitted files into an author-scoped sibling worktree so the
+conversation cannot dirty main.
 
 Give an external agent harness the Loopflow operating skill:
 
@@ -77,7 +80,8 @@ Delegate durable work — the same verbs whether the caller is you or the wave:
 lf task run INF-123                                   # durable Task Work, own worktree
 lf task steer INF-123 "take the smaller approach"     # redirect the active turn
 lf task status INF-123 --json                         # inspect durable state
-lf pr land -c                                         # merge the PR, complete the Task
+lf pr arm -c                                          # request exact-head auto-merge and return
+lf pr land -c                                         # watch, repair CI, merge, then complete the Task
 ```
 
 Turn a reviewed design into work without another planning subsystem:
@@ -152,8 +156,9 @@ corpus at [/llms-full.txt](https://loopflow.studio/llms-full.txt).
 ## Developing loopflow
 
 ```bash
-uv run python scripts/install.py local     # build validation-only lf + lfd + Loopflow.app under local-bin/
-uv run python scripts/install.py refresh   # install the latest published release through the public installer
+uv run python scripts/install.py local --use  # build and pin this checkout against a disposable Home
+uv run python scripts/install.py refresh      # return to the latest published release and reliable Home
+uv run python scripts/install.py local        # build only under local-bin/
 ```
 
 `TESTING.md` covers the test suites; `STYLE.md` is the governing style guide;

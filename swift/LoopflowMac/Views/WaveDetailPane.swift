@@ -22,6 +22,7 @@ struct WaveDetailReading {
     }
 
     mutating func recordFailure(_ error: Error) {
+        snapshot = nil
         errorMessage = "Wave status unavailable: \(error.localizedDescription)"
     }
 
@@ -149,6 +150,14 @@ private struct WavePlanView: View {
         ScrollView {
             VStack(alignment: .leading, spacing: Spacing.xl) {
                 objective
+                if let portfolio = reading.snapshot?.metricPortfolio {
+                    WaveMetricPortfolioView(
+                        portfolio: portfolio,
+                        projectNames: Dictionary(uniqueKeysWithValues:
+                            (workMap?.projects ?? []).map { ($0.project.id, $0.project.name) }
+                        )
+                    )
+                }
                 projects
                 if let selection, let workMap {
                     WaveWorkInspector(
@@ -280,8 +289,9 @@ private struct WavePlanView: View {
     }
 
     /// Live-status failures are operational detail, not primary hierarchy: a
-    /// quiet footer says the plan is showing cached and hides the raw reason
-    /// behind disclosure. The plan above still renders from the cached `WavePlan`.
+    /// quiet footer says the authored plan is showing cached and hides the raw
+    /// reason behind disclosure. Volatile status and metrics never survive a
+    /// failed refresh; the plan above still renders from the cached `WavePlan`.
     @ViewBuilder
     private var liveStatusFooter: some View {
         if let errorMessage = reading.errorMessage {
@@ -335,6 +345,477 @@ private struct WavePlanView: View {
         )
         reading = outcome.reading
         isAwaitingDetail = outcome.awaitingFirstRead
+    }
+}
+
+struct WaveMetricPortfolioView: View {
+    let portfolio: MetricPortfolio
+    let projectNames: [String: String]
+
+    @Environment(\.palette) private var palette
+
+    private var presentation: WaveMetricPortfolioPresentation {
+        WaveMetricPortfolioPresentation(portfolio: portfolio)
+    }
+
+    private var official: [MetricReading] {
+        portfolio.metrics
+            .filter { $0.stage == .graduated }
+            .sorted { left, right in
+                let priority = left.evidence.displayPriority - right.evidence.displayPriority
+                return priority == 0 ? left.name < right.name : priority < 0
+            }
+    }
+
+    private var candidates: [MetricReading] {
+        portfolio.metrics
+            .filter { $0.stage == .installed }
+            .sorted { $0.name < $1.name }
+    }
+
+    var body: some View {
+        if !portfolio.metrics.isEmpty || !portfolio.contractIssues.isEmpty {
+            VStack(alignment: .leading, spacing: Spacing.lg) {
+                portfolioHeader
+
+                if !official.isEmpty {
+                    VStack(alignment: .leading, spacing: Spacing.md) {
+                        portfolioSectionLabel("Official measures", count: official.count)
+                        metricGroups(official)
+                    }
+                    .accessibilityIdentifier("wave-metric-official")
+                }
+
+                if !candidates.isEmpty {
+                    VStack(alignment: .leading, spacing: Spacing.md) {
+                        VStack(alignment: .leading, spacing: Spacing.xxs) {
+                            portfolioSectionLabel("Candidates", count: candidates.count)
+                            Text("Installed contracts still proving their instruments.")
+                                .font(Typography.caption(10))
+                                .foregroundStyle(palette.textSecondary)
+                        }
+                        metricGroups(candidates)
+                    }
+                    .padding(Spacing.md)
+                    .background(palette.surfaceMuted.opacity(0.48))
+                    .overlay {
+                        RoundedRectangle(cornerRadius: CornerRadius.md)
+                            .stroke(palette.border.opacity(0.8), lineWidth: 1)
+                    }
+                    .clipShape(RoundedRectangle(cornerRadius: CornerRadius.md))
+                    .accessibilityIdentifier("wave-metric-candidates")
+                }
+
+                if !portfolio.contractIssues.isEmpty {
+                    VStack(alignment: .leading, spacing: Spacing.sm) {
+                        HStack(spacing: Spacing.sm) {
+                            Image(systemName: "exclamationmark.triangle.fill")
+                                .foregroundStyle(Color.statusWarning)
+                            portfolioSectionLabel(
+                                "Contract issues",
+                                count: portfolio.contractIssues.count
+                            )
+                        }
+
+                        VStack(alignment: .leading, spacing: Spacing.sm) {
+                            ForEach(
+                                Array(portfolio.contractIssues.enumerated()),
+                                id: \.offset
+                            ) { _, issue in
+                                Text(issue.summary)
+                                    .font(Typography.caption(10))
+                                    .foregroundStyle(palette.text)
+                                    .textSelection(.enabled)
+                                    .frame(maxWidth: .infinity, alignment: .leading)
+                            }
+                        }
+                    }
+                    .padding(Spacing.md)
+                    .background(Color.statusWarning.opacity(0.08))
+                    .overlay {
+                        RoundedRectangle(cornerRadius: CornerRadius.md)
+                            .stroke(Color.statusWarning.opacity(0.25), lineWidth: 1)
+                    }
+                    .clipShape(RoundedRectangle(cornerRadius: CornerRadius.md))
+                    .accessibilityIdentifier("wave-metric-contract-issues")
+                }
+            }
+            .accessibilityIdentifier("wave-metric-portfolio")
+        }
+    }
+
+    private var portfolioHeader: some View {
+        VStack(alignment: .leading, spacing: Spacing.sm) {
+            HStack(alignment: .firstTextBaseline, spacing: Spacing.sm) {
+                Text("Metrics")
+                    .font(Typography.sectionTitle(18))
+                    .foregroundStyle(palette.text)
+
+                Spacer()
+
+                if presentation.needsAttentionCount > 0 {
+                    Label(
+                        countLabel(
+                            presentation.needsAttentionCount,
+                            singular: "measure needs attention",
+                            plural: "measures need attention"
+                        ),
+                        systemImage: "exclamationmark.circle.fill"
+                    )
+                    .font(Typography.caption(10))
+                    .fontWeight(.medium)
+                    .foregroundStyle(Color.statusError)
+                }
+            }
+
+            Text(presentation.headline)
+                .font(Typography.body(12))
+                .foregroundStyle(palette.textSecondary)
+
+            HStack(spacing: Spacing.sm) {
+                summaryPill(countLabel(
+                    presentation.officialCount,
+                    singular: "official measure",
+                    plural: "official measures"
+                ))
+                summaryPill(countLabel(
+                    presentation.candidateCount,
+                    singular: "candidate",
+                    plural: "candidates"
+                ))
+                if presentation.contractIssueCount > 0 {
+                    summaryPill(
+                        countLabel(
+                            presentation.contractIssueCount,
+                            singular: "issue",
+                            plural: "issues"
+                        ),
+                        color: .statusWarning
+                    )
+                }
+            }
+        }
+        .accessibilityIdentifier("wave-metric-summary")
+    }
+
+    private func countLabel(_ count: Int, singular: String, plural: String) -> String {
+        "\(count) \(count == 1 ? singular : plural)"
+    }
+
+    private func summaryPill(_ text: String, color: Color? = nil) -> some View {
+        Text(text)
+            .font(Typography.caption(9))
+            .fontWeight(.medium)
+            .foregroundStyle(color ?? palette.textSecondary)
+            .padding(.horizontal, Spacing.sm)
+            .padding(.vertical, Spacing.xs)
+            .background((color ?? palette.textSecondary).opacity(0.09))
+            .clipShape(Capsule())
+    }
+
+    private func portfolioSectionLabel(_ text: String, count: Int) -> some View {
+        HStack(spacing: Spacing.sm) {
+            Text(text.uppercased())
+                .font(Typography.caption(9))
+                .fontWeight(.semibold)
+                .tracking(0.8)
+                .foregroundStyle(palette.textSecondary)
+            Text("\(count)")
+                .font(Typography.caption(9))
+                .foregroundStyle(palette.textSecondary)
+        }
+    }
+
+    @ViewBuilder
+    private func metricGroups(_ metrics: [MetricReading]) -> some View {
+        let projectIds = Array(Set(metrics.map(\.projectId))).sorted {
+            (projectNames[$0] ?? $0) < (projectNames[$1] ?? $1)
+        }
+        ForEach(projectIds, id: \.self) { projectId in
+            VStack(alignment: .leading, spacing: Spacing.sm) {
+                HStack(spacing: Spacing.sm) {
+                    Rectangle()
+                        .fill(palette.accent)
+                        .frame(width: 12, height: 2)
+                    Text(projectNames[projectId] ?? projectId)
+                        .font(Typography.body(11))
+                        .fontWeight(.semibold)
+                        .foregroundStyle(palette.text)
+                }
+                ForEach(metrics.filter { $0.projectId == projectId }) { metric in
+                    WaveMetricCard(
+                        metric: metric,
+                        owner: projectNames[projectId] ?? projectId
+                    )
+                }
+            }
+        }
+    }
+}
+
+struct WaveMetricPortfolioPresentation: Equatable {
+    let officialCount: Int
+    let candidateCount: Int
+    let holdingCount: Int
+    let needsAttentionCount: Int
+    let contractIssueCount: Int
+
+    init(portfolio: MetricPortfolio) {
+        let official = portfolio.metrics.filter { $0.stage == .graduated }
+        officialCount = official.count
+        candidateCount = portfolio.metrics.count - official.count
+        holdingCount = official.count { $0.evidence.isHealthy }
+        needsAttentionCount = official.count - holdingCount
+        contractIssueCount = portfolio.contractIssues.count
+    }
+
+    var headline: String {
+        switch (officialCount, holdingCount) {
+        case (0, _):
+            return "No official measures yet. Candidates remain visible while their evidence matures."
+        case (1, 1):
+            return "The official measure currently holds."
+        case (1, 0):
+            return "The official measure needs attention."
+        default:
+            return "\(holdingCount) of \(officialCount) official measures currently hold."
+        }
+    }
+}
+
+struct WaveMetricRowPresentation: Equatable {
+    let name: String
+    let description: String
+    let state: String
+    let owner: String
+    let instrumentState: String
+    let value: String
+    let target: String
+    let window: String
+    let freshness: String
+    let reason: String?
+
+    init(metric: MetricReading, owner: String) {
+        name = metric.name
+        description = metric.description
+        state = metric.evidence.label
+        self.owner = owner
+        instrumentState = metric.instrumented ? "Instrumented" : "Awaiting instrument"
+        value = metric.evidence.value.map { metric.format($0) } ?? "—"
+        target = metric.target.display(unit: metric.unit)
+        window = metric.window
+        freshness = metric.freshness.summary
+        reason = metric.evidence.reason
+    }
+}
+
+private struct WaveMetricCard: View {
+    let metric: MetricReading
+    let owner: String
+
+    @Environment(\.palette) private var palette
+
+    var body: some View {
+        let presentation = WaveMetricRowPresentation(metric: metric, owner: owner)
+        HStack(spacing: 0) {
+            Rectangle()
+                .fill(metric.evidence.stateColor)
+                .frame(width: 3)
+
+            VStack(alignment: .leading, spacing: Spacing.sm) {
+                HStack(alignment: .firstTextBaseline, spacing: Spacing.sm) {
+                    Text(presentation.name)
+                        .font(Typography.body(13))
+                        .fontWeight(.semibold)
+                        .foregroundStyle(palette.text)
+                    Spacer(minLength: Spacing.xs)
+                    stateBadge(presentation.state)
+                }
+
+                Text(presentation.description)
+                    .font(Typography.body(11))
+                    .foregroundStyle(palette.textSecondary)
+                    .lineSpacing(2)
+                    .fixedSize(horizontal: false, vertical: true)
+
+                HStack(alignment: .firstTextBaseline, spacing: Spacing.sm) {
+                    Text(presentation.value)
+                        .font(Typography.sectionTitle(18))
+                        .foregroundStyle(palette.text)
+                    Text("target \(presentation.target)")
+                        .font(Typography.caption(9))
+                        .foregroundStyle(palette.textSecondary)
+                    Spacer()
+                    Text("\(presentation.window) window")
+                        .font(Typography.caption(9))
+                        .foregroundStyle(palette.textSecondary)
+                }
+
+                HStack(spacing: Spacing.xs) {
+                    Text(presentation.instrumentState)
+                        .font(Typography.caption(9))
+                        .fontWeight(.medium)
+                        .foregroundStyle(metric.instrumented ? palette.textSecondary : Color.statusWarning)
+                    Text("·")
+                        .foregroundStyle(palette.textSecondary)
+                    Text(presentation.freshness)
+                        .font(Typography.caption(9))
+                        .foregroundStyle(palette.textSecondary)
+                        .lineLimit(1)
+                }
+
+                if let reason = presentation.reason {
+                    Text(reason)
+                        .font(Typography.caption(10))
+                        .foregroundStyle(metric.evidence.stateColor)
+                        .textSelection(.enabled)
+                        .fixedSize(horizontal: false, vertical: true)
+                }
+            }
+            .padding(Spacing.md)
+        }
+        .background(palette.surface)
+        .overlay {
+            RoundedRectangle(cornerRadius: CornerRadius.md)
+                .stroke(palette.border.opacity(0.85), lineWidth: 1)
+        }
+        .clipShape(RoundedRectangle(cornerRadius: CornerRadius.md))
+        .accessibilityIdentifier("wave-metric")
+        .accessibilityElement(children: .combine)
+    }
+
+    private func stateBadge(_ state: String) -> some View {
+        Text(state.uppercased())
+            .font(Typography.caption(8))
+            .fontWeight(.bold)
+            .tracking(0.5)
+            .foregroundStyle(metric.evidence.stateColor)
+            .padding(.horizontal, Spacing.sm)
+            .padding(.vertical, Spacing.xs)
+            .background(metric.evidence.stateColor.opacity(0.10))
+            .clipShape(Capsule())
+    }
+}
+
+private extension MetricReading {
+    func format(_ value: Double) -> String {
+        if unit == "ratio" {
+            return value.formatted(.percent.precision(.fractionLength(0 ... 2)))
+        }
+        return "\(value.formatted(.number.precision(.fractionLength(0 ... 3)))) \(unit)"
+    }
+}
+
+private extension MetricTarget {
+    func display(unit: String) -> String {
+        switch self {
+        case let .atLeast(value): return "≥ \(formatted(value, unit: unit))"
+        case let .atMost(value): return "≤ \(formatted(value, unit: unit))"
+        }
+    }
+
+    private func formatted(_ value: Double, unit: String) -> String {
+        if unit == "ratio" {
+            return value.formatted(.percent.precision(.fractionLength(0 ... 2)))
+        }
+        return "\(value.formatted(.number.precision(.fractionLength(0 ... 3)))) \(unit)"
+    }
+}
+
+private extension MetricFreshness {
+    var summary: String {
+        switch self {
+        case .never: return "Never observed"
+        case let .fresh(_, expiresAt): return "Fresh until \(expiresAt)"
+        case let .stale(_, expiresAt): return "Stale since \(expiresAt)"
+        }
+    }
+}
+
+private extension MetricEvidence {
+    var stateColor: Color {
+        switch self {
+        case .met: return .statusSuccess
+        case .missed: return .statusError
+        case .unknown: return .statusNeutral
+        case .unavailable: return .statusWarning
+        }
+    }
+
+    var displayPriority: Int {
+        switch self {
+        case .missed, .unavailable: return 0
+        case .unknown: return 1
+        case .met: return 2
+        }
+    }
+
+    var label: String {
+        switch self {
+        case .met: return "Met"
+        case .missed: return "Missed"
+        case .unknown: return "Unknown"
+        case .unavailable: return "Unavailable"
+        }
+    }
+
+    var isHealthy: Bool {
+        if case .met = self { return true }
+        return false
+    }
+
+    var value: Double? {
+        switch self {
+        case let .met(value, _, _), let .missed(value, _, _): return value
+        case let .unknown(cause): return cause.value
+        case .unavailable: return nil
+        }
+    }
+
+    var reason: String? {
+        switch self {
+        case .met, .missed: return nil
+        case let .unknown(cause): return cause.summary
+        case let .unavailable(reason, sourceAsOf): return "\(reason) · source time \(sourceAsOf)"
+        }
+    }
+}
+
+private extension MetricUnknownCause {
+    var value: Double? {
+        switch self {
+        case let .incomplete(value, _, _),
+             let .windowMismatch(value, _, _),
+             let .staleObservation(value, _, _): return value
+        case .never, .revisionMismatch, .staleUnavailable: return nil
+        }
+    }
+
+    var summary: String {
+        switch self {
+        case .never: return "No observation has arrived."
+        case let .revisionMismatch(expected, observed, sourceTime):
+            return "Evidence at \(sourceTime) measured revision \(observed), not \(expected)."
+        case .incomplete: return "The latest source window is incomplete."
+        case .windowMismatch: return "The latest source window does not match the contract."
+        case .staleObservation: return "The latest observation is stale."
+        case let .staleUnavailable(reason, sourceAsOf):
+            return "The last source failure is stale: \(reason) · source time \(sourceAsOf)"
+        }
+    }
+}
+
+private extension MetricContractIssue {
+    var summary: String {
+        switch self {
+        case let .malformedContract(path, message): return "\(path): \(message)"
+        case let .unresolvedOwner(waveId, metricId, projectId):
+            return "\(waveId)/\(metricId) names unknown Project \(projectId)."
+        case let .instrumentMismatch(waveId, metricId, contractInstrument, registeredInstrument):
+            return "\(waveId)/\(metricId) declares \(contractInstrument), but \(registeredInstrument) is registered."
+        case let .invalidGraduation(waveId, metricId, _, reason):
+            return "\(waveId)/\(metricId) cannot graduate: \(reason)."
+        }
     }
 }
 

@@ -7,8 +7,8 @@ use std::time::{Duration, Instant};
 
 use crate::child::ChildRef;
 use crate::durable::{
-    AgentInvocation, AuthenticatedRequest, ContainmentObservation, ControlCtx, Run, RunLease,
-    RunState, RunTrigger, WaitOn, WorkRef, WorkStatus,
+    AgentInvocation, ContainmentObservation, Run, RunContext, RunState, RunTrigger, WaitOn,
+    WorkRef, WorkStatus,
 };
 use crate::engine::config::{load_config_or_default, parse_agent};
 use crate::engine::git::{
@@ -33,10 +33,9 @@ use crate::store::{
 };
 use crate::task::actions::{derive_task_actions, TaskActionEvidence, TaskActionModel};
 use crate::task::{
-    AfterMerge, CiCheck, CiIncident, CiObservation, CiState, GithubObservation,
-    GithubObservationResult, GithubPr, Observation, PmWritebackOperation, PmWritebackState,
-    PrMergeMode, PrMergeRequest, PrPhase, PrPresentation, PrPublication, Task, TaskEventKind,
-    TaskPr, TaskPrId,
+    AfterMerge, CiCheck, CiObservation, CiState, GithubObservation, GithubObservationResult,
+    GithubPr, Observation, PmWritebackOperation, PmWritebackState, PrMergeMode, PrMergeRequest,
+    PrPhase, PrPresentation, PrPublication, Task, TaskEventKind, TaskPr, TaskPrId,
 };
 use crate::wave::Wave;
 use fs2::FileExt;
@@ -431,9 +430,9 @@ pub fn task_run(repo: &Path, issue: &str, options: TaskLaunchOptions) -> OpsResu
                 }
                 WorkStatus::Abandoned => {
                     return Err(task_error(format!(
-                    "Task {} is abandoned; explicit User recovery requires `lf task recover {}`",
-                    task.plan.identifier, task.plan.identifier
-                )))
+                        "Task {} is abandoned; recover it with `lf task recover {}`",
+                        task.plan.identifier, task.plan.identifier
+                    )))
                 }
                 WorkStatus::Ready | WorkStatus::Running { .. } | WorkStatus::Waiting { .. } => {}
             }
@@ -633,9 +632,9 @@ pub fn task_run(repo: &Path, issue: &str, options: TaskLaunchOptions) -> OpsResu
                 }
                 WorkStatus::Abandoned => {
                     return Err(task_error(format!(
-                    "Task {} is abandoned; explicit User recovery requires `lf task recover {}`",
-                    existing.plan.identifier, existing.plan.identifier
-                )))
+                        "Task {} is abandoned; recover it with `lf task recover {}`",
+                        existing.plan.identifier, existing.plan.identifier
+                    )))
                 }
                 WorkStatus::Ready | WorkStatus::Running { .. } | WorkStatus::Waiting { .. } => {
                     return Ok(existing)
@@ -694,19 +693,14 @@ pub fn task_run(repo: &Path, issue: &str, options: TaskLaunchOptions) -> OpsResu
             updated_at: now,
         };
 
-        let caller = crate::ops::ambient_run_lease(&store).await?;
+        let caller = crate::ops::ambient_run_context(&store).await?;
         let reservation = match caller.as_ref() {
             Some(caller) => {
                 store
-                    .create_task_run(&ControlCtx::Run(caller), &task, &pr, &directive)
+                    .create_task_run(Some(caller), &task, &pr, &directive)
                     .await
             }
-            None => {
-                let request = AuthenticatedRequest::cli();
-                store
-                    .create_task_run(&ControlCtx::User(&request), &task, &pr, &directive)
-                    .await
-            }
+            None => store.create_task_run(None, &task, &pr, &directive).await,
         };
         let (run, lease) = match reservation {
             Ok(reservation) => reservation,
@@ -1346,7 +1340,7 @@ fn parse_pr_slug(value: &str) -> OpsResult<String> {
 async fn update_task_pr_with_authority(
     store: &SharedStore,
     pr: &TaskPr,
-    lease: Option<&RunLease>,
+    lease: Option<&RunContext>,
 ) -> Result<(), StoreError> {
     match lease {
         Some(lease) => store.update_task_pr_for_run(pr, lease).await,
@@ -1358,7 +1352,7 @@ async fn settle_task_pr_with_authority(
     store: &SharedStore,
     settled: &TaskPr,
     next: Option<&TaskPr>,
-    lease: Option<&RunLease>,
+    lease: Option<&RunContext>,
 ) -> Result<(), StoreError> {
     match lease {
         Some(lease) => store.settle_task_pr_for_run(settled, next, lease).await,
@@ -1370,7 +1364,7 @@ async fn settle_task_pr_merged_with_authority(
     store: &SharedStore,
     settled: &TaskPr,
     merged_at: Option<time::OffsetDateTime>,
-    lease: Option<&RunLease>,
+    lease: Option<&RunContext>,
 ) -> Result<crate::store::TaskPrMergeEvidenceOutcome, StoreError> {
     match lease {
         Some(lease) => {
@@ -1386,7 +1380,7 @@ async fn append_task_event_with_authority(
     store: &SharedStore,
     task_id: &crate::task::TaskId,
     event: &TaskEventKind,
-    lease: Option<&RunLease>,
+    lease: Option<&RunContext>,
 ) -> Result<(), StoreError> {
     match lease {
         Some(lease) => {
@@ -1404,7 +1398,7 @@ async fn append_task_event_with_authority(
 async fn update_task_with_authority(
     store: &SharedStore,
     task: &Task,
-    lease: Option<&RunLease>,
+    lease: Option<&RunContext>,
 ) -> Result<(), StoreError> {
     match lease {
         Some(lease) => store.update_task_for_run(task, lease).await,
@@ -1416,7 +1410,7 @@ async fn complete_task_after_pr_with_authority(
     store: &SharedStore,
     task: &Task,
     pr: &TaskPr,
-    lease: Option<&RunLease>,
+    lease: Option<&RunContext>,
 ) -> Result<(), StoreError> {
     match lease {
         Some(lease) => store.complete_task_after_pr_for_run(task, pr, lease).await,
@@ -1428,7 +1422,7 @@ async fn complete_task_with_authority(
     store: &SharedStore,
     task: &Task,
     skipped_pr: Option<&TaskPr>,
-    lease: Option<&RunLease>,
+    lease: Option<&RunContext>,
 ) -> Result<(), StoreError> {
     match lease {
         Some(lease) => store.complete_task_for_run(task, skipped_pr, lease).await,
@@ -1436,8 +1430,11 @@ async fn complete_task_with_authority(
     }
 }
 
-async fn ambient_task_run_lease(store: &SharedStore, task: &Task) -> OpsResult<Option<RunLease>> {
-    let Some(lease) = crate::ops::ambient_run_lease(store).await? else {
+async fn ambient_task_run_context(
+    store: &SharedStore,
+    task: &Task,
+) -> OpsResult<Option<RunContext>> {
+    let Some(lease) = crate::ops::ambient_run_context(store).await? else {
         return Ok(None);
     };
     let work = store
@@ -1456,9 +1453,9 @@ async fn ambient_task_run_lease(store: &SharedStore, task: &Task) -> OpsResult<O
 async fn task_for_worktree(
     store: &SharedStore,
     repo: &Path,
-) -> OpsResult<Option<(Task, Option<RunLease>)>> {
+) -> OpsResult<Option<(Task, Option<RunContext>)>> {
     let checkout = repo.canonicalize().unwrap_or_else(|_| repo.to_path_buf());
-    if let Some(lease) = crate::ops::ambient_run_lease(store).await? {
+    if let Some(lease) = crate::ops::ambient_run_context(store).await? {
         let WorkRef::Task(id) = &lease.work else {
             return Err(task_error(format!(
                 "ambient Run {} owns {}, not Task Work",
@@ -1539,7 +1536,7 @@ enum TaskAuthority {
     Authority {
         store: SharedStore,
         task: Box<Task>,
-        lease: Option<RunLease>,
+        lease: Option<RunContext>,
     },
 }
 
@@ -1602,11 +1599,33 @@ pub(crate) fn guard_task_mutation_authority(repo: &Path) -> OpsResult<()> {
     })
 }
 
+/// Refuse `lf pr submit` inside a managed Task worktree, before any mutation.
+///
+/// `submit` marks a PR ready and assigns it for a human merge click. A managed
+/// Task already carries exactly one shipping judgment — its `finally`/`ship`
+/// gate, reviewed in the provider-backed conversation and declared with
+/// `lf pr land`. A second GitHub-side merge click would be a competing gate,
+/// so it is rejected rather than layered on top. Ordinary non-Task PRs are an
+/// explicit no-op and keep `submit` unchanged.
+pub(crate) fn reject_managed_task_submit(repo: &Path) -> OpsResult<()> {
+    block_on_task(async move {
+        let TaskAuthority::Authority { task, .. } = resolve_task_authority(repo).await? else {
+            return Ok(());
+        };
+        Err(task_error(format!(
+            "`lf pr submit` would add a second shipping gate, and managed Task {} already has one: its `finally` review. \
+             Declare the reviewed outcome with `lf pr land -c` (merge completes the Task) or `lf pr land --next <slug>` (another serial PR follows); \
+             Loopflow arms the merge mechanically once required checks pass.",
+            task.plan.identifier
+        )))
+    })
+}
+
 async fn validate_automated_task_authority(
     repo: &Path,
     store: &SharedStore,
     task: &Task,
-    lease: &RunLease,
+    lease: &RunContext,
 ) -> OpsResult<()> {
     let main_repo = main_repo_root(repo)?;
     let current = Box::pin(crate::ops::task_pm::resolve_task_async(
@@ -1944,7 +1963,7 @@ pub(crate) fn lock_task_pr_mutation(repo: &Path) -> OpsResult<TaskPrMutationGuar
 async fn clear_task_pr_merge(
     store: &SharedStore,
     task: &Task,
-    lease: Option<&RunLease>,
+    lease: Option<&RunContext>,
     repo: &Path,
     mutation_is_unconditional: bool,
 ) -> OpsResult<bool> {
@@ -2320,7 +2339,7 @@ async fn resolve_verifier_upstream(
 pub(crate) async fn verify_task_pr_range_with_authority(
     store: &SharedStore,
     task: &Task,
-    lease: Option<&RunLease>,
+    lease: Option<&RunContext>,
     repo: &Path,
 ) -> OpsResult<()> {
     verify_task_pr_range_with_authority_mode(store, task, lease, repo, StaleBaseAction::Heal, None)
@@ -2337,7 +2356,7 @@ enum StaleBaseAction {
 async fn verify_task_pr_range_with_authority_mode(
     store: &SharedStore,
     task: &Task,
-    lease: Option<&RunLease>,
+    lease: Option<&RunContext>,
     repo: &Path,
     stale_base: StaleBaseAction,
     upstream_override: Option<(String, String)>,
@@ -2455,7 +2474,7 @@ async fn verify_task_pr_range_with_authority_mode(
 async fn require_task_pr_range_nonempty_with_authority(
     store: &SharedStore,
     task: &Task,
-    lease: Option<&RunLease>,
+    lease: Option<&RunContext>,
     repo: &Path,
 ) -> OpsResult<()> {
     require_task_pr_range_nonempty_with_authority_mode(
@@ -2471,7 +2490,7 @@ async fn require_task_pr_range_nonempty_with_authority(
 async fn require_task_pr_range_nonempty_with_authority_mode(
     store: &SharedStore,
     task: &Task,
-    lease: Option<&RunLease>,
+    lease: Option<&RunContext>,
     repo: &Path,
     stale_base: StaleBaseAction,
 ) -> OpsResult<()> {
@@ -2738,6 +2757,21 @@ pub(crate) async fn relaunch_inactive_process_with_trigger(
     launch_task_process(store, task, trigger).await
 }
 
+pub(crate) async fn relaunch_inactive_process_for_install_switch(
+    store: &SharedStore,
+    task: &mut Task,
+    trigger: RunTrigger,
+    switch_id: &str,
+) -> OpsResult<()> {
+    let Some(_) = ensure_working_pr(store, task).await? else {
+        return Err(task_error(format!(
+            "Task {} is terminal and cannot start a Run",
+            task.plan.identifier
+        )));
+    };
+    launch_task_process_for_switch(store, task, Some(trigger), Some(switch_id)).await
+}
+
 const MAX_AUTOMATIC_TASK_RECOVERY_RUNS: usize = 3;
 
 #[derive(Debug, Clone, PartialEq, Eq)]
@@ -2923,24 +2957,19 @@ async fn relaunch_inactive_process_automatically(
     launch_task_process(store, task, Some(trigger)).await
 }
 
-async fn relaunch_for_ci_incident(
-    store: &SharedStore,
-    task: &mut Task,
-    incident_id: String,
-) -> OpsResult<()> {
-    let Some(_) = ensure_working_pr(store, task).await? else {
-        return Err(task_error(format!(
-            "Task {} is terminal and cannot repair CI",
-            task.plan.identifier
-        )));
-    };
-    launch_task_process(store, task, Some(RunTrigger::CiIncident { incident_id })).await
-}
-
 async fn launch_task_process(
     store: &SharedStore,
     task: &mut Task,
     trigger: Option<RunTrigger>,
+) -> OpsResult<()> {
+    launch_task_process_for_switch(store, task, trigger, None).await
+}
+
+async fn launch_task_process_for_switch(
+    store: &SharedStore,
+    task: &mut Task,
+    trigger: Option<RunTrigger>,
+    switch_id: Option<&str>,
 ) -> OpsResult<()> {
     let work = store
         .work_for_child(&ChildRef::Task(task.id.clone()))
@@ -2999,9 +3028,12 @@ async fn launch_task_process(
                 .current_basis,
         },
     };
-    let caller = crate::ops::ambient_run_lease(store).await?;
-    let reservation = match caller.as_ref() {
-        Some(caller) => store.reserve_child_run(caller, &work, trigger).await,
+    let reservation = match switch_id {
+        Some(switch_id) => {
+            store
+                .reserve_run_for_install_switch(&work, trigger, switch_id)
+                .await
+        }
         None => store.reserve_run(&work, trigger).await,
     };
     let (run, lease) =
@@ -3013,7 +3045,7 @@ async fn launch_reserved_task_process(
     store: &SharedStore,
     task: &mut Task,
     run: &Run,
-    lease: &RunLease,
+    lease: &RunContext,
     account_id: ProviderAccountId,
 ) -> OpsResult<()> {
     let tmux_name = format!(
@@ -3207,126 +3239,6 @@ async fn park_invalid_lifecycle(store: &SharedStore, task: &Task) -> OpsResult<b
     }
     Ok(true)
 }
-
-/// Let one live Project body supervise the progress leases of its Task bodies.
-///
-/// This is deliberately parent-driven: Project and Tasks do not grow a
-/// second watchdog process. A live Project runner calls this on its existing
-/// control tick and recovers only children whose durable progress deadline has
-/// passed on a machine that can still observe their tmux body.
-pub(crate) async fn reconcile_project_tasks(
-    store: &SharedStore,
-    project: &crate::project::Project,
-) -> OpsResult<Vec<Task>> {
-    let project_tasks = |tasks: Vec<Task>| {
-        tasks
-            .into_iter()
-            .filter(|task| task.project_id == project.id)
-            .collect::<Vec<_>>()
-    };
-    let mut tasks = project_tasks(
-        store
-            .list_tasks(Some(&project.wave_id))
-            .await
-            .map_err(|error| task_error(format!("failed to list supervised Tasks: {error}")))?,
-    );
-    for task in &mut tasks {
-        if matches!(
-            task_work_status(store, task).await?,
-            WorkStatus::Done | WorkStatus::Abandoned
-        ) {
-            continue;
-        }
-        if park_invalid_lifecycle(store, task).await? {
-            continue;
-        }
-        if task_launch_refusal_after_lifecycle_validation(store, task)
-            .await
-            .map_err(|error| task_error(format!("failed to read Task blocker: {error}")))?
-            .is_some()
-        {
-            continue;
-        }
-        if task_worktree_blocker(store, task)
-            .await?
-            .is_some_and(|blocker| blocker.initializing)
-        {
-            continue;
-        }
-        if let Err(error) = task_recovery_adoption(store, task).await {
-            tracing::warn!(
-                task = %task.plan.identifier,
-                %error,
-                "supervisor skipped Task recovery: unsafe worktree/branch state"
-            );
-            continue;
-        }
-        let observed = reconcile_task_pr(store, task).await?;
-        refuse_dirty_between_prs(store, task).await?;
-        reconcile_process_liveness(store, task).await?;
-        reconcile_task_completion(store, task, None).await?;
-        if matches!(
-            task_work_status(store, task).await?,
-            WorkStatus::Done | WorkStatus::Abandoned
-        ) {
-            continue;
-        }
-        let no_active_pr = if observed.is_none() {
-            store
-                .active_task_pr(&task.id)
-                .await
-                .map_err(|error| task_error(format!("failed to read active PR: {error}")))?
-                .is_none()
-        } else {
-            false
-        };
-        let settled = observed.as_ref().is_some_and(TaskPr::is_settled) || no_active_pr;
-        let completing = observed
-            .as_ref()
-            .is_some_and(|pr| pr.is_settled() && pr.after_merge() == AfterMerge::CompleteTask);
-        if settled && !completing {
-            ensure_working_pr(store, task).await?;
-            if !matches!(
-                task_work_status(store, task).await?,
-                WorkStatus::Running { .. }
-            ) {
-                relaunch_inactive_process_automatically(store, task).await?;
-            }
-        } else {
-            let Some(pr) = observed.as_ref() else {
-                continue;
-            };
-            route_ci_incident(store, task, pr).await?;
-            if pr.merge_request().is_none()
-                && !matches!(
-                    task_work_status(store, task).await?,
-                    WorkStatus::Running { .. }
-                )
-            {
-                // Publication is not settlement. Keep executing the authored
-                // Task flow unless submit/land requested a merge for this head.
-                relaunch_inactive_process_automatically(store, task).await?;
-            }
-        }
-    }
-
-    let refreshed = store
-        .list_tasks(Some(&project.wave_id))
-        .await
-        .map_err(|error| task_error(format!("failed to reread supervised Tasks: {error}")))?;
-    Ok(project_tasks(refreshed))
-}
-
-pub(crate) async fn supervise_project_task_bodies(
-    store: &SharedStore,
-    project: &crate::project::Project,
-) -> OpsResult<usize> {
-    // Project supervision reconciles each child's durable Run. Live
-    // containment is never killed merely for being quiet; missing containment
-    // is recovered by exact Run identity in reconcile_process_liveness.
-    reconcile_project_tasks(store, project).await?;
-    Ok(0)
-}
 pub(crate) async fn reconcile_task_pr(
     store: &SharedStore,
     task: &mut Task,
@@ -3335,71 +3247,69 @@ pub(crate) async fn reconcile_task_pr(
         .await
 }
 
-/// Status for a Task whose PR is open, decided after a body turn completed.
-///
-/// Only the runner may call this: it is the sole caller that knows whether the
-/// turn that just ran pushed anything. A passive reconcile has no such evidence
-/// and leaves an open PR `Waiting`, so the `ci-fix` wake stays armed.
-///
-/// `head_advanced` is true when the PR head moved during the iteration — the
-/// body pushed a fix, so the Task waits for CI to resolve even if the reading is
-/// currently `Failing`. A failing head the body did *not* move is a repair that
-/// did not happen: block rather than report false progress. `github_degraded`
-/// carries `Observation::Degraded`'s reason and dominates — a turn that ran
-/// blind to GitHub cannot be said to have repaired anything.
-/// What an open PR makes the Task wait for.
-///
-/// This is the durable vocabulary for the triage policy below. It deliberately
-/// does not name a lifecycle status: every arm is a Wait, and the arms differ by
-/// the fact that would end the wait, which is what `WaitOn` records. Keeping
-/// them distinct matters because "we cannot see CI" and "CI is red and nobody
-/// fixed it" need different operator responses even though the old enum
-/// flattened both to `Blocked`.
-#[derive(Debug, Clone, Copy, PartialEq, Eq)]
-pub(crate) enum OpenPrDisposition {
-    /// GitHub observation is degraded, so the PR's real state is unknown.
-    /// Resolved by the capability recovering, not by anyone authoring anything.
-    ObservationDegraded,
-    /// CI is failing and the body did not move the head. New authored direction
-    /// is required before another repair can be useful.
-    NeedsDirection,
+/// Apply a watched landing's authoritative merged observation to its Task.
+/// The landing owns Auto settlement; Task and Project runners do not poll or
+/// infer it from process liveness.
+pub(crate) async fn settle_task_landing(
+    store: &SharedStore,
+    landing: &crate::pr_landing::PrLanding,
+) -> OpsResult<()> {
+    let task_id = landing
+        .task_id
+        .as_ref()
+        .ok_or_else(|| task_error("direct landing has no Task to settle"))?;
+    let mut task = store
+        .get_task(task_id)
+        .await
+        .map_err(|error| task_error(format!("failed to read landing Task: {error}")))?
+        .ok_or_else(|| task_error(format!("landing Task {task_id} disappeared")))?;
+    reconcile_process_liveness(store, &mut task).await?;
+    let pr = reconcile_task_pr_with_authority(
+        store,
+        &mut task,
+        None,
+        crate::ops::pr::PrReadFreshness::Fresh,
+    )
+    .await?
+    .ok_or_else(|| task_error("landing Task PR disappeared during merge settlement"))?;
+    apply_merged_task_landing(store, &mut task, &pr, landing).await
 }
 
-/// Triage an open PR into the exact thing it is waiting for.
-///
-/// Pure policy: evidence in, disposition plus its operator-facing reason out.
-/// Degraded observation dominates a healthy CI reading, because a reading we
-/// could not take is not a passing reading.
-pub(crate) fn decide_open_pr_status(
+async fn apply_merged_task_landing(
+    store: &SharedStore,
+    task: &mut Task,
     pr: &TaskPr,
-    github_degraded: Option<&str>,
-    head_advanced: bool,
-) -> (Option<OpenPrDisposition>, String) {
+    landing: &crate::pr_landing::PrLanding,
+) -> OpsResult<()> {
+    if pr.phase() != PrPhase::Merged
+        || pr.github().map(|github| github.number) != Some(landing.pr_number)
+        || pr.head_sha() != Some(landing.observed_head_sha.as_str())
+        || pr.merge_request().map(|request| request.after_merge) != landing.after_merge
+        || pr
+            .merge_request()
+            .and_then(|request| request.next_slug.as_ref())
+            != landing.next_slug.as_ref()
+    {
+        return Err(task_error(format!(
+            "GitHub did not confirm landing pull request #{} merged for Task {}",
+            landing.pr_number, task.plan.identifier
+        )));
+    }
+    match landing.after_merge {
+        Some(AfterMerge::CompleteTask) => reconcile_task_completion(store, task, None).await,
+        Some(AfterMerge::ContinueTask) if landing.next_slug.is_some() => {
+            ensure_working_pr(store, task).await.map(|_| ())
+        }
+        Some(AfterMerge::ContinueTask) | None => Ok(()),
+    }
+}
+
+pub(crate) fn open_pr_wait_reason(pr: &TaskPr) -> String {
     let number = pr
         .github()
         .expect("open Task PR requires a GitHub PR record")
         .number;
-    if let Some(reason) = github_degraded {
-        return (
-            Some(OpenPrDisposition::ObservationDegraded),
-            format!(
-                "ci-fix blocked by github-observation: {reason}. Resume when GitHub recovers; pull request #{number} stays attached."
-            ),
-        );
-    }
-    let failing = pr
-        .ci_observation
-        .as_ref()
-        .is_some_and(|observation| observation.state == CiState::Failing);
-    if failing && !head_advanced {
-        return (
-            Some(OpenPrDisposition::NeedsDirection),
-            format!(
-                "CI failing on pull request #{number}; the Task body did not repair the head. Needs a new directive; pull request #{number} stays attached."
-            ),
-        );
-    }
-    let reason = match pr.merge_request() {
+    match pr.merge_request() {
         Some(request) if request.mode == PrMergeMode::User => {
             let short = request.head_sha.chars().take(12).collect::<String>();
             format!("pull request #{number} awaits the user's explicit merge of head {short}")
@@ -3409,87 +3319,19 @@ pub(crate) fn decide_open_pr_status(
             format!("pull request #{number} awaits GitHub auto-merge of head {short}")
         }
         None => format!("pull request #{number} is published; no merge was requested"),
-    };
-    (None, reason)
-}
-
-/// The incident this PR's current reading warrants, if any.
-///
-/// The single mint point for a wake's identity. The enqueue and the arm must
-/// derive it the same way or a claimed wake could never be matched to the failure
-/// it names, so both call this rather than composing the parts themselves.
-/// `None` when the current head is not failing a required check — including when
-/// the head has moved past the reading (`fresh_ci`), which makes any wake for the
-/// old head moot.
-pub(crate) fn current_ci_incident(pr: &TaskPr) -> Option<CiIncident> {
-    let observation = pr.fresh_ci().filter(|reading| reading.wake_legal())?;
-    ci_incident(pr, observation)
-}
-
-/// Route current actionable CI into the Task's one control lane.
-///
-/// An active Run observes the incident on its next boundary. An idle Task
-/// reserves exactly one Run whose typed trigger names the incident.
-pub(crate) async fn route_ci_incident(
-    store: &SharedStore,
-    task: &Task,
-    pr: &TaskPr,
-) -> OpsResult<()> {
-    let Some(incident) = current_ci_incident(pr) else {
-        return Ok(());
-    };
-    match task_work_status(store, task).await? {
-        WorkStatus::Ready => {
-            let mut task = task.clone();
-            relaunch_for_ci_incident(store, &mut task, incident.identity.clone()).await?;
-        }
-        WorkStatus::Running { .. } => {}
-        WorkStatus::Waiting { .. } | WorkStatus::Done | WorkStatus::Abandoned => return Ok(()),
     }
-    let work = store
-        .work_for_child(&ChildRef::Task(task.id.clone()))
-        .await
-        .map_err(|error| task_error(error.to_string()))?;
-    let run = store
-        .current_run(&work)
-        .await
-        .map_err(|error| task_error(error.to_string()))?
-        .ok_or_else(|| task_error("actionable CI has no active Run"))?;
-    store
-        .claim_ci_incident(&incident.identity, &run.id, time::OffsetDateTime::now_utc())
-        .await
-        .map_err(|error| task_error(error.to_string()))?;
-    Ok(())
 }
 
 pub(crate) async fn reconcile_task_pr_for_run(
     store: &SharedStore,
     task: &mut Task,
-    lease: &RunLease,
+    lease: &RunContext,
 ) -> OpsResult<Option<TaskPr>> {
     reconcile_task_pr_with_authority(
         store,
         task,
         Some(lease),
         crate::ops::pr::PrReadFreshness::Cached,
-    )
-    .await
-}
-
-/// Reconcile the PR reading GitHub live, bypassing both the store observation
-/// cache and `gh`'s HTTP cache. The ci-fix settlement path uses this so it judges
-/// head advancement against the authoritative remote head the repair body just
-/// pushed — never a warm pre-turn observation.
-pub(crate) async fn reconcile_task_pr_fresh_for_run(
-    store: &SharedStore,
-    task: &mut Task,
-    lease: &RunLease,
-) -> OpsResult<Option<TaskPr>> {
-    reconcile_task_pr_with_authority(
-        store,
-        task,
-        Some(lease),
-        crate::ops::pr::PrReadFreshness::Fresh,
     )
     .await
 }
@@ -3506,7 +3348,9 @@ fn observe_required_checks(
     now: time::OffsetDateTime,
 ) -> Option<CiObservation> {
     let head_sha = head_sha?.to_string();
-    let checks = crate::ops::pr::merge_gate_state(worktree, branch)?;
+    let checks = crate::ops::pr::merge_gate_state(worktree, branch)
+        .ok()
+        .flatten()?;
     let state = if checks.failing {
         CiState::Failing
     } else if checks.pending {
@@ -3517,8 +3361,8 @@ fn observe_required_checks(
     Some(CiObservation {
         head_sha,
         state,
-        // Seed with the actionable leaf failures, never the required aggregate:
-        // a ci-fix turn needs the broken job, not the roll-up.
+        // Keep actionable leaf failures, never the required aggregate, so the
+        // landing supervisor can report the broken jobs precisely.
         failing_checks: checks
             .failing_leaves
             .into_iter()
@@ -3529,55 +3373,6 @@ fn observe_required_checks(
             .collect(),
         observed_at: now,
     })
-}
-
-fn ci_incident(pr: &TaskPr, observation: &CiObservation) -> Option<CiIncident> {
-    if observation.state != CiState::Failing {
-        return None;
-    }
-    let github = pr.github()?;
-    let repo = github_repo_slug_from_pr_url(&github.url)?;
-    let failure_set = observation.failure_set();
-    let mut digest = Sha256::new();
-    for check in &failure_set {
-        digest.update(check.as_bytes());
-        digest.update([0]);
-    }
-    Some(CiIncident {
-        identity: format!(
-            "github:ci:{}:{}:{}:{}",
-            repo,
-            github.number,
-            observation.head_sha,
-            hex::encode(digest.finalize())
-        ),
-        task_id: pr.task_id.clone(),
-        pr_id: pr.id.clone(),
-        repo,
-        pr_number: github.number,
-        failed_head_sha: observation.head_sha.clone(),
-        repaired_head_sha: None,
-        failure_set,
-        provider_completed_at: None,
-        poll_observed_at: Some(observation.observed_at),
-        webhook_received_at: None,
-        claimed_run_id: None,
-        responded_at: None,
-        green_at: None,
-        merged_at: None,
-        blocked_at: None,
-        blocked_reason: None,
-        created_at: observation.observed_at,
-        updated_at: observation.observed_at,
-    })
-}
-
-fn github_repo_slug_from_pr_url(url: &str) -> Option<String> {
-    let path = url.split("github.com/").nth(1)?;
-    let mut parts = path.split('/');
-    let owner = parts.next().filter(|part| !part.is_empty())?;
-    let repo = parts.next().filter(|part| !part.is_empty())?;
-    Some(format!("{owner}/{repo}"))
 }
 
 // Local control commands often arrive in a burst (`status`, then `follow-up`,
@@ -3640,7 +3435,7 @@ async fn reconcile_subject(store: &SharedStore, task: &Task) -> OpsResult<Option
 async fn reconcile_task_pr_with_authority(
     store: &SharedStore,
     task: &mut Task,
-    lease: Option<&RunLease>,
+    lease: Option<&RunContext>,
     freshness: crate::ops::pr::PrReadFreshness,
 ) -> OpsResult<Option<TaskPr>> {
     if let Some(lease) = lease {
@@ -3664,9 +3459,7 @@ async fn reconcile_task_pr_with_authority(
         return Ok(Some(pr));
     };
     let now = time::OffsetDateTime::now_utc();
-    // A `Fresh` read (ci-fix settlement) must never be served from the store's
-    // observation cache: the repair body may have pushed a new head seconds ago,
-    // and the warm cache still names the pre-turn head.
+    // A fresh caller must never receive the store's warm head observation.
     if matches!(freshness, crate::ops::pr::PrReadFreshness::Cached) {
         if let Some(observation) = cached_github_observation(&pr, now) {
             task.observation = observation;
@@ -3744,9 +3537,6 @@ async fn reconcile_task_pr_with_authority(
         head_sha: github_pr.head_sha.clone(),
     });
 
-    let mut observed_incident = None;
-    let mut green_at = None;
-    let mut ci_merged_at = None;
     let mut authoritative_merged_at = None;
     let pr_event = match github_pr.state.as_str() {
         "merged" => {
@@ -3758,7 +3548,6 @@ async fn reconcile_task_pr_with_authority(
             })?;
             pr.merge_commit = Some(merge_commit.clone());
             pr.ci_observation = None;
-            ci_merged_at = Some(now);
             match github_pr.merged_at.as_deref() {
                 Some(value) => match time::OffsetDateTime::parse(value, &Rfc3339) {
                     Ok(value) => authoritative_merged_at = Some(value),
@@ -3849,11 +3638,6 @@ async fn reconcile_task_pr_with_authority(
                 github_pr.head_sha.as_deref(),
                 now,
             ) {
-                if ci_observation.state == CiState::Passing {
-                    green_at = Some(ci_observation.observed_at);
-                } else {
-                    observed_incident = ci_incident(&pr, &ci_observation);
-                }
                 pr.ci_observation = Some(ci_observation);
             }
             Some(TaskEventKind::PrOpened {
@@ -3890,24 +3674,6 @@ async fn reconcile_task_pr_with_authority(
                 .await
                 .map_err(|error| task_error(error.to_string()))?;
         }
-    }
-    if let Some(incident) = observed_incident {
-        store
-            .observe_ci_incident(&incident)
-            .await
-            .map_err(|error| task_error(error.to_string()))?;
-    }
-    if let Some(green_at) = green_at {
-        store
-            .mark_ci_incidents_green(&pr.id, green_at)
-            .await
-            .map_err(|error| task_error(error.to_string()))?;
-    }
-    if let Some(merged_at) = ci_merged_at {
-        store
-            .mark_ci_incidents_merged(&pr.id, merged_at)
-            .await
-            .map_err(|error| task_error(error.to_string()))?;
     }
     if task.gate_proposal != previous_gate_proposal || task.pm_writeback != previous_pm_writeback {
         update_task_with_authority(store, task, lease)
@@ -4105,16 +3871,8 @@ pub(crate) async fn ensure_working_pr(
     ensure_working_pr_with_authority(store, task, None, RotateOptions::runner()).await
 }
 
-pub(crate) async fn ensure_working_pr_for_run(
-    store: &SharedStore,
-    task: &mut Task,
-    lease: &RunLease,
-) -> OpsResult<Option<TaskPr>> {
-    ensure_working_pr_with_authority(store, task, Some(lease), RotateOptions::runner()).await
-}
-
-/// How a serial-PR rotation treats the worktree. The runner rotates only a clean
-/// tree (`carry_dirty = false`); the operator's `lf pr next` carries the
+/// How a serial-PR rotation treats the worktree. Automated settlement rotates
+/// only a clean tree (`carry_dirty = false`); the operator's `lf pr next` carries the
 /// preserved follow-up edits forward onto the next serial branch
 /// (`carry_dirty = true`) and may name that branch via `slug_override`.
 #[derive(Debug, Clone, Default)]
@@ -4225,7 +3983,7 @@ async fn heal_incoherent_base(
     store: &SharedStore,
     task: &Task,
     pr: TaskPr,
-    lease: Option<&RunLease>,
+    lease: Option<&RunContext>,
 ) -> OpsResult<TaskPr> {
     if pr.phase() != PrPhase::Working || !task.worktree.exists() {
         return Ok(pr);
@@ -4324,7 +4082,7 @@ fn roll_back_failed_rotation(
 async fn ensure_working_pr_with_authority(
     store: &SharedStore,
     task: &mut Task,
-    lease: Option<&RunLease>,
+    lease: Option<&RunContext>,
     rotate: RotateOptions,
 ) -> OpsResult<Option<TaskPr>> {
     validate_task_launch(task)?;
@@ -4624,8 +4382,16 @@ pub fn task_status(issue: &str) -> OpsResult<Task> {
             .await
             .map_err(|error| task_error(format!("failed to read Task blocker: {error}")))?;
         if launch_refusal.is_none() && task_worktree_blocker(&store, &task).await?.is_none() {
-            reconcile_task_pr(&store, &mut task).await?;
-            reconcile_task_completion(&store, &mut task, None).await?;
+            let observed = reconcile_task_pr(&store, &mut task).await?;
+            let user_merged = observed.as_ref().is_some_and(|pr| {
+                pr.phase() == PrPhase::Merged
+                    && pr
+                        .merge_request()
+                        .is_some_and(|request| request.mode == PrMergeMode::User)
+            });
+            if user_merged {
+                reconcile_task_completion(&store, &mut task, None).await?;
+            }
         }
         Ok(task)
     })
@@ -4682,7 +4448,7 @@ fn complete_task(issue: &str, authority: TaskCompletionAuthority) -> OpsResult<T
             .await
             .map_err(|error| task_error(format!("failed to read Task: {error}")))?
             .ok_or_else(|| task_error(format!("no Task exists for {issue:?}")))?;
-        let lease = ambient_task_run_lease(&store, &task).await?;
+        let lease = ambient_task_run_context(&store, &task).await?;
         reconcile_task_pr_with_authority(
             &store,
             &mut task,
@@ -5085,7 +4851,7 @@ async fn merged_completing_pr(store: &SharedStore, task: &Task) -> OpsResult<Opt
 async fn advance_completion_after_gate(
     store: &SharedStore,
     task: &mut Task,
-    lease: Option<&RunLease>,
+    lease: Option<&RunContext>,
 ) -> OpsResult<bool> {
     if let Some(lease) = lease {
         validate_automated_task_authority(&task.worktree, store, task, lease).await?;
@@ -5141,7 +4907,7 @@ async fn advance_completion_after_gate(
 pub(crate) async fn reconcile_task_completion(
     store: &SharedStore,
     task: &mut Task,
-    lease: Option<&RunLease>,
+    lease: Option<&RunContext>,
 ) -> OpsResult<()> {
     let status = task_work_status(store, task).await?;
     if status == WorkStatus::Done && matches!(task.pm_writeback, PmWritebackState::Pending { .. }) {
@@ -5583,9 +5349,8 @@ pub fn task_interrupt(issue: &str) -> OpsResult<TaskControlResult> {
             .await
             .map_err(|error| task_error(error.to_string()))?
             .ok_or_else(|| task_error("Task has no active Run to interrupt"))?;
-        let request = AuthenticatedRequest::cli();
         let receipt = store
-            .interrupt(&ControlCtx::User(&request), &work, &run.id)
+            .interrupt(None, &work, &run.id)
             .await
             .map_err(|error| task_error(error.to_string()))?;
         Ok(TaskControlResult {
@@ -5612,7 +5377,7 @@ async fn _recover_abandoned_task(
     issue: &str,
     reason: Option<String>,
 ) -> OpsResult<Task> {
-    let caller = crate::ops::ambient_run_lease(store).await?;
+    let caller = crate::ops::ambient_run_context(store).await?;
     let reason = reason
         .map(|value| value.trim().to_string())
         .map(|value| {
@@ -5670,17 +5435,8 @@ async fn _recover_abandoned_task(
     task.updated_at = now;
     task.observation = Observation::NotRequired;
     match caller.as_ref() {
-        Some(caller) => {
-            store
-                .reopen_task(&ControlCtx::Run(caller), &task, None, &carried)
-                .await
-        }
-        None => {
-            let request = AuthenticatedRequest::cli();
-            store
-                .reopen_task(&ControlCtx::User(&request), &task, None, &carried)
-                .await
-        }
+        Some(caller) => store.reopen_task(Some(caller), &task, None, &carried).await,
+        None => store.reopen_task(None, &task, None, &carried).await,
     }
     .map_err(|error| task_error(format!("failed to recover Task: {error}")))?;
     Ok(task)
@@ -5826,12 +5582,12 @@ pub fn task_wait(issue: &str, until: TaskWaitUntil, timeout: Option<Duration>) -
 #[cfg(test)]
 mod tests {
     use super::{
-        ensure_task_flow_override, ensure_working_pr, launch_task_process, lock_task_pr_mutation,
-        mark_task_body_lost, preflight_task_execution, prepare_automatic_task_relaunch,
-        probe_task_execution_boundary, reconcile_process_liveness, reconcile_project_tasks,
-        resolve_task_lifecycle, resolve_task_start_input, task_event_launch_refusal,
-        task_execution_boundary, validate_task_lifecycle, TaskFlowOverrides,
-        MAX_AUTOMATIC_TASK_RECOVERY_RUNS,
+        apply_merged_task_landing, ensure_task_flow_override, ensure_working_pr,
+        launch_task_process, lock_task_pr_mutation, mark_task_body_lost, preflight_task_execution,
+        prepare_automatic_task_relaunch, probe_task_execution_boundary, propose_task_done,
+        reconcile_process_liveness, resolve_task_lifecycle, resolve_task_start_input,
+        task_event_launch_refusal, task_execution_boundary, validate_task_lifecycle,
+        TaskFlowOverrides, MAX_AUTOMATIC_TASK_RECOVERY_RUNS,
     };
     use crate::child::ChildRef;
     use crate::durable::{RunTrigger, WorkRef, WorkStatus};
@@ -5841,7 +5597,8 @@ mod tests {
     use crate::project::{Project, ProjectId};
     use crate::store::{open_store, SharedStore, StorageConfig};
     use crate::task::{
-        Observation, PmWritebackState, Task, TaskEventKind, TaskId, TaskLifecyclePhase,
+        AfterMerge, GithubPr, Observation, PmWritebackState, PrMergeMode, PrMergeRequest,
+        PrPresentation, PrPublication, Task, TaskEventKind, TaskId, TaskLifecyclePhase,
         TaskLifecyclePlan, TaskPr, TaskPrId,
     };
     use crate::wave::Wave;
@@ -5978,6 +5735,82 @@ mod tests {
             task,
             work,
         }
+    }
+
+    #[tokio::test]
+    async fn watched_landing_completes_task_only_from_merged_pr_evidence() {
+        let TaskFixture {
+            _database,
+            store,
+            mut task,
+            work,
+            database_path,
+            ..
+        } = task_fixture("LOO-248", "slice").await;
+        let now = time::OffsetDateTime::now_utc();
+        task.lifecycle_phase = TaskLifecyclePhase::Finally;
+        propose_task_done(&mut task, "watched pull request merged".to_string()).unwrap();
+        store.update_task(&task).await.unwrap();
+
+        let mut pr = store.active_task_pr(&task.id).await.unwrap().unwrap();
+        pr.branch = "HEAD".to_string();
+        rusqlite::Connection::open(database_path)
+            .unwrap()
+            .execute(
+                "UPDATE task_prs SET branch=?2 WHERE id=?1",
+                rusqlite::params![pr.id.as_str(), pr.branch],
+            )
+            .unwrap();
+        let landed_head = crate::engine::git::rev_parse(&task.worktree, "HEAD").unwrap();
+        pr.publication = Some(PrPublication {
+            requested_at: now,
+            presentation: Some(PrPresentation {
+                title: "Watch the landing".to_string(),
+                body: "Finish only after GitHub confirms merge.".to_string(),
+                head_sha: landed_head.clone(),
+            }),
+            github: Some(GithubPr {
+                number: 248,
+                url: "https://github.com/loopflowstudio/loopflow/pull/248".to_string(),
+                head_sha: Some(landed_head.clone()),
+            }),
+            merge: Some(PrMergeRequest {
+                mode: PrMergeMode::Auto,
+                requested_at: now,
+                head_sha: landed_head.clone(),
+                after_merge: AfterMerge::CompleteTask,
+                next_slug: None,
+            }),
+        });
+        store.update_task_pr(&pr).await.unwrap();
+        let landing = crate::pr_landing::PrLanding::new(
+            crate::pr_landing::NewPrLanding {
+                repo: "loopflowstudio/loopflow".to_string(),
+                pr_number: 248,
+                worktree: task.worktree.clone(),
+                branch: pr.branch.clone(),
+                task_id: Some(task.id.clone()),
+                requested_head_sha: landed_head.clone(),
+                after_merge: Some(AfterMerge::CompleteTask),
+                next_slug: None,
+            },
+            now,
+        )
+        .unwrap();
+
+        assert_eq!(store.work_status(&work).await.unwrap(), WorkStatus::Ready);
+        let error = apply_merged_task_landing(&store, &mut task, &pr, &landing)
+            .await
+            .expect_err("an armed but unmerged PR cannot complete the Task");
+        assert!(error.to_string().contains("did not confirm"));
+        assert_eq!(store.work_status(&work).await.unwrap(), WorkStatus::Ready);
+
+        pr.merge_commit = Some(landed_head);
+        store.settle_task_pr(&pr, None).await.unwrap();
+        apply_merged_task_landing(&store, &mut task, &pr, &landing)
+            .await
+            .unwrap();
+        assert_eq!(store.work_status(&work).await.unwrap(), WorkStatus::Done);
     }
 
     #[test]
@@ -6371,30 +6204,6 @@ mod tests {
             .await
             .unwrap()
             .is_empty());
-    }
-
-    #[tokio::test]
-    async fn resident_records_an_invalid_lifecycle_once_without_retrying() {
-        let TaskFixture {
-            store, task, work, ..
-        } = task_fixture("TEST-STALE-RESIDENT", "retired-task-flow").await;
-        let project = store.get_project(&task.project_id).await.unwrap().unwrap();
-
-        for _ in 0..2 {
-            reconcile_project_tasks(&store, &project).await.unwrap();
-        }
-
-        let events = store.recent_task_events(&task.id, 10).await.unwrap();
-        assert_eq!(events.len(), 1);
-        assert!(matches!(
-            &events[0].kind,
-            TaskEventKind::Failed {
-                error,
-                resumable: true,
-            } if error.contains("retired-task-flow")
-        ));
-        assert!(store.current_run(&work).await.unwrap().is_none());
-        assert_eq!(store.task_prs(&task.id).await.unwrap().len(), 1);
     }
 
     #[tokio::test]

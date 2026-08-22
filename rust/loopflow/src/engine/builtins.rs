@@ -230,6 +230,39 @@ mod tests {
     }
 
     #[test]
+    fn wave_goal_authoring_keeps_live_metrics_project_owned() {
+        let prompt = get_builtin_skill("prompt").expect("prompt skill");
+
+        assert!(prompt.contains("Project-owned metrics"));
+        assert!(prompt.contains("never copy them"));
+        assert!(prompt.contains("into the Wave body"));
+        assert!(!prompt.contains("Readable measures"));
+    }
+
+    #[test]
+    fn project_guidance_sponsors_metrics_and_task_workers_propose_them() {
+        let normalize = |prompt: &str| prompt.split_whitespace().collect::<Vec<_>>().join(" ");
+
+        let project = normalize(get_builtin_skill("project/clarify").expect("project clarify"));
+        assert!(project.contains("Owning a formal metric is explicit sponsorship"));
+        assert!(project.contains("which one or two outcomes the Project most wants to get"));
+        assert!(project.contains("Reject a convenient proxy"));
+        assert!(project.contains("frontier may keep earning work even when Met"));
+        assert!(project.contains("guardrail may enqueue nothing until its alarm trips"));
+
+        let project = normalize(get_builtin_skill("project/pursue").expect("project pursue"));
+        assert!(project.contains("Task worker may propose a metric"));
+        assert!(project.contains("Missed target usually gets roughly one worker"));
+        assert!(project.contains("Met guardrail stays quiet until its alarm trips"));
+        assert!(project.contains("not a utilization quota"));
+
+        let task = normalize(get_builtin_skill("task/pursue").expect("task pursue"));
+        assert!(task.contains("While building feature work, notice signals"));
+        assert!(task.contains("otherwise leave the proposal for Project sponsorship"));
+        assert!(task.contains("Metric proposals are discoveries, not a completion quota"));
+    }
+
+    #[test]
     fn formerly_attended_skills_have_bounded_headless_contracts() {
         let design = get_builtin_skill("design").expect("design skill");
         for contract in [

@@ -46,7 +46,7 @@ struct PortfolioRepoStateTests {
     }
 
     @Test("a development worktree sees the origin registry rows")
-    func worktreeSeesOriginRegistryRows() throws {
+    func worktreeSeesOriginRegistryRows() async throws {
         // Real git, like WaveOriginTests: the origin resolution is the point.
         let root = FileManager.default.temporaryDirectory
             .appendingPathComponent("registry-origin-\(UUID().uuidString)", isDirectory: true)
@@ -74,14 +74,37 @@ struct PortfolioRepoStateTests {
         try git(["worktree", "add", "-q", worktree.path], at: origin)
 
         let repo = PortfolioRepo(path: worktree.path.normalizedFilePath, lastOpened: Date())
-        let state = PortfolioRepoState(repo: repo)
-        state.applyConnectedWaves([
-            makeWave(
-                id: "goals",
-                repoPath: origin.path.normalizedFilePath,
-                status: .running(runID: "run_goals")
-            ),
-        ])
+        let originPath = origin.path.normalizedFilePath
+        let json = """
+        [{
+          "id":"goals",
+          "name":"goals",
+          "status":{"running":{"run_id":"run_00000000000000000000000000000001"}},
+          "current":{"state":"working","reason":"working","owner":"work","controls":["attach","steer","interrupt","stop"],"progress_age_secs":0,"deadline_in_secs":1800,"step":null,"liveness":{"state":"present","observed_at":"1970-01-01T00:00:00Z","fresh":true}},
+          "goal":"ship goals",
+          "repo":"\(originPath)",
+          "active_tasks":0,
+          "active_projects":0,
+          "live":true,
+          "paused":false,
+          "enabled":true,
+          "endpoint":"127.0.0.1:5678",
+          "created_at":null,
+          "parent_wave_id":null,
+          "retired_at":null,
+          "superseded_by_wave_id":null,
+          "retirement_reason":null,
+          "home":{"id":"home_00000000000000000000000000000001","route":"local","created_at":"1970-01-01T00:00:00Z","observed_at":"1970-01-01T00:00:00Z"}
+        }]
+        """
+        let query = RegistryQuery { args, _ in
+            #expect(args == ["ls", "--all", "--json"])
+            return json
+        }
+        let state = PortfolioRepoState(repo: repo, registryQuery: query)
+
+        await state.refresh()
+
         #expect(state.waves.map(\.id) == ["goals"], "a dev worktree sees its origin's registry row")
     }
 

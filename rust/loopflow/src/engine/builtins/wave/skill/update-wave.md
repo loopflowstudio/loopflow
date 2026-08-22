@@ -82,8 +82,9 @@ fold it. If it only describes what was already built, let it go.
    issue ids, status, or implementation receipts. Individual technical-debt
    cleanup is a task; a standing debt frontier can be a project.
 7. **Update `GOAL.md` only if the wave's identity moved.** Changed objective,
-   changed measures, or changed routing judgment count. If the branch didn't
-   change what the wave *is*, leave `GOAL.md` alone.
+   bounds, cadence, or routing judgment count. If the branch didn't change what
+   the wave *is*, leave `GOAL.md` alone. Official metric meaning belongs in
+   reviewed `wave/<wave>/metrics/*.md` contracts.
 8. **Trim scratch docs for shipped work.** Don't delete them — `lf pr land`
    handles that. Strip implementation detail that now lives in the code. Keep
    only:
@@ -123,11 +124,13 @@ pm:
 **Body** — the loop prompt, in the wave's own voice:
 
 - What this wave is and why it exists; scope boundaries as natural qualifiers.
-- How it judges progress — the metrics that matter (numeric where possible).
+- How it selects and steers Project bets.
 - The milestones or shape of the work ahead.
 
 **GOAL.md must not contain:** a roadmap table, status indicators
-(shipped/in-progress/planned), or item lists. Tasks are in Linear.
+(shipped/in-progress/planned), item lists, or a live Measures section. Tasks are
+in Linear; official live metrics are reviewed contracts under
+`wave/<wave>/metrics/`.
 
 ### Projects
 

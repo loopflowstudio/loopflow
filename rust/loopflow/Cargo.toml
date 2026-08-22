@@ -35,7 +35,7 @@ serde_yaml_ng = "0.10"
 tracing = "0.1"
 thiserror = "2.0"
 tiktoken-rs = "0.12"
-fancy-regex = "0.18"
+fancy-regex = "0.19"
 uuid = { version = "1", features = ["v4"] }
 chrono = { version = "0.4", default-features = false, features = ["clock", "serde"] }
 rand = "0.10"
@@ -61,7 +61,7 @@ tracing-subscriber = { version = "0.3", features = ["env-filter"] }
 async-trait = "0.1"
 aes-gcm = "0.10"
 axum = { version = "0.8", features = ["ws"] }
-base64 = "0.22"
+base64 = "0.23"
 bytes = "1"
 cron = "0.17"
 futures-util = "0.3"
@@ -82,6 +82,10 @@ tempfile = "3.27"
 [dev-dependencies]
 loopflow-test-support = { path = "../loopflow-test-support" }
 tokio = { version = "1", features = ["test-util"] }
+
+[build-dependencies]
+hex = "0.4"
+sha2 = "0.10"
 
 [[bench]]
 name = "wave_stream"

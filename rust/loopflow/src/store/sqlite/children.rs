@@ -15,7 +15,7 @@ use time::OffsetDateTime;
 use crate::child::{
     AbandonIntent, ChildBodyHandoff, ChildBodyHandoffRequest, ChildRef, ObservationRecipient,
 };
-use crate::durable::{Author, Basis, Run, RunLease, RunTrigger};
+use crate::durable::{Author, Basis, Run, RunContext, RunTrigger};
 use crate::id::WaveId;
 use crate::planning::{LinearIssueId, LinearProjectId, ProjectPlan, TaskPlan};
 use crate::project::{
@@ -31,9 +31,9 @@ use crate::task::{
 };
 
 use super::durable::{
-    create_project_spine, create_task_spine, current_epoch_in, end_run_for_lease, validate_basis,
-    validate_completion_readiness_in, validate_run_lease, validate_stop_lease, work_for_child_in,
-    work_status_in,
+    create_project_spine, create_task_spine, current_epoch_in, end_run_for_context, validate_basis,
+    validate_completion_readiness_in, validate_run_context, validate_stop_context,
+    work_for_child_in, work_status_in,
 };
 use super::SqliteStore;
 
@@ -53,15 +53,15 @@ impl SqliteStore {
         &self,
         task: &Task,
         pr: &TaskPr,
-        caller: Option<&RunLease>,
+        caller: Option<&RunContext>,
         text: &str,
-    ) -> StoreResult<(Run, RunLease)> {
+    ) -> StoreResult<(Run, RunContext)> {
         let mut conn = self.conn.lock().expect("store mutex poisoned");
         let transaction = conn.transaction_with_behavior(TransactionBehavior::Immediate)?;
         insert_initial_task(&transaction, task, pr)?;
         let work = work_for_child_in(&transaction, &ChildRef::Task(task.id.clone()))?;
-        super::durable::validate_control_caller(&transaction, caller, &work)?;
-        let author = caller.map_or(Author::User, |lease| Author::Run(lease.run_id.clone()));
+        super::durable::validate_actor(&transaction, caller)?;
+        let author = caller.map_or(Author::User, |actor| Author::Run(actor.run_id.clone()));
         let steer = Self::append_steer_in(&transaction, &work, &author, text)?;
         insert_task_event_in(
             &transaction,
@@ -91,20 +91,14 @@ impl SqliteStore {
         &self,
         task: &Task,
         pr: Option<&TaskPr>,
-        caller: Option<&RunLease>,
+        caller: Option<&RunContext>,
         text: &str,
     ) -> StoreResult<()> {
         validate_task(task)?;
         let mut conn = self.conn.lock().expect("store mutex poisoned");
         let transaction = conn.transaction_with_behavior(TransactionBehavior::Immediate)?;
-        let work = work_for_child_in(&transaction, &ChildRef::Task(task.id.clone()))?;
-        if caller.is_some() {
-            super::durable::validate_control_caller(&transaction, caller, &work)?;
-            return Err(StoreError::InvalidAuthority(
-                "Run cannot recover terminal Task Work; explicit User recovery is required"
-                    .to_string(),
-            ));
-        }
+        super::durable::validate_actor(&transaction, caller)?;
+        let author = caller.map_or(Author::User, |actor| Author::Run(actor.run_id.clone()));
         let previous: String = transaction
             .query_row(
                 "SELECT state FROM epochs WHERE task_id=?1 ORDER BY number DESC LIMIT 1",
@@ -145,7 +139,7 @@ impl SqliteStore {
             work_for_child_in(&transaction, &ChildRef::Task(task.id.clone())).map_err(|error| {
                 StoreError::InvalidData(format!("resolve reopened Task Work: {error}"))
             })?;
-        Self::append_steer_in(&transaction, &work, &Author::User, text)
+        Self::append_steer_in(&transaction, &work, &author, text)
             .map_err(|error| StoreError::InvalidData(format!("steer reopened Task: {error}")))?;
         transaction.commit()?;
         Ok(())
@@ -171,7 +165,7 @@ impl SqliteStore {
     pub(crate) fn validate_task_run_route(
         &self,
         task: &Task,
-        lease: &RunLease,
+        lease: &RunContext,
         current_external_project_id: &str,
     ) -> StoreResult<()> {
         let conn = self.conn.lock().expect("store mutex poisoned");
@@ -250,7 +244,7 @@ impl SqliteStore {
         Ok(true)
     }
 
-    pub(crate) fn update_task_for_run(&self, task: &Task, lease: &RunLease) -> StoreResult<()> {
+    pub(crate) fn update_task_for_run(&self, task: &Task, lease: &RunContext) -> StoreResult<()> {
         validate_task(task)?;
         let conn = self.conn.lock().expect("store mutex poisoned");
         if update_task_for_run_in(&conn, task, lease)? == 0 {
@@ -265,7 +259,7 @@ impl SqliteStore {
     pub(crate) fn finish_task_run(
         &self,
         task: &Task,
-        lease: &RunLease,
+        lease: &RunContext,
         outcome: crate::durable::BoundaryState,
     ) -> StoreResult<()> {
         validate_task(task)?;
@@ -283,7 +277,7 @@ impl SqliteStore {
                 lease.run_id, task.id
             )));
         }
-        end_run_for_lease(&transaction, lease, outcome)?;
+        end_run_for_context(&transaction, lease, outcome)?;
         transaction.commit()?;
         Ok(())
     }
@@ -296,7 +290,7 @@ impl SqliteStore {
         &self,
         task: &Task,
         skipped_pr: Option<&TaskPr>,
-        lease: &RunLease,
+        lease: &RunContext,
     ) -> StoreResult<()> {
         self.complete_task_with_authority(task, skipped_pr, Some(lease))
     }
@@ -305,7 +299,7 @@ impl SqliteStore {
         &self,
         task: &Task,
         skipped_pr: Option<&TaskPr>,
-        run_lease: Option<&RunLease>,
+        run_context: Option<&RunContext>,
     ) -> StoreResult<()> {
         validate_task(task)?;
         if let Some(pr) = skipped_pr {
@@ -319,7 +313,7 @@ impl SqliteStore {
         let mut conn = self.conn.lock().expect("store mutex poisoned");
         let transaction = conn.transaction_with_behavior(TransactionBehavior::Immediate)?;
         validate_task_project(&transaction, task)?;
-        if let Some(lease) = run_lease {
+        if let Some(lease) = run_context {
             require_run_owns_child(&transaction, &ChildRef::Task(task.id.clone()), lease)?;
         }
         if let Some(pr) = skipped_pr {
@@ -334,7 +328,7 @@ impl SqliteStore {
                 return Err(StoreError::NotFound);
             }
         }
-        let changed = match run_lease {
+        let changed = match run_context {
             Some(lease) => update_task_for_run_in(&transaction, task, lease)?,
             None => {
                 let parameters = task_control_params(task);
@@ -345,7 +339,7 @@ impl SqliteStore {
             }
         };
         if changed == 0 {
-            if let Some(lease) = run_lease {
+            if let Some(lease) = run_context {
                 return Err(StoreError::InvalidAuthority(format!(
                     "Run {} cannot complete Task {}",
                     lease.run_id, task.id
@@ -353,7 +347,7 @@ impl SqliteStore {
             }
             return Err(StoreError::NotFound);
         }
-        if run_lease.is_none() {
+        if run_context.is_none() {
             complete_task_work_in(&transaction, task)?;
         }
         transaction.commit()?;
@@ -467,7 +461,11 @@ impl SqliteStore {
         Ok(())
     }
 
-    pub(crate) fn update_task_pr_for_run(&self, pr: &TaskPr, lease: &RunLease) -> StoreResult<()> {
+    pub(crate) fn update_task_pr_for_run(
+        &self,
+        pr: &TaskPr,
+        lease: &RunContext,
+    ) -> StoreResult<()> {
         validate_task_pr(pr)?;
         let mut conn = self.conn.lock().expect("store mutex poisoned");
         let transaction = conn.transaction_with_behavior(TransactionBehavior::Immediate)?;
@@ -494,7 +492,7 @@ impl SqliteStore {
         pr_id: &TaskPrId,
         kind: TaskPrRepairKind,
         occurred_at: OffsetDateTime,
-        lease: &RunLease,
+        lease: &RunContext,
     ) -> StoreResult<bool> {
         let mut conn = self.conn.lock().expect("store mutex poisoned");
         let transaction = conn.transaction_with_behavior(TransactionBehavior::Immediate)?;
@@ -526,7 +524,7 @@ impl SqliteStore {
     pub(crate) fn heal_task_pr_base_for_run(
         &self,
         pr: &TaskPr,
-        lease: &RunLease,
+        lease: &RunContext,
     ) -> StoreResult<()> {
         let mut conn = self.conn.lock().expect("store mutex poisoned");
         let transaction = conn.transaction_with_behavior(TransactionBehavior::Immediate)?;
@@ -598,7 +596,7 @@ impl SqliteStore {
         &self,
         settled: &TaskPr,
         next: Option<&TaskPr>,
-        lease: &RunLease,
+        lease: &RunContext,
     ) -> StoreResult<()> {
         validate_task_pr_settlement(settled, next)?;
         let mut conn = self.conn.lock().expect("store mutex poisoned");
@@ -630,7 +628,7 @@ impl SqliteStore {
         &self,
         settled: &TaskPr,
         merged_at: Option<OffsetDateTime>,
-        lease: &RunLease,
+        lease: &RunContext,
     ) -> StoreResult<crate::store::TaskPrMergeEvidenceOutcome> {
         validate_task_pr_settlement(settled, None)?;
         let mut conn = self.conn.lock().expect("store mutex poisoned");
@@ -677,7 +675,7 @@ impl SqliteStore {
         &self,
         task: &Task,
         pr: &TaskPr,
-        lease: &RunLease,
+        lease: &RunContext,
     ) -> StoreResult<()> {
         validate_task(task)?;
         validate_task_pr(pr)?;
@@ -904,7 +902,7 @@ impl SqliteStore {
     pub(crate) fn append_task_event_for_run(
         &self,
         task_id: &TaskId,
-        lease: &RunLease,
+        lease: &RunContext,
         kind: &TaskEventKind,
     ) -> StoreResult<TaskEvent> {
         let mut conn = self.conn.lock().expect("store mutex poisoned");
@@ -919,7 +917,7 @@ impl SqliteStore {
     pub(crate) fn fail_task_run(
         &self,
         task_id: &TaskId,
-        lease: &RunLease,
+        lease: &RunContext,
         error: &str,
         resumable: bool,
     ) -> StoreResult<TaskEvent> {
@@ -936,7 +934,7 @@ impl SqliteStore {
                 resumable,
             },
         )?;
-        end_run_for_lease(&transaction, lease, crate::durable::BoundaryState::Failed)?;
+        end_run_for_context(&transaction, lease, crate::durable::BoundaryState::Failed)?;
         transaction.commit()?;
         Ok(event)
     }
@@ -1089,7 +1087,7 @@ impl SqliteStore {
     pub(crate) fn update_project_for_run(
         &self,
         project: &Project,
-        lease: &RunLease,
+        lease: &RunContext,
     ) -> StoreResult<()> {
         validate_project(project)?;
         let conn = self.conn.lock().expect("store mutex poisoned");
@@ -1106,7 +1104,7 @@ impl SqliteStore {
         &self,
         project_id: &ProjectId,
         plan: &ProjectPlan,
-        lease: &RunLease,
+        lease: &RunContext,
     ) -> StoreResult<(Project, bool)> {
         let mut conn = self.conn.lock().expect("store mutex poisoned");
         let transaction = conn.transaction_with_behavior(TransactionBehavior::Immediate)?;
@@ -1157,7 +1155,7 @@ impl SqliteStore {
     pub(crate) fn finish_project_run(
         &self,
         project: &Project,
-        lease: &RunLease,
+        lease: &RunContext,
         outcome: crate::durable::BoundaryState,
     ) -> StoreResult<()> {
         validate_project(project)?;
@@ -1185,7 +1183,7 @@ impl SqliteStore {
                 lease.run_id, project.id
             )));
         }
-        end_run_for_lease(&transaction, lease, outcome)?;
+        end_run_for_context(&transaction, lease, outcome)?;
         transaction.commit()?;
         Ok(())
     }
@@ -1193,7 +1191,7 @@ impl SqliteStore {
     pub(crate) fn fail_project_run(
         &self,
         project: &Project,
-        lease: &RunLease,
+        lease: &RunContext,
         error: &str,
     ) -> StoreResult<ProjectEvent> {
         validate_project(project)?;
@@ -1224,7 +1222,7 @@ impl SqliteStore {
             },
             Some(&lease.run_id),
         )?;
-        end_run_for_lease(&transaction, lease, crate::durable::BoundaryState::Failed)?;
+        end_run_for_context(&transaction, lease, crate::durable::BoundaryState::Failed)?;
         transaction.commit()?;
         Ok(event)
     }
@@ -1232,7 +1230,7 @@ impl SqliteStore {
     pub(crate) fn complete_project_run(
         &self,
         project: &Project,
-        lease: &RunLease,
+        lease: &RunContext,
         basis: &Basis,
         summary: &str,
     ) -> StoreResult<ProjectEvent> {
@@ -1240,7 +1238,7 @@ impl SqliteStore {
         let mut conn = self.conn.lock().expect("store mutex poisoned");
         let transaction = conn.transaction_with_behavior(TransactionBehavior::Immediate)?;
         require_run_owns_child(&transaction, &ChildRef::Project(project.id.clone()), lease)?;
-        let run = validate_run_lease(&transaction, lease)?;
+        let run = validate_run_context(&transaction, lease)?;
         let epoch = current_epoch_in(&transaction, &run.work)?;
         if epoch.id != run.epoch_id {
             return Err(StoreError::InvalidAuthority(format!(
@@ -1275,7 +1273,7 @@ impl SqliteStore {
                 project.id
             )));
         }
-        end_run_for_lease(
+        end_run_for_context(
             &transaction,
             lease,
             crate::durable::BoundaryState::Succeeded,
@@ -1401,7 +1399,7 @@ impl SqliteStore {
     pub(crate) fn append_project_event_for_run(
         &self,
         project_id: &ProjectId,
-        lease: &RunLease,
+        lease: &RunContext,
         kind: &ProjectEventKind,
     ) -> StoreResult<ProjectEvent> {
         let mut conn = self.conn.lock().expect("store mutex poisoned");
@@ -1551,7 +1549,7 @@ impl SqliteStore {
         &self,
         project_id: &ProjectId,
         observation: &ObservationOutboxRow,
-        lease: &RunLease,
+        lease: &RunContext,
     ) -> StoreResult<bool> {
         self.consume_task_observation_for_project_with_authority(
             project_id,
@@ -1564,7 +1562,7 @@ impl SqliteStore {
         &self,
         project_id: &ProjectId,
         observation: &ObservationOutboxRow,
-        run_lease: Option<&RunLease>,
+        run_context: Option<&RunContext>,
     ) -> StoreResult<bool> {
         let (
             ObservationRecipient::Project {
@@ -1584,7 +1582,7 @@ impl SqliteStore {
         };
         let mut conn = self.conn.lock().expect("store mutex poisoned");
         let transaction = conn.transaction_with_behavior(TransactionBehavior::Immediate)?;
-        if let Some(lease) = run_lease {
+        if let Some(lease) = run_context {
             require_run_owns_child(&transaction, &ChildRef::Project(project_id.clone()), lease)?;
         }
         if recipient_id != project_id {
@@ -1619,7 +1617,7 @@ impl SqliteStore {
                 &transaction,
                 &project,
                 &kind,
-                run_lease.map(|lease| &lease.run_id),
+                run_context.map(|context| &context.run_id),
             )?;
         }
         let now = now_unix();
@@ -2034,7 +2032,11 @@ fn task_control_params(task: &Task) -> Vec<Box<dyn ToSql>> {
     task_params(task)
 }
 
-fn update_task_for_run_in(conn: &Connection, task: &Task, lease: &RunLease) -> StoreResult<usize> {
+fn update_task_for_run_in(
+    conn: &Connection,
+    task: &Task,
+    lease: &RunContext,
+) -> StoreResult<usize> {
     require_run_owns_child(conn, &ChildRef::Task(task.id.clone()), lease)?;
     let parameters = task_params(task);
     Ok(conn.execute(
@@ -2045,9 +2047,9 @@ fn update_task_for_run_in(conn: &Connection, task: &Task, lease: &RunLease) -> S
 fn require_run_owns_child(
     conn: &Connection,
     target: &ChildRef,
-    lease: &RunLease,
+    lease: &RunContext,
 ) -> StoreResult<()> {
-    let run = validate_run_lease(conn, lease)?;
+    let run = validate_run_context(conn, lease)?;
     let work = work_for_child_in(conn, target)?;
     if run.work != work {
         return Err(StoreError::InvalidAuthority(format!(
@@ -2063,9 +2065,9 @@ fn require_run_owns_child(
 fn require_cleanup_run_owns_child(
     conn: &Connection,
     target: &ChildRef,
-    lease: &RunLease,
+    lease: &RunContext,
 ) -> StoreResult<()> {
-    let run = validate_stop_lease(conn, lease)?;
+    let run = validate_stop_context(conn, lease)?;
     let work = work_for_child_in(conn, target)?;
     if run.work != work {
         return Err(StoreError::InvalidAuthority(format!(
@@ -2700,7 +2702,7 @@ fn project_control_params(project: &Project) -> Vec<Box<dyn ToSql>> {
 fn update_project_for_run_in(
     conn: &Connection,
     project: &Project,
-    lease: &RunLease,
+    lease: &RunContext,
 ) -> StoreResult<usize> {
     require_run_owns_child(conn, &ChildRef::Project(project.id.clone()), lease)?;
     let parameters = project_params(project);

@@ -163,6 +163,10 @@ enum Commands {
         /// Internal Unix socket used to signal the waiting `lf start` process.
         #[arg(long, hide = true, requires_all = ["startup_attempt", "startup_receipt"])]
         startup_socket: Option<PathBuf>,
+
+        /// Receipt capability for keeper health startup during install settlement.
+        #[arg(long, hide = true)]
+        install_switch: Option<String>,
     },
     /// Render and load the launchd (macOS) or systemd user (Linux) service so
     /// the daemon stays up across reboots. Service files never carry secrets —
@@ -184,9 +188,19 @@ enum Commands {
 }
 
 fn main() -> anyhow::Result<()> {
-    init_tracing()?;
-
+    loopflow::machine_install::dispatch_entry_gate(
+        &loopflow::machine_install::ArtifactRole::Daemon,
+    )?;
     let cli = Cli::parse();
+    let install_switch = match &cli.command {
+        Commands::Serve { install_switch, .. } => install_switch.as_deref(),
+        _ => None,
+    };
+    loopflow::machine_install::authorize_current_for_switch(
+        &loopflow::machine_install::ArtifactRole::Daemon,
+        install_switch,
+    )?;
+    init_tracing()?;
     let rt = tokio::runtime::Runtime::new()?;
 
     match cli.command {
@@ -196,6 +210,7 @@ fn main() -> anyhow::Result<()> {
             startup_attempt,
             startup_receipt,
             startup_socket,
+            install_switch: _,
         } => {
             let startup = match (startup_attempt, startup_receipt, startup_socket) {
                 (Some(attempt_id), Some(receipt_path), Some(socket_path)) => {

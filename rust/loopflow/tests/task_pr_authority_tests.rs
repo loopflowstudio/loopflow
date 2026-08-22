@@ -13,7 +13,9 @@ use std::fs;
 use std::process::{Command, Stdio};
 
 use loopflow::ops::task::task_stack;
-use loopflow::ops::{create_or_update_pr, land, submit, LandOptions, NullProgress, PrOptions};
+use loopflow::ops::{
+    arm as land, create_or_update_pr, submit, LandOptions, NullProgress, PrOptions,
+};
 use loopflow_test_support::TestRepo;
 use support::{register_task, EnvGuard};
 
@@ -508,5 +510,100 @@ fn ordinary_pr_publishes_when_no_registry_exists() {
     assert!(
         remote_branch_exists(&repo, branch),
         "an ordinary non-Task PR must still push and publish with no registry"
+    );
+}
+
+/// LOO-162 — a managed Task has exactly one shipping decision: its `finally`
+/// review, declared with `lf pr land`. `lf pr submit` (assign for a human merge
+/// click) would be a competing second gate, so it must refuse **before any push
+/// or `gh pr` mutation**, and name the land declaration as the path forward.
+#[test]
+fn managed_task_submit_refuses_before_any_push() {
+    let home = tempfile::TempDir::new().expect("temp home");
+    let repo = TestRepo::new();
+    let base = repo.head_sha();
+
+    let log_path = home.path().join("gh.log");
+    let script = gh_record_script(log_path.to_string_lossy().as_ref());
+    let _env = EnvGuard::with_lf_home(
+        &[("gh", script.as_str()), ("open", noop_open_script())],
+        home.path(),
+    );
+
+    let branch = "jack/managed-submit";
+    repo.create_branch(branch);
+    repo.create_file("task.txt", "task work\n");
+    repo.stage_all();
+    repo.commit("task commit");
+    // Deliberately NOT pushed: the refusal must precede the first push.
+
+    let _task = register_task(home.path(), repo.path(), branch, &base);
+
+    let err = submit(
+        repo.path(),
+        &land_options(true, "managed submit"),
+        &NullProgress,
+    )
+    .expect_err("managed Task submit must refuse before any push");
+    let message = err.to_string();
+    assert!(
+        message.contains("second shipping gate"),
+        "refusal must explain the competing gate, got: {message}"
+    );
+    assert!(
+        message.contains("lf pr land"),
+        "refusal must name the land declaration, got: {message}"
+    );
+
+    assert!(
+        !remote_branch_exists(&repo, branch),
+        "the branch must never reach the remote when submit is refused"
+    );
+    assert_no_gh_pr_mutation(&log_path);
+}
+
+/// The refusal is scoped to managed Tasks: an ordinary non-Task worktree still
+/// `submit`s — pushing the branch and marking the PR ready — so the LOO-162 gate
+/// does not over-block the separation-of-duties workflow for plain PRs.
+#[test]
+fn ordinary_submit_still_assigns_for_review() {
+    let home = tempfile::TempDir::new().expect("temp home");
+    let repo = TestRepo::new();
+    let base = repo.head_sha();
+
+    let log_path = home.path().join("gh.log");
+    let script = gh_record_script(log_path.to_string_lossy().as_ref());
+    let _env = EnvGuard::with_lf_home(
+        &[("gh", script.as_str()), ("open", noop_open_script())],
+        home.path(),
+    );
+
+    // A healthy registry exists, but its one Task claims a different worktree —
+    // this checkout is provably not a Task worktree, so submit is unaffected.
+    let elsewhere = tempfile::TempDir::new().expect("unrelated worktree");
+    let _unrelated = register_task(home.path(), elsewhere.path(), "jack/elsewhere", &base);
+
+    let branch = "jack/ordinary-submit";
+    repo.create_branch(branch);
+    repo.create_file("task.txt", "ordinary work\n");
+    repo.stage_all();
+    repo.commit("ordinary commit");
+    repo.push_new_branch(branch);
+
+    submit(
+        repo.path(),
+        &land_options(true, "ordinary submit"),
+        &NullProgress,
+    )
+    .expect("ordinary non-Task submit still assigns for review");
+
+    let log = fs::read_to_string(&log_path).unwrap_or_default();
+    assert!(
+        log.contains("pr edit --add-assignee @me"),
+        "ordinary submit must assign the PR for a human merge, got log:\n{log}"
+    );
+    assert!(
+        !log.contains("merge --auto"),
+        "submit must never arm auto-merge, got log:\n{log}"
     );
 }

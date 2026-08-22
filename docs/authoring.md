@@ -158,21 +158,17 @@ memory, pick the next useful move, resolve its local blocker, spin off
 independent work only when parallelism earns it, and fold what shipped into
 memory.
 
-## Measures
-
-- **Quality**: fresh-store tests cover every live persistence path.
-- **Done means**: a landed PR of real product code, Linear task closed and PR-linked.
-
 ## Process
 
 Make mechanical changes directly; write a scratch design first when the
 blast radius crosses storage, auth, or public APIs.
 ```
 
-The three sections carry different weight. **Objective** is identity — what
-this wave is for and how it moves. **Measures** is judgment — what the wave
-re-reads each wake to decide if the bet holds. **Process** is constraint —
-when to design first, what never to touch.
+The two sections carry different weight. **Objective** is identity — what this
+wave is for and how it moves. **Process** is constraint — when to design first,
+what never to touch. Project definitions and KRs live in Linear. Official live
+measurement lives in reviewed `wave/<wave>/metrics/*.md` contracts, not a
+`GOAL.md` Measures section.
 
 ### Frontmatter
 

@@ -8,10 +8,10 @@ use crate::durable::{
     ContainmentObservation, DoneProposal, DoneProposalId, Epoch, EpochId, EpochReceipt, EpochState,
     FlowPosition, Home, HomeId, InterruptReceipt, InvocationObservation,
     InvocationObservationState, InvocationRoute, InvocationSurface, Placement, ProjectId, Run,
-    RunAdvance, RunId, RunLease, RunLeaseToken, RunLivenessEvidence, RunLivenessReceipt,
-    RunLivenessState, RunState, RunTrigger, Send, SendId, SendState, SendVia, Steer, SteerId,
-    SteerReceipt, StopCause, StopReceipt, TaskId, ToolResponseId, ToolResponseReceipt,
-    ToolResponseWrite, Turn, TurnId, Wait, WaitId, WaitOn, WorkRef, WorkStatus,
+    RunAdvance, RunContext, RunId, RunLivenessEvidence, RunLivenessReceipt, RunLivenessState,
+    RunState, RunTrigger, Send, SendId, SendState, SendVia, Steer, SteerId, SteerReceipt,
+    StopCause, StopReceipt, TaskId, ToolResponseId, ToolResponseReceipt, ToolResponseWrite, Turn,
+    TurnId, Wait, WaitId, WaitOn, WorkRef, WorkStatus,
 };
 use crate::id::WaveId;
 use crate::project::Project;
@@ -169,7 +169,7 @@ impl SqliteStore {
         &self,
         work: &WorkRef,
         trigger: &RunTrigger,
-    ) -> StoreResult<(Run, RunLease)> {
+    ) -> StoreResult<(Run, RunContext)> {
         let mut conn = self.conn.lock().expect("store mutex poisoned");
         let tx = conn.transaction_with_behavior(TransactionBehavior::Immediate)?;
         let receipt = reserve_run_in(&tx, work, trigger)?;
@@ -177,24 +177,13 @@ impl SqliteStore {
         Ok(receipt)
     }
 
-    pub(crate) fn reserve_child_run(
+    pub(crate) fn reserve_recovery_run(
         &self,
-        caller: &RunLease,
-        work: &WorkRef,
-        trigger: &RunTrigger,
-    ) -> StoreResult<(Run, RunLease)> {
+        lease: &RunContext,
+    ) -> StoreResult<(Run, RunContext)> {
         let mut conn = self.conn.lock().expect("store mutex poisoned");
         let tx = conn.transaction_with_behavior(TransactionBehavior::Immediate)?;
-        validate_control_caller(&tx, Some(caller), work)?;
-        let receipt = reserve_run_in(&tx, work, trigger)?;
-        tx.commit()?;
-        Ok(receipt)
-    }
-
-    pub(crate) fn reserve_recovery_run(&self, lease: &RunLease) -> StoreResult<(Run, RunLease)> {
-        let mut conn = self.conn.lock().expect("store mutex poisoned");
-        let tx = conn.transaction_with_behavior(TransactionBehavior::Immediate)?;
-        let prior = validate_run_lease(&tx, lease)?;
+        let prior = validate_run_context(&tx, lease)?;
         if prior.state != RunState::Active {
             return Err(StoreError::InvalidData(format!(
                 "Run {} cannot hand off recovery while {:?}",
@@ -222,7 +211,6 @@ impl SqliteStore {
         let trigger = RunTrigger::Recovery {
             prior_run_id: prior.id.clone(),
         };
-        let token = RunLeaseToken::new();
         let runtime_generation = runtime_generation_in(&tx, &prior.home_id)?;
         let run = Run {
             id: RunId::new(),
@@ -244,9 +232,8 @@ impl SqliteStore {
             tx.execute(
                 "INSERT INTO runs (
                     id, epoch_id, home_id, runtime_generation, state, trigger_json, retry_of,
-                    lease_hash, lease_generation, source_kind, source_id, created_at, ended_at,
-                    stop_reason
-                 ) VALUES (?1, ?2, ?3, ?4, 'reserved', ?5, ?6, ?7, NULL, ?8, ?9, ?10, NULL, NULL)",
+                    source_kind, source_id, created_at, ended_at, stop_reason
+                 ) VALUES (?1, ?2, ?3, ?4, 'reserved', ?5, ?6, ?7, ?8, ?9, NULL, NULL)",
                 params![
                     run.id.as_str(),
                     run.epoch_id.as_str(),
@@ -254,7 +241,6 @@ impl SqliteStore {
                     runtime_generation,
                     serde_json::to_string(&trigger).expect("Run trigger must serialize"),
                     run.retry_of.as_ref().map(RunId::as_str),
-                    token.hash(),
                     run.work.kind(),
                     run.work.id(),
                     run.created_at.unix_timestamp(),
@@ -263,30 +249,28 @@ impl SqliteStore {
         } else {
             tx.execute(
                 "INSERT INTO runs (
-                    id, epoch_id, home_id, state, trigger_json, retry_of, lease_hash,
-                    lease_generation, source_kind, source_id, created_at, ended_at, stop_reason
-                 ) VALUES (?1, ?2, ?3, 'reserved', ?4, ?5, ?6, NULL, ?7, ?8, ?9, NULL, NULL)",
+                    id, epoch_id, home_id, state, trigger_json, retry_of,
+                    source_kind, source_id, created_at, ended_at, stop_reason
+                 ) VALUES (?1, ?2, ?3, 'reserved', ?4, ?5, ?6, ?7, ?8, NULL, NULL)",
                 params![
                     run.id.as_str(),
                     run.epoch_id.as_str(),
                     run.home_id.as_str(),
                     serde_json::to_string(&trigger).expect("Run trigger must serialize"),
                     run.retry_of.as_ref().map(RunId::as_str),
-                    token.hash(),
                     run.work.kind(),
                     run.work.id(),
                     run.created_at.unix_timestamp(),
                 ],
             )?;
         }
-        let recovery_lease = RunLease::new(
+        let recovery_context = RunContext::new(
             run.id.clone(),
             run.work.clone(),
             current_epoch_in(&tx, &run.work)?.current_basis,
-            token,
         );
         tx.commit()?;
-        Ok((run, recovery_lease))
+        Ok((run, recovery_context))
     }
 
     pub fn current_run(&self, work: &WorkRef) -> StoreResult<Option<Run>> {
@@ -374,39 +358,31 @@ impl SqliteStore {
         latest_run_for_epoch_in(&conn, &epoch.id)
     }
 
-    pub(crate) fn resolve_run_lease(&self, token: &RunLeaseToken) -> StoreResult<RunLease> {
+    pub(crate) fn run_context(&self, run_id: &RunId) -> StoreResult<RunContext> {
         let conn = self.conn.lock().expect("store mutex poisoned");
-        let id = conn
-            .query_row(
-                "SELECT id FROM runs
-                 WHERE lease_hash=?1 AND state IN ('reserved', 'active')",
-                [token.hash()],
-                |row| row.get::<_, String>(0),
-            )
-            .optional()?
-            .ok_or_else(|| {
-                StoreError::InvalidAuthority(
-                    "Run lease is malformed, stale, stopped, or unknown".to_string(),
-                )
-            })?;
-        let run = run_by_id_in(&conn, &RunId::parse(&id).map_err(invalid_durable)?)?;
+        let run = run_by_id_in(&conn, run_id)?;
+        if !matches!(run.state, RunState::Reserved | RunState::Active) {
+            return Err(StoreError::InvalidAuthority(format!(
+                "Run {run_id} is no longer current"
+            )));
+        }
         let basis = current_epoch_in(&conn, &run.work)?.current_basis;
-        Ok(RunLease::new(run.id, run.work, basis, token.clone()))
+        Ok(RunContext::new(run.id, run.work, basis))
     }
 
-    pub(crate) fn validate_run_lease(&self, lease: &RunLease) -> StoreResult<()> {
+    pub(crate) fn validate_run_context(&self, lease: &RunContext) -> StoreResult<()> {
         let conn = self.conn.lock().expect("store mutex poisoned");
-        validate_run_lease(&conn, lease)?;
+        validate_run_context(&conn, lease)?;
         Ok(())
     }
 
     pub(crate) fn record_first_material_at(
         &self,
-        lease: &RunLease,
+        lease: &RunContext,
         observed_at: OffsetDateTime,
     ) -> StoreResult<OffsetDateTime> {
         let conn = self.conn.lock().expect("store mutex poisoned");
-        let run = validate_run_lease(&conn, lease)?;
+        let run = validate_run_context(&conn, lease)?;
         if !matches!(run.work, WorkRef::Task(_)) || run.state != RunState::Active {
             return Err(StoreError::InvalidAuthority(format!(
                 "Run {} does not hold active Task progress authority",
@@ -439,12 +415,12 @@ impl SqliteStore {
 
     pub fn advance_run(
         &self,
-        lease: &RunLease,
+        lease: &RunContext,
         advance: &RunAdvance,
     ) -> StoreResult<AdvanceReceipt> {
         let mut conn = self.conn.lock().expect("store mutex poisoned");
         let tx = conn.transaction_with_behavior(TransactionBehavior::Immediate)?;
-        let mut run = validate_run_lease(&tx, lease)?;
+        let mut run = validate_run_context(&tx, lease)?;
         let receipt = match advance {
             RunAdvance::RunStarting { containment, cwd } => {
                 if run.state != RunState::Reserved {
@@ -655,13 +631,13 @@ impl SqliteStore {
 
     pub fn stop_run(
         &self,
-        lease: &RunLease,
+        lease: &RunContext,
         cause: &StopCause,
         containment: ContainmentObservation,
     ) -> StoreResult<StopReceipt> {
         let mut conn = self.conn.lock().expect("store mutex poisoned");
         let tx = conn.transaction_with_behavior(TransactionBehavior::Immediate)?;
-        let run = validate_stop_lease(&tx, lease)?;
+        let run = validate_stop_context(&tx, lease)?;
         let cause_json = serde_json::to_string(cause).expect("Stop cause must serialize");
         match containment {
             ContainmentObservation::Absent => {
@@ -695,18 +671,18 @@ impl SqliteStore {
         Ok(StopReceipt { run, containment })
     }
 
-    pub(crate) fn finish_run(&self, lease: &RunLease, outcome: BoundaryState) -> StoreResult<()> {
+    pub(crate) fn finish_run(&self, lease: &RunContext, outcome: BoundaryState) -> StoreResult<()> {
         let conn = self.conn.lock().expect("store mutex poisoned");
-        end_run_for_lease(&conn, lease, outcome)
+        end_run_for_context(&conn, lease, outcome)
     }
 
     pub fn run_control(
         &self,
-        lease: &RunLease,
+        lease: &RunContext,
         active_turn_id: Option<&str>,
     ) -> StoreResult<Option<crate::durable::RunControl>> {
         let conn = self.conn.lock().expect("store mutex poisoned");
-        let run = validate_stop_lease(&conn, lease)?;
+        let run = validate_stop_context(&conn, lease)?;
         let epoch_state: String = conn.query_row(
             "SELECT state FROM epochs WHERE id=?1",
             [run.epoch_id.as_str()],
@@ -761,12 +737,12 @@ impl SqliteStore {
 
     pub fn set_flow_position(
         &self,
-        lease: &RunLease,
+        lease: &RunContext,
         position: &FlowPosition,
     ) -> StoreResult<FlowPosition> {
         let mut conn = self.conn.lock().expect("store mutex poisoned");
         let tx = conn.transaction_with_behavior(TransactionBehavior::Immediate)?;
-        let run = validate_run_lease(&tx, lease)?;
+        let run = validate_run_context(&tx, lease)?;
         if position.work != run.work || position.epoch_id != run.epoch_id {
             return Err(StoreError::InvalidAuthority(
                 "flow position does not belong to the active Run".to_string(),
@@ -808,7 +784,7 @@ impl SqliteStore {
 
     pub fn create_ask(
         &self,
-        lease: &RunLease,
+        lease: &RunContext,
         origin: &AskOrigin,
         request: &AskBody,
         target: &AskTarget,
@@ -857,17 +833,17 @@ impl SqliteStore {
 
     pub fn pending_asks(
         &self,
-        caller: Option<&RunLease>,
+        caller: Option<&RunContext>,
         target: &AskTarget,
     ) -> StoreResult<Vec<Ask>> {
         let conn = self.conn.lock().expect("store mutex poisoned");
-        validate_target_caller(&conn, caller, target)?;
+        validate_actor(&conn, caller)?;
         query_asks(&conn, AskScope::Target(target))
     }
 
     pub fn claim_ask(
         &self,
-        caller: Option<&RunLease>,
+        caller: Option<&RunContext>,
         ask_id: &AskId,
         route: &InvocationRoute,
         surface: &str,
@@ -880,7 +856,7 @@ impl SqliteStore {
         let mut conn = self.conn.lock().expect("store mutex poisoned");
         let tx = conn.transaction_with_behavior(TransactionBehavior::Immediate)?;
         let ask = ask_by_id_in(&tx, ask_id)?;
-        validate_target_caller(&tx, caller, &ask.target)?;
+        validate_actor(&tx, caller)?;
         require_open_ask_epoch(&tx, ask_id)?;
         if ask.state.is_terminal() {
             return Err(StoreError::InvalidAuthority(format!(
@@ -934,11 +910,11 @@ impl SqliteStore {
         })
     }
 
-    pub(crate) fn claim_flow_step_run_lease(
+    pub(crate) fn claim_flow_step_run_context(
         &self,
         ask_id: &AskId,
         invocation_id: &AgentInvocationId,
-    ) -> StoreResult<Option<RunLease>> {
+    ) -> StoreResult<Option<RunContext>> {
         let mut conn = self.conn.lock().expect("store mutex poisoned");
         let tx = conn.transaction_with_behavior(TransactionBehavior::Immediate)?;
         let invocation = validate_ask_invocation(&tx, ask_id, invocation_id)?;
@@ -974,20 +950,9 @@ impl SqliteStore {
                 ask.id
             )));
         }
-        let token = RunLeaseToken::new();
-        if tx.execute(
-            "UPDATE runs SET lease_hash=?2 WHERE id=?1 AND state='active'",
-            params![run.id.as_str(), token.hash()],
-        )? != 1
-        {
-            return Err(StoreError::InvalidAuthority(format!(
-                "Ask {} lost flow-step writer authority",
-                ask.id
-            )));
-        }
-        let run_lease = RunLease::new(run.id, run.work, epoch.current_basis, token);
+        let run_context = RunContext::new(run.id, run.work, epoch.current_basis);
         tx.commit()?;
-        Ok(Some(run_lease))
+        Ok(Some(run_context))
     }
 
     pub fn mark_ask_ready(
@@ -1040,14 +1005,14 @@ impl SqliteStore {
 
     pub fn mark_presented_by_target(
         &self,
-        caller: Option<&RunLease>,
+        caller: Option<&RunContext>,
         ask_id: &AskId,
         expected_invocation_id: &AgentInvocationId,
     ) -> StoreResult<AgentInvocation> {
         let mut conn = self.conn.lock().expect("store mutex poisoned");
         let tx = conn.transaction_with_behavior(TransactionBehavior::Immediate)?;
         let ask = ask_by_id_in(&tx, ask_id)?;
-        validate_target_caller(&tx, caller, &ask.target)?;
+        validate_actor(&tx, caller)?;
         let invocation_id = ask.active_invocation_id.ok_or_else(|| {
             StoreError::InvalidData(format!("Ask {ask_id} has no active Invocation"))
         })?;
@@ -1217,13 +1182,13 @@ impl SqliteStore {
 
     pub fn escalate_queued_ask(
         &self,
-        caller: Option<&RunLease>,
+        caller: Option<&RunContext>,
         ask_id: &AskId,
     ) -> StoreResult<Ask> {
         let mut conn = self.conn.lock().expect("store mutex poisoned");
         let tx = conn.transaction_with_behavior(TransactionBehavior::Immediate)?;
         let ask = ask_by_id_in(&tx, ask_id)?;
-        validate_target_caller(&tx, caller, &ask.target)?;
+        validate_actor(&tx, caller)?;
         if !matches!(ask.target, AskTarget::Parent(_)) || ask.state != AskState::Queued {
             return Err(StoreError::InvalidAuthority(format!(
                 "Ask {ask_id} is not a queued parent request"
@@ -1242,7 +1207,7 @@ impl SqliteStore {
 
     pub fn cancel_ask(
         &self,
-        caller: Option<&RunLease>,
+        caller: Option<&RunContext>,
         ask_id: &AskId,
         reason: &str,
     ) -> StoreResult<Ask> {
@@ -1250,19 +1215,8 @@ impl SqliteStore {
         let mut conn = self.conn.lock().expect("store mutex poisoned");
         let tx = conn.transaction_with_behavior(TransactionBehavior::Immediate)?;
         let ask = ask_by_id_in(&tx, ask_id)?;
-        let author = match caller {
-            None => Author::User,
-            Some(lease) => {
-                let run = validate_run_lease(&tx, lease)?;
-                let epoch_id = ask_epoch_id_in(&tx, ask_id)?;
-                if run.work != ask.origin.work || run.epoch_id != epoch_id {
-                    return Err(StoreError::InvalidAuthority(
-                        "Run may cancel only an Ask from its current Work Epoch".to_string(),
-                    ));
-                }
-                Author::Run(run.id)
-            }
-        };
+        validate_actor(&tx, caller)?;
+        let author = caller.map_or(Author::User, |actor| Author::Run(actor.run_id.clone()));
         if ask.state.is_terminal() {
             if ask.result
                 == Some(AskResult::Cancelled {
@@ -1345,7 +1299,7 @@ impl SqliteStore {
 
     pub fn request_intervention(
         &self,
-        lease: &RunLease,
+        lease: &RunContext,
         invocation_id: &AgentInvocationId,
         prompt: &str,
         user: bool,
@@ -1357,7 +1311,7 @@ impl SqliteStore {
             ));
         }
         let conn = self.conn.lock().expect("store mutex poisoned");
-        let run = validate_run_lease(&conn, lease)?;
+        let run = validate_run_context(&conn, lease)?;
         require_open_invocation_for_run(&conn, invocation_id, &run.id)?;
         let turn_id = current_turn_for_invocation_in(&conn, invocation_id)?;
         let request = AskBody::Intervention {
@@ -1389,9 +1343,9 @@ impl SqliteStore {
         self.create_ask(lease, &origin, &request, &target)
     }
 
-    pub fn asks_for_work_epoch(&self, lease: &RunLease) -> StoreResult<Vec<Ask>> {
+    pub fn asks_for_work_epoch(&self, lease: &RunContext) -> StoreResult<Vec<Ask>> {
         let conn = self.conn.lock().expect("store mutex poisoned");
-        let run = validate_run_lease(&conn, lease)?;
+        let run = validate_run_context(&conn, lease)?;
         query_asks(
             &conn,
             AskScope::OriginEpoch {
@@ -1680,14 +1634,14 @@ impl SqliteStore {
     /// observation.
     pub fn observe_invocation_provider(
         &self,
-        lease: &RunLease,
+        lease: &RunContext,
         invocation_id: &AgentInvocationId,
         account_id: Option<&crate::store::ProviderAccountId>,
         resume_token: Option<&str>,
     ) -> StoreResult<AgentInvocation> {
         let mut conn = self.conn.lock().expect("store mutex poisoned");
         let tx = conn.transaction_with_behavior(TransactionBehavior::Immediate)?;
-        let run = validate_run_lease(&tx, lease)?;
+        let run = validate_run_context(&tx, lease)?;
         if !matches!(run.state, RunState::Reserved | RunState::Active) {
             return Err(StoreError::InvalidData(format!(
                 "Run {} cannot observe a provider while {:?}",
@@ -1751,13 +1705,13 @@ impl SqliteStore {
 
     pub fn interrupt(
         &self,
-        caller: Option<&RunLease>,
+        caller: Option<&RunContext>,
         work: &WorkRef,
         if_run: &RunId,
     ) -> StoreResult<InterruptReceipt> {
         let mut conn = self.conn.lock().expect("store mutex poisoned");
         let tx = conn.transaction_with_behavior(TransactionBehavior::Immediate)?;
-        validate_control_caller(&tx, caller, work)?;
+        validate_actor(&tx, caller)?;
         let run = current_run_for_work_in(&tx, work)?.ok_or(StoreError::NotFound)?;
         if &run.id != if_run {
             return Err(StoreError::InvalidAuthority(format!(
@@ -1807,10 +1761,10 @@ impl SqliteStore {
         Ok(receipt)
     }
 
-    pub fn done(&self, lease: &RunLease, basis: &Basis) -> StoreResult<DoneProposal> {
+    pub fn done(&self, lease: &RunContext, basis: &Basis) -> StoreResult<DoneProposal> {
         let mut conn = self.conn.lock().expect("store mutex poisoned");
         let tx = conn.transaction_with_behavior(TransactionBehavior::Immediate)?;
-        let run = validate_run_lease(&tx, lease)?;
+        let run = validate_run_context(&tx, lease)?;
         let epoch = current_epoch_in(&tx, &run.work)?;
         validate_basis(&epoch.current_basis, basis)?;
         let applied = applied_basis_in(&tx, &epoch.id)?.ok_or_else(|| {
@@ -1955,7 +1909,7 @@ impl SqliteStore {
 
     pub fn steer(
         &self,
-        caller: Option<&RunLease>,
+        caller: Option<&RunContext>,
         work: &WorkRef,
         text: &str,
         if_basis: Option<&Basis>,
@@ -1972,7 +1926,7 @@ impl SqliteStore {
         if let Some(expected) = if_basis {
             validate_basis(&epoch.current_basis, expected)?;
         }
-        validate_control_caller(&tx, caller, work)?;
+        validate_actor(&tx, caller)?;
         let author = caller.map_or(Author::User, |lease| Author::Run(lease.run_id.clone()));
         let receipt = Self::append_steer_in(&tx, work, &author, text)?;
         tx.commit()?;
@@ -2051,7 +2005,7 @@ impl SqliteStore {
             ));
         }
         let epoch = current_epoch_in(tx, work)?;
-        validate_author(tx, work, author)?;
+        validate_author(tx, author)?;
         let revision = epoch.current_basis.revision + 1;
         let steer = Steer {
             id: SteerId::new(),
@@ -2667,7 +2621,7 @@ pub(super) fn reserve_run_in(
     tx: &Transaction<'_>,
     work: &WorkRef,
     trigger: &RunTrigger,
-) -> StoreResult<(Run, RunLease)> {
+) -> StoreResult<(Run, RunContext)> {
     let epoch = current_epoch_in(tx, work)?;
     let home_id = reserving_home_in(tx, work)?;
     if let Some(run) = run_for_epoch_in(tx, &epoch.id)? {
@@ -2678,7 +2632,6 @@ pub(super) fn reserve_run_in(
         });
     }
     resolve_wait_for_trigger(tx, &epoch, trigger)?;
-    let token = RunLeaseToken::new();
     let runtime_generation = runtime_generation_in(tx, &home_id)?;
     validate_upgrade_reservation(tx, &home_id, runtime_generation)?;
     let run = Run {
@@ -2704,9 +2657,8 @@ pub(super) fn reserve_run_in(
         tx.execute(
             "INSERT INTO runs (
                 id, epoch_id, home_id, runtime_generation, state, trigger_json, retry_of,
-                lease_hash, lease_generation, source_kind, source_id, created_at, ended_at,
-                stop_reason
-             ) VALUES (?1, ?2, ?3, ?4, 'reserved', ?5, ?6, ?7, NULL, ?8, ?9, ?10, NULL, NULL)",
+                source_kind, source_id, created_at, ended_at, stop_reason
+             ) VALUES (?1, ?2, ?3, ?4, 'reserved', ?5, ?6, ?7, ?8, ?9, NULL, NULL)",
             params![
                 run.id.as_str(),
                 run.epoch_id.as_str(),
@@ -2714,7 +2666,6 @@ pub(super) fn reserve_run_in(
                 runtime_generation,
                 serde_json::to_string(trigger).expect("Run trigger must serialize"),
                 run.retry_of.as_ref().map(RunId::as_str),
-                token.hash(),
                 work.kind(),
                 work.id(),
                 run.created_at.unix_timestamp(),
@@ -2723,24 +2674,23 @@ pub(super) fn reserve_run_in(
     } else {
         tx.execute(
             "INSERT INTO runs (
-                id, epoch_id, home_id, state, trigger_json, retry_of, lease_hash,
-                lease_generation, source_kind, source_id, created_at, ended_at, stop_reason
-             ) VALUES (?1, ?2, ?3, 'reserved', ?4, ?5, ?6, NULL, ?7, ?8, ?9, NULL, NULL)",
+                id, epoch_id, home_id, state, trigger_json, retry_of,
+                source_kind, source_id, created_at, ended_at, stop_reason
+             ) VALUES (?1, ?2, ?3, 'reserved', ?4, ?5, ?6, ?7, ?8, NULL, NULL)",
             params![
                 run.id.as_str(),
                 run.epoch_id.as_str(),
                 run.home_id.as_str(),
                 serde_json::to_string(trigger).expect("Run trigger must serialize"),
                 run.retry_of.as_ref().map(RunId::as_str),
-                token.hash(),
                 work.kind(),
                 work.id(),
                 run.created_at.unix_timestamp(),
             ],
         )?;
     }
-    let lease = RunLease::new(run.id.clone(), work.clone(), epoch.current_basis, token);
-    Ok((run, lease))
+    let context = RunContext::new(run.id.clone(), work.clone(), epoch.current_basis);
+    Ok((run, context))
 }
 
 fn inherit_placement(
@@ -2801,7 +2751,7 @@ fn resolve_wait_for_trigger(
     Ok(())
 }
 
-pub(crate) fn validate_run_lease(conn: &Connection, lease: &RunLease) -> StoreResult<Run> {
+pub(crate) fn validate_run_context(conn: &Connection, lease: &RunContext) -> StoreResult<Run> {
     let run = run_by_id_in(conn, &lease.run_id)?;
     if run.work != lease.work || !matches!(run.state, RunState::Reserved | RunState::Active) {
         return Err(StoreError::InvalidAuthority(format!(
@@ -2809,21 +2759,10 @@ pub(crate) fn validate_run_lease(conn: &Connection, lease: &RunLease) -> StoreRe
             lease.run_id
         )));
     }
-    let stored_hash: String = conn.query_row(
-        "SELECT lease_hash FROM runs WHERE id=?1",
-        [lease.run_id.as_str()],
-        |row| row.get(0),
-    )?;
-    if stored_hash != lease.token_hash() {
-        return Err(StoreError::InvalidAuthority(format!(
-            "Run {} lease token does not match",
-            lease.run_id
-        )));
-    }
     Ok(run)
 }
 
-pub(crate) fn validate_stop_lease(conn: &Connection, lease: &RunLease) -> StoreResult<Run> {
+pub(crate) fn validate_stop_context(conn: &Connection, lease: &RunContext) -> StoreResult<Run> {
     let run = run_by_id_in(conn, &lease.run_id)?;
     if run.work != lease.work
         || !matches!(
@@ -2833,17 +2772,6 @@ pub(crate) fn validate_stop_lease(conn: &Connection, lease: &RunLease) -> StoreR
     {
         return Err(StoreError::InvalidAuthority(format!(
             "Run {} no longer owns cleanup authority",
-            lease.run_id
-        )));
-    }
-    let stored_hash: String = conn.query_row(
-        "SELECT lease_hash FROM runs WHERE id=?1",
-        [lease.run_id.as_str()],
-        |row| row.get(0),
-    )?;
-    if stored_hash != lease.token_hash() {
-        return Err(StoreError::InvalidAuthority(format!(
-            "Run {} lease token does not match",
             lease.run_id
         )));
     }
@@ -3889,29 +3817,6 @@ fn map_ask_row(
     })
 }
 
-fn validate_target_caller(
-    conn: &Connection,
-    caller: Option<&RunLease>,
-    target: &AskTarget,
-) -> StoreResult<()> {
-    match (target, caller) {
-        (AskTarget::User, None) => Ok(()),
-        (AskTarget::Parent(parent), Some(lease)) => {
-            let run = validate_run_lease(conn, lease)?;
-            if &run.work == parent {
-                Ok(())
-            } else {
-                Err(StoreError::InvalidAuthority(
-                    "Run does not own this Ask target".to_string(),
-                ))
-            }
-        }
-        _ => Err(StoreError::InvalidAuthority(
-            "caller does not own this Ask target".to_string(),
-        )),
-    }
-}
-
 fn ask_epoch_is_open_in(conn: &Connection, ask_id: &AskId) -> StoreResult<bool> {
     conn.query_row(
         "SELECT EXISTS(
@@ -3986,17 +3891,17 @@ fn query_asks(conn: &Connection, scope: AskScope<'_>) -> StoreResult<Vec<Ask>> {
 
 fn validate_ask_origin(
     conn: &Connection,
-    lease: &RunLease,
+    lease: &RunContext,
     origin: &AskOrigin,
 ) -> StoreResult<Run> {
-    let run = validate_run_lease(conn, lease)?;
+    let run = validate_run_context(conn, lease)?;
     if origin.work != run.work
         || origin.run_id != run.id
         || origin.home_id != run.home_id
         || run.cwd.as_ref() != Some(&origin.cwd)
     {
         return Err(StoreError::InvalidAuthority(
-            "Ask origin does not match the active Run lease".to_string(),
+            "Ask origin does not match the active Run context".to_string(),
         ));
     }
     match (&origin.turn_id, &origin.invocation_id) {
@@ -4459,48 +4364,11 @@ fn cancel_pending_asks_for_epoch(
     Ok(())
 }
 
-pub(super) fn validate_control_caller(
-    conn: &Connection,
-    caller: Option<&RunLease>,
-    target: &WorkRef,
-) -> StoreResult<()> {
-    let Some(lease) = caller else {
+pub(super) fn validate_actor(conn: &Connection, actor: Option<&RunContext>) -> StoreResult<()> {
+    let Some(actor) = actor else {
         return Ok(());
     };
-    let run = validate_run_lease(conn, lease)?;
-    if parent_work(conn, target)?.as_ref() == Some(&run.work) {
-        let parent_epoch = current_epoch_in(conn, &run.work)?;
-        let selected = conn
-            .query_row(
-                "SELECT t.epoch_id, t.basis_rev
-                 FROM agent_turns t
-                 JOIN agent_invocations i ON i.id=t.invocation_id
-                 WHERE i.supervising_run_id=?1
-                 ORDER BY (t.status='running') DESC, t.started_at DESC, t.rowid DESC
-                 LIMIT 1",
-                [run.id.as_str()],
-                |row| Ok((row.get::<_, String>(0)?, row.get::<_, i64>(1)?)),
-            )
-            .optional()?
-            .map(|(epoch_id, revision)| {
-                Ok::<Basis, StoreError>(Basis {
-                    epoch_id: EpochId::parse(&epoch_id).map_err(invalid_durable)?,
-                    revision: revision as u64,
-                })
-            })
-            .transpose()?
-            .ok_or_else(|| {
-                StoreError::InvalidAuthority(format!(
-                    "Run {} has no durable Turn Basis for child control",
-                    run.id
-                ))
-            })?;
-        validate_basis(&parent_epoch.current_basis, &selected)
-    } else {
-        Err(StoreError::InvalidAuthority(
-            "Run may control only immediate child Work".to_string(),
-        ))
-    }
+    validate_run_context(conn, actor).map(|_| ())
 }
 
 pub(crate) fn work_status_in(conn: &Connection, work: &WorkRef) -> StoreResult<WorkStatus> {
@@ -4783,12 +4651,12 @@ pub(crate) fn create_task_spine(tx: &Transaction<'_>, task: &Task) -> StoreResul
     Ok(())
 }
 
-pub(crate) fn end_run_for_lease(
+pub(crate) fn end_run_for_context(
     conn: &Connection,
-    lease: &RunLease,
+    lease: &RunContext,
     outcome: BoundaryState,
 ) -> StoreResult<()> {
-    let run = validate_stop_lease(conn, lease)?;
+    let run = validate_stop_context(conn, lease)?;
     end_run_in(conn, &run, outcome)
 }
 
@@ -4951,54 +4819,24 @@ pub(crate) fn validate_completion_readiness_in(conn: &Connection, run: &Run) -> 
     Ok(())
 }
 
-fn validate_author(tx: &Transaction<'_>, target: &WorkRef, author: &Author) -> StoreResult<()> {
+fn validate_author(tx: &Transaction<'_>, author: &Author) -> StoreResult<()> {
     let Author::Run(run_id) = author else {
         return Ok(());
     };
-    let source = tx
-        .query_row(
-            "SELECT e.wave_id, e.project_id, e.task_id
-             FROM runs r JOIN epochs e ON e.id=r.epoch_id
-             WHERE r.id=?1 AND r.state IN ('reserved', 'active')",
-            [run_id.as_str()],
-            |row| {
-                Ok((
-                    row.get::<_, Option<String>>(0)?,
-                    row.get::<_, Option<String>>(1)?,
-                    row.get::<_, Option<String>>(2)?,
-                ))
-            },
-        )
-        .optional()?
-        .ok_or_else(|| {
-            StoreError::InvalidAuthority("Run no longer holds execution authority".to_string())
-        })?;
-    let allowed = match target {
-        WorkRef::Project(project_id) => {
-            let parent: String = tx.query_row(
-                "SELECT wave_id FROM projects WHERE id=?1",
-                [project_id.as_str()],
-                |row| row.get(0),
-            )?;
-            source.0.as_deref() == Some(parent.as_str())
-        }
-        WorkRef::Task(task_id) => {
-            let parent: String = tx.query_row(
-                "SELECT project_id FROM tasks WHERE id=?1",
-                [task_id.as_str()],
-                |row| row.get(0),
-            )?;
-            source.1.as_deref() == Some(parent.as_str())
-        }
-        WorkRef::Wave(_) => false,
-    };
-    if allowed {
-        Ok(())
-    } else {
-        Err(StoreError::InvalidAuthority(format!(
-            "Run {run_id} may steer only immediate child Work"
-        )))
+    let present = tx.query_row(
+        "SELECT EXISTS(
+            SELECT 1 FROM runs
+            WHERE id=?1 AND state IN ('reserved', 'active')
+         )",
+        [run_id.as_str()],
+        |row| row.get::<_, bool>(0),
+    )?;
+    if present {
+        return Ok(());
     }
+    Err(StoreError::InvalidAuthority(
+        "Run no longer holds execution authority".to_string(),
+    ))
 }
 
 pub(crate) fn work_for_child_in(conn: &Connection, target: &ChildRef) -> StoreResult<WorkRef> {
@@ -5488,7 +5326,7 @@ mod durable_store_tests {
     fn start_invocation(
         store: &SqliteStore,
         work: &WorkRef,
-    ) -> (crate::durable::RunLease, crate::durable::AgentInvocation) {
+    ) -> (crate::durable::RunContext, crate::durable::AgentInvocation) {
         let (_, lease) = store
             .reserve_run(work, &RunTrigger::User)
             .expect("reserve a Run");
@@ -5607,7 +5445,7 @@ mod durable_store_tests {
         store: &SqliteStore,
         work: &WorkRef,
     ) -> (
-        crate::durable::RunLease,
+        crate::durable::RunContext,
         crate::durable::AgentInvocation,
         crate::durable::Turn,
     ) {
@@ -5871,13 +5709,13 @@ mod durable_store_tests {
             .interrupt(None, &work, &lease.run_id)
             .expect("mark the Run for interruption");
 
-        assert!(store.validate_run_lease(&lease).is_err());
+        assert!(store.validate_run_context(&lease).is_err());
         assert_eq!(
             store.run_control(&lease, None).unwrap(),
             Some(RunControl::Interrupt)
         );
         let conn = rusqlite::Connection::open(dir.path().join("loopflow.db")).unwrap();
-        super::end_run_for_lease(&conn, &lease, BoundaryState::Interrupted)
+        super::end_run_for_context(&conn, &lease, BoundaryState::Interrupted)
             .expect("the stopped runner can finish cleanup");
         assert_eq!(
             store.run_by_id(&lease.run_id).unwrap().state,

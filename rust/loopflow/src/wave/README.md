@@ -22,11 +22,13 @@ Project and Task observations. The resident owns the pass
 scheduler and provider process. It reads the listener's inbox and returns
 ordered deltas; it never writes the journal directly.
 
-Repository mutations belong to Tasks in their own sibling worktrees.
-The Wave coordinates Projects and Tasks from the canonical checkout. Its UUID
-is stable identity; canonical checkout plus normalized name is its mutable
-locator. Two repositories may each own a Wave named `product` without sharing
-state.
+The listener keeps the canonical checkout as its journal and control plane.
+The resident runs from the long-lived sibling `<repo>.wave-<name>` worktree.
+Inline `GOAL.md` and `MEMORY.md` curation commits there and arms a normal
+CI-gated pull request; every other repository mutation still belongs to a Task
+in its own sibling worktree. The Wave UUID is stable identity; canonical
+checkout plus normalized name is its mutable locator. Two repositories may
+each own a Wave named `product` without sharing state.
 
 ## Persistence and discovery
 
@@ -35,6 +37,7 @@ The Wave's current canonical repository holds its durable files:
 ```text
 .lf/journal/waves/<name>/journal.jsonl
 wave/<name>/MEMORY.md
+wave/<name>/metrics/*.md
 wave/<name>/.wave-endpoint
 wave/<name>/.wave-resident-token
 ```
@@ -42,6 +45,11 @@ wave/<name>/.wave-resident-token
 The journal rebuilds the thread, playhead, and loop state after restart. The
 endpoint and resident token exist only while the listener owns that boot and
 are removed on shutdown.
+
+Metric Markdown owns reviewed meaning and one stable Project owner. Registered
+instruments push typed observations into the local store; `lf status`,
+`lf roadmap`, Wave/Project turns, and Apple clients consume one Rust-derived
+portfolio. No read executes an instrument query, and no metric completes a KR.
 
 Expanded Wave plans stay pinned across restarts while their definitions remain
 unchanged. Before opening a body, the listener compares every journaled stack
@@ -80,7 +88,9 @@ Relocation preserves the UUID, PM projection, Work and Run history, Home
 placement, authored files, and journal. It moves a complete Wave chord when the
 repository changes, carries nested descendants through a rename, requires
 compatible configured PM Teams, and refuses live Work or divergent target
-files. Retry completes verified source cleanup after a crash at the commit
+files. A dirty, unpublished, or open-PR resident worktree also blocks the move;
+after merge, relocation fast-forwards canonical main before copying the authored
+Wave state. Retry completes verified source cleanup after a crash at the commit
 boundary.
 
 ## Thread

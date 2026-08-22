@@ -2,18 +2,18 @@
 
 use time::OffsetDateTime;
 
-use crate::durable::RunId;
-use crate::task::{CiIncident, TaskPrId};
+use crate::pr_landing::PrLandingId;
+use crate::task::CiIncident;
 
 use super::{run_sqlite, Store, StoreResult};
 
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub(crate) struct CiIncidentReportRow {
     pub incident: CiIncident,
-    pub wave: String,
-    pub task: String,
-    pub task_started_at: OffsetDateTime,
-    pub task_status: String,
+    pub wave: Option<String>,
+    pub task: Option<String>,
+    pub task_started_at: Option<OffsetDateTime>,
+    pub task_status: Option<String>,
     pub human_assisted: bool,
 }
 
@@ -27,17 +27,18 @@ impl Store {
         .await
     }
 
-    /// Claim one unsettled incident for an exact active Run and stamp response.
+    /// Claim one unsettled incident for the current landing generation.
     pub async fn claim_ci_incident(
         &self,
         identity: &str,
-        run_id: &RunId,
+        landing_id: &PrLandingId,
+        generation: u64,
         responded_at: OffsetDateTime,
     ) -> StoreResult<bool> {
         let identity = identity.to_string();
-        let run_id = run_id.clone();
+        let landing_id = landing_id.clone();
         run_sqlite(&self.sqlite, move |store| {
-            store.claim_ci_incident(&identity, &run_id, responded_at)
+            store.claim_ci_incident(&identity, &landing_id, generation, responded_at)
         })
         .await
     }
@@ -48,51 +49,63 @@ impl Store {
     pub async fn mark_ci_incident_repaired(
         &self,
         identity: &str,
+        landing_id: &PrLandingId,
+        generation: u64,
         repaired_head_sha: &str,
         updated_at: OffsetDateTime,
     ) -> StoreResult<bool> {
         let identity = identity.to_string();
+        let landing_id = landing_id.clone();
         let repaired_head_sha = repaired_head_sha.to_string();
         run_sqlite(&self.sqlite, move |store| {
-            store.mark_ci_incident_repaired(&identity, &repaired_head_sha, updated_at)
+            store.mark_ci_incident_repaired(
+                &identity,
+                &landing_id,
+                generation,
+                &repaired_head_sha,
+                updated_at,
+            )
         })
         .await
     }
 
     pub async fn mark_ci_incidents_green(
         &self,
-        pr_id: &TaskPrId,
+        landing_id: &PrLandingId,
+        generation: u64,
         green_at: OffsetDateTime,
     ) -> StoreResult<usize> {
-        let pr_id = pr_id.clone();
+        let landing_id = landing_id.clone();
         run_sqlite(&self.sqlite, move |store| {
-            store.mark_ci_incidents_green(&pr_id, green_at)
+            store.mark_ci_incidents_green(&landing_id, generation, green_at)
         })
         .await
     }
 
     pub async fn mark_ci_incidents_merged(
         &self,
-        pr_id: &TaskPrId,
+        landing_id: &PrLandingId,
+        generation: u64,
         merged_at: OffsetDateTime,
     ) -> StoreResult<usize> {
-        let pr_id = pr_id.clone();
+        let landing_id = landing_id.clone();
         run_sqlite(&self.sqlite, move |store| {
-            store.mark_ci_incidents_merged(&pr_id, merged_at)
+            store.mark_ci_incidents_merged(&landing_id, generation, merged_at)
         })
         .await
     }
 
     pub async fn mark_ci_incidents_blocked(
         &self,
-        pr_id: &TaskPrId,
+        landing_id: &PrLandingId,
+        generation: u64,
         blocked_at: OffsetDateTime,
         reason: &str,
     ) -> StoreResult<usize> {
-        let pr_id = pr_id.clone();
+        let landing_id = landing_id.clone();
         let reason = reason.to_string();
         run_sqlite(&self.sqlite, move |store| {
-            store.mark_ci_incidents_blocked(&pr_id, blocked_at, &reason)
+            store.mark_ci_incidents_blocked(&landing_id, generation, blocked_at, &reason)
         })
         .await
     }

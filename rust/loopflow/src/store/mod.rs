@@ -14,6 +14,8 @@ use crate::wave::{Wave, WaveLocator};
 mod children;
 pub(crate) mod ci_incidents;
 mod durable;
+mod metrics;
+mod pr_landings;
 pub(crate) use durable::{AskCommentWrite, TaskWriterState};
 pub mod migrations;
 pub mod provider_deliveries;
@@ -155,8 +157,6 @@ pub enum StoreError {
         upgrade_id: String,
         runtime_generation: Option<u64>,
     },
-    #[error("{target} generation {generation} no longer holds its write lease")]
-    LeaseRevoked { target: String, generation: u32 },
     #[error("stale Basis: expected {expected}, current {current}")]
     StaleBasis { expected: String, current: String },
     #[error("invalid control authority: {0}")]
@@ -194,7 +194,8 @@ pub const CONTROL_HOME_ENV: &str = "LF_CONTROL_HOME";
 pub const CONTROL_DB_PATH_ENV: &str = "LF_CONTROL_DB_PATH";
 
 fn machine_home_dir() -> PathBuf {
-    dirs::home_dir().unwrap_or_else(|| PathBuf::from("."))
+    crate::machine_install::account_home()
+        .expect("resolve OS account home directory for the production store guard")
 }
 
 pub(crate) fn production_database_path() -> PathBuf {
@@ -256,6 +257,11 @@ pub(crate) fn writer_invocation_is_authoritative(
 }
 
 fn default_lf_home_dir() -> PathBuf {
+    if let Ok(Some(selection)) = crate::machine_install::selection_for_current_executable() {
+        if let Some(parent) = selection.store.parent() {
+            return parent.to_path_buf();
+        }
+    }
     default_lf_home_dir_for(
         &machine_home_dir(),
         crate::build_info::provenance(),
@@ -290,6 +296,16 @@ pub fn default_db_path() -> PathBuf {
 }
 
 pub fn database_path_from_env() -> Result<PathBuf, std::io::Error> {
+    if let Some(selection) = crate::machine_install::selection_for_current_executable()
+        .map_err(|error| std::io::Error::other(error.to_string()))?
+    {
+        guard_development_database(
+            &selection.store,
+            crate::build_info::provenance(),
+            &machine_home_dir(),
+        )?;
+        return Ok(selection.store);
+    }
     resolve_database_path(
         select_store_env_value(
             crate::build_info::provenance(),
@@ -306,6 +322,11 @@ pub fn database_path_from_env() -> Result<PathBuf, std::io::Error> {
 /// legacy body carries in `LF_CONTROL_HOME`. Only `LF_HOME` (or the built-in
 /// default) is honored here — the control-plane selection is deliberately not.
 pub(crate) fn current_home_lf_home_dir() -> PathBuf {
+    if let Ok(Some(selection)) = crate::machine_install::selection_for_current_executable() {
+        if let Some(parent) = selection.store.parent() {
+            return parent.to_path_buf();
+        }
+    }
     std::env::var_os("LF_HOME")
         .filter(|value| !value.is_empty())
         .map(PathBuf::from)
@@ -317,6 +338,16 @@ pub(crate) fn current_home_lf_home_dir() -> PathBuf {
 /// The companion to [`current_home_lf_home_dir`]: a relaunch resolves the
 /// current store, never the launching body's pinned control database.
 pub(crate) fn current_home_database_path() -> Result<PathBuf, std::io::Error> {
+    if let Some(selection) = crate::machine_install::selection_for_current_executable()
+        .map_err(|error| std::io::Error::other(error.to_string()))?
+    {
+        guard_development_database(
+            &selection.store,
+            crate::build_info::provenance(),
+            &machine_home_dir(),
+        )?;
+        return Ok(selection.store);
+    }
     resolve_database_path(std::env::var_os("LF_DB_PATH"), current_home_lf_home_dir())
 }
 
@@ -438,7 +469,7 @@ fn same_database_file(left: &Path, right: &Path) -> Result<bool, std::io::Error>
     Ok(false)
 }
 
-fn canonicalize_with_missing_tail(path: &Path) -> Result<PathBuf, std::io::Error> {
+pub(crate) fn canonicalize_with_missing_tail(path: &Path) -> Result<PathBuf, std::io::Error> {
     let absolute = if path.is_absolute() {
         path.to_path_buf()
     } else {
@@ -496,6 +527,11 @@ impl Store {
     #[cfg(test)]
     pub(crate) fn from_sqlite_for_test(sqlite: sqlite::SqliteStore) -> Self {
         Self { sqlite }
+    }
+
+    #[cfg(test)]
+    pub(crate) fn apply_migration_for_test(&self, name: &str) -> StoreResult<()> {
+        self.sqlite.apply_migration_for_test(name)
     }
 
     pub async fn put_pm_snapshot(&self, snapshot: PmSnapshotRow) -> StoreResult<()> {
@@ -1164,9 +1200,9 @@ mod tests {
     use crate::build_info::{BuildProvenance, MigrationAuthority};
     use crate::child::ChildRef;
     use crate::durable::{
-        AdvanceReceipt, AgentInvocation, AuthenticatedRequest, Author, Basis, BoundaryState,
-        Containment, ContainmentObservation, ControlCtx, EpochState, InvocationRoute, RunAdvance,
-        RunLease, RunTrigger, StopCause, Turn, WorkRef, WorkStatus,
+        AdvanceReceipt, AgentInvocation, Author, Basis, BoundaryState, Containment,
+        ContainmentObservation, EpochState, InvocationRoute, RunAdvance, RunContext, RunTrigger,
+        StopCause, Turn, WorkRef, WorkStatus,
     };
     use crate::id::WaveId;
     use crate::planning::{LinearIssueId, LinearProjectId, ProjectPlan, TaskPlan};
@@ -1428,7 +1464,7 @@ mod tests {
         work: &WorkRef,
         basis: Basis,
         containment: &str,
-    ) -> (RunLease, AgentInvocation, Turn) {
+    ) -> (RunContext, AgentInvocation, Turn) {
         let (_run, lease) = store
             .reserve_run(
                 work,
@@ -1920,7 +1956,7 @@ mod tests {
     }
 
     #[tokio::test]
-    async fn only_the_active_parent_run_can_steer_child_work() {
+    async fn active_run_can_steer_any_work_and_stale_run_is_fenced() {
         let directory = tempfile::tempdir().unwrap();
         let store = open_store(&StorageConfig::sqlite(directory.path().join("registry.db")))
             .await
@@ -1944,43 +1980,15 @@ mod tests {
             .activate_project_process(&project, &child_lease)
             .await
             .unwrap();
-        let parent_lease = store
-            .resolve_run_lease(child_lease.run_token.clone())
-            .await
-            .unwrap();
+        let parent_lease = store.run_context(&child_lease.run_id).await.unwrap();
         let task_work = store
             .work_for_child(&ChildRef::Task(task.id.clone()))
             .await
             .unwrap();
 
-        let error = store
-            .steer(
-                &ControlCtx::Run(&parent_lease),
-                &task_work,
-                "unproven parent Turn",
-                None,
-            )
-            .await
-            .expect_err("child control requires a durable parent Turn Basis");
-        assert!(matches!(error, super::StoreError::InvalidAuthority(_)));
-        let invocation = store
-            .open_invocation_for_run(&parent_lease.run_id)
-            .await
-            .unwrap()
-            .unwrap();
-        store
-            .advance_run(
-                &parent_lease,
-                RunAdvance::TurnStarting {
-                    invocation_id: invocation.id,
-                },
-            )
-            .await
-            .unwrap();
-
         let receipt = store
             .steer(
-                &ControlCtx::Run(&parent_lease),
+                Some(&parent_lease),
                 &task_work,
                 "inspect the child result",
                 None,
@@ -2001,24 +2009,18 @@ mod tests {
             .await
             .unwrap();
         let error = store
-            .steer(
-                &ControlCtx::Run(&parent_lease),
-                &task_work,
-                "stale parent",
-                None,
-            )
+            .steer(Some(&parent_lease), &task_work, "stale parent", None)
             .await
             .expect_err("a stopped parent Run cannot steer");
         assert!(matches!(error, super::StoreError::InvalidAuthority(_)));
         assert!(matches!(
-            store.resolve_run_lease(child_lease.run_token.clone()).await,
+            store.run_context(&child_lease.run_id).await,
             Err(super::StoreError::InvalidAuthority(_))
         ));
-        assert!(crate::durable::RunLeaseToken::parse("run_not-a-capability").is_err());
     }
 
     #[tokio::test]
-    async fn newer_parent_steer_fences_stale_child_run_reservation() {
+    async fn active_run_reservation_ignores_parent_input() {
         let directory = tempfile::tempdir().unwrap();
         let store = open_store(&StorageConfig::sqlite(directory.path().join("registry.db")))
             .await
@@ -2103,17 +2105,15 @@ mod tests {
             .await
             .unwrap();
         let task_basis = store.current_epoch(&task_work).await.unwrap().current_basis;
-        let error = store
-            .reserve_child_run(
-                &project_lease,
-                &task_work,
-                RunTrigger::Input { basis: task_basis },
-            )
+        let (task_run, _task_context) = store
+            .reserve_run(&task_work, RunTrigger::Input { basis: task_basis })
             .await
-            .expect_err("revision N cannot launch after hold N+1");
+            .expect("Run reservation depends on target state, not caller ancestry");
 
-        assert!(matches!(error, super::StoreError::StaleBasis { .. }));
-        assert!(store.current_run(&task_work).await.unwrap().is_none());
+        assert_eq!(
+            store.current_run(&task_work).await.unwrap().unwrap().id,
+            task_run.id
+        );
         let seed = store.boundary_seed(&project_work).await.unwrap();
         assert_eq!(seed.basis, hold.steer.basis);
         assert_eq!(
@@ -2147,11 +2147,14 @@ mod tests {
             panic!("expected next Turn receipt")
         };
         assert_eq!(next_turn.basis, hold.steer.basis);
-        assert!(store.current_run(&task_work).await.unwrap().is_none());
+        assert_eq!(
+            store.current_run(&task_work).await.unwrap().unwrap().id,
+            task_run.id
+        );
     }
 
     #[tokio::test]
-    async fn newer_parent_steer_rolls_back_initial_child_creation_before_files_exist() {
+    async fn active_run_can_create_task_after_receiving_new_input() {
         let directory = tempfile::tempdir().unwrap();
         let database_path = directory.path().join("registry.db");
         let store = open_store(&StorageConfig::sqlite(database_path.clone()))
@@ -2186,20 +2189,15 @@ mod tests {
         task.worktree = directory.path().join("uncreated-child-worktree");
         let pr = make_task_pr(&task);
 
-        let error = store
+        let (child_run, _child_context) = store
             .create_task_run(
-                &ControlCtx::Run(&project_lease),
+                Some(&project_lease),
                 &task,
                 &pr,
                 "a sibling completed; begin file-writing work",
             )
             .await
-            .expect_err("revision N cannot create a child after hold N+1");
-
-        assert!(matches!(error, super::StoreError::StaleBasis { .. }));
-        assert!(store.get_task(&task.id).await.unwrap().is_none());
-        assert!(store.task_prs(&task.id).await.unwrap().is_empty());
-        assert!(!task.worktree.exists());
+            .expect("active Run identity supplies provenance, not ancestry permission");
         let durable_child_rows = |path: &std::path::Path| {
             rusqlite::Connection::open(path)
                 .unwrap()
@@ -2225,7 +2223,7 @@ mod tests {
                 )
                 .unwrap()
         };
-        assert_eq!(durable_child_rows(&database_path), (0, 0, 0, 0, 0));
+        assert_eq!(durable_child_rows(&database_path), (1, 1, 1, 1, 1));
         let seed = store.boundary_seed(&project_work).await.unwrap();
         assert_eq!(seed.basis, hold.steer.basis);
         assert_eq!(
@@ -2259,16 +2257,6 @@ mod tests {
             panic!("expected current Turn receipt")
         };
         assert_eq!(current_turn.basis, hold.steer.basis);
-
-        let (child_run, _child_lease) = store
-            .create_task_run(
-                &ControlCtx::Run(&project_lease),
-                &task,
-                &pr,
-                "create a different child under current direction",
-            )
-            .await
-            .expect("the current parent Turn can create its immediate child");
 
         let task_work = WorkRef::Task(task.id.clone());
         let child_seed = store.boundary_seed(&task_work).await.unwrap();
@@ -2385,7 +2373,7 @@ mod tests {
     }
 
     #[tokio::test]
-    async fn abandoned_task_recovery_requires_user_after_parent_freshness() {
+    async fn active_run_can_reopen_abandoned_task_with_run_provenance() {
         let directory = tempfile::tempdir().unwrap();
         let database_path = directory.path().join("registry.db");
         let store = open_store(&StorageConfig::sqlite(database_path.clone()))
@@ -2398,7 +2386,6 @@ mod tests {
         let mut task = make_task(&wave, &project);
         task.worktree = directory.path().join("preserved-task-worktree");
         let pr = make_task_pr(&task);
-        let request = AuthenticatedRequest::cli();
         store.create_task(&task, &pr).await.unwrap();
         let task_work = WorkRef::Task(task.id.clone());
         store
@@ -2483,16 +2470,6 @@ mod tests {
         recovered.phase_epoch += 1;
         recovered.updated_at = time::OffsetDateTime::now_utc();
 
-        let stale = store
-            .reopen_task(
-                &ControlCtx::Run(&project_lease),
-                &recovered,
-                None,
-                "a sibling completed; recover the Task",
-            )
-            .await
-            .expect_err("stale Project direction cannot reopen terminal Task Work");
-        assert!(matches!(stale, super::StoreError::StaleBasis { .. }));
         assert!(matches!(
             store.current_epoch(&task_work).await,
             Err(super::StoreError::NotFound)
@@ -2531,38 +2508,17 @@ mod tests {
             panic!("expected current Turn receipt")
         };
         assert_eq!(current_turn.basis, hold.steer.basis);
-        let dependency_only = store
+        store
             .reopen_task(
-                &ControlCtx::Run(&project_lease),
+                Some(&project_lease),
                 &recovered,
                 None,
                 "the dependency is complete",
             )
             .await
-            .expect_err("current Project direction is not User recovery authority");
-        assert!(matches!(
-            dependency_only,
-            super::StoreError::InvalidAuthority(_)
-        ));
-        assert!(dependency_only
-            .to_string()
-            .contains("explicit User recovery is required"));
-        assert!(matches!(
-            store.current_epoch(&task_work).await,
-            Err(super::StoreError::NotFound)
-        ));
+            .expect("active Run identity may reopen terminal Work");
         assert_eq!(store.task_prs(&task.id).await.unwrap(), historical_prs);
         assert!(!task.worktree.exists());
-
-        store
-            .reopen_task(
-                &ControlCtx::User(&request),
-                &recovered,
-                None,
-                "explicit User recovery",
-            )
-            .await
-            .expect("User direction opens exactly one successor Epoch");
 
         let successor = store.current_epoch(&task_work).await.unwrap();
         assert_eq!(successor.number, abandoned.number + 1);
@@ -2579,8 +2535,11 @@ mod tests {
         assert!(store.current_run(&task_work).await.unwrap().is_none());
         let successor_seed = store.boundary_seed(&task_work).await.unwrap();
         assert_eq!(successor_seed.steers.len(), 1);
-        assert_eq!(successor_seed.steers[0].author, Author::User);
-        assert_eq!(successor_seed.steers[0].text, "explicit User recovery");
+        assert_eq!(
+            successor_seed.steers[0].author,
+            Author::Run(project_lease.run_id.clone())
+        );
+        assert_eq!(successor_seed.steers[0].text, "the dependency is complete");
         let steers = SqliteStore::new(&database_path)
             .unwrap()
             .list_steers_since(0)
@@ -2590,7 +2549,7 @@ mod tests {
             .any(|steer| steer.text == "initial Task direction"));
         assert!(steers
             .iter()
-            .any(|steer| steer.text == "explicit User recovery"));
+            .any(|steer| steer.text == "the dependency is complete"));
         assert!(!task.worktree.exists());
     }
 
@@ -2714,7 +2673,7 @@ mod tests {
         let mut stale = task.clone();
 
         task.enter_loop().unwrap();
-        store.update_task_for_lease(&task, &lease).await.unwrap();
+        store.update_task_for_run(&task, &lease).await.unwrap();
         let iterating = store.get_task(&task.id).await.unwrap().unwrap();
         assert_eq!(
             (
@@ -2727,7 +2686,7 @@ mod tests {
 
         stale.phase_cursor = 9;
         stale.phase_iteration = 9;
-        store.update_task_for_lease(&stale, &lease).await.unwrap();
+        store.update_task_for_run(&stale, &lease).await.unwrap();
         let after_stale = store.get_task(&task.id).await.unwrap().unwrap();
         assert_eq!(
             (
@@ -2744,7 +2703,7 @@ mod tests {
             reason: "implementation complete".to_string(),
         })
         .unwrap();
-        store.update_task_for_lease(&task, &lease).await.unwrap();
+        store.update_task_for_run(&task, &lease).await.unwrap();
         let gating = store.get_task(&task.id).await.unwrap().unwrap();
         assert_eq!(
             gating.lifecycle_phase,

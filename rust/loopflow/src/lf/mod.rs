@@ -367,7 +367,7 @@ pub enum Commands {
         #[command(subcommand)]
         cmd: WorkCommand,
     },
-    /// Internal: run a Project or Task body holding the ambient Run lease
+    /// Internal: run a Project or Task body under the ambient Run context
     #[command(name = "__work", hide = true)]
     WorkRunner {
         #[arg(value_parser = ["project", "task"])]
@@ -928,7 +928,7 @@ pub enum WorkCommand {
         #[arg(long)]
         json: bool,
     },
-    /// Append authored direction through User or active parent Run authority
+    /// Append authored direction with User or active Run provenance
     Steer {
         #[arg(value_parser = ["wave", "project", "task"])]
         kind: String,
@@ -1239,6 +1239,13 @@ pub enum TaskCommand {
 
 #[derive(Subcommand, Debug)]
 pub enum InstallCommand {
+    /// Continue one interrupted machine install switch from its pinned candidate.
+    #[command(hide = true)]
+    RecoverSwitch {
+        /// The fixed machine switch receipt to continue.
+        #[arg(long)]
+        switch: String,
+    },
     /// Continue one interrupted Home upgrade from its staged candidate.
     #[command(hide = true)]
     Recover {
@@ -1262,12 +1269,41 @@ pub enum InstallCommand {
         #[arg(long)]
         json: bool,
     },
+    /// Validate this exact local candidate against one receipt-selected store.
+    #[command(hide = true)]
+    LocalPreflight {
+        #[arg(long)]
+        store: PathBuf,
+        #[arg(long)]
+        json: bool,
+    },
+    /// Advance the receipt-selected store with this exact candidate's registry.
+    #[command(hide = true)]
+    AdvanceSwitch {
+        #[arg(long)]
+        switch: String,
+    },
+    /// Relaunch enabled child Work through the receipt-selected candidate.
+    #[command(hide = true)]
+    ReconcileSwitch {
+        #[arg(long)]
+        switch: String,
+    },
     /// Promote this build to the global CLI: content-address it into ~/.lf/bin
     /// and atomically repoint the target symlink, under the exclusive promotion
     /// lock. Refuses — leaving every target unchanged — on incompatible or
     /// live-body evidence.
     #[command(hide = true)]
     Promote {
+        /// Promote this exact unpublished local lf into a disposable installed Home.
+        #[arg(long)]
+        from_build: Option<PathBuf>,
+        /// Candidate delegated to the receipt-pinned active coordinator.
+        #[arg(long, hide = true)]
+        coordinated_build: Option<PathBuf>,
+        /// Abandon an incompatible disposable Home and fork published data again.
+        #[arg(long, requires = "from_build")]
+        fresh: bool,
         /// The global CLI symlink to replace (e.g. ~/.local/bin/lf).
         #[arg(long)]
         cli_target: PathBuf,
@@ -1363,7 +1399,26 @@ pub enum PrCommand {
         #[arg(long = "body")]
         body: Option<String>,
     },
-    /// Land a PR hands-off: rebase, clear scratch, and arm auto-merge
+    /// Prepare a PR, request exact-head auto-merge, and return without watching.
+    Arm {
+        #[arg(long)]
+        strict: bool,
+        #[arg(long)]
+        local: bool,
+        #[arg(short = 'c', long)]
+        complete: bool,
+        #[arg(long = "next")]
+        next: Option<String>,
+        #[arg(short = 'w', long = "worktree")]
+        worktree: Option<String>,
+        #[arg(short = 'm', long = "message")]
+        message: Option<String>,
+        #[arg(long = "title")]
+        title: Option<String>,
+        #[arg(long = "body")]
+        body: Option<String>,
+    },
+    /// Arm and watch a PR through CI repair and authoritative merge.
     Land {
         #[arg(long)]
         strict: bool,
@@ -3244,6 +3299,48 @@ mod tests {
 
         assert!(Cli::try_parse_from(["lf", "rebase", "--continue", "--abort"]).is_err());
         assert!(Cli::try_parse_from(["lf", "rebase", "--plan", "--manual"]).is_err());
+    }
+
+    #[test]
+    fn install_promote_requires_a_local_build_for_fresh_forks() {
+        let cli = Cli::try_parse_from([
+            "lf",
+            "install",
+            "promote",
+            "--from-build",
+            "/tmp/lf",
+            "--fresh",
+            "--cli-target",
+            "/tmp/bin/lf",
+            "--daemon-source",
+            "/tmp/lfd",
+            "--daemon-target",
+            "/tmp/bin/lfd",
+        ])
+        .expect("parse local promotion");
+        assert!(matches!(
+            cli.command,
+            Some(Commands::Install {
+                cmd: InstallCommand::Promote {
+                    from_build: Some(_),
+                    fresh: true,
+                    ..
+                }
+            })
+        ));
+        assert!(Cli::try_parse_from([
+            "lf",
+            "install",
+            "promote",
+            "--fresh",
+            "--cli-target",
+            "/tmp/bin/lf",
+            "--daemon-source",
+            "/tmp/lfd",
+            "--daemon-target",
+            "/tmp/bin/lfd",
+        ])
+        .is_err());
     }
 
     #[test]

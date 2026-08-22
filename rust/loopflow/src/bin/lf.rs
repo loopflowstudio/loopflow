@@ -478,6 +478,23 @@ fn in_repo_runtime<T>(
     with_runtime(&repo_root, command, || run(&repo_root))
 }
 
+fn run_default_agent(cli: &Cli, command: &[String]) -> anyhow::Result<()> {
+    let repo_root = loopflow::lf::commands::util::find_repo_root()?;
+    let moved = loopflow::engine::worktrees::move_default_agent_to_worktree(&repo_root)?;
+    match moved {
+        Some(worktree) => {
+            eprintln!("moved to `{}`", worktree.path.display());
+            let _cwd = CwdGuard::enter(&worktree.path)?;
+            with_runtime(&worktree.path, command, || {
+                loopflow::lf::commands::run::run(Some("loopflow"), None, cli)
+            })
+        }
+        None => with_runtime(&repo_root, command, || {
+            loopflow::lf::commands::run::run(Some("loopflow"), None, cli)
+        }),
+    }
+}
+
 fn run_work_runner_entrypoint<T>(
     command: &[String],
     kind: &str,
@@ -643,19 +660,16 @@ fn prepare_work_binding(
                 .await
                 .ok_or_else(|| anyhow::anyhow!("no Loopflow registry on this machine"))?,
         );
-        let ambient = loopflow::ops::ambient_run_lease(&store)
+        let ambient = loopflow::ops::ambient_run_context(&store)
             .await
             .map_err(|error| anyhow::anyhow!(error.to_string()))?;
         let binding = loopflow::ops::resolve_work_binding(&store, repo, selector)
             .await
             .map_err(|error| anyhow::anyhow!(error.to_string()))?;
-        if let Some(lease) = ambient {
-            binding
-                .assert_ambient(&lease)
-                .map_err(|error| anyhow::anyhow!(error.to_string()))?;
-            return Ok((store, binding, true));
-        }
-        Ok((store, binding, false))
+        let reuses_ambient_run = ambient
+            .as_ref()
+            .is_some_and(|context| binding.matches_run(context));
+        Ok((store, binding, reuses_ambient_run))
     })
 }
 
@@ -1237,6 +1251,7 @@ fn piped_task_report() -> anyhow::Result<Option<String>> {
 }
 
 fn main() -> anyhow::Result<()> {
+    loopflow::machine_install::dispatch_entry_gate(&loopflow::machine_install::ArtifactRole::Cli)?;
     // Ensure Ctrl+C terminates lf and the child agent. Without this,
     // child.wait() retries on EINTR and hangs while the agent catches
     // SIGINT and keeps running. SIGTERM the agent first so it doesn't
@@ -1258,6 +1273,26 @@ fn main() -> anyhow::Result<()> {
     let args = reorder_args(normalize_ssh_args(std::env::args().collect()));
 
     let mut cli = Cli::parse_from(args.clone());
+    let bypasses_machine_startup_gate = matches!(
+        &cli.command,
+        Some(Commands::Install {
+            cmd: InstallCommand::RecoverSwitch { .. }
+                | InstallCommand::Recover { .. }
+                | InstallCommand::AdvanceSwitch { .. }
+                | InstallCommand::ReconcileSwitch { .. }
+                | InstallCommand::LocalPreflight { .. }
+                | InstallCommand::Promote { .. }
+        })
+    );
+    if !bypasses_machine_startup_gate {
+        let switch_id = std::env::var(loopflow::machine_install::INSTALL_SWITCH_ENV)
+            .ok()
+            .filter(|value| !value.is_empty());
+        loopflow::machine_install::authorize_current_for_switch(
+            &loopflow::machine_install::ArtifactRole::Cli,
+            switch_id.as_deref(),
+        )?;
+    }
     ctrlc::set_handler(|| {
         loopflow::engine::agent::run_interrupt_cleanups();
         loopflow::engine::agent::kill_child_if_running();
@@ -1335,13 +1370,28 @@ fn main() -> anyhow::Result<()> {
     // its own preflight.
     if let Some(Commands::Install { cmd }) = &cli.command {
         return match cmd {
+            InstallCommand::RecoverSwitch { switch } => {
+                loopflow::lf::commands::install::recover_switch(switch)
+            }
             InstallCommand::Recover {
                 upgrade,
                 parent_pid,
                 parent_started_at,
             } => loopflow::lf::commands::install::recover(upgrade, *parent_pid, *parent_started_at),
             InstallCommand::Preflight { json } => loopflow::lf::commands::install::preflight(*json),
+            InstallCommand::LocalPreflight { store, json } => {
+                loopflow::lf::commands::install::local_preflight(store, *json)
+            }
+            InstallCommand::AdvanceSwitch { switch } => {
+                loopflow::lf::commands::install::advance_switch(switch)
+            }
+            InstallCommand::ReconcileSwitch { switch } => {
+                loopflow::lf::commands::install::reconcile_switch(switch)
+            }
             InstallCommand::Promote {
+                from_build,
+                coordinated_build,
+                fresh,
                 cli_target,
                 daemon_source,
                 daemon_target,
@@ -1361,6 +1411,9 @@ fn main() -> anyhow::Result<()> {
                 },
                 *sync_skills,
                 *preview,
+                from_build.as_deref(),
+                coordinated_build.as_deref(),
+                *fresh,
             ),
             InstallCommand::Rollback {
                 cli_target,
@@ -1789,9 +1842,7 @@ fn main() -> anyhow::Result<()> {
                     Err(err) => Err(err),
                 }
             }
-            None => in_repo_runtime(&args, |_| {
-                loopflow::lf::commands::run::run(Some("loopflow"), None, &cli)
-            }),
+            None => run_default_agent(&cli, &args),
         }
     };
 
@@ -1841,6 +1892,18 @@ mod tests {
             created_at: now,
             updated_at: now,
         }
+    }
+
+    #[test]
+    fn only_bare_lf_selects_the_default_agent_surface() {
+        let bare = Cli::try_parse_from(["lf"]).unwrap();
+        assert!(bare.command.is_none());
+
+        let code = Cli::try_parse_from(["lf", "code"]).unwrap();
+        assert!(matches!(
+            code.command,
+            Some(Commands::External(parts)) if parts == ["code"]
+        ));
     }
 
     /// A healthy linkage says nothing: silence on the happy path keeps the status
@@ -1994,7 +2057,7 @@ mod tests {
             loopflow::journal::LF_TRACE_ID_ENV,
             loopflow::journal::LF_PROCESS_ID_ENV,
             loopflow::durable::RUN_CONTEXT_ENV,
-            loopflow::durable::RUN_LEASE_ENV,
+            loopflow::durable::RUN_ID_ENV,
             loopflow::durable::AGENT_INVOCATION_ENV,
             loopflow::engine::wave_context::WAVE_ID_ENV,
         ]

@@ -34,8 +34,8 @@ pub struct LandOptions {
 /// marked ready.
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 enum Finalize {
-    /// Arm GitHub auto-merge so the PR merges itself once checks pass. Used by
-    /// `land` — the walk-away path.
+    /// Arm GitHub auto-merge so the PR merges itself once checks pass. `arm`
+    /// returns here; `land` continues into the watched lifecycle.
     AutoMerge,
     /// Assign the PR to the current user and leave it for a required, manual
     /// merge click. Used by `submit` — nothing merges without that one click.
@@ -48,12 +48,11 @@ enum Integration {
     Completed,
 }
 
-/// Run every land skill: commit, rebase onto main, clear scratch, mark the PR
-/// ready, and finalize per `finalize`. `land` arms auto-merge; `submit` assigns
-/// the PR for a human to merge. Neither rotates the worktree — the wave home is
-/// permanent. Returns the resulting PR, or `None` for a local merge or direct
-/// Task completion over an already-merged PR, so callers can record it against
-/// the run.
+/// Prepare one PR: commit, rebase onto main, clear scratch, mark it ready, and
+/// finalize per `finalize`. `arm` requests auto-merge; `submit` assigns the PR
+/// for a human to merge. Neither rotates the worktree. Returns the resulting PR,
+/// or `None` for a local merge or direct Task completion over an already-merged
+/// PR.
 fn prepare_pr(
     repo: &Path,
     options: &LandOptions,
@@ -162,6 +161,15 @@ fn prepare_pr(
     // Refuse an already-empty Task before scratch cleanup can manufacture a
     // bookkeeping-only `.gitkeep` commit or any GitHub command observes it.
     crate::ops::task::require_task_pr_range_nonempty(&repo_root)?;
+    // A managed Task ships on one judgment: its `finally` review, declared with
+    // `lf pr land`. `submit` (assign for a human merge click) would be a second
+    // gate. Refuse it now — after the shared authority/range proofs, so a
+    // contaminated or empty range still reports that deeper problem first, but
+    // before the first push, any `gh pr` mutation, or PR-copy generation. Non-
+    // Task PRs are an explicit no-op and keep `submit` unchanged.
+    if matches!(finalize, Finalize::UserMerge) {
+        crate::ops::task::reject_managed_task_submit(&repo_root)?;
+    }
     let pr_exists = if options.local {
         false
     } else {
@@ -289,10 +297,8 @@ fn prepare_pr(
     Ok(pr)
 }
 
-/// Land a PR and walk away: commit, rebase, clear scratch, and arm auto-merge so
-/// GitHub merges it once checks pass. Task worktrees self-prune once their PR
-/// merges; permanent Wave homes are rejected before any mutation.
-pub fn land(
+/// Prepare a PR and request exact-head auto-merge, then return without watching.
+pub fn arm(
     repo: &Path,
     options: &LandOptions,
     progress: &impl Progress,
@@ -307,7 +313,7 @@ pub fn land(
 }
 
 /// Continue land after owned recovery already verified and pushed integration.
-pub(crate) fn finish_land_after_rebase(
+pub(crate) fn finish_arm_after_rebase(
     repo: &Path,
     options: &LandOptions,
     progress: &impl Progress,
@@ -324,7 +330,7 @@ pub(crate) fn finish_land_after_rebase(
 /// Prepare a PR to land without arming auto-merge: commit, rebase onto main,
 /// clear scratch, mark the PR ready, and assign it to the current user. Nothing
 /// merges until that user clicks merge on GitHub — that one click is the
-/// required gate. Like `land`, this never rotates the worktree.
+/// required gate. Like `arm`, this never rotates the worktree.
 pub fn submit(
     repo: &Path,
     options: &LandOptions,
@@ -593,9 +599,9 @@ fn resolve_repos(repo: &Path, worktree: Option<&str>) -> OpsResult<(PathBuf, Pat
 /// Clear `scratch/` down to `.gitkeep` and commit it.
 ///
 /// This step is what greens the `scratch-clear` required check, which is why
-/// that check is a *land-time precondition* and no Task repair turn can act on
-/// it — see [`crate::task::CiCheck::land_time_precondition`], which classifies it
-/// so a ci-fix wake never arms against work only this function can do.
+/// that check is a *land-time precondition* and no repair turn can act on it —
+/// see [`crate::task::CiCheck::land_time_precondition`], which keeps the landing
+/// supervisor from launching `ci-fix` against work only this function can do.
 fn clear_scratch(repo: &Path, progress: &impl Progress) -> OpsResult<()> {
     let scratch = repo.join("scratch");
     let gitkeep = scratch.join(".gitkeep");

@@ -116,13 +116,14 @@ there is no separate CLI or server surface for it.
 
 ## Ship
 
-Three commitment levels, all headless — pick by how done the work is and who
+Four commitment levels, all headless — pick by how done the work is and who
 lands it:
 
 ```bash
 lf pr publish    # make work visible mid-stream; the agent's default verb
 lf pr submit     # done, a human clicks merge
-lf pr land       # done, loopflow lands it hands-off; -c completes the Task
+lf pr arm        # request exact-head auto-merge and return
+lf pr land       # watch, repair CI, and return only after merge
 ```
 
 `lf pr open` is the one presenting verb — it opens a browser. Agents reach for
@@ -134,8 +135,8 @@ Every read the conducting surfaces offer is `--json`:
 
 ```bash
 lf ls --json                # every durable Wave and its Home/runtime evidence
-lf status <wave> --json     # live Project → Task hierarchy
-lf roadmap --json           # every open Task across every wave
+lf status <wave> --json     # hierarchy plus one Rust-derived metric_portfolio
+lf roadmap --json           # every Wave repeats that required portfolio envelope
 lf activity --task INF-123 --json
 lf runs --project parser --json
 lf runs --task INF-123 --json

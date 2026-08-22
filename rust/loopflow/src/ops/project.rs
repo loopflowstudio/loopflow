@@ -4,8 +4,8 @@ use std::time::{Duration, Instant};
 
 use crate::child::ChildRef;
 use crate::durable::{
-    AgentInvocation, AuthenticatedRequest, Author, Containment, ContainmentObservation, ControlCtx,
-    RunState, RunTrigger, WorkRef, WorkStatus,
+    AgentInvocation, Author, Containment, ContainmentObservation, RunState, RunTrigger, WorkRef,
+    WorkStatus,
 };
 use crate::engine::config::{load_config_or_default, parse_agent};
 use crate::engine::git::{current_branch, get_default_branch, is_clean, worktree_root};
@@ -360,6 +360,24 @@ pub(crate) async fn launch_project_process_with_trigger(
     project: &mut Project,
     trigger: RunTrigger,
 ) -> OpsResult<()> {
+    launch_project_process_with_trigger_for_switch(store, project, trigger, None).await
+}
+
+pub(crate) async fn launch_project_process_for_install_switch(
+    store: &SharedStore,
+    project: &mut Project,
+    trigger: RunTrigger,
+    switch_id: &str,
+) -> OpsResult<()> {
+    launch_project_process_with_trigger_for_switch(store, project, trigger, Some(switch_id)).await
+}
+
+async fn launch_project_process_with_trigger_for_switch(
+    store: &SharedStore,
+    project: &mut Project,
+    trigger: RunTrigger,
+    switch_id: Option<&str>,
+) -> OpsResult<()> {
     // Re-check at the launch boundary: commands and observations can wake a
     // stopped Project long after its initial reservation.
     let wave = owning_wave(store, project).await?;
@@ -376,9 +394,15 @@ pub(crate) async fn launch_project_process_with_trigger(
     {
         return Ok(());
     }
-    let (run, lease) = store
-        .reserve_run(&work, trigger)
-        .await
+    let reservation = match switch_id {
+        Some(switch_id) => {
+            store
+                .reserve_run_for_install_switch(&work, trigger, switch_id)
+                .await
+        }
+        None => store.reserve_run(&work, trigger).await,
+    };
+    let (run, lease) = reservation
         .map_err(|error| project_error(format!("failed to reserve Project Run: {error}")))?;
     let tmux_name = format!(
         "lf-project-{}-{}-{}",
@@ -616,9 +640,8 @@ pub fn project_interrupt(project: &str) -> OpsResult<ProjectControlResult> {
             .await
             .map_err(|error| project_error(error.to_string()))?
             .ok_or_else(|| project_error("Project has no active Run to interrupt"))?;
-        let request = AuthenticatedRequest::cli();
         let receipt = store
-            .interrupt(&ControlCtx::User(&request), &work, &run.id)
+            .interrupt(None, &work, &run.id)
             .await
             .map_err(|error| project_error(error.to_string()))?;
         Ok(ProjectControlResult {

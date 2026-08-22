@@ -104,8 +104,7 @@ mod tests {
 
     use super::publish_claimed_ask_comment;
     use crate::durable::{
-        AdvanceReceipt, AskResult, Containment, ControlCtx, InvocationRoute, RunAdvance,
-        RunTrigger, WorkRef,
+        AdvanceReceipt, AskResult, Containment, InvocationRoute, RunAdvance, RunTrigger, WorkRef,
     };
     use crate::id::WaveId;
     use crate::planning::{LinearIssueId, LinearProjectId, ProjectPlan, TaskPlan};
@@ -123,7 +122,7 @@ mod tests {
         store: &Store,
         work: &WorkRef,
         process_group: i64,
-    ) -> (crate::durable::RunLease, crate::durable::AgentInvocation) {
+    ) -> (crate::durable::RunContext, crate::durable::AgentInvocation) {
         let (_, lease) = store.reserve_run(work, RunTrigger::User).await.unwrap();
         store
             .advance_run(
@@ -315,7 +314,7 @@ mod tests {
         drop(recovery_requests);
 
         let claim = store
-            .claim_test_ask(&ControlCtx::Run(&parent_lease), &ask.id)
+            .claim_test_ask(Some(&parent_lease), &ask.id)
             .await
             .unwrap();
         store

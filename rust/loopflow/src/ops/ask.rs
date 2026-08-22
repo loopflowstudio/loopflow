@@ -9,7 +9,7 @@ use serde::Serialize;
 
 use crate::durable::{
     AgentInvocation, AgentInvocationId, Ask, AskId, AskResult, AskState, AskTarget, BoundaryState,
-    ContainmentObservation, ControlCtx, InvocationRoute, InvocationSurface, RunLease, WorkRef,
+    ContainmentObservation, InvocationRoute, InvocationSurface, RunContext, WorkRef,
 };
 use crate::engine::wave_home::HomeRoute;
 use crate::store::SharedStore;
@@ -48,7 +48,7 @@ pub(crate) struct AskAttention {
 
 pub(crate) async fn request_intervention(
     store: &SharedStore,
-    lease: &RunLease,
+    lease: &RunContext,
     invocation_id: &AgentInvocationId,
     prompt: &str,
     user: bool,
@@ -62,10 +62,10 @@ pub(crate) async fn request_intervention(
 
 pub(crate) async fn pending_attention(
     store: &SharedStore,
-    context: &ControlCtx<'_>,
+    actor: Option<&RunContext>,
     target: &AskTarget,
 ) -> Result<Vec<AskAttention>> {
-    let asks = store.pending_asks(context, target).await?;
+    let asks = store.pending_asks(actor, target).await?;
     let mut projection = Vec::with_capacity(asks.len());
     for ask in asks {
         projection.push(project_attention(store, ask).await?);
@@ -119,16 +119,14 @@ pub(crate) async fn project_attention(store: &SharedStore, mut ask: Ask) -> Resu
 
 pub(crate) async fn prepare_open(
     store: &SharedStore,
-    context: &ControlCtx<'_>,
+    actor: Option<&RunContext>,
     ask_id: &AskId,
 ) -> Result<InvocationSurface> {
     let ask = project_attention(store, store.ask_by_id(ask_id).await?)
         .await?
         .ask;
     let (route, surface_kind) = launch_identity(&ask, false);
-    let claim = store
-        .claim_ask(context, ask_id, route, surface_kind)
-        .await?;
+    let claim = store.claim_ask(actor, ask_id, route, surface_kind).await?;
     let ask = store.ask_by_id(ask_id).await?;
     let surface = if claim.needs_launch {
         launch_claimed(store, &ask, &claim.invocation_id, false).await?
@@ -193,8 +191,8 @@ pub(crate) async fn launch_claimed(
     invocation_id: &AgentInvocationId,
     headless: bool,
 ) -> Result<InvocationSurface> {
-    let flow_run_lease = store
-        .claim_flow_step_run_lease(&ask.id, invocation_id)
+    let flow_run_context = store
+        .claim_flow_step_run_context(&ask.id, invocation_id)
         .await?;
     let session_name = session_name(invocation_id);
     let lf = crate::engine::process::resolve_lf_binary();
@@ -211,8 +209,8 @@ pub(crate) async fn launch_claimed(
         (crate::durable::AGENT_INVOCATION_ENV, invocation_id.as_str()),
         (crate::durable::RUN_CONTEXT_ENV, "ask"),
     ];
-    if let Some(run_lease) = flow_run_lease.as_ref() {
-        environment.push((crate::durable::RUN_LEASE_ENV, run_lease.env_value()));
+    if let Some(run_context) = flow_run_context.as_ref() {
+        environment.push((crate::durable::RUN_ID_ENV, run_context.run_id.as_str()));
     }
     if let Err(error) = crate::engine::process::start_lf_session_with_env(
         &session_name,
@@ -256,11 +254,11 @@ pub(crate) async fn settle(
 
 pub(crate) async fn cancel(
     store: &SharedStore,
-    context: &ControlCtx<'_>,
+    actor: Option<&RunContext>,
     ask_id: &AskId,
     reason: &str,
 ) -> Result<Ask> {
-    let ask = store.cancel_ask(context, ask_id, reason).await?;
+    let ask = store.cancel_ask(actor, ask_id, reason).await?;
     checkpoint_origin_task(store, &ask, "cancel").await;
     resume_flow_step(store, &ask).await?;
     Ok(ask)
@@ -430,7 +428,7 @@ async fn run_provider(
         task_prompt: prompt.to_string(),
         agent: Some(agent.to_string()),
         cwd: Some(cwd.to_path_buf()),
-        authority: crate::engine::agent::AgentAuthority::Detached,
+        run_context: crate::engine::agent::AgentRunContext::Detached,
         ..Default::default()
     };
     launch.env.insert(
@@ -462,7 +460,7 @@ async fn run_flow_step_harness(
     let mut launch = turn.config;
     launch.task_prompt = turn.input;
     launch.cwd = Some(cwd.to_path_buf());
-    launch.authority = crate::engine::agent::AgentAuthority::Inherit;
+    launch.run_context = crate::engine::agent::AgentRunContext::Inherit;
     launch.env.insert(
         crate::durable::AGENT_INVOCATION_ENV.to_string(),
         invocation_id.as_str().to_string(),
@@ -595,15 +593,15 @@ pub(crate) fn tmux_target(argv: &[String]) -> Option<&str> {
 
 pub(crate) struct AskLane {
     parent: WorkRef,
-    lease: RunLease,
+    context: RunContext,
     retry_at: Option<tokio::time::Instant>,
 }
 
 impl AskLane {
-    pub(crate) fn new(parent: WorkRef, lease: RunLease) -> Self {
+    pub(crate) fn new(parent: WorkRef, context: RunContext) -> Self {
         Self {
             parent,
-            lease,
+            context,
             retry_at: None,
         }
     }
@@ -618,7 +616,7 @@ impl AskLane {
         }
         let asks = pending_attention(
             store,
-            &ControlCtx::Run(&self.lease),
+            Some(&self.context),
             &AskTarget::Parent(self.parent.clone()),
         )
         .await?
@@ -641,7 +639,7 @@ impl AskLane {
         }
         let (route, surface) = launch_identity(&ask, true);
         let claim = store
-            .claim_ask(&ControlCtx::Run(&self.lease), &ask.id, route, surface)
+            .claim_ask(Some(&self.context), &ask.id, route, surface)
             .await?;
         if !claim.needs_launch {
             return Ok(true);

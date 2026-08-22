@@ -1682,7 +1682,18 @@ mod tests {
     #[allow(clippy::await_holding_lock)]
     #[tokio::test]
     async fn broker_serves_a_fixed_grant_and_fails_closed_on_drop() {
+        let _lock = crate::journal::test_env_lock();
         let temp = tempdir().unwrap();
+        let _home = RestoreEnv::capture("LF_HOME");
+        let _database = RestoreEnv::capture("LF_DB_PATH");
+        let _control_home = RestoreEnv::capture("LF_CONTROL_HOME");
+        let _control_database = RestoreEnv::capture("LF_CONTROL_DB_PATH");
+        let _lease = RestoreEnv::capture(ACCOUNT_LEASE_ENV);
+        std::env::set_var("LF_HOME", temp.path());
+        std::env::remove_var("LF_DB_PATH");
+        std::env::set_var("LF_CONTROL_HOME", temp.path());
+        std::env::remove_var("LF_CONTROL_DB_PATH");
+        std::env::remove_var(ACCOUNT_LEASE_ENV);
         let store = Arc::new(
             open_store(&StorageConfig::sqlite(temp.path().join("lease.db")))
                 .await
@@ -1898,8 +1909,6 @@ mod tests {
             client.resolve(Provider::Codex, None).unwrap().account_id,
             id("primary")
         );
-        let _lock = crate::journal::test_env_lock();
-        let _restore = RestoreEnv::capture(ACCOUNT_LEASE_ENV);
         std::env::set_var(ACCOUNT_LEASE_ENV, broker.local_handle().encode().unwrap());
         let route = crate::provider_account::resolve_provider_account(Provider::Claude, None)
             .await

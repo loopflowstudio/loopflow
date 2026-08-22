@@ -9,7 +9,8 @@ flow.
 
 Resolve the exact wave from the prompt or its `wave/<wave>/GOAL.md`; never infer
 an approximate name. Read GOAL/MEMORY, the PM snapshot's Project definitions,
-KRs and tasks, the selected Turn, and Task state. If that reader fails,
+KRs and tasks, the selected Turn, Task state, and the seeded
+`metric_portfolio`. If that reader fails,
 report the failure once and select from memory; repairing PM or auth is not
 this wave's new objective. Trust worker summaries; do not reread worker
 transcripts. Each project belongs to exactly one wave and owns KRs, not memory
@@ -45,6 +46,16 @@ its available status/next owner.
 ## Pursue
 
 - Select from filed tasks and open KRs; filing work does not require launching it.
+- Route missing, stale, or unavailable instrumentation to the metric's owning
+  Project. A different Project may use that reading for KR proof, but name the
+  true owner and pass the cross-owned evidence explicitly in the Project
+  direction.
+- When an important Project outcome is still invisible, direct its Project to
+  consider sponsorship; do not define the metric at Wave level. Pass relevant
+  cross-Project evidence explicitly.
+- When an active Project has actionable KR evidence but no outcome worker,
+  direct the Project to choose its next experiment. Let it yield when evidence
+  needs time, a dependency blocks progress, or no justified move remains.
 - Treat Projects as the Wave's bet portfolio. When one Project has an unresolved
   mechanism choice, direct its Project to run an approach portfolio;
   do not create duplicate Projects or several Tasks with the same favored

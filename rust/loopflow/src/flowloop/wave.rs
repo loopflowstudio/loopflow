@@ -45,9 +45,10 @@
 //! there is no in-process limbo. The listener disappearing (send failure,
 //! inbox closed) ends the residency cleanly instead: `Ok(())`.
 
-use std::collections::{HashMap, HashSet};
+use std::collections::{BTreeSet, HashMap, HashSet};
 use std::ffi::OsString;
 use std::path::{Path, PathBuf};
+use std::process::Command;
 use std::str::FromStr;
 use std::sync::Arc;
 use std::time::Duration;
@@ -58,7 +59,7 @@ use tokio::sync::mpsc;
 use tokio::time::Instant;
 
 use crate::chat::types::{ConversationEvent, Lifecycle};
-use crate::durable::{RunLease, WorkRef};
+use crate::durable::{RunContext, WorkRef};
 use crate::engine::flow::{available_flow_names, load_goal, render_goal, GoalRenderContext};
 use crate::engine::wave_config::{read_wave_config, WaveCronDef};
 use crate::harness::{default_create_harness, ApprovalPolicy, Harness, SendCurrentOutcome};
@@ -99,12 +100,97 @@ fn finish_capture(capture: Option<&crate::trace::CaptureHandle>, outcome: &str) 
     }
 }
 
+async fn finish_resident_skill_work(resident_repo: &Path, wave: &str, skill: &str) -> Result<()> {
+    validate_resident_changes(resident_repo, wave)?;
+    if !crate::lf::commands::flow::commit_skill_work(resident_repo, skill)? {
+        return Ok(());
+    }
+
+    let branch = crate::engine::git::current_branch(resident_repo)?
+        .unwrap_or_else(|| "detached HEAD".to_string());
+    let head = crate::engine::git::rev_parse(resident_repo, "HEAD")?;
+    let resident_repo = resident_repo.to_path_buf();
+    let retained_path = resident_repo.display().to_string();
+    let title = format!("wave/{wave}: curate resident state");
+    let body = format!("Curates the inline GOAL.md and MEMORY.md state owned by Wave `{wave}`.");
+    let options = crate::ops::LandOptions {
+        strict: true,
+        local: false,
+        create_pr: true,
+        complete: false,
+        next_slug: None,
+        worktree: None,
+        commit_message: None,
+        pr_title: Some(title),
+        pr_body: Some(body),
+        agent: None,
+    };
+    tokio::task::spawn_blocking(move || {
+        crate::lf::commands::ops::land_repo(&resident_repo, &options, &crate::ops::NullProgress)
+    })
+    .await
+    .map_err(|error| anyhow!("resident delivery task failed: {error}"))?
+    .map_err(|error| {
+        anyhow!(
+            "resident delivery failed; retained {branch} at {head} in {}: {error:#}",
+            retained_path
+        )
+    })?;
+    Ok(())
+}
+
+fn validate_resident_changes(resident_repo: &Path, wave: &str) -> Result<()> {
+    let changed = resident_changed_paths(resident_repo)?;
+    let wave_root = Path::new("wave").join(wave);
+    let allowed = BTreeSet::from([wave_root.join("GOAL.md"), wave_root.join("MEMORY.md")]);
+    let unexpected = changed
+        .difference(&allowed)
+        .map(|path| path.display().to_string())
+        .collect::<Vec<_>>();
+    if unexpected.is_empty() {
+        return Ok(());
+    }
+    anyhow::bail!(
+        "Wave resident may only curate wave/{wave}/GOAL.md and wave/{wave}/MEMORY.md; unexpected changes: {}",
+        unexpected.join(", ")
+    )
+}
+
+fn resident_changed_paths(repo: &Path) -> Result<BTreeSet<PathBuf>> {
+    let mut changed = BTreeSet::new();
+    for args in [
+        vec!["diff", "--name-only", "-z", "HEAD", "--"],
+        vec!["ls-files", "--others", "--exclude-standard", "-z"],
+    ] {
+        let output = Command::new("git")
+            .arg("-C")
+            .arg(repo)
+            .args(&args)
+            .output()?;
+        if !output.status.success() {
+            anyhow::bail!(
+                "git {} failed while validating resident changes: {}",
+                args.join(" "),
+                String::from_utf8_lossy(&output.stderr).trim()
+            );
+        }
+        changed.extend(
+            output
+                .stdout
+                .split(|byte| *byte == 0)
+                .filter(|path| !path.is_empty())
+                .map(|path| PathBuf::from(String::from_utf8_lossy(path).into_owned())),
+        );
+    }
+    Ok(changed)
+}
+
 // -- Cron: the third deadline ------------------------------------------------
 
 /// The wave's cron lines, re-read from GOAL.md frontmatter on every deadline
 /// computation — editing the file reschedules a live loop, no restart.
-fn read_crons(origin_repo: &Path, wave: &str) -> Vec<WaveCronDef> {
-    read_wave_config(origin_repo, wave)
+fn read_crons(resident_repo: &Path, wave: &str) -> Vec<WaveCronDef> {
+    read_wave_config(resident_repo, wave)
         .and_then(|config| config.crons)
         .unwrap_or_default()
 }
@@ -177,29 +263,80 @@ pub fn path_for_children() -> OsString {
 /// One pass's seed: the shared loopflow operating document (pass seeds
 /// bypass context assembly, so the `<lf:loopflow>` section is emitted here),
 /// the orchestration discipline, the rendered goal seed, and the wake that
-/// opened the pass. Reads GOAL.md and MEMORY.md from the ORIGIN repo (reads
-/// are free; writes go through the listener's doors).
+/// opened the pass. Mutable GOAL.md and MEMORY.md follow the resident writer;
+/// installed flow definitions remain canonical control-plane inputs.
 ///
 /// Order is stable → volatile so providers can prefix-cache fresh sessions:
 /// the doctrine and discipline are byte-identical every pass, the goal seed
 /// ends with rewritten-every-pass memory, and the wake is unique per pass.
-fn wave_pass_seed(origin_repo: &Path, wave: &str, wake: &str) -> String {
-    let seed = build_goal_seed(origin_repo, wave);
+fn wave_pass_seed(
+    resident_repo: &Path,
+    origin_repo: &Path,
+    wave: &str,
+    wake: &str,
+    metric_context: &str,
+) -> String {
+    let seed = build_goal_seed(resident_repo, origin_repo, wave);
     format!(
-        "{}\n\n{}\n\n{seed}\n\n<wake>\n{wake}\n</wake>",
+        "{}\n\n{}\n\n{seed}\n\n{metric_context}\n\n<lf:wave-executive-loop>\n1. What is most important?\n2. What signals are arriving?\n3. What works?\n4. What does not?\n5. What is the current strategy?\n6. How should strategy adjust?\n\nTreat metrics as evidence, never as automatic KR completion or a composite Wave score.\n</lf:wave-executive-loop>\n\n<wake>\n{wake}\n</wake>",
         crate::engine::prompt::loopflow_section(),
         orchestration_discipline(wave),
     )
 }
 
+async fn wave_metric_context(
+    control: Option<&WaveControl>,
+    origin_repo: &Path,
+    wave_name: &str,
+) -> String {
+    let result = async {
+        let store = match control {
+            Some(control) => control.store.clone(),
+            None => Arc::new(
+                crate::store::open_existing_store()
+                    .await
+                    .ok_or_else(|| anyhow!("local registry is unavailable"))?,
+            ),
+        };
+        let wave = match control {
+            Some(control) => {
+                let WorkRef::Wave(wave_id) = &control.context.work else {
+                    return Err(anyhow!("ambient Wave Run does not carry a Wave identity"));
+                };
+                store
+                    .get_wave(wave_id)
+                    .await?
+                    .ok_or_else(|| anyhow!("ambient Wave is absent from the registry"))?
+            }
+            None => {
+                let locator = crate::wave::WaveLocator::discover(origin_repo, wave_name)?;
+                store
+                    .get_wave_at(&locator)
+                    .await?
+                    .ok_or_else(|| anyhow!("wave/{wave_name} is absent from the registry"))?
+            }
+        };
+        crate::ops::metrics::stored_wave_metric_portfolio(
+            &store,
+            &wave,
+            time::OffsetDateTime::now_utc(),
+        )
+        .await
+    }
+    .await;
+    crate::ops::metrics::metric_prompt_section("metric-portfolio", result)
+}
+
 /// The wave's rendered `GOAL.md` plus current memory, or a minimal-but-real
 /// fallback when there's no `GOAL.md` so the loop still has an identity.
-fn build_goal_seed(repo: &Path, wave: &str) -> String {
-    let memory = crate::engine::wave_context::gather_wave_memory(repo, wave).unwrap_or_default();
-    match load_goal(wave, repo) {
+fn build_goal_seed(resident_repo: &Path, origin_repo: &Path, wave: &str) -> String {
+    let memory =
+        crate::engine::wave_context::gather_wave_memory_from(origin_repo, resident_repo, wave)
+            .unwrap_or_default();
+    match load_goal(wave, resident_repo) {
         Ok(goal) => {
             let ctx = GoalRenderContext {
-                flows: available_flow_names(repo),
+                flows: available_flow_names(origin_repo),
                 memory,
             };
             render_goal(&goal, &ctx)
@@ -340,20 +477,31 @@ enum BodyBackend {
 pub async fn run_loop(
     client: ListenerClient,
     inbox_rx: mpsc::UnboundedReceiver<InboxItem>,
-    cwd: PathBuf,
+    resident_repo: PathBuf,
     origin_repo: PathBuf,
     wave: String,
     config: LoopConfig,
 ) -> Result<()> {
     let control = wave_control(&wave).await?;
+    let prepare_origin = origin_repo.clone();
+    let prepare_resident = resident_repo.clone();
     let backend = BodyBackend::Harness {
-        prepare: Box::new(crate::lf::commands::run::prepare_harness_turn),
+        prepare: Box::new(move |skill, message, wave, max_turns| {
+            crate::lf::commands::run::prepare_wave_harness_turn(
+                skill,
+                message,
+                wave,
+                max_turns,
+                &prepare_origin,
+                &prepare_resident,
+            )
+        }),
         create: Box::new(default_create_harness),
     };
     run_loop_with(
         client,
         inbox_rx,
-        cwd,
+        resident_repo,
         origin_repo,
         wave,
         config,
@@ -365,21 +513,21 @@ pub async fn run_loop(
 
 struct WaveControl {
     store: Arc<Store>,
-    lease: RunLease,
+    context: RunContext,
 }
 
 async fn wave_control(wave: &str) -> Result<Option<WaveControl>> {
-    if std::env::var_os(crate::durable::RUN_LEASE_ENV).is_none()
+    if std::env::var_os(crate::durable::RUN_ID_ENV).is_none()
         && std::env::var_os(crate::durable::RUN_CONTEXT_ENV).is_none()
     {
         return Ok(None);
     }
     let store = Arc::new(open_store(&storage_config_from_env()?).await?);
-    let lease = crate::ops::required_run_lease(&store).await?;
-    let WorkRef::Wave(wave_id) = &lease.work else {
+    let context = crate::ops::required_run_context(&store).await?;
+    let WorkRef::Wave(wave_id) = &context.work else {
         return Err(anyhow!(
             "ambient Run {} does not own Wave Work",
-            lease.run_id
+            context.run_id
         ));
     };
     let registered = store
@@ -389,18 +537,18 @@ async fn wave_control(wave: &str) -> Result<Option<WaveControl>> {
     if registered.name() != wave {
         return Err(anyhow!(
             "ambient Run {} owns Wave '{}', not '{wave}'",
-            lease.run_id,
+            context.run_id,
             registered.name()
         ));
     }
-    Ok(Some(WaveControl { store, lease }))
+    Ok(Some(WaveControl { store, context }))
 }
 
 #[allow(clippy::too_many_arguments)]
 async fn run_loop_with(
     client: ListenerClient,
     mut inbox_rx: mpsc::UnboundedReceiver<InboxItem>,
-    cwd: PathBuf,
+    resident_repo: PathBuf,
     origin_repo: PathBuf,
     wave: String,
     config: LoopConfig,
@@ -408,11 +556,11 @@ async fn run_loop_with(
     control: Option<WaveControl>,
 ) -> Result<()> {
     let ask_lane = control.as_ref().map(|control| {
-        crate::ops::ask::AskLane::new(control.lease.work.clone(), control.lease.clone())
+        crate::ops::ask::AskLane::new(control.context.work.clone(), control.context.clone())
     });
     let mut wave_loop = WaveLoop {
         client,
-        cwd,
+        resident_repo,
         origin_repo,
         wave,
         config,
@@ -469,7 +617,7 @@ async fn run_loop_with(
 
 struct WaveLoop {
     client: ListenerClient,
-    cwd: PathBuf,
+    resident_repo: PathBuf,
     origin_repo: PathBuf,
     wave: String,
     config: LoopConfig,
@@ -502,7 +650,7 @@ impl WaveLoop {
 
     fn cron_deadline(&self) -> Option<Instant> {
         let now = Utc::now();
-        let next = read_crons(&self.origin_repo, &self.wave)
+        let next = read_crons(&self.resident_repo, &self.wave)
             .iter()
             .filter_map(|cron| {
                 next_cron_fire(
@@ -566,7 +714,7 @@ impl WaveLoop {
 
     async fn on_cron(&mut self, inbox_rx: &mut mpsc::UnboundedReceiver<InboxItem>) {
         let now = Utc::now();
-        let due: Vec<WaveCronDef> = read_crons(&self.origin_repo, &self.wave)
+        let due: Vec<WaveCronDef> = read_crons(&self.resident_repo, &self.wave)
             .into_iter()
             .filter(|cron| {
                 next_cron_fire(
@@ -627,16 +775,16 @@ impl WaveLoop {
         let Some(control) = &self.control else {
             return Ok((None, None));
         };
-        let epoch = control.store.current_epoch(&control.lease.work).await?;
+        let epoch = control.store.current_epoch(&control.context.work).await?;
         let mut run = control
             .store
-            .current_run(&control.lease.work)
+            .current_run(&control.context.work)
             .await?
             .ok_or_else(|| anyhow!("Wave Run authority disappeared before Invocation"))?;
-        if run.id != control.lease.run_id {
+        if run.id != control.context.run_id {
             anyhow::bail!(
                 "Wave Run {} was replaced before Invocation by {}",
-                control.lease.run_id,
+                control.context.run_id,
                 run.id
             );
         }
@@ -646,12 +794,12 @@ impl WaveLoop {
             let receipt = control
                 .store
                 .advance_run(
-                    &control.lease,
+                    &control.context,
                     crate::durable::RunAdvance::RunStarting {
                         containment: crate::durable::Containment::ProcessGroup {
                             id: i64::from(process_group),
                         },
-                        cwd: self.cwd.clone(),
+                        cwd: self.resident_repo.clone(),
                     },
                 )
                 .await?;
@@ -663,7 +811,7 @@ impl WaveLoop {
         let receipt = control
             .store
             .advance_run(
-                &control.lease,
+                &control.context,
                 crate::durable::RunAdvance::InvocationStarting {
                     route: crate::durable::InvocationRoute {
                         provider: provider.to_string(),
@@ -714,7 +862,15 @@ impl WaveLoop {
             }
             invocation.get_or_insert(key);
             let completed_index = step.index;
-            let seed = wave_pass_seed(&self.origin_repo, &self.wave, &wake);
+            let metric_context =
+                wave_metric_context(self.control.as_ref(), &self.origin_repo, &self.wave).await;
+            let seed = wave_pass_seed(
+                &self.resident_repo,
+                &self.origin_repo,
+                &self.wave,
+                &wake,
+                &metric_context,
+            );
             let live_skill = step.kind == StepKind::Skill
                 && matches!(&self.backend, BodyBackend::Harness { .. });
             if live_skill {
@@ -748,7 +904,7 @@ impl WaveLoop {
         answers: Vec<String>,
         inbox_rx: &mut mpsc::UnboundedReceiver<InboxItem>,
     ) {
-        let body = body_provenance(&step, &self.cwd);
+        let body = body_provenance(&step, &self.resident_repo);
         let body_id = body.body_id.clone();
         self.open_body(body, answers).await;
         if self.end.is_some() {
@@ -757,10 +913,12 @@ impl WaveLoop {
 
         let child = match &self.backend {
             BodyBackend::Harness { .. } => {
-                spawn_wave_step(&self.cwd, &step, &seed, self.config.max_turns)
+                spawn_wave_step(&self.resident_repo, &step, &seed, self.config.max_turns)
             }
             #[cfg(test)]
-            BodyBackend::Process(spawn) => spawn(&self.cwd, &step, &seed, self.config.max_turns),
+            BodyBackend::Process(spawn) => {
+                spawn(&self.resident_repo, &step, &seed, self.config.max_turns)
+            }
         };
         let child = match child {
             Ok(child) => child,
@@ -834,7 +992,7 @@ impl WaveLoop {
         destination: &MessageDestination,
         inbox_rx: &mut mpsc::UnboundedReceiver<InboxItem>,
     ) {
-        let mut body = body_provenance(&step, &self.cwd);
+        let mut body = body_provenance(&step, &self.resident_repo);
         let prepared = match &self.backend {
             BodyBackend::Harness { prepare, .. } => {
                 prepare(&step.step, &seed, &self.wave, self.config.max_turns)
@@ -875,7 +1033,7 @@ impl WaveLoop {
         };
 
         let capture = match crate::journal::trace_capture_context(
-            &self.cwd,
+            &self.resident_repo,
             Some(step.flow.clone()),
             Some(step.step.clone()),
         ) {
@@ -1249,11 +1407,11 @@ impl WaveLoop {
         match status {
             Lifecycle::Completed => {
                 if let Err(err) =
-                    crate::lf::commands::flow::commit_skill_work(&self.cwd, &step.step)
+                    finish_resident_skill_work(&self.resident_repo, &self.wave, &step.step).await
                 {
                     self.finish_failed_pass(
                         body_id,
-                        &format!("failed to commit {}: {err:#}", step.step),
+                        &format!("failed to deliver {}: {err:#}", step.step),
                     )
                     .await;
                     return;
@@ -1498,6 +1656,42 @@ mod tests {
     }
 
     #[test]
+    fn resident_completion_accepts_only_its_wave_state_files() {
+        let repo = loopflow_test_support::TestRepo::new();
+        repo.create_file("wave/ship/GOAL.md", "Ship.\n");
+        repo.create_file("wave/ship/MEMORY.md", "Empty.\n");
+        repo.create_file("src/lib.rs", "// source\n");
+        repo.stage_all();
+        repo.commit("base");
+
+        repo.create_file("wave/ship/MEMORY.md", "Curated.\n");
+        validate_resident_changes(repo.path(), "ship").expect("owned memory is allowed");
+
+        repo.create_file("src/lib.rs", "// changed\n");
+        let error = validate_resident_changes(repo.path(), "ship")
+            .expect_err("source edits cannot auto-land");
+        assert!(error.to_string().contains("src/lib.rs"));
+    }
+
+    #[tokio::test]
+    async fn resident_completion_does_not_publish_an_unchanged_tree() {
+        let repo = loopflow_test_support::TestRepo::new();
+        repo.create_file("wave/ship/GOAL.md", "Ship.\n");
+        repo.stage_all();
+        repo.commit("base");
+
+        let head = crate::engine::git::rev_parse(repo.path(), "HEAD").unwrap();
+        finish_resident_skill_work(repo.path(), "ship", "assess")
+            .await
+            .unwrap();
+
+        assert_eq!(
+            crate::engine::git::rev_parse(repo.path(), "HEAD").unwrap(),
+            head
+        );
+    }
+
+    #[test]
     fn discord_chat_batches_only_the_fifo_prefix_for_one_destination() {
         let mut queue = vec![
             queued_message("discord-1", Some(discord_source("1"))),
@@ -1716,6 +1910,47 @@ mod tests {
         panic!("condition not met in time: {what}");
     }
 
+    fn init_test_git_repo(path: &Path) {
+        let status = std::process::Command::new("git")
+            .args([
+                "-c",
+                "user.name=Loopflow Test",
+                "-c",
+                "user.email=test@loopflow.dev",
+                "init",
+                "--quiet",
+            ])
+            .current_dir(path)
+            .status()
+            .expect("git init");
+        assert!(status.success());
+
+        std::fs::write(path.join(".gitignore"), ".lf/\n").expect("write gitignore");
+        let status = std::process::Command::new("git")
+            .args(["add", ".gitignore"])
+            .current_dir(path)
+            .status()
+            .expect("git add");
+        assert!(status.success());
+
+        let status = std::process::Command::new("git")
+            .args([
+                "-c",
+                "user.name=Loopflow Test",
+                "-c",
+                "user.email=test@loopflow.dev",
+                "commit",
+                "--quiet",
+                "--allow-empty",
+                "-m",
+                "initial",
+            ])
+            .current_dir(path)
+            .status()
+            .expect("git commit");
+        assert!(status.success());
+    }
+
     fn started_answers(events: &[EventKind]) -> Vec<Vec<MessageId>> {
         events
             .iter()
@@ -1863,12 +2098,7 @@ mod tests {
     #[tokio::test]
     async fn stale_wave_definition_resets_before_running_the_fresh_flow() {
         let tmp = tempfile::tempdir().expect("tempdir");
-        let status = std::process::Command::new("git")
-            .args(["init", "--quiet"])
-            .current_dir(tmp.path())
-            .status()
-            .expect("git init");
-        assert!(status.success());
+        init_test_git_repo(tmp.path());
 
         let (mut journal, _) =
             Journal::open(&journal_path(tmp.path(), "ship")).expect("open journal");
@@ -2014,12 +2244,7 @@ mod tests {
     #[tokio::test]
     async fn steer_reaches_the_live_body_and_streams_into_one_turn() {
         let tmp = tempfile::tempdir().expect("tempdir");
-        let status = std::process::Command::new("git")
-            .args(["init", "--quiet"])
-            .current_dir(tmp.path())
-            .status()
-            .expect("git init");
-        assert!(status.success());
+        init_test_git_repo(tmp.path());
 
         let inputs = Arc::new(Mutex::new(Vec::new()));
         let harness_inputs = inputs.clone();
@@ -2100,12 +2325,7 @@ mod tests {
     #[tokio::test]
     async fn unsupported_steer_waits_for_the_next_wave_boundary() {
         let tmp = tempfile::tempdir().expect("tempdir");
-        let status = std::process::Command::new("git")
-            .args(["init", "--quiet"])
-            .current_dir(tmp.path())
-            .status()
-            .expect("git init");
-        assert!(status.success());
+        init_test_git_repo(tmp.path());
 
         let inputs = Arc::new(Mutex::new(Vec::new()));
         let harness_inputs = inputs.clone();
@@ -2216,10 +2436,19 @@ mod tests {
         std::fs::create_dir_all(&goal_dir).expect("goal dir");
         std::fs::write(goal_dir.join("GOAL.md"), "Ship the thing.").expect("goal");
 
-        let seed = wave_pass_seed(tmp.path(), "ship", "hello from chat");
+        let seed = wave_pass_seed(
+            tmp.path(),
+            tmp.path(),
+            "ship",
+            "hello from chat",
+            "<lf:metric-portfolio>\n{\"metrics\":[],\"contract_issues\":[]}\n</lf:metric-portfolio>",
+        );
 
         assert!(seed.contains("Ship the thing."));
         assert!(seed.contains("<lf:loopflow>"));
+        assert!(seed.contains("<lf:metric-portfolio>"));
+        assert!(seed.contains("What is most important?"));
+        assert!(seed.contains("How should strategy adjust?"));
         assert!(seed.contains("<wake>\nhello from chat\n</wake>"));
         // Stable → volatile: the byte-identical doctrine leads so fresh
         // sessions prefix-cache it; per-pass memory and wake trail it.
@@ -2232,6 +2461,41 @@ mod tests {
             LoopConfig::default().heartbeat_idle,
             Duration::from_secs(4 * 60 * 60)
         );
+    }
+
+    #[test]
+    fn wave_pass_reads_mutable_state_from_resident_and_catalog_from_origin() {
+        let origin = tempfile::tempdir().unwrap();
+        let resident = tempfile::tempdir().unwrap();
+        std::fs::create_dir_all(origin.path().join("wave/ship")).unwrap();
+        std::fs::create_dir_all(origin.path().join(".lf/flows")).unwrap();
+        std::fs::create_dir_all(resident.path().join("wave/ship")).unwrap();
+        std::fs::write(
+            origin.path().join("wave/ship/MEMORY.md"),
+            "stale canonical memory\n",
+        )
+        .unwrap();
+        std::fs::write(
+            origin.path().join(".lf/flows/canonical.yaml"),
+            "- implement\n",
+        )
+        .unwrap();
+        std::fs::write(
+            resident.path().join("wave/ship/GOAL.md"),
+            "Use the current state.\n",
+        )
+        .unwrap();
+        std::fs::write(
+            resident.path().join("wave/ship/MEMORY.md"),
+            "curated resident memory\n",
+        )
+        .unwrap();
+
+        let seed = wave_pass_seed(resident.path(), origin.path(), "ship", "continue", "");
+
+        assert!(seed.contains("curated resident memory"));
+        assert!(!seed.contains("stale canonical memory"));
+        assert!(seed.contains("canonical"));
     }
 
     #[tokio::test]

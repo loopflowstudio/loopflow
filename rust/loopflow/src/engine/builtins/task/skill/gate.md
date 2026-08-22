@@ -95,6 +95,9 @@ Make the change easy to review.
    - If the work has measurable outcomes (performance, accuracy, latency, size, counts), run before/after comparisons and record the numbers
    - If the work is a UI or UX change, capture the key states and interactions
    - Not every PR has metrics — but when they exist, capture them now. The reviewer shouldn't have to reproduce your setup to see the impact.
+   - For substantial UI work, state which production performance signal covers
+     the new path. If none does, capture a concrete metric proposal for the
+     Project. A local benchmark supports it but is not live coverage by itself.
 
 3. **Write PR copy for ops handoff**
 

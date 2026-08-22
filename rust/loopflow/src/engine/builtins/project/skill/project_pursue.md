@@ -15,6 +15,36 @@ Resolve the exact wave and Project from the session prompt; never guess them. If
 reader fails, report that once and continue from the KR set instead of repairing
 PM or auth.
 
+The seed carries only metrics owned by this Project. Use the few readings that
+make the most important outcomes visible to focus Task direction. When KR
+pursuit or Task work exposes a decision-relevant blind spot, get the first
+useful signal from zero to one through a coherent Task. Once a signal is
+trustworthy, get the machinery out of the way: use the reading to choose work
+that improves or protects the sponsored outcome, and revisit the instrument
+only when it is broken, misleading, or no longer measures what matters. Use a
+cross-owned reading only when the Wave explicitly routed it, preserving the
+reading's real owner.
+
+A Task worker may propose a metric while building feature work. Review those
+proposals as potential sponsorship decisions: adopt a useful proposal by
+formalizing its meaning and filing coherent producer work, ask for the missing
+evidence that would make it credible, or decline it. Prefer measures whose
+movement changes the next Project decision; do not collect proposals into a
+backlog of interesting numbers.
+
+For each sponsored metric, decide whether its current reading calls for a worker:
+
+- A Missed target usually gets roughly one worker iterating on the outcome.
+  Combine work when one experiment or root cause moves several metrics.
+- A Met frontier may keep a worker because better still matters. A Met guardrail
+  stays quiet until its alarm trips.
+- Unknown or Unavailable evidence calls for instrument repair, investigation,
+  or waiting—not blind optimization of the outcome.
+
+This is a momentum default, not a utilization quota. Yield when evidence needs
+time, an external dependency blocks progress, or no justified experiment
+remains.
+
 The project may read and file its own tasks:
 
 ```bash
@@ -55,7 +85,10 @@ its available status/next owner.
   after the independent Tasks have exposed their own strengths and failures.
 - Every file-writing task must already have a Linear identity. Start it with
   `lf task run <issue-id> --directive "<delegation brief>"` and supervise the
-  same Task through review and merge.
+  same Task through review and merge. Include relevant KR and metric evidence
+  in the direction so the worker can advance or protect it without receiving
+  the entire Wave portfolio. Invite the worker to return a metric proposal when
+  feature work reveals a better signal.
 - When a separate Task depends on an open parent PR and should begin now, start
   it with `lf task run <child> --stack-on <parent> --directive "..."`. The child
   keeps its own worktree and worker; never create a second simultaneously open
@@ -73,4 +106,5 @@ its available status/next owner.
   reveals a broader standing quality frontier. Do not turn individual cleanup
   into a project-shaped KR.
 
-Do not check off a KR unless its observable condition is already true.
+Do not check off a KR unless its observable condition is already true. A Met
+metric is evidence, not automatic completion.

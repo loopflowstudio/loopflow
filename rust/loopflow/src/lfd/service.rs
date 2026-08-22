@@ -6,11 +6,16 @@
 //! the environment or Doppler by `lfd` itself. The file is written `0o600`
 //! regardless, since it may contain paths.
 
+use std::io::Write;
 use std::path::{Path, PathBuf};
 
 use serde::{Deserialize, Serialize};
 
 pub const LABEL: &str = "com.loopflow.lfd";
+
+fn account_home() -> anyhow::Result<PathBuf> {
+    crate::machine_install::account_home()
+}
 
 /// The non-secret configuration embedded into the service file.
 #[derive(Debug, Clone)]
@@ -205,30 +210,190 @@ pub fn render_systemd_unit(spec: &ServiceSpec) -> String {
 }
 
 fn write_service_file(path: &Path, contents: &str) -> anyhow::Result<()> {
-    if let Some(parent) = path.parent() {
-        std::fs::create_dir_all(parent)?;
-    }
-    let file = std::fs::OpenOptions::new()
+    let parent = path
+        .parent()
+        .ok_or_else(|| anyhow::anyhow!("service file has no parent directory"))?;
+    std::fs::create_dir_all(parent)?;
+    let name = path
+        .file_name()
+        .ok_or_else(|| anyhow::anyhow!("service file has no filename"))?
+        .to_string_lossy();
+    let pending = parent.join(format!(".{name}.tmp.{}", std::process::id()));
+    let mut file = std::fs::OpenOptions::new()
         .create(true)
         .truncate(true)
         .write(true)
-        .open(path)?;
+        .open(&pending)?;
     #[cfg(unix)]
     {
         use std::os::unix::fs::PermissionsExt;
         file.set_permissions(std::fs::Permissions::from_mode(0o600))?;
     }
-    drop(file);
-    std::fs::write(path, contents)?;
+    file.write_all(contents.as_bytes())?;
+    file.sync_all()?;
+    std::fs::rename(&pending, path)?;
+    std::fs::File::open(parent)?.sync_all()?;
     Ok(())
+}
+
+fn configure_launchd_switch(
+    contents: &str,
+    lfd_path: &Path,
+    switch_id: Option<&str>,
+) -> anyhow::Result<String> {
+    let mut output = Vec::new();
+    let mut in_arguments = false;
+    let mut replaced_path = false;
+    let mut skip_switch_value = false;
+    for line in contents.lines() {
+        if skip_switch_value {
+            skip_switch_value = false;
+            continue;
+        }
+        if line.trim() == "<key>ProgramArguments</key>" {
+            in_arguments = true;
+            output.push(line.to_string());
+            continue;
+        }
+        if in_arguments && line.trim() == "</array>" {
+            in_arguments = false;
+        }
+        if in_arguments && line.trim() == "<string>--install-switch</string>" {
+            skip_switch_value = true;
+            continue;
+        }
+        if in_arguments && !replaced_path && line.trim_start().starts_with("<string>") {
+            let indent = &line[..line.len() - line.trim_start().len()];
+            output.push(format!(
+                "{indent}<string>{}</string>",
+                xml_escape(&lfd_path.to_string_lossy())
+            ));
+            replaced_path = true;
+            continue;
+        }
+        output.push(line.to_string());
+        if in_arguments && line.trim() == "<string>serve</string>" {
+            if let Some(switch_id) = switch_id {
+                let indent = &line[..line.len() - line.trim_start().len()];
+                output.push(format!("{indent}<string>--install-switch</string>"));
+                output.push(format!(
+                    "{indent}<string>{}</string>",
+                    xml_escape(switch_id)
+                ));
+            }
+        }
+    }
+    if !replaced_path {
+        anyhow::bail!("installed launchd service has no daemon program argument");
+    }
+    Ok(format!("{}\n", output.join("\n")))
+}
+
+fn configure_systemd_switch(
+    contents: &str,
+    lfd_path: &Path,
+    switch_id: Option<&str>,
+) -> anyhow::Result<String> {
+    let mut output = Vec::new();
+    let mut replaced = false;
+    for line in contents.lines() {
+        if let Some(command) = line.strip_prefix("ExecStart=") {
+            let (_, arguments) = command.split_once(" serve").ok_or_else(|| {
+                anyhow::anyhow!("installed systemd service has no daemon serve command")
+            })?;
+            let arguments = if let Some((_, after)) = arguments.split_once(" --install-switch ") {
+                let (_, rest) = after.split_once(" --addr").ok_or_else(|| {
+                    anyhow::anyhow!("installed systemd switch capability has no --addr boundary")
+                })?;
+                format!(" --addr{rest}")
+            } else {
+                arguments.to_string()
+            };
+            let capability = switch_id
+                .map(|id| format!(" --install-switch {}", shell_escape(id)))
+                .unwrap_or_default();
+            output.push(format!(
+                "ExecStart={} serve{capability}{arguments}",
+                shell_escape(&lfd_path.to_string_lossy())
+            ));
+            replaced = true;
+        } else {
+            output.push(line.to_string());
+        }
+    }
+    if !replaced {
+        anyhow::bail!("installed systemd service has no ExecStart");
+    }
+    Ok(format!("{}\n", output.join("\n")))
+}
+
+#[cfg(target_os = "macos")]
+fn configured_service_path() -> anyhow::Result<PathBuf> {
+    Ok(account_home()?
+        .join("Library/LaunchAgents")
+        .join(format!("{LABEL}.plist")))
+}
+
+#[cfg(target_os = "linux")]
+fn configured_service_path() -> anyhow::Result<PathBuf> {
+    Ok(account_home()?.join(".config/systemd/user/lfd.service"))
+}
+
+#[cfg(any(target_os = "macos", target_os = "linux"))]
+fn configure_install_switch(
+    mode: KeeperMode,
+    lfd_path: &Path,
+    switch_id: Option<&str>,
+) -> anyhow::Result<()> {
+    if mode == KeeperMode::None {
+        return Ok(());
+    }
+    let path = configured_service_path()?;
+    let contents = std::fs::read_to_string(&path)?;
+    let configured = match mode {
+        KeeperMode::Launchd => configure_launchd_switch(&contents, lfd_path, switch_id)?,
+        KeeperMode::Systemd => configure_systemd_switch(&contents, lfd_path, switch_id)?,
+        KeeperMode::None => return Ok(()),
+    };
+    write_service_file(&path, &configured)?;
+    #[cfg(target_os = "linux")]
+    {
+        let status = std::process::Command::new("systemctl")
+            .args(["--user", "daemon-reload"])
+            .status()?;
+        if !status.success() {
+            anyhow::bail!("systemctl --user daemon-reload failed");
+        }
+    }
+    Ok(())
+}
+
+#[cfg(not(any(target_os = "macos", target_os = "linux")))]
+fn configure_install_switch(
+    _mode: KeeperMode,
+    _lfd_path: &Path,
+    _switch_id: Option<&str>,
+) -> anyhow::Result<()> {
+    Ok(())
+}
+
+pub fn prepare_install_switch(
+    mode: KeeperMode,
+    lfd_path: &Path,
+    switch_id: &str,
+) -> anyhow::Result<()> {
+    configure_install_switch(mode, lfd_path, Some(switch_id))
+}
+
+pub fn finish_install_switch(mode: KeeperMode, lfd_path: &Path) -> anyhow::Result<()> {
+    configure_install_switch(mode, lfd_path, None)
 }
 
 // -- Install / uninstall / status (platform-specific) -----------------------
 
 #[cfg(target_os = "macos")]
 pub fn install(spec: &ServiceSpec) -> anyhow::Result<ServiceFile> {
-    let home =
-        dirs::home_dir().ok_or_else(|| anyhow::anyhow!("no home directory to install into"))?;
+    let home = account_home()?;
     let dir = home.join("Library/LaunchAgents");
     let path = dir.join(format!("{LABEL}.plist"));
     let plist = render_launchd_plist(spec);
@@ -253,8 +418,7 @@ pub fn install(spec: &ServiceSpec) -> anyhow::Result<ServiceFile> {
 
 #[cfg(target_os = "linux")]
 pub fn install(spec: &ServiceSpec) -> anyhow::Result<ServiceFile> {
-    let home =
-        dirs::home_dir().ok_or_else(|| anyhow::anyhow!("no home directory to install into"))?;
+    let home = account_home()?;
     let dir = home.join(".config/systemd/user");
     let path = dir.join("lfd.service");
     let unit = render_systemd_unit(spec);
@@ -281,8 +445,7 @@ pub fn install(_spec: &ServiceSpec) -> anyhow::Result<ServiceFile> {
 
 #[cfg(target_os = "macos")]
 pub fn uninstall() -> anyhow::Result<PathBuf> {
-    let home =
-        dirs::home_dir().ok_or_else(|| anyhow::anyhow!("no home directory to uninstall from"))?;
+    let home = account_home()?;
     let path = home
         .join("Library/LaunchAgents")
         .join(format!("{LABEL}.plist"));
@@ -298,8 +461,7 @@ pub fn uninstall() -> anyhow::Result<PathBuf> {
 
 #[cfg(target_os = "linux")]
 pub fn uninstall() -> anyhow::Result<PathBuf> {
-    let home =
-        dirs::home_dir().ok_or_else(|| anyhow::anyhow!("no home directory to uninstall from"))?;
+    let home = account_home()?;
     let path = home.join(".config/systemd/user/lfd.service");
     if path.exists() {
         let _ = std::process::Command::new("systemctl")
@@ -336,7 +498,7 @@ pub fn status() -> anyhow::Result<String> {
 
 #[cfg(target_os = "macos")]
 pub fn configured_mode() -> anyhow::Result<KeeperMode> {
-    let home = dirs::home_dir().ok_or_else(|| anyhow::anyhow!("no home directory to inspect"))?;
+    let home = account_home()?;
     let path = home
         .join("Library/LaunchAgents")
         .join(format!("{LABEL}.plist"));
@@ -352,7 +514,7 @@ pub fn pause() -> anyhow::Result<KeeperMode> {
     if mode == KeeperMode::None {
         return Ok(mode);
     }
-    let home = dirs::home_dir().ok_or_else(|| anyhow::anyhow!("no home directory to inspect"))?;
+    let home = account_home()?;
     let path = home
         .join("Library/LaunchAgents")
         .join(format!("{LABEL}.plist"));
@@ -368,7 +530,7 @@ pub fn resume(mode: KeeperMode) -> anyhow::Result<()> {
     if mode != KeeperMode::Launchd {
         return Ok(());
     }
-    let home = dirs::home_dir().ok_or_else(|| anyhow::anyhow!("no home directory to inspect"))?;
+    let home = account_home()?;
     let path = home
         .join("Library/LaunchAgents")
         .join(format!("{LABEL}.plist"));
@@ -391,7 +553,7 @@ pub fn resume(mode: KeeperMode) -> anyhow::Result<()> {
 
 #[cfg(target_os = "linux")]
 pub fn configured_mode() -> anyhow::Result<KeeperMode> {
-    let home = dirs::home_dir().ok_or_else(|| anyhow::anyhow!("no home directory to inspect"))?;
+    let home = account_home()?;
     if !home.join(".config/systemd/user/lfd.service").exists() {
         return Ok(KeeperMode::None);
     }
@@ -526,6 +688,44 @@ mod tests {
         assert!(unit.contains("Environment=DOPPLER_CONFIG=example-config"));
         assert!(unit.contains("WantedBy=default.target"));
         assert!(!unit.contains("WEBHOOK_SECRET"));
+    }
+
+    #[test]
+    fn keeper_switch_repoints_and_scopes_launchd_startup() {
+        let configured = configure_launchd_switch(
+            &render_launchd_plist(&spec()),
+            Path::new("/home/op/.local/bin/lfd"),
+            Some("switch-test"),
+        )
+        .unwrap();
+        assert!(configured.contains("<string>/home/op/.local/bin/lfd</string>"));
+        assert!(configured.contains("<string>--install-switch</string>"));
+        assert!(configured.contains("<string>switch-test</string>"));
+
+        let settled =
+            configure_launchd_switch(&configured, Path::new("/home/op/.local/bin/lfd"), None)
+                .unwrap();
+        assert!(!settled.contains("--install-switch"));
+        assert!(!settled.contains("switch-test"));
+    }
+
+    #[test]
+    fn keeper_switch_repoints_and_scopes_systemd_startup() {
+        let configured = configure_systemd_switch(
+            &render_systemd_unit(&spec()),
+            Path::new("/home/op/.local/bin/lfd"),
+            Some("switch-test"),
+        )
+        .unwrap();
+        assert!(configured.contains(
+            "ExecStart=/home/op/.local/bin/lfd serve --install-switch switch-test --addr"
+        ));
+
+        let settled =
+            configure_systemd_switch(&configured, Path::new("/home/op/.local/bin/lfd"), None)
+                .unwrap();
+        assert!(settled.contains("ExecStart=/home/op/.local/bin/lfd serve --addr"));
+        assert!(!settled.contains("--install-switch"));
     }
 
     #[test]

@@ -22,5 +22,8 @@ Ordered PRs own its serial branches; a merge settles one PR, while only
 `lf pr land -c` or `lf task complete` requests Task completion. The resident
 Task runs kickoff once, repeats its selected inner flow, and settles only after
 its gate approves; gate repairs return it to another iteration.
-A Project owns the bounded KR-pursuit process that creates and
-supervises Tasks, but no worktree, branch, or PR.
+`lf pr land` hands one durable landing to `lfd` when available and otherwise
+watches it in the invoking process. That landing observes GitHub, runs bounded
+`ci-fix`, re-arms changed heads, and applies Task disposition only after GitHub
+reports the PR merged. A Project owns the bounded KR-pursuit process that
+creates Tasks, but no worktree, branch, PR, or child-PR supervisor.

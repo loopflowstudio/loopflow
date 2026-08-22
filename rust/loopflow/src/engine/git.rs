@@ -131,6 +131,11 @@ pub fn fetch(repo: &Path, remote: &str, refspec: &str) -> Result<(), GitError> {
     Ok(())
 }
 
+pub(crate) fn has_origin(repo: &Path) -> Result<bool, GitError> {
+    let output = run_git(repo, &["config", "--get", "remote.origin.url"])?;
+    Ok(output.status.success() && !String::from_utf8_lossy(&output.stdout).trim().is_empty())
+}
+
 /// Check if `commit` is an ancestor of `descendant`.
 /// Returns true if commit is fully merged into descendant.
 pub fn is_ancestor(repo: &Path, commit: &str, descendant: &str) -> Result<bool, GitError> {

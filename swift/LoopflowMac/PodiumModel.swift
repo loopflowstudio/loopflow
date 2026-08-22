@@ -123,8 +123,18 @@ final class PodiumModel {
     }
 
     var allRepos: [PortfolioRepo] {
-        var result = repos
-        var seen = Set(result.map { repoIdentity($0.path) })
+        var result: [PortfolioRepo] = []
+        var seen = Set<String>()
+        let selectedPath = repoPath?.normalizedFilePath
+        let orderedRepos = repos.sorted { left, right in
+            let leftIsSelected = left.path.normalizedFilePath == selectedPath
+            let rightIsSelected = right.path.normalizedFilePath == selectedPath
+            return leftIsSelected && !rightIsSelected
+        }
+        for repo in orderedRepos {
+            guard seen.insert(repoIdentity(repo.path)).inserted else { continue }
+            result.append(repo)
+        }
         for wave in waves.value ?? [] {
             let identity = repoIdentity(wave.repo)
             guard seen.insert(identity).inserted else { continue }

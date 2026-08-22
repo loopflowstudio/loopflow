@@ -23,12 +23,30 @@ use time::OffsetDateTime;
 
 fn repository(path: &Path) {
     std::fs::create_dir_all(path).unwrap();
+    git(path, &["init", "-b", "main"]);
+    git(path, &["config", "user.email", "test@example.com"]);
+    git(path, &["config", "user.name", "Test User"]);
+    std::fs::write(path.join(".gitignore"), ".lf/\n").unwrap();
+    commit(path, "initial");
+}
+
+fn git(path: &Path, args: &[&str]) {
     let output = Command::new("git")
-        .args(["init", "-b", "main"])
+        .args(args)
         .current_dir(path)
         .output()
         .unwrap();
-    assert!(output.status.success());
+    assert!(
+        output.status.success(),
+        "git {} failed: {}",
+        args.join(" "),
+        String::from_utf8_lossy(&output.stderr)
+    );
+}
+
+fn commit(repo: &Path, message: &str) {
+    git(repo, &["add", "."]);
+    git(repo, &["commit", "-m", message]);
 }
 
 fn author_wave(repo: &Path, slug: &str, marker: &str) {
@@ -38,6 +56,7 @@ fn author_wave(repo: &Path, slug: &str, marker: &str) {
     let journal = journal::journal_path(repo, slug);
     std::fs::create_dir_all(journal.parent().unwrap()).unwrap();
     std::fs::write(journal, format!("{{\"repository\":\"{marker}\"}}\n")).unwrap();
+    commit(repo, &format!("author {slug}"));
 }
 
 fn registered_wave(repo: &Path, slug: &str) -> Wave {
@@ -155,7 +174,7 @@ fn lf_command(home: &Path, repo: &Path, args: &[&str]) -> std::process::Output {
         .env_remove("LF_CONTROL_HOME")
         .env_remove("LF_CONTROL_DB_PATH")
         .env_remove("LF_RUN_CONTEXT")
-        .env_remove("LF_RUN_LEASE")
+        .env_remove("LF_RUN_ID")
         .env_remove("LF_AGENT_INVOCATION_ID")
         .env_remove("LF_ACCOUNT_LEASE")
         .output()
@@ -555,6 +574,7 @@ async fn repositories_own_same_named_waves_and_relocation_preserves_identity() {
     assert!(repo_a.join("wave/infrastructure").is_dir());
     std::fs::remove_dir_all(repo_a.join("wave/platform")).unwrap();
     std::fs::remove_dir_all(repo_a.join(".lf/journal/waves/platform")).unwrap();
+    commit(&repo_a, "remove divergent target");
 
     rusqlite::Connection::open(&database)
         .unwrap()
@@ -574,6 +594,7 @@ async fn repositories_own_same_named_waves_and_relocation_preserves_identity() {
     );
     assert!(repo_a.join("wave/infrastructure").is_dir());
     assert!(repo_a.join("wave/platform").is_dir());
+    commit(&repo_a, "record staged relocation");
     rusqlite::Connection::open(&database)
         .unwrap()
         .execute_batch("DROP TRIGGER fail_wave_relocation")
@@ -614,6 +635,7 @@ async fn repositories_own_same_named_waves_and_relocation_preserves_identity() {
             .id(),
         beta.id()
     );
+    commit(&repo_a, "record Wave rename");
 
     relocate_wave(&store, alpha.id(), &repo_a, Some(&repo_c), None)
         .await
@@ -798,6 +820,7 @@ async fn relocation_retires_an_empty_destination_shadow_without_losing_identity(
             .await
             .unwrap();
         assert_eq!(receipt.wave_id, established.id().as_str());
+        commit(&source, &format!("relocate {}", established.name()));
 
         let active = store
             .get_wave_at(&WaveLocator::discover(&target, established.name()).unwrap())

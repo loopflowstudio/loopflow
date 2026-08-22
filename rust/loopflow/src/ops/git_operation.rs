@@ -735,6 +735,7 @@ mod tests {
         std::env::set_var("LF_AGENT_INVOCATION_ID", "invocation_stale");
         std::env::set_var("LF_TRACE_ID", "trace_stale");
         std::env::set_var("LF_PROCESS_ID", "process_stale");
+        std::env::remove_var("LF_WORKTREE_WRITER_ID");
         let guard = prepare_agent_writer(&repo, &BTreeMap::new())
             .unwrap()
             .expect("Git repo gets a writer");

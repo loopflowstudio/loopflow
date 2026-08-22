@@ -15,6 +15,12 @@ lf roadmap             # every open Task across every wave
 lf activity            # what changed, newest first, with durable evidence
 ```
 
+`lf status` and every `lf roadmap --json` Wave row carry the same
+Project-owned `metric_portfolio`: current Met/Missed evidence, explicit
+Unknown or Unavailable states, candidate instruments, and contract issues.
+The Mac Wave detail renders that Rust-derived evidence without recomputing
+targets or freshness.
+
 `lf roadmap` buckets the whole machine's work by what it needs: **Now** (live
 and advancing), **Needs attention** (a User-routed Ask or recovery),
 **Available**, **Later**. It overlays live evidence on

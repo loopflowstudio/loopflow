@@ -3,6 +3,9 @@ use std::path::Path;
 use sha2::{Digest, Sha256};
 
 use crate::engine::git;
+pub use crate::migration_drafts::MigrationDraft;
+
+include!(concat!(env!("OUT_DIR"), "/migration_draft_manifest.rs"));
 
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub struct MergedCommit {
@@ -157,14 +160,17 @@ pub fn migration_authority() -> MigrationAuthority {
     }
 }
 
+/// Ordered draft migrations embedded when this binary was compiled.
+pub fn migration_draft_manifest() -> &'static [MigrationDraft] {
+    MIGRATION_DRAFT_MANIFEST
+}
+
 /// Drafts present when this binary was compiled and therefore absent from its registry.
 pub fn pending_migration_drafts() -> Vec<&'static str> {
-    let drafts = env!("LOOPFLOW_PENDING_MIGRATION_DRAFTS");
-    if drafts.is_empty() {
-        Vec::new()
-    } else {
-        drafts.split(',').collect()
-    }
+    migration_draft_manifest()
+        .iter()
+        .map(|draft| draft.name)
+        .collect()
 }
 
 fn parse_provenance(value: &str) -> Option<BuildProvenance> {
@@ -199,9 +205,9 @@ mod tests {
     use std::process::Command;
 
     use super::{
-        classify_revision, migration_authority, parse_provenance, pending_migration_drafts,
-        provenance, short_revision, source_identity_for, source_revision, source_root,
-        BuildFreshness, BuildProvenance, MigrationAuthority, BUILD_VERSION,
+        classify_revision, migration_authority, migration_draft_manifest, parse_provenance,
+        pending_migration_drafts, provenance, short_revision, source_identity_for, source_revision,
+        source_root, BuildFreshness, BuildProvenance, MigrationAuthority, BUILD_VERSION,
     };
 
     /// A throwaway `A -> B -> C` repo keeps classifier tests offline.
@@ -353,6 +359,11 @@ mod tests {
         assert!(pending_migration_drafts()
             .iter()
             .all(|name| !name.is_empty()));
+        for draft in migration_draft_manifest() {
+            assert_eq!(draft.id.len(), 32);
+            assert_eq!(draft.checksum.len(), 64);
+            assert!(draft.sql.is_empty() || draft.sql.ends_with('\n'));
+        }
         assert!(!source_revision().is_empty());
         let package_version = env!("CARGO_PKG_VERSION");
         assert!(

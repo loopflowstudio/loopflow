@@ -147,9 +147,13 @@ contracts, evidence loops, Wave goals, and directions.
 ```bash
 lf pr publish   # push + create or update PR (no browser)
 lf pr open      # publish, then open the PR for review
-lf pr submit    # prepare the exact head; you click merge
-lf pr land      # arm auto-merge; GitHub merges after required checks pass
+lf pr submit    # non-Task PR: prepare the exact head; you click merge
+lf pr arm       # arm exact-head auto-merge and return
+lf pr land      # watch, repair CI, and return after GitHub merges
 ```
+
+A managed Task ships only with `lf pr land` — its `finally` review is the single
+shipping decision, and `submit` (a human merge click) is refused inside a Task.
 
 ---
 
@@ -171,8 +175,9 @@ needed. From the CLI, `lf start shipper` does the same start.
 
 The Wave creates or selects a Linear task, starts it with `lf task run
 <issue-id>`, and stays steerable while the Task runs in its immutable
-worktree. CI failures and review feedback return to the same Task; linked
-events land in the Wave thread.
+worktree. `lf pr land` keeps the PR under one durable watcher through CI repair
+and merge; review feedback returns to the same Task and linked events land in
+the Wave thread.
 
 Detached processes use named tmux sessions for process lifetime and read-only
 inspection:

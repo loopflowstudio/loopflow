@@ -21,6 +21,7 @@
 //!   │ /status          → wave count + delivery count │
 //!   │ /waves/start     → local capability → start    │
 //!   │ /waves/stop      → local capability → stop     │
+//!   │ /landings/claim  → claim watched PR generation │
 //!   │ /linear/webhook  → verify → inbox → ingest     │
 //!   │ /github/webhook  → verify → prune worktree     │
 //!   └────────────────────────────────────────────────┘
@@ -58,6 +59,9 @@ use crate::engine::worktrees::{
 };
 use crate::harness::opencode_runtime::reap_orphaned_opencode_servers_at;
 use crate::id::WaveId;
+use crate::pr_landing::{
+    LandingClaim, LandingPlacement, PrLanding, PrLandingId, SUPERVISOR_STALE_AFTER,
+};
 use crate::repository::RepoId;
 use crate::store::provider_deliveries::{DeliveryCompletion, DeliveryEventKind, DeliveryStatus};
 use crate::store::Store;
@@ -72,6 +76,8 @@ const GITHUB_SIGNATURE_HEADER: &str = "x-hub-signature-256";
 const GITHUB_EVENT_HEADER: &str = "x-github-event";
 const ABANDONED_LOG_AGE: Duration = Duration::from_secs(24 * 60 * 60);
 const STARTUP_TIMEOUT: Duration = Duration::from_secs(10);
+const LANDING_CLAIM_TIMEOUT: Duration = Duration::from_secs(2);
+const LANDING_RECOVERY_INTERVAL: Duration = Duration::from_secs(30);
 
 #[derive(Debug, Clone)]
 pub struct StartupSignal {
@@ -175,6 +181,7 @@ pub fn router(state: LfdState) -> Router {
         .route("/waves/start", post(start_waves_handler))
         .route("/waves/reconcile", post(reconcile_waves_handler))
         .route("/waves/stop", post(stop_wave_handler))
+        .route("/landings/claim", post(claim_landing_handler))
         .route(
             "/linear/webhook",
             post(webhook_handler).layer(DefaultBodyLimit::max(WEBHOOK_BODY_LIMIT)),
@@ -192,16 +199,27 @@ pub fn router(state: LfdState) -> Router {
 struct HealthBody {
     status: String,
     home_id: HomeId,
+    store: String,
     runtime_generation: Option<u64>,
     build_version: Option<String>,
     source_revision: Option<String>,
     migration_frontier: Option<String>,
 }
 
+#[derive(Debug, Deserialize)]
+struct LivenessHealthBody {
+    status: String,
+    home_id: HomeId,
+}
+
 async fn health_handler(State(state): State<LfdState>) -> Json<HealthBody> {
     Json(HealthBody {
         status: "ok".to_string(),
         home_id: state.wave_host.home_id().clone(),
+        store: crate::store::database_path_from_env()
+            .expect("running lfd already opened its selected store")
+            .display()
+            .to_string(),
         runtime_generation: Some(crate::lf::commands::install::current_runtime_generation()),
         build_version: Some(crate::build_info::BUILD_VERSION.to_string()),
         source_revision: Some(crate::build_info::source_revision().to_string()),
@@ -286,6 +304,113 @@ fn authorize_wave_control(
             StatusCode::UNAUTHORIZED,
             "Wave control requires the local lfd capability".to_string(),
         ))
+    }
+}
+
+#[derive(Debug, Serialize, Deserialize)]
+struct ClaimLandingRequest {
+    landing_id: PrLandingId,
+    generation: u64,
+}
+
+async fn claim_landing_handler(
+    State(state): State<LfdState>,
+    headers: HeaderMap,
+    Json(request): Json<ClaimLandingRequest>,
+) -> Result<StatusCode, (StatusCode, String)> {
+    authorize_wave_control(&state, &headers)?;
+    let now = OffsetDateTime::now_utc();
+    let claim = LandingClaim {
+        placement: LandingPlacement::Home {
+            home_id: state.wave_host.home_id().clone(),
+        },
+        process_id: std::process::id(),
+        heartbeat_at: now,
+    };
+    let claimed = state
+        .store
+        .claim_pr_landing(
+            &request.landing_id,
+            request.generation,
+            &claim,
+            now - SUPERVISOR_STALE_AFTER,
+        )
+        .await
+        .map_err(|error| (StatusCode::INTERNAL_SERVER_ERROR, error.to_string()))?;
+    let Some(claimed) = claimed else {
+        return Ok(StatusCode::CONFLICT);
+    };
+    spawn_claimed_landing(state.store.clone(), claimed);
+    Ok(StatusCode::ACCEPTED)
+}
+
+fn spawn_claimed_landing(store: Arc<Store>, landing: PrLanding) {
+    tokio::spawn(async move {
+        let driver = crate::ops::pr_landing::github_landing_driver();
+        if let Err(error) = crate::ops::supervise_pr_landing(
+            store,
+            landing.clone(),
+            driver,
+            Duration::from_secs(30),
+        )
+        .await
+        {
+            tracing::warn!(landing = %landing.id, %error, "watched PR landing stopped");
+        }
+    });
+}
+
+async fn claim_recoverable_pr_landings(state: &LfdState, now: OffsetDateTime) -> Vec<PrLanding> {
+    let recoverable = match state
+        .store
+        .recoverable_pr_landings(now - SUPERVISOR_STALE_AFTER)
+        .await
+    {
+        Ok(landings) => landings,
+        Err(error) => {
+            tracing::warn!(%error, "could not scan watched PR landings");
+            return Vec::new();
+        }
+    };
+    let mut claimed = Vec::new();
+    for landing in recoverable {
+        let claim = LandingClaim {
+            placement: LandingPlacement::Home {
+                home_id: state.wave_host.home_id().clone(),
+            },
+            process_id: std::process::id(),
+            heartbeat_at: now,
+        };
+        match state
+            .store
+            .claim_pr_landing(
+                &landing.id,
+                landing.generation,
+                &claim,
+                now - SUPERVISOR_STALE_AFTER,
+            )
+            .await
+        {
+            Ok(Some(landing)) => claimed.push(landing),
+            Ok(None) => {}
+            Err(error) => {
+                tracing::warn!(landing = %landing.id, %error, "could not recover watched PR landing")
+            }
+        }
+    }
+    claimed
+}
+
+async fn recover_pr_landings(state: &LfdState) {
+    for landing in claim_recoverable_pr_landings(state, OffsetDateTime::now_utc()).await {
+        spawn_claimed_landing(state.store.clone(), landing);
+    }
+}
+
+async fn recover_pr_landings_forever(state: LfdState) {
+    loop {
+        recover_pr_landings(&state).await;
+        tokio::time::sleep(LANDING_RECOVERY_INTERVAL).await;
     }
 }
 
@@ -1089,6 +1214,8 @@ pub async fn serve(
     }
     let subscription_state = state.clone();
     tokio::spawn(async move { ensure_github_subscriptions(&subscription_state).await });
+    let landing_state = state.clone();
+    tokio::spawn(recover_pr_landings_forever(landing_state));
     tracing::info!(addr = %bound, home_id = %wave_host.home_id(), "lfd serving");
     let result = axum::serve(listener, router(state).into_make_service())
         .with_graceful_shutdown(shutdown_signal())
@@ -1133,16 +1260,77 @@ async fn shutdown_signal() {
 }
 
 pub(crate) async fn ensure(home_id: &HomeId, repo: &Path) -> anyhow::Result<()> {
-    if live_endpoint(home_id).await.is_some() {
+    ensure_with_selection(home_id, repo, None, None).await
+}
+
+pub(crate) async fn ensure_for_switch(
+    home_id: &HomeId,
+    repo: &Path,
+    switch_id: &str,
+) -> anyhow::Result<()> {
+    let selection = install_switch_selection(switch_id)?;
+    ensure_with_selection(home_id, repo, Some(&selection), Some(switch_id)).await
+}
+
+pub(crate) async fn ensure_install_selection(
+    home_id: &HomeId,
+    repo: &Path,
+    selection: &crate::machine_install::InstallSelection,
+) -> anyhow::Result<()> {
+    ensure_with_selection(home_id, repo, Some(selection), None).await
+}
+
+fn install_switch_selection(
+    switch_id: &str,
+) -> anyhow::Result<crate::machine_install::InstallSelection> {
+    match crate::machine_install::read_state(&crate::machine_install::root()?)? {
+        crate::machine_install::MachineInstallState::Switching(receipt)
+            if receipt.id == switch_id
+                && receipt.phase == crate::machine_install::SwitchPhase::Reconciling
+                && receipt.target_store_advanced =>
+        {
+            Ok(receipt.target.clone())
+        }
+        crate::machine_install::MachineInstallState::Switching(receipt) => {
+            anyhow::bail!(
+                "install switch {} is not reconciling as {switch_id}",
+                receipt.id
+            )
+        }
+        _ => anyhow::bail!("install switch {switch_id} is no longer active"),
+    }
+}
+
+async fn ensure_with_selection(
+    home_id: &HomeId,
+    repo: &Path,
+    selection: Option<&crate::machine_install::InstallSelection>,
+    switch_id: Option<&str>,
+) -> anyhow::Result<()> {
+    let lf_home = selection
+        .and_then(|selection| selection.store.parent().map(Path::to_path_buf))
+        .unwrap_or_else(crate::store::lf_home_dir);
+    let endpoints = lf_home.join("lfd");
+    if live_endpoint_at(home_id, &endpoints).await.is_some() {
         return Ok(());
     }
-    let _launch_lock = lock_start(home_id).await?;
-    if live_endpoint(home_id).await.is_some() {
+    let _launch_lock = lock_start_at(home_id, &endpoints).await?;
+    if live_endpoint_at(home_id, &endpoints).await.is_some() {
         return Ok(());
     }
-    let lfd = crate::engine::process::resolve_lfd_binary_checked()?;
+    let lfd = match selection {
+        Some(selection) => {
+            let daemon = selection
+                .artifact_set
+                .artifact(&crate::machine_install::ArtifactRole::Daemon)
+                .ok_or_else(|| anyhow::anyhow!("install selection has no daemon"))?;
+            daemon.verify()?;
+            daemon.path.clone()
+        }
+        None => crate::engine::process::resolve_lfd_binary_checked()?,
+    };
     let attempt_id = uuid::Uuid::new_v4().simple().to_string();
-    let startup_dir = endpoint_dir().join("startup");
+    let startup_dir = endpoints.join("startup");
     std::fs::create_dir_all(&startup_dir)?;
     let socket_id = &attempt_id[..12];
     let socket_dir = std::env::temp_dir().join(format!("lfd-{socket_id}"));
@@ -1160,7 +1348,7 @@ pub(crate) async fn ensure(home_id: &HomeId, repo: &Path) -> anyhow::Result<()> 
     };
     let receipt_path = startup_dir.join(format!("{attempt_id}.json"));
     let listener = tokio::net::UnixListener::bind(&socket_path)?;
-    let argv = vec![
+    let mut argv = vec![
         lfd.to_string_lossy().to_string(),
         "serve".to_string(),
         "--addr".to_string(),
@@ -1174,15 +1362,22 @@ pub(crate) async fn ensure(home_id: &HomeId, repo: &Path) -> anyhow::Result<()> 
         "--startup-socket".to_string(),
         socket_path.display().to_string(),
     ];
-    let launch = crate::engine::process::start_home_session(
-        &format!(
-            "lfd-{}",
-            crate::engine::process::tmux_session_slug(home_id.as_str())
-        ),
-        repo,
-        &argv,
-    )
-    .await;
+    if let Some(switch_id) = switch_id {
+        argv.extend(["--install-switch".to_string(), switch_id.to_string()]);
+    }
+    let session = format!(
+        "lfd-{}",
+        crate::engine::process::tmux_session_slug(home_id.as_str())
+    );
+    let launch = match selection {
+        Some(selection) => {
+            crate::engine::process::start_home_session_for_install_selection(
+                &session, repo, &argv, selection, switch_id,
+            )
+            .await
+        }
+        _ => crate::engine::process::start_home_session(&session, repo, &argv).await,
+    };
     if let Err(error) = launch {
         return Err(anyhow::anyhow!(
             "failed to start lfd for Home {home_id}: {error}"
@@ -1196,24 +1391,27 @@ pub(crate) async fn ensure(home_id: &HomeId, repo: &Path) -> anyhow::Result<()> 
     .map_err(|_| {
         anyhow::anyhow!(
             "lfd did not publish a live or failed startup receipt for Home {home_id} within 10s; inspect {}",
-            crate::store::lf_home_dir().join("logs/lfd.log").display()
+            lf_home.join("logs/lfd.log").display()
         )
     })??;
     match receipt.state {
         StartupState::Live {
             home_id: reported, ..
-        } if reported == *home_id => live_endpoint(home_id).await.map(|_| ()).ok_or_else(|| {
-            anyhow::anyhow!(
-                "lfd reported live for Home {home_id}, but its endpoint is not answering"
-            )
-        }),
+        } if reported == *home_id => live_endpoint_at(home_id, &endpoints)
+            .await
+            .map(|_| ())
+            .ok_or_else(|| {
+                anyhow::anyhow!(
+                    "lfd reported live for Home {home_id}, but its endpoint is not answering"
+                )
+            }),
         StartupState::Live {
             home_id: reported, ..
         } => Err(anyhow::anyhow!(
             "lfd startup reached Home {reported}, not requested Home {home_id}"
         )),
         StartupState::Failed { reason } => {
-            if live_endpoint(home_id).await.is_some() {
+            if live_endpoint_at(home_id, &endpoints).await.is_some() {
                 Ok(())
             } else {
                 Err(anyhow::anyhow!(
@@ -1248,6 +1446,34 @@ pub(crate) async fn start_waves(
             "lfd refused Wave start with HTTP {status}: {}",
             response.text().await.unwrap_or_default()
         ))
+    }
+}
+
+pub(crate) async fn claim_pr_landing(
+    home_id: &HomeId,
+    landing_id: &PrLandingId,
+    generation: u64,
+) -> anyhow::Result<bool> {
+    let Some(client) = live_endpoint(home_id).await else {
+        return Ok(false);
+    };
+    let response = reqwest::Client::new()
+        .post(format!("http://{}/landings/claim", client.endpoint))
+        .bearer_auth(&client.token)
+        .json(&ClaimLandingRequest {
+            landing_id: landing_id.clone(),
+            generation,
+        })
+        .timeout(LANDING_CLAIM_TIMEOUT)
+        .send()
+        .await?;
+    match response.status() {
+        StatusCode::ACCEPTED => Ok(true),
+        StatusCode::CONFLICT | StatusCode::NOT_FOUND => Ok(false),
+        status => Err(anyhow::anyhow!(
+            "lfd refused landing claim with HTTP {status}: {}",
+            response.text().await.unwrap_or_default()
+        )),
     }
 }
 
@@ -1307,14 +1533,18 @@ struct LfdClientEndpoint {
 }
 
 async fn live_endpoint(home_id: &HomeId) -> Option<LfdClientEndpoint> {
-    let client = read_endpoint(home_id)?;
+    live_endpoint_at(home_id, &endpoint_dir()).await
+}
+
+async fn live_endpoint_at(home_id: &HomeId, endpoints: &Path) -> Option<LfdClientEndpoint> {
+    let client = read_endpoint_at(home_id, endpoints)?;
     let health = reqwest::Client::new()
         .get(format!("http://{}/health", client.endpoint))
         .timeout(Duration::from_millis(500))
         .send()
         .await
         .ok()?
-        .json::<HealthBody>()
+        .json::<LivenessHealthBody>()
         .await
         .ok()?;
     (health.home_id == *home_id && health.status == "ok").then_some(client)
@@ -1324,8 +1554,15 @@ pub(crate) async fn home_is_live(home_id: &HomeId) -> bool {
     live_endpoint(home_id).await.is_some()
 }
 
+pub(crate) async fn home_is_live_at(home_id: &HomeId, lf_home: &Path) -> bool {
+    live_endpoint_at(home_id, &lf_home.join("lfd"))
+        .await
+        .is_some()
+}
+
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub(crate) struct HomeHealthIdentity {
+    pub store: PathBuf,
     pub runtime_generation: u64,
     pub build_version: String,
     pub source_revision: String,
@@ -1333,7 +1570,14 @@ pub(crate) struct HomeHealthIdentity {
 }
 
 pub(crate) async fn home_health_identity(home_id: &HomeId) -> Option<HomeHealthIdentity> {
-    let client = read_endpoint(home_id)?;
+    home_health_identity_at(home_id, &crate::store::lf_home_dir()).await
+}
+
+pub(crate) async fn home_health_identity_at(
+    home_id: &HomeId,
+    lf_home: &Path,
+) -> Option<HomeHealthIdentity> {
+    let client = read_endpoint_at(home_id, &lf_home.join("lfd"))?;
     let health = reqwest::Client::new()
         .get(format!("http://{}/health", client.endpoint))
         .timeout(Duration::from_millis(500))
@@ -1347,6 +1591,7 @@ pub(crate) async fn home_health_identity(home_id: &HomeId) -> Option<HomeHealthI
         return None;
     }
     Some(HomeHealthIdentity {
+        store: PathBuf::from(health.store),
         runtime_generation: health.runtime_generation?,
         build_version: health.build_version?,
         source_revision: health.source_revision?,
@@ -1355,7 +1600,11 @@ pub(crate) async fn home_health_identity(home_id: &HomeId) -> Option<HomeHealthI
 }
 
 fn endpoint_path(home_id: &HomeId) -> PathBuf {
-    endpoint_dir().join(format!("{}.endpoint", home_id.as_str()))
+    endpoint_path_at(home_id, &endpoint_dir())
+}
+
+fn endpoint_path_at(home_id: &HomeId, endpoints: &Path) -> PathBuf {
+    endpoints.join(format!("{}.endpoint", home_id.as_str()))
 }
 
 fn endpoint_dir() -> PathBuf {
@@ -1377,8 +1626,8 @@ fn lock_home(home_id: &HomeId) -> anyhow::Result<File> {
     Ok(file)
 }
 
-async fn lock_start(home_id: &HomeId) -> anyhow::Result<File> {
-    let path = endpoint_dir().join(format!("{}.start.lock", home_id.as_str()));
+async fn lock_start_at(home_id: &HomeId, endpoints: &Path) -> anyhow::Result<File> {
+    let path = endpoints.join(format!("{}.start.lock", home_id.as_str()));
     tokio::task::spawn_blocking(move || {
         if let Some(parent) = path.parent() {
             std::fs::create_dir_all(parent)?;
@@ -1435,7 +1684,11 @@ fn write_startup_receipt(path: &Path, receipt: &StartupReceipt) -> anyhow::Resul
 }
 
 fn read_endpoint(home_id: &HomeId) -> Option<LfdClientEndpoint> {
-    let bytes = std::fs::read(endpoint_path(home_id)).ok()?;
+    read_endpoint_at(home_id, &endpoint_dir())
+}
+
+fn read_endpoint_at(home_id: &HomeId, endpoints: &Path) -> Option<LfdClientEndpoint> {
+    let bytes = std::fs::read(endpoint_path_at(home_id, endpoints)).ok()?;
     serde_json::from_slice(&bytes).ok()
 }
 
@@ -1697,6 +1950,31 @@ mod tests {
         assert_eq!(turn_status, "partial");
     }
 
+    async fn open_landing_store(dir: &Path) -> Arc<Store> {
+        let path = dir.join("registry.db");
+        drop(open_store(dir).await);
+        let connection = rusqlite::Connection::open(&path).unwrap();
+        let migrated = connection
+            .query_row(
+                "SELECT EXISTS(SELECT 1 FROM sqlite_master WHERE type='table' AND name='pr_landings')",
+                [],
+                |row| row.get::<_, bool>(0),
+            )
+            .unwrap();
+        if !migrated {
+            connection
+                .execute_batch(&crate::store::migrations::migration_sql_for_test(
+                    "pr_landings",
+                ))
+                .unwrap();
+        }
+        Arc::new(
+            crate::store::open_store(&StorageConfig::sqlite(path))
+                .await
+                .unwrap(),
+        )
+    }
+
     #[tokio::test]
     async fn health_returns_ok() {
         let repo = tempfile::tempdir().unwrap();
@@ -1712,6 +1990,7 @@ mod tests {
         let body: serde_json::Value = resp.json().await.unwrap();
         assert_eq!(body["status"], "ok");
         assert_eq!(body["home_id"], home_id.as_str());
+        assert!(body["store"].as_str().is_some());
         assert!(body["runtime_generation"].is_number());
         assert_eq!(body["build_version"], crate::build_info::BUILD_VERSION);
         assert_eq!(
@@ -1721,6 +2000,81 @@ mod tests {
         assert_eq!(
             body["migration_frontier"],
             crate::store::migrations::latest_known_version()
+        );
+    }
+
+    #[test]
+    fn liveness_probe_accepts_health_from_a_pre_store_identity_daemon() {
+        let home_id = HomeId::new();
+        let body = serde_json::json!({
+            "status": "ok",
+            "home_id": home_id.as_str(),
+            "runtime_generation": 1,
+            "build_version": "0.12.8",
+            "source_revision": "published",
+            "migration_frontier": "0.12.8.001_release"
+        });
+
+        let health: LivenessHealthBody = serde_json::from_value(body).unwrap();
+
+        assert_eq!(health.status, "ok");
+        assert_eq!(health.home_id, home_id);
+    }
+
+    #[tokio::test]
+    async fn home_recovery_never_steals_a_live_landing_and_fences_a_stale_one() {
+        let repo = tempfile::tempdir().unwrap();
+        let store = open_landing_store(repo.path()).await;
+        let state = make_state(repo.path(), store.clone(), None).await;
+        let now = OffsetDateTime::now_utc();
+        let candidate = crate::pr_landing::PrLanding::new(
+            crate::pr_landing::NewPrLanding {
+                repo: "loopflowstudio/loopflow".to_string(),
+                pr_number: 248,
+                worktree: repo.path().to_path_buf(),
+                branch: "jack/watched-landing".to_string(),
+                task_id: None,
+                requested_head_sha: "head-a".to_string(),
+                after_merge: None,
+                next_slug: None,
+            },
+            now,
+        )
+        .unwrap();
+        let landing = store.start_or_join_pr_landing(&candidate).await.unwrap();
+        let local = store
+            .claim_pr_landing(
+                &landing.id,
+                landing.generation,
+                &LandingClaim {
+                    placement: LandingPlacement::Local,
+                    process_id: 41,
+                    heartbeat_at: now,
+                },
+                now - SUPERVISOR_STALE_AFTER,
+            )
+            .await
+            .unwrap()
+            .unwrap();
+
+        assert!(
+            claim_recoverable_pr_landings(&state, now + time::Duration::minutes(1))
+                .await
+                .is_empty()
+        );
+
+        let recovered =
+            claim_recoverable_pr_landings(&state, now + time::Duration::minutes(3)).await;
+        assert_eq!(recovered.len(), 1);
+        assert_eq!(recovered[0].generation, local.generation + 1);
+        assert_eq!(
+            recovered[0]
+                .supervisor
+                .as_ref()
+                .map(|owner| &owner.placement),
+            Some(&LandingPlacement::Home {
+                home_id: state.wave_host.home_id().clone(),
+            })
         );
     }
 

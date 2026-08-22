@@ -30,9 +30,9 @@ enum MockWaveFixture {
 
     /// Which detail-pane state the selected Wave renders. `selected` is the
     /// populated hierarchy; `loading` holds the pre-snapshot state so the plan
-    /// pane shows its loading affordance; `error` preserves the cached detail
-    /// under the "showing cached plan · live status unavailable" footer (the
-    /// PR #932 preservation behavior). A screenshot run picks one with
+    /// pane shows its loading affordance; `error` discards volatile detail and
+    /// leaves the authored plan under the "showing cached plan · live status
+    /// unavailable" footer. A screenshot run picks one with
     /// `LOOPFLOW_UI_TEST_DETAIL_STATE`, so the fixture covers every state the
     /// Proof names without a live registry.
     enum DetailState: String {
@@ -301,6 +301,67 @@ enum MockWaveFixture {
           ]
         }
       ],
+      "metric_portfolio": {
+        "metrics": [
+          {
+            "identity": {"wave_id": "wave-1", "metric_id": "task-loop-trust"},
+            "contract_revision": "aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa",
+            "name": "Task loops earn trust",
+            "description": "Fraction of Task epochs settled during the trailing seven days that either completed with every PR landed through Loopflow auto-merge or stopped with a non-resumable failure receipt. Open epochs are excluded. A user-landed PR or manual Git repair inside the Task epoch fails the metric.",
+            "project_id": "project-1",
+            "stage": "graduated",
+            "instrumented": true,
+            "instrument": "lifecycle-scorecard",
+            "unit": "ratio",
+            "target": {"kind": "at_least", "value": 1.0},
+            "window": "7d",
+            "freshness_policy": "30h",
+            "freshness": {"kind": "fresh", "source_time": "2026-08-20T18:00:00Z", "expires_at": "2026-08-22T00:00:00Z"},
+            "evidence": {"kind": "met", "value": 1.0, "source_window_start": "2026-08-13T18:00:00Z", "source_window_end": "2026-08-20T18:00:00Z"}
+          },
+          {
+            "identity": {"wave_id": "wave-1", "metric_id": "failure-ownership"},
+            "contract_revision": "bbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbb",
+            "name": "Failures leave with an owner",
+            "description": "Share of failed release runs assigned to one accountable Project before the next scheduled run.",
+            "project_id": "project-1",
+            "stage": "graduated",
+            "instrumented": true,
+            "instrument": "release-ledger",
+            "unit": "ratio",
+            "target": {"kind": "at_least", "value": 0.95},
+            "window": "30d",
+            "freshness_policy": "24h",
+            "freshness": {"kind": "fresh", "source_time": "2026-08-20T18:00:00Z", "expires_at": "2026-08-21T18:00:00Z"},
+            "evidence": {"kind": "missed", "value": 0.82, "source_window_start": "2026-07-21T18:00:00Z", "source_window_end": "2026-08-20T18:00:00Z"}
+          },
+          {
+            "identity": {"wave_id": "wave-1", "metric_id": "diagnosis-latency"},
+            "contract_revision": "cccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccc",
+            "name": "Diagnosis stays fast",
+            "description": "Median elapsed time from a failed release check to an actionable diagnosis.",
+            "project_id": "project-1",
+            "stage": "installed",
+            "instrumented": false,
+            "instrument": "incident-timeline",
+            "unit": "minutes",
+            "target": {"kind": "at_most", "value": 30.0},
+            "window": "14d",
+            "freshness_policy": "24h",
+            "freshness": {"kind": "never"},
+            "evidence": {"kind": "unknown", "cause": {"kind": "never"}}
+          }
+        ],
+        "contract_issues": [
+          {
+            "kind": "instrument_mismatch",
+            "wave_id": "wave-1",
+            "metric_id": "diagnosis-latency",
+            "contract_instrument": "incident-timeline",
+            "registered_instrument": "release-events-v1"
+          }
+        ]
+      },
       "unavailable_projects": [],
       "runs": {
         "state": "ok",

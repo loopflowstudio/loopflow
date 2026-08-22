@@ -168,6 +168,14 @@ Every line of code must earn its place. Readable code is not terse code; don't s
 
 Start with minimal data structures and APIs. If the core is right, trimming excess at the edges is straightforward.
 
+## Flexibility
+
+Meet the caller where they are. When code breaks because it assumed a fixed context—running on `main`, an un-owned worktree, an ambient home—accept the context and adapt to it. Resolve the right thing automatically; don't add a guard, a verification, an allowlist, or a precondition that refuses.
+
+Rigidity is usually what caused the failure: refuse the context, and someone works around the refusal and corrupts state. Flexibility deletes the whole failure class. Every guard is one more thing to remember and one more thing that can drift across hand-mirrored layers.
+
+The instinct on a bug is often a new check. Invert it: can the system adapt instead? Prefer dropping a precondition to adding one. If a fix reads as "extend the allowlist," "verify identity," or "add scaffolding," reframe it as a reduction before shipping. The best fix makes the system smaller and gets in our own way less.
+
 ## Wave Planning
 
 Use three planning nouns, and keep them distinct by kind rather than size:

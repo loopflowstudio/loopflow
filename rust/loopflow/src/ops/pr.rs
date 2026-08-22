@@ -823,10 +823,9 @@ impl GhRestPr {
 /// Read the required-check state for `branch`'s open PR from GitHub.
 ///
 /// Read the merge-gate state for `branch`'s head. `gh pr checks` exits non-zero
-/// while checks are pending or failing, so the exit status is ignored: what
-/// matters is whether stdout parses. Returns `None` when gh is unavailable, the
-/// PR has no required checks configured, or the output cannot be read — CI state
-/// is simply unknown, never a hard error on the reconcile path.
+/// while checks are pending or failing, so valid JSON outranks the exit status.
+/// A missing required-check set is distinct from an unreadable one: callers may
+/// wait on the former, while watched landing must surface or back off the latter.
 ///
 /// Branch protection frequently requires only an aggregate roll-up check (e.g.
 /// `tests-result`) whose own job link points at the aggregation step, not the
@@ -835,21 +834,19 @@ impl GhRestPr {
 /// checks handed to a ci-fix turn are the actionable *leaves* read from the full
 /// check set. Seeding a ci-fix turn with the aggregate gives the skill nothing
 /// to act on; seeding the leaves points it at the broken job.
-pub(crate) fn merge_gate_state(repo: &Path, branch: &str) -> Option<MergeGateReading> {
+pub(crate) fn merge_gate_state(repo: &Path, branch: &str) -> OpsResult<Option<MergeGateReading>> {
     if !gh_available() {
-        return None;
+        return Err(OpsError::Message("gh CLI not found".to_string()));
     }
-    // Empty stdout with a failure exit means "no required checks" (or an error we
-    // treat as unknown), not "all green" — distinguish by whether JSON parses.
     let required = read_check_set(repo, branch, true)?;
     if required.is_empty() {
-        return None;
+        return Ok(None);
     }
-    let full = read_check_set(repo, branch, false).unwrap_or_default();
-    Some(MergeGateReading::from_checks(required, full))
+    let full = read_check_set(repo, branch, false)?;
+    Ok(Some(MergeGateReading::from_checks(required, full)))
 }
 
-fn read_check_set(repo: &Path, branch: &str, required: bool) -> Option<Vec<GhCheck>> {
+fn read_check_set(repo: &Path, branch: &str, required: bool) -> OpsResult<Vec<GhCheck>> {
     let mut command = Command::new("gh");
     command.arg("pr").arg("checks").arg(branch);
     if required {
@@ -859,9 +856,39 @@ fn read_check_set(repo: &Path, branch: &str, required: bool) -> Option<Vec<GhChe
         .arg("--json")
         .arg("name,bucket,link")
         .current_dir(repo)
-        .output()
-        .ok()?;
-    serde_json::from_slice(&output.stdout).ok()
+        .output()?;
+    parse_check_set_output(
+        branch,
+        required,
+        output.status.success(),
+        &output.stdout,
+        &stderr_from_output(&output),
+    )
+}
+
+fn parse_check_set_output(
+    branch: &str,
+    required: bool,
+    succeeded: bool,
+    stdout: &[u8],
+    stderr: &str,
+) -> OpsResult<Vec<GhCheck>> {
+    if let Ok(checks) = serde_json::from_slice(stdout) {
+        return Ok(checks);
+    }
+    if required && stderr.to_ascii_lowercase().contains("no required checks") {
+        return Ok(Vec::new());
+    }
+    if !succeeded {
+        let required_flag = if required { " --required" } else { "" };
+        return Err(OpsError::CommandFailed {
+            command: format!("gh pr checks {branch}{required_flag}"),
+            stderr: stderr.to_string(),
+        });
+    }
+    Err(OpsError::Message(format!(
+        "could not parse GitHub check state for branch {branch}"
+    )))
 }
 
 /// The merge-gate reading for one head: whether the required checks block the
@@ -1462,9 +1489,9 @@ fn truncate_chars(text: &str, max_chars: usize) -> String {
 #[cfg(test)]
 mod tests {
     use super::{
-        classify_pr_read_failure, is_missing_pr, normalize_task_pr_copy, parse_generated_pr_copy,
-        pr_number_from_url, GhCheck, GhRestHead, GhRestPr, MergeGateReading, PrCopy,
-        RequiredChecks, TaskPrCopyLifecycle,
+        classify_pr_read_failure, is_missing_pr, normalize_task_pr_copy, parse_check_set_output,
+        parse_generated_pr_copy, pr_number_from_url, GhCheck, GhRestHead, GhRestPr,
+        MergeGateReading, PrCopy, RequiredChecks, TaskPrCopyLifecycle,
     };
     use crate::ops::task::TaskPrContext;
     use crate::task::TaskLifecyclePlan;
@@ -1576,6 +1603,29 @@ mod tests {
             RequiredChecks::from_checks(vec![check("build", "pass"), check("lint", "skipping")]);
         assert!(!checks.failing);
         assert!(!checks.pending);
+    }
+
+    #[test]
+    fn unreadable_required_checks_remain_an_error() {
+        let error = parse_check_set_output(
+            "jack/task",
+            true,
+            false,
+            b"",
+            "HTTP 403: authentication required",
+        )
+        .unwrap_err();
+        assert!(error.to_string().contains("authentication required"));
+
+        assert!(parse_check_set_output(
+            "jack/task",
+            true,
+            false,
+            b"",
+            "no required checks reported on branch",
+        )
+        .unwrap()
+        .is_empty());
     }
 
     #[test]

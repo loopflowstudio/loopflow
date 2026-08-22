@@ -1,7 +1,43 @@
--- name: status_truth
--- id: b75f82f77cfb4c8ea2eb4a281c4af03c
--- depends_on:
+-- draft: project_metric_observations
+CREATE TABLE metric_instruments (
+    wave_id TEXT NOT NULL REFERENCES waves(id) ON DELETE CASCADE,
+    metric_id TEXT NOT NULL,
+    instrument TEXT NOT NULL,
+    registered_at INTEGER NOT NULL,
+    PRIMARY KEY (wave_id, metric_id)
+);
 
+CREATE TABLE metric_observations (
+    observation_id TEXT PRIMARY KEY,
+    wave_id TEXT NOT NULL REFERENCES waves(id) ON DELETE CASCADE,
+    metric_id TEXT NOT NULL,
+    contract_revision TEXT NOT NULL,
+    instrument TEXT NOT NULL,
+    source_time_seconds INTEGER NOT NULL,
+    source_time_nanoseconds INTEGER NOT NULL,
+    received_at INTEGER NOT NULL,
+    graduation_qualifying INTEGER NOT NULL,
+    payload TEXT NOT NULL
+);
+
+CREATE INDEX metric_observations_identity_source
+ON metric_observations (
+    wave_id,
+    metric_id,
+    source_time_seconds,
+    source_time_nanoseconds,
+    observation_id
+);
+
+CREATE INDEX metric_observations_contract_evidence
+ON metric_observations (
+    wave_id,
+    metric_id,
+    contract_revision,
+    graduation_qualifying
+);
+
+-- draft: status_truth
 CREATE TABLE run_liveness (
     run_id TEXT PRIMARY KEY REFERENCES runs(id) ON DELETE CASCADE,
     home_id TEXT NOT NULL REFERENCES homes(id) ON DELETE RESTRICT,

@@ -9,6 +9,7 @@ use std::sync::{Arc, Mutex};
 use std::time::Instant;
 
 use serde::{Deserialize, Serialize};
+use serde_json::{json, Map, Value};
 use sha2::{Digest, Sha256};
 use time::OffsetDateTime;
 
@@ -20,7 +21,34 @@ use crate::store::{StoreError, StoreResult};
 
 pub use crate::durable::{AgentInvocationId, TurnId};
 
-pub const TRACE_SCHEMA_VERSION: u32 = 1;
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+enum TraceSchemaVersion {
+    V1,
+}
+
+impl TraceSchemaVersion {
+    // Breaking changes to a persisted payload discriminator, required field,
+    // or field meaning allocate a new variant. Keep every older variant in the
+    // reader dispatch and freeze the new emitted shape in a fixture.
+    const CURRENT: Self = Self::V1;
+
+    const fn version(self) -> u32 {
+        match self {
+            Self::V1 => 1,
+        }
+    }
+
+    fn parse(version: u64) -> StoreResult<Self> {
+        match version {
+            1 => Ok(Self::V1),
+            _ => Err(StoreError::InvalidData(format!(
+                "unsupported trace schema version: {version}"
+            ))),
+        }
+    }
+}
+
+pub const TRACE_SCHEMA_VERSION: u32 = TraceSchemaVersion::CURRENT.version();
 pub const TOKENIZER: &str = "cl100k_base";
 
 #[derive(Debug, Clone)]
@@ -1645,6 +1673,194 @@ pub struct ConversationRead {
     pub incomplete_tail: bool,
 }
 
+// Schema version 1 outlived two usage enum vocabularies. Keep compatibility at
+// the reader boundary, limited to shapes observed in the long-lived ledger;
+// the emitter continues to write `usage_checkpoint`.
+const HISTORICAL_OUTER_USAGE_FIELDS: &[&[&str]] = &[
+    &["input_tokens", "output_tokens", "cache_read_tokens"],
+    &[
+        "input_tokens",
+        "output_tokens",
+        "total_input_tokens",
+        "cache_read_tokens",
+    ],
+    &[
+        "input_tokens",
+        "output_tokens",
+        "cache_read_tokens",
+        "cost_usd",
+    ],
+    &[
+        "input_tokens",
+        "output_tokens",
+        "total_input_tokens",
+        "cache_read_tokens",
+        "cost_usd",
+    ],
+];
+const HISTORICAL_INNER_USAGE_FIELDS: &[&[&str]] = &[
+    &[
+        "input_tokens",
+        "output_tokens",
+        "reasoning_tokens",
+        "cache_read_tokens",
+    ],
+    &[
+        "input_tokens",
+        "output_tokens",
+        "total_input_tokens",
+        "peak_input_tokens",
+        "context_window_tokens",
+        "reasoning_tokens",
+        "cache_read_tokens",
+    ],
+];
+
+fn _require_exact_fields(
+    value: &Map<String, Value>,
+    accepted: &[&[&str]],
+    label: &str,
+) -> StoreResult<()> {
+    if accepted.iter().any(|fields| {
+        value.len() == fields.len() && fields.iter().all(|field| value.contains_key(*field))
+    }) {
+        return Ok(());
+    }
+    let mut fields = value.keys().map(String::as_str).collect::<Vec<_>>();
+    fields.sort_unstable();
+    Err(StoreError::InvalidData(format!(
+        "{label} has unsupported fields: {}",
+        fields.join(", ")
+    )))
+}
+
+fn _validate_historical_usage(value: &Value, accepted: &[&[&str]], label: &str) -> StoreResult<()> {
+    let fields = value
+        .as_object()
+        .ok_or_else(|| StoreError::InvalidData(format!("{label} must be an object")))?;
+    _require_exact_fields(fields, accepted, label)?;
+    if let Some((field, _)) = fields.iter().find(|(_, value)| value.is_null()) {
+        return Err(StoreError::InvalidData(format!(
+            "{label}.{field} must not be null"
+        )));
+    }
+    Ok(())
+}
+
+fn _normalize_historical_usage(value: &mut Value) -> StoreResult<bool> {
+    let outer = value.pointer("/payload/type").and_then(Value::as_str) == Some("usage");
+    let inner = value.pointer("/payload/event/type").and_then(Value::as_str) == Some("turn_usage");
+    if !outer && !inner {
+        return Ok(false);
+    }
+
+    let record = value
+        .as_object()
+        .ok_or_else(|| StoreError::InvalidData("recorded event must be an object".to_string()))?;
+    _require_exact_fields(
+        record,
+        &[&["schema_version", "seq", "ts", "turn_id", "payload"]],
+        if outer {
+            "recorded usage event"
+        } else {
+            "recorded turn usage event"
+        },
+    )?;
+    let payload = record
+        .get("payload")
+        .and_then(Value::as_object)
+        .ok_or_else(|| {
+            StoreError::InvalidData("recorded usage payload must be an object".into())
+        })?;
+
+    let (turn_id, usage, accepted_usage_fields, usage_label) = if outer {
+        _require_exact_fields(payload, &[&["type", "usage"]], "recorded usage payload")?;
+        let turn_id = record
+            .get("turn_id")
+            .and_then(Value::as_str)
+            .filter(|turn_id| !turn_id.is_empty())
+            .ok_or_else(|| {
+                StoreError::InvalidData("recorded usage event must name its turn".to_string())
+            })?;
+        (
+            Value::String(turn_id.to_string()),
+            payload
+                .get("usage")
+                .expect("exact outer usage fields include usage")
+                .clone(),
+            HISTORICAL_OUTER_USAGE_FIELDS,
+            "recorded usage payload",
+        )
+    } else {
+        _require_exact_fields(
+            payload,
+            &[&["type", "event"]],
+            "recorded turn usage payload",
+        )?;
+        let event = payload
+            .get("event")
+            .and_then(Value::as_object)
+            .ok_or_else(|| {
+                StoreError::InvalidData("recorded turn usage event must be an object".to_string())
+            })?;
+        _require_exact_fields(
+            event,
+            &[&["type", "turn_id", "usage"]],
+            "recorded turn usage event",
+        )?;
+        (
+            event
+                .get("turn_id")
+                .expect("exact inner usage fields include turn_id")
+                .clone(),
+            event
+                .get("usage")
+                .expect("exact inner usage fields include usage")
+                .clone(),
+            HISTORICAL_INNER_USAGE_FIELDS,
+            "recorded turn usage",
+        )
+    };
+    _validate_historical_usage(&usage, accepted_usage_fields, usage_label)?;
+
+    value
+        .as_object_mut()
+        .expect("validated recorded event object")
+        .insert(
+            "payload".to_string(),
+            json!({
+                "type": "conversation",
+                "event": {
+                    "type": "usage_checkpoint",
+                    "turn_id": turn_id,
+                    "usage": usage,
+                    "final_receipt": true
+                }
+            }),
+        );
+    Ok(true)
+}
+
+fn _decode_versioned_conversation_event(
+    line: &str,
+    current_error: serde_json::Error,
+) -> StoreResult<RecordedConversationEvent> {
+    let mut value: Value = serde_json::from_str(line)?;
+    let schema_version = value
+        .get("schema_version")
+        .and_then(Value::as_u64)
+        .ok_or_else(|| {
+            StoreError::InvalidData("recorded event has no numeric schema version".to_string())
+        })?;
+    match TraceSchemaVersion::parse(schema_version)? {
+        TraceSchemaVersion::V1 if !_normalize_historical_usage(&mut value)? => {
+            return Err(current_error.into());
+        }
+        TraceSchemaVersion::V1 => {}
+    }
+    Ok(serde_json::from_value(value)?)
+}
+
 pub fn read_conversation_status(path: &Path) -> StoreResult<ConversationRead> {
     let file = fs::File::open(path)
         .map_err(|error| StoreError::InvalidData(format!("open {}: {error}", path.display())))?;
@@ -1662,13 +1878,16 @@ pub fn read_conversation_status(path: &Path) -> StoreResult<ConversationRead> {
         if line.trim().is_empty() {
             continue;
         }
-        match serde_json::from_str(&line) {
-            Ok(event) => events.push(event),
-            Err(_) if !line.ends_with('\n') => {
+        match serde_json::from_str::<RecordedConversationEvent>(&line) {
+            Ok(event) => {
+                TraceSchemaVersion::parse(u64::from(event.schema_version))?;
+                events.push(event);
+            }
+            Err(error) if !line.ends_with('\n') && error.is_eof() => {
                 incomplete_tail = true;
                 break;
             }
-            Err(error) => return Err(error.into()),
+            Err(error) => events.push(_decode_versioned_conversation_event(&line, error)?),
         }
     }
     Ok(ConversationRead {
@@ -1682,10 +1901,18 @@ mod tests {
     use super::{
         provider_session_id, read_conversation_status, resolve_artifact, CaptureHandle,
         ContextAssetKind, ContextAssetSpec, ContextChannel, ContextScope, PreparedTurnContext,
-        TraceCaptureContext,
+        RecordedConversationEvent, RecordedConversationPayload, TraceCaptureContext,
+        TraceSchemaVersion, TRACE_SCHEMA_VERSION,
     };
     use crate::id::{ExecId, TraceId};
     use time::OffsetDateTime;
+
+    fn _conversation_error(line: &str) -> String {
+        let dir = tempfile::tempdir().unwrap();
+        let path = dir.path().join("events.jsonl");
+        std::fs::write(&path, format!("{line}\n")).unwrap();
+        read_conversation_status(&path).unwrap_err().to_string()
+    }
 
     #[test]
     fn prompt_manifest_covers_exact_bytes_and_tokens() {
@@ -1718,7 +1945,107 @@ mod tests {
             "{\"schema_version\":1,\"seq\":0,\"ts\":\"2026-07-10T00:00:00Z\",\"turn_id\":null,\"payload\":{\"type\":\"capture_error\",\"message\":\"x\"}}\n{\"schema_version\":",
         )
         .unwrap();
-        assert_eq!(read_conversation_status(&path).unwrap().events.len(), 1);
+        let read = read_conversation_status(&path).unwrap();
+        assert_eq!(read.events.len(), 1);
+        assert!(read.incomplete_tail);
+    }
+
+    #[test]
+    fn conversation_reader_normalizes_every_persisted_usage_variant() {
+        let dir = tempfile::tempdir().unwrap();
+        let path = dir.path().join("events.jsonl");
+        std::fs::write(
+            &path,
+            include_str!("../tests/fixtures/trace/historical_usage_variants.jsonl"),
+        )
+        .unwrap();
+
+        let read = read_conversation_status(&path).unwrap();
+        assert!(!read.incomplete_tail);
+        assert_eq!(read.events.len(), 6);
+        let checkpoints = read
+            .events
+            .into_iter()
+            .map(|record| match record.payload {
+                RecordedConversationPayload::Conversation { event } => match *event {
+                    crate::chat::types::ConversationEvent::UsageCheckpoint {
+                        turn_id,
+                        usage,
+                        final_receipt,
+                    } => (turn_id, usage, final_receipt),
+                    event => panic!("expected usage checkpoint, got {event:?}"),
+                },
+                payload => panic!("expected conversation payload, got {payload:?}"),
+            })
+            .collect::<Vec<_>>();
+
+        assert!(checkpoints
+            .iter()
+            .all(|(_, _, final_receipt)| *final_receipt));
+        assert_eq!(
+            checkpoints
+                .iter()
+                .map(|(turn_id, _, _)| turn_id.as_str())
+                .collect::<Vec<_>>(),
+            [
+                "turn_00000000000000000000000000000001",
+                "turn_00000000000000000000000000000002",
+                "turn_00000000000000000000000000000003",
+                "turn_00000000000000000000000000000004",
+                "provider-turn-basic",
+                "provider-turn-context",
+            ]
+        );
+        assert_eq!(checkpoints[0].1.total_input_tokens, None);
+        assert_eq!(checkpoints[1].1.total_input_tokens, Some(24));
+        assert_eq!(checkpoints[2].1.cost_usd, Some(0.03));
+        assert_eq!(checkpoints[3].1.cost_usd, Some(0.04));
+        assert_eq!(checkpoints[4].1.context_window_tokens, None);
+        assert_eq!(checkpoints[5].1.context_window_tokens, Some(200_000));
+    }
+
+    #[test]
+    fn conversation_usage_checkpoint_wire_shape_is_frozen_for_current_schema() {
+        let expected =
+            include_str!("../tests/fixtures/trace/current_usage_checkpoint.jsonl").trim_end();
+        let event: RecordedConversationEvent = serde_json::from_str(expected).unwrap();
+
+        assert_eq!(
+            TraceSchemaVersion::parse(u64::from(TRACE_SCHEMA_VERSION)).unwrap(),
+            TraceSchemaVersion::CURRENT
+        );
+        assert_eq!(event.schema_version, TRACE_SCHEMA_VERSION);
+        assert_eq!(serde_json::to_string(&event).unwrap(), expected);
+    }
+
+    #[test]
+    fn conversation_reader_rejects_partial_or_unknown_historical_usage() {
+        let error = _conversation_error(
+            r#"{"schema_version":1,"seq":0,"ts":"2026-07-10T00:00:00Z","turn_id":"turn_00000000000000000000000000000001","payload":{"type":"usage","usage":{"input_tokens":10,"output_tokens":1}}}"#,
+        );
+        assert!(error.contains("recorded usage payload has unsupported fields"));
+
+        let error = _conversation_error(
+            r#"{"schema_version":1,"seq":0,"ts":"2026-07-10T00:00:00Z","turn_id":"turn_00000000000000000000000000000001","payload":{"type":"usage","usage":{"input_tokens":10,"output_tokens":1,"cache_read_tokens":2,"model":"future-model"}}}"#,
+        );
+        assert!(error.contains("recorded usage payload has unsupported fields"));
+
+        let error = _conversation_error(
+            r#"{"schema_version":1,"seq":0,"ts":"2026-07-10T00:00:00Z","turn_id":"turn_00000000000000000000000000000001","payload":{"type":"usage","usage":{"input_tokens":10,"output_tokens":null,"cache_read_tokens":2}}}"#,
+        );
+        assert!(error.contains("recorded usage payload.output_tokens must not be null"));
+    }
+
+    #[test]
+    fn conversation_reader_rejects_unknown_schema_and_event_types() {
+        let error = _conversation_error(
+            r#"{"schema_version":2,"seq":0,"ts":"2026-07-10T00:00:00Z","turn_id":null,"payload":{"type":"capture_error","message":"future"}}"#,
+        );
+        assert!(error.contains("unsupported trace schema version: 2"));
+
+        _conversation_error(
+            r#"{"schema_version":1,"seq":0,"ts":"2026-07-10T00:00:00Z","turn_id":"turn_00000000000000000000000000000001","payload":{"type":"conversation","event":{"type":"future_usage","turn_id":"provider-turn","usage":{"input_tokens":10}}}}"#,
+        );
     }
 
     #[test]

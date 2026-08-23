@@ -971,12 +971,6 @@ fn trace_events(
 
     for invocation in selected {
         let path = crate::trace::resolve_artifact(&invocation.conversation_path)?;
-        let file = std::fs::File::open(&path).map_err(|error| {
-            anyhow!(
-                "normalized conversation missing at {}: {error}",
-                path.display()
-            )
-        })?;
         if !jsonl && invocations.len() > 1 {
             println!(
                 "invocation {}  {}  {}",
@@ -985,25 +979,40 @@ fn trace_events(
                 invocation.capture_status
             );
         }
-        let mut reader = BufReader::new(file);
-        loop {
-            let mut line = String::new();
-            if reader.read_line(&mut line)? == 0 {
-                break;
-            }
-            if line.trim().is_empty() {
-                continue;
-            }
-            let parsed = serde_json::from_str::<crate::trace::RecordedConversationEvent>(&line);
-            if parsed.is_err() && !line.ends_with('\n') {
-                break;
-            }
-            if jsonl {
+
+        if jsonl {
+            let file = std::fs::File::open(&path).map_err(|error| {
+                anyhow!(
+                    "normalized conversation missing at {}: {error}",
+                    path.display()
+                )
+            })?;
+            let mut reader = BufReader::new(file);
+            loop {
+                let mut line = String::new();
+                if reader.read_line(&mut line)? == 0 {
+                    break;
+                }
+                if line.trim().is_empty() {
+                    continue;
+                }
+                let parsed = serde_json::from_str::<crate::trace::RecordedConversationEvent>(&line);
+                if parsed.is_err() && !line.ends_with('\n') {
+                    break;
+                }
                 print!("{line}");
-                continue;
             }
-            let event = parsed?;
-            print_recorded_event(&event);
+            continue;
+        }
+
+        let conversation = crate::trace::read_conversation_status(&path).map_err(|error| {
+            anyhow!(
+                "normalized conversation unreadable at {}: {error}",
+                path.display()
+            )
+        })?;
+        for event in &conversation.events {
+            print_recorded_event(event);
         }
     }
     Ok(())

@@ -1385,7 +1385,223 @@ fn _print_text(result: &ReplayCheckDto) {
 
 #[cfg(test)]
 mod tests {
+    use std::collections::BTreeMap;
+    use std::ffi::OsString;
+    use std::fs;
+    #[cfg(unix)]
+    use std::os::unix::fs::PermissionsExt;
+    use std::path::{Path, PathBuf};
+    use std::process::Command;
+
     use super::*;
+    use crate::chat::types::{ConversationEvent, Lifecycle};
+    use crate::engine::agent::{
+        prepare_agent_invocation, AgentConfig, AgentRunContext, AgentWriteScope, ProcessConfig,
+    };
+    use crate::id::{ExecId, TraceId};
+    use crate::provider_account::new_account;
+    use crate::provider_auth::Provider;
+    use crate::store::{ProviderAccountId, StorageConfig};
+    use crate::trace::{CaptureHandle, CaptureStart, PreparedTurnContext, TraceCaptureContext};
+
+    struct AccountEnvironment {
+        lease: Option<OsString>,
+        selection: Option<OsString>,
+    }
+
+    impl AccountEnvironment {
+        fn clear() -> Self {
+            let lease = std::env::var_os(crate::provider_account::lease::ACCOUNT_LEASE_ENV);
+            let selection = std::env::var_os(crate::provider_account::lease::ACCOUNT_SELECTION_ENV);
+            std::env::remove_var(crate::provider_account::lease::ACCOUNT_LEASE_ENV);
+            std::env::remove_var(crate::provider_account::lease::ACCOUNT_SELECTION_ENV);
+            Self { lease, selection }
+        }
+    }
+
+    impl Drop for AccountEnvironment {
+        fn drop(&mut self) {
+            for (name, value) in [
+                (
+                    crate::provider_account::lease::ACCOUNT_LEASE_ENV,
+                    self.lease.as_ref(),
+                ),
+                (
+                    crate::provider_account::lease::ACCOUNT_SELECTION_ENV,
+                    self.selection.as_ref(),
+                ),
+            ] {
+                match value {
+                    Some(value) => std::env::set_var(name, value),
+                    None => std::env::remove_var(name),
+                }
+            }
+        }
+    }
+
+    struct ProducerFixture {
+        _account_environment: AccountEnvironment,
+        guard: crate::journal::TestLedgerGuard,
+        repo: PathBuf,
+        capture: CaptureHandle,
+        launch: AgentConfig,
+        process: ProcessConfig,
+        account_id: ProviderAccountId,
+        account_home: PathBuf,
+        sentinel: PathBuf,
+    }
+
+    fn _run_git(repo: &Path, args: &[&str]) {
+        let status = Command::new("git")
+            .arg("-C")
+            .arg(repo)
+            .args(args)
+            .status()
+            .unwrap();
+        assert!(status.success(), "git {args:?} failed");
+    }
+
+    fn _artifact_snapshot(root: &Path) -> Vec<(PathBuf, Vec<u8>)> {
+        fn collect(root: &Path, path: &Path, snapshot: &mut Vec<(PathBuf, Vec<u8>)>) {
+            let mut entries = fs::read_dir(path)
+                .unwrap()
+                .map(|entry| entry.unwrap().path())
+                .collect::<Vec<_>>();
+            entries.sort();
+            for entry in entries {
+                if entry.is_dir() {
+                    collect(root, &entry, snapshot);
+                } else {
+                    snapshot.push((
+                        entry.strip_prefix(root).unwrap().to_path_buf(),
+                        fs::read(&entry).unwrap(),
+                    ));
+                }
+            }
+        }
+
+        let mut snapshot = Vec::new();
+        collect(root, root, &mut snapshot);
+        snapshot
+    }
+
+    fn _producer_fixture() -> ProducerFixture {
+        let guard = crate::journal::TestLedgerGuard::new();
+        let account_environment = AccountEnvironment::clear();
+        let repo = guard.home().join("repo");
+        fs::create_dir_all(&repo).unwrap();
+        _run_git(&repo, &["init", "-b", "main"]);
+        fs::write(repo.join("README.md"), "replay producer proof\n").unwrap();
+        _run_git(&repo, &["add", "README.md"]);
+        _run_git(&repo, &["config", "user.name", "Loopflow Test"]);
+        _run_git(&repo, &["config", "user.email", "loopflow@example.com"]);
+        _run_git(&repo, &["commit", "-m", "proof"]);
+        let repo = repo.canonicalize().unwrap();
+
+        let bin = guard.home().join("bin");
+        fs::create_dir_all(&bin).unwrap();
+        let codex = bin.join("codex");
+        fs::write(&codex, "#!/bin/sh\n: > \"${0}.started\"\nexit 99\n").unwrap();
+        #[cfg(unix)]
+        {
+            let mut permissions = fs::metadata(&codex).unwrap().permissions();
+            permissions.set_mode(0o700);
+            fs::set_permissions(&codex, permissions).unwrap();
+        }
+        let sentinel = bin.join("codex.started");
+
+        let account_id = ProviderAccountId::parse("replay-test").unwrap();
+        let account_home = guard.home().join("accounts/codex/replay-test");
+        fs::create_dir_all(&account_home).unwrap();
+        fs::write(
+            account_home.join("config.toml"),
+            "web_search = \"live\"\nnotify = [\"echo\"]\n[sandbox_workspace_write]\nnetwork_access = true\n[mcp_servers.remote]\nurl = \"https://example.test\"\n",
+        )
+        .unwrap();
+        let account = new_account(
+            Provider::Codex,
+            account_id.clone(),
+            account_home.clone(),
+            None,
+        );
+        let runtime = tokio::runtime::Runtime::new().unwrap();
+        runtime.block_on(async {
+            let store =
+                crate::store::open_store(&StorageConfig::sqlite(guard.home().join("loopflow.db")))
+                    .await
+                    .unwrap();
+            store.upsert_provider_account(&account).await.unwrap();
+            store.apply_migration_for_test("replay_contracts").unwrap();
+        });
+
+        let capture = CaptureHandle::begin(
+            TraceCaptureContext {
+                run_id: TraceId::new(),
+                process_id: ExecId::new(),
+                repo: repo.clone(),
+                worktree: repo.clone(),
+                wave: None,
+                project: None,
+                task: None,
+                flow: None,
+                skill: Some("producer-proof".to_string()),
+            },
+            PreparedTurnContext::from_prompts("system", "task"),
+            CaptureStart {
+                provider: "codex".to_string(),
+                model: Some("gpt-5.6".to_string()),
+                surface: "headless".to_string(),
+                input_op: "initial".to_string(),
+                gather_ms: 1,
+                render_ms: 1,
+                raw_provider: true,
+                basis: None,
+                supervision: None,
+            },
+        )
+        .unwrap();
+        let launch = AgentConfig {
+            system_prompt: "system".to_string(),
+            task_prompt: "task".to_string(),
+            agent: Some("codex:gpt-5.6".to_string()),
+            cwd: Some(repo.clone()),
+            run_context: AgentRunContext::Detached,
+            write_scope: AgentWriteScope::Worktree,
+            env: BTreeMap::from([("PATH".to_string(), bin.display().to_string())]),
+            replay_safe: true,
+            ..Default::default()
+        };
+        let process = ProcessConfig {
+            auto: true,
+            stream: true,
+            capture: Some(capture.clone()),
+            ..Default::default()
+        };
+        ProducerFixture {
+            _account_environment: account_environment,
+            guard,
+            repo,
+            capture,
+            launch,
+            process,
+            account_id,
+            account_home,
+            sentinel,
+        }
+    }
+
+    fn _prepare(fixture: &ProducerFixture) -> crate::engine::agent::PreparedAgentInvocation {
+        let prepared = prepare_agent_invocation(
+            &fixture.launch,
+            &fixture.process,
+            &fixture.capture,
+            Some(fixture.account_id.clone()),
+        )
+        .unwrap()
+        .expect("native Codex capture should prepare");
+        assert!(!fixture.sentinel.exists());
+        prepared
+    }
 
     #[test]
     fn every_refusal_code_has_a_stable_snake_case_name() {
@@ -1418,5 +1634,210 @@ mod tests {
                 format!("\"{}\"", code.as_str())
             );
         }
+    }
+
+    #[test]
+    fn complete_native_codex_capture_is_bound_before_launch_and_replay_eligible() {
+        let fixture = _producer_fixture();
+        let prepared = _prepare(&fixture);
+        for expected in [
+            "sandbox_workspace_write.network_access=false",
+            "web_search=\"disabled\"",
+            "tools.web_search=false",
+            "features.apps=false",
+            "features.remote_plugin=false",
+            "mcp_servers.remote.enabled=false",
+            "notify=[]",
+        ] {
+            assert!(
+                prepared.argv().iter().any(|value| value == expected),
+                "missing replay-safe Codex override {expected}"
+            );
+        }
+        let invocation_id = fixture.capture.invocation_id().to_string();
+        let store = crate::journal::open_ledger().unwrap();
+        let capturing = store
+            .agent_invocations_matching_address(&invocation_id)
+            .unwrap()
+            .pop()
+            .unwrap();
+        assert_eq!(capturing.capture_status, "capturing");
+        assert_eq!(capturing.model.as_deref(), Some("gpt-5.6"));
+        assert!(store
+            .replay_contract_for_invocation(&invocation_id)
+            .unwrap()
+            .is_none());
+        assert!(fs::read_dir(fixture.capture.artifact_dir())
+            .unwrap()
+            .map(|entry| entry.unwrap().file_name().to_string_lossy().into_owned())
+            .any(|name| name.starts_with("execution-contract-v1-")));
+
+        fixture
+            .capture
+            .record_conversation(ConversationEvent::TurnStarted {
+                turn_id: "provider-turn".to_string(),
+            });
+        fixture
+            .capture
+            .record_conversation(ConversationEvent::TurnCompleted {
+                turn_id: "provider-turn".to_string(),
+                status: Lifecycle::Completed,
+            });
+        fixture.capture.finish("completed", false).unwrap();
+
+        let before = _artifact_snapshot(&fixture.capture.artifact_dir());
+        let first = check(&store, fixture.guard.home(), &invocation_id).unwrap();
+        let second = check(&store, fixture.guard.home(), &invocation_id).unwrap();
+        assert!(first.eligible, "replay refusal: {:?}", first.reasons);
+        assert_eq!(first, second);
+        assert_eq!(before, _artifact_snapshot(&fixture.capture.artifact_dir()));
+        assert!(!fixture.sentinel.exists());
+    }
+
+    #[test]
+    fn complete_managed_codex_capture_keeps_its_unsafe_delivery_authority() {
+        let mut fixture = _producer_fixture();
+        fixture.launch.replay_safe = false;
+        fixture.launch.run_context = AgentRunContext::Inherit;
+        fixture.launch.write_scope = AgentWriteScope::Configured;
+        fixture.launch.execution_boundary = Some(crate::engine::agent::AgentExecutionBoundary {
+            writable_roots: vec![fixture.guard.home().join("control")],
+        });
+        fixture.launch.skip_permissions = true;
+        _prepare(&fixture);
+        let invocation_id = fixture.capture.invocation_id().to_string();
+        fixture
+            .capture
+            .record_conversation(ConversationEvent::TurnStarted {
+                turn_id: "provider-turn".to_string(),
+            });
+        fixture
+            .capture
+            .record_conversation(ConversationEvent::TurnCompleted {
+                turn_id: "provider-turn".to_string(),
+                status: Lifecycle::Completed,
+            });
+        fixture.capture.finish("completed", false).unwrap();
+
+        let result = check(
+            &crate::journal::open_ledger().unwrap(),
+            fixture.guard.home(),
+            &invocation_id,
+        )
+        .unwrap();
+        assert!(!result.eligible);
+        assert!(result
+            .reasons
+            .iter()
+            .all(|reason| reason.code == ReplayRefusalCode::UnsafeExecutionBoundary));
+        assert_eq!(result.reasons.len(), 5);
+        assert!(!fixture.sentinel.exists());
+    }
+
+    #[test]
+    fn capture_without_provider_terminal_evidence_never_publishes_replay_index() {
+        let fixture = _producer_fixture();
+        _prepare(&fixture);
+        let invocation_id = fixture.capture.invocation_id().to_string();
+        fixture.capture.finish("completed", false).unwrap();
+
+        let store = crate::journal::open_ledger().unwrap();
+        assert!(store
+            .replay_contract_for_invocation(&invocation_id)
+            .unwrap()
+            .is_none());
+        let result = check(&store, fixture.guard.home(), &invocation_id).unwrap();
+        assert_eq!(
+            result
+                .reasons
+                .iter()
+                .map(|reason| reason.code)
+                .collect::<Vec<_>>(),
+            [
+                ReplayRefusalCode::CaptureIncomplete,
+                ReplayRefusalCode::MissingExecutionContract,
+                ReplayRefusalCode::MissingRepositoryRevision,
+            ]
+        );
+        assert!(!fixture.sentinel.exists());
+    }
+
+    #[test]
+    fn dirty_replay_safe_source_is_refused_before_provider_or_contract_write() {
+        let fixture = _producer_fixture();
+        fs::write(fixture.repo.join("dirty.txt"), "dirty\n").unwrap();
+        let error = prepare_agent_invocation(
+            &fixture.launch,
+            &fixture.process,
+            &fixture.capture,
+            Some(fixture.account_id.clone()),
+        )
+        .unwrap_err();
+        assert!(matches!(
+            error,
+            crate::engine::agent::ExecutionContractError::UnsafeBoundary(_)
+        ));
+        assert!(!fixture.sentinel.exists());
+        assert!(!fs::read_dir(fixture.capture.artifact_dir())
+            .unwrap()
+            .map(|entry| entry.unwrap().file_name().to_string_lossy().into_owned())
+            .any(|name| name.starts_with("execution-contract-v1-")));
+    }
+
+    #[test]
+    fn replay_safe_missing_model_is_a_typed_prelaunch_failure() {
+        let mut fixture = _producer_fixture();
+        fixture.launch.agent = Some("codex".to_string());
+        let error = prepare_agent_invocation(
+            &fixture.launch,
+            &fixture.process,
+            &fixture.capture,
+            Some(fixture.account_id.clone()),
+        )
+        .unwrap_err();
+        assert!(matches!(
+            error,
+            crate::engine::agent::ExecutionContractError::MissingEffectiveModel
+        ));
+        assert!(!fixture.sentinel.exists());
+    }
+
+    #[test]
+    fn replay_safe_unknown_account_is_a_typed_prelaunch_failure() {
+        let fixture = _producer_fixture();
+        let error = prepare_agent_invocation(
+            &fixture.launch,
+            &fixture.process,
+            &fixture.capture,
+            Some(ProviderAccountId::parse("unknown-account").unwrap()),
+        )
+        .unwrap_err();
+        assert!(matches!(
+            error,
+            crate::engine::agent::ExecutionContractError::UnsupportedAuthority(_)
+        ));
+        assert!(!fixture.sentinel.exists());
+    }
+
+    #[test]
+    fn replay_safe_codex_hooks_are_refused_before_provider_start() {
+        let fixture = _producer_fixture();
+        fs::write(
+            fixture.account_home.join("config.toml"),
+            "[hooks]\nSessionStart = []\n",
+        )
+        .unwrap();
+        let error = prepare_agent_invocation(
+            &fixture.launch,
+            &fixture.process,
+            &fixture.capture,
+            Some(fixture.account_id.clone()),
+        )
+        .unwrap_err();
+        assert!(matches!(
+            error,
+            crate::engine::agent::ExecutionContractError::UnsafeBoundary(_)
+        ));
+        assert!(!fixture.sentinel.exists());
     }
 }

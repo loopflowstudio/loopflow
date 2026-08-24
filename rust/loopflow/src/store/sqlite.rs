@@ -14,8 +14,8 @@ use crate::store::rows::{map_wave_row, now_unix};
 use crate::store::token_crypto;
 use crate::store::{
     AccountLimitRow, AttributedTurnUsage, CredentialState, PmSnapshotRow, ProviderAccount,
-    ProviderAccountId, ProviderAccountSelection, RoutingState, RunEventRow, StoreError,
-    StoreResult, TurnUsageSample, WaveLocatorUpdate,
+    ProviderAccountId, ProviderAccountSelection, ReplayContractRow, RoutingState, RunEventRow,
+    StoreError, StoreResult, TurnUsageSample, WaveLocatorUpdate,
 };
 #[cfg(test)]
 use crate::store::{
@@ -2209,6 +2209,7 @@ impl SqliteStore {
         &self,
         invocation: &AgentInvocationRow,
         turn: &AgentTurnRow,
+        replay_contract: Option<&ReplayContractRow>,
     ) -> StoreResult<()> {
         let mut conn = self.conn.lock().expect("store mutex poisoned");
         let tx = conn.transaction_with_behavior(TransactionBehavior::Immediate)?;
@@ -2238,6 +2239,68 @@ impl SqliteStore {
             ],
         )?;
         update_agent_turn(&tx, turn)?;
+        if let Some(contract) = replay_contract {
+            validate_replay_contract_insert(invocation, turn, contract)?;
+            tx.execute(
+                "INSERT INTO replay_contracts (
+                    invocation_id, schema_version, home_id, contract_path,
+                    contract_sha256, captured_at
+                 ) VALUES (?1, ?2, ?3, ?4, ?5, ?6)",
+                params![
+                    contract.invocation_id,
+                    contract.schema_version,
+                    contract.home_id,
+                    contract.contract_path,
+                    contract.contract_sha256,
+                    contract.captured_at,
+                ],
+            )?;
+        }
+        tx.commit()?;
+        Ok(())
+    }
+
+    pub fn bind_trace_capture_runtime(
+        &self,
+        invocation_id: &str,
+        provider: &str,
+        model: &str,
+        account_id: &ProviderAccountId,
+    ) -> StoreResult<()> {
+        let mut conn = self.conn.lock().expect("store mutex poisoned");
+        let tx = conn.transaction_with_behavior(TransactionBehavior::Immediate)?;
+        let recorded_account = tx
+            .query_row(
+                "SELECT account_id FROM agent_invocations
+                 WHERE id=?1 AND capture_status='capturing'",
+                params![invocation_id],
+                |row| row.get::<_, Option<String>>(0),
+            )
+            .optional()?
+            .ok_or_else(|| {
+                StoreError::InvalidData(format!(
+                    "capture {invocation_id} is missing or no longer capturing"
+                ))
+            })?;
+        if recorded_account
+            .as_deref()
+            .is_some_and(|recorded| recorded != account_id.as_str())
+        {
+            return Err(StoreError::InvalidData(format!(
+                "capture {invocation_id} account {recorded_account:?} disagrees with prepared account {account_id}"
+            )));
+        }
+        let updated = tx.execute(
+            "UPDATE agent_invocations
+             SET provider=?2, model=?3, account_id=?4
+             WHERE id=?1 AND capture_status='capturing'",
+            params![invocation_id, provider, model, account_id.as_str()],
+        )?;
+        if updated != 1 {
+            return Err(StoreError::InvalidData(format!(
+                "capture {invocation_id} could not bind its prepared provider runtime"
+            )));
+        }
         tx.commit()?;
         Ok(())
     }
@@ -3176,6 +3239,32 @@ fn update_agent_turn(conn: &rusqlite::Connection, turn: &AgentTurnRow) -> StoreR
     Ok(())
 }
 
+fn validate_replay_contract_insert(
+    invocation: &AgentInvocationRow,
+    turn: &AgentTurnRow,
+    contract: &ReplayContractRow,
+) -> StoreResult<()> {
+    let valid = invocation.id == contract.invocation_id
+        && turn.invocation_id == invocation.id
+        && invocation.capture_status == "complete"
+        && matches!(invocation.outcome.as_str(), "completed" | "failed")
+        && matches!(turn.status.as_str(), "completed" | "failed")
+        && invocation.ended_at.is_some()
+        && turn.ended_at.is_some()
+        && contract.schema_version == crate::replay::REPLAY_CONTRACT_SCHEMA_VERSION
+        && crate::durable::HomeId::parse(&contract.home_id).is_ok()
+        && crate::trace::resolve_artifact_from(Path::new("."), &contract.contract_path).is_ok()
+        && crate::replay::is_lowercase_sha256(&contract.contract_sha256)
+        && contract.captured_at > 0;
+    if valid {
+        return Ok(());
+    }
+    Err(StoreError::InvalidData(format!(
+        "replay index for {} is not a complete terminal capture",
+        invocation.id
+    )))
+}
+
 fn map_agent_turn(row: &rusqlite::Row<'_>) -> rusqlite::Result<AgentTurnRow> {
     Ok(AgentTurnRow {
         id: row.get(0)?,
@@ -3415,7 +3504,7 @@ mod contention_tests {
         second_turn.ended_at = Some(4);
         second_turn.status = "completed".to_string();
         while_wal_writer_holds_lock(&store, &path, "capture finish", || {
-            store.finish_trace_capture(&invocation, &second_turn)
+            store.finish_trace_capture(&invocation, &second_turn, None)
         });
 
         let invocations = store

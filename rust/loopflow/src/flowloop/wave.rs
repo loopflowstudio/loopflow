@@ -1097,16 +1097,50 @@ impl WaveLoop {
                 return;
             }
         };
+        let resume_session_id =
+            provider_session_id_for_harness(self.provider_session.as_ref(), &prepared.harness);
+        let prepared_invocation = match capture.as_ref() {
+            Some(capture) if prepared.harness == "codex" && resume_session_id.is_none() => {
+                let process = crate::engine::ProcessConfig {
+                    auto: true,
+                    stream: true,
+                    capture: Some(capture.clone()),
+                    ..Default::default()
+                };
+                match crate::engine::agent::prepare_agent_invocation(
+                    &prepared.config,
+                    &process,
+                    capture,
+                    None,
+                ) {
+                    Ok(prepared) => prepared,
+                    Err(error) => {
+                        let _ = capture.finish("failed", true);
+                        let body_id = body.body_id.clone();
+                        self.open_body(body, answers).await;
+                        self.finish_failed_pass(
+                            &body_id,
+                            &format!("failed to prepare Codex execution contract: {error}"),
+                        )
+                        .await;
+                        return;
+                    }
+                }
+            }
+            _ => None,
+        };
         if capture.is_some() {
             harness.set_raw_provider_sender(Some(raw_tx));
         }
-        let resume_session_id =
-            provider_session_id_for_harness(self.provider_session.as_ref(), &prepared.harness);
         if resume_session_id.is_none() {
             self.provider_session = None;
         }
         harness.set_provider_session_id(resume_session_id);
-        if let Err(err) = harness.start(&prepared.config).await {
+        let start = match &prepared_invocation {
+            Some(prepared_invocation) => harness.start_prepared(prepared_invocation).await,
+            None => harness.start(&prepared.config).await,
+        };
+        if let Err(err) = start {
             finish_capture(capture.as_ref(), "failed");
             let body_id = body.body_id.clone();
             self.open_body(body, answers).await;

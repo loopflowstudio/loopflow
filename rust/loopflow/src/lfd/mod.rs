@@ -75,7 +75,7 @@ const WEBHOOK_BODY_LIMIT: usize = 256 * 1024;
 const GITHUB_SIGNATURE_HEADER: &str = "x-hub-signature-256";
 const GITHUB_EVENT_HEADER: &str = "x-github-event";
 const ABANDONED_LOG_AGE: Duration = Duration::from_secs(24 * 60 * 60);
-const STARTUP_TIMEOUT: Duration = Duration::from_secs(10);
+const STARTUP_TIMEOUT: Duration = Duration::from_secs(30);
 const LANDING_CLAIM_TIMEOUT: Duration = Duration::from_secs(2);
 const LANDING_RECOVERY_INTERVAL: Duration = Duration::from_secs(30);
 
@@ -1390,7 +1390,7 @@ async fn ensure_with_selection(
     .await
     .map_err(|_| {
         anyhow::anyhow!(
-            "lfd did not publish a live or failed startup receipt for Home {home_id} within 10s; inspect {}",
+            "lfd did not publish a live or failed startup receipt for Home {home_id} within {STARTUP_TIMEOUT:?}; inspect {}",
             lf_home.join("logs/lfd.log").display()
         )
     })??;

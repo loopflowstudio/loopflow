@@ -535,6 +535,7 @@ lf execs                        # one row per lf process
 lf trace 66863649               # select an exec or trace; render its process tree
 lf trace 66863649 --json        # inspect the same tree and its skill invocations
 lf trace 66863649 --json --content --invocation <invocation> --turn <turn>
+lf replay check <invocation> --json  # classify every replay boundary without launching
 lf context --days 30 --repo "$PWD" --project context --task W2-71 --json
 lf context --days 30 --repo "$PWD" --steered-only --current-revision-only --json
 lf usage                        # subscriptions plus provider tokens, cache, and cost
@@ -631,6 +632,14 @@ revision; missing revision identity does not match the current-only filter.
 `lf trace --content` is the explicit
 reader for the exact prompt and normalized conversation at one immutable
 run/invocation/turn address.
+
+`lf replay check` accepts a full AgentInvocation id or one literal,
+unambiguous prefix from `lf runs`. It reads the whole selected Home ledger,
+the indexed immutable contract, local trace artifacts, provider runtime
+identities, and the recorded repository commit. It never launches a provider
+or fills a missing field from current configuration. A refusal prints every
+deterministic reason it can establish and exits 1; `reasons[].code` from
+`--json` is the stable API.
 
 `lf ci` reads durable CI incidents from the local Home store. One failed head is
 one attempt; later passing and merge observations close every open attempt on

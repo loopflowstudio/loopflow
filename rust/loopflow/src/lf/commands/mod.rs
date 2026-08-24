@@ -15,6 +15,7 @@ pub mod invocation;
 pub mod list;
 pub mod ops;
 pub mod profile;
+pub mod replay;
 pub mod run;
 pub mod runs;
 pub mod screenshot;

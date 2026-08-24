@@ -8,7 +8,9 @@ use tracing::{debug, warn};
 use tracing_subscriber::EnvFilter;
 
 use loopflow::journal::{self, LfEventFields, LfEventType, LfNode};
-use loopflow::lf::{Cli, Commands, InstallCommand, ProjectCommand, RunsCommand, TaskCommand};
+use loopflow::lf::{
+    Cli, Commands, InstallCommand, ProjectCommand, ReplayCommand, RunsCommand, TaskCommand,
+};
 
 #[derive(Clone, Default)]
 struct FlagTables {
@@ -1742,6 +1744,9 @@ fn main() -> anyhow::Result<()> {
                 invocation.as_deref(),
                 turn.as_deref(),
             ),
+            Some(Commands::Replay {
+                cmd: ReplayCommand::Check { invocation, json },
+            }) => loopflow::lf::commands::replay::run(invocation, *json),
             Some(Commands::Chat {
                 text,
                 follow,

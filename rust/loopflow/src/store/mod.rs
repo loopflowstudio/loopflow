@@ -48,6 +48,17 @@ pub struct RunEventRow {
     pub error: Option<String>,
 }
 
+/// Final producer-owned index for one immutable replay contract artifact.
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub struct ReplayContractRow {
+    pub invocation_id: String,
+    pub schema_version: u32,
+    pub home_id: String,
+    pub contract_path: String,
+    pub contract_sha256: String,
+    pub captured_at: i64,
+}
+
 /// One provider-measured Turn's latest cumulative usage, joined to the
 /// invocation that names where it ran.
 ///

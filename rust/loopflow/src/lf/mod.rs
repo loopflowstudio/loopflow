@@ -611,6 +611,11 @@ pub enum Commands {
         #[arg(long, requires = "content")]
         turn: Option<String>,
     },
+    /// Check whether one recorded AgentInvocation can be replayed exactly
+    Replay {
+        #[command(subcommand)]
+        cmd: ReplayCommand,
+    },
     /// Converse with a served mind's thread; --follow replays it and --steer
     /// reaches the live body.
     Chat {
@@ -842,6 +847,18 @@ pub enum RunsCommand {
         #[arg(long)]
         all: bool,
         /// Emit the reconciliation report as JSON
+        #[arg(long)]
+        json: bool,
+    },
+}
+
+#[derive(Subcommand, Debug)]
+pub enum ReplayCommand {
+    /// Classify every known replay boundary without launching a provider
+    Check {
+        /// Full AgentInvocation id or literal unambiguous prefix
+        invocation: String,
+        /// Emit the typed replay eligibility result as JSON
         #[arg(long)]
         json: bool,
     },
@@ -2708,6 +2725,21 @@ mod tests {
             }) if invocation == "invocation-1" && turn == "turn-1"
         ));
         assert!(Cli::try_parse_from(["lf", "trace", "run-1", "--content"]).is_err());
+    }
+
+    #[test]
+    fn replay_check_accepts_an_invocation_prefix() {
+        let cli = Cli::try_parse_from(["lf", "replay", "check", "invocation_742f7387", "--json"])
+            .expect("parse replay eligibility check");
+        assert!(matches!(
+            cli.command,
+            Some(Commands::Replay {
+                cmd: ReplayCommand::Check {
+                    invocation,
+                    json: true
+                }
+            }) if invocation == "invocation_742f7387"
+        ));
     }
 
     #[test]

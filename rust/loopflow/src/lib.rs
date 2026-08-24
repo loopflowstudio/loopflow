@@ -23,6 +23,7 @@ pub mod project;
 pub(crate) mod promotion_lock;
 pub mod provider_account;
 pub mod provider_auth;
+pub mod replay;
 pub mod repository;
 pub mod security;
 pub mod store;

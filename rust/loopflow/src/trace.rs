@@ -1539,9 +1539,13 @@ fn artifact_relative(root: &Path, path: &Path) -> StoreResult<String> {
 }
 
 pub fn resolve_artifact(relative: &str) -> StoreResult<PathBuf> {
+    resolve_artifact_from(&trace_root(), relative)
+}
+
+pub(crate) fn resolve_artifact_from(root: &Path, relative: &str) -> StoreResult<PathBuf> {
     let relative = Path::new(relative);
     validate_artifact_path(relative)?;
-    Ok(trace_root().join(relative))
+    Ok(root.join(relative))
 }
 
 pub fn list_invocation_artifact_dirs() -> StoreResult<Vec<String>> {

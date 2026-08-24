@@ -2356,6 +2356,82 @@ impl SqliteStore {
         )
     }
 
+    /// Resolve a literal invocation id or prefix across the whole ledger.
+    pub fn agent_invocations_matching_address(
+        &self,
+        address: &str,
+    ) -> StoreResult<Vec<AgentInvocationRow>> {
+        let predicate = if crate::durable::AgentInvocationId::parse(address).is_ok() {
+            "id = ?1"
+        } else {
+            "substr(id, 1, length(?1)) = ?1"
+        };
+        self.query_agent_invocations(
+            &format!(
+                "SELECT id, run_id, process_id, started_at, ended_at, repo, worktree, wave, flow,
+                    skill, project, task, provider, model, surface, capture_status,
+                    incomplete_reason, outcome, artifact_dir, conversation_path,
+                    provider_events_path, provider_session_id, provider_session_path,
+                    conversation_event_count, conversation_bytes, supervising_run_id,
+                    account_id, resume_token, answer_ask_id
+             FROM agent_invocations
+             WHERE {predicate}
+             ORDER BY id"
+            ),
+            params![address],
+        )
+    }
+
+    /// Read the finalized replay-contract index written by the capture producer.
+    pub fn replay_contract_for_invocation(
+        &self,
+        invocation_id: &str,
+    ) -> StoreResult<Option<crate::store::ReplayContractRow>> {
+        let conn = self.conn.lock().expect("store mutex poisoned");
+        let row = conn
+            .query_row(
+                "SELECT invocation_id, schema_version, home_id, contract_path,
+                        contract_sha256, captured_at
+                 FROM replay_contracts WHERE invocation_id=?1",
+                [invocation_id],
+                |row| {
+                    Ok((
+                        row.get::<_, String>(0)?,
+                        row.get::<_, i64>(1)?,
+                        row.get::<_, String>(2)?,
+                        row.get::<_, String>(3)?,
+                        row.get::<_, String>(4)?,
+                        row.get::<_, i64>(5)?,
+                    ))
+                },
+            )
+            .optional()?;
+        let Some((
+            invocation_id,
+            schema_version,
+            home_id,
+            contract_path,
+            contract_sha256,
+            captured_at,
+        )) = row
+        else {
+            return Ok(None);
+        };
+        let schema_version = u32::try_from(schema_version).map_err(|_| {
+            StoreError::InvalidData(format!(
+                "invalid replay contract schema version for {invocation_id}"
+            ))
+        })?;
+        Ok(Some(crate::store::ReplayContractRow {
+            invocation_id,
+            schema_version,
+            home_id,
+            contract_path,
+            contract_sha256,
+            captured_at,
+        }))
+    }
+
     pub fn agent_invocations_since(&self, since: i64) -> StoreResult<Vec<AgentInvocationRow>> {
         self.query_agent_invocations(
             "SELECT id, run_id, process_id, started_at, ended_at, repo, worktree, wave, flow,

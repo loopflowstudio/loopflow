@@ -27,6 +27,10 @@ addresses. Revision evidence carries both Rust's effective-content hash and the
 current source-file hash used to reject a stale Task worktree without
 reimplementing prompt transformations in Swift.
 
+`replay_check.json` pins the read-only `lf replay check` JSON result. It freezes
+every refusal code and keeps unavailable invocation, contract, model,
+repository revision, and Work inputs explicitly nullable.
+
 `activity_snapshot.json` pins `lf ps --json` and its embedded canonical usage
 snapshot: Exec and provider nodes retain their existing Work attribution,
 working/stalled state, and exact provider-output rates, while a registered

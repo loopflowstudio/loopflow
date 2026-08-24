@@ -145,27 +145,8 @@ async fn run_project_inner(
         .map(crate::store::ProviderAccountId::parse)
         .transpose()
         .map_err(|reason| anyhow!("invalid Invocation account route: {reason}"))?;
-    harness.set_provider_account_id(requested_account);
+    harness.set_provider_account_id(requested_account.clone());
     store.validate_run_context(lease).await?;
-    harness.start(&prepared.turn.config).await?;
-    project.provider = harness_name;
-    project.provider_session_id = harness.provider_session_id();
-    let invocation = store
-        .observe_invocation_provider(
-            lease,
-            &invocation.id,
-            harness.provider_account_id(),
-            project.provider_session_id.clone(),
-        )
-        .await?;
-    let invocation_id = invocation.id.clone();
-    let invocation_route = invocation.route.clone();
-    supervision.account_id = invocation.route.account_id.clone();
-    supervision.resume_token = invocation.resume_token.clone();
-    if let Err(error) = store.update_project_for_run(&project, lease).await {
-        let _ = harness.stop().await;
-        return Err(error.into());
-    }
     let capture = flow.current().and_then(|step| {
         let context = match crate::journal::trace_capture_context(
             Path::new(wave.repo()),
@@ -200,6 +181,66 @@ async fn run_project_inner(
             }
         }
     });
+    if harness_name == "codex"
+        && project.provider_session_id.is_none()
+        && initial_input.is_none()
+        && capture.is_none()
+    {
+        return Err(anyhow!(
+            "Project trace capture must exist before a fresh Codex provider starts"
+        ));
+    }
+    let prepared_invocation = match capture.as_ref() {
+        Some(capture)
+            if harness_name == "codex"
+                && project.provider_session_id.is_none()
+                && initial_input.is_none() =>
+        {
+            let process = crate::engine::ProcessConfig {
+                auto: true,
+                stream: true,
+                capture: Some(capture.clone()),
+                ..Default::default()
+            };
+            match crate::engine::agent::prepare_agent_invocation(
+                &prepared.turn.config,
+                &process,
+                capture,
+                requested_account,
+            ) {
+                Ok(prepared) => prepared,
+                Err(error) => {
+                    let _ = capture.finish("failed", true);
+                    return Err(anyhow!(
+                        "Project execution contract could not be prepared: {error}"
+                    ));
+                }
+            }
+        }
+        _ => None,
+    };
+    match &prepared_invocation {
+        Some(prepared_invocation) => harness.start_prepared(prepared_invocation).await?,
+        None => harness.start(&prepared.turn.config).await?,
+    }
+    project.provider = harness_name;
+    project.provider_session_id = harness.provider_session_id();
+    let invocation = store
+        .observe_invocation_provider(
+            lease,
+            &invocation.id,
+            harness.provider_account_id(),
+            project.provider_session_id.clone(),
+        )
+        .await?;
+    let invocation_id = invocation.id.clone();
+    let invocation_route = invocation.route.clone();
+    supervision.account_id = invocation.route.account_id.clone();
+    supervision.resume_token = invocation.resume_token.clone();
+    if let Err(error) = store.update_project_for_run(&project, lease).await {
+        let _ = harness.stop().await;
+        return Err(error.into());
+    }
     if let Some(capture) = &capture {
         capture.set_provider_session_id(project.provider_session_id.clone());
     }
@@ -801,7 +842,11 @@ async fn start_project_flow_turn(
     let wave = owning_wave(store, project).await?;
     open_project_flow_body(flow, wave.repo())?;
     if let Some(capture) = capture {
-        capture.begin_turn_at("queued", &prepared.turn.input, Some(prepared.basis.clone()))?;
+        capture.begin_turn_at(
+            "message",
+            &prepared.turn.input,
+            Some(prepared.basis.clone()),
+        )?;
     }
     apply_input(
         store,

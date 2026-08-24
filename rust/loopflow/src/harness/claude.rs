@@ -394,6 +394,7 @@ mod tests {
             structured_replies: Vec::new(),
             directive_relay: None,
             env: Default::default(),
+            replay_safe: false,
         });
 
         let first = harness

@@ -81,6 +81,14 @@ pub struct Cli {
     #[arg(short = 'b', long = "batch", short_alias = 'B')]
     pub batch: bool,
 
+    /// Record a strict detached Codex execution contract before launch
+    #[arg(
+        long = "replay-safe",
+        requires = "model",
+        conflicts_with_all = ["yolo", "interactive", "tui", "ide", "as_work"]
+    )]
+    pub replay_safe: bool,
+
     /// Hand off Claude, Codex, or OpenCode to the terminal (overrides session.launch)
     #[arg(long, conflicts_with = "ide")]
     pub tui: bool,
@@ -2740,6 +2748,28 @@ mod tests {
                 }
             }) if invocation == "invocation_742f7387"
         ));
+    }
+
+    #[test]
+    fn replay_safe_requires_an_explicit_model_and_conflicts_with_privileged_surfaces() {
+        let cli =
+            Cli::try_parse_from(["lf", "--batch", "--replay-safe", "--model", "codex:gpt-5.6"])
+                .expect("parse replay-safe launch");
+        assert!(cli.batch);
+        assert!(cli.replay_safe);
+        assert_eq!(cli.model.as_deref(), Some("codex:gpt-5.6"));
+
+        assert!(Cli::try_parse_from(["lf", "--batch", "--replay-safe"]).is_err());
+        for conflicting in ["--yolo", "--interactive", "--tui", "--ide"] {
+            assert!(Cli::try_parse_from([
+                "lf",
+                "--replay-safe",
+                "--model",
+                "codex:gpt-5.6",
+                conflicting,
+            ])
+            .is_err());
+        }
     }
 
     #[test]

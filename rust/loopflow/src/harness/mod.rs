@@ -49,8 +49,13 @@ pub(crate) fn configure_agent_run_context(
         return;
     }
     command
+        .env_remove(crate::durable::RUN_CONTEXT_ENV)
         .env_remove(crate::durable::RUN_ID_ENV)
-        .env_remove(crate::durable::AGENT_INVOCATION_ENV);
+        .env_remove(crate::durable::AGENT_INVOCATION_ENV)
+        .env_remove(crate::journal::LF_PROCESS_ID_ENV)
+        .env_remove(crate::journal::LF_TRACE_ID_ENV)
+        .env_remove(crate::engine::wave_context::WAVE_ID_ENV)
+        .env_remove("LF_PARENT_RUN_ID");
 }
 
 pub(crate) fn configure_agent_env(command: &mut tokio::process::Command, config: &AgentConfig) {
@@ -140,7 +145,11 @@ mod environment_tests {
         command
             .env(crate::durable::RUN_CONTEXT_ENV, "agent")
             .env(crate::durable::RUN_ID_ENV, "run_stale")
-            .env(crate::durable::AGENT_INVOCATION_ENV, "invocation_core");
+            .env(crate::durable::AGENT_INVOCATION_ENV, "invocation_core")
+            .env(crate::journal::LF_PROCESS_ID_ENV, "exec_stale")
+            .env(crate::journal::LF_TRACE_ID_ENV, "trace_stale")
+            .env(crate::engine::wave_context::WAVE_ID_ENV, "wave_stale")
+            .env("LF_PARENT_RUN_ID", "run_parent");
 
         configure_agent_run_context(&mut command, AgentRunContext::Detached);
 
@@ -149,12 +158,13 @@ mod environment_tests {
             .get_envs()
             .map(|(key, value)| (key.to_string_lossy().to_string(), value.map(OsString::from)))
             .collect::<std::collections::HashMap<_, _>>();
-        assert_eq!(
-            environment[crate::durable::RUN_CONTEXT_ENV],
-            Some(OsString::from("agent"))
-        );
+        assert_eq!(environment[crate::durable::RUN_CONTEXT_ENV], None);
         assert_eq!(environment[crate::durable::RUN_ID_ENV], None);
         assert_eq!(environment[crate::durable::AGENT_INVOCATION_ENV], None);
+        assert_eq!(environment[crate::journal::LF_PROCESS_ID_ENV], None);
+        assert_eq!(environment[crate::journal::LF_TRACE_ID_ENV], None);
+        assert_eq!(environment[crate::engine::wave_context::WAVE_ID_ENV], None);
+        assert_eq!(environment["LF_PARENT_RUN_ID"], None);
     }
 }
 
@@ -311,6 +321,12 @@ pub enum ApprovalPolicy {
 #[async_trait]
 pub trait Harness: Send + Sync {
     async fn start(&mut self, config: &AgentConfig) -> Result<()>;
+    async fn start_prepared(
+        &mut self,
+        _prepared: &crate::engine::agent::PreparedAgentInvocation,
+    ) -> Result<()> {
+        anyhow::bail!("harness does not support contract-bound launch")
+    }
     /// Start the next provider Turn from durable seed input.
     async fn send_input(&mut self, content: &str) -> Result<()>;
     /// Try to deliver input to the exact Turn currently active.

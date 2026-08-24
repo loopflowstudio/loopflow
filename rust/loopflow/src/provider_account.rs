@@ -215,6 +215,13 @@ impl ProviderAccountRoute {
         matches!(self.authority, AccountRouteAuthority::Local { .. })
     }
 
+    pub(crate) fn native_home(&self) -> Option<&Path> {
+        match &self.authority {
+            AccountRouteAuthority::Local { home, .. } => Some(home),
+            AccountRouteAuthority::Lease { .. } => None,
+        }
+    }
+
     /// Prove that this route can authenticate before durable Work is reserved.
     ///
     /// The token is deliberately consumed here and never returned: Task launch
@@ -1037,6 +1044,20 @@ pub(crate) fn resolve_provider_account_blocking(
         runtime.block_on(resolve_provider_account(
             provider,
             provider_session_id.as_deref(),
+        ))
+    })
+}
+
+pub(crate) fn resolve_provider_account_exact_blocking(
+    provider: Provider,
+    provider_session_id: Option<String>,
+    exact_account_id: Option<ProviderAccountId>,
+) -> Result<Option<ProviderAccountRoute>, ProviderAccountError> {
+    _run_blocking_account(provider, "exact-route", move |runtime| {
+        runtime.block_on(resolve_provider_account_exact(
+            provider,
+            provider_session_id.as_deref(),
+            exact_account_id.as_ref(),
         ))
     })
 }

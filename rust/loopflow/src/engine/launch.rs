@@ -182,6 +182,7 @@ pub fn prepare_launch_prompt(
         structured_replies: structured_replies_for_context(&client_context, action_style),
         directive_relay: None,
         env: Default::default(),
+        replay_safe: false,
     };
 
     Ok(PreparedLaunchPrompt {

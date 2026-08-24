@@ -195,10 +195,15 @@ level stays there. Put `--` before literal arguments that look like flags.
 
 ## Run Mode Flags
 
+```bash
+lf --batch --replay-safe -m codex:gpt-5.6 : "Return exactly: replay contract ready"
+```
+
 | Flag | Description |
 |------|-------------|
 | `-i, --interactive` | Run interactively (can interrupt, redirect) |
 | `-b, --batch` | Run in batch/headless mode |
+| `--replay-safe` | Record a strict detached native-Codex execution contract before launch; requires an explicit `codex:<model>` and clean worktree |
 | `--max-turns N` | Cap agent turns for this invocation |
 
 ## Model Flags
@@ -632,6 +637,12 @@ revision; missing revision identity does not match the current-only filter.
 `lf trace --content` is the explicit
 reader for the exact prompt and normalized conversation at one immutable
 run/invocation/turn address.
+
+`--replay-safe` freezes native Codex model, account, runtime, clean commit,
+permissions, prompts, and environment selectors before provider launch. It
+disables sandbox network, web search, Apps, and configured MCP servers, and
+disables notifications. Lifecycle hooks are refused. A complete capture
+publishes the final replay index; partial or interrupted capture does not.
 
 `lf replay check` accepts a full AgentInvocation id or one literal,
 unambiguous prefix from `lf runs`. It reads the whole selected Home ledger,

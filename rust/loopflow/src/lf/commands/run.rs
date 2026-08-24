@@ -341,6 +341,11 @@ fn build_prompt_at(
         .clone()
         .expect("prepare_launch_prompt always sets agent");
     let (harness, model) = parse_agent(&agent);
+    if cli.replay_safe && (harness != "codex" || model.as_deref().is_none_or(str::is_empty)) {
+        return Err(anyhow!(
+            "--replay-safe requires an explicit codex:<model> selector"
+        ));
+    }
 
     let skill_name = discovered_skill
         .as_ref()
@@ -360,6 +365,14 @@ fn build_prompt_at(
     };
 
     let mut agent_config = prepared.config;
+    if cli.replay_safe {
+        agent_config.run_context = crate::engine::agent::AgentRunContext::Detached;
+        agent_config.write_scope = crate::engine::agent::AgentWriteScope::Worktree;
+        agent_config.execution_boundary = None;
+        agent_config.skip_permissions = false;
+        agent_config.directive_relay = None;
+        agent_config.replay_safe = true;
+    }
     let mut prompt = prepared.prompt;
     // Interactive handoffs use the vendor skill sigil because the vendor owns
     // the session from that point. Headless launches keep the fully assembled
@@ -441,7 +454,9 @@ fn is_interactive_run_with_tty(
     cli.tui
         || cli.ide
         || cli.interactive
-        || (!cli.batch && (attached_tty || (skill.is_none() && message.is_none())))
+        || (!cli.batch
+            && !cli.replay_safe
+            && (attached_tty || (skill.is_none() && message.is_none())))
 }
 
 fn should_launch_via_skill(skill_name: &str) -> bool {
@@ -571,17 +586,19 @@ fn launch_prompt(built: &PromptBuild, cli: &Cli, control: Option<CaptureControl>
         return result;
     }
 
-    let cli_check_start = Instant::now();
-    if !check_cli_available(&built.harness) {
-        return Err(anyhow!(
-            "'{}' CLI not found. Install it and rerun `lf init`.",
-            built.harness
-        ));
+    if built.harness != "codex" {
+        let cli_check_start = Instant::now();
+        if !check_cli_available(&built.harness) {
+            return Err(anyhow!(
+                "'{}' CLI not found. Install it and rerun `lf init`.",
+                built.harness
+            ));
+        }
+        debug!(
+            elapsed_ms = cli_check_start.elapsed().as_millis(),
+            "checked cli availability"
+        );
     }
-    debug!(
-        elapsed_ms = cli_check_start.elapsed().as_millis(),
-        "checked cli availability"
-    );
 
     let effective_system =
         crate::engine::agent::system_prompt_with_structured_replies(&built.agent_config);
@@ -616,11 +633,14 @@ fn launch_prompt(built: &PromptBuild, cli: &Cli, control: Option<CaptureControl>
     // (e.g. `cd` after `lf pr land` rotates worktrees).
     let directive_file = std::env::var("LOOPFLOW_DIRECTIVE_FILE").ok();
     let mut agent_config = built.agent_config.clone();
-    let relay_path = directive_file.as_ref().and_then(|_| {
-        tempfile::NamedTempFile::new()
-            .ok()
-            .map(|f| f.into_temp_path().to_path_buf())
-    });
+    let relay_path = (!cli.replay_safe)
+        .then_some(())
+        .and(directive_file.as_ref())
+        .and_then(|_| {
+            tempfile::NamedTempFile::new()
+                .ok()
+                .map(|f| f.into_temp_path().to_path_buf())
+        });
     if let Some(ref path) = relay_path {
         agent_config.directive_relay = Some(path.clone());
     }

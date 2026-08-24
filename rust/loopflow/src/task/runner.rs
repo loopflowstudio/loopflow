@@ -157,35 +157,8 @@ async fn run_task_with(
         .map(crate::store::ProviderAccountId::parse)
         .transpose()
         .map_err(|reason| anyhow!("invalid Invocation account route: {reason}"))?;
-    harness.set_provider_account_id(requested_account);
+    harness.set_provider_account_id(requested_account.clone());
     store.validate_run_context(lease).await?;
-    harness.start(&prepared.turn.config).await?;
-    task.provider = harness_name;
-    task.provider_session_id = harness.provider_session_id();
-    let invocation = store
-        .observe_invocation_provider(
-            lease,
-            &invocation.id,
-            harness.provider_account_id(),
-            task.provider_session_id.clone(),
-        )
-        .await?;
-    let invocation_id = invocation.id.clone();
-    let invocation_route = invocation.route.clone();
-    supervision.account_id = invocation.route.account_id.clone();
-    supervision.resume_token = invocation.resume_token.clone();
-    if let Err(error) = store.update_task_for_run(&task, lease).await {
-        let _ = harness.stop().await;
-        return Err(error.into());
-    }
-    let mut state_fingerprint = task_state_fingerprint(&task)?;
-    let mut gate_fingerprint = if task.lifecycle_phase == TaskLifecyclePhase::Finally {
-        Some(task_gate_fingerprint(&task)?)
-    } else {
-        None
-    };
-
-    let mut pending = VecDeque::new();
     // Record this body's turns the way `flowloop/wave.rs` does. Without it a
     // Task's spend reaches no store at all: the provider runs in this
     // process, so no child `lf` records on its behalf.
@@ -242,6 +215,69 @@ async fn run_task_with(
         }
         None => None,
     };
+    let prepared_invocation = match capture.as_ref() {
+        Some(capture) if harness_name == "codex" && task.provider_session_id.is_none() => {
+            let process = crate::engine::ProcessConfig {
+                auto: true,
+                stream: true,
+                capture: Some(capture.clone()),
+                ..Default::default()
+            };
+            match crate::engine::agent::prepare_agent_invocation(
+                &prepared.turn.config,
+                &process,
+                capture,
+                requested_account,
+            ) {
+                Ok(prepared) => prepared,
+                Err(error) => {
+                    let _ = capture.finish("failed", true);
+                    return finish_execution_blocked(
+                        &store,
+                        &mut task,
+                        lease,
+                        harness.as_mut(),
+                        &[format!(
+                            "Task execution contract could not be prepared: {error}"
+                        )],
+                        None,
+                    )
+                    .await;
+                }
+            }
+        }
+        _ => None,
+    };
+    match &prepared_invocation {
+        Some(prepared_invocation) => harness.start_prepared(prepared_invocation).await?,
+        None => harness.start(&prepared.turn.config).await?,
+    }
+    task.provider = harness_name;
+    task.provider_session_id = harness.provider_session_id();
+    let invocation = store
+        .observe_invocation_provider(
+            lease,
+            &invocation.id,
+            harness.provider_account_id(),
+            task.provider_session_id.clone(),
+        )
+        .await?;
+    let invocation_id = invocation.id.clone();
+    let invocation_route = invocation.route.clone();
+    supervision.account_id = invocation.route.account_id.clone();
+    supervision.resume_token = invocation.resume_token.clone();
+    if let Err(error) = store.update_task_for_run(&task, lease).await {
+        let _ = harness.stop().await;
+        return Err(error.into());
+    }
+    let mut state_fingerprint = task_state_fingerprint(&task)?;
+    let mut gate_fingerprint = if task.lifecycle_phase == TaskLifecyclePhase::Finally {
+        Some(task_gate_fingerprint(&task)?)
+    } else {
+        None
+    };
+
+    let mut pending = VecDeque::new();
     if let Some(capture) = &capture {
         capture.set_provider_session_id(task.provider_session_id.clone());
     }
@@ -251,7 +287,7 @@ async fn run_task_with(
         lease,
         harness.as_mut(),
         &mut flow,
-        capture.as_ref(),
+        None,
         prepared,
     )
     .await?;
@@ -964,7 +1000,11 @@ async fn start_prepared_task_step(
         .await?;
     debug_assert!(!prepared.position.human);
     if let Some(capture) = capture {
-        capture.begin_turn_at("queued", &prepared.turn.input, Some(prepared.basis.clone()))?;
+        capture.begin_turn_at(
+            "message",
+            &prepared.turn.input,
+            Some(prepared.basis.clone()),
+        )?;
     }
     start_task_flow_turn(store, task, lease, harness, flow, prepared.turn).await?;
     Ok(prepared.basis)

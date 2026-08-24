@@ -13,11 +13,16 @@ use serde_json::{json, Map, Value};
 use sha2::{Digest, Sha256};
 use time::OffsetDateTime;
 
-use crate::chat::types::{ConversationEvent, TurnUsage};
+use crate::chat::types::{ConversationEvent, Lifecycle, TurnUsage};
 use crate::engine::prompt::{account_prompt_tokens, count_tokens};
 use crate::engine::stream::{ResultSubtype, StreamEvent};
 use crate::id::{ExecId, TraceId};
-use crate::store::{StoreError, StoreResult};
+use crate::replay::{
+    context_manifest_sha256, sha256_bytes, ArtifactReferenceV1, ContextManifestIdentityV1,
+    ConversationReferenceV1, ExecutionContractV1, ReplayContractV1, ReplayTurnV1,
+    EXECUTION_CONTRACT_SCHEMA_VERSION, REPLAY_CONTRACT_SCHEMA_VERSION,
+};
+use crate::store::{ReplayContractRow, StoreError, StoreResult};
 
 pub use crate::durable::{AgentInvocationId, TurnId};
 
@@ -826,6 +831,24 @@ impl CaptureHandle {
         resolve_artifact(&relative).expect("capture stores a validated relative artifact path")
     }
 
+    pub fn initial_replay_turn(&self) -> StoreResult<ReplayTurnV1> {
+        let capture = self.0.lock().expect("trace capture mutex poisoned");
+        capture.replay_turn(&capture.turn)
+    }
+
+    pub fn publish_effective_config(&self, bytes: &[u8]) -> StoreResult<ArtifactReferenceV1> {
+        let capture = self.0.lock().expect("trace capture mutex poisoned");
+        capture.publish_content_addressed("effective-config-v1", bytes)
+    }
+
+    pub fn bind_execution_contract(
+        &self,
+        contract: &ExecutionContractV1,
+    ) -> StoreResult<ArtifactReferenceV1> {
+        let mut capture = self.0.lock().expect("trace capture mutex poisoned");
+        capture.bind_execution_contract(contract)
+    }
+
     pub fn begin(
         context: TraceCaptureContext,
         prepared: PreparedTurnContext,
@@ -972,6 +995,7 @@ struct TraceCapture {
     usage: TurnUsage,
     usage_observed: bool,
     usage_final: bool,
+    execution_contract: Option<ArtifactReferenceV1>,
     failed: Option<String>,
 }
 
@@ -1150,8 +1174,111 @@ impl TraceCapture {
             usage: TurnUsage::default(),
             usage_observed: false,
             usage_final: false,
+            execution_contract: None,
             failed: None,
         })
+    }
+
+    fn replay_turn(&self, turn: &AgentTurnRow) -> StoreResult<ReplayTurnV1> {
+        let ledger = crate::journal::open_ledger()?;
+        let assets = ledger
+            .context_assets_for_turns(std::slice::from_ref(&turn.id))?
+            .into_iter()
+            .map(|row| row.asset)
+            .collect::<Vec<_>>();
+        Ok(ReplayTurnV1 {
+            turn_id: turn.id.clone(),
+            ordinal: u32::try_from(turn.ordinal).map_err(|_| {
+                StoreError::InvalidData(format!("invalid Turn ordinal: {}", turn.ordinal))
+            })?,
+            input_op: turn.input_op.clone(),
+            timing: if turn.ordinal == 1 {
+                "initial".to_string()
+            } else {
+                "turn_boundary".to_string()
+            },
+            system_prompt: turn
+                .system_prompt_path
+                .as_deref()
+                .map(artifact_reference)
+                .transpose()?,
+            task_prompt: artifact_reference(&turn.task_prompt_path)?,
+            context_manifest: ContextManifestIdentityV1 {
+                sha256: context_manifest_sha256(&assets),
+                asset_count: u32::try_from(assets.len()).map_err(|_| {
+                    StoreError::InvalidData("context manifest is too large".to_string())
+                })?,
+            },
+        })
+    }
+
+    fn publish_content_addressed(
+        &self,
+        stem: &str,
+        bytes: &[u8],
+    ) -> StoreResult<ArtifactReferenceV1> {
+        let sha256 = sha256_bytes(bytes);
+        let artifact_dir = resolve_artifact(&self.invocation.artifact_dir)?;
+        let path = artifact_dir.join(format!("{stem}-{sha256}.json"));
+        publish_immutable(&path, bytes)?;
+        Ok(ArtifactReferenceV1 {
+            path: artifact_relative(&trace_root(), &path)?,
+            sha256,
+        })
+    }
+
+    fn bind_execution_contract(
+        &mut self,
+        contract: &ExecutionContractV1,
+    ) -> StoreResult<ArtifactReferenceV1> {
+        if self.failed.is_some() {
+            return Err(StoreError::InvalidData(
+                "a partial capture cannot bind an execution contract".to_string(),
+            ));
+        }
+        if self.execution_contract.is_some() {
+            return Err(StoreError::InvalidData(format!(
+                "capture {} already has an execution contract",
+                self.invocation.id
+            )));
+        }
+        let local_home = crate::journal::open_ledger()?.local_home()?.id;
+        let expected_turn = self.replay_turn(&self.turn)?;
+        if contract.schema_version != EXECUTION_CONTRACT_SCHEMA_VERSION
+            || contract.invocation_id != self.invocation.id
+            || contract.home_id != local_home.as_str()
+            || contract.repository.root != self.invocation.repo
+            || contract.agent.cwd != self.invocation.worktree
+            || contract.process.surface != self.invocation.surface
+            || contract.provider.provider.trim().is_empty()
+            || contract.provider.model.trim().is_empty()
+            || contract.initial_turn != expected_turn
+        {
+            return Err(StoreError::InvalidData(format!(
+                "execution contract identity disagrees with capture {}",
+                self.invocation.id
+            )));
+        }
+        let account_id = crate::store::ProviderAccountId::parse(&contract.provider.account_id)
+            .map_err(|error| StoreError::InvalidData(error.to_string()))?;
+        let bytes = serde_json::to_vec(contract)?;
+        let reference = self.publish_content_addressed(
+            &format!("execution-contract-v{}", contract.schema_version),
+            &bytes,
+        )?;
+        crate::journal::open_ledger()?.bind_trace_capture_runtime(
+            &self.invocation.id,
+            &contract.provider.provider,
+            &contract.provider.model,
+            &account_id,
+        )?;
+        self.invocation.provider = contract.provider.provider.clone();
+        self.invocation.model = Some(contract.provider.model.clone());
+        if let Some(supervision) = &mut self.invocation.supervision {
+            supervision.account_id = Some(account_id.to_string());
+        }
+        self.execution_contract = Some(reference.clone());
+        Ok(reference)
     }
 
     fn append_payload(&mut self, payload: RecordedConversationPayload) -> StoreResult<()> {
@@ -1466,6 +1593,109 @@ impl TraceCapture {
         crate::journal::open_ledger()?.finish_agent_turn_capture(&self.turn)
     }
 
+    fn finalize_replay_contract(&self, captured_at: i64) -> StoreResult<ReplayContractRow> {
+        let execution_contract = self.execution_contract.clone().ok_or_else(|| {
+            StoreError::InvalidData("complete replay capture has no execution contract".to_string())
+        })?;
+        let ledger = crate::journal::open_ledger()?;
+        let home_id = ledger.local_home()?.id.to_string();
+        let mut turns =
+            ledger.agent_turns_for_invocations(std::slice::from_ref(&self.invocation.id))?;
+        if let Some(current) = turns.iter_mut().find(|turn| turn.id == self.turn.id) {
+            *current = self.turn.clone();
+        }
+        turns.sort_by_key(|turn| turn.ordinal);
+        if turns.is_empty()
+            || turns
+                .iter()
+                .any(|turn| !matches!(turn.status.as_str(), "completed" | "failed"))
+        {
+            return Err(StoreError::InvalidData(
+                "replay contract requires complete terminal Turns".to_string(),
+            ));
+        }
+        let replay_turns = turns
+            .iter()
+            .map(|turn| self.replay_turn(turn))
+            .collect::<StoreResult<Vec<_>>>()?;
+        let conversation_bytes = fs::read(&self.conversation_path).map_err(|error| {
+            StoreError::InvalidData(format!(
+                "read {}: {error}",
+                self.conversation_path.display()
+            ))
+        })?;
+        let conversation = read_conversation_status(&self.conversation_path)?;
+        if conversation.incomplete_tail
+            || conversation.events.len() as i64 != self.invocation.conversation_event_count
+            || conversation_bytes.len() as i64 != self.invocation.conversation_bytes
+        {
+            return Err(StoreError::InvalidData(
+                "normalized conversation is not complete and self-consistent".to_string(),
+            ));
+        }
+        if turns.iter().any(|turn| {
+            let expected = match turn.status.as_str() {
+                "completed" => Lifecycle::Completed,
+                "failed" => Lifecycle::Failed,
+                _ => return true,
+            };
+            let terminal = conversation
+                .events
+                .iter()
+                .filter(|event| {
+                    event
+                        .turn_id
+                        .as_ref()
+                        .is_some_and(|id| id.as_str() == turn.id)
+                })
+                .filter_map(|event| match &event.payload {
+                    RecordedConversationPayload::Conversation { event } => match event.as_ref() {
+                        ConversationEvent::TurnCompleted { status, .. } => Some(*status),
+                        _ => None,
+                    },
+                    _ => None,
+                })
+                .collect::<Vec<_>>();
+            terminal.as_slice() != [expected]
+        }) {
+            return Err(StoreError::InvalidData(
+                "normalized conversation lacks exact terminal evidence for every Turn".to_string(),
+            ));
+        }
+        let replay = ReplayContractV1 {
+            schema_version: REPLAY_CONTRACT_SCHEMA_VERSION,
+            invocation_id: self.invocation.id.clone(),
+            home_id: home_id.clone(),
+            wave: self.invocation.wave.clone(),
+            project: self.invocation.project.clone(),
+            task: self.invocation.task.clone(),
+            flow: self.invocation.flow.clone(),
+            skill: self.invocation.skill.clone(),
+            execution_contract,
+            turns: replay_turns,
+            conversation: ConversationReferenceV1 {
+                path: self.invocation.conversation_path.clone(),
+                sha256: sha256_bytes(&conversation_bytes),
+                trace_schema_version: TRACE_SCHEMA_VERSION,
+                event_count: conversation.events.len() as u64,
+                bytes: conversation_bytes.len() as u64,
+            },
+        };
+        let bytes = serde_json::to_vec(&replay)?;
+        let reference = self.publish_content_addressed(
+            &format!("replay-contract-v{}", replay.schema_version),
+            &bytes,
+        )?;
+        Ok(ReplayContractRow {
+            invocation_id: self.invocation.id.clone(),
+            schema_version: replay.schema_version,
+            home_id,
+            contract_path: reference.path,
+            contract_sha256: reference.sha256,
+            captured_at,
+        })
+    }
+
     fn finish(&mut self, outcome: &str, prompt_only: bool) -> StoreResult<()> {
         if !matches!(outcome, "completed" | "failed" | "interrupted") {
             return Err(StoreError::InvalidData(format!(
@@ -1505,7 +1735,28 @@ impl TraceCapture {
             }
             .to_string()
         };
-        crate::journal::open_ledger()?.finish_trace_capture(&self.invocation, &self.turn)
+        let replay_contract = if self.invocation.capture_status == "complete"
+            && matches!(outcome, "completed" | "failed")
+            && self.execution_contract.is_some()
+        {
+            match self.finalize_replay_contract(now) {
+                Ok(contract) => Some(contract),
+                Err(error) => {
+                    self.failed = Some(error.to_string());
+                    self.invocation.capture_status = "partial".to_string();
+                    self.invocation.incomplete_reason = Some(error.to_string());
+                    self.turn.status = "partial".to_string();
+                    None
+                }
+            }
+        } else {
+            None
+        };
+        crate::journal::open_ledger()?.finish_trace_capture(
+            &self.invocation,
+            &self.turn,
+            replay_contract.as_ref(),
+        )
     }
 }
 
@@ -1627,6 +1878,68 @@ fn write_private(path: &Path, bytes: &[u8]) -> StoreResult<()> {
             StoreError::InvalidData(format!("set permissions on {}: {error}", path.display()))
         })?;
     Ok(())
+}
+
+fn publish_immutable(path: &Path, bytes: &[u8]) -> StoreResult<()> {
+    if path.exists() {
+        let recorded = fs::read(path).map_err(|error| {
+            StoreError::InvalidData(format!("read {}: {error}", path.display()))
+        })?;
+        if recorded == bytes {
+            return Ok(());
+        }
+        return Err(StoreError::InvalidData(format!(
+            "immutable trace artifact {} already exists with different bytes",
+            path.display()
+        )));
+    }
+    let file_name = path.file_name().ok_or_else(|| {
+        StoreError::InvalidData(format!("artifact has no file name: {}", path.display()))
+    })?;
+    let staging = path.with_file_name(format!(".{}.staging", file_name.to_string_lossy()));
+    let mut options = OpenOptions::new();
+    options.create_new(true).write(true);
+    #[cfg(unix)]
+    options.mode(0o600);
+    let mut file = options
+        .open(&staging)
+        .map_err(|error| StoreError::InvalidData(format!("open {}: {error}", staging.display())))?;
+    if let Err(error) = file.write_all(bytes).and_then(|_| file.sync_all()) {
+        let _ = fs::remove_file(&staging);
+        return Err(StoreError::InvalidData(format!(
+            "write {}: {error}",
+            staging.display()
+        )));
+    }
+    fs::rename(&staging, path).map_err(|error| {
+        let _ = fs::remove_file(&staging);
+        StoreError::InvalidData(format!(
+            "publish {} as {}: {error}",
+            staging.display(),
+            path.display()
+        ))
+    })?;
+    let parent = path.parent().ok_or_else(|| {
+        StoreError::InvalidData(format!("artifact has no parent: {}", path.display()))
+    })?;
+    let directory = OpenOptions::new()
+        .read(true)
+        .open(parent)
+        .map_err(|error| StoreError::InvalidData(format!("open {}: {error}", parent.display())))?;
+    directory
+        .sync_all()
+        .map_err(|error| StoreError::InvalidData(format!("sync {}: {error}", parent.display())))?;
+    Ok(())
+}
+
+fn artifact_reference(relative: &str) -> StoreResult<ArtifactReferenceV1> {
+    let path = resolve_artifact(relative)?;
+    let bytes = fs::read(&path)
+        .map_err(|error| StoreError::InvalidData(format!("read {}: {error}", path.display())))?;
+    Ok(ArtifactReferenceV1 {
+        path: relative.to_string(),
+        sha256: sha256_bytes(&bytes),
+    })
 }
 
 fn append_json_line<T: Serialize>(path: &Path, value: &T) -> StoreResult<usize> {

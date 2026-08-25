@@ -654,7 +654,9 @@ deterministic reason it can establish and exits 1; `reasons[].code` from
 
 `lf ci` reads durable CI incidents from the local Home store. One failed head is
 one attempt; later passing and merge observations close every open attempt on
-that PR. `--wave` and `--repo owner/repo` filter the same local report.
+that PR. Claimed repairs include their hosted evidence URLs and digest, provider
+capture, deadline, and terminal outcome. `--wave` and `--repo owner/repo` filter
+the same local report.
 
 `lf doctor` also prints the binary's build provenance, the resolved database
 path, and the latest known and applied migrations. Those fields still print
@@ -839,7 +841,11 @@ rotation wait for a later authoritative merged observation.
 
 Prepare and arm the PR, then watch GitHub until merged or actionably blocked.
 Failing required checks launch one bounded repair for the exact failed head;
-material repairs are published and re-armed before watching resumes.
+Loopflow fetches the exact Actions failure log and proves a clean, exclusive
+worktree before launch. The provider runs without ambient Run or Home authority
+and under a finite deadline. Material repairs are published and re-armed before
+watching resumes; missing evidence, a contaminated worktree, or an unusable
+provider exit becomes a durable blocker.
 
 ```bash
 lf pr land                    # land one PR; the Task stays open

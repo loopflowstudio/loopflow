@@ -11,6 +11,7 @@ use serde::{Deserialize, Serialize};
 use time::OffsetDateTime;
 
 use crate::child::{prefixed_uuid_id, AbandonIntent};
+use crate::durable::AgentInvocationId;
 pub use crate::durable::TaskId;
 use crate::id::WaveId;
 use crate::planning::TaskPlan;
@@ -295,6 +296,39 @@ impl CiObservation {
 
 /// One failed CI head carried forward after the PR's current observation moves
 /// on. This is evidence about the recovery loop, never a wake queue.
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize)]
+#[serde(rename_all = "snake_case")]
+#[non_exhaustive]
+pub enum CiRepairOutcome {
+    Running,
+    Repaired,
+    Blocked,
+    Superseded,
+}
+
+impl CiRepairOutcome {
+    pub fn as_str(self) -> &'static str {
+        match self {
+            Self::Running => "running",
+            Self::Repaired => "repaired",
+            Self::Blocked => "blocked",
+            Self::Superseded => "superseded",
+        }
+    }
+}
+
+/// Controller-owned receipt for the one provider repair admitted for a CI
+/// incident. Hosted evidence is identified before the provider starts, and the
+/// controller alone settles the outcome after the process is gone.
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
+pub struct CiRepairAttempt {
+    pub evidence_urls: Vec<String>,
+    pub evidence_sha256: String,
+    pub provider_invocation_id: AgentInvocationId,
+    pub deadline_at: OffsetDateTime,
+    pub finished_at: Option<OffsetDateTime>,
+}
+
 #[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
 pub struct CiIncident {
     pub identity: String,
@@ -316,12 +350,28 @@ pub struct CiIncident {
     /// Landing generation that won repair admission for this exact incident.
     pub claimed_landing_generation: Option<u64>,
     pub responded_at: Option<OffsetDateTime>,
+    pub repair_attempt: Option<CiRepairAttempt>,
     pub green_at: Option<OffsetDateTime>,
     pub merged_at: Option<OffsetDateTime>,
     pub blocked_at: Option<OffsetDateTime>,
     pub blocked_reason: Option<String>,
     pub created_at: OffsetDateTime,
     pub updated_at: OffsetDateTime,
+}
+
+impl CiIncident {
+    pub fn repair_outcome(&self) -> Option<CiRepairOutcome> {
+        let attempt = self.repair_attempt.as_ref()?;
+        Some(if attempt.finished_at.is_none() {
+            CiRepairOutcome::Running
+        } else if self.repaired_head_sha.is_some() {
+            CiRepairOutcome::Repaired
+        } else if self.blocked_at.is_some() {
+            CiRepairOutcome::Blocked
+        } else {
+            CiRepairOutcome::Superseded
+        })
+    }
 }
 
 /// The last attempt to refresh one persisted GitHub PR. This metadata lives on

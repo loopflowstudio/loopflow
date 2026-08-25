@@ -108,7 +108,10 @@ pub struct LaunchResult {
 pub enum AgentRunContext {
     #[default]
     Inherit,
+    /// Drop Work/Run identity while retaining this Home's pinned control path.
     Detached,
+    /// Drop all ambient Loopflow authority so local commands reproduce a clean host.
+    Isolated,
 }
 
 /// Filesystem write boundary for a provider launch.
@@ -1394,6 +1397,7 @@ fn project_agent_config(launch: &AgentConfig) -> AgentConfigV1 {
         run_context: match launch.run_context {
             AgentRunContext::Inherit => "inherit",
             AgentRunContext::Detached => "detached",
+            AgentRunContext::Isolated => "isolated",
         }
         .to_string(),
         permission_policy: if launch.skip_permissions {
@@ -2063,6 +2067,40 @@ fn _provider_resume_token(result: &LaunchResult) -> Option<String> {
     })
 }
 
+fn _start_capture(
+    launch: &AgentConfig,
+    process: &ProcessConfig,
+    harness: &str,
+    model: Option<String>,
+    context: crate::trace::TraceCaptureContext,
+) -> Result<crate::trace::CaptureHandle, CoreError> {
+    let system_prompt = process
+        .context_file
+        .as_deref()
+        .and_then(|path| fs::read_to_string(path).ok())
+        .unwrap_or_else(|| system_prompt_with_structured_replies(launch));
+    crate::trace::CaptureHandle::begin(
+        context,
+        crate::trace::PreparedTurnContext::from_prompts(&system_prompt, &launch.task_prompt),
+        crate::trace::CaptureStart {
+            provider: harness.to_string(),
+            model,
+            surface: if process.auto { "headless" } else { "tui" }.to_string(),
+            input_op: "initial".to_string(),
+            gather_ms: 0,
+            render_ms: 0,
+            raw_provider: process.auto,
+            basis: None,
+            supervision: None,
+        },
+    )
+    .map_err(|error| {
+        CoreError::ExecutionFailed(format!(
+            "failed to establish trace capture before agent launch: {error}"
+        ))
+    })
+}
+
 fn _begin_implicit_capture(
     launch: &AgentConfig,
     process: &ProcessConfig,
@@ -2072,44 +2110,39 @@ fn _begin_implicit_capture(
     if process.capture.is_some() {
         return Ok(None);
     }
-    launch
+    let Some(context) = launch
         .cwd
         .as_deref()
-        .and_then(|cwd| {
-            crate::journal::trace_capture_context(cwd, None, None)
-                .ok()
-                .map(|context| {
-                    let system_prompt = process
-                        .context_file
-                        .as_deref()
-                        .and_then(|path| fs::read_to_string(path).ok())
-                        .unwrap_or_else(|| system_prompt_with_structured_replies(launch));
-                    crate::trace::CaptureHandle::begin(
-                        context,
-                        crate::trace::PreparedTurnContext::from_prompts(
-                            &system_prompt,
-                            &launch.task_prompt,
-                        ),
-                        crate::trace::CaptureStart {
-                            provider: harness.to_string(),
-                            model,
-                            surface: if process.auto { "headless" } else { "tui" }.to_string(),
-                            input_op: "initial".to_string(),
-                            gather_ms: 0,
-                            render_ms: 0,
-                            raw_provider: process.auto,
-                            basis: None,
-                            supervision: None,
-                        },
-                    )
-                })
-        })
-        .transpose()
-        .map_err(|error| {
-            CoreError::ExecutionFailed(format!(
-                "failed to establish trace capture before agent launch: {error}"
-            ))
-        })
+        .and_then(|cwd| crate::journal::trace_capture_context(cwd, None, None).ok())
+    else {
+        return Ok(None);
+    };
+    _start_capture(launch, process, harness, model, context).map(Some)
+}
+
+/// Reserve the same durable capture an ordinary agent launch would create so a
+/// controller can persist its invocation id before starting the provider.
+pub(crate) fn begin_agent_capture(
+    launch: &AgentConfig,
+    process: &ProcessConfig,
+) -> Result<crate::trace::CaptureHandle, CoreError> {
+    if process.capture.is_some() {
+        return Err(CoreError::ExecutionFailed(
+            "agent capture is already configured".to_string(),
+        ));
+    }
+    let (harness, model) = parse_agent(launch.agent());
+    let cwd = launch
+        .cwd
+        .as_deref()
+        .ok_or_else(|| CoreError::ExecutionFailed("agent capture requires a cwd".to_string()))?;
+    let context = crate::journal::trace_capture_context(cwd, None, None).map_err(|error| {
+        CoreError::ExecutionFailed(format!(
+            "failed to resolve trace capture context for {}: {error}",
+            cwd.display()
+        ))
+    })?;
+    _start_capture(launch, process, &harness, model, context)
 }
 
 fn _launch_codex_harness_once(
@@ -2398,6 +2431,7 @@ fn _launch_agent_once(
     crate::provider_auth::apply_provider_env_to_command(program, &mut cmd);
     crate::harness::configure_vendor_std_env(&mut cmd)
         .map_err(|error| CoreError::ExecutionFailed(error.to_string()))?;
+    crate::harness::configure_agent_run_context_std(&mut cmd, launch.run_context);
 
     // Harness-specific environment setup.
     let managed_provider = match harness.as_str() {

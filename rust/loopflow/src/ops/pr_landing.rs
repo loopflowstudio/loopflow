@@ -7,15 +7,18 @@ use std::time::Duration;
 use sha2::{Digest, Sha256};
 use time::OffsetDateTime;
 
-use crate::engine::agent::{launch_agent, AgentCapabilities, AgentConfig, ProcessConfig};
+use crate::engine::agent::{
+    begin_agent_capture, launch_agent, AgentCapabilities, AgentConfig, AgentRunContext,
+    ProcessConfig,
+};
 use crate::engine::config::load_config_or_default;
-use crate::engine::git::current_branch;
+use crate::engine::git::{current_branch, is_clean, is_materially_clean, rev_parse};
 use crate::engine::load_skill;
 use crate::pr_landing::{
     LandingClaim, LandingPlacement, NewPrLanding, PrLanding, PrLandingState, SUPERVISOR_STALE_AFTER,
 };
 use crate::store::{open_store, storage_config_from_env, SharedStore};
-use crate::task::{CiCheck, CiIncident, CiObservation, CiState};
+use crate::task::{CiCheck, CiIncident, CiObservation, CiRepairAttempt, CiState};
 
 use super::error::{OpsError, OpsResult};
 use super::land::{arm, LandOptions};
@@ -25,6 +28,7 @@ use super::progress::{NullProgress, Progress};
 const LANDING_POLL_INTERVAL: Duration = Duration::from_secs(30);
 const LANDING_DEGRADED_INTERVAL: Duration = Duration::from_secs(60);
 const LANDING_HEARTBEAT_INTERVAL: Duration = Duration::from_secs(15);
+const CI_FIX_TIMEOUT: Duration = Duration::from_secs(10 * 60);
 const MAX_REPAIRS: u32 = 3;
 
 #[derive(Debug, Clone, PartialEq, Eq)]
@@ -70,8 +74,35 @@ impl LandingObservation {
 
 pub(crate) trait LandingDriver: Send + Sync {
     fn observe(&self, landing: &PrLanding) -> OpsResult<LandingObservation>;
-    fn repair(&self, landing: &PrLanding, incident: &CiIncident) -> OpsResult<()>;
+    fn prepare_repair(
+        &self,
+        landing: &PrLanding,
+        incident: &CiIncident,
+        failing_checks: &[CiCheck],
+    ) -> OpsResult<PreparedRepair>;
     fn rearm(&self, landing: &PrLanding) -> OpsResult<PrInfo>;
+}
+
+pub(crate) struct PreparedRepair {
+    responded_at: OffsetDateTime,
+    attempt: CiRepairAttempt,
+    capture: Option<crate::trace::CaptureHandle>,
+    operation: Box<dyn FnOnce() -> OpsResult<()> + Send>,
+}
+
+impl PreparedRepair {
+    fn run(self) -> OpsResult<()> {
+        (self.operation)()
+    }
+
+    fn cancel(self) -> OpsResult<()> {
+        match self.capture {
+            Some(capture) => capture
+                .finish("failed", true)
+                .map_err(|error| OpsError::Message(error.to_string())),
+            None => Ok(()),
+        }
+    }
 }
 
 #[derive(Debug, Clone)]
@@ -115,8 +146,13 @@ impl LandingDriver for GithubLandingDriver {
         }
     }
 
-    fn repair(&self, landing: &PrLanding, incident: &CiIncident) -> OpsResult<()> {
-        launch_ci_fix(landing, incident)
+    fn prepare_repair(
+        &self,
+        landing: &PrLanding,
+        incident: &CiIncident,
+        failing_checks: &[CiCheck],
+    ) -> OpsResult<PreparedRepair> {
+        prepare_ci_fix(landing, incident, failing_checks)
     }
 
     fn rearm(&self, landing: &PrLanding) -> OpsResult<PrInfo> {
@@ -181,22 +217,20 @@ fn classify_github_observation(landing: &PrLanding, pr: PrInfo) -> OpsResult<Lan
     }
 }
 
-fn launch_ci_fix(landing: &PrLanding, incident: &CiIncident) -> OpsResult<()> {
+fn prepare_ci_fix(
+    landing: &PrLanding,
+    incident: &CiIncident,
+    failing_checks: &[CiCheck],
+) -> OpsResult<PreparedRepair> {
+    verify_repair_start(landing, incident)?;
     let skill = load_skill("ci-fix", &landing.worktree)
         .map_err(|error| OpsError::Message(format!("ci-fix skill not found: {error}")))?
         .content
         .ok_or_else(|| OpsError::Message("ci-fix skill has no content".to_string()))?;
-    let urls = merge_gate_state(&landing.worktree, &landing.branch)
-        .ok()
-        .flatten()
-        .map(|reading| {
-            reading
-                .failing_leaves
-                .into_iter()
-                .filter_map(|check| check.url.map(|url| (check.name, url)))
-                .collect::<std::collections::BTreeMap<_, _>>()
-        })
-        .unwrap_or_default();
+    let urls = failing_checks
+        .iter()
+        .filter_map(|check| check.url.clone().map(|url| (check.name.clone(), url)))
+        .collect::<std::collections::BTreeMap<_, _>>();
     let checks = incident
         .failure_set
         .iter()
@@ -206,47 +240,176 @@ fn launch_ci_fix(landing: &PrLanding, incident: &CiIncident) -> OpsResult<()> {
         })
         .collect::<Vec<_>>()
         .join("\n");
+    let hosted_evidence = incident
+        .failure_set
+        .iter()
+        .map(|name| {
+            let url = urls.get(name).ok_or_else(|| {
+                OpsError::Message(format!(
+                    "exact hosted failure evidence is unavailable for {name} on pull request #{} head {}: GitHub supplied no Actions job URL",
+                    landing.pr_number, incident.failed_head_sha
+                ))
+            })?;
+            super::pr::bounded_failed_check_log(&landing.worktree, name, url)
+                .map(|evidence| (url.clone(), evidence))
+        })
+        .collect::<OpsResult<Vec<_>>>()?;
+    let evidence_urls = hosted_evidence
+        .iter()
+        .map(|(url, _)| url.clone())
+        .collect::<Vec<_>>();
+    let mut evidence_digest = Sha256::new();
+    for (url, evidence) in &hosted_evidence {
+        evidence_digest.update(url.as_bytes());
+        evidence_digest.update([0]);
+        evidence_digest.update(evidence.as_bytes());
+        evidence_digest.update([0]);
+    }
+    let hosted_evidence = hosted_evidence
+        .into_iter()
+        .map(|(_, evidence)| evidence)
+        .collect::<Vec<_>>()
+        .join("\n");
     let task_context = landing
         .task_id
         .as_ref()
         .map(|task_id| format!("\nTask context: {task_id}"))
         .unwrap_or_default();
     let prompt = format!(
-        "{skill}\n\nRepair the exact watched landing incident below. Do not land or merge it; leave a material fix in the worktree for the landing supervisor to publish.\n\nRepository: {}\nPull request: #{}\nBranch: {}\nFailed head: {}\nFailing checks:\n{}{}",
+        "{skill}\n\nRepair the exact watched landing incident below. Do not commit, push, land, or merge it; leave one material worktree fix for the landing supervisor to publish through Loopflow. The worktree was proved clean at the failed head and ambient Loopflow authority is removed from your environment. Start from the smallest failing test named by the hosted log; do not run a repository-wide suite first.\n\nRepository: {}\nPull request: #{}\nBranch: {}\nFailed head: {}\nFailing checks:\n{}{}\n\nHosted failure evidence fetched from the exact check URLs:\n\n{}",
         incident.repo,
         incident.pr_number,
         landing.branch,
         incident.failed_head_sha,
         checks,
         task_context,
+        hosted_evidence,
     );
     let config = load_config_or_default(Some(&landing.worktree));
     let launch = AgentConfig {
         task_prompt: prompt,
         agent: Some(config.agent().to_string()),
         cwd: Some(landing.worktree.clone()),
+        run_context: AgentRunContext::Isolated,
         write_scope: crate::engine::agent::AgentWriteScope::Worktree,
         skip_permissions: true,
         ..Default::default()
     };
-    let process = ProcessConfig {
+    let mut process = ci_fix_process_config();
+    let capture = begin_agent_capture(&launch, &process)
+        .map_err(|error| OpsError::Message(error.to_string()))?;
+    let responded_at = OffsetDateTime::now_utc();
+    let deadline_at = responded_at
+        + time::Duration::seconds(
+            i64::try_from(CI_FIX_TIMEOUT.as_secs()).expect("CI fix timeout fits i64 seconds"),
+        );
+    let attempt = CiRepairAttempt {
+        evidence_urls,
+        evidence_sha256: hex::encode(evidence_digest.finalize()),
+        provider_invocation_id: capture.invocation_id(),
+        deadline_at,
+        finished_at: None,
+    };
+    process.capture = Some(capture.clone());
+    let capabilities = AgentCapabilities {
+        chrome: config.chrome,
+    };
+    let landing = landing.clone();
+    let incident = incident.clone();
+    let operation_capture = capture.clone();
+    let operation = Box::new(move || {
+        let result = launch_agent(&launch, &process, &capabilities);
+        let capture_outcome = match &result {
+            Ok(result) if result.exit_code == 0 => "completed",
+            Ok(_) | Err(_) => "failed",
+        };
+        let capture_result = operation_capture.finish(capture_outcome, false);
+        let result = match (result, capture_result) {
+            (Ok(result), Ok(())) => result,
+            (Ok(_), Err(error)) => {
+                return Err(OpsError::Message(format!(
+                    "ci-fix provider capture could not be finalized: {error}"
+                )))
+            }
+            (Err(error), Ok(())) => {
+                return Err(OpsError::Message(format!(
+                    "ci-fix provider failed or exceeded its {} minute deadline: {error}",
+                    CI_FIX_TIMEOUT.as_secs() / 60
+                )))
+            }
+            (Err(error), Err(capture_error)) => {
+                return Err(OpsError::Message(format!(
+                    "ci-fix provider failed or exceeded its {} minute deadline: {error}; provider capture also failed to finalize: {capture_error}",
+                    CI_FIX_TIMEOUT.as_secs() / 60
+                )))
+            }
+        };
+        if result.exit_code != 0 {
+            let detail = if result.stderr.trim().is_empty() {
+                result.stdout.trim()
+            } else {
+                result.stderr.trim()
+            };
+            return Err(OpsError::Message(format!(
+                "ci-fix provider exited {}: {detail}",
+                result.exit_code
+            )));
+        }
+        verify_repair_result(&landing, &incident)
+    });
+    Ok(PreparedRepair {
+        responded_at,
+        attempt,
+        capture: Some(capture),
+        operation,
+    })
+}
+
+fn ci_fix_process_config() -> ProcessConfig {
+    ProcessConfig {
         auto: true,
         stream: true,
+        timeout: Some(CI_FIX_TIMEOUT),
         ..Default::default()
-    };
-    let result = launch_agent(
-        &launch,
-        &process,
-        &AgentCapabilities {
-            chrome: config.chrome,
-        },
-    )
-    .map_err(|error| OpsError::Message(format!("ci-fix provider failed: {error}")))?;
-    if result.exit_code != 0 {
+    }
+}
+
+fn verify_repair_start(landing: &PrLanding, incident: &CiIncident) -> OpsResult<()> {
+    let branch = current_branch(&landing.worktree)?
+        .ok_or_else(|| OpsError::Message("ci-fix worktree is detached".to_string()))?;
+    if branch != landing.branch {
         return Err(OpsError::Message(format!(
-            "ci-fix provider exited {}: {}",
-            result.exit_code,
-            result.stderr.trim()
+            "ci-fix worktree is on branch {branch}, expected {}",
+            landing.branch
+        )));
+    }
+    let head = rev_parse(&landing.worktree, "HEAD")?;
+    if head != incident.failed_head_sha {
+        return Err(OpsError::Message(format!(
+            "ci-fix worktree head {head} does not match failed head {}",
+            incident.failed_head_sha
+        )));
+    }
+    if !is_clean(&landing.worktree)? {
+        return Err(OpsError::Message(format!(
+            "ci-fix worktree {} is not clean at failed head {}; preserve the existing changes and settle their writer before retrying `lf pr land`",
+            landing.worktree.display(), incident.failed_head_sha
+        )));
+    }
+    Ok(())
+}
+
+fn verify_repair_result(landing: &PrLanding, incident: &CiIncident) -> OpsResult<()> {
+    let head = rev_parse(&landing.worktree, "HEAD")?;
+    if head != incident.failed_head_sha {
+        return Err(OpsError::Message(format!(
+            "ci-fix committed head {head} instead of leaving a bounded worktree repair for Loopflow; the branch is preserved and was not published"
+        )));
+    }
+    if is_materially_clean(&landing.worktree)? {
+        return Err(OpsError::Message(format!(
+            "ci-fix provider completed without a material repair for pull request #{} failed head {}",
+            landing.pr_number, incident.failed_head_sha
         )));
     }
     Ok(())
@@ -285,6 +448,7 @@ fn ci_incident(landing: &PrLanding, checks: &[CiCheck], now: OffsetDateTime) -> 
         webhook_received_at: None,
         claimed_landing_generation: None,
         responded_at: None,
+        repair_attempt: None,
         green_at: None,
         merged_at: None,
         blocked_at: None,
@@ -630,7 +794,7 @@ pub(crate) async fn supervise_pr_landing(
                         return block_landing(&store, &mut landing, reason).await;
                     }
                 };
-                let still_current = match &confirmation {
+                let repair_checks = match &confirmation {
                     LandingObservation::Failing {
                         head_sha,
                         failing_checks,
@@ -641,11 +805,12 @@ pub(crate) async fn supervise_pr_landing(
                             OffsetDateTime::now_utc(),
                         ) =>
                     {
-                        ci_incident(&landing, failing_checks, now).identity == incident.identity
+                        (ci_incident(&landing, failing_checks, now).identity == incident.identity)
+                            .then(|| failing_checks.clone())
                     }
-                    _ => false,
+                    _ => None,
                 };
-                if !still_current {
+                let Some(repair_checks) = repair_checks else {
                     if let LandingObservation::Degraded { reason } = confirmation {
                         if degraded_is_actionable(&reason) {
                             return block_landing(&store, &mut landing, reason).await;
@@ -653,24 +818,66 @@ pub(crate) async fn supervise_pr_landing(
                     }
                     wait_interval(poll_interval).await;
                     continue;
-                }
-                if !store
-                    .claim_ci_incident(&incident.identity, &landing.id, landing.generation, now)
-                    .await
-                    .map_err(|error| OpsError::Message(error.to_string()))?
-                {
+                };
+                let prepared = run_driver_operation(&store, &landing, "prepare ci-fix", {
+                    let driver = Arc::clone(&driver);
+                    let landing = landing.clone();
+                    let incident = incident.clone();
+                    move || driver.prepare_repair(&landing, &incident, &repair_checks)
+                })
+                .await;
+                let prepared = match prepared {
+                    Ok(prepared) => prepared,
+                    Err(error) => {
+                        let reason = format!(
+                            "ci-fix preparation blocked for pull request #{}: {error}",
+                            landing.pr_number
+                        );
+                        return block_landing(&store, &mut landing, reason).await;
+                    }
+                };
+                let claimed = store
+                    .claim_ci_incident(
+                        &incident.identity,
+                        &landing.id,
+                        landing.generation,
+                        prepared.responded_at,
+                        &prepared.attempt,
+                    )
+                    .await;
+                let claimed = match claimed {
+                    Ok(claimed) => claimed,
+                    Err(error) => {
+                        let cancellation = prepared.cancel().err();
+                        let detail = cancellation
+                            .map(|error| {
+                                format!("; unused provider capture also failed to settle: {error}")
+                            })
+                            .unwrap_or_default();
+                        let reason =
+                            format!("CI repair attempt could not be persisted: {error}{detail}");
+                        return block_landing(&store, &mut landing, reason).await;
+                    }
+                };
+                if !claimed {
+                    let cancellation = prepared.cancel().err();
+                    let detail = cancellation
+                        .map(|error| {
+                            format!("; unused provider capture also failed to settle: {error}")
+                        })
+                        .unwrap_or_default();
                     return block_landing(
                         &store,
                         &mut landing,
                         format!(
-                            "CI incident {} already consumed its one repair without advancing the head",
-                            incident.identity
+                            "CI incident {} already consumed its one repair without advancing the head{detail}",
+                            incident.identity,
                         ),
                     )
                     .await;
                 }
                 landing.repair_count += 1;
-                persist_landing_state(
+                if let Err(error) = persist_landing_state(
                     &store,
                     &mut landing,
                     PrLandingState::Repairing,
@@ -678,14 +885,19 @@ pub(crate) async fn supervise_pr_landing(
                     None,
                     None,
                 )
-                .await?;
-                let repair = run_driver_operation(&store, &landing, "ci-fix", {
-                    let driver = Arc::clone(&driver);
-                    let landing = landing.clone();
-                    let incident = incident.clone();
-                    move || driver.repair(&landing, &incident)
-                })
-                .await;
+                .await
+                {
+                    let cancellation = prepared.cancel().err();
+                    let detail = cancellation
+                        .map(|error| format!("; provider capture also failed to settle: {error}"))
+                        .unwrap_or_default();
+                    let reason = format!(
+                        "CI repair admission could not enter repairing state: {error}{detail}"
+                    );
+                    return block_landing(&store, &mut landing, reason).await;
+                }
+                let repair =
+                    run_driver_operation(&store, &landing, "ci-fix", move || prepared.run()).await;
                 match repair {
                     Ok(()) => {}
                     Err(error) => {
@@ -969,14 +1181,15 @@ mod tests {
     use std::sync::Mutex;
 
     use super::*;
+    use crate::durable::AgentInvocationId;
     use crate::store::migrations::migration_sql_for_test;
     use crate::store::{open_store, StorageConfig};
 
     struct FakeDriver {
         observations: Mutex<VecDeque<LandingObservation>>,
         repaired_head: String,
-        repairs: Mutex<u32>,
-        rearms: Mutex<u32>,
+        repairs: Arc<Mutex<u32>>,
+        rearms: Arc<Mutex<u32>>,
     }
 
     impl LandingDriver for FakeDriver {
@@ -988,9 +1201,17 @@ mod tests {
                 .ok_or_else(|| OpsError::Message("fake observation exhausted".to_string()))
         }
 
-        fn repair(&self, _landing: &PrLanding, _incident: &CiIncident) -> OpsResult<()> {
-            *self.repairs.lock().unwrap() += 1;
-            Ok(())
+        fn prepare_repair(
+            &self,
+            _landing: &PrLanding,
+            _incident: &CiIncident,
+            _failing_checks: &[CiCheck],
+        ) -> OpsResult<PreparedRepair> {
+            let repairs = Arc::clone(&self.repairs);
+            Ok(fake_prepared_repair(move || {
+                *repairs.lock().unwrap() += 1;
+                Ok(())
+            }))
         }
 
         fn rearm(&self, landing: &PrLanding) -> OpsResult<PrInfo> {
@@ -1010,6 +1231,61 @@ mod tests {
         }
     }
 
+    struct FailedRepairDriver {
+        observations: Mutex<VecDeque<LandingObservation>>,
+    }
+
+    impl LandingDriver for FailedRepairDriver {
+        fn observe(&self, _landing: &PrLanding) -> OpsResult<LandingObservation> {
+            self.observations
+                .lock()
+                .unwrap()
+                .pop_front()
+                .ok_or_else(|| OpsError::Message("fake observation exhausted".to_string()))
+        }
+
+        fn prepare_repair(
+            &self,
+            _landing: &PrLanding,
+            _incident: &CiIncident,
+            _failing_checks: &[CiCheck],
+        ) -> OpsResult<PreparedRepair> {
+            Ok(fake_prepared_repair(|| {
+                Err(OpsError::Message(
+                    "repair provider exited without a terminal fix".to_string(),
+                ))
+            }))
+        }
+
+        fn rearm(&self, _landing: &PrLanding) -> OpsResult<PrInfo> {
+            Err(OpsError::Message(
+                "failed repair must not be re-armed".to_string(),
+            ))
+        }
+    }
+
+    fn fake_repair_attempt(responded_at: OffsetDateTime) -> CiRepairAttempt {
+        CiRepairAttempt {
+            evidence_urls: vec!["https://github.com/o/r/actions/runs/12/job/34".to_string()],
+            evidence_sha256: "0".repeat(64),
+            provider_invocation_id: AgentInvocationId::new(),
+            deadline_at: responded_at + time::Duration::minutes(10),
+            finished_at: None,
+        }
+    }
+
+    fn fake_prepared_repair(
+        operation: impl FnOnce() -> OpsResult<()> + Send + 'static,
+    ) -> PreparedRepair {
+        let responded_at = OffsetDateTime::now_utc();
+        PreparedRepair {
+            responded_at,
+            attempt: fake_repair_attempt(responded_at),
+            capture: None,
+            operation: Box::new(operation),
+        }
+    }
+
     async fn store() -> (tempfile::TempDir, SharedStore) {
         let directory = tempfile::tempdir().unwrap();
         let path = directory.path().join("registry.db");
@@ -1026,6 +1302,20 @@ mod tests {
             .unwrap();
         if !migrated {
             conn.execute_batch(&migration_sql_for_test("pr_landings"))
+                .unwrap();
+        }
+        let repair_attempt_materialized = conn
+            .query_row(
+                "SELECT EXISTS(
+                    SELECT 1 FROM pragma_table_info('ci_incidents')
+                    WHERE name='repair_finished_at'
+                 )",
+                [],
+                |row| row.get::<_, bool>(0),
+            )
+            .unwrap();
+        if !repair_attempt_materialized {
+            conn.execute_batch(&migration_sql_for_test("ci_repair_attempt"))
                 .unwrap();
         }
         let store = Arc::new(open_store(&StorageConfig::sqlite(path)).await.unwrap());
@@ -1094,15 +1384,98 @@ mod tests {
                 },
             ])),
             repaired_head: "repaired-head".to_string(),
-            repairs: Mutex::new(0),
-            rearms: Mutex::new(0),
+            repairs: Arc::new(Mutex::new(0)),
+            rearms: Arc::new(Mutex::new(0)),
         });
-        let landed = supervise_pr_landing(store, landing, driver.clone(), Duration::ZERO)
+        let landed = supervise_pr_landing(store.clone(), landing, driver.clone(), Duration::ZERO)
             .await
             .unwrap();
         assert_eq!(landed.state, PrLandingState::Merged);
         assert_eq!(landed.repair_count, 1);
         assert_eq!(*driver.repairs.lock().unwrap(), 1);
+        let incidents = store
+            .ci_incidents_since(
+                OffsetDateTime::now_utc() - time::Duration::minutes(1),
+                None,
+                Some("loopflowstudio/loopflow"),
+            )
+            .await
+            .unwrap();
+        let attempt = incidents[0]
+            .incident
+            .repair_attempt
+            .as_ref()
+            .expect("successful provider keeps its repair receipt");
+        assert_eq!(
+            incidents[0].incident.repair_outcome(),
+            Some(crate::task::CiRepairOutcome::Repaired)
+        );
+        assert!(attempt.finished_at.is_some());
+    }
+
+    #[tokio::test]
+    async fn repair_provider_exit_terminates_watcher_with_a_durable_block() {
+        let (_directory, store) = store().await;
+        let landing = claimed(&store).await;
+        let landing_id = landing.id.clone();
+        let failed = LandingObservation::Failing {
+            head_sha: "failed-head".to_string(),
+            failing_checks: vec![CiCheck {
+                name: "rust".to_string(),
+                url: Some("https://github.com/o/r/actions/runs/12/job/34".to_string()),
+            }],
+        };
+        let driver = Arc::new(FailedRepairDriver {
+            observations: Mutex::new(VecDeque::from([failed.clone(), failed])),
+        });
+
+        let error = tokio::time::timeout(
+            Duration::from_secs(1),
+            supervise_pr_landing(store.clone(), landing, driver, Duration::ZERO),
+        )
+        .await
+        .expect("watcher returns after repair provider exit")
+        .expect_err("failed repair blocks the landing");
+
+        assert!(error
+            .to_string()
+            .contains("repair provider exited without a terminal fix"));
+        let persisted = store.get_pr_landing(&landing_id).await.unwrap().unwrap();
+        assert_eq!(persisted.state, PrLandingState::Blocked);
+        assert!(persisted
+            .blocked_reason
+            .as_deref()
+            .is_some_and(|reason| reason.contains("repair provider exited")));
+        let incidents = store
+            .ci_incidents_since(
+                OffsetDateTime::now_utc() - time::Duration::minutes(1),
+                None,
+                Some("loopflowstudio/loopflow"),
+            )
+            .await
+            .unwrap();
+        assert_eq!(incidents.len(), 1);
+        assert!(incidents[0].incident.blocked_at.is_some());
+        assert!(incidents[0]
+            .incident
+            .blocked_reason
+            .as_deref()
+            .is_some_and(|reason| reason.contains("repair provider exited")));
+        let attempt = incidents[0]
+            .incident
+            .repair_attempt
+            .as_ref()
+            .expect("failed provider keeps its repair receipt");
+        assert_eq!(
+            incidents[0].incident.repair_outcome(),
+            Some(crate::task::CiRepairOutcome::Blocked)
+        );
+        assert!(attempt.finished_at.is_some());
+    }
+
+    #[test]
+    fn ci_fix_provider_has_a_finite_deadline() {
+        assert_eq!(ci_fix_process_config().timeout, Some(CI_FIX_TIMEOUT));
     }
 
     #[tokio::test]
@@ -1120,8 +1493,8 @@ mod tests {
                 },
             ])),
             repaired_head: "unused".to_string(),
-            repairs: Mutex::new(0),
-            rearms: Mutex::new(0),
+            repairs: Arc::new(Mutex::new(0)),
+            rearms: Arc::new(Mutex::new(0)),
         });
         supervise_pr_landing(store, landing, driver.clone(), Duration::ZERO)
             .await
@@ -1144,8 +1517,8 @@ mod tests {
                 },
             ])),
             repaired_head: "failed-head".to_string(),
-            repairs: Mutex::new(0),
-            rearms: Mutex::new(0),
+            repairs: Arc::new(Mutex::new(0)),
+            rearms: Arc::new(Mutex::new(0)),
         });
         supervise_pr_landing(store, landing, driver.clone(), Duration::ZERO)
             .await
@@ -1173,8 +1546,8 @@ mod tests {
                 },
             ])),
             repaired_head: "unused".to_string(),
-            repairs: Mutex::new(0),
-            rearms: Mutex::new(0),
+            repairs: Arc::new(Mutex::new(0)),
+            rearms: Arc::new(Mutex::new(0)),
         });
         supervise_pr_landing(store, landing, driver.clone(), Duration::ZERO)
             .await
@@ -1211,8 +1584,8 @@ mod tests {
                 },
             ])),
             repaired_head: "next-head".to_string(),
-            repairs: Mutex::new(0),
-            rearms: Mutex::new(0),
+            repairs: Arc::new(Mutex::new(0)),
+            rearms: Arc::new(Mutex::new(0)),
         });
         supervise_pr_landing(store, landing, driver.clone(), Duration::ZERO)
             .await
@@ -1236,7 +1609,13 @@ mod tests {
         store.observe_ci_incident(&incident).await.unwrap();
 
         assert!(store
-            .claim_ci_incident(&incident.identity, &landing.id, landing.generation, now)
+            .claim_ci_incident(
+                &incident.identity,
+                &landing.id,
+                landing.generation,
+                now,
+                &fake_repair_attempt(now),
+            )
             .await
             .unwrap());
     }

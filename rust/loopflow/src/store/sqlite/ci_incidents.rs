@@ -3,10 +3,11 @@
 use rusqlite::{params, types::Type};
 use time::OffsetDateTime;
 
+use crate::durable::AgentInvocationId;
 use crate::pr_landing::PrLandingId;
 use crate::store::ci_incidents::CiIncidentReportRow;
 use crate::store::{StoreError, StoreResult};
-use crate::task::{CiIncident, TaskId, TaskPrId};
+use crate::task::{CiIncident, CiRepairAttempt, TaskId, TaskPrId};
 
 fn timestamp(value: OffsetDateTime) -> i64 {
     value.unix_timestamp_nanos() as i64
@@ -22,11 +23,70 @@ fn optional_datetime(index: usize, value: Option<i64>) -> rusqlite::Result<Optio
     value.map(|value| datetime(index, value)).transpose()
 }
 
+fn invalid_data(index: usize, message: impl Into<String>) -> rusqlite::Error {
+    rusqlite::Error::FromSqlConversionFailure(
+        index,
+        Type::Text,
+        Box::new(std::io::Error::new(
+            std::io::ErrorKind::InvalidData,
+            message.into(),
+        )),
+    )
+}
+
+fn map_repair_attempt(row: &rusqlite::Row<'_>) -> rusqlite::Result<Option<CiRepairAttempt>> {
+    let evidence_urls_json = row.get::<_, Option<String>>(25)?;
+    let evidence_sha256 = row.get::<_, Option<String>>(26)?;
+    let invocation_id = row.get::<_, Option<String>>(27)?;
+    let deadline_at = row.get::<_, Option<i64>>(28)?;
+    let finished_at = row.get::<_, Option<i64>>(29)?;
+    match (
+        evidence_urls_json,
+        evidence_sha256,
+        invocation_id,
+        deadline_at,
+        finished_at,
+    ) {
+        (None, None, None, None, None) => Ok(None),
+        (
+            Some(evidence_urls_json),
+            Some(evidence_sha256),
+            Some(invocation_id),
+            Some(deadline_at),
+            finished_at,
+        ) => {
+            let evidence_urls = serde_json::from_str(&evidence_urls_json)
+                .map_err(|error| invalid_data(25, error.to_string()))?;
+            let provider_invocation_id = AgentInvocationId::parse(&invocation_id)
+                .map_err(|error| invalid_data(27, error.to_string()))?;
+            Ok(Some(CiRepairAttempt {
+                evidence_urls,
+                evidence_sha256,
+                provider_invocation_id,
+                deadline_at: datetime(28, deadline_at)?,
+                finished_at: optional_datetime(29, finished_at)?,
+            }))
+        }
+        _ => Err(invalid_data(
+            29,
+            "CI repair attempt columns are only partially populated",
+        )),
+    }
+}
+
 fn map_incident_report_row(row: &rusqlite::Row<'_>) -> rusqlite::Result<CiIncidentReportRow> {
     let failure_set_json: String = row.get(7)?;
     let failure_set = serde_json::from_str(&failure_set_json).map_err(|error| {
         rusqlite::Error::FromSqlConversionFailure(7, Type::Text, Box::new(error))
     })?;
+    let responded_at = optional_datetime(12, row.get(12)?)?;
+    let repair_attempt = map_repair_attempt(row)?;
+    if repair_attempt.is_some() && responded_at.is_none() {
+        return Err(invalid_data(
+            12,
+            "CI repair attempt is missing its incident response time",
+        ));
+    }
     Ok(CiIncidentReportRow {
         incident: CiIncident {
             identity: row.get(0)?,
@@ -43,7 +103,8 @@ fn map_incident_report_row(row: &rusqlite::Row<'_>) -> rusqlite::Result<CiIncide
             claimed_landing_generation: row
                 .get::<_, Option<i64>>(11)?
                 .map(|generation| generation as u64),
-            responded_at: optional_datetime(12, row.get(12)?)?,
+            responded_at,
+            repair_attempt,
             green_at: optional_datetime(13, row.get(13)?)?,
             merged_at: optional_datetime(14, row.get(14)?)?,
             blocked_at: optional_datetime(15, row.get(15)?)?,
@@ -127,23 +188,48 @@ impl super::SqliteStore {
         landing_id: &PrLandingId,
         generation: u64,
         responded_at: OffsetDateTime,
+        attempt: &CiRepairAttempt,
     ) -> StoreResult<bool> {
+        if attempt.finished_at.is_some()
+            || attempt.evidence_urls.is_empty()
+            || attempt.deadline_at <= responded_at
+        {
+            return Err(StoreError::InvalidData(
+                "a claimed CI repair attempt must be running with evidence and a future deadline"
+                    .to_string(),
+            ));
+        }
+        let evidence_urls = serde_json::to_string(&attempt.evidence_urls)?;
         let at = timestamp(responded_at);
         let conn = self.conn.lock().expect("store mutex poisoned");
         Ok(conn.execute(
             "UPDATE ci_incidents
              SET claimed_landing_generation=?3,
-                 responded_at=COALESCE(responded_at, ?4),
+                 responded_at=?4,
+                 repair_evidence_urls_json=?5,
+                 repair_evidence_sha256=?6,
+                 repair_invocation_id=?7,
+                 repair_deadline_at=?8,
                  updated_at=MAX(updated_at, ?4)
              WHERE identity=?1 AND landing_id=?2
                AND claimed_landing_generation IS NULL
+               AND responded_at IS NULL AND repair_invocation_id IS NULL
                AND green_at IS NULL AND merged_at IS NULL AND blocked_at IS NULL
                AND EXISTS (
                     SELECT 1 FROM pr_landings landing
                     WHERE landing.id=?2 AND landing.generation=?3
                       AND landing.state IN ('watching', 'repairing')
                )",
-            params![identity, landing_id.as_str(), generation as i64, at],
+            params![
+                identity,
+                landing_id.as_str(),
+                generation as i64,
+                at,
+                evidence_urls,
+                attempt.evidence_sha256,
+                attempt.provider_invocation_id.as_str(),
+                timestamp(attempt.deadline_at),
+            ],
         )? > 0)
     }
 
@@ -160,6 +246,11 @@ impl super::SqliteStore {
         Ok(conn.execute(
             "UPDATE ci_incidents
              SET repaired_head_sha=COALESCE(repaired_head_sha, ?4),
+                 repair_finished_at=CASE
+                    WHEN repair_invocation_id IS NOT NULL
+                    THEN COALESCE(repair_finished_at, ?5)
+                    ELSE repair_finished_at
+                 END,
                  updated_at=MAX(updated_at, ?5)
              WHERE identity=?1 AND landing_id=?2
                AND claimed_landing_generation=?3
@@ -188,7 +279,13 @@ impl super::SqliteStore {
         let conn = self.conn.lock().expect("store mutex poisoned");
         Ok(conn.execute(
             "UPDATE ci_incidents
-             SET green_at=COALESCE(green_at, ?3), updated_at=MAX(updated_at, ?3)
+             SET green_at=COALESCE(green_at, ?3),
+                 repair_finished_at=CASE
+                    WHEN repair_invocation_id IS NOT NULL
+                    THEN COALESCE(repair_finished_at, ?3)
+                    ELSE repair_finished_at
+                 END,
+                 updated_at=MAX(updated_at, ?3)
              WHERE landing_id=?1 AND green_at IS NULL
                AND EXISTS (
                     SELECT 1 FROM pr_landings landing
@@ -209,7 +306,13 @@ impl super::SqliteStore {
         let conn = self.conn.lock().expect("store mutex poisoned");
         Ok(conn.execute(
             "UPDATE ci_incidents
-             SET merged_at=COALESCE(merged_at, ?3), updated_at=MAX(updated_at, ?3)
+             SET merged_at=COALESCE(merged_at, ?3),
+                 repair_finished_at=CASE
+                    WHEN repair_invocation_id IS NOT NULL
+                    THEN COALESCE(repair_finished_at, ?3)
+                    ELSE repair_finished_at
+                 END,
+                 updated_at=MAX(updated_at, ?3)
              WHERE landing_id=?1
                AND EXISTS (
                     SELECT 1 FROM pr_landings landing
@@ -232,6 +335,11 @@ impl super::SqliteStore {
         Ok(conn.execute(
             "UPDATE ci_incidents
              SET blocked_at=COALESCE(blocked_at, ?3), blocked_reason=?4,
+                 repair_finished_at=CASE
+                    WHEN repair_invocation_id IS NOT NULL
+                    THEN COALESCE(repair_finished_at, ?3)
+                    ELSE repair_finished_at
+                 END,
                  updated_at=MAX(updated_at, ?3)
              WHERE landing_id=?1 AND green_at IS NULL AND merged_at IS NULL
                AND EXISTS (
@@ -279,7 +387,10 @@ impl super::SqliteStore {
                           ELSE MIN(ci.poll_observed_at, ci.webhook_received_at)
                       END
                       AND s.issued_at * 1000000000 <= COALESCE(ci.green_at, ci.merged_at, 9223372036854775807)
-                )
+                ),
+                ci.repair_evidence_urls_json, ci.repair_evidence_sha256,
+                ci.repair_invocation_id, ci.repair_deadline_at,
+                ci.repair_finished_at
              FROM ci_incidents ci
              LEFT JOIN tasks ts ON ts.id=ci.task_id
              LEFT JOIN epochs e ON e.id=(

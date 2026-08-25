@@ -3,7 +3,7 @@
 use time::OffsetDateTime;
 
 use crate::pr_landing::PrLandingId;
-use crate::task::CiIncident;
+use crate::task::{CiIncident, CiRepairAttempt};
 
 use super::{run_sqlite, Store, StoreResult};
 
@@ -34,11 +34,13 @@ impl Store {
         landing_id: &PrLandingId,
         generation: u64,
         responded_at: OffsetDateTime,
+        attempt: &CiRepairAttempt,
     ) -> StoreResult<bool> {
         let identity = identity.to_string();
         let landing_id = landing_id.clone();
+        let attempt = attempt.clone();
         run_sqlite(&self.sqlite, move |store| {
-            store.claim_ci_incident(&identity, &landing_id, generation, responded_at)
+            store.claim_ci_incident(&identity, &landing_id, generation, responded_at, &attempt)
         })
         .await
     }

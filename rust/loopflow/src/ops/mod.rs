@@ -46,6 +46,7 @@ pub use error::{OpsError, OpsResult};
 pub use flow::execute_flow_ops;
 pub use land::{arm, mark_ready, submit, LandOptions};
 pub(crate) use land::{finish_arm_after_rebase, finish_submit_after_rebase};
+pub(crate) use pr::failed_check_log;
 pub use pr::{create_or_update_pr, current_pr, PrInfo, PrOptions, PrResult};
 pub(crate) use pr_landing::supervise_pr_landing;
 pub use present::{present_pr_review, ReviewSurface};

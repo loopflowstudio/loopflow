@@ -24,6 +24,8 @@ Task runs kickoff once, repeats its selected inner flow, and settles only after
 its gate approves; gate repairs return it to another iteration.
 `lf pr land` hands one durable landing to `lfd` when available and otherwise
 watches it in the invoking process. That landing observes GitHub, runs bounded
-`ci-fix`, re-arms changed heads, and applies Task disposition only after GitHub
-reports the PR merged. A Project owns the bounded KR-pursuit process that
-creates Tasks, but no worktree, branch, PR, or child-PR supervisor.
+`ci-fix` from exact hosted failure logs in an isolated, clean worktree, re-arms
+changed heads, and durably blocks when evidence, provider completion, or the
+repair result is unusable. It applies Task disposition only after GitHub reports
+the PR merged. A Project owns the bounded KR-pursuit process that creates Tasks,
+but no worktree, branch, PR, or child-PR supervisor.

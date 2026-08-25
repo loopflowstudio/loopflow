@@ -192,7 +192,7 @@ pub(crate) fn begin_rebase_operation(
 
     let worktree = canonical(worktree);
     let (writer_id, writer_lease) = establish_writer(&worktree, inherited_writer_id()?)?;
-    refuse_other_writers(&worktree, &writer_id)?;
+    refuse_other_writers(&worktree, &writer_id, "rebase")?;
 
     let path = operation_path(&worktree)?;
     let mut file = create_record(&path)?;
@@ -298,7 +298,7 @@ fn adopt_operation(
     stored: Option<GitOperationOwner>,
 ) -> OpsResult<OperationAuthorization> {
     let (writer_id, writer_lease) = establish_writer(worktree, inherited_writer_id()?)?;
-    refuse_other_writers(worktree, &writer_id)?;
+    refuse_other_writers(worktree, &writer_id, "rebase")?;
 
     let mut owner = match stored {
         Some(owner) => owner,
@@ -355,6 +355,7 @@ pub(crate) fn prepare_agent_writer(
     // Establish the writer first. A rebase racing this preflight will then see
     // the live writer and refuse, instead of creating an operation in the gap
     // between an agent's operation check and its writer claim.
+    refuse_other_writers(worktree, &writer_id, "launch an agent")?;
     let requested_operation = env
         .get(LF_GIT_OPERATION_ID_ENV)
         .cloned()
@@ -455,7 +456,11 @@ fn establish_writer(
     }
 }
 
-fn refuse_other_writers(worktree: &Path, own_id: &WorktreeWriterId) -> OpsResult<()> {
+fn refuse_other_writers(
+    worktree: &Path,
+    own_id: &WorktreeWriterId,
+    operation: &str,
+) -> OpsResult<()> {
     let dir = writers_dir(worktree)?;
     if !dir.exists() {
         return Ok(());
@@ -479,7 +484,7 @@ fn refuse_other_writers(worktree: &Path, own_id: &WorktreeWriterId) -> OpsResult
                 })?;
                 if writer_owner_is_authoritative(&owner)? {
                     return Err(OpsError::Message(format!(
-                        "refusing to rebase while independent writer {} (pid {}) has live durable authority in this worktree",
+                        "refusing to {operation} while independent writer {} (pid {}) has live durable authority in this worktree",
                         owner.id.as_str(), owner.pid
                     )));
                 }
@@ -766,5 +771,39 @@ mod tests {
         assert!(error.to_string().contains("was revoked"));
         operation.complete().unwrap();
         drop(guard);
+    }
+
+    #[test]
+    fn agent_launch_refuses_an_independent_live_writer() {
+        let _env_lock = crate::journal::test_env_lock();
+        let _restore = EnvRestore::capture(&[
+            "LF_AGENT_INVOCATION_ID",
+            "LF_TRACE_ID",
+            "LF_PROCESS_ID",
+            "LF_WORKTREE_WRITER_ID",
+        ]);
+        for name in [
+            "LF_AGENT_INVOCATION_ID",
+            "LF_TRACE_ID",
+            "LF_PROCESS_ID",
+            "LF_WORKTREE_WRITER_ID",
+        ] {
+            std::env::remove_var(name);
+        }
+        let directory = tempfile::tempdir().unwrap();
+        let repo = directory.path().join("repo");
+        std::fs::create_dir(&repo).unwrap();
+        git(&repo, &["init", "-b", "main"]);
+
+        let first = prepare_agent_writer(&repo, &BTreeMap::new())
+            .unwrap()
+            .expect("first agent owns the worktree");
+        let error = prepare_agent_writer(&repo, &BTreeMap::new())
+            .expect_err("second agent must not share the worktree");
+
+        assert!(error
+            .to_string()
+            .contains("refusing to launch an agent while independent writer"));
+        drop(first);
     }
 }

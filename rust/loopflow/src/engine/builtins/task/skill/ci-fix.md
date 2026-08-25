@@ -14,14 +14,18 @@ them, and leave the branch ready for the landing supervisor to publish.
 ## Workflow
 
 1. **Resolve the watched PR**
-   - If the prompt message already includes check metadata (PR number, branch, commit SHA, logs URL), use it directly.
+   - If the prompt includes `Hosted failure evidence fetched from the exact
+     check URLs`, use that evidence directly. The landing supervisor has
+     already bound it to the recorded head.
+   - Otherwise, if the prompt includes check metadata (PR number, branch,
+     commit SHA, logs URL), use it directly.
    - Otherwise, resolve the PR for the current branch with the GitHub CLI:
      ```bash
      gh pr view --json number,headRefName,headRefOid,url
      ```
    - If there is no PR, stop and explain what is missing.
 
-2. **Fetch latest check-run failures**
+2. **Fetch latest check-run failures only when evidence was not supplied**
    - Query checks for the PR head SHA (from `headRefOid`):
      ```bash
      repo=$(gh repo view --json nameWithOwner -q .nameWithOwner)
@@ -32,9 +36,14 @@ them, and leave the branch ready for the landing supervisor to publish.
    - Use the check `html_url`/logs link for repro details.
 
 3. **Fix one failing check at a time**
-   - Reproduce the failure locally from the current branch.
+   - Derive the smallest test selector named by the hosted failure and run it
+     first. Do not begin with a repository-wide suite.
+   - Reproduce the failure locally from the current branch. This launch has no
+     ambient Loopflow Run, Home, or writer authority; keep local repro state
+     isolated rather than discovering or restoring the parent Run context.
    - Apply the smallest correct fix.
-   - Run only the relevant local checks first, then broader checks if needed.
+   - Run only the relevant local checks. The hosted gate reruns the full suite
+     after the landing supervisor publishes the repair.
    - Repeat until failing checks for the head SHA are addressed or a real blocker remains.
 
 4. **Verify and report**
@@ -50,9 +59,9 @@ them, and leave the branch ready for the landing supervisor to publish.
 - Stay scoped to CI failures on this PR.
 - Prefer targeted fixes over broad refactors.
 - Do not ignore failing tests to get green.
-- Do not push, land, or merge. If you cannot repair the head, say so and stop. A
-  material tree change is the only signal that lets the landing supervisor
-  publish, re-arm a new head, and continue watching.
+- Do not commit, push, land, or merge. If you cannot repair the head, say so and
+  stop. A material tree change is the only signal that lets the landing
+  supervisor publish, re-arm a new head, and continue watching.
 
 ## Adaptation
 

@@ -1,5 +1,8 @@
+use std::io::Read;
 use std::path::{Path, PathBuf};
-use std::process::Command;
+use std::process::{Command, Output, Stdio};
+use std::thread;
+use std::time::{Duration, Instant};
 
 use serde::Deserialize;
 
@@ -47,6 +50,8 @@ pub struct PrCopy {
 }
 
 const GITHUB_PR_TITLE_MAX_CHARS: usize = 256;
+const FAILED_CHECK_LOG_MAX_CHARS: usize = 24_000;
+const FAILED_CHECK_LOG_TIMEOUT: Duration = Duration::from_secs(30);
 const TASK_PR_CONTEXT_START: &str = "<!-- loopflow:task-pr-context:start -->";
 const TASK_PR_CONTEXT_END: &str = "<!-- loopflow:task-pr-context:end -->";
 
@@ -957,6 +962,177 @@ pub struct GhFailingCheck {
     pub url: Option<String>,
 }
 
+/// One immutable GitHub Actions run/job named by a check's details URL.
+#[derive(Debug, Clone, PartialEq, Eq)]
+struct ActionsRunRef {
+    run_id: String,
+    job_id: Option<String>,
+}
+
+impl ActionsRunRef {
+    fn parse(value: &str) -> Option<Self> {
+        let trimmed = value.trim();
+        if trimmed.is_empty() {
+            return None;
+        }
+        if trimmed.chars().all(|character| character.is_ascii_digit()) {
+            return Some(Self {
+                run_id: trimmed.to_string(),
+                job_id: None,
+            });
+        }
+        let after = trimmed.split_once("/actions/runs/")?.1;
+        let mut parts = after.split('/');
+        let run_id = parts.next()?;
+        if !is_numeric(run_id) {
+            return None;
+        }
+        let job_id = match parts.next() {
+            Some("job" | "jobs") => parts.next().filter(|value| is_numeric(value)),
+            _ => None,
+        };
+        Some(Self {
+            run_id: run_id.to_string(),
+            job_id: job_id.map(str::to_string),
+        })
+    }
+}
+
+fn is_numeric(value: &str) -> bool {
+    !value.is_empty() && value.chars().all(|character| character.is_ascii_digit())
+}
+
+/// Fetch the failed hosted step for one immutable GitHub Actions check URL.
+pub(crate) fn failed_check_log(repo: &Path, name: &str, url: &str) -> OpsResult<String> {
+    _failed_check_log(repo, name, url, None)
+}
+
+pub(super) fn bounded_failed_check_log(repo: &Path, name: &str, url: &str) -> OpsResult<String> {
+    _failed_check_log(repo, name, url, Some(FAILED_CHECK_LOG_MAX_CHARS))
+}
+
+fn _failed_check_log(
+    repo: &Path,
+    name: &str,
+    url: &str,
+    max_chars: Option<usize>,
+) -> OpsResult<String> {
+    let run_ref = ActionsRunRef::parse(url).ok_or_else(|| {
+        let source = if url.trim().is_empty() {
+            "the check has no details URL".to_string()
+        } else {
+            format!("{url} is not a GitHub Actions run or job URL")
+        };
+        OpsError::Message(format!(
+            "exact hosted failure evidence is unavailable for {name}: {source}"
+        ))
+    })?;
+
+    let mut command = Command::new("gh");
+    command
+        .arg("run")
+        .arg("view")
+        .arg(&run_ref.run_id)
+        .arg("--log-failed");
+    if let Some(job_id) = &run_ref.job_id {
+        command.arg("--job").arg(job_id);
+    }
+    command.current_dir(repo);
+    let output =
+        command_output_with_timeout(&mut command, FAILED_CHECK_LOG_TIMEOUT).map_err(|error| {
+            OpsError::Message(format!(
+                "exact hosted failure evidence is unavailable for {name}: {error}. Open {url}"
+            ))
+        })?;
+    if !output.status.success() {
+        return Err(OpsError::CommandFailed {
+            command: format!("gh run view {} --log-failed", run_ref.run_id),
+            stderr: format!(
+                "exact hosted failure evidence is unavailable for {name}: {}. Open {url}",
+                stderr_from_output(&output)
+            ),
+        });
+    }
+    let log = String::from_utf8_lossy(&output.stdout);
+    if log.trim().is_empty() {
+        return Err(OpsError::Message(format!(
+            "exact hosted failure evidence is empty for {name}; open {url}"
+        )));
+    }
+    let log = max_chars
+        .map(|max_chars| bounded_log_tail(&log, max_chars))
+        .unwrap_or_else(|| log.to_string());
+    Ok(format!("### {name}\nSource: {url}\n\n{log}\n"))
+}
+
+fn command_output_with_timeout(command: &mut Command, timeout: Duration) -> OpsResult<Output> {
+    command.stdout(Stdio::piped()).stderr(Stdio::piped());
+    let mut child = command.spawn()?;
+    let stdout = child
+        .stdout
+        .take()
+        .ok_or_else(|| OpsError::Message("command stdout was not captured".to_string()))?;
+    let stderr = child
+        .stderr
+        .take()
+        .ok_or_else(|| OpsError::Message("command stderr was not captured".to_string()))?;
+    let stdout_reader = thread::spawn(move || {
+        let mut output = Vec::new();
+        let mut stdout = stdout;
+        stdout.read_to_end(&mut output).map(|_| output)
+    });
+    let stderr_reader = thread::spawn(move || {
+        let mut output = Vec::new();
+        let mut stderr = stderr;
+        stderr.read_to_end(&mut output).map(|_| output)
+    });
+    let started = Instant::now();
+    let status = loop {
+        if let Some(status) = child.try_wait()? {
+            break status;
+        }
+        if started.elapsed() >= timeout {
+            let _ = child.kill();
+            let _ = child.wait();
+            let _ = stdout_reader.join();
+            let _ = stderr_reader.join();
+            return Err(OpsError::Message(format!(
+                "command exceeded its {} second deadline",
+                timeout.as_secs()
+            )));
+        }
+        thread::sleep(Duration::from_millis(25));
+    };
+    let stdout = stdout_reader
+        .join()
+        .map_err(|_| OpsError::Message("command stdout reader panicked".to_string()))??;
+    let stderr = stderr_reader
+        .join()
+        .map_err(|_| OpsError::Message("command stderr reader panicked".to_string()))??;
+    Ok(Output {
+        status,
+        stdout,
+        stderr,
+    })
+}
+
+fn bounded_log_tail(text: &str, max_chars: usize) -> String {
+    let characters = text.chars().count();
+    if characters <= max_chars {
+        return text.to_string();
+    }
+    let omitted = characters - max_chars;
+    let start = text
+        .char_indices()
+        .nth(omitted)
+        .map(|(index, _)| index)
+        .unwrap_or(text.len());
+    format!(
+        "[{omitted} earlier hosted log characters omitted]\n{}",
+        &text[start..]
+    )
+}
+
 impl RequiredChecks {
     fn from_checks(checks: Vec<GhCheck>) -> Self {
         let mut failing = false;
@@ -1489,12 +1665,15 @@ fn truncate_chars(text: &str, max_chars: usize) -> String {
 #[cfg(test)]
 mod tests {
     use super::{
-        classify_pr_read_failure, is_missing_pr, normalize_task_pr_copy, parse_check_set_output,
-        parse_generated_pr_copy, pr_number_from_url, GhCheck, GhRestHead, GhRestPr,
-        MergeGateReading, PrCopy, RequiredChecks, TaskPrCopyLifecycle,
+        bounded_log_tail, classify_pr_read_failure, command_output_with_timeout, is_missing_pr,
+        normalize_task_pr_copy, parse_check_set_output, parse_generated_pr_copy,
+        pr_number_from_url, ActionsRunRef, GhCheck, GhRestHead, GhRestPr, MergeGateReading, PrCopy,
+        RequiredChecks, TaskPrCopyLifecycle,
     };
     use crate::ops::task::TaskPrContext;
     use crate::task::TaskLifecyclePlan;
+    use std::process::Command;
+    use std::time::Duration;
 
     fn check(name: &str, bucket: &str) -> GhCheck {
         GhCheck {
@@ -1517,6 +1696,63 @@ mod tests {
                 sha: Some("headsha".to_string()),
             },
         }
+    }
+
+    #[test]
+    fn actions_run_reference_keeps_the_exact_job() {
+        let reference = ActionsRunRef::parse(
+            "https://github.com/loopflowstudio/loopflow/actions/runs/978123456/job/111222333",
+        )
+        .expect("job URL parses");
+        assert_eq!(reference.run_id, "978123456");
+        assert_eq!(reference.job_id.as_deref(), Some("111222333"));
+
+        let plural = ActionsRunRef::parse(
+            "https://github.com/loopflowstudio/loopflow/actions/runs/978123456/jobs/444555666",
+        )
+        .expect("plural job URL parses");
+        assert_eq!(plural.job_id.as_deref(), Some("444555666"));
+
+        let run = ActionsRunRef::parse(
+            "https://github.com/loopflowstudio/loopflow/actions/runs/978123456",
+        )
+        .expect("run URL parses");
+        assert_eq!(run.job_id, None);
+        assert_eq!(ActionsRunRef::parse(" 978123456 "), Some(run));
+    }
+
+    #[test]
+    fn actions_run_reference_rejects_non_actions_evidence() {
+        assert_eq!(ActionsRunRef::parse("https://example.com/build/123"), None);
+        assert_eq!(
+            ActionsRunRef::parse("https://github.com/o/r/actions/runs/abc"),
+            None
+        );
+        assert_eq!(ActionsRunRef::parse(""), None);
+    }
+
+    #[test]
+    fn hosted_log_bound_keeps_the_failure_tail() {
+        assert_eq!(
+            bounded_log_tail("setup\nFAIL exact\n", 100),
+            "setup\nFAIL exact\n"
+        );
+        assert_eq!(
+            bounded_log_tail("discard this prefix\nFAIL exact\n", 11),
+            "[20 earlier hosted log characters omitted]\nFAIL exact\n"
+        );
+    }
+
+    #[cfg(unix)]
+    #[test]
+    fn hosted_log_command_has_a_finite_deadline() {
+        let mut command = Command::new("sh");
+        command.args(["-c", "while :; do :; done"]);
+
+        let error = command_output_with_timeout(&mut command, Duration::from_millis(25))
+            .expect_err("non-terminating evidence command times out");
+
+        assert!(error.to_string().contains("deadline"));
     }
 
     #[test]

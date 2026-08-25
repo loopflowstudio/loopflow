@@ -60,6 +60,7 @@ pub struct CiIncidentDto {
     pub landing_id: Option<String>,
     pub claimed_landing_generation: Option<u64>,
     pub responded_at: Option<String>,
+    pub repair_attempt: Option<CiRepairAttemptDto>,
     pub green_at: Option<String>,
     pub merged_at: Option<String>,
     pub blocked_at: Option<String>,
@@ -71,6 +72,16 @@ pub struct CiIncidentDto {
     pub green_seconds: Option<f64>,
     pub merge_seconds: Option<f64>,
     pub task_cycle_seconds: Option<f64>,
+}
+
+#[derive(Debug, Clone, PartialEq, Serialize)]
+pub struct CiRepairAttemptDto {
+    pub evidence_urls: Vec<String>,
+    pub evidence_sha256: String,
+    pub provider_invocation_id: String,
+    pub deadline_at: String,
+    pub finished_at: Option<String>,
+    pub outcome: String,
 }
 
 pub fn run(since: &str, wave: Option<&str>, repo: Option<&str>, json: bool) -> Result<()> {
@@ -157,6 +168,23 @@ fn incident_dto(
     } else {
         "open"
     };
+    let repair_outcome = incident.repair_outcome();
+    let repair_attempt = incident
+        .repair_attempt
+        .map(|attempt| {
+            Ok::<_, anyhow::Error>(CiRepairAttemptDto {
+                evidence_urls: attempt.evidence_urls,
+                evidence_sha256: attempt.evidence_sha256,
+                provider_invocation_id: attempt.provider_invocation_id.to_string(),
+                deadline_at: format_time(attempt.deadline_at)?,
+                finished_at: attempt.finished_at.map(format_time).transpose()?,
+                outcome: repair_outcome
+                    .expect("an attempt has a derived repair outcome")
+                    .as_str()
+                    .to_string(),
+            })
+        })
+        .transpose()?;
     Ok(CiIncidentDto {
         identity: incident.identity,
         repo: incident.repo,
@@ -181,6 +209,7 @@ fn incident_dto(
             .map(|id| id.as_str().to_string()),
         claimed_landing_generation: incident.claimed_landing_generation,
         responded_at: incident.responded_at.map(format_time).transpose()?,
+        repair_attempt,
         green_at: incident.green_at.map(format_time).transpose()?,
         merged_at: incident.merged_at.map(format_time).transpose()?,
         blocked_at: incident.blocked_at.map(format_time).transpose()?,
@@ -309,6 +338,30 @@ fn print_report(report: &CiReportDto) {
             incident.outcome,
         );
     }
+    let repairs = report
+        .incidents
+        .iter()
+        .filter_map(|incident| {
+            incident
+                .repair_attempt
+                .as_ref()
+                .map(|repair| (incident, repair))
+        })
+        .collect::<Vec<_>>();
+    if !repairs.is_empty() {
+        println!();
+        println!("repair attempts:");
+        for (incident, repair) in repairs {
+            println!(
+                "  #{} {} · capture {} · deadline {}",
+                incident.pr_number,
+                repair.outcome,
+                repair.provider_invocation_id,
+                repair.deadline_at,
+            );
+            println!("    evidence: {}", repair.evidence_urls.join(", "));
+        }
+    }
     let summary = &report.summary;
     println!();
     println!(
@@ -334,7 +387,7 @@ fn print_report(report: &CiReportDto) {
 
 #[cfg(test)]
 mod tests {
-    use super::{parse_since, percentile, summarize, CiIncidentDto};
+    use super::{parse_since, percentile, summarize, CiIncidentDto, CiRepairAttemptDto};
     use time::OffsetDateTime;
 
     fn green_incident(landing: Option<&str>, responded: Option<&str>) -> CiIncidentDto {
@@ -356,6 +409,7 @@ mod tests {
             landing_id: landing.map(str::to_string),
             claimed_landing_generation: landing.map(|_| 1),
             responded_at: responded.map(str::to_string),
+            repair_attempt: None,
             green_at: Some("2026-07-16T00:10:00Z".to_string()),
             merged_at: None,
             blocked_at: None,
@@ -368,6 +422,38 @@ mod tests {
             merge_seconds: None,
             task_cycle_seconds: None,
         }
+    }
+
+    #[test]
+    fn repair_receipt_is_exposed_without_dropping_terminal_fields() {
+        let mut dto = green_incident(Some("landing_1"), Some("2026-07-16T00:05:00Z"));
+        dto.repair_attempt = Some(CiRepairAttemptDto {
+            evidence_urls: vec![
+                "https://github.com/loopflowstudio/loopflow/actions/runs/12/job/34".to_string(),
+            ],
+            evidence_sha256: "0".repeat(64),
+            provider_invocation_id: "invocation_00000000000000000000000000000000".to_string(),
+            deadline_at: "2026-07-16T00:15:00Z".to_string(),
+            finished_at: Some("2026-07-16T00:06:00Z".to_string()),
+            outcome: "repaired".to_string(),
+        });
+
+        let json = serde_json::to_value(&dto).expect("serialize CiIncidentDto");
+        let repair = json
+            .get("repair_attempt")
+            .and_then(|value| value.as_object())
+            .expect("repair receipt object");
+        assert_eq!(
+            repair
+                .get("provider_invocation_id")
+                .and_then(|value| value.as_str()),
+            Some("invocation_00000000000000000000000000000000")
+        );
+        assert_eq!(
+            repair.get("outcome").and_then(|value| value.as_str()),
+            Some("repaired")
+        );
+        assert!(repair.get("finished_at").is_some());
     }
 
     /// `repaired_head_sha` is the operator-facing half of the settlement-race fix

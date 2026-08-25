@@ -23,6 +23,29 @@ use tokio::sync::mpsc;
 use crate::chat::types::ConversationEvent;
 use crate::engine::agent::{AgentConfig, AgentRunContext};
 
+const DETACHED_AGENT_ENV: &[&str] = &[
+    crate::durable::RUN_CONTEXT_ENV,
+    crate::durable::RUN_ID_ENV,
+    crate::durable::AGENT_INVOCATION_ENV,
+    crate::journal::LF_PROCESS_ID_ENV,
+    crate::journal::LF_TRACE_ID_ENV,
+    crate::engine::wave_context::WAVE_ID_ENV,
+    "LF_PARENT_RUN_ID",
+];
+const ISOLATED_AGENT_ENV: &[&str] = &[
+    crate::store::CONTROL_BIN_ENV,
+    crate::store::CONTROL_HOME_ENV,
+    crate::store::CONTROL_DB_PATH_ENV,
+    crate::ops::git_operation::LF_WORKTREE_WRITER_ID_ENV,
+    crate::ops::git_operation::LF_GIT_OPERATION_ID_ENV,
+    "LF_BIN",
+    "LF_HOME",
+    "LF_DB_PATH",
+    "LF_RUN_DIR",
+    "LF_ACCOUNT_LEASE",
+    "LF_ACCOUNT_SELECTION",
+];
+
 pub(crate) fn configure_vendor_std_env(command: &mut std::process::Command) -> Result<()> {
     let (control_bin, control_home, control_db) = vendor_control_context()?;
     set_vendor_std_env(command, &control_bin, &control_home, &control_db);
@@ -45,17 +68,34 @@ pub(crate) fn configure_agent_run_context(
     command: &mut tokio::process::Command,
     run_context: AgentRunContext,
 ) {
-    if run_context != AgentRunContext::Detached {
+    if run_context == AgentRunContext::Inherit {
         return;
     }
-    command
-        .env_remove(crate::durable::RUN_CONTEXT_ENV)
-        .env_remove(crate::durable::RUN_ID_ENV)
-        .env_remove(crate::durable::AGENT_INVOCATION_ENV)
-        .env_remove(crate::journal::LF_PROCESS_ID_ENV)
-        .env_remove(crate::journal::LF_TRACE_ID_ENV)
-        .env_remove(crate::engine::wave_context::WAVE_ID_ENV)
-        .env_remove("LF_PARENT_RUN_ID");
+    for &name in DETACHED_AGENT_ENV {
+        command.env_remove(name);
+    }
+    if run_context == AgentRunContext::Isolated {
+        for &name in ISOLATED_AGENT_ENV {
+            command.env_remove(name);
+        }
+    }
+}
+
+pub(crate) fn configure_agent_run_context_std(
+    command: &mut std::process::Command,
+    run_context: AgentRunContext,
+) {
+    if run_context == AgentRunContext::Inherit {
+        return;
+    }
+    for &name in DETACHED_AGENT_ENV {
+        command.env_remove(name);
+    }
+    if run_context == AgentRunContext::Isolated {
+        for &name in ISOLATED_AGENT_ENV {
+            command.env_remove(name);
+        }
+    }
 }
 
 pub(crate) fn configure_agent_env(command: &mut tokio::process::Command, config: &AgentConfig) {
@@ -99,7 +139,7 @@ mod environment_tests {
     use std::ffi::OsString;
     use std::path::Path;
 
-    use super::{configure_agent_run_context, set_vendor_std_env};
+    use super::{configure_agent_run_context, configure_agent_run_context_std, set_vendor_std_env};
     use crate::engine::agent::AgentRunContext;
 
     #[test]
@@ -165,6 +205,72 @@ mod environment_tests {
         assert_eq!(environment[crate::journal::LF_TRACE_ID_ENV], None);
         assert_eq!(environment[crate::engine::wave_context::WAVE_ID_ENV], None);
         assert_eq!(environment["LF_PARENT_RUN_ID"], None);
+    }
+
+    #[test]
+    fn isolated_agent_drops_home_and_writer_authority() {
+        let mut command = tokio::process::Command::new("vendor");
+        command
+            .env(crate::store::CONTROL_BIN_ENV, "/control/lf")
+            .env(crate::store::CONTROL_HOME_ENV, "/control")
+            .env(crate::store::CONTROL_DB_PATH_ENV, "/control/loopflow.db")
+            .env(
+                crate::ops::git_operation::LF_WORKTREE_WRITER_ID_ENV,
+                "writer_live",
+            )
+            .env(
+                crate::ops::git_operation::LF_GIT_OPERATION_ID_ENV,
+                "gitop_live",
+            )
+            .env("LF_RUN_DIR", "/control/runs/run_live")
+            .env("LF_ACCOUNT_LEASE", "lease_live");
+
+        configure_agent_run_context(&mut command, AgentRunContext::Isolated);
+
+        let environment = command
+            .as_std()
+            .get_envs()
+            .map(|(key, value)| (key.to_string_lossy().to_string(), value.map(OsString::from)))
+            .collect::<std::collections::HashMap<_, _>>();
+        for name in [
+            crate::store::CONTROL_BIN_ENV,
+            crate::store::CONTROL_HOME_ENV,
+            crate::store::CONTROL_DB_PATH_ENV,
+            crate::ops::git_operation::LF_WORKTREE_WRITER_ID_ENV,
+            crate::ops::git_operation::LF_GIT_OPERATION_ID_ENV,
+            "LF_RUN_DIR",
+            "LF_ACCOUNT_LEASE",
+        ] {
+            assert_eq!(environment[name], None, "{name} leaked into isolated agent");
+        }
+    }
+
+    #[test]
+    fn isolated_cli_agent_drops_home_and_writer_authority() {
+        let mut command = std::process::Command::new("vendor");
+        command
+            .env(crate::store::CONTROL_HOME_ENV, "/control")
+            .env(crate::store::CONTROL_DB_PATH_ENV, "/control/loopflow.db")
+            .env(
+                crate::ops::git_operation::LF_WORKTREE_WRITER_ID_ENV,
+                "writer_live",
+            )
+            .env(crate::durable::RUN_ID_ENV, "run_live");
+
+        configure_agent_run_context_std(&mut command, AgentRunContext::Isolated);
+
+        let environment = command
+            .get_envs()
+            .map(|(key, value)| (key.to_string_lossy().to_string(), value.map(OsString::from)))
+            .collect::<std::collections::HashMap<_, _>>();
+        for name in [
+            crate::store::CONTROL_HOME_ENV,
+            crate::store::CONTROL_DB_PATH_ENV,
+            crate::ops::git_operation::LF_WORKTREE_WRITER_ID_ENV,
+            crate::durable::RUN_ID_ENV,
+        ] {
+            assert_eq!(environment[name], None, "{name} leaked into isolated agent");
+        }
     }
 }
 

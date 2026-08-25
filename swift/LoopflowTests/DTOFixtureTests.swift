@@ -26,28 +26,16 @@ struct DTOFixtureTests {
         #expect(plan.projects[0].krs[0].proof == .holds)
     }
 
-    @Test("Activity fixture preserves process state and exact output evidence")
+    @Test("Activity fixture preserves exact OS-live process state")
     func activityFixtureRoundTrips() throws {
         let data = try loadFixtureData("activity_snapshot.json")
         let snapshot = try JSONDecoder().decode(ActivitySnapshot.self, from: data)
 
         #expect(snapshot.schemaVersion == 1)
-        #expect(snapshot.usage.windows == [5, 300, 3_600, 86_400])
-        #expect(snapshot.usage.global?.interval(seconds: 86_400)?.outputTokens == 48_200)
-        #expect(snapshot.usage.global?.interval(seconds: 5)?.outputTokensPerSecond == 4.0)
-        #expect(snapshot.usage.global?.interval(seconds: 300)?.inputTokens == 100)
-        #expect(snapshot.usage.global?.interval(seconds: 300)?.cacheReadTokens == 350)
-        #expect(snapshot.usage.global?.interval(seconds: 300)?.peakInputTokens == 120_000)
-        #expect(snapshot.usage.global?.interval(seconds: 300)?.costUsd == 0.2)
-        #expect(snapshot.usage.globalHistory.reduce(0) { $0 + $1.outputTokens } == 80)
-        #expect(snapshot.nodes.filter { $0.kind == .providerLaunch }.map(\.state)
+        #expect(snapshot.nodes.filter { $0.kind == .providerProcess }.map(\.state)
             == [.working, .stalled])
-        #expect(snapshot.nodes.filter { $0.kind == .providerLaunch }.map(\.wave)
+        #expect(snapshot.nodes.filter { $0.kind == .providerProcess }.map(\.wave)
             == ["product", "product"])
-        #expect(snapshot.nodes.filter { $0.kind == .providerLaunch }.map(\.project)
-            == ["loopflow-api", "loopflow-api"])
-        #expect(snapshot.nodes.filter { $0.kind == .providerLaunch }.map(\.task)
-            == ["W2-144", "W2-144"])
         #expect(snapshot.providerProcesses[0].claim == .orphaned)
 
         let encoded = try JSONEncoder().encode(snapshot)
@@ -64,7 +52,12 @@ struct DTOFixtureTests {
         #expect(snapshot.items.map(\.subject) == [
             "W2-144", "W2-144", "W2-144", "product", "mac-surface-ux",
         ])
-        #expect(snapshot.items[0].fact.invocationId == "invocation-product-run")
+        if case .runFinished(let runId, let status) = snapshot.items[0].fact {
+            #expect(runId == "run_00000000000000000000000000000001")
+            #expect(status == "ok")
+        } else {
+            Issue.record("expected a typed Run finish")
+        }
         #expect(snapshot.items[1].fact.github?.number == 1144)
         #expect(snapshot.items[1].fact.github?.url.host == "github.com")
         if case .prMergeRequested(_, let request, _) = snapshot.items[2].fact {
@@ -79,34 +72,6 @@ struct DTOFixtureTests {
             Issue.record("expected a Run-authored Steer")
         }
         #expect(snapshot.items[4].fact == .workCreated)
-    }
-
-    @Test("Context Lab fixture preserves missing coverage and trace identity")
-    func contextLabFixturePreservesResearchTruth() throws {
-        let data = try loadFixtureData("context_lab_snapshot.json")
-        let snapshot = try JSONDecoder().decode(ContextLabSnapshot.self, from: data)
-
-        #expect(snapshot.totals.runs == 1)
-        #expect(snapshot.totals.invocations == 1)
-        #expect(snapshot.totals.initialPromptTokens == 1_000)
-        #expect(snapshot.totals.lifetimeInputTokens == 2_400)
-        #expect(snapshot.totals.medianPeakContextPercent == 45)
-        #expect(snapshot.coverage.unknownTurns == 1)
-        #expect(snapshot.coverage.sourceObservableInvocations == 1)
-        #expect(snapshot.aggregateRoot.children[0].children[0].children.count == 1)
-        #expect(snapshot.query.projects == ["context"])
-        #expect(snapshot.query.steeredOnly)
-        #expect(snapshot.query.currentRevisionOnly)
-        #expect(snapshot.invocations[0].task == "W2-71")
-        #expect(snapshot.invocations[0].turns[1].suppliedContextTokens == nil)
-        #expect(snapshot.sources[0].impressions == 1)
-        #expect(snapshot.sources[0].currentRevisionNodeId == "context-revision")
-        #expect(snapshot.sources[1].impressions == nil)
-        #expect(snapshot.evidence[0].isEditable)
-        #expect(snapshot.evidence[0].currentSourceSha256 == "fedcba9876543210")
-        #expect(snapshot.evidence[0].measurements.lastSeen == 120)
-        #expect(snapshot.evidence[0].measurements.providerModels[0].model == "gpt-5")
-        #expect(snapshot.evidence[0].representatives[0].address.turnId == "turn-1")
     }
 
     @Test("wave detail fixture preserves Project and Task identity")
@@ -140,21 +105,20 @@ struct DTOFixtureTests {
         #expect(detail.projects[0].tasks[0].reference.workspace?.slug == "infrastructure-task")
         #expect(detail.projects[0].tasks[0].reference.workspace?.worktree == "/src/loopflow.infrastructure.task")
         #expect(detail.projects[0].tasks[0].reference.issueUrl?.host == "linear.app")
-        // Ready is durable current intent. Historical failure evidence stays
+        // Ready is durable Work status. Historical failure evidence stays
         // visible without replacing that present-tense state.
-        #expect(detail.projects[0].tasks[0].runtime?.current.state == .ready)
-        #expect(detail.projects[0].tasks[0].runtime?.current.owner == .loopflow)
-        #expect(detail.projects[0].tasks[0].runtime?.current.reason == "ready")
-        #expect(detail.projects[0].runtime?.current.state == .ready)
-        #expect(detail.projects[0].runtime?.current.reason == "ready")
+        #expect(detail.projects[0].tasks[0].runtime?.status == .ready)
+        #expect(detail.projects[0].tasks[0].runtime?.reason == "ready")
+        #expect(detail.projects[0].runtime?.status == .ready)
+        #expect(detail.projects[0].runtime?.reason == "ready")
         #expect(detail.projects[0].runtime?.lastFailure?.message.contains("credential") == true)
         #expect(detail.projects[0].tasks[1].runtime == nil)
         #expect(detail.projects[0].tasks[1].reference.issueUrl == nil)
         #expect(detail.projects[0].tasks[1].reference.workspace == nil)
-        #expect(detail.runs.items[0].traceId == "run-1")
+        #expect(detail.runs.items[0].id == "run_00000000000000000000000000000001")
         #expect(detail.runs.items[0].skill == "task/pursue")
-        #expect(detail.runs.items[0].suppliedContextTokens == 3000)
-        #expect(detail.runs.items[0].status == "ok")
+        #expect(detail.runs.items[0].usage.inputTokens == 12000)
+        #expect(detail.runs.items[0].outcome == "completed")
         #expect(detail.attention.items[0].subject == "INF-123")
         #expect(detail.attention.items[0].owner == .user)
         #expect(detail.attention.items[0].reason == "merge pull request head 333333333333 on GitHub")
@@ -203,13 +167,13 @@ struct DTOFixtureTests {
         #expect(product.wave.enabled)
         #expect(product.unavailableProjects[0].workId == "proj_e972b70272fbb5e91c096ebe657f9f9b")
         #expect(product.unavailableProjects[0].projectSlug == "technical-architecture")
-        #expect(product.unavailableProjects[0].current.state == .abandoned)
+        #expect(product.unavailableProjects[0].status == .abandoned)
         #expect(product.unavailableProjects[0].tasks[0].taskIdentifier == "W2-127")
-        #expect(product.unavailableProjects[0].tasks[0].current.state == .ready)
+        #expect(product.unavailableProjects[0].tasks[0].status == .ready)
         #expect(product.unavailableProjects[0].tasks[0].recovery.contains("lf work abandon task task_40fbeea"))
         let project = try #require(product.projects.items.first)
         #expect(project.tasks.map(\.section) == [.now, .needsAttention, .available, .later])
-        #expect(project.tasks.map(\.attention.level) == [.green, .red, .black, .black])
+        #expect(project.tasks.map(\.attention.level) == [.black, .red, .black, .black])
         #expect(project.tasks[0].reference.workspace?.slug == "make-lf-work-the-machine")
         #expect(project.tasks[2].reference.workspace == nil)
         #expect(project.tasks[2].reference.issueUrl == nil)
@@ -270,32 +234,6 @@ struct DTOFixtureTests {
         #expect(activity.kind == .prOpened)
         #expect(activity.title == "Opened PR #1073")
     }
-    @Test("Invocation surface fixture preserves Run ownership and attach")
-    func invocationSurfaceFixtureRoundTrips() throws {
-        let data = try loadFixtureData("invocation_surface.json")
-        let surface = try JSONDecoder().decode(InvocationSurfaceRecord.self, from: data)
-
-        #expect(surface.id == "invocation_00000000000000000000000000000001")
-        #expect(surface.work.kind == .task)
-        #expect(surface.status == .live)
-        #expect(surface.current.liveness?.state == .present)
-        #expect(surface.run.runtimeGeneration == 8)
-        #expect(surface.run.containment == .tmux(name: "lf-task"))
-        #expect(
-            surface.run.trigger
-                == .homeUpgrade(
-                    upgradeId: "upgrade_00000000000000000000000000000007",
-                    priorRunId: "run_00000000000000000000000000000008"
-                )
-        )
-        #expect(surface.run.cwd == "/src/loopflow.task")
-        #expect(surface.argv == ["tmux", "attach-session", "-t", "lf-task"])
-
-        let encoded = try JSONEncoder().encode(surface)
-        let decoded = try JSONDecoder().decode(InvocationSurfaceRecord.self, from: encoded)
-        #expect(decoded == surface)
-    }
-
     @Test("User Ask attention fixture preserves the durable queue projection")
     func askAttentionFixtureRoundTrips() throws {
         let attention = try JSONDecoder().decode(
@@ -315,42 +253,32 @@ struct DTOFixtureTests {
         #expect(decoded == attention)
     }
 
-    @Test("Work status fixture preserves every status and wait kind")
+    @Test("Ask session fixture preserves generic Run identity and attach")
+    func askSessionFixtureRoundTrips() throws {
+        let session = try JSONDecoder().decode(
+            AskSessionRecord.self,
+            from: loadFixtureData("ask_session.json")
+        )
+
+        #expect(session.askId == "ask_00000000000000000000000000000001")
+        #expect(session.runId == "run_00000000000000000000000000000002")
+        #expect(session.homeRoute == "jack@local")
+        #expect(session.attachArgv == ["tmux", "attach-session", "-t", "lf-ask-000000000000"])
+
+        let encoded = try JSONEncoder().encode(session)
+        let decoded = try JSONDecoder().decode(AskSessionRecord.self, from: encoded)
+        #expect(decoded == session)
+    }
+
+    @Test("Work status fixture preserves every status")
     func workStatusFixtureRoundTrips() throws {
         let data = try loadFixtureData("work_statuses.json")
         let statuses = try JSONDecoder().decode([WorkStatus].self, from: data)
-        func wait(at index: Int) -> WorkWait? {
-            guard case .waiting(let wait) = statuses[index] else { return nil }
-            return wait
-        }
 
+        #expect(statuses.count == 3)
         #expect(statuses[0] == .ready)
-        #expect(statuses[1] == .running(runID: "run_00000000000000000000000000000001"))
-        #expect(try #require(wait(at: 2)).on == .input(after: WorkBasis(
-            epochID: "epoch_00000000000000000000000000000004",
-            revision: 7
-        )))
-        #expect(try #require(wait(at: 3)).on == .time(notBefore: "2026-07-17T13:00:00Z"))
-        #expect(try #require(wait(at: 4)).on == .event(WorkEventReference(
-            source: "github",
-            id: "check-42"
-        )))
-        #expect(try #require(wait(at: 5)).on == .child(WorkReference(
-            kind: .task,
-            id: "task_0000000000000000000000000000000e"
-        )))
-        #expect(try #require(wait(at: 6)).on == .capability(WorkCapabilityReference(
-            kind: "deploy",
-            key: "production"
-        )))
-        let effectWait = try #require(wait(at: 7))
-        #expect(effectWait.on == .effect(WorkEffectReference(
-            kind: "message",
-            idempotencyKey: "release-ready"
-        )))
-        #expect(effectWait.resolvedAt == "2026-07-17T12:06:00Z")
-        #expect(statuses[8] == .done)
-        #expect(statuses[9] == .abandoned)
+        #expect(statuses[1] == .done)
+        #expect(statuses[2] == .abandoned)
 
         let encoded = try JSONEncoder().encode(statuses)
         let decoded = try JSONDecoder().decode([WorkStatus].self, from: encoded)

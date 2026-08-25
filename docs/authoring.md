@@ -31,7 +31,7 @@ is. One skill, one job: `design` writes the spec, `implement` builds from
 it, `gate` judges ship-readiness. Chain them rather than writing one skill
 that does everything.
 
-Direct invocation from a TTY runs with a present human. `--batch` and automated
+Direct launch from a TTY runs with a present human. `--batch` and automated
 flow execution run the same skill headlessly, so write a bounded contract for
 both surfaces when the work involves judgment or conversation:
 
@@ -60,8 +60,9 @@ flow — with commits between them:
 ```
 
 Skills that need outside authority run `lf ask "<intervention>"`. The command
-creates a durable Ask session under the current Turn, waits for
-its typed result, then returns the verified summary to the same skill process.
+creates a durable Ask session for the current Work, waits for its typed result,
+then returns the verified summary to the same skill process. The Ask owns its
+claim and settlement; the surrounding Run remains execution evidence.
 
 Put a mandatory absent-User gate on the exact authored occurrence. `id` is
 stable within the expanded flow and required with `human: true`:

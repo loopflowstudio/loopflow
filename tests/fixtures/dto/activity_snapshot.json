@@ -1,94 +1,10 @@
 {
   "schema_version": 1,
   "observed_at": 1784606400,
-  "usage": {
-    "schema_version": 1,
-    "observed_at": 1784606400,
-    "windows": [5, 300, 3600, 86400],
-    "readings": [
-      {
-        "scope": {"id":"global","parent_id":null,"kind":"global","label":"All Loopflow","repo":null,"wave":null,"project":null,"task":null,"exec_id":null,"invocation_id":null},
-        "intervals": [
-          {"window_seconds":5,"output_tokens":20,"reasoning_tokens":8,"output_tokens_per_second":4.0,"measured_turns":1,"unmeasured_turns":1,"output_complete":false},
-          {"window_seconds":300,"input_tokens":100,"total_input_tokens":500,"output_tokens":80,"reasoning_tokens":20,"cache_read_tokens":350,"cache_write_tokens":50,"peak_input_tokens":120000,"context_window_tokens":258400,"cost_usd":0.2,"output_tokens_per_second":0.26666666666666666,"measured_turns":2,"unmeasured_turns":0,"output_complete":true},
-          {"window_seconds":3600,"output_tokens":4200,"reasoning_tokens":1000,"output_tokens_per_second":1.1666666666666667,"measured_turns":5,"unmeasured_turns":0,"output_complete":true},
-          {"window_seconds":86400,"output_tokens":48200,"reasoning_tokens":12000,"output_tokens_per_second":0.5578703703703703,"measured_turns":18,"unmeasured_turns":0,"output_complete":true}
-        ]
-      },
-      {
-        "scope": {"id":"repo:/src/loopflow","parent_id":"global","kind":"repository","label":"loopflow","repo":"/src/loopflow","wave":null,"project":null,"task":null,"exec_id":null,"invocation_id":null},
-        "intervals": [
-          {"window_seconds":5,"output_tokens":20,"reasoning_tokens":8,"output_tokens_per_second":4.0,"measured_turns":1,"unmeasured_turns":1,"output_complete":false},
-          {"window_seconds":300,"output_tokens":80,"reasoning_tokens":20,"output_tokens_per_second":0.26666666666666666,"measured_turns":2,"unmeasured_turns":0,"output_complete":true},
-          {"window_seconds":3600,"output_tokens":4200,"reasoning_tokens":1000,"output_tokens_per_second":1.1666666666666667,"measured_turns":5,"unmeasured_turns":0,"output_complete":true},
-          {"window_seconds":86400,"output_tokens":48200,"reasoning_tokens":12000,"output_tokens_per_second":0.5578703703703703,"measured_turns":18,"unmeasured_turns":0,"output_complete":true}
-        ]
-      },
-      {
-        "scope": {"id":"wave:/src/loopflow:product","parent_id":"repo:/src/loopflow","kind":"wave","label":"product","repo":"/src/loopflow","wave":"product","project":null,"task":null,"exec_id":null,"invocation_id":null},
-        "intervals": [
-          {"window_seconds":5,"output_tokens":20,"reasoning_tokens":8,"output_tokens_per_second":4.0,"measured_turns":1,"unmeasured_turns":1,"output_complete":false},
-          {"window_seconds":300,"output_tokens":80,"reasoning_tokens":20,"output_tokens_per_second":0.26666666666666666,"measured_turns":2,"unmeasured_turns":0,"output_complete":true},
-          {"window_seconds":3600,"output_tokens":4200,"reasoning_tokens":1000,"output_tokens_per_second":1.1666666666666667,"measured_turns":5,"unmeasured_turns":0,"output_complete":true},
-          {"window_seconds":86400,"output_tokens":48200,"reasoning_tokens":12000,"output_tokens_per_second":0.5578703703703703,"measured_turns":18,"unmeasured_turns":0,"output_complete":true}
-        ]
-      },
-      {
-        "scope": {"id":"wave:/src/loopflow:product:project:loopflow-api","parent_id":"wave:/src/loopflow:product","kind":"project","label":"loopflow-api","repo":"/src/loopflow","wave":"product","project":"loopflow-api","task":null,"exec_id":null,"invocation_id":null},
-        "intervals": [
-          {"window_seconds":5,"output_tokens":20,"reasoning_tokens":8,"output_tokens_per_second":4.0,"measured_turns":1,"unmeasured_turns":1,"output_complete":false},
-          {"window_seconds":300,"output_tokens":80,"reasoning_tokens":20,"output_tokens_per_second":0.26666666666666666,"measured_turns":2,"unmeasured_turns":0,"output_complete":true},
-          {"window_seconds":3600,"output_tokens":4200,"reasoning_tokens":1000,"output_tokens_per_second":1.1666666666666667,"measured_turns":5,"unmeasured_turns":0,"output_complete":true},
-          {"window_seconds":86400,"output_tokens":48200,"reasoning_tokens":12000,"output_tokens_per_second":0.5578703703703703,"measured_turns":18,"unmeasured_turns":0,"output_complete":true}
-        ]
-      },
-      {
-        "scope": {"id":"wave:/src/loopflow:product:project:loopflow-api:task:W2-144","parent_id":"wave:/src/loopflow:product:project:loopflow-api","kind":"task","label":"W2-144","repo":"/src/loopflow","wave":"product","project":"loopflow-api","task":"W2-144","exec_id":null,"invocation_id":null},
-        "intervals": [
-          {"window_seconds":5,"output_tokens":20,"reasoning_tokens":8,"output_tokens_per_second":4.0,"measured_turns":1,"unmeasured_turns":1,"output_complete":false},
-          {"window_seconds":300,"output_tokens":80,"reasoning_tokens":20,"output_tokens_per_second":0.26666666666666666,"measured_turns":2,"unmeasured_turns":0,"output_complete":true},
-          {"window_seconds":3600,"output_tokens":4200,"reasoning_tokens":1000,"output_tokens_per_second":1.1666666666666667,"measured_turns":5,"unmeasured_turns":0,"output_complete":true},
-          {"window_seconds":86400,"output_tokens":48200,"reasoning_tokens":12000,"output_tokens_per_second":0.5578703703703703,"measured_turns":18,"unmeasured_turns":0,"output_complete":true}
-        ]
-      },
-      {
-        "scope": {"id":"exec:exec-podium","parent_id":"wave:/src/loopflow:product:project:loopflow-api:task:W2-144","kind":"exec","label":"exec-podium","repo":"/src/loopflow","wave":"product","project":"loopflow-api","task":"W2-144","exec_id":"exec-podium","invocation_id":null},
-        "intervals": [
-          {"window_seconds":5,"output_tokens":20,"reasoning_tokens":8,"output_tokens_per_second":4.0,"measured_turns":1,"unmeasured_turns":1,"output_complete":false},
-          {"window_seconds":300,"output_tokens":80,"reasoning_tokens":20,"output_tokens_per_second":0.26666666666666666,"measured_turns":2,"unmeasured_turns":0,"output_complete":true},
-          {"window_seconds":3600,"output_tokens":4200,"reasoning_tokens":1000,"output_tokens_per_second":1.1666666666666667,"measured_turns":5,"unmeasured_turns":0,"output_complete":true},
-          {"window_seconds":86400,"output_tokens":48200,"reasoning_tokens":12000,"output_tokens_per_second":0.5578703703703703,"measured_turns":18,"unmeasured_turns":0,"output_complete":true}
-        ]
-      },
-      {
-        "scope": {"id":"invocation:invocation-working","parent_id":"exec:exec-podium","kind":"invocation","label":"codex","repo":"/src/loopflow","wave":"product","project":"loopflow-api","task":"W2-144","exec_id":"exec-podium","invocation_id":"invocation-working"},
-        "intervals": [
-          {"window_seconds":5,"output_tokens":20,"reasoning_tokens":8,"output_tokens_per_second":4.0,"measured_turns":1,"unmeasured_turns":0,"output_complete":true},
-          {"window_seconds":300,"output_tokens":40,"reasoning_tokens":10,"output_tokens_per_second":0.13333333333333333,"measured_turns":1,"unmeasured_turns":0,"output_complete":true},
-          {"window_seconds":3600,"output_tokens":3000,"reasoning_tokens":800,"output_tokens_per_second":0.8333333333333334,"measured_turns":3,"unmeasured_turns":0,"output_complete":true},
-          {"window_seconds":86400,"output_tokens":41000,"reasoning_tokens":10000,"output_tokens_per_second":0.47453703703703703,"measured_turns":15,"unmeasured_turns":0,"output_complete":true}
-        ]
-      },
-      {
-        "scope": {"id":"invocation:invocation-stalled","parent_id":"exec:exec-podium","kind":"invocation","label":"claude","repo":"/src/loopflow","wave":"product","project":"loopflow-api","task":"W2-144","exec_id":"exec-podium","invocation_id":"invocation-stalled"},
-        "intervals": [
-          {"window_seconds":5,"output_tokens":0,"reasoning_tokens":null,"output_tokens_per_second":0.0,"measured_turns":0,"unmeasured_turns":1,"output_complete":false},
-          {"window_seconds":300,"output_tokens":40,"reasoning_tokens":10,"output_tokens_per_second":0.13333333333333333,"measured_turns":1,"unmeasured_turns":0,"output_complete":true},
-          {"window_seconds":3600,"output_tokens":1200,"reasoning_tokens":200,"output_tokens_per_second":0.3333333333333333,"measured_turns":2,"unmeasured_turns":0,"output_complete":true},
-          {"window_seconds":86400,"output_tokens":7200,"reasoning_tokens":2000,"output_tokens_per_second":0.08333333333333333,"measured_turns":3,"unmeasured_turns":0,"output_complete":true}
-        ]
-      }
-    ],
-    "history_bucket_seconds": 300,
-    "global_history": [
-      {"started_at":1784605800,"ended_at":1784606100,"input_tokens":50,"total_input_tokens":250,"output_tokens":40,"reasoning_tokens":10,"cache_read_tokens":175,"cache_write_tokens":25,"cost_usd":0.1},
-      {"started_at":1784606100,"ended_at":1784606400,"input_tokens":50,"total_input_tokens":250,"output_tokens":40,"reasoning_tokens":10,"cache_read_tokens":175,"cache_write_tokens":25,"cost_usd":0.1}
-    ]
-  },
   "nodes": [
-    {"id":"exec:exec-podium","parent_id":null,"kind":"exec","label":"lf task pursue","repo":"/src/loopflow","wave":"product","project":null,"task":null,"pid":4100,"started_at":1784602800,"last_progress_at":1784606380,"state":"working","usage_scope_id":"exec:exec-podium"},
-    {"id":"launch:invocation-working","parent_id":"exec:exec-podium","kind":"provider_launch","label":"codex 4101","repo":"/src/loopflow","wave":"product","project":"loopflow-api","task":"W2-144","pid":4101,"started_at":1784602805,"last_progress_at":1784606380,"state":"working","usage_scope_id":"invocation:invocation-working"},
-    {"id":"launch:invocation-stalled","parent_id":"exec:exec-podium","kind":"provider_launch","label":"claude 4201","repo":"/src/loopflow","wave":"product","project":"loopflow-api","task":"W2-144","pid":4201,"started_at":1784599200,"last_progress_at":1784603400,"state":"stalled","usage_scope_id":"invocation:invocation-stalled"}
+    {"id":"exec:exec-podium","parent_id":null,"kind":"exec","label":"lf task pursue","repo":"/src/loopflow","wave":"product","pid":4100,"started_at":1784602800,"state":"working"},
+    {"id":"provider:4101","parent_id":"exec:exec-podium","kind":"provider_process","label":"codex 4101","repo":"/src/loopflow","wave":"product","pid":4101,"started_at":1784602805,"state":"working"},
+    {"id":"provider:4201","parent_id":"exec:exec-podium","kind":"provider_process","label":"claude 4201","repo":"/src/loopflow","wave":"product","pid":4201,"started_at":1784599200,"state":"stalled"}
   ],
   "provider_processes": [
     {"pid":4301,"ppid":1,"process_group":4301,"started_at":1784595600,"kernel_state":"S","provider":"opencode","command":"opencode serve","claim":"orphaned"}

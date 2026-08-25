@@ -5,7 +5,7 @@
   "truncated": false,
   "items": [
     {
-      "id": "run:invocation-product-run:finished",
+      "id": "run:run_00000000000000000000000000000001:finished",
       "recorded_at": 1784654700,
       "summary": "task/task_pursue finished ok",
       "work": {
@@ -15,9 +15,7 @@
       "subject": "W2-144",
       "fact": {
         "kind": "run_finished",
-        "invocation_id": "invocation-product-run",
-        "trace_id": "trace-product-run",
-        "exec_id": "exec-product-run",
+        "run_id": "run_00000000000000000000000000000001",
         "status": "ok"
       }
     },

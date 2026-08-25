@@ -4,7 +4,7 @@ use std::process::Command;
 use std::sync::Arc;
 use std::time::Duration;
 
-use crate::durable::{AgentInvocationId, Ask, AskId, AskResult, AskTarget, InvocationSurface};
+use crate::durable::{Ask, AskId, AskOrigin, AskResult, AskSession, AskTarget, RunId, WorkRef};
 use crate::engine::wave_home::HomeRoute;
 use crate::lf::{AskArgs, AskCommand};
 use crate::store::{open_store, storage_config_from_env, Store};
@@ -41,9 +41,9 @@ async fn run_async(args: &AskArgs) -> anyhow::Result<()> {
         }) => open_command(&store, ask_id, *prepare, *json).await,
         Some(AskCommand::Presented {
             ask_id,
-            invocation_id,
+            run_id,
             json,
-        }) => presented_command(&store, ask_id, invocation_id, *json).await,
+        }) => presented_command(&store, ask_id, run_id, *json).await,
         Some(AskCommand::Resolve {
             ask_id,
             summary,
@@ -79,10 +79,11 @@ async fn run_async(args: &AskArgs) -> anyhow::Result<()> {
             let reason = optional_text(reason, "Ask cancelled");
             cancel_command(&store, ask_id, &reason, *json).await
         }
-        Some(AskCommand::Serve { ask_id, headless }) => {
-            let invocation_id = ambient_invocation_id()?;
-            crate::ops::ask::serve(store, ask_id.clone(), invocation_id, *headless).await
-        }
+        Some(AskCommand::Serve {
+            ask_id,
+            run_id,
+            headless,
+        }) => crate::ops::ask::serve(store, ask_id.clone(), run_id.clone(), *headless).await,
     }
 }
 
@@ -94,13 +95,9 @@ async fn create_and_maybe_wait(store: &Arc<Store>, args: &AskArgs) -> anyhow::Re
     if prompt.is_empty() {
         bail!("Ask request cannot be empty");
     }
-    let lease = crate::ops::required_run_context(store)
-        .await
-        .map_err(|error| anyhow!(error.to_string()))?;
-    let invocation_id = ambient_invocation_id()?;
-    let ask =
-        crate::ops::ask::request_intervention(store, &lease, &invocation_id, &prompt, args.user)
-            .await?;
+    let origin = ambient_ask_origin(store).await?;
+    let work = origin.work.clone();
+    let ask = crate::ops::ask::request_intervention(store, origin, &prompt, args.user).await?;
     publish_comments(store);
     if args.noblock {
         if args.json {
@@ -111,7 +108,7 @@ async fn create_and_maybe_wait(store: &Arc<Store>, args: &AskArgs) -> anyhow::Re
         return Ok(());
     }
     print_wait_selection(&ask, args.json);
-    wait_for_terminal(store, &lease, ask, args.json).await
+    wait_for_terminal(store, &work, ask, args.json).await
 }
 
 async fn wait_command(
@@ -119,23 +116,16 @@ async fn wait_command(
     ask_id: Option<&AskId>,
     json: bool,
 ) -> anyhow::Result<()> {
-    let lease = crate::ops::required_run_context(store)
-        .await
-        .map_err(|error| anyhow!(error.to_string()))?;
-    let invocation_id = if ask_id.is_none() {
-        ambient_invocation_id_if_present()?
-    } else {
-        None
-    };
-    let ask = ask_for_wait(store, &lease, invocation_id.as_ref(), ask_id).await?;
+    let origin = ambient_ask_origin(store).await?;
+    let ask = ask_for_wait(store, &origin.work, origin.source_run_id.as_ref(), ask_id).await?;
     print_wait_selection(&ask, json);
     crate::ops::ask::wake(store, &ask.target).await;
-    wait_for_terminal(store, &lease, ask, json).await
+    wait_for_terminal(store, &origin.work, ask, json).await
 }
 
 async fn wait_for_terminal(
     store: &Arc<Store>,
-    lease: &crate::durable::RunContext,
+    work: &WorkRef,
     mut ask: Ask,
     json: bool,
 ) -> anyhow::Result<()> {
@@ -145,7 +135,7 @@ async fn wait_for_terminal(
             return print_terminal_ask(&ask, json);
         }
         tokio::time::sleep(WAIT_INTERVAL).await;
-        ask = ask_for_wait(store, lease, None, Some(&ask.id)).await?;
+        ask = ask_for_wait(store, work, None, Some(&ask.id)).await?;
         if tokio::time::Instant::now() >= next_wake {
             crate::ops::ask::wake(store, &ask.target).await;
             next_wake = tokio::time::Instant::now() + TARGET_WAKE_INTERVAL;
@@ -155,41 +145,33 @@ async fn wait_for_terminal(
 
 async fn ask_for_wait(
     store: &Arc<Store>,
-    lease: &crate::durable::RunContext,
-    invocation_id: Option<&AgentInvocationId>,
+    work: &WorkRef,
+    source_run_id: Option<&RunId>,
     ask_id: Option<&AskId>,
 ) -> anyhow::Result<Ask> {
-    let asks = store.asks_for_work_epoch(lease).await?;
+    let asks = store.asks_for_work(work).await?;
     match ask_id {
         Some(ask_id) => asks
             .into_iter()
             .find(|ask| &ask.id == ask_id)
-            .ok_or_else(|| anyhow!("Ask {ask_id} does not belong to this Work Epoch")),
-        None => select_default_wait(asks, &lease.run_id, invocation_id)
-            .ok_or_else(|| anyhow!("this Work Epoch has no unresolved outgoing Ask")),
+            .ok_or_else(|| anyhow!("Ask {ask_id} does not belong to this Work")),
+        None => select_default_wait(asks, source_run_id)
+            .ok_or_else(|| anyhow!("this Work has no unresolved outgoing Ask")),
     }
 }
 
-fn select_default_wait(
-    asks: Vec<Ask>,
-    run_id: &crate::durable::RunId,
-    invocation_id: Option<&AgentInvocationId>,
-) -> Option<Ask> {
+fn select_default_wait(asks: Vec<Ask>, source_run_id: Option<&RunId>) -> Option<Ask> {
     let unresolved = |ask: &&Ask| !ask.state.is_terminal();
-    if let Some(invocation_id) = invocation_id {
+    if let Some(run_id) = source_run_id {
         if let Some(ask) = asks
             .iter()
             .filter(unresolved)
-            .find(|ask| ask.origin.invocation_id.as_ref() == Some(invocation_id))
+            .find(|ask| ask.origin.source_run_id.as_ref() == Some(run_id))
         {
             return Some(ask.clone());
         }
     }
-    asks.iter()
-        .filter(unresolved)
-        .find(|ask| &ask.origin.run_id == run_id)
-        .or_else(|| asks.iter().find(unresolved))
-        .cloned()
+    asks.iter().find(unresolved).cloned()
 }
 
 /// Keep only Asks whose origin cwd resolves to the current repository,
@@ -219,11 +201,9 @@ async fn list_command(
     all: bool,
 ) -> anyhow::Result<()> {
     if outgoing {
-        let lease = crate::ops::required_run_context(store)
-            .await
-            .map_err(|error| anyhow!(error.to_string()))?;
+        let origin = ambient_ask_origin(store).await?;
         let asks = store
-            .asks_for_work_epoch(&lease)
+            .asks_for_work(&origin.work)
             .await?
             .into_iter()
             .filter(|ask| !ask.state.is_terminal())
@@ -235,13 +215,13 @@ async fn list_command(
         } else {
             for ask in asks {
                 println!(
-                    "{}  {:<8} to={:<32} from={}:{} run={}  {}",
+                    "{}  {:<8} to={:<32} from={}:{} source_run={}  {}",
                     ask.id,
                     ask.state.as_str(),
                     ask.target,
                     ask.origin.work.kind(),
                     ask.origin.work.id(),
-                    ask.origin.run_id,
+                    ask.origin.source_run_id.as_ref().map_or("-", RunId::as_str),
                     ask.request,
                 );
             }
@@ -249,18 +229,13 @@ async fn list_command(
         return Ok(());
     }
     let attention = if user {
-        let attention = crate::ops::ask::pending_attention(store, None, &AskTarget::User).await?;
+        let attention = crate::ops::ask::pending_attention(store, &AskTarget::User).await?;
         scope_attention_to_repo(attention, all)
     } else {
-        let lease = crate::ops::required_run_context(store)
-            .await
-            .map_err(|_| anyhow!("parent Ask listing requires an active Run; use `lf ask list --user` for User attention"))?;
-        crate::ops::ask::pending_attention(
-            store,
-            Some(&lease),
-            &AskTarget::Parent(lease.work.clone()),
-        )
-        .await?
+        let origin = ambient_ask_origin(store).await.map_err(|_| {
+            anyhow!("parent Ask listing requires ambient Work; use `lf ask list --user` for User attention")
+        })?;
+        crate::ops::ask::pending_attention(store, &AskTarget::Parent(origin.work)).await?
     };
     if json {
         println!("{}", serde_json::to_string_pretty(&attention)?);
@@ -284,13 +259,10 @@ async fn open_command(
     json: bool,
 ) -> anyhow::Result<()> {
     let ask = store.ask_by_id(ask_id).await?;
-    let ambient = crate::ops::ambient_run_context(store).await?;
-    let surface = crate::ops::ask::prepare_open(store, ambient.as_ref(), ask_id).await?;
+    let surface = crate::ops::ask::prepare_open(store, ask_id).await?;
     if !prepare {
         present_in_external_terminal(&surface)?;
-        store
-            .mark_presented_by_target(ambient.as_ref(), ask_id, &surface.invocation.id)
-            .await?;
+        store.mark_ask_presented(ask_id, &surface.run_id).await?;
     }
     if json {
         println!("{}", serde_json::to_string_pretty(&surface)?);
@@ -303,15 +275,12 @@ async fn open_command(
 async fn presented_command(
     store: &Arc<Store>,
     ask_id: &AskId,
-    invocation_id: &AgentInvocationId,
+    run_id: &RunId,
     json: bool,
 ) -> anyhow::Result<()> {
-    let ambient = crate::ops::ambient_run_context(store).await?;
-    let invocation = store
-        .mark_presented_by_target(ambient.as_ref(), ask_id, invocation_id)
-        .await?;
+    let ask = store.mark_ask_presented(ask_id, run_id).await?;
     if json {
-        println!("{}", serde_json::to_string_pretty(&invocation)?);
+        println!("{}", serde_json::to_string_pretty(&ask)?);
     }
     Ok(())
 }
@@ -322,8 +291,8 @@ async fn settle_command(
     result: AskResult,
     json: bool,
 ) -> anyhow::Result<()> {
-    let invocation_id = ambient_invocation_id()?;
-    let ask = crate::ops::ask::settle(store, ask_id, &invocation_id, result).await?;
+    let run_id = ambient_run_id()?;
+    let ask = crate::ops::ask::settle(store, ask_id, &run_id, result).await?;
     publish_comments(store);
     print_ask_receipt(&ask, json)
 }
@@ -334,8 +303,8 @@ async fn release_command(
     reason: Option<&str>,
     json: bool,
 ) -> anyhow::Result<()> {
-    let invocation_id = ambient_invocation_id()?;
-    let ask = store.release_ask(ask_id, &invocation_id, reason).await?;
+    let run_id = ambient_run_id()?;
+    let ask = store.release_ask(ask_id, &run_id, reason).await?;
     crate::ops::ask::checkpoint_origin_task(store, &ask, "release").await;
     if json {
         println!("{}", serde_json::to_string_pretty(&ask)?);
@@ -347,15 +316,14 @@ async fn release_command(
 
 async fn escalate_command(store: &Arc<Store>, ask_id: &AskId, json: bool) -> anyhow::Result<()> {
     let current = store.ask_by_id(ask_id).await?;
-    let ambient_invocation = ambient_invocation_id_if_present()?;
-    let active_invocation = ambient_invocation
+    let ambient_run = ambient_run_id_if_present()?;
+    let active_run = ambient_run
         .as_ref()
-        .filter(|invocation_id| Some(*invocation_id) == current.active_invocation_id.as_ref());
-    let ask = if let Some(invocation_id) = active_invocation {
-        store.escalate_ask(ask_id, invocation_id).await?
+        .filter(|run_id| Some(*run_id) == current.active_run_id.as_ref());
+    let ask = if let Some(run_id) = active_run {
+        store.escalate_ask(ask_id, run_id).await?
     } else {
-        let ambient = crate::ops::ambient_run_context(store).await?;
-        store.escalate_queued_ask(ambient.as_ref(), ask_id).await?
+        store.escalate_queued_ask(ask_id).await?
     };
     print_ask_receipt(&ask, json)
 }
@@ -366,23 +334,57 @@ async fn cancel_command(
     reason: &str,
     json: bool,
 ) -> anyhow::Result<()> {
-    let ambient = crate::ops::ambient_run_context(store).await?;
-    let ask = crate::ops::ask::cancel(store, ambient.as_ref(), ask_id, reason).await?;
+    let ask = crate::ops::ask::cancel(store, ask_id, reason).await?;
     publish_comments(store);
     print_ask_receipt(&ask, json)
 }
 
-fn ambient_invocation_id() -> anyhow::Result<AgentInvocationId> {
-    let value = std::env::var(crate::durable::AGENT_INVOCATION_ENV)
-        .context("lf ask requires LF_AGENT_INVOCATION_ID from the active agent Turn")?;
-    AgentInvocationId::parse(&value).map_err(Into::into)
+fn ambient_run_id() -> anyhow::Result<RunId> {
+    ambient_run_id_if_present()?
+        .ok_or_else(|| anyhow!("lf ask settlement requires LF_RUN_ID from the active generic Run"))
 }
 
-fn ambient_invocation_id_if_present() -> anyhow::Result<Option<AgentInvocationId>> {
-    std::env::var(crate::durable::AGENT_INVOCATION_ENV)
+fn ambient_run_id_if_present() -> anyhow::Result<Option<RunId>> {
+    std::env::var(crate::durable::RUN_ID_ENV)
         .ok()
-        .map(|value| AgentInvocationId::parse(&value).map_err(Into::into))
+        .map(|value| RunId::parse(&value).map_err(Into::into))
         .transpose()
+}
+
+async fn ambient_ask_origin(store: &Arc<Store>) -> anyhow::Result<AskOrigin> {
+    let cwd = std::env::current_dir().context("resolve Ask cwd")?;
+    let work = ambient_work(store, &cwd).await?;
+    let placement = store.placement(&work).await?;
+    Ok(AskOrigin {
+        work,
+        source_run_id: ambient_run_id_if_present()?,
+        home_id: placement.home_id,
+        cwd,
+    })
+}
+
+async fn ambient_work(store: &Arc<Store>, cwd: &std::path::Path) -> anyhow::Result<WorkRef> {
+    if let Ok(run_dir) = std::env::var(crate::run_record::RUN_DIR_ENV) {
+        let manifest = std::fs::read(std::path::Path::new(&run_dir).join("manifest.json"))
+            .context("read ambient Run manifest")?;
+        let manifest: crate::run_record::RunManifest =
+            serde_json::from_slice(&manifest).context("parse ambient Run manifest")?;
+        let repo = manifest.repo.as_deref().unwrap_or(cwd);
+        for subject in manifest.subjects {
+            if let Ok(binding) =
+                crate::ops::resolve_work_binding(store, repo, &subject.selector).await
+            {
+                return Ok(binding.work);
+            }
+        }
+    }
+    if let Some(task) = store
+        .get_task_by_worktree(&cwd.display().to_string())
+        .await?
+    {
+        return Ok(WorkRef::Task(task.id));
+    }
+    bail!("cannot resolve ambient Work from the generic Run or current worktree")
 }
 
 fn required_text(args: &[String], label: &str) -> anyhow::Result<String> {
@@ -479,7 +481,7 @@ async fn open_shared_store() -> anyhow::Result<Arc<Store>> {
     ))
 }
 
-fn present_in_external_terminal(surface: &InvocationSurface) -> anyhow::Result<()> {
+fn present_in_external_terminal(surface: &AskSession) -> anyhow::Result<()> {
     let attach = exact_attach_argv(surface)?;
     let terminal = resolve_external_terminal();
     if cfg!(target_os = "macos") && is_ghostty_terminal(&terminal) {
@@ -723,11 +725,8 @@ fn write_terminal_launcher(argv: &[String]) -> anyhow::Result<PathBuf> {
     Ok(path)
 }
 
-fn exact_attach_argv(surface: &InvocationSurface) -> anyhow::Result<Vec<String>> {
-    let attach = surface
-        .attach_argv
-        .as_ref()
-        .ok_or_else(|| anyhow!("Invocation {} has no attach route", surface.invocation.id))?;
+fn exact_attach_argv(surface: &AskSession) -> anyhow::Result<Vec<String>> {
+    let attach = &surface.attach_argv;
     let home = HomeRoute::parse(&surface.home_route)
         .ok_or_else(|| anyhow!("invalid Home route {:?}", surface.home_route))?;
     if let Some(destination) = home.ssh_destination() {
@@ -754,43 +753,6 @@ fn default_external_terminal() -> String {
 
 #[cfg(test)]
 mod tests {
-    use std::path::PathBuf;
-    use std::sync::Arc;
-
-    use crate::durable::{
-        AgentInvocationId, Ask, AskBody, AskId, AskOrigin, AskResult, AskState, AskTarget,
-        Containment, HomeId, InvocationRoute, RunAdvance, RunId, RunTrigger, WorkRef,
-    };
-    use crate::id::WaveId;
-    use crate::store::{open_store, StorageConfig};
-    use crate::wave::Wave;
-
-    #[test]
-    fn external_terminal_launcher_execs_the_exact_attach_route() {
-        let attach = vec![
-            "ssh".to_string(),
-            "jack@mini".to_string(),
-            "--".to_string(),
-            "tmux".to_string(),
-            "attach-session".to_string(),
-            "-t".to_string(),
-            "lf-ask-proof".to_string(),
-        ];
-        let command = super::external_terminal_command("Terminal", &attach).unwrap();
-        if cfg!(target_os = "macos") {
-            assert_eq!(command.program, "open");
-            let launcher = std::path::Path::new(command.args.last().unwrap());
-            let contents = std::fs::read_to_string(launcher).unwrap();
-            assert!(contents.contains(
-                "exec 'ssh' 'jack@mini' '--' 'tmux' 'attach-session' '-t' 'lf-ask-proof'"
-            ));
-            std::fs::remove_file(launcher).unwrap();
-        } else {
-            assert_eq!(command.args[0], "-e");
-            assert_eq!(&command.args[1..], attach);
-        }
-    }
-
     #[test]
     fn local_tmux_attach_preserves_the_ask_session() {
         let attach = vec![
@@ -806,376 +768,20 @@ mod tests {
     }
 
     #[test]
-    fn local_ghostty_asks_use_native_tabs_with_distinct_tmux_sessions() {
-        let first_attach = vec![
-            "tmux".to_string(),
-            "attach-session".to_string(),
-            "-t".to_string(),
-            "lf-ask-first".to_string(),
-        ];
-        let second_attach = vec![
-            "tmux".to_string(),
-            "attach-session".to_string(),
-            "-t".to_string(),
-            "lf-ask-second".to_string(),
-        ];
-
-        let first = super::ghostty_ask_command(&first_attach, "lf-ask-first").unwrap();
-        let second = super::ghostty_ask_command(&second_attach, "lf-ask-second").unwrap();
-
-        assert_eq!(first.program, "osascript");
-        assert!(first.args[1].contains("new window with configuration"));
-        assert!(first.args[1].contains("new tab in askWindow"));
-        assert!(first.args[1].contains("name of candidateTab as text"));
-        assert!(first.args[1].contains("select tab askTab"));
-        assert!(!first.args[1].contains("link-window"));
-        assert_eq!(first.args[4], "lf-ask-first");
-        assert_eq!(second.args[4], "lf-ask-second");
-        assert_eq!(first.args[5], second.args[5]);
-
-        std::fs::remove_file(first.cleanup_on_failure.unwrap()).unwrap();
-        std::fs::remove_file(second.cleanup_on_failure.unwrap()).unwrap();
-    }
-
-    #[test]
-    fn ghostty_detection_accepts_app_names_and_paths() {
-        assert!(super::is_ghostty_terminal("Ghostty"));
-        assert!(super::is_ghostty_terminal("Ghostty.app"));
-        assert!(super::is_ghostty_terminal("/Applications/Ghostty.app"));
-        assert!(!super::is_ghostty_terminal("Terminal"));
-    }
-
-    #[test]
-    fn ghostty_automation_denial_explains_the_permission_boundary() {
-        let message = super::_presentation_failure_message(
-            "/usr/bin/osascript",
-            "exit status: 1",
-            "Not authorized to send Apple events to Ghostty. (-1743)",
-        );
-
-        assert!(message.contains("allow your terminal to control Ghostty"));
-        assert!(message.contains("Privacy & Security > Automation"));
-    }
-
-    #[test]
-    fn remote_and_non_attach_routes_keep_direct_presentation() {
-        let ssh = vec![
-            "ssh".to_string(),
-            "jack@mini".to_string(),
-            "--".to_string(),
-            "tmux".to_string(),
-            "attach-session".to_string(),
-            "-t".to_string(),
-            "lf-ask-proof".to_string(),
-        ];
-        assert_eq!(super::local_tmux_attach_session(&ssh), None);
-
-        let new_session = vec![
-            "tmux".to_string(),
-            "new-session".to_string(),
-            "-t".to_string(),
-            "lf-ask-proof".to_string(),
-        ];
-        assert_eq!(super::local_tmux_attach_session(&new_session), None);
-    }
-
-    #[test]
-    fn failed_terminal_presentation_is_reported_without_a_fallback() {
-        let cleanup = tempfile::NamedTempFile::new().unwrap().into_temp_path();
-        let cleanup = cleanup.keep().unwrap();
-        let command = super::PresentationCommand {
-            program: "/usr/bin/false".to_string(),
-            args: Vec::new(),
-            cleanup_on_failure: Some(cleanup.clone()),
-        };
-
-        let error = super::run_presentation(&command).unwrap_err();
-
-        assert!(error.to_string().contains("presentation failed"));
-        assert!(!cleanup.exists());
-    }
-
-    #[test]
-    fn default_wait_prefers_invocation_then_run_then_work() {
-        fn outgoing(run_id: RunId, invocation_id: AgentInvocationId) -> Ask {
-            Ask {
-                id: AskId::new(),
-                origin: AskOrigin {
-                    work: WorkRef::Wave(WaveId::new()),
-                    run_id,
-                    turn_id: None,
-                    invocation_id: Some(invocation_id),
-                    home_id: HomeId::new(),
-                    cwd: PathBuf::from("/repo"),
-                },
-                target: AskTarget::User,
-                request: AskBody::Intervention {
-                    prompt: "Which proof?".to_string(),
-                },
-                state: AskState::Queued,
-                active_invocation_id: None,
-                result: None,
-                terminal_author: None,
-                asked_at: time::OffsetDateTime::now_utc(),
-                terminal_at: None,
-            }
-        }
-
-        let run_id = RunId::new();
-        let invocation_id = AgentInvocationId::new();
-        let work_ask = outgoing(RunId::new(), AgentInvocationId::new());
-        let run_ask = outgoing(run_id.clone(), AgentInvocationId::new());
-        let invocation_ask = outgoing(run_id.clone(), invocation_id.clone());
-        let asks = vec![work_ask.clone(), run_ask.clone(), invocation_ask.clone()];
-
-        assert_eq!(
-            super::select_default_wait(asks.clone(), &run_id, Some(&invocation_id))
-                .unwrap()
-                .id,
-            invocation_ask.id
-        );
-        assert_eq!(
-            super::select_default_wait(
-                vec![work_ask.clone(), run_ask.clone()],
-                &run_id,
-                Some(&invocation_id),
-            )
-            .unwrap()
-            .id,
-            run_ask.id
-        );
-        assert_eq!(
-            super::select_default_wait(vec![work_ask.clone()], &run_id, Some(&invocation_id))
-                .unwrap()
-                .id,
-            work_ask.id
-        );
-    }
-
-    #[tokio::test]
-    async fn waiter_rejoins_without_ending_its_invocation_and_terminal_results_are_typed() {
-        let directory = tempfile::tempdir().unwrap();
-        let store = Arc::new(
-            open_store(&StorageConfig::sqlite(directory.path().join("registry.db")))
-                .await
-                .unwrap(),
-        );
-        let wave = Wave::new(
-            WaveId::new(),
-            "ask-cli".to_string(),
-            directory.path().display().to_string(),
-        );
-        store.create_wave(&wave).await.unwrap();
-        let work = WorkRef::Wave(wave.id().clone());
-        let (_, run_context) = store.reserve_run(&work, RunTrigger::User).await.unwrap();
-        store
-            .advance_run(
-                &run_context,
-                RunAdvance::RunStarting {
-                    containment: Containment::Tmux {
-                        name: "lf-ask-cli".to_string(),
-                    },
-                    cwd: PathBuf::from("/tmp/ask-cli"),
-                },
-            )
-            .await
-            .unwrap();
-        let crate::durable::AdvanceReceipt::Invocation(invocation) = store
-            .advance_run(
-                &run_context,
-                RunAdvance::InvocationStarting {
-                    route: InvocationRoute {
-                        provider: "codex".to_string(),
-                        model: None,
-                        account_id: None,
-                    },
-                    surface: "headless".to_string(),
-                    resume_token: None,
-                    answer_ask_id: None,
-                },
-            )
-            .await
-            .unwrap()
-        else {
-            panic!("expected Invocation receipt")
-        };
-        store
-            .advance_run(
-                &run_context,
-                RunAdvance::TurnStarting {
-                    invocation_id: invocation.id.clone(),
-                },
-            )
-            .await
-            .unwrap();
-        let ask = store
-            .request_intervention(&run_context, &invocation.id, "Connect the account", true)
-            .await
-            .unwrap();
-
-        let wait_store = Arc::clone(&store);
-        let wait_lease = run_context.clone();
-        let wait_ask = ask.clone();
-        let abandoned_wait = tokio::spawn(async move {
-            super::wait_for_terminal(&wait_store, &wait_lease, wait_ask, false).await
-        });
-        tokio::time::sleep(super::WAIT_INTERVAL).await;
-        abandoned_wait.abort();
-        assert_eq!(
-            store.ask_by_id(&ask.id).await.unwrap().state,
-            AskState::Queued
-        );
-
-        let wait_store = Arc::clone(&store);
-        let wait_lease = run_context.clone();
-        let wait_ask = ask.clone();
-        let resumed_wait = tokio::spawn(async move {
-            super::wait_for_terminal(&wait_store, &wait_lease, wait_ask, false).await
-        });
-        let claim = store.claim_test_ask(None, &ask.id).await.unwrap();
-        assert!(claim.needs_launch);
-        let mismatched = store
-            .request_intervention(&run_context, &invocation.id, "Different Ask", true)
-            .await
-            .unwrap();
-        let mismatch = store
-            .settle_ask(
-                &mismatched.id,
-                &claim.invocation_id,
-                AskResult::Resolved {
-                    summary: "Wrong Ask".to_string(),
-                },
-            )
-            .await
-            .unwrap_err();
-        assert!(mismatch.to_string().contains("does not belong to Ask"));
-        let ask_invocation = store
-            .ask_invocations(&ask.id)
-            .await
-            .unwrap()
-            .into_iter()
-            .find(|invocation| invocation.id == claim.invocation_id)
-            .unwrap();
-        let surface = store
-            .invocation_surface(&ask_invocation.id)
-            .await
-            .unwrap()
-            .unwrap();
-        assert_eq!(surface.run.cwd, Some(PathBuf::from("/tmp/ask-cli")));
-        assert_eq!(
-            surface.attach_argv,
-            Some(vec![
+    fn remote_attach_route_is_preserved() {
+        let surface = crate::durable::AskSession {
+            ask_id: crate::durable::AskId::new(),
+            run_id: crate::durable::RunId::new(),
+            home_route: "ssh://jack@mini".to_string(),
+            attach_argv: vec![
                 "tmux".to_string(),
                 "attach-session".to_string(),
                 "-t".to_string(),
-                crate::ops::ask::session_name(&ask_invocation.id),
-            ])
-        );
-        store
-            .mark_ask_ready(&ask.id, &claim.invocation_id)
-            .await
-            .unwrap();
-        let failed_presentation = super::PresentationCommand {
-            program: "/usr/bin/false".to_string(),
-            args: Vec::new(),
-            cleanup_on_failure: None,
+                "lf-ask-proof".to_string(),
+            ],
         };
-        super::run_presentation(&failed_presentation).unwrap_err();
-        assert_eq!(
-            store.ask_presentation(&ask_invocation.id).await.unwrap(),
-            (true, false)
-        );
-        assert_eq!(
-            store.ask_by_id(&ask.id).await.unwrap().state,
-            AskState::Claimed
-        );
-        let reopened = store.claim_test_ask(None, &ask.id).await.unwrap();
-        assert_eq!(reopened.invocation_id, claim.invocation_id);
-        assert!(!reopened.needs_launch);
-        assert_eq!(
-            store
-                .invocation_surface(&claim.invocation_id)
-                .await
-                .unwrap()
-                .unwrap()
-                .invocation
-                .id,
-            ask_invocation.id
-        );
-        let stale_invocation_id = AgentInvocationId::new();
-        let stale_error = store
-            .mark_presented_by_target(None, &ask.id, &stale_invocation_id)
-            .await
-            .unwrap_err();
-        assert!(stale_error.to_string().contains("not"));
-        assert_eq!(
-            store.ask_presentation(&ask_invocation.id).await.unwrap(),
-            (true, false)
-        );
-        store
-            .mark_presented_by_target(None, &ask.id, &ask_invocation.id)
-            .await
-            .unwrap();
-        store
-            .settle_ask(
-                &ask.id,
-                &claim.invocation_id,
-                AskResult::Resolved {
-                    summary: "Account connected".to_string(),
-                },
-            )
-            .await
-            .unwrap();
-        resumed_wait.await.unwrap().unwrap();
-
-        let invocation = store
-            .invocations_for_run(&run_context.run_id)
-            .await
-            .unwrap()
-            .into_iter()
-            .find(|candidate| candidate.id == invocation.id)
-            .unwrap();
-        assert!(invocation.ended_at.is_none());
-
-        let declined = store
-            .request_intervention(&run_context, &invocation.id, "Unsafe action", true)
-            .await
-            .unwrap();
-        let claim = store.claim_test_ask(None, &declined.id).await.unwrap();
-        store
-            .mark_ask_ready(&declined.id, &claim.invocation_id)
-            .await
-            .unwrap();
-        store
-            .mark_ask_presented(&declined.id, &claim.invocation_id)
-            .await
-            .unwrap();
-        let declined = store
-            .settle_ask(
-                &declined.id,
-                &claim.invocation_id,
-                AskResult::Declined {
-                    reason: "Unsafe".to_string(),
-                },
-            )
-            .await
-            .unwrap();
-        assert!(super::print_terminal_ask(&declined, true)
-            .unwrap_err()
-            .to_string()
-            .contains("declined"));
-
-        let cancelled = store
-            .request_intervention(&run_context, &invocation.id, "No longer needed", true)
-            .await
-            .unwrap();
-        let cancelled = store
-            .cancel_ask(Some(&run_context), &cancelled.id, "Withdrawn")
-            .await
-            .unwrap();
-        assert!(super::print_terminal_ask(&cancelled, true)
-            .unwrap_err()
-            .to_string()
-            .contains("cancelled"));
+        let argv = super::exact_attach_argv(&surface).unwrap();
+        assert_eq!(argv.first().map(String::as_str), Some("ssh"));
+        assert_eq!(argv.last().map(String::as_str), Some("lf-ask-proof"));
     }
 }

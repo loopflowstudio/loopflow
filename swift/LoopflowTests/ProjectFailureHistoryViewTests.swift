@@ -12,8 +12,7 @@ struct ProjectFailureHistoryViewTests {
         let view = ProjectFailureHistoryView(
             failure: HistoricalFailure(
                 message: "project runner failed: credential is missing",
-                occurredAt: "2026-07-22T09:30:00Z",
-                runId: "run_failure"
+                occurredAt: "2026-07-22T09:30:00Z"
             )
         )
 

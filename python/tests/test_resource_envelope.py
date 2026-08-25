@@ -19,7 +19,7 @@ def _policy(**overrides) -> "resources.ResourcePolicy":
         "minimum_free_disk_bytes": 100,
         "maximum_worktree_build_bytes": 100,
         "maximum_aggregate_build_bytes": 150,
-        "maximum_trace_bytes": 100,
+        "maximum_run_record_bytes": 100,
         "maximum_uv_cache_bytes": 100,
         "maximum_cargo_cache_bytes": 100,
         "maximum_gate_artifact_bytes": 100,
@@ -79,36 +79,42 @@ def _snapshot(
     )
 
 
-def test_over_budget_diagnostics_name_owner_and_remediation(tmp_path: Path) -> None:
-    policy = _policy(minimum_free_disk_bytes=1_000, maximum_trace_bytes=10)
-    trace = _source(
-        tmp_path / "traces",
-        id="trace:home",
-        kind="trace",
-        owner="Loopflow Home",
-        disposable=False,
-        active=True,
-        budget=10,
+def test_snapshot_measures_home_run_records_and_names_retention(
+    tmp_path: Path, monkeypatch
+) -> None:
+    repo = tmp_path / "repo"
+    repo.mkdir()
+    home = tmp_path / "lf-home"
+    run_dir = home / "runs" / "12" / "run_1234"
+    run_dir.mkdir(parents=True)
+    (run_dir / "manifest.json").write_text('{"id":"run_1234"}\n')
+    (run_dir / "events.jsonl").write_text('{"type":"usage"}\n')
+    monkeypatch.delenv("LF_CONTROL_HOME", raising=False)
+    monkeypatch.setenv("LF_HOME", str(home))
+    monkeypatch.setenv("UV_CACHE_DIR", str(tmp_path / "uv-cache"))
+    monkeypatch.setenv("CARGO_HOME", str(tmp_path / "cargo-home"))
+    monkeypatch.setattr(
+        resources,
+        "_discover_worktrees",
+        lambda _repo: ([resources.Worktree(repo, "feature")], None),
     )
-    trace.root.mkdir()
-    (trace.root / "capture").write_bytes(b"evidence")
-    trace = _source(
-        trace.root,
-        id="trace:home",
-        kind="trace",
-        owner="Loopflow Home",
-        disposable=False,
-        active=True,
-        budget=10,
+    monkeypatch.setattr(resources, "_running_cwds", lambda: ({repo}, None))
+
+    snapshot = resources.collect_snapshot(
+        repo,
+        _policy(maximum_run_record_bytes=1),
     )
 
-    issues = resources._assess_sources(50, policy, [trace])
-
-    assert {issue.code for issue in issues} == {"disk:free", "trace:home"}
-    trace_issue = next(issue for issue in issues if issue.code == "trace:home")
-    assert trace_issue.owner == "Loopflow Home"
-    assert trace_issue.action == "repair Loopflow Home"
-    assert trace_issue.recoverable is False
+    source = next(source for source in snapshot.sources if source.id == "runs:home")
+    issue = next(issue for issue in snapshot.issues if issue.code == "runs:home")
+    assert source.kind == "runs"
+    assert source.paths == (home / "runs",)
+    assert source.bytes > 0
+    assert source.disposable is False
+    assert issue.owner == "Loopflow Home"
+    assert issue.recoverable is False
+    assert str(home / "runs") in issue.action
+    assert "reconcile" not in issue.action
 
 
 def test_recovery_removes_only_inactive_allowlisted_builds(tmp_path: Path) -> None:
@@ -120,8 +126,9 @@ def test_recovery_removes_only_inactive_allowlisted_builds(tmp_path: Path) -> No
         (root / "target/artifact").write_bytes(b"x" * 4096)
         (root / "source.rs").write_text("fn main() {}\n")
         (root / ".git").write_text("gitdir: retained\n")
-    (durable / "traces").mkdir(parents=True)
-    (durable / "traces/capture.jsonl").write_text("durable\n")
+    run_dir = durable / "runs" / "12" / "run_1234"
+    run_dir.mkdir(parents=True)
+    (run_dir / "events.jsonl").write_text("durable\n")
     (durable / "loopflow.db").write_bytes(b"sqlite")
 
     policy = _policy(maximum_aggregate_build_bytes=1)
@@ -129,13 +136,13 @@ def test_recovery_removes_only_inactive_allowlisted_builds(tmp_path: Path) -> No
         _source(active, id="build:active", owner="active", active=True),
         _source(inactive, id="build:inactive", owner="inactive"),
         resources.ResourceSource(
-            id="trace:home",
-            kind="trace",
+            id="runs:home",
+            kind="runs",
             owner="Loopflow Home",
             root=durable,
-            paths=(durable / "traces",),
-            bytes=resources._allocated_bytes(durable / "traces"),
-            budget_bytes=1_000_000,
+            paths=(durable / "runs",),
+            bytes=resources._allocated_bytes(durable / "runs"),
+            budget_bytes=1,
             disposable=False,
             active=True,
             action="retain",
@@ -150,7 +157,7 @@ def test_recovery_removes_only_inactive_allowlisted_builds(tmp_path: Path) -> No
     assert (active / "source.rs").exists()
     assert (inactive / "source.rs").exists()
     assert (inactive / ".git").exists()
-    assert (durable / "traces/capture.jsonl").exists()
+    assert (run_dir / "events.jsonl").exists()
     assert (durable / "loopflow.db").exists()
 
 

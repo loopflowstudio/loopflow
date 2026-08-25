@@ -36,8 +36,7 @@ enum SessionScope: Hashable, Sendable {
         case .repo:
             true
         case .wave(_, let id):
-            record.surface?.waveId == id
-                || (record.ask.origin.work.kind == .wave && record.ask.origin.work.id == id)
+            record.ask.origin.work.kind == .wave && record.ask.origin.work.id == id
         case .project(_, let id):
             record.ask.origin.work.kind == .project && record.ask.origin.work.id == id
         case .task(_, let id):
@@ -50,7 +49,7 @@ struct SessionItem: Identifiable, Equatable {
     enum State: Equatable {
         case pending
         case opening
-        case live(InvocationSurfaceRecord)
+        case live(AskSessionRecord)
         case failed(String)
     }
 
@@ -81,7 +80,7 @@ struct SessionItem: Identifiable, Equatable {
         return nil
     }
 
-    var surface: InvocationSurfaceRecord? {
+    var surface: AskSessionRecord? {
         guard case .live(let surface) = state else { return nil }
         return surface
     }
@@ -209,7 +208,7 @@ final class SessionsStore: ObservableObject {
         do {
             _ = try await query.confirmAskPresented(
                 askId: id,
-                invocationId: surface.invocation.id,
+                runId: surface.runId,
                 cwd: scope.repoPath
             )
             if let latest = _index(id) {
@@ -968,15 +967,15 @@ private struct SessionPaneView: View {
     }
 
     @ViewBuilder
-    private func _terminal(item: SessionItem, surface: InvocationSurfaceRecord) -> some View {
-        let command = LaunchTargetLauncher.command(for: surface, home: surface.home)
+    private func _terminal(item: SessionItem, surface: AskSessionRecord) -> some View {
+        let command = LaunchTargetLauncher.command(for: surface, localCwd: scope.repoPath)
         GhosttyTerminalView(
             workingDirectory: command.cwd,
             argv: command.argv,
             env: command.environment,
             sessionId: _terminalSurfaceId(
                 askId: item.id,
-                invocationId: surface.invocation.id
+                runId: surface.runId
             ),
             isFocused: isFocused,
             onSurfaceCreated: {
@@ -985,7 +984,7 @@ private struct SessionPaneView: View {
             },
             onFocus: { store.setFocusedPane(pane.id) }
         )
-        .id(surface.invocation.id)
+        .id(surface.runId)
     }
 
     private var _title: String {
@@ -1001,15 +1000,15 @@ private struct SessionPaneView: View {
         if let item, let surface = item.surface {
             return _terminalSurfaceId(
                 askId: item.id,
-                invocationId: surface.invocation.id
+                runId: surface.runId
             )
         }
         return "shell-pane-\(pane.id)"
     }
 }
 
-private func _terminalSurfaceId(askId: String, invocationId: String) -> String {
-    "ask-\(askId)-\(invocationId)"
+private func _terminalSurfaceId(askId: String, runId: String) -> String {
+    "ask-\(askId)-\(runId)"
 }
 
 private enum SessionsShortcut {

@@ -1,24 +1,20 @@
 import Foundation
 
-/// The NOW lens: the live-and-stuck frontier across every Wave, grouped by who
+/// The NOW lens: the attention frontier across every Wave, grouped by who
 /// must move next. A display grouping over the Rust-owned attention signal in
 /// the one `lf roadmap` read, re-shaped into a flat, cross-wave list. It
-/// invents no Work or process state.
+/// invents no Work or runtime state.
 public enum NowGroup: String, CaseIterable, Sendable, Hashable {
     case readyForReview
     case needsInput
-    case working
     case stopped
-    case failed
     case unknown
 
     public var title: String {
         switch self {
         case .readyForReview: "Ready for review"
         case .needsInput: "Needs input"
-        case .working: "Working"
         case .stopped: "Stopped"
-        case .failed: "Failed"
         case .unknown: "Unknown"
         }
     }
@@ -26,15 +22,13 @@ public enum NowGroup: String, CaseIterable, Sendable, Hashable {
 
 /// Which NOW group a Task belongs to, or `nil` when it is not a NOW row.
 ///
-/// Rust owns whether the row is advancing, needs attention, is quiet, or could
-/// not be proven. Swift only gives red rows a useful reading group; it never
-/// reconstructs the attention level from status and process flags.
+/// Rust owns whether the row needs attention, is quiet, or could not be proven.
+/// Swift only gives red rows a useful reading group; it never reconstructs the
+/// attention level from status or local progress.
 public func nowGroup(for task: RoadmapTask) -> NowGroup? {
     switch task.attention.level {
     case .blue:
         return .readyForReview
-    case .green:
-        return .working
     case .black:
         return nil
     case .unknown:

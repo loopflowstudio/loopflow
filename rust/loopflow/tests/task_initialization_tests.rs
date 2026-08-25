@@ -2,7 +2,6 @@ mod support;
 
 use std::process::Command;
 
-use loopflow::child::ChildRef;
 use loopflow::ops::task::{task_snapshot, task_status};
 use loopflow::store::PmSnapshotRow;
 use loopflow::task::actions::TaskAction;
@@ -128,17 +127,6 @@ fn initializing_worktree_keeps_status_wait_and_roadmap_readable() {
         .as_str()
         .expect("roadmap attention reason")
         .contains("is initializing worktree"));
-    let work = runtime
-        .block_on(
-            task.store
-                .work_for_child(&ChildRef::Task(task.task.id.clone())),
-        )
-        .expect("resolve initializing Task Work");
-    assert!(runtime
-        .block_on(task.store.current_run(&work))
-        .expect("read initializing Task Run")
-        .is_none());
-
     let projected =
         task_snapshot(&task_status("INF-123").expect("read Task")).expect("project Task status");
     assert_eq!(projected.actions.recommended, Some(TaskAction::NoAction));

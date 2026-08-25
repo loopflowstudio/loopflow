@@ -9,7 +9,6 @@ use time::OffsetDateTime;
 
 use crate::child::{AbandonIntent, ChildRef, ObservationRecipient};
 pub use crate::durable::ProjectId;
-use crate::durable::RunId;
 use crate::id::WaveId;
 use crate::planning::ProjectPlan;
 use crate::task::{TaskEventKind, TaskId};
@@ -106,7 +105,6 @@ pub struct ProjectEvent {
     pub id: i64,
     pub project_id: ProjectId,
     pub kind: ProjectEventKind,
-    pub run_id: Option<RunId>,
     pub created_at: OffsetDateTime,
 }
 
@@ -115,7 +113,6 @@ pub struct HistoricalFailure {
     pub message: String,
     #[serde(with = "time::serde::rfc3339")]
     pub occurred_at: OffsetDateTime,
-    pub run_id: Option<RunId>,
 }
 
 impl HistoricalFailure {
@@ -123,7 +120,6 @@ impl HistoricalFailure {
         Some(Self {
             message: event.kind.failure_reason()?.to_string(),
             occurred_at: event.created_at,
-            run_id: event.run_id.clone(),
         })
     }
 }

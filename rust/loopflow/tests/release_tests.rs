@@ -828,9 +828,7 @@ fn release_run_reintegrates_a_dirty_existing_pr() {
         write_gh_dirty_release_script(&log_path.to_string_lossy(), release_branch, &main_branch);
     let lf_script = "#!/bin/sh\ncat > RELEASE_NOTES.md <<'EOF'\n# v0.9.2\n\n<!-- loopflow:release-notes=narrative;gate=safe -->\n\nRegenerated release notes.\nEOF\n";
     let _env = EnvGuard::new(&[("gh", gh_script.as_str()), ("lf", lf_script)]);
-    std::env::set_var("LF_RUN_CONTEXT", "agent");
     std::env::set_var("LF_RUN_ID", "run_stale");
-    std::env::set_var("LF_AGENT_INVOCATION_ID", "invocation_stale");
     std::env::set_var("LF_WAVE_ID", "wave_stale");
 
     let outcome = release_run(repo.path(), "patch", None, &NullProgress)

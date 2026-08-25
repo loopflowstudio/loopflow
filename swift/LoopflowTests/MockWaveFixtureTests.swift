@@ -55,9 +55,8 @@ struct MockWaveFixtureTests {
         #expect(detail.metricPortfolio.metrics.count { $0.stage == .installed } == 1)
         #expect(detail.metricPortfolio.contractIssues.count == 1)
 
-        // Project row lens folds its Tasks' attention (runtime not running):
-        // the red Task outranks the black one.
-        #expect(WaveLens.forProject(runtime: project.runtime, tasks: project.tasks).color == .red)
+        // Project row lens folds its Tasks' attention: the red Task outranks the black one.
+        #expect(WaveLens.forProject(tasks: project.tasks).color == .red)
 
         // Task rows: the shared attention level verbatim.
         let byId = Dictionary(uniqueKeysWithValues: project.tasks.map { ($0.task.identifier, $0) })

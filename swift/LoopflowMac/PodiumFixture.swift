@@ -105,7 +105,7 @@ enum PodiumFixture {
     }
 
     private static func emptyProcessActivity() throws -> ActivitySnapshot {
-        let json = #"{"schema_version":1,"observed_at":1784606400,"usage":{"schema_version":1,"observed_at":1784606400,"windows":[5,300,3600,86400],"readings":[{"scope":{"id":"global","parent_id":null,"kind":"global","label":"All Loopflow","repo":null,"wave":null,"project":null,"task":null,"exec_id":null,"invocation_id":null},"intervals":[{"window_seconds":5,"output_tokens":0,"reasoning_tokens":null,"output_tokens_per_second":0.0,"measured_turns":0,"unmeasured_turns":0,"output_complete":true},{"window_seconds":300,"output_tokens":0,"reasoning_tokens":null,"output_tokens_per_second":0.0,"measured_turns":0,"unmeasured_turns":0,"output_complete":true},{"window_seconds":3600,"output_tokens":0,"reasoning_tokens":null,"output_tokens_per_second":0.0,"measured_turns":0,"unmeasured_turns":0,"output_complete":true},{"window_seconds":86400,"output_tokens":0,"reasoning_tokens":null,"output_tokens_per_second":0.0,"measured_turns":0,"unmeasured_turns":0,"output_complete":true}]}],"history_bucket_seconds":300,"global_history":[]},"nodes":[],"provider_processes":[]}"#
+        let json = #"{"schema_version":1,"observed_at":1784606400,"nodes":[],"provider_processes":[]}"#
         return try JSONDecoder().decode(ActivitySnapshot.self, from: Data(json.utf8))
     }
 

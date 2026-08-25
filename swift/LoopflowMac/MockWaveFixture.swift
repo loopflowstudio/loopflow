@@ -56,14 +56,14 @@ enum MockWaveFixture {
     static var waves: [Wave] {
         [
             Wave(id: "wave-1", name: "infrastructure", repo: repoPath,
-                 status: .running(runID: "run_infrastructure"),
+                 status: .ready,
                  live: true, activeTasks: 1, activeProjects: 1),
             Wave(id: "wave-2", name: "intelligence", repo: repoPath, status: .ready,
                  live: false, activeTasks: 2, activeProjects: 1),
             Wave(id: "wave-3", name: "feedback", repo: repoPath, status: .ready,
                  live: false, enabled: false, activeTasks: 0, activeProjects: 0),
             Wave(id: "wave-4", name: "cadenza", repo: repoPath,
-                 status: .running(runID: "run_cadenza"),
+                 status: .ready,
                  live: true, activeTasks: 0, activeProjects: 0, parentWaveId: "wave-1"),
         ]
     }
@@ -125,8 +125,7 @@ enum MockWaveFixture {
       "wave": {
         "id": "wave-1",
         "name": "infrastructure",
-        "status": {"running":{"run_id":"run_00000000000000000000000000000004"}},
-        "current": {"state":"working","reason":"Run is active","owner":"work","controls":["attach","steer","interrupt","stop"],"progress_age_secs":60,"deadline_in_secs":1740,"step":null,"liveness":{"state":"present","observed_at":"2026-07-17T00:00:00Z","fresh":true}},
+        "status": "ready",
         "goal": "Make releases boring.",
         "repo": "/src/loopflow",
         "active_tasks": 1,
@@ -137,6 +136,9 @@ enum MockWaveFixture {
         "endpoint": "127.0.0.1:7777",
         "created_at": "2026-07-01T00:00:00Z",
         "parent_wave_id": null,
+        "retired_at": null,
+        "superseded_by_wave_id": null,
+        "retirement_reason": null,
         "home": {
           "id": "home_00000000000000000000000000000001",
           "route": "ssh://jack@mini-heart",
@@ -166,11 +168,9 @@ enum MockWaveFixture {
             "iteration": 2,
             "pending_observations": 0,
             "provider": "codex",
-            "current": {"state": "ready", "reason": "ready", "owner": "loopflow", "controls": ["resume", "abandon"], "progress_age_secs": null, "deadline_in_secs": null, "step": "iteration 2", "liveness": null},
             "last_failure": {
               "message": "project runner failed: credential is missing",
-              "occurred_at": "2026-07-22T09:30:00Z",
-              "run_id": "run_00000000000000000000000000000009"
+              "occurred_at": "2026-07-22T09:30:00Z"
             }
           },
           "directive": {
@@ -208,8 +208,7 @@ enum MockWaveFixture {
                 "status": "ready",
                 "reason": "ready",
                 "updated_at": "2026-07-13T19:00:00Z",
-                "provider": "codex",
-                "current": {"state": "ready", "reason": "ready", "owner": "loopflow", "controls": ["resume", "abandon"], "progress_age_secs": null, "deadline_in_secs": null, "step": "iterate", "liveness": null}
+                "provider": "codex"
               },
               "directive": {
                 "version": 2,
@@ -229,7 +228,6 @@ enum MockWaveFixture {
                 "actions":{"recommended":"open_pr","reason":"merge head 333333333333 on GitHub"},
                 "pm_completed": false,
                 "work_status": "ready",
-                "process": {"state": "not_expected", "alive": null, "reason": null},
                 "local_progress": {"state": "observed", "unsettled": true, "dirty": false, "authored_commits": true, "recovery_required": false, "reason": null},
                 "active_pr_phase": "open"
               },
@@ -291,7 +289,6 @@ enum MockWaveFixture {
                 "actions":{"recommended":null,"reason":"Task is ready to start"},
                 "pm_completed": false,
                 "work_status": null,
-                "process": {"state": "not_applicable", "alive": null, "reason": null},
                 "local_progress": {"state": "not_applicable", "unsettled": false, "dirty": null, "authored_commits": null, "recovery_required": null, "reason": null},
                 "active_pr_phase": null
               },
@@ -307,7 +304,7 @@ enum MockWaveFixture {
             "identity": {"wave_id": "wave-1", "metric_id": "task-loop-trust"},
             "contract_revision": "aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa",
             "name": "Task loops earn trust",
-            "description": "Fraction of Task epochs settled during the trailing seven days that either completed with every PR landed through Loopflow auto-merge or stopped with a non-resumable failure receipt. Open epochs are excluded. A user-landed PR or manual Git repair inside the Task epoch fails the metric.",
+            "description": "Fraction of Tasks settled during the trailing seven days that either completed with every PR landed through Loopflow auto-merge or stopped with a non-resumable failure receipt. Open Tasks are excluded. A user-landed PR or manual Git repair inside the Task fails the metric.",
             "project_id": "project-1",
             "stage": "graduated",
             "instrumented": true,
@@ -368,33 +365,36 @@ enum MockWaveFixture {
         "truncated": false,
         "items": [
           {
-            "id": "invocation-1",
-            "trace_id": "run-1",
-            "exec_id": "proc-1",
-            "parent_exec_id": null,
+            "id": "run_00000000000000000000000000000001",
+            "parent_run_id": null,
             "repo": "/src/loopflow",
             "worktree": "/src/loopflow.task",
-            "wave": "infrastructure",
-            "flow": "task",
+            "subjects": [
+              {"selector": "wave:infrastructure", "source": "declared"},
+              {"selector": "task:INF-123", "source": "declared"}
+            ],
             "skill": "task/pursue",
-            "status": "ok",
+            "outcome": "completed",
             "started": 1784052000,
             "ended": 1784052600,
-            "turns": 1,
-            "system_tokens": 2000,
-            "task_tokens": 1000,
-            "supplied_context_tokens": 3000,
-            "input_tokens": 12000,
-            "output_tokens": 3000,
-            "reasoning_tokens": 1000,
-            "cache_read_tokens": 8000,
-            "cache_write_tokens": 500,
-            "cost_usd": 0.42,
-            "duration_secs": 600.0,
-            "provider": "codex",
+            "usage": {
+              "streams": 1,
+              "final_streams": 1,
+              "gaps": 0,
+              "input_tokens": 12000,
+              "output_tokens": 3000,
+              "total_input_tokens": 12000,
+              "peak_input_tokens": 10000,
+              "context_window_tokens": 200000,
+              "reasoning_tokens": 1000,
+              "cache_read_tokens": 8000,
+              "cache_write_tokens": 500,
+              "cost_usd": 0.42
+            },
+            "evidence_gaps": 0,
+            "harness": "codex",
             "model": "gpt-5",
-            "surface": "headless",
-            "capture_status": "complete"
+            "surface": "headless"
           }
         ]
       },

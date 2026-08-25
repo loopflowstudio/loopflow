@@ -5,10 +5,10 @@ homepage:
   hero:
     tagline: "Living software, conducted by you."
     subline: >-
-      Waves are persistent agents that hold a goal, remember what they learn,
-      and stay steerable. The organization is recursive — waves conduct
-      projects, projects conduct tasks, agents launch agents — and no Loopflow
-      server sits at the center.
+      Waves keep a goal, remember what they learn, and stay steerable while
+      replaceable agents do the work. Projects carry measurable bets; Tasks
+      carry concrete changes. Each machine keeps its own evidence and no
+      Loopflow server sits at the center.
     loopflow_download_url: "https://downloads.loopflow.studio/Loopflow-latest.dmg"
 
   showcase:
@@ -22,9 +22,9 @@ homepage:
     items:
       - title: "Agents conduct agents"
         description: >-
-          `lf` is the API. A wave delegates work with `lf task run`, redirects
-          it mid-turn with `lf task steer`, and proves the redirect landed
-          with a receipt. The same verbs you type.
+          `lf` is the API. A wave delegates a Task with `lf task run`, adds
+          durable input with `lf task steer`, and reads the same status and
+          evidence surfaces you do. The same verbs you type.
       - title: "The whole lifecycle, not just the code"
         description: >-
           Plans live in Linear. PRs publish, survive review, and land after
@@ -34,15 +34,17 @@ homepage:
           not just writing it.
       - title: "Self-organizing, all the way down"
         description: >-
-          Waves supervise projects; projects supervise tasks. Sessions keep
-          journals and receipts; Waves fold durable learning into memory.
+          Waves supervise projects; projects supervise tasks. Stable Work
+          preserves purpose while each mediated provider launch leaves a
+          Home-local Run record. Waves fold durable learning into memory.
           Coordination lives in the repo, Linear, and GitHub — no Loopflow
           server sits between them.
       - title: "The whole system on one screen"
         description: >-
           `lf roadmap` buckets every open task by what it needs from you.
-          Trace what any agent was told, what it spent, and what it shipped.
-          The Mac app renders the same JSON the CLI reads.
+          Inspect live local processes, durable Work, and provider-authored
+          usage without inventing one central ledger. The Mac app renders the
+          same JSON the CLI reads.
 
   building_blocks:
     heading: "Building blocks"

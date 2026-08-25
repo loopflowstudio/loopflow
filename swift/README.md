@@ -25,17 +25,14 @@ repository rather than a machine-wide aggregate.
 The Podium keeps a closable Wave hierarchy above the Sessions and Work surfaces.
 Its Work surface shows machine-wide Now/Roadmap Work beside durable Activity. Selecting a
 Wave, Project, or Task preserves the live view and scopes `lf activity --json`
-at the source. Disclose each branch from Wave → Project → Task → live Exec. Every
-level uses the same output meter and the existing `WorkReference`; Exec remains
-process evidence rather than a fourth Work kind. Run facts open their exact
-trace; PR facts open GitHub proof.
+at the source. Disclose each branch from Wave → Project → Task → live Exec.
+Exec remains process evidence rather than a fourth Work kind. PR facts open
+GitHub proof.
 
 The compact Podium bar reads live process evidence from `lf ps --json`. Its
-vertical signal meter shows normalized output over five seconds, with the
-60-second rate as a reference tick; completed provider usage stays the exact
-counter. The lamp stays independent from output: black is off, green
-is producing, blue is blocked, and amber is waiting or unknown. Wave count,
-active Runs, and Run-without-listener warnings come from `lf ls --json`.
+lamp reflects OS-live state: black is off, green is working, blue is stalled,
+and amber is waiting or unknown. Wave count, active Runs, and
+Run-without-listener warnings come from `lf ls --json`.
 Its User-attention badge reads repo-scoped `lf ask list --user --json` and returns
 to Sessions.
 Repository scope filters the Work and Wave snapshots locally; live process
@@ -73,21 +70,6 @@ or unstarted, and unknown means the required evidence could not be read.
 Open **Go → Telemetry** for token spend, codebase growth, a token-weighted
 codebase tree, and registry health.
 
-Select a Wave, then open **Context Lab** from its header. Compare that Wave's
-aggregate initial-prompt flame and prompt-ordered Invocation lanes, or rank
-current instruction sources by captured Invocation impressions. Select a skill or
-`LOOPFLOW.md` to read main's current file beside exact trace evidence. Choose a
-Refinement Project once per multi-Project Wave, then **Refine in task-worker**
-creates a Task and opens its running agent. The Project destination does not
-filter the Wave evidence. Repo and Wave stay fixed for the window; saved views
-store only filters inside that scope. Historical attribution gaps stay unattributed.
-Selecting a segment never opens prompt bodies;
-**Open trace** is the explicit boundary. Saved views retain only the query and visualization mode.
-The research-state filters can require observed steering or a launch containing
-a current resolvable file-backed instruction revision. Revision comparisons stay unavailable until
-both revisions have enough invocations with comparable capture, provider/model mix,
-and observation spans.
-
 ## Product ownership
 
 - **Wave Chat** owns the human conversation, the active Wave turn, and
@@ -101,18 +83,17 @@ and observation spans.
   Lifecycle mutations remain `lf task run/resume/interrupt`; routed questions
   use the shared `lf ask` queue.
 - **Registry queries** own durable reads. `RegistryQuery` runs
-  `lf ls/status/roadmap/ps/activity/usage/doctor/tokens/context/trace --json`; the app
-  does not maintain a second roadmap or lifecycle database. Unavailable per-Wave
-  evidence renders its reason, and refresh failures leave the last successful
-  roadmap or Activity history visible. Prompt and conversation bodies load only
-  after **Open trace**.
+  `lf ls/status/roadmap/ps/activity/usage/doctor/tokens --json`; the app does not
+  maintain a second roadmap or lifecycle database. Unavailable per-Wave evidence
+  renders its reason, and refresh failures leave the last successful roadmap or
+  Activity history visible.
 - **Per-Wave SSE** owns live motion. `WaveChatConnection` first reads
   `lf chat --history --json`, then connects only to the selected Wave's
   `/events` stream and upserts its replay before continuing live.
 
 ## Code map
 
-- `LoopflowMac/Views/PodiumView.swift` — primary Wave scope, Work, and live TOK/s signal
+- `LoopflowMac/Views/PodiumView.swift` — primary Wave scope, Work, and live process signal
 - `LoopflowMac/Views/SessionsView.swift` — scoped Ask queue and native split multiplexer
 - `Loopflow/Models/MultiplexerLayout.swift` — immutable pane split tree
 - `Loopflow/Models/MultiplexerStore.swift` — reference-owned layout, focus, color, and undo
@@ -122,8 +103,6 @@ and observation spans.
 - `LoopflowMac/Views/RoadmapView.swift` — all-Wave roadmap and lifecycle controls
 - `LoopflowMac/Views/WaveDetailPane.swift` — Wave Chat plus Project/Task work
 - `LoopflowMac/Views/TaskWorkspaceView.swift` — Task diff, file, Ghostty, and Warp surface
-- `LoopflowMac/Views/ContextLabView.swift` — invocation-set filters, flames, lanes, and evidence
-- `LoopflowMac/Views/ContextLabHandoffView.swift` — explicit trace bodies and Task refinement handoff
 - `LoopflowMac/PortfolioRepoState.swift` — one repository's Wave projection
 - `Loopflow/Services/RegistryQuery.swift` — typed `lf --json` reads
 - `Loopflow/Services/WaveChatClient.swift` — per-Wave event and message client

@@ -1,7 +1,7 @@
 //! Durable Project and Task compatibility rows and their observation outbox.
 
 use crate::child::{ChildBodyHandoffRequest, ObservationRecipient};
-use crate::durable::{Author, Basis, Run, RunContext};
+use crate::durable::Author;
 use crate::id::WaveId;
 use crate::project::{ObservationOutboxRow, Project, ProjectEvent, ProjectEventKind, ProjectId};
 use crate::task::{
@@ -10,22 +10,7 @@ use crate::task::{
 };
 use time::OffsetDateTime;
 
-use super::{run_sqlite, Store, StoreError, StoreResult};
-
-#[cfg(test)]
-#[derive(Debug, Clone)]
-pub(crate) struct TestRunReservation {
-    context: RunContext,
-}
-
-#[cfg(test)]
-impl std::ops::Deref for TestRunReservation {
-    type Target = RunContext;
-
-    fn deref(&self) -> &Self::Target {
-        &self.context
-    }
-}
+use super::{run_sqlite, Store, StoreResult};
 
 impl Store {
     pub async fn create_task(&self, task: &Task, pr: &TaskPr) -> StoreResult<()> {
@@ -34,43 +19,36 @@ impl Store {
         run_sqlite(&self.sqlite, move |store| store.insert_task(&task, &pr)).await
     }
 
-    pub async fn create_task_run(
+    pub async fn create_task_with_input(
         &self,
-        actor: Option<&RunContext>,
         task: &Task,
         pr: &TaskPr,
+        author: &Author,
         text: &str,
-    ) -> StoreResult<(Run, RunContext)> {
-        let _promotion_lock = crate::promotion_lock::acquire_shared()
-            .await
-            .map_err(|error| {
-                StoreError::InvalidData(format!(
-                    "acquire shared promotion lock before Task Run reservation: {error}"
-                ))
-            })?;
-        let actor = actor.cloned();
+    ) -> StoreResult<()> {
         let task = task.clone();
         let pr = pr.clone();
+        let author = author.clone();
         let text = text.to_string();
         run_sqlite(&self.sqlite, move |store| {
-            store.insert_task_run(&task, &pr, actor.as_ref(), &text)
+            store.insert_task_with_input(&task, &pr, &author, &text)
         })
         .await
     }
 
     pub async fn reopen_task(
         &self,
-        actor: Option<&RunContext>,
         task: &Task,
         pr: Option<&TaskPr>,
+        author: &Author,
         text: &str,
     ) -> StoreResult<()> {
-        let actor = actor.cloned();
         let task = task.clone();
         let pr = pr.cloned();
+        let author = author.clone();
         let text = text.to_string();
         run_sqlite(&self.sqlite, move |store| {
-            store.reopen_task(&task, pr.as_ref(), actor.as_ref(), &text)
+            store.reopen_task(&task, pr.as_ref(), &author, &text)
         })
         .await
     }
@@ -78,21 +56,6 @@ impl Store {
     pub async fn update_task(&self, task: &Task) -> StoreResult<()> {
         let task = task.clone();
         run_sqlite(&self.sqlite, move |store| store.update_task(&task)).await
-    }
-
-    pub(crate) async fn validate_task_run_route(
-        &self,
-        task: &Task,
-        lease: &RunContext,
-        current_external_project_id: &str,
-    ) -> StoreResult<()> {
-        let task = task.clone();
-        let lease = lease.clone();
-        let current_external_project_id = current_external_project_id.to_string();
-        run_sqlite(&self.sqlite, move |store| {
-            store.validate_task_run_route(&task, &lease, &current_external_project_id)
-        })
-        .await
     }
 
     pub async fn rebind_task_issue_identifier(
@@ -110,42 +73,6 @@ impl Store {
         .await
     }
 
-    #[cfg(test)]
-    pub(crate) async fn activate_task_process(
-        &self,
-        task: &Task,
-        lease: &RunContext,
-    ) -> StoreResult<()> {
-        self.update_task_for_run(task, lease).await
-    }
-
-    pub(crate) async fn update_task_for_run(
-        &self,
-        task: &Task,
-        lease: &RunContext,
-    ) -> StoreResult<()> {
-        let task = task.clone();
-        let lease = lease.clone();
-        run_sqlite(&self.sqlite, move |store| {
-            store.update_task_for_run(&task, &lease)
-        })
-        .await
-    }
-
-    pub(crate) async fn finish_task_run(
-        &self,
-        task: &Task,
-        lease: &RunContext,
-        outcome: crate::durable::BoundaryState,
-    ) -> StoreResult<()> {
-        let task = task.clone();
-        let lease = lease.clone();
-        run_sqlite(&self.sqlite, move |store| {
-            store.finish_task_run(&task, &lease, outcome)
-        })
-        .await
-    }
-
     pub async fn complete_task(&self, task: &Task, skipped_pr: Option<&TaskPr>) -> StoreResult<()> {
         let task = task.clone();
         let skipped_pr = skipped_pr.cloned();
@@ -153,66 +80,6 @@ impl Store {
             store.complete_task(&task, skipped_pr.as_ref())
         })
         .await
-    }
-
-    pub(crate) async fn complete_task_for_run(
-        &self,
-        task: &Task,
-        skipped_pr: Option<&TaskPr>,
-        lease: &RunContext,
-    ) -> StoreResult<()> {
-        let task = task.clone();
-        let skipped_pr = skipped_pr.cloned();
-        let lease = lease.clone();
-        run_sqlite(&self.sqlite, move |store| {
-            store.complete_task_for_run(&task, skipped_pr.as_ref(), &lease)
-        })
-        .await
-    }
-
-    #[cfg(test)]
-    pub(crate) async fn reserve_task_process(
-        &self,
-        task: &Task,
-        _expected_status: crate::durable::WorkStatus,
-    ) -> StoreResult<Option<TestRunReservation>> {
-        self.update_task(task).await?;
-        let work = self
-            .work_for_child(&crate::child::ChildRef::Task(task.id.clone()))
-            .await?;
-        let (_run, lease) = match self
-            .reserve_run(&work, crate::durable::RunTrigger::User)
-            .await
-        {
-            Ok(reserved) => reserved,
-            Err(super::StoreError::RunFenced { .. }) => return Ok(None),
-            Err(error) => return Err(error),
-        };
-        self.advance_run(
-            &lease,
-            crate::durable::RunAdvance::RunStarting {
-                containment: crate::durable::Containment::Tmux {
-                    name: format!("test-task-{}", task.id),
-                },
-                cwd: task.worktree.clone(),
-            },
-        )
-        .await?;
-        self.advance_run(
-            &lease,
-            crate::durable::RunAdvance::InvocationStarting {
-                route: crate::durable::InvocationRoute {
-                    provider: task.provider.clone(),
-                    model: None,
-                    account_id: None,
-                },
-                surface: "headless".to_string(),
-                resume_token: task.provider_session_id.clone(),
-                answer_ask_id: None,
-            },
-        )
-        .await?;
-        Ok(Some(TestRunReservation { context: lease }))
     }
 
     pub async fn handoff_task_body(
@@ -256,19 +123,6 @@ impl Store {
         run_sqlite(&self.sqlite, move |store| store.update_task_pr(&pr)).await
     }
 
-    pub(crate) async fn update_task_pr_for_run(
-        &self,
-        pr: &TaskPr,
-        lease: &RunContext,
-    ) -> StoreResult<()> {
-        let pr = pr.clone();
-        let lease = lease.clone();
-        run_sqlite(&self.sqlite, move |store| {
-            store.update_task_pr_for_run(&pr, &lease)
-        })
-        .await
-    }
-
     pub(crate) async fn record_task_pr_repair_incident(
         &self,
         pr_id: &TaskPrId,
@@ -282,37 +136,9 @@ impl Store {
         .await
     }
 
-    pub(crate) async fn record_task_pr_repair_incident_for_run(
-        &self,
-        pr_id: &TaskPrId,
-        kind: crate::task::TaskPrRepairKind,
-        occurred_at: OffsetDateTime,
-        lease: &RunContext,
-    ) -> StoreResult<bool> {
-        let pr_id = pr_id.clone();
-        let lease = lease.clone();
-        run_sqlite(&self.sqlite, move |store| {
-            store.record_task_pr_repair_incident_for_run(&pr_id, kind, occurred_at, &lease)
-        })
-        .await
-    }
-
     pub async fn heal_task_pr_base(&self, pr: &TaskPr) -> StoreResult<()> {
         let pr = pr.clone();
         run_sqlite(&self.sqlite, move |store| store.heal_task_pr_base(&pr)).await
-    }
-
-    pub(crate) async fn heal_task_pr_base_for_run(
-        &self,
-        pr: &TaskPr,
-        lease: &RunContext,
-    ) -> StoreResult<()> {
-        let pr = pr.clone();
-        let lease = lease.clone();
-        run_sqlite(&self.sqlite, move |store| {
-            store.heal_task_pr_base_for_run(&pr, &lease)
-        })
-        .await
     }
 
     pub async fn task_prs(&self, task_id: &TaskId) -> StoreResult<Vec<TaskPr>> {
@@ -415,21 +241,6 @@ impl Store {
         .await
     }
 
-    pub(crate) async fn settle_task_pr_for_run(
-        &self,
-        settled: &TaskPr,
-        next: Option<&TaskPr>,
-        lease: &RunContext,
-    ) -> StoreResult<()> {
-        let settled = settled.clone();
-        let next = next.cloned();
-        let lease = lease.clone();
-        run_sqlite(&self.sqlite, move |store| {
-            store.settle_task_pr_for_run(&settled, next.as_ref(), &lease)
-        })
-        .await
-    }
-
     pub(crate) async fn settle_task_pr_merged(
         &self,
         settled: &TaskPr,
@@ -442,40 +253,11 @@ impl Store {
         .await
     }
 
-    pub(crate) async fn settle_task_pr_merged_for_run(
-        &self,
-        settled: &TaskPr,
-        merged_at: Option<OffsetDateTime>,
-        lease: &RunContext,
-    ) -> StoreResult<crate::store::TaskPrMergeEvidenceOutcome> {
-        let settled = settled.clone();
-        let lease = lease.clone();
-        run_sqlite(&self.sqlite, move |store| {
-            store.settle_task_pr_merged_for_run(&settled, merged_at, &lease)
-        })
-        .await
-    }
-
     pub async fn complete_task_after_pr(&self, task: &Task, pr: &TaskPr) -> StoreResult<()> {
         let task = task.clone();
         let pr = pr.clone();
         run_sqlite(&self.sqlite, move |store| {
             store.complete_task_after_pr(&task, &pr)
-        })
-        .await
-    }
-
-    pub(crate) async fn complete_task_after_pr_for_run(
-        &self,
-        task: &Task,
-        pr: &TaskPr,
-        lease: &RunContext,
-    ) -> StoreResult<()> {
-        let task = task.clone();
-        let pr = pr.clone();
-        let lease = lease.clone();
-        run_sqlite(&self.sqlite, move |store| {
-            store.complete_task_after_pr_for_run(&task, &pr, &lease)
         })
         .await
     }
@@ -541,53 +323,6 @@ impl Store {
         })
         .await?;
         self.nudge_task_event(&task_id, &kind, &event).await?;
-        Ok(event)
-    }
-
-    pub(crate) async fn append_task_event_for_run(
-        &self,
-        task_id: &TaskId,
-        lease: &RunContext,
-        kind: &TaskEventKind,
-    ) -> StoreResult<TaskEvent> {
-        let task_id = task_id.clone();
-        let lease = lease.clone();
-        let kind = kind.clone();
-        let write_task_id = task_id.clone();
-        let write_kind = kind.clone();
-        let event = run_sqlite(&self.sqlite, move |store| {
-            store.append_task_event_for_run(&write_task_id, &lease, &write_kind)
-        })
-        .await?;
-        self.nudge_task_event(&task_id, &kind, &event).await?;
-        Ok(event)
-    }
-
-    pub(crate) async fn fail_task_run(
-        &self,
-        task_id: &TaskId,
-        lease: &RunContext,
-        error: &str,
-        resumable: bool,
-    ) -> StoreResult<TaskEvent> {
-        let task_id = task_id.clone();
-        let lease = lease.clone();
-        let error = error.to_string();
-        let write_task_id = task_id.clone();
-        let write_error = error.clone();
-        let event = run_sqlite(&self.sqlite, move |store| {
-            store.fail_task_run(&write_task_id, &lease, &write_error, resumable)
-        })
-        .await?;
-        let kind = TaskEventKind::Failed { error, resumable };
-        if let Err(error) = self.nudge_task_event(&task_id, &kind, &event).await {
-            tracing::debug!(
-                %error,
-                %task_id,
-                event_id = event.id,
-                "terminal Task event persisted; live observer nudge will retry"
-            );
-        }
         Ok(event)
     }
 
@@ -699,70 +434,38 @@ impl Store {
         run_sqlite(&self.sqlite, move |store| store.update_project(&project)).await
     }
 
-    #[cfg(test)]
-    pub(crate) async fn activate_project_process(
-        &self,
-        project: &Project,
-        lease: &RunContext,
-    ) -> StoreResult<()> {
-        self.update_project_for_run(project, lease).await
-    }
-
-    pub(crate) async fn update_project_for_run(
-        &self,
-        project: &Project,
-        lease: &RunContext,
-    ) -> StoreResult<()> {
+    pub(crate) async fn update_project_progress(&self, project: &Project) -> StoreResult<()> {
         let project = project.clone();
-        let lease = lease.clone();
         run_sqlite(&self.sqlite, move |store| {
-            store.update_project_for_run(&project, &lease)
+            store.update_project_progress(&project)
         })
         .await
     }
 
-    pub(crate) async fn adopt_project_plan_for_run(
+    pub(crate) async fn adopt_project_plan(
         &self,
         project_id: &ProjectId,
         plan: &crate::planning::ProjectPlan,
-        lease: &RunContext,
     ) -> StoreResult<(Project, bool)> {
         let project_id = project_id.clone();
         let plan = plan.clone();
-        let lease = lease.clone();
         run_sqlite(&self.sqlite, move |store| {
-            store.adopt_project_plan_for_run(&project_id, &plan, &lease)
+            store.adopt_project_plan(&project_id, &plan)
         })
         .await
     }
 
-    pub(crate) async fn finish_project_run(
+    pub(crate) async fn fail_project(
         &self,
         project: &Project,
-        lease: &RunContext,
-        outcome: crate::durable::BoundaryState,
-    ) -> StoreResult<()> {
-        let project = project.clone();
-        let lease = lease.clone();
-        run_sqlite(&self.sqlite, move |store| {
-            store.finish_project_run(&project, &lease, outcome)
-        })
-        .await
-    }
-
-    pub(crate) async fn fail_project_run(
-        &self,
-        project: &Project,
-        lease: &RunContext,
         error: &str,
     ) -> StoreResult<ProjectEvent> {
         let project_id = project.id.clone();
         let wave_id = project.wave_id.clone();
         let project = project.clone();
-        let lease = lease.clone();
         let error = error.to_string();
         let event = run_sqlite(&self.sqlite, move |store| {
-            store.fail_project_run(&project, &lease, &error)
+            store.fail_project(&project, &error)
         })
         .await?;
         self.nudge_project_terminal_observation(&project_id, &wave_id, event.id, "failed")
@@ -770,21 +473,17 @@ impl Store {
         Ok(event)
     }
 
-    pub(crate) async fn complete_project_run(
+    pub(crate) async fn complete_project(
         &self,
         project: &Project,
-        lease: &RunContext,
-        basis: &Basis,
         summary: &str,
     ) -> StoreResult<ProjectEvent> {
         let project_id = project.id.clone();
         let wave_id = project.wave_id.clone();
         let project = project.clone();
-        let lease = lease.clone();
-        let basis = basis.clone();
         let summary = summary.to_string();
         let event = run_sqlite(&self.sqlite, move |store| {
-            store.complete_project_run(&project, &lease, &basis, &summary)
+            store.complete_project(&project, &summary)
         })
         .await?;
         self.nudge_project_terminal_observation(&project_id, &wave_id, event.id, "completed")
@@ -814,51 +513,6 @@ impl Store {
                 tracing::debug!(%error, %wave_id, %project_id, event_id, outcome, "Project terminal observation lookup failed; Wave observer will retry")
             }
         }
-    }
-
-    #[cfg(test)]
-    pub(crate) async fn reserve_project_process(
-        &self,
-        project: &Project,
-        _expected_status: crate::durable::WorkStatus,
-    ) -> StoreResult<Option<TestRunReservation>> {
-        self.update_project(project).await?;
-        let work = self
-            .work_for_child(&crate::child::ChildRef::Project(project.id.clone()))
-            .await?;
-        let (_run, lease) = match self
-            .reserve_run(&work, crate::durable::RunTrigger::User)
-            .await
-        {
-            Ok(reserved) => reserved,
-            Err(super::StoreError::RunFenced { .. }) => return Ok(None),
-            Err(error) => return Err(error),
-        };
-        self.advance_run(
-            &lease,
-            crate::durable::RunAdvance::RunStarting {
-                containment: crate::durable::Containment::Tmux {
-                    name: format!("test-project-{}", project.id),
-                },
-                cwd: std::path::PathBuf::from("/tmp/project-test"),
-            },
-        )
-        .await?;
-        self.advance_run(
-            &lease,
-            crate::durable::RunAdvance::InvocationStarting {
-                route: crate::durable::InvocationRoute {
-                    provider: project.provider.clone(),
-                    model: None,
-                    account_id: None,
-                },
-                surface: "headless".to_string(),
-                resume_token: project.provider_session_id.clone(),
-                answer_ask_id: None,
-            },
-        )
-        .await?;
-        Ok(Some(TestRunReservation { context: lease }))
     }
 
     pub async fn handoff_project_body(
@@ -935,40 +589,6 @@ impl Store {
         Ok(event)
     }
 
-    pub(crate) async fn append_project_event_for_run(
-        &self,
-        project_id: &ProjectId,
-        lease: &RunContext,
-        kind: &ProjectEventKind,
-    ) -> StoreResult<ProjectEvent> {
-        let project_id = project_id.clone();
-        let lease = lease.clone();
-        let kind = kind.clone();
-        let write_project_id = project_id.clone();
-        let write_kind = kind.clone();
-        let event = run_sqlite(&self.sqlite, move |store| {
-            store.append_project_event_for_run(&write_project_id, &lease, &write_kind)
-        })
-        .await?;
-        if kind.is_wave_observable() {
-            if let Some(project) = self.get_project(&project_id).await? {
-                if let Some(wave) = self.get_wave(&project.wave_id).await? {
-                    if let Err(error) =
-                        crate::lf::commands::chat::nudge_child_observations(wave.name()).await
-                    {
-                        tracing::debug!(
-                            %error,
-                            %project_id,
-                            event_id = event.id,
-                            "live Project observation delivery failed; Wave observer will retry"
-                        );
-                    }
-                }
-            }
-        }
-        Ok(event)
-    }
-
     pub async fn project_events_after(
         &self,
         project_id: &ProjectId,
@@ -1019,21 +639,6 @@ impl Store {
         let observation = observation.clone();
         run_sqlite(&self.sqlite, move |store| {
             store.consume_task_observation_for_project(&project_id, &observation)
-        })
-        .await
-    }
-
-    pub(crate) async fn consume_task_observation_for_project_for_run(
-        &self,
-        project_id: &ProjectId,
-        observation: &ObservationOutboxRow,
-        lease: &RunContext,
-    ) -> StoreResult<bool> {
-        let project_id = project_id.clone();
-        let observation = observation.clone();
-        let lease = lease.clone();
-        run_sqlite(&self.sqlite, move |store| {
-            store.consume_task_observation_for_project_for_run(&project_id, &observation, &lease)
         })
         .await
     }

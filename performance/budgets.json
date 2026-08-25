@@ -6,7 +6,7 @@
     "minimum_free_disk_bytes": 68719476736,
     "maximum_worktree_build_bytes": 12884901888,
     "maximum_aggregate_build_bytes": 137438953472,
-    "maximum_trace_bytes": 17179869184,
+    "maximum_run_record_bytes": 17179869184,
     "maximum_uv_cache_bytes": 17179869184,
     "maximum_cargo_cache_bytes": 4294967296,
     "maximum_gate_artifact_bytes": 4294967296,

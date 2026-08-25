@@ -16,6 +16,9 @@ PAGES_TO_TEST = [
     "/docs/config",
     "/docs/subscriptions",
     "/docs/security",
+    "/architecture",
+    "/architecture/execution",
+    "/architecture/reference",
     "/download",
 ]
 

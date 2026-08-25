@@ -20,14 +20,10 @@ use crate::engine::platform::kill_process;
 use crate::engine::stream::{format_event, ParseResult, StreamFormat, StreamParser};
 use crate::engine::structured_reply::{render_structured_reply_guidance, StructuredReply};
 use crate::provider_account::{
-    resolve_provider_account_blocking, resolve_provider_account_exact_blocking,
+    resolve_provider_account_exact_blocking, resolve_recorded_provider_account_blocking,
     ProviderAccountRoute, RateLimitSignal,
 };
 use crate::provider_auth::Provider;
-use crate::replay::{
-    AgentConfigV1, ExecutionContractV1, LocalFileIdentityV1, ProcessConfigV1, ProviderExecutionV1,
-    RepositoryExecutionV1, StructuredReplyV1, EXECUTION_CONTRACT_SCHEMA_VERSION,
-};
 use crate::store::ProviderAccountId;
 
 /// PID of the current child agent process. The Ctrl+C handler sends SIGTERM
@@ -103,16 +99,9 @@ pub struct LaunchResult {
     pub failure: Option<AgentFailure>,
 }
 
-/// Configuration for launching an agent.
-#[derive(Debug, Clone, Copy, Default, PartialEq, Eq)]
-pub enum AgentRunContext {
-    #[default]
-    Inherit,
-    Detached,
-}
-
 /// Filesystem write boundary for a provider launch.
-#[derive(Debug, Clone, Copy, Default, PartialEq, Eq)]
+#[derive(Debug, Clone, Copy, Default, PartialEq, Eq, serde::Serialize, serde::Deserialize)]
+#[serde(rename_all = "snake_case")]
 pub enum AgentWriteScope {
     /// Respect the provider's configured permissions and Loopflow's ordinary floor.
     #[default]
@@ -123,12 +112,19 @@ pub enum AgentWriteScope {
 
 /// Roots that a managed delivery launch must prove writable before it starts.
 ///
-/// Presence marks a trusted Loopflow Task boundary: the provider receives full
-/// delivery access while the current Run and Invocation ids fence mutations.
-#[derive(Debug, Clone, Default, PartialEq, Eq)]
+/// Presence marks a trusted Loopflow Task boundary.
+#[derive(Debug, Clone, Default, PartialEq, Eq, serde::Serialize, serde::Deserialize)]
 pub struct AgentExecutionBoundary {
     pub writable_roots: Vec<PathBuf>,
 }
+
+pub(crate) const EXECUTION_IDENTITY_ENV: [&str; 5] = [
+    crate::journal::LF_TRACE_ID_ENV,
+    crate::journal::LF_PROCESS_ID_ENV,
+    crate::durable::RUN_ID_ENV,
+    crate::run_record::RUN_DIR_ENV,
+    crate::run_record::PARENT_RUN_ID_ENV,
+];
 
 #[derive(Clone, Default)]
 pub struct AgentConfig {
@@ -142,10 +138,13 @@ pub struct AgentConfig {
     pub max_turns: Option<u32>,
     /// Opaque provider continuation token for this launch.
     pub resume_token: Option<String>,
+    /// Stable managed account identity selected before durable capture.
+    pub provider_account_id: Option<ProviderAccountId>,
+    /// Home whose deterministic account directory resolves a recorded account.
+    /// This is launch authority, not a replay input, and is never serialized.
+    pub provider_account_authority_home: Option<std::path::PathBuf>,
     /// Working directory.
     pub cwd: Option<std::path::PathBuf>,
-    /// Whether the provider process inherits the ambient Run identity.
-    pub run_context: AgentRunContext,
     /// Maximum filesystem write scope granted to the provider.
     pub write_scope: AgentWriteScope,
     /// Exact roots and network access needed beyond `cwd`.
@@ -161,8 +160,6 @@ pub struct AgentConfig {
     pub directive_relay: Option<std::path::PathBuf>,
     /// Environment scoped to this provider process and its descendants.
     pub env: BTreeMap<String, String>,
-    /// Require the strict detached V1 capture boundary before provider start.
-    pub replay_safe: bool,
 }
 
 impl AgentConfig {
@@ -189,7 +186,11 @@ impl std::fmt::Debug for AgentConfig {
             .field("agent", &self.agent)
             .field("max_turns", &self.max_turns)
             .field("resume_token", &self.resume_token)
-            .field("run_context", &self.run_context)
+            .field("provider_account_id", &self.provider_account_id)
+            .field(
+                "provider_account_authority_home",
+                &self.provider_account_authority_home,
+            )
             .field("write_scope", &self.write_scope)
             .field("execution_boundary", &self.execution_boundary)
             .field("cwd", &self.cwd)
@@ -197,84 +198,54 @@ impl std::fmt::Debug for AgentConfig {
             .field("structured_replies", &self.structured_replies)
             .field("directive_relay", &self.directive_relay)
             .field("env_keys", &self.env.keys().collect::<Vec<_>>())
-            .field("replay_safe", &self.replay_safe)
             .finish()
     }
 }
 
-#[derive(Debug, thiserror::Error)]
-#[non_exhaustive]
-pub enum ExecutionContractError {
-    #[error("effective Codex model is unavailable")]
-    MissingEffectiveModel,
-    #[error("native managed Codex authority is unavailable: {0}")]
-    UnsupportedAuthority(String),
-    #[error("repository execution state is unavailable: {0}")]
-    RepositoryUnavailable(String),
-    #[error("Codex runtime identity is unavailable: {0}")]
-    RuntimeUnavailable(String),
-    #[error("execution contract persistence failed: {0}")]
-    Artifact(String),
-    #[error("replay-safe policy is not satisfied: {0}")]
-    UnsafeBoundary(String),
+/// Select and pin a managed Claude/Codex account before publishing a Run.
+pub(crate) fn pin_provider_account_id_blocking(launch: &mut AgentConfig) -> Result<(), CoreError> {
+    let (harness, _) = parse_agent(launch.agent());
+    let provider = match harness.as_str() {
+        "claude" => Provider::Claude,
+        "codex" => Provider::Codex,
+        _ if launch.provider_account_id.is_some() => {
+            return Err(CoreError::ExecutionFailed(
+                "managed provider account IDs apply only to Claude and Codex".to_string(),
+            ));
+        }
+        _ => return Ok(()),
+    };
+    let route = resolve_account_route_blocking(provider, launch).map_err(|error| {
+        CoreError::ExecutionFailed(format!("failed to select provider account: {error}"))
+    })?;
+    if let Some(route) = route {
+        launch.provider_account_id = Some(route.account_id().clone());
+    }
+    Ok(())
 }
 
-#[derive(Clone)]
-pub struct PreparedAgentInvocation {
-    launch: AgentConfig,
-    process: ProcessConfig,
-    executable: PathBuf,
-    argv: Vec<String>,
-    thread_method: String,
-    thread_params: serde_json::Map<String, serde_json::Value>,
-    environment_selectors: BTreeMap<String, String>,
-    account_route: ProviderAccountRoute,
-    execution_contract: crate::replay::ArtifactReferenceV1,
-}
-
-impl std::fmt::Debug for PreparedAgentInvocation {
-    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
-        f.debug_struct("PreparedAgentInvocation")
-            .field("provider", &"codex")
-            .field("agent", &self.launch.agent)
-            .field("account_id", self.account_route.account_id())
-            .field("executable", &self.executable)
-            .field("argv", &self.argv)
-            .field("thread_method", &self.thread_method)
-            .field("thread_params", &self.thread_params)
-            .field("environment_selectors", &self.environment_selectors)
-            .field("execution_contract", &self.execution_contract)
-            .finish()
-    }
-}
-
-impl PreparedAgentInvocation {
-    pub fn agent_config(&self) -> &AgentConfig {
-        &self.launch
-    }
-
-    pub fn process_config(&self) -> &ProcessConfig {
-        &self.process
-    }
-
-    pub(crate) fn executable(&self) -> &Path {
-        &self.executable
-    }
-
-    pub(crate) fn argv(&self) -> &[String] {
-        &self.argv
-    }
-
-    pub(crate) fn thread_request(&self) -> (&str, &serde_json::Map<String, serde_json::Value>) {
-        (&self.thread_method, &self.thread_params)
-    }
-
-    pub(crate) fn environment_selectors(&self) -> &BTreeMap<String, String> {
-        &self.environment_selectors
-    }
-
-    pub(crate) fn account_route(&self) -> &ProviderAccountRoute {
-        &self.account_route
+fn resolve_account_route_blocking(
+    provider: Provider,
+    launch: &AgentConfig,
+) -> Result<Option<ProviderAccountRoute>, crate::provider_account::ProviderAccountError> {
+    match (
+        launch.provider_account_id.clone(),
+        launch.provider_account_authority_home.clone(),
+    ) {
+        (Some(account_id), Some(home)) => resolve_recorded_provider_account_blocking(
+            provider,
+            launch.resume_token.clone(),
+            account_id,
+            home,
+        ),
+        (account_id, None) => resolve_provider_account_exact_blocking(
+            provider,
+            launch.resume_token.clone(),
+            account_id,
+        ),
+        (None, Some(_)) => Err(crate::provider_account::ProviderAccountError::Runtime(
+            "recorded account authority requires an account ID".to_string(),
+        )),
     }
 }
 
@@ -305,8 +276,48 @@ pub struct ProcessConfig {
     pub stream_format: StreamFormat,
     /// Optional timeout for the subprocess.
     pub timeout: Option<Duration>,
-    /// Durable local capture for this provider invocation.
-    pub capture: Option<crate::trace::CaptureHandle>,
+    /// Durable local capture for this harness launch.
+    pub capture: Option<AgentCapture>,
+}
+
+#[derive(Debug, Clone)]
+pub struct AgentCapture(crate::run_record::CaptureHandle);
+
+impl AgentCapture {
+    fn record_raw(&self, stream: &str, line: &str) {
+        self.0.record_raw(stream, line);
+    }
+
+    fn record_stream_event(&self, event: &crate::engine::stream::StreamEvent) {
+        self.0.record_stream_event(event);
+    }
+
+    fn record_conversation(&self, event: crate::chat::types::ConversationEvent) {
+        self.0.record_conversation(event);
+    }
+
+    fn fail_and_begin_attempt(
+        &self,
+        provider: String,
+        model: Option<String>,
+        account_id: Option<ProviderAccountId>,
+    ) {
+        self.0.fail_and_begin_attempt(provider, model, account_id);
+    }
+
+    fn set_provider_session_id(&self, session_id: Option<String>) {
+        self.0.set_provider_session_id(session_id);
+    }
+
+    fn finish(&self, outcome: &str) -> crate::store::StoreResult<()> {
+        self.0.finish(outcome)
+    }
+}
+
+impl From<crate::run_record::CaptureHandle> for AgentCapture {
+    fn from(capture: crate::run_record::CaptureHandle) -> Self {
+        Self(capture)
+    }
 }
 
 /// Agent capability flags.
@@ -780,13 +791,6 @@ pub enum AgentFailure {
 pub fn build_codex_thread_start_params(
     launch: &AgentConfig,
 ) -> serde_json::Map<String, serde_json::Value> {
-    _build_codex_thread_start_params(launch, read_codex_permission_config(launch.cwd.as_deref()))
-}
-
-fn _build_codex_thread_start_params(
-    launch: &AgentConfig,
-    permission_config: CodexPermissionConfig,
-) -> serde_json::Map<String, serde_json::Value> {
     let mut params = serde_json::Map::new();
 
     params.insert(
@@ -831,13 +835,14 @@ fn _build_codex_thread_start_params(
             serde_json::Value::String("danger-full-access".to_string()),
         );
     } else {
-        if permission_config.sandbox < Some(CodexSandboxMode::WorkspaceWrite) {
+        let config = read_codex_permission_config(launch.cwd.as_deref());
+        if config.sandbox < Some(CodexSandboxMode::WorkspaceWrite) {
             params.insert(
                 "sandbox".to_string(),
                 serde_json::Value::String("workspace-write".to_string()),
             );
         }
-        if permission_config.approval < Some(CodexApprovalPolicy::Never) {
+        if config.approval < Some(CodexApprovalPolicy::Never) {
             params.insert(
                 "approvalPolicy".to_string(),
                 serde_json::Value::String("never".to_string()),
@@ -846,611 +851,6 @@ fn _build_codex_thread_start_params(
     }
 
     params
-}
-
-#[derive(serde::Serialize)]
-struct EffectiveCodexConfigV1<'a> {
-    schema_version: u32,
-    argv: &'a [String],
-    thread_method: &'a str,
-    thread_params: &'a serde_json::Map<String, serde_json::Value>,
-    environment_selectors: &'a BTreeMap<String, String>,
-}
-
-#[derive(Debug)]
-struct CodexConfigSnapshot {
-    model: Option<String>,
-    permissions: CodexPermissionConfig,
-    files: Vec<LocalFileIdentityV1>,
-    network_tool_overrides: Vec<String>,
-    unsupported_automation: Vec<String>,
-}
-
-pub fn prepare_agent_invocation(
-    launch: &AgentConfig,
-    process: &ProcessConfig,
-    capture: &crate::trace::CaptureHandle,
-    requested_account: Option<ProviderAccountId>,
-) -> Result<Option<PreparedAgentInvocation>, ExecutionContractError> {
-    let (harness, explicit_model) = parse_agent(launch.agent());
-    if harness != "codex" || !process.auto || launch.resume_token.is_some() {
-        if launch.replay_safe {
-            return Err(ExecutionContractError::UnsafeBoundary(
-                "replay-safe capture requires a fresh headless Codex invocation".to_string(),
-            ));
-        }
-        return Ok(None);
-    }
-    if launch.replay_safe {
-        validate_replay_safe_launch(launch, explicit_model.as_deref())?;
-    }
-
-    let route = resolve_provider_account_exact_blocking(Provider::Codex, None, requested_account)
-        .map_err(|error| ExecutionContractError::UnsupportedAuthority(error.to_string()))?;
-    let Some(route) = route.filter(ProviderAccountRoute::uses_native_home) else {
-        if launch.replay_safe {
-            return Err(ExecutionContractError::UnsupportedAuthority(
-                "a connected native managed account is required".to_string(),
-            ));
-        }
-        return Ok(None);
-    };
-    let native_home = route
-        .native_home()
-        .expect("native route carries a credential home");
-    let cwd = launch.cwd.as_deref().ok_or_else(|| {
-        ExecutionContractError::RepositoryUnavailable("working directory is missing".to_string())
-    })?;
-    let config_snapshot = read_codex_config_snapshot(native_home, cwd)?;
-    if launch.replay_safe && !config_snapshot.unsupported_automation.is_empty() {
-        return Err(ExecutionContractError::UnsafeBoundary(format!(
-            "Codex config contains unsupported automation: {}",
-            config_snapshot.unsupported_automation.join(", ")
-        )));
-    }
-    let model = explicit_model
-        .filter(|model| !model.trim().is_empty())
-        .or(config_snapshot.model.clone())
-        .ok_or(ExecutionContractError::MissingEffectiveModel)?;
-
-    let mut pinned = launch.clone();
-    pinned.agent = Some(format!("codex:{model}"));
-    let repository = repository_execution(cwd)?;
-    if pinned.replay_safe && !repository.clean {
-        return Err(ExecutionContractError::UnsafeBoundary(
-            "the launch worktree is dirty".to_string(),
-        ));
-    }
-    let executable = resolve_program("codex", pinned.env.get("PATH"))?;
-    let binary = local_file_identity(&executable)?;
-    let runtime = resolve_codex_runtime(&executable)?;
-    let mut argv = vec![executable.display().to_string()];
-    argv.extend([
-        "-c".to_string(),
-        "cli_auth_credentials_store=\"file\"".to_string(),
-    ]);
-    if pinned.replay_safe {
-        for value in replay_safe_codex_overrides(&config_snapshot) {
-            argv.extend(["-c".to_string(), value]);
-        }
-    }
-    argv.push("app-server".to_string());
-    let thread_method = "thread/start".to_string();
-    let thread_params = _build_codex_thread_start_params(&pinned, config_snapshot.permissions);
-    let environment_selectors = effective_environment_selectors(&pinned, &route)?;
-    let effective_config = serde_json::to_vec(&EffectiveCodexConfigV1 {
-        schema_version: EXECUTION_CONTRACT_SCHEMA_VERSION,
-        argv: &argv,
-        thread_method: &thread_method,
-        thread_params: &thread_params,
-        environment_selectors: &environment_selectors,
-    })
-    .map_err(|error| ExecutionContractError::Artifact(error.to_string()))?;
-    let effective_reference = capture
-        .publish_effective_config(&effective_config)
-        .map_err(|error| ExecutionContractError::Artifact(error.to_string()))?;
-    let effective_path = crate::trace::resolve_artifact(&effective_reference.path)
-        .map_err(|error| ExecutionContractError::Artifact(error.to_string()))?;
-
-    let mut config_files = vec![runtime];
-    config_files.extend(config_snapshot.files);
-    config_files.push(LocalFileIdentityV1 {
-        path: effective_path.display().to_string(),
-        sha256: effective_reference.sha256,
-    });
-
-    let home_id = crate::journal::open_ledger()
-        .and_then(|store| store.local_home())
-        .map_err(|error| ExecutionContractError::Artifact(error.to_string()))?
-        .id
-        .to_string();
-    let initial_turn = capture
-        .initial_replay_turn()
-        .map_err(|error| ExecutionContractError::Artifact(error.to_string()))?;
-    let execution = ExecutionContractV1 {
-        schema_version: EXECUTION_CONTRACT_SCHEMA_VERSION,
-        invocation_id: capture.invocation_id().to_string(),
-        home_id,
-        repository,
-        provider: ProviderExecutionV1 {
-            provider: "codex".to_string(),
-            model,
-            account_id: route.account_id().to_string(),
-            binary,
-            config_files,
-        },
-        agent: project_agent_config(&pinned),
-        process: project_process_config(process),
-        sanitized_argv: argv.clone(),
-        environment_selectors: environment_selectors.clone(),
-        initial_turn,
-    };
-    let execution_contract = capture
-        .bind_execution_contract(&execution)
-        .map_err(|error| ExecutionContractError::Artifact(error.to_string()))?;
-    Ok(Some(PreparedAgentInvocation {
-        launch: pinned,
-        process: process.clone(),
-        executable,
-        argv,
-        thread_method,
-        thread_params,
-        environment_selectors,
-        account_route: route,
-        execution_contract,
-    }))
-}
-
-fn validate_replay_safe_launch(
-    launch: &AgentConfig,
-    explicit_model: Option<&str>,
-) -> Result<(), ExecutionContractError> {
-    if explicit_model.is_none_or(|model| model.trim().is_empty()) {
-        return Err(ExecutionContractError::MissingEffectiveModel);
-    }
-    let valid = launch.run_context == AgentRunContext::Detached
-        && launch.write_scope == AgentWriteScope::Worktree
-        && launch.execution_boundary.is_none()
-        && !launch.skip_permissions
-        && launch.directive_relay.is_none();
-    if valid {
-        return Ok(());
-    }
-    Err(ExecutionContractError::UnsafeBoundary(
-        "requires detached Run context, worktree-only writes, provider permissions, and no directive relay"
-            .to_string(),
-    ))
-}
-
-fn repository_execution(cwd: &Path) -> Result<RepositoryExecutionV1, ExecutionContractError> {
-    let root = crate::repository::CanonicalRepo::discover(cwd)
-        .map_err(|error| ExecutionContractError::RepositoryUnavailable(error.to_string()))?;
-    let commit = crate::engine::git::rev_parse(cwd, "HEAD")
-        .map_err(|error| ExecutionContractError::RepositoryUnavailable(error.to_string()))?;
-    let clean = crate::engine::git::is_clean(cwd)
-        .map_err(|error| ExecutionContractError::RepositoryUnavailable(error.to_string()))?;
-    Ok(RepositoryExecutionV1 {
-        root: root.to_string(),
-        commit,
-        clean,
-    })
-}
-
-fn read_codex_config_snapshot(
-    home: &Path,
-    cwd: &Path,
-) -> Result<CodexConfigSnapshot, ExecutionContractError> {
-    _read_codex_config_snapshot(home, cwd, Some(Path::new("/etc/codex/config.toml")))
-}
-
-fn _read_codex_config_snapshot(
-    home: &Path,
-    cwd: &Path,
-    system_config: Option<&Path>,
-) -> Result<CodexConfigSnapshot, ExecutionContractError> {
-    let mut loaded = Vec::new();
-    for path in system_config
-        .into_iter()
-        .map(Path::to_path_buf)
-        .chain(std::iter::once(home.join("config.toml")))
-    {
-        if let Some(config) = read_codex_config_file(&path, false)? {
-            loaded.push(config);
-        }
-    }
-    let profile = loaded
-        .iter()
-        .filter_map(|(_, bytes)| std::str::from_utf8(bytes).ok())
-        .filter_map(|contents| top_level_toml_string(contents, "profile"))
-        .next_back();
-    if let Some(profile) = profile {
-        if profile.is_empty() || profile.contains(['/', '\\']) || profile == "." || profile == ".."
-        {
-            return Err(ExecutionContractError::RuntimeUnavailable(format!(
-                "invalid selected Codex profile {profile:?}"
-            )));
-        }
-        let path = home.join(format!("{profile}.config.toml"));
-        let config = read_codex_config_file(&path, true)?.expect("required config was read");
-        loaded.push(config);
-    }
-    for path in codex_project_config_paths(cwd) {
-        if let Some(config) = read_codex_config_file(&path, false)? {
-            loaded.push(config);
-        }
-    }
-
-    let mut model = None;
-    let mut permissions = CodexPermissionConfig::default();
-    let mut files = Vec::new();
-    let mut network_tool_overrides = Vec::new();
-    let mut unsupported_automation = Vec::new();
-    for (path, bytes) in loaded {
-        let contents = std::str::from_utf8(&bytes).map_err(|error| {
-            ExecutionContractError::RuntimeUnavailable(format!(
-                "read {} as UTF-8: {error}",
-                path.display()
-            ))
-        })?;
-        permissions =
-            merge_codex_permission_config(permissions, parse_codex_permission_config(contents));
-        let mut in_top_level = true;
-        for line in contents.lines().map(str::trim) {
-            if let Some(section) = line
-                .strip_prefix('[')
-                .and_then(|line| line.strip_suffix(']'))
-            {
-                in_top_level = false;
-                let components = split_toml_path(section.trim());
-                match components.as_slice() {
-                    [root, server, ..] if root == "mcp_servers" => {
-                        network_tool_overrides.push(format!("mcp_servers.{server}.enabled=false"));
-                    }
-                    [root, plugin, servers, server, ..]
-                        if root == "plugins" && servers == "mcp_servers" =>
-                    {
-                        network_tool_overrides.push(format!(
-                            "plugins.{plugin}.mcp_servers.{server}.enabled=false"
-                        ));
-                    }
-                    [root, ..] if root == "hooks" => {
-                        unsupported_automation.push("hooks".to_string());
-                    }
-                    _ => {}
-                }
-                continue;
-            }
-            if !in_top_level {
-                continue;
-            }
-            let Some((key, _)) = line.split_once('=') else {
-                continue;
-            };
-            match key.trim() {
-                "hooks" => unsupported_automation.push("hooks".to_string()),
-                "mcp_servers" | "plugins" => {
-                    unsupported_automation.push(format!("inline {} table", key.trim()))
-                }
-                _ => {}
-            }
-        }
-        for line in contents
-            .lines()
-            .map(str::trim)
-            .take_while(|line| !line.starts_with('['))
-        {
-            if let Some(value) = parse_toml_string_assignment(line, "model") {
-                model = Some(value);
-            }
-        }
-        files.push(LocalFileIdentityV1 {
-            path: path.display().to_string(),
-            sha256: crate::replay::sha256_bytes(&bytes),
-        });
-    }
-    network_tool_overrides.sort();
-    network_tool_overrides.dedup();
-    unsupported_automation.sort();
-    unsupported_automation.dedup();
-    Ok(CodexConfigSnapshot {
-        model: model.filter(|model| !model.trim().is_empty()),
-        permissions,
-        files,
-        network_tool_overrides,
-        unsupported_automation,
-    })
-}
-
-fn read_codex_config_file(
-    path: &Path,
-    required: bool,
-) -> Result<Option<(PathBuf, Vec<u8>)>, ExecutionContractError> {
-    let path = match path.canonicalize() {
-        Ok(path) => path,
-        Err(error) if !required && error.kind() == std::io::ErrorKind::NotFound => return Ok(None),
-        Err(error) => {
-            return Err(ExecutionContractError::RuntimeUnavailable(format!(
-                "canonicalize {}: {error}",
-                path.display()
-            )))
-        }
-    };
-    let bytes = fs::read(&path).map_err(|error| {
-        ExecutionContractError::RuntimeUnavailable(format!("read {}: {error}", path.display()))
-    })?;
-    Ok(Some((path, bytes)))
-}
-
-fn top_level_toml_string(contents: &str, key: &str) -> Option<String> {
-    contents
-        .lines()
-        .map(str::trim)
-        .take_while(|line| !line.starts_with('['))
-        .find_map(|line| parse_toml_string_assignment(line, key))
-}
-
-fn split_toml_path(value: &str) -> Vec<String> {
-    let mut components = Vec::new();
-    let mut start = 0;
-    let mut quote = None;
-    let mut escaped = false;
-    for (index, character) in value.char_indices() {
-        if escaped {
-            escaped = false;
-            continue;
-        }
-        if quote == Some('"') && character == '\\' {
-            escaped = true;
-            continue;
-        }
-        match (quote, character) {
-            (None, '"' | '\'') => quote = Some(character),
-            (Some(open), close) if open == close => quote = None,
-            (None, '.') => {
-                components.push(value[start..index].trim().to_string());
-                start = index + character.len_utf8();
-            }
-            _ => {}
-        }
-    }
-    components.push(value[start..].trim().to_string());
-    components
-}
-
-fn replay_safe_codex_overrides(snapshot: &CodexConfigSnapshot) -> Vec<String> {
-    let mut values = vec![
-        "sandbox_workspace_write.network_access=false".to_string(),
-        "web_search=\"disabled\"".to_string(),
-        "tools.web_search=false".to_string(),
-        "features.apps=false".to_string(),
-        "features.remote_plugin=false".to_string(),
-        "features.skill_mcp_dependency_install=false".to_string(),
-        "agents.enabled=false".to_string(),
-        "notify=[]".to_string(),
-        "check_for_update_on_startup=false".to_string(),
-    ];
-    values.extend(snapshot.network_tool_overrides.iter().cloned());
-    values
-}
-
-fn codex_project_config_paths(cwd: &Path) -> Vec<PathBuf> {
-    let mut ancestors = cwd.ancestors().map(Path::to_path_buf).collect::<Vec<_>>();
-    ancestors.reverse();
-    ancestors
-        .into_iter()
-        .map(|ancestor| ancestor.join(".codex").join("config.toml"))
-        .collect()
-}
-
-fn resolve_program(
-    program: &str,
-    path_override: Option<&String>,
-) -> Result<PathBuf, ExecutionContractError> {
-    let candidate = if Path::new(program).components().count() > 1 {
-        PathBuf::from(program)
-    } else {
-        let path = path_override
-            .map(std::ffi::OsString::from)
-            .or_else(|| env::var_os("PATH"))
-            .ok_or_else(|| {
-                ExecutionContractError::RuntimeUnavailable("PATH is unavailable".to_string())
-            })?;
-        env::split_paths(&path)
-            .map(|directory| directory.join(program))
-            .find(|path| path.is_file())
-            .ok_or_else(|| {
-                ExecutionContractError::RuntimeUnavailable(format!(
-                    "{program} is not present on the effective PATH"
-                ))
-            })?
-    };
-    candidate.canonicalize().map_err(|error| {
-        ExecutionContractError::RuntimeUnavailable(format!(
-            "canonicalize {}: {error}",
-            candidate.display()
-        ))
-    })
-}
-
-fn local_file_identity(path: &Path) -> Result<LocalFileIdentityV1, ExecutionContractError> {
-    let path = path.canonicalize().map_err(|error| {
-        ExecutionContractError::RuntimeUnavailable(format!(
-            "canonicalize {}: {error}",
-            path.display()
-        ))
-    })?;
-    let bytes = fs::read(&path).map_err(|error| {
-        ExecutionContractError::RuntimeUnavailable(format!("read {}: {error}", path.display()))
-    })?;
-    Ok(LocalFileIdentityV1 {
-        path: path.display().to_string(),
-        sha256: crate::replay::sha256_bytes(&bytes),
-    })
-}
-
-fn resolve_codex_runtime(entrypoint: &Path) -> Result<LocalFileIdentityV1, ExecutionContractError> {
-    if entrypoint.file_name().and_then(|name| name.to_str()) != Some("codex.js") {
-        return local_file_identity(entrypoint);
-    }
-    let package_root = entrypoint.parent().and_then(Path::parent).ok_or_else(|| {
-        ExecutionContractError::RuntimeUnavailable(format!(
-            "unrecognized Codex entrypoint layout: {}",
-            entrypoint.display()
-        ))
-    })?;
-    let (package, target) = match (env::consts::OS, env::consts::ARCH) {
-        ("macos", "aarch64") => ("codex-darwin-arm64", "aarch64-apple-darwin"),
-        ("macos", "x86_64") => ("codex-darwin-x64", "x86_64-apple-darwin"),
-        ("linux", "aarch64") => ("codex-linux-arm64", "aarch64-unknown-linux-musl"),
-        ("linux", "x86_64") => ("codex-linux-x64", "x86_64-unknown-linux-musl"),
-        (os, arch) => {
-            return Err(ExecutionContractError::RuntimeUnavailable(format!(
-                "unsupported Codex runtime platform {os}/{arch}"
-            )))
-        }
-    };
-    let candidates = [
-        package_root
-            .join("node_modules")
-            .join("@openai")
-            .join(package)
-            .join("vendor")
-            .join(target)
-            .join("bin")
-            .join("codex"),
-        package_root
-            .join("vendor")
-            .join(target)
-            .join("bin")
-            .join("codex"),
-    ];
-    let runtime = candidates
-        .into_iter()
-        .find(|path| path.is_file())
-        .ok_or_else(|| {
-            ExecutionContractError::RuntimeUnavailable(format!(
-                "native runtime for {} is unavailable",
-                entrypoint.display()
-            ))
-        })?;
-    local_file_identity(&runtime)
-}
-
-fn effective_environment_selectors(
-    launch: &AgentConfig,
-    route: &ProviderAccountRoute,
-) -> Result<BTreeMap<String, String>, ExecutionContractError> {
-    const ALLOWLIST: [&str; 11] = [
-        "PATH",
-        "SHELL",
-        "LANG",
-        "LC_ALL",
-        "LC_CTYPE",
-        "TERM",
-        "COLORTERM",
-        "NO_COLOR",
-        "TZ",
-        "CODEX_HOME",
-        "CLAUDE_CONFIG_DIR",
-    ];
-    let mut selectors = BTreeMap::new();
-    for name in ALLOWLIST {
-        let value = match launch.env.get(name) {
-            Some(value) => Some(value.clone()),
-            None => env::var_os(name)
-                .map(|value| value.into_string())
-                .transpose()
-                .map_err(|_| {
-                    ExecutionContractError::Artifact(format!(
-                        "environment selector {name} is not UTF-8"
-                    ))
-                })?,
-        };
-        if let Some(value) = value {
-            selectors.insert(name.to_string(), value);
-        }
-    }
-    selectors.insert(
-        "CODEX_HOME".to_string(),
-        route
-            .native_home()
-            .expect("native route carries a credential home")
-            .display()
-            .to_string(),
-    );
-    Ok(selectors)
-}
-
-fn project_agent_config(launch: &AgentConfig) -> AgentConfigV1 {
-    AgentConfigV1 {
-        agent: launch.agent().to_string(),
-        max_turns: launch.max_turns,
-        cwd: launch
-            .cwd
-            .as_deref()
-            .expect("prepared invocation has a cwd")
-            .display()
-            .to_string(),
-        run_context: match launch.run_context {
-            AgentRunContext::Inherit => "inherit",
-            AgentRunContext::Detached => "detached",
-        }
-        .to_string(),
-        permission_policy: if launch.skip_permissions {
-            "bypass"
-        } else {
-            "managed"
-        }
-        .to_string(),
-        write_scope: match launch.write_scope {
-            AgentWriteScope::Configured => "configured",
-            AgentWriteScope::Worktree => "worktree",
-        }
-        .to_string(),
-        writable_roots: launch
-            .execution_boundary
-            .as_ref()
-            .map(|boundary| {
-                boundary
-                    .writable_roots
-                    .iter()
-                    .map(|path| path.display().to_string())
-                    .collect()
-            })
-            .unwrap_or_default(),
-        network_access: launch.execution_boundary.is_some()
-            || launch.write_scope == AgentWriteScope::Configured,
-        skip_permissions: launch.skip_permissions,
-        structured_replies: launch
-            .structured_replies
-            .iter()
-            .map(|reply| StructuredReplyV1 {
-                name: reply.name.clone(),
-                description: reply.description.clone(),
-                guidance: reply.guidance.clone(),
-            })
-            .collect(),
-        directive_relay: launch
-            .directive_relay
-            .as_ref()
-            .map(|path| path.display().to_string()),
-    }
-}
-
-fn project_process_config(process: &ProcessConfig) -> ProcessConfigV1 {
-    ProcessConfigV1 {
-        surface: if process.auto { "headless" } else { "tui" }.to_string(),
-        unattended: process.auto,
-        stream: process.stream,
-        stream_format: match process.stream_format {
-            StreamFormat::Raw => "raw",
-            StreamFormat::Human(_) => "human",
-        }
-        .to_string(),
-        timeout_ms: process
-            .timeout
-            .map(|timeout| u64::try_from(timeout.as_millis()).unwrap_or(u64::MAX)),
-    }
 }
 
 /// Extra workspace roots agents need for Git worktree metadata.
@@ -1764,18 +1164,48 @@ pub fn launch_agent(
     process: &ProcessConfig,
     capabilities: &AgentCapabilities,
 ) -> Result<LaunchResult, CoreError> {
-    let retry_delays = if launch.replay_safe {
-        &[][..]
+    let mut launch = launch.clone();
+    pin_provider_account_id_blocking(&mut launch)?;
+    let (harness, model) = parse_agent(launch.agent());
+    let implicit_capture = if process.capture.is_none() {
+        Some(_begin_implicit_capture(
+            &launch,
+            process,
+            capabilities,
+            &harness,
+            model,
+        )?)
     } else {
-        &TRANSIENT_RETRY_DELAYS
+        None
     };
-    _launch_with_transient_retries(
-        launch,
-        process,
-        retry_delays,
-        |attempt, retry| _launch_agent_once(attempt, process, capabilities, retry),
+    let mut process = process.clone();
+    for name in EXECUTION_IDENTITY_ENV {
+        launch.env.remove(name);
+    }
+    if let Some(capture) = &implicit_capture {
+        process.capture = Some(capture.clone());
+    }
+    if let Some(capture) = &process.capture {
+        launch.env.extend(capture.0.environment());
+        capture.0.mark_spawn_requested();
+    }
+    let result = _launch_with_transient_retries(
+        &launch,
+        &process,
+        &TRANSIENT_RETRY_DELAYS,
+        |attempt, retry| _launch_agent_once(attempt, &process, capabilities, retry),
         thread::sleep,
-    )
+    );
+    if let Some(capture) = implicit_capture {
+        let outcome = match &result {
+            Ok(result) if result.exit_code == 0 => "completed",
+            Ok(_) | Err(_) => "failed",
+        };
+        capture
+            .finish(outcome)
+            .map_err(|error| CoreError::ExecutionFailed(error.to_string()))?;
+    }
+    result
 }
 
 #[derive(Debug)]
@@ -1844,6 +1274,7 @@ fn _launch_with_transient_retries(
         let (delay, failover) = match &failure {
             AgentFailure::AccountSubscriptionLimit { .. } => {
                 account_failure = Some(result.clone());
+                attempt_config.provider_account_id = None;
                 attempt_config.task_prompt = format!(
                     "{LIMIT_FAILOVER_PROMPT}\n\nOriginal task:\n\n{}",
                     launch.task_prompt
@@ -1852,6 +1283,7 @@ fn _launch_with_transient_retries(
             }
             AgentFailure::AccountCredentialInvalidated => {
                 account_failure = Some(result.clone());
+                attempt_config.provider_account_id = None;
                 attempt_config.task_prompt = format!(
                     "{CREDENTIAL_FAILOVER_PROMPT}\n\nOriginal task:\n\n{}",
                     launch.task_prompt
@@ -2066,48 +1498,43 @@ fn _provider_resume_token(result: &LaunchResult) -> Option<String> {
 fn _begin_implicit_capture(
     launch: &AgentConfig,
     process: &ProcessConfig,
+    capabilities: &AgentCapabilities,
     harness: &str,
     model: Option<String>,
-) -> Result<Option<crate::trace::CaptureHandle>, CoreError> {
-    if process.capture.is_some() {
-        return Ok(None);
-    }
-    launch
+) -> Result<AgentCapture, CoreError> {
+    let cwd = launch
         .cwd
-        .as_deref()
-        .and_then(|cwd| {
-            crate::journal::trace_capture_context(cwd, None, None)
-                .ok()
-                .map(|context| {
-                    let system_prompt = process
-                        .context_file
-                        .as_deref()
-                        .and_then(|path| fs::read_to_string(path).ok())
-                        .unwrap_or_else(|| system_prompt_with_structured_replies(launch));
-                    crate::trace::CaptureHandle::begin(
-                        context,
-                        crate::trace::PreparedTurnContext::from_prompts(
-                            &system_prompt,
-                            &launch.task_prompt,
-                        ),
-                        crate::trace::CaptureStart {
-                            provider: harness.to_string(),
-                            model,
-                            surface: if process.auto { "headless" } else { "tui" }.to_string(),
-                            input_op: "initial".to_string(),
-                            gather_ms: 0,
-                            render_ms: 0,
-                            raw_provider: process.auto,
-                            basis: None,
-                            supervision: None,
-                        },
-                    )
-                })
+        .clone()
+        .or_else(|| std::env::current_dir().ok())
+        .ok_or_else(|| {
+            CoreError::ExecutionFailed("agent launch has no working directory".into())
+        })?;
+    let spec = crate::run_record::RunSpec {
+        harness: harness.to_string(),
+        model,
+        surface: if process.auto { "headless" } else { "tui" }.to_string(),
+        cwd: cwd.clone(),
+        repo: Some(cwd.clone()),
+        worktree: Some(cwd),
+        skill: None,
+        subjects: Vec::new(),
+    };
+    let capture = if process.auto {
+        crate::run_record::CaptureHandle::begin_with_launch(
+            spec,
+            crate::run_record::RunLaunchRequest::from_prepared(launch, capabilities),
+        )
+    } else {
+        crate::run_record::CaptureHandle::begin(spec)
+    };
+    capture
+        .map(|capture| {
+            capture.record_input("initial", &launch.task_prompt);
+            capture.into()
         })
-        .transpose()
         .map_err(|error| {
             CoreError::ExecutionFailed(format!(
-                "failed to establish trace capture before agent launch: {error}"
+                "failed to publish Run manifest before agent launch: {error}"
             ))
         })
 }
@@ -2134,13 +1561,24 @@ fn _launch_codex_harness_once(
     use crate::chat::types::{ConversationEvent, Lifecycle};
     use crate::harness::ApprovalPolicy;
 
-    let implicit_capture = _begin_implicit_capture(launch, process, "codex", model.clone())?;
-    let capture = process.capture.as_ref().or(implicit_capture.as_ref());
+    let capture = process.capture.as_ref();
+    let account_route = match resolve_account_route_blocking(Provider::Codex, launch) {
+        Ok(route) => route,
+        Err(error) => {
+            return Ok(AgentAttempt::AccountUnavailable(
+                CoreError::ExecutionFailed(format!("failed to select provider account: {error}")),
+            ));
+        }
+    };
     if retry {
         if let Some(capture) = capture {
-            capture
-                .fail_and_begin_invocation("codex".to_string(), model, &launch.task_prompt)
-                .map_err(|error| CoreError::ExecutionFailed(error.to_string()))?;
+            capture.fail_and_begin_attempt(
+                "codex".to_string(),
+                model,
+                account_route
+                    .as_ref()
+                    .map(|route| route.account_id().clone()),
+            );
         }
     }
 
@@ -2159,31 +1597,6 @@ fn _launch_codex_harness_once(
             .entry(crate::ops::git_operation::LF_WORKTREE_WRITER_ID_ENV.to_string())
             .or_insert_with(|| guard.writer_id().to_string());
     }
-    let prepared = match capture {
-        Some(capture) if !retry => prepare_agent_invocation(&config, process, capture, None)
-            .map_err(|error| CoreError::ExecutionFailed(error.to_string()))?,
-        _ if launch.replay_safe => {
-            return Err(CoreError::ExecutionFailed(
-                "replay-safe launch has no durable capture authority".to_string(),
-            ));
-        }
-        _ => None,
-    };
-    let account_route = match &prepared {
-        Some(prepared) => Some(prepared.account_route().clone()),
-        None => {
-            match resolve_provider_account_blocking(Provider::Codex, launch.resume_token.clone()) {
-                Ok(route) => route,
-                Err(error) => {
-                    return Ok(AgentAttempt::AccountUnavailable(
-                        CoreError::ExecutionFailed(format!(
-                            "failed to select provider account: {error}"
-                        )),
-                    ));
-                }
-            }
-        }
-    };
 
     let runtime = tokio::runtime::Builder::new_current_thread()
         .enable_all()
@@ -2207,16 +1620,16 @@ fn _launch_codex_harness_once(
         if capture.is_some() {
             harness.set_raw_provider_sender(Some(raw_tx));
         }
-        match &prepared {
-            Some(prepared) => harness.start_prepared(prepared).await,
-            None => harness.start(&config).await,
-        }
-        .map_err(|error| CoreError::ExecutionFailed(error.to_string()))?;
+        harness
+            .start(&config)
+            .await
+            .map_err(|error| CoreError::ExecutionFailed(error.to_string()))?;
         let provider_session_id = harness.provider_session_id();
         if let Some(capture) = capture {
             capture.set_provider_session_id(provider_session_id.clone());
         }
-        let can_failover = account_route.is_some();
+        let can_failover = account_route.is_some()
+            && launch.provider_account_authority_home.is_none();
 
         let drive = async {
             harness
@@ -2320,15 +1733,6 @@ fn _launch_codex_harness_once(
         }
     }
 
-    if let Some(capture) = implicit_capture {
-        let outcome = match &result {
-            Ok(AgentAttempt::Finished { result, .. }) if result.exit_code == 0 => "completed",
-            _ => "failed",
-        };
-        capture
-            .finish(outcome, false)
-            .map_err(|error| CoreError::ExecutionFailed(error.to_string()))?;
-    }
     result
 }
 
@@ -2379,6 +1783,9 @@ fn _launch_agent_once(
             .entry(crate::ops::git_operation::LF_WORKTREE_WRITER_ID_ENV.to_string())
             .or_insert_with(|| guard.writer_id().to_string());
     }
+    for name in EXECUTION_IDENTITY_ENV {
+        cmd.env_remove(name);
+    }
     cmd.envs(&scoped_env);
 
     // Shell integration sets LOOPFLOW_DIRECTIVE_FILE so top-level `lf` commands
@@ -2406,7 +1813,7 @@ fn _launch_agent_once(
         _ => None,
     };
     let account_route = match managed_provider
-        .map(|provider| resolve_provider_account_blocking(provider, launch.resume_token.clone()))
+        .map(|provider| resolve_account_route_blocking(provider, launch))
         .transpose()
     {
         Ok(route) => route.flatten(),
@@ -2433,18 +1840,18 @@ fn _launch_agent_once(
     }
     if retry {
         if let Some(capture) = &process.capture {
-            capture
-                .fail_and_begin_invocation(harness.clone(), model.clone(), &launch.task_prompt)
-                .map_err(|error| CoreError::ExecutionFailed(error.to_string()))?;
+            capture.fail_and_begin_attempt(
+                harness.clone(),
+                model.clone(),
+                account_route
+                    .as_ref()
+                    .map(|route| route.account_id().clone()),
+            );
         }
     }
     apply_harness_env(&harness, &mut cmd, launch, process);
 
-    // Callers that already assembled semantic assets supply a capture handle.
-    // Small internal agent launches (PR copy, commit copy, ops fallback) still
-    // get an exact assembly manifest when they run inside a journaled `lf`.
-    let implicit_capture = _begin_implicit_capture(launch, process, &harness, model.clone())?;
-    let capture = process.capture.as_ref().or(implicit_capture.as_ref());
+    let capture = process.capture.as_ref();
 
     let result = if process.auto && process.stream {
         // Stream mode: capture stdout line by line
@@ -2456,7 +1863,8 @@ fn _launch_agent_once(
         // Interactive mode: inherit stdio
         launch_interactive(&mut cmd, process.timeout)
     };
-    let mut can_failover = account_route.is_some();
+    let mut can_failover =
+        account_route.is_some() && launch.provider_account_authority_home.is_none();
     if let (Some(route), Ok(result)) = (&account_route, &result) {
         let credential_invalidated =
             _find_provider_error(result, credential_invalidated_failure).is_some();
@@ -2477,15 +1885,6 @@ fn _launch_agent_once(
             }
         }
     }
-    if let Some(capture) = implicit_capture {
-        let outcome = match &result {
-            Ok(result) if result.exit_code == 0 => "completed",
-            Ok(_) | Err(_) => "failed",
-        };
-        capture
-            .finish(outcome, !process.auto)
-            .map_err(|error| CoreError::ExecutionFailed(error.to_string()))?;
-    }
     result.map(|result| AgentAttempt::Finished {
         result,
         can_failover,
@@ -2495,7 +1894,7 @@ fn _launch_agent_once(
 fn launch_batch(
     cmd: &mut Command,
     timeout: Option<Duration>,
-    capture: Option<&crate::trace::CaptureHandle>,
+    capture: Option<&AgentCapture>,
 ) -> Result<LaunchResult, CoreError> {
     let start = Instant::now();
     cmd.stdin(Stdio::null());
@@ -2607,7 +2006,7 @@ fn launch_streaming(
     cmd: &mut Command,
     stream_format: StreamFormat,
     timeout: Option<Duration>,
-    capture: Option<&crate::trace::CaptureHandle>,
+    capture: Option<&AgentCapture>,
 ) -> Result<LaunchResult, CoreError> {
     cmd.stdin(Stdio::null());
     cmd.stdout(Stdio::piped());
@@ -2919,74 +2318,6 @@ trust_level = "trusted"
 
         assert_eq!(config.sandbox, Some(CodexSandboxMode::DangerFullAccess));
         assert_eq!(config.approval, Some(CodexApprovalPolicy::Never));
-    }
-
-    #[test]
-    fn codex_config_snapshot_pins_selected_home_and_project_precedence() {
-        let temp = tempfile::tempdir().unwrap();
-        let home = temp.path().join("account");
-        let repo = temp.path().join("repo");
-        let system = temp.path().join("etc/config.toml");
-        std::fs::create_dir_all(&home).unwrap();
-        std::fs::create_dir_all(system.parent().unwrap()).unwrap();
-        std::fs::create_dir_all(repo.join(".codex")).unwrap();
-        std::fs::write(&system, "model = \"gpt-system\"\n").unwrap();
-        std::fs::write(
-            home.join("config.toml"),
-            "model = \"gpt-home\"\nprofile = \"proof\"\nsandbox_mode = \"read-only\"\n[mcp_servers.\"remote.one\"]\nurl = \"https://example.test\"\n",
-        )
-        .unwrap();
-        std::fs::write(home.join("proof.config.toml"), "model = \"gpt-profile\"\n").unwrap();
-        std::fs::write(
-            repo.join(".codex/config.toml"),
-            "model = \"gpt-project\"\nsandbox_mode = \"danger-full-access\"\napproval_policy = \"never\"\n",
-        )
-        .unwrap();
-
-        let snapshot = _read_codex_config_snapshot(&home, &repo, Some(&system)).unwrap();
-
-        assert_eq!(snapshot.model.as_deref(), Some("gpt-project"));
-        assert_eq!(
-            snapshot.permissions,
-            CodexPermissionConfig {
-                sandbox: Some(CodexSandboxMode::DangerFullAccess),
-                approval: Some(CodexApprovalPolicy::Never),
-            }
-        );
-        assert_eq!(snapshot.files.len(), 4);
-        assert_eq!(
-            snapshot.network_tool_overrides,
-            ["mcp_servers.\"remote.one\".enabled=false"]
-        );
-        assert!(snapshot.unsupported_automation.is_empty());
-        assert_eq!(
-            snapshot.files[0].path,
-            system.canonicalize().unwrap().display().to_string()
-        );
-        assert_eq!(
-            snapshot.files[1].path,
-            home.join("config.toml")
-                .canonicalize()
-                .unwrap()
-                .display()
-                .to_string()
-        );
-        assert_eq!(
-            snapshot.files[2].path,
-            home.join("proof.config.toml")
-                .canonicalize()
-                .unwrap()
-                .display()
-                .to_string()
-        );
-        assert_eq!(
-            snapshot.files[3].path,
-            repo.join(".codex/config.toml")
-                .canonicalize()
-                .unwrap()
-                .display()
-                .to_string()
-        );
     }
 
     #[test]
@@ -3630,14 +2961,14 @@ trust_level = "trusted"
             cwd: Some("/tmp".into()),
             max_turns: None,
             resume_token: None,
-            run_context: AgentRunContext::Inherit,
+            provider_account_id: None,
+            provider_account_authority_home: None,
             write_scope: AgentWriteScope::Configured,
             execution_boundary: None,
             skip_permissions: false,
             structured_replies: Vec::new(),
             directive_relay: None,
             env: BTreeMap::new(),
-            replay_safe: false,
         };
         let args = build_claude_session_turn_args("hello", &config, None);
         assert_eq!(args[0], "-p");
@@ -3660,14 +2991,14 @@ trust_level = "trusted"
             cwd: Some("/tmp".into()),
             max_turns: Some(5),
             resume_token: None,
-            run_context: AgentRunContext::Inherit,
+            provider_account_id: None,
+            provider_account_authority_home: None,
             write_scope: AgentWriteScope::Configured,
             execution_boundary: None,
             skip_permissions: true,
             structured_replies: Vec::new(),
             directive_relay: None,
             env: BTreeMap::new(),
-            replay_safe: false,
         };
         let args = build_claude_session_turn_args("fix tests", &config, Some("sess_abc"));
         assert!(args.contains(&"--resume".to_string()));
@@ -3690,7 +3021,8 @@ trust_level = "trusted"
             cwd: Some("/tmp".into()),
             max_turns: None,
             resume_token: None,
-            run_context: AgentRunContext::Inherit,
+            provider_account_id: None,
+            provider_account_authority_home: None,
             write_scope: AgentWriteScope::Configured,
             execution_boundary: None,
             skip_permissions: false,
@@ -3701,7 +3033,6 @@ trust_level = "trusted"
             }],
             directive_relay: None,
             env: BTreeMap::new(),
-            replay_safe: false,
         };
 
         let args = build_claude_session_turn_args("hello", &config, None);

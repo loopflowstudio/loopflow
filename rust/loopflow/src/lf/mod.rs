@@ -81,14 +81,6 @@ pub struct Cli {
     #[arg(short = 'b', long = "batch", short_alias = 'B')]
     pub batch: bool,
 
-    /// Record a strict detached Codex execution contract before launch
-    #[arg(
-        long = "replay-safe",
-        requires = "model",
-        conflicts_with_all = ["yolo", "interactive", "tui", "ide", "as_work"]
-    )]
-    pub replay_safe: bool,
-
     /// Hand off Claude, Codex, or OpenCode to the terminal (overrides session.launch)
     #[arg(long, conflicts_with = "ide")]
     pub tui: bool,
@@ -365,11 +357,6 @@ pub enum Commands {
         #[command(subcommand)]
         cmd: TaskCommand,
     },
-    /// Inspect, attach, and hand back provider or opaque AgentInvocations
-    Invocation {
-        #[command(subcommand)]
-        cmd: InvocationCommand,
-    },
     /// Inspect and control stable Wave, Project, or Task Work
     Work {
         #[command(subcommand)]
@@ -391,20 +378,14 @@ pub enum Commands {
         #[arg(long, value_name = "DAYS")]
         days: Option<u32>,
     },
-    /// Show subscription state per account and token spend by repo/provider
+    /// Show direct provider-authored usage from Home-local Run records
     Usage {
-        /// Emit one additive row per provider-measured Turn as JSON
+        /// Emit Run usage evidence as JSON
         #[arg(long)]
         json: bool,
-        /// Spend window, in days
+        /// Run window, in days (zero means all time)
         #[arg(long, default_value_t = 30)]
         days: u32,
-        /// Poll every account now, even the freshly observed ones
-        #[arg(long, short = 'r')]
-        refresh: bool,
-        /// Skip polling entirely; show only stored observations
-        #[arg(long)]
-        cached: bool,
     },
     /// Internal: render the repository maintainer scorecard for telemetry-daily
     #[command(name = "__telemetry-scorecard", hide = true)]
@@ -433,18 +414,12 @@ pub enum Commands {
         /// Emit the versioned activity snapshot as JSON
         #[arg(long)]
         json: bool,
-        /// Rank siblings by cumulative completed tokens or live rate
-        #[arg(long, value_enum, default_value_t)]
-        sort: commands::top::ActivitySort,
     },
     /// Refresh live Loopflow call trees on a terminal; print once when redirected
     Top {
         /// Emit one versioned activity snapshot as JSON
         #[arg(long)]
         json: bool,
-        /// Rank siblings by cumulative completed tokens or live rate
-        #[arg(long, value_enum, default_value = "rate")]
-        sort: commands::top::ActivitySort,
     },
     /// Reap registered orphan providers and remove dead process receipts
     Prune {
@@ -452,60 +427,6 @@ pub enum Commands {
         #[arg(long)]
         dry_run: bool,
         /// Emit the versioned prune report as JSON
-        #[arg(long)]
-        json: bool,
-    },
-    /// Inspect supplied agent context and its contributing assets
-    Context {
-        /// Window in days
-        #[arg(long, default_value_t = 30)]
-        days: u32,
-        /// Inclusive window start as a Unix timestamp (overrides --days)
-        #[arg(long)]
-        started_after: Option<i64>,
-        /// Exclusive window end as a Unix timestamp
-        #[arg(long)]
-        started_before: Option<i64>,
-        /// Filter by wave
-        #[arg(long)]
-        wave: Vec<String>,
-        /// Filter by attributed Linear Project slug
-        #[arg(long)]
-        project: Vec<String>,
-        /// Filter by attributed Linear Task identifier
-        #[arg(long)]
-        task: Vec<String>,
-        /// Filter by absolute main-repo path
-        #[arg(long)]
-        repo: Vec<String>,
-        /// Filter by flow
-        #[arg(long)]
-        flow: Vec<String>,
-        /// Filter by skill
-        #[arg(long)]
-        skill: Vec<String>,
-        /// Filter by provider
-        #[arg(long)]
-        provider: Vec<String>,
-        /// Filter by model
-        #[arg(long)]
-        model: Vec<String>,
-        /// Filter by invocation surface
-        #[arg(long)]
-        surface: Vec<String>,
-        /// Filter by invocation outcome
-        #[arg(long)]
-        outcome: Vec<String>,
-        /// Filter by capture state
-        #[arg(long)]
-        capture_state: Vec<String>,
-        /// Include only invocations with observed steering turns
-        #[arg(long)]
-        steered_only: bool,
-        /// Include only invocations containing a current file instruction revision
-        #[arg(long)]
-        current_revision_only: bool,
-        /// Emit the Context Lab snapshot as JSON
         #[arg(long)]
         json: bool,
     },
@@ -575,6 +496,12 @@ pub enum Commands {
     },
     /// Show recent agent-backed skill runs with context and token evidence
     Runs {
+        /// Inspect one Run by full id or unambiguous displayed prefix
+        #[arg(conflicts_with_all = ["task", "project", "wave"])]
+        run: Option<String>,
+        /// Print the Run's append-only event stream verbatim
+        #[arg(long, requires = "run", conflicts_with = "json")]
+        events: bool,
         /// Drill to one roadmap Task by its Linear issue identifier (e.g. W2-122)
         #[arg(long)]
         task: Option<String>,
@@ -587,42 +514,11 @@ pub enum Commands {
         /// Emit the run history as JSON
         #[arg(long)]
         json: bool,
-        #[command(subcommand)]
-        cmd: Option<RunsCommand>,
     },
-    /// Show recent lf process executions (all repos, local-only)
-    Execs {
-        /// Emit the process history as JSON
-        #[arg(long)]
-        json: bool,
-    },
-    /// Reconstruct one process tree from an exec or trace address
-    Trace {
-        /// Exec id from `lf execs` or trace id from Context Lab
-        exec_id: String,
-        /// Emit the process tree as JSON
-        #[arg(long)]
-        json: bool,
-        /// Include exact prompt and normalized conversation bodies for one address
-        #[arg(long, requires = "json", conflicts_with = "events")]
-        content: bool,
-        /// Render the normalized recorded conversation
-        #[arg(long, conflicts_with = "json")]
-        events: bool,
-        /// Stream stored event objects as JSONL
-        #[arg(long, requires = "events")]
-        jsonl: bool,
-        /// Select one AgentInvocation by id prefix
-        #[arg(long)]
-        invocation: Option<String>,
-        /// Select one turn by id prefix (with --content)
-        #[arg(long, requires = "content")]
-        turn: Option<String>,
-    },
-    /// Check whether one recorded AgentInvocation can be replayed exactly
+    /// Launch the exact provider request recorded by a prior Run as a child Run.
     Replay {
-        #[command(subcommand)]
-        cmd: ReplayCommand,
+        /// Full Run id or an unambiguous displayed prefix
+        run: String,
     },
     /// Converse with a served mind's thread; --follow replays it and --steer
     /// reaches the live body.
@@ -784,14 +680,14 @@ pub enum AskCommand {
         #[arg(long)]
         json: bool,
     },
-    /// Confirm that a target presented the exact active Ask Invocation
+    /// Confirm that a target presented the exact active Ask Run
     Presented {
         ask_id: crate::durable::AskId,
-        invocation_id: crate::durable::AgentInvocationId,
+        run_id: crate::durable::RunId,
         #[arg(long)]
         json: bool,
     },
-    /// Resolve one Ask from its active Invocation
+    /// Resolve one Ask from its active answering attempt
     Resolve {
         ask_id: crate::durable::AskId,
         #[arg(value_name = "SUMMARY")]
@@ -799,7 +695,7 @@ pub enum AskCommand {
         #[arg(long)]
         json: bool,
     },
-    /// Decline one Ask from its active Invocation
+    /// Decline one Ask from its active answering attempt
     Decline {
         ask_id: crate::durable::AskId,
         #[arg(value_name = "REASON")]
@@ -807,7 +703,7 @@ pub enum AskCommand {
         #[arg(long)]
         json: bool,
     },
-    /// Close one Ask's active Invocation without settling it
+    /// Close one Ask's active answering attempt without settling it
     Release {
         ask_id: crate::durable::AskId,
         #[arg(value_name = "REASON")]
@@ -835,80 +731,15 @@ pub enum AskCommand {
     #[command(hide = true)]
     Serve {
         ask_id: crate::durable::AskId,
+        run_id: crate::durable::RunId,
         #[arg(long)]
         headless: bool,
     },
 }
 
 #[derive(Subcommand, Debug)]
-pub enum RunsCommand {
-    /// Tombstone terminal captures whose conversation artifacts are gone, and
-    /// finalize orphaned `capturing` invocations. Dry-run by default; `--apply`
-    /// writes. This repairs capture lifecycle state and may remove unclaimed
-    /// artifacts; `lf doctor` observes recovery without requiring reconciliation.
-    Reconcile {
-        /// Apply the tombstone/finalize transitions (default: dry-run report)
-        #[arg(long)]
-        apply: bool,
-        /// Reconcile recent missing captures too (default: age-guard <48h as
-        /// candidates to investigate, not tombstone)
-        #[arg(long)]
-        all: bool,
-        /// Emit the reconciliation report as JSON
-        #[arg(long)]
-        json: bool,
-    },
-}
-
-#[derive(Subcommand, Debug)]
-pub enum ReplayCommand {
-    /// Classify every known replay boundary without launching a provider
-    Check {
-        /// Full AgentInvocation id or literal unambiguous prefix
-        invocation: String,
-        /// Emit the typed replay eligibility result as JSON
-        #[arg(long)]
-        json: bool,
-    },
-}
-
-#[derive(Subcommand, Debug)]
-pub enum InvocationCommand {
-    /// List AgentInvocations supervised by Runs
-    List {
-        /// Include only invocations whose supervising Run may still be live
-        #[arg(long)]
-        active: bool,
-        #[arg(long)]
-        json: bool,
-    },
-    /// Show one AgentInvocation and its generic attach route
-    Status {
-        invocation_id: String,
-        #[arg(long)]
-        json: bool,
-    },
-    /// Return the generic attach descriptor without changing Run state
-    Attach {
-        invocation_id: String,
-        #[arg(long)]
-        json: bool,
-    },
-    /// Record explicit terminal evidence for an opaque invocation boundary
-    Handback {
-        invocation_id: String,
-        #[arg(long, value_parser = ["succeeded", "failed", "interrupted", "unknown"])]
-        outcome: String,
-        #[arg(long)]
-        json: bool,
-    },
-    /// Exec the AgentInvocation's generic attach route
-    Present { invocation_id: String },
-}
-
-#[derive(Subcommand, Debug)]
 pub enum WorkCommand {
-    /// Show current Epoch, Basis, Run, and Wait projection
+    /// Show current Work state and placement
     Status {
         #[arg(value_parser = ["wave", "project", "task"])]
         kind: String,
@@ -916,7 +747,7 @@ pub enum WorkCommand {
         #[arg(long)]
         json: bool,
     },
-    /// Record Wave Work's Home. Refuses while the Work has a live Run.
+    /// Record Wave Work's Home
     Place {
         #[arg(value_parser = ["wave"])]
         kind: String,
@@ -953,7 +784,7 @@ pub enum WorkCommand {
         #[arg(long)]
         json: bool,
     },
-    /// Append authored direction with User or active Run provenance
+    /// Append authored direction with User or generic Run provenance
     Steer {
         #[arg(value_parser = ["wave", "project", "task"])]
         kind: String,
@@ -979,7 +810,7 @@ pub enum WorkCommand {
         #[arg(long)]
         json: bool,
     },
-    /// Interrupt the current Turn or opaque Invocation boundary
+    /// Refuse interruption until Work has an exact process owner
     Interrupt {
         #[arg(value_parser = ["wave", "project", "task"])]
         kind: String,
@@ -987,7 +818,7 @@ pub enum WorkCommand {
         #[arg(long)]
         json: bool,
     },
-    /// Abandon the current Epoch from an authenticated User surface
+    /// Abandon the Work
     Abandon {
         #[arg(value_parser = ["wave", "project", "task"])]
         kind: String,
@@ -1271,23 +1102,10 @@ pub enum InstallCommand {
         #[arg(long)]
         switch: String,
     },
-    /// Continue one interrupted Home upgrade from its staged candidate.
-    #[command(hide = true)]
-    Recover {
-        /// The durable Home upgrade receipt to continue.
-        #[arg(long)]
-        upgrade: String,
-        /// Wait for the original coordinator before taking over.
-        #[arg(long, hide = true)]
-        parent_pid: Option<u32>,
-        /// Exact start time of the original coordinator process.
-        #[arg(long, hide = true)]
-        parent_started_at: Option<i64>,
-    },
     /// Preview whether this build may replace the global lf (read-only).
-    /// Reads the shared store's migration frontier and live-body count against
-    /// this binary's own registry; mutates nothing and exits non-zero on a
-    /// refusal so a caller can gate on it.
+    /// Reads the shared store's migration frontier and validates executable
+    /// planning references against this binary; mutates nothing and exits
+    /// non-zero on refusal so a caller can gate on it.
     #[command(hide = true)]
     Preflight {
         /// Emit the structured PromotionPreview as JSON.
@@ -1308,16 +1126,10 @@ pub enum InstallCommand {
         #[arg(long)]
         switch: String,
     },
-    /// Relaunch enabled child Work through the receipt-selected candidate.
-    #[command(hide = true)]
-    ReconcileSwitch {
-        #[arg(long)]
-        switch: String,
-    },
     /// Promote this build to the global CLI: content-address it into ~/.lf/bin
     /// and atomically repoint the target symlink, under the exclusive promotion
-    /// lock. Refuses — leaving every target unchanged — on incompatible or
-    /// live-body evidence.
+    /// lock. Refuses — leaving every target unchanged — on incompatible
+    /// schema or persisted executable evidence.
     #[command(hide = true)]
     Promote {
         /// Promote this exact unpublished local lf into a disposable installed Home.
@@ -2655,124 +2467,6 @@ mod tests {
     }
 
     #[test]
-    fn context_accepts_repeatable_invocation_set_filters() {
-        let cli = Cli::try_parse_from([
-            "lf",
-            "context",
-            "--started-after",
-            "100",
-            "--started-before",
-            "200",
-            "--repo",
-            "/src/a",
-            "--repo",
-            "/src/b",
-            "--project",
-            "context",
-            "--task",
-            "W2-71",
-            "--outcome",
-            "failed",
-            "--capture-state",
-            "partial",
-            "--steered-only",
-            "--current-revision-only",
-            "--json",
-        ])
-        .expect("parse context query");
-        let Some(Commands::Context {
-            started_after,
-            started_before,
-            repo,
-            project,
-            task,
-            outcome,
-            capture_state,
-            steered_only,
-            current_revision_only,
-            json,
-            ..
-        }) = cli.command
-        else {
-            panic!("expected context command");
-        };
-
-        assert_eq!(started_after, Some(100));
-        assert_eq!(started_before, Some(200));
-        assert_eq!(repo, ["/src/a", "/src/b"]);
-        assert_eq!(project, ["context"]);
-        assert_eq!(task, ["W2-71"]);
-        assert_eq!(outcome, ["failed"]);
-        assert_eq!(capture_state, ["partial"]);
-        assert!(steered_only);
-        assert!(current_revision_only);
-        assert!(json);
-    }
-
-    #[test]
-    fn trace_content_requires_json_and_accepts_an_exact_address() {
-        let cli = Cli::try_parse_from([
-            "lf",
-            "trace",
-            "run-1",
-            "--json",
-            "--content",
-            "--invocation",
-            "invocation-1",
-            "--turn",
-            "turn-1",
-        ])
-        .expect("parse trace content");
-        assert!(matches!(
-            cli.command,
-            Some(Commands::Trace {
-                content: true,
-                invocation: Some(invocation),
-                turn: Some(turn),
-                ..
-            }) if invocation == "invocation-1" && turn == "turn-1"
-        ));
-        assert!(Cli::try_parse_from(["lf", "trace", "run-1", "--content"]).is_err());
-    }
-
-    #[test]
-    fn replay_check_accepts_an_invocation_prefix() {
-        let cli = Cli::try_parse_from(["lf", "replay", "check", "invocation_742f7387", "--json"])
-            .expect("parse replay eligibility check");
-        assert!(matches!(
-            cli.command,
-            Some(Commands::Replay {
-                cmd: ReplayCommand::Check {
-                    invocation,
-                    json: true
-                }
-            }) if invocation == "invocation_742f7387"
-        ));
-    }
-
-    #[test]
-    fn replay_safe_requires_an_explicit_model_and_conflicts_with_privileged_surfaces() {
-        let cli =
-            Cli::try_parse_from(["lf", "--batch", "--replay-safe", "--model", "codex:gpt-5.6"])
-                .expect("parse replay-safe launch");
-        assert!(cli.batch);
-        assert!(cli.replay_safe);
-        assert_eq!(cli.model.as_deref(), Some("codex:gpt-5.6"));
-
-        assert!(Cli::try_parse_from(["lf", "--batch", "--replay-safe"]).is_err());
-        for conflicting in ["--yolo", "--interactive", "--tui", "--ide"] {
-            assert!(Cli::try_parse_from([
-                "lf",
-                "--replay-safe",
-                "--model",
-                "codex:gpt-5.6",
-                conflicting,
-            ])
-            .is_err());
-        }
-    }
-
-    #[test]
     fn task_completion_and_pr_dispositions_parse() {
         let complete = Cli::try_parse_from([
             "lf",
@@ -2820,23 +2514,11 @@ mod tests {
     #[test]
     fn top_is_a_first_class_machine_dashboard() {
         let cli = Cli::try_parse_from(["lf", "top"]).expect("parse top");
-        assert!(matches!(
-            cli.command,
-            Some(Commands::Top {
-                json: false,
-                sort: commands::top::ActivitySort::Rate,
-            })
-        ));
+        assert!(matches!(cli.command, Some(Commands::Top { json: false })));
 
-        let cli =
-            Cli::try_parse_from(["lf", "ps", "--json", "--sort", "tokens"]).expect("parse ps");
-        assert!(matches!(
-            cli.command,
-            Some(Commands::Ps {
-                json: true,
-                sort: commands::top::ActivitySort::Tokens,
-            })
-        ));
+        let cli = Cli::try_parse_from(["lf", "ps", "--json"]).expect("parse ps");
+        assert!(matches!(cli.command, Some(Commands::Ps { json: true })));
+        assert!(Cli::try_parse_from(["lf", "ps", "--sort", "tokens"]).is_err());
 
         let cli = Cli::try_parse_from(["lf", "prune", "--dry-run", "--json"])
             .expect("parse process prune");
@@ -2847,6 +2529,21 @@ mod tests {
                 json: true,
             })
         ));
+    }
+
+    #[test]
+    fn usage_exposes_only_the_direct_run_window() {
+        let cli = Cli::try_parse_from(["lf", "usage", "--days", "7", "--json"])
+            .expect("parse direct usage");
+        assert!(matches!(
+            cli.command,
+            Some(Commands::Usage {
+                json: true,
+                days: 7,
+            })
+        ));
+        assert!(Cli::try_parse_from(["lf", "usage", "--refresh"]).is_err());
+        assert!(Cli::try_parse_from(["lf", "usage", "--cached"]).is_err());
     }
 
     #[test]
@@ -3072,30 +2769,6 @@ mod tests {
         ));
     }
     #[test]
-    fn cli_parses_generic_invocation_contract() {
-        let cli = Cli::try_parse_from([
-            "lf",
-            "invocation",
-            "handback",
-            "invocation_1",
-            "--outcome",
-            "unknown",
-            "--json",
-        ])
-        .expect("parse Invocation handback");
-        assert!(matches!(
-            cli.command,
-            Some(Commands::Invocation {
-                cmd: InvocationCommand::Handback {
-                    invocation_id,
-                    outcome,
-                    json: true,
-                }
-            }) if invocation_id == "invocation_1" && outcome == "unknown"
-        ));
-    }
-
-    #[test]
     fn cli_parses_stable_work_controls() {
         let cli = Cli::try_parse_from([
             "lf",
@@ -3258,7 +2931,7 @@ mod tests {
             "ask",
             "presented",
             "ask_00000000000000000000000000000001",
-            "invocation_00000000000000000000000000000001",
+            "run_00000000000000000000000000000001",
             "--json",
         ])
         .expect("parse exact presentation confirmation");

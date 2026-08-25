@@ -1,6 +1,21 @@
 # Configuration
 
-Configure loopflow via CLI flags, global config (`~/.lf/config.yaml`), or repo config (`.lf/config.yaml`). Precedence: CLI flags > repo config > global config.
+Start with a one-run override; keep it in repo config only when the choice
+should apply to everyone:
+
+```bash
+lf gate -m codex --docs docs/api.md
+```
+
+```yaml
+# .lf/config.yaml
+agent: codex
+docs: [docs/api.md]
+```
+
+CLI flags override repo config (`.lf/config.yaml`), which overrides global
+config (`~/.lf/config.yaml`). Additive lists such as `docs` combine across
+config files.
 
 ## Quick Reference
 

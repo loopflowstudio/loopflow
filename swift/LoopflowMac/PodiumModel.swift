@@ -37,8 +37,6 @@ enum PodiumReading<Value> {
 
 struct WaveSummary: Equatable {
     let waves: Int
-    let activeRuns: Int
-    let unservedRuns: Int
 }
 
 @MainActor
@@ -106,14 +104,7 @@ final class PodiumModel {
 
     var waveSummary: WaveSummary? {
         guard waves.value != nil else { return nil }
-        let registered = visibleWaves.filter(\.isRegistered).map(\.api)
-        return WaveSummary(
-            waves: visibleWaves.count,
-            activeRuns: registered.count { $0.current?.state.hasPresentProcess == true },
-            unservedRuns: registered.count {
-                $0.current?.state.hasPresentProcess == true && !$0.live
-            }
-        )
+        return WaveSummary(waves: visibleWaves.count)
     }
 
     var visibleRepos: [PortfolioRepo] {
@@ -274,10 +265,6 @@ final class PodiumModel {
 
         guard selection == requestedSelection, workActivityGeneration == generation else { return }
         workActivity = reading(from: result, lastGood: previous)
-    }
-
-    func traceAddress(invocationId: String) async throws -> TraceAddress {
-        try await query.traceAddress(invocationId: invocationId)
     }
 
     func refreshUserAskAttention() async {

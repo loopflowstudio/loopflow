@@ -32,7 +32,6 @@ public enum WaveLensColor: String, Sendable, Hashable {
     /// lens renders it, it never reconstructs it from status or process flags.
     public init(_ level: TaskAttentionLevel) {
         switch level {
-        case .green: self = .green
         case .red: self = .red
         case .blue: self = .blue
         case .black: self = .black
@@ -60,36 +59,11 @@ public struct WaveLens: Sendable, Hashable {
         WaveLens(color: WaveLensColor(attention.level), reason: attention.reason)
     }
 
-    /// Project lens: derived only from shared runtime and the Project's Tasks'
-    /// attention evidence — never a filesystem guess. A live Project body is
-    /// advancing (green), but a Task that needs a hand still wins (red or blue),
-    /// so a Project never hides its stuck work behind an advancing sibling. Among
-    /// the remaining Tasks the most demanding evidence wins (red > blue > green >
-    /// unknown > black), so unreadable Task evidence surfaces as unknown, not a
-    /// silent black.
-    public static func forProject(
-        runtime: ProjectRuntimeSnapshot?,
-        tasks: [WaveTaskWork]
-    ) -> WaveLens {
+    /// Project lens: derived only from the Project's Tasks' shared attention
+    /// evidence. The most demanding evidence wins (red > blue > unknown > black),
+    /// so unreadable Task evidence surfaces as unknown, not a silent black.
+    public static func forProject(tasks: [WaveTaskWork]) -> WaveLens {
         let folded = fold(tasks.map(\.attention))
-        if let runtime {
-            let own: WaveLens? = switch runtime.current.state {
-            case .working:
-                WaveLens(color: .green, reason: runtime.current.reason)
-            case .stalled, .stopped:
-                WaveLens(color: .red, reason: runtime.current.reason)
-            case .unobservable:
-                WaveLens(color: .unknown, reason: runtime.current.reason)
-            case .waiting where runtime.current.owner == .user:
-                WaveLens(color: .blue, reason: runtime.current.reason)
-            case .ready, .waiting, .done, .abandoned:
-                nil
-            }
-            if let own {
-                if let folded, folded.color == .red || folded.color == .blue { return folded }
-                return own
-            }
-        }
         if let folded { return folded }
         return WaveLens(color: .black, reason: "Off · no active work")
     }
@@ -110,7 +84,6 @@ public struct WaveLens: Sendable, Hashable {
         live: Bool,
         paused: Bool = false,
         enabled: Bool = true,
-        current: CurrentWorkObservation? = nil,
         activeTasks: Int,
         activeProjects: Int
     ) -> WaveLens {
@@ -127,24 +100,6 @@ public struct WaveLens: Sendable, Hashable {
                     : "Paused · listener is stopped"
             )
         }
-        if let current {
-            switch current.state {
-            case .working where live:
-                return WaveLens(color: .green, reason: current.reason)
-            case .working, .stalled:
-                return WaveLens(color: .red, reason: current.reason)
-            case .stopped:
-                let listener = live ? " · Wave listener still answered" : ""
-                return WaveLens(color: .red, reason: current.reason + listener)
-            case .unobservable:
-                let listener = live ? " · Wave listener answered" : ""
-                return WaveLens(color: .unknown, reason: current.reason + listener)
-            case .waiting where current.owner == .user:
-                return WaveLens(color: .blue, reason: current.reason)
-            case .ready, .waiting, .done, .abandoned:
-                break
-            }
-        }
         if live {
             return WaveLens(color: .green, reason: "Listening · Wave listener answered")
         }
@@ -160,12 +115,12 @@ public struct WaveLens: Sendable, Hashable {
     }
 
     /// Fold Task attention into the parent's single reading. Priority is
-    /// red > blue > green > unknown > black: failure and user attention outrank motion, and unproven
+    /// red > blue > unknown > black: failure and user attention outrank unproven
     /// evidence outranks (never collapses into) an off-and-clean black. Returns
     /// nil when there are no Tasks to read.
     private static func fold(_ attentions: [TaskAttentionSnapshot]) -> WaveLens? {
         guard !attentions.isEmpty else { return nil }
-        for level in [TaskAttentionLevel.red, .blue, .green, .unknown, .black] {
+        for level in [TaskAttentionLevel.red, .blue, .unknown, .black] {
             if let hit = attentions.first(where: { $0.level == level }) {
                 return WaveLens(color: WaveLensColor(level), reason: hit.reason)
             }

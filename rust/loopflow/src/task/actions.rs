@@ -2,7 +2,6 @@
 
 use serde::{Deserialize, Serialize};
 
-use crate::child::CurrentWorkState;
 use crate::durable::WorkStatus;
 use crate::task::{AfterMerge, CiObservation, CiState, PrMergeMode, PrMergeRequest, PrPhase};
 
@@ -10,7 +9,6 @@ use crate::task::{AfterMerge, CiObservation, CiState, PrMergeMode, PrMergeReques
 #[serde(rename_all = "snake_case")]
 #[non_exhaustive]
 pub enum TaskAction {
-    Recover,
     Resume,
     OpenPr,
     StartNextPr,
@@ -21,7 +19,6 @@ pub enum TaskAction {
 impl TaskAction {
     pub fn as_str(self) -> &'static str {
         match self {
-            Self::Recover => "recover",
             Self::Resume => "resume",
             Self::OpenPr => "open_pr",
             Self::StartNextPr => "start_next_pr",
@@ -55,10 +52,8 @@ pub struct TaskActionEvidence<'a> {
     pub completion_refusal: Option<&'a str>,
     pub resume_refusal: Option<&'a str>,
     pub ci: Option<&'a CiObservation>,
-    pub current_state: CurrentWorkState,
     pub predecessor_phase: Option<PrPhase>,
     pub abandon_intent: bool,
-    pub local_progress_unsettled: Option<bool>,
     pub launch_refusal: Option<&'a str>,
 }
 
@@ -78,8 +73,7 @@ pub fn derive_task_actions(evidence: &TaskActionEvidence) -> TaskActionModel {
         phase_action(evidence)
     };
     let model = apply_predecessor(model, evidence.predecessor_phase);
-    let model = apply_resume_refusal(model, evidence.resume_refusal);
-    apply_current_authority(model, evidence.current_state)
+    apply_resume_refusal(model, evidence.resume_refusal)
 }
 
 fn phase_action(evidence: &TaskActionEvidence) -> TaskActionModel {
@@ -91,14 +85,6 @@ fn phase_action(evidence: &TaskActionEvidence) -> TaskActionModel {
         Some(PrPhase::Open) => match evidence.ci {
             Some(ci) if ci.state == CiState::Failing && !ci.only_land_time_preconditions() => {
                 action(TaskAction::Resume, ci_failure_reason(ci))
-            }
-            _ if evidence.latest_pr_merge_request.is_none()
-                && matches!(
-                    evidence.current_state,
-                    CurrentWorkState::Working | CurrentWorkState::Stalled
-                ) =>
-            {
-                action(TaskAction::NoAction, "Task body is preparing settlement")
             }
             _ if evidence.latest_pr_merge_request.is_none() => action(
                 TaskAction::Resume,
@@ -156,27 +142,10 @@ fn merged_action(evidence: &TaskActionEvidence) -> TaskActionModel {
 }
 
 fn body_action(evidence: &TaskActionEvidence) -> TaskActionModel {
-    match evidence.current_state {
-        CurrentWorkState::Working | CurrentWorkState::Stalled => {
-            action(TaskAction::NoAction, "Task body is working")
-        }
-        CurrentWorkState::Stopped if evidence.local_progress_unsettled == Some(true) => action(
-            TaskAction::Recover,
-            "Task body stopped with unsettled work; recover to continue",
-        ),
-        CurrentWorkState::Stopped => action(
-            TaskAction::Recover,
-            "Task body stopped; recover to continue",
-        ),
-        CurrentWorkState::Unobservable => {
-            action(TaskAction::NoAction, "Task body liveness is unobservable")
-        }
-        CurrentWorkState::Ready | CurrentWorkState::Waiting => {
-            action(TaskAction::Resume, "resume the parked Task")
-        }
-        CurrentWorkState::Done | CurrentWorkState::Abandoned => {
-            action(TaskAction::NoAction, "Task is terminal")
-        }
+    if matches!(evidence.status, WorkStatus::Done | WorkStatus::Abandoned) {
+        action(TaskAction::NoAction, "Task is terminal")
+    } else {
+        action(TaskAction::Resume, "resume the parked Task")
     }
 }
 
@@ -200,49 +169,12 @@ fn apply_predecessor(model: TaskActionModel, predecessor: Option<PrPhase>) -> Ta
 }
 
 fn apply_resume_refusal(model: TaskActionModel, refusal: Option<&str>) -> TaskActionModel {
-    if !matches!(
-        model.recommended,
-        Some(TaskAction::Resume | TaskAction::Recover)
-    ) {
+    if !matches!(model.recommended, Some(TaskAction::Resume)) {
         return model;
     }
     match refusal {
         Some(refusal) => action(TaskAction::NoAction, refusal),
         None => model,
-    }
-}
-
-fn apply_current_authority(
-    model: TaskActionModel,
-    current_state: CurrentWorkState,
-) -> TaskActionModel {
-    match model.recommended {
-        Some(TaskAction::Resume)
-            if !matches!(
-                current_state,
-                CurrentWorkState::Ready | CurrentWorkState::Waiting
-            ) =>
-        {
-            action(
-                TaskAction::NoAction,
-                match current_state {
-                    CurrentWorkState::Unobservable => "Task body liveness is unobservable",
-                    CurrentWorkState::Working | CurrentWorkState::Stalled => {
-                        "Task body is already running"
-                    }
-                    CurrentWorkState::Stopped => "Task body requires recovery",
-                    CurrentWorkState::Done | CurrentWorkState::Abandoned => "Task is terminal",
-                    CurrentWorkState::Ready | CurrentWorkState::Waiting => {
-                        unreachable!("allowed Resume states were excluded")
-                    }
-                },
-            )
-        }
-        Some(TaskAction::Recover) if current_state != CurrentWorkState::Stopped => action(
-            TaskAction::NoAction,
-            "Task recovery requires a stopped body",
-        ),
-        _ => model,
     }
 }
 
@@ -271,7 +203,6 @@ mod tests {
     use time::OffsetDateTime;
 
     use super::{derive_task_actions, TaskAction, TaskActionEvidence};
-    use crate::child::CurrentWorkState;
     use crate::durable::WorkStatus;
     use crate::task::{AfterMerge, CiObservation, CiState, PrMergeMode, PrMergeRequest, PrPhase};
 
@@ -289,10 +220,8 @@ mod tests {
             completion_refusal: None,
             resume_refusal: None,
             ci,
-            current_state: CurrentWorkState::Ready,
             predecessor_phase: None,
             abandon_intent: false,
-            local_progress_unsettled: Some(false),
             launch_refusal: None,
         }
     }
@@ -330,7 +259,6 @@ mod tests {
     #[test]
     fn nonresumable_execution_blocker_names_the_user_as_next_owner() {
         let mut evidence = evidence(PrPhase::Working, None, None);
-        evidence.current_state = CurrentWorkState::Stopped;
         evidence.launch_refusal = Some(
             "Task execution boundary is blocked: linked Git index.lock is not writable; correct the filesystem capability before starting a new Run",
         );
@@ -375,49 +303,14 @@ mod tests {
     }
 
     #[test]
-    fn resume_refusal_suppresses_recovery_during_a_working_pr() {
+    fn resume_refusal_suppresses_resume_during_a_working_pr() {
         let mut evidence = evidence(PrPhase::Working, None, None);
-        evidence.current_state = CurrentWorkState::Stopped;
         evidence.resume_refusal = Some("Task worktree is still initializing");
 
         let model = derive_task_actions(&evidence);
 
         assert_eq!(model.recommended, Some(TaskAction::NoAction));
         assert_eq!(model.reason, "Task worktree is still initializing");
-    }
-
-    #[test]
-    fn status_surfaces_unobservable_body_offers_no_resume_authority() {
-        let mut evidence = evidence(PrPhase::Working, None, None);
-        evidence.status = WorkStatus::Running {
-            run_id: crate::durable::RunId::new(),
-        };
-        evidence.current_state = CurrentWorkState::Unobservable;
-
-        let model = derive_task_actions(&evidence);
-
-        assert_eq!(model.recommended, Some(TaskAction::NoAction));
-        assert_eq!(model.reason, "Task body liveness is unobservable");
-    }
-
-    #[test]
-    fn status_surfaces_unobservable_body_fences_ci_resume_too() {
-        let ci = CiObservation {
-            head_sha: "head".to_string(),
-            state: CiState::Failing,
-            failing_checks: Vec::new(),
-            observed_at: OffsetDateTime::now_utc(),
-        };
-        let mut evidence = evidence(PrPhase::Open, None, Some(&ci));
-        evidence.status = WorkStatus::Running {
-            run_id: crate::durable::RunId::new(),
-        };
-        evidence.current_state = CurrentWorkState::Unobservable;
-
-        let model = derive_task_actions(&evidence);
-
-        assert_eq!(model.recommended, Some(TaskAction::NoAction));
-        assert_eq!(model.reason, "Task body liveness is unobservable");
     }
 
     #[test]

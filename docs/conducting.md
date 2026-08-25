@@ -2,16 +2,26 @@
 
 Running one agent is a conversation. Running many is conducting: knowing what
 is playing, what is stuck, what needs you, what it cost — and redirecting a
-performer without stopping the piece. Loopflow answers all of that from the
-local ledger. Use `lf ps --json` for a machine-readable activity frame and
-`lf top` for the continuously refreshed terminal view.
+performer without stopping the piece.
+
+```bash
+lf roadmap                 # planning across this repository
+lf roadmap --all           # every repository on this machine
+lf top                     # processes moving right now
+lf runs --wave infra       # append-only launch evidence on this Home
+lf ssh <home-id> roadmap   # ask another Home the same question
+```
+
+There is no hidden global conductor. Each command reads the machine where it
+executes; `lf ssh` is the explicit remote boundary.
 
 ## See everything
 
 ```bash
 lf ls                  # every wave, running and stopped, live servers marked
 lf status <wave>       # one wave's Project → Task hierarchy, runs, attention
-lf roadmap             # every open Task across every wave
+lf roadmap             # every open Task across this repository's Waves
+lf roadmap --all       # every repository on this machine
 lf activity            # what changed, newest first, with durable evidence
 ```
 
@@ -21,11 +31,11 @@ Unknown or Unavailable states, candidate instruments, and contract issues.
 The Mac Wave detail renders that Rust-derived evidence without recomputing
 targets or freshness.
 
-`lf roadmap` buckets the whole machine's work by what it needs: **Now** (live
+`lf roadmap` buckets this repository's work by what it needs: **Now** (live
 and advancing), **Needs attention** (a User-routed Ask or recovery),
 **Available**, **Later**. It overlays live evidence on
 the Linear-backed plan, so the answer to "where is my attention needed" is one
-command.
+command. Add `--all` for the machine-wide projection.
 
 `lf activity` orders durable Work creation, Run, Task PR, and Steer facts.
 Filter with `--wave`, `--project`, or `--task`; filters apply before `--limit`.
@@ -34,27 +44,32 @@ It is history, not another live process model: `lf ps` owns current motion.
 ## Drill down
 
 ```bash
-lf runs --wave infra          # recent agent-backed runs with token evidence
+lf runs --wave infra          # recent Home-local Run records for one Wave
 lf runs --project parser      # one Project, filtered before the result cap
-lf execs                      # recent lf processes across all repos
-lf trace <exec-id>            # reconstruct one process tree
-lf trace <id> --content       # include prompt/conversation bodies (gated)
-lf context                    # what each agent actually received
+lf runs --task INF-123 --json # direct bundle evidence for one Task
+lf runs run_ab12 --events     # raw append-only evidence for one Run
+lf replay run_ab12            # repeat the recorded request as a child Run
 ```
 
-`lf context` is the Context Lab: for any run, the contributing assets, the
-prompt-ordered lanes, and the trace addresses — the difference between "the
-agent did something odd" and "the agent was told something odd." Filter by
-wave, project, task, repo, flow, skill, provider, model, or outcome.
+`lf runs` scans bundles under the current Home. Each has an immutable manifest,
+append-only evidence streams, and at most one exclusive terminal receipt. The
+scan does not depend on the planning store. `lf usage` reduces provider-authored
+counters from those same bundles; missing telemetry stays missing instead of
+blocking the launch or becoming a synthetic zero.
+
+Replay reads the source manifest and launches its recorded prompt, agent/model,
+turn limit, permission mode, capability flags, and provider account ID through
+the ordinary harness. It creates a new Run whose parent names the source. It
+does not mutate the source or open planning SQLite.
 
 ## Health and usage
 
 ```bash
-lf ps              # one call-tree snapshot ranked by completed output
-lf top             # continuously refresh rates, age, idle time, and health
+lf ps              # one OS-live process and call-tree snapshot
+lf top             # continuously refresh elapsed time and process state
 lf prune --dry-run # inspect safely removable process state
-lf usage           # subscriptions plus provider tokens, cache, and cost
-lf telemetry-daily # repository maintainer health and budget report
+lf usage --days 30 # direct cumulative provider evidence per Run
+lf usage --json    # RunSnapshot rows ordered newest first
 lf tokens          # lines and tokens per directory; --days walks history
 lf ci --since 7d   # how failed CI was detected, repaired, and landed
 lf doctor          # audit the ledger: continuity, attribution, lineage
@@ -75,25 +90,20 @@ Reading is half; the system stays steerable while it runs.
 ```bash
 lf chat --steer "ship the parser fix first"   # reach the live wave body, else queue
 lf chat --follow                              # replay and tail the conversation
-lf task steer INF-123 "smaller PR"            # redirect one Task's active turn
+lf task steer INF-123 "smaller PR"            # queue durable Task direction
 lf ask list --user --json                     # requested sessions needing attention
 lf ask open ask_...                            # open one Ask session
-lf invocation list --active                   # live or explicitly unverified provider/TUI invocations
 ```
 
-Steering is durable-first: `steer` appends direction before attempting a live
-send. Provider acceptance is only transport evidence; a later successful
-boundary Basis proves application — see [The Agent API](agent-api.md#steer).
+Task and Project steering appends durable direction for the controller's next
+boundary and relaunches it if stopped. Wave Chat may also attempt a live send.
+Neither a stored Steer nor transport acceptance proves that an agent applied
+the direction — see [The Agent API](agent-api.md#steer).
 
-An intervention Ask is targeted tool I/O in one Turn. It does not enter the
-Steer queue; the enclosing Turn advances only when it completes. A human Task
-node uses a `FlowStep` Ask between provider Invocations and advances only after
+An intervention Ask is targeted tool I/O for one Work. It does not enter the
+Steer queue; the enclosing work advances only when it completes. A human Task
+node uses a `FlowStep` Ask between autonomous steps and advances only after
 explicit resolution.
-
-Genuinely terminal-shaped work (a login, an opaque TUI) stays on the owning
-AgentInvocation. `lf invocation present <id>` reopens its attach route, and `lf invocation
-handback <id> --outcome ...` records explicit terminal evidence without
-inventing a second Work identity.
 
 Human Task nodes park the playhead and appear in the same User Ask queue.
 Opening one runs the authored skill with fenced Task writer authority in its
@@ -111,8 +121,6 @@ second database, no machine-wide service. What the CLI reads, it renders:
   attention lenses: green (advancing), blue (waiting on you), red (unhealthy),
   black (settled).
 - **Task workspace** — changed files, per-file patches, and local inspection tools.
-- **Context Lab** — the same `lf context` evidence, with "refine in a task"
-  one click away.
 - **Telemetry** — token spend, codebase growth, registry health.
 
 ## tmux

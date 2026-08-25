@@ -13,7 +13,7 @@ freshness: 30h
 
 # Task loops earn trust
 
-Fraction of Task epochs settled during the trailing seven days that either
+Fraction of Tasks settled during the trailing seven days that either
 completed with every PR landed through Loopflow auto-merge or stopped with a
-non-resumable failure receipt. Open epochs are excluded. A user-landed PR or
-manual Git repair inside the Task epoch fails the metric.
+non-resumable failure receipt. Open Tasks are excluded. A user-landed PR or
+manual Git repair inside the Task fails the metric.

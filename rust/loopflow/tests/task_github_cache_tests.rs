@@ -7,7 +7,7 @@ use loopflow::durable::WorkStatus;
 use loopflow::ops::task::{task_interrupt, task_status, task_steer};
 use loopflow::task::{GithubPr, Observation, PrPublication};
 use loopflow_test_support::TestRepo;
-use support::{register_active_task, EnvGuard, RegisteredTask};
+use support::{register_task, EnvGuard, RegisteredTask};
 use time::{Duration, OffsetDateTime};
 
 fn publish_task(task: &mut RegisteredTask) {
@@ -110,7 +110,7 @@ fn graph_ql_exhaustion_never_blocks_task_control_or_forces_pr_enumeration() {
     repo.create_branch("jack/task-pr-proof");
     point_origin_at_github(&repo);
     let base = repo.head_sha();
-    let mut task = register_active_task(home.path(), repo.path(), "jack/task-pr-proof", &base);
+    let mut task = register_task(home.path(), repo.path(), "jack/task-pr-proof", &base);
     publish_task(&mut task);
     let log = home.path().join("gh.log");
     let script = gh_success_script(log.to_string_lossy().as_ref());
@@ -122,10 +122,7 @@ fn graph_ql_exhaustion_never_blocks_task_control_or_forces_pr_enumeration() {
     let first = task_status("INF-123").expect("REST status succeeds despite GraphQL exhaustion");
     assert!(matches!(&first.observation, Observation::Fresh { .. }));
     let status = loopflow::ops::task::task_snapshot(&first).expect("snapshot Task");
-    assert!(
-        matches!(status.status, WorkStatus::Running { .. }),
-        "{first:?}"
-    );
+    assert_eq!(status.status, WorkStatus::Ready, "{first:?}");
 
     let steer =
         task_steer("INF-123", "keep going".to_string()).expect("Steer remains local and durable");
@@ -149,7 +146,7 @@ fn rest_failure_opens_one_durable_circuit_while_local_controls_continue() {
     repo.create_branch("jack/task-pr-proof");
     point_origin_at_github(&repo);
     let base = repo.head_sha();
-    let mut task = register_active_task(home.path(), repo.path(), "jack/task-pr-proof", &base);
+    let mut task = register_task(home.path(), repo.path(), "jack/task-pr-proof", &base);
     publish_task(&mut task);
     let cached_as_of = task.pr.updated_at;
     let log = home.path().join("gh.log");
@@ -161,10 +158,7 @@ fn rest_failure_opens_one_durable_circuit_while_local_controls_continue() {
 
     let first = task_status("INF-123").expect("REST failure degrades instead of failing");
     let status = loopflow::ops::task::task_snapshot(&first).expect("snapshot Task");
-    assert!(
-        matches!(status.status, WorkStatus::Running { .. }),
-        "{first:?}"
-    );
+    assert_eq!(status.status, WorkStatus::Ready, "{first:?}");
     let (reason, first_retry_at) = match first.observation {
         Observation::Degraded {
             reason,
@@ -183,19 +177,18 @@ fn rest_failure_opens_one_durable_circuit_while_local_controls_continue() {
 
     let steer =
         task_steer("INF-123", "work locally".to_string()).expect("Steer survives REST failure");
-    let interrupt = task_interrupt("INF-123").expect("interrupt survives REST failure");
-    for observation in [&steer.observation, &interrupt.observation] {
-        match observation {
-            Observation::Degraded {
-                reason, retry_at, ..
-            } => {
-                assert!(reason.contains("Internal Server Error"));
-                assert_eq!(*retry_at, first_retry_at);
-            }
-            other => panic!("expected cached degradation, got {other:?}"),
+    let interrupt = task_interrupt("INF-123").unwrap_err();
+    assert!(interrupt.to_string().contains("no exact process owner"));
+    match &steer.observation {
+        Observation::Degraded {
+            reason, retry_at, ..
+        } => {
+            assert!(reason.contains("Internal Server Error"));
+            assert_eq!(*retry_at, first_retry_at);
         }
+        other => panic!("expected cached degradation, got {other:?}"),
     }
-    assert!(matches!(status.status, WorkStatus::Running { .. }));
+    assert_eq!(status.status, WorkStatus::Ready);
     assert_eq!(
         github_reads(log.to_string_lossy().as_ref()).len(),
         1,

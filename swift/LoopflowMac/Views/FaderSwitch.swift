@@ -1,6 +1,6 @@
 // The Podium's one instrument: a vertical LED fader that is simultaneously the
-// state lens (fill color), the live output meter (fill height on the VU log
-// scale), and the on/off switch (press spins the agent up or down). There is
+// state lens (fill color) and the on/off switch (press spins the agent up or
+// down). There is
 // no separate lamp dot and no adjacent lifecycle button — the rail is the
 // whole vocabulary, at every altitude from the Podium bar down to a task row.
 
@@ -45,8 +45,8 @@ enum FaderPhase: Equatable {
     }
 }
 
-/// Collapse the output signal and the human-attention channel into one phase.
-/// A human-owed stop wins over sibling output: one red task turns its wave's
+/// Collapse exact process activity and the human-attention channel into one phase.
+/// A human-owed stop wins over sibling activity: one red task turns its wave's
 /// whole column red. `agentRunning` distinguishes a spun-up-but-quiet agent
 /// (starting) from no agent at all (off).
 enum ConsoleSignal {
@@ -64,10 +64,6 @@ enum ConsoleSignal {
         }
     }
 
-    static func fastRate(_ usage: UsageReading?) -> Double {
-        usage?.interval(seconds: 5)?.outputTokensPerSecond ?? 0
-    }
-
     /// How a press starts Task Work, per the server's recommended move.
     /// Nil means the fader is display-only at rest (completed Task, or a Task
     /// whose only move is not a lifecycle start).
@@ -79,35 +75,22 @@ enum ConsoleSignal {
     static func taskStart(_ task: RoadmapTask) -> TaskStart? {
         switch roadmapTaskAction(task) {
         case .run: .run
-        case .resume, .recover: .resume
-        case .attach, .openPr, .none: nil
+        case .resume: .resume
+        case .openPr, .none: nil
         }
     }
 }
 
 struct FaderSwitch: View {
     let phase: FaderPhase
-    /// Five-minute output rate in tokens per second; drawn on `TokenRateScale`.
-    let rate: Double
     var width: CGFloat = 15
     var height: CGFloat = 34
-    /// Hover/help naming for the press; nil renders a display-only meter.
+    /// Hover/help naming for the press; nil renders a display-only state rail.
     var verb: String?
     var isBusy: Bool = false
     let accessibilityId: String
     let accessibilityLabel: String
     var action: (() -> Void)?
-
-    /// One number, two voices: "9.8 TOK/s" for the eye, "9.8 tokens per
-    /// second" for VoiceOver and the hosted UI proof.
-    static func rateLabel(_ rate: Double) -> String? {
-        guard rate > 0 else { return nil }
-        return "\(rate.formatted(.number.precision(.fractionLength(1)))) TOK/s"
-    }
-
-    static func spokenRate(_ rate: Double) -> String {
-        "\(rate.formatted(.number.precision(.fractionLength(1)))) tokens per second"
-    }
 
     var body: some View {
         Group {
@@ -169,11 +152,10 @@ struct FaderSwitch: View {
         .contentShape(Rectangle())
     }
 
-    /// Any live phase keeps at least one lit segment so state reads even at
-    /// zero output; off keeps the rail empty.
+    /// Live phases fill the state rail; off keeps it empty.
     private func fillHeight(available: CGFloat) -> CGFloat {
         guard phase != .off else { return 0 }
-        return max(available * TokenRateScale.level(rate), ledStep)
+        return available
     }
 
     private func drawLadder(context: GraphicsContext, inset: CGRect, fillHeight: CGFloat) {
@@ -214,12 +196,11 @@ struct FaderSwitch: View {
     }
 
     private var helpText: String {
-        let state = Self.rateLabel(rate).map { "\($0) · \(phase.label)" } ?? phase.label
-        guard let verb else { return state }
-        return "\(verb) — \(state)"
+        guard let verb else { return phase.label }
+        return "\(verb) — \(phase.label)"
     }
 
     private var accessibilityValue: String {
-        "\(Self.spokenRate(rate)), \(phase.label)"
+        phase.label
     }
 }

@@ -69,11 +69,28 @@ public struct AskRecord: Codable, Sendable, Hashable, Identifiable {
     public let request: AskBodyRecord
 }
 
-/// `lf ask list --user --json`: a projection over Rust-owned Ask and Invocation
-/// state. Swift renders and refreshes this value; it never advances the lifecycle.
+/// One generic Run claimed to answer an Ask, plus its exact attach route.
+public struct AskSessionRecord: Codable, Sendable, Hashable, Identifiable {
+    public let askId: String
+    public let runId: String
+    public let homeRoute: String
+    public let attachArgv: [String]
+
+    public var id: String { runId }
+
+    enum CodingKeys: String, CodingKey {
+        case askId = "ask_id"
+        case runId = "run_id"
+        case homeRoute = "home_route"
+        case attachArgv = "attach_argv"
+    }
+}
+
+/// `lf ask list --user --json`: a projection over Rust-owned Ask state.
+/// Swift renders and refreshes this value; it never advances the lifecycle.
 public struct AskAttentionRecord: Codable, Sendable, Hashable, Identifiable {
     public let ask: AskRecord
-    public let surface: InvocationSurfaceRecord?
+    public let surface: AskSessionRecord?
     public let attention: AskAttentionStateRecord
 
     public var id: String { ask.id }

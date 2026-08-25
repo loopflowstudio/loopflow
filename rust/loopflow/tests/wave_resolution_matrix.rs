@@ -866,9 +866,7 @@ fn cron_add_rejects_a_development_binary_before_mutation() {
         .env_remove("LF_DB_PATH")
         .env_remove("LF_CONTROL_HOME")
         .env_remove("LF_CONTROL_DB_PATH")
-        .env_remove("LF_RUN_CONTEXT")
         .env_remove("LF_RUN_ID")
-        .env_remove("LF_AGENT_INVOCATION_ID")
         .output()
         .expect("run cron add");
 

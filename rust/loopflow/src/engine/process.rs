@@ -65,58 +65,6 @@ pub(crate) fn current_process_group_id() -> Option<u32> {
     u32::try_from(process_group).ok().filter(|id| *id > 1)
 }
 
-pub(crate) fn process_group_id(pid: u32) -> Option<u32> {
-    let pid = i32::try_from(pid).ok()?;
-    // SAFETY: getpgid reads kernel process metadata for one numeric pid and
-    // does not dereference memory.
-    let process_group = unsafe { libc::getpgid(pid) };
-    u32::try_from(process_group).ok().filter(|id| *id > 1)
-}
-
-pub(crate) fn process_group_observation(
-    process_group: i64,
-) -> crate::durable::ContainmentObservation {
-    use crate::durable::ContainmentObservation;
-
-    #[cfg(unix)]
-    {
-        let Ok(process_group) = i32::try_from(process_group) else {
-            return ContainmentObservation::Unprovable;
-        };
-        if process_group <= 1 {
-            return ContainmentObservation::Unprovable;
-        }
-        // SAFETY: a negative pid selects one process group and signal 0 only
-        // probes its existence; no pointers are used and no signal is sent.
-        let result = unsafe { libc::kill(-process_group, 0) };
-        if result == 0 {
-            return ContainmentObservation::Present;
-        }
-        match std::io::Error::last_os_error().raw_os_error() {
-            Some(libc::ESRCH) => ContainmentObservation::Absent,
-            Some(libc::EPERM) => ContainmentObservation::Present,
-            _ => ContainmentObservation::Unprovable,
-        }
-    }
-
-    #[cfg(not(unix))]
-    {
-        let _ = process_group;
-        ContainmentObservation::Unprovable
-    }
-}
-
-pub(crate) async fn containment_observation(
-    containment: &crate::durable::Containment,
-) -> crate::durable::ContainmentObservation {
-    use crate::durable::Containment;
-
-    match containment {
-        Containment::ProcessGroup { id } => process_group_observation(*id),
-        Containment::Tmux { name } => tmux_session_observation(name).await,
-    }
-}
-
 pub(crate) fn resolve_lf_binary() -> PathBuf {
     if let Some(path) = select_binary_override(
         crate::build_info::provenance(),
@@ -397,52 +345,36 @@ pub(crate) fn shell_escape(value: &str) -> String {
 }
 
 pub(crate) async fn tmux_session_exists(session_name: &str) -> Result<bool> {
-    match tmux_session_observation(session_name).await {
-        crate::durable::ContainmentObservation::Present => Ok(true),
-        crate::durable::ContainmentObservation::Absent => Ok(false),
-        crate::durable::ContainmentObservation::Unprovable => {
-            Err(anyhow!("tmux session liveness could not be verified"))
-        }
-    }
-}
-
-async fn tmux_session_observation(session_name: &str) -> crate::durable::ContainmentObservation {
     let target = format!("={session_name}");
     let mut command = tokio::process::Command::new("tmux");
     command.args(["has-session", "-t", &target]);
-    tmux_session_observation_with_timeout(&mut command, TMUX_LIVENESS_TIMEOUT).await
+    tmux_session_exists_with_timeout(&mut command, TMUX_LIVENESS_TIMEOUT).await
 }
 
-async fn tmux_session_observation_with_timeout(
+async fn tmux_session_exists_with_timeout(
     command: &mut tokio::process::Command,
     timeout: std::time::Duration,
-) -> crate::durable::ContainmentObservation {
-    use crate::durable::ContainmentObservation;
-
+) -> Result<bool> {
     command
         .stdout(std::process::Stdio::null())
         .kill_on_drop(true);
     let output = match tokio::time::timeout(timeout, command.output()).await {
         Ok(Ok(output)) => output,
-        Ok(Err(_)) | Err(_) => return ContainmentObservation::Unprovable,
+        Ok(Err(error)) => return Err(error.into()),
+        Err(_) => return Err(anyhow!("tmux session probe timed out")),
     };
     if output.status.success() {
-        return ContainmentObservation::Present;
+        return Ok(true);
     }
     let stderr = String::from_utf8_lossy(&output.stderr);
-    failed_tmux_session_observation(&stderr)
-}
-
-fn failed_tmux_session_observation(stderr: &str) -> crate::durable::ContainmentObservation {
-    use crate::durable::ContainmentObservation;
-
     if stderr.contains("can't find session")
         || stderr.contains("no server running")
         || stderr.contains("no sessions")
+        || (stderr.contains("error connecting to") && stderr.contains("No such file or directory"))
     {
-        ContainmentObservation::Absent
+        Ok(false)
     } else {
-        ContainmentObservation::Unprovable
+        Err(anyhow!("tmux session probe failed: {}", stderr.trim()))
     }
 }
 
@@ -582,7 +514,7 @@ pub(crate) fn lf_session_shell_command(argv: &[String], env: &[(&str, &str)]) ->
         .map(|(key, value)| format!("{}={}", shell_escape(key), shell_escape(value)))
         .collect::<Vec<_>>()
         .join(" ");
-    let clear_context = "if [ -n \"${LF_FORWARDED_SECRET_NAMES:-}\" ]; then unset $LF_FORWARDED_SECRET_NAMES; fi; unset LF_TRACE_ID LF_PROCESS_ID LF_WAVE_ID LF_RUN_CONTEXT LF_RUN_ID LF_AGENT_INVOCATION_ID LF_INSTALL_SWITCH LF_BIN LF_HOME LF_DB_PATH LF_CONTROL_BIN LF_CONTROL_HOME LF_CONTROL_DB_PATH LF_ACCOUNT_LEASE LF_ACCOUNT_SELECTION LF_FORWARDED_PM_TOKEN LF_FORWARDED_PM_PROVIDER LF_FORWARDED_SECRET_NAMES LF_SSH_TARGET LF_LINEAR_WEBHOOK_SECRET LF_LINEAR_VIEWER_ID LF_GITHUB_WEBHOOK_SECRET LF_GITHUB_WEBHOOK_URL LF_LFD_ALLOW_NON_LOOPBACK LF_DISCORD_TOKEN GH_TOKEN OPENCODE_API_KEY CLAUDE_CODE_OAUTH_TOKEN ANTHROPIC_API_KEY CODEX_ACCESS_TOKEN OPENAI_API_KEY";
+    let clear_context = "if [ -n \"${LF_FORWARDED_SECRET_NAMES:-}\" ]; then unset $LF_FORWARDED_SECRET_NAMES; fi; unset LF_TRACE_ID LF_PROCESS_ID LF_WAVE_ID LF_RUN_ID LF_INSTALL_SWITCH LF_BIN LF_HOME LF_DB_PATH LF_CONTROL_BIN LF_CONTROL_HOME LF_CONTROL_DB_PATH LF_ACCOUNT_LEASE LF_ACCOUNT_SELECTION LF_FORWARDED_PM_TOKEN LF_FORWARDED_PM_PROVIDER LF_FORWARDED_SECRET_NAMES LF_SSH_TARGET LF_LINEAR_WEBHOOK_SECRET LF_LINEAR_VIEWER_ID LF_GITHUB_WEBHOOK_SECRET LF_GITHUB_WEBHOOK_URL LF_LFD_ALLOW_NON_LOOPBACK LF_DISCORD_TOKEN GH_TOKEN OPENCODE_API_KEY CLAUDE_CODE_OAUTH_TOKEN ANTHROPIC_API_KEY CODEX_ACCESS_TOKEN OPENAI_API_KEY";
     if env.is_empty() {
         format!("{clear_context}; exec {command}")
     } else {
@@ -669,45 +601,41 @@ mod tests {
     use std::path::PathBuf;
 
     use super::{
-        extend_session_control_context, failed_tmux_session_observation,
-        forwarded_authority_env_names, lf_session_shell_command, pin_control_binary,
-        select_binary_override, select_current_home_binary, select_lfd_binary,
-        tmux_session_observation_with_timeout,
+        extend_session_control_context, forwarded_authority_env_names, lf_session_shell_command,
+        pin_control_binary, select_binary_override, select_current_home_binary, select_lfd_binary,
+        tmux_session_exists_with_timeout,
     };
     use crate::build_info::BuildProvenance;
     use crate::child::ChildExecutionContext;
-    use crate::durable::ContainmentObservation;
-
-    #[test]
-    fn tmux_probe_failures_are_not_session_absence() {
-        assert_eq!(
-            failed_tmux_session_observation("can't find session: probe"),
-            ContainmentObservation::Absent
-        );
-        assert_eq!(
-            failed_tmux_session_observation("permission denied while opening socket"),
-            ContainmentObservation::Unprovable
-        );
-        assert_eq!(
-            failed_tmux_session_observation("malformed tmux response"),
-            ContainmentObservation::Unprovable
-        );
-    }
 
     #[tokio::test]
-    async fn status_surfaces_hanging_tmux_probe_is_bounded_and_unprovable() {
+    async fn hanging_tmux_probe_is_bounded() {
         let mut command = tokio::process::Command::new("/bin/sh");
         command.args(["-c", "sleep 5"]);
 
         let started = tokio::time::Instant::now();
-        let observation = tmux_session_observation_with_timeout(
-            &mut command,
-            std::time::Duration::from_millis(20),
-        )
-        .await;
+        let result =
+            tmux_session_exists_with_timeout(&mut command, std::time::Duration::from_millis(20))
+                .await;
 
-        assert_eq!(observation, ContainmentObservation::Unprovable);
+        assert!(result.is_err());
         assert!(started.elapsed() < std::time::Duration::from_secs(1));
+    }
+
+    #[tokio::test]
+    async fn missing_tmux_socket_means_no_session() {
+        let mut command = tokio::process::Command::new("/bin/sh");
+        command.args([
+            "-c",
+            "echo 'error connecting to /tmp/tmux-1001/default (No such file or directory)' >&2; exit 1",
+        ]);
+
+        let exists =
+            tmux_session_exists_with_timeout(&mut command, std::time::Duration::from_millis(100))
+                .await
+                .unwrap();
+
+        assert!(!exists);
     }
 
     #[test]
@@ -836,22 +764,17 @@ mod tests {
             "task".to_string(),
             "tsk_123".to_string(),
         ];
-        let command = lf_session_shell_command(
-            &argv,
-            &[("LF_RUN_CONTEXT", "agent"), ("LF_WAVE_ID", "infra")],
-        );
+        let command = lf_session_shell_command(&argv, &[("LF_WAVE_ID", "infra")]);
 
         assert!(command.starts_with(
             "if [ -n \"${LF_FORWARDED_SECRET_NAMES:-}\" ]; then unset $LF_FORWARDED_SECRET_NAMES; fi; unset "
         ));
-        assert!(command.contains("LF_RUN_CONTEXT LF_RUN_ID LF_AGENT_INVOCATION_ID"));
+        assert!(command.contains("LF_WAVE_ID LF_RUN_ID LF_INSTALL_SWITCH"));
         assert!(command.contains("LF_INSTALL_SWITCH LF_BIN"));
         assert!(command.contains("LF_ACCOUNT_LEASE LF_ACCOUNT_SELECTION"));
         assert!(command.contains("LF_DISCORD_TOKEN"));
         assert!(command.contains("GH_TOKEN OPENCODE_API_KEY"));
-        assert!(command.ends_with(
-            "exec env 'LF_RUN_CONTEXT'='agent' 'LF_WAVE_ID'='infra' 'lf' '__work' 'task' 'tsk_123'"
-        ));
+        assert!(command.ends_with("exec env 'LF_WAVE_ID'='infra' 'lf' '__work' 'task' 'tsk_123'"));
     }
 
     #[test]
@@ -860,7 +783,7 @@ mod tests {
 
         let command = lf_session_shell_command(&argv, &[]);
 
-        assert!(command.contains("LF_AGENT_INVOCATION_ID"));
+        assert!(command.contains("LF_WAVE_ID LF_RUN_ID"));
         assert!(command.contains("LF_ACCOUNT_LEASE LF_ACCOUNT_SELECTION"));
         assert!(command.ends_with("exec 'lf' 'wave' 'child'"));
     }
@@ -914,7 +837,7 @@ mod tests {
             ],
         );
 
-        assert!(command.contains("LF_AGENT_INVOCATION_ID"));
+        assert!(command.contains("LF_WAVE_ID LF_RUN_ID"));
         assert!(command.contains("LF_ACCOUNT_LEASE LF_ACCOUNT_SELECTION"));
         assert!(command.ends_with(
             "exec env 'LF_TRACE_ID'='run-1' 'LF_PROCESS_ID'='process-1' 'LF_DB_PATH'='/tmp/current.db' 'LF_HOME'='/tmp/lf' 'lf' '__work' 'task' 'tsk_123'"

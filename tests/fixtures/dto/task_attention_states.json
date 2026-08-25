@@ -1,79 +1,91 @@
 {
-  "live_advancing": {
+  "clean_backlog": {
     "task": {
-      "id": "live",
-      "identifier": "W2-A1",
-      "name": "Live advancing",
+      "id": "backlog",
+      "identifier": "W2-A5",
+      "name": "Clean backlog",
       "description": "",
-      "rank": 1,
+      "rank": 5,
       "completed": false,
       "assignee": null
     },
     "reference": {
       "issue_url": null,
+      "workspace": null
+    },
+    "runtime": null,
+    "next_move": {
+      "owner": "project",
+      "reason": "Task is ready to start"
+    },
+    "attention": {
+      "level": "black",
+      "reason": "Task is ready to start",
+      "observed_at": "2026-07-15T00:01:00Z",
+      "evidence_age_secs": null,
+      "next_owner": "project",
+      "actions": {
+        "recommended": null,
+        "reason": "Task is ready to start"
+      },
+      "pm_completed": false,
+      "work_status": null,
+      "local_progress": {
+        "state": "not_applicable",
+        "unsettled": false,
+        "dirty": null,
+        "authored_commits": null,
+        "recovery_required": null,
+        "reason": null
+      },
+      "active_pr_phase": null
+    },
+    "active_pr": null,
+    "section": "available"
+  },
+  "completed": {
+    "task": {
+      "id": "completed",
+      "identifier": "W2-A6",
+      "name": "Completed",
+      "description": "",
+      "rank": 6,
+      "completed": true,
+      "assignee": null
+    },
+    "reference": {
+      "issue_url": null,
       "workspace": {
-        "slug": "live",
-        "branch": "jack/live",
-        "worktree": "/src/loopflow.live"
+        "slug": "completed",
+        "branch": "jack/completed",
+        "worktree": "/src/loopflow.completed"
       }
     },
     "runtime": {
-      "work_id": "ts_live",
+      "work_id": "ts_completed",
       "project_id": "ps_1",
-      "status": {
-        "running": {
-          "run_id": "run_00000000000000000000000000000005"
-        }
-      },
-      "reason": "Run run_00000000000000000000000000000005 is active",
-      "updated_at": "2026-07-15T00:00:00Z",
+      "status": "done",
+      "reason": "done",
+      "updated_at": "2026-07-14T20:00:00Z",
       "provider": "codex",
-      "current": {
-        "state": "working",
-        "reason": "Run run_00000000000000000000000000000005 is active",
-        "owner": "work",
-        "controls": [
-          "attach",
-          "steer",
-          "interrupt",
-          "stop"
-        ],
-        "progress_age_secs": 60,
-        "deadline_in_secs": 1740,
-        "step": "iterate",
-        "liveness": {
-          "state": "present",
-          "observed_at": "2026-07-15T00:00:00Z",
-          "fresh": true
-        }
-      },
       "routing_project_id": "ps_1"
     },
     "next_move": {
-      "owner": "task",
-      "reason": "implementing the projection"
+      "owner": "project",
+      "reason": "Linear Task is complete"
     },
     "attention": {
-      "level": "green",
-      "reason": "implementing the projection",
+      "level": "black",
+      "reason": "Linear Task is complete",
       "observed_at": "2026-07-15T00:01:00Z",
-      "evidence_age_secs": 60,
-      "next_owner": "task",
+      "evidence_age_secs": 14460,
+      "next_owner": "project",
       "actions": {
         "recommended": "no_action",
-        "reason": "Task body is working"
+        "reason": "Task is completed"
       },
-      "pm_completed": false,
-      "work_status": {
-        "running": {
-          "run_id": "run_00000000000000000000000000000005"
-        }
-      },
-      "process": {
-        "state": "observed",
-        "alive": true,
-        "reason": null
-      },
+      "pm_completed": true,
+      "work_status": "done",
       "local_progress": {
         "state": "observed",
         "unsettled": false,
@@ -85,13 +97,125 @@
       "active_pr_phase": null
     },
     "active_pr": null,
-    "section": "now"
+    "section": "later"
   },
-  "live_user_wait": {
+  "stale": {
+    "task": {
+      "id": "stale",
+      "identifier": "W2-A7",
+      "name": "Stale active intent",
+      "description": "",
+      "rank": 7,
+      "completed": false,
+      "assignee": null
+    },
+    "reference": {
+      "issue_url": null,
+      "workspace": {
+        "slug": "stale",
+        "branch": "jack/stale",
+        "worktree": "/src/loopflow.stale"
+      }
+    },
+    "runtime": {
+      "work_id": "ts_stale",
+      "project_id": "ps_1",
+      "status": "ready",
+      "reason": "ready",
+      "updated_at": "2026-07-14T18:00:00Z",
+      "provider": "codex",
+      "routing_project_id": "ps_1"
+    },
+    "next_move": {
+      "owner": "task",
+      "reason": "implementing"
+    },
+    "attention": {
+      "level": "red",
+      "reason": "local Task progress requires recovery",
+      "observed_at": "2026-07-15T00:01:00Z",
+      "evidence_age_secs": 21660,
+      "next_owner": "task",
+      "actions": {
+        "recommended": "resume",
+        "reason": "resume the parked Task"
+      },
+      "pm_completed": false,
+      "work_status": "ready",
+      "local_progress": {
+        "state": "observed",
+        "unsettled": true,
+        "dirty": false,
+        "authored_commits": false,
+        "recovery_required": true,
+        "reason": null
+      },
+      "active_pr_phase": null
+    },
+    "active_pr": null,
+    "section": "needs_attention"
+  },
+  "unavailable": {
+    "task": {
+      "id": "unavailable",
+      "identifier": "W2-A8",
+      "name": "Unavailable evidence",
+      "description": "",
+      "rank": 8,
+      "completed": false,
+      "assignee": null
+    },
+    "reference": {
+      "issue_url": null,
+      "workspace": {
+        "slug": "unavailable",
+        "branch": "jack/unavailable",
+        "worktree": "/missing/loopflow.unavailable"
+      }
+    },
+    "runtime": {
+      "work_id": "ts_unavailable",
+      "project_id": "ps_1",
+      "status": "ready",
+      "reason": "ready",
+      "updated_at": "2026-07-14T23:00:00Z",
+      "provider": "codex",
+      "routing_project_id": "ps_1"
+    },
+    "next_move": {
+      "owner": "task",
+      "reason": "implementing"
+    },
+    "attention": {
+      "level": "unknown",
+      "reason": "failed to inspect Task worktree",
+      "observed_at": "2026-07-15T00:01:00Z",
+      "evidence_age_secs": 3660,
+      "next_owner": "task",
+      "actions": {
+        "recommended": "resume",
+        "reason": "resume the parked Task"
+      },
+      "pm_completed": false,
+      "work_status": "ready",
+      "local_progress": {
+        "state": "unavailable",
+        "unsettled": null,
+        "dirty": null,
+        "authored_commits": null,
+        "recovery_required": true,
+        "reason": "failed to inspect Task worktree"
+      },
+      "active_pr_phase": null
+    },
+    "active_pr": null,
+    "section": "needs_attention"
+  },
+  "user_wait": {
     "task": {
       "id": "user",
       "identifier": "W2-A2",
-      "name": "Live User wait",
+      "name": "User wait",
       "description": "",
       "rank": 2,
       "completed": false,
@@ -108,33 +232,10 @@
     "runtime": {
       "work_id": "task-user",
       "project_id": "ps_1",
-      "status": {
-        "running": {
-          "run_id": "run_00000000000000000000000000000005"
-        }
-      },
-      "reason": "alive but no meaningful progress past the deadline",
+      "status": "ready",
+      "reason": "ready",
       "updated_at": "2026-07-14T23:59:00Z",
       "provider": "codex",
-      "current": {
-        "state": "stalled",
-        "reason": "alive but no meaningful progress past the deadline",
-        "owner": "loopflow",
-        "controls": [
-          "attach",
-          "extend",
-          "interrupt",
-          "stop"
-        ],
-        "progress_age_secs": 2400,
-        "deadline_in_secs": -600,
-        "step": "iterate",
-        "liveness": {
-          "state": "present",
-          "observed_at": "2026-07-14T23:59:00Z",
-          "fresh": true
-        }
-      },
       "routing_project_id": "ps_1"
     },
     "next_move": {
@@ -149,19 +250,10 @@
       "next_owner": "user",
       "actions": {
         "recommended": "no_action",
-        "reason": "Task body is working"
+        "reason": "Waiting for your answer"
       },
       "pm_completed": false,
-      "work_status": {
-        "running": {
-          "run_id": "run_00000000000000000000000000000005"
-        }
-      },
-      "process": {
-        "state": "observed",
-        "alive": true,
-        "reason": null
-      },
+      "work_status": "ready",
       "local_progress": {
         "state": "observed",
         "unsettled": false,
@@ -175,11 +267,11 @@
     "active_pr": null,
     "section": "needs_attention"
   },
-  "dead_dirty": {
+  "dirty": {
     "task": {
       "id": "dirty",
       "identifier": "W2-A3",
-      "name": "Dead dirty",
+      "name": "Dirty worktree",
       "description": "",
       "rank": 3,
       "completed": false,
@@ -196,31 +288,10 @@
     "runtime": {
       "work_id": "ts_dirty",
       "project_id": "ps_1",
-      "status": {
-        "running": {
-          "run_id": "run_00000000000000000000000000000005"
-        }
-      },
-      "reason": "the owning Home proved the Run process is gone",
+      "status": "ready",
+      "reason": "ready",
       "updated_at": "2026-07-14T23:50:00Z",
       "provider": "codex",
-      "current": {
-        "state": "stopped",
-        "reason": "the owning Home proved the Run process is gone",
-        "owner": "loopflow",
-        "controls": [
-          "resume",
-          "stop"
-        ],
-        "progress_age_secs": null,
-        "deadline_in_secs": null,
-        "step": "iterate",
-        "liveness": {
-          "state": "absent",
-          "observed_at": "2026-07-14T23:50:00Z",
-          "fresh": true
-        }
-      },
       "routing_project_id": "ps_1"
     },
     "next_move": {
@@ -229,25 +300,16 @@
     },
     "attention": {
       "level": "red",
-      "reason": "Task body stopped with uncommitted work",
+      "reason": "Task has uncommitted work",
       "observed_at": "2026-07-15T00:01:00Z",
       "evidence_age_secs": 660,
       "next_owner": "task",
       "actions": {
-        "recommended": "recover",
-        "reason": "Task body stopped with unsettled work; recover to continue"
+        "recommended": "resume",
+        "reason": "resume the parked Task"
       },
       "pm_completed": false,
-      "work_status": {
-        "running": {
-          "run_id": "run_00000000000000000000000000000005"
-        }
-      },
-      "process": {
-        "state": "observed",
-        "alive": false,
-        "reason": null
-      },
+      "work_status": "ready",
       "local_progress": {
         "state": "observed",
         "unsettled": true,
@@ -261,11 +323,11 @@
     "active_pr": null,
     "section": "needs_attention"
   },
-  "dead_authored_commits": {
+  "authored_commits": {
     "task": {
       "id": "commits",
       "identifier": "W2-A4",
-      "name": "Dead authored commits",
+      "name": "Authored commits",
       "description": "",
       "rank": 4,
       "completed": false,
@@ -286,19 +348,6 @@
       "reason": "ready",
       "updated_at": "2026-07-14T22:00:00Z",
       "provider": "codex",
-      "current": {
-        "state": "ready",
-        "reason": "ready",
-        "owner": "loopflow",
-        "controls": [
-          "resume",
-          "abandon"
-        ],
-        "progress_age_secs": null,
-        "deadline_in_secs": null,
-        "step": "iterate",
-        "liveness": null
-      },
       "routing_project_id": "ps_1"
     },
     "next_move": {
@@ -317,11 +366,6 @@
       },
       "pm_completed": false,
       "work_status": "ready",
-      "process": {
-        "state": "not_expected",
-        "alive": null,
-        "reason": null
-      },
       "local_progress": {
         "state": "observed",
         "unsettled": true,
@@ -362,298 +406,6 @@
       "merge_commit": null,
       "abandoned_at": null
     },
-    "section": "needs_attention"
-  },
-  "clean_backlog": {
-    "task": {
-      "id": "backlog",
-      "identifier": "W2-A5",
-      "name": "Clean backlog",
-      "description": "",
-      "rank": 5,
-      "completed": false,
-      "assignee": null
-    },
-    "reference": {
-      "issue_url": null,
-      "workspace": null
-    },
-    "runtime": null,
-    "next_move": {
-      "owner": "project",
-      "reason": "Task is ready to start"
-    },
-    "attention": {
-      "level": "black",
-      "reason": "Task is ready to start",
-      "observed_at": "2026-07-15T00:01:00Z",
-      "evidence_age_secs": null,
-      "next_owner": "project",
-      "actions": {
-        "recommended": null,
-        "reason": "Task is ready to start"
-      },
-      "pm_completed": false,
-      "work_status": null,
-      "process": {
-        "state": "not_applicable",
-        "alive": null,
-        "reason": null
-      },
-      "local_progress": {
-        "state": "not_applicable",
-        "unsettled": false,
-        "dirty": null,
-        "authored_commits": null,
-        "recovery_required": null,
-        "reason": null
-      },
-      "active_pr_phase": null
-    },
-    "active_pr": null,
-    "section": "available"
-  },
-  "completed": {
-    "task": {
-      "id": "completed",
-      "identifier": "W2-A6",
-      "name": "Completed",
-      "description": "",
-      "rank": 6,
-      "completed": true,
-      "assignee": null
-    },
-    "reference": {
-      "issue_url": null,
-      "workspace": {
-        "slug": "completed",
-        "branch": "jack/completed",
-        "worktree": "/src/loopflow.completed"
-      }
-    },
-    "runtime": {
-      "work_id": "ts_completed",
-      "project_id": "ps_1",
-      "status": "done",
-      "reason": "done",
-      "updated_at": "2026-07-14T20:00:00Z",
-      "provider": "codex",
-      "current": {
-        "state": "done",
-        "reason": "done",
-        "owner": "nobody",
-        "controls": [],
-        "progress_age_secs": null,
-        "deadline_in_secs": null,
-        "step": "iterate",
-        "liveness": null
-      },
-      "routing_project_id": "ps_1"
-    },
-    "next_move": {
-      "owner": "project",
-      "reason": "Linear Task is complete"
-    },
-    "attention": {
-      "level": "black",
-      "reason": "Linear Task is complete",
-      "observed_at": "2026-07-15T00:01:00Z",
-      "evidence_age_secs": 14460,
-      "next_owner": "project",
-      "actions": {
-        "recommended": "no_action",
-        "reason": "Task is completed"
-      },
-      "pm_completed": true,
-      "work_status": "done",
-      "process": {
-        "state": "not_expected",
-        "alive": null,
-        "reason": null
-      },
-      "local_progress": {
-        "state": "observed",
-        "unsettled": false,
-        "dirty": false,
-        "authored_commits": false,
-        "recovery_required": false,
-        "reason": null
-      },
-      "active_pr_phase": null
-    },
-    "active_pr": null,
-    "section": "later"
-  },
-  "stale": {
-    "task": {
-      "id": "stale",
-      "identifier": "W2-A7",
-      "name": "Stale active intent",
-      "description": "",
-      "rank": 7,
-      "completed": false,
-      "assignee": null
-    },
-    "reference": {
-      "issue_url": null,
-      "workspace": {
-        "slug": "stale",
-        "branch": "jack/stale",
-        "worktree": "/src/loopflow.stale"
-      }
-    },
-    "runtime": {
-      "work_id": "ts_stale",
-      "project_id": "ps_1",
-      "status": {
-        "running": {
-          "run_id": "run_00000000000000000000000000000005"
-        }
-      },
-      "reason": "the owning Home proved the Run process is gone",
-      "updated_at": "2026-07-14T18:00:00Z",
-      "provider": "codex",
-      "current": {
-        "state": "stopped",
-        "reason": "the owning Home proved the Run process is gone",
-        "owner": "loopflow",
-        "controls": [
-          "resume",
-          "stop"
-        ],
-        "progress_age_secs": null,
-        "deadline_in_secs": null,
-        "step": "iterate",
-        "liveness": {
-          "state": "absent",
-          "observed_at": "2026-07-14T18:00:00Z",
-          "fresh": true
-        }
-      },
-      "routing_project_id": "ps_1"
-    },
-    "next_move": {
-      "owner": "task",
-      "reason": "implementing"
-    },
-    "attention": {
-      "level": "red",
-      "reason": "no live Task body; local progress requires recovery",
-      "observed_at": "2026-07-15T00:01:00Z",
-      "evidence_age_secs": 21660,
-      "next_owner": "task",
-      "actions": {
-        "recommended": "recover",
-        "reason": "Task body stopped with unsettled work; recover to continue"
-      },
-      "pm_completed": false,
-      "work_status": {
-        "running": {
-          "run_id": "run_00000000000000000000000000000005"
-        }
-      },
-      "process": {
-        "state": "observed",
-        "alive": false,
-        "reason": null
-      },
-      "local_progress": {
-        "state": "observed",
-        "unsettled": true,
-        "dirty": false,
-        "authored_commits": false,
-        "recovery_required": true,
-        "reason": null
-      },
-      "active_pr_phase": null
-    },
-    "active_pr": null,
-    "section": "needs_attention"
-  },
-  "unavailable": {
-    "task": {
-      "id": "unavailable",
-      "identifier": "W2-A8",
-      "name": "Unavailable evidence",
-      "description": "",
-      "rank": 8,
-      "completed": false,
-      "assignee": null
-    },
-    "reference": {
-      "issue_url": null,
-      "workspace": {
-        "slug": "unavailable",
-        "branch": "jack/unavailable",
-        "worktree": "/missing/loopflow.unavailable"
-      }
-    },
-    "runtime": {
-      "work_id": "ts_unavailable",
-      "project_id": "ps_1",
-      "status": {
-        "running": {
-          "run_id": "run_00000000000000000000000000000005"
-        }
-      },
-      "reason": "the owning Home proved the Run process is gone",
-      "updated_at": "2026-07-14T23:00:00Z",
-      "provider": "codex",
-      "current": {
-        "state": "stopped",
-        "reason": "the owning Home proved the Run process is gone",
-        "owner": "loopflow",
-        "controls": [
-          "resume",
-          "stop"
-        ],
-        "progress_age_secs": null,
-        "deadline_in_secs": null,
-        "step": "iterate",
-        "liveness": {
-          "state": "absent",
-          "observed_at": "2026-07-14T23:00:00Z",
-          "fresh": true
-        }
-      },
-      "routing_project_id": "ps_1"
-    },
-    "next_move": {
-      "owner": "task",
-      "reason": "implementing"
-    },
-    "attention": {
-      "level": "unknown",
-      "reason": "failed to inspect Task worktree",
-      "observed_at": "2026-07-15T00:01:00Z",
-      "evidence_age_secs": 3660,
-      "next_owner": "task",
-      "actions": {
-        "recommended": "recover",
-        "reason": "Task body stopped; recover to continue"
-      },
-      "pm_completed": false,
-      "work_status": {
-        "running": {
-          "run_id": "run_00000000000000000000000000000005"
-        }
-      },
-      "process": {
-        "state": "observed",
-        "alive": false,
-        "reason": null
-      },
-      "local_progress": {
-        "state": "unavailable",
-        "unsettled": null,
-        "dirty": null,
-        "authored_commits": null,
-        "recovery_required": true,
-        "reason": "failed to inspect Task worktree"
-      },
-      "active_pr_phase": null
-    },
-    "active_pr": null,
     "section": "needs_attention"
   }
 }

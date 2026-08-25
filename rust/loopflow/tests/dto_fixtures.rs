@@ -1,33 +1,12 @@
-use loopflow::lf::commands::replay::ReplayCheckDto;
+use loopflow::durable::WorkStatus;
 use loopflow::lf::commands::waves::{RoadmapSnapshot, WaveDetailSnapshot};
 use loopflow::ops::pm::PmShowResult;
 use loopflow::wave::metrics::MetricPortfolioDto;
-use loopflow::{child::CurrentWorkState, durable::WorkStatus};
 
 const PM_SHOW: &str = include_str!("../../../tests/fixtures/dto/pm_show.json");
 const WAVE_DETAIL: &str = include_str!("../../../tests/fixtures/dto/wave_detail.json");
 const ROADMAP: &str = include_str!("../../../tests/fixtures/dto/roadmap_snapshot.json");
 const METRIC_PORTFOLIO: &str = include_str!("../../../tests/fixtures/dto/metric_portfolio.json");
-const REPLAY_CHECK: &str = include_str!("../../../tests/fixtures/dto/replay_check.json");
-
-#[test]
-fn replay_check_fixture_locks_required_fields_and_every_refusal_code() {
-    let result: ReplayCheckDto = serde_json::from_str(REPLAY_CHECK).unwrap();
-    assert!(!result.eligible);
-    assert_eq!(result.reasons.len(), 21);
-    assert!(result.inputs.as_ref().unwrap().model.is_none());
-
-    let round_trip = serde_json::to_string(&result).unwrap();
-    assert_eq!(
-        serde_json::from_str::<ReplayCheckDto>(&round_trip).unwrap(),
-        result
-    );
-
-    let mut missing_required: serde_json::Value = serde_json::from_str(REPLAY_CHECK).unwrap();
-    missing_required.as_object_mut().unwrap().remove("eligible");
-    let error = serde_json::from_value::<ReplayCheckDto>(missing_required).unwrap_err();
-    assert!(error.to_string().contains("eligible"));
-}
 
 #[test]
 fn pm_show_preserves_repository_team_and_project_ownership() {
@@ -96,27 +75,23 @@ fn status_surfaces_keep_last_failure_out_of_current_truth() {
     let failure = runtime.last_failure.as_ref().unwrap();
 
     assert_eq!(runtime.status, WorkStatus::Ready);
-    assert_eq!(runtime.current.state, CurrentWorkState::Ready);
-    assert_eq!(runtime.reason, runtime.current.reason);
-    assert_eq!(runtime.current.reason, "ready");
-    assert!(!runtime.current.reason.contains("credential"));
+    assert_eq!(runtime.reason, "ready");
+    assert!(!runtime.reason.contains("credential"));
     assert_eq!(
         failure.message,
         "project runner failed: credential is missing"
     );
-    assert!(failure.run_id.is_some());
     assert!(failure.occurred_at < time::OffsetDateTime::now_utc());
     assert_eq!(
-        snapshot.unavailable_projects[0].current.state,
-        CurrentWorkState::Abandoned
+        snapshot.unavailable_projects[0].status,
+        WorkStatus::Abandoned
     );
     assert_eq!(
-        snapshot.unavailable_projects[0].tasks[0].current.state,
-        CurrentWorkState::Ready
+        snapshot.unavailable_projects[0].tasks[0].status,
+        WorkStatus::Ready
     );
     let task_runtime = snapshot.projects[0].tasks[0].runtime.as_ref().unwrap();
-    assert_eq!(task_runtime.reason, task_runtime.current.reason);
-    assert_eq!(task_runtime.current.reason, "ready");
+    assert_eq!(task_runtime.reason, "ready");
 }
 
 #[test]

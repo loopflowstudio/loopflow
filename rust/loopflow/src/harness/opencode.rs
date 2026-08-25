@@ -116,8 +116,6 @@ impl OpenCodeHarness {
         #[cfg(unix)]
         command.process_group(0);
         super::configure_vendor_tokio_env(&mut command)?;
-        super::configure_agent_run_context(&mut command, config.run_context);
-
         let mut child = command
             .spawn()
             .map_err(|err| anyhow!("failed to spawn opencode serve: {err}"))?;

@@ -43,10 +43,8 @@ const RELEASE_NOTES_MAX_BYTES: usize = 60 * 1024;
 const FALLBACK_NOTES_MAX_COMMITS: usize = 50;
 const FALLBACK_NOTES_MAX_PRS: usize = 50;
 const RELEASE_NOTES_STATUS_PREFIX: &str = "<!-- loopflow:release-notes=";
-const RELEASE_WORKTREE_CONTEXT_ENV: [&str; 4] = [
-    crate::durable::RUN_CONTEXT_ENV,
+const RELEASE_WORKTREE_CONTEXT_ENV: [&str; 2] = [
     crate::durable::RUN_ID_ENV,
-    crate::durable::AGENT_INVOCATION_ENV,
     crate::engine::wave_context::WAVE_ID_ENV,
 ];
 

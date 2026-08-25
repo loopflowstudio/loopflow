@@ -34,12 +34,12 @@ struct SessionsStoreTests {
         // state, before the opener Task runs.
         let store = SessionsStore(
             scope: .repo("/tmp/repo"),
-            query: RegistryQuery { _, _ in surfaceJSON(invId: "inv-x") }
+            query: RegistryQuery { _, _ in surfaceJSON(runId: "run-x") }
         )
 
         store.reconcile(try records([
             entry(id: "a", attention: "queued", surface: false),
-            entry(id: "b", attention: "claimed", surface: true, invId: "inv-b"),
+            entry(id: "b", attention: "claimed", surface: true, runId: "run-b"),
         ]))
         #expect(store.sessions.count == 2)
         #expect(item(store, "a")?.state == .pending)  // no surface → awaits opener
@@ -47,7 +47,7 @@ struct SessionsStoreTests {
 
         // 'a' gains a surface on the next poll; 'b' settled and left the queue.
         store.reconcile(try records([
-            entry(id: "a", attention: "claimed", surface: true, invId: "inv-a"),
+            entry(id: "a", attention: "claimed", surface: true, runId: "run-a"),
         ]))
         #expect(store.sessions.map(\.id) == ["a"])
         #expect(item(store, "a")?.surface != nil)      // adopted the surface
@@ -64,7 +64,7 @@ struct SessionsStoreTests {
                 await probe.begin(id)
                 try? await Task.sleep(nanoseconds: 15_000_000)
                 await probe.end()
-                return surfaceJSON(invId: "inv-\(id)")
+                return surfaceJSON(runId: "run-\(id)")
             }
         )
 
@@ -92,7 +92,7 @@ struct SessionsStoreTests {
                 let id = args[2]
                 try? await Task.sleep(nanoseconds: 5_000_000)
                 if id == "bad" { throw StubError() }
-                return surfaceJSON(invId: "inv-\(id)")
+                return surfaceJSON(runId: "run-\(id)")
             }
         )
 
@@ -150,9 +150,9 @@ private func records(_ entries: [String]) throws -> [AskAttentionRecord] {
     return try JSONDecoder().decode([AskAttentionRecord].self, from: Data(json.utf8))
 }
 
-private func entry(id: String, attention: String, surface: Bool, invId: String = "inv") -> String {
+private func entry(id: String, attention: String, surface: Bool, runId: String = "run") -> String {
     let state = attention == "queued" ? "queued" : "claimed"
-    let surfaceField = surface ? surfaceJSON(invId: invId) : "null"
+    let surfaceField = surface ? surfaceJSON(runId: runId, askId: id) : "null"
     return """
     {
       "ask": {
@@ -161,7 +161,7 @@ private func entry(id: String, attention: String, surface: Bool, invId: String =
         "target": { "kind": "user" },
         "request": { "kind": "intervention", "prompt": "Question \(id)" },
         "state": "\(state)",
-        "active_invocation_id": null,
+        "active_run_id": null,
         "result": null,
         "terminal_author": null,
         "asked_at": "2026-07-19T22:00:01Z",
@@ -173,48 +173,13 @@ private func entry(id: String, attention: String, surface: Bool, invId: String =
     """
 }
 
-private func surfaceJSON(invId: String) -> String {
+private func surfaceJSON(runId: String, askId: String = "ask") -> String {
     """
     {
-      "invocation": {
-        "id": "\(invId)",
-        "supervising_run_id": "run2",
-        "answer_ask_id": null,
-        "route": { "provider": "opaque", "model": null, "account_id": null },
-        "surface": "terminal",
-        "resume_token": null,
-        "started_at": "2026-07-17T12:00:00Z",
-        "ended_at": null
-      },
-      "run": {
-        "id": "run2",
-        "work": { "kind": "task", "id": "task5" },
-        "epoch_id": "e",
-        "home_id": "h",
-        "runtime_generation": 8,
-        "state": "active",
-        "trigger": { "kind": "user" },
-        "retry_of": null,
-        "containment": { "kind": "tmux", "name": "lf-task" },
-        "cwd": "/tmp",
-        "created_at": "2026-07-17T11:59:59Z",
-        "started_at": "2026-07-17T12:00:00Z",
-        "ended_at": null
-      },
-      "work": { "kind": "task", "id": "task5" },
-      "wave_id": "00000000-0000-4000-8000-000000000006",
+      "ask_id": "\(askId)",
+      "run_id": "\(runId)",
       "home_route": "jack@local",
-      "handback": null,
-      "attach_argv": ["tmux", "attach-session", "-t", "lf-task"],
-      "current": {
-        "state": "live",
-        "reason": "the owning Home verified the supervising Run",
-        "liveness": {
-          "state": "present",
-          "observed_at": "2026-07-17T12:00:01Z",
-          "fresh": true
-        }
-      }
+      "attach_argv": ["tmux", "attach-session", "-t", "lf-ask"]
     }
     """
 }

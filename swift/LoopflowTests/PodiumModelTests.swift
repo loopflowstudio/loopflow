@@ -20,7 +20,6 @@ struct PodiumModelTests {
 
         #expect(model.visibleRoadmaps.map(\.wave.name) == ["context"])
         #expect(model.waveSummary?.waves == 1)
-        #expect(model.waveSummary?.activeRuns == 0)
         #expect(model.selection == nil)
     }
 
@@ -73,8 +72,8 @@ struct PodiumModelTests {
     func liveRefreshChangesOnlyProcessEvidence() async throws {
         let fixture = try PodiumTestFixture.load()
         let frames = LiveProcessFrames(frames: [
-            try fixture.processActivityJSON(rate: 2, observedAt: 1),
-            try fixture.processActivityJSON(rate: 4, observedAt: 2),
+            try fixture.processActivityJSON(providersLive: true, observedAt: 1),
+            try fixture.processActivityJSON(providersLive: true, observedAt: 2),
         ])
         let query = RegistryQuery { args, _ in
             try await frames.next(args: args)
@@ -90,11 +89,11 @@ struct PodiumModelTests {
 
         await model.refreshProcessActivity()
         #expect(model.processActivity.value?.observedAt == 1)
-        #expect(model.processActivity.value?.usage.global?.interval(seconds: 5)?.outputTokensPerSecond == 2)
+        #expect(model.processActivity.value?.nodes.count == 3)
 
         await model.refreshProcessActivity()
         #expect(model.processActivity.value?.observedAt == 2)
-        #expect(model.processActivity.value?.usage.global?.interval(seconds: 5)?.outputTokensPerSecond == 4)
+        #expect(model.processActivity.value?.nodes.count == 3)
 
         await model.refreshProcessActivity()
         #expect(model.processActivity.value?.observedAt == 2)
@@ -127,47 +126,9 @@ struct PodiumModelTests {
         await model.refreshProcessActivity()
         #expect(await deferred.requestCount == 1)
 
-        await deferred.release(try fixture.processActivityJSON(rate: 3, observedAt: 3))
+        await deferred.release(try fixture.processActivityJSON(providersLive: true, observedAt: 3))
         await first.value
         #expect(model.processActivity.value?.observedAt == 3)
-    }
-
-    @Test("Wave summary identifies running Waves without listeners")
-    func waveSummaryIdentifiesUnservedRuns() async throws {
-        let fixture = try PodiumTestFixture.load()
-        let model = PodiumModel(query: fixture.query)
-
-        await model.refresh()
-        let summary = try #require(model.waveSummary)
-
-        #expect(summary.waves == 2)
-        #expect(summary.activeRuns == 1)
-        #expect(summary.unservedRuns == 0)
-
-        let unserved = fixture.waves.map { wave in
-            Wave(
-                id: wave.id,
-                name: wave.name,
-                repo: wave.repo,
-                status: wave.status,
-                current: wave.current,
-                live: false,
-                paused: wave.paused,
-                activeTasks: wave.activeTasks,
-                activeProjects: wave.activeProjects,
-                parentWaveId: wave.parentWaveId
-            )
-        }
-        model.applyFixture(
-            roadmap: .available(fixture.roadmap),
-            waves: .available(unserved),
-            processActivity: .available(fixture.processActivity),
-            workActivity: .available(fixture.workActivity),
-            repos: []
-        )
-
-        #expect(model.waveSummary?.activeRuns == 1)
-        #expect(model.waveSummary?.unservedRuns == 1)
     }
 
     @Test("Wave summary counts authored Waves without active Runs")
@@ -202,7 +163,6 @@ struct PodiumModelTests {
             "infrastructure", "intelligence", "product",
         ])
         #expect(model.waveSummary?.waves == 3)
-        #expect(model.waveSummary?.activeRuns == 0)
     }
 
     @Test("A development worktree merges authored and registered Wave identity")
@@ -247,21 +207,7 @@ struct PodiumModelTests {
             id: "product",
             name: "product",
             repo: origin.path,
-            status: .running(runID: "run_product"),
-            current: CurrentWorkObservation(
-                state: .working,
-                reason: "provider is producing output",
-                owner: .work,
-                controls: [.steer, .interrupt],
-                progressAgeSeconds: 0,
-                deadlineInSeconds: nil,
-                step: nil,
-                liveness: RunLivenessEvidence(
-                    state: .present,
-                    observedAt: "2026-08-21T22:00:00Z",
-                    fresh: true
-                )
-            ),
+            status: .ready,
             live: true
         )
         let model = PodiumModel(query: fixture.query, repoPath: worktree.path)
@@ -286,7 +232,7 @@ struct PodiumModelTests {
         #expect(model.repoIdentity(model.visibleRepos[0].path) == model.repoIdentity(worktree.path))
         #expect(model.visibleWaves.map(\.displayName) == ["product"])
         #expect(model.visibleWaves.map(\.isRegistered) == [true])
-        #expect(model.waveSummary == WaveSummary(waves: 1, activeRuns: 1, unservedRuns: 0))
+        #expect(model.waveSummary == WaveSummary(waves: 1))
     }
 
     @Test("Work selection becomes one server-side Activity filter")
@@ -432,54 +378,33 @@ struct PodiumModelTests {
     }
 }
 
-@Suite("Podium output signal")
+@Suite("Podium process signal")
 struct PodiumOutputSignalTests {
-    @Test("Global output ignores provider attention while hierarchy preserves it")
-    func stateSeparatesRateFromAttention() throws {
+    @Test("Exact provider process state drives the signal")
+    func processStateDrivesSignal() throws {
         let fixture = try PodiumTestFixture.load()
         let empty = try JSONDecoder().decode(
             ActivitySnapshot.self,
-            from: Data(fixture.processActivityJSON(rate: 0, observedAt: 1).utf8)
+            from: Data(fixture.processActivityJSON(providersLive: false, observedAt: 1).utf8)
         )
 
         #expect(PodiumSignalState.from(empty) == .off)
         #expect(PodiumSignalState.from(empty).lens == .black)
-        #expect(PodiumSignalState.from(fixture.processActivity) == .producing)
-        #expect(PodiumSignalState.from(fixture.processActivity).lens == .green)
-        #expect(PodiumSignalState.from(
-            nodes: fixture.processActivity.nodes,
-            usage: fixture.processActivity.usage.global
-        ) == .blocked)
-        #expect(PodiumSignalState.from(
-            nodes: fixture.processActivity.nodes,
-            usage: fixture.processActivity.usage.global
-        ).lens == .blue)
+        #expect(PodiumSignalState.from(fixture.processActivity) == .blocked)
+        #expect(PodiumSignalState.from(fixture.processActivity).lens == .blue)
 
         let silentWorker = ActivityNode(
-            id: "launch:silent",
+            id: "provider:1",
             parentId: nil,
-            kind: .providerLaunch,
+            kind: .providerProcess,
             label: "codex",
             repo: "/src/loopflow",
             wave: "product",
-            project: nil,
-            task: nil,
             pid: 1,
             startedAt: 1,
-            lastProgressAt: 1,
-            state: .working,
-            usageScopeId: "invocation:silent"
+            state: .working
         )
-        #expect(PodiumSignalState.from(nodes: [silentWorker], usage: nil) == .waiting)
-    }
-
-    @Test("The rail is logarithmic, monotonic, and capped")
-    func rateScaleIsBounded() {
-        #expect(TokenRateScale.level(0) == 0)
-        #expect(TokenRateScale.level(1) < TokenRateScale.level(4))
-        #expect(TokenRateScale.level(4) < TokenRateScale.level(10))
-        #expect(TokenRateScale.level(10) == 1)
-        #expect(TokenRateScale.level(100) == 1)
+        #expect(PodiumSignalState.from(nodes: [silentWorker]) == .producing)
     }
 }
 
@@ -559,26 +484,13 @@ private struct PodiumTestFixture {
         return try #require(String(data: data, encoding: .utf8))
     }
 
-    func processActivityJSON(rate: Double, observedAt: Int64) throws -> String {
+    func processActivityJSON(providersLive: Bool, observedAt: Int64) throws -> String {
         let encoded = try JSONEncoder().encode(processActivity)
         var object = try #require(JSONSerialization.jsonObject(with: encoded) as? [String: Any])
-        var usage = try #require(object["usage"] as? [String: Any])
-        var readings = try #require(usage["readings"] as? [[String: Any]])
-        let globalIndex = try #require(readings.firstIndex { reading in
-            (reading["scope"] as? [String: Any])?["kind"] as? String == "global"
-        })
-        var global = readings[globalIndex]
-        var intervals = try #require(global["intervals"] as? [[String: Any]])
-        let fastIndex = try #require(intervals.firstIndex { interval in
-            interval["window_seconds"] as? Int == 5
-        })
-        intervals[fastIndex]["output_tokens"] = UInt64(max(rate * 5, 0))
-        intervals[fastIndex]["output_tokens_per_second"] = rate
-        global["intervals"] = intervals
-        readings[globalIndex] = global
-        usage["readings"] = readings
-        usage["observed_at"] = observedAt
-        object["usage"] = usage
+        if !providersLive {
+            let nodes = try #require(object["nodes"] as? [[String: Any]])
+            object["nodes"] = nodes.filter { $0["kind"] as? String == "exec" }
+        }
         object["observed_at"] = observedAt
         let data = try JSONSerialization.data(withJSONObject: object)
         return try #require(String(data: data, encoding: .utf8))

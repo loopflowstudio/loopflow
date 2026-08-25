@@ -103,63 +103,24 @@ mod tests {
     use serde_json::json;
 
     use super::publish_claimed_ask_comment;
-    use crate::durable::{
-        AdvanceReceipt, AskResult, Containment, InvocationRoute, RunAdvance, RunTrigger, WorkRef,
-    };
+    use crate::durable::{AskResult, WorkRef};
     use crate::id::WaveId;
     use crate::planning::{LinearIssueId, LinearProjectId, ProjectPlan, TaskPlan};
     use crate::pm::linear::LinearClient;
     use crate::pm::test_server::{self, json_response};
     use crate::project::{Project, ProjectId};
-    use crate::store::{open_store, StorageConfig, Store};
+    use crate::store::{open_store, StorageConfig};
     use crate::task::{
         Observation, PmWritebackState, Task, TaskId, TaskLifecyclePhase, TaskLifecyclePlan, TaskPr,
         TaskPrId,
     };
     use crate::wave::Wave;
 
-    async fn start_invocation(
-        store: &Store,
-        work: &WorkRef,
-        process_group: i64,
-    ) -> (crate::durable::RunContext, crate::durable::AgentInvocation) {
-        let (_, lease) = store.reserve_run(work, RunTrigger::User).await.unwrap();
-        store
-            .advance_run(
-                &lease,
-                RunAdvance::RunStarting {
-                    containment: Containment::ProcessGroup { id: process_group },
-                    cwd: "/repo".into(),
-                },
-            )
-            .await
-            .unwrap();
-        let AdvanceReceipt::Invocation(invocation) = store
-            .advance_run(
-                &lease,
-                RunAdvance::InvocationStarting {
-                    route: InvocationRoute {
-                        provider: "codex".to_string(),
-                        model: None,
-                        account_id: None,
-                    },
-                    surface: "headless".to_string(),
-                    resume_token: None,
-                    answer_ask_id: None,
-                },
-            )
-            .await
-            .unwrap()
-        else {
-            panic!("expected Invocation receipt")
-        };
-        (lease, invocation)
-    }
-
     #[tokio::test]
     async fn ask_request_and_result_comments_commit_first_and_retry_without_duplicates() {
         let directory = tempfile::tempdir().unwrap();
-        let store = open_store(&StorageConfig::sqlite(directory.path().join("registry.db")))
+        let database = directory.path().join("registry.db");
+        let store = open_store(&StorageConfig::sqlite(database.clone()))
             .await
             .unwrap();
         let now = time::OffsetDateTime::now_utc();
@@ -240,23 +201,17 @@ mod tests {
         };
         store.create_task(&task, &pr).await.unwrap();
 
-        let parent_work = WorkRef::Project(project.id.clone());
-        let (parent_lease, _) = start_invocation(&store, &parent_work, 1).await;
         let child_work = WorkRef::Task(task.id.clone());
-        let (child_lease, child_invocation) = start_invocation(&store, &child_work, 2).await;
-        store
-            .advance_run(
-                &child_lease,
-                RunAdvance::TurnStarting {
-                    invocation_id: child_invocation.id.clone(),
-                },
-            )
-            .await
-            .unwrap();
+        let source_run_id = crate::durable::RunId::new();
+        let home_id = store.local_home().await.unwrap().id;
         let ask = store
             .request_intervention(
-                &child_lease,
-                &child_invocation.id,
+                crate::durable::AskOrigin {
+                    work: child_work.clone(),
+                    source_run_id: Some(source_run_id),
+                    home_id,
+                    cwd: task.worktree.clone(),
+                },
                 "Which durable proof matters?",
                 false,
             )
@@ -313,22 +268,15 @@ mod tests {
         assert!(recovery_requests[0].body.contains("IssueComments"));
         drop(recovery_requests);
 
-        let claim = store
-            .claim_test_ask(Some(&parent_lease), &ask.id)
-            .await
-            .unwrap();
+        let claim = store.claim_ask(&ask.id).await.unwrap();
         store
-            .mark_ask_ready(&ask.id, &claim.invocation_id)
-            .await
-            .unwrap();
-        store
-            .mark_ask_presented(&ask.id, &claim.invocation_id)
+            .mark_ask_presented(&ask.id, &claim.run_id)
             .await
             .unwrap();
         let settled = store
             .settle_ask(
                 &ask.id,
-                &claim.invocation_id,
+                &claim.run_id,
                 AskResult::Resolved {
                     summary: "The committed exchange.".to_string(),
                 },
@@ -339,7 +287,7 @@ mod tests {
         assert!(result_write.body.contains("The committed exchange."));
         assert!(result_write
             .body
-            .contains(&format!("Run `{}`", parent_lease.run_id)));
+            .contains(&format!("Run `{}`", claim.run_id)));
 
         let (base_url, _) = test_server::spawn(vec![json_response(
             StatusCode::OK,
@@ -360,7 +308,7 @@ mod tests {
         assert!(failed[0].last_error.is_some());
         assert_eq!(
             store
-                .asks_for_work_epoch(&child_lease)
+                .asks_for_work(&child_work)
                 .await
                 .unwrap()
                 .into_iter()

@@ -1,36 +1,6 @@
 # Loopflow
 
-Loopflow creates and runs **Waves** — persistent agents that work toward an
-outcome. Write a Wave's goal once; it coordinates Linear-backed Projects and
-Tasks, remembers what it learns, and keeps one steerable conversation beside
-the live work map.
-
-Everything is one binary. `lf` is the command humans type *and* the API agents
-call to launch, steer, and observe other agents. There is no centralized
-server: state lives in a local SQLite store and append-only journals, shared
-truth lives in Linear and GitHub, and remote machines are reached over plain
-SSH.
-
-## The Model
-
-| Atom | What it does | Where it lives |
-|------|--------------|----------------|
-| **Skill** | Runs a prompt with assembled context | `.lf/skills/*.md` |
-| **Flow** | Chains skills together | `.lf/flows/*.yaml` |
-| **Wave** | Durable operating context with memory, cadence, chat, and project selection | `wave/<name>/` |
-| **Goal** | A wave's intent and loop prompt | `wave/<name>/GOAL.md` |
-| **Memory** | What a wave remembers between loops | `wave/<name>/MEMORY.md` |
-| **Project** | Measured bet inside exactly one wave | Linear, via `lf pm` |
-| **Task** | Concrete work that advances a project; owns the only delivery worktree | Linear, via `lf pm` |
-| **Direction** | Shapes judgment and intent | `.lf/directions/*.md` |
-| **Home** | Stable execution authority; its route may move without changing identity | local SQLite |
-
-A wave is a named agent with a goal. Goal, memory, and crons are authored in
-the repo and reviewed like code. Execution placement lives in the local
-durable store. Projects and Tasks live in Linear. Only Task Work owns a
-worktree; that is where every file change happens.
-
-## Try it
+Run one useful prompt first:
 
 ```bash
 curl -fsSL https://github.com/loopflowstudio/loopflow/releases/latest/download/install.sh | sh
@@ -38,19 +8,45 @@ lf init
 lf debug -c        # copy an error to the clipboard, watch it fix
 ```
 
-Then author a Wave and let it run. **Loopflow** (macOS) is the home for
-running waves — open the repository and start it there — or start it from the
-CLI:
+That command assembles the skill, repository guidance, scratch notes, and
+clipboard into one prompt. It launches the configured provider and writes one
+Home-local Run record. The Run records what happened; it does not reserve the
+repository, control a Wave, or become planning state.
+
+The same building block runs **Waves**: persistent agents that coordinate
+Linear-backed Projects and Tasks, remember what they learn, and stay steerable.
+There is no Loopflow server at the center. Repo files hold authored behavior;
+Linear and GitHub hold shared coordination and delivery facts; each Home keeps
+its local execution records. `lf ssh` runs the same local commands on another
+Home.
+
+## Build outward
+
+| Add this | When you need it | Truth lives in |
+|---|---|---|
+| **Skill** | One repeatable agent action | `.lf/skills/*.md` |
+| **Flow** | Several bounded actions in order | `.lf/flows/*.yaml` |
+| **Wave** | A durable goal, memory, cadence, and project selection | `wave/<name>/` plus local placement |
+| **Project** | A measured bet with KRs | Linear |
+| **Task** | One concrete change in its own worktree | Linear, Git, and GitHub |
+| **Run** | Evidence from one harness launch | `$LF_HOME/runs/` on the executing Home |
+
+Each layer owns one kind of fact. None needs a universal current execution
+record to coordinate the others.
+
+Start a Wave after authoring `wave/engbot/GOAL.md`:
 
 ```bash
-# author wave/engbot/GOAL.md, then:
-lf start engbot           # idempotently start the Wave on this machine
+lf start engbot
 lf chat --steer "ship the parser fix first"
-lf status engbot          # its live Project → Task hierarchy
+lf status engbot
 lf stop engbot
 ```
 
-## The Journey
+**Loopflow** (macOS) presents the same conversation and work map. It is a
+client of the same local `lf --json` reads, not another source of truth.
+
+## Read by area
 
 | Where you are | What to read |
 |---|---|
@@ -59,10 +55,9 @@ lf stop engbot
 | Writing skills, flows, and goals | [Authoring](authoring.md) |
 | Writing an agent that drives other agents | [The Agent API](agent-api.md) |
 | Watching and steering many agents | [Conducting](conducting.md) |
-| Understanding how it works without a central server | [Architecture](architecture.md) |
 | Looking up a command | [`lf` reference](lf.md) |
 
-## Skills, flows, directions
+## Shape one run
 
 A skill is a markdown file that tells the coding agent what to do:
 
@@ -101,9 +96,9 @@ lf gate --direction ux,clarity    # stack intents
 ```
 
 Built-ins cover the common ground: `debug`, `design`, `implement`, `compress`,
-`gate`, `qa`, the `build` flow, and more. Repo skills in `.lf/skills/`
-override and extend them. [Authoring](authoring.md) covers writing each of
-these well.
+`gate`, `qa`, the `build` flow, and more. Repo skills in `.lf/skills/` override
+and extend them. [Authoring](authoring.md) starts with a working skill and then
+adds flow and goal structure only where it earns its place.
 
 ## Context
 
@@ -133,6 +128,7 @@ Do not take the first N commits and call that the history.
 scratch/                  # PR scratchpad (cleared on merge)
 wave/                     # Wave goals and memory (persists)
 ~/.lf/                    # Global config, skills, and the local store
+  runs/                   # Home-local append-only launch evidence
 ```
 
 `scratch/` dies with the PR; `wave/` lives forever. Design docs go in
@@ -140,12 +136,12 @@ wave/                     # Wave goals and memory (persists)
 
 ## For agents
 
-Every page here is raw markdown: append `.md` to the URL
-(`/docs/waves.md`) or request the canonical URL with `Accept: text/markdown`.
-The curated index is [/llms.txt](/llms.txt); the complete corpus in one file
-is [/llms-full.txt](/llms-full.txt). Inside a loopflow-launched run you
-already carry the operating contract (`LOOPFLOW.md`) — these pages are the
-long form.
+Every human docs URL serves HTML. The reviewed Markdown source remains
+available to agents: append `.md` to the URL (`/docs/waves.md`) or request the
+canonical URL with `Accept: text/markdown`. The curated index is
+[/llms.txt](/llms.txt); the complete corpus in one file is
+[/llms-full.txt](/llms-full.txt). Inside a Loopflow-launched Run you already
+carry the operating contract (`LOOPFLOW.md`) — these pages are the long form.
 
 ## Next
 
@@ -153,4 +149,4 @@ long form.
 
 ## Reference
 
-[`lf` commands](lf.md) · [Authoring](authoring.md) · [Configuration](config.md) · [Subscriptions](subscriptions.md) · [Security](security.md) · [Architecture](architecture.md) · [Troubleshooting](troubleshooting.md)
+[`lf` commands](lf.md) · [Authoring](authoring.md) · [Configuration](config.md) · [Subscriptions](subscriptions.md) · [Security](security.md) · [Troubleshooting](troubleshooting.md)

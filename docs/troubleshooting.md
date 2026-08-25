@@ -19,8 +19,8 @@ lf start <wave>            # idempotently start the Wave on this machine
 
 ## Task Work stops advancing
 
-**Symptom:** A Task remains waiting, blocked, failed, or submitted without an
-obvious next action.
+**Symptom:** A Task is still `ready`, but no useful work is advancing or its
+provider process stopped.
 
 Read its durable state before restarting anything:
 
@@ -35,16 +35,17 @@ Steer, or resume a stopped process through the same Task Work:
 ```bash
 lf ask open ask_...
 lf task steer INF-123 "address the latest feedback"
-lf task interrupt INF-123
 lf task resume INF-123
 lf task resume INF-123 --model codex --reason "Claude quota exhausted"
 ```
 
 Plain `resume` continues the same provider transcript. `--model` keeps the Task
-Work, Steers, worktree, and active PR, but gives the next Invocation to the selected
-agent. It refuses while another executor is still writing; interrupt that
-boundary first. A Steer is durable before live delivery is attempted. Provider
-acceptance is not incorporation; the Basis of a later successful boundary is.
+Work, Steers, worktree, and active PR, but gives the next attempt to the selected
+agent. It refuses while another executor is still writing. There is currently
+no supported cross-process CLI for immediate Task cancellation; wait for the
+writer to stop, then resume. A Task Steer is durable input for the next
+controller boundary; it is not a live provider message or proof that the agent
+applied it.
 
 During new-Task placement, status reports the declared worktree as initializing.
 If creation does not finish, status keeps the Task identity and names the exact
@@ -102,13 +103,15 @@ lf rebase
 The feature branch uses the current remote base even when the sibling default
 checkout has not moved.
 
-## Project or Task is waiting
+## Status says `ready`, but attention is elsewhere
 
-**Symptom:** Loopflow shows a Project or Task Work in `waiting`.
+**Symptom:** Project or Task Work is `ready`, while the roadmap says it needs
+attention or is waiting on a child, Ask, CI, or merge.
 
-Waiting is deliberate: no provider process is running while a child or external
-system must change the answer. Inspect the Wave's work map and the child's
-state reason:
+Work status is deliberately small: `ready`, `done`, or `abandoned`. Process
+liveness, pending Ask, child progress, CI, and merge state are separate facts.
+Inspect the focused projection instead of inferring a control state from one
+field:
 
 ```bash
 lf status <wave> --json
@@ -116,11 +119,8 @@ lf project status <project-id> --json
 lf task status INF-123 --json
 ```
 
-Typical owners are an unanswered Ask, an active child Task, CI, or an
-explicitly requested merge. Steer, decide, or resume the named Project or Task.
-Task lifecycle observations wake Project Work when their typed route allows it.
-`lf ask` wakes a stopped parent before waiting. There is no PR-limit counter to
-clear.
+Resolve the named fact: answer the Ask, inspect the child, repair CI, merge, or
+resume the provider. There is no Run slot or PR-limit counter to clear.
 
 ## Context too large
 

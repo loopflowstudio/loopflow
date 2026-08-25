@@ -5,9 +5,6 @@ struct WorkActivityView: View {
     @Bindable var model: PodiumModel
 
     @Environment(\.palette) private var palette
-    @State private var openingInvocationId: String?
-    @State private var traceError: String?
-    @State private var traceRequest: TraceAddress?
     @State private var isSettingTurnIntent = false
     @State private var turnIntentError: String?
 
@@ -17,9 +14,6 @@ struct WorkActivityView: View {
             Divider()
             if let reason = model.workActivity.errorMessage {
                 evidenceBanner(reason)
-            }
-            if let traceError {
-                evidenceBanner(traceError)
             }
             if let turnIntentError {
                 evidenceBanner(turnIntentError)
@@ -31,12 +25,7 @@ struct WorkActivityView: View {
         .accessibilityElement(children: .contain)
         .accessibilityIdentifier("podium-activity")
         .task(id: model.selection) {
-            traceError = nil
             await model.refreshWorkActivity()
-        }
-        .sheet(item: $traceRequest) { address in
-            TraceEvidenceView(address: address)
-                .frame(minWidth: 900, minHeight: 620)
         }
     }
 
@@ -151,16 +140,7 @@ struct WorkActivityView: View {
                     .fixedSize(horizontal: false, vertical: true)
                     .textSelection(.enabled)
 
-                if let invocationId = entry.fact.invocationId {
-                    Button(openingInvocationId == invocationId ? "Opening…" : "Open trace") {
-                        Task { await openTrace(invocationId) }
-                    }
-                    .buttonStyle(.plain)
-                    .font(Typography.caption(9).weight(.semibold))
-                    .foregroundStyle(Color.loopflowBurgundy)
-                    .disabled(openingInvocationId != nil)
-                    .accessibilityIdentifier("podium-open-trace-\(invocationId)")
-                } else if let github = entry.fact.github {
+                if let github = entry.fact.github {
                     Link("Open PR #\(github.number)", destination: github.url)
                         .font(Typography.caption(9).weight(.semibold))
                         .foregroundStyle(Color.loopflowBurgundy)
@@ -224,7 +204,7 @@ struct WorkActivityView: View {
         switch fact {
         case .workCreated: ("plus", .statusNeutral)
         case .runStarted: ("play.fill", .statusInfo)
-        case .runFinished(_, _, _, let status):
+        case .runFinished(_, let status):
             (
                 "checkmark",
                 ["ok", "completed", "succeeded"].contains(status.lowercased())
@@ -260,18 +240,6 @@ struct WorkActivityView: View {
             .padding(.vertical, Spacing.sm)
             .frame(maxWidth: .infinity, alignment: .leading)
             .background(Color.statusWarning.opacity(0.10))
-    }
-
-    @MainActor
-    private func openTrace(_ invocationId: String) async {
-        openingInvocationId = invocationId
-        traceError = nil
-        defer { openingInvocationId = nil }
-        do {
-            traceRequest = try await model.traceAddress(invocationId: invocationId)
-        } catch {
-            traceError = error.localizedDescription
-        }
     }
 
     @MainActor

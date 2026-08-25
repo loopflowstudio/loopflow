@@ -3,7 +3,6 @@ pub mod ask;
 pub mod auth;
 pub mod chat;
 pub mod ci;
-pub mod context;
 pub mod desktop;
 pub mod doctor;
 #[cfg(test)]
@@ -11,7 +10,6 @@ pub(crate) mod fixtures;
 pub mod flow;
 pub mod home;
 pub mod install;
-pub mod invocation;
 pub mod list;
 pub mod ops;
 pub mod profile;

@@ -103,29 +103,39 @@ def sync_docs(args: argparse.Namespace) -> None:
     docs_dest.mkdir(exist_ok=True)
     static_dest.mkdir(exist_ok=True)
 
-    # Remove stale .md files not in source
-    source_names = {p.name for p in docs_source.glob("*.md")}
-    for existing in docs_dest.glob("*.md"):
-        if existing.name not in source_names:
+    # Preserve the source tree so relative links and nested developer guides
+    # resolve the same way in Markdown and HTML.
+    source_paths = {
+        path.relative_to(docs_source) for path in docs_source.rglob("*.md")
+    }
+    for existing in docs_dest.rglob("*.md"):
+        if existing.relative_to(docs_dest) not in source_paths:
             existing.unlink()
-            print(f"  ✗ docs/{existing.name} (removed)")
+            print(f"  ✗ docs/{existing.relative_to(docs_dest)} (removed)")
 
     synced = []
 
     # Copy .md files with URL rewrites
-    for src in docs_source.glob("*.md"):
+    for src in docs_source.rglob("*.md"):
         text = src.read_text()
         for old, new in INSTALL_REWRITES:
             text = text.replace(old, new)
-        dest = docs_dest / src.name
+        relative = src.relative_to(docs_source)
+        dest = docs_dest / relative
+        dest.parent.mkdir(parents=True, exist_ok=True)
         dest.write_text(text)
-        synced.append(f"docs/{src.name}")
+        synced.append(f"docs/{relative}")
 
     # Copy images/gifs to static/
     for pattern in ["*.png", "*.gif"]:
-        for src in docs_source.glob(pattern):
-            shutil.copy2(src, static_dest / src.name)
-            synced.append(f"static/{src.name}")
+        for src in docs_source.rglob(pattern):
+            relative = src.relative_to(docs_source)
+            if relative.parts[0] == "reviews":
+                continue
+            dest = static_dest / relative
+            dest.parent.mkdir(parents=True, exist_ok=True)
+            shutil.copy2(src, dest)
+            synced.append(f"static/{relative}")
 
     print(f"Synced {len(synced)} files from {docs_source}")
     for name in sorted(synced):

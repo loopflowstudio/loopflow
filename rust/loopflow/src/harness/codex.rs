@@ -29,7 +29,6 @@ use tokio::task::JoinHandle;
 use crate::chat::types::{ConversationEvent, ConversationItem, TurnUsage};
 use crate::engine::agent::{
     build_codex_thread_start_params, system_prompt_with_structured_replies, AgentConfig,
-    PreparedAgentInvocation,
 };
 use crate::harness::codex_mapping::ItemPhase;
 use crate::harness::common::spawn_stderr_logger;
@@ -572,7 +571,6 @@ pub struct CodexHarness {
     /// matching response for the vendor thread id. 0 = none pending.
     thread_start_request_id: Arc<AtomicI64>,
     launch: Option<AgentConfig>,
-    prepared_launch: Option<PreparedAgentInvocation>,
     should_seed_prompt: bool,
     /// Pid of the live child's process group; 0 = none. Read by the interrupt
     /// hook so SIGINT/SIGTERM/SIGHUP kill the whole codex group before the
@@ -613,7 +611,6 @@ impl CodexHarness {
             initialize_request_id: Arc::new(AtomicI64::new(0)),
             thread_start_request_id: Arc::new(AtomicI64::new(0)),
             launch: None,
-            prepared_launch: None,
             should_seed_prompt: true,
             child_group: Arc::new(AtomicU32::new(0)),
             interrupt_hook_registered: false,
@@ -744,7 +741,6 @@ impl Harness for CodexHarness {
             return Ok(());
         }
         self.shutdown_requested.store(false, Ordering::Relaxed);
-        self.prepared_launch = None;
         self.launch = Some(config.clone());
         self.should_seed_prompt = true;
         let requested_session = self.resume_provider_session_id.clone();
@@ -773,33 +769,6 @@ impl Harness for CodexHarness {
         if let Err(err) = start_result {
             let _ = self.stop().await;
             return Err(err);
-        }
-        Ok(())
-    }
-
-    async fn start_prepared(&mut self, prepared: &PreparedAgentInvocation) -> Result<()> {
-        if self.child.is_some() {
-            return Ok(());
-        }
-        self.shutdown_requested.store(false, Ordering::Relaxed);
-        self.launch = Some(prepared.agent_config().clone());
-        self.prepared_launch = Some(prepared.clone());
-        self.should_seed_prompt = true;
-        self.resume_provider_session_id = None;
-        self.account_route = Some(prepared.account_route().clone());
-        *self
-            .provider_session_id
-            .lock()
-            .expect("codex provider session id lock poisoned") = None;
-        *self
-            .current_turn_id
-            .lock()
-            .expect("codex turn id lock poisoned") = None;
-
-        let start_result = self.start_inner(prepared.agent_config()).await;
-        if let Err(error) = start_result {
-            let _ = self.stop().await;
-            return Err(error);
         }
         Ok(())
     }
@@ -962,28 +931,18 @@ impl Harness for CodexHarness {
 
 impl CodexHarness {
     async fn start_inner(&mut self, launch: &AgentConfig) -> Result<()> {
-        let mut command = match &self.prepared_launch {
-            Some(prepared) => {
-                let mut command = Command::new(prepared.executable());
-                command.args(&prepared.argv()[1..]);
-                command
-            }
-            None => {
-                let mut command = Command::new("codex");
-                if self
-                    .account_route
-                    .as_ref()
-                    .is_some_and(ProviderAccountRoute::uses_native_home)
-                {
-                    command.args(["-c", "cli_auth_credentials_store=\"file\""]);
-                }
-                // Subcommand, not flag: codex-cli >= 0.142 renamed
-                // `--app-server` to `codex app-server` (verified against 0.142.5).
-                command.arg("app-server");
-                command
-            }
-        };
+        let mut command = Command::new("codex");
+        if self
+            .account_route
+            .as_ref()
+            .is_some_and(ProviderAccountRoute::uses_native_home)
+        {
+            command.args(["-c", "cli_auth_credentials_store=\"file\""]);
+        }
         command
+            // Subcommand, not flag: codex-cli >= 0.142 renamed `--app-server`
+            // to `codex app-server` (verified against 0.142.5).
+            .arg("app-server")
             .stdin(std::process::Stdio::piped())
             .stdout(std::process::Stdio::piped())
             .stderr(std::process::Stdio::piped())
@@ -991,24 +950,6 @@ impl CodexHarness {
             // must not leak a live app-server.
             .kill_on_drop(true);
         super::configure_agent_env(&mut command, launch);
-        if let Some(prepared) = &self.prepared_launch {
-            for name in [
-                "PATH",
-                "SHELL",
-                "LANG",
-                "LC_ALL",
-                "LC_CTYPE",
-                "TERM",
-                "COLORTERM",
-                "NO_COLOR",
-                "TZ",
-                "CODEX_HOME",
-                "CLAUDE_CONFIG_DIR",
-            ] {
-                command.env_remove(name);
-            }
-            command.envs(prepared.environment_selectors());
-        }
         if let Some(cwd) = &launch.cwd {
             command.current_dir(cwd);
         }
@@ -1021,7 +962,6 @@ impl CodexHarness {
         #[cfg(unix)]
         command.process_group(0);
         super::configure_vendor_tokio_env(&mut command)?;
-        super::configure_agent_run_context(&mut command, launch.run_context);
         let mut child = command
             .spawn()
             .map_err(|err| anyhow!("failed to spawn codex app-server: {err}"))?;
@@ -1298,17 +1238,8 @@ impl CodexHarness {
             .map_err(|_| anyhow!("codex initialize channel closed"))?;
         self.send_notification("initialized").await?;
 
-        let (thread_method, thread_params) = match &self.prepared_launch {
-            Some(prepared) => {
-                let (method, params) = prepared.thread_request();
-                (method.to_string(), params.clone())
-            }
-            None => {
-                let (method, params) =
-                    build_thread_request(launch, self.resume_provider_session_id.as_deref());
-                (method.to_string(), params)
-            }
-        };
+        let (thread_method, thread_params) =
+            build_thread_request(launch, self.resume_provider_session_id.as_deref());
         // The thread params include Loopflow's conservative defaults only when
         // Codex config is missing or less permissive. More permissive user or
         // repo config, such as danger-full-access, is left alone.
@@ -1317,7 +1248,7 @@ impl CodexHarness {
         let request_id = self.next_request_id;
         self.thread_start_request_id
             .store(request_id, Ordering::Relaxed);
-        self.send_request(&thread_method, Value::Object(thread_params))
+        self.send_request(thread_method, Value::Object(thread_params))
             .await?;
 
         // The vendor thread id arrives either in the thread/start response or

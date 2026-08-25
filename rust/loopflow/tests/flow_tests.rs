@@ -6,7 +6,6 @@ use std::process::Command;
 
 use loopflow::engine::flow::{ConcreteStep, Skill, SkillStep, Step};
 use loopflow::engine::{expand_flow, load_flow};
-use loopflow::store::sqlite::SqliteStore;
 use support::codex_app_server_script;
 use tempfile::TempDir;
 
@@ -129,7 +128,7 @@ fn flow_parsing_parity() {
 }
 
 #[test]
-fn code_flow_records_each_agent_invocation_in_one_trace() {
+fn code_flow_records_each_skill_as_one_generic_run() {
     let repo = TempDir::new().unwrap();
     run_git(repo.path(), &["init", "-b", "main"]);
     run_git(repo.path(), &["config", "user.email", "test@example.com"]);
@@ -163,89 +162,20 @@ fn code_flow_records_each_agent_invocation_in_one_trace() {
         String::from_utf8_lossy(&output.stderr)
     );
 
-    let store = SqliteStore::new(&home.path().join("loopflow.db")).unwrap();
-    let events = store.list_run_events_since(0).unwrap();
-    let run_id = events
-        .iter()
-        .find(|event| event.node == "run" && event.event == "started")
-        .map(|event| event.run_id.as_str())
-        .expect("flow run event");
-    let invocations = store.agent_invocations_matching(run_id).unwrap();
-
-    assert_eq!(invocations.len(), 2);
-    assert!(invocations
-        .iter()
-        .all(|invocation| invocation.run_id == run_id));
-    assert!(invocations
-        .iter()
-        .all(|invocation| invocation.process_id == invocations[0].process_id));
-    assert!(invocations
-        .iter()
-        .all(|invocation| invocation.capture_status == "complete"));
-    assert_eq!(
-        invocations
-            .iter()
-            .map(|invocation| invocation.skill.as_deref().unwrap())
-            .collect::<Vec<_>>(),
-        ["implement", "compress"]
-    );
-    assert_eq!(
-        invocations
-            .iter()
-            .map(|invocation| invocation.id.as_str())
-            .collect::<std::collections::HashSet<_>>()
-            .len(),
-        2
-    );
-    assert_eq!(
-        store
-            .agent_turns_for_invocations(
-                &invocations
-                    .iter()
-                    .map(|invocation| invocation.id.clone())
-                    .collect::<Vec<_>>(),
-            )
-            .unwrap()
-            .len(),
-        2
-    );
-
-    let trace = run_lf(
-        repo.path(),
-        home.path(),
-        &["trace", &invocations[0].process_id, "--json"],
-        None,
-    );
+    let output = run_lf(repo.path(), home.path(), &["runs", "--json"], None);
     assert!(
-        trace.status.success(),
-        "lf trace failed: {}",
-        String::from_utf8_lossy(&trace.stderr)
+        output.status.success(),
+        "lf runs failed: {}",
+        String::from_utf8_lossy(&output.stderr)
     );
-    let trace: serde_json::Value = serde_json::from_slice(&trace.stdout).unwrap();
-    assert_eq!(
-        trace["invocations"]
-            .as_array()
-            .unwrap()
-            .iter()
-            .map(|invocation| invocation["skill"].as_str().unwrap())
-            .collect::<Vec<_>>(),
-        ["implement", "compress"]
-    );
-
-    let doctor = run_lf(repo.path(), home.path(), &["doctor", "--json"], None);
-    assert!(
-        doctor.status.success(),
-        "lf doctor failed: {}",
-        String::from_utf8_lossy(&doctor.stderr)
-    );
-    let doctor: serde_json::Value = serde_json::from_slice(&doctor.stdout).unwrap();
-    let capture = doctor["checks"]
-        .as_array()
-        .unwrap()
+    let runs: Vec<serde_json::Value> = serde_json::from_slice(&output.stdout).unwrap();
+    let mut skills = runs
         .iter()
-        .find(|check| check["name"] == "capture")
-        .expect("capture check");
-    assert_eq!(capture["status"], "ok");
+        .filter_map(|run| run["skill"].as_str())
+        .collect::<Vec<_>>();
+    skills.sort_unstable();
+    assert_eq!(skills, ["compress", "implement"]);
+    assert!(runs.iter().all(|run| run["outcome"] == "completed"));
 }
 
 #[test]

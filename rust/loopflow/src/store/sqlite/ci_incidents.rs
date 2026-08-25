@@ -259,19 +259,11 @@ impl super::SqliteStore {
                 ci.merged_at, ci.blocked_at, ci.blocked_reason, ci.created_at,
                 ci.updated_at, ci.repaired_head_sha,
                 w.name, ts.issue_identifier,
-                CASE
-                    WHEN e.state='done' THEN 'done'
-                    WHEN e.state='abandoned' THEN 'abandoned'
-                    WHEN EXISTS (SELECT 1 FROM runs r WHERE r.epoch_id=e.id AND r.state != 'ended') THEN 'running'
-                    WHEN EXISTS (SELECT 1 FROM waits wait WHERE wait.epoch_id=e.id AND wait.resolved_at IS NULL) THEN 'waiting'
-                    WHEN e.id IS NOT NULL THEN 'ready'
-                    ELSE NULL
-                END,
+                ts.work_state,
                 ts.created_at,
                 EXISTS (
                     SELECT 1 FROM steers s
-                    JOIN epochs steer_epoch ON steer_epoch.id=s.epoch_id
-                    WHERE steer_epoch.task_id=ci.task_id
+                    WHERE s.work_kind='task' AND s.work_id=ci.task_id
                       AND s.author_kind='user'
                       AND s.issued_at * 1000000000 >= CASE
                           WHEN ci.poll_observed_at IS NULL THEN COALESCE(ci.webhook_received_at, ci.created_at)
@@ -282,10 +274,6 @@ impl super::SqliteStore {
                 )
              FROM ci_incidents ci
              LEFT JOIN tasks ts ON ts.id=ci.task_id
-             LEFT JOIN epochs e ON e.id=(
-                 SELECT latest.id FROM epochs latest
-                 WHERE latest.task_id=ts.id ORDER BY latest.number DESC LIMIT 1
-             )
              LEFT JOIN projects p ON p.id=ts.project_id
              LEFT JOIN waves w ON w.id=p.wave_id
              WHERE COALESCE(ci.provider_completed_at, ci.poll_observed_at,

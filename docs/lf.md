@@ -1,15 +1,16 @@
 # lf Command Reference
 
-One binary, three audiences. `lf` launches prompts for humans, gives agents
-the verbs to run and steer other agents, and reads the local ledger for
-whoever is watching. The map:
+One binary, three audiences. `lf` launches prompts for humans, gives agents the
+verbs to run and steer other agents, and reads the executing Home's planning,
+process, journal, and Run evidence. Prefix a command with `lf ssh <home-id>` to
+run the same local operation on another Home.
 
 | You are | Start with | Deep dive |
 |---|---|---|
 | A human running prompts | [Basic Usage](#basic-usage), [Context Flags](#context-flags) | [Get Started](getting-started.md) |
 | A human operating waves | [Running Waves, Projects, and Tasks](#running-waves-projects-and-tasks), [Speaking to Waves](#speaking-to-waves) | [Waves](waves.md) |
 | An agent driving other agents | [Running Waves, Projects, and Tasks](#running-waves-projects-and-tasks) | [The Agent API](agent-api.md) |
-| Watching the whole machine | [Reading the Local Ledger](#reading-the-local-ledger) | [Conducting](conducting.md) |
+| Watching the whole machine | [Reading This Home](#reading-this-home) | [Conducting](conducting.md) |
 
 Every read surface takes `--json`; that JSON is the same wire the Mac app
 renders.
@@ -195,16 +196,11 @@ level stays there. Put `--` before literal arguments that look like flags.
 
 ## Run Mode Flags
 
-```bash
-lf --batch --replay-safe -m codex:gpt-5.6 : "Return exactly: replay contract ready"
-```
-
 | Flag | Description |
 |------|-------------|
 | `-i, --interactive` | Run interactively (can interrupt, redirect) |
 | `-b, --batch` | Run in batch/headless mode |
-| `--replay-safe` | Record a strict detached native-Codex execution contract before launch; requires an explicit `codex:<model>` and clean worktree |
-| `--max-turns N` | Cap agent turns for this invocation |
+| `--max-turns N` | Cap agent turns for this launch |
 
 ## Model Flags
 
@@ -298,12 +294,12 @@ lf ask list --outgoing                                # this Work's unresolved r
 lf ask list --user --json                             # User attention projection
 lf ask open ask_...                                   # sibling Ask terminal
 lf task steer DES-123 "rename the flag"
-lf task interrupt DES-123                            # no replacement direction
 lf task steer DES-123 "take the smaller approach"
 lf task wait DES-123
 lf task resume DES-123 --model codex --reason "Claude quota exhausted"
 lf project resume <linear-project-id> --model codex
 lf work status task task_... --json                  # stable Work projection
+lf work interrupt task task_...                      # refuses without exact process ownership
 lf work place wave wave_... home_...                 # move idle Wave Work to a Home
 lf work relocate wave wave_... --name platform       # rename a stopped Wave
 lf work relocate wave wave_... --repo ../moved-repo  # repair or move its repository
@@ -324,10 +320,11 @@ Each Project phase refreshes Linear before it starts. Definition, Task-flow, and
 KR edits take effect together on the next phase without replacing the Project
 Work or its direction; an unavailable or invalid plan stops before another
 provider turn and status prints the restart reason.
-Each Linear Project has at most one current Work; terminal Work remains readable
-history and the next pursuit creates a successor. Every Task requires the
-current Project Work; `task start/run` ensures it before reserving the Task.
-The Task starts only after its Linear issue exists and owns one stable worktree.
+Project and Task Work have stable identities and small state:
+`ready`, `done`, or `abandoned`. Process liveness, pending attention, PR state,
+and Run evidence stay separate. `task start/run` ensures the Project planning
+record, then starts the Task only after its Linear issue exists. The Task owns
+one stable worktree.
 Its provider process and transcript are replaceable execution state: plain
 `resume` keeps compatible history; `resume --model <agent>` preserves the same
 Work, durable Steers, worktree, and PR chain while selecting another provider.
@@ -335,10 +332,12 @@ The Task remains resumable through serial PRs, review, and explicit
 completion.
 Wave names are repository-scoped. Relocation requires the UUID because the
 repository and name may both change; it preserves authored Wave files, journal,
-PM binding, Work/Run history, and Home placement. It refuses live Wave,
-Project, or Task Runs and never keeps an old-name alias. UUID-addressed `lf
-work` reads and mutations also verify that the selected Work belongs to the
-invoking repository; a UUID from another repository is not a capability.
+PM binding, Work state, and Home placement. Home-local Run records remain on
+the Home that recorded them and are never rewritten as control state.
+Relocation refuses live Wave, Project, or Task processes and never keeps an
+old-name alias. UUID-addressed `lf work` reads and mutations also verify that
+the selected Work belongs to the invoking repository; a UUID from another
+repository is not a capability.
 
 Every Task runs `first → loop N → finally`. Its Project supplies those three
 flows; Task launch pins their resolved names. `--first`, `--loop`, and
@@ -356,14 +355,12 @@ anchors whenever it publishes, refreshes, submits, or lands a serial PR. If the
 cached PM snapshot has no provider URL, run `lf pm sync --wave <wave>` before
 publishing.
 
-Task launch also resolves the exact execution boundary the lifecycle needs:
-the linked worktree's shared Git metadata, Loopflow's pinned control store, and
-network access for delivery. Headless Tasks require a managed Codex or Claude
-account with usable credentials. Loopflow probes the linked Git and control
-roots before reserving a Run, then launches the provider inside the trusted
-managed delivery boundary with unrestricted network and filesystem access. A
-supervised Task establishes its active Turn record before provider work begins,
-so `lf ask` always has durable authority while that Turn is live.
+Task launch also resolves the execution boundary the work needs: the assigned
+worktree, Loopflow's pinned planning store, and network access for delivery.
+Headless Tasks require a managed Codex or Claude account with usable
+credentials. The generic harness publishes one Home-local Run manifest before
+the provider starts; the bundle records the launch but does not reserve Task
+Work or grant mutation authority.
 
 If a provider returns normally after a permission, control-authority, or
 network command failure, Loopflow records the exact command blocker as a
@@ -372,21 +369,20 @@ non-resumable Task failure. Status assigns the next move to the User with
 replace or repeat it. Correct the capability, then run
 `lf task resume ID --reason "<what changed>"` to create a fresh input boundary.
 
-A worktree writer is authoritative only while its exact Run, Turn, and optional
-Ask are live. Commit, rebase, and land refuse a genuinely concurrent writer but
-atomically reclaim a writer whose durable owner is terminal, absent, or
-superseded. A surviving unclaimed provider PID has no mutation authority and
-cannot block settlement; its revoked writer token prevents later writes.
+Worktree safety comes from short OS-held mutation locks and prepared Git state,
+not Run identity. Commit, rebase, and land serialize their exact critical
+sections and refuse a conflicting prepared state. A surviving unclaimed
+provider PID has no mutation or signal authority.
 
 A skill that needs judgment runs
 `lf ask "<intervention>"`; the Ask routes to the
-immediate parent Run. `--user` is explicit and never inferred for root Work.
+immediate parent Work. `--user` is explicit and never inferred for root Work.
 The ordinary command prints its id and request, then blocks without ending the
-provider invocation. `--noblock` returns an id and `lf ask wait` joins it
+provider process. `--noblock` returns an id and `lf ask wait` joins it
 later. Bare `wait` selects the newest unresolved Ask from the ambient
-Invocation, then Run, then Work; pass an id when the choice must be exact.
+Run, then Work; pass an id when the choice must be exact.
 
-An intervention Ask does not move Work Basis or advance a flow. A human flow
+An intervention Ask does not change Work state or advance a flow. A human flow
 node uses a `FlowStep` Ask as its authored body: resolve advances that node,
 decline returns to the preceding autonomous step, and release or process exit
 keeps it parked. `lf task steer` and `lf project steer` remain unsolicited
@@ -402,29 +398,28 @@ lf ask wait [ask_...]                            # join newest outgoing or exact
 lf ask list [--user] [--outgoing] [--json]       # attention or outgoing requests
 lf ask open ask_... [--json]                     # open or reattach a sibling session
 lf ask open ask_... --prepare --json             # return its exact attach descriptor
-lf ask presented ask_... invocation_... --json   # confirm that exact presentation
-lf ask resolve ask_... "Verified summary" [--json] # explicit success from its Invocation
+lf ask presented ask_... run_... --json          # confirm that exact presentation
+lf ask resolve ask_... "Verified summary" [--json] # explicit success from its Run
 lf ask decline ask_... "Unsafe request" [--json] # explicit refusal
 lf ask release ask_... "Unfinished" [--json]     # close this attempt and requeue
 lf ask escalate ask_... --user [--json]          # transfer one parent Ask
 lf ask cancel ask_... "Withdrawn" [--json]       # requester/User cancellation
 ```
 
-Ask Invocations start in the origin Run's captured cwd. An intervention
-Invocation receives no Run context; a human flow-step Invocation also receives
-the active step's Run id so it runs the actual authored skill.
-The explicit id selects the Ask; the ambient AgentInvocation id authorizes the
-mutation and must be that Ask's active Invocation. A clean exit, Ctrl-D,
+Ask sessions start in the requesting Work's captured cwd. The explicit id
+selects the Ask; the answering harness's generic Run id scopes claim and
+settlement to that Ask only. It grants no general Work or process authority. A
+clean exit, Ctrl-D,
 exiting Ctrl-C, TERM, HUP, or proven local
 disappearance never means success; it requeues the same Ask. Unreachable remote
 liveness stays claimed rather than expiring on time. If the configured external
 terminal fails to open, the attachable attempt remains `not-presented`; repeat
-`open` to present that exact Invocation.
+`open` to present that exact Run.
 
 Loopflow.app uses the same two-part presentation boundary: `open --prepare`
 claims or recovers the Ask session without launching a terminal, then `presented`
 records success only after Ghostty or an external target attaches the exact
-returned Invocation. A failed venue launch leaves the Ask `not-presented`.
+returned Run. A failed venue launch leaves the Ask `not-presented`.
 
 `--stack-on` places a new Task worktree on another Task's published PR. Its PR
 targets that parent branch automatically, then collapses onto `main` after the
@@ -473,27 +468,6 @@ target prove that identity. The remote `lf` is implicit, so everything after
 the target is normal `lf` syntax. Foreground commands can use origin and target
 accounts; durable processes scrub forwarded authority before detaching.
 
-## Presenting an Opaque AgentInvocation
-
-```bash
-lf invocation list --active --json
-lf invocation status invocation_... --json
-lf invocation present invocation_...                 # exec the tmux/provider attach route
-lf invocation handback invocation_... --outcome succeeded
-```
-
-`present` is the generic presentation adapter for an opaque TUI Invocation: it
-executes that Invocation's attach route but does not create an Ask or become
-its identity. The descriptor carries the supervising Run and its stable Work,
-Wave, Home, cwd, and containment alongside provider trace, explicit
-handback evidence, and optional attach argv.
-
-Closing the app or terminal does not supply handback evidence. Record the
-observed boundary result with `handback --outcome
-succeeded|failed|interrupted|unknown`; process exit alone does not claim
-success. Invocation handback describes opaque surfaces only; it never advances
-a Task flow. Human Task nodes use the durable Ask contract above.
-
 ## Speaking to Waves
 
 The **thread** is the human surface: durable, replayed, and owned by a running
@@ -526,7 +500,7 @@ Waves sharing `main`.
 | `--history --json` | Read the selected Wave's durable local thread without requiring a listener (`lf chat`) |
 | `--limit N` | Bound a `--history` read (default: 12) |
 
-## Reading the Local Ledger
+## Reading This Home
 
 ```bash
 lf ls --json                    # every durable Wave and its Home/runtime evidence
@@ -534,22 +508,16 @@ lf status <wave> --json         # Work, Runs, attention, and live metric_portfol
 lf roadmap --json               # current plan plus that portfolio on every Wave
 lf activity                     # durable Work changes, newest first
 lf activity --task INF-123 --json # filter before the bounded typed snapshot
-lf runs                         # one row per skill call: context, tokens, cost
+lf runs                         # recent Home-local Run records
 lf runs --project parser        # one Project's Runs, filtered before the result cap
-lf execs                        # one row per lf process
-lf trace 66863649               # select an exec or trace; render its process tree
-lf trace 66863649 --json        # inspect the same tree and its skill invocations
-lf trace 66863649 --json --content --invocation <invocation> --turn <turn>
-lf replay check <invocation> --json  # classify every replay boundary without launching
-lf context --days 30 --repo "$PWD" --project context --task W2-71 --json
-lf context --days 30 --repo "$PWD" --steered-only --current-revision-only --json
-lf usage                        # subscriptions plus provider tokens, cache, and cost
-lf usage --refresh              # poll every account's provider now
-lf usage --json                 # fixed 5s, 5m, 1h, and 24h UsageSnapshot
+lf runs run_ab12                 # inspect one Run by unambiguous prefix
+lf runs run_ab12 --events        # print its event stream verbatim
+lf replay run_ab12               # launch that request as a child Run
+lf usage --days 30              # direct provider-authored usage per Run
+lf usage --days 0 --json        # all RunSnapshot rows; zero means all time
 lf ci --since 7d                # CI repair attempts, latency, and outcomes
 lf ci --since 7d --json         # complete machine-wide incident receipt
-lf ps                            # one live call-tree snapshot, ranked by completed output
-lf ps --sort rate                # rank siblings by five-second live output
+lf ps                            # one OS-live process and call-tree snapshot
 lf ps --json                     # versioned flat nodes with stable parent ids
 lf top                           # refresh the same snapshot every two seconds on a TTY
 lf top --json                    # emit once; redirected output also emits once without ANSI
@@ -559,19 +527,24 @@ lf doctor                       # audit continuity, identity, lineage, coverage,
 lf doctor --json                # machine-readable audit
 ```
 
-`lf ls` reads the Wave registry. `lf status` focuses one Wave's operational
-truth. `lf roadmap` overlays the current Linear-backed plan without creating a
-second runtime model. `lf activity` orders durable Work creation, Run, Task PR,
-and Steer facts; it reuses `WorkRef` identity and does not read reconstructable
-Task or Project wake events.
+`lf ls` reads the local Wave registry. `lf status` focuses one Wave's local
+planning and runtime projection. `lf roadmap` overlays the current
+Linear-backed plan without creating a second runtime model. `lf activity`
+orders durable Work creation, Run, Task PR, and Steer facts; it reuses
+`WorkRef` identity and does not read reconstructable Task or Project wake
+events. `lf runs`, `lf replay`, and `lf usage` scan `$LF_HOME/runs/` directly.
+Replay uses the immutable prompt, agent/model, non-secret provider account ID,
+and tool boundary recorded before spawn; it never reconstructs those inputs
+from current planning or prompt configuration. Managed Claude/Codex replay
+resolves that account ID through the current Home's deterministic credential
+directory or an explicit forwarded lease, without opening planning SQLite.
+None of these commands silently queries or aggregates another Home.
 
 `lf ps` and `lf top` show OS-live processes only. Exact PID/start-time receipts
 attach `lf` processes to call records; exact ancestry attaches provider
-processes. Completed calls and launches disappear. The embedded `UsageSnapshot`
-uses provider receipts for 5-second, 5-minute, 1-hour, and 24-hour windows;
-unattributed Loopflow Turns count globally but never leak into a Work rollup.
-Exec rows fold their live descendants once. Missing measurements stay explicit
-and elapsed time never implies death.
+processes. Completed calls and launches disappear. Unclaimed providers remain
+separate because Loopflow has no exact authority to attach or signal them.
+Elapsed time never implies death.
 
 Both commands open the live Home ledger and ownership registry read-only. This
 also applies under `scripts/dev-lf`: source builds can inspect real activity
@@ -589,7 +562,7 @@ lf --only-account codex=manabot-eng@ review             # no fallback login
 `--account <email-prefix>` prefers each matching managed login before its
 provider's normal route. The first preferred attempt bypasses stored health;
 a missing credential continues through the healthy fallback route.
-`--only-account` restricts the invocation and its children to exactly the
+`--only-account` restricts the launch and its children to exactly the
 selected provider accounts. Both flags are repeatable and accept
 `claude=<selector>` or `codex=<selector>`. They cannot be combined.
 
@@ -603,54 +576,18 @@ route, then the default route. If neither exists, all automatic managed logins
 are eligible and Loopflow skips known cooling or limited accounts. If no
 managed login exists, the provider CLI uses its ambient default credentials.
 
-`lf usage` leads with each managed account's subscription state — provider-
-reported plan, session and weekly windows as percent *used*, reset times —
-from stored observations (harness streams report them mid-run) topped up by a
-live poll when older than 15 minutes. `--refresh` polls everything now;
-`--cached` skips polling. A revoked credential shows the fix
-(`lf auth connect <provider> <email>`), not a blank. The table below it keeps
-provider input, cache reads, cache writes, inclusive output, reasoning, and cost
-separate. Reasoning is already included in output and is never added twice.
+`lf usage` scans the same Home-local bundles as `lf runs`, ordered newest first.
+`--days` filters by Run start time and defaults to 30; zero selects all recorded
+Runs. JSON is the direct `RunSnapshot` array. Each row preserves provider-authored
+cumulative counters once per usage stream. Omitted counters stay unknown,
+provider final receipts are counted explicitly, and evidence gaps remain visible.
+Run settlement never invents provider finality.
 
-Under forwarded account authority, subscription polling is unavailable so the
-remote account store is never consulted. `lf usage` still prints provider usage
-from the local execution ledger.
-
-The repository's `telemetry-daily` operator flow combines the same accepted
-per-Turn evidence with pre-land records under the Git common directory. Its
-scorecard generator is deterministic internal code, not a general-user `lf`
-API. Missing provider usage never becomes zero; an explicit provider-reported
-zero remains a measured sample. Versioned policy lives in
-`performance/budgets.json`, while generated reports remain runtime evidence.
-The same run publishes the Product Project's exact-window Task-loop trust
-observation through the typed metric writer. Before the metric-storage draft is
-released, the scorecard still runs and names that persistence is pending.
-
-A run is one agent-backed skill invocation. It owns the context, model, token,
-cost, and outcome evidence. An exec is one `lf` process; nested execs share a
-trace. `lf trace` accepts an exec or trace id and leaves killed processes open instead
-of hiding them. `lf context` aggregates one filtered Invocation set without opening
-bodies. Its Project and Task filters use captured control identity rather than
-inferring ownership from a worktree path. The research-state flags require an
-observed steer or a launch containing a current resolvable file-backed instruction
-revision; missing revision identity does not match the current-only filter.
-`lf trace --content` is the explicit
-reader for the exact prompt and normalized conversation at one immutable
-run/invocation/turn address.
-
-`--replay-safe` freezes native Codex model, account, runtime, clean commit,
-permissions, prompts, and environment selectors before provider launch. It
-disables sandbox network, web search, Apps, and configured MCP servers, and
-disables notifications. Lifecycle hooks are refused. A complete capture
-publishes the final replay index; partial or interrupted capture does not.
-
-`lf replay check` accepts a full AgentInvocation id or one literal,
-unambiguous prefix from `lf runs`. It reads the whole selected Home ledger,
-the indexed immutable contract, local trace artifacts, provider runtime
-identities, and the recorded repository commit. It never launches a provider
-or fills a missing field from current configuration. A refusal prints every
-deterministic reason it can establish and exits 1; `reasons[].code` from
-`--json` is the stable API.
+A Run is one Home-local harness bundle. Its immutable manifest names launch
+context and causal parent; append-only event and conversation streams retain
+direct evidence; an exclusive terminal receipt settles it once. Provider
+retry/failover remains inside that Run as distinct attempts and usage streams.
+No owner receipt means no process signal authority.
 
 `lf ci` reads durable CI incidents from the local Home store. One failed head is
 one attempt; later passing and merge observations close every open attempt on
@@ -660,12 +597,6 @@ that PR. `--wave` and `--repo owner/repo` filter the same local report.
 path, and the latest known and applied migrations. Those fields still print
 when the database is too new or came from a divergent development build.
 
-The `capture` check keeps partial captures and unclaimed trace artifacts visible
-as historical evidence. A loss stays red until a later complete capture starts
-a 48-hour loss-free window; after that window it reports `capture recovered`
-without rewriting the ledger or deleting traces. Any recurrence resets the
-window and reports its UTC time, owner, provider or reason, and current `.lf`
-storage context. `lf doctor` and `lf doctor --json` apply the same gate.
 ## Measuring Codebase Weight
 
 ```bash
@@ -983,7 +914,7 @@ each launchd firing through durable receipts.
 lf cron preflight --wave infrastructure
 lf cron sync --wave infrastructure
 lf cron list --wave infrastructure --json
-lf cron trigger --wave infrastructure --flow telemetry-daily --wait --timeout 15m
+lf cron trigger --wave infrastructure --flow <flow> --wait --timeout 15m
 lf cron history --wave infrastructure --days 35
 ```
 

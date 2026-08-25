@@ -212,41 +212,6 @@ async fn resolve_registry(main_repo: &Path, wave: &str) -> Option<registry::Regi
     }
 }
 
-struct WaveRunGuard(Option<(SharedStore, crate::durable::RunContext)>);
-
-impl WaveRunGuard {
-    fn as_ref(&self) -> Option<&(SharedStore, crate::durable::RunContext)> {
-        self.0.as_ref()
-    }
-
-    fn take(&mut self) -> Option<(SharedStore, crate::durable::RunContext)> {
-        self.0.take()
-    }
-}
-
-impl Drop for WaveRunGuard {
-    fn drop(&mut self) {
-        let Some((store, lease)) = self.0.take() else {
-            return;
-        };
-        let Ok(runtime) = tokio::runtime::Handle::try_current() else {
-            return;
-        };
-        runtime.spawn(async move {
-            if let Err(error) = store
-                .stop_run(
-                    &lease,
-                    crate::durable::StopCause::Requested,
-                    crate::durable::ContainmentObservation::Absent,
-                )
-                .await
-            {
-                tracing::warn!(%error, "failed to roll back Wave Run authority");
-            }
-        });
-    }
-}
-
 /// The production resident spawner: `lf __resident <wave>`, run by the
 /// current Home's `lf` binary with endpoint + token + Wave context in env.
 /// The resident's stdout/stderr inherit — one `lf wave` terminal shows both
@@ -299,7 +264,6 @@ fn resident_command(
         .env(wire::RESIDENT_TOKEN_ENV, token)
         // The resident's children must resolve `lf` to this binary.
         .env("PATH", crate::flowloop::wave::path_for_children())
-        .env_remove(crate::durable::RUN_CONTEXT_ENV)
         .env_remove(crate::durable::RUN_ID_ENV)
         .stdin(std::process::Stdio::null());
     for (key, value) in resident_env {
@@ -462,21 +426,7 @@ where
     let registered = registry_config
         .as_ref()
         .map(|config| (config.store.clone(), config.wave.id().clone()));
-    let mut wave_run = WaveRunGuard(if spawn_resident {
-        match registry_config.as_ref() {
-            Some(config) => {
-                let work = crate::durable::WorkRef::Wave(config.wave.id().clone());
-                let trigger = crate::lf::commands::install::upgrade_trigger_for_work(&work)
-                    .unwrap_or(crate::durable::RunTrigger::User);
-                let (_, lease) = config.store.reserve_run(&work, trigger).await?;
-                Some((config.store.clone(), lease))
-            }
-            None => None,
-        }
-    } else {
-        None
-    });
-    let mut resident_env = registry_config
+    let resident_env = registry_config
         .as_ref()
         .map(|config| {
             vec![(
@@ -485,18 +435,6 @@ where
             )]
         })
         .unwrap_or_default();
-    if let Some((_, lease)) = wave_run.as_ref() {
-        resident_env.extend([
-            (
-                crate::durable::RUN_CONTEXT_ENV.to_string(),
-                "agent".to_string(),
-            ),
-            (
-                crate::durable::RUN_ID_ENV.to_string(),
-                lease.run_id.to_string(),
-            ),
-        ]);
-    }
 
     // Refusals are behind us: NOW open the journal for writing and mark the
     // boot. The store-polling observer starts once the runtime exists.
@@ -573,17 +511,9 @@ where
     let cleanup_addr = own_addr.clone();
     let cleanup_token = token.clone();
     let cleanup_door = door.clone();
-    let cleanup_run = wave_run
-        .as_ref()
-        .map(|(store, lease)| (Arc::clone(store), lease.clone()));
     crate::engine::agent::register_interrupt_cleanup(move || {
         if let Some(pid) = cleanup_door.seat_pid() {
             supervisor::terminate_resident_blocking(pid);
-        }
-        if let Some((store, lease)) = cleanup_run.as_ref() {
-            if let Err(error) = store.stop_run_on_interrupt(lease) {
-                tracing::warn!(%error, "failed to release Wave Run authority on interrupt");
-            }
         }
         server::remove_endpoint(&cleanup_repo, &cleanup_wave, &cleanup_addr);
         server::remove_resident_token(&cleanup_repo, &cleanup_wave, &cleanup_token);
@@ -613,17 +543,6 @@ where
         Some(supervisor_handle),
         shutdown_door,
         discord_projection,
-        wave_run
-            .as_ref()
-            .map(|(store, context)| server::WaveRunAttach {
-                store: Arc::clone(store),
-                context: context.clone(),
-                cwd: resident_worktree
-                    .as_ref()
-                    .expect("a Wave Run has a spawned resident worktree")
-                    .path
-                    .clone(),
-            }),
     );
     let result = axum::serve(listener, app)
         .with_graceful_shutdown(graceful_shutdown)
@@ -642,18 +561,6 @@ where
         supervisor::terminate_resident(pid).await;
     }
     observer_task.abort();
-    if let Some((store, lease)) = wave_run.take() {
-        if let Err(error) = store
-            .stop_run(
-                &lease,
-                crate::durable::StopCause::Requested,
-                crate::durable::ContainmentObservation::Absent,
-            )
-            .await
-        {
-            tracing::warn!(%error, "failed to release Wave Run authority");
-        }
-    }
     server::remove_endpoint(&repo_root, &wave, &own_addr);
     server::remove_resident_token(&repo_root, &wave, &token);
 

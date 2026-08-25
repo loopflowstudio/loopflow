@@ -4,14 +4,14 @@
 //! A branch-local build must never silently become the Home-global command:
 //! on 2026-07-17 a `--use` promotion repointed `~/.local/bin/lf` at a binary
 //! whose migration registry ended at `0.11.026` while the shared store was at
-//! `0.11.027`, and every subsequent invocation — including active Runs mid-turn
-//! — hit a store its own binary could not read.
+//! `0.11.027`, and subsequent invocations hit a store their binary could not
+//! read.
 //!
 //! The candidate binary (the one running this command) reads the shared store's
-//! applied frontier and its own migration registry, counts active Runs, applies
-//! its migrations to an isolated snapshot, resolves every placed open Work's
+//! applied frontier and its own migration registry, applies its migrations to
+//! an isolated snapshot, resolves every placed open Work's
 //! executable lifecycle, and renders a verdict. `promote` consumes that verdict
-//! under the Home-global reservation fence, retains immutable rollback bytes,
+//! under the machine-global promotion lock, retains immutable rollback bytes,
 //! and activates the candidate before any migration advances the frontier.
 //!
 //! Compatibility is not re-derived: `classify_compatibility` calls the exact
@@ -19,12 +19,14 @@
 //! reason is the store's own error string, never a second registry.
 
 use std::fs;
-use std::os::unix::fs::{OpenOptionsExt, PermissionsExt};
+use std::os::unix::fs::PermissionsExt;
 #[cfg(not(any(target_os = "macos", target_os = "linux")))]
 use std::os::unix::process::CommandExt;
 use std::path::{Path, PathBuf};
 use std::process::Command;
-use std::time::{Duration, Instant};
+use std::time::Duration;
+#[cfg(target_os = "macos")]
+use std::time::Instant;
 
 use anyhow::{anyhow, Context, Result};
 use rusqlite::{OpenFlags, OptionalExtension};
@@ -33,12 +35,7 @@ use sha2::{Digest, Sha256};
 use uuid::Uuid;
 
 use crate::build_info::{self, MigrationAuthority};
-use crate::durable::{Containment, ContainmentObservation};
 use crate::store::migrations;
-
-const DRAIN_GRACE: Duration = Duration::from_secs(120);
-const FORCE_GRACE: Duration = Duration::from_secs(10);
-const DRAIN_POLL: Duration = Duration::from_millis(200);
 
 /// The candidate binary's identity. The process running `lf install` *is* the
 /// candidate, so every field comes from its own compiled-in build metadata.
@@ -93,17 +90,6 @@ pub enum Compatibility {
     Unreadable { reason: String },
 }
 
-/// One active Run that blocks a global replacement.
-#[derive(Debug, Clone, PartialEq, Eq, Deserialize, Serialize)]
-pub struct ActiveRun {
-    pub run_id: String,
-    pub work_kind: String,
-    pub work_id: String,
-    pub state: String,
-    pub containment: Option<Containment>,
-    pub containment_observation: ContainmentObservation,
-}
-
 /// One persisted executable reference the candidate cannot resolve through the
 /// effective builtin and repository-local catalog.
 #[derive(Debug, Clone, PartialEq, Eq, Deserialize, Serialize)]
@@ -143,68 +129,11 @@ pub struct PromotionPreview {
     pub database_path: String,
     pub compatibility: Compatibility,
     pub executable_compatibility: ExecutableCompatibility,
-    pub active_runs: Vec<ActiveRun>,
     pub verdict: Verdict,
 }
 
-#[derive(Debug, Clone, Copy, PartialEq, Eq, Deserialize, Serialize)]
-#[serde(rename_all = "snake_case")]
-pub enum HomeUpgradePhase {
-    Planned,
-    Draining,
-    Drained,
-    Migrating,
-    Restarting,
-    Reconciling,
-    Completed,
-    Failed,
-    RolledBack,
-}
-
-impl HomeUpgradePhase {
-    fn label(self) -> &'static str {
-        match self {
-            Self::Planned => "planned",
-            Self::Draining => "draining",
-            Self::Drained => "drained",
-            Self::Migrating => "migrating",
-            Self::Restarting => "restarting",
-            Self::Reconciling => "reconciling",
-            Self::Completed => "completed",
-            Self::Failed => "failed",
-            Self::RolledBack => "rolled back",
-        }
-    }
-}
-
-#[derive(Debug, Clone, Copy, PartialEq, Eq)]
-enum UpgradeRecovery {
-    Settled,
-    ContinueTransaction,
-    ResumeCandidate,
-}
-
-#[derive(Debug, Clone, Copy, PartialEq, Eq, Deserialize, Serialize)]
-#[serde(rename_all = "snake_case")]
-pub enum UpgradeDrainOutcome {
-    Pending,
-    DurableOnly,
-    Interrupted,
-    Forced,
-    Failed,
-}
-
-#[derive(Debug, Clone, Copy, PartialEq, Eq, Deserialize, Serialize)]
-#[serde(rename_all = "snake_case")]
-pub enum UpgradeReconciliationOutcome {
-    Pending,
-    Resumed,
-    Skipped,
-    Failed,
-}
-
 #[derive(Debug, Clone, PartialEq, Eq, Deserialize, Serialize)]
-pub struct HomeUpgradeArtifacts {
+pub struct PreparedArtifacts {
     pub cli_binary: PathBuf,
     pub cli_target: PathBuf,
     pub daemon_binary: PathBuf,
@@ -215,198 +144,32 @@ pub struct HomeUpgradeArtifacts {
     pub legacy_app_target: Option<PathBuf>,
 }
 
-#[derive(Debug, Clone, PartialEq, Eq, Deserialize, Serialize)]
-pub struct HomeUpgradeWorkReceipt {
-    pub work_kind: String,
-    pub work_id: String,
-    pub enabled_before: bool,
-    pub prior_run_id: Option<String>,
-    pub resumed_run_id: Option<String>,
-    pub containment: Option<Containment>,
-    pub containment_observation: ContainmentObservation,
-    pub drain: UpgradeDrainOutcome,
-    pub reconciliation: UpgradeReconciliationOutcome,
-    pub error: Option<String>,
+#[derive(Debug, Clone, Copy)]
+pub struct PromotionArtifacts<'a> {
+    pub cli_target: &'a Path,
+    pub daemon_source: &'a Path,
+    pub daemon_target: &'a Path,
+    pub app_source: Option<&'a Path>,
+    pub app_target: Option<&'a Path>,
+    pub legacy_app_target: Option<&'a Path>,
 }
 
-#[derive(Debug, Clone, PartialEq, Eq, Deserialize, Serialize)]
-pub struct HomeUpgradeReceipt {
-    pub id: String,
-    pub home_id: Option<String>,
-    pub candidate: CandidateIdentity,
-    pub prior_generation: u64,
-    pub target_generation: u64,
-    pub phase: HomeUpgradePhase,
-    pub keeper_mode: crate::lfd::service::KeeperMode,
-    pub artifacts: Option<HomeUpgradeArtifacts>,
-    pub migration_required: bool,
-    pub started_at: i64,
-    pub completed_at: Option<i64>,
-    pub artifacts_activated: bool,
-    pub migration_applied: bool,
-    pub daemon_restarted: bool,
-    pub drain_timed_out: bool,
-    pub coordinator_started_at: i64,
-    pub recovery_pid: Option<u32>,
-    pub works: Vec<HomeUpgradeWorkReceipt>,
-    pub error: Option<String>,
-}
-
-impl HomeUpgradeReceipt {
-    fn new(candidate: CandidateIdentity, runs: &[ActiveRun]) -> Self {
-        let prior_generation = current_runtime_generation();
-        Self::with_generation(candidate, runs, prior_generation)
-    }
-
-    fn with_generation(
-        candidate: CandidateIdentity,
-        runs: &[ActiveRun],
-        prior_generation: u64,
-    ) -> Self {
-        let started_at = time::OffsetDateTime::now_utc().unix_timestamp();
-        let coordinator_started_at = process_started_at(std::process::id()).unwrap_or(started_at);
-        Self {
-            id: format!("upgrade_{}", Uuid::new_v4().simple()),
-            home_id: None,
-            candidate,
-            prior_generation,
-            target_generation: prior_generation + 1,
-            phase: HomeUpgradePhase::Planned,
-            keeper_mode: crate::lfd::service::KeeperMode::None,
-            artifacts: None,
-            migration_required: false,
-            started_at,
-            completed_at: None,
-            artifacts_activated: false,
-            migration_applied: false,
-            daemon_restarted: false,
-            drain_timed_out: false,
-            coordinator_started_at,
-            recovery_pid: None,
-            works: runs
-                .iter()
-                .map(|run| HomeUpgradeWorkReceipt {
-                    work_kind: run.work_kind.clone(),
-                    work_id: run.work_id.clone(),
-                    enabled_before: false,
-                    prior_run_id: Some(run.run_id.clone()),
-                    resumed_run_id: None,
-                    containment: run.containment.clone(),
-                    containment_observation: run.containment_observation,
-                    drain: UpgradeDrainOutcome::Pending,
-                    reconciliation: UpgradeReconciliationOutcome::Pending,
-                    error: None,
-                })
-                .collect(),
-            error: None,
-        }
-    }
-
-    fn work_mut(&mut self, run_id: &str) -> Option<&mut HomeUpgradeWorkReceipt> {
-        self.works
-            .iter_mut()
-            .find(|work| work.prior_run_id.as_deref() == Some(run_id))
-    }
-
-    fn recovery(&self) -> UpgradeRecovery {
-        if matches!(
-            self.phase,
-            HomeUpgradePhase::Completed | HomeUpgradePhase::RolledBack
-        ) || (self.phase == HomeUpgradePhase::Failed && !self.artifacts_activated)
-        {
-            UpgradeRecovery::Settled
-        } else if self.artifacts_activated {
-            UpgradeRecovery::ResumeCandidate
-        } else {
-            UpgradeRecovery::ContinueTransaction
-        }
-    }
-
-    fn ensure_work(&mut self, work: &crate::durable::WorkRef) -> &mut HomeUpgradeWorkReceipt {
-        self.ensure_work_parts(work.kind(), work.id())
-    }
-
-    fn ensure_work_parts(&mut self, kind: &str, id: &str) -> &mut HomeUpgradeWorkReceipt {
-        if let Some(index) = self
-            .works
-            .iter()
-            .position(|receipt| receipt.work_kind == kind && receipt.work_id == id)
-        {
-            return &mut self.works[index];
-        }
-        self.works.push(HomeUpgradeWorkReceipt {
-            work_kind: kind.to_string(),
-            work_id: id.to_string(),
-            enabled_before: false,
-            prior_run_id: None,
-            resumed_run_id: None,
-            containment: None,
-            containment_observation: ContainmentObservation::Absent,
-            drain: UpgradeDrainOutcome::Pending,
-            reconciliation: UpgradeReconciliationOutcome::Pending,
-            error: None,
-        });
-        self.works
-            .last_mut()
-            .expect("the Home upgrade Work receipt was just appended")
-    }
-}
-
-fn capture_enabled_work(store_path: &Path, receipt: &mut HomeUpgradeReceipt) -> Result<()> {
-    if !store_path.exists() {
-        return Ok(());
-    }
-    let connection = open_upgrade_store(store_path)?;
-    let has_enabled = connection
-        .prepare("PRAGMA table_info(work_placements)")?
-        .query_map([], |row| row.get::<_, String>(1))?
-        .collect::<Result<Vec<_>, _>>()?
-        .iter()
-        .any(|column| column == "enabled");
-    let enabled = if has_enabled {
-        " AND placement.enabled=1"
-    } else {
-        ""
-    };
-    let query = format!(
-        "SELECT 'wave', w.id
-         FROM work_placements placement
-         JOIN waves w ON w.id=placement.wave_id
-         WHERE placement.wave_id IS NOT NULL{enabled}
-         UNION
-         SELECT 'project', p.id
-         FROM work_placements placement
-         JOIN projects p ON p.id=placement.project_id
-         WHERE placement.project_id IS NOT NULL{enabled}
-         UNION
-         SELECT 'task', t.id
-         FROM work_placements placement
-         JOIN tasks t ON t.id=placement.task_id
-         WHERE placement.task_id IS NOT NULL{enabled}
-         ORDER BY 1, 2"
-    );
-    let mut statement = connection.prepare(&query)?;
-    let rows = statement
-        .query_map([], |row| {
-            Ok((row.get::<_, String>(0)?, row.get::<_, String>(1)?))
-        })?
-        .collect::<Result<Vec<_>, _>>()?;
-    for (kind, id) in rows {
-        receipt.ensure_work_parts(&kind, &id).enabled_before = true;
-    }
-    Ok(())
+#[derive(Debug)]
+struct PausedHome {
+    keeper_mode: crate::lfd::service::KeeperMode,
+    home_id: Option<crate::durable::HomeId>,
+    repo: Option<PathBuf>,
 }
 
 /// The pure promotion decision. Given the candidate's authority, its
-/// compatibility with the store, and the active Runs, decide whether the global
-/// command may be replaced. Pure over its inputs — no I/O — so every branch is
-/// unit-tested below.
+/// compatibility with the store, decide whether the global command may be
+/// replaced. Pure over its inputs — no I/O — so every branch is unit-tested
+/// below.
 pub fn decide(
     authority: MigrationAuthority,
     pending_migration_drafts: &[&str],
     compatibility: &Compatibility,
     executable_compatibility: &ExecutableCompatibility,
-    active_runs: &[ActiveRun],
 ) -> Verdict {
     let mut reasons = Vec::new();
     let mut migrate = false;
@@ -466,30 +229,6 @@ pub fn decide(
         )),
     }
 
-    let unprovable = active_runs
-        .iter()
-        .filter(|run| {
-            run.containment_observation == ContainmentObservation::Unprovable
-                && !pause_resolvable_wave_reservation(run)
-        })
-        .collect::<Vec<_>>();
-    if !unprovable.is_empty() {
-        let named = unprovable
-            .iter()
-            .map(|run| {
-                format!(
-                    "{} {} via Run {} ({})",
-                    run.work_kind, run.work_id, run.run_id, run.state
-                )
-            })
-            .collect::<Vec<_>>()
-            .join(", ");
-        reasons.push(format!(
-            "{} non-ended Run(s) have unprovable containment; promotion fails closed: {named}",
-            unprovable.len()
-        ));
-    }
-
     if !reasons.is_empty() {
         Verdict::Reject { reasons }
     } else if migrate {
@@ -497,13 +236,6 @@ pub fn decide(
     } else {
         Verdict::Promote
     }
-}
-
-fn pause_resolvable_wave_reservation(run: &ActiveRun) -> bool {
-    run.work_kind == "wave"
-        && run.state == "reserved"
-        && run.containment.is_none()
-        && run.containment_observation == ContainmentObservation::Unprovable
 }
 
 /// Classify the candidate against the store's applied history, reusing the
@@ -544,139 +276,14 @@ fn classify_compatibility(conn: &rusqlite::Connection) -> Compatibility {
     }
 }
 
-/// Every non-ended Run. A stopping Run remains active until containment is
-/// positively absent, so unreadable or unprovable cleanup evidence fails closed.
-fn read_active_runs(conn: &rusqlite::Connection) -> rusqlite::Result<Vec<ActiveRun>> {
-    let has_runs = conn.query_row(
-        "SELECT EXISTS(SELECT 1 FROM sqlite_master WHERE type = 'table' AND name = 'runs')",
-        [],
-        |row| row.get::<_, bool>(0),
-    )?;
-    if !has_runs {
-        return read_legacy_active_runs(conn);
-    }
-    let mut statement = conn.prepare(
-        "SELECT run.id, run.source_kind, run.source_id, run.state,
-                run.containment_kind, run.containment_id
-         FROM runs run
-         JOIN homes home ON home.id=run.home_id
-         WHERE run.state != 'ended' AND home.route='local'
-         ORDER BY run.created_at, run.id",
-    )?;
-    let runs = statement
-        .query_map([], |row| {
-            let state = row.get::<_, String>(3)?;
-            let containment = match (
-                row.get::<_, Option<String>>(4)?,
-                row.get::<_, Option<String>>(5)?,
-            ) {
-                (Some(kind), Some(id)) => Some(Containment::parse(&kind, id).map_err(|error| {
-                    rusqlite::Error::FromSqlConversionFailure(
-                        5,
-                        rusqlite::types::Type::Text,
-                        Box::new(error),
-                    )
-                })?),
-                (None, None) => None,
-                _ => {
-                    return Err(rusqlite::Error::InvalidColumnType(
-                        5,
-                        "containment_id".to_string(),
-                        rusqlite::types::Type::Null,
-                    ))
-                }
-            };
-            let containment_observation = observe_containment(containment.as_ref());
-            Ok(ActiveRun {
-                run_id: row.get(0)?,
-                work_kind: row.get(1)?,
-                work_id: row.get(2)?,
-                state,
-                containment,
-                containment_observation,
-            })
-        })?
-        .collect();
-    runs
-}
-
-fn observe_containment(containment: Option<&Containment>) -> ContainmentObservation {
-    match containment {
-        Some(Containment::ProcessGroup { id }) => {
-            crate::engine::process::process_group_observation(*id)
-        }
-        Some(Containment::Tmux { name }) => {
-            let status = Command::new("tmux")
-                .args(["has-session", "-t", name])
-                .stdout(std::process::Stdio::null())
-                .stderr(std::process::Stdio::null())
-                .status();
-            match status {
-                Ok(status) if status.success() => ContainmentObservation::Present,
-                Ok(_) => ContainmentObservation::Absent,
-                Err(_) => ContainmentObservation::Unprovable,
-            }
-        }
-        None => ContainmentObservation::Unprovable,
-    }
-}
-
-/// architecture-shim: pre-run-promotion
-/// Promotion from the last Session-based release must prove the same drain
-/// that the `durable_input_spine` migration itself requires. The `runs` table
-/// does not exist yet at that frontier, so preflight reads the legacy leases
-/// until the one-way migration replaces them.
-fn read_legacy_active_runs(conn: &rusqlite::Connection) -> rusqlite::Result<Vec<ActiveRun>> {
-    let mut active = Vec::new();
-    for (work_kind, table, work_column) in [
-        ("project", "project_sessions", "project_id"),
-        ("task", "task_sessions", "issue_identifier"),
-    ] {
-        let sql = format!(
-            "SELECT id, {work_column}, process_lease_state
-             FROM {table}
-             WHERE process_lease_state IN ('reserved', 'active', 'revoked')
-             ORDER BY created_at, id"
-        );
-        let mut statement = conn.prepare(&sql)?;
-        let rows = statement.query_map([], |row| {
-            let session_id = row.get::<_, String>(0)?;
-            Ok(ActiveRun {
-                run_id: format!("legacy-{session_id}"),
-                work_kind: work_kind.to_string(),
-                work_id: row.get(1)?,
-                state: row.get(2)?,
-                containment: None,
-                containment_observation: ContainmentObservation::Unprovable,
-            })
-        })?;
-        active.extend(rows.collect::<Result<Vec<_>, _>>()?);
-    }
-    Ok(active)
-}
-
-/// Read the shared store's promotion evidence: how the candidate's registry
-/// relates to the store, and which Runs are active.
-///
-/// An **absent** store, read under the exclusive promotion lock, is positive
-/// proof of zero persisted Runs — no Run can have reserved against a store that
-/// does not exist — and an uninitialized frontier the authorized boundary may
-/// create. It classifies as `AheadPending` with no active Runs, so
-/// a published candidate reaches `PromoteAndMigrate` and first initialization
-/// happens through the authorized open during activation.
-///
-/// An **existing** store that cannot be opened, or whose active-Run set cannot be
-/// read, resolves to `Unreadable` and fails closed — an empty or corrupt file is
-/// not the fresh-initialization case and never promotes.
-fn read_store_evidence(store_path: &Path) -> (Compatibility, Vec<ActiveRun>) {
+/// Read only the schema evidence promotion consumes. An absent store is an
+/// uninitialized frontier; an existing unreadable store still fails closed.
+fn read_store_evidence(store_path: &Path) -> Compatibility {
     if !store_path.exists() {
-        return (
-            Compatibility::AheadPending {
-                applied_frontier: "(uninitialized)".to_string(),
-                latest_known: migrations::latest_known_version(),
-            },
-            Vec::new(),
-        );
+        return Compatibility::AheadPending {
+            applied_frontier: "(uninitialized)".to_string(),
+            latest_known: migrations::latest_known_version(),
+        };
     }
     let conn = match rusqlite::Connection::open_with_flags(
         store_path,
@@ -684,27 +291,12 @@ fn read_store_evidence(store_path: &Path) -> (Compatibility, Vec<ActiveRun>) {
     ) {
         Ok(conn) => conn,
         Err(error) => {
-            return (
-                Compatibility::Unreadable {
-                    reason: error.to_string(),
-                },
-                Vec::new(),
-            )
+            return Compatibility::Unreadable {
+                reason: error.to_string(),
+            }
         }
     };
-
-    let compatibility = classify_compatibility(&conn);
-    // Cannot prove zero active Runs if the read fails: fail closed rather than
-    // pass an empty set that would read as "no Runs".
-    match read_active_runs(&conn) {
-        Ok(active_runs) => (compatibility, active_runs),
-        Err(error) => (
-            Compatibility::Unreadable {
-                reason: format!("cannot read active Runs: {error}"),
-            },
-            Vec::new(),
-        ),
-    }
+    classify_compatibility(&conn)
 }
 
 fn _copy_store_for_candidate(source_path: &Path, destination_path: &Path) -> Result<()> {
@@ -732,34 +324,34 @@ fn _read_executable_references(
         "SELECT 'wave', w.id, 'wave', w.repo
          FROM work_placements placement
          JOIN waves w ON w.id=placement.wave_id
-         JOIN epochs e ON e.wave_id=w.id AND e.state='open'
+         WHERE placement.enabled=1 AND w.work_state='ready'
          UNION
          SELECT 'project', p.id, 'project', w.repo
          FROM work_placements placement
          JOIN projects p ON p.id=placement.project_id
          JOIN waves w ON w.id=p.wave_id
-         JOIN epochs e ON e.project_id=p.id AND e.state='open'
+         WHERE placement.enabled=1 AND p.work_state='ready'
          UNION
          SELECT 'task', t.id, COALESCE(t.kickoff_flow, ''), t.worktree
          FROM work_placements placement
          JOIN tasks t ON t.id=placement.task_id
          JOIN projects p ON p.id=t.project_id
          JOIN waves w ON w.id=p.wave_id
-         JOIN epochs e ON e.task_id=t.id AND e.state='open'
+         WHERE placement.enabled=1 AND t.work_state='ready'
          UNION
          SELECT 'task', t.id, COALESCE(t.iterate_flow, ''), t.worktree
          FROM work_placements placement
          JOIN tasks t ON t.id=placement.task_id
          JOIN projects p ON p.id=t.project_id
          JOIN waves w ON w.id=p.wave_id
-         JOIN epochs e ON e.task_id=t.id AND e.state='open'
+         WHERE placement.enabled=1 AND t.work_state='ready'
          UNION
          SELECT 'task', t.id, COALESCE(t.gate_flow, ''), t.worktree
          FROM work_placements placement
          JOIN tasks t ON t.id=placement.task_id
          JOIN projects p ON p.id=t.project_id
          JOIN waves w ON w.id=p.wave_id
-         JOIN epochs e ON e.task_id=t.id AND e.state='open'
+         WHERE placement.enabled=1 AND t.work_state='ready'
          ORDER BY 1, 2, 3, 4",
     )?;
     let references = statement
@@ -937,7 +529,7 @@ fn _executable_compatibility(connection: &rusqlite::Connection) -> ExecutableCom
 pub fn build_preview(store_path: &Path) -> PromotionPreview {
     let candidate = CandidateIdentity::current();
     let database_path = store_path.display().to_string();
-    let (compatibility, active_runs) = read_store_evidence(store_path);
+    let compatibility = read_store_evidence(store_path);
     let executable_compatibility = _read_executable_compatibility(store_path);
     let pending_migration_drafts = build_info::pending_migration_drafts();
     let verdict = decide(
@@ -945,14 +537,12 @@ pub fn build_preview(store_path: &Path) -> PromotionPreview {
         &pending_migration_drafts,
         &compatibility,
         &executable_compatibility,
-        &active_runs,
     );
     PromotionPreview {
         candidate,
         database_path,
         compatibility,
         executable_compatibility,
-        active_runs,
         verdict,
     }
 }
@@ -960,7 +550,6 @@ pub fn build_preview(store_path: &Path) -> PromotionPreview {
 fn build_local_preview(store_path: &Path) -> PromotionPreview {
     let candidate = CandidateIdentity::current();
     let database_path = store_path.display().to_string();
-    let (_, active_runs) = read_store_evidence(store_path);
     let executable_compatibility = _read_local_executable_compatibility(store_path);
     let compatibility = match (_local_store_is_exact(store_path), &executable_compatibility) {
         (Ok(frontier), _) => Compatibility::Exact { frontier },
@@ -981,14 +570,12 @@ fn build_local_preview(store_path: &Path) -> PromotionPreview {
         &[],
         &compatibility,
         &executable_compatibility,
-        &active_runs,
     );
     PromotionPreview {
         candidate,
         database_path,
         compatibility,
         executable_compatibility,
-        active_runs,
         verdict,
     }
 }
@@ -1045,21 +632,7 @@ fn render_human(preview: &PromotionPreview) {
             println!("  lifecycles     UNREADABLE: {reason}")
         }
     }
-    if preview.active_runs.is_empty() {
-        println!("  active Runs    none");
-    } else {
-        println!("  active Runs    {}", preview.active_runs.len());
-        for run in &preview.active_runs {
-            println!(
-                "    - {} {} via {} ({}, {:?})",
-                run.work_kind, run.work_id, run.run_id, run.state, run.containment_observation
-            );
-        }
-    }
     match &preview.verdict {
-        Verdict::Promote if !preview.active_runs.is_empty() => {
-            println!("  VERDICT: promote (exact frontier; CLI repair writes no shared store)")
-        }
         Verdict::Promote => println!("  VERDICT: promote (no migration to apply)"),
         Verdict::PromoteAndMigrate => println!("  VERDICT: promote and apply pending migration"),
         Verdict::Reject { reasons } => {
@@ -1108,2261 +681,72 @@ pub fn local_preflight(store_path: &Path, json: bool) -> Result<()> {
     }
 }
 
-fn upgrade_receipt_dir() -> PathBuf {
-    crate::store::lf_home_dir().join("upgrades")
-}
-
-fn upgrade_receipt_path(id: &str) -> PathBuf {
-    upgrade_receipt_dir().join(format!("{id}.json"))
-}
-
-fn enum_token<T: Serialize>(value: &T) -> Result<String> {
-    match serde_json::to_value(value)? {
-        serde_json::Value::String(value) => Ok(value),
-        _ => Err(anyhow!("durable enum did not serialize as a string")),
-    }
-}
-
-fn parse_enum_token<T: serde::de::DeserializeOwned>(
-    index: usize,
-    value: String,
-) -> rusqlite::Result<T> {
-    serde_json::from_value(serde_json::Value::String(value)).map_err(|error| {
-        rusqlite::Error::FromSqlConversionFailure(
-            index,
-            rusqlite::types::Type::Text,
-            Box::new(error),
-        )
-    })
-}
-
-fn durable_upgrade_receipts_available(store_path: &Path) -> Result<bool> {
-    if !store_path.exists() {
-        return Ok(false);
-    }
-    let connection = open_upgrade_store(store_path)?;
-    connection
-        .query_row(
-            "SELECT EXISTS (
-                SELECT 1 FROM sqlite_master
-                WHERE type='table' AND name='home_upgrades'
-             )",
-            [],
-            |row| row.get::<_, bool>(0),
-        )
-        .map_err(anyhow::Error::from)
-}
-
-fn persist_durable_upgrade_receipt(store_path: &Path, receipt: &HomeUpgradeReceipt) -> Result<()> {
-    let mut connection = open_upgrade_store(store_path)?;
-    let transaction =
-        connection.transaction_with_behavior(rusqlite::TransactionBehavior::Immediate)?;
-    let artifacts = receipt.artifacts.as_ref();
-    let path = |value: Option<&PathBuf>| value.map(|value| value.to_string_lossy().to_string());
-    let prior_generation = i64::try_from(receipt.prior_generation)
-        .context("prior Home runtime generation exceeds SQLite")?;
-    let target_generation = i64::try_from(receipt.target_generation)
-        .context("target Home runtime generation exceeds SQLite")?;
-    let recovery_pid = receipt.recovery_pid.map(i64::from);
-    transaction.execute(
-        "INSERT INTO home_upgrades (
-            id, home_id, source_revision, source_identity, migration_authority,
-            package_version, build_version, latest_known_migration,
-            prior_generation, target_generation, phase, keeper_mode,
-            cli_binary, cli_target, daemon_binary, daemon_target,
-            app_source, app_target, app_superseded, legacy_app_target,
-            migration_required, started_at, completed_at, artifacts_activated,
-            migration_applied, daemon_restarted, drain_timed_out,
-            coordinator_started_at, recovery_pid, error
-         ) VALUES (
-            ?1, ?2, ?3, ?4, ?5, ?6, ?7, ?8, ?9, ?10,
-            ?11, ?12, ?13, ?14, ?15, ?16, ?17, ?18, ?19, ?20,
-            ?21, ?22, ?23, ?24, ?25, ?26, ?27, ?28, ?29, ?30
-         )
-         ON CONFLICT(id) DO UPDATE SET
-            home_id=excluded.home_id,
-            source_revision=excluded.source_revision,
-            source_identity=excluded.source_identity,
-            migration_authority=excluded.migration_authority,
-            package_version=excluded.package_version,
-            build_version=excluded.build_version,
-            latest_known_migration=excluded.latest_known_migration,
-            prior_generation=excluded.prior_generation,
-            target_generation=excluded.target_generation,
-            phase=excluded.phase,
-            keeper_mode=excluded.keeper_mode,
-            cli_binary=excluded.cli_binary,
-            cli_target=excluded.cli_target,
-            daemon_binary=excluded.daemon_binary,
-            daemon_target=excluded.daemon_target,
-            app_source=excluded.app_source,
-            app_target=excluded.app_target,
-            app_superseded=excluded.app_superseded,
-            legacy_app_target=excluded.legacy_app_target,
-            migration_required=excluded.migration_required,
-            started_at=excluded.started_at,
-            completed_at=excluded.completed_at,
-            artifacts_activated=excluded.artifacts_activated,
-            migration_applied=excluded.migration_applied,
-            daemon_restarted=excluded.daemon_restarted,
-            drain_timed_out=excluded.drain_timed_out,
-            coordinator_started_at=excluded.coordinator_started_at,
-            recovery_pid=excluded.recovery_pid,
-            error=excluded.error",
-        rusqlite::params![
-            receipt.id,
-            receipt.home_id,
-            receipt.candidate.source_revision,
-            receipt.candidate.source_identity,
-            enum_token(&receipt.candidate.authority)?,
-            receipt.candidate.package_version,
-            receipt.candidate.build_version,
-            receipt.candidate.latest_known_migration,
-            prior_generation,
-            target_generation,
-            enum_token(&receipt.phase)?,
-            enum_token(&receipt.keeper_mode)?,
-            path(artifacts.map(|artifacts| &artifacts.cli_binary)),
-            path(artifacts.map(|artifacts| &artifacts.cli_target)),
-            path(artifacts.map(|artifacts| &artifacts.daemon_binary)),
-            path(artifacts.map(|artifacts| &artifacts.daemon_target)),
-            path(artifacts.and_then(|artifacts| artifacts.app_source.as_ref())),
-            path(artifacts.and_then(|artifacts| artifacts.app_target.as_ref())),
-            path(artifacts.and_then(|artifacts| artifacts.app_superseded.as_ref())),
-            path(artifacts.and_then(|artifacts| artifacts.legacy_app_target.as_ref())),
-            receipt.migration_required,
-            receipt.started_at,
-            receipt.completed_at,
-            receipt.artifacts_activated,
-            receipt.migration_applied,
-            receipt.daemon_restarted,
-            receipt.drain_timed_out,
-            receipt.coordinator_started_at,
-            recovery_pid,
-            receipt.error,
-        ],
-    )?;
-    transaction.execute(
-        "DELETE FROM home_upgrade_work WHERE upgrade_id=?1",
-        [&receipt.id],
-    )?;
-    for work in &receipt.works {
-        let (containment_kind, containment_id) = work
-            .containment
-            .as_ref()
-            .map(Containment::parts)
-            .map_or((None, None), |(kind, id)| (Some(kind), Some(id)));
-        transaction.execute(
-            "INSERT INTO home_upgrade_work (
-                upgrade_id, work_kind, work_id, enabled_before,
-                prior_run_id, resumed_run_id, containment_kind, containment_id,
-                containment_observation, drain, reconciliation, error
-             ) VALUES (?1, ?2, ?3, ?4, ?5, ?6, ?7, ?8, ?9, ?10, ?11, ?12)",
-            rusqlite::params![
-                receipt.id,
-                work.work_kind,
-                work.work_id,
-                work.enabled_before,
-                work.prior_run_id,
-                work.resumed_run_id,
-                containment_kind,
-                containment_id,
-                enum_token(&work.containment_observation)?,
-                enum_token(&work.drain)?,
-                enum_token(&work.reconciliation)?,
-                work.error,
-            ],
-        )?;
-    }
-    transaction.commit()?;
-    Ok(())
-}
-
-fn write_upgrade_receipt(receipt: &HomeUpgradeReceipt) -> Result<()> {
-    let store_path = crate::store::production_database_path();
-    let durable = durable_upgrade_receipts_available(&store_path)?;
-    if durable {
-        persist_durable_upgrade_receipt(&store_path, receipt)?;
-    }
-    let directory = upgrade_receipt_dir();
-    fs::create_dir_all(&directory)
-        .with_context(|| format!("create upgrade receipt directory {}", directory.display()))?;
-    fs::set_permissions(&directory, fs::Permissions::from_mode(0o700))?;
-    let path = upgrade_receipt_path(&receipt.id);
-    let terminal = receipt.recovery() == UpgradeRecovery::Settled;
-    if durable && terminal {
-        match fs::remove_file(&path) {
-            Ok(()) => fs::File::open(&directory)?.sync_all()?,
-            Err(error) if error.kind() == std::io::ErrorKind::NotFound => {}
-            Err(error) => return Err(error).with_context(|| format!("remove {}", path.display())),
-        }
-        crate::promotion_lock::clear_upgrade_fence(&receipt.id)
-            .context("clear the settled Home upgrade reservation fence")?;
-        return Ok(());
-    }
-    let pending = path.with_extension(format!("json.tmp.{}", std::process::id()));
-    let payload = serde_json::to_vec_pretty(receipt)?;
-    let file = fs::OpenOptions::new()
-        .create(true)
-        .truncate(true)
-        .write(true)
-        .mode(0o600)
-        .open(&pending)
-        .with_context(|| format!("create pending upgrade receipt {}", pending.display()))?;
-    use std::io::Write;
-    (&file).write_all(&payload)?;
-    (&file).write_all(b"\n")?;
-    file.sync_all()?;
-    fs::rename(&pending, &path)
-        .with_context(|| format!("commit upgrade receipt {}", path.display()))?;
-    fs::File::open(&directory)?.sync_all()?;
-    if terminal {
-        crate::promotion_lock::clear_upgrade_fence(&receipt.id)
-            .context("clear the settled Home upgrade reservation fence")?;
-    } else {
-        crate::promotion_lock::persist_upgrade_fence(&payload)
-            .context("persist the active Home upgrade reservation fence")?;
-    }
-    Ok(())
-}
-
-fn process_is_live(pid: u32) -> bool {
-    // SAFETY: signal 0 does not mutate the target process; it only asks the OS
-    // whether this exact pid is visible to the caller.
-    let result = unsafe { libc::kill(pid as libc::pid_t, 0) };
-    result == 0 || std::io::Error::last_os_error().raw_os_error() == Some(libc::EPERM)
-}
-
-fn elapsed_seconds(value: &str) -> Option<i64> {
-    let (days, clock) = match value.trim().split_once('-') {
-        Some((days, clock)) => (days.parse::<i64>().ok()?, clock),
-        None => (0, value.trim()),
-    };
-    let fields = clock
-        .split(':')
-        .map(str::parse::<i64>)
-        .collect::<Result<Vec<_>, _>>()
-        .ok()?;
-    let clock_seconds = match fields.as_slice() {
-        [minutes, seconds] => minutes.checked_mul(60)?.checked_add(*seconds)?,
-        [hours, minutes, seconds] => hours
-            .checked_mul(3_600)?
-            .checked_add(minutes.checked_mul(60)?)?
-            .checked_add(*seconds)?,
-        _ => return None,
-    };
-    days.checked_mul(86_400)?.checked_add(clock_seconds)
-}
-
-fn process_matches_start(pid: u32, expected_started_at: i64) -> bool {
-    if !process_is_live(pid) {
-        return false;
-    }
-    let Some(observed) = process_started_at(pid) else {
-        return true;
-    };
-    observed.abs_diff(expected_started_at) <= 2
-}
-
-fn process_started_at(pid: u32) -> Option<i64> {
-    let output = Command::new("ps")
-        .args(["-p", &pid.to_string(), "-o", "etime="])
-        .output()
-        .ok()?;
-    if !output.status.success() {
-        return None;
-    }
-    let elapsed = elapsed_seconds(&String::from_utf8_lossy(&output.stdout))?;
-    Some(
-        time::OffsetDateTime::now_utc()
-            .unix_timestamp()
-            .saturating_sub(elapsed),
-    )
-}
-
-fn recovery_arguments(receipt: &HomeUpgradeReceipt) -> Vec<String> {
-    vec![
-        "install".to_string(),
-        "recover".to_string(),
-        "--upgrade".to_string(),
-        receipt.id.clone(),
-        "--parent-pid".to_string(),
-        std::process::id().to_string(),
-        "--parent-started-at".to_string(),
-        receipt.coordinator_started_at.to_string(),
-    ]
-}
-
-#[cfg(not(any(target_os = "macos", target_os = "linux")))]
-fn spawn_detached_recovery_guard(receipt: &HomeUpgradeReceipt) -> Result<Option<u32>> {
-    let artifacts = receipt
-        .artifacts
-        .as_ref()
-        .ok_or_else(|| anyhow!("Home upgrade {} has no staged artifacts", receipt.id))?;
-    let log_path = upgrade_receipt_dir().join(format!("{}.recovery.log", receipt.id));
-    let log = fs::OpenOptions::new()
-        .create(true)
-        .append(true)
-        .mode(0o600)
-        .open(&log_path)
-        .with_context(|| format!("open recovery log {}", log_path.display()))?;
-    let stderr = log.try_clone()?;
-    let child = Command::new(&artifacts.cli_binary)
-        .args(recovery_arguments(receipt))
-        .stdin(std::process::Stdio::null())
-        .stdout(log)
-        .stderr(stderr)
-        .process_group(0)
-        .spawn()
-        .with_context(|| {
-            format!(
-                "start Home upgrade recovery guard from {}",
-                artifacts.cli_binary.display()
-            )
-        })?;
-    Ok(Some(child.id()))
-}
-
-#[cfg(target_os = "macos")]
-fn xml_escape(value: &str) -> String {
-    value
-        .replace('&', "&amp;")
-        .replace('<', "&lt;")
-        .replace('>', "&gt;")
-        .replace('"', "&quot;")
-        .replace('\'', "&apos;")
-}
-
-#[cfg(target_os = "macos")]
-fn recovery_job_path(upgrade_id: &str) -> Result<PathBuf> {
-    Ok(crate::machine_install::account_home()?
-        .join("Library/LaunchAgents")
-        .join(format!("com.loopflow.upgrade.{upgrade_id}.plist")))
-}
-
-#[cfg(target_os = "macos")]
-fn spawn_recovery_guard(receipt: &HomeUpgradeReceipt) -> Result<Option<u32>> {
-    let artifacts = receipt
-        .artifacts
-        .as_ref()
-        .ok_or_else(|| anyhow!("Home upgrade {} has no staged artifacts", receipt.id))?;
-    let path = recovery_job_path(&receipt.id)?;
-    let parent = path
-        .parent()
-        .expect("launchd recovery job has a parent directory");
-    fs::create_dir_all(parent)?;
-    let mut arguments = vec![artifacts.cli_binary.to_string_lossy().to_string()];
-    arguments.extend(recovery_arguments(receipt));
-    let arguments = arguments
-        .iter()
-        .map(|argument| format!("        <string>{}</string>", xml_escape(argument)))
-        .collect::<Vec<_>>()
-        .join("\n");
-    let environment = ["PATH", "LF_HOME", "LF_DB_PATH"]
-        .into_iter()
-        .filter_map(|key| std::env::var(key).ok().map(|value| (key, value)))
-        .map(|(key, value)| {
-            format!(
-                "<key>{}</key><string>{}</string>",
-                xml_escape(key),
-                xml_escape(&value)
-            )
-        })
-        .collect::<Vec<_>>()
-        .join("\n");
-    let environment = if environment.is_empty() {
-        String::new()
-    } else {
-        format!("<key>EnvironmentVariables</key><dict>\n{environment}\n</dict>\n")
-    };
-    let log_path = upgrade_receipt_dir().join(format!("{}.recovery.log", receipt.id));
-    let label = format!("com.loopflow.upgrade.{}", receipt.id);
-    let plist = format!(
-        "<?xml version=\"1.0\" encoding=\"UTF-8\"?>\n\
-         <!DOCTYPE plist PUBLIC \"-//Apple//DTD PLIST 1.0//EN\" \"http://www.apple.com/DTDs/PropertyList-1.0.dtd\">\n\
-         <plist version=\"1.0\"><dict>\n\
-         <key>Label</key><string>{}</string>\n\
-         <key>ProgramArguments</key><array>\n{}\n</array>\n\
-         {}\
-         <key>RunAtLoad</key><true/>\n\
-         <key>KeepAlive</key><dict><key>SuccessfulExit</key><false/></dict>\n\
-         <key>StandardOutPath</key><string>{}</string>\n\
-         <key>StandardErrorPath</key><string>{}</string>\n\
-         </dict></plist>\n",
-        xml_escape(&label),
-        arguments,
-        environment,
-        xml_escape(&log_path.to_string_lossy()),
-        xml_escape(&log_path.to_string_lossy()),
-    );
-    let pending = path.with_extension(format!("plist.tmp.{}", std::process::id()));
-    let file = fs::OpenOptions::new()
-        .create(true)
-        .truncate(true)
-        .write(true)
-        .mode(0o600)
-        .open(&pending)?;
-    use std::io::Write;
-    (&file).write_all(plist.as_bytes())?;
-    file.sync_all()?;
-    fs::rename(&pending, &path)?;
-    fs::File::open(parent)?.sync_all()?;
-    let _ = Command::new("launchctl").arg("unload").arg(&path).status();
-    let status = Command::new("launchctl").arg("load").arg(&path).status()?;
-    if !status.success() {
-        return Err(anyhow!("launchctl could not load {}", path.display()));
-    }
-    Ok(None)
-}
-
-#[cfg(target_os = "linux")]
-fn spawn_recovery_guard(receipt: &HomeUpgradeReceipt) -> Result<Option<u32>> {
-    let artifacts = receipt
-        .artifacts
-        .as_ref()
-        .ok_or_else(|| anyhow!("Home upgrade {} has no staged artifacts", receipt.id))?;
-    let home = crate::machine_install::account_home()?;
-    let directory = home.join(".config/systemd/user");
-    fs::create_dir_all(&directory)?;
-    let unit_name = format!("loopflow-upgrade-{}.service", receipt.id);
-    let path = directory.join(&unit_name);
-    let quote = |value: &str| format!("\"{}\"", value.replace('\\', "\\\\").replace('"', "\\\""));
-    let mut command = vec![quote(&artifacts.cli_binary.to_string_lossy())];
-    command.extend(
-        recovery_arguments(receipt)
-            .iter()
-            .map(|argument| quote(argument)),
-    );
-    let environment = ["PATH", "LF_HOME", "LF_DB_PATH"]
-        .into_iter()
-        .filter_map(|key| std::env::var(key).ok().map(|value| (key, value)))
-        .map(|(key, value)| format!("Environment={}\n", quote(&format!("{key}={value}"))))
-        .collect::<String>();
-    let unit = format!(
-        "[Unit]\nDescription=Recover Loopflow Home upgrade {}\n\n\
-         [Service]\nType=simple\nExecStart={}\nRestart=on-failure\nRestartSec=5\n{}\n\
-         [Install]\nWantedBy=default.target\n",
-        receipt.id,
-        command.join(" "),
-        environment,
-    );
-    let file = fs::OpenOptions::new()
-        .create(true)
-        .truncate(true)
-        .write(true)
-        .mode(0o600)
-        .open(&path)?;
-    use std::io::Write;
-    (&file).write_all(unit.as_bytes())?;
-    file.sync_all()?;
-    fs::File::open(&directory)?.sync_all()?;
-    let reload = Command::new("systemctl")
-        .args(["--user", "daemon-reload"])
-        .status()?;
-    let enable = Command::new("systemctl")
-        .args(["--user", "enable", "--now", &unit_name])
-        .status()?;
-    if !reload.success() || !enable.success() {
-        return Err(anyhow!("systemd could not start {unit_name}"));
-    }
-    Ok(None)
-}
-
-#[cfg(not(any(target_os = "macos", target_os = "linux")))]
-fn spawn_recovery_guard(receipt: &HomeUpgradeReceipt) -> Result<Option<u32>> {
-    spawn_detached_recovery_guard(receipt)
-}
-
-#[cfg(target_os = "macos")]
-fn cleanup_recovery_job(upgrade_id: &str) {
-    let Ok(path) = recovery_job_path(upgrade_id) else {
-        return;
-    };
-    let _ = fs::remove_file(&path);
-    let label = format!("com.loopflow.upgrade.{upgrade_id}");
-    let _ = Command::new("launchctl").args(["remove", &label]).status();
-}
-
-#[cfg(target_os = "linux")]
-fn cleanup_recovery_job(upgrade_id: &str) {
-    let Ok(home) = crate::machine_install::account_home() else {
-        return;
-    };
-    let unit_name = format!("loopflow-upgrade-{upgrade_id}.service");
-    let path = home.join(".config/systemd/user").join(&unit_name);
-    let _ = fs::remove_file(path);
-    let _ = Command::new("systemctl")
-        .args(["--user", "disable", "--now", &unit_name])
-        .status();
-    let _ = Command::new("systemctl")
-        .args(["--user", "daemon-reload"])
-        .status();
-}
-
-#[cfg(not(any(target_os = "macos", target_os = "linux")))]
-fn cleanup_recovery_job(_upgrade_id: &str) {}
-
-fn integer_conversion_error(index: usize, value: i64, name: &str) -> rusqlite::Error {
-    rusqlite::Error::FromSqlConversionFailure(
-        index,
-        rusqlite::types::Type::Integer,
-        Box::new(std::io::Error::new(
-            std::io::ErrorKind::InvalidData,
-            format!("invalid {name}: {value}"),
-        )),
-    )
-}
-
-fn read_durable_upgrade_header(row: &rusqlite::Row<'_>) -> rusqlite::Result<HomeUpgradeReceipt> {
-    let prior_generation = row.get::<_, i64>(8)?;
-    let target_generation = row.get::<_, i64>(9)?;
-    let cli_binary = row.get::<_, Option<String>>(12)?;
-    let cli_target = row.get::<_, Option<String>>(13)?;
-    let daemon_binary = row.get::<_, Option<String>>(14)?;
-    let daemon_target = row.get::<_, Option<String>>(15)?;
-    let app_source = row.get::<_, Option<String>>(16)?.map(PathBuf::from);
-    let app_target = row.get::<_, Option<String>>(17)?.map(PathBuf::from);
-    let app_superseded = row.get::<_, Option<String>>(18)?.map(PathBuf::from);
-    let legacy_app_target = row.get::<_, Option<String>>(19)?.map(PathBuf::from);
-    let artifacts = match (cli_binary, cli_target, daemon_binary, daemon_target) {
-        (None, None, None, None) => None,
-        (Some(cli_binary), Some(cli_target), Some(daemon_binary), Some(daemon_target)) => {
-            Some(HomeUpgradeArtifacts {
-                cli_binary: PathBuf::from(cli_binary),
-                cli_target: PathBuf::from(cli_target),
-                daemon_binary: PathBuf::from(daemon_binary),
-                daemon_target: PathBuf::from(daemon_target),
-                app_source,
-                app_target,
-                app_superseded,
-                legacy_app_target,
-            })
-        }
-        _ => return Err(rusqlite::Error::InvalidQuery),
-    };
-    let recovery_pid = row
-        .get::<_, Option<i64>>(28)?
-        .map(|value| {
-            u32::try_from(value).map_err(|_| integer_conversion_error(28, value, "recovery pid"))
-        })
-        .transpose()?;
-    Ok(HomeUpgradeReceipt {
-        id: row.get(0)?,
-        home_id: row.get(1)?,
-        candidate: CandidateIdentity {
-            source_revision: row.get(2)?,
-            source_identity: row.get(3)?,
-            authority: parse_enum_token(4, row.get(4)?)?,
-            package_version: row.get(5)?,
-            build_version: row.get(6)?,
-            latest_known_migration: row.get(7)?,
-        },
-        prior_generation: u64::try_from(prior_generation).map_err(|_| {
-            integer_conversion_error(8, prior_generation, "prior Home runtime generation")
-        })?,
-        target_generation: u64::try_from(target_generation).map_err(|_| {
-            integer_conversion_error(9, target_generation, "target Home runtime generation")
-        })?,
-        phase: parse_enum_token(10, row.get(10)?)?,
-        keeper_mode: parse_enum_token(11, row.get(11)?)?,
-        artifacts,
-        migration_required: row.get(20)?,
-        started_at: row.get(21)?,
-        completed_at: row.get(22)?,
-        artifacts_activated: row.get(23)?,
-        migration_applied: row.get(24)?,
-        daemon_restarted: row.get(25)?,
-        drain_timed_out: row.get(26)?,
-        coordinator_started_at: row.get(27)?,
-        recovery_pid,
-        works: Vec::new(),
-        error: row.get(29)?,
-    })
-}
-
-fn read_durable_upgrade_receipt(
-    store_path: &Path,
-    id: Option<&str>,
-) -> Result<Option<HomeUpgradeReceipt>> {
-    if !durable_upgrade_receipts_available(store_path)? {
-        return Ok(None);
-    }
-    let connection = open_upgrade_store(store_path)?;
-    let fields = "id, home_id, source_revision, source_identity, migration_authority,
-                  package_version, build_version, latest_known_migration,
-                  prior_generation, target_generation, phase, keeper_mode,
-                  cli_binary, cli_target, daemon_binary, daemon_target,
-                  app_source, app_target, app_superseded, legacy_app_target,
-                  migration_required, started_at, completed_at, artifacts_activated,
-                  migration_applied, daemon_restarted, drain_timed_out,
-                  coordinator_started_at, recovery_pid, error";
-    let mut receipt = match id {
-        Some(id) => connection
-            .query_row(
-                &format!("SELECT {fields} FROM home_upgrades WHERE id=?1"),
-                [id],
-                read_durable_upgrade_header,
-            )
-            .optional()?,
-        None => connection
-            .query_row(
-                &format!(
-                    "SELECT {fields} FROM home_upgrades
-                     ORDER BY target_generation DESC, started_at DESC, id DESC LIMIT 1"
-                ),
-                [],
-                read_durable_upgrade_header,
-            )
-            .optional()?,
-    };
-    let Some(receipt) = receipt.as_mut() else {
-        return Ok(None);
-    };
-    let mut statement = connection.prepare(
-        "SELECT work_kind, work_id, enabled_before, prior_run_id, resumed_run_id,
-                containment_kind, containment_id, containment_observation,
-                drain, reconciliation, error
-         FROM home_upgrade_work WHERE upgrade_id=?1 ORDER BY work_kind, work_id",
-    )?;
-    receipt.works = statement
-        .query_map([&receipt.id], |row| {
-            let containment = match (
-                row.get::<_, Option<String>>(5)?,
-                row.get::<_, Option<String>>(6)?,
-            ) {
-                (None, None) => None,
-                (Some(kind), Some(id)) => Some(Containment::parse(&kind, id).map_err(|error| {
-                    rusqlite::Error::FromSqlConversionFailure(
-                        6,
-                        rusqlite::types::Type::Text,
-                        Box::new(error),
-                    )
-                })?),
-                _ => return Err(rusqlite::Error::InvalidQuery),
-            };
-            Ok(HomeUpgradeWorkReceipt {
-                work_kind: row.get(0)?,
-                work_id: row.get(1)?,
-                enabled_before: row.get(2)?,
-                prior_run_id: row.get(3)?,
-                resumed_run_id: row.get(4)?,
-                containment,
-                containment_observation: parse_enum_token(7, row.get(7)?)?,
-                drain: parse_enum_token(8, row.get(8)?)?,
-                reconciliation: parse_enum_token(9, row.get(9)?)?,
-                error: row.get(10)?,
-            })
-        })?
-        .collect::<Result<Vec<_>, _>>()?;
-    Ok(Some(receipt.clone()))
-}
-
-fn read_bridge_upgrade_receipt(id: Option<&str>) -> Result<Option<HomeUpgradeReceipt>> {
-    let directory = upgrade_receipt_dir();
-    if let Some(id) = id {
-        let path = upgrade_receipt_path(id);
-        return match fs::read(&path) {
-            Ok(payload) => serde_json::from_slice(&payload)
-                .with_context(|| format!("read upgrade receipt {}", path.display()))
-                .map(Some),
-            Err(error) if error.kind() == std::io::ErrorKind::NotFound => Ok(None),
-            Err(error) => Err(error).with_context(|| format!("read {}", path.display())),
-        };
-    }
-    let entries = match fs::read_dir(&directory) {
-        Ok(entries) => entries,
-        Err(error) if error.kind() == std::io::ErrorKind::NotFound => return Ok(None),
-        Err(error) => return Err(error).with_context(|| format!("read {}", directory.display())),
-    };
-    let mut latest = None;
-    for entry in entries {
-        let path = entry?.path();
-        if path.extension().and_then(|value| value.to_str()) != Some("json") {
-            continue;
-        }
-        let receipt: HomeUpgradeReceipt = serde_json::from_slice(&fs::read(&path)?)
-            .with_context(|| format!("parse upgrade receipt {}", path.display()))?;
-        if latest.as_ref().is_none_or(|current: &HomeUpgradeReceipt| {
-            (
-                receipt.target_generation,
-                receipt.started_at,
-                receipt.id.as_str(),
-            ) > (
-                current.target_generation,
-                current.started_at,
-                current.id.as_str(),
-            )
-        }) {
-            latest = Some(receipt);
-        }
-    }
-    Ok(latest)
-}
-
-fn read_upgrade_receipt(id: Option<&str>) -> Result<Option<HomeUpgradeReceipt>> {
-    if let Some(id) = id {
-        return match read_durable_upgrade_receipt(
-            &crate::store::production_database_path(),
-            Some(id),
-        )? {
-            Some(receipt) => Ok(Some(receipt)),
-            None => read_bridge_upgrade_receipt(Some(id)),
-        };
-    }
-    let durable = read_durable_upgrade_receipt(&crate::store::production_database_path(), None)?;
-    let bridge = read_bridge_upgrade_receipt(None)?;
-    match (durable, bridge) {
-        (Some(durable), Some(bridge))
-            if durable.id == bridge.id || bridge.recovery() == UpgradeRecovery::Settled =>
-        {
-            Ok(Some(durable))
-        }
-        (Some(durable), Some(bridge)) => Ok(Some(
-            if (
-                bridge.target_generation,
-                bridge.started_at,
-                bridge.id.as_str(),
-            ) > (
-                durable.target_generation,
-                durable.started_at,
-                durable.id.as_str(),
-            ) {
-                bridge
-            } else {
-                durable
-            },
-        )),
-        (Some(durable), None) => Ok(Some(durable)),
-        (None, bridge) => Ok(bridge),
-    }
-}
-
-pub(crate) fn current_runtime_generation() -> u64 {
-    let store = crate::store::database_path_from_env()
-        .unwrap_or_else(|_| crate::store::production_database_path());
-    if let Some(generation) = stored_runtime_generation(&store) {
-        return generation;
-    }
-    let Some(receipt) = read_upgrade_receipt(None).ok().flatten() else {
-        return 0;
-    };
-    if receipt.artifacts_activated {
-        receipt.target_generation
-    } else {
-        receipt.prior_generation
-    }
-}
-
-fn stored_runtime_generation(store_path: &Path) -> Option<u64> {
-    if !store_path.exists() {
-        return None;
-    }
-    let connection = open_upgrade_store(store_path).ok()?;
-    let has_table = connection
-        .query_row(
-            "SELECT EXISTS (
-                SELECT 1 FROM sqlite_master
-                WHERE type='table' AND name='home_runtime_generations'
-             )",
-            [],
-            |row| row.get::<_, bool>(0),
-        )
-        .ok()?;
-    if !has_table {
-        return None;
-    }
-    let generation = connection
-        .query_row(
-            "SELECT MAX(generation)
-             FROM home_runtime_generations generation
-             JOIN homes home ON home.id=generation.home_id
-             WHERE home.route='local'",
-            [],
-            |row| row.get::<_, Option<i64>>(0),
-        )
-        .ok()??;
-    u64::try_from(generation).ok()
-}
-
-fn persist_runtime_generation(store_path: &Path, receipt: &HomeUpgradeReceipt) -> Result<()> {
-    if !store_path.exists() {
-        return Ok(());
-    }
-    let mut connection = open_upgrade_store(store_path)?;
-    let has_table = connection.query_row(
-        "SELECT EXISTS (
-            SELECT 1 FROM sqlite_master
-            WHERE type='table' AND name='home_runtime_generations'
-         )",
-        [],
-        |row| row.get::<_, bool>(0),
-    )?;
-    if !has_table {
-        return Ok(());
-    }
-    let transaction =
-        connection.transaction_with_behavior(rusqlite::TransactionBehavior::Immediate)?;
-    let home_id = transaction
-        .query_row("SELECT id FROM homes WHERE route='local'", [], |row| {
-            row.get::<_, String>(0)
-        })
-        .optional()?;
-    let Some(home_id) = home_id else {
-        transaction.commit()?;
-        return Ok(());
-    };
-    let build_version = receipt
-        .candidate
-        .build_version
-        .as_deref()
-        .unwrap_or(&receipt.candidate.package_version);
-    let generation = i64::try_from(receipt.target_generation)
-        .context("Home runtime generation exceeds SQLite")?;
-    transaction.execute(
-        "INSERT OR IGNORE INTO home_runtime_generations (
-            home_id, generation, build_version, source_revision,
-            migration_frontier, activated_at
-         ) VALUES (?1, ?2, ?3, ?4, ?5, ?6)",
-        rusqlite::params![
-            home_id,
-            generation,
-            build_version,
-            receipt.candidate.source_revision,
-            receipt.candidate.latest_known_migration,
-            time::OffsetDateTime::now_utc().unix_timestamp(),
-        ],
-    )?;
-    let stored = transaction.query_row(
-        "SELECT build_version, source_revision, migration_frontier
-         FROM home_runtime_generations WHERE home_id=?1 AND generation=?2",
-        rusqlite::params![home_id, generation],
-        |row| {
-            Ok((
-                row.get::<_, String>(0)?,
-                row.get::<_, String>(1)?,
-                row.get::<_, String>(2)?,
-            ))
-        },
-    )?;
-    let expected = (
-        build_version.to_string(),
-        receipt.candidate.source_revision.clone(),
-        receipt.candidate.latest_known_migration.clone(),
-    );
-    if stored != expected {
-        return Err(anyhow!(
-            "Home generation {} already belongs to a different runtime identity",
-            receipt.target_generation
-        ));
-    }
-    transaction.commit()?;
-    Ok(())
-}
-
-pub(crate) fn upgrade_trigger_for_work(
-    work: &crate::durable::WorkRef,
-) -> Option<crate::durable::RunTrigger> {
-    let receipt = read_upgrade_receipt(None).ok().flatten()?;
-    if !matches!(
-        receipt.phase,
-        HomeUpgradePhase::Restarting | HomeUpgradePhase::Reconciling
-    ) {
-        return None;
-    }
-    let entry = receipt
-        .works
-        .iter()
-        .find(|entry| entry.work_kind == work.kind() && entry.work_id == work.id())?;
-    let prior_run_id = entry
-        .prior_run_id
-        .as_deref()
-        .and_then(|id| crate::durable::RunId::parse(id).ok());
-    Some(crate::durable::RunTrigger::HomeUpgrade {
-        upgrade_id: receipt.id,
-        prior_run_id,
-    })
-}
-
 #[cfg(test)]
-mod tests {
+mod compatibility_tests {
     use super::{
-        _read_executable_compatibility, classify_live_run, decide as decide_with_drafts,
-        pin_direct_resume_sessions, read_active_runs, read_store_evidence, ActiveRun,
-        Compatibility, ExecutableCompatibility, LiveInvocationEvidence, PlannedRunDrain,
-        SafeStopDisposition, UpgradeDrainPlan, Verdict,
+        _read_local_executable_compatibility, decide, read_store_evidence, Compatibility,
+        ExecutableCompatibility, Verdict,
     };
     use crate::build_info::MigrationAuthority::{Published, ValidationOnly};
-    use crate::child::ChildRef;
-    use crate::durable::{Containment, ContainmentObservation, WorkRef};
-    use crate::id::WaveId;
-    use crate::planning::{LinearIssueId, LinearProjectId, ProjectPlan, TaskPlan};
-    use crate::project::{Project, ProjectId};
-    use crate::store::migrations::latest_known_version;
-    use crate::store::{open_store, StorageConfig};
-    use crate::task::{
-        Observation, PmWritebackState, Task, TaskId, TaskLifecyclePhase, TaskLifecyclePlan, TaskPr,
-        TaskPrId,
-    };
-    use crate::wave::Wave;
-    use time::OffsetDateTime;
 
-    fn table_exists(connection: &rusqlite::Connection, table: &str) -> bool {
-        connection
-            .query_row(
-                "SELECT EXISTS(SELECT 1 FROM sqlite_master WHERE type='table' AND name=?1)",
-                [table],
-                |row| row.get(0),
-            )
-            .unwrap()
-    }
-
-    fn column_exists(connection: &rusqlite::Connection, table: &str, column: &str) -> bool {
-        connection
-            .query_row(
-                "SELECT EXISTS(SELECT 1 FROM pragma_table_info(?1) WHERE name=?2)",
-                rusqlite::params![table, column],
-                |row| row.get(0),
-            )
-            .unwrap()
-    }
-
-    fn decide(
-        authority: crate::build_info::MigrationAuthority,
-        compatibility: &Compatibility,
-        active_runs: &[ActiveRun],
-    ) -> Verdict {
-        decide_with_drafts(
-            authority,
-            &[],
-            compatibility,
-            &ExecutableCompatibility::Compatible { references: 0 },
-            active_runs,
-        )
-    }
-
-    fn exact() -> Compatibility {
-        Compatibility::Exact {
-            frontier: latest_known_version(),
-        }
-    }
-
-    fn ahead() -> Compatibility {
-        Compatibility::AheadPending {
-            applied_frontier: "0.11.026_lineage_boundary".to_string(),
-            latest_known: "0.11.027_accounts_first".to_string(),
-        }
-    }
-
-    fn run(kind: &str, work_id: &str) -> ActiveRun {
-        ActiveRun {
-            run_id: format!("run-{work_id}"),
-            work_kind: kind.to_string(),
-            work_id: work_id.to_string(),
-            state: "active".to_string(),
-            containment: Some(Containment::Tmux {
-                name: format!("session-{work_id}"),
-            }),
-            containment_observation: ContainmentObservation::Present,
-        }
-    }
-
-    fn invocation(
-        provider: &str,
-        surface: &str,
-        resume_token: Option<&str>,
-    ) -> LiveInvocationEvidence {
-        LiveInvocationEvidence {
-            id: "invocation-live".to_string(),
-            provider: provider.to_string(),
-            model: None,
-            surface: surface.to_string(),
-            resume_token: resume_token.map(str::to_string),
-            provider_session_id: resume_token.map(str::to_string),
-        }
+    fn executable() -> ExecutableCompatibility {
+        ExecutableCompatibility::Compatible { references: 0 }
     }
 
     #[test]
-    fn tui_invocation_defers_install_before_any_signal() {
-        let error = classify_live_run(
-            &run("task", "task-one"),
-            &[invocation("codex", "tui", None)],
-        )
-        .unwrap_err();
-
-        assert!(error.to_string().contains("defers before pause or signal"));
-    }
-
-    #[test]
-    fn headless_lifecycle_and_native_provider_sessions_have_safe_stop_routes() {
+    fn published_candidate_advances_only_a_known_pending_frontier() {
+        let compatibility = Compatibility::AheadPending {
+            applied_frontier: "older".to_string(),
+            latest_known: "current".to_string(),
+        };
         assert_eq!(
-            classify_live_run(
-                &run("task", "task-lifecycle"),
-                &[invocation("opencode", "headless", None)]
-            )
-            .unwrap(),
-            SafeStopDisposition::LifecycleRelaunch
-        );
-        for provider in ["claude", "codex"] {
-            let mut direct = run("task", &format!("task-{provider}"));
-            direct.containment = Some(Containment::ProcessGroup { id: 42 });
-            assert!(matches!(
-                classify_live_run(
-                    &direct,
-                    &[invocation(provider, "headless", Some("provider-session"))]
-                )
-                .unwrap(),
-                SafeStopDisposition::DirectProviderResume { .. }
-            ));
-        }
-    }
-
-    #[test]
-    fn direct_provider_resume_pins_the_existing_child_session() {
-        let directory = tempfile::tempdir().unwrap();
-        let database = directory.path().join("loopflow.db");
-        let connection = rusqlite::Connection::open(&database).unwrap();
-        connection
-            .execute_batch(
-                "CREATE TABLE tasks (
-                     id TEXT PRIMARY KEY, agent TEXT NOT NULL, provider TEXT NOT NULL,
-                     provider_session_id TEXT
-                 );
-                 INSERT INTO tasks VALUES ('task-one', 'codex', 'codex', NULL);",
-            )
-            .unwrap();
-        drop(connection);
-        let mut direct = run("task", "task-one");
-        direct.containment = Some(Containment::ProcessGroup { id: 42 });
-        let plan = UpgradeDrainPlan {
-            runs: vec![PlannedRunDrain {
-                run: direct,
-                disposition: SafeStopDisposition::DirectProviderResume {
-                    invocation_id: "invocation-old".to_string(),
-                    provider: "codex".to_string(),
-                    model: None,
-                    resume_token: "thread-existing".to_string(),
-                },
-            }],
-        };
-
-        pin_direct_resume_sessions(&database, &plan).unwrap();
-
-        let pinned: String = rusqlite::Connection::open(&database)
-            .unwrap()
-            .query_row(
-                "SELECT provider_session_id FROM tasks WHERE id='task-one'",
-                [],
-                |row| row.get(0),
-            )
-            .unwrap();
-        assert_eq!(pinned, "thread-existing");
-    }
-
-    #[test]
-    fn recovery_guard_parses_process_elapsed_time_without_pid_reuse_ambiguity() {
-        assert_eq!(super::elapsed_seconds("01:02"), Some(62));
-        assert_eq!(super::elapsed_seconds("03:04:05"), Some(11_045));
-        assert_eq!(super::elapsed_seconds("2-03:04:05"), Some(183_845));
-        assert_eq!(super::elapsed_seconds("not-a-duration"), None);
-    }
-
-    #[test]
-    fn runtime_generation_reads_the_local_home_store_authority() {
-        let directory = tempfile::tempdir().unwrap();
-        let database = directory.path().join("loopflow.db");
-        let connection = rusqlite::Connection::open(&database).unwrap();
-        connection
-            .execute_batch(
-                "CREATE TABLE homes (id TEXT PRIMARY KEY, route TEXT NOT NULL);
-                 CREATE TABLE home_runtime_generations (
-                     home_id TEXT NOT NULL, generation INTEGER NOT NULL
-                 );
-                 INSERT INTO homes VALUES ('home-local', 'local');
-                 INSERT INTO homes VALUES ('home-remote', 'ssh://remote');
-                 INSERT INTO home_runtime_generations VALUES ('home-local', 7);
-                 INSERT INTO home_runtime_generations VALUES ('home-remote', 99);",
-            )
-            .unwrap();
-
-        assert_eq!(super::stored_runtime_generation(&database), Some(7));
-    }
-
-    #[tokio::test]
-    async fn every_upgrade_phase_upserts_one_typed_durable_receipt() {
-        let directory = tempfile::tempdir().unwrap();
-        let database = directory.path().join("loopflow.db");
-        let store = open_store(&StorageConfig::sqlite(database.clone()))
-            .await
-            .unwrap();
-        drop(store);
-        let connection = rusqlite::Connection::open(&database).unwrap();
-        if !table_exists(&connection, "home_runtime_generations") {
-            connection
-                .execute_batch(&crate::store::migrations::migration_sql_for_test(
-                    "home_runtime_generation",
-                ))
-                .unwrap();
-        }
-        let home_id: String = connection
-            .query_row("SELECT id FROM homes WHERE route='local'", [], |row| {
-                row.get(0)
-            })
-            .unwrap();
-        drop(connection);
-
-        let mut receipt =
-            super::HomeUpgradeReceipt::with_generation(super::CandidateIdentity::current(), &[], 7);
-        receipt.home_id = Some(home_id);
-        let work = receipt.ensure_work_parts("task", "task-one");
-        work.enabled_before = true;
-        work.prior_run_id = Some("run-old".to_string());
-        let phases = [
-            super::HomeUpgradePhase::Planned,
-            super::HomeUpgradePhase::Draining,
-            super::HomeUpgradePhase::Drained,
-            super::HomeUpgradePhase::Migrating,
-            super::HomeUpgradePhase::Restarting,
-            super::HomeUpgradePhase::Reconciling,
-            super::HomeUpgradePhase::Completed,
-            super::HomeUpgradePhase::Failed,
-            super::HomeUpgradePhase::RolledBack,
-        ];
-        for phase in phases {
-            receipt.phase = phase;
-            super::persist_durable_upgrade_receipt(&database, &receipt).unwrap();
-            assert_eq!(
-                super::read_durable_upgrade_receipt(&database, Some(&receipt.id)).unwrap(),
-                Some(receipt.clone())
-            );
-        }
-
-        let connection = rusqlite::Connection::open(&database).unwrap();
-        let upgrades: i64 = connection
-            .query_row("SELECT COUNT(*) FROM home_upgrades", [], |row| row.get(0))
-            .unwrap();
-        let works: i64 = connection
-            .query_row("SELECT COUNT(*) FROM home_upgrade_work", [], |row| {
-                row.get(0)
-            })
-            .unwrap();
-        assert_eq!((upgrades, works), (1, 1));
-    }
-
-    #[test]
-    fn recovery_resumes_each_consequential_phase_idempotently() {
-        let mut receipt =
-            super::HomeUpgradeReceipt::with_generation(super::CandidateIdentity::current(), &[], 7);
-        for phase in [
-            super::HomeUpgradePhase::Planned,
-            super::HomeUpgradePhase::Draining,
-            super::HomeUpgradePhase::Drained,
-            super::HomeUpgradePhase::Migrating,
-        ] {
-            receipt.phase = phase;
-            receipt.artifacts_activated = false;
-            assert_eq!(
-                receipt.recovery(),
-                super::UpgradeRecovery::ContinueTransaction
-            );
-        }
-        for phase in [
-            super::HomeUpgradePhase::Restarting,
-            super::HomeUpgradePhase::Reconciling,
-            super::HomeUpgradePhase::Failed,
-        ] {
-            receipt.phase = phase;
-            receipt.artifacts_activated = true;
-            assert_eq!(
-                receipt.recovery(),
-                super::UpgradeRecovery::ResumeCandidate,
-                "an activated candidate must not repeat the old-generation drain"
-            );
-        }
-        for phase in [
-            super::HomeUpgradePhase::Completed,
-            super::HomeUpgradePhase::RolledBack,
-        ] {
-            receipt.phase = phase;
-            assert_eq!(receipt.recovery(), super::UpgradeRecovery::Settled);
-        }
-        receipt.phase = super::HomeUpgradePhase::Failed;
-        receipt.artifacts_activated = false;
-        assert_eq!(receipt.recovery(), super::UpgradeRecovery::Settled);
-    }
-
-    #[test]
-    fn only_a_published_candidate_promotes_at_an_exact_frontier() {
-        assert!(matches!(
-            decide(ValidationOnly, &exact(), &[]),
-            Verdict::Reject { .. }
-        ));
-        assert_eq!(decide(Published, &exact(), &[]), Verdict::Promote);
-    }
-
-    #[test]
-    fn pending_drafts_refuse_promotion_even_at_the_exact_store_frontier() {
-        let Verdict::Reject { reasons } = decide_with_drafts(
-            Published,
-            &["run_owns_execution", "durable_asks"],
-            &exact(),
-            &ExecutableCompatibility::Compatible { references: 0 },
-            &[],
-        ) else {
-            panic!("runtime code newer than the embedded schema must never become global");
-        };
-        assert_eq!(reasons.len(), 1);
-        assert!(reasons[0].contains("run_owns_execution, durable_asks"));
-        assert!(reasons[0].contains("cut a release"));
-    }
-
-    #[test]
-    fn a_validation_only_candidate_ahead_of_the_store_is_rejected() {
-        let Verdict::Reject { reasons } = decide(ValidationOnly, &ahead(), &[]) else {
-            panic!("a validation-only build must not advance the shared store");
-        };
-        assert!(reasons
-            .iter()
-            .any(|reason| reason.contains("validation-only")));
-    }
-
-    #[test]
-    fn a_published_candidate_ahead_of_the_store_promotes_and_migrates() {
-        assert_eq!(decide(Published, &ahead(), &[]), Verdict::PromoteAndMigrate);
-    }
-
-    #[test]
-    fn incompatible_and_unreadable_evidence_fail_closed_for_every_authority() {
-        let incompatible = Compatibility::Incompatible {
-            reason: "database migration 0.11.027_accounts_first is unknown to lf".to_string(),
-        };
-        let unreadable = Compatibility::Unreadable {
-            reason: "store does not exist".to_string(),
-        };
-        for authority in [Published, ValidationOnly] {
-            assert!(matches!(
-                decide(authority, &incompatible, &[]),
-                Verdict::Reject { .. }
-            ));
-            assert!(matches!(
-                decide(authority, &unreadable, &[]),
-                Verdict::Reject { .. }
-            ));
-        }
-    }
-
-    #[test]
-    fn an_exact_frontier_repairs_the_cli_with_thirty_live_runs() {
-        let runs = (0..30)
-            .map(|index| run("project", &format!("project-{index:02}")))
-            .collect::<Vec<_>>();
-        assert_eq!(decide(Published, &exact(), &runs), Verdict::Promote);
-        assert!(matches!(
-            decide(ValidationOnly, &exact(), &runs),
-            Verdict::Reject { .. }
-        ));
-    }
-
-    #[test]
-    fn thirty_proven_live_runs_are_accepted_for_coordinated_drain() {
-        let runs = (0..30)
-            .map(|index| run("project", &format!("project-{index:02}")))
-            .collect::<Vec<_>>();
-        assert_eq!(
-            decide(Published, &ahead(), &runs),
+            decide(Published, &[], &compatibility, &executable()),
             Verdict::PromoteAndMigrate
         );
-    }
-
-    #[test]
-    fn an_old_reserved_run_without_containment_still_fences_a_migration() {
-        let conn = rusqlite::Connection::open_in_memory().unwrap();
-        conn.execute_batch(
-            "CREATE TABLE homes (id TEXT PRIMARY KEY, route TEXT NOT NULL);
-             CREATE TABLE runs (
-                 id TEXT, home_id TEXT, source_kind TEXT, source_id TEXT, state TEXT,
-                 containment_kind TEXT, containment_id TEXT, created_at INTEGER
-             );
-             INSERT INTO homes VALUES ('home-local', 'local');
-             INSERT INTO runs VALUES
-                 ('run-reserved', 'home-local', 'task', 'task-reserved',
-                  'reserved', NULL, NULL, 1);",
-        )
-        .unwrap();
-        let runs = read_active_runs(&conn).unwrap();
-        assert_eq!(
-            runs[0].containment_observation,
-            ContainmentObservation::Unprovable,
-            "elapsed time is never containment-absence evidence"
-        );
         assert!(matches!(
-            decide(Published, &ahead(), &runs),
+            decide(ValidationOnly, &[], &compatibility, &executable()),
             Verdict::Reject { .. }
         ));
     }
 
     #[test]
-    fn a_reserved_wave_requires_post_pause_listener_proof() {
-        let run = ActiveRun {
-            run_id: "run-wave".to_string(),
-            work_kind: "wave".to_string(),
-            work_id: "wave-product".to_string(),
-            state: "reserved".to_string(),
-            containment: None,
-            containment_observation: ContainmentObservation::Unprovable,
-        };
-
-        assert_eq!(
-            decide(Published, &ahead(), &[run]),
-            Verdict::PromoteAndMigrate,
-            "the transaction may pause the Home, but cannot migrate until the exact listener is absent"
-        );
-    }
-
-    #[test]
-    fn an_unresolved_placed_lifecycle_rejects_an_exact_frontier() {
-        let incompatible = ExecutableCompatibility::Incompatible {
-            failures: vec![super::ExecutableFailure {
-                work_kind: "project".to_string(),
-                work_id: "project-incident-management".to_string(),
-                flow: "project".to_string(),
-                catalog_root: "/src/loopflow".to_string(),
-                reason: "skill not found: removed-project-step".to_string(),
-            }],
-        };
-
-        let Verdict::Reject { reasons } =
-            decide_with_drafts(Published, &[], &exact(), &incompatible, &[])
-        else {
-            panic!("an upgrade must preserve every reachable Work lifecycle");
-        };
-        assert_eq!(reasons.len(), 1);
-        assert!(reasons[0].contains("project-incident-management"));
-        assert!(reasons[0].contains("removed-project-step"));
-    }
-
-    #[tokio::test]
-    async fn candidate_gate_expands_effective_lifecycles_for_placed_work() {
+    fn absent_store_is_an_uninitialized_frontier() {
         let directory = tempfile::tempdir().unwrap();
-        let repo = directory.path().join("repo");
-        std::fs::create_dir_all(repo.join(".lf/flows")).unwrap();
-        let database = directory.path().join("loopflow.db");
-        let store = open_store(&StorageConfig::sqlite(database.clone()))
-            .await
-            .unwrap();
-        let connection = rusqlite::Connection::open(&database).unwrap();
-        let enablement_is_materialized = column_exists(&connection, "work_placements", "enabled");
-        if !enablement_is_materialized {
-            connection
-                .execute_batch(&crate::store::migrations::migration_sql_for_test(
-                    "work_enablement",
-                ))
-                .unwrap();
-        }
-        drop(connection);
-        let wave = Wave::new(
-            WaveId::new(),
-            "infrastructure".to_string(),
-            repo.display().to_string(),
-        );
-        store.create_wave(&wave).await.unwrap();
-        let now = OffsetDateTime::now_utc();
-        let project = Project {
-            id: ProjectId::new(),
-            plan: ProjectPlan {
-                id: LinearProjectId::new("linear-project").unwrap(),
-                slug: "incident-management".to_string(),
-                name: "Incident Management".to_string(),
-                prompt_context: "Restore first.".to_string(),
-                pm_snapshot_synced_at: now.unix_timestamp(),
-            },
-            wave_id: wave.id().clone(),
-            iteration: 14,
-            observation_cursor: 0,
-            last_state_fingerprint: None,
-            agent: "codex".to_string(),
-            provider: "codex".to_string(),
-            provider_session_id: None,
-            abandon_intent: None,
-            created_at: now,
-            updated_at: now,
-        };
-        store.create_project(&project).await.unwrap();
-        let work = store
-            .work_for_child(&ChildRef::Project(project.id.clone()))
-            .await
-            .unwrap();
-        assert_eq!(work, WorkRef::Project(project.id.clone()));
-
-        let task_id = TaskId::new();
-        let task_worktree = repo.join("task-worktree");
-        std::fs::create_dir_all(&task_worktree).unwrap();
-        let task = Task {
-            id: task_id.clone(),
-            plan: TaskPlan {
-                id: LinearIssueId::new("linear-issue").unwrap(),
-                identifier: "LOO-211".to_string(),
-                title: "Restore Project settlement".to_string(),
-                description: "Preserve the live Project boundary.".to_string(),
-                pm_snapshot_synced_at: now.unix_timestamp(),
-            },
-            pm_writeback: PmWritebackState::Current,
-            wave_id: wave.id().clone(),
-            project_id: project.id.clone(),
-            worktree: task_worktree,
-            workspace_slug: "project-settlement".to_string(),
-            lifecycle: TaskLifecyclePlan::standard("task-design", "slice", "removed-task-gate"),
-            lifecycle_phase: TaskLifecyclePhase::Loop,
-            phase_epoch: 1,
-            phase_cursor: 0,
-            phase_iteration: 0,
-            gate_cycle: 0,
-            gate_proposal: None,
-            agent: "codex".to_string(),
-            provider: "codex".to_string(),
-            provider_session_id: None,
-            abandon_intent: None,
-            created_at: now,
-            updated_at: now,
-            observation: Observation::NotRequired,
-        };
-        let task_pr = TaskPr {
-            id: TaskPrId::new(),
-            task_id: task_id.clone(),
-            sequence: 1,
-            slug: task.workspace_slug.clone(),
-            branch: "jack/project-settlement".to_string(),
-            base_commit: "deadbeef".to_string(),
-            parent_pr_id: None,
-            publication: None,
-            merge_commit: None,
-            abandoned_at: None,
-            ci_observation: None,
-            github_observation: None,
-            linear_attachment_id: None,
-            linear_comment_id: None,
-            linear_link_error: None,
-            created_at: now,
-            updated_at: now,
-        };
-        store.create_task(&task, &task_pr).await.unwrap();
-        let task_work = WorkRef::Task(task_id.clone());
-        let connection = rusqlite::Connection::open(&database).unwrap();
-        assert_eq!(task_work, WorkRef::Task(task_id.clone()));
-        if !enablement_is_materialized {
-            connection
-                .execute("ALTER TABLE work_placements DROP COLUMN enabled", [])
-                .unwrap();
-        }
-
-        std::fs::write(
-            repo.join(".lf/flows/project.yaml"),
-            "- removed-project-step\n",
-        )
-        .unwrap();
-        let compatibility = _read_executable_compatibility(&database);
-        let ExecutableCompatibility::Incompatible { failures } = compatibility else {
-            panic!("the candidate must expand the effective Project flow: {compatibility:?}");
-        };
-        assert_eq!(failures.len(), 2);
-        assert!(failures.iter().any(|failure| {
-            failure.work_kind == "project"
-                && failure.work_id == project.id.as_str()
-                && failure.flow == "project"
-                && failure.reason.contains("removed-project-step")
-        }));
-        assert!(failures.iter().any(|failure| {
-            failure.work_kind == "task"
-                && failure.work_id == task_id.as_str()
-                && failure.flow == "removed-task-gate"
-        }));
-
-        std::fs::remove_file(repo.join(".lf/flows/project.yaml")).unwrap();
-        let compatibility = _read_executable_compatibility(&database);
-        let ExecutableCompatibility::Incompatible { failures } = compatibility else {
-            panic!("all pinned Task phases must remain reachable: {compatibility:?}");
-        };
-        assert_eq!(failures.len(), 1);
-        assert_eq!(failures[0].flow, "removed-task-gate");
-
-        rusqlite::Connection::open(&database)
-            .unwrap()
-            .execute(
-                "UPDATE tasks SET gate_flow='ship' WHERE id=?1",
-                [task_id.as_str()],
-            )
-            .unwrap();
-        assert_eq!(
-            _read_executable_compatibility(&database),
-            ExecutableCompatibility::Compatible { references: 5 }
-        );
-    }
-
-    /// Under the exclusive promotion lock an absent store is a promotable
-    /// uninitialized frontier with zero live bodies: a published candidate may
-    /// initialize it, a validation-only one still may not. This is what lets
-    /// `lf install promote` reach the authorized open on a machine that has no
-    /// shared store yet.
-    #[test]
-    fn an_absent_store_is_a_promotable_uninitialized_frontier() {
-        let dir = tempfile::tempdir().unwrap();
-        let (compatibility, live_bodies) = read_store_evidence(&dir.path().join("absent.db"));
-        assert!(
-            matches!(compatibility, Compatibility::AheadPending { .. }),
-            "an absent store is an uninitialized frontier, not unreadable"
-        );
-        assert!(
-            live_bodies.is_empty(),
-            "an absent store proves zero persisted live leases under the lock"
-        );
-        assert_eq!(
-            decide(Published, &compatibility, &live_bodies),
-            Verdict::PromoteAndMigrate,
-            "a published candidate initializes the shared store"
-        );
-        assert!(
-            matches!(
-                decide(ValidationOnly, &compatibility, &live_bodies),
-                Verdict::Reject { .. }
-            ),
-            "a validation-only build still may not initialize the shared store"
-        );
-    }
-
-    /// An existing-but-empty (or corrupt) file is not the fresh-initialization
-    /// case and must keep failing closed rather than promote.
-    #[test]
-    fn an_existing_empty_store_still_fails_closed() {
-        let dir = tempfile::tempdir().unwrap();
-        let empty = dir.path().join("loopflow.db");
-        std::fs::write(&empty, b"").unwrap();
-        let (compatibility, _bodies) = read_store_evidence(&empty);
-        assert!(
-            matches!(
-                compatibility,
-                Compatibility::Incompatible { .. } | Compatibility::Unreadable { .. }
-            ),
-            "an existing empty file is not a clean uninitialized frontier: {compatibility:?}"
-        );
         assert!(matches!(
-            decide(Published, &compatibility, &[]),
-            Verdict::Reject { .. }
+            read_store_evidence(&directory.path().join("missing.db")),
+            Compatibility::AheadPending { applied_frontier, .. }
+                if applied_frontier == "(uninitialized)"
         ));
     }
 
     #[test]
-    fn active_runs_are_read_until_their_containment_is_absent() {
-        let conn = rusqlite::Connection::open_in_memory().unwrap();
-        conn.execute_batch(
-            "CREATE TABLE homes (id TEXT PRIMARY KEY, route TEXT NOT NULL);
-             CREATE TABLE runs (
-                 id TEXT, home_id TEXT, source_kind TEXT, source_id TEXT, state TEXT,
-                 containment_kind TEXT, containment_id TEXT, created_at INTEGER
-             );
-             INSERT INTO homes VALUES ('home-local', 'local');
-             INSERT INTO homes VALUES ('home-remote', 'ssh://remote');
-             INSERT INTO runs VALUES
-                 ('run-active', 'home-local', 'task', 'task-one',
-                  'active', 'tmux', 'missing-task', 1),
-                 ('run-stopping', 'home-local', 'project', 'project-one',
-                  'stopping', 'tmux', 'missing-project', 2),
-                 ('run-remote', 'home-remote', 'task', 'task-remote',
-                  'active', 'process_group', '42', 3),
-                 ('run-ended', 'home-local', 'task', 'task-done',
-                  'ended', NULL, NULL, 4);",
-        )
-        .unwrap();
-        let active = read_active_runs(&conn).unwrap();
-        let ids: Vec<&str> = active.iter().map(|run| run.run_id.as_str()).collect();
-        assert_eq!(ids, vec!["run-active", "run-stopping"]);
-        assert_eq!(active[0].work_kind, "task");
-        assert_eq!(active[1].work_kind, "project");
-    }
-
-    #[test]
-    fn absent_containment_ends_stale_durable_run_without_waiting() {
+    fn existing_empty_store_fails_closed() {
         let directory = tempfile::tempdir().unwrap();
-        let database = directory.path().join("loopflow.db");
-        let conn = rusqlite::Connection::open(&database).unwrap();
-        conn.execute_batch(
-            "CREATE TABLE homes (id TEXT PRIMARY KEY, route TEXT NOT NULL);
-             CREATE TABLE runs (
-                 id TEXT, home_id TEXT, source_kind TEXT, source_id TEXT, state TEXT,
-                 containment_kind TEXT, containment_id TEXT, created_at INTEGER,
-                 ended_at INTEGER, stop_reason TEXT
-             );
-             CREATE TABLE agent_invocations (
-                 id TEXT, supervising_run_id TEXT, ended_at INTEGER,
-                 outcome TEXT, handback_state TEXT, run_id TEXT,
-                 process_id TEXT, started_at INTEGER
-             );
-             CREATE TABLE agent_turns (
-                 invocation_id TEXT, status TEXT, ended_at INTEGER
-             );
-             CREATE TABLE run_events (
-                 run_id TEXT, process_id TEXT, node TEXT, event TEXT
-             );
-             INSERT INTO homes VALUES ('home-local', 'local');
-             INSERT INTO runs VALUES
-                 ('run-stale', 'home-local', 'task', 'task-one', 'active', 'tmux',
-                  'definitely-missing-upgrade-session', 1, NULL, NULL);
-             INSERT INTO agent_invocations VALUES
-                 ('invocation-stale', 'run-stale', NULL, 'running', NULL,
-                  'trace-stale', 'exec-stale', 1);
-             INSERT INTO agent_turns VALUES
-                 ('invocation-stale', 'running', NULL);
-             INSERT INTO run_events VALUES
-                 ('trace-stale', 'exec-stale', 'run', 'interrupted');",
-        )
-        .unwrap();
-        drop(conn);
-        let runs = super::active_runs_at(&database).unwrap();
-        let mut receipt = super::HomeUpgradeReceipt::with_generation(
-            super::CandidateIdentity::current(),
-            &runs,
-            0,
-        );
-        let plan = super::UpgradeDrainPlan {
-            runs: runs
-                .into_iter()
-                .map(|run| super::PlannedRunDrain {
-                    run,
-                    disposition: super::SafeStopDisposition::DurableOnly,
-                })
-                .collect(),
-        };
-
-        let present = super::settle_absent_runs(&database, &mut receipt, &plan).unwrap();
-
-        assert!(present.is_empty());
-        assert_eq!(
-            receipt.works[0].drain,
-            super::UpgradeDrainOutcome::DurableOnly
-        );
-        let state: String = rusqlite::Connection::open(&database)
-            .unwrap()
-            .query_row("SELECT state FROM runs WHERE id='run-stale'", [], |row| {
-                row.get(0)
-            })
-            .unwrap();
-        assert_eq!(state, "ended");
-        let connection = rusqlite::Connection::open(&database).unwrap();
-        let first: (String, String, i64, i64) = connection
-            .query_row(
-                "SELECT invocation.outcome, invocation.handback_state,
-                        invocation.ended_at, turn.ended_at
-                 FROM agent_invocations invocation
-                 JOIN agent_turns turn ON turn.invocation_id=invocation.id
-                 WHERE invocation.id='invocation-stale'",
-                [],
-                |row| Ok((row.get(0)?, row.get(1)?, row.get(2)?, row.get(3)?)),
-            )
-            .unwrap();
-        assert_eq!(first.0.as_str(), "interrupted");
-        assert_eq!(first.1.as_str(), "interrupted");
-        drop(connection);
-
-        assert!(super::settle_absent_runs(&database, &mut receipt, &plan)
-            .unwrap()
-            .is_empty());
-        let second: (String, String, i64, i64) = rusqlite::Connection::open(&database)
-            .unwrap()
-            .query_row(
-                "SELECT invocation.outcome, invocation.handback_state,
-                        invocation.ended_at, turn.ended_at
-                 FROM agent_invocations invocation
-                 JOIN agent_turns turn ON turn.invocation_id=invocation.id
-                 WHERE invocation.id='invocation-stale'",
-                [],
-                |row| Ok((row.get(0)?, row.get(1)?, row.get(2)?, row.get(3)?)),
-            )
-            .unwrap();
-        assert_eq!(second, first);
+        let store = directory.path().join("empty.db");
+        rusqlite::Connection::open(&store).unwrap();
+        assert!(matches!(
+            read_store_evidence(&store),
+            Compatibility::Incompatible { .. } | Compatibility::Unreadable { .. }
+        ));
     }
 
     #[test]
-    fn a_reserved_run_with_present_containment_must_drain_before_ending() {
+    fn local_candidate_schema_is_validated_on_an_isolated_copy() {
         let directory = tempfile::tempdir().unwrap();
-        let database = directory.path().join("loopflow.db");
-        let connection = rusqlite::Connection::open(&database).unwrap();
-        connection
-            .execute_batch(
-                "CREATE TABLE runs (
-                     id TEXT PRIMARY KEY, state TEXT NOT NULL, stop_reason TEXT
-                 );
-                 INSERT INTO runs VALUES ('run-reserved', 'reserved', NULL);",
-            )
-            .unwrap();
-        drop(connection);
-        let run = ActiveRun {
-            run_id: "run-reserved".to_string(),
-            work_kind: "task".to_string(),
-            work_id: "task-one".to_string(),
-            state: "reserved".to_string(),
-            containment: Some(Containment::Tmux {
-                name: "lf-task-one".to_string(),
-            }),
-            containment_observation: ContainmentObservation::Present,
-        };
-
-        super::request_upgrade_stop(&database, &run, "upgrade-one", 1_900_000_000).unwrap();
-
-        let state: String = rusqlite::Connection::open(&database)
-            .unwrap()
-            .query_row(
-                "SELECT state FROM runs WHERE id='run-reserved'",
-                [],
-                |row| row.get(0),
-            )
-            .unwrap();
-        assert_eq!(state, "stopping");
-    }
-
-    #[test]
-    fn reconciliation_requires_the_target_generation_and_live_containment() {
-        let work = WorkRef::Wave(WaveId::new());
-        let receipt =
-            super::HomeUpgradeReceipt::with_generation(super::CandidateIdentity::current(), &[], 4);
-        let mut run = crate::durable::Run {
-            id: crate::durable::RunId::new(),
-            work: work.clone(),
-            epoch_id: crate::durable::EpochId::new(),
-            home_id: crate::durable::HomeId::new(),
-            runtime_generation: Some(receipt.prior_generation),
-            state: crate::durable::RunState::Reserved,
-            trigger: super::reconciliation_trigger(&receipt, &work),
-            retry_of: None,
-            containment: Some(Containment::Tmux {
-                name: "definitely-missing-reconciled-wave".to_string(),
-            }),
-            cwd: None,
-            created_at: OffsetDateTime::now_utc(),
-            started_at: None,
-            ended_at: None,
-        };
-
-        let error = super::validate_reconciled_run(&receipt, &work, &run).unwrap_err();
-        assert!(error.to_string().contains("expected 5"));
-
-        run.runtime_generation = Some(receipt.target_generation);
-        let error = super::validate_reconciled_run(&receipt, &work, &run).unwrap_err();
-        assert!(error.to_string().contains("Absent containment"));
-    }
-
-    #[test]
-    fn a_paused_home_and_absent_exact_listener_settle_a_reserved_wave() {
-        let directory = tempfile::tempdir().unwrap();
-        let repo = directory.path().join("repo");
-        std::fs::create_dir_all(repo.join("wave/product")).unwrap();
-        let database = directory.path().join("loopflow.db");
-        let home_id = crate::durable::HomeId::new();
-        let connection = rusqlite::Connection::open(&database).unwrap();
-        connection
-            .execute_batch(&format!(
-                "CREATE TABLE homes (id TEXT PRIMARY KEY, route TEXT NOT NULL);
-                 CREATE TABLE waves (
-                     id TEXT, name TEXT, repo TEXT, created_at INTEGER
-                 );
-                 CREATE TABLE runs (
-                     id TEXT, home_id TEXT, source_kind TEXT, source_id TEXT, state TEXT,
-                     containment_kind TEXT, containment_id TEXT, created_at INTEGER,
-                     ended_at INTEGER, stop_reason TEXT
-                 );
-                 CREATE TABLE agent_invocations (
-                     id TEXT, supervising_run_id TEXT, ended_at INTEGER,
-                     outcome TEXT, handback_state TEXT
-                 );
-                 CREATE TABLE agent_turns (
-                     invocation_id TEXT, status TEXT, ended_at INTEGER
-                 );
-                 INSERT INTO homes VALUES ('{}', 'local');
-                 INSERT INTO waves VALUES ('wave-product', 'product', '{}', 1);
-                 INSERT INTO runs VALUES (
-                     'run-reserved', '{}', 'wave', 'wave-product', 'reserved',
-                     NULL, NULL, 1, NULL, NULL
-                 );",
-                home_id.as_str(),
-                repo.display(),
-                home_id.as_str(),
-            ))
-            .unwrap();
-        let runs = read_active_runs(&connection).unwrap();
-        drop(connection);
-        let mut receipt = super::HomeUpgradeReceipt::with_generation(
-            super::CandidateIdentity::current(),
-            &runs,
-            4,
-        );
-        let paused = super::PausedHome {
-            keeper_mode: crate::lfd::service::KeeperMode::None,
-            home_id: Some(home_id),
-            repo: Some(repo),
-        };
-
-        super::settle_paused_wave_reservations(&database, &mut receipt, &paused).unwrap();
-
-        assert_eq!(
-            receipt.works[0].containment_observation,
-            ContainmentObservation::Absent
-        );
-        assert_eq!(
-            receipt.works[0].drain,
-            super::UpgradeDrainOutcome::DurableOnly
-        );
-        let state: String = rusqlite::Connection::open(&database)
-            .unwrap()
-            .query_row(
-                "SELECT state FROM runs WHERE id='run-reserved'",
-                [],
-                |row| row.get(0),
-            )
-            .unwrap();
-        assert_eq!(state, "ended");
-    }
-
-    #[test]
-    fn first_fork_captures_every_enabled_placement_regardless_of_epoch_state() {
-        let directory = tempfile::tempdir().unwrap();
-        let database = directory.path().join("loopflow.db");
-        let connection = rusqlite::Connection::open(&database).unwrap();
-        connection
-            .execute_batch(
-                "CREATE TABLE waves (id TEXT);
-                 CREATE TABLE projects (id TEXT);
-                 CREATE TABLE tasks (id TEXT);
-                 CREATE TABLE epochs (
-                     wave_id TEXT, project_id TEXT, task_id TEXT, state TEXT
-                 );
-                 CREATE TABLE work_placements (
-                     wave_id TEXT, project_id TEXT, task_id TEXT, home_id TEXT
-                 );
-                 INSERT INTO waves VALUES ('wave-one');
-                 INSERT INTO projects VALUES ('project-one');
-                 INSERT INTO tasks VALUES ('task-one');
-                 INSERT INTO epochs VALUES ('wave-one', NULL, NULL, 'open');
-                 INSERT INTO epochs VALUES (NULL, 'project-one', NULL, 'done');
-                 INSERT INTO epochs VALUES (NULL, NULL, 'task-one', 'abandoned');
-                 INSERT INTO work_placements VALUES ('wave-one', NULL, NULL, 'local');
-                 INSERT INTO work_placements VALUES (NULL, 'project-one', NULL, 'local');
-                 INSERT INTO work_placements VALUES (NULL, NULL, 'task-one', 'local');",
-            )
-            .unwrap();
-        drop(connection);
-        let mut receipt =
-            super::HomeUpgradeReceipt::with_generation(super::CandidateIdentity::current(), &[], 4);
-
-        super::capture_enabled_work(&database, &mut receipt).unwrap();
-
-        assert_eq!(receipt.prior_generation, 4);
-        assert_eq!(receipt.target_generation, 5);
-        assert_eq!(
-            receipt
-                .works
-                .iter()
-                .map(|work| (work.work_kind.as_str(), work.work_id.as_str()))
-                .collect::<Vec<_>>(),
-            vec![
-                ("project", "project-one"),
-                ("task", "task-one"),
-                ("wave", "wave-one")
-            ]
-        );
-        assert!(receipt.works.iter().all(|work| work.enabled_before));
-    }
-
-    #[test]
-    fn published_return_parks_only_surviving_first_fork_work() {
-        let directory = tempfile::tempdir().unwrap();
-        let database = directory.path().join("loopflow.db");
-        let connection = rusqlite::Connection::open(&database).unwrap();
-        let wave_open = crate::id::WaveId::new();
-        let project_done = crate::durable::ProjectId::new();
-        let task_abandoned = crate::durable::TaskId::new();
-        let task_disabled = crate::durable::TaskId::new();
-        let task_missing = crate::durable::TaskId::new();
-        connection
-            .execute_batch(
-                "CREATE TABLE epochs (
-                     number INTEGER, wave_id TEXT, project_id TEXT, task_id TEXT, state TEXT
-                 );
-                 CREATE TABLE work_placements (
-                     wave_id TEXT, project_id TEXT, task_id TEXT,
-                     home_id TEXT, enabled INTEGER NOT NULL
-                 );",
-            )
-            .unwrap();
-        connection
-            .execute(
-                "INSERT INTO epochs VALUES (1, ?1, NULL, NULL, 'open')",
-                [wave_open.as_str()],
-            )
-            .unwrap();
-        connection
-            .execute(
-                "INSERT INTO epochs VALUES (1, NULL, ?1, NULL, 'done')",
-                [project_done.as_str()],
-            )
-            .unwrap();
-        connection
-            .execute(
-                "INSERT INTO epochs VALUES (1, NULL, NULL, ?1, 'abandoned')",
-                [task_abandoned.as_str()],
-            )
-            .unwrap();
-        for (column, id, enabled) in [
-            ("wave_id", wave_open.as_str(), true),
-            ("project_id", project_done.as_str(), true),
-            ("task_id", task_abandoned.as_str(), true),
-            ("task_id", task_disabled.as_str(), false),
-        ] {
-            connection
-                .execute(
-                    &format!(
-                        "INSERT INTO work_placements ({column}, home_id, enabled) VALUES (?1, 'local', ?2)"
-                    ),
-                    rusqlite::params![id, enabled],
-                )
-                .unwrap();
-        }
-        drop(connection);
-        let evidence = crate::machine_install::ForkEvidence {
-            enabled_work: vec![
-                crate::durable::WorkRef::Wave(wave_open.clone()),
-                crate::durable::WorkRef::Project(project_done),
-                crate::durable::WorkRef::Task(task_abandoned),
-                crate::durable::WorkRef::Task(task_disabled),
-                crate::durable::WorkRef::Task(task_missing),
-            ],
-            drained_run_ids: Vec::new(),
-        };
-
-        let outcomes = super::park_first_fork_work(&database, Some(&evidence)).unwrap();
-
-        assert_eq!(
-            outcomes
-                .iter()
-                .map(|outcome| outcome.outcome)
-                .collect::<Vec<_>>(),
-            vec![
-                crate::machine_install::WorkDisposition::Disabled,
-                crate::machine_install::WorkDisposition::Terminal,
-                crate::machine_install::WorkDisposition::Abandoned,
-                crate::machine_install::WorkDisposition::AlreadyDisabled,
-                crate::machine_install::WorkDisposition::Missing,
-            ]
-        );
-        let enabled: bool = rusqlite::Connection::open(&database)
-            .unwrap()
-            .query_row(
-                "SELECT enabled FROM work_placements WHERE wave_id=?1",
-                [wave_open.as_str()],
-                |row| row.get(0),
-            )
-            .unwrap();
-        assert!(!enabled);
-    }
-
-    #[test]
-    fn fresh_development_fork_parks_work_only_in_the_new_clone() {
-        let directory = tempfile::tempdir().unwrap();
-        let reliable = directory.path().join("reliable.db");
-        let clone = directory.path().join("clone.db");
-        let wave_open = crate::id::WaveId::new();
-        let schema = "CREATE TABLE epochs (
-                          number INTEGER, wave_id TEXT, project_id TEXT, task_id TEXT, state TEXT
-                      );
-                      CREATE TABLE work_placements (
-                          wave_id TEXT, project_id TEXT, task_id TEXT,
-                          home_id TEXT, enabled INTEGER NOT NULL
-                      );";
-        let connection = rusqlite::Connection::open(&reliable).unwrap();
-        connection.execute_batch(schema).unwrap();
-        connection
-            .execute(
-                "INSERT INTO epochs VALUES (1, ?1, NULL, NULL, 'open')",
-                [wave_open.as_str()],
-            )
-            .unwrap();
-        connection
-            .execute(
-                "INSERT INTO work_placements VALUES (?1, NULL, NULL, 'local', 1)",
-                [wave_open.as_str()],
-            )
-            .unwrap();
-        drop(connection);
-        std::fs::copy(&reliable, &clone).unwrap();
-        let evidence = crate::machine_install::ForkEvidence {
-            enabled_work: vec![crate::durable::WorkRef::Wave(wave_open.clone())],
-            drained_run_ids: vec![crate::durable::RunId::new().to_string()],
-        };
-
-        let outcomes = super::park_first_fork_work(&clone, Some(&evidence)).unwrap();
-
-        assert_eq!(
-            outcomes[0].outcome,
-            crate::machine_install::WorkDisposition::Disabled
-        );
-        for (database, expected) in [(&reliable, true), (&clone, false)] {
-            let enabled: bool = rusqlite::Connection::open(database)
-                .unwrap()
-                .query_row(
-                    "SELECT enabled FROM work_placements WHERE wave_id=?1",
-                    [wave_open.as_str()],
-                    |row| row.get(0),
-                )
-                .unwrap();
-            assert_eq!(enabled, expected, "{}", database.display());
-        }
-    }
-
-    #[test]
-    fn rollback_routes_drained_children_through_the_previous_runtime() {
-        let runs = [
-            ActiveRun {
-                run_id: "run-wave-old".to_string(),
-                work_kind: "wave".to_string(),
-                work_id: "wave-one".to_string(),
-                state: "running".to_string(),
-                containment: Some(Containment::Tmux {
-                    name: "old-wave".to_string(),
-                }),
-                containment_observation: ContainmentObservation::Present,
-            },
-            ActiveRun {
-                run_id: "run-project-old".to_string(),
-                work_kind: "project".to_string(),
-                work_id: "project-one".to_string(),
-                state: "running".to_string(),
-                containment: Some(Containment::Tmux {
-                    name: "old-project".to_string(),
-                }),
-                containment_observation: ContainmentObservation::Present,
-            },
-            ActiveRun {
-                run_id: "run-task-old".to_string(),
-                work_kind: "task".to_string(),
-                work_id: "task-one".to_string(),
-                state: "running".to_string(),
-                containment: Some(Containment::Tmux {
-                    name: "old-task".to_string(),
-                }),
-                containment_observation: ContainmentObservation::Present,
-            },
-        ];
-        let mut receipt = super::HomeUpgradeReceipt::with_generation(
-            super::CandidateIdentity::current(),
-            &runs,
-            4,
-        );
-        for work in &mut receipt.works {
-            work.enabled_before = true;
-            work.drain = super::UpgradeDrainOutcome::Interrupted;
-        }
-        let connection = rusqlite::Connection::open_in_memory().unwrap();
-        connection
-            .execute_batch(
-                "CREATE TABLE waves (id TEXT PRIMARY KEY, repo TEXT NOT NULL);
-                 CREATE TABLE projects (
-                     id TEXT PRIMARY KEY,
-                     wave_id TEXT NOT NULL,
-                     external_project_id TEXT NOT NULL
-                 );
-                 CREATE TABLE tasks (
-                     id TEXT PRIMARY KEY,
-                     project_id TEXT NOT NULL,
-                     issue_identifier TEXT NOT NULL
-                 );
-                 INSERT INTO waves VALUES ('wave-one', '/src/loopflow');
-                 INSERT INTO projects VALUES ('project-one', 'wave-one', 'linear-project');
-                 INSERT INTO tasks VALUES ('task-one', 'project-one', 'LOO-220');",
-            )
-            .unwrap();
-
-        let launches = super::prior_child_launches(&connection, &receipt).unwrap();
-        assert_eq!(
-            launches
-                .iter()
-                .map(|launch| (
-                    launch.work_kind.as_str(),
-                    launch.external_id.as_str(),
-                    launch.repo.as_path()
-                ))
-                .collect::<Vec<_>>(),
-            vec![
-                (
-                    "project",
-                    "linear-project",
-                    std::path::Path::new("/src/loopflow")
-                ),
-                ("task", "LOO-220", std::path::Path::new("/src/loopflow")),
-            ]
-        );
-
-        let mut failed = receipt.clone();
-        let failure = anyhow::anyhow!("prior Task launch failed");
-        super::record_prior_generation_failure(&mut failed, &failure);
-        assert!(failed.works.iter().all(|work| {
-            work.reconciliation == super::UpgradeReconciliationOutcome::Failed
-                && work.error.as_deref() == Some("prior Task launch failed")
-        }));
-
-        let replacements = runs.map(|mut run| {
-            run.run_id = format!("{}-replacement", run.run_id);
-            run
-        });
-        super::record_prior_generation_runs(&mut receipt, &replacements).unwrap();
-        assert!(receipt.works.iter().all(|work| {
-            work.reconciliation == super::UpgradeReconciliationOutcome::Resumed
-                && work
-                    .resumed_run_id
-                    .as_deref()
-                    .is_some_and(|run| run.ends_with("-replacement"))
-        }));
-    }
-
-    #[test]
-    fn rollback_evidence_excludes_disabled_interrupted_work() {
-        let directory = tempfile::tempdir().unwrap();
-        let database = directory.path().join("loopflow.db");
-        let project_id = crate::durable::ProjectId::new();
-        let task_id = crate::durable::TaskId::new();
-        let connection = rusqlite::Connection::open(&database).unwrap();
-        connection
-            .execute_batch(
-                "CREATE TABLE waves (id TEXT PRIMARY KEY);
-                 CREATE TABLE projects (id TEXT PRIMARY KEY);
-                 CREATE TABLE tasks (id TEXT PRIMARY KEY);
-                 CREATE TABLE work_placements (
-                     wave_id TEXT,
-                     project_id TEXT,
-                     task_id TEXT,
-                     enabled INTEGER NOT NULL
-                 );",
-            )
-            .unwrap();
-        connection
-            .execute("INSERT INTO projects VALUES (?1)", [project_id.as_str()])
-            .unwrap();
-        connection
-            .execute("INSERT INTO tasks VALUES (?1)", [task_id.as_str()])
-            .unwrap();
-        connection
-            .execute(
-                "INSERT INTO work_placements VALUES (NULL, ?1, NULL, 1)",
-                [project_id.as_str()],
-            )
-            .unwrap();
-        connection
-            .execute(
-                "INSERT INTO work_placements VALUES (NULL, NULL, ?1, 0)",
-                [task_id.as_str()],
-            )
-            .unwrap();
-        drop(connection);
-        let receipt = super::HomeUpgradeReceipt::new(
-            super::CandidateIdentity::current(),
-            &[
-                ActiveRun {
-                    run_id: crate::durable::RunId::new().to_string(),
-                    work_kind: "project".to_string(),
-                    work_id: project_id.to_string(),
-                    state: "active".to_string(),
-                    containment: None,
-                    containment_observation: ContainmentObservation::Present,
-                },
-                ActiveRun {
-                    run_id: crate::durable::RunId::new().to_string(),
-                    work_kind: "task".to_string(),
-                    work_id: task_id.to_string(),
-                    state: "active".to_string(),
-                    containment: None,
-                    containment_observation: ContainmentObservation::Present,
-                },
-            ],
-        );
-
-        let interrupted = super::interrupted_work(&database, &receipt).unwrap();
-
-        assert_eq!(
-            interrupted
-                .iter()
-                .map(|entry| entry.work.clone())
-                .collect::<Vec<_>>(),
-            vec![crate::durable::WorkRef::Project(project_id)]
-        );
-    }
-
-    #[test]
-    fn first_fork_evidence_includes_a_run_first_observed_during_drain() {
-        let run_id = crate::durable::RunId::new();
-        let project_id = crate::durable::ProjectId::new();
-        let run = ActiveRun {
-            run_id: run_id.to_string(),
-            work_kind: "project".to_string(),
-            work_id: project_id.to_string(),
-            state: "active".to_string(),
-            containment: Some(Containment::ProcessGroup { id: 42 }),
-            containment_observation: ContainmentObservation::Present,
-        };
-        let mut receipt = super::HomeUpgradeReceipt::new(super::CandidateIdentity::current(), &[]);
-
-        super::record_active_run_evidence(&mut receipt, &run).unwrap();
-        let evidence = super::first_fork_evidence(&receipt).unwrap();
-
-        assert_eq!(evidence.drained_run_ids, vec![run_id.to_string()]);
-        assert_eq!(receipt.works[0].prior_run_id, Some(run_id.to_string()));
-        assert_eq!(receipt.works[0].containment, run.containment);
-    }
-
-    #[test]
-    fn promotion_prints_the_terminal_upgrade_result() {
-        let mut receipt =
-            super::HomeUpgradeReceipt::with_generation(super::CandidateIdentity::current(), &[], 7);
-        receipt.phase = super::HomeUpgradePhase::Completed;
-        receipt.ensure_work_parts("wave", "wave-one").reconciliation =
-            super::UpgradeReconciliationOutcome::Resumed;
-        receipt
-            .ensure_work_parts("project", "project-one")
-            .reconciliation = super::UpgradeReconciliationOutcome::Skipped;
-        receipt.ensure_work_parts("task", "task-one").reconciliation =
-            super::UpgradeReconciliationOutcome::Failed;
-
-        let result = super::terminal_upgrade_result(&receipt);
-
-        assert!(result.starts_with("Home upgrade completed: generation 7 -> 8"));
-        assert!(result.contains("1 resumed, 1 skipped, 1 failed"));
-        assert!(result.ends_with(&format!("({})", receipt.id)));
-    }
-
-    #[test]
-    fn the_pre_run_frontier_reads_legacy_active_leases_for_the_drain() {
-        let conn = rusqlite::Connection::open_in_memory().unwrap();
-        conn.execute_batch(
-            "CREATE TABLE project_sessions (
-                 id TEXT, project_id TEXT, process_lease_state TEXT, created_at INTEGER
-             );
-             CREATE TABLE task_sessions (
-                 id TEXT, issue_identifier TEXT, process_lease_state TEXT, created_at INTEGER
-             );
-             INSERT INTO project_sessions VALUES
-                 ('project-live', 'ENG', 'active', 1),
-                 ('project-done', 'DONE', 'finished', 2);
-             INSERT INTO task_sessions VALUES
-                 ('task-revoked', 'ENG-9', 'revoked', 3);",
-        )
-        .unwrap();
-
-        let active = read_active_runs(&conn).unwrap();
-        assert_eq!(active.len(), 2);
-        assert_eq!(active[0].work_id, "ENG");
-        assert_eq!(active[1].work_id, "ENG-9");
+        let store = directory.path().join("loopflow.db");
+        crate::store::sqlite::SqliteStore::open_as_promotion_boundary(&store).unwrap();
+        assert!(matches!(
+            _read_local_executable_compatibility(&store),
+            ExecutableCompatibility::Compatible { .. }
+        ));
     }
 }
 
 // -- Promotion publication (PR2) ---------------------------------------------
 //
 // The mutating half consumes the merged `decide()` verdict and performs every
-// machine-global install mutation under the same exclusive promotion lock whose
-// shared side fences every product Run reservation. Python stages
+// machine-global install mutation under the same exclusive promotion lock.
+// Python stages
 // branch-local artifacts only; Rust owns CLI activation, app replacement,
 // migration advancement, rollback validation, and post-commit skill sync.
 
@@ -3439,13 +823,13 @@ fn stage_daemon_binary(source: &Path, bin_dir: &Path) -> Result<PathBuf> {
     stage_binary_as(source, bin_dir, "lfd")
 }
 
-fn prepare_upgrade_artifacts(
+fn prepare_artifacts(
     artifacts: &PromotionArtifacts<'_>,
     candidate_binary: &Path,
     preview: &PromotionPreview,
     upgrade_id: &str,
     app_verdict: Option<&Verdict>,
-) -> Result<HomeUpgradeArtifacts> {
+) -> Result<PreparedArtifacts> {
     let bin_dir = lf_bin_dir();
     let cli_binary = stage_binary(candidate_binary, &bin_dir)?;
     let staged_cli = read_binary_preflight(&cli_binary)?;
@@ -3484,7 +868,7 @@ fn prepare_upgrade_artifacts(
             .unwrap_or("Loopflow.app");
         Some(target.with_file_name(format!(".{name}.superseded.{upgrade_id}")))
     });
-    Ok(HomeUpgradeArtifacts {
+    Ok(PreparedArtifacts {
         cli_binary,
         cli_target: artifacts.cli_target.to_path_buf(),
         daemon_binary,
@@ -3709,7 +1093,7 @@ fn verify_gated_app_bundle(
 fn activate_prepared_machine_switch(
     root: &Path,
     receipt: &crate::machine_install::SwitchReceipt,
-    prepared: &HomeUpgradeArtifacts,
+    prepared: &PreparedArtifacts,
     candidate: &CandidateIdentity,
     verdict: &Verdict,
 ) -> Result<()> {
@@ -3806,21 +1190,6 @@ struct AppPromotion<'a> {
     expected_verdict: &'a Verdict,
 }
 
-struct DaemonPromotion<'a> {
-    source: &'a Path,
-    target: &'a Path,
-    bin_dir: &'a Path,
-    expected_candidate: &'a CandidateIdentity,
-}
-
-#[derive(Debug)]
-struct ActivatedInstall {
-    cli: PathBuf,
-    prior_cli: Option<PathBuf>,
-    prior_daemon: Option<PathBuf>,
-    superseded_app: Option<PathBuf>,
-}
-
 fn stage_app_bundle(plan: &AppPromotion<'_>) -> Result<PathBuf> {
     let parent = plan.target.parent().unwrap_or_else(|| Path::new("."));
     fs::create_dir_all(parent).with_context(|| format!("create {}", parent.display()))?;
@@ -3863,7 +1232,7 @@ fn commit_app_bundle(staged: &Path, plan: &AppPromotion<'_>) -> Result<Option<Pa
     let had_superseded = superseded.exists();
     if had_superseded && plan.target.exists() {
         validate_staged_app_helper(plan.target, plan.expected_candidate, plan.expected_verdict)
-            .context("validate already-activated app during Home upgrade recovery")?;
+            .context("validate already-activated app during install-switch recovery")?;
         remove_path(staged)?;
         return Ok(Some(superseded));
     }
@@ -3897,7 +1266,7 @@ fn commit_app_bundle(staged: &Path, plan: &AppPromotion<'_>) -> Result<Option<Pa
     Ok((had_target || had_superseded).then_some(superseded))
 }
 
-fn settle_app_artifacts(artifacts: &HomeUpgradeArtifacts) -> Result<()> {
+fn settle_app_artifacts(artifacts: &PreparedArtifacts) -> Result<()> {
     for path in [
         artifacts.app_source.as_deref(),
         artifacts.app_superseded.as_deref(),
@@ -3914,138 +1283,6 @@ fn settle_app_artifacts(artifacts: &HomeUpgradeArtifacts) -> Result<()> {
         }
     }
     Ok(())
-}
-
-/// Where a CLI promotion writes: the candidate binary to stage, the global
-/// symlink to repoint, and the content-addressed store to stage into.
-struct CliPromotion<'a> {
-    candidate_binary: &'a Path,
-    cli_target: &'a Path,
-    bin_dir: &'a Path,
-}
-
-/// The CLI half of a promotion for an already-decided verdict. `Reject` changes
-/// nothing and returns the reasons as an error; `Promote`/`PromoteAndMigrate`
-/// preserve the prior executable, stage the candidate, and atomically repoint
-/// the target, returning both immutable paths. Migration application (for
-/// `PromoteAndMigrate`) is the caller's job and must follow activation so no
-/// advanced frontier is ever left behind an incompatible global command.
-fn publish_cli(verdict: &Verdict, plan: &CliPromotion) -> Result<(PathBuf, Option<PathBuf>)> {
-    if let Verdict::Reject { reasons } = verdict {
-        return Err(anyhow!(
-            "promotion refused; every target is unchanged:\n  - {}",
-            reasons.join("\n  - ")
-        ));
-    }
-    let rollback = preserve_prior_binary(plan.cli_target, plan.bin_dir)?;
-    let dest = stage_binary(plan.candidate_binary, plan.bin_dir)?;
-    commit_cli_symlink(plan.cli_target, &dest)?;
-    Ok((dest, rollback))
-}
-
-fn activate_install_then_advance(
-    verdict: &Verdict,
-    cli: &CliPromotion<'_>,
-    daemon: Option<&DaemonPromotion<'_>>,
-    app: Option<&AppPromotion<'_>>,
-    advance_frontier: impl FnOnce() -> Result<()>,
-) -> Result<ActivatedInstall> {
-    if matches!(verdict, Verdict::Reject { .. }) {
-        return publish_cli(verdict, cli).map(|(cli, prior_cli)| ActivatedInstall {
-            cli,
-            prior_cli,
-            prior_daemon: None,
-            superseded_app: None,
-        });
-    }
-
-    // Stage every fallible artifact before either control-plane target moves.
-    // A missing, unreadable, or mismatched daemon/app leaves the global pair
-    // untouched.
-    let staged_app = app.map(stage_app_bundle).transpose()?;
-    let staged_daemon = match daemon
-        .map(|plan| {
-            validate_daemon_candidate(plan.source, plan.expected_candidate)?;
-            stage_daemon_binary(plan.source, plan.bin_dir)
-        })
-        .transpose()
-    {
-        Ok(staged) => staged,
-        Err(error) => {
-            if let Some(staged) = &staged_app {
-                let _ = remove_path(staged);
-            }
-            return Err(error);
-        }
-    };
-    let prior_daemon = match daemon
-        .map(|plan| preserve_prior_daemon(plan.target, plan.bin_dir))
-        .transpose()
-    {
-        Ok(prior) => prior.flatten(),
-        Err(error) => {
-            if let Some(staged) = &staged_app {
-                let _ = remove_path(staged);
-            }
-            return Err(error);
-        }
-    };
-
-    if let (Some(plan), Some(staged)) = (daemon, staged_daemon.as_deref()) {
-        if let Err(error) = commit_cli_symlink(plan.target, staged) {
-            if let Some(staged) = &staged_app {
-                let _ = remove_path(staged);
-            }
-            return Err(error);
-        }
-    }
-    let published = match publish_cli(verdict, cli) {
-        Ok(published) => published,
-        Err(error) => {
-            if let Some(plan) = daemon {
-                let restored = match prior_daemon.as_deref() {
-                    Some(prior) => commit_cli_symlink(plan.target, prior),
-                    None => remove_path(plan.target),
-                };
-                if let Err(restore_error) = restored {
-                    return Err(anyhow!(
-                        "{error}; restoring prior lfd target also failed: {restore_error}"
-                    ));
-                }
-            }
-            if let Some(staged) = &staged_app {
-                let _ = remove_path(staged);
-            }
-            return Err(error);
-        }
-    };
-
-    if matches!(verdict, Verdict::PromoteAndMigrate) {
-        if let Err(error) = advance_frontier() {
-            if let Some(staged) = &staged_app {
-                let _ = remove_path(staged);
-            }
-            return Err(error);
-        }
-    }
-
-    let superseded_app = if let (Some(staged), Some(app)) = (staged_app.as_deref(), app) {
-        match commit_app_bundle(staged, app) {
-            Ok(superseded) => superseded,
-            Err(error) => {
-                let _ = remove_path(staged);
-                return Err(error);
-            }
-        }
-    } else {
-        None
-    };
-    Ok(ActivatedInstall {
-        cli: published.0,
-        prior_cli: published.1,
-        prior_daemon,
-        superseded_app,
-    })
 }
 
 #[derive(Debug, Deserialize)]
@@ -4074,9 +1311,7 @@ fn read_binary_preflight(binary: &Path) -> Result<BinaryPreflight> {
 fn isolate_candidate_command(command: &mut Command) {
     for name in [
         crate::machine_install::INSTALL_SWITCH_ENV,
-        crate::durable::RUN_CONTEXT_ENV,
         crate::durable::RUN_ID_ENV,
-        crate::durable::AGENT_INVOCATION_ENV,
         "LF_BIN",
         "LF_HOME",
         "LF_DB_PATH",
@@ -4217,901 +1452,16 @@ fn retained_daemon_path(candidate: &Path, bin_dir: &Path) -> Result<PathBuf> {
     retained_binary_path_as(candidate, bin_dir, "lfd")
 }
 
-fn render_retained_pair(prior_cli: Option<&Path>, prior_daemon: Option<&Path>) {
-    let (Some(prior_cli), Some(prior_daemon)) = (prior_cli, prior_daemon) else {
-        println!("no complete prior control-plane pair retained; rollback is unavailable");
-        return;
-    };
-    match read_binary_preflight(prior_cli).and_then(|preflight| {
-        validate_rollback_verdict(&preflight.verdict)?;
-        validate_daemon_candidate(prior_daemon, &preflight.candidate)
-    }) {
-        Ok(_) => println!("prior control-plane pair retained for automatic rollback"),
-        Err(error) => println!(
-            "prior control-plane bytes retained but not rollback-compatible: {}, {} ({error})",
-            prior_cli.display(),
-            prior_daemon.display()
-        ),
-    }
-}
-
-fn open_upgrade_store(store_path: &Path) -> Result<rusqlite::Connection> {
-    let connection = rusqlite::Connection::open(store_path)
-        .with_context(|| format!("open upgrade store {}", store_path.display()))?;
-    connection.busy_timeout(Duration::from_secs(5))?;
-    Ok(connection)
-}
-
-#[derive(Debug, Clone, PartialEq, Eq)]
-struct LiveInvocationEvidence {
-    id: String,
-    provider: String,
-    model: Option<String>,
-    surface: String,
-    resume_token: Option<String>,
-    provider_session_id: Option<String>,
-}
-
-#[derive(Debug, Clone, PartialEq, Eq)]
-enum SafeStopDisposition {
-    DurableOnly,
-    PausedWaveReservation,
-    LifecycleRelaunch,
-    DirectProviderResume {
-        invocation_id: String,
-        provider: String,
-        model: Option<String>,
-        resume_token: String,
-    },
-}
-
-#[derive(Debug, Clone, PartialEq, Eq)]
-struct PlannedRunDrain {
-    run: ActiveRun,
-    disposition: SafeStopDisposition,
-}
-
-#[derive(Debug, Clone, PartialEq, Eq)]
-struct UpgradeDrainPlan {
-    runs: Vec<PlannedRunDrain>,
-}
-
-impl UpgradeDrainPlan {
-    fn active_runs(&self) -> Vec<ActiveRun> {
-        self.runs.iter().map(|entry| entry.run.clone()).collect()
-    }
-
-    fn disposition(&self, run_id: &str) -> Option<&SafeStopDisposition> {
-        self.runs
-            .iter()
-            .find(|entry| entry.run.run_id == run_id)
-            .map(|entry| &entry.disposition)
-    }
-}
-
-fn read_live_invocations(
-    connection: &rusqlite::Connection,
-    run_id: &str,
-) -> Result<Vec<LiveInvocationEvidence>> {
-    let mut statement = connection.prepare(
-        "SELECT id, provider, model, surface, resume_token, provider_session_id
-         FROM agent_invocations
-         WHERE supervising_run_id=?1 AND ended_at IS NULL
-         ORDER BY started_at, id",
-    )?;
-    let invocations = statement
-        .query_map([run_id], |row| {
-            Ok(LiveInvocationEvidence {
-                id: row.get(0)?,
-                provider: row.get(1)?,
-                model: row.get(2)?,
-                surface: row.get(3)?,
-                resume_token: row.get(4)?,
-                provider_session_id: row.get(5)?,
-            })
-        })?
-        .collect::<rusqlite::Result<Vec<_>>>()?;
-    Ok(invocations)
-}
-
-fn classify_live_run(
-    run: &ActiveRun,
-    invocations: &[LiveInvocationEvidence],
-) -> Result<SafeStopDisposition> {
-    if invocations.is_empty() {
-        return Err(anyhow!(
-            "Run {} for {} {} has live containment but no live Invocation; install transition defers before pause or signal",
-            run.run_id,
-            run.work_kind,
-            run.work_id
-        ));
-    }
-    if let Some(invocation) = invocations
-        .iter()
-        .find(|invocation| invocation.surface != "headless")
-    {
-        return Err(anyhow!(
-            "Invocation {} for Run {} uses {:?} surface; install transition defers before pause or signal",
-            invocation.id,
-            run.run_id,
-            invocation.surface
-        ));
-    }
-    match run.containment.as_ref() {
-        Some(Containment::Tmux { .. }) => Ok(SafeStopDisposition::LifecycleRelaunch),
-        Some(Containment::ProcessGroup { .. }) => {
-            let [invocation] = invocations else {
-                return Err(anyhow!(
-                    "direct Run {} has {} live Invocations; install transition defers before pause or signal",
-                    run.run_id,
-                    invocations.len()
-                ));
-            };
-            if !matches!(run.work_kind.as_str(), "project" | "task") {
-                return Err(anyhow!(
-                    "direct {} Run {} has no provider-session relaunch owner; install transition defers before pause or signal",
-                    run.work_kind,
-                    run.run_id
-                ));
-            }
-            if !matches!(invocation.provider.as_str(), "claude" | "codex") {
-                return Err(anyhow!(
-                    "direct Invocation {} uses provider {:?} without a proved native resume route; install transition defers before pause or signal",
-                    invocation.id,
-                    invocation.provider
-                ));
-            }
-            let Some(resume_token) = invocation.resume_token.as_deref() else {
-                return Err(anyhow!(
-                    "direct Invocation {} has no native resume token; install transition defers before pause or signal",
-                    invocation.id
-                ));
-            };
-            if invocation.provider_session_id.as_deref() != Some(resume_token) {
-                return Err(anyhow!(
-                    "direct Invocation {} resume token is not backed by its observed provider session; install transition defers before pause or signal",
-                    invocation.id
-                ));
-            }
-            Ok(SafeStopDisposition::DirectProviderResume {
-                invocation_id: invocation.id.clone(),
-                provider: invocation.provider.clone(),
-                model: invocation.model.clone(),
-                resume_token: resume_token.to_string(),
-            })
-        }
-        None => Err(anyhow!(
-            "Run {} for {} {} has no containment; install transition defers before pause or signal",
-            run.run_id,
-            run.work_kind,
-            run.work_id
-        )),
-    }
-}
-
-fn validate_direct_resume_route(
-    connection: &rusqlite::Connection,
-    run: &ActiveRun,
-    disposition: &SafeStopDisposition,
-) -> Result<()> {
-    let SafeStopDisposition::DirectProviderResume {
-        invocation_id,
-        provider,
-        model,
-        ..
-    } = disposition
-    else {
-        return Ok(());
-    };
-    let table = match run.work_kind.as_str() {
-        "project" => "projects",
-        "task" => "tasks",
-        _ => unreachable!("direct provider resumes are limited to child Work"),
-    };
-    let (agent, configured_provider) = connection
-        .query_row(
-            &format!("SELECT agent, provider FROM {table} WHERE id=?1"),
-            [&run.work_id],
-            |row| Ok((row.get::<_, String>(0)?, row.get::<_, String>(1)?)),
-        )
-        .with_context(|| {
-            format!(
-                "read {} {} provider route for Invocation {}",
-                run.work_kind, run.work_id, invocation_id
-            )
-        })?;
-    let (agent_provider, agent_model) = crate::engine::config::parse_agent(&agent);
-    if configured_provider != *provider
-        || agent_provider != *provider
-        || agent_model.as_deref() != model.as_deref()
-    {
-        return Err(anyhow!(
-            "{} {} route {:?} cannot reopen Invocation {} route {:?}; install transition defers before pause or signal",
-            run.work_kind,
-            run.work_id,
-            agent,
-            invocation_id,
-            (provider, model)
-        ));
-    }
-    Ok(())
-}
-
-fn prove_absent_run_owners(
-    connection: &rusqlite::Connection,
-    store_path: &Path,
-    run: &ActiveRun,
-) -> Result<()> {
-    let has_open_invocation = connection.query_row(
-        "SELECT EXISTS (
-             SELECT 1 FROM agent_invocations
-             WHERE supervising_run_id=?1 AND ended_at IS NULL
-         )",
-        [&run.run_id],
-        |row| row.get::<_, bool>(0),
-    )?;
-    if !has_open_invocation {
-        return Ok(());
-    }
-    let mut statement = connection.prepare(
-        "SELECT run_id, process_id
-         FROM agent_invocations
-         WHERE supervising_run_id=?1 AND ended_at IS NULL
-         ORDER BY started_at, id",
-    )?;
-    let owners = statement
-        .query_map([&run.run_id], |row| {
-            Ok((row.get::<_, String>(0)?, row.get::<_, String>(1)?))
-        })?
-        .collect::<rusqlite::Result<Vec<_>>>()?;
-    drop(statement);
-    let lf_home = store_path
-        .parent()
-        .expect("Home store has a parent directory");
-    let receipts = crate::journal::read_exec_process_receipts_at(lf_home)
-        .context("read exact Exec process receipts for install drain")?;
-    for (trace_id, exec_id) in owners {
-        let terminal_event = connection.query_row(
-            "SELECT EXISTS (
-                 SELECT 1 FROM run_events
-                 WHERE run_id=?1 AND process_id=?2
-                   AND node='run' AND event!='started'
-             )",
-            rusqlite::params![trace_id, exec_id],
-            |row| row.get::<_, bool>(0),
-        )?;
-        let receipt = receipts
-            .iter()
-            .find(|receipt| receipt.trace_id == trace_id && receipt.exec_id == exec_id);
-        if receipt.is_some_and(|receipt| process_matches_start(receipt.pid, receipt.started_at)) {
-            return Err(anyhow!(
-                "Run {} containment is absent but Invocation owner {trace_id}/{exec_id} has an exact live process receipt; install transition defers before pause or signal",
-                run.run_id
-            ));
-        }
-        if !terminal_event && receipt.is_none() {
-            return Err(anyhow!(
-                "Run {} containment is absent but Invocation owner {trace_id}/{exec_id} has neither an exact terminal Run event nor a dead process receipt; install transition defers before pause or signal",
-                run.run_id
-            ));
-        }
-    }
-    Ok(())
-}
-
-fn plan_upgrade_drain(store_path: &Path) -> Result<UpgradeDrainPlan> {
-    let runs = active_runs_at(store_path)?;
-    if runs.is_empty() {
-        return Ok(UpgradeDrainPlan { runs: Vec::new() });
-    }
-    let connection = open_upgrade_store(store_path)?;
-    let mut planned = Vec::with_capacity(runs.len());
-    for run in runs {
-        let disposition = match run.containment_observation {
-            ContainmentObservation::Absent => {
-                prove_absent_run_owners(&connection, store_path, &run)?;
-                SafeStopDisposition::DurableOnly
-            }
-            ContainmentObservation::Present => {
-                classify_live_run(&run, &read_live_invocations(&connection, &run.run_id)?)?
-            }
-            ContainmentObservation::Unprovable if pause_resolvable_wave_reservation(&run) => {
-                SafeStopDisposition::PausedWaveReservation
-            }
-            ContainmentObservation::Unprovable => {
-                return Err(anyhow!(
-                    "Run {} for {} {} has unprovable containment; install transition defers before pause or signal",
-                    run.run_id,
-                    run.work_kind,
-                    run.work_id
-                ))
-            }
-        };
-        validate_direct_resume_route(&connection, &run, &disposition)?;
-        planned.push(PlannedRunDrain { run, disposition });
-    }
-    Ok(UpgradeDrainPlan { runs: planned })
-}
-
-fn pin_direct_resume_sessions(store_path: &Path, plan: &UpgradeDrainPlan) -> Result<()> {
-    let mut connection = open_upgrade_store(store_path)?;
-    let transaction =
-        connection.transaction_with_behavior(rusqlite::TransactionBehavior::Immediate)?;
-    for entry in &plan.runs {
-        let SafeStopDisposition::DirectProviderResume { resume_token, .. } = &entry.disposition
-        else {
-            continue;
-        };
-        validate_direct_resume_route(&transaction, &entry.run, &entry.disposition)?;
-        let table = match entry.run.work_kind.as_str() {
-            "project" => "projects",
-            "task" => "tasks",
-            _ => unreachable!("direct provider resumes are limited to child Work"),
-        };
-        transaction.execute(
-            &format!("UPDATE {table} SET provider_session_id=?2 WHERE id=?1"),
-            rusqlite::params![entry.run.work_id, resume_token],
-        )?;
-    }
-    transaction.commit()?;
-    Ok(())
-}
-
-fn request_upgrade_stop(
-    store_path: &Path,
-    run: &ActiveRun,
-    upgrade_id: &str,
-    deadline: i64,
-) -> Result<()> {
-    let mut connection = open_upgrade_store(store_path)?;
-    let transaction =
-        connection.transaction_with_behavior(rusqlite::TransactionBehavior::Immediate)?;
-    let cause = serde_json::to_string(&crate::durable::StopCause::HomeUpgrade {
-        upgrade_id: upgrade_id.to_string(),
-        deadline,
-    })
-    .expect("Home upgrade cause must serialize");
-    transaction.execute(
-        "UPDATE runs SET state='stopping', stop_reason=?2
-         WHERE id=?1 AND state IN ('reserved', 'active', 'stopping')",
-        rusqlite::params![run.run_id, cause],
-    )?;
-    transaction.commit()?;
-    Ok(())
-}
-
-fn finish_absent_run(store_path: &Path, run_id: &str, upgrade_id: &str) -> Result<()> {
-    let mut connection = open_upgrade_store(store_path)?;
-    let transaction =
-        connection.transaction_with_behavior(rusqlite::TransactionBehavior::Immediate)?;
-    let now = time::OffsetDateTime::now_utc().unix_timestamp();
-    transaction.execute(
-        "UPDATE agent_turns SET status='interrupted', ended_at=COALESCE(ended_at, ?2)
-         WHERE status='running' AND invocation_id IN (
-             SELECT id FROM agent_invocations WHERE supervising_run_id=?1
-         )",
-        rusqlite::params![run_id, now],
-    )?;
-    transaction.execute(
-        "UPDATE agent_invocations
-         SET ended_at=COALESCE(ended_at, ?2),
-             outcome=CASE WHEN outcome='running' THEN 'interrupted' ELSE outcome END,
-             handback_state=COALESCE(handback_state, 'interrupted')
-         WHERE supervising_run_id=?1 AND ended_at IS NULL",
-        rusqlite::params![run_id, now],
-    )?;
-    transaction.execute(
-        "UPDATE runs SET state='ended', ended_at=?2, stop_reason=?3
-         WHERE id=?1 AND state != 'ended'",
-        rusqlite::params![
-            run_id,
-            now,
-            serde_json::to_string(&crate::durable::StopCause::HomeUpgrade {
-                upgrade_id: upgrade_id.to_string(),
-                deadline: now,
-            })
-            .expect("Home upgrade cause must serialize")
-        ],
-    )?;
-    transaction.commit()?;
-    Ok(())
-}
-
-fn force_containment(containment: &Containment, signal: i32) -> Result<()> {
-    match containment {
-        Containment::Tmux { name } => {
-            let status = Command::new("tmux")
-                .args(["kill-session", "-t", name])
-                .stdout(std::process::Stdio::null())
-                .stderr(std::process::Stdio::null())
-                .status()
-                .with_context(|| format!("terminate tmux containment {name}"))?;
-            let _ = (status, signal);
-            Ok(())
-        }
-        Containment::ProcessGroup { id } => {
-            let process_group = i32::try_from(*id)
-                .ok()
-                .filter(|id| *id > 1)
-                .ok_or_else(|| anyhow!("unsafe process group id {id}"))?;
-            // SAFETY: a negative pid targets one validated process group and no
-            // memory is dereferenced. Only containment read from the Run is used.
-            let result = unsafe { libc::kill(-process_group, signal) };
-            if result == 0 || std::io::Error::last_os_error().raw_os_error() == Some(libc::ESRCH) {
-                Ok(())
-            } else {
-                Err(std::io::Error::last_os_error())
-                    .with_context(|| format!("signal process group {process_group}"))
-            }
-        }
-    }
-}
-
-fn active_runs_at(store_path: &Path) -> Result<Vec<ActiveRun>> {
-    if !store_path.exists() {
-        return Ok(Vec::new());
-    }
-    let connection = open_upgrade_store(store_path)?;
-    read_active_runs(&connection).context("read non-ended Runs during Home drain")
-}
-
-fn settle_absent_runs(
-    store_path: &Path,
-    receipt: &mut HomeUpgradeReceipt,
-    plan: &UpgradeDrainPlan,
-) -> Result<Vec<ActiveRun>> {
-    let runs = active_runs_at(store_path)?;
-    let connection = open_upgrade_store(store_path)?;
-    let mut present = Vec::new();
-    for run in runs {
-        let disposition = plan.disposition(&run.run_id).ok_or_else(|| {
-            anyhow!(
-                "Run {} appeared after the install drain plan; refusing an unplanned signal",
-                run.run_id
-            )
-        })?;
-        record_active_run_evidence(receipt, &run)?;
-        match run.containment_observation {
-            ContainmentObservation::Absent => {
-                prove_absent_run_owners(&connection, store_path, &run)?;
-                finish_absent_run(store_path, &run.run_id, &receipt.id)?;
-                if let Some(work) = receipt.work_mut(&run.run_id) {
-                    work.containment_observation = ContainmentObservation::Absent;
-                    if work.drain == UpgradeDrainOutcome::Pending {
-                        work.drain = UpgradeDrainOutcome::DurableOnly;
-                    }
-                }
-            }
-            ContainmentObservation::Present => {
-                if matches!(
-                    disposition,
-                    SafeStopDisposition::DurableOnly | SafeStopDisposition::PausedWaveReservation
-                ) {
-                    return Err(anyhow!(
-                        "Run {} became live after its absent drain disposition; refusing an unplanned signal",
-                        run.run_id
-                    ));
-                }
-                present.push(run);
-            }
-            ContainmentObservation::Unprovable => {
-                return Err(anyhow!(
-                    "Run {} for {} {} has unprovable containment",
-                    run.run_id,
-                    run.work_kind,
-                    run.work_id
-                ))
-            }
-        }
-    }
-    Ok(present)
-}
-
-fn record_active_run_evidence(receipt: &mut HomeUpgradeReceipt, run: &ActiveRun) -> Result<()> {
-    let work = receipt.ensure_work_parts(&run.work_kind, &run.work_id);
-    match work.prior_run_id.as_deref() {
-        Some(existing) if existing != run.run_id => {
-            return Err(anyhow!(
-                "{} Work {} has two non-ended Runs during upgrade drain: {} and {}",
-                run.work_kind,
-                run.work_id,
-                existing,
-                run.run_id
-            ));
-        }
-        Some(_) => {}
-        None => work.prior_run_id = Some(run.run_id.clone()),
-    }
-    work.containment = run.containment.clone();
-    work.containment_observation = run.containment_observation;
-    Ok(())
-}
-
-fn settle_paused_wave_reservations(
-    store_path: &Path,
-    receipt: &mut HomeUpgradeReceipt,
-    paused: &PausedHome,
-) -> Result<()> {
-    let Some(home_id) = paused.home_id.as_ref() else {
-        return Ok(());
-    };
-    if !store_path.exists() {
-        return Ok(());
-    }
-    let connection = open_upgrade_store(store_path)?;
-    let mut statement = connection.prepare(
-        "SELECT run.id, wave.name, wave.repo
-         FROM runs run
-         JOIN waves wave ON wave.id=run.source_id
-         WHERE run.source_kind='wave'
-           AND run.home_id=?1
-           AND run.state='reserved'
-           AND run.containment_kind IS NULL
-           AND run.containment_id IS NULL
-         ORDER BY run.created_at, run.id",
-    )?;
-    let waves = statement
-        .query_map([home_id.as_str()], |row| {
-            Ok((
-                row.get::<_, String>(0)?,
-                row.get::<_, String>(1)?,
-                PathBuf::from(row.get::<_, String>(2)?),
-            ))
-        })?
-        .collect::<Result<Vec<_>, _>>()?;
-    drop(statement);
-    drop(connection);
-    if waves.is_empty() {
-        return Ok(());
-    }
-
-    let runtime = tokio::runtime::Runtime::new().context("probe paused Wave listeners")?;
-    for (run_id, wave, repo) in waves {
-        let listener = runtime.block_on(crate::wave::server::live_endpoint(&repo, &wave));
-        if let Some(endpoint) = listener {
-            return Err(anyhow!(
-                "reserved Wave Run {run_id} has no containment, but its exact listener is still live at {endpoint}"
-            ));
-        }
-        finish_absent_run(store_path, &run_id, &receipt.id)?;
-        if let Some(work) = receipt.work_mut(&run_id) {
-            work.containment_observation = ContainmentObservation::Absent;
-            work.drain = UpgradeDrainOutcome::DurableOnly;
-        }
-    }
-    Ok(())
-}
-
-fn drain_active_runs(
-    store_path: &Path,
-    receipt: &mut HomeUpgradeReceipt,
-    plan: &UpgradeDrainPlan,
-    grace: Duration,
-    force_grace: Duration,
-    persist_receipt: bool,
-) -> Result<()> {
-    receipt.phase = HomeUpgradePhase::Draining;
-    if persist_receipt {
-        write_upgrade_receipt(receipt)?;
-    }
-    let initial = settle_absent_runs(store_path, receipt, plan)?;
-    let deadline_timestamp = time::OffsetDateTime::now_utc()
-        .unix_timestamp()
-        .saturating_add(i64::try_from(grace.as_secs()).unwrap_or(i64::MAX));
-    for run in &initial {
-        request_upgrade_stop(store_path, run, &receipt.id, deadline_timestamp)?;
-        if let Some(work) = receipt.work_mut(&run.run_id) {
-            work.drain = UpgradeDrainOutcome::Interrupted;
-        }
-    }
-    if persist_receipt {
-        write_upgrade_receipt(receipt)?;
-    }
-
-    let deadline = Instant::now() + grace;
-    let mut present = settle_absent_runs(store_path, receipt, plan)?;
-    while !present.is_empty() && Instant::now() < deadline {
-        std::thread::sleep(DRAIN_POLL.min(deadline.saturating_duration_since(Instant::now())));
-        present = settle_absent_runs(store_path, receipt, plan)?;
-    }
-
-    if !present.is_empty() {
-        receipt.drain_timed_out = true;
-        if persist_receipt {
-            write_upgrade_receipt(receipt)?;
-        }
-        for run in &present {
-            let containment = run
-                .containment
-                .as_ref()
-                .ok_or_else(|| anyhow!("Run {} became live without containment", run.run_id))?;
-            force_containment(containment, libc::SIGTERM)?;
-            if let Some(work) = receipt.work_mut(&run.run_id) {
-                work.drain = UpgradeDrainOutcome::Forced;
-            }
-        }
-        let force_deadline = Instant::now() + force_grace;
-        present = settle_absent_runs(store_path, receipt, plan)?;
-        while !present.is_empty() && Instant::now() < force_deadline {
-            std::thread::sleep(
-                DRAIN_POLL.min(force_deadline.saturating_duration_since(Instant::now())),
-            );
-            present = settle_absent_runs(store_path, receipt, plan)?;
-        }
-        for run in &present {
-            let containment = run
-                .containment
-                .as_ref()
-                .ok_or_else(|| anyhow!("Run {} became live without containment", run.run_id))?;
-            force_containment(containment, libc::SIGKILL)?;
-        }
-        std::thread::sleep(DRAIN_POLL);
-        present = settle_absent_runs(store_path, receipt, plan)?;
-    }
-
-    if !present.is_empty() {
-        return Err(anyhow!(
-            "{} old-generation containment(s) remained live after forced drain: {}",
-            present.len(),
-            present
-                .iter()
-                .map(|run| run.run_id.as_str())
-                .collect::<Vec<_>>()
-                .join(", ")
-        ));
-    }
-    receipt.phase = HomeUpgradePhase::Drained;
-    if persist_receipt {
-        write_upgrade_receipt(receipt)?;
-    }
-    Ok(())
-}
-
-#[derive(Debug)]
-struct PausedHome {
-    keeper_mode: crate::lfd::service::KeeperMode,
-    home_id: Option<crate::durable::HomeId>,
-    repo: Option<PathBuf>,
-}
-
-#[derive(Debug, Clone, PartialEq, Eq)]
-struct PriorChildLaunch {
-    work_kind: String,
-    work_id: String,
-    external_id: String,
-    repo: PathBuf,
-}
-
-fn prior_child_launches(
-    connection: &rusqlite::Connection,
-    receipt: &HomeUpgradeReceipt,
-) -> Result<Vec<PriorChildLaunch>> {
-    let mut launches = Vec::new();
-    for work in receipt
-        .works
-        .iter()
-        .filter(|work| work.enabled_before && work.prior_run_id.is_some())
-    {
-        let target = match work.work_kind.as_str() {
-            "wave" => None,
-            "project" => connection
-                .query_row(
-                    "SELECT project.external_project_id, wave.repo
-                     FROM projects project
-                     JOIN waves wave ON wave.id=project.wave_id
-                     WHERE project.id=?1",
-                    [&work.work_id],
-                    |row| {
-                        Ok(PriorChildLaunch {
-                            work_kind: work.work_kind.clone(),
-                            work_id: work.work_id.clone(),
-                            external_id: row.get(0)?,
-                            repo: PathBuf::from(row.get::<_, String>(1)?),
-                        })
-                    },
-                )
-                .optional()?,
-            "task" => connection
-                .query_row(
-                    "SELECT task.issue_identifier, wave.repo
-                     FROM tasks task
-                     JOIN projects project ON project.id=task.project_id
-                     JOIN waves wave ON wave.id=project.wave_id
-                     WHERE task.id=?1",
-                    [&work.work_id],
-                    |row| {
-                        Ok(PriorChildLaunch {
-                            work_kind: work.work_kind.clone(),
-                            work_id: work.work_id.clone(),
-                            external_id: row.get(0)?,
-                            repo: PathBuf::from(row.get::<_, String>(1)?),
-                        })
-                    },
-                )
-                .optional()?,
-            kind => return Err(anyhow!("unsupported rollback Work kind {kind:?}")),
-        };
-        if work.work_kind != "wave" && target.is_none() {
-            return Err(anyhow!(
-                "rollback could not resolve {} {} through the previous store",
-                work.work_kind,
-                work.work_id
-            ));
-        }
-        launches.extend(target);
-    }
-    Ok(launches)
-}
-
-fn active_local_runs(store_path: &Path) -> Result<Vec<ActiveRun>> {
-    let connection = open_upgrade_store(store_path)?;
-    read_active_runs(&connection).context("read previous-generation Runs during rollback")
-}
-
-fn live_run_for_work<'a>(
-    runs: &'a [ActiveRun],
-    work_kind: &str,
-    work_id: &str,
-) -> Option<&'a ActiveRun> {
-    runs.iter().find(|run| {
-        run.work_kind == work_kind
-            && run.work_id == work_id
-            && run.state != "stopping"
-            && run.containment_observation == ContainmentObservation::Present
-    })
-}
-
-fn launch_prior_child(cli: &Path, target: &PriorChildLaunch) -> Result<()> {
-    let mut command = Command::new(cli);
-    match target.work_kind.as_str() {
-        "project" => {
-            command.args(["project", "run", &target.external_id, "--json"]);
-        }
-        "task" => {
-            command.args(["task", "resume", &target.external_id, "--json"]);
-        }
-        kind => return Err(anyhow!("unsupported rollback child kind {kind:?}")),
-    }
-    let output = command
-        .current_dir(&target.repo)
-        .env("LF_BIN", cli)
-        .env_remove(crate::machine_install::INSTALL_SWITCH_ENV)
-        .env_remove(crate::durable::RUN_CONTEXT_ENV)
-        .env_remove(crate::durable::RUN_ID_ENV)
-        .env_remove(crate::durable::AGENT_INVOCATION_ENV)
-        .output()
-        .with_context(|| {
-            format!(
-                "relaunch previous-generation {} {}",
-                target.work_kind, target.external_id
-            )
-        })?;
-    if output.status.success() {
-        return Ok(());
-    }
-    let detail = String::from_utf8_lossy(&output.stderr).trim().to_string();
-    Err(anyhow!(
-        "previous-generation {} {} did not relaunch: {}",
-        target.work_kind,
-        target.external_id,
-        if detail.is_empty() {
-            format!("exit {}", output.status)
-        } else {
-            detail
-        }
-    ))
-}
-
-fn record_prior_generation_runs(
-    receipt: &mut HomeUpgradeReceipt,
-    runs: &[ActiveRun],
-) -> Result<()> {
-    let mut missing = Vec::new();
-    for work in receipt
-        .works
-        .iter_mut()
-        .filter(|work| work.enabled_before && work.prior_run_id.is_some())
-    {
-        let Some(run) = live_run_for_work(runs, &work.work_kind, &work.work_id) else {
-            work.reconciliation = UpgradeReconciliationOutcome::Failed;
-            work.error = Some("previous-generation containment did not become live".to_string());
-            missing.push(format!("{} {}", work.work_kind, work.work_id));
-            continue;
-        };
-        work.resumed_run_id = Some(run.run_id.clone());
-        work.containment = run.containment.clone();
-        work.containment_observation = run.containment_observation;
-        work.reconciliation = UpgradeReconciliationOutcome::Resumed;
-        work.error = None;
-    }
-    if missing.is_empty() {
-        Ok(())
-    } else {
-        Err(anyhow!(
-            "previous-generation rollback did not restore live containment for {}",
-            missing.join(", ")
-        ))
-    }
-}
-
-fn record_prior_generation_failure(receipt: &mut HomeUpgradeReceipt, error: &anyhow::Error) {
-    for work in receipt
-        .works
-        .iter_mut()
-        .filter(|work| work.enabled_before && work.prior_run_id.is_some())
-    {
-        if work.reconciliation == UpgradeReconciliationOutcome::Pending {
-            work.reconciliation = UpgradeReconciliationOutcome::Failed;
-            work.error = Some(error.to_string());
-        }
-    }
-}
-
-fn reconcile_prior_generation_work(
-    store_path: &Path,
-    receipt: &mut HomeUpgradeReceipt,
-) -> Result<()> {
-    let artifacts = receipt
-        .artifacts
-        .as_ref()
-        .ok_or_else(|| anyhow!("Home upgrade {} has no artifact plan", receipt.id))?;
-    let connection = open_upgrade_store(store_path)?;
-    let launches = prior_child_launches(&connection, receipt)?;
-    drop(connection);
-
-    let mut runs = active_local_runs(store_path)?;
-    for target in &launches {
-        let deadline = Instant::now() + Duration::from_secs(10);
-        loop {
-            if live_run_for_work(&runs, &target.work_kind, &target.work_id).is_some() {
-                break;
-            }
-            let stopping = runs.iter().any(|run| {
-                run.work_kind == target.work_kind
-                    && run.work_id == target.work_id
-                    && run.state == "stopping"
-            });
-            if stopping && Instant::now() < deadline {
-                std::thread::sleep(DRAIN_POLL);
-                runs = active_local_runs(store_path)?;
-                continue;
-            }
-            if stopping {
-                return Err(anyhow!(
-                    "previous-generation {} {} remained stopping during rollback",
-                    target.work_kind,
-                    target.work_id
-                ));
-            }
-            launch_prior_child(&artifacts.cli_target, target)?;
-            runs = active_local_runs(store_path)?;
-            break;
-        }
-    }
-
-    let deadline = Instant::now() + Duration::from_secs(10);
-    loop {
-        runs = active_local_runs(store_path)?;
-        let settled = receipt
-            .works
-            .iter()
-            .filter(|work| work.enabled_before && work.prior_run_id.is_some())
-            .all(|work| live_run_for_work(&runs, &work.work_kind, &work.work_id).is_some());
-        if settled || Instant::now() >= deadline {
-            break;
-        }
-        std::thread::sleep(DRAIN_POLL);
-    }
-    record_prior_generation_runs(receipt, &runs)
-}
-
 fn read_home_context(
     store_path: &Path,
 ) -> Result<(Option<crate::durable::HomeId>, Option<PathBuf>)> {
     if !store_path.exists() {
         return Ok((None, None));
     }
-    let connection = open_upgrade_store(store_path)?;
+    let connection = rusqlite::Connection::open_with_flags(
+        store_path,
+        OpenFlags::SQLITE_OPEN_READ_ONLY | OpenFlags::SQLITE_OPEN_NO_MUTEX,
+    )?;
     let home_id = connection
         .query_row("SELECT id FROM homes WHERE route='local'", [], |row| {
             row.get::<_, String>(0)
@@ -5391,10 +1741,6 @@ fn pause_home(store_path: &Path) -> Result<PausedHome> {
     })
 }
 
-fn resume_home(home: &PausedHome) -> Result<()> {
-    resume_home_with_selection(home, None, None)
-}
-
 fn resume_home_for_switch(
     home: &PausedHome,
     receipt: &crate::machine_install::SwitchReceipt,
@@ -5484,566 +1830,6 @@ fn verify_switch_home(
         ));
     }
     Ok(())
-}
-
-fn record_upgrade_terminal(
-    receipt: &mut HomeUpgradeReceipt,
-    error: anyhow::Error,
-    phase: HomeUpgradePhase,
-) -> anyhow::Error {
-    let terminal_error = anyhow!("Home upgrade {} {}: {error}", receipt.id, phase.label());
-    receipt.phase = phase;
-    receipt.completed_at = Some(time::OffsetDateTime::now_utc().unix_timestamp());
-    receipt.error = Some(error.to_string());
-    let result = match write_upgrade_receipt(receipt) {
-        Ok(()) => terminal_error,
-        Err(receipt_error) => {
-            anyhow!(
-                "{terminal_error}; recording the Home upgrade failure also failed: {receipt_error}"
-            )
-        }
-    };
-    if receipt.recovery() == UpgradeRecovery::Settled {
-        cleanup_recovery_job(&receipt.id);
-    }
-    result
-}
-
-fn terminal_upgrade_result(receipt: &HomeUpgradeReceipt) -> String {
-    let resumed = receipt
-        .works
-        .iter()
-        .filter(|work| work.reconciliation == UpgradeReconciliationOutcome::Resumed)
-        .count();
-    let skipped = receipt
-        .works
-        .iter()
-        .filter(|work| work.reconciliation == UpgradeReconciliationOutcome::Skipped)
-        .count();
-    let failed = receipt
-        .works
-        .iter()
-        .filter(|work| work.reconciliation == UpgradeReconciliationOutcome::Failed)
-        .count();
-    format!(
-        "Home upgrade {}: generation {} -> {}; Work: {resumed} resumed, {skipped} skipped, {failed} failed ({})",
-        receipt.phase.label(),
-        receipt.prior_generation,
-        receipt.target_generation,
-        receipt.id
-    )
-}
-
-fn record_upgrade_failure(receipt: &mut HomeUpgradeReceipt, error: anyhow::Error) -> anyhow::Error {
-    record_upgrade_terminal(receipt, error, HomeUpgradePhase::Failed)
-}
-
-fn record_upgrade_rollback(
-    receipt: &mut HomeUpgradeReceipt,
-    error: anyhow::Error,
-) -> anyhow::Error {
-    record_upgrade_terminal(receipt, error, HomeUpgradePhase::RolledBack)
-}
-
-fn rollback_paused_upgrade(
-    receipt: &mut HomeUpgradeReceipt,
-    error: anyhow::Error,
-    paused: &PausedHome,
-    lock: crate::promotion_lock::PromotionLock,
-    store_path: &Path,
-) -> anyhow::Error {
-    drop(lock);
-    match resume_home(paused).and_then(|()| reconcile_prior_generation_work(store_path, receipt)) {
-        Ok(()) => record_upgrade_rollback(receipt, error),
-        Err(restart_error) => {
-            record_prior_generation_failure(receipt, &restart_error);
-            record_upgrade_failure(
-                receipt,
-                anyhow!("{error}; restoring prior-generation Work also failed: {restart_error}"),
-            )
-        }
-    }
-}
-
-fn fail_paused_upgrade(
-    receipt: &mut HomeUpgradeReceipt,
-    error: anyhow::Error,
-    paused: &PausedHome,
-    lock: crate::promotion_lock::PromotionLock,
-) -> anyhow::Error {
-    drop(lock);
-    let error = match resume_home(paused) {
-        Ok(()) => error,
-        Err(restart_error) => {
-            anyhow!("{error}; restoring the compatible Home keeper also failed: {restart_error}")
-        }
-    };
-    record_upgrade_failure(receipt, error)
-}
-
-fn verify_restarted_home(home: &PausedHome, receipt: &HomeUpgradeReceipt) -> Result<()> {
-    let Some(home_id) = home.home_id.as_ref() else {
-        return Ok(());
-    };
-    let runtime = tokio::runtime::Runtime::new().context("create Home identity runtime")?;
-    let identity = runtime.block_on(async {
-        let deadline = tokio::time::Instant::now() + Duration::from_secs(10);
-        while tokio::time::Instant::now() < deadline {
-            if let Some(identity) = crate::lfd::home_health_identity(home_id).await {
-                return Some(identity);
-            }
-            tokio::time::sleep(Duration::from_millis(200)).await;
-        }
-        None
-    });
-    let identity = identity.ok_or_else(|| anyhow!("new Home did not report a typed identity"))?;
-    let expected_version = receipt
-        .candidate
-        .build_version
-        .as_deref()
-        .unwrap_or(&receipt.candidate.package_version);
-    if identity.runtime_generation != receipt.target_generation
-        || identity.build_version != expected_version
-        || identity.source_revision != receipt.candidate.source_revision
-        || identity.migration_frontier != receipt.candidate.latest_known_migration
-    {
-        return Err(anyhow!(
-            "new Home identity mismatch: expected generation {} build {} revision {} frontier {}, got generation {} build {} revision {} frontier {}",
-            receipt.target_generation,
-            expected_version,
-            receipt.candidate.source_revision,
-            receipt.candidate.latest_known_migration,
-            identity.runtime_generation,
-            identity.build_version,
-            identity.source_revision,
-            identity.migration_frontier
-        ));
-    }
-    Ok(())
-}
-
-fn prior_run_id(
-    receipt: &HomeUpgradeReceipt,
-    work: &crate::durable::WorkRef,
-) -> Option<crate::durable::RunId> {
-    receipt
-        .works
-        .iter()
-        .find(|entry| entry.work_kind == work.kind() && entry.work_id == work.id())
-        .and_then(|entry| entry.prior_run_id.as_deref())
-        .and_then(|id| crate::durable::RunId::parse(id).ok())
-}
-
-fn reconciliation_trigger(
-    receipt: &HomeUpgradeReceipt,
-    work: &crate::durable::WorkRef,
-) -> crate::durable::RunTrigger {
-    crate::durable::RunTrigger::HomeUpgrade {
-        upgrade_id: receipt.id.clone(),
-        prior_run_id: prior_run_id(receipt, work),
-    }
-}
-
-fn validate_reconciled_run(
-    receipt: &HomeUpgradeReceipt,
-    work: &crate::durable::WorkRef,
-    run: &crate::durable::Run,
-) -> Result<()> {
-    if run.retry_of.is_some() {
-        return Err(anyhow!(
-            "{} {} HomeUpgrade Run {} unexpectedly consumes recovery lineage {:?}",
-            work.kind(),
-            work.id(),
-            run.id,
-            run.retry_of
-        ));
-    }
-    if run.runtime_generation != Some(receipt.target_generation) {
-        return Err(anyhow!(
-            "{} {} reserved Run {} on runtime generation {:?}, expected {}",
-            work.kind(),
-            work.id(),
-            run.id,
-            run.runtime_generation,
-            receipt.target_generation
-        ));
-    }
-    let expected_trigger = reconciliation_trigger(receipt, work);
-    if run.trigger != expected_trigger {
-        return Err(anyhow!(
-            "{} {} reserved Run {} with trigger {:?}, expected {:?}",
-            work.kind(),
-            work.id(),
-            run.id,
-            run.trigger,
-            expected_trigger
-        ));
-    }
-    let containment = observe_containment(run.containment.as_ref());
-    if containment != ContainmentObservation::Present {
-        return Err(anyhow!(
-            "{} {} replacement Run {} has {:?} containment",
-            work.kind(),
-            work.id(),
-            run.id,
-            containment
-        ));
-    }
-    Ok(())
-}
-
-fn record_reconciliation_failure(
-    receipt: &mut HomeUpgradeReceipt,
-    work: &crate::durable::WorkRef,
-    error: impl Into<String>,
-) {
-    let entry = receipt.ensure_work(work);
-    entry.reconciliation = UpgradeReconciliationOutcome::Failed;
-    entry.error = Some(error.into());
-}
-
-async fn record_reconciled_run(
-    store: &crate::store::Store,
-    receipt: &mut HomeUpgradeReceipt,
-    work: &crate::durable::WorkRef,
-) -> Result<()> {
-    let deadline = tokio::time::Instant::now() + Duration::from_secs(10);
-    let mut last_error = anyhow!(
-        "{} {} did not reserve a replacement Run",
-        work.kind(),
-        work.id()
-    );
-    loop {
-        if let Some(run) = store.current_run(work).await? {
-            match validate_reconciled_run(receipt, work, &run) {
-                Ok(()) => {
-                    let entry = receipt.ensure_work(work);
-                    entry.resumed_run_id = Some(run.id.to_string());
-                    entry.reconciliation = UpgradeReconciliationOutcome::Resumed;
-                    entry.error = None;
-                    return Ok(());
-                }
-                Err(error) => last_error = error,
-            }
-        }
-        if tokio::time::Instant::now() >= deadline {
-            return Err(last_error);
-        }
-        tokio::time::sleep(DRAIN_POLL).await;
-    }
-}
-
-async fn work_needs_reconciliation(
-    store: &crate::store::Store,
-    home_id: &crate::durable::HomeId,
-    work: &crate::durable::WorkRef,
-) -> Result<bool> {
-    let placement = store.placement(work).await?;
-    if placement.home_id != *home_id || !placement.enabled {
-        return Ok(false);
-    }
-    Ok(matches!(
-        store.work_status(work).await?,
-        crate::durable::WorkStatus::Ready
-    ))
-}
-
-async fn switch_reconciliation_trigger(
-    store: &crate::store::Store,
-    work: &crate::durable::WorkRef,
-    switch_id: &str,
-) -> Result<crate::durable::RunTrigger> {
-    Ok(crate::durable::RunTrigger::HomeUpgrade {
-        upgrade_id: switch_id.to_string(),
-        prior_run_id: store.latest_run(work).await?.map(|run| run.id),
-    })
-}
-
-async fn verify_switch_reconciled_run(
-    store: &crate::store::Store,
-    work: &crate::durable::WorkRef,
-    trigger: &crate::durable::RunTrigger,
-) -> Result<()> {
-    let deadline = tokio::time::Instant::now() + Duration::from_secs(10);
-    loop {
-        if let Some(run) = store.current_run(work).await? {
-            if run.retry_of.is_some() {
-                return Err(anyhow!(
-                    "{} {} install replacement Run {} unexpectedly consumes recovery lineage {:?}",
-                    work.kind(),
-                    work.id(),
-                    run.id,
-                    run.retry_of
-                ));
-            }
-            if &run.trigger != trigger {
-                return Err(anyhow!(
-                    "{} {} replacement Run {} has trigger {:?}, expected {:?}",
-                    work.kind(),
-                    work.id(),
-                    run.id,
-                    run.trigger,
-                    trigger
-                ));
-            }
-            if observe_containment(run.containment.as_ref()) == ContainmentObservation::Present {
-                return Ok(());
-            }
-        }
-        if tokio::time::Instant::now() >= deadline {
-            return Err(anyhow!(
-                "{} {} did not start replacement containment during install reconciliation",
-                work.kind(),
-                work.id()
-            ));
-        }
-        tokio::time::sleep(DRAIN_POLL).await;
-    }
-}
-
-async fn reconcile_switch_child_work(
-    receipt: &crate::machine_install::SwitchReceipt,
-) -> Result<()> {
-    let store = std::sync::Arc::new(
-        crate::store::open_store(&crate::store::StorageConfig::sqlite(
-            receipt.target.store.clone(),
-        ))
-        .await?,
-    );
-    let home = store.local_home().await?;
-
-    for mut project in store.list_projects(None).await? {
-        let work = crate::durable::WorkRef::Project(project.id.clone());
-        if !work_needs_reconciliation(&store, &home.id, &work).await? {
-            continue;
-        }
-        let trigger = switch_reconciliation_trigger(&store, &work, &receipt.id).await?;
-        crate::ops::project::launch_project_process_for_install_switch(
-            &store,
-            &mut project,
-            trigger.clone(),
-            &receipt.id,
-        )
-        .await
-        .map_err(|error| anyhow!(error.to_string()))?;
-        verify_switch_reconciled_run(&store, &work, &trigger).await?;
-    }
-
-    for mut task in store.list_tasks(None).await? {
-        let work = crate::durable::WorkRef::Task(task.id.clone());
-        if !work_needs_reconciliation(&store, &home.id, &work).await? {
-            continue;
-        }
-        let trigger = switch_reconciliation_trigger(&store, &work, &receipt.id).await?;
-        crate::ops::task::relaunch_inactive_process_for_install_switch(
-            &store,
-            &mut task,
-            trigger.clone(),
-            &receipt.id,
-        )
-        .await
-        .map_err(|error| anyhow!(error.to_string()))?;
-        verify_switch_reconciled_run(&store, &work, &trigger).await?;
-    }
-    Ok(())
-}
-
-async fn record_running_or_skipped(
-    store: &crate::store::Store,
-    receipt: &mut HomeUpgradeReceipt,
-    work: &crate::durable::WorkRef,
-) {
-    if matches!(
-        store.work_status(work).await,
-        Ok(crate::durable::WorkStatus::Running { .. })
-    ) {
-        if let Err(error) = record_reconciled_run(store, receipt, work).await {
-            record_reconciliation_failure(receipt, work, error.to_string());
-        }
-    } else {
-        receipt.ensure_work(work).reconciliation = UpgradeReconciliationOutcome::Skipped;
-    }
-}
-
-async fn reconcile_enabled_work(receipt: &mut HomeUpgradeReceipt) -> Result<()> {
-    let store = std::sync::Arc::new(
-        crate::store::open_existing_store()
-            .await
-            .ok_or_else(|| anyhow!("the migrated Home store could not be opened"))?,
-    );
-    let home = store.local_home().await?;
-    receipt.phase = HomeUpgradePhase::Reconciling;
-    write_upgrade_receipt(receipt)?;
-
-    let waves = store.list_waves(None).await?;
-    let mut wave_ids = Vec::new();
-    for wave in waves {
-        let work = crate::durable::WorkRef::Wave(wave.id().clone());
-        receipt.ensure_work(&work);
-        match work_needs_reconciliation(&store, &home.id, &work).await {
-            Ok(true) => wave_ids.push(wave.id().clone()),
-            Ok(false) => record_running_or_skipped(&store, receipt, &work).await,
-            Err(error) => record_reconciliation_failure(receipt, &work, error.to_string()),
-        }
-    }
-    if !wave_ids.is_empty() {
-        match crate::lfd::reconcile_waves(&home.id, wave_ids.clone()).await {
-            Ok(outcomes) => {
-                for outcome in outcomes {
-                    let work = crate::durable::WorkRef::Wave(outcome.wave_id);
-                    match outcome.state {
-                        crate::wave_host::WaveStartState::Live { .. } => {
-                            if let Err(error) = record_reconciled_run(&store, receipt, &work).await
-                            {
-                                record_reconciliation_failure(receipt, &work, error.to_string());
-                            }
-                        }
-                        crate::wave_host::WaveStartState::Failed { reason } => {
-                            record_reconciliation_failure(receipt, &work, reason)
-                        }
-                    }
-                }
-            }
-            Err(error) => {
-                for wave_id in wave_ids {
-                    record_reconciliation_failure(
-                        receipt,
-                        &crate::durable::WorkRef::Wave(wave_id),
-                        error.to_string(),
-                    );
-                }
-            }
-        }
-        write_upgrade_receipt(receipt)?;
-    }
-
-    for mut project in store.list_projects(None).await? {
-        let work = crate::durable::WorkRef::Project(project.id.clone());
-        receipt.ensure_work(&work);
-        match work_needs_reconciliation(&store, &home.id, &work).await {
-            Ok(true) => {
-                let trigger = reconciliation_trigger(receipt, &work);
-                match crate::ops::project::launch_project_process_with_trigger(
-                    &store,
-                    &mut project,
-                    trigger,
-                )
-                .await
-                {
-                    Ok(()) => {
-                        if let Err(error) = record_reconciled_run(&store, receipt, &work).await {
-                            record_reconciliation_failure(receipt, &work, error.to_string());
-                        }
-                    }
-                    Err(error) => record_reconciliation_failure(receipt, &work, error.to_string()),
-                }
-            }
-            Ok(false) => record_running_or_skipped(&store, receipt, &work).await,
-            Err(error) => record_reconciliation_failure(receipt, &work, error.to_string()),
-        }
-        write_upgrade_receipt(receipt)?;
-    }
-
-    for mut task in store.list_tasks(None).await? {
-        let work = crate::durable::WorkRef::Task(task.id.clone());
-        receipt.ensure_work(&work);
-        match work_needs_reconciliation(&store, &home.id, &work).await {
-            Ok(true) => {
-                let trigger = reconciliation_trigger(receipt, &work);
-                match crate::ops::task::relaunch_inactive_process_with_trigger(
-                    &store,
-                    &mut task,
-                    Some(trigger),
-                )
-                .await
-                {
-                    Ok(()) => {
-                        if let Err(error) = record_reconciled_run(&store, receipt, &work).await {
-                            record_reconciliation_failure(receipt, &work, error.to_string());
-                        }
-                    }
-                    Err(error) => record_reconciliation_failure(receipt, &work, error.to_string()),
-                }
-            }
-            Ok(false) => record_running_or_skipped(&store, receipt, &work).await,
-            Err(error) => record_reconciliation_failure(receipt, &work, error.to_string()),
-        }
-        write_upgrade_receipt(receipt)?;
-    }
-    Ok(())
-}
-
-fn restart_reconcile_and_settle(
-    mut receipt: HomeUpgradeReceipt,
-    prepared: &HomeUpgradeArtifacts,
-    paused: &PausedHome,
-    lock: crate::promotion_lock::PromotionLock,
-    sync_skills: bool,
-) -> Result<()> {
-    receipt.phase = HomeUpgradePhase::Restarting;
-    receipt.completed_at = None;
-    receipt.error = None;
-    if let Err(error) = write_upgrade_receipt(&receipt) {
-        return Err(record_upgrade_failure(&mut receipt, error));
-    }
-    drop(lock);
-    if let Err(error) = resume_home(paused) {
-        return Err(record_upgrade_failure(&mut receipt, error));
-    }
-    if let Err(error) = verify_restarted_home(paused, &receipt) {
-        return Err(record_upgrade_failure(&mut receipt, error));
-    }
-    if !receipt.daemon_restarted {
-        receipt.daemon_restarted = true;
-        receipt.phase = HomeUpgradePhase::Restarting;
-        if let Err(error) = write_upgrade_receipt(&receipt) {
-            return Err(record_upgrade_failure(&mut receipt, error));
-        }
-    }
-    let runtime = match tokio::runtime::Runtime::new().context("create Home reconciliation runtime")
-    {
-        Ok(runtime) => runtime,
-        Err(error) => return Err(record_upgrade_failure(&mut receipt, error)),
-    };
-    if let Err(error) = runtime.block_on(reconcile_enabled_work(&mut receipt)) {
-        return Err(record_upgrade_failure(&mut receipt, error));
-    }
-    receipt.phase = HomeUpgradePhase::Completed;
-    receipt.completed_at = Some(time::OffsetDateTime::now_utc().unix_timestamp());
-    if let Err(error) = write_upgrade_receipt(&receipt) {
-        return Err(record_upgrade_failure(&mut receipt, error));
-    }
-    settle_app_artifacts(prepared).with_context(|| {
-        format!(
-            "Home upgrade {} completed but retained app cleanup is still pending",
-            receipt.id
-        )
-    })?;
-    cleanup_recovery_job(&receipt.id);
-    println!("{}", terminal_upgrade_result(&receipt));
-    if sync_skills {
-        if let Err(error) = crate::lf::commands::ops::run_sync_skills(true, false) {
-            eprintln!(
-                "warning: skill sync failed ({error:#}); binaries installed, skills unchanged"
-            );
-        }
-    }
-    Ok(())
-}
-
-/// Run `lf install promote`. The candidate is the running binary; under the
-/// exclusive promotion lock it reads the shared store's frontier and active-Run
-/// count, decides via the merged `decide()`, and — unless refused or preview —
-/// content-addresses itself into `~/.lf/bin` and atomically repoints `cli_target`.
-/// A refusal leaves every target unchanged.
-#[derive(Debug)]
-pub struct PromotionArtifacts<'a> {
-    pub cli_target: &'a Path,
-    pub daemon_source: &'a Path,
-    pub daemon_target: &'a Path,
-    pub app_source: Option<&'a Path>,
-    pub app_target: Option<&'a Path>,
-    pub legacy_app_target: Option<&'a Path>,
 }
 
 fn required_machine_artifact_roles(has_app: bool) -> Vec<crate::machine_install::ArtifactRole> {
@@ -6242,8 +2028,6 @@ fn bootstrap_published_install(
         selection,
         published_fallback: fallback.clone(),
         retained_published_sets: vec![fallback],
-        first_fork: None,
-        work_dispositions: Vec::new(),
     };
     crate::machine_install::write_active(root, &active)?;
     Ok(active)
@@ -6435,92 +2219,6 @@ fn active_install_matches_candidate(
     active_keeper_matches(&active.selection, candidate)
 }
 
-fn work_ref(kind: &str, id: &str) -> Result<crate::durable::WorkRef> {
-    match kind {
-        "wave" => Ok(crate::durable::WorkRef::Wave(crate::id::WaveId::parse(id)?)),
-        "project" => Ok(crate::durable::WorkRef::Project(
-            crate::durable::ProjectId::parse(id)?,
-        )),
-        "task" => Ok(crate::durable::WorkRef::Task(
-            crate::durable::TaskId::parse(id)?,
-        )),
-        other => Err(anyhow!("unknown durable Work kind {other:?}")),
-    }
-}
-
-fn first_fork_evidence(
-    receipt: &HomeUpgradeReceipt,
-) -> Result<crate::machine_install::ForkEvidence> {
-    Ok(crate::machine_install::ForkEvidence {
-        enabled_work: receipt
-            .works
-            .iter()
-            .filter(|work| work.enabled_before)
-            .map(|work| work_ref(&work.work_kind, &work.work_id))
-            .collect::<Result<Vec<_>>>()?,
-        drained_run_ids: receipt
-            .works
-            .iter()
-            .filter_map(|work| work.prior_run_id.clone())
-            .collect(),
-    })
-}
-
-fn interrupted_work(
-    store_path: &Path,
-    receipt: &HomeUpgradeReceipt,
-) -> Result<Vec<crate::machine_install::InterruptedWork>> {
-    let mut evidence = receipt.clone();
-    capture_enabled_work(store_path, &mut evidence)?;
-    evidence
-        .works
-        .iter()
-        .filter(|work| work.enabled_before)
-        .filter_map(|work| work.prior_run_id.as_deref().map(|run_id| (work, run_id)))
-        .map(|(work, run_id)| {
-            Ok(crate::machine_install::InterruptedWork {
-                work: work_ref(&work.work_kind, &work.work_id)?,
-                prior_run_id: crate::durable::RunId::parse(run_id)?,
-            })
-        })
-        .collect()
-}
-
-fn interrupted_upgrade_receipt(
-    receipt: &crate::machine_install::SwitchReceipt,
-) -> HomeUpgradeReceipt {
-    let mut upgrade = HomeUpgradeReceipt::new(CandidateIdentity::current(), &[]);
-    for interrupted in &receipt.interrupted_work {
-        let work = upgrade.ensure_work(&interrupted.work);
-        work.enabled_before = true;
-        work.prior_run_id = Some(interrupted.prior_run_id.to_string());
-        work.drain = UpgradeDrainOutcome::Interrupted;
-    }
-    let daemon = receipt
-        .prior
-        .artifact_set
-        .artifact(&crate::machine_install::ArtifactRole::Daemon)
-        .expect("validated prior install has a daemon")
-        .path
-        .clone();
-    upgrade.artifacts = Some(HomeUpgradeArtifacts {
-        cli_binary: receipt.coordinator.path.clone(),
-        cli_target: receipt.coordinator.path.clone(),
-        daemon_binary: daemon.clone(),
-        daemon_target: daemon,
-        app_source: None,
-        app_target: None,
-        app_superseded: None,
-        legacy_app_target: None,
-    });
-    upgrade
-}
-
-fn reconcile_interrupted_work(receipt: &crate::machine_install::SwitchReceipt) -> Result<()> {
-    let mut upgrade = interrupted_upgrade_receipt(receipt);
-    reconcile_prior_generation_work(&receipt.prior.store, &mut upgrade)
-}
-
 fn discard_unadvanced_disposable_store(
     receipt: &crate::machine_install::SwitchReceipt,
 ) -> Result<()> {
@@ -6565,15 +2263,10 @@ fn restore_before_local_advance(
     drop(lock);
     let resume = resume_home_for_install_selection(paused, &receipt.prior);
     let app = resume_switch_app(receipt);
-    let work = if clear.is_ok() && resume.is_ok() {
-        reconcile_interrupted_work(receipt)
-    } else {
-        Ok(())
-    };
-    match (cleanup, clear, resume, app, work) {
-        (Ok(()), Ok(()), Ok(()), Ok(()), Ok(())) => error,
-        (cleanup, clear, resume, app, work) => anyhow!(
-            "{error}; restoring the prior install also failed (target: {}, receipt: {}, keeper: {}, app: {}, Work: {})",
+    match (cleanup, clear, resume, app) {
+        (Ok(()), Ok(()), Ok(()), Ok(())) => error,
+        (cleanup, clear, resume, app) => anyhow!(
+            "{error}; restoring the prior install also failed (target: {}, receipt: {}, keeper: {}, app: {})",
             cleanup
                 .err()
                 .map(|error| error.to_string())
@@ -6587,9 +2280,6 @@ fn restore_before_local_advance(
                 .map(|error| error.to_string())
                 .unwrap_or_else(|| "ok".to_string()),
             app.err()
-                .map(|error| error.to_string())
-                .unwrap_or_else(|| "ok".to_string()),
-            work.err()
                 .map(|error| error.to_string())
                 .unwrap_or_else(|| "ok".to_string())
         ),
@@ -6640,9 +2330,6 @@ fn promote_local_candidate(
         return Ok(());
     }
 
-    let legacy_drain_plan = matches!(state, crate::machine_install::MachineInstallState::Legacy)
-        .then(|| plan_upgrade_drain(&preview_store))
-        .transpose()?;
     let prior = active_install_for_local_promotion(&root, &artifacts)?;
     require_active_development_coordinator(&prior)?;
     let standard_preflight = read_binary_preflight(candidate_binary)?;
@@ -6672,17 +2359,12 @@ fn promote_local_candidate(
         );
         return Ok(());
     }
-    let drain_plan = match legacy_drain_plan {
-        Some(plan) => plan,
-        None => plan_upgrade_drain(&prior.selection.store)?,
-    };
-    let mut upgrade = HomeUpgradeReceipt::new(preview.candidate.clone(), &drain_plan.active_runs());
-    upgrade.keeper_mode = crate::lfd::service::configured_mode()?;
-    let prepared = prepare_upgrade_artifacts(
+    let switch_id = format!("switch-{}", Uuid::new_v4().simple());
+    let prepared = prepare_artifacts(
         &artifacts,
         candidate_binary,
         &preview,
-        &upgrade.id,
+        &switch_id,
         Some(&standard_preflight.verdict),
     )?;
     let target_set = machine_artifact_set(
@@ -6716,7 +2398,7 @@ fn promote_local_candidate(
     };
     let mut switch = crate::machine_install::SwitchReceipt {
         schema_version: 1,
-        id: format!("switch-{}", Uuid::new_v4().simple()),
+        id: switch_id,
         prior: prior.selection.clone(),
         target: target.clone(),
         published_fallback: prior.published_fallback.clone(),
@@ -6753,9 +2435,6 @@ fn promote_local_candidate(
         },
         app_was_running: false,
         disposable_store_owned: false,
-        interrupted_work: interrupted_work(&prior.selection.store, &upgrade)?,
-        first_fork: prior.first_fork.clone(),
-        work_dispositions: prior.work_dispositions.clone(),
     };
     let target_daemon = switch
         .target
@@ -6780,54 +2459,10 @@ fn promote_local_candidate(
             return Err(error);
         }
     };
-    if let Err(error) = pin_direct_resume_sessions(&prior.selection.store, &drain_plan)
-        .and_then(|()| {
-            settle_paused_wave_reservations(&prior.selection.store, &mut upgrade, &paused)
-        })
-        .and_then(|()| {
-            drain_active_runs(
-                &prior.selection.store,
-                &mut upgrade,
-                &drain_plan,
-                DRAIN_GRACE,
-                FORCE_GRACE,
-                false,
-            )
-        })
-    {
-        return Err(restore_before_local_advance(
-            &root, &switch, &paused, lock, error,
-        ));
-    }
     if let Err(error) = quiesce_switch_app(&root, &mut switch) {
         return Err(restore_before_local_advance(
             &root, &switch, &paused, lock, error,
         ));
-    }
-    if switch.first_fork.is_none() {
-        if let Err(error) = capture_enabled_work(&prior.selection.store, &mut upgrade) {
-            return Err(restore_before_local_advance(
-                &root, &switch, &paused, lock, error,
-            ));
-        }
-        let evidence = match first_fork_evidence(&upgrade) {
-            Ok(evidence) => evidence,
-            Err(error) => {
-                return Err(restore_before_local_advance(
-                    &root, &switch, &paused, lock, error,
-                ))
-            }
-        };
-        switch.work_dispositions = evidence
-            .enabled_work
-            .iter()
-            .cloned()
-            .map(|work| crate::machine_install::WorkDispositionReceipt {
-                work,
-                outcome: crate::machine_install::WorkDisposition::Pending,
-            })
-            .collect();
-        switch.first_fork = Some(evidence);
     }
     switch.phase = crate::machine_install::SwitchPhase::Quiesced;
     if let Err(error) = crate::machine_install::write_switch(&root, &switch) {
@@ -6921,14 +2556,6 @@ fn promote_local_candidate(
     )?;
     switch.phase = crate::machine_install::SwitchPhase::Activated;
     crate::machine_install::write_switch(&root, &switch)?;
-    if prior.selection.source == crate::machine_install::InstallSource::Development
-        && target_store != prior.selection.store
-    {
-        switch.work_dispositions = park_first_fork_work(&target_store, switch.first_fork.as_ref())?;
-        switch.phase = crate::machine_install::SwitchPhase::Reconciling;
-        crate::machine_install::write_switch(&root, &switch)?;
-    }
-
     let mut retained = prior.retained_published_sets.clone();
     if !retained
         .iter()
@@ -6941,11 +2568,7 @@ fn promote_local_candidate(
         selection: target,
         published_fallback: prior.published_fallback,
         retained_published_sets: retained,
-        first_fork: switch.first_fork.clone(),
-        work_dispositions: switch.work_dispositions.clone(),
     };
-    switch.phase = crate::machine_install::SwitchPhase::Reconciling;
-    crate::machine_install::write_switch(&root, &switch)?;
     crate::lfd::service::prepare_install_switch(
         paused.keeper_mode,
         &switch.activation.daemon,
@@ -6953,7 +2576,6 @@ fn promote_local_candidate(
     )?;
     resume_home_for_switch(&paused, &switch)?;
     verify_switch_home(&paused, &switch)?;
-    run_switch_work_reconciliation(&switch)?;
     settle_app_artifacts(&prepared)?;
     resume_switch_app(&switch)?;
     crate::lfd::service::finish_install_switch(paused.keeper_mode, &switch.activation.daemon)?;
@@ -7299,80 +2921,6 @@ fn run_switch_candidate(receipt: &crate::machine_install::SwitchReceipt) -> Resu
     }
 }
 
-fn run_switch_work_reconciliation(receipt: &crate::machine_install::SwitchReceipt) -> Result<()> {
-    receipt.candidate.verify()?;
-    let status = Command::new(&receipt.candidate.path)
-        .args(["install", "reconcile-switch", "--switch", &receipt.id])
-        .env(
-            crate::machine_install::INSTALL_SWITCH_ENV,
-            receipt.id.as_str(),
-        )
-        .env("LF_BIN", &receipt.candidate.path)
-        .env_remove(crate::durable::RUN_CONTEXT_ENV)
-        .env_remove(crate::durable::RUN_ID_ENV)
-        .env_remove(crate::durable::AGENT_INVOCATION_ENV)
-        .status()
-        .with_context(|| {
-            format!(
-                "reconcile enabled Work through install candidate {}",
-                receipt.candidate.path.display()
-            )
-        })?;
-    if status.success() {
-        Ok(())
-    } else {
-        Err(anyhow!(
-            "install switch Work reconciliation exited {status}"
-        ))
-    }
-}
-
-pub fn reconcile_switch(switch_id: &str) -> Result<()> {
-    crate::promotion_lock::require_exclusive_holder()
-        .context("verify the receipt-pinned promotion coordinator")?;
-    let root = crate::machine_install::root()?;
-    let receipt = match crate::machine_install::read_state(&root)? {
-        crate::machine_install::MachineInstallState::Switching(receipt)
-            if receipt.id == switch_id =>
-        {
-            *receipt
-        }
-        crate::machine_install::MachineInstallState::Switching(receipt) => {
-            return Err(anyhow!(
-                "install switch {} is active, not {switch_id}",
-                receipt.id
-            ))
-        }
-        _ => return Err(anyhow!("install switch {switch_id} is no longer active")),
-    };
-    if receipt.phase != crate::machine_install::SwitchPhase::Reconciling
-        || !receipt.target_store_advanced
-    {
-        return Err(anyhow!(
-            "install switch {} is not ready to reconcile Work",
-            receipt.id
-        ));
-    }
-    let current = fs::canonicalize(
-        std::env::current_exe().context("resolve running install reconciliation candidate")?,
-    )?;
-    if current != receipt.candidate.path {
-        return Err(anyhow!(
-            "install switch {} must reconcile with candidate {}",
-            receipt.id,
-            receipt.candidate.path.display()
-        ));
-    }
-    receipt.candidate.verify()?;
-    crate::machine_install::authorize_current_for_switch(
-        &crate::machine_install::ArtifactRole::Cli,
-        Some(&receipt.id),
-    )?;
-    let runtime =
-        tokio::runtime::Runtime::new().context("create install reconciliation runtime")?;
-    runtime.block_on(reconcile_switch_child_work(&receipt))
-}
-
 fn active_install_from_switch(
     receipt: &crate::machine_install::SwitchReceipt,
 ) -> crate::machine_install::ActiveInstall {
@@ -7387,20 +2935,11 @@ fn active_install_from_switch(
     if receipt.published_fallback != published_fallback {
         retained.push(receipt.published_fallback.clone());
     }
-    let (first_fork, work_dispositions) = match receipt.target.source {
-        crate::machine_install::InstallSource::Published => (None, Vec::new()),
-        crate::machine_install::InstallSource::Development => (
-            receipt.first_fork.clone(),
-            receipt.work_dispositions.clone(),
-        ),
-    };
     crate::machine_install::ActiveInstall {
         schema_version: 1,
         selection: receipt.target.clone(),
         published_fallback,
         retained_published_sets: retained,
-        first_fork,
-        work_dispositions,
     }
 }
 
@@ -7455,7 +2994,6 @@ pub fn recover_switch(switch_id: &str) -> Result<()> {
         crate::machine_install::clear_switch(&root, &receipt.id)?;
         drop(lock);
         resume_store_home(&receipt.prior, None)?;
-        reconcile_interrupted_work(&receipt)?;
         resume_switch_app(&receipt)?;
         return Ok(());
     }
@@ -7506,21 +3044,8 @@ pub fn recover_switch(switch_id: &str) -> Result<()> {
         crate::machine_install::write_switch(&root, &receipt)?;
     }
 
-    let parks_first_fork = receipt.prior.source
-        == crate::machine_install::InstallSource::Development
-        && (receipt.target.source == crate::machine_install::InstallSource::Published
-            || receipt.target.store != receipt.prior.store);
-    if parks_first_fork && receipt.phase == crate::machine_install::SwitchPhase::Activated {
-        receipt.work_dispositions =
-            park_first_fork_work(&receipt.target.store, receipt.first_fork.as_ref())?;
-        receipt.phase = crate::machine_install::SwitchPhase::Reconciling;
-        crate::machine_install::write_switch(&root, &receipt)?;
-    }
-
     let active = active_install_from_switch(&receipt);
     let published_fallback = active.published_fallback.clone();
-    receipt.phase = crate::machine_install::SwitchPhase::Reconciling;
-    crate::machine_install::write_switch(&root, &receipt)?;
     let keeper_mode = crate::lfd::service::configured_mode()?;
     crate::lfd::service::prepare_install_switch(
         keeper_mode,
@@ -7529,7 +3054,6 @@ pub fn recover_switch(switch_id: &str) -> Result<()> {
     )?;
     let home = resume_store_home(&active.selection, Some(&receipt))?;
     verify_switch_home(&home, &receipt)?;
-    run_switch_work_reconciliation(&receipt)?;
     resume_switch_app(&receipt)?;
     crate::lfd::service::finish_install_switch(keeper_mode, &receipt.activation.daemon)?;
     receipt.published_fallback = published_fallback;
@@ -7542,84 +3066,6 @@ pub fn recover_switch(switch_id: &str) -> Result<()> {
     }
     drop(lock);
     Ok(())
-}
-
-fn park_first_fork_work(
-    store_path: &Path,
-    evidence: Option<&crate::machine_install::ForkEvidence>,
-) -> Result<Vec<crate::machine_install::WorkDispositionReceipt>> {
-    let Some(evidence) = evidence else {
-        return Ok(Vec::new());
-    };
-    let mut connection = open_upgrade_store(store_path)?;
-    let transaction =
-        connection.transaction_with_behavior(rusqlite::TransactionBehavior::Immediate)?;
-    let mut outcomes = Vec::new();
-    for work in &evidence.enabled_work {
-        let (column, epoch_column) = match work.kind() {
-            "wave" => ("wave_id", "wave_id"),
-            "project" => ("project_id", "project_id"),
-            "task" => ("task_id", "task_id"),
-            other => {
-                return Err(anyhow!(
-                    "first-fork receipt contains unknown Work kind {other:?}"
-                ))
-            }
-        };
-        let enabled = transaction
-            .query_row(
-                &format!("SELECT enabled FROM work_placements WHERE {column}=?1"),
-                [work.id()],
-                |row| row.get::<_, bool>(0),
-            )
-            .optional()?;
-        let outcome = match enabled {
-            None => crate::machine_install::WorkDisposition::Missing,
-            Some(false) => crate::machine_install::WorkDisposition::AlreadyDisabled,
-            Some(true) => {
-                let state = transaction
-                    .query_row(
-                    &format!(
-                            "SELECT state FROM epochs WHERE {epoch_column}=?1 ORDER BY number DESC LIMIT 1"
-                    ),
-                    [work.id()],
-                        |row| row.get::<_, String>(0),
-                    )
-                    .optional()?
-                    .ok_or_else(|| {
-                        anyhow!(
-                            "enabled {} Work {} has no durable epoch",
-                            work.kind(),
-                            work.id()
-                        )
-                    })?;
-                match state.as_str() {
-                    "open" => {
-                        transaction.execute(
-                            &format!("UPDATE work_placements SET enabled=0 WHERE {column}=?1"),
-                            [work.id()],
-                        )?;
-                        crate::machine_install::WorkDisposition::Disabled
-                    }
-                    "done" => crate::machine_install::WorkDisposition::Terminal,
-                    "abandoned" => crate::machine_install::WorkDisposition::Abandoned,
-                    other => {
-                        return Err(anyhow!(
-                            "{} Work {} has unknown epoch state {other:?}",
-                            work.kind(),
-                            work.id()
-                        ))
-                    }
-                }
-            }
-        };
-        outcomes.push(crate::machine_install::WorkDispositionReceipt {
-            work: work.clone(),
-            outcome,
-        });
-    }
-    transaction.commit()?;
-    Ok(outcomes)
 }
 
 fn promote_published_from_machine_install(
@@ -7691,11 +3137,8 @@ fn promote_published_from_machine_install(
         );
         return Ok(());
     }
-    let drain_plan = plan_upgrade_drain(&prior.selection.store)?;
-    let mut upgrade = HomeUpgradeReceipt::new(preview.candidate.clone(), &drain_plan.active_runs());
-    upgrade.keeper_mode = crate::lfd::service::configured_mode()?;
-    let prepared =
-        prepare_upgrade_artifacts(&artifacts, candidate_binary, &preview, &upgrade.id, None)?;
+    let switch_id = format!("switch-{}", Uuid::new_v4().simple());
+    let prepared = prepare_artifacts(&artifacts, candidate_binary, &preview, &switch_id, None)?;
     let target_set = machine_artifact_set(
         &root,
         crate::machine_install::InstallSource::Published,
@@ -7713,7 +3156,7 @@ fn promote_published_from_machine_install(
     };
     let mut switch = crate::machine_install::SwitchReceipt {
         schema_version: 1,
-        id: format!("switch-{}", Uuid::new_v4().simple()),
+        id: switch_id,
         prior: prior.selection.clone(),
         target: target.clone(),
         published_fallback: prior.published_fallback.clone(),
@@ -7742,9 +3185,6 @@ fn promote_published_from_machine_install(
         },
         app_was_running: false,
         disposable_store_owned: false,
-        interrupted_work: interrupted_work(&prior.selection.store, &upgrade)?,
-        first_fork: prior.first_fork.clone(),
-        work_dispositions: prior.work_dispositions.clone(),
     };
     crate::machine_install::write_switch(&root, &switch)?;
     let paused = match pause_home(&prior.selection.store) {
@@ -7754,25 +3194,6 @@ fn promote_published_from_machine_install(
             return Err(error);
         }
     };
-    if let Err(error) = pin_direct_resume_sessions(&prior.selection.store, &drain_plan)
-        .and_then(|()| {
-            settle_paused_wave_reservations(&prior.selection.store, &mut upgrade, &paused)
-        })
-        .and_then(|()| {
-            drain_active_runs(
-                &prior.selection.store,
-                &mut upgrade,
-                &drain_plan,
-                DRAIN_GRACE,
-                FORCE_GRACE,
-                false,
-            )
-        })
-    {
-        return Err(restore_before_local_advance(
-            &root, &switch, &paused, lock, error,
-        ));
-    }
     if let Err(error) = quiesce_switch_app(&root, &mut switch) {
         return Err(restore_before_local_advance(
             &root, &switch, &paused, lock, error,
@@ -7818,12 +3239,6 @@ fn promote_published_from_machine_install(
     )?;
     switch.phase = crate::machine_install::SwitchPhase::Activated;
     crate::machine_install::write_switch(&root, &switch)?;
-    if prior.selection.source == crate::machine_install::InstallSource::Development {
-        switch.work_dispositions = park_first_fork_work(&store_path, switch.first_fork.as_ref())?;
-        switch.phase = crate::machine_install::SwitchPhase::Reconciling;
-        crate::machine_install::write_switch(&root, &switch)?;
-    }
-
     let mut retained = prior.retained_published_sets;
     if !retained.iter().any(|set| set == &target_published_fallback) {
         retained.push(target_published_fallback.clone());
@@ -7833,11 +3248,7 @@ fn promote_published_from_machine_install(
         selection: target.clone(),
         published_fallback: target_published_fallback.clone(),
         retained_published_sets: retained,
-        first_fork: None,
-        work_dispositions: Vec::new(),
     };
-    switch.phase = crate::machine_install::SwitchPhase::Reconciling;
-    crate::machine_install::write_switch(&root, &switch)?;
     crate::lfd::service::prepare_install_switch(
         paused.keeper_mode,
         &switch.activation.daemon,
@@ -7845,7 +3256,6 @@ fn promote_published_from_machine_install(
     )?;
     resume_home_for_switch(&paused, &switch)?;
     verify_switch_home(&paused, &switch)?;
-    run_switch_work_reconciliation(&switch)?;
     settle_app_artifacts(&prepared)?;
     resume_switch_app(&switch)?;
     crate::lfd::service::finish_install_switch(paused.keeper_mode, &switch.activation.daemon)?;
@@ -7870,163 +3280,6 @@ fn promote_published_from_machine_install(
     }
     drop(lock);
     Ok(())
-}
-
-fn run_upgrade_transaction(
-    mut receipt: HomeUpgradeReceipt,
-    preview: &PromotionPreview,
-    prepared: &HomeUpgradeArtifacts,
-    drain_plan: &UpgradeDrainPlan,
-    lock: crate::promotion_lock::PromotionLock,
-    store_path: &Path,
-    sync_skills: bool,
-) -> Result<()> {
-    let paused = match pause_home(store_path) {
-        Ok(paused) => paused,
-        Err(error) => {
-            return Err(record_upgrade_rollback(&mut receipt, error));
-        }
-    };
-    if let Err(error) = pin_direct_resume_sessions(store_path, drain_plan)
-        .and_then(|()| settle_paused_wave_reservations(store_path, &mut receipt, &paused))
-    {
-        return Err(rollback_paused_upgrade(
-            &mut receipt,
-            error,
-            &paused,
-            lock,
-            store_path,
-        ));
-    }
-    if let Err(error) = drain_active_runs(
-        store_path,
-        &mut receipt,
-        drain_plan,
-        DRAIN_GRACE,
-        FORCE_GRACE,
-        true,
-    ) {
-        return Err(rollback_paused_upgrade(
-            &mut receipt,
-            error,
-            &paused,
-            lock,
-            store_path,
-        ));
-    }
-    receipt.phase = HomeUpgradePhase::Migrating;
-    if let Err(error) = write_upgrade_receipt(&receipt) {
-        return Err(rollback_paused_upgrade(
-            &mut receipt,
-            error,
-            &paused,
-            lock,
-            store_path,
-        ));
-    }
-
-    let app = prepared.app_source.as_deref().map(|source| AppPromotion {
-        source,
-        target: prepared
-            .app_target
-            .as_deref()
-            .expect("prepared app source has an app target"),
-        superseded: prepared.app_superseded.as_deref(),
-        expected_candidate: &preview.candidate,
-        expected_verdict: &preview.verdict,
-    });
-    let daemon = DaemonPromotion {
-        source: &prepared.daemon_binary,
-        target: &prepared.daemon_target,
-        bin_dir: prepared
-            .daemon_binary
-            .parent()
-            .expect("prepared daemon binary has an immutable parent"),
-        expected_candidate: &preview.candidate,
-    };
-    let activated = activate_install_then_advance(
-        &preview.verdict,
-        &CliPromotion {
-            candidate_binary: &prepared.cli_binary,
-            cli_target: &prepared.cli_target,
-            bin_dir: prepared
-                .cli_binary
-                .parent()
-                .expect("prepared CLI binary has an immutable parent"),
-        },
-        Some(&daemon),
-        app.as_ref(),
-        || {
-            crate::store::sqlite::SqliteStore::open_as_promotion_boundary(store_path)
-                .map(|_| ())
-                .map_err(|error| {
-                    anyhow!("apply pending migration after activating compatible CLI: {error}")
-                })
-        },
-    );
-    let activated = match activated {
-        Ok(activated) => activated,
-        Err(error) => {
-            return Err(fail_paused_upgrade(&mut receipt, error, &paused, lock));
-        }
-    };
-    if activated.superseded_app != prepared.app_superseded {
-        return Err(fail_paused_upgrade(
-            &mut receipt,
-            anyhow!("activated app predecessor does not match the durable upgrade plan"),
-            &paused,
-            lock,
-        ));
-    }
-    if let Err(error) = persist_runtime_generation(store_path, &receipt) {
-        return Err(fail_paused_upgrade(&mut receipt, error, &paused, lock));
-    }
-    receipt.artifacts_activated = true;
-    receipt.migration_applied |= receipt.migration_required
-        && matches!(
-            preview.verdict,
-            Verdict::Promote | Verdict::PromoteAndMigrate
-        );
-    receipt.phase = HomeUpgradePhase::Restarting;
-    if let Err(error) = write_upgrade_receipt(&receipt) {
-        return Err(fail_paused_upgrade(&mut receipt, error, &paused, lock));
-    }
-
-    println!(
-        "promoted {}: {} -> {}",
-        preview.candidate.display_version(),
-        prepared.cli_target.display(),
-        activated.cli.display()
-    );
-    let active_daemon = match fs::canonicalize(&prepared.daemon_target).with_context(|| {
-        format!(
-            "resolve promoted daemon {}",
-            prepared.daemon_target.display()
-        )
-    }) {
-        Ok(active_daemon) => active_daemon,
-        Err(error) => {
-            return Err(fail_paused_upgrade(&mut receipt, error, &paused, lock));
-        }
-    };
-    println!(
-        "promoted lfd: {} -> {}",
-        prepared.daemon_target.display(),
-        active_daemon.display()
-    );
-    render_retained_pair(
-        activated.prior_cli.as_deref(),
-        activated.prior_daemon.as_deref(),
-    );
-    if let Some(app) = &app {
-        println!(
-            "installed app: {} -> {}",
-            app.source.display(),
-            app.target.display()
-        );
-    }
-
-    restart_reconcile_and_settle(receipt, prepared, &paused, lock, sync_skills)
 }
 
 pub fn promote(
@@ -8139,21 +3392,11 @@ pub fn promote(
         }
         crate::machine_install::MachineInstallState::Switching(receipt) => {
             return Err(anyhow!(
-                "install switch {} is unsettled; recover it before publishing another generation",
+                "install switch {} is unsettled; recover it before publishing another artifact set",
                 receipt.id
             ));
         }
         _ => {}
-    }
-    let lock = crate::promotion_lock::acquire_exclusive()
-        .context("acquire the exclusive promotion lock")?;
-    if !matches!(
-        crate::machine_install::read_state(&root)?,
-        crate::machine_install::MachineInstallState::Legacy
-    ) {
-        return Err(anyhow!(
-            "machine install authority changed while waiting for the promotion lock; rerun promotion"
-        ));
     }
     let store_path = crate::store::production_database_path();
     let preview = build_preview(&store_path);
@@ -8169,150 +3412,24 @@ pub fn promote(
         println!("  (preview only: no target changed)");
         return Ok(());
     }
-
-    let candidate = std::env::current_exe().context("resolve the running candidate binary")?;
-    let drain_plan = plan_upgrade_drain(&store_path)?;
-    let mut receipt = HomeUpgradeReceipt::new(preview.candidate.clone(), &drain_plan.active_runs());
-    receipt.home_id = read_home_context(&store_path)?
-        .0
-        .map(|home_id| home_id.as_str().to_string());
-    receipt.keeper_mode = crate::lfd::service::configured_mode()?;
-    receipt.migration_required = matches!(preview.verdict, Verdict::PromoteAndMigrate);
-    let prepared = prepare_upgrade_artifacts(&artifacts, &candidate, &preview, &receipt.id, None)?;
-    receipt.artifacts = Some(prepared.clone());
-    capture_enabled_work(&store_path, &mut receipt)?;
-    write_upgrade_receipt(&receipt)?;
-    receipt.recovery_pid = match spawn_recovery_guard(&receipt) {
-        Ok(pid) => pid,
-        Err(error) => return Err(record_upgrade_rollback(&mut receipt, error)),
-    };
-    write_upgrade_receipt(&receipt)?;
-    run_upgrade_transaction(
-        receipt,
-        &preview,
-        &prepared,
-        &drain_plan,
-        lock,
-        &store_path,
-        sync_skills,
-    )
-}
-
-pub fn recover(
-    upgrade_id: &str,
-    parent_pid: Option<u32>,
-    parent_started_at: Option<i64>,
-) -> Result<()> {
-    match crate::machine_install::read_state(&crate::machine_install::root()?)? {
-        crate::machine_install::MachineInstallState::Switching(receipt) => {
-            return delegate_switch_recovery(&receipt)
-        }
-        crate::machine_install::MachineInstallState::Settled(active) => {
-            return Err(anyhow!(
-            "machine installation {} is receipt-managed; legacy Home-upgrade recovery is fenced",
-            active.selection.installation_id
-        ))
-        }
-        crate::machine_install::MachineInstallState::Legacy => {}
-    }
-    if let (Some(parent_pid), Some(parent_started_at)) = (parent_pid, parent_started_at) {
-        while process_matches_start(parent_pid, parent_started_at) {
-            std::thread::sleep(DRAIN_POLL);
-        }
-    }
-
     let lock = crate::promotion_lock::acquire_exclusive()
-        .context("acquire the exclusive promotion lock for recovery")?;
+        .context("acquire the exclusive promotion lock")?;
     if !matches!(
-        crate::machine_install::read_state(&crate::machine_install::root()?)?,
+        crate::machine_install::read_state(&root)?,
         crate::machine_install::MachineInstallState::Legacy
     ) {
         return Err(anyhow!(
-            "machine install authority changed while legacy recovery waited for the promotion lock; rerun the current installer"
+            "machine install authority changed while waiting for the promotion lock; rerun promotion"
         ));
     }
-    let mut receipt = read_upgrade_receipt(Some(upgrade_id))?
-        .ok_or_else(|| anyhow!("Home upgrade {upgrade_id} was not found"))?;
-    if receipt.recovery() == UpgradeRecovery::Settled {
-        if receipt.phase == HomeUpgradePhase::Completed {
-            let artifacts = receipt.artifacts.as_ref().ok_or_else(|| {
-                anyhow!("completed Home upgrade {} has no artifact plan", receipt.id)
-            })?;
-            settle_app_artifacts(artifacts)?;
-        }
-        let _ = crate::promotion_lock::clear_upgrade_fence(&receipt.id);
-        cleanup_recovery_job(&receipt.id);
-        return Ok(());
-    }
-    let current = CandidateIdentity::current();
-    if current != receipt.candidate {
-        return Err(anyhow!(
-            "Home upgrade {} must recover with candidate {} at revision {}; this binary is {} at revision {}",
-            receipt.id,
-            receipt.candidate.display_version(),
-            receipt.candidate.source_revision,
-            current.display_version(),
-            current.source_revision
-        ));
-    }
-    let prepared = receipt
-        .artifacts
-        .clone()
-        .ok_or_else(|| anyhow!("Home upgrade {} has no staged artifact plan", receipt.id))?;
-    let store_path = crate::store::production_database_path();
-    if receipt.recovery() == UpgradeRecovery::ResumeCandidate {
-        let (home_id, repo) = read_home_context(&store_path)?;
-        let paused = PausedHome {
-            keeper_mode: receipt.keeper_mode,
-            home_id,
-            repo,
-        };
-        return restart_reconcile_and_settle(receipt, &prepared, &paused, lock, false);
-    }
-    let preview = build_preview(&store_path);
-    if preview.candidate != receipt.candidate {
-        return Err(anyhow!(
-            "Home upgrade {} recovery preview no longer matches its candidate",
-            receipt.id
-        ));
-    }
-    if let Verdict::Reject { reasons } = &preview.verdict {
-        let error = anyhow!(
-            "Home upgrade {} recovery preflight refused:\n  - {}",
-            receipt.id,
-            reasons.join("\n  - ")
-        );
-        let (home_id, repo) = read_home_context(&store_path)?;
-        let paused = PausedHome {
-            keeper_mode: receipt.keeper_mode,
-            home_id,
-            repo,
-        };
-        return Err(rollback_paused_upgrade(
-            &mut receipt,
-            error,
-            &paused,
-            lock,
-            &store_path,
-        ));
-    }
-    let drain_plan = plan_upgrade_drain(&store_path)?;
-    capture_enabled_work(&store_path, &mut receipt)?;
-    write_upgrade_receipt(&receipt)?;
-    run_upgrade_transaction(
-        receipt,
-        &preview,
-        &prepared,
-        &drain_plan,
-        lock,
-        &store_path,
-        false,
-    )
+    bootstrap_published_install(&root, &artifacts)?;
+    drop(lock);
+    promote_published_from_machine_install(artifacts, &current, sync_skills, false)
 }
 
 /// Activate retained immutable bytes only when that binary's own preflight
-/// recognizes the current store exactly. The exclusive lock keeps the frontier
-/// and active-Run set stable between the preflight and symlink commit.
+/// recognizes the current store exactly. The exclusive lock keeps artifact and
+/// store selection serialized through the symlink commit.
 pub fn rollback(
     cli_target: &Path,
     candidate: &Path,
@@ -8387,907 +3504,60 @@ fn rollback_from_store(
 }
 
 #[cfg(test)]
-mod promote_tests {
-    #[cfg(target_os = "macos")]
-    use super::running_app_processes;
-    use super::{
-        activate_install_then_advance, commit_app_bundle, commit_cli_symlink, copy_tree,
-        entry_gate_targets, preserve_prior_binary, publish_cli, retained_binary_path,
-        rollback_from_store, stage_app_bundle, stage_binary, stage_daemon_binary, tree_digest,
-        validate_rollback_verdict, verify_gated_app_bundle, AppPromotion, CandidateIdentity,
-        CliPromotion, DaemonPromotion, Verdict,
-    };
-    use anyhow::anyhow;
+mod artifact_tests {
+    use super::{commit_cli_symlink, copy_tree, stage_binary, tree_digest};
     use std::fs;
     use std::os::unix::fs::PermissionsExt;
 
-    fn write_preflight_binary(
-        path: &std::path::Path,
-        candidate: &CandidateIdentity,
-        verdict: &Verdict,
-    ) {
-        let preview = serde_json::json!({"candidate": candidate, "verdict": verdict});
-        fs::write(path, format!("#!/bin/sh\ncat <<'JSON'\n{preview}\nJSON\n")).unwrap();
-        fs::set_permissions(path, fs::Permissions::from_mode(0o755)).unwrap();
-    }
-
-    fn write_app(root: &std::path::Path, candidate: &CandidateIdentity, verdict: &Verdict) {
-        let helpers = root.join("Contents/MacOS");
-        fs::create_dir_all(&helpers).unwrap();
-        write_preflight_binary(&helpers.join("lf"), candidate, verdict);
-        write_daemon_binary(&helpers.join("lfd"), candidate);
-        fs::write(root.join("new-app"), b"new").unwrap();
-    }
-
-    fn write_daemon_binary(path: &std::path::Path, candidate: &CandidateIdentity) {
-        fs::write(
-            path,
-            format!("#!/bin/sh\necho 'lfd {}'\n", candidate.display_version()),
-        )
-        .unwrap();
-        fs::set_permissions(path, fs::Permissions::from_mode(0o755)).unwrap();
-    }
-
     #[test]
-    fn app_surface_requires_the_selected_main_executable_and_gated_helpers() {
+    fn staging_is_content_addressed_and_rejects_replaced_bytes() {
         let directory = tempfile::tempdir().unwrap();
-        let root = directory.path().join("machine");
-        let retained = directory.path().join("retained/Loopflow.app");
-        let retained_helpers = retained.join("Contents/MacOS");
-        fs::create_dir_all(&retained_helpers).unwrap();
-        let retained_app = retained_helpers.join("Loopflow");
-        let retained_cli = retained_helpers.join("lf");
-        let retained_daemon = retained_helpers.join("lfd");
-        for (path, contents) in [
-            (&retained_app, "selected app"),
-            (&retained_cli, "selected cli"),
-            (&retained_daemon, "selected daemon"),
-        ] {
-            fs::write(path, contents).unwrap();
-            fs::set_permissions(path, fs::Permissions::from_mode(0o755)).unwrap();
-        }
-        let retained_resource = retained.join("Contents/Resources/selected.txt");
-        fs::create_dir_all(retained_resource.parent().unwrap()).unwrap();
-        fs::write(&retained_resource, "selected resource").unwrap();
-        let set = crate::machine_install::ArtifactSet {
-            id: "selected-app".to_string(),
-            source: crate::machine_install::InstallSource::Development,
-            source_revision: "revision".to_string(),
-            source_identity: "identity".to_string(),
-            content_sha256: crate::machine_install::artifact_set_sha256(
-                &retained_cli,
-                &retained_daemon,
-                Some(&retained),
-            )
-            .unwrap(),
-            artifacts: vec![
-                crate::machine_install::ArtifactIdentity::capture(
-                    crate::machine_install::ArtifactRole::Cli,
-                    &retained_cli,
-                )
-                .unwrap(),
-                crate::machine_install::ArtifactIdentity::capture(
-                    crate::machine_install::ArtifactRole::Daemon,
-                    &retained_daemon,
-                )
-                .unwrap(),
-                crate::machine_install::ArtifactIdentity::capture(
-                    crate::machine_install::ArtifactRole::App,
-                    &retained_app,
-                )
-                .unwrap(),
-            ],
-        };
-        let active_app = directory.path().join("Applications/Loopflow.app");
-        fs::create_dir_all(active_app.parent().unwrap()).unwrap();
-        copy_tree(&retained, &active_app).unwrap();
-        let activation = crate::machine_install::ActivationTargets {
-            cli: directory.path().join("bin/lf"),
-            daemon: directory.path().join("bin/lfd"),
-            app: Some(active_app.clone()),
-            legacy_app: None,
-        };
-        entry_gate_targets(&root, &retained_cli, &retained_daemon, &activation).unwrap();
-        verify_gated_app_bundle(&root, &active_app, &set).unwrap();
+        let candidate = directory.path().join("candidate");
+        let store = directory.path().join("store");
+        fs::write(&candidate, b"first").unwrap();
+        fs::set_permissions(&candidate, fs::Permissions::from_mode(0o755)).unwrap();
+        let staged = stage_binary(&candidate, &store).unwrap();
+        assert_eq!(fs::read(&staged).unwrap(), b"first");
 
-        fs::write(active_app.join("Contents/MacOS/Loopflow"), "wrong app").unwrap();
-        assert!(verify_gated_app_bundle(&root, &active_app, &set)
+        fs::set_permissions(&staged, fs::Permissions::from_mode(0o755)).unwrap();
+        fs::write(&staged, b"replaced").unwrap();
+        assert!(stage_binary(&candidate, &store)
             .unwrap_err()
             .to_string()
-            .contains("does not match artifact set"));
-        fs::copy(&retained_app, active_app.join("Contents/MacOS/Loopflow")).unwrap();
-        fs::write(
-            active_app.join("Contents/Resources/selected.txt"),
-            "wrong resource",
-        )
-        .unwrap();
-        assert!(verify_gated_app_bundle(&root, &active_app, &set)
-            .unwrap_err()
-            .to_string()
-            .contains("resources do not match artifact set"));
-        fs::copy(
-            &retained_resource,
-            active_app.join("Contents/Resources/selected.txt"),
-        )
-        .unwrap();
-        fs::remove_file(active_app.join("Contents/MacOS/lf")).unwrap();
-        std::os::unix::fs::symlink(&retained_cli, active_app.join("Contents/MacOS/lf")).unwrap();
-        assert!(verify_gated_app_bundle(&root, &active_app, &set)
-            .unwrap_err()
-            .to_string()
-            .contains("bypasses machine entry gate"));
+            .contains("content-addressed binary"));
     }
 
-    #[cfg(target_os = "macos")]
     #[test]
-    fn app_process_probe_finds_the_exact_main_and_helper_executables() {
+    fn entry_symlink_switches_to_the_complete_target() {
         let directory = tempfile::tempdir().unwrap();
-        let source = directory.path().join("sleeper.c");
-        fs::write(
-            &source,
-            "#include <unistd.h>\nint main(void) { sleep(30); }\n",
-        )
-        .unwrap();
-        let mut paths = Vec::new();
-        let mut children = Vec::new();
-        for name in ["Loopflow", "lf", "lfd"] {
-            let path = directory.path().join(name);
-            let compiled = std::process::Command::new("cc")
-                .arg(&source)
-                .arg("-o")
-                .arg(&path)
-                .status()
-                .unwrap();
-            assert!(compiled.success());
-            paths.push(path.canonicalize().unwrap());
-            children.push(std::process::Command::new(&path).spawn().unwrap());
-        }
-        std::thread::sleep(std::time::Duration::from_millis(100));
-
-        let observed = running_app_processes(&paths);
-        let mut expected_pids = children
-            .iter()
-            .map(std::process::Child::id)
-            .collect::<Vec<_>>();
-        for child in &mut children {
-            let _ = child.kill();
-            let _ = child.wait();
-        }
-
-        let mut observed_pids = observed
-            .unwrap()
-            .into_iter()
-            .map(|(pid, _)| u32::try_from(pid).unwrap())
-            .collect::<Vec<_>>();
-        expected_pids.sort_unstable();
-        observed_pids.sort_unstable();
-        assert_eq!(observed_pids, expected_pids);
+        let first = directory.path().join("first");
+        let second = directory.path().join("second");
+        let target = directory.path().join("lf");
+        fs::write(&first, b"first").unwrap();
+        fs::write(&second, b"second").unwrap();
+        commit_cli_symlink(&target, &first).unwrap();
+        commit_cli_symlink(&target, &second).unwrap();
+        assert_eq!(fs::read(&target).unwrap(), b"second");
     }
 
     #[test]
-    fn promotion_identity_carries_the_displayed_build_version() {
-        let identity = CandidateIdentity::current();
-
+    fn app_tree_copy_preserves_content_and_modes() {
+        let directory = tempfile::tempdir().unwrap();
+        let source = directory.path().join("source");
+        let target = directory.path().join("target");
+        fs::create_dir(&source).unwrap();
+        let executable = source.join("helper");
+        fs::write(&executable, b"helper").unwrap();
+        fs::set_permissions(&executable, fs::Permissions::from_mode(0o755)).unwrap();
+        copy_tree(&source, &target).unwrap();
+        assert_eq!(tree_digest(&source).unwrap(), tree_digest(&target).unwrap());
         assert_eq!(
-            identity.build_version.as_deref(),
-            Some(crate::build_info::BUILD_VERSION)
-        );
-    }
-
-    #[test]
-    fn retained_pre_build_identity_binaries_still_parse_for_rollback() {
-        let identity: CandidateIdentity = serde_json::from_value(serde_json::json!({
-            "source_revision": "0123456789abcdef",
-            "source_identity": "release",
-            "authority": "published",
-            "package_version": "0.12.1",
-            "latest_known_migration": "0.11.035_drop_child_commands"
-        }))
-        .unwrap();
-
-        assert_eq!(identity.build_version, None);
-        assert_eq!(identity.display_version(), "0.12.1");
-    }
-
-    #[test]
-    fn staging_is_content_addressed_and_refuses_a_byte_mismatch() {
-        let dir = tempfile::tempdir().unwrap();
-        let bin_dir = dir.path().canonicalize().unwrap().join("bin");
-        let candidate = dir.path().join("lf");
-        fs::write(&candidate, b"BINARY-A").unwrap();
-
-        let first = stage_binary(&candidate, &bin_dir).unwrap();
-        assert!(first.exists());
-        // Re-staging identical bytes reuses the same digest path.
-        fs::set_permissions(&first, fs::Permissions::from_mode(0o755)).unwrap();
-        assert_eq!(stage_binary(&candidate, &bin_dir).unwrap(), first);
-        assert_eq!(
-            fs::metadata(&first).unwrap().permissions().mode() & 0o777,
-            0o555
-        );
-
-        // A retained artifact corrupted to different bytes is refused, not
-        // silently overwritten.
-        fs::set_permissions(&first, fs::Permissions::from_mode(0o644)).unwrap();
-        fs::write(&first, b"CORRUPT").unwrap();
-        let error = stage_binary(&candidate, &bin_dir).unwrap_err();
-        assert!(error.to_string().contains("different bytes"), "{error}");
-    }
-
-    #[test]
-    fn commit_symlink_is_atomic() {
-        let dir = tempfile::tempdir().unwrap();
-        let target = dir.path().join("lf");
-        let a = dir.path().join("lf-a");
-        let b = dir.path().join("lf-b");
-        fs::write(&a, b"a").unwrap();
-        fs::write(&b, b"b").unwrap();
-
-        commit_cli_symlink(&target, &a).unwrap();
-        assert_eq!(fs::read_link(&target).unwrap(), a);
-
-        commit_cli_symlink(&target, &b).unwrap();
-        assert_eq!(fs::read_link(&target).unwrap(), b);
-    }
-
-    #[test]
-    fn prior_symlink_bytes_survive_a_mutable_target() {
-        let dir = tempfile::tempdir().unwrap();
-        let bin_dir = dir.path().join("bin");
-        let worktree_binary = dir.path().join("worktree-lf");
-        let cli_target = dir.path().join("lf");
-        fs::write(&worktree_binary, b"old-compatible").unwrap();
-        std::os::unix::fs::symlink("worktree-lf", &cli_target).unwrap();
-
-        let retained = preserve_prior_binary(&cli_target, &bin_dir)
-            .unwrap()
-            .unwrap();
-        fs::set_permissions(&worktree_binary, fs::Permissions::from_mode(0o644)).unwrap();
-        fs::write(&worktree_binary, b"rebuilt-in-place").unwrap();
-
-        assert_eq!(fs::read(retained).unwrap(), b"old-compatible");
-    }
-
-    #[test]
-    fn prior_regular_file_bytes_are_retained_before_replacement() {
-        let dir = tempfile::tempdir().unwrap();
-        let bin_dir = dir.path().join("bin");
-        let cli_target = dir.path().join("lf");
-        fs::write(&cli_target, b"old-compatible").unwrap();
-
-        let retained = preserve_prior_binary(&cli_target, &bin_dir)
-            .unwrap()
-            .unwrap();
-
-        assert_eq!(fs::read(retained).unwrap(), b"old-compatible");
-    }
-
-    #[test]
-    fn a_rejected_verdict_stages_nothing_and_moves_no_target() {
-        let dir = tempfile::tempdir().unwrap();
-        let target = dir.path().join("lf");
-        let candidate = dir.path().join("cand");
-        fs::write(&candidate, b"x").unwrap();
-        let bin_dir = dir.path().join("bin");
-
-        let error = publish_cli(
-            &Verdict::Reject {
-                reasons: vec!["an active Run blocks replacement".to_string()],
-            },
-            &CliPromotion {
-                candidate_binary: &candidate,
-                cli_target: &target,
-                bin_dir: &bin_dir,
-            },
-        )
-        .unwrap_err();
-
-        assert!(error.to_string().contains("refused"), "{error}");
-        assert!(!target.exists(), "target must be untouched on refusal");
-        assert!(!bin_dir.exists(), "nothing staged on refusal");
-    }
-
-    #[test]
-    fn a_promote_verdict_stages_and_repoints() {
-        let dir = tempfile::tempdir().unwrap();
-        let target = dir.path().join("lf");
-        let candidate = dir.path().join("cand");
-        fs::write(&candidate, b"candidate-bytes").unwrap();
-        let bin_dir = dir.path().join("bin");
-
-        let (dest, rollback) = publish_cli(
-            &Verdict::Promote,
-            &CliPromotion {
-                candidate_binary: &candidate,
-                cli_target: &target,
-                bin_dir: &bin_dir,
-            },
-        )
-        .unwrap();
-
-        assert_eq!(rollback, None);
-        assert_eq!(fs::read_link(&target).unwrap(), dest);
-        assert_eq!(fs::read(&dest).unwrap(), b"candidate-bytes");
-    }
-
-    #[test]
-    fn promotion_advances_cli_and_daemon_as_one_validated_pair() {
-        let dir = tempfile::tempdir().unwrap();
-        let bin_dir = dir.path().join("immutable");
-        let cli_source = dir.path().join("candidate-lf");
-        let daemon_source = dir.path().join("candidate-lfd");
-        let cli_target = dir.path().join("bin/lf");
-        let daemon_target = dir.path().join("bin/lfd");
-        fs::create_dir_all(cli_target.parent().unwrap()).unwrap();
-        fs::write(&cli_source, b"candidate-cli").unwrap();
-        fs::write(&cli_target, b"prior-cli").unwrap();
-        fs::write(&daemon_target, b"prior-daemon").unwrap();
-        let identity = CandidateIdentity::current();
-        write_daemon_binary(&daemon_source, &identity);
-
-        let activated = activate_install_then_advance(
-            &Verdict::Promote,
-            &CliPromotion {
-                candidate_binary: &cli_source,
-                cli_target: &cli_target,
-                bin_dir: &bin_dir,
-            },
-            Some(&DaemonPromotion {
-                source: &daemon_source,
-                target: &daemon_target,
-                bin_dir: &bin_dir,
-                expected_candidate: &identity,
-            }),
-            None,
-            || Ok(()),
-        )
-        .unwrap();
-
-        assert_eq!(fs::read_link(&cli_target).unwrap(), activated.cli);
-        assert_eq!(fs::read(&cli_target).unwrap(), b"candidate-cli");
-        assert_eq!(
-            fs::read(&daemon_target).unwrap(),
-            fs::read(&daemon_source).unwrap()
-        );
-        assert_eq!(
-            fs::read(activated.prior_cli.unwrap()).unwrap(),
-            b"prior-cli"
-        );
-        assert_eq!(
-            fs::read(activated.prior_daemon.unwrap()).unwrap(),
-            b"prior-daemon"
-        );
-        assert_eq!(activated.superseded_app, None);
-    }
-
-    #[test]
-    fn mismatched_daemon_leaves_both_control_plane_targets_untouched() {
-        let dir = tempfile::tempdir().unwrap();
-        let bin_dir = dir.path().join("immutable");
-        let cli_source = dir.path().join("candidate-lf");
-        let daemon_source = dir.path().join("candidate-lfd");
-        let cli_target = dir.path().join("lf");
-        let daemon_target = dir.path().join("lfd");
-        fs::write(&cli_source, b"candidate-cli").unwrap();
-        fs::write(&cli_target, b"prior-cli").unwrap();
-        fs::write(&daemon_target, b"prior-daemon").unwrap();
-        fs::write(&daemon_source, b"#!/bin/sh\necho 'lfd 0.0.0+other'\n").unwrap();
-        fs::set_permissions(&daemon_source, fs::Permissions::from_mode(0o755)).unwrap();
-        let identity = CandidateIdentity::current();
-
-        let error = activate_install_then_advance(
-            &Verdict::Promote,
-            &CliPromotion {
-                candidate_binary: &cli_source,
-                cli_target: &cli_target,
-                bin_dir: &bin_dir,
-            },
-            Some(&DaemonPromotion {
-                source: &daemon_source,
-                target: &daemon_target,
-                bin_dir: &bin_dir,
-                expected_candidate: &identity,
-            }),
-            None,
-            || Ok(()),
-        )
-        .unwrap_err();
-
-        assert!(
-            error.to_string().contains("not the promoted candidate"),
-            "{error}"
-        );
-        assert_eq!(fs::read(&cli_target).unwrap(), b"prior-cli");
-        assert_eq!(fs::read(&daemon_target).unwrap(), b"prior-daemon");
-        assert!(!bin_dir.exists());
-    }
-
-    #[test]
-    fn failed_cli_activation_restores_the_prior_daemon() {
-        let dir = tempfile::tempdir().unwrap();
-        let bin_dir = dir.path().join("immutable");
-        let cli_source = dir.path().join("candidate-lf");
-        let daemon_source = dir.path().join("candidate-lfd");
-        let cli_target = dir.path().join("lf");
-        let daemon_target = dir.path().join("lfd");
-        fs::write(&cli_source, b"candidate-cli").unwrap();
-        fs::create_dir(&cli_target).unwrap();
-        fs::write(&daemon_target, b"prior-daemon").unwrap();
-        let identity = CandidateIdentity::current();
-        write_daemon_binary(&daemon_source, &identity);
-
-        let error = activate_install_then_advance(
-            &Verdict::Promote,
-            &CliPromotion {
-                candidate_binary: &cli_source,
-                cli_target: &cli_target,
-                bin_dir: &bin_dir,
-            },
-            Some(&DaemonPromotion {
-                source: &daemon_source,
-                target: &daemon_target,
-                bin_dir: &bin_dir,
-                expected_candidate: &identity,
-            }),
-            None,
-            || Ok(()),
-        )
-        .unwrap_err();
-
-        assert!(
-            error.to_string().contains("neither a file nor a symlink"),
-            "{error}"
-        );
-        assert!(cli_target.is_dir());
-        assert_eq!(fs::read(&daemon_target).unwrap(), b"prior-daemon");
-    }
-
-    #[test]
-    fn a_frontier_failure_leaves_the_compatible_candidate_global() {
-        let dir = tempfile::tempdir().unwrap();
-        let target = dir.path().join("lf");
-        let candidate = dir.path().join("cand");
-        fs::write(&target, b"old-compatible").unwrap();
-        fs::write(&candidate, b"candidate-knows-pending-frontier").unwrap();
-        let bin_dir = dir.path().join("bin");
-
-        let error = activate_install_then_advance(
-            &Verdict::PromoteAndMigrate,
-            &CliPromotion {
-                candidate_binary: &candidate,
-                cli_target: &target,
-                bin_dir: &bin_dir,
-            },
-            None,
-            None,
-            || Err(anyhow!("migration fsync failed")),
-        )
-        .unwrap_err();
-
-        assert!(
-            error.to_string().contains("migration fsync failed"),
-            "{error}"
-        );
-        let active = fs::read_link(&target).unwrap();
-        assert_eq!(
-            fs::read(active).unwrap(),
-            b"candidate-knows-pending-frontier"
-        );
-        let retained = fs::read_dir(&bin_dir)
-            .unwrap()
-            .filter_map(Result::ok)
-            .map(|entry| entry.path())
-            .find(|path| fs::read(path).ok().as_deref() == Some(b"old-compatible"))
-            .expect("prior compatible bytes retained before activation");
-        assert_eq!(fs::read(retained).unwrap(), b"old-compatible");
-    }
-
-    #[test]
-    fn app_commits_after_the_frontier_and_retains_its_predecessor_until_health() {
-        let dir = tempfile::tempdir().unwrap();
-        let candidate_binary = dir.path().join("candidate-lf");
-        let cli_target = dir.path().join("bin/lf");
-        let bin_dir = dir.path().join("immutable");
-        let app_source = dir.path().join("staged/Loopflow.app");
-        let app_target = dir.path().join("Applications/Loopflow.app");
-        let legacy = dir.path().join("Applications/Concerto.app");
-        fs::create_dir_all(cli_target.parent().unwrap()).unwrap();
-        fs::write(&candidate_binary, b"candidate").unwrap();
-        fs::write(&cli_target, b"old-cli").unwrap();
-        fs::create_dir_all(&app_target).unwrap();
-        fs::write(app_target.join("old-app"), b"old").unwrap();
-        fs::create_dir_all(&legacy).unwrap();
-        let identity = CandidateIdentity::current();
-        let verdict = Verdict::Promote;
-        write_app(&app_source, &identity, &verdict);
-
-        let activated = activate_install_then_advance(
-            &verdict,
-            &CliPromotion {
-                candidate_binary: &candidate_binary,
-                cli_target: &cli_target,
-                bin_dir: &bin_dir,
-            },
-            None,
-            Some(&AppPromotion {
-                source: &app_source,
-                target: &app_target,
-                superseded: None,
-                expected_candidate: &identity,
-                expected_verdict: &verdict,
-            }),
-            || {
-                assert!(
-                    cli_target.is_symlink(),
-                    "candidate activates before migration"
-                );
-                assert!(
-                    app_target.join("old-app").exists(),
-                    "app waits until migration"
-                );
-                Ok(())
-            },
-        )
-        .unwrap();
-
-        assert_eq!(
-            fs::read(fs::read_link(&cli_target).unwrap()).unwrap(),
-            b"candidate"
-        );
-        assert!(app_target.join("new-app").exists());
-        assert!(!app_target.join("old-app").exists());
-        assert!(activated.superseded_app.unwrap().join("old-app").exists());
-        assert!(legacy.exists());
-    }
-
-    #[test]
-    fn mismatched_bundled_helper_leaves_cli_and_app_untouched() {
-        let dir = tempfile::tempdir().unwrap();
-        let candidate_binary = dir.path().join("candidate-lf");
-        let cli_target = dir.path().join("bin/lf");
-        let bin_dir = dir.path().join("immutable");
-        let app_source = dir.path().join("staged/Loopflow.app");
-        let app_target = dir.path().join("Applications/Loopflow.app");
-        fs::create_dir_all(cli_target.parent().unwrap()).unwrap();
-        fs::write(&candidate_binary, b"candidate").unwrap();
-        fs::write(&cli_target, b"old-cli").unwrap();
-        fs::create_dir_all(&app_target).unwrap();
-        fs::write(app_target.join("old-app"), b"old").unwrap();
-        let identity = CandidateIdentity::current();
-        let mut other = identity.clone();
-        other.source_revision = "different-branch".to_string();
-        let verdict = Verdict::Promote;
-        write_app(&app_source, &other, &verdict);
-
-        let error = activate_install_then_advance(
-            &verdict,
-            &CliPromotion {
-                candidate_binary: &candidate_binary,
-                cli_target: &cli_target,
-                bin_dir: &bin_dir,
-            },
-            None,
-            Some(&AppPromotion {
-                source: &app_source,
-                target: &app_target,
-                superseded: None,
-                expected_candidate: &identity,
-                expected_verdict: &verdict,
-            }),
-            || Ok(()),
-        )
-        .unwrap_err();
-
-        assert!(
-            error.to_string().contains("not the promoted candidate"),
-            "{error}"
-        );
-        assert_eq!(fs::read(&cli_target).unwrap(), b"old-cli");
-        assert!(app_target.join("old-app").exists());
-        assert!(!bin_dir.exists(), "candidate staging must not start");
-    }
-
-    #[test]
-    fn incompatible_retained_binary_is_never_activated_as_rollback() {
-        let dir = tempfile::tempdir().unwrap();
-        let bin_dir = dir.path().join("immutable");
-        let source = dir.path().join("prior-lf");
-        let cli_target = dir.path().join("lf");
-        let verdict = Verdict::Reject {
-            reasons: vec!["unknown applied migration 0.11.999".to_string()],
-        };
-        write_preflight_binary(&source, &CandidateIdentity::current(), &verdict);
-        let retained = stage_binary(&source, &bin_dir).unwrap();
-        fs::write(&cli_target, b"current-compatible").unwrap();
-
-        let daemon_source = dir.path().join("prior-lfd");
-        write_daemon_binary(&daemon_source, &CandidateIdentity::current());
-        let daemon_candidate = stage_daemon_binary(&daemon_source, &bin_dir).unwrap();
-        let daemon_target = dir.path().join("lfd");
-        fs::write(&daemon_target, b"current-compatible-daemon").unwrap();
-
-        let error = rollback_from_store(
-            &cli_target,
-            &retained,
-            &daemon_target,
-            &daemon_candidate,
-            &bin_dir,
-        )
-        .unwrap_err();
-
-        assert!(
-            error.to_string().contains("not rollback-compatible"),
-            "{error}"
-        );
-        assert_eq!(fs::read(&cli_target).unwrap(), b"current-compatible");
-        assert!(!cli_target.is_symlink());
-    }
-
-    #[test]
-    fn rollback_restores_a_validated_cli_and_daemon_pair() {
-        let dir = tempfile::tempdir().unwrap();
-        let bin_dir = dir.path().join("immutable");
-        let identity = CandidateIdentity::current();
-        let prior_cli_source = dir.path().join("prior-lf");
-        let prior_daemon_source = dir.path().join("prior-lfd");
-        write_preflight_binary(&prior_cli_source, &identity, &Verdict::Promote);
-        write_daemon_binary(&prior_daemon_source, &identity);
-        let prior_cli = stage_binary(&prior_cli_source, &bin_dir).unwrap();
-        let prior_daemon = stage_daemon_binary(&prior_daemon_source, &bin_dir).unwrap();
-        let cli_target = dir.path().join("bin/lf");
-        let daemon_target = dir.path().join("bin/lfd");
-        fs::create_dir_all(cli_target.parent().unwrap()).unwrap();
-        fs::write(&cli_target, b"current-cli").unwrap();
-        fs::write(&daemon_target, b"current-daemon").unwrap();
-
-        let restored = rollback_from_store(
-            &cli_target,
-            &prior_cli,
-            &daemon_target,
-            &prior_daemon,
-            &bin_dir,
-        )
-        .unwrap();
-
-        let prior_cli = fs::canonicalize(prior_cli).unwrap();
-        let prior_daemon = fs::canonicalize(prior_daemon).unwrap();
-        assert_eq!(restored, (prior_cli.clone(), prior_daemon.clone()));
-        assert_eq!(fs::read_link(&cli_target).unwrap(), prior_cli);
-        assert_eq!(fs::read_link(&daemon_target).unwrap(), prior_daemon);
-    }
-
-    #[test]
-    fn validate_rollback_verdict_accepts_only_an_exact_promote() {
-        validate_rollback_verdict(&Verdict::Promote).expect("an exact-compatible prior rolls back");
-
-        let ahead = validate_rollback_verdict(&Verdict::PromoteAndMigrate).unwrap_err();
-        assert!(
-            ahead.to_string().contains("ahead of the current store"),
-            "{ahead}"
-        );
-
-        let reject = validate_rollback_verdict(&Verdict::Reject {
-            reasons: vec!["database migration 0.11.027 is unknown to lf".to_string()],
-        })
-        .unwrap_err();
-        assert!(
-            reject.to_string().contains("not rollback-compatible"),
-            "{reject}"
-        );
-        assert!(reject.to_string().contains("0.11.027"), "{reject}");
-    }
-
-    #[test]
-    fn retained_binary_path_rejects_out_of_store_and_mismatched_content_address() {
-        let dir = tempfile::tempdir().unwrap();
-        let bin_dir = dir.path().join("bin");
-        let candidate = dir.path().join("lf");
-        fs::write(&candidate, b"retained-bytes").unwrap();
-        let staged = fs::canonicalize(stage_binary(&candidate, &bin_dir).unwrap()).unwrap();
-
-        // A correctly content-addressed member of the store resolves. Compare
-        // against the canonicalized staged path so a symlinked TMPDIR
-        // (/var -> /private/var on macOS) doesn't masquerade as a mismatch.
-        assert_eq!(
-            retained_binary_path(&staged, &bin_dir).unwrap(),
-            fs::canonicalize(&staged).unwrap()
-        );
-
-        // A binary outside the immutable store is refused.
-        let outside = retained_binary_path(&candidate, &bin_dir).unwrap_err();
-        assert!(
-            outside
-                .to_string()
-                .contains("outside the immutable binary store"),
-            "{outside}"
-        );
-
-        // A file inside the store whose name is not its digest is refused.
-        let renamed = bin_dir.join("lf-deadbeef");
-        fs::copy(&staged, &renamed).unwrap();
-        let mismatch = retained_binary_path(&renamed, &bin_dir).unwrap_err();
-        assert!(
-            mismatch.to_string().contains("content address"),
-            "{mismatch}"
-        );
-    }
-
-    #[test]
-    fn copy_tree_preserves_symlinks_and_permissions() {
-        let dir = tempfile::tempdir().unwrap();
-        let source = dir.path().join("Loopflow.app");
-        fs::create_dir_all(source.join("Contents/MacOS")).unwrap();
-        let helper = source.join("Contents/MacOS/lf");
-        fs::write(&helper, b"bundled-lf").unwrap();
-        fs::set_permissions(&helper, fs::Permissions::from_mode(0o555)).unwrap();
-        std::os::unix::fs::symlink("MacOS/lf", source.join("Contents/current")).unwrap();
-
-        let dest = dir.path().join("staged.app");
-        copy_tree(&source, &dest).unwrap();
-
-        assert_eq!(
-            fs::read(dest.join("Contents/MacOS/lf")).unwrap(),
-            b"bundled-lf"
-        );
-        assert_eq!(
-            fs::metadata(dest.join("Contents/MacOS/lf"))
+            fs::metadata(target.join("helper"))
                 .unwrap()
                 .permissions()
                 .mode()
                 & 0o777,
-            0o555
+            0o755
         );
-        let link = dest.join("Contents/current");
-        assert!(fs::symlink_metadata(&link)
-            .unwrap()
-            .file_type()
-            .is_symlink());
-        assert_eq!(
-            fs::read_link(&link).unwrap(),
-            std::path::Path::new("MacOS/lf")
-        );
-        assert_eq!(tree_digest(&source).unwrap(), tree_digest(&dest).unwrap());
-        fs::write(dest.join("Contents/resource"), b"changed resource").unwrap();
-        assert_ne!(tree_digest(&source).unwrap(), tree_digest(&dest).unwrap());
-    }
-
-    #[test]
-    fn commit_app_bundle_restores_the_old_app_when_the_staged_rename_fails() {
-        let dir = tempfile::tempdir().unwrap();
-        let target = dir.path().join("Applications/Loopflow.app");
-        fs::create_dir_all(&target).unwrap();
-        fs::write(target.join("marker"), b"old-app").unwrap();
-
-        // A staged path that does not exist forces the staged -> target rename to
-        // fail *after* the old app has already moved to its sidecar — exactly the
-        // window between old-app->sidecar and staged->target. The old app must be
-        // restored in place, not stranded in the sidecar.
-        let missing_staged = dir.path().join("Applications/.never-staged");
-        let identity = CandidateIdentity::current();
-        let verdict = Verdict::Promote;
-        let plan = AppPromotion {
-            source: dir.path(), // unused on the commit path
-            target: &target,
-            superseded: None,
-            expected_candidate: &identity,
-            expected_verdict: &verdict,
-        };
-        let error = commit_app_bundle(&missing_staged, &plan).unwrap_err();
-        assert!(error.to_string().contains("commit staged app"), "{error}");
-
-        assert!(
-            target.exists(),
-            "old app must be restored to the target on a failed commit"
-        );
-        assert_eq!(fs::read(target.join("marker")).unwrap(), b"old-app");
-        let sidecars: Vec<_> = fs::read_dir(dir.path().join("Applications"))
-            .unwrap()
-            .filter_map(Result::ok)
-            .map(|entry| entry.file_name().to_string_lossy().into_owned())
-            .filter(|name| name.contains("superseded"))
-            .collect();
-        assert!(
-            sidecars.is_empty(),
-            "superseded sidecar leaked: {sidecars:?}"
-        );
-    }
-
-    #[test]
-    fn app_activation_recovery_keeps_the_same_predecessor() {
-        let dir = tempfile::tempdir().unwrap();
-        let source = dir.path().join("candidate/Loopflow.app");
-        let target = dir.path().join("Applications/Loopflow.app");
-        let superseded = dir
-            .path()
-            .join("Applications/.Loopflow.app.superseded.upgrade-one");
-        fs::create_dir_all(&target).unwrap();
-        fs::write(target.join("old-app"), b"old").unwrap();
-        let identity = CandidateIdentity::current();
-        let verdict = Verdict::Promote;
-        write_app(&source, &identity, &verdict);
-        let plan = AppPromotion {
-            source: &source,
-            target: &target,
-            superseded: Some(&superseded),
-            expected_candidate: &identity,
-            expected_verdict: &verdict,
-        };
-
-        let first_staged = stage_app_bundle(&plan).unwrap();
-        assert_eq!(
-            commit_app_bundle(&first_staged, &plan).unwrap(),
-            Some(superseded.clone())
-        );
-        let recovery_staged = stage_app_bundle(&plan).unwrap();
-        assert_eq!(
-            commit_app_bundle(&recovery_staged, &plan).unwrap(),
-            Some(superseded.clone())
-        );
-
-        assert!(target.join("new-app").exists());
-        assert!(superseded.join("old-app").exists());
-        assert!(!recovery_staged.exists());
-    }
-
-    #[test]
-    fn a_frontier_failure_leaves_the_cli_new_and_the_app_untouched() {
-        let dir = tempfile::tempdir().unwrap();
-        let cli_target = dir.path().join("lf");
-        let candidate = dir.path().join("cand");
-        fs::write(&cli_target, b"old-compatible").unwrap();
-        fs::write(&candidate, b"candidate-knows-pending-frontier").unwrap();
-        let bin_dir = dir.path().join("bin");
-
-        let source = dir.path().join("built.app");
-        let identity = CandidateIdentity::current();
-        let verdict = Verdict::PromoteAndMigrate;
-        write_app(&source, &identity, &verdict);
-        let app_target = dir.path().join("Applications/Loopflow.app");
-        fs::create_dir_all(&app_target).unwrap();
-        fs::write(app_target.join("old-app"), b"old-app").unwrap();
-        let app = AppPromotion {
-            source: &source,
-            target: &app_target,
-            superseded: None,
-            expected_candidate: &identity,
-            expected_verdict: &verdict,
-        };
-
-        let error = activate_install_then_advance(
-            &verdict,
-            &CliPromotion {
-                candidate_binary: &candidate,
-                cli_target: &cli_target,
-                bin_dir: &bin_dir,
-            },
-            None,
-            Some(&app),
-            || Err(anyhow!("migration fsync failed")),
-        )
-        .unwrap_err();
-        assert!(
-            error.to_string().contains("migration fsync failed"),
-            "{error}"
-        );
-
-        // The CLI is already the compatible candidate; the app never committed, so
-        // its old bytes remain and no staged bundle leaks.
-        let active = fs::read_link(&cli_target).unwrap();
-        assert_eq!(
-            fs::read(active).unwrap(),
-            b"candidate-knows-pending-frontier"
-        );
-        assert!(app_target.join("old-app").exists());
-        assert!(
-            !app_target.join("new-app").exists(),
-            "app not committed on failure"
-        );
-        let leftovers: Vec<_> = fs::read_dir(dir.path().join("Applications"))
-            .unwrap()
-            .filter_map(Result::ok)
-            .map(|entry| entry.file_name().to_string_lossy().into_owned())
-            .filter(|name| name.starts_with('.'))
-            .collect();
-        assert!(leftovers.is_empty(), "staged app leaked: {leftovers:?}");
     }
 }

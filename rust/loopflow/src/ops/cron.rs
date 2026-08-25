@@ -1293,7 +1293,7 @@ mod tests {
         let executable = temp.path().join("fake-lf");
         fs::write(
             &executable,
-            "#!/bin/sh\nprintf '%s\\n' \"$@\"\nprintf 'LF_RUN_CONTEXT=%s\\n' \"${LF_RUN_CONTEXT-unset}\"\n",
+            "#!/bin/sh\nprintf '%s\\n' \"$@\"\nprintf 'LF_RUN_ID=%s\\n' \"${LF_RUN_ID-unset}\"\n",
         )
         .unwrap();
         fs::set_permissions(&executable, fs::Permissions::from_mode(0o700)).unwrap();
@@ -1315,7 +1315,7 @@ mod tests {
 
         assert_eq!(
             fs::read_to_string(cron.log_path()).unwrap(),
-            "--wave\nreliability\n--batch\nflow\nwave-report\nLF_RUN_CONTEXT=unset\n"
+            "--wave\nreliability\n--batch\nflow\nwave-report\nLF_RUN_ID=unset\n"
         );
     }
 

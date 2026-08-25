@@ -25,9 +25,7 @@ use crate::provider_auth::{
     provider_token_refresh_due, refresh_stored_provider_token, Provider, TokenRefreshError,
 };
 use crate::repository::RepoId;
-use crate::store::{
-    open_existing_store, open_store, PmSnapshotRow, ProviderToken, Store, TaskWriterState,
-};
+use crate::store::{open_existing_store, open_store, PmSnapshotRow, ProviderToken, Store};
 
 // ── Options and results ─────────────────────────────────────────────
 
@@ -154,15 +152,6 @@ pub struct PmReteamMove {
     pub new_identifier: Option<String>,
 }
 
-/// One issue left in place while a Task Run can still write its old id.
-#[derive(Debug, Clone, PartialEq, Eq)]
-pub struct PmReteamDeferral {
-    pub wave: String,
-    pub identifier: String,
-    pub title: String,
-    pub reason: String,
-}
-
 /// One Project narrowed onto the repository Team. Projects keep their id and slug on
 /// a team move (Linear only renumbers issues), so there is no new identifier to
 /// carry — `from_teams` records where it came from for the plan output.
@@ -187,7 +176,6 @@ pub struct PmReteamResult {
     /// off the legacy team).
     pub project_moves: Vec<PmReteamProjectMove>,
     pub moves: Vec<PmReteamMove>,
-    pub deferrals: Vec<PmReteamDeferral>,
     /// Issues already carrying the target Team id (skipped — idempotency).
     pub already: usize,
     /// Durable Tasks whose cached display identifier was reconciled.
@@ -1619,45 +1607,11 @@ fn wave_for_initiative(repo: &Path, initiative_id: &str) -> OpsResult<String> {
 #[derive(Debug, Clone, PartialEq, Eq)]
 enum ReteamClass {
     Already,
-    Defer(String),
     Move,
 }
 
-#[derive(Debug, Clone, Copy)]
-struct ReteamWriterState<'a> {
-    identifier: &'a str,
-    run_id: Option<&'a str>,
-}
-
-impl<'a> From<&'a TaskWriterState> for ReteamWriterState<'a> {
-    fn from(state: &'a TaskWriterState) -> Self {
-        Self {
-            identifier: &state.identifier,
-            run_id: state.run.as_ref().map(|run| run.id.as_str()),
-        }
-    }
-}
-
-impl ReteamWriterState<'_> {
-    fn protection_reason(self) -> Option<String> {
-        self.run_id.map(|run_id| format!("active Run {run_id}"))
-    }
-}
-
-fn classify_reteam_item(
-    item: &PmItem,
-    team_id: &str,
-    writer: Option<ReteamWriterState<'_>>,
-) -> ReteamClass {
-    let already = item.team_id == team_id;
-    let identifier_needs_update = writer.is_some_and(|writer| writer.identifier != item.identifier);
-    if let Some(reason) = writer
-        .filter(|_| !already || identifier_needs_update)
-        .and_then(ReteamWriterState::protection_reason)
-    {
-        return ReteamClass::Defer(reason);
-    }
-    if already {
+fn classify_reteam_item(item: &PmItem, team_id: &str) -> ReteamClass {
+    if item.team_id == team_id {
         return ReteamClass::Already;
     }
     ReteamClass::Move
@@ -1665,30 +1619,6 @@ fn classify_reteam_item(
 
 fn project_needs_reteam(bound_team: &str, project_team_ids: &[String]) -> bool {
     project_team_ids.len() != 1 || project_team_ids[0] != bound_team
-}
-
-/// Refuse the whole apply when any Task Run can still write the old identifier.
-/// The plan is read-only up to this point, so this preserves the hierarchy rather
-/// than moving its Project and idle siblings around the protected Task.
-fn ensure_reteam_apply_safe(deferrals: &[PmReteamDeferral]) -> OpsResult<()> {
-    if deferrals.is_empty() {
-        return Ok(());
-    }
-
-    let protected = deferrals
-        .iter()
-        .map(|deferral| {
-            format!(
-                "{} `{}` (wave/{}; {})",
-                deferral.identifier, deferral.title, deferral.wave, deferral.reason
-            )
-        })
-        .collect::<Vec<_>>()
-        .join("; ");
-    Err(OpsError::Message(format!(
-        "cannot apply reteam while {} Task Run(s) can still write the old identifier: {protected}. No Projects or Tasks were moved; stop those Runs and rerun the dry-run.",
-        deferrals.len()
-    )))
 }
 
 #[derive(Debug)]
@@ -1786,7 +1716,6 @@ async fn apply_or_plan_repository_reteam(
     }
     let mut project_moves = Vec::new();
     let mut moves = Vec::new();
-    let mut deferrals = Vec::new();
     let mut identifier_updates = Vec::new();
     let mut states = Vec::new();
     let mut seen_initiatives = BTreeMap::new();
@@ -1870,32 +1799,26 @@ async fn apply_or_plan_repository_reteam(
                         project.team_ids.join(", ")
                     )));
                 }
-                let writer = store.task_writer_state(&item.id).await.map_err(|error| {
-                    OpsError::Message(format!("failed to read task registry: {error}"))
-                })?;
-                match classify_reteam_item(
-                    &item,
-                    team_id,
-                    writer.as_ref().map(ReteamWriterState::from),
-                ) {
+                let registered_identifier =
+                    store
+                        .task_issue_identifier(&item.id)
+                        .await
+                        .map_err(|error| {
+                            OpsError::Message(format!("failed to read task registry: {error}"))
+                        })?;
+                match classify_reteam_item(&item, team_id) {
                     ReteamClass::Already => {
                         already += 1;
-                        if let Some(writer) =
-                            writer.filter(|writer| writer.identifier != item.identifier)
+                        if let Some(old_identifier) = registered_identifier
+                            .filter(|identifier| identifier != &item.identifier)
                         {
                             identifier_updates.push(ReteamIdentifierUpdate {
                                 issue_id: item.id,
-                                old_identifier: writer.identifier,
+                                old_identifier,
                                 new_identifier: item.identifier,
                             });
                         }
                     }
-                    ReteamClass::Defer(reason) => deferrals.push(PmReteamDeferral {
-                        wave: wave.clone(),
-                        identifier: item.identifier,
-                        title: item.name,
-                        reason,
-                    }),
                     ReteamClass::Move => moves.push(PmReteamMove {
                         wave: wave.clone(),
                         project_id: project.id.clone(),
@@ -1914,8 +1837,6 @@ async fn apply_or_plan_repository_reteam(
     }
 
     if apply {
-        ensure_reteam_apply_safe(&deferrals)?;
-
         // Linear requires the destination Team on a Project before its Issues
         // can move. Expand first; narrowing is the final provider phase.
         for state in &states {
@@ -2069,7 +1990,6 @@ async fn apply_or_plan_repository_reteam(
         applied: apply,
         project_moves,
         moves,
-        deferrals,
         already,
         task_updates,
     })
@@ -3167,26 +3087,6 @@ mod tests {
         std::fs::write(repo.join(".lf/config.yaml"), content).unwrap();
     }
 
-    fn reteam_item(identifier: &str, team_id: &str, completed: bool) -> PmItem {
-        PmItem {
-            id: format!("uuid-of-{identifier}"),
-            identifier: identifier.to_string(),
-            url: None,
-            name: format!("Task {identifier}"),
-            description: String::new(),
-            rank: 0,
-            completed,
-            project_id: "project-1".to_string(),
-            project: "project-one".to_string(),
-            team_id: team_id.to_string(),
-            assignee: None,
-        }
-    }
-
-    fn reteam_writer<'a>(identifier: &'a str, run_id: Option<&'a str>) -> ReteamWriterState<'a> {
-        ReteamWriterState { identifier, run_id }
-    }
-
     #[test]
     fn repository_team_config_is_the_only_normal_authority() {
         let repo = tempfile::tempdir().unwrap();
@@ -3555,46 +3455,6 @@ mod tests {
             1,
             "the resumed migration reuses its first traceability comment"
         );
-    }
-
-    #[test]
-    fn reteam_protects_only_tasks_with_an_active_run() {
-        assert_eq!(
-            classify_reteam_item(
-                &reteam_item("W2-9", "team-old", false),
-                "team-loo",
-                Some(reteam_writer("W2-9", None))
-            ),
-            ReteamClass::Move
-        );
-        assert_eq!(
-            classify_reteam_item(
-                &reteam_item("W2-9", "team-old", false),
-                "team-loo",
-                Some(reteam_writer("W2-9", Some("run-active")))
-            ),
-            ReteamClass::Defer("active Run run-active".to_string())
-        );
-    }
-
-    #[test]
-    fn reteam_reconciles_only_when_already_moved_work_has_no_run() {
-        assert_eq!(
-            classify_reteam_item(
-                &reteam_item("LOO-8", "team-loo", false),
-                "team-loo",
-                Some(reteam_writer("W2-9", None))
-            ),
-            ReteamClass::Already
-        );
-        assert!(matches!(
-            classify_reteam_item(
-                &reteam_item("LOO-8", "team-loo", false),
-                "team-loo",
-                Some(reteam_writer("W2-9", Some("run-active")))
-            ),
-            ReteamClass::Defer(_)
-        ));
     }
 
     #[test]

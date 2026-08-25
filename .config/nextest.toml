@@ -4,3 +4,7 @@ machine-promotion = { max-threads = 1 }
 [[profile.default.overrides]]
 filter = 'test(local_promotion_controller_bootstraps_reuses_dev_and_returns_to_published) | test(switch_recovery_obeys_every_persisted_phase_owner)'
 test-group = 'machine-promotion'
+
+[[profile.default.overrides]]
+filter = 'test(every_receipt_at_fleet_fanout_is_recorded_exactly_once)'
+threads-required = "num-test-threads"

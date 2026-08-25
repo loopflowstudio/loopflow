@@ -1067,11 +1067,6 @@ pub(crate) fn validate_persisted_json(conn: &rusqlite::Connection) -> StoreResul
         "identity",
         "failure_set_json",
     )?);
-    failures.extend(validate_run_triggers(conn)?);
-    failures.extend(validate_json_column::<crate::durable::WaitOn>(
-        conn, "waits", "id", "on_json",
-    )?);
-
     if failures.is_empty() {
         Ok(())
     } else {
@@ -1099,34 +1094,6 @@ fn validate_json_column<T: DeserializeOwned>(
         let (row_key, json) = row?;
         if let Err(error) = serde_json::from_str::<T>(&json) {
             failures.push(format!("{table}.{column} row {row_key}: {error}"));
-        }
-    }
-    Ok(failures)
-}
-
-fn validate_run_triggers(conn: &rusqlite::Connection) -> StoreResult<Vec<String>> {
-    let mut statement = conn.prepare(
-        "SELECT CAST(id AS TEXT), state, trigger_json FROM runs WHERE trigger_json IS NOT NULL",
-    )?;
-    let rows = statement.query_map([], |row| {
-        Ok((
-            row.get::<_, String>(0)?,
-            row.get::<_, String>(1)?,
-            row.get::<_, String>(2)?,
-        ))
-    })?;
-    let mut failures = Vec::new();
-    for row in rows {
-        let (run_id, state, raw_json) = row?;
-        let state = match crate::durable::RunState::parse(&state) {
-            Ok(state) => state,
-            Err(error) => {
-                failures.push(format!("runs.trigger_json row {run_id}: {error}"));
-                continue;
-            }
-        };
-        if let Err(error) = crate::durable::RunTrigger::parse_persisted(state, &raw_json) {
-            failures.push(format!("runs.trigger_json row {run_id}: {error}"));
         }
     }
     Ok(failures)
@@ -2056,53 +2023,6 @@ mod tests {
         apply_installed_development_sqlite(&conn, &[draft]).unwrap();
     }
 
-    #[test]
-    fn installed_development_promotion_reads_arbitrary_historical_run_triggers() {
-        let conn = open();
-        apply_sqlite(&conn).unwrap();
-        conn.execute_batch(
-            "INSERT INTO waves (id, name, repo, created_at)
-             VALUES ('wave-ci-history', 'infrastructure', '/repo', 1);
-             INSERT INTO projects (id, wave_id, external_project_id, created_at)
-             VALUES ('project-ci-history', 'wave-ci-history', 'linear-project', 2);
-             INSERT INTO tasks (
-                 id, project_id, external_issue_id, issue_identifier, created_at
-             ) VALUES (
-                 'task-ci-history', 'project-ci-history', 'linear-task', 'LOO-262', 3
-             );
-             INSERT INTO epochs (
-                 id, number, task_id, state, current_rev, created_at, terminal_at
-             ) VALUES ('epoch-ci-history', 1, 'task-ci-history', 'done', 0, 4, 6);",
-        )
-        .unwrap();
-        let raw_json =
-            r#"{ "kind":"retired_controller", "opaque":[3,{"z":true}], "note":"keep spacing" }"#;
-        conn.execute(
-            "INSERT INTO runs (
-                id, epoch_id, home_id, state, trigger_json, source_kind,
-                source_id, created_at, ended_at
-             ) VALUES (
-                'run-ci-history', 'epoch-ci-history',
-                (SELECT id FROM homes WHERE route='local'), 'ended',
-                ?1, 'task', 'task-ci-history', 5, 6
-             )",
-            [raw_json],
-        )
-        .unwrap();
-
-        apply_installed_development_sqlite(&conn, &[]).unwrap();
-
-        assert_eq!(
-            conn.query_row(
-                "SELECT trigger_json FROM runs WHERE id='run-ci-history'",
-                [],
-                |row| row.get::<_, String>(0),
-            )
-            .unwrap(),
-            raw_json
-        );
-    }
-
     fn baseline() -> Migration {
         MIGRATIONS[0]
     }
@@ -2327,21 +2247,6 @@ mod tests {
             0,
             "the durable spine has no compatibility, Agent Bus, or shadow lifecycle tables"
         );
-        let turn_columns = columns(&conn, "agent_turns");
-        assert!(turn_columns.iter().any(|name| name == "epoch_id"));
-        assert!(turn_columns.iter().any(|name| name == "basis_rev"));
-        assert_eq!(
-            conn.query_row(
-                "SELECT COUNT(*) FROM pragma_foreign_key_list('sends')
-                 WHERE \"table\"='agent_turns' AND \"from\"='turn_id' AND \"to\"='id'",
-                [],
-                |row| row.get::<_, i64>(0),
-            )
-            .unwrap(),
-            1,
-            "Send evidence belongs to the sole durable Turn row"
-        );
-
         apply_sqlite(&conn).unwrap();
         assert_eq!(
             applied_versions(&conn).unwrap(),
@@ -2361,6 +2266,14 @@ mod tests {
             .position(|migration| migration.name == name)
             .expect("named migration is registered");
         &MIGRATIONS[..index]
+    }
+
+    fn apply_through(conn: &rusqlite::Connection, name: &str) {
+        let index = MIGRATIONS
+            .iter()
+            .position(|migration| migration.name == name)
+            .expect("named migration is registered");
+        apply_set(conn, &MIGRATIONS[..=index]).unwrap();
     }
 
     fn draft_location(name: &str) -> (usize, &'static str, usize) {
@@ -2418,6 +2331,144 @@ mod tests {
             .map(|offset| body_start + offset)
             .unwrap_or(sql.len());
         sql[body_start..body_end].to_string()
+    }
+
+    fn apply_current_work_schema(conn: &rusqlite::Connection) {
+        if columns(conn, "tasks").contains(&"work_state".to_string()) {
+            return;
+        }
+        let foreign_keys: bool = conn
+            .pragma_query_value(None, "foreign_keys", |row| row.get(0))
+            .unwrap();
+        conn.pragma_update(None, "foreign_keys", "OFF").unwrap();
+        for draft in [
+            "generic_ask_run_claim",
+            "opaque_steer_run_provenance",
+            "stable_work_state",
+            "obsolete_sql_lifecycle",
+        ] {
+            conn.execute_batch(&current_draft_sql(draft)).unwrap();
+        }
+        if foreign_keys {
+            conn.pragma_update(None, "foreign_keys", "ON").unwrap();
+        }
+    }
+
+    #[test]
+    fn stable_work_draft_keeps_definitions_and_clears_execution_state() {
+        let conn = open();
+        conn.execute_batch("PRAGMA foreign_keys = ON").unwrap();
+        apply_before_current_draft(&conn, "stable_work_state");
+        if !columns(&conn, "ask_exchanges").contains(&"source_run_id".to_string()) {
+            for draft in ["generic_ask_run_claim", "opaque_steer_run_provenance"] {
+                conn.execute_batch(&current_draft_sql(draft)).unwrap();
+            }
+        }
+        conn.execute(
+            "INSERT INTO waves (id, name, repo, created_at, parent_wave_id)
+             VALUES ('wave_keep', 'keep', '/repo', 1700000000, NULL)",
+            [],
+        )
+        .unwrap();
+
+        conn.execute_batch(&current_draft_sql("stable_work_state"))
+            .unwrap();
+
+        let state: (String, Option<i64>) = conn
+            .query_row(
+                "SELECT work_state, work_terminal_at FROM waves WHERE id='wave_keep'",
+                [],
+                |row| Ok((row.get(0)?, row.get(1)?)),
+            )
+            .unwrap();
+        assert_eq!(state, ("ready".to_string(), None));
+        for table in ["waits", "work_truth", "epoch_revisions"] {
+            let exists: bool = conn
+                .query_row(
+                    "SELECT EXISTS(
+                        SELECT 1 FROM sqlite_master WHERE type='table' AND name=?1
+                     )",
+                    [table],
+                    |row| row.get(0),
+                )
+                .unwrap();
+            assert!(!exists, "{table} must be deleted");
+        }
+        for table in [
+            "steers",
+            "tool_responses",
+            "work_flow_positions",
+            "ask_exchanges",
+        ] {
+            let rows: i64 = conn
+                .query_row(&format!("SELECT COUNT(*) FROM {table}"), [], |row| {
+                    row.get(0)
+                })
+                .unwrap();
+            assert_eq!(rows, 0, "{table} must start empty");
+        }
+    }
+
+    #[test]
+    fn obsolete_sql_lifecycle_draft_preserves_only_the_outer_exec_ledger() {
+        let conn = open();
+        conn.execute_batch("PRAGMA foreign_keys = OFF").unwrap();
+        apply_before_current_draft(&conn, "obsolete_sql_lifecycle");
+        if !columns(&conn, "tasks").contains(&"work_state".to_string()) {
+            for draft in [
+                "generic_ask_run_claim",
+                "opaque_steer_run_provenance",
+                "stable_work_state",
+            ] {
+                conn.execute_batch(&current_draft_sql(draft)).unwrap();
+            }
+        }
+        conn.execute(
+            "INSERT INTO run_events (run_id, process_id, seq, ts, node, event)
+             VALUES ('trace-keep', 'exec-keep', 0, 1, 'run', 'started')",
+            [],
+        )
+        .unwrap();
+        conn.execute_batch("PRAGMA foreign_keys = ON").unwrap();
+        conn.execute_batch(&current_draft_sql("obsolete_sql_lifecycle"))
+            .unwrap();
+
+        validate_foreign_keys(&conn).unwrap();
+        for table in [
+            "runs",
+            "epochs",
+            "run_liveness",
+            "home_upgrade_work",
+            "home_upgrades",
+            "home_runtime_generations",
+            "agent_invocations",
+            "agent_turns",
+            "turn_usage_samples",
+            "context_assets",
+            "context_decisions",
+            "done_proposals",
+            "sends",
+            "performance_evidence_authority",
+        ] {
+            let exists = conn
+                .query_row(
+                    "SELECT EXISTS(
+                        SELECT 1 FROM sqlite_master WHERE type='table' AND name=?1
+                     )",
+                    [table],
+                    |row| row.get::<_, bool>(0),
+                )
+                .unwrap();
+            assert!(!exists, "{table} must be deleted");
+        }
+        assert!(!columns(&conn, "project_events").contains(&"run_id".to_string()));
+        assert_eq!(
+            conn.query_row("SELECT COUNT(*) FROM run_events", [], |row| {
+                row.get::<_, i64>(0)
+            })
+            .unwrap(),
+            1
+        );
     }
 
     #[test]
@@ -2886,12 +2937,12 @@ mod tests {
         )
         .unwrap();
 
-        apply_sqlite(&conn).unwrap();
+        apply_through(&conn, "capture_pruned_state");
 
         let (status, events, bytes) = conn
             .query_row(
                 "SELECT capture_status, conversation_event_count, conversation_bytes
-                 FROM agent_invocations WHERE id = 'al_history'",
+                 FROM agent_launches WHERE id = 'al_history'",
                 [],
                 |row| {
                     Ok((
@@ -2955,11 +3006,11 @@ mod tests {
             .unwrap();
         }
 
-        apply_sqlite(&conn).unwrap();
+        apply_through(&conn, "capture_terminal_states");
 
         let mut statuses = conn
             .prepare(
-                "SELECT capture_status FROM agent_invocations
+                "SELECT capture_status FROM agent_launches
                  WHERE id LIKE 'history-%' ORDER BY capture_status",
             )
             .unwrap()
@@ -3019,11 +3070,7 @@ mod tests {
         )
         .unwrap();
 
-        let terminal_index = MIGRATIONS
-            .iter()
-            .position(|migration| migration.name == "capture_terminal_states")
-            .expect("capture terminal migration is registered");
-        apply_set(&conn, &MIGRATIONS[..=terminal_index]).unwrap();
+        apply_through(&conn, "capture_terminal_states");
 
         let legacy_trace = conn
             .query_row(
@@ -3052,78 +3099,6 @@ mod tests {
             .unwrap(),
             "explicit-resume"
         );
-    }
-
-    #[test]
-    fn the_trace_rebuild_restores_every_invocation_index() {
-        // A rebuild drops the table, and with it its indexes. Losing one would
-        // silently degrade every `lf runs`/`lf trace` lookup.
-        let conn = open();
-        apply_sqlite(&conn).unwrap();
-
-        let mut indexes = conn
-            .prepare("SELECT name FROM sqlite_master WHERE type = 'index' AND tbl_name = 'agent_invocations'")
-            .unwrap()
-            .query_map([], |row| row.get::<_, String>(0))
-            .unwrap()
-            .collect::<Result<Vec<_>, _>>()
-            .unwrap();
-        indexes.sort();
-        indexes.retain(|name| !name.starts_with("sqlite_autoindex"));
-
-        assert_eq!(
-            indexes,
-            vec![
-                "idx_agent_invocations_one_live_answer",
-                "idx_agent_invocations_process",
-                "idx_agent_invocations_project",
-                "idx_agent_invocations_run",
-                "idx_agent_invocations_supervisor",
-                "idx_agent_invocations_task",
-                "idx_agent_invocations_wave",
-            ]
-        );
-    }
-
-    #[test]
-    fn run_owns_execution_migration_leaves_one_current_schema() {
-        let conn = open();
-        apply_sqlite(&conn).unwrap();
-
-        let old_table_exists: bool = conn
-            .query_row(
-                "SELECT EXISTS(
-                    SELECT 1 FROM sqlite_master
-                    WHERE type='table' AND name='agent_launches'
-                 )",
-                [],
-                |row| row.get(0),
-            )
-            .unwrap();
-        assert!(!old_table_exists);
-
-        let run_columns = columns(&conn, "runs");
-        for column in ["containment_kind", "containment_id", "cwd", "started_at"] {
-            assert!(run_columns.contains(&column.to_string()));
-        }
-
-        let invocation_columns = columns(&conn, "agent_invocations");
-        assert!(invocation_columns.contains(&"supervising_run_id".to_string()));
-        for removed in [
-            "product_run_id",
-            "home_id",
-            "launch_state",
-            "containment_kind",
-            "containment_id",
-            "opaque_epoch_id",
-            "opaque_basis_rev",
-        ] {
-            assert!(!invocation_columns.contains(&removed.to_string()));
-        }
-
-        let turn_columns = columns(&conn, "agent_turns");
-        assert!(turn_columns.contains(&"invocation_id".to_string()));
-        assert!(!turn_columns.contains(&"launch_id".to_string()));
     }
 
     #[test]
@@ -3604,61 +3579,19 @@ mod tests {
         .unwrap();
 
         apply_sqlite(&conn).unwrap();
+        apply_current_work_schema(&conn);
 
-        let task: (String, String, String) = conn
+        let task: (String, String, String, String) = conn
             .query_row(
-                "SELECT id, issue_identifier, workspace_slug
+                "SELECT id, issue_identifier, workspace_slug, work_state
                  FROM tasks WHERE external_issue_id='issue-1'",
                 [],
-                |row| Ok((row.get(0)?, row.get(1)?, row.get(2)?)),
+                |row| Ok((row.get(0)?, row.get(1)?, row.get(2)?, row.get(3)?)),
             )
             .unwrap();
         assert_eq!(task.1, "INF-123");
         assert_eq!(task.2, "inf-123");
-        let task_state: String = conn
-            .query_row(
-                "SELECT state FROM epochs WHERE task_id=?1",
-                [&task.0],
-                |row| row.get(0),
-            )
-            .unwrap();
-        assert_eq!(task_state, "done");
-        let project_id: String = conn
-            .query_row(
-                "SELECT id FROM projects WHERE external_project_id='project-1'",
-                [],
-                |row| row.get(0),
-            )
-            .unwrap();
-        let project_run: (String, String, String, String, String) = conn
-            .query_row(
-                "SELECT agent_invocations.id, runs.state, runs.containment_kind,
-                        runs.containment_id, agent_invocations.provider
-                 FROM agent_invocations
-                JOIN runs ON runs.id = agent_invocations.supervising_run_id
-                 WHERE runs.source_kind = 'project' AND runs.source_id = ?1",
-                [&project_id],
-                |row| {
-                    Ok((
-                        row.get(0)?,
-                        row.get(1)?,
-                        row.get(2)?,
-                        row.get(3)?,
-                        row.get(4)?,
-                    ))
-                },
-            )
-            .unwrap();
-        assert!(project_run.0.starts_with("invocation_"));
-        assert_eq!(
-            (
-                project_run.1.as_str(),
-                project_run.2.as_str(),
-                project_run.3.as_str(),
-                project_run.4.as_str(),
-            ),
-            ("active", "tmux", "project-legacy", "codex")
-        );
+        assert_eq!(task.3, "ready");
         let pr: (
             i64,
             String,
@@ -4373,9 +4306,11 @@ mod tests {
         // on the first read of a table it never created.
         assert!(store.list_run_events_since(0).unwrap().is_empty());
         let conn = rusqlite::Connection::open(&path).unwrap();
+        validate_installed_development_sqlite(&conn, crate::build_info::migration_draft_manifest())
+            .unwrap();
         assert_eq!(
-            latest_version_sqlite(&conn).unwrap(),
-            latest_known_version()
+            applied_versions(&conn).unwrap().last(),
+            Some(&latest_known_version())
         );
     }
 
@@ -4538,98 +4473,74 @@ mod tests {
     }
 
     #[test]
-    fn durable_ask_invocations_enforce_complete_results_and_allow_plural_pending_turns() {
+    fn stable_work_schema_keeps_plural_asks_without_execution_authority() {
         let conn = open();
         apply_sqlite(&conn).unwrap();
+        apply_current_work_schema(&conn);
 
-        let invocation_columns = columns(&conn, "agent_invocations");
-        for deleted in [
-            "attention_kind",
-            "attention_work_kind",
-            "attention_work_id",
-            "attention_at",
-        ] {
-            assert!(!invocation_columns.contains(&deleted.to_string()));
-        }
+        assert!(!conn
+            .query_row(
+                "SELECT EXISTS(
+                    SELECT 1 FROM sqlite_master
+                    WHERE type='table' AND name='agent_invocations'
+                )",
+                [],
+                |row| row.get::<_, bool>(0),
+            )
+            .unwrap());
         let task_columns = columns(&conn, "tasks");
         for deleted in ["kickoff_reviewer", "iterate_reviewer", "gate_reviewer"] {
             assert!(!task_columns.contains(&deleted.to_string()));
         }
-        assert!(!columns(&conn, "work_flow_positions").contains(&"interactive".to_string()));
-        assert!(columns(&conn, "work_flow_positions").contains(&"node_id".to_string()));
-        assert!(columns(&conn, "work_flow_positions").contains(&"human".to_string()));
+        let position_columns = columns(&conn, "work_flow_positions");
+        for present in ["work_kind", "work_id", "node_id", "human"] {
+            assert!(position_columns.contains(&present.to_string()));
+        }
+        for deleted in ["epoch_id", "interactive"] {
+            assert!(!position_columns.contains(&deleted.to_string()));
+        }
+
+        let ask_columns = columns(&conn, "ask_exchanges");
+        assert!(ask_columns.contains(&"source_run_id".to_string()));
+        for deleted in [
+            "epoch_id",
+            "origin_run_id",
+            "origin_turn_id",
+            "origin_invocation_id",
+        ] {
+            assert!(!ask_columns.contains(&deleted.to_string()));
+        }
 
         conn.execute_batch("PRAGMA foreign_keys=OFF").unwrap();
-        assert!(conn
-            .execute(
-                "INSERT INTO work_flow_positions (
-                    epoch_id, flow, step, node_id, human,
-                    step_index, iteration, updated_at
-                 ) VALUES ('epoch_human', 'task-design', 'review-design',
-                           NULL, 1, 1, 0, 1)",
-                [],
-            )
-            .is_err());
-        conn.execute(
+        conn.execute_batch(
             "INSERT INTO ask_exchanges (
-                id, epoch_id, origin_work_kind, origin_work_id, origin_run_id,
-                origin_turn_id, origin_invocation_id, origin_home_id, origin_cwd,
+                id, origin_work_kind, origin_work_id, source_run_id,
+                origin_home_id, origin_cwd,
                 target_kind, target_work_kind, target_work_id,
                 request_kind, request_prompt, state, asked_at
-             ) VALUES (
-                'ask_one', 'epoch_one', 'task', 'task_one', 'run_one',
-                'turn_one', 'invocation_one', 'home_one', '/repo',
+             ) VALUES
+             (
+                'ask_one', 'task', 'task_one', 'run_one', 'home_one', '/repo',
                 'parent', 'project', 'proj_parent',
                 'intervention', 'Which proof?', 'queued', 1
+             ),
+             (
+                'ask_two', 'task', 'task_one', 'run_one', 'home_one', '/repo',
+                'user', NULL, NULL,
+                'intervention', 'Another proof?', 'queued', 2
              )",
-            [],
         )
         .unwrap();
-        conn.execute(
-            "INSERT INTO ask_exchanges (
-                id, epoch_id, origin_work_kind, origin_work_id, origin_run_id,
-                origin_turn_id, origin_invocation_id, origin_home_id, origin_cwd,
-                target_kind, request_kind, request_prompt, state, asked_at
-             ) VALUES (
-                'ask_two', 'epoch_one', 'task', 'task_one', 'run_one',
-                'turn_one', 'invocation_one', 'home_one', '/repo',
-                'user', 'intervention', 'Which proof?', 'queued', 2
-             )",
-            [],
-        )
-        .unwrap();
-        assert!(conn
-            .execute(
-                "UPDATE ask_exchanges
-                 SET result_text='partial' WHERE id='ask_one'",
+        assert_eq!(
+            conn.query_row(
+                "SELECT COUNT(*) FROM ask_exchanges
+                 WHERE state='queued' AND source_run_id='run_one'",
                 [],
+                |row| row.get::<_, i64>(0),
             )
-            .is_err());
-        conn.execute(
-            "UPDATE ask_exchanges
-             SET state='resolved', result_kind='resolved', result_text='This proof',
-                 terminal_author_kind='user', terminal_at=3
-             WHERE id='ask_one'",
-            [],
-        )
-        .unwrap();
-        conn.execute(
-            "INSERT INTO ask_exchanges (
-                id, epoch_id, origin_work_kind, origin_work_id, origin_run_id,
-                origin_turn_id, origin_invocation_id, origin_home_id, origin_cwd,
-                target_kind, request_kind, request_prompt, state, asked_at
-             ) VALUES (
-                'ask_three', 'epoch_one', 'task', 'task_one', 'run_one',
-                'turn_one', 'invocation_one', 'home_one', '/repo',
-                'user', 'intervention', 'Another?', 'queued', 4
-             )",
-            [],
-        )
-        .unwrap();
-        let invocation_columns = columns(&conn, "agent_invocations");
-        for column in ["answer_ask_id", "ask_ready_at", "ask_presented_at"] {
-            assert!(invocation_columns.contains(&column.to_string()));
-        }
+            .unwrap(),
+            2
+        );
     }
 
     #[test]
@@ -4834,6 +4745,91 @@ mod tests {
             .unwrap(),
             None
         );
+    }
+
+    #[test]
+    fn generic_ask_run_claim_keeps_history_and_removes_invocation_authority() {
+        let conn = open();
+        apply_before_current_draft(&conn, "generic_ask_run_claim");
+        conn.execute_batch(
+            "INSERT INTO waves (id, name, repo, created_at)
+                 VALUES ('wave_ask', 'ask', '/repo', 1);
+             INSERT INTO projects (id, wave_id, external_project_id, created_at)
+                 VALUES ('project_ask', 'wave_ask', 'linear-ask', 1);
+             INSERT INTO epochs (
+                 id, number, wave_id, project_id, task_id, state, current_rev,
+                 created_at, terminal_at
+             ) VALUES ('epoch_ask', 1, NULL, 'project_ask', NULL, 'open', 0, 1, NULL);
+             INSERT INTO runs (
+                 id, epoch_id, home_id, state, trigger_json, retry_of,
+                 runtime_generation, source_kind, source_id, created_at,
+                 ended_at, stop_reason, containment_kind, containment_id, cwd,
+                 started_at
+             ) VALUES (
+                 'run_source_bytes', 'epoch_ask', (SELECT id FROM homes LIMIT 1),
+                 'ended', '{\"kind\":\"user\"}', NULL, NULL, 'project',
+                 'project_ask', 1, 2, NULL, NULL, NULL, NULL, NULL
+             );
+             INSERT INTO ask_exchanges (
+                 id, epoch_id, origin_work_kind, origin_work_id, origin_run_id,
+                 origin_turn_id, origin_invocation_id, origin_home_id, origin_cwd,
+                 target_kind, request_kind, request_prompt, state, asked_at
+             ) VALUES (
+                 'ask_generic', 'epoch_ask', 'project', 'project_ask',
+                 'run_source_bytes', NULL, NULL, (SELECT id FROM homes LIMIT 1),
+                 '/repo', 'user', 'intervention', 'Recover safely', 'queued', 2
+             );
+             INSERT INTO agent_invocations (
+                 id, run_id, process_id, started_at, repo, worktree, provider,
+                 surface, capture_status, outcome, artifact_dir,
+                 conversation_path, conversation_event_count, conversation_bytes,
+                 supervising_run_id, answer_ask_id, ask_ready_at, ask_presented_at
+             ) VALUES (
+                 'invocation_ask', 'trace_ask', 'process_ask', 3, '/repo', '/repo',
+                 'codex', 'ask_tui', 'prompt_only', 'running', '', '', 0, 0,
+                 'run_source_bytes', 'ask_generic', 4, 5
+             );
+             UPDATE ask_exchanges
+                SET state='claimed', active_invocation_id='invocation_ask'
+              WHERE id='ask_generic';",
+        )
+        .unwrap();
+
+        conn.execute_batch(&current_draft_sql("generic_ask_run_claim"))
+            .unwrap();
+
+        let ask_columns = columns(&conn, "ask_exchanges");
+        for removed in [
+            "origin_run_id",
+            "origin_turn_id",
+            "origin_invocation_id",
+            "active_invocation_id",
+        ] {
+            assert!(!ask_columns.contains(&removed.to_string()));
+        }
+        for added in ["source_run_id", "active_run_id", "ready_at", "presented_at"] {
+            assert!(ask_columns.contains(&added.to_string()));
+        }
+        assert_eq!(
+            conn.query_row(
+                "SELECT state || ':' || source_run_id || ':' ||
+                        COALESCE(active_run_id, 'none')
+                 FROM ask_exchanges WHERE id='ask_generic'",
+                [],
+                |row| row.get::<_, String>(0),
+            )
+            .unwrap(),
+            "queued:run_source_bytes:none"
+        );
+        assert!(conn
+            .query_row(
+                "SELECT answer_ask_id IS NULL AND ask_ready_at IS NULL
+                        AND ask_presented_at IS NULL
+                 FROM agent_invocations WHERE id='invocation_ask'",
+                [],
+                |row| row.get::<_, bool>(0),
+            )
+            .unwrap());
     }
 
     #[test]

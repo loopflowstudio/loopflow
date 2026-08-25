@@ -97,9 +97,7 @@ fn lf_command(repo: &Path, home: &Path, fake_bin: &Path, args: &[&str]) -> tokio
         .env_remove("LF_CONTROL_HOME")
         .env_remove("LF_CONTROL_DB_PATH")
         .env_remove("LF_WAVE_ID")
-        .env_remove("LF_RUN_CONTEXT")
         .env_remove("LF_RUN_ID")
-        .env_remove("LF_AGENT_INVOCATION_ID")
         .stdout(Stdio::piped())
         .stderr(Stdio::piped())
         .kill_on_drop(true);

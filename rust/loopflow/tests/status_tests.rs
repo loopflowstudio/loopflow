@@ -6,252 +6,37 @@ use std::os::unix::fs::PermissionsExt;
 use std::path::Path;
 use std::process::Command;
 
-use loopflow::chat::types::TurnUsage;
 use loopflow::child::ChildRef;
-use loopflow::durable::{
-    AdvanceReceipt, BoundaryState, Containment, ContainmentObservation, InvocationRoute,
-    RunAdvance, RunTrigger, StopCause, WorkRef,
-};
 use loopflow::id::WaveId;
 use loopflow::planning::{LinearIssueId, LinearProjectId, ProjectPlan, TaskPlan};
 use loopflow::project::{Project, ProjectEventKind, ProjectId};
 use loopflow::store::sqlite::SqliteStore;
-use loopflow::store::{open_store, PmSnapshotRow, RunEventRow, StorageConfig, TurnUsageSample};
+use loopflow::store::{open_store, PmSnapshotRow, StorageConfig};
 use loopflow::task::{
     Observation, PmWritebackState, PrMergeMode, Task, TaskId, TaskLifecyclePhase,
     TaskLifecyclePlan, TaskPr, TaskPrId,
 };
-use loopflow::trace::{AgentInvocationRow, AgentTurnRow, SupervisedInvocation};
 use loopflow::wave::metrics::{load_metric_contract, MetricObservation, ObservationAcceptance};
 use loopflow::wave::Wave;
 use time::OffsetDateTime;
 
-const LEGACY_INVOCATION_ID: &str = "invocation_74115449";
-const INVOCATION_ID: &str = "invocation_74115449000000000000000000000000";
 const PREVIOUS_RELEASE_TASK_PR_FIXTURE: &str = include_str!("fixtures/store_0_12_8_task_pr.sql");
 const PERSISTED_TASK_ID: &str = "task_40fbeeaadfbca5367aa7391432ae84ff";
 
-fn apply_status_truth(database: &Path) {
-    let connection = rusqlite::Connection::open(database).expect("open status database");
-    let has_retirement = connection
-        .prepare("PRAGMA table_info(waves)")
-        .expect("inspect Wave schema")
-        .query_map([], |row| row.get::<_, String>(1))
-        .expect("read Wave columns")
-        .any(|column| column.is_ok_and(|column| column == "retired_at"));
-    if has_retirement {
-        return;
-    }
-    connection
-        .pragma_update(None, "foreign_keys", "OFF")
-        .expect("disable foreign keys for migration table rebuilds");
-    connection
-        .execute_batch(&loopflow_test_support::migration_sql_for_test(
-            Path::new(env!("CARGO_MANIFEST_DIR")),
-            "status_truth",
-        ))
-        .expect("apply status truth migration");
-    let violations = connection
-        .prepare("PRAGMA foreign_key_check")
-        .expect("prepare foreign key check")
-        .query_map([], |_| Ok(()))
-        .expect("check migrated foreign keys")
-        .collect::<Result<Vec<_>, _>>()
-        .expect("read foreign key violations");
-    assert!(
-        violations.is_empty(),
-        "status truth migration broke foreign keys"
-    );
-}
-
-/// A machine home holding one wave with lookup noise, a flow, and a skill. The
-/// registry and the ledgers are the same database.
+/// A machine home holding one Wave.
 fn seed(home: &Path, wave_name: &str) -> Wave {
     std::fs::create_dir_all(home).expect("home");
     let repo = home.join("repo");
     std::fs::create_dir_all(&repo).expect("repo");
     let db = home.join("loopflow.db");
     let store = SqliteStore::new(&db).expect("open store");
-    apply_status_truth(&db);
     let wave = Wave::new(
         WaveId::new(),
         wave_name.to_string(),
         repo.display().to_string(),
     );
     store.create_wave(&wave).expect("register wave");
-    let work = WorkRef::Wave(wave.id().clone());
-    let (_, lease) = store
-        .reserve_run(&work, &RunTrigger::User)
-        .expect("reserve Run");
-    store
-        .advance_run(
-            &lease,
-            &RunAdvance::RunStarting {
-                containment: Containment::ProcessGroup { id: 1 },
-                cwd: repo.clone(),
-            },
-        )
-        .expect("start Run");
-    store
-        .stop_run(
-            &lease,
-            &StopCause::Requested,
-            ContainmentObservation::Absent,
-        )
-        .expect("stop Run");
-
-    let now = chrono::Utc::now().timestamp();
-    let event = |seq: i64, ts: i64, event: &str| RunEventRow {
-        run_id: "run-1".to_string(),
-        process_id: "proc-lookup".to_string(),
-        parent_process_id: None,
-        seq,
-        ts,
-        repo: Some(home.join("repo").display().to_string()),
-        worktree: None,
-        wave: Some(wave_name.to_string()),
-        node: "run".to_string(),
-        event: event.to_string(),
-        command: Some(r#"["lf","pm","sync"]"#.to_string()),
-        flow: None,
-        skill: None,
-        step_index: None,
-        error: None,
-    };
-    store
-        .insert_run_event(&event(0, now - 120, "started"))
-        .expect("seed run start");
-    store
-        .insert_run_event(&event(1, now - 60, "completed"))
-        .expect("seed run end");
-
-    let mut flow_start = event(1, now - 50, "started");
-    flow_start.run_id = "run-flow".to_string();
-    flow_start.process_id = "proc-flow".to_string();
-    flow_start.node = "flow".to_string();
-    flow_start.command = Some(r#"["lf","build"]"#.to_string());
-    flow_start.flow = Some("build".to_string());
-    store
-        .insert_run_event(&flow_start)
-        .expect("seed flow start");
-    let mut flow_end = flow_start.clone();
-    flow_end.seq = 2;
-    flow_end.ts = now - 40;
-    flow_end.event = "completed".to_string();
-    store.insert_run_event(&flow_end).expect("seed flow end");
-
-    // The run boundary the resident invocation below rides on. A real agent invocation
-    // always sits inside a run, so its trace is reachable by process or run id.
-    let mut resident_start = event(0, now - 30, "started");
-    resident_start.run_id = "run-resident".to_string();
-    resident_start.process_id = "proc-resident".to_string();
-    resident_start.command = Some(r#"["lf","__resident"]"#.to_string());
-    store
-        .insert_run_event(&resident_start)
-        .expect("seed resident start");
-    let mut resident_end = resident_start.clone();
-    resident_end.seq = 1;
-    resident_end.ts = now - 20;
-    resident_end.event = "completed".to_string();
-    store
-        .insert_run_event(&resident_end)
-        .expect("seed resident end");
-
-    let invocation = AgentInvocationRow {
-        id: INVOCATION_ID.to_string(),
-        run_id: "run-resident".to_string(),
-        answer_ask_id: None,
-        process_id: "proc-resident".to_string(),
-        started_at: now - 30,
-        ended_at: Some(now - 20),
-        repo: home.join("repo").display().to_string(),
-        worktree: home.join("repo").display().to_string(),
-        wave: Some(wave_name.to_string()),
-        flow: Some("wave".to_string()),
-        skill: Some("wave/mutate".to_string()),
-        project: Some("auditability".to_string()),
-        task: Some("W2-122".to_string()),
-        provider: "codex".to_string(),
-        model: Some("gpt-5".to_string()),
-        surface: "headless".to_string(),
-        capture_status: "complete".to_string(),
-        incomplete_reason: None,
-        outcome: "completed".to_string(),
-        artifact_dir: "traces/invocation-wave-mutate".to_string(),
-        conversation_path: "traces/invocation-wave-mutate/conversation.jsonl".to_string(),
-        provider_events_path: None,
-        provider_session_id: None,
-        provider_session_path: None,
-        conversation_event_count: 2,
-        conversation_bytes: 10,
-        supervision: Some(SupervisedInvocation {
-            invocation_id: loopflow::durable::AgentInvocationId::parse(INVOCATION_ID)
-                .expect("invocation id"),
-            supervising_run_id: lease.run_id,
-            account_id: None,
-            resume_token: None,
-        }),
-    };
-    let turn = AgentTurnRow {
-        id: "turn-wave-mutate".to_string(),
-        invocation_id: invocation.id.clone(),
-        ordinal: 1,
-        provider_turn_id: None,
-        started_at: now - 30,
-        ended_at: Some(now - 20),
-        status: "completed".to_string(),
-        input_op: "initial".to_string(),
-        context_coverage: "assembled".to_string(),
-        tokenizer: "o200k_base".to_string(),
-        system_prompt_path: None,
-        task_prompt_path: "traces/invocation-wave-mutate/task.md".to_string(),
-        system_tokens: 0,
-        task_tokens: 10,
-        supplied_context_tokens: 10,
-        usage: None,
-        context_gather_ms: 1,
-        context_render_ms: 1,
-        context_persist_ms: 1,
-        first_event_seq: None,
-        last_event_seq: None,
-        root_output: None,
-        basis: None,
-    };
-    store
-        .insert_trace_capture(&invocation, &turn, &[], &[])
-        .expect("seed skill invocation");
-    store
-        .record_turn_usage_sample(&TurnUsageSample {
-            turn_id: turn.id,
-            observed_at: now - 20,
-            final_receipt: true,
-            usage: TurnUsage {
-                input_tokens: Some(10),
-                total_input_tokens: Some(10),
-                peak_input_tokens: Some(10),
-                context_window_tokens: Some(100),
-                output_tokens: Some(5),
-                cache_read_tokens: Some(0),
-                cost_usd: Some(0.01),
-                ..TurnUsage::default()
-            },
-        })
-        .expect("seed provider usage");
     wave
-}
-
-fn activate_runtime_generation(home: &Path, store: &SqliteStore) {
-    let home_id = store.local_home().expect("local Home").id;
-    rusqlite::Connection::open(home.join("loopflow.db"))
-        .expect("open status store")
-        .execute(
-            "INSERT INTO home_runtime_generations (
-                home_id, generation, build_version, source_revision,
-                migration_frontier, activated_at
-             ) VALUES (?1, 1, 'test', 'test', 'status_truth', ?2)",
-            rusqlite::params![home_id.as_str(), OffsetDateTime::now_utc().unix_timestamp()],
-        )
-        .expect("activate runtime generation");
 }
 
 fn test_project(wave: &Wave, slug: &str, updated_at: OffsetDateTime) -> Project {
@@ -304,30 +89,12 @@ fn put_project_snapshot(home: &Path, wave: &Wave, project: &Project) {
         .expect("seed PM snapshot");
 }
 
-fn seed_credential_history(home: &Path) -> (Project, String) {
+fn seed_credential_history(home: &Path) -> Project {
     let wave = seed(home, "infrastructure");
     let store = SqliteStore::new(&home.join("loopflow.db")).expect("open status store");
     let now = OffsetDateTime::now_utc();
     let project = test_project(&wave, "stability-security", now);
     store.insert_project(&project).expect("seed Project");
-    let work = store
-        .work_for_child(&ChildRef::Project(project.id.clone()))
-        .expect("resolve Project Work");
-
-    let (_, failed_lease) = store
-        .reserve_run(&work, &RunTrigger::User)
-        .expect("reserve failed Run");
-    store
-        .advance_run(
-            &failed_lease,
-            &RunAdvance::RunStarting {
-                containment: Containment::Tmux {
-                    name: "credential-ghost".to_string(),
-                },
-                cwd: home.join("repo"),
-            },
-        )
-        .expect("start failed Run");
     let failure = store
         .append_project_event(
             &project.id,
@@ -337,128 +104,14 @@ fn seed_credential_history(home: &Path) -> (Project, String) {
             },
         )
         .expect("record failure history");
-    let connection =
-        rusqlite::Connection::open(home.join("loopflow.db")).expect("open status store");
-    connection
-        .execute(
-            "UPDATE project_events SET run_id=?2, created_at=created_at-60 WHERE id=?1",
-            rusqlite::params![failure.id, failed_lease.run_id.as_str()],
-        )
-        .expect("attribute historical failure");
-    connection
-        .execute(
-            "UPDATE runs SET state='ended', ended_at=?2 WHERE id=?1",
-            rusqlite::params![failed_lease.run_id.as_str(), now.unix_timestamp() - 30],
-        )
-        .expect("end failed Run");
-
-    let (_, successful_lease) = store
-        .reserve_run(&work, &RunTrigger::User)
-        .expect("reserve successful Run");
-    store
-        .advance_run(
-            &successful_lease,
-            &RunAdvance::RunStarting {
-                containment: Containment::Tmux {
-                    name: "healthy-successor".to_string(),
-                },
-                cwd: home.join("repo"),
-            },
-        )
-        .expect("start successful Run");
-    let invocation = match store
-        .advance_run(
-            &successful_lease,
-            &RunAdvance::InvocationStarting {
-                route: InvocationRoute {
-                    provider: "codex".to_string(),
-                    model: Some("gpt-5".to_string()),
-                    account_id: None,
-                },
-                surface: "headless".to_string(),
-                resume_token: None,
-                answer_ask_id: None,
-            },
-        )
-        .expect("start successful Invocation")
-    {
-        AdvanceReceipt::Invocation(invocation) => invocation,
-        receipt => panic!("expected Invocation receipt, got {receipt:?}"),
-    };
-    store
-        .advance_run(
-            &successful_lease,
-            &RunAdvance::InvocationEnded {
-                invocation_id: invocation.id,
-                outcome: BoundaryState::Succeeded,
-            },
-        )
-        .expect("finish successful Invocation");
-    connection
-        .execute(
-            "UPDATE runs SET state='ended', ended_at=?2 WHERE id=?1",
-            rusqlite::params![successful_lease.run_id.as_str(), now.unix_timestamp()],
-        )
-        .expect("end successful Run");
-    put_project_snapshot(home, &wave, &project);
-    (project, failed_lease.run_id.to_string())
-}
-
-fn seed_running_project(home: &Path, observation: &str, stalled: bool) -> Project {
-    let wave = seed(home, "infrastructure");
-    let store = SqliteStore::new(&home.join("loopflow.db")).expect("open status store");
-    activate_runtime_generation(home, &store);
-    let now = OffsetDateTime::now_utc();
-    let updated_at = if stalled {
-        now - time::Duration::minutes(31)
-    } else {
-        now
-    };
-    let project = test_project(&wave, &format!("project-{observation}"), updated_at);
-    store.insert_project(&project).expect("seed Project");
-    let work = store
-        .work_for_child(&ChildRef::Project(project.id.clone()))
-        .expect("resolve Project Work");
-    let (_, lease) = store
-        .reserve_run(&work, &RunTrigger::User)
-        .expect("reserve Project Run");
-    store
-        .advance_run(
-            &lease,
-            &RunAdvance::RunStarting {
-                containment: Containment::Tmux {
-                    name: format!("project-{observation}"),
-                },
-                cwd: home.join("repo"),
-            },
-        )
-        .expect("start Project Run");
-    if stalled {
-        let event = store
-            .append_project_event(&project.id, &ProjectEventKind::Started)
-            .expect("record Project progress");
-        let connection =
-            rusqlite::Connection::open(home.join("loopflow.db")).expect("open status store");
-        connection
-            .execute(
-                "UPDATE project_events SET created_at=?2 WHERE id=?1",
-                rusqlite::params![event.id, updated_at.unix_timestamp()],
-            )
-            .expect("age Project event");
-        connection
-            .execute(
-                "UPDATE projects SET updated_at=?2 WHERE id=?1",
-                rusqlite::params![project.id.as_str(), updated_at.unix_timestamp()],
-            )
-            .expect("age Project state");
-    }
     rusqlite::Connection::open(home.join("loopflow.db"))
         .expect("open status store")
         .execute(
-            "UPDATE run_liveness SET observation=?2, observed_at=?3 WHERE run_id=?1",
-            rusqlite::params![lease.run_id.as_str(), observation, now.unix_timestamp()],
+            "UPDATE project_events SET created_at=created_at-60 WHERE id=?1",
+            [failure.id],
         )
-        .expect("set Run liveness");
+        .expect("age historical failure");
+    put_project_snapshot(home, &wave, &project);
     project
 }
 
@@ -506,45 +159,6 @@ fn status_human(home: &Path, wave: &str) -> String {
         String::from_utf8_lossy(&output.stderr)
     );
     String::from_utf8(output.stdout).expect("status is utf8")
-}
-
-fn project_status(home: &Path, project: &str, json: bool) -> String {
-    let mut command = Command::new(env!("CARGO_BIN_EXE_lf"));
-    command
-        .args(["project", "status", project])
-        .env("LF_HOME", home)
-        .env_remove("LF_DB_PATH")
-        .env_remove("LF_CONTROL_HOME")
-        .env_remove("LF_CONTROL_DB_PATH")
-        .current_dir(home.join("repo"));
-    if json {
-        command.arg("--json");
-    }
-    let output = command.output().expect("lf project status runs");
-    assert!(
-        output.status.success(),
-        "lf project status failed: {}",
-        String::from_utf8_lossy(&output.stderr)
-    );
-    String::from_utf8(output.stdout).expect("Project status is utf8")
-}
-
-fn work_status_json(home: &Path, project_id: &str) -> serde_json::Value {
-    let output = Command::new(env!("CARGO_BIN_EXE_lf"))
-        .args(["work", "status", "project", project_id, "--json"])
-        .env("LF_HOME", home)
-        .env_remove("LF_DB_PATH")
-        .env_remove("LF_CONTROL_HOME")
-        .env_remove("LF_CONTROL_DB_PATH")
-        .current_dir(home.join("repo"))
-        .output()
-        .expect("lf work status runs");
-    assert!(
-        output.status.success(),
-        "lf work status failed: {}",
-        String::from_utf8_lossy(&output.stderr)
-    );
-    serde_json::from_slice(&output.stdout).expect("lf work status emits JSON")
 }
 
 fn roadmap_json(home: &Path, wave: &str) -> serde_json::Value {
@@ -664,15 +278,10 @@ fn seed_stale_project_work(home: &Path, abandon_stale_project: bool) {
         let stale_work = store
             .work_for_child(&ChildRef::Project(stale.id.clone()))
             .expect("resolve stale Project Work");
-        let stale_basis = store
-            .current_epoch(&stale_work)
-            .expect("read stale Project epoch")
-            .current_basis;
         store
             .abandon(
                 &stale_work,
                 "Project is absent from the current PM snapshot",
-                &stale_basis,
             )
             .expect("retire stale Project Work");
     }
@@ -701,24 +310,6 @@ fn seed_stale_project_work(home: &Path, abandon_stale_project: bool) {
     store
         .insert_project(&current)
         .expect("seed current Project");
-
-    let work = store
-        .work_for_child(&ChildRef::Project(current.id.clone()))
-        .expect("resolve current Project Work");
-    let (_, lease) = store
-        .reserve_run(&work, &RunTrigger::User)
-        .expect("reserve current Project Run");
-    store
-        .advance_run(
-            &lease,
-            &RunAdvance::RunStarting {
-                containment: Containment::Tmux {
-                    name: "missing-current-project".to_string(),
-                },
-                cwd: repo.clone(),
-            },
-        )
-        .expect("start current Project Run");
 
     let bin = home.join("bin");
     std::fs::create_dir_all(&bin).expect("test bin");
@@ -835,163 +426,34 @@ fn seed_previous_release_task_pr(home: &Path) {
     drop(store);
 
     let connection = rusqlite::Connection::open(&database).expect("reopen migrated store");
+    let frontier: String = connection
+        .query_row(
+            "SELECT version FROM schema_migrations ORDER BY rowid DESC LIMIT 1",
+            [],
+            |row| row.get(0),
+        )
+        .expect("read current migration frontier");
     assert_eq!(
-        loopflow::store::migrations::latest_version_sqlite(&connection)
-            .expect("current migration frontier"),
+        frontier,
         loopflow::store::migrations::latest_known_version()
     );
     drop(connection);
-    apply_status_truth(&database);
-}
-
-fn execs_json(home: &Path) -> serde_json::Value {
-    let output = Command::new(env!("CARGO_BIN_EXE_lf"))
-        .args(["execs", "--json"])
-        .env("LF_HOME", home)
-        .env_remove("LF_DB_PATH")
-        .env_remove("LF_CONTROL_HOME")
-        .env_remove("LF_CONTROL_DB_PATH")
-        .output()
-        .expect("lf execs runs");
-    assert!(
-        output.status.success(),
-        "lf execs failed: {}",
-        String::from_utf8_lossy(&output.stderr)
-    );
-    serde_json::from_slice(&output.stdout).expect("lf execs emits JSON")
-}
-
-fn runs_json(home: &Path) -> serde_json::Value {
-    let output = Command::new(env!("CARGO_BIN_EXE_lf"))
-        .args(["runs", "--json"])
-        .env("LF_HOME", home)
-        .env_remove("LF_DB_PATH")
-        .env_remove("LF_CONTROL_HOME")
-        .env_remove("LF_CONTROL_DB_PATH")
-        .output()
-        .expect("lf runs runs");
-    assert!(
-        output.status.success(),
-        "lf runs failed: {}",
-        String::from_utf8_lossy(&output.stderr)
-    );
-    serde_json::from_slice(&output.stdout).expect("lf runs emits JSON")
-}
-
-fn runs_json_filtered(home: &Path, filter: &[&str]) -> serde_json::Value {
-    let output = Command::new(env!("CARGO_BIN_EXE_lf"))
-        .arg("runs")
-        .args(filter)
-        .arg("--json")
-        .env("LF_HOME", home)
-        .env_remove("LF_DB_PATH")
-        .env_remove("LF_CONTROL_HOME")
-        .env_remove("LF_CONTROL_DB_PATH")
-        .output()
-        .expect("lf runs runs");
-    assert!(
-        output.status.success(),
-        "lf runs failed: {}",
-        String::from_utf8_lossy(&output.stderr)
-    );
-    serde_json::from_slice(&output.stdout).expect("lf runs emits JSON")
-}
-
-fn trace_json(home: &Path, exec_id: &str) -> serde_json::Value {
-    let output = Command::new(env!("CARGO_BIN_EXE_lf"))
-        .args(["trace", exec_id, "--json"])
-        .env("LF_HOME", home)
-        .env_remove("LF_DB_PATH")
-        .env_remove("LF_CONTROL_HOME")
-        .env_remove("LF_CONTROL_DB_PATH")
-        .output()
-        .expect("lf trace runs");
-    assert!(
-        output.status.success(),
-        "lf trace failed: {}",
-        String::from_utf8_lossy(&output.stderr)
-    );
-    serde_json::from_slice(&output.stdout).expect("lf trace emits JSON")
-}
-
-fn invocation_status_json(home: &Path, invocation_id: &str) -> serde_json::Value {
-    let output = Command::new(env!("CARGO_BIN_EXE_lf"))
-        .args(["invocation", "status", invocation_id, "--json"])
-        .env("LF_HOME", home)
-        .env_remove("LF_DB_PATH")
-        .env_remove("LF_CONTROL_HOME")
-        .env_remove("LF_CONTROL_DB_PATH")
-        .output()
-        .expect("lf invocation status runs");
-    assert!(
-        output.status.success(),
-        "lf invocation status failed: {}",
-        String::from_utf8_lossy(&output.stderr)
-    );
-    serde_json::from_slice(&output.stdout).expect("lf invocation status emits JSON")
-}
-
-#[test]
-fn legacy_invocation_id_selector_resolves_to_canonical_history() {
-    let home = tempfile::tempdir().expect("tempdir");
-    seed(home.path(), "audit-a");
-
-    let status = invocation_status_json(home.path(), LEGACY_INVOCATION_ID);
-
-    assert_eq!(status["invocation"]["id"], INVOCATION_ID);
-    assert_eq!(status["current"]["state"], "history");
-}
-
-#[test]
-fn status_reports_skill_runs_without_lookup_or_flow_processes() {
-    let home = tempfile::tempdir().expect("tempdir");
-    seed(home.path(), "audit-a");
-
-    let status = status_json(home.path(), &["audit-a"], None);
-
-    assert_eq!(status["wave"]["name"], "audit-a");
-    assert_eq!(status["runs"]["state"], "ok");
-    let runs = status["runs"]["items"].as_array().expect("runs array");
-    assert_eq!(runs.len(), 1);
-    let skill = runs
-        .iter()
-        .find(|run| run["skill"] == "wave/mutate")
-        .expect("the wave's skill is in its status");
-    assert_eq!(skill["flow"], "wave");
-    assert_eq!(skill["provider"], "codex");
-    assert_eq!(skill["supplied_context_tokens"], 10);
-    assert_eq!(skill["input_tokens"], 10);
-    assert_eq!(skill["output_tokens"], 5);
-
-    let human = status_human(home.path(), "audit-a");
-    assert!(human.contains("wave/wave/mutate"));
-    assert!(human.contains("ctx      10"));
-    assert!(human.contains("tok      15"));
-    assert!(!human.contains("pm sync"));
-    assert!(!human.contains("build"));
-
-    // Nothing is waiting, and the snapshot says so — it does not omit the field.
-    assert_eq!(status["attention"]["state"], "ok");
-    assert_eq!(status["attention"]["items"], serde_json::json!([]));
 }
 
 #[test]
 fn status_surfaces_keep_credential_failure_in_history() {
     let home = tempfile::tempdir().expect("tempdir");
-    let (project, failed_run_id) = seed_credential_history(home.path());
+    let project = seed_credential_history(home.path());
 
     let status = status_json(home.path(), &["infrastructure"], None);
     let runtime = &status["projects"][0]["runtime"];
     assert_eq!(runtime["status"], "ready");
-    assert_eq!(runtime["current"]["state"], "ready");
-    assert_eq!(runtime["current"]["reason"], "ready");
     assert_eq!(runtime["reason"], "ready");
+    assert!(runtime.get("current").is_none());
     assert_eq!(
         runtime["last_failure"]["message"],
         "project runner failed: credential is missing"
     );
-    assert_eq!(runtime["last_failure"]["run_id"], failed_run_id);
-
     let human = status_human(home.path(), "infrastructure");
     let current_line = human
         .lines()
@@ -1001,162 +463,6 @@ fn status_surfaces_keep_credential_failure_in_history() {
     assert!(!current_line.contains("credential"));
     assert!(human.contains("last failure at "));
     assert!(human.contains("project runner failed: credential is missing"));
-}
-
-#[test]
-fn status_surfaces_defensively_render_absent_or_unobservable_active_truth() {
-    for (observation, state, reason) in [
-        (
-            "absent",
-            "stopped",
-            "the owning Home proved the Run process is gone",
-        ),
-        (
-            "unprovable",
-            "unobservable",
-            "the owning Home could not verify current Run liveness",
-        ),
-    ] {
-        let home = tempfile::tempdir().expect("tempdir");
-        let project = seed_running_project(home.path(), observation, false);
-
-        let json: serde_json::Value =
-            serde_json::from_str(&project_status(home.path(), &project.plan.slug, true))
-                .expect("lf project status emits JSON");
-        assert_eq!(json["current"]["state"], state);
-        assert_eq!(json["current"]["reason"], reason);
-        assert_eq!(json["reason"], reason);
-
-        let human = project_status(home.path(), &project.plan.slug, false);
-        assert!(human.contains(state));
-        assert!(human.contains(&format!("reason: {reason}")));
-        assert!(!human.contains(" is active"));
-    }
-}
-
-#[test]
-fn status_surfaces_generic_work_matches_project_progress() {
-    let home = tempfile::tempdir().expect("tempdir");
-    let project = seed_running_project(home.path(), "present", true);
-
-    let focused: serde_json::Value =
-        serde_json::from_str(&project_status(home.path(), &project.plan.slug, true))
-            .expect("lf project status emits JSON");
-    let generic = work_status_json(home.path(), project.id.as_str());
-
-    assert_eq!(focused["current"]["state"], "stalled");
-    assert_eq!(generic["current"]["state"], "stalled");
-    assert_eq!(focused["current"]["reason"], generic["current"]["reason"]);
-    assert_eq!(focused["current"]["step"], generic["current"]["step"]);
-    let focused_age = focused["current"]["progress_age_secs"]
-        .as_u64()
-        .expect("focused progress age");
-    let generic_age = generic["current"]["progress_age_secs"]
-        .as_u64()
-        .expect("generic progress age");
-    assert!(focused_age.abs_diff(generic_age) <= 2);
-}
-
-#[test]
-fn execs_keep_the_lookup_process_ledger() {
-    let home = tempfile::tempdir().expect("tempdir");
-    seed(home.path(), "audit-execs");
-
-    let execs = execs_json(home.path());
-    let execs = execs.as_array().expect("exec array");
-    let lookup = execs
-        .iter()
-        .find(|exec| exec["label"] == "pm sync")
-        .expect("lookup stays available as an exec");
-    assert_eq!(lookup["status"], "ok");
-    assert_eq!(lookup["trace_id"], "run-1");
-
-    let trace = trace_json(home.path(), "proc-lookup");
-    assert_eq!(trace["spans"][0]["process_id"], "proc-lookup");
-}
-
-#[test]
-fn runs_are_skill_invocations_with_context_and_token_evidence() {
-    let home = tempfile::tempdir().expect("tempdir");
-    seed(home.path(), "audit-runs");
-
-    let runs = runs_json(home.path());
-    let runs = runs.as_array().expect("run array");
-    assert_eq!(runs.len(), 1);
-    let run = &runs[0];
-    assert_eq!(run["id"], INVOCATION_ID);
-    assert_eq!(run["trace_id"], "run-resident");
-    assert_eq!(run["exec_id"], "proc-resident");
-    assert_eq!(run["skill"], "wave/mutate");
-    assert_eq!(run["supplied_context_tokens"], 10);
-    assert_eq!(run["input_tokens"], 10);
-    assert_eq!(run["output_tokens"], 5);
-    // A run declares the roadmap Project/Task that owns it — the foreign key a
-    // roadmap row drills through to reach its runs.
-    assert_eq!(run["project"], "auditability");
-    assert_eq!(run["task"], "W2-122");
-}
-
-/// The drill: `lf runs --task <id>` joins a roadmap Task to exactly the runs it
-/// produced, by the Linear issue identifier. A non-matching identifier finds
-/// nothing rather than guessing.
-#[test]
-fn runs_drill_to_one_task_by_issue_identifier() {
-    let home = tempfile::tempdir().expect("tempdir");
-    seed(home.path(), "audit-drill");
-
-    let matched = runs_json_filtered(home.path(), &["--task", "W2-122"]);
-    let matched = matched.as_array().expect("run array");
-    assert_eq!(matched.len(), 1);
-    assert_eq!(matched[0]["task"], "W2-122");
-    assert_eq!(matched[0]["trace_id"], "run-resident");
-
-    let missed = runs_json_filtered(home.path(), &["--task", "W2-999"]);
-    assert_eq!(missed.as_array().expect("run array").len(), 0);
-}
-
-/// Project drill applies before the result cap, using the slug carried by the
-/// invocation rather than inferring ownership from its Wave or Task.
-#[test]
-fn runs_drill_to_one_project_by_slug() {
-    let home = tempfile::tempdir().expect("tempdir");
-    seed(home.path(), "audit-project-drill");
-
-    let matched = runs_json_filtered(home.path(), &["--project", "auditability"]);
-    let matched = matched.as_array().expect("run array");
-    assert_eq!(matched.len(), 1);
-    assert_eq!(matched[0]["project"], "auditability");
-
-    let missed = runs_json_filtered(home.path(), &["--project", "no-such-project"]);
-    assert_eq!(missed.as_array().expect("run array").len(), 0);
-}
-
-/// The wave drill mirrors the internal scoping `lf status` uses.
-#[test]
-fn runs_drill_to_one_wave_by_name() {
-    let home = tempfile::tempdir().expect("tempdir");
-    seed(home.path(), "audit-wave-drill");
-
-    let matched = runs_json_filtered(home.path(), &["--wave", "audit-wave-drill"]);
-    assert_eq!(matched.as_array().expect("run array").len(), 1);
-
-    let missed = runs_json_filtered(home.path(), &["--wave", "no-such-wave"]);
-    assert_eq!(missed.as_array().expect("run array").len(), 0);
-}
-
-/// The drill loop closes: `lf trace` accepts the invocation id `lf runs` prints,
-/// resolving it to the complete trace.
-#[test]
-fn trace_opens_from_the_invocation_id_lf_runs_prints() {
-    let home = tempfile::tempdir().expect("tempdir");
-    seed(home.path(), "audit-trace-invocation");
-
-    let trace = trace_json(home.path(), INVOCATION_ID);
-    assert_eq!(trace["trace_id"], "run-resident");
-    let spans = trace["spans"].as_array().expect("span array");
-    assert!(spans
-        .iter()
-        .any(|span| span["process_id"] == "proc-resident"));
 }
 
 /// The reproduced break: inside a resident wave, `LF_WAVE_ID` is a wave id, and
@@ -1338,7 +644,6 @@ fn a_wave_with_no_runs_reports_an_empty_reading_not_a_missing_one() {
     std::fs::create_dir_all(home.path()).expect("home");
     let database = home.path().join("loopflow.db");
     let store = SqliteStore::new(&database).expect("open store");
-    apply_status_truth(&database);
     std::fs::create_dir_all(home.path().join("repo")).expect("repo");
     let wave = Wave::new(
         WaveId::new(),
@@ -1369,18 +674,12 @@ fn orphaned_task_work_preserves_status_and_roadmap_evidence() {
         "PRD-52"
     );
     assert_eq!(status["runs"]["state"], "ok");
-    assert_eq!(status["runs"]["items"].as_array().expect("runs").len(), 1);
+    assert_eq!(status["runs"]["items"].as_array().expect("runs").len(), 0);
     assert_eq!(status["attention"]["state"], "ok");
     let attention = status["attention"]["items"]
         .as_array()
         .expect("attention items");
-    assert_eq!(attention.len(), 1);
-    assert_eq!(attention[0]["subject"], "auditability");
-    assert_eq!(attention[0]["owner"], "wave");
-    assert_eq!(
-        attention[0]["reason"],
-        "the owning Home could not verify current Run liveness"
-    );
+    assert!(attention.is_empty());
 
     let unavailable = status["unavailable_projects"]
         .as_array()

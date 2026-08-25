@@ -67,7 +67,7 @@ struct LoopflowApp: App {
             .uiTestWindowWidth()
             .uiTestSnapshot()
             .task {
-                openCaptureViewIfNeeded(repoURL: launchRepoURL)
+                openCaptureViewIfNeeded()
             }
         }
         .windowStyle(.automatic)
@@ -149,51 +149,15 @@ struct LoopflowApp: App {
         }
         .defaultSize(width: 1180, height: 860)
 
-        WindowGroup("Context Lab", id: "context-lab", for: ContextLabRoute.self) { $route in
-            if let route, route.isWaveScoped {
-                ContextLabView(route: route)
-                .frame(minWidth: 1120, minHeight: 680)
-                .tint(.loopflowBurgundy)
-                .preferredColorScheme(theme.preferredScheme)
-                .environment(\.palette, theme.palette)
-            } else {
-                ContentUnavailableView(
-                    "Open Context Lab from a Wave",
-                    systemImage: "water.waves",
-                    description: Text("Select a Wave, then open Context Lab from its header.")
-                )
-                .frame(minWidth: 720, minHeight: 480)
-                .preferredColorScheme(theme.preferredScheme)
-                .environment(\.palette, theme.palette)
-            }
-        }
-        .windowResizability(.contentMinSize)
-        .defaultSize(width: 1420, height: 900)
-
-        WindowGroup("Task workspace", id: "task-workspace", for: TaskWorkspaceRoute.self) { $route in
-            if let route, route.context.isWaveScoped {
-                TaskWorkspaceWindow(route: route)
-                    .tint(.loopflowBurgundy)
-                    .preferredColorScheme(theme.preferredScheme)
-                    .environment(\.palette, theme.palette)
-            }
-        }
-        .defaultSize(width: 1180, height: 820)
     }
 
     @MainActor
-    private func openCaptureViewIfNeeded(repoURL: URL?) {
+    private func openCaptureViewIfNeeded() {
         guard !didOpenCaptureView, let target = AppTestMode.captureTarget else { return }
         didOpenCaptureView = true
         switch target {
         case .primary:
             break
-        case .contextLab:
-            guard let repoURL, let wave = AppTestMode.selectBranch else { return }
-            openWindow(
-                id: "context-lab",
-                value: ContextLabRoute.wave(repoPath: repoURL.path, wave: wave)
-            )
         case .window(let id):
             openWindow(id: id)
         }

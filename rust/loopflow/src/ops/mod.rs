@@ -28,9 +28,7 @@ pub(crate) mod util;
 
 pub use abandon::{abandon_branch, AbandonOptions};
 pub(crate) use ask_comments::publish_pending_ask_comments;
-#[doc(hidden)]
-pub use child::ambient_run_context;
-pub(crate) use child::required_run_context;
+pub(crate) use child::ambient_author;
 pub(crate) use commit::checkpoint_task_worktree;
 pub use commit::{commit_workflow, commit_workflow_traced, CommitOptions};
 pub(crate) use cron::cron_receipt_ids;
@@ -61,7 +59,7 @@ pub use release::{
     release_run, release_status, release_tag, MergedPr, ReleaseNotesDegradation,
     ReleaseNotesStatus, ReleaseReceipt, ReleaseRunOutcome, ReleaseStatusResult,
 };
-pub(crate) use run::{launch_in_run, DirectRun, RunLaunch};
+pub(crate) use run::{launch_work, WorkLaunch, TASK_ACCOUNT_ID_ENV, TASK_RESUME_TOKEN_ENV};
 #[doc(hidden)]
 pub use run::{resolve_work_binding, WorkBinding};
 pub use trace::{hash_prompt, trace_enabled, MockResponses, OpTrace, Tracer};

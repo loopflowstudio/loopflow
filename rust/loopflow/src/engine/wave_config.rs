@@ -87,14 +87,6 @@ pub struct WaveConfig {
     /// live (`crate::wave::runtime::WaveRuntime::paused`), not the registry
     /// row.
     pub paused: Option<bool>,
-    /// Backup agent for disconnect-class body failures: when an opencode body
-    /// goes hollow or the SSE stream disconnects, the next generation is handed
-    /// to this agent instead of retrying the same flaky provider. Example:
-    /// `backup_agent: claude:opus`. Absent → no auto-handoff (the body fails
-    /// and the supervisor respawns the same agent if replay-safe, or stops).
-    /// Re-read live from GOAL.md, not the registry row.
-    #[serde(default)]
-    pub backup_agent: Option<String>,
 }
 
 /// Read wave intent from `wave/<name>/GOAL.md` frontmatter.

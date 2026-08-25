@@ -9,7 +9,7 @@ struct WaveTests {
             id: "wave-123",
             name: "infrastructure",
             repo: "/tmp/repo",
-            status: .running(runID: "run_test"),
+            status: .ready,
             live: true
         ))
 

@@ -7,7 +7,6 @@ NAV_SLUGS = [
     "authoring",
     "agent-api",
     "conducting",
-    "architecture",
     "lf",
     "config",
     "subscriptions",
@@ -21,6 +20,12 @@ def test_docs_page_loads(page: Page, base_url: str):
     assert page.locator(".docs-layout").is_visible()
     assert page.locator(".docs-nav").is_visible()
     assert page.locator(".docs-content").is_visible()
+    assert page.locator(".docs-nav-area-title").all_text_contents() == [
+        "Start",
+        "Plan and conduct",
+        "Build and extend",
+        "Reference",
+    ]
 
 
 def test_docs_sidebar_links_resolve(page: Page, base_url: str):
@@ -76,6 +81,47 @@ def test_docs_subscriptions_page_owns_account_selection(
 def test_docs_nonexistent_redirects(page: Page, base_url: str):
     page.goto(f"{base_url}/docs/nonexistent-page")
     assert page.url == f"{base_url}/docs"
+
+
+def test_developer_architecture_is_hidden_from_public_docs(page: Page, base_url: str):
+    page.goto(f"{base_url}/docs")
+    assert page.locator('.docs-nav a[href="/docs/architecture"]').count() == 0
+
+    page.goto(f"{base_url}/docs/architecture")
+    assert page.url == f"{base_url}/docs"
+
+
+def test_developer_architecture_has_its_own_reading_surface(
+    page: Page, base_url: str
+):
+    page.goto(f"{base_url}/architecture")
+    assert page.locator('meta[name="robots"]').get_attribute("content") == "noindex,nofollow"
+    assert page.locator(".docs-content h1").inner_text() == "Architecture"
+    assert page.locator(".docs-nav-architecture").is_visible()
+    assert page.locator(".docs-outline").is_visible()
+    assert page.locator(".docs-content").evaluate(
+        "el => getComputedStyle(el).backgroundColor"
+    ) == "rgba(0, 0, 0, 0)"
+    assert page.locator('a[href="/architecture/execution"]').count() >= 1
+    assert page.locator(".docs-md-link a").get_attribute("href") == "/architecture.md"
+
+    response = page.request.get(f"{base_url}/architecture")
+    assert response.headers["x-robots-tag"] == "noindex, nofollow"
+
+
+def test_architecture_area_routes_render(page: Page, base_url: str):
+    for slug in (
+        "execution",
+        "planning",
+        "delivery",
+        "homes",
+        "data",
+        "codebase",
+        "reference",
+    ):
+        page.goto(f"{base_url}/architecture/{slug}")
+        assert page.url.endswith(f"/architecture/{slug}")
+        assert page.locator(".docs-content h1").is_visible()
 
 
 def test_retired_docs_redirect(page: Page, base_url: str):

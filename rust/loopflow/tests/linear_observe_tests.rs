@@ -70,11 +70,11 @@ fn linear_edits_and_comments_stream_into_task_control_exactly_once() {
     let work = rt
         .block_on(task.store.work_for_child(&target))
         .expect("work");
-    let seed = rt
-        .block_on(task.store.boundary_seed(&work))
-        .expect("boundary seed");
-    assert_eq!(seed.steers.len(), 1);
-    assert!(seed.steers[0].text.contains("New title"));
+    let steers = rt
+        .block_on(task.store.work_steers(&work))
+        .expect("Work steers");
+    assert_eq!(steers.len(), 1);
+    assert!(steers[0].text.contains("New title"));
 
     // 2. Re-deliver the same edit → no duplicate directive.
     let outcome = rt
@@ -108,11 +108,11 @@ fn linear_edits_and_comments_stream_into_task_control_exactly_once() {
         .expect("duplicate comment");
     assert!(duplicate.is_none(), "redelivery is a no-op");
 
-    let seed = rt
-        .block_on(task.store.boundary_seed(&work))
-        .expect("boundary seed");
-    assert_eq!(seed.steers.len(), 2, "one edit + one comment, no dup");
-    assert!(seed.steers[1].text.contains("please prioritize"));
+    let steers = rt
+        .block_on(task.store.work_steers(&work))
+        .expect("Work steers");
+    assert_eq!(steers.len(), 2, "one edit + one comment, no dup");
+    assert!(steers[1].text.contains("please prioritize"));
 
     // 4. A stale, out-of-order edit (older revision, older content) is dropped.
     let outcome = rt

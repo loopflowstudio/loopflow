@@ -52,6 +52,7 @@ def test_llms_txt_is_spec_shaped(page: Page, base_url: str):
     assert lines[1].startswith("> ")
     assert "## Docs" in body
     assert "/docs/agent-api.md)" in body
+    assert "/docs/architecture" not in body
     assert "/llms-full.txt" in body
 
 
@@ -61,6 +62,19 @@ def test_llms_full_txt(page: Page, base_url: str):
     body = response.text()
     assert "# Waves" in body
     assert "# The Agent API" in body
+    assert "# Architecture" not in body
+
+
+def test_internal_architecture_markdown_is_not_in_public_docs(
+    page: Page, base_url: str
+):
+    public = page.request.get(f"{base_url}/docs/architecture.md")
+    assert public.status == 404
+
+    internal = page.request.get(f"{base_url}/architecture/execution.md")
+    assert internal.status == 200
+    assert "text/markdown" in internal.headers["content-type"]
+    assert "canonical_url: https://loopflow.studio/architecture/execution" in internal.text()
 
 
 def test_sitemap(page: Page, base_url: str):

@@ -41,7 +41,6 @@ struct WaveDetailPane: View {
     let onClose: () -> Void
 
     @Environment(\.palette) private var palette
-    @Environment(\.openWindow) private var openWindow
     @State private var selection: WaveWorkSelection?
     @State private var prefill: WaveComposerPrefill?
     @State private var workRefresh: UInt64 = 0
@@ -96,19 +95,6 @@ struct WaveDetailPane: View {
                 .foregroundStyle(palette.text)
 
             Spacer()
-
-            Button {
-                openWindow(
-                    id: "context-lab",
-                    value: ContextLabRoute.wave(repoPath: repoPath, wave: wave.name)
-                )
-            } label: {
-                Label("Context Lab", systemImage: "text.magnifyingglass")
-                    .font(Typography.caption())
-            }
-            .buttonStyle(.borderless)
-            .help("Study the instructions seen by this Wave's invocations")
-            .accessibilityIdentifier("wave-context-lab")
 
             Button {
                 onClose()
@@ -847,7 +833,7 @@ private struct WaveProjectWorkView: View {
 
                 Spacer()
 
-                if let status = project.runtime?.current.state.label {
+                if let status = project.runtime?.status.label {
                     Text(status)
                         .font(Typography.caption(10))
                         .foregroundStyle(palette.textSecondary)
@@ -911,7 +897,7 @@ private struct WaveProjectWorkView: View {
     /// The Project's lens, derived from its shared runtime and its Tasks'
     /// attention evidence — the same grammar the Wave and Task rows use.
     private var projectLens: WaveLens {
-        WaveLens.forProject(runtime: project.runtime, tasks: project.tasks)
+        WaveLens.forProject(tasks: project.tasks)
     }
 
     private var openTaskLabel: String {
@@ -979,7 +965,7 @@ private struct WaveTaskWorkView: View {
                         .foregroundStyle(palette.text)
                         .lineLimit(2)
                 }
-                Text("\(task.runtime?.current.state.label ?? "unstarted") · next: \(task.nextMove.owner.rawValue)")
+                Text("\(task.runtime?.status.label ?? "unstarted") · next: \(task.nextMove.owner.rawValue)")
                     .font(Typography.caption(10))
                     .foregroundStyle(palette.textSecondary)
                 if let directive = task.directive {
@@ -1039,7 +1025,7 @@ private struct WaveWorkInspector: View {
                     .foregroundStyle(palette.text)
                 details(
                     directive: project.directive,
-                    status: project.runtime?.current.state.label ?? "unstarted",
+                    status: project.runtime?.status.label ?? "unstarted",
                     reason: project.nextMove.reason,
                     provider: project.runtime?.provider,
                     location: nil,
@@ -1051,7 +1037,7 @@ private struct WaveWorkInspector: View {
                     .foregroundStyle(palette.text)
                 details(
                     directive: task.directive,
-                    status: task.runtime?.current.state.label ?? "unstarted",
+                    status: task.runtime?.status.label ?? "unstarted",
                     reason: task.attention.reason,
                     provider: task.runtime?.provider,
                     location: taskLocation,

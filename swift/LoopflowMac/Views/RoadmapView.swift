@@ -5,17 +5,13 @@ import SwiftUI
 
 enum RoadmapTaskAction: Equatable {
     case run
-    case attach
     case resume
-    case recover
     case openPr
 
     var label: String {
         switch self {
         case .run: "Start"
-        case .attach: "Attach"
         case .resume: "Resume"
-        case .recover: "Recover"
         case .openPr: "Open PR"
         }
     }
@@ -24,25 +20,19 @@ enum RoadmapTaskAction: Equatable {
 /// Pick the one contextual Task action from Rust's legal-action model. The
 /// server decides what is legal and recommends one move; this maps that
 /// recommendation onto the affordance the app can offer, and never re-derives
-/// it from status. Attach is the fallback for a live body with no lifecycle
-/// move waiting on it.
+/// it from status.
 func roadmapTaskAction(_ task: RoadmapTask) -> RoadmapTaskAction? {
-    guard let runtime = task.runtime else {
+    guard task.runtime != nil else {
         return task.attention.pmCompleted ? nil : .run
     }
     switch task.attention.actions.recommended {
-    case .recover: return .recover
     case .resume: return .resume
     case .openPr:
         if task.activePr?.publication?.github != nil { return .openPr }
     case .startNextPr, .complete, .noAction, .none:
         break
     }
-    return runtime.current.controls.contains(.attach) ? .attach : nil
-}
-
-func roadmapTaskCanInterrupt(_ task: RoadmapTask) -> Bool {
-    task.runtime?.current.controls.contains(.interrupt) ?? false
+    return nil
 }
 
 private struct RoadmapTaskSelection: Identifiable {
@@ -73,7 +63,7 @@ enum WorkLens: String, CaseIterable, Identifiable {
 /// it is greyed with its `next_move.reason` attached, so nothing silently
 /// disappears (the OmniFocus failure mode). One hiding mechanism, never two.
 func roadmapTaskIsActionable(_ task: RoadmapTask) -> Bool {
-    roadmapTaskAction(task) != nil || roadmapTaskCanInterrupt(task)
+    roadmapTaskAction(task) != nil
 }
 
 /// The Podium's shared Work surface: one machine-wide `lf roadmap --json`
@@ -92,7 +82,6 @@ struct RoadmapView: View {
     @State private var controlError: String?
     @State private var activeControlId: String?
     @State private var workspaceSelection: RoadmapTaskSelection?
-    @State private var interruptSelection: RoadmapTaskSelection?
 
     init(
         repoPath: String?,
@@ -181,23 +170,6 @@ struct RoadmapView: View {
                 terminalStore: terminalStore,
                 initialSection: .changes
             )
-        }
-        .confirmationDialog(
-            interruptSelection.map { "Interrupt \($0.task.task.identifier)?" } ?? "Interrupt Task?",
-            isPresented: Binding(
-                get: { interruptSelection != nil },
-                set: { if !$0 { interruptSelection = nil } }
-            ),
-            titleVisibility: .visible
-        ) {
-            Button("Interrupt Task", role: .destructive) {
-                guard let selection = interruptSelection else { return }
-                interruptSelection = nil
-                perform(.interrupt, on: selection)
-            }
-            Button("Cancel", role: .cancel) { interruptSelection = nil }
-        } message: {
-            Text("Queues the audited Task interrupt. Task Work and its worktree remain durable.")
         }
     }
 
@@ -420,9 +392,6 @@ struct RoadmapView: View {
                             onTaskAction: { row, action in
                                 perform(action, on: RoadmapTaskSelection(wave: row.wave, task: row.task))
                             },
-                            onInterrupt: { row in
-                                interruptSelection = RoadmapTaskSelection(wave: row.wave, task: row.task)
-                            },
                             onOpenWorktree: openWorktree
                         )
                     }
@@ -471,9 +440,6 @@ struct RoadmapView: View {
             onTaskAction: { task, action in
                 perform(action, on: RoadmapTaskSelection(wave: roadmap.wave, task: task))
             },
-            onInterrupt: { task in
-                interruptSelection = RoadmapTaskSelection(wave: roadmap.wave, task: task)
-            },
             onOpenWorktree: openWorktree
         )
     }
@@ -487,9 +453,6 @@ struct RoadmapView: View {
             onTaskAction: { task, action in
                 perform(action, on: RoadmapTaskSelection(wave: wave, task: task))
             },
-            onInterrupt: { task in
-                interruptSelection = RoadmapTaskSelection(wave: wave, task: task)
-            },
             onOpenWorktree: openWorktree
         )
     }
@@ -502,9 +465,6 @@ struct RoadmapView: View {
             onSelect: {},
             onAction: { action in
                 perform(action, on: RoadmapTaskSelection(wave: wave, task: task))
-            },
-            onInterrupt: {
-                interruptSelection = RoadmapTaskSelection(wave: wave, task: task)
             },
             onOpenWorktree: openWorktree
         )
@@ -551,18 +511,13 @@ struct RoadmapView: View {
     private enum TaskControl {
         case run
         case resume
-        case interrupt
     }
 
     private func perform(_ action: RoadmapTaskAction, on selection: RoadmapTaskSelection) {
         switch action {
-        case .attach:
-            workspaceSelection = selection
         case .run:
             perform(TaskControl.run, on: selection)
-        case .resume, .recover:
-            // Recovering a dead body and resuming a parked step are the same
-            // control; the label distinguishes them because the situations do.
+        case .resume:
             perform(TaskControl.resume, on: selection)
         case .openPr:
             if let github = selection.task.activePr?.publication?.github {
@@ -585,8 +540,6 @@ struct RoadmapView: View {
                         try LocalWaveAgentLauncher.runTask(repoPath: repo, issue: issue)
                     case .resume:
                         try LocalWaveAgentLauncher.resumeTask(repoPath: repo, issue: issue)
-                    case .interrupt:
-                        try LocalWaveAgentLauncher.interruptTask(repoPath: repo, issue: issue)
                     }
                 }.value
                 await refresh()
@@ -769,7 +722,6 @@ private struct RoadmapWaveCard: View {
     let onSetPaused: (Bool) async throws -> Void
     let onError: (String) -> Void
     let onTaskAction: (RoadmapTask, RoadmapTaskAction) -> Void
-    let onInterrupt: (RoadmapTask) -> Void
     let onOpenWorktree: (TaskWorkspaceSnapshot) -> Void
 
     @Environment(\.palette) private var palette
@@ -789,7 +741,7 @@ private struct RoadmapWaveCard: View {
                         Text(roadmap.wave.name)
                             .font(Typography.sectionTitle(18))
                             .foregroundStyle(palette.text)
-                        Text(roadmap.wave.current.state.label)
+                        Text(roadmap.wave.status.label)
                             .font(Typography.caption(10))
                             .foregroundStyle(palette.textSecondary)
                         if roadmap.wave.paused {
@@ -844,7 +796,6 @@ private struct RoadmapWaveCard: View {
                             activeControlId: activeControlId,
                             onSelect: onSelect,
                             onTaskAction: onTaskAction,
-                            onInterrupt: onInterrupt,
                             onOpenWorktree: onOpenWorktree
                         )
                     }
@@ -877,7 +828,6 @@ private struct RoadmapProjectCard: View {
     let activeControlId: String?
     let onSelect: (WorkReference) -> Void
     let onTaskAction: (RoadmapTask, RoadmapTaskAction) -> Void
-    let onInterrupt: (RoadmapTask) -> Void
     let onOpenWorktree: (TaskWorkspaceSnapshot) -> Void
 
     @Environment(\.palette) private var palette
@@ -918,7 +868,6 @@ private struct RoadmapProjectCard: View {
                             onSelect(.task(id: task.id))
                         },
                         onAction: { action in onTaskAction(task, action) },
-                        onInterrupt: { onInterrupt(task) },
                         onOpenWorktree: onOpenWorktree
                     )
                 }
@@ -954,7 +903,6 @@ struct RoadmapTaskRow: View {
     let activeControlId: String?
     let onSelect: () -> Void
     let onAction: (RoadmapTaskAction) -> Void
-    let onInterrupt: () -> Void
     let onOpenWorktree: (TaskWorkspaceSnapshot) -> Void
 
     @Environment(\.palette) private var palette
@@ -997,7 +945,6 @@ struct RoadmapTaskRow: View {
                     isActing: isActing,
                     controlsDisabled: activeControlId != nil,
                     onAction: onAction,
-                    onInterrupt: onInterrupt,
                     onOpenWorktree: onOpenWorktree
                 )
             }
@@ -1015,9 +962,8 @@ struct RoadmapTaskRow: View {
     }
 }
 
-/// The shared attention fold plus its orthogonal raw facts: PM completion,
-/// Work status and process liveness. `runtime == nil` means Work has not started — an
-/// Available Task, distinct from a dead process.
+/// The shared attention fold plus its orthogonal planning facts. `runtime == nil`
+/// means Work has not started.
 struct WorkChannelChips: View {
     let task: RoadmapTask
     @Environment(\.palette) private var palette
@@ -1028,27 +974,10 @@ struct WorkChannelChips: View {
             channel("PM", task.task.completed ? "done" : "open",
                     task.task.completed ? Color.statusSuccess : palette.textSecondary)
             if let runtime = task.runtime {
-                channel("Current", runtime.current.state.label, currentColor(runtime.current.state))
-                processChannel
+                channel("Status", runtime.status.label, statusColor(runtime.status))
             } else {
                 channel("Work", "none", palette.textSecondary)
             }
-        }
-    }
-
-    @ViewBuilder
-    private var processChannel: some View {
-        switch task.attention.process.state {
-        case .observed:
-            let alive = task.attention.process.alive == true
-            channel("Process", alive ? "alive" : "dead",
-                    alive ? Color.statusSuccess : Color.statusNeutral)
-        case .notExpected:
-            channel("Process", "not expected", palette.textSecondary)
-        case .notApplicable:
-            channel("Process", "none", palette.textSecondary)
-        case .unavailable:
-            channel("Process", "unknown", Color.statusWarning)
         }
     }
 
@@ -1064,12 +993,8 @@ struct WorkChannelChips: View {
         .clipShape(Capsule())
     }
 
-    private func currentColor(_ state: CurrentWorkState) -> Color {
-        switch state {
-        case .working: .statusSuccess
-        case .stalled, .stopped: .statusError
-        case .unobservable: .statusWarning
-        case .waiting: .statusWarning
+    private func statusColor(_ status: WorkStatus) -> Color {
+        switch status {
         case .done, .abandoned: .statusNeutral
         case .ready: .statusInfo
         }
@@ -1084,7 +1009,6 @@ struct TaskActionCluster: View {
     let isActing: Bool
     let controlsDisabled: Bool
     let onAction: (RoadmapTaskAction) -> Void
-    let onInterrupt: () -> Void
     let onOpenWorktree: (TaskWorkspaceSnapshot) -> Void
 
     var body: some View {
@@ -1092,12 +1016,6 @@ struct TaskActionCluster: View {
             if let action = roadmapTaskAction(task) {
                 Button(action.label) { onAction(action) }
                     .buttonStyle(.borderedProminent)
-                    .controlSize(.small)
-                    .disabled(controlsDisabled)
-            }
-            if roadmapTaskCanInterrupt(task) {
-                Button("Interrupt", role: .destructive) { onInterrupt() }
-                    .buttonStyle(.bordered)
                     .controlSize(.small)
                     .disabled(controlsDisabled)
             }
@@ -1123,7 +1041,6 @@ struct NowSectionView: View {
     let activeControlId: String?
     let onSelect: (NowRow) -> Void
     let onTaskAction: (NowRow, RoadmapTaskAction) -> Void
-    let onInterrupt: (NowRow) -> Void
     let onOpenWorktree: (TaskWorkspaceSnapshot) -> Void
 
     @Environment(\.palette) private var palette
@@ -1150,7 +1067,6 @@ struct NowSectionView: View {
                     activeControlId: activeControlId,
                     onSelect: { onSelect(row) },
                     onAction: { action in onTaskAction(row, action) },
-                    onInterrupt: { onInterrupt(row) },
                     onOpenWorktree: onOpenWorktree
                 )
             }
@@ -1162,9 +1078,7 @@ struct NowSectionView: View {
         switch group {
         case .readyForReview: .statusInfo
         case .needsInput: .statusWarning
-        case .working: .statusSuccess
         case .stopped: .statusNeutral
-        case .failed: .statusError
         case .unknown: .statusWarning
         }
     }
@@ -1176,7 +1090,6 @@ private struct NowRowView: View {
     let activeControlId: String?
     let onSelect: () -> Void
     let onAction: (RoadmapTaskAction) -> Void
-    let onInterrupt: () -> Void
     let onOpenWorktree: (TaskWorkspaceSnapshot) -> Void
 
     @Environment(\.palette) private var palette
@@ -1216,7 +1129,6 @@ private struct NowRowView: View {
                 isActing: isActing,
                 controlsDisabled: activeControlId != nil,
                 onAction: onAction,
-                onInterrupt: onInterrupt,
                 onOpenWorktree: onOpenWorktree
             )
         }
@@ -1258,7 +1170,6 @@ extension RoadmapSection {
 private extension TaskAttentionLevel {
     var color: Color {
         switch self {
-        case .green: .statusSuccess
         case .red: .statusError
         case .blue: WaveLensColor.blue.glow
         case .black: .statusNeutral

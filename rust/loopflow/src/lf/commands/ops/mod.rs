@@ -1044,18 +1044,6 @@ fn print_pm_reteam_result(result: &crate::ops::pm::PmReteamResult) {
         }
     }
 
-    if !result.deferrals.is_empty() {
-        println!(
-            "  deferred — protected active Task Run ({}):",
-            result.deferrals.len()
-        );
-        for deferral in &result.deferrals {
-            println!(
-                "    wave/{}: {}  {}  ({})",
-                deferral.wave, deferral.identifier, deferral.title, deferral.reason
-            );
-        }
-    }
     if result.task_updates > 0 {
         println!("  reconciled Task identifiers: {}", result.task_updates);
     }
@@ -2406,41 +2394,31 @@ fn launch_skill_agent(
         },
     )?;
 
-    let effective_system =
-        crate::engine::agent::system_prompt_with_structured_replies(&prepared.config);
-    let context = crate::lf::commands::run::attributed_context(
-        &prepared.components,
-        &effective_system,
-        &prepared.config.task_prompt,
-        &prepared.deduplicated_docs,
-    );
     let agent = prepared.config.agent();
     let (provider, model) = crate::engine::parse_agent(agent);
-    let capture_context =
-        crate::journal::trace_capture_context(repo_root, None, Some(skill_name.to_string()))
-            .map_err(|_| anyhow!("trace capture identity is unavailable before agent launch"))?;
-    let capture = crate::trace::CaptureHandle::begin(
-        capture_context,
-        context,
-        crate::trace::CaptureStart {
-            provider,
-            model,
-            surface: "headless".to_string(),
-            input_op: "initial".to_string(),
-            gather_ms: 0,
-            render_ms: 0,
-            raw_provider: true,
-            basis: None,
-            supervision: None,
-        },
-    )?;
+    let cwd = prepared
+        .config
+        .cwd
+        .clone()
+        .unwrap_or_else(|| repo_root.to_path_buf());
+    let capture = crate::run_record::CaptureHandle::begin(crate::run_record::RunSpec {
+        harness: provider,
+        model,
+        surface: "headless".to_string(),
+        cwd,
+        repo: Some(repo_root.to_path_buf()),
+        worktree: Some(repo_root.to_path_buf()),
+        skill: Some(skill_name.to_string()),
+        subjects: Vec::new(),
+    })?;
+    capture.record_input("initial", &prepared.config.task_prompt);
 
     let mut launch = prepared.config;
     launch.env = env.cloned().unwrap_or_default();
     let process = ProcessConfig {
         auto: true,
         stream: true,
-        capture: Some(capture.clone()),
+        capture: Some(capture.clone().into()),
         ..Default::default()
     };
     let capabilities = AgentCapabilities {
@@ -2452,7 +2430,7 @@ fn launch_skill_agent(
         Ok(result) if result.exit_code == 0 => "completed",
         Ok(_) | Err(_) => "failed",
     };
-    capture.finish(outcome, false)?;
+    capture.finish(outcome)?;
     let result = result?;
     if result.exit_code != 0 {
         return Err(anyhow!(

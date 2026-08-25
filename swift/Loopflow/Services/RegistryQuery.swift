@@ -111,7 +111,7 @@ public struct RegistryQuery: Sendable {
         return try Self.decode(RoadmapSnapshot.self, from: stdout)
     }
 
-    /// Live process trees, normalized output rates, and completed provider usage.
+    /// Exact OS-live Loopflow process trees and unattributed provider processes.
     public func processActivity() async throws -> ActivitySnapshot {
         let stdout = try await run(["ps", "--json"], nil)
         return try Self.decode(ActivitySnapshot.self, from: stdout)
@@ -184,23 +184,6 @@ public struct RegistryQuery: Sendable {
         return try Self.decode(TaskFileSnapshot.self, from: stdout)
     }
 
-    /// Resolve one durable Activity Run fact to its latest captured turn.
-    public func traceAddress(invocationId: String) async throws -> TraceAddress {
-        let stdout = try await run(["trace", invocationId, "--json"], nil)
-        let trace = try Self.decode(TraceIndexSnapshot.self, from: stdout)
-        guard let turn = trace.turns
-            .filter({ $0.invocationId == invocationId })
-            .max(by: { $0.ordinal < $1.ordinal })
-        else {
-            throw RegistryQueryError("Run \(invocationId) has no captured trace turn")
-        }
-        return TraceAddress(
-            runId: trace.traceId,
-            invocationId: invocationId,
-            turnId: turn.id
-        )
-    }
-
     /// User-targeted Ask sessions from the same durable queue as bare `lf`.
     public func userAskAttention(cwd: String? = nil) async throws -> [AskAttentionRecord] {
         // Repo-scoped: the sessions surface shows the sessions for the repository
@@ -216,37 +199,25 @@ public struct RegistryQuery: Sendable {
     public func prepareAskOpen(
         askId: String,
         cwd: String? = nil
-    ) async throws -> InvocationSurfaceRecord {
+    ) async throws -> AskSessionRecord {
         let stdout = try await run(
             ["ask", "open", askId, "--prepare", "--json"],
             cwd
         )
-        return try Self.decode(InvocationSurfaceRecord.self, from: stdout)
+        return try Self.decode(AskSessionRecord.self, from: stdout)
     }
 
-    /// Confirm presentation only for the exact Invocation returned by prepare.
+    /// Confirm presentation only for the exact generic Run returned by prepare.
     public func confirmAskPresented(
         askId: String,
-        invocationId: String,
+        runId: String,
         cwd: String? = nil
-    ) async throws -> AgentInvocationRecord {
+    ) async throws -> AskRecord {
         let stdout = try await run(
-            ["ask", "presented", askId, invocationId, "--json"],
+            ["ask", "presented", askId, runId, "--json"],
             cwd
         )
-        return try Self.decode(AgentInvocationRecord.self, from: stdout)
-    }
-
-    /// Every recorded non-ended Invocation, with its canonical liveness observation.
-    public func activeInvocations() async throws -> [InvocationSurfaceRecord] {
-        let stdout = try await run(["invocation", "list", "--active", "--json"], nil)
-        return try Self.decode([InvocationSurfaceRecord].self, from: stdout)
-    }
-
-    /// Read the generic attach descriptor without changing Invocation liveness.
-    public func attachInvocation(invocationId: String) async throws -> InvocationSurfaceRecord {
-        let stdout = try await run(["invocation", "attach", invocationId, "--json"], nil)
-        return try Self.decode(InvocationSurfaceRecord.self, from: stdout)
+        return try Self.decode(AskRecord.self, from: stdout)
     }
 
     /// A wave's measured bets from the local PM snapshot. Cache-only reads keep
@@ -275,11 +246,11 @@ public struct RegistryQuery: Sendable {
         )
     }
 
-    /// The same provider-billed output snapshot rendered by `lf usage`,
-    /// `lf ps`, `lf top`, and the Podium.
-    public func usage() async throws -> UsageSnapshot {
-        let stdout = try await run(["usage", "--json"], nil)
-        return try Self.decode(UsageSnapshot.self, from: stdout)
+    /// Direct provider-authored usage for recent Home-local Runs. Each row
+    /// keeps omitted counters, evidence gaps, and provider finality explicit.
+    public func usage(days: Int = 30) async throws -> [RunSnapshot] {
+        let stdout = try await run(["usage", "--days", String(days), "--json"], nil)
+        return try Self.decode([RunSnapshot].self, from: stdout)
     }
 
     /// The codebase on disk, as a tree of directories weighted by tokens.
@@ -302,49 +273,6 @@ public struct RegistryQuery: Sendable {
     public func doctor() async throws -> DoctorReport {
         let stdout = try await run(["doctor", "--json"], nil)
         return try Self.decode(DoctorReport.self, from: stdout)
-    }
-
-    /// One atomic Context Lab population. Rust owns every trace join, token
-    /// attribution, revision identity, and representative choice; the app sends
-    /// only the filter query and renders the returned snapshot.
-    public func contextLab(_ query: InvocationSetQuery) async throws -> ContextLabSnapshot {
-        var args = [
-            "context", "--json",
-            "--started-after", String(query.startedAfter),
-            "--started-before", String(query.startedBefore),
-        ]
-        Self.append(query.repoPaths, flag: "--repo", to: &args)
-        Self.append(query.waves, flag: "--wave", to: &args)
-        Self.append(query.projects, flag: "--project", to: &args)
-        Self.append(query.tasks, flag: "--task", to: &args)
-        Self.append(query.flows, flag: "--flow", to: &args)
-        Self.append(query.skills, flag: "--skill", to: &args)
-        Self.append(query.providers, flag: "--provider", to: &args)
-        Self.append(query.models, flag: "--model", to: &args)
-        Self.append(query.surfaces, flag: "--surface", to: &args)
-        Self.append(query.outcomes.map(\.rawValue), flag: "--outcome", to: &args)
-        Self.append(query.captureStates.map(\.rawValue), flag: "--capture-state", to: &args)
-        if query.steeredOnly { args.append("--steered-only") }
-        if query.currentRevisionOnly { args.append("--current-revision-only") }
-        let stdout = try await run(args, nil)
-        return try Self.decode(ContextLabSnapshot.self, from: stdout)
-    }
-
-    /// Exact local artifacts for one immutable trace address. Unlike Context
-    /// Lab's aggregate query, this intentionally opens prompt and conversation
-    /// bodies and must only be called after an explicit Open trace action.
-    public func traceContent(_ address: TraceAddress) async throws -> TraceContentSnapshot {
-        let stdout = try await run([
-            "trace", address.runId, "--json", "--content",
-            "--invocation", address.invocationId, "--turn", address.turnId,
-        ], nil)
-        return try Self.decode(TraceContentSnapshot.self, from: stdout)
-    }
-
-    private static func append(_ values: [String], flag: String, to args: inout [String]) {
-        for value in values {
-            args.append(contentsOf: [flag, value])
-        }
     }
 
     private static func decode<T: Decodable>(_ type: T.Type, from stdout: String) throws -> T {
@@ -489,7 +417,6 @@ public struct WaveSnapshot: Decodable, Sendable, Hashable {
     public let id: String
     public let name: String
     public let status: WorkStatus
-    public let current: CurrentWorkObservation
     public let goal: String
     public let repo: String
     public let activeTasks: Int
@@ -506,7 +433,7 @@ public struct WaveSnapshot: Decodable, Sendable, Hashable {
     public let home: Home
 
     enum CodingKeys: String, CodingKey {
-        case id, name, status, current, goal, repo, live, paused, enabled, endpoint, home
+        case id, name, status, goal, repo, live, paused, enabled, endpoint, home
         case activeTasks = "active_tasks"
         case activeProjects = "active_projects"
         case createdAt = "created_at"
@@ -524,7 +451,6 @@ public struct WaveSnapshot: Decodable, Sendable, Hashable {
             name: name,
             repo: repo,
             status: status,
-            current: current,
             live: live,
             paused: paused,
             enabled: enabled,
@@ -574,14 +500,13 @@ public struct UnavailableProjectEvidence: Decodable, Sendable, Hashable {
     public let projectId: String
     public let projectSlug: String
     public let status: WorkStatus
-    public let current: CurrentWorkObservation
     public let owner: WorkNextMoveOwner
     public let reason: String
     public let recovery: String
     public let tasks: [UnavailableTaskEvidence]
 
     enum CodingKeys: String, CodingKey {
-        case status, current, owner, reason, recovery, tasks
+        case status, owner, reason, recovery, tasks
         case workId = "work_id"
         case projectId = "project_id"
         case projectSlug = "project_slug"
@@ -595,13 +520,12 @@ public struct UnavailableTaskEvidence: Decodable, Sendable, Hashable {
     public let taskId: String
     public let taskIdentifier: String
     public let status: WorkStatus
-    public let current: CurrentWorkObservation
     public let owner: WorkNextMoveOwner
     public let reason: String
     public let recovery: String
 
     enum CodingKeys: String, CodingKey {
-        case status, current, owner, reason, recovery
+        case status, owner, reason, recovery
         case workId = "work_id"
         case taskId = "task_id"
         case taskIdentifier = "task_identifier"
@@ -616,7 +540,7 @@ public struct WaveDetailSnapshot: Decodable, Sendable {
     public let projects: [WaveProjectWork]
     public let metricPortfolio: MetricPortfolio
     public let unavailableProjects: [UnavailableProjectEvidence]
-    public let runs: WorkEvidence<SkillRunEntry>
+    public let runs: WorkEvidence<RunSnapshot>
     public let attention: WorkEvidence<WaveAttentionItem>
     /// The focused Wave's Home probed for liveness and its one contextual action.
     public let homeRuntime: HomeRuntime
@@ -634,83 +558,62 @@ public struct WaveDetailSnapshot: Decodable, Sendable {
     }
 }
 
-/// One agent-backed skill invocation from `lf runs --json`. Mirrors Rust
-/// `SkillRunEntry`; `lf status` filters the same dataset to one Wave.
-public struct SkillRunEntry: Decodable, Sendable, Identifiable, Hashable {
+/// One Home-local harness bundle from `lf runs --json`.
+public struct RunSnapshot: Decodable, Sendable, Identifiable, Hashable {
     public let id: String
-    public let traceId: String
-    public let execId: String
-    public let parentExecId: String?
-    public let repo: String
-    public let worktree: String
-    public let wave: String?
-    /// Roadmap Project slug that owns this run; nil when unattributed.
-    public let project: String?
-    /// Roadmap Task's Linear issue identifier (e.g. W2-122) that owns this run;
-    /// nil when unattributed. Joins a roadmap row to its runs and trace.
-    public let task: String?
-    public let flow: String?
-    public let skill: String
-    public let status: String
+    public let parentRunId: String?
+    public let repo: String?
+    public let worktree: String?
+    public let subjects: [RunSubjectAttribution]
+    public let skill: String?
+    public let outcome: String?
     public let started: Int
     public let ended: Int?
-    public let turns: Int
-    public let systemTokens: Int
-    public let taskTokens: Int
-    public let suppliedContextTokens: Int
+    public let usage: RunUsageSnapshot
+    public let evidenceGaps: Int
+    public let harness: String
+    public let model: String?
+    public let surface: String
+
+    enum CodingKeys: String, CodingKey {
+        case id, repo, worktree, subjects, skill, outcome, started, ended, usage, harness, model,
+            surface
+        case parentRunId = "parent_run_id"
+        case evidenceGaps = "evidence_gaps"
+    }
+}
+
+public struct RunSubjectAttribution: Decodable, Sendable, Hashable {
+    public let selector: String
+    public let source: String
+}
+
+public struct RunUsageSnapshot: Decodable, Sendable, Hashable {
+    public let streams: Int
+    public let finalStreams: Int
+    public let gaps: Int
     public let inputTokens: Int?
     public let outputTokens: Int?
+    public let totalInputTokens: Int?
+    public let peakInputTokens: Int?
+    public let contextWindowTokens: Int?
     public let reasoningTokens: Int?
     public let cacheReadTokens: Int?
     public let cacheWriteTokens: Int?
     public let costUsd: Double?
-    public let durationSecs: Double?
-    public let provider: String
-    public let model: String?
-    public let surface: String
-    public let captureStatus: String
 
     enum CodingKeys: String, CodingKey {
-        case id, repo, worktree, wave, project, task, flow, skill, status, started, ended, turns,
-            provider, model, surface
-        case traceId = "trace_id"
-        case execId = "exec_id"
-        case parentExecId = "parent_exec_id"
-        case systemTokens = "system_tokens"
-        case taskTokens = "task_tokens"
-        case suppliedContextTokens = "supplied_context_tokens"
+        case streams, gaps
+        case finalStreams = "final_streams"
         case inputTokens = "input_tokens"
         case outputTokens = "output_tokens"
+        case totalInputTokens = "total_input_tokens"
+        case peakInputTokens = "peak_input_tokens"
+        case contextWindowTokens = "context_window_tokens"
         case reasoningTokens = "reasoning_tokens"
         case cacheReadTokens = "cache_read_tokens"
         case cacheWriteTokens = "cache_write_tokens"
         case costUsd = "cost_usd"
-        case durationSecs = "duration_secs"
-        case captureStatus = "capture_status"
-    }
-}
-
-/// Narrow decoding view over `lf trace <run> --json`. Rust owns the full trace
-/// graph; The Podium needs only the immutable ids for an explicit content
-/// request.
-public struct TraceIndexSnapshot: Decodable, Sendable {
-    public let traceId: String
-    public let turns: [TraceTurnIndex]
-
-    enum CodingKeys: String, CodingKey {
-        case turns
-        case traceId = "trace_id"
-    }
-}
-
-public struct TraceTurnIndex: Decodable, Sendable {
-    public let id: String
-    public let invocationId: String
-    public let ordinal: Int
-
-    enum CodingKeys: String, CodingKey {
-        case id, ordinal
-        case invocationId = "invocation_id"
     }
 }
 

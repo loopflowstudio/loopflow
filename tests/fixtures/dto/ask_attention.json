@@ -7,9 +7,7 @@
           "kind": "task",
           "id": "task_00000000000000000000000000000001"
         },
-        "run_id": "run_00000000000000000000000000000001",
-        "turn_id": "turn_00000000000000000000000000000001",
-        "invocation_id": "invocation_00000000000000000000000000000001",
+        "source_run_id": "run_00000000000000000000000000000001",
         "home_id": "home_00000000000000000000000000000001",
         "cwd": "/src/loopflow.task"
       },
@@ -21,7 +19,9 @@
         "prompt": "Connect Linear for this worktree"
       },
       "state": "queued",
-      "active_invocation_id": null,
+      "active_run_id": null,
+      "ready_at": null,
+      "presented_at": null,
       "result": null,
       "terminal_author": null,
       "asked_at": "2026-07-19T22:00:01Z",

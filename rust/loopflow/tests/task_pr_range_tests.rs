@@ -435,7 +435,7 @@ fn rebase_revokes_auto_before_force_pushing_a_new_task_head() {
 /// pushed unchanged, its recorded fork remains authoritative, and a later
 /// explicit rebase owns the rewrite.
 #[test]
-fn publish_keeps_a_behind_branch_and_recorded_base_unchanged() {
+fn publish_uses_managed_worktree_even_with_unknown_ambient_run() {
     let home = tempfile::TempDir::new().expect("temp home");
     let repo = TestRepo::new(); // origin/main = P
     let stale_base = repo.head_sha();
@@ -465,6 +465,7 @@ fn publish_keeps_a_behind_branch_and_recorded_base_unchanged() {
     let before_publish = repo.head_sha();
 
     let task = register_task(home.path(), repo.path(), branch, &stale_base);
+    std::env::set_var("LF_RUN_ID", "run_00000000000000000000000000000000");
 
     create_or_update_pr(
         repo.path(),

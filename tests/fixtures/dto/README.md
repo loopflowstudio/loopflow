@@ -10,10 +10,8 @@ listener↔resident wire (`POST /resident/deltas`, `POST /resident/attach`,
 the same `lf` binary, so only the Rust fixture tests pin them. Swift does not
 consume this wire.
 
-`invocation_surface.json` pins `lf invocation list|attach --json`: one
-AgentInvocation, its supervising Run authority and containment, stable Work and
-Wave identity, Home route, temporary User/parent attention and handback
-evidence, and a generic attach argv.
+`ask_session.json` pins `lf ask open --prepare --json`: one generic answering
+Run and its exact Home-local attach route.
 
 `task_attention_states.json` pins the Rust-owned desktop attention fold for
 live advancing, live human wait, dead dirty, dead authored commits, clean
@@ -21,21 +19,15 @@ backlog, completed, stale active intent, and unavailable local evidence. Rust
 and Swift decode the same Task rows; consumers never reconstruct the signal
 from process flags.
 
-`context_lab_snapshot.json` is shared by Rust and Swift. It pins the atomic
-invocation-set query, including explicit missing token coverage and immutable trace
-addresses. Revision evidence carries both Rust's effective-content hash and the
-current source-file hash used to reject a stale Task worktree without
-reimplementing prompt transformations in Swift.
+`activity_snapshot.json` pins `lf ps --json`: exact live Exec and provider
+processes carry OS-derived state, while a provider without exact ownership
+stays separate from the call tree. Rust and Swift both round-trip it; The
+Podium derives no process state of its own.
 
-`replay_check.json` pins the read-only `lf replay check` JSON result. It freezes
-every refusal code and keeps unavailable invocation, contract, model,
-repository revision, and Work inputs explicitly nullable.
-
-`activity_snapshot.json` pins `lf ps --json` and its embedded canonical usage
-snapshot: Exec and provider nodes retain their existing Work attribution,
-working/stalled state, and exact provider-output rates, while a registered
-orphan stays separate from the counted call tree. Rust and Swift both
-round-trip it; The Podium derives no process state of its own.
+`wave_detail.json` embeds the `RunSnapshot` row shape shared by both bundle
+reads: `lf runs --json` and `lf usage --json`. Provider cumulative counters
+remain optional; stream finality and evidence gaps are required, explicit
+evidence.
 
 `work_activity_snapshot.json` pins `lf activity --json`: durable Work creation,
 Run, PR, and Steer facts retain their existing Work, Run, author, and GitHub

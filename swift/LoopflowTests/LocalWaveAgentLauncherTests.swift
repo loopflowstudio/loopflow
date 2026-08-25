@@ -17,19 +17,34 @@ struct LocalWaveAgentLauncherTests {
         #expect(LaunchTargetLauncher.isRemoteHome("ssh://jack@builder.example:22"))
     }
 
-    @Test("Ask presentation offers only targets that attach the exact Invocation")
-    func askPresentationFiltersWorktreeOnlyTargets() {
-        let capability = LaunchTargetCapability(
-            installedApps: [.warp, .vscode],
-            workspaceProven: true,
-            warpCommandBearing: false,
-            isRemoteHome: false,
-            providerIsClaude: false,
-            providerSessionKnown: false
+    @Test("Ask sessions attach through their generic Run route")
+    func askSessionCommands() {
+        let local = AskSessionRecord(
+            askId: "ask-1",
+            runId: "run-1",
+            homeRoute: "jack@local",
+            attachArgv: ["lf", "run", "attach", "run-1"]
         )
+        #expect(LaunchTargetLauncher.command(for: local, localCwd: "/repo") == .init(
+            cwd: "/repo",
+            argv: ["lf", "run", "attach", "run-1"],
+            environment: [:]
+        ))
 
-        #expect(capability.offeredOptions.map(\.surface) == [.ghostty, .warp, .vscode])
-        #expect(capability.attachOptions.map(\.surface) == [.ghostty])
+        let remote = AskSessionRecord(
+            askId: "ask-2",
+            runId: "run-2",
+            homeRoute: "ssh://jack@builder.example:2200",
+            attachArgv: ["lf", "run", "attach", "run-2"]
+        )
+        #expect(LaunchTargetLauncher.command(for: remote, localCwd: "/repo") == .init(
+            cwd: "/",
+            argv: [
+                "ssh", "-p", "2200", "jack@builder.example",
+                "exec 'lf' 'run' 'attach' 'run-2'",
+            ],
+            environment: [:]
+        ))
     }
 
     @Test("development launcher preserves the selected Home registry")
@@ -134,7 +149,7 @@ struct LocalWaveAgentLauncherTests {
 
         let snapshot = try await query.processActivity()
         #expect(snapshot.schemaVersion == 1)
-        #expect(snapshot.usage.windows == [5, 300, 3_600, 86_400])
+        #expect(snapshot.observedAt > 0)
     }
     #endif
 

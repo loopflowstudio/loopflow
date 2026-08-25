@@ -198,8 +198,6 @@ impl Harness for ClaudeHarness {
             cmd.current_dir(cwd);
         }
         super::configure_vendor_tokio_env(&mut cmd)?;
-        super::configure_agent_run_context(&mut cmd, config.run_context);
-
         self.shutdown_requested.store(false, Ordering::SeqCst);
         self.interrupt_requested.store(false, Ordering::SeqCst);
 
@@ -387,14 +385,14 @@ mod tests {
             cwd: Some(format!("/tmp/loopflow-missing-{}", uuid::Uuid::new_v4()).into()),
             max_turns: None,
             resume_token: None,
-            run_context: crate::engine::agent::AgentRunContext::Inherit,
+            provider_account_id: None,
+            provider_account_authority_home: None,
             write_scope: crate::engine::agent::AgentWriteScope::Configured,
             execution_boundary: None,
             skip_permissions: false,
             structured_replies: Vec::new(),
             directive_relay: None,
             env: Default::default(),
-            replay_safe: false,
         });
 
         let first = harness

@@ -6,7 +6,6 @@ use anyhow::{anyhow, Context, Result};
 use fs2::FileExt;
 use serde::{Deserialize, Serialize};
 
-use crate::durable::WorkRef;
 use crate::engine::git::{
     current_branch, fetch, get_default_branch, has_origin, is_ancestor, is_clean, is_squash_merged,
     sync_main,
@@ -374,7 +373,6 @@ async fn preflight(store: &Store, moves: &mut [PlannedWaveMove]) -> Result<()> {
                 ));
             }
         }
-        ensure_wave_stopped(store, planned.wave.id()).await?;
         prepare_source_for_relocation(planned)?;
     }
     Ok(())
@@ -490,35 +488,6 @@ fn ensure_move_paths_do_not_overlap(planned: &PlannedWaveMove) -> Result<()> {
 
 fn is_strict_descendant(candidate: &str, parent: &str) -> bool {
     candidate != parent && Path::new(candidate).starts_with(parent)
-}
-
-async fn ensure_wave_stopped(store: &Store, wave_id: &WaveId) -> Result<()> {
-    let mut work = vec![WorkRef::Wave(wave_id.clone())];
-    work.extend(
-        store
-            .list_projects(Some(wave_id))
-            .await?
-            .into_iter()
-            .map(|project| WorkRef::Project(project.id)),
-    );
-    work.extend(
-        store
-            .list_tasks(Some(wave_id))
-            .await?
-            .into_iter()
-            .map(|task| WorkRef::Task(task.id)),
-    );
-    for work in work {
-        if let Some(run) = store.current_run(&work).await? {
-            return Err(anyhow!(
-                "cannot relocate Wave {wave_id} while Run {} owns {} {}",
-                run.id,
-                work.kind(),
-                work.id()
-            ));
-        }
-    }
-    Ok(())
 }
 
 fn acquire_locks(paths: &[RelocationPath]) -> Result<Vec<WaveLocatorLock>> {
@@ -901,7 +870,6 @@ async fn recover_committed_relocation(
                 move_path.to_name
             ));
         }
-        ensure_wave_stopped(store, current.id()).await?;
     }
     let _locks = acquire_locks(&recovery.paths)?;
     ensure_no_live_endpoints(&recovery.paths).await?;

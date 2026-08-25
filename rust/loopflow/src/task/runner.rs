@@ -1,30 +1,16 @@
-use std::collections::VecDeque;
 use std::io::BufRead;
 use std::path::Path;
-use std::time::Duration;
 
 use anyhow::{anyhow, Result};
 use sha2::{Digest, Sha256};
 use tokio::sync::mpsc;
 
 use crate::chat::types::{ConversationEvent, ConversationItem, Lifecycle};
-use crate::child::{ChildBodyHandoff, ChildRef};
-use crate::child_control::{
-    absorb_run_control, apply_input as apply_child_input, input_is_current,
-    send_outstanding_steers, CommandStop, PendingInput,
-};
-use crate::durable::{AskId, Basis, BoundarySeed, FlowPosition, RunContext};
-use crate::engine::wave_config::read_wave_config;
-use crate::harness::{
-    classify_disconnect_recovery, drain_turn_failure_reason, ApprovalPolicy, Harness,
-    RecoveryDecision,
-};
+use crate::child::ChildRef;
+use crate::durable::{render_steers, AskId, FlowPosition, RunId, Steer};
+use crate::harness::{drain_turn_failure_reason, ApprovalPolicy, Harness};
 use crate::planning::ProjectPlan;
 use crate::project::Project;
-use crate::provider_account::recovery::{
-    capability_key, plan_run_route_recovery, settle_route_recovery, stop_invocation_for_recovery,
-    ExactRoute, RecoveryChoice, RecoverySettlement, RecoveryStopOutcome,
-};
 use crate::store::SharedStore;
 use crate::task::{PrPhase, Task, TaskEventKind, TaskGateProposal, TaskId, TaskLifecyclePhase};
 use crate::wave::playhead::{
@@ -36,21 +22,30 @@ use crate::wave::Wave;
 struct PreparedTaskStep {
     turn: crate::lf::commands::run::PreparedHarnessTurn,
     position: FlowPosition,
-    basis: Basis,
 }
 
-pub(crate) async fn run(store: SharedStore, task_id: TaskId, lease: &RunContext) -> Result<()> {
+pub(crate) async fn run(store: SharedStore, task_id: TaskId) -> Result<()> {
     let result = run_task_with(
         store.clone(),
         task_id.clone(),
-        lease,
         Box::new(crate::harness::default_create_harness),
     )
     .await;
     if let Err(error) = &result {
-        record_unhandled_failure(&store, &task_id, lease, error).await;
+        record_unhandled_failure(&store, &task_id, error).await;
     }
     result
+}
+
+fn take_task_launch_env(key: &'static str, label: &str) -> Result<Option<String>> {
+    let Some(value) = std::env::var_os(key) else {
+        return Ok(None);
+    };
+    std::env::remove_var(key);
+    value
+        .into_string()
+        .map(Some)
+        .map_err(|_| anyhow!("{label} is not valid UTF-8"))
 }
 
 async fn owning_wave(store: &SharedStore, task: &Task) -> Result<Wave> {
@@ -67,39 +62,9 @@ async fn owning_project(store: &SharedStore, task: &Task) -> Result<Project> {
         .ok_or_else(|| anyhow!("owning Project {} is not registered", task.project_id))
 }
 
-async fn spawn_failover(
-    store: &SharedStore,
-    task: &Task,
-    lease: &RunContext,
-    route: &ExactRoute,
-) -> Result<()> {
-    let tmux_name = format!(
-        "lf-task-{}-{}",
-        &task.id.as_str()[3..11],
-        &uuid::Uuid::new_v4().simple().to_string()[..8]
-    );
-    crate::ops::launch_in_run(
-        store,
-        lease,
-        crate::ops::RunLaunch {
-            work: crate::durable::WorkRef::Task(task.id.clone()),
-            wave_id: task.wave_id.clone(),
-            cwd: task.worktree.clone(),
-            tmux_name,
-            agent: route.agent.agent(),
-            account_id: route.account_id.clone(),
-            resume_token: task.provider_session_id.clone(),
-        },
-    )
-    .await
-    .map(|_| ())
-    .map_err(|error| anyhow!(error.to_string()))
-}
-
 async fn run_task_with(
     store: SharedStore,
     task_id: TaskId,
-    lease: &RunContext,
     create_harness: crate::harness::CreateHarness,
 ) -> Result<()> {
     let mut task = store
@@ -107,166 +72,64 @@ async fn run_task_with(
         .await?
         .ok_or_else(|| anyhow!("Task {task_id} not found"))?;
     let wave = owning_wave(&store, &task).await?;
-    store.update_task_for_run(&task, lease).await?;
+    let project = owning_project(&store, &task).await?;
+    store.update_task(&task).await?;
     store
-        .append_task_event_for_run(&task.id, lease, &TaskEventKind::Started)
+        .append_task_event(&task.id, &TaskEventKind::Started)
         .await?;
-    let target = ChildRef::Task(task.id.clone());
-    let work = store.work_for_child(&target).await?;
-    if lease.work != work {
-        anyhow::bail!("ambient Run context does not own Task Work {}", work.id());
-    }
-    let run = store
-        .current_run(&work)
-        .await?
-        .ok_or_else(|| anyhow!("Task Work {} has no active Run", work.id()))?;
-    let invocation = store
-        .open_invocation(lease)
-        .await?
-        .ok_or_else(|| anyhow!("Task Run {} has no open Invocation", lease.run_id))?;
-    let mut supervision = crate::trace::SupervisedInvocation {
-        invocation_id: invocation.id.clone(),
-        supervising_run_id: run.id,
-        account_id: invocation.route.account_id.clone(),
-        resume_token: invocation.resume_token.clone(),
-    };
     let mut flow = resume_task_phase(&task)?;
-    let Some(prepared) =
-        prepare_task_flow_step(&store, &mut task, lease, wave.name(), &mut flow).await?
+    let Some(mut prepared) =
+        prepare_task_flow_step(&store, &mut task, wave.name(), &mut flow, None).await?
     else {
-        store
-            .advance_run(
-                lease,
-                crate::durable::RunAdvance::InvocationEnded {
-                    invocation_id: invocation.id,
-                    outcome: crate::durable::BoundaryState::Succeeded,
-                },
-            )
-            .await?;
-        wait_for_parked_run(&store, &lease.run_id).await?;
         return Ok(());
     };
     let (harness_name, _) = crate::engine::config::parse_agent(&task.agent);
+    let capture = crate::run_record::CaptureHandle::begin(crate::run_record::RunSpec {
+        harness: prepared.turn.harness.clone(),
+        model: prepared.turn.model.clone(),
+        surface: "headless".to_string(),
+        cwd: Path::new(&task.worktree).to_path_buf(),
+        repo: Some(Path::new(wave.repo()).to_path_buf()),
+        worktree: Some(Path::new(&task.worktree).to_path_buf()),
+        skill: flow.current().map(|step| step.step.clone()),
+        subjects: vec![
+            crate::run_record::SubjectAttribution::declared(format!("wave:{}", wave.name())),
+            crate::run_record::SubjectAttribution::declared(format!(
+                "project:{}",
+                project.plan.slug
+            )),
+            crate::run_record::SubjectAttribution::declared(format!(
+                "task:{}",
+                task.plan.identifier
+            )),
+        ],
+    })?;
+    capture.record_input("initial", &prepared.turn.input);
+    prepared.turn.config.env.extend(capture.environment());
+    capture.mark_spawn_requested();
+    let capture = Some(capture);
     let (event_tx, mut event_rx) = mpsc::unbounded_channel();
-    let mut harness = create_harness(&harness_name, ApprovalPolicy::AutoApprove, event_tx)?;
-    harness.set_provider_session_id(task.provider_session_id.clone());
-    let requested_account = invocation
-        .route
-        .account_id
-        .as_deref()
-        .map(crate::store::ProviderAccountId::parse)
-        .transpose()
-        .map_err(|reason| anyhow!("invalid Invocation account route: {reason}"))?;
-    harness.set_provider_account_id(requested_account.clone());
-    store.validate_run_context(lease).await?;
-    // Record this body's turns the way `flowloop/wave.rs` does. Without it a
-    // Task's spend reaches no store at all: the provider runs in this
-    // process, so no child `lf` records on its behalf.
-    let capture = match flow.current() {
-        Some(step) => {
-            let context = match crate::journal::trace_capture_context(
-                Path::new(&task.worktree),
-                Some(step.flow.clone()),
-                Some(step.step.clone()),
-            ) {
-                Ok(context) => context,
-                Err(error) => {
-                    return finish_execution_blocked(
-                        &store,
-                        &mut task,
-                        lease,
-                        harness.as_mut(),
-                        &[format!("Task trace capture prerequisite missing: {error}")],
-                        None,
-                    )
-                    .await;
-                }
-            };
-            match crate::trace::CaptureHandle::begin(
-                context,
-                prepared.turn.context.clone(),
-                crate::trace::CaptureStart {
-                    provider: prepared.turn.harness.clone(),
-                    model: prepared.turn.model.clone(),
-                    surface: "headless".to_string(),
-                    input_op: "initial".to_string(),
-                    gather_ms: prepared.turn.context_gather_ms,
-                    render_ms: prepared.turn.context_render_ms,
-                    raw_provider: true,
-                    basis: Some(prepared.basis.clone()),
-                    supervision: Some(supervision.clone()),
-                },
-            ) {
-                Ok(capture) => Some(capture),
-                Err(error) => {
-                    return finish_execution_blocked(
-                        &store,
-                        &mut task,
-                        lease,
-                        harness.as_mut(),
-                        &[format!(
-                            "Loopflow active Turn authority could not be established: {error}"
-                        )],
-                        None,
-                    )
-                    .await;
-                }
-            }
-        }
-        None => None,
-    };
-    let prepared_invocation = match capture.as_ref() {
-        Some(capture) if harness_name == "codex" && task.provider_session_id.is_none() => {
-            let process = crate::engine::ProcessConfig {
-                auto: true,
-                stream: true,
-                capture: Some(capture.clone()),
-                ..Default::default()
-            };
-            match crate::engine::agent::prepare_agent_invocation(
-                &prepared.turn.config,
-                &process,
-                capture,
-                requested_account,
-            ) {
-                Ok(prepared) => prepared,
-                Err(error) => {
-                    let _ = capture.finish("failed", true);
-                    return finish_execution_blocked(
-                        &store,
-                        &mut task,
-                        lease,
-                        harness.as_mut(),
-                        &[format!(
-                            "Task execution contract could not be prepared: {error}"
-                        )],
-                        None,
-                    )
-                    .await;
-                }
-            }
-        }
-        _ => None,
-    };
-    match &prepared_invocation {
-        Some(prepared_invocation) => harness.start_prepared(prepared_invocation).await?,
-        None => harness.start(&prepared.turn.config).await?,
+    let mut harness = create_harness(&harness_name, ApprovalPolicy::AutoApprove, event_tx)
+        .inspect_err(|_| {
+            finish_capture(capture.as_ref(), "failed");
+        })?;
+    let requested_account =
+        take_task_launch_env(crate::ops::TASK_ACCOUNT_ID_ENV, "Task provider account id")?
+            .map(|value| crate::store::ProviderAccountId::parse(&value))
+            .transpose()
+            .map_err(|reason| anyhow!("invalid Task provider account route: {reason}"))?;
+    harness.set_provider_account_id(requested_account);
+    harness.set_provider_session_id(
+        take_task_launch_env(crate::ops::TASK_RESUME_TOKEN_ENV, "Task resume token")?
+            .or_else(|| task.provider_session_id.clone()),
+    );
+    if let Err(error) = harness.start(&prepared.turn.config).await {
+        finish_capture(capture.as_ref(), "failed");
+        return Err(error);
     }
     task.provider = harness_name;
     task.provider_session_id = harness.provider_session_id();
-    let invocation = store
-        .observe_invocation_provider(
-            lease,
-            &invocation.id,
-            harness.provider_account_id(),
-            task.provider_session_id.clone(),
-        )
-        .await?;
-    let invocation_id = invocation.id.clone();
-    let invocation_route = invocation.route.clone();
-    supervision.account_id = invocation.route.account_id.clone();
-    supervision.resume_token = invocation.resume_token.clone();
-    if let Err(error) = store.update_task_for_run(&task, lease).await {
+    if let Err(error) = store.update_task(&task).await {
         let _ = harness.stop().await;
         return Err(error.into());
     }
@@ -277,22 +140,18 @@ async fn run_task_with(
         None
     };
 
-    let mut pending = VecDeque::new();
     if let Some(capture) = &capture {
         capture.set_provider_session_id(task.provider_session_id.clone());
     }
-    let mut active_basis = start_prepared_task_step(
+    start_prepared_task_step(
         &store,
         &mut task,
-        lease,
         harness.as_mut(),
         &mut flow,
         None,
         prepared,
     )
     .await?;
-    let mut flow_turn_active = true;
-    let mut provider_turn_active = true;
 
     let (attachment_tx, mut attachment_rx) = mpsc::unbounded_channel();
     std::thread::spawn(move || {
@@ -307,59 +166,17 @@ async fn run_task_with(
         "task {}> attached; /status, /interrupt, /detach, or type a message/instruction",
         task.plan.identifier
     );
-    let mut command_poll = tokio::time::interval(Duration::from_millis(200));
-    command_poll.set_missed_tick_behavior(tokio::time::MissedTickBehavior::Delay);
     let mut last_text = String::new();
-    let mut turn_had_durable_side_effect = false;
     let mut command_failures = Vec::new();
-    let mut first_material_recorded = false;
-    let mut first_material_warning_emitted = false;
     'runner: loop {
         tokio::select! {
             line = attachment_rx.recv() => {
                 if let Some(line) = line {
-                    handle_attachment(&store, &task, lease, line).await?;
-                }
-            }
-            _ = command_poll.tick() => {
-                let active_turn_id = provider_turn_active
-                    .then(|| capture.as_ref().map(|capture| capture.current_turn_id()))
-                    .flatten();
-                if let Some(stop) = absorb_run_control(
-                    &store,
-                    lease,
-                    harness.as_mut(),
-                    provider_turn_active,
-                    active_turn_id.as_deref(),
-                ).await? {
-                    return finish_command_stop(
-                        &store,
-                        &mut task,
-                        lease,
-                        harness.as_mut(),
-                        stop,
-                        capture.as_ref(),
-                    ).await;
-                }
-                if provider_turn_active {
-                    if let Some(capture) = &capture {
-                        send_outstanding_steers(
-                            &store,
-                            lease,
-                            harness.as_mut(),
-                            &capture.current_turn_id(),
-                            &active_basis,
-                        )
-                        .await?;
-                    }
-                }
-                if !provider_turn_active {
-                    provider_turn_active = apply_next_pending(
+                    handle_attachment(
                         &store,
                         &task,
-                        lease,
                         harness.as_mut(),
-                        &mut pending,
+                        line,
                     ).await?;
                 }
             }
@@ -368,40 +185,22 @@ async fn run_task_with(
                     return finish_failed(
                         &store,
                         &mut task,
-                        lease,
                         harness.as_mut(),
                         "provider event stream closed",
                         capture.as_ref(),
                     ).await;
                 };
-                if !first_material_recorded && event.is_material_progress() {
-                    let observed_at = time::OffsetDateTime::now_utc();
-                    match store.record_first_material_at(lease, observed_at).await {
-                        Ok(_) => first_material_recorded = true,
-                        Err(error) if !first_material_warning_emitted => {
-                            tracing::warn!(
-                                task = %task.id,
-                                run = %lease.run_id,
-                                %error,
-                                "Task first-material evidence did not persist; a later material event will retry"
-                            );
-                            first_material_warning_emitted = true;
-                        }
-                        Err(_) => {}
-                    }
-                }
                 if let Some(capture) = &capture {
                     capture.record_conversation(event.clone());
                 }
                 let provider_session_id = harness.provider_session_id();
                 if provider_session_id != task.provider_session_id {
                     task.provider_session_id = provider_session_id;
-                    store.update_task_for_run(&task, lease).await?;
+                    store.update_task(&task).await?;
                 }
                 match event {
                     ConversationEvent::TextDelta { content, .. } => last_text.push_str(&content),
                     ConversationEvent::TurnStarted { .. } => {
-                        turn_had_durable_side_effect = false;
                         command_failures.clear();
                     }
                     ConversationEvent::ItemCompleted { item, .. } => {
@@ -424,38 +223,18 @@ async fn run_task_with(
                                 }
                             }
                         }
-                        if matches!(
-                            item,
-                            ConversationItem::Command { .. } | ConversationItem::File { .. }
-                        ) {
-                            turn_had_durable_side_effect = true;
-                        }
                     }
                     ConversationEvent::TurnCompleted { status, .. } => {
-                        if let Some(capture) = &capture {
-                            let outcome = match status {
-                                Lifecycle::Completed => "completed",
-                                Lifecycle::Interrupted => "interrupted",
-                                Lifecycle::Failed => "failed",
-                                _ => "failed",
-                            };
-                            capture.finish_turn(outcome)?;
-                        }
                         if status == Lifecycle::Failed {
                             let reason = drain_turn_failure_reason(
                                 &mut event_rx,
                                 "provider turn failed",
                             );
-                            return fail_and_maybe_recover(
+                            return finish_body_failure(
                                 &store,
                                 &mut task,
-                                lease,
-                                &invocation_id,
-                                &invocation_route,
                                 harness.as_mut(),
-                                &wave,
                                 &reason,
-                                turn_had_durable_side_effect,
                                 capture.as_ref(),
                             )
                             .await;
@@ -464,30 +243,14 @@ async fn run_task_with(
                             return finish_execution_blocked(
                                 &store,
                                 &mut task,
-                                lease,
                                 harness.as_mut(),
                                 &command_failures,
                                 capture.as_ref(),
                             )
                             .await;
                         }
-                        provider_turn_active = apply_next_pending(
-                            &store,
-                            &task,
-                            lease,
-                            harness.as_mut(),
-                            &mut pending,
-                        ).await?;
-                        if provider_turn_active {
-                            continue 'runner;
-                        }
-                        let resume_interrupted_flow =
-                            flow_turn_active && status == Lifecycle::Interrupted;
-                        let mut flow_iteration_completed = if flow_turn_active {
-                            finish_task_flow_turn(&mut flow, status)?
-                        } else {
-                            false
-                        };
+                        let mut flow_iteration_completed =
+                            finish_task_flow_turn(&mut flow, status)?;
                         let mut finally_ops_ran = false;
                         if !flow_iteration_completed
                             && flow.current().is_some_and(|step| step.kind == StepKind::Op)
@@ -504,46 +267,23 @@ async fn run_task_with(
                                 flow_iteration_completed = true;
                             }
                         }
-                        if flow_turn_active {
-                            let latest = store
-                                .get_task(&task.id)
-                                .await?
-                                .ok_or_else(|| {
-                                    anyhow!("Task {} disappeared", task.id)
-                                })?;
-                            sync_task_state(&mut task, &latest);
-                            record_task_flow_position(&mut task, &flow)?;
-                            store.update_task_for_run(&task, lease).await?;
-                        }
-                        flow_turn_active = false;
+                        let latest = store
+                            .get_task(&task.id)
+                            .await?
+                            .ok_or_else(|| anyhow!("Task {} disappeared", task.id))?;
+                        sync_task_state(&mut task, &latest);
+                        record_task_flow_position(&mut task, &flow)?;
+                        store.update_task(&task).await?;
                         if flow_iteration_completed
                                 && task.lifecycle_phase == TaskLifecyclePhase::First
                             {
                                 task.enter_loop()?;
-                                store.update_task_for_run(&task, lease).await?;
+                                store.update_task(&task).await?;
                                 flow = resume_task_phase(&task)?;
                                 flow_iteration_completed = false;
                                 state_fingerprint = task_state_fingerprint(&task)?;
                                 gate_fingerprint = None;
                                 last_text.clear();
-                            }
-                            while let Some(input) = pending.pop_front() {
-                                if !pending_input_is_current(&store, &task, lease, &input).await? {
-                                    continue;
-                                }
-                                if resume_interrupted_flow {
-                                    open_task_flow_body(&mut flow, &task)?;
-                                    flow_turn_active = true;
-                                }
-                                apply_input(
-                                    &store,
-                                    &task,
-                                    lease,
-                                    harness.as_mut(),
-                                    &input.text,
-                                ).await?;
-                                provider_turn_active = true;
-                                continue 'runner;
                             }
                             let approved_gate = if flow_iteration_completed
                                 && task.lifecycle_phase == TaskLifecyclePhase::Finally
@@ -555,11 +295,10 @@ async fn run_task_with(
                                     state_fingerprint = task_state_fingerprint(&task)?;
                                     gate_fingerprint = None;
                                     task.enter_loop()?;
-                                    store.update_task_for_run(&task, lease).await?;
-                                    let Some(basis) = start_resumed_task_phase(
+                                    store.update_task(&task).await?;
+                                    let Some(()) = start_resumed_task_phase(
                                         &store,
                                         &mut task,
-                                        lease,
                                         harness.as_mut(),
                                         &mut flow,
                                         wave.name(),
@@ -568,17 +307,11 @@ async fn run_task_with(
                                     .await?
                                     else {
                                         return park_task_at_human(
-                                            &store,
-                                            lease,
-                                            &invocation_id,
                                             Some(harness.as_mut()),
                                             capture.as_ref(),
                                         )
                                         .await;
                                     };
-                                    active_basis = basis;
-                                    flow_turn_active = true;
-                                    provider_turn_active = true;
                                     last_text.clear();
                                     continue 'runner;
                                 }
@@ -590,33 +323,27 @@ async fn run_task_with(
                                 let Some(prepared) = prepare_task_flow_step(
                                     &store,
                                     &mut task,
-                                    lease,
                                     wave.name(),
                                     &mut flow,
+                                    capture.as_ref().map(crate::run_record::CaptureHandle::run_id),
                                 )
                                 .await?
                                 else {
                                     return park_task_at_human(
-                                        &store,
-                                        lease,
-                                        &invocation_id,
                                         Some(harness.as_mut()),
                                         capture.as_ref(),
                                     )
                                     .await;
                                 };
-                                active_basis = start_prepared_task_step(
+                                start_prepared_task_step(
                                     &store,
                                     &mut task,
-                                    lease,
                                     harness.as_mut(),
                                     &mut flow,
                                     capture.as_ref(),
                                     prepared,
                                 )
                                 .await?;
-                                flow_turn_active = true;
-                                provider_turn_active = true;
                                 continue 'runner;
                             }
                             let summary = progress_summary(&last_text);
@@ -625,10 +352,9 @@ async fn run_task_with(
                                 .await?
                                 .ok_or_else(|| anyhow!("Task {} disappeared", task.id))?;
                             sync_task_state(&mut task, &latest);
-                            let observed_pr = crate::ops::task::reconcile_task_pr_for_run(
+                            let observed_pr = crate::ops::task::reconcile_task_pr(
                                 &store,
                                 &mut task,
-                                lease,
                             )
                             .await
                             .map_err(|error| anyhow!(error.to_string()))?;
@@ -648,37 +374,33 @@ async fn run_task_with(
                                 let next_fingerprint = task_state_fingerprint(&task)?;
                                 if next_fingerprint != state_fingerprint {
                                     state_fingerprint = next_fingerprint;
-                                    store.update_task_for_run(&task, lease).await?;
+                                    store.update_task(&task).await?;
                                     let Some(prepared) = prepare_task_flow_step(
                                         &store,
                                         &mut task,
-                                        lease,
                                         wave.name(),
                                         &mut flow,
+                                        capture
+                                            .as_ref()
+                                            .map(crate::run_record::CaptureHandle::run_id),
                                     )
                                     .await?
                                     else {
                                         return park_task_at_human(
-                                            &store,
-                                            lease,
-                                            &invocation_id,
                                             Some(harness.as_mut()),
                                             capture.as_ref(),
                                         )
                                         .await;
                                     };
-                                    active_basis = start_prepared_task_step(
+                                    start_prepared_task_step(
                                         &store,
                                         &mut task,
-                                        lease,
                                         harness.as_mut(),
                                         &mut flow,
                                         capture.as_ref(),
                                         prepared,
                                     )
                                     .await?;
-                                    flow_turn_active = true;
-                                    provider_turn_active = true;
                                     last_text.clear();
                                     continue 'runner;
                                 }
@@ -695,11 +417,10 @@ async fn run_task_with(
                                     reason: stopped_reason,
                                 })?;
                                 gate_fingerprint = Some(task_gate_fingerprint(&task)?);
-                                store.update_task_for_run(&task, lease).await?;
-                                let Some(basis) = start_resumed_task_phase(
+                                store.update_task(&task).await?;
+                                let Some(()) = start_resumed_task_phase(
                                     &store,
                                     &mut task,
-                                    lease,
                                     harness.as_mut(),
                                     &mut flow,
                                     wave.name(),
@@ -708,69 +429,44 @@ async fn run_task_with(
                                 .await?
                                 else {
                                     return park_task_at_human(
-                                        &store,
-                                        lease,
-                                        &invocation_id,
                                         Some(harness.as_mut()),
                                         capture.as_ref(),
                                     )
                                     .await;
                                 };
-                                active_basis = basis;
-                                flow_turn_active = true;
-                                provider_turn_active = true;
                                 last_text.clear();
                                 continue 'runner;
                             }
-                            // Persist non-status fields while the Run still owns authority.
-                            store.update_task_for_run(&task, lease).await?;
+                            store.update_task(&task).await?;
                             let _ = harness.stop().await;
+                            finish_capture(
+                                capture.as_ref(),
+                                if status == Lifecycle::Interrupted {
+                                    "interrupted"
+                                } else {
+                                    "completed"
+                                },
+                            );
                             if !summary.is_empty() {
-                                store.append_task_event_for_run(
+                                store.append_task_event(
                                     &task.id,
-                                    lease,
                                     &TaskEventKind::Progress {
                                         summary: summary.clone(),
                                     },
                                 ).await?;
                             }
                             if stopped_done {
-                                store.append_task_event_for_run(
-                                    &task.id,
-                                    lease,
-                                    &TaskEventKind::Completed { summary },
-                                ).await?;
-                            }
-                            store.advance_run(
-                                lease,
-                                crate::durable::RunAdvance::InvocationEnded {
-                                    invocation_id: invocation_id.clone(),
-                                    outcome: crate::durable::BoundaryState::Succeeded,
-                                },
-                            ).await?;
-                            if stopped_done {
-                                store.done(lease, &active_basis).await?;
-                            } else {
-                                store.finish_task_run(
-                                    &task,
-                                    lease,
-                                    crate::durable::BoundaryState::Succeeded,
-                                ).await?;
+                                store.complete_task(&task, None).await?;
                             }
                         return Ok(());
                     }
                     ConversationEvent::Error { code, message, .. } => {
                         let reason = format!("{code}: {message}");
-                        return fail_and_maybe_recover(
+                        return finish_body_failure(
                             &store,
                             &mut task,
-                            lease,
-                            &invocation_id,
-                            &invocation_route,
                             harness.as_mut(),
-                            &wave,
                             &reason,
-                            turn_had_durable_side_effect,
                             capture.as_ref(),
                         )
                         .await;
@@ -791,14 +487,13 @@ async fn run_task_with(
 async fn prepare_task_flow_step_once(
     store: &SharedStore,
     task: &mut Task,
-    lease: &RunContext,
     wave_name: &str,
     flow: &Playhead,
 ) -> Result<PreparedTaskStep> {
     let work = store
         .work_for_child(&ChildRef::Task(task.id.clone()))
         .await?;
-    let boundary = store.boundary_seed(&work).await?;
+    let steers = store.work_steers(&work).await?;
     let step = flow
         .current()
         .ok_or_else(|| anyhow!("Task flow has no current step"))?;
@@ -809,13 +504,13 @@ async fn prepare_task_flow_step_once(
             step.kind
         );
     }
-    store.update_task_for_run(task, lease).await?;
+    store.update_task(task).await?;
     let pr = store
         .active_task_pr(&task.id)
         .await?
         .ok_or_else(|| anyhow!("Task {} has no active PR", task.id))?;
     let project = owning_project(store, task).await?;
-    let seed = task_seed(task, &project.plan, &pr, wave_name, &boundary);
+    let seed = task_seed(task, &project.plan, &pr, wave_name, &steers);
     let mut prepared =
         crate::lf::commands::run::prepare_harness_turn(&step.step, &seed, wave_name, None)?;
     prepared.config.agent = Some(task.agent.clone());
@@ -827,7 +522,6 @@ async fn prepare_task_flow_step_once(
     prepared.config.skip_permissions = true;
     let position = FlowPosition {
         work,
-        epoch_id: boundary.basis.epoch_id.clone(),
         flow: task.phase_plan().flow.clone(),
         step: step.step.clone(),
         node_id: step.policy.id.clone(),
@@ -839,19 +533,18 @@ async fn prepare_task_flow_step_once(
     Ok(PreparedTaskStep {
         turn: prepared,
         position,
-        basis: boundary.basis,
     })
 }
 
 async fn prepare_task_flow_step(
     store: &SharedStore,
     task: &mut Task,
-    lease: &RunContext,
     wave_name: &str,
     flow: &mut Playhead,
+    source_run_id: Option<RunId>,
 ) -> Result<Option<PreparedTaskStep>> {
     loop {
-        let prepared = prepare_task_flow_step_once(store, task, lease, wave_name, flow).await?;
+        let prepared = prepare_task_flow_step_once(store, task, wave_name, flow).await?;
         if !prepared.position.human {
             return Ok(Some(prepared));
         }
@@ -863,22 +556,16 @@ async fn prepare_task_flow_step(
             .ok_or_else(|| anyhow!("human Task flow step has no stable node id"))?;
         checkpoint_worktree_before_human(task, &node_id).await;
         store
-            .set_flow_position(lease, prepared.position.clone())
+            .set_flow_position(&prepared.position.work, prepared.position.clone())
             .await?;
-        let run = store.run_by_id(&lease.run_id).await?;
-        let origin_cwd = run
-            .cwd
-            .ok_or_else(|| anyhow!("active Task Run has no execution cwd"))?;
+        let placement = store.placement(&prepared.position.work).await?;
         let ask = store
             .create_ask(
-                lease,
                 crate::durable::AskOrigin {
-                    work: lease.work.clone(),
-                    run_id: lease.run_id.clone(),
-                    turn_id: None,
-                    invocation_id: None,
-                    home_id: run.home_id,
-                    cwd: origin_cwd,
+                    work: prepared.position.work.clone(),
+                    source_run_id: source_run_id.clone(),
+                    home_id: placement.home_id,
+                    cwd: task.worktree.clone(),
                 },
                 crate::durable::AskBody::FlowStep {
                     flow: prepared.position.flow.clone(),
@@ -899,7 +586,7 @@ async fn prepare_task_flow_step(
                 crate::durable::AskState::Resolved,
                 Some(crate::durable::AskResult::Resolved { .. }),
             ) => {
-                complete_human_task_step(store, task, lease, flow).await?;
+                complete_human_task_step(store, task, flow).await?;
             }
             (
                 crate::durable::AskState::Declined,
@@ -911,16 +598,15 @@ async fn prepare_task_flow_step(
             ) => {
                 store
                     .append_steer(
-                        &lease.work,
+                        &prepared.position.work,
                         crate::durable::Author::User,
                         &format!("Human flow node {node_id} did not accept the step: {reason}"),
-                        None,
                     )
                     .await?;
                 task.phase_cursor = preceding_autonomous_step(flow, prepared.position.step_index)?;
                 task.phase_iteration += 1;
                 task.updated_at = time::OffsetDateTime::now_utc();
-                store.update_task_for_run(task, lease).await?;
+                store.update_task(task).await?;
                 *flow = resume_task_phase(task)?;
             }
             _ => anyhow::bail!("human Task Ask {} has an invalid terminal result", ask.id),
@@ -931,7 +617,6 @@ async fn prepare_task_flow_step(
 async fn complete_human_task_step(
     store: &SharedStore,
     task: &mut Task,
-    lease: &RunContext,
     flow: &mut Playhead,
 ) -> Result<()> {
     open_task_flow_body(flow, task)?;
@@ -942,7 +627,7 @@ async fn complete_human_task_step(
     } else {
         record_task_flow_position(task, flow)?;
     }
-    store.update_task_for_run(task, lease).await?;
+    store.update_task(task).await?;
     Ok(())
 }
 
@@ -973,60 +658,56 @@ fn open_task_flow_body(flow: &mut Playhead, task: &Task) -> Result<()> {
 }
 
 async fn start_task_flow_turn(
-    _store: &SharedStore,
     task: &mut Task,
-    lease: &RunContext,
     harness: &mut dyn Harness,
     flow: &mut Playhead,
     prepared: crate::lf::commands::run::PreparedHarnessTurn,
 ) -> Result<()> {
     open_task_flow_body(flow, task)?;
-    apply_input(_store, task, lease, harness, &prepared.input).await?;
+    harness.send_input(&prepared.input).await?;
     Ok(())
 }
 
-#[allow(clippy::too_many_arguments)]
 async fn start_prepared_task_step(
     store: &SharedStore,
     task: &mut Task,
-    lease: &RunContext,
     harness: &mut dyn Harness,
     flow: &mut Playhead,
-    capture: Option<&crate::trace::CaptureHandle>,
+    capture: Option<&crate::run_record::CaptureHandle>,
     prepared: PreparedTaskStep,
-) -> Result<Basis> {
+) -> Result<()> {
     store
-        .set_flow_position(lease, prepared.position.clone())
+        .set_flow_position(&prepared.position.work, prepared.position.clone())
         .await?;
     debug_assert!(!prepared.position.human);
     if let Some(capture) = capture {
-        capture.begin_turn_at(
-            "message",
-            &prepared.turn.input,
-            Some(prepared.basis.clone()),
-        )?;
+        capture.record_input("queued", &prepared.turn.input);
     }
-    start_task_flow_turn(store, task, lease, harness, flow, prepared.turn).await?;
-    Ok(prepared.basis)
+    start_task_flow_turn(task, harness, flow, prepared.turn).await
 }
 
-#[allow(clippy::too_many_arguments)]
 async fn start_resumed_task_phase(
     store: &SharedStore,
     task: &mut Task,
-    lease: &RunContext,
     harness: &mut dyn Harness,
     flow: &mut Playhead,
     wave_name: &str,
-    capture: Option<&crate::trace::CaptureHandle>,
-) -> Result<Option<Basis>> {
+    capture: Option<&crate::run_record::CaptureHandle>,
+) -> Result<Option<()>> {
     *flow = resume_task_phase(task)?;
-    let Some(prepared) = prepare_task_flow_step(store, task, lease, wave_name, flow).await? else {
+    let Some(prepared) = prepare_task_flow_step(
+        store,
+        task,
+        wave_name,
+        flow,
+        capture.map(crate::run_record::CaptureHandle::run_id),
+    )
+    .await?
+    else {
         return Ok(None);
     };
-    Ok(Some(
-        start_prepared_task_step(store, task, lease, harness, flow, capture, prepared).await?,
-    ))
+    start_prepared_task_step(store, task, harness, flow, capture, prepared).await?;
+    Ok(Some(()))
 }
 
 fn finish_task_flow_turn(flow: &mut Playhead, status: Lifecycle) -> Result<bool> {
@@ -1096,13 +777,11 @@ async fn run_task_flow_ops(task: &Task, flow: &mut Playhead) -> Result<bool> {
 
 /// End a parked body while Work stays open. The caller supplies
 /// `outcome` — only it knows whether the turn finished or was cut short.
-/// Close the body's trace capture so its last turn's usage is persisted.
-/// A capture left open leaves a `running` turn with NULL usage -- the orphan
-/// row `lf doctor` reports -- so this runs on every terminal path.
-fn finish_capture(capture: Option<&crate::trace::CaptureHandle>, outcome: &str) {
+/// Settle the harness launch on every terminal path.
+fn finish_capture(capture: Option<&crate::run_record::CaptureHandle>, outcome: &str) {
     let Some(capture) = capture else { return };
-    if let Err(error) = capture.finish(outcome, false) {
-        tracing::warn!(%error, "failed to finish Task trace capture");
+    if let Err(error) = capture.finish(outcome) {
+        tracing::warn!(%error, "failed to finish Task Run record");
     }
 }
 
@@ -1122,35 +801,14 @@ async fn checkpoint_worktree_before_human(task: &Task, node_id: &str) {
 }
 
 async fn park_task_at_human(
-    store: &SharedStore,
-    lease: &RunContext,
-    invocation_id: &crate::durable::AgentInvocationId,
     harness: Option<&mut dyn Harness>,
-    capture: Option<&crate::trace::CaptureHandle>,
+    capture: Option<&crate::run_record::CaptureHandle>,
 ) -> Result<()> {
     finish_capture(capture, "completed");
     if let Some(harness) = harness {
         let _ = harness.stop().await;
     }
-    store
-        .advance_run(
-            lease,
-            crate::durable::RunAdvance::InvocationEnded {
-                invocation_id: invocation_id.clone(),
-                outcome: crate::durable::BoundaryState::Succeeded,
-            },
-        )
-        .await?;
-    wait_for_parked_run(store, &lease.run_id).await
-}
-
-async fn wait_for_parked_run(store: &SharedStore, run_id: &crate::durable::RunId) -> Result<()> {
-    loop {
-        if store.run_by_id(run_id).await?.state != crate::durable::RunState::Active {
-            return Ok(());
-        }
-        tokio::time::sleep(Duration::from_millis(500)).await;
-    }
+    Ok(())
 }
 
 fn record_task_flow_position(task: &mut Task, flow: &Playhead) -> Result<()> {
@@ -1205,36 +863,10 @@ fn task_gate_fingerprint(task: &Task) -> Result<String> {
     Ok(hex::encode(Sha256::digest(state.as_bytes())))
 }
 
-async fn pending_input_is_current(
-    _store: &SharedStore,
-    _task: &Task,
-    _lease: &RunContext,
-    input: &PendingInput,
-) -> Result<bool> {
-    input_is_current(input).await
-}
-
-async fn apply_next_pending(
-    store: &SharedStore,
-    task: &Task,
-    lease: &RunContext,
-    harness: &mut dyn Harness,
-    pending: &mut VecDeque<PendingInput>,
-) -> Result<bool> {
-    while let Some(input) = pending.pop_front() {
-        if !pending_input_is_current(store, task, lease, &input).await? {
-            continue;
-        }
-        apply_input(store, task, lease, harness, &input.text).await?;
-        return Ok(true);
-    }
-    Ok(false)
-}
-
 async fn handle_attachment(
     store: &SharedStore,
     task: &Task,
-    lease: &RunContext,
+    harness: &mut dyn Harness,
     line: String,
 ) -> Result<()> {
     let line = line.trim();
@@ -1258,75 +890,59 @@ async fn handle_attachment(
             .status();
         return Ok(());
     }
-    store.validate_run_context(lease).await?;
     let target = ChildRef::Task(task.id.clone());
     if line == "/interrupt" {
-        let work = store.work_for_child(&target).await?;
-        let run = store
-            .current_run(&work)
-            .await?
-            .ok_or_else(|| anyhow!("Task Work {} has no active Run", work.id()))?;
-        let receipt = store.interrupt(None, &work, &run.id).await?;
-        println!("interrupted {}", receipt.run_id);
+        harness.interrupt().await?;
+        println!("interrupted active provider turn");
     } else {
         let work = store.work_for_child(&target).await?;
         let receipt = store
-            .append_steer(&work, crate::durable::Author::User, line, None)
+            .append_steer(&work, crate::durable::Author::User, line)
             .await?;
+        harness.send_input(line).await?;
         println!("queued {}", receipt.steer.id);
     }
     Ok(())
 }
 
-async fn record_unhandled_failure(
-    store: &SharedStore,
-    task_id: &TaskId,
-    lease: &RunContext,
-    error: &anyhow::Error,
-) {
-    match store.current_run(&lease.work).await {
-        Ok(Some(run)) if run.id == lease.run_id => {}
-        Ok(_) => return,
-        Err(store_error) => {
-            tracing::error!(
-                task = %task_id,
-                run = %lease.run_id,
-                error = %store_error,
-                "cannot inspect Task Run before recording its failure receipt"
-            );
-            return;
-        }
-    }
-    let (message, resumable) = unhandled_failure_receipt(&error.to_string());
-    if let Err(persist_error) = store
-        .fail_task_run(task_id, lease, &message, resumable)
+async fn record_unhandled_failure(store: &SharedStore, task_id: &TaskId, error: &anyhow::Error) {
+    let detail = error.to_string();
+    let (message, resumable) = unhandled_failure_receipt(&detail);
+    if store
+        .latest_task_event(task_id)
         .await
+        .ok()
+        .flatten()
+        .is_some_and(|event| {
+            matches!(
+                event.kind,
+                TaskEventKind::Failed {
+                    error,
+                    resumable: recorded_resumable,
+                } if (error == detail || error == message) && recorded_resumable == resumable
+            )
+        })
     {
+        return;
+    }
+    let event = TaskEventKind::Failed {
+        error: message,
+        resumable,
+    };
+    if let Err(persist_error) = store.append_task_event(task_id, &event).await {
         tracing::error!(
             task = %task_id,
-            run = %lease.run_id,
             error = %persist_error,
-            "Task failure receipt did not persist; Run remains recoverable"
+            "Task failure receipt did not persist"
         );
     }
 }
 
 fn unhandled_failure_receipt(detail: &str) -> (String, bool) {
-    if let Some(reason) = trace_capture_blocker(detail) {
-        return (reason, false);
-    }
     match provider_credential_blocker(detail) {
         Some(message) => (message, false),
         None => (format!("task process failed: {detail}"), true),
     }
-}
-
-fn trace_capture_blocker(detail: &str) -> Option<String> {
-    let (_, reason) = detail.split_once("trace capture is already partial:")?;
-    Some(format!(
-        "Task trace capture could not continue:{} The partial trace, Task worktree, and active pull request remain preserved. Repair local ledger write contention before starting a new Run.",
-        reason
-    ))
 }
 
 fn provider_credential_blocker(detail: &str) -> Option<String> {
@@ -1337,34 +953,25 @@ fn provider_credential_blocker(detail: &str) -> Option<String> {
     })
 }
 
-async fn apply_input(
-    store: &SharedStore,
-    _task: &Task,
-    lease: &RunContext,
-    harness: &mut dyn Harness,
-    text: &str,
-) -> Result<()> {
-    apply_child_input(
-        store,
-        lease,
-        harness,
-        PendingInput::system(text.to_string()),
-    )
-    .await
-}
-
 async fn finish_failed(
     store: &SharedStore,
     task: &mut Task,
-    lease: &RunContext,
     harness: &mut dyn Harness,
     error: &str,
-    capture: Option<&crate::trace::CaptureHandle>,
+    capture: Option<&crate::run_record::CaptureHandle>,
 ) -> Result<()> {
     finish_capture(capture, "failed");
     let _ = harness.stop().await;
-    store.update_task_for_run(task, lease).await?;
-    store.fail_task_run(&task.id, lease, error, true).await?;
+    store.update_task(task).await?;
+    store
+        .append_task_event(
+            &task.id,
+            &TaskEventKind::Failed {
+                error: error.to_string(),
+                resumable: true,
+            },
+        )
+        .await?;
     anyhow::bail!(error.to_string())
 }
 
@@ -1383,7 +990,6 @@ fn completed_boundary_failure(
         "operation not permitted",
         "permission denied",
         "read-only file system",
-        "has no active turn",
         "network access is disabled",
         "network is unreachable",
     ]
@@ -1409,27 +1015,33 @@ fn completed_boundary_failure(
 async fn finish_execution_blocked(
     store: &SharedStore,
     task: &mut Task,
-    lease: &RunContext,
     harness: &mut dyn Harness,
     failures: &[String],
-    capture: Option<&crate::trace::CaptureHandle>,
+    capture: Option<&crate::run_record::CaptureHandle>,
 ) -> Result<()> {
     let reason = execution_blocked_reason(failures);
-    finish_nonresumable(store, task, lease, harness, &reason, capture).await
+    finish_nonresumable(store, task, harness, &reason, capture).await
 }
 
 async fn finish_nonresumable(
     store: &SharedStore,
     task: &mut Task,
-    lease: &RunContext,
     harness: &mut dyn Harness,
     reason: &str,
-    capture: Option<&crate::trace::CaptureHandle>,
+    capture: Option<&crate::run_record::CaptureHandle>,
 ) -> Result<()> {
     finish_capture(capture, "failed");
     let _ = harness.stop().await;
-    store.update_task_for_run(task, lease).await?;
-    store.fail_task_run(&task.id, lease, reason, false).await?;
+    store.update_task(task).await?;
+    store
+        .append_task_event(
+            &task.id,
+            &TaskEventKind::Failed {
+                error: reason.to_string(),
+                resumable: false,
+            },
+        )
+        .await?;
     Ok(())
 }
 
@@ -1462,7 +1074,6 @@ fn infra_blocked_reason(capability: &str, detail: &str, pr_number: Option<u32>) 
 async fn finish_infra_blocked(
     store: &SharedStore,
     task: &mut Task,
-    lease: &RunContext,
     harness: &mut dyn Harness,
     capability: &str,
     detail: &str,
@@ -1473,228 +1084,34 @@ async fn finish_infra_blocked(
         .await?
         .and_then(|pr| pr.github().map(|g| g.number));
     let reason = infra_blocked_reason(capability, detail, pr_number);
-    store.update_task_for_run(task, lease).await?;
-    store.fail_task_run(&task.id, lease, &reason, true).await?;
-    Ok(())
-}
-
-/// Recover a retryable body failure through the Run's next exact route after
-/// PRD-38 permits replacement and the current containment stops positively.
-#[allow(clippy::too_many_arguments)] // capture is a terminal-path output, not a knob
-async fn handle_body_failure(
-    store: &SharedStore,
-    task: &mut Task,
-    lease: &RunContext,
-    invocation_id: &crate::durable::AgentInvocationId,
-    invocation_route: &crate::durable::InvocationRoute,
-    harness: &mut dyn Harness,
-    wave: &Wave,
-    reason: &str,
-    turn_had_durable_side_effect: bool,
-    capture: Option<&crate::trace::CaptureHandle>,
-) -> Result<Option<(RunContext, ExactRoute)>> {
-    if let Some(blocker) = provider_credential_blocker(reason) {
-        return finish_nonresumable(store, task, lease, harness, &blocker, capture)
-            .await
-            .map(|_| None);
-    }
-    finish_capture(capture, "failed");
-    let wave_config = read_wave_config(Path::new(wave.repo()), wave.name());
-    let backup_agent = wave_config.as_ref().and_then(|c| c.backup_agent.as_deref());
-    let decision = classify_disconnect_recovery(
-        reason,
-        &task.agent,
-        turn_had_durable_side_effect,
-        backup_agent,
-    );
-
-    let route_recovery_permitted = matches!(
-        decision,
-        RecoveryDecision::HandoffToBackup { .. } | RecoveryDecision::AllowRetry
-    ) || (matches!(decision, RecoveryDecision::Normal)
-        && !turn_had_durable_side_effect
-        && crate::engine::agent::classify_retryable_agent_failure(reason).is_some());
-
-    if route_recovery_permitted {
-        let current_route = ExactRoute::try_from(invocation_route)?;
-        let stopped = match stop_invocation_for_recovery(store, lease, invocation_id, harness)
-            .await?
-        {
-            RecoveryStopOutcome::Stopped(stopped) => stopped,
-            RecoveryStopOutcome::Fenced { error, stop } => {
-                tracing::error!(task = %task.id, containment = ?stop.containment, %error, "Task recovery left the Run fenced");
-                return Ok(None);
-            }
-        };
-        let choice = plan_run_route_recovery(store, lease, backup_agent).await?;
-        let failure = match &choice {
-            RecoveryChoice::Invoke(_) => reason.to_string(),
-            RecoveryChoice::AwaitCapability { reasons } => format!(
-                "{reason}; waiting on provider route capability: {}",
-                capability_key(reasons)
-            ),
-        };
-        store
-            .append_task_event_for_run(
-                &task.id,
-                lease,
-                &TaskEventKind::Failed {
-                    error: failure,
-                    resumable: true,
-                },
-            )
-            .await?;
-        store.update_task_for_run(task, lease).await?;
-        return match settle_route_recovery(store, lease, stopped, choice).await? {
-            RecoverySettlement::RecoveryRun {
-                lease: recovery_lease,
-                route,
-            } => {
-                let agent = route.agent.agent();
-                let provider = route.agent.provider.clone();
-                let handoff = ChildBodyHandoff {
-                    from_agent: task.agent.clone(),
-                    to_agent: agent.clone(),
-                    from_provider: task.provider.clone(),
-                    to_provider: provider.clone(),
-                    reason: format!("route recovery after {reason}"),
-                };
-                if current_route.agent.provider != route.agent.provider
-                    || current_route.account_id != route.account_id
-                {
-                    task.provider_session_id = None;
-                }
-                task.agent = agent;
-                task.provider = provider;
-                store.update_task_for_run(task, &recovery_lease).await?;
-                store
-                    .append_task_event_for_run(
-                        &task.id,
-                        &recovery_lease,
-                        &TaskEventKind::BodyHandedOff { handoff },
-                    )
-                    .await?;
-                Ok(Some((recovery_lease, route)))
-            }
-            RecoverySettlement::AwaitCapability { wait } => {
-                tracing::info!(task = %task.id, wait = %wait.id, "Task waiting for a provider route capability");
-                Ok(None)
-            }
-        };
-    }
-
-    match decision {
-        RecoveryDecision::Stop => {
-            let non_convergence = format!(
-                "{reason}; not replay-safe (durable side effects this turn) and no backup agent configured"
-            );
-            finish_failed(store, task, lease, harness, &non_convergence, None)
-                .await
-                .map(|_| None)
-        }
-        RecoveryDecision::AllowRetry => finish_failed(store, task, lease, harness, reason, None)
-            .await
-            .map(|_| None),
-        RecoveryDecision::Normal => {
-            // Keep an attached PR visible across a provider outage so a later
-            // Task resume continues from the same delivery state.
-            if store.active_task_pr(&task.id).await?.is_some() {
-                return finish_infra_blocked(store, task, lease, harness, "provider", reason)
-                    .await
-                    .map(|_| None);
-            }
-            finish_failed(store, task, lease, harness, reason, None)
-                .await
-                .map(|_| None)
-        }
-        RecoveryDecision::HandoffToBackup { .. } => unreachable!(
-            "backup handoff is consumed by route recovery before ordinary failure handling"
-        ),
-    }
-}
-
-#[allow(clippy::too_many_arguments)]
-async fn fail_and_maybe_recover(
-    store: &SharedStore,
-    task: &mut Task,
-    lease: &RunContext,
-    invocation_id: &crate::durable::AgentInvocationId,
-    invocation_route: &crate::durable::InvocationRoute,
-    harness: &mut dyn Harness,
-    wave: &Wave,
-    reason: &str,
-    turn_had_durable_side_effect: bool,
-    capture: Option<&crate::trace::CaptureHandle>,
-) -> Result<()> {
-    let Some((recovery_lease, route)) = handle_body_failure(
-        store,
-        task,
-        lease,
-        invocation_id,
-        invocation_route,
-        harness,
-        wave,
-        reason,
-        turn_had_durable_side_effect,
-        capture,
-    )
-    .await?
-    else {
-        return Ok(());
-    };
-    spawn_failover(store, task, &recovery_lease, &route).await
-}
-
-async fn finish_abandoned(
-    store: &SharedStore,
-    task: &mut Task,
-    lease: &RunContext,
-    harness: &mut dyn Harness,
-    _reason: String,
-) -> Result<()> {
-    let _ = harness.interrupt().await;
-    let _ = harness.stop().await;
+    store.update_task(task).await?;
     store
-        .finish_task_run(task, lease, crate::durable::BoundaryState::Interrupted)
+        .append_task_event(
+            &task.id,
+            &TaskEventKind::Failed {
+                error: reason,
+                resumable: true,
+            },
+        )
         .await?;
     Ok(())
 }
 
-async fn finish_command_stop(
+async fn finish_body_failure(
     store: &SharedStore,
     task: &mut Task,
-    lease: &RunContext,
     harness: &mut dyn Harness,
-    stop: CommandStop,
-    capture: Option<&crate::trace::CaptureHandle>,
+    reason: &str,
+    capture: Option<&crate::run_record::CaptureHandle>,
 ) -> Result<()> {
-    finish_capture(
-        capture,
-        match stop {
-            CommandStop::Interrupted => "interrupted",
-            CommandStop::Quiesced => "completed",
-            _ => "completed",
-        },
-    );
-    match stop {
-        CommandStop::Interrupted => {
-            let _ = harness.stop().await;
-            store
-                .finish_task_run(task, lease, crate::durable::BoundaryState::Interrupted)
-                .await?;
-            Ok(())
-        }
-        CommandStop::Quiesced => {
-            let _ = harness.stop().await;
-            store
-                .finish_task_run(task, lease, crate::durable::BoundaryState::Interrupted)
-                .await?;
-            Ok(())
-        }
-        CommandStop::Abandoned(reason) => {
-            finish_abandoned(store, task, lease, harness, reason).await
-        }
+    if let Some(blocker) = provider_credential_blocker(reason) {
+        return finish_nonresumable(store, task, harness, &blocker, capture).await;
     }
+    if store.active_task_pr(&task.id).await?.is_some() {
+        finish_capture(capture, "failed");
+        return finish_infra_blocked(store, task, harness, "provider", reason).await;
+    }
+    finish_failed(store, task, harness, reason, capture).await
 }
 
 fn task_seed(
@@ -1702,7 +1119,7 @@ fn task_seed(
     project: &ProjectPlan,
     pr: &crate::task::TaskPr,
     wave_name: &str,
-    boundary: &BoundarySeed,
+    steers: &[Steer],
 ) -> String {
     let placement = pr
         .parent_pr_id
@@ -1728,7 +1145,7 @@ fn task_seed(
         project = project.name,
         project_id = project.id.as_str(),
         project_context = project.prompt_context,
-        direction = boundary.render(),
+        direction = render_steers(steers),
         task_snapshot_synced_at = task.plan.pm_snapshot_synced_at,
         project_snapshot_synced_at = project.pm_snapshot_synced_at,
         wave = wave_name,
@@ -1798,14 +1215,14 @@ pub(crate) async fn flow_step_harness_turn(
             ask.id
         );
     }
-    let boundary = store.boundary_seed(&ask.origin.work).await?;
+    let steers = store.work_steers(&ask.origin.work).await?;
     let pr = store
         .active_task_pr(&task.id)
         .await?
         .ok_or_else(|| anyhow!("Task {} has no active PR", task.id))?;
     let project = owning_project(store, &task).await?;
     let wave = owning_wave(store, &task).await?;
-    let seed = task_seed(&task, &project.plan, &pr, wave.name(), &boundary);
+    let seed = task_seed(&task, &project.plan, &pr, wave.name(), &steers);
     let mut prepared =
         crate::lf::commands::run::prepare_interactive_harness_turn(skill, &seed, wave.name())?;
     prepared.input = human_flow_settlement(&prepared.input, skill, node_id, &ask.id);
@@ -1867,10 +1284,7 @@ mod planning_tests {
         preceding_autonomous_step, sync_task_state, task_seed, unhandled_failure_receipt,
     };
     use crate::chat::types::Lifecycle;
-    use crate::durable::{
-        AskBody, AskId, AskResult, AskTarget, Basis, BoundarySeed, Containment, EpochId,
-        InvocationRoute, RunAdvance, RunContext, RunTrigger,
-    };
+    use crate::durable::{AskBody, AskId, AskResult, AskTarget, RunId};
     use crate::engine::agent::AgentConfig;
     use crate::engine::OccurrencePolicy;
     use crate::harness::{Harness, SendCurrentOutcome};
@@ -1939,7 +1353,7 @@ mod planning_tests {
         }
     }
 
-    async fn human_task_fixture() -> (SharedStore, Task, RunContext, Playhead) {
+    async fn human_task_fixture() -> (SharedStore, Task, Playhead) {
         let repository =
             std::fs::canonicalize(std::path::Path::new(env!("CARGO_MANIFEST_DIR")).join("../.."))
                 .unwrap();
@@ -1969,8 +1383,9 @@ mod planning_tests {
             "init",
         ]);
         let database = tempfile::tempdir().unwrap().keep();
+        let database = database.join("registry.db");
         let store = std::sync::Arc::new(
-            open_store(&StorageConfig::sqlite(database.join("registry.db")))
+            open_store(&StorageConfig::sqlite(database.clone()))
                 .await
                 .unwrap(),
         );
@@ -2051,25 +1466,8 @@ mod planning_tests {
         store.create_wave(&wave).await.unwrap();
         store.create_project(&project).await.unwrap();
         store.create_task(&task, &pr).await.unwrap();
-        let work = store
-            .work_for_child(&crate::child::ChildRef::Task(task.id.clone()))
-            .await
-            .unwrap();
-        let (_, lease) = store.reserve_run(&work, RunTrigger::User).await.unwrap();
-        store
-            .advance_run(
-                &lease,
-                RunAdvance::RunStarting {
-                    containment: Containment::Tmux {
-                        name: "human-task-proof".to_string(),
-                    },
-                    cwd: worktree.clone(),
-                },
-            )
-            .await
-            .unwrap();
         let flow = super::resume_task_phase(&task).unwrap();
-        (store, task, lease, flow)
+        (store, task, flow)
     }
 
     #[test]
@@ -2090,28 +1488,32 @@ mod planning_tests {
     }
 
     #[tokio::test]
-    async fn parked_task_supervisor_stays_alive_until_the_run_settles() {
-        let (store, task, lease, _) = human_task_fixture().await;
-        let waiting_store = store.clone();
-        let run_id = lease.run_id.clone();
-        let waiter =
-            tokio::spawn(async move { super::wait_for_parked_run(&waiting_store, &run_id).await });
-        tokio::time::sleep(std::time::Duration::from_millis(20)).await;
-        assert!(!waiter.is_finished());
+    async fn provider_failure_records_planning() {
+        let (store, mut task, _) = human_task_fixture().await;
+        let mut harness = UnusedHarness;
 
-        store
-            .finish_task_run(&task, &lease, crate::durable::BoundaryState::Succeeded)
-            .await
-            .unwrap();
-        tokio::time::timeout(std::time::Duration::from_secs(1), waiter)
-            .await
-            .expect("parked supervisor exits after Run settlement")
-            .unwrap()
-            .unwrap();
+        super::finish_body_failure(
+            &store,
+            &mut task,
+            &mut harness,
+            "opencode_disconnected: provider stream ended",
+            None,
+        )
+        .await
+        .unwrap();
+
+        let events = store.task_events_after(&task.id, 0).await.unwrap();
+        assert!(matches!(
+            &events.last().unwrap().kind,
+            TaskEventKind::Failed {
+                error,
+                resumable: true,
+            } if error.contains("provider stream ended")
+        ));
     }
 
     #[test]
-    fn normal_task_completion_preserves_delivery_permission_and_ask_authority_failures() {
+    fn normal_task_completion_preserves_delivery_permission_and_ask_network_failures() {
         let commit = completed_boundary_failure(
             &["lf".into(), "commit".into(), "-m".into(), "ship".into(), "-p".into()],
             Lifecycle::Failed,
@@ -2129,7 +1531,7 @@ mod planning_tests {
                 "Need authority".into(),
             ],
             Lifecycle::Failed,
-            Some("AgentInvocation invocation_test has no active Turn"),
+            Some("network access is disabled by policy"),
             Some(1),
         )
         .unwrap();
@@ -2138,7 +1540,7 @@ mod planning_tests {
 
         assert!(reason.contains(".git/worktrees/task/index.lock"));
         assert!(reason.contains("Operation not permitted"));
-        assert!(reason.contains("AgentInvocation invocation_test has no active Turn"));
+        assert!(reason.contains("network access is disabled by policy"));
         assert!(reason.contains("before starting a new Run"));
     }
 
@@ -2164,394 +1566,86 @@ mod planning_tests {
         assert!(reason.contains("Reconnect the named managed account"));
     }
 
-    #[allow(clippy::await_holding_lock)]
     #[tokio::test]
-    async fn pre_provider_failure_ends_prompt_only_invocation_and_records_task_failure() {
-        let repository =
-            std::fs::canonicalize(std::path::Path::new(env!("CARGO_MANIFEST_DIR")).join("../.."))
-                .unwrap();
-        let database = tempfile::tempdir().unwrap();
-        let database_path = database.path().join("registry.db");
-        let store = std::sync::Arc::new(
-            open_store(&StorageConfig::sqlite(database_path.clone()))
-                .await
-                .unwrap(),
-        );
-        let now = time::OffsetDateTime::now_utc();
-        let wave = Wave::new(
-            crate::id::WaveId::new(),
-            "prompt-only-failure".to_string(),
-            repository.display().to_string(),
-        );
-        let project = Project {
-            id: ProjectId::new(),
-            plan: ProjectPlan {
-                id: LinearProjectId::new("prompt-only-project").unwrap(),
-                slug: "prompt-only-failure".to_string(),
-                name: "Prompt-only failure".to_string(),
-                prompt_context: "Preserve the exact terminal failure.".to_string(),
-                pm_snapshot_synced_at: now.unix_timestamp(),
-            },
-            wave_id: wave.id().clone(),
-            iteration: 0,
-            observation_cursor: 0,
-            last_state_fingerprint: None,
-            agent: "unsupported".to_string(),
-            provider: "unsupported".to_string(),
-            provider_session_id: None,
-            abandon_intent: None,
-            created_at: now,
-            updated_at: now,
-        };
-        let mut task = Task {
-            id: TaskId::new(),
-            plan: TaskPlan {
-                id: LinearIssueId::new("prompt-only-issue").unwrap(),
-                identifier: "TEST-PROMPT".to_string(),
-                title: "Prompt-only failure".to_string(),
-                description: String::new(),
-                pm_snapshot_synced_at: now.unix_timestamp(),
-            },
-            pm_writeback: PmWritebackState::Current,
-            wave_id: wave.id().clone(),
-            project_id: project.id.clone(),
-            worktree: repository.clone(),
-            workspace_slug: "prompt-only-failure".to_string(),
-            lifecycle: TaskLifecyclePlan::defaults(),
-            lifecycle_phase: TaskLifecyclePhase::First,
-            phase_epoch: 1,
-            phase_cursor: 0,
-            phase_iteration: 0,
-            gate_cycle: 0,
-            gate_proposal: None,
-            agent: "unsupported".to_string(),
-            provider: "unsupported".to_string(),
-            provider_session_id: None,
-            abandon_intent: None,
-            created_at: now,
-            updated_at: now,
-            observation: Observation::NotRequired,
-        };
-        let pr = TaskPr {
-            id: TaskPrId::new(),
-            task_id: task.id.clone(),
-            sequence: 1,
-            slug: task.workspace_slug.clone(),
-            branch: "test/prompt-only-failure".to_string(),
-            base_commit: "deadbeef".to_string(),
-            parent_pr_id: None,
-            publication: None,
-            merge_commit: None,
-            abandoned_at: None,
-            ci_observation: None,
-            github_observation: None,
-            linear_attachment_id: None,
-            linear_comment_id: None,
-            linear_link_error: None,
-            created_at: now,
-            updated_at: now,
-        };
-        store.create_wave(&wave).await.unwrap();
-        store.create_project(&project).await.unwrap();
-        store.create_task(&task, &pr).await.unwrap();
-        let work = store
-            .work_for_child(&crate::child::ChildRef::Task(task.id.clone()))
-            .await
-            .unwrap();
-        let (run, lease) = store.reserve_run(&work, RunTrigger::User).await.unwrap();
-        store
-            .advance_run(
-                &lease,
-                RunAdvance::RunStarting {
-                    containment: Containment::Tmux {
-                        name: "prompt-only-failure".to_string(),
-                    },
-                    cwd: repository.clone(),
-                },
-            )
-            .await
-            .unwrap();
-        let invocation = store
-            .advance_run(
-                &lease,
-                RunAdvance::InvocationStarting {
-                    route: InvocationRoute {
-                        provider: "unsupported".to_string(),
-                        model: None,
-                        account_id: None,
-                    },
-                    surface: "headless".to_string(),
-                    resume_token: None,
-                    answer_ask_id: None,
-                },
-            )
-            .await
-            .unwrap();
-        let crate::durable::AdvanceReceipt::Invocation(invocation) = invocation else {
-            unreachable!("InvocationStarting returns an Invocation receipt")
-        };
-        let connection = rusqlite::Connection::open(&database_path).unwrap();
-        connection
-            .execute_batch(
-                "CREATE TRIGGER reject_test_task_failure
-                 BEFORE INSERT ON task_events
-                 WHEN json_extract(NEW.kind_json, '$.kind') = 'failed'
-                 BEGIN
-                     SELECT RAISE(ABORT, 'injected Task failure write');
-                 END;",
-            )
-            .unwrap();
+    async fn unhandled_task_failure_is_a_planning_receipt() {
+        let (store, task, _) = human_task_fixture().await;
 
-        let _env_lock = crate::journal::test_env_lock();
-        let inherited_invocation = std::env::var_os(crate::durable::AGENT_INVOCATION_ENV);
-        std::env::set_var(crate::durable::AGENT_INVOCATION_ENV, invocation.id.as_str());
-        let result = super::run(store.clone(), task.id.clone(), &lease).await;
-        match inherited_invocation {
-            Some(value) => std::env::set_var(crate::durable::AGENT_INVOCATION_ENV, value),
-            None => std::env::remove_var(crate::durable::AGENT_INVOCATION_ENV),
-        }
-        let error = result.expect_err("unsupported provider must fail before its first event");
-        assert!(
-            error
-                .to_string()
-                .contains("has no managed account route for the required linked Git"),
-            "unexpected startup failure: {error:#}"
-        );
+        super::record_unhandled_failure(
+            &store,
+            &task.id,
+            &anyhow::anyhow!("provider stream closed"),
+        )
+        .await;
 
         let events = store.recent_task_events(&task.id, 10).await.unwrap();
-        assert_eq!(events.len(), 1);
-        assert_eq!(events[0].kind, TaskEventKind::Started);
-        assert!(store.current_run(&work).await.unwrap().is_some());
-        let unsettled: (String, bool) = connection
-            .query_row(
-                "SELECT outcome, ended_at IS NOT NULL
-                 FROM agent_invocations WHERE supervising_run_id=?1",
-                [run.id.as_str()],
-                |row| Ok((row.get(0)?, row.get(1)?)),
-            )
-            .unwrap();
-        assert_eq!(unsettled, ("running".into(), false));
-
-        connection
-            .execute_batch("DROP TRIGGER reject_test_task_failure;")
-            .unwrap();
-        super::record_unhandled_failure(&store, &task.id, &lease, &error).await;
-
-        let events = store.recent_task_events(&task.id, 10).await.unwrap();
-        assert_eq!(events.len(), 2);
         assert!(matches!(
             &events[0].kind,
             TaskEventKind::Failed { error, resumable: true }
-                if error.contains("task process failed: Task execution cannot converge")
-                    && error.contains("has no managed account route for the required linked Git")
+                if error == "task process failed: provider stream closed"
         ));
-        assert_eq!(events[1].kind, TaskEventKind::Started);
-        assert!(store.current_run(&work).await.unwrap().is_none());
-
-        let invocation: (String, String, bool) = connection
-            .query_row(
-                "SELECT capture_status, outcome, ended_at IS NOT NULL
-                 FROM agent_invocations WHERE supervising_run_id=?1",
-                [run.id.as_str()],
-                |row| Ok((row.get(0)?, row.get(1)?, row.get(2)?)),
-            )
-            .unwrap();
-        assert_eq!(invocation, ("prompt_only".into(), "failed".into(), true));
-
-        let (run, lease) = store.reserve_run(&work, RunTrigger::User).await.unwrap();
-        store
-            .advance_run(
-                &lease,
-                RunAdvance::RunStarting {
-                    containment: Containment::Tmux {
-                        name: "handled-provider-failure".to_string(),
-                    },
-                    cwd: repository.clone(),
-                },
-            )
-            .await
-            .unwrap();
-        store
-            .advance_run(
-                &lease,
-                RunAdvance::InvocationStarting {
-                    route: InvocationRoute {
-                        provider: "unsupported".to_string(),
-                        model: None,
-                        account_id: None,
-                    },
-                    surface: "headless".to_string(),
-                    resume_token: None,
-                    answer_ask_id: None,
-                },
-            )
-            .await
-            .unwrap();
-        store
-            .append_task_event_for_run(&task.id, &lease, &TaskEventKind::Started)
-            .await
-            .unwrap();
-        connection
-            .execute_batch(
-                "CREATE TRIGGER reject_test_task_failure
-                 BEFORE INSERT ON task_events
-                 WHEN json_extract(NEW.kind_json, '$.kind') = 'failed'
-                 BEGIN
-                     SELECT RAISE(ABORT, 'injected Task failure write');
-                 END;",
-            )
-            .unwrap();
-
-        let mut harness = UnusedHarness;
-        super::finish_failed(
-            &store,
-            &mut task,
-            &lease,
-            &mut harness,
-            "provider stream closed",
-            None,
-        )
-        .await
-        .expect_err("the rejected receipt keeps the handled failure recoverable");
-        assert!(store.current_run(&work).await.unwrap().is_some());
-        let unsettled: (String, bool) = connection
-            .query_row(
-                "SELECT outcome, ended_at IS NOT NULL
-                 FROM agent_invocations WHERE supervising_run_id=?1",
-                [run.id.as_str()],
-                |row| Ok((row.get(0)?, row.get(1)?)),
-            )
-            .unwrap();
-        assert_eq!(unsettled, ("running".into(), false));
-
-        connection
-            .execute_batch("DROP TRIGGER reject_test_task_failure;")
-            .unwrap();
-        let handled_error = super::finish_failed(
-            &store,
-            &mut task,
-            &lease,
-            &mut harness,
-            "provider stream closed",
-            None,
-        )
-        .await
-        .expect_err("a handled failure returns its reason after settlement");
-        let event_count = store.recent_task_events(&task.id, 10).await.unwrap().len();
-        super::record_unhandled_failure(&store, &task.id, &lease, &handled_error).await;
-        let events = store.recent_task_events(&task.id, 10).await.unwrap();
-        assert_eq!(events.len(), event_count);
-        assert!(matches!(
-            &events[0].kind,
-            TaskEventKind::Failed { error, resumable: true }
-                if error == "provider stream closed"
-        ));
-        assert!(store.current_run(&work).await.unwrap().is_none());
-        let invocation: (String, String, bool) = connection
-            .query_row(
-                "SELECT capture_status, outcome, ended_at IS NOT NULL
-                 FROM agent_invocations WHERE supervising_run_id=?1",
-                [run.id.as_str()],
-                |row| Ok((row.get(0)?, row.get(1)?, row.get(2)?)),
-            )
-            .unwrap();
-        assert_eq!(invocation, ("prompt_only".into(), "failed".into(), true));
     }
 
-    async fn settle_human_task(
-        store: &SharedStore,
-        result: AskResult,
-    ) -> (crate::durable::Ask, RunContext) {
+    async fn settle_human_task(store: &SharedStore, result: AskResult) -> crate::durable::Ask {
         let ask = store
-            .pending_asks(None, &AskTarget::User)
+            .pending_asks(&AskTarget::User)
             .await
             .unwrap()
             .into_iter()
             .next()
             .unwrap();
-        let claim = store.claim_test_ask(None, &ask.id).await.unwrap();
+        let claim = store.claim_ask(&ask.id).await.unwrap();
         assert!(claim.needs_launch);
-        let run_context = store
-            .claim_flow_step_run_context(&ask.id, &claim.invocation_id)
-            .await
-            .unwrap()
-            .unwrap();
         store
-            .mark_ask_ready(&ask.id, &claim.invocation_id)
-            .await
-            .unwrap();
-        store
-            .mark_ask_presented(&ask.id, &claim.invocation_id)
+            .mark_ask_presented(&ask.id, &claim.run_id)
             .await
             .unwrap();
         let ask = store
-            .settle_ask(&ask.id, &claim.invocation_id, result)
+            .settle_ask(&ask.id, &claim.run_id, result)
             .await
             .unwrap();
-        assert!(store.validate_run_context(&run_context).await.is_err());
-        assert!(store.current_run(&ask.origin.work).await.unwrap().is_none());
-        let (_, successor) = store
-            .reserve_run(&ask.origin.work, RunTrigger::User)
-            .await
-            .unwrap();
-        store
-            .advance_run(
-                &successor,
-                RunAdvance::RunStarting {
-                    containment: Containment::Tmux {
-                        name: "human-task-successor".to_string(),
-                    },
-                    cwd: ask.origin.cwd.clone(),
-                },
-            )
-            .await
-            .unwrap();
-        (ask, successor)
+        ask
     }
 
     #[tokio::test]
     #[allow(clippy::await_holding_lock)] // the guard serializes LF_BIN for the fixture
     async fn released_human_task_attempt_keeps_the_same_node_parked() {
         let _lf_bin = super::TestLfBinGuard::pin();
-        let (store, mut task, lease, mut flow) = human_task_fixture().await;
+        let (store, mut task, mut flow) = human_task_fixture().await;
+        let parent_run_id = RunId::new();
         assert!(super::prepare_task_flow_step(
             &store,
             &mut task,
-            &lease,
             "human-task-proof",
             &mut flow,
+            Some(parent_run_id.clone()),
         )
         .await
         .unwrap()
         .is_none());
         let ask = store
-            .pending_asks(None, &AskTarget::User)
+            .pending_asks(&AskTarget::User)
             .await
             .unwrap()
             .remove(0);
-        let claim = store.claim_test_ask(None, &ask.id).await.unwrap();
+        assert_eq!(ask.origin.source_run_id, Some(parent_run_id));
+        let claim = store.claim_ask(&ask.id).await.unwrap();
         assert!(claim.needs_launch);
-        let flow_writer = store
-            .claim_flow_step_run_context(&ask.id, &claim.invocation_id)
-            .await
-            .unwrap()
-            .unwrap();
         store
-            .release_ask(&ask.id, &claim.invocation_id, Some("not finished"))
+            .release_ask(&ask.id, &claim.run_id, Some("not finished"))
             .await
             .unwrap();
 
         assert!(super::prepare_task_flow_step(
             &store,
             &mut task,
-            &flow_writer,
             "human-task-proof",
             &mut flow,
+            None
         )
         .await
         .unwrap()
         .is_none());
-        let queued = store.pending_asks(None, &AskTarget::User).await.unwrap();
+        let queued = store.pending_asks(&AskTarget::User).await.unwrap();
         assert_eq!(queued.len(), 1);
         assert_eq!(queued[0].id, ask.id);
         assert_eq!(task.phase_cursor, 1);
@@ -2559,91 +1653,55 @@ mod planning_tests {
 
     #[tokio::test]
     #[allow(clippy::await_holding_lock)] // the guard serializes LF_BIN for the fixture
-    async fn restarted_human_task_reuses_the_queued_ask_with_current_run_authority() {
+    async fn restarted_human_task_reuses_the_queued_ask_without_sql_run_authority() {
         let _lf_bin = super::TestLfBinGuard::pin();
-        let (store, mut task, lease, mut flow) = human_task_fixture().await;
+        let (store, mut task, mut flow) = human_task_fixture().await;
         assert!(super::prepare_task_flow_step(
             &store,
             &mut task,
-            &lease,
             "human-task-proof",
             &mut flow,
+            None
         )
         .await
         .unwrap()
         .is_none());
         let original = store
-            .pending_asks(None, &AskTarget::User)
+            .pending_asks(&AskTarget::User)
             .await
             .unwrap()
             .remove(0);
-        store
-            .finish_task_run(&task, &lease, crate::durable::BoundaryState::Succeeded)
-            .await
-            .unwrap();
-        let (_, successor) = store
-            .reserve_run(&original.origin.work, RunTrigger::User)
-            .await
-            .unwrap();
-        store
-            .advance_run(
-                &successor,
-                RunAdvance::RunStarting {
-                    containment: Containment::Tmux {
-                        name: "human-task-restart".to_string(),
-                    },
-                    cwd: task.worktree.clone(),
-                },
-            )
-            .await
-            .unwrap();
         let mut restarted_flow = super::resume_task_phase(&task).unwrap();
 
         assert!(super::prepare_task_flow_step(
             &store,
             &mut task,
-            &successor,
             "human-task-proof",
             &mut restarted_flow,
+            None,
         )
         .await
         .unwrap()
         .is_none());
-        let recovered = store.pending_asks(None, &AskTarget::User).await.unwrap();
+        let recovered = store.pending_asks(&AskTarget::User).await.unwrap();
         assert_eq!(recovered.len(), 1);
         assert_eq!(recovered[0].id, original.id);
         assert_eq!(recovered[0].origin, original.origin);
-        let claim = store.claim_test_ask(None, &recovered[0].id).await.unwrap();
-        let flow_writer = store
-            .claim_flow_step_run_context(&recovered[0].id, &claim.invocation_id)
-            .await
-            .unwrap()
-            .expect("recovered flow Ask receives current writer authority");
-        store.validate_run_context(&flow_writer).await.unwrap();
-        let invocation = store
-            .ask_invocations(&recovered[0].id)
-            .await
-            .unwrap()
-            .into_iter()
-            .find(|invocation| invocation.id == claim.invocation_id)
-            .unwrap();
-        assert_eq!(
-            invocation.supervising_run_id.as_ref(),
-            Some(&successor.run_id)
-        );
+        let claim = store.claim_ask(&recovered[0].id).await.unwrap();
+        assert!(claim.needs_launch);
     }
 
     #[tokio::test]
     #[allow(clippy::await_holding_lock)] // the guard serializes LF_BIN for the fixture
     async fn human_task_node_queues_without_starting_a_provider_and_resolve_advances() {
         let _lf_bin = super::TestLfBinGuard::pin();
-        let (store, mut task, lease, mut flow) = human_task_fixture().await;
+        let (store, mut task, mut flow) = human_task_fixture().await;
         let prepared =
-            super::prepare_task_flow_step(&store, &mut task, &lease, "human-task-proof", &mut flow)
+            super::prepare_task_flow_step(&store, &mut task, "human-task-proof", &mut flow, None)
                 .await
                 .unwrap();
         assert!(prepared.is_none());
-        let queued = store.pending_asks(None, &AskTarget::User).await.unwrap();
+        let queued = store.pending_asks(&AskTarget::User).await.unwrap();
         assert_eq!(queued.len(), 1);
         assert!(matches!(
             &queued[0].request,
@@ -2657,29 +1715,19 @@ mod planning_tests {
         // contract is appended — no generic-agent reviewer-mode injection.
         assert!(turn.input.contains("<lf:human-flow-node>"));
         assert!(turn.input.contains("lf ask resolve"));
-        assert!(store
-            .invocations_for_run(&lease.run_id)
-            .await
-            .unwrap()
-            .is_empty());
 
-        let (_, flow_writer) = settle_human_task(
+        settle_human_task(
             &store,
             AskResult::Resolved {
                 summary: "design accepted".to_string(),
             },
         )
         .await;
-        let prepared = super::prepare_task_flow_step(
-            &store,
-            &mut task,
-            &flow_writer,
-            "human-task-proof",
-            &mut flow,
-        )
-        .await
-        .unwrap()
-        .expect("resolved human node advances to autonomous work");
+        let prepared =
+            super::prepare_task_flow_step(&store, &mut task, "human-task-proof", &mut flow, None)
+                .await
+                .unwrap()
+                .expect("resolved human node advances to autonomous work");
         assert!(!prepared.position.human);
         assert_eq!(task.lifecycle_phase, TaskLifecyclePhase::Loop);
     }
@@ -2688,18 +1736,18 @@ mod planning_tests {
     #[allow(clippy::await_holding_lock)] // the guard serializes LF_BIN for the fixture
     async fn declined_human_task_node_returns_to_preceding_autonomous_step_with_reason() {
         let _lf_bin = super::TestLfBinGuard::pin();
-        let (store, mut task, lease, mut flow) = human_task_fixture().await;
+        let (store, mut task, mut flow) = human_task_fixture().await;
         assert!(super::prepare_task_flow_step(
             &store,
             &mut task,
-            &lease,
             "human-task-proof",
             &mut flow,
+            None
         )
         .await
         .unwrap()
         .is_none());
-        let (declined, flow_writer) = settle_human_task(
+        let declined = settle_human_task(
             &store,
             AskResult::Declined {
                 reason: "narrow the design".to_string(),
@@ -2707,43 +1755,34 @@ mod planning_tests {
         )
         .await;
 
-        let prepared = super::prepare_task_flow_step(
-            &store,
-            &mut task,
-            &flow_writer,
-            "human-task-proof",
-            &mut flow,
-        )
-        .await
-        .unwrap()
-        .expect("decline returns to autonomous kickoff");
+        let prepared =
+            super::prepare_task_flow_step(&store, &mut task, "human-task-proof", &mut flow, None)
+                .await
+                .unwrap()
+                .expect("decline returns to autonomous kickoff");
         assert_eq!(prepared.position.step, "kickoff");
         assert_eq!(task.phase_cursor, 0);
         assert_eq!(task.phase_iteration, 1);
-        let boundary = store.boundary_seed(&flow_writer.work).await.unwrap();
-        assert!(boundary
-            .steers
+        let steers = store.work_steers(&declined.origin.work).await.unwrap();
+        assert!(steers
             .iter()
             .any(|steer| steer.text.contains("narrow the design")));
 
         super::open_task_flow_body(&mut flow, &task).unwrap();
         assert!(!super::finish_task_flow_turn(&mut flow, Lifecycle::Completed).unwrap());
         super::record_task_flow_position(&mut task, &flow).unwrap();
-        store
-            .update_task_for_run(&task, &flow_writer)
-            .await
-            .unwrap();
+        store.update_task(&task).await.unwrap();
         assert!(super::prepare_task_flow_step(
             &store,
             &mut task,
-            &flow_writer,
             "human-task-proof",
             &mut flow,
+            None
         )
         .await
         .unwrap()
         .is_none());
-        let queued = store.pending_asks(None, &AskTarget::User).await.unwrap();
+        let queued = store.pending_asks(&AskTarget::User).await.unwrap();
         assert_eq!(queued.len(), 1);
         assert_ne!(queued[0].id, declined.id);
     }
@@ -2868,15 +1907,7 @@ mod planning_tests {
             prompt_context: "Current project definition".to_string(),
             pm_snapshot_synced_at: 22,
         };
-        let boundary = BoundarySeed {
-            basis: Basis {
-                epoch_id: EpochId::new(),
-                revision: 0,
-            },
-            steers: Vec::new(),
-        };
-
-        let seed = task_seed(&task, &project, &pr, "wave", &boundary);
+        let seed = task_seed(&task, &project, &pr, "wave", &[]);
 
         assert!(seed.contains("Current project name"));
         assert!(seed.contains("Current project definition"));

@@ -51,7 +51,7 @@ struct WaveDetailReadingTests {
         let metRow = WaveMetricRowPresentation(metric: met, owner: "Loopflow API")
 
         #expect(metRow.name == "Task loops earn trust")
-        #expect(metRow.description == "Fraction of Task epochs settled during the trailing seven days that either completed with every PR landed through Loopflow auto-merge or stopped with a non-resumable failure receipt. Open epochs are excluded. A user-landed PR or manual Git repair inside the Task epoch fails the metric.")
+        #expect(metRow.description == "Fraction of Tasks settled during the trailing seven days that either completed with every PR landed through Loopflow auto-merge or stopped with a non-resumable failure receipt. Open Tasks are excluded. A user-landed PR or manual Git repair inside the Task fails the metric.")
         #expect(metRow.state == "Met")
         #expect(metRow.owner == "Loopflow API")
         #expect(metRow.instrumentState == "Instrumented")
@@ -124,10 +124,9 @@ struct WaveDetailReadingTests {
         let openTasks = project.tasks.filter { !$0.task.completed }.count
         #expect(openTasks == 2)
 
-        // Project row lens: derived from shared runtime + Task attention only.
-        // The runtime body is not running, so the fold wins — a red Task
+        // Project row lens: derived from Task attention only. A red Task
         // (INF-123) outranks the black one (INF-124): red > green > unknown > black.
-        let projectLens = WaveLens.forProject(runtime: project.runtime, tasks: project.tasks)
+        let projectLens = WaveLens.forProject(tasks: project.tasks)
         #expect(projectLens.color == .red)
         #expect(projectLens.reason == "merge pull request head 333333333333 on GitHub")
 

@@ -11,7 +11,6 @@ use serde::{Deserialize, Serialize};
 use time::OffsetDateTime;
 use tracing::{debug, warn};
 
-use crate::durable::{RunId, WorkRef, RUN_ID_ENV};
 use crate::engine::worktrees::main_repo_root;
 use crate::id::{ExecId, TraceId};
 use crate::store::sqlite::SqliteStore;
@@ -353,70 +352,6 @@ fn first_ledger_failure() -> bool {
 /// Open the local ledger store, creating and migrating it if needed.
 pub fn open_ledger() -> Result<SqliteStore, crate::store::StoreError> {
     SqliteStore::new(&ledger_db_path()?)
-}
-
-/// Return explicit launch identity for durable trace capture.
-pub fn trace_capture_context(
-    worktree: &Path,
-    flow: Option<String>,
-    skill: Option<String>,
-) -> Result<crate::trace::TraceCaptureContext, TraceCaptureContextError> {
-    let context = current_context().ok_or(TraceCaptureContextError::MissingJournalRunContext)?;
-    let (project, task) = child_work_attribution();
-    Ok(crate::trace::TraceCaptureContext {
-        run_id: context.run_id,
-        process_id: context.process_id,
-        repo: context
-            .repo
-            .map(PathBuf::from)
-            .unwrap_or_else(|| worktree.to_path_buf()),
-        worktree: worktree.to_path_buf(),
-        wave: context.wave,
-        project,
-        task,
-        flow,
-        skill,
-    })
-}
-
-#[derive(Debug, PartialEq, Eq, thiserror::Error)]
-#[non_exhaustive]
-pub enum TraceCaptureContextError {
-    #[error(
-        "journal Run context is missing; Work-owned provider entrypoints must enter repo runtime before trace capture starts"
-    )]
-    MissingJournalRunContext,
-}
-
-fn child_work_attribution() -> (Option<String>, Option<String>) {
-    let Some(value) = std::env::var_os(RUN_ID_ENV) else {
-        return (None, None);
-    };
-    let Ok(run_id) = RunId::parse(&value.to_string_lossy()) else {
-        return (None, None);
-    };
-    let Ok(store) = open_ledger() else {
-        return (None, None);
-    };
-    let Ok(lease) = store.run_context(&run_id) else {
-        return (None, None);
-    };
-    match lease.work {
-        WorkRef::Project(id) => store
-            .project(&id)
-            .ok()
-            .flatten()
-            .map_or((None, None), |project| (Some(project.plan.slug), None)),
-        WorkRef::Task(id) => store.task(&id).ok().flatten().map_or((None, None), |task| {
-            let project = store
-                .project(&task.project_id)
-                .ok()
-                .flatten()
-                .map(|project| project.plan.slug);
-            (project, Some(task.plan.identifier))
-        }),
-        WorkRef::Wave(_) => (None, None),
-    }
 }
 
 #[cfg(not(test))]
@@ -930,25 +865,6 @@ mod tests {
         assert_ne!(resolved, ambient_home.path().join("loopflow.db"));
         assert!(!ambient_db.exists());
         assert!(!ambient_home.path().join("loopflow.db").exists());
-    }
-
-    #[test]
-    fn trace_capture_context_names_missing_journal_run_context() {
-        let _guard = journal_test_guard();
-        let repo = TestRepo::new();
-
-        let error = super::trace_capture_context(
-            repo.path(),
-            Some("task-design".to_string()),
-            Some("review-design".to_string()),
-        )
-        .expect_err("trace capture requires an active journal Run context");
-
-        assert_eq!(
-            error,
-            super::TraceCaptureContextError::MissingJournalRunContext
-        );
-        assert!(error.to_string().contains("journal Run context is missing"));
     }
 
     fn started_fields(

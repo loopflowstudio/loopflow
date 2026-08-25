@@ -16,10 +16,8 @@ use time::OffsetDateTime;
 
 /// Ambient execution identity a live agent process exports. Tests must never inherit the
 /// real Run that invoked the suite.
-const AMBIENT_AGENT_ENV: [&str; 6] = [
-    "LF_RUN_CONTEXT",
+const AMBIENT_AGENT_ENV: [&str; 4] = [
     "LF_RUN_ID",
-    "LF_AGENT_INVOCATION_ID",
     "LF_WAVE_ID",
     "LF_ACCOUNT_LEASE",
     "LF_WORKTREE_WRITER_ID",
@@ -256,7 +254,7 @@ pub fn register_task(
     branch: &str,
     base_commit: &str,
 ) -> RegisteredTask {
-    register_task_with_process(home, worktree, branch, base_commit, true, false)
+    register_task_fixture(home, worktree, branch, base_commit)
 }
 
 #[allow(dead_code)] // Shared helper compiled into integration tests without this incident shape.
@@ -266,26 +264,14 @@ pub fn register_unrun_task(
     branch: &str,
     base_commit: &str,
 ) -> RegisteredTask {
-    register_task_with_process(home, worktree, branch, base_commit, false, false)
+    register_task_fixture(home, worktree, branch, base_commit)
 }
 
-#[allow(dead_code)] // Shared helper compiled into integration tests that do not need Task state.
-pub fn register_active_task(
+fn register_task_fixture(
     home: &Path,
     worktree: &Path,
     branch: &str,
     base_commit: &str,
-) -> RegisteredTask {
-    register_task_with_process(home, worktree, branch, base_commit, true, true)
-}
-
-fn register_task_with_process(
-    home: &Path,
-    worktree: &Path,
-    branch: &str,
-    base_commit: &str,
-    completed_boundary: bool,
-    active: bool,
 ) -> RegisteredTask {
     let runtime = tokio::runtime::Runtime::new().expect("task test runtime");
     let store = runtime
@@ -412,102 +398,6 @@ fn register_task_with_process(
             .create_task(&task, &pr)
             .await
             .expect("create test Task");
-        let work = store
-            .work_for_child(&loopflow::child::ChildRef::Task(task.id.clone()))
-            .await
-            .expect("resolve test Task Work");
-        if !completed_boundary {
-            return;
-        }
-        let (_, lease) = store
-            .reserve_run(&work, loopflow::durable::RunTrigger::User)
-            .await
-            .expect("reserve completed test Task Run");
-        store
-            .advance_run(
-                &lease,
-                loopflow::durable::RunAdvance::RunStarting {
-                    containment: loopflow::durable::Containment::ProcessGroup { id: 1 },
-                    cwd: worktree.to_path_buf(),
-                },
-            )
-            .await
-            .expect("start test Task Run");
-        let loopflow::durable::AdvanceReceipt::Invocation(invocation) = store
-            .advance_run(
-                &lease,
-                loopflow::durable::RunAdvance::InvocationStarting {
-                    route: loopflow::durable::InvocationRoute {
-                        provider: "codex".to_string(),
-                        model: None,
-                        account_id: None,
-                    },
-                    surface: "test".to_string(),
-                    resume_token: None,
-                    answer_ask_id: None,
-                },
-            )
-            .await
-            .expect("start test Task Invocation")
-        else {
-            unreachable!("InvocationStarting returns Invocation")
-        };
-        let loopflow::durable::AdvanceReceipt::Turn(turn) = store
-            .advance_run(
-                &lease,
-                loopflow::durable::RunAdvance::TurnStarting {
-                    invocation_id: invocation.id.clone(),
-                },
-            )
-            .await
-            .expect("start test Task Turn")
-        else {
-            unreachable!("TurnStarting returns Turn")
-        };
-        store
-            .advance_run(
-                &lease,
-                loopflow::durable::RunAdvance::TurnActive {
-                    turn_id: turn.id.clone(),
-                    provider_turn_id: None,
-                },
-            )
-            .await
-            .expect("activate test Task Turn");
-        store
-            .advance_run(
-                &lease,
-                loopflow::durable::RunAdvance::TurnEnded {
-                    turn_id: turn.id,
-                    outcome: loopflow::durable::BoundaryState::Succeeded,
-                },
-            )
-            .await
-            .expect("finish test Task Turn");
-        store
-            .advance_run(
-                &lease,
-                loopflow::durable::RunAdvance::InvocationEnded {
-                    invocation_id: invocation.id,
-                    outcome: loopflow::durable::BoundaryState::Succeeded,
-                },
-            )
-            .await
-            .expect("finish test Task Launch");
-        store
-            .stop_run(
-                &lease,
-                loopflow::durable::StopCause::Requested,
-                loopflow::durable::ContainmentObservation::Absent,
-            )
-            .await
-            .expect("finish test Task Run");
-        if active {
-            store
-                .reserve_run(&work, loopflow::durable::RunTrigger::User)
-                .await
-                .expect("reserve test Task Run");
-        }
     });
     RegisteredTask { store, task, pr }
 }

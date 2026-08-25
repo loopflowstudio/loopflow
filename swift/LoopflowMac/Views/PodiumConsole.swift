@@ -355,9 +355,7 @@ struct PodiumConsole<Content: View>: View {
             }
             .buttonStyle(.plain)
             .accessibilityLabel(accessibilityLabel)
-            .accessibilityValue(
-                "\(FaderSwitch.spokenRate(fader.rate)), \(fader.phase.label)"
-            )
+            .accessibilityValue(fader.phase.label)
             .accessibilityIdentifier(accessibilityId)
             .accessibilityAddTraits(isCurrent ? [.isSelected] : [])
 
@@ -373,12 +371,10 @@ struct PodiumConsole<Content: View>: View {
 
     // MARK: - Fader wiring
 
-    /// Everything a rendered fader needs: phase + level for the rail, and the
-    /// press already bound to the node's one legal lifecycle move (nil verbs
-    /// render display-only).
+    /// Everything a rendered fader needs, with the press already bound to the
+    /// node's one legal lifecycle move (nil verbs render display-only).
     private struct FaderModel {
         let phase: FaderPhase
-        let rate: Double
         let verb: String?
         let controlId: String
         let accessibilityId: String
@@ -389,7 +385,6 @@ struct PodiumConsole<Content: View>: View {
     private func faderSwitch(_ model: FaderModel, width: CGFloat, height: CGFloat) -> some View {
         FaderSwitch(
             phase: model.phase,
-            rate: model.rate,
             width: width,
             height: height,
             verb: model.action == nil ? nil : model.verb,
@@ -402,7 +397,6 @@ struct PodiumConsole<Content: View>: View {
     }
 
     private func waveFader(_ entry: WaveEntry) -> FaderModel {
-        let rate = ConsoleSignal.fastRate(entry.usage)
         let action: (() -> Void)?
         switch entry.phase {
         case .off:
@@ -414,7 +408,6 @@ struct PodiumConsole<Content: View>: View {
         }
         return FaderModel(
             phase: entry.phase,
-            rate: rate,
             verb: entry.phase.verb,
             controlId: "wave:\(entry.vm.id)",
             accessibilityId: "podium-fader-wave-\(entry.vm.id)",
@@ -424,22 +417,18 @@ struct PodiumConsole<Content: View>: View {
     }
 
     private func projectFader(_ project: RoadmapProject, wave entry: WaveEntry) -> FaderModel {
-        let nodes = outputNodes(wave: entry.vm, project: project)
-        let usage = usageReading(kind: .project, wave: entry.vm, project: project)
         let phase = ConsoleSignal.phase(
             humanStop: project.tasks.contains { $0.attention.level == .red },
             agentRunning: false,
-            signal: signal(nodes, usage: usage)
+            signal: signal([])
         )
-        let rate = ConsoleSignal.fastRate(usage)
-        // No agent lives at the project level; the fader is evidence only.
+        // No exact process ownership exists below the Wave level.
         return FaderModel(
             phase: phase,
-            rate: rate,
             verb: nil,
             controlId: "project:\(project.id)",
             accessibilityId: "podium-fader-project-\(project.id)",
-            accessibilityLabel: "\(project.project.name) output",
+            accessibilityLabel: "\(project.project.name) status",
             action: nil
         )
     }
@@ -449,12 +438,10 @@ struct PodiumConsole<Content: View>: View {
         wave entry: WaveEntry,
         project: RoadmapProject
     ) -> FaderModel {
-        let nodes = outputNodes(wave: entry.vm, project: project, task: task)
-        let usage = usageReading(kind: .task, wave: entry.vm, project: project, task: task)
         let phase = ConsoleSignal.phase(
             humanStop: task.attention.level == .red,
-            agentRunning: task.runtime?.current.state.hasPresentProcess == true,
-            signal: signal(nodes, usage: usage)
+            agentRunning: false,
+            signal: signal([])
         )
         let action: (() -> Void)?
         switch phase {
@@ -465,21 +452,15 @@ struct PodiumConsole<Content: View>: View {
                 action = nil
             }
         case .starting, .producing:
-            if roadmapTaskCanInterrupt(task) {
-                action = { performTask(task, wave: entry, start: nil) }
-            } else {
-                action = nil
-            }
+            action = nil
         case .waiting:
             action = {
                 model.select(.task(id: task.id))
                 closeDrawers()
             }
         }
-        let rate = ConsoleSignal.fastRate(usage)
         return FaderModel(
             phase: phase,
-            rate: rate,
             verb: phase.verb,
             controlId: "task:\(task.id)",
             accessibilityId: "podium-fader-task-\(task.id)",
@@ -546,8 +527,6 @@ struct PodiumConsole<Content: View>: View {
     private struct WaveEntry: Identifiable {
         let vm: WaveViewModel
         let roadmap: WaveRoadmap?
-        let nodes: [ActivityNode]
-        let usage: UsageReading?
         let phase: FaderPhase
         var id: String { vm.id }
     }
@@ -557,24 +536,20 @@ struct PodiumConsole<Content: View>: View {
     private var waveEntries: [WaveEntry] {
         visibleWaves.map { vm in
             let roadmap = roadmap(for: vm)
-            let nodes = outputNodes(wave: vm)
-            let usage = usageReading(kind: .wave, wave: vm)
+            let nodes = providerNodes(wave: vm)
             let hasRedTask = (roadmap?.projects.items ?? [])
                 .flatMap(\.tasks)
                 .contains { $0.attention.level == .red }
             return WaveEntry(
                 vm: vm,
                 roadmap: roadmap,
-                nodes: nodes,
-                usage: usage,
                 // A Wave's agent is its Home resident: a serving listener
                 // (live) counts as up even between runs, so the fader answers
                 // the press that just started it.
                 phase: ConsoleSignal.phase(
                     humanStop: hasRedTask,
-                    agentRunning: vm.isRegistered
-                        && (vm.api.current?.state.hasPresentProcess == true || vm.api.live),
-                    signal: signal(nodes, usage: usage)
+                    agentRunning: vm.isRegistered && vm.api.live,
+                    signal: signal(nodes)
                 )
             )
         }
@@ -617,52 +592,18 @@ struct PodiumConsole<Content: View>: View {
         }
     }
 
-    private func signal(_ nodes: [ActivityNode], usage: UsageReading?) -> PodiumSignalState {
-        model.processActivity.value == nil ? .unknown : .from(nodes: nodes, usage: usage)
+    private func signal(_ nodes: [ActivityNode]) -> PodiumSignalState {
+        model.processActivity.value == nil ? .unknown : .from(nodes: nodes)
     }
 
-    private func usageReading(
-        kind: UsageScopeKind,
-        wave: WaveViewModel,
-        project: RoadmapProject? = nil,
-        task: RoadmapTask? = nil
-    ) -> UsageReading? {
-        guard let snapshot = model.processActivity.value else { return nil }
-        let projectNames = project.map { [$0.id, $0.project.slug] } ?? []
-        let taskNames = task.map { task in
-            [task.id, task.task.identifier, task.reference.workspace?.slug].compactMap { $0 }
-        } ?? []
-        return snapshot.usage.readings.first { reading in
-            let scope = reading.scope
-            guard scope.kind == kind,
-                  scope.wave == wave.api.name,
-                  scope.repo.map(model.repoIdentity) == model.repoIdentity(wave.api.repo) else {
-                return false
-            }
-            if !projectNames.isEmpty, !projectNames.contains(scope.project ?? "") { return false }
-            if !taskNames.isEmpty, !taskNames.contains(scope.task ?? "") { return false }
-            return true
-        }
-    }
-
-    private func outputNodes(
-        wave: WaveViewModel,
-        project: RoadmapProject? = nil,
-        task: RoadmapTask? = nil
-    ) -> [ActivityNode] {
+    private func providerNodes(wave: WaveViewModel) -> [ActivityNode] {
         guard let snapshot = model.processActivity.value else { return [] }
-        let projectNames = project.map { [$0.id, $0.project.slug] } ?? []
-        let taskNames = task.map { task in
-            [task.id, task.task.identifier, task.reference.workspace?.slug].compactMap { $0 }
-        } ?? []
         return snapshot.nodes.filter { node in
-            guard node.kind == .providerLaunch,
+            guard node.kind == .providerProcess,
                   node.wave == wave.api.name,
                   node.repo.map(model.repoIdentity) == model.repoIdentity(wave.api.repo) else {
                 return false
             }
-            if !projectNames.isEmpty, !projectNames.contains(node.project ?? "") { return false }
-            if !taskNames.isEmpty, !taskNames.contains(node.task ?? "") { return false }
             return true
         }
     }

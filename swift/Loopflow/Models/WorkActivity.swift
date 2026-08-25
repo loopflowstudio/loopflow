@@ -30,8 +30,8 @@ public struct WorkActivityEntry: Decodable, Sendable, Hashable, Identifiable {
 
 public enum WorkActivityFact: Decodable, Sendable, Hashable {
     case workCreated
-    case runStarted(invocationId: String, traceId: String, execId: String)
-    case runFinished(invocationId: String, traceId: String, execId: String, status: String)
+    case runStarted(runId: String)
+    case runFinished(runId: String, status: String)
     case prStarted(id: String)
     case prPublishRequested(id: String, github: GithubPrSnapshot?)
     case prMergeRequested(
@@ -45,9 +45,7 @@ public enum WorkActivityFact: Decodable, Sendable, Hashable {
 
     private enum CodingKeys: String, CodingKey {
         case kind, id, status, request, github, author
-        case invocationId = "invocation_id"
-        case traceId = "trace_id"
-        case execId = "exec_id"
+        case runId = "run_id"
         case mergeCommit = "merge_commit"
     }
 
@@ -70,15 +68,11 @@ public enum WorkActivityFact: Decodable, Sendable, Hashable {
             self = .workCreated
         case .runStarted:
             self = .runStarted(
-                invocationId: try container.decode(String.self, forKey: .invocationId),
-                traceId: try container.decode(String.self, forKey: .traceId),
-                execId: try container.decode(String.self, forKey: .execId)
+                runId: try container.decode(String.self, forKey: .runId)
             )
         case .runFinished:
             self = .runFinished(
-                invocationId: try container.decode(String.self, forKey: .invocationId),
-                traceId: try container.decode(String.self, forKey: .traceId),
-                execId: try container.decode(String.self, forKey: .execId),
+                runId: try container.decode(String.self, forKey: .runId),
                 status: try container.decode(String.self, forKey: .status)
             )
         case .prStarted:
@@ -115,16 +109,6 @@ public enum WorkActivityFact: Decodable, Sendable, Hashable {
 }
 
 public extension WorkActivityFact {
-    var invocationId: String? {
-        switch self {
-        case .runStarted(let invocationId, _, _),
-             .runFinished(let invocationId, _, _, _):
-            invocationId
-        default:
-            nil
-        }
-    }
-
     var github: GithubPrSnapshot? {
         switch self {
         case .prPublishRequested(_, let github),

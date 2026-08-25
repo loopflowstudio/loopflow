@@ -1,17 +1,16 @@
 use std::path::{Path, PathBuf};
 
-use crate::durable::{
-    AdvanceReceipt, AgentInvocation, BoundaryState, Containment, InvocationRoute, ProjectId,
-    RunAdvance, RunContext, RunTrigger, TaskId, WorkRef,
-};
+use crate::durable::{ProjectId, TaskId, WorkRef};
 use crate::engine::process::{
-    current_home_execution_context, current_process_group_id, pin_control_binary,
-    start_lf_session_with_env,
+    current_home_execution_context, pin_control_binary, start_lf_session_with_env,
 };
 use crate::id::WaveId;
 use crate::store::SharedStore;
 
 use super::{OpsError, OpsResult};
+
+pub(crate) const TASK_ACCOUNT_ID_ENV: &str = "LF_TASK_ACCOUNT_ID";
+pub(crate) const TASK_RESUME_TOKEN_ENV: &str = "LF_TASK_RESUME_TOKEN";
 
 #[derive(Debug, Clone)]
 pub struct WorkBinding {
@@ -20,123 +19,6 @@ pub struct WorkBinding {
     pub wave_name: String,
     pub cwd: PathBuf,
     pub context: String,
-}
-
-impl WorkBinding {
-    pub fn matches_run(&self, context: &RunContext) -> bool {
-        context.work == self.work
-    }
-}
-
-#[derive(Debug)]
-pub(crate) struct DirectRun {
-    store: SharedStore,
-    context: RunContext,
-    invocation: AgentInvocation,
-    finished: bool,
-}
-
-impl DirectRun {
-    pub(crate) async fn start(
-        store: SharedStore,
-        binding: &WorkBinding,
-        route: InvocationRoute,
-        surface: &str,
-    ) -> OpsResult<Self> {
-        let (_, context) = store
-            .reserve_run(&binding.work, RunTrigger::User)
-            .await
-            .map_err(run_error)?;
-        let process_group = match current_process_group_id() {
-            Some(process_group) => process_group,
-            None => {
-                let _ = store.stop_run_on_interrupt(&context);
-                return Err(run_error("direct lf invocation has no process group"));
-            }
-        };
-        if let Err(error) = store
-            .advance_run(
-                &context,
-                RunAdvance::RunStarting {
-                    containment: Containment::ProcessGroup {
-                        id: i64::from(process_group),
-                    },
-                    cwd: binding.cwd.clone(),
-                },
-            )
-            .await
-        {
-            let _ = store.stop_run_on_interrupt(&context);
-            return Err(run_error(error));
-        }
-        let invocation = match store
-            .advance_run(
-                &context,
-                RunAdvance::InvocationStarting {
-                    route,
-                    surface: surface.to_string(),
-                    resume_token: None,
-                    answer_ask_id: None,
-                },
-            )
-            .await
-        {
-            Ok(AdvanceReceipt::Invocation(invocation)) => invocation,
-            Ok(_) => unreachable!("InvocationStarting returns an Invocation receipt"),
-            Err(error) => {
-                let _ = store.stop_run_on_interrupt(&context);
-                return Err(run_error(error));
-            }
-        };
-
-        let cleanup_store = store.clone();
-        let cleanup_context = context.clone();
-        crate::engine::agent::register_interrupt_cleanup(move || {
-            let _ = cleanup_store.stop_run_on_interrupt(&cleanup_context);
-        });
-
-        Ok(Self {
-            store,
-            context,
-            invocation,
-            finished: false,
-        })
-    }
-
-    pub(crate) fn context(&self) -> &RunContext {
-        &self.context
-    }
-
-    pub(crate) fn invocation(&self) -> &AgentInvocation {
-        &self.invocation
-    }
-
-    pub(crate) async fn finish(&mut self, outcome: BoundaryState) -> OpsResult<()> {
-        let invocation_result = self
-            .store
-            .advance_run(
-                &self.context,
-                RunAdvance::InvocationEnded {
-                    invocation_id: self.invocation.id.clone(),
-                    outcome,
-                },
-            )
-            .await;
-        let run_result = self.store.finish_run(&self.context, outcome).await;
-        if run_result.is_ok() {
-            self.finished = true;
-        }
-        invocation_result.map_err(run_error)?;
-        run_result.map_err(run_error)
-    }
-}
-
-impl Drop for DirectRun {
-    fn drop(&mut self) {
-        if !self.finished {
-            let _ = self.store.stop_run_on_interrupt(&self.context);
-        }
-    }
 }
 
 pub async fn resolve_work_binding(
@@ -280,62 +162,25 @@ fn run_error(error: impl std::fmt::Display) -> OpsError {
 }
 
 #[derive(Debug)]
-pub(crate) struct RunLaunch {
+pub(crate) struct WorkLaunch {
     pub work: WorkRef,
     pub wave_id: WaveId,
     pub cwd: PathBuf,
     pub tmux_name: String,
-    pub agent: String,
-    pub account_id: Option<crate::store::ProviderAccountId>,
-    pub resume_token: Option<String>,
+    pub environment: Vec<(String, String)>,
 }
 
-pub(crate) async fn launch_in_run(
-    store: &SharedStore,
-    lease: &RunContext,
-    request: RunLaunch,
-) -> OpsResult<AgentInvocation> {
+pub(crate) async fn launch_work(request: WorkLaunch) -> OpsResult<()> {
+    let environment = request.environment.clone();
+    start_work_session(&request, environment).await
+}
+
+async fn start_work_session(
+    request: &WorkLaunch,
+    mut environment: Vec<(String, String)>,
+) -> OpsResult<()> {
     let execution = current_home_execution_context()
         .map_err(|error| OpsError::Message(format!("cannot resolve current lf binary: {error}")))?;
-    let (provider, model) = crate::engine::config::parse_agent(&request.agent);
-    let tmux_name = request.tmux_name.clone();
-    let run = store
-        .advance_run(
-            lease,
-            RunAdvance::RunStarting {
-                containment: Containment::Tmux {
-                    name: tmux_name.clone(),
-                },
-                cwd: request.cwd.clone(),
-            },
-        )
-        .await
-        .map_err(|error| OpsError::Message(error.to_string()))?;
-    let AdvanceReceipt::Run(_) = run else {
-        unreachable!("RunStarting returns a Run receipt")
-    };
-    let receipt = store
-        .advance_run(
-            lease,
-            RunAdvance::InvocationStarting {
-                route: InvocationRoute {
-                    provider,
-                    model,
-                    account_id: request
-                        .account_id
-                        .as_ref()
-                        .map(|account_id| account_id.as_str().to_string()),
-                },
-                surface: "headless".to_string(),
-                resume_token: request.resume_token,
-                answer_ask_id: None,
-            },
-        )
-        .await
-        .map_err(|error| OpsError::Message(error.to_string()))?;
-    let AdvanceReceipt::Invocation(invocation) = receipt else {
-        unreachable!("InvocationStarting returns an Invocation receipt")
-    };
     let control_bin = pin_control_binary(&execution.lf_bin)
         .to_string_lossy()
         .to_string();
@@ -345,28 +190,21 @@ pub(crate) async fn launch_in_run(
         request.work.kind().to_string(),
         request.work.id().to_string(),
     ];
-    let run_context = lease.run_id.to_string();
-    let invocation_id = invocation.id.as_str().to_string();
-    let db_path = execution.db_path.to_string_lossy().to_string();
-    let lf_home = execution.lf_home.to_string_lossy().to_string();
-    let mut environment = vec![
+    environment.extend([
         (
             crate::engine::wave_context::WAVE_ID_ENV.to_string(),
             request.wave_id.as_str().to_string(),
         ),
-        (
-            crate::durable::RUN_CONTEXT_ENV.to_string(),
-            "agent".to_string(),
-        ),
-        (crate::durable::RUN_ID_ENV.to_string(), run_context),
-        (
-            crate::durable::AGENT_INVOCATION_ENV.to_string(),
-            invocation_id,
-        ),
         (crate::store::CONTROL_BIN_ENV.to_string(), control_bin),
-        (crate::store::CONTROL_DB_PATH_ENV.to_string(), db_path),
-        (crate::store::CONTROL_HOME_ENV.to_string(), lf_home),
-    ];
+        (
+            crate::store::CONTROL_DB_PATH_ENV.to_string(),
+            execution.db_path.to_string_lossy().to_string(),
+        ),
+        (
+            crate::store::CONTROL_HOME_ENV.to_string(),
+            execution.lf_home.to_string_lossy().to_string(),
+        ),
+    ]);
     if let Some(switch_id) = std::env::var_os(crate::machine_install::INSTALL_SWITCH_ENV)
         .filter(|value| !value.is_empty())
     {
@@ -379,31 +217,14 @@ pub(crate) async fn launch_in_run(
         .iter()
         .map(|(key, value)| (key.as_str(), value.as_str()))
         .collect::<Vec<_>>();
-    if let Err(error) =
-        start_lf_session_with_env(&tmux_name, &request.cwd, &argv, &environment).await
-    {
-        let _ = store
-            .advance_run(
-                lease,
-                RunAdvance::InvocationEnded {
-                    invocation_id: invocation.id.clone(),
-                    outcome: BoundaryState::Failed,
-                },
-            )
-            .await;
-        let _ = store
-            .stop_run(
-                lease,
-                crate::durable::StopCause::Recovery,
-                crate::durable::ContainmentObservation::Absent,
-            )
-            .await;
-        return Err(OpsError::Message(format!(
-            "failed to launch {} body: {error}",
-            request.work.kind()
-        )));
-    }
-    Ok(invocation)
+    start_lf_session_with_env(&request.tmux_name, &request.cwd, &argv, &environment)
+        .await
+        .map_err(|error| {
+            OpsError::Message(format!(
+                "failed to launch {} body: {error}",
+                request.work.kind()
+            ))
+        })
 }
 
 #[cfg(test)]
@@ -425,16 +246,6 @@ mod tests {
             .await
             .unwrap();
         (directory, Arc::new(store))
-    }
-
-    fn binding(wave: &Wave, cwd: &Path) -> WorkBinding {
-        WorkBinding {
-            work: WorkRef::Wave(wave.id().clone()),
-            wave_id: wave.id().clone(),
-            wave_name: wave.name().to_string(),
-            cwd: cwd.to_path_buf(),
-            context: format!("Wave {}", wave.name()),
-        }
     }
 
     fn project(wave: &Wave, slug: &str, planning_id: &str) -> Project {
@@ -545,73 +356,5 @@ mod tests {
         assert!(wave_binding.context.contains("<lf:metric-portfolio>"));
         assert!(wave_binding.context.contains("What signals are arriving?"));
         assert!(!wave_binding.context.contains("<lf:project-owned-metrics>"));
-    }
-
-    #[tokio::test]
-    async fn work_binding_matches_only_its_run_identity() {
-        let (directory, store) = test_store().await;
-        let selected = Wave::new(
-            WaveId::new(),
-            "selected".to_string(),
-            directory.path().display().to_string(),
-        );
-        let other = Wave::new(
-            WaveId::new(),
-            "other".to_string(),
-            directory.path().display().to_string(),
-        );
-        store.create_wave(&selected).await.unwrap();
-        store.create_wave(&other).await.unwrap();
-        let selected_binding = binding(&selected, directory.path());
-        let (_, selected_lease) = store
-            .reserve_run(&selected_binding.work, RunTrigger::User)
-            .await
-            .unwrap();
-        let (_, other_lease) = store
-            .reserve_run(&WorkRef::Wave(other.id().clone()), RunTrigger::User)
-            .await
-            .unwrap();
-
-        assert!(selected_binding.matches_run(&selected_lease));
-        assert!(!selected_binding.matches_run(&other_lease));
-    }
-
-    #[tokio::test]
-    async fn direct_run_fences_overlap_and_releases_work_after_finish() {
-        let (directory, store) = test_store().await;
-        let wave = Wave::new(
-            WaveId::new(),
-            "runtime".to_string(),
-            directory.path().display().to_string(),
-        );
-        store.create_wave(&wave).await.unwrap();
-        let binding = binding(&wave, directory.path());
-        let route = InvocationRoute {
-            provider: "codex".to_string(),
-            model: None,
-            account_id: None,
-        };
-        let mut direct = DirectRun::start(store.clone(), &binding, route.clone(), "headless")
-            .await
-            .unwrap();
-
-        let active_run = store.current_run(&binding.work).await.unwrap().unwrap();
-        DirectRun::start(store.clone(), &binding, route, "headless")
-            .await
-            .expect_err("active direct Run must fence overlap");
-        assert_eq!(
-            store.current_run(&binding.work).await.unwrap().unwrap().id,
-            active_run.id
-        );
-
-        direct.finish(BoundaryState::Succeeded).await.unwrap();
-        assert!(store.current_run(&binding.work).await.unwrap().is_none());
-        let invocation = store
-            .invocations_for_run(&direct.context().run_id)
-            .await
-            .unwrap()
-            .pop()
-            .expect("direct invocation");
-        assert!(invocation.ended_at.is_some());
     }
 }

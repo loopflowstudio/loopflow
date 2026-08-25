@@ -8,14 +8,14 @@ use anyhow::{anyhow, Result};
 use serde::Serialize;
 
 use crate::durable::{
-    AgentInvocation, AgentInvocationId, Ask, AskId, AskResult, AskState, AskTarget, BoundaryState,
-    ContainmentObservation, InvocationRoute, InvocationSurface, RunContext, WorkRef,
+    Ask, AskId, AskOrigin, AskResult, AskSession, AskState, AskTarget, RunId, WorkRef,
 };
 use crate::engine::wave_home::HomeRoute;
 use crate::store::SharedStore;
 
 const POLL_INTERVAL: Duration = Duration::from_millis(250);
 const RETRY_DELAY: Duration = Duration::from_secs(5);
+const LAUNCH_GRACE_SECONDS: i64 = 5;
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize)]
 #[serde(rename_all = "kebab-case")]
@@ -42,30 +42,26 @@ impl std::fmt::Display for AttentionState {
 #[derive(Debug, Serialize)]
 pub(crate) struct AskAttention {
     pub(crate) ask: Ask,
-    pub(crate) surface: Option<InvocationSurface>,
+    pub(crate) surface: Option<AskSession>,
     pub(crate) attention: AttentionState,
 }
 
 pub(crate) async fn request_intervention(
     store: &SharedStore,
-    lease: &RunContext,
-    invocation_id: &AgentInvocationId,
+    origin: AskOrigin,
     prompt: &str,
     user: bool,
 ) -> Result<Ask> {
-    let ask = store
-        .request_intervention(lease, invocation_id, prompt, user)
-        .await?;
+    let ask = store.request_intervention(origin, prompt, user).await?;
     wake(store, &ask.target).await;
     Ok(ask)
 }
 
 pub(crate) async fn pending_attention(
     store: &SharedStore,
-    actor: Option<&RunContext>,
     target: &AskTarget,
 ) -> Result<Vec<AskAttention>> {
-    let asks = store.pending_asks(actor, target).await?;
+    let asks = store.pending_asks(target).await?;
     let mut projection = Vec::with_capacity(asks.len());
     for ask in asks {
         projection.push(project_attention(store, ask).await?);
@@ -73,42 +69,18 @@ pub(crate) async fn pending_attention(
     Ok(projection)
 }
 
-pub(crate) async fn project_attention(store: &SharedStore, mut ask: Ask) -> Result<AskAttention> {
-    let mut surface = active_surface(store, &ask).await?;
-    let mut presentation = match ask.active_invocation_id.as_ref() {
-        Some(invocation_id) => store.ask_presentation(invocation_id).await?,
-        None => (false, false),
-    };
+pub(crate) async fn project_attention(store: &SharedStore, ask: Ask) -> Result<AskAttention> {
+    let surface = active_surface(store, &ask).await?;
     let mut stale = false;
-    if let Some(invocation_surface) = surface.as_ref() {
-        if presentation.0 && invocation_surface.invocation.ended_at.is_none() {
-            match observe_surface(invocation_surface).await {
-                ContainmentObservation::Absent => {
-                    ask = store
-                        .reconcile_ask(
-                            &invocation_surface.invocation.id,
-                            ContainmentObservation::Absent,
-                        )
-                        .await?;
-                    surface = active_surface(store, &ask).await?;
-                    presentation = match ask.active_invocation_id.as_ref() {
-                        Some(invocation_id) => store.ask_presentation(invocation_id).await?,
-                        None => (false, false),
-                    };
-                }
-                ContainmentObservation::Unprovable => stale = true,
-                ContainmentObservation::Present => {}
-            }
+    if absence_is_authoritative(&ask, time::OffsetDateTime::now_utc()) {
+        if let Some(active) = surface.as_ref() {
+            stale = !matches!(observe_surface(active).await, Ok(true));
         }
     }
     let attention = if stale {
         AttentionState::Stale
     } else {
-        attention_state(
-            &ask,
-            surface.as_ref().map(|surface| &surface.invocation),
-            presentation,
-        )
+        attention_state(&ask)
     };
     Ok(AskAttention {
         ask,
@@ -117,155 +89,117 @@ pub(crate) async fn project_attention(store: &SharedStore, mut ask: Ask) -> Resu
     })
 }
 
-pub(crate) async fn prepare_open(
-    store: &SharedStore,
-    actor: Option<&RunContext>,
-    ask_id: &AskId,
-) -> Result<InvocationSurface> {
-    let ask = project_attention(store, store.ask_by_id(ask_id).await?)
-        .await?
-        .ask;
-    let (route, surface_kind) = launch_identity(&ask, false);
-    let claim = store.claim_ask(actor, ask_id, route, surface_kind).await?;
+pub(crate) async fn prepare_open(store: &SharedStore, ask_id: &AskId) -> Result<AskSession> {
+    project_attention(store, store.ask_by_id(ask_id).await?).await?;
+    let claim = store.claim_ask(ask_id).await?;
     let ask = store.ask_by_id(ask_id).await?;
-    let surface = if claim.needs_launch {
-        launch_claimed(store, &ask, &claim.invocation_id, false).await?
+    if claim.needs_launch {
+        launch_claimed(store, &ask, &claim.run_id, false).await
     } else {
-        if !store.ask_presentation(&claim.invocation_id).await?.0 {
-            return Err(anyhow!(
-                "Ask {ask_id} Invocation {} is starting and has no attach route yet",
-                claim.invocation_id
-            ));
+        let session = session_for(store, &ask, &claim.run_id).await?;
+        match observe_surface(&session).await {
+            Ok(false) => Err(anyhow!(
+                "Ask {ask_id} Run {} is still starting",
+                claim.run_id
+            )),
+            Ok(true) | Err(_) => Ok(session),
         }
-        active_surface(store, &ask).await?.ok_or_else(|| {
-            anyhow!(
-                "Ask {ask_id} Invocation {} is starting and has no attach route yet",
-                claim.invocation_id
-            )
-        })?
-    };
-    Ok(surface)
+    }
 }
 
-async fn active_surface(store: &SharedStore, ask: &Ask) -> Result<Option<InvocationSurface>> {
-    match ask.active_invocation_id.as_ref() {
-        Some(invocation_id) => Ok(store.invocation_surface(invocation_id).await?),
+async fn active_surface(store: &SharedStore, ask: &Ask) -> Result<Option<AskSession>> {
+    match ask.active_run_id.as_ref() {
+        Some(run_id) => Ok(Some(session_for(store, ask, run_id).await?)),
         None => Ok(None),
     }
 }
 
-fn attention_state(
-    ask: &Ask,
-    invocation: Option<&AgentInvocation>,
-    presentation: (bool, bool),
-) -> AttentionState {
-    match (ask.state, invocation, presentation) {
+async fn session_for(store: &SharedStore, ask: &Ask, run_id: &RunId) -> Result<AskSession> {
+    let home = store
+        .home_by_id(&ask.origin.home_id)
+        .await?
+        .ok_or_else(|| anyhow!("Ask {} Home {} disappeared", ask.id, ask.origin.home_id))?;
+    Ok(AskSession {
+        ask_id: ask.id.clone(),
+        run_id: run_id.clone(),
+        home_route: home.route,
+        attach_argv: vec![
+            "tmux".to_string(),
+            "attach-session".to_string(),
+            "-t".to_string(),
+            session_name(run_id),
+        ],
+    })
+}
+
+fn attention_state(ask: &Ask) -> AttentionState {
+    match (ask.state, ask.ready_at, ask.presented_at) {
         (AskState::Queued, _, _) => AttentionState::Queued,
-        (AskState::Claimed, Some(invocation), (_, true)) if invocation.ended_at.is_none() => {
-            AttentionState::Active
-        }
-        (AskState::Claimed, Some(invocation), (true, _)) if invocation.ended_at.is_none() => {
-            AttentionState::NotPresented
-        }
-        (AskState::Claimed, _, _) => AttentionState::Claimed,
+        (AskState::Claimed, _, Some(_)) => AttentionState::Active,
+        (AskState::Claimed, Some(_), None) => AttentionState::NotPresented,
+        (AskState::Claimed, None, None) => AttentionState::Claimed,
         _ => AttentionState::Queued,
     }
 }
 
-fn launch_identity(ask: &Ask, headless: bool) -> (InvocationRoute, &'static str) {
-    let config = crate::engine::load_config_or_default(Some(&ask.origin.cwd));
-    let agent = config.agent().to_string();
-    let (provider, model) = crate::engine::parse_agent(&agent);
-    let surface = if headless { "ask_headless" } else { "ask_tui" };
-    let route = InvocationRoute {
-        provider,
-        model,
-        account_id: None,
-    };
-    (route, surface)
+fn absence_is_authoritative(ask: &Ask, now: time::OffsetDateTime) -> bool {
+    ask.presented_at.is_some()
+        || ask
+            .ready_at
+            .is_some_and(|ready_at| now - ready_at >= time::Duration::seconds(LAUNCH_GRACE_SECONDS))
 }
 
 pub(crate) async fn launch_claimed(
     store: &SharedStore,
     ask: &Ask,
-    invocation_id: &AgentInvocationId,
+    run_id: &RunId,
     headless: bool,
-) -> Result<InvocationSurface> {
-    let flow_run_context = store
-        .claim_flow_step_run_context(&ask.id, invocation_id)
-        .await?;
-    let session_name = session_name(invocation_id);
-    let lf = crate::engine::process::resolve_lf_binary();
+) -> Result<AskSession> {
+    let session_name = session_name(run_id);
+    let lf = crate::engine::process::resolve_current_home_lf_binary();
     let mut argv = vec![
         lf.to_string_lossy().to_string(),
         "ask".to_string(),
         "serve".to_string(),
         ask.id.to_string(),
+        run_id.to_string(),
     ];
     if headless {
         argv.push("--headless".to_string());
     }
-    let mut environment = vec![
-        (crate::durable::AGENT_INVOCATION_ENV, invocation_id.as_str()),
-        (crate::durable::RUN_CONTEXT_ENV, "ask"),
-    ];
-    if let Some(run_context) = flow_run_context.as_ref() {
-        environment.push((crate::durable::RUN_ID_ENV, run_context.run_id.as_str()));
-    }
-    if let Err(error) = crate::engine::process::start_lf_session_with_env(
-        &session_name,
-        &ask.origin.cwd,
-        &argv,
-        &environment,
-    )
-    .await
+    if let Err(error) =
+        crate::engine::process::start_home_session(&session_name, &ask.origin.cwd, &argv).await
     {
         let _ = store
-            .close_ask_invocation(
-                &ask.id,
-                invocation_id,
-                Some("Ask session failed to start"),
-                BoundaryState::Failed,
-            )
+            .release_ask(&ask.id, run_id, Some("Ask session failed to start"))
             .await;
         return Err(error.context("start Ask session"));
     }
-    store.mark_ask_ready(&ask.id, invocation_id).await?;
     if headless {
-        store.mark_ask_presented(&ask.id, invocation_id).await?;
+        store.mark_ask_presented(&ask.id, run_id).await?;
     }
-    store
-        .invocation_surface(invocation_id)
-        .await?
-        .ok_or_else(|| anyhow!("Ask Invocation {invocation_id} has no surface"))
+    session_for(store, ask, run_id).await
 }
 
 pub(crate) async fn settle(
     store: &SharedStore,
     ask_id: &AskId,
-    invocation_id: &AgentInvocationId,
+    run_id: &RunId,
     result: AskResult,
 ) -> Result<Ask> {
-    let ask = store.settle_ask(ask_id, invocation_id, result).await?;
+    let ask = store.settle_ask(ask_id, run_id, result).await?;
     checkpoint_origin_task(store, &ask, "settle").await;
     resume_flow_step(store, &ask).await?;
     Ok(ask)
 }
 
-pub(crate) async fn cancel(
-    store: &SharedStore,
-    actor: Option<&RunContext>,
-    ask_id: &AskId,
-    reason: &str,
-) -> Result<Ask> {
-    let ask = store.cancel_ask(actor, ask_id, reason).await?;
+pub(crate) async fn cancel(store: &SharedStore, ask_id: &AskId, reason: &str) -> Result<Ask> {
+    let ask = store.cancel_ask(ask_id, reason).await?;
     checkpoint_origin_task(store, &ask, "cancel").await;
     resume_flow_step(store, &ask).await?;
     Ok(ask)
 }
 
-/// Push whatever the Ask session left in the origin Task worktree before the
-/// Task resumes or the session's product waits for another machine.
 pub(crate) async fn checkpoint_origin_task(store: &SharedStore, ask: &Ask, action: &str) {
     let WorkRef::Task(task_id) = &ask.origin.work else {
         return;
@@ -307,67 +241,43 @@ async fn resume_flow_step(store: &SharedStore, ask: &Ask) -> Result<()> {
 pub(crate) async fn serve(
     store: SharedStore,
     ask_id: AskId,
-    invocation_id: AgentInvocationId,
+    run_id: RunId,
     headless: bool,
 ) -> Result<()> {
     let cleanup_store = Arc::clone(&store);
     let cleanup_ask_id = ask_id.clone();
-    let cleanup_invocation_id = invocation_id.clone();
+    let cleanup_run_id = run_id.clone();
     crate::engine::agent::register_interrupt_cleanup(move || {
-        let _ = cleanup_store.interrupt_ask_on_interrupt(&cleanup_ask_id, &cleanup_invocation_id);
+        let _ = cleanup_store.interrupt_ask_on_interrupt(&cleanup_ask_id, &cleanup_run_id);
     });
-    let ask = wait_until_presented(&store, &ask_id, &invocation_id).await?;
-    if ask.state.is_terminal() {
+    let ask = wait_until_presented(&store, &ask_id, &run_id).await?;
+    if ask.state.is_terminal()
+        || ask.state != AskState::Claimed
+        || ask.active_run_id.as_ref() != Some(&run_id)
+    {
         return Ok(());
     }
-    // Two cases, two launches. A FlowStep gate runs the skill's REAL harness
-    // (the `lf <skill>` turn), so the session IS the skill — no generic agent to
-    // freelance an approval. An Intervention is a free-text thread with the User.
     let result = match &ask.request {
         crate::durable::AskBody::FlowStep { .. } => {
             let turn = crate::task::runner::flow_step_harness_turn(&store, &ask).await?;
-            run_flow_step_harness(&ask.origin.cwd, turn, &invocation_id, headless).await
+            run_flow_step_harness(&ask, turn, &run_id, headless).await
         }
         crate::durable::AskBody::Intervention { .. } => {
-            let prompt = ask_prompt(&store, &ask).await?;
+            let prompt = ask_prompt(&ask);
             let config = crate::engine::load_config_or_default(Some(&ask.origin.cwd));
             let agent = config.agent().to_string();
-            run_provider(&ask.origin.cwd, &agent, &prompt, &invocation_id, headless).await
+            run_provider(&ask, &agent, &prompt, &run_id, headless).await
         }
     };
     let current = store.ask_by_id(&ask.id).await?;
-    if current.state == AskState::Claimed
-        && current.active_invocation_id.as_ref() == Some(&invocation_id)
-    {
-        if interrupted_result(&result) {
-            let _ = store
-                .close_ask_invocation(
-                    &ask_id,
-                    &invocation_id,
-                    Some("Ask provider exited on a signal"),
-                    BoundaryState::Interrupted,
-                )
-                .await?;
-            eprintln!("Ask Invocation interrupted; {} requeued", current.id);
+    if current.state == AskState::Claimed && current.active_run_id.as_ref() == Some(&run_id) {
+        let reason = if interrupted_result(&result) {
+            "Ask provider exited on a signal"
         } else {
-            let outcome = if result.as_ref().is_ok_and(|status| status.success()) {
-                BoundaryState::Unknown
-            } else {
-                BoundaryState::Failed
-            };
-            let _ = store
-                .close_ask_invocation(
-                    &ask_id,
-                    &invocation_id,
-                    Some("Ask provider exited without settlement"),
-                    outcome,
-                )
-                .await?;
-            eprintln!(
-                "Invocation closed without resolution; {} requeued",
-                current.id
-            );
-        }
+            "Ask provider exited without settlement"
+        };
+        store.release_ask(&ask_id, &run_id, Some(reason)).await?;
+        eprintln!("Ask Run closed without resolution; {} requeued", current.id);
     }
     if matches!(current.state, AskState::Resolved | AskState::Declined) {
         Ok(())
@@ -380,42 +290,27 @@ pub(crate) async fn serve(
     }
 }
 
-async fn wait_until_presented(
-    store: &SharedStore,
-    ask_id: &AskId,
-    invocation_id: &AgentInvocationId,
-) -> Result<Ask> {
+async fn wait_until_presented(store: &SharedStore, ask_id: &AskId, run_id: &RunId) -> Result<Ask> {
     loop {
         let ask = store.ask_by_id(ask_id).await?;
-        if ask.state.is_terminal() {
+        if ask.state.is_terminal()
+            || ask.active_run_id.as_ref() != Some(run_id)
+            || ask.presented_at.is_some()
+        {
             return Ok(ask);
         }
-        let invocation = store
-            .invocation_surface(invocation_id)
-            .await?
-            .ok_or_else(|| anyhow!("Ask Invocation {invocation_id} disappeared"))?
-            .invocation;
-        if store.ask_presentation(&invocation.id).await?.1 {
-            return Ok(ask);
-        }
-        if invocation.ended_at.is_none() {
-            tokio::time::sleep(POLL_INTERVAL).await;
-        } else {
-            return Ok(ask);
-        }
+        tokio::time::sleep(POLL_INTERVAL).await;
     }
 }
 
-/// An Intervention thread: a detached free-text agent that must not adopt the
-/// originating Work. FlowStep gates never use this path.
 async fn run_provider(
-    cwd: &Path,
+    ask: &Ask,
     agent: &str,
     prompt: &str,
-    invocation_id: &AgentInvocationId,
+    run_id: &RunId,
     headless: bool,
 ) -> Result<ExitStatus> {
-    let mut launch = crate::engine::AgentConfig {
+    let launch = crate::engine::AgentConfig {
         system_prompt: if headless {
             format!(
                 "{}\n\n{}",
@@ -427,17 +322,16 @@ async fn run_provider(
         },
         task_prompt: prompt.to_string(),
         agent: Some(agent.to_string()),
-        cwd: Some(cwd.to_path_buf()),
-        run_context: crate::engine::agent::AgentRunContext::Detached,
+        cwd: Some(ask.origin.cwd.clone()),
         ..Default::default()
     };
-    launch.env.insert(
-        crate::durable::AGENT_INVOCATION_ENV.to_string(),
-        invocation_id.as_str().to_string(),
-    );
+    let (provider, model) = crate::engine::parse_agent(agent);
+    let capture = begin_capture(ask, run_id, provider.clone(), model.clone(), "ask")?;
+    capture.record_input("initial", prompt);
     let process = crate::engine::ProcessConfig {
         auto: headless,
         stream: false,
+        capture: Some(capture.into()),
         ..Default::default()
     };
     let capabilities = crate::engine::AgentCapabilities::default();
@@ -448,26 +342,33 @@ async fn run_provider(
     Ok(ExitStatus::from_raw(result.exit_code << 8))
 }
 
-/// Launch a human FlowStep gate as the skill's real harness turn — its own
-/// system prompt, context, and config (the `lf <skill>` launch), writing into
-/// the origin Task. No generic agent sits between the human and the skill.
 async fn run_flow_step_harness(
-    cwd: &Path,
+    ask: &Ask,
     turn: crate::lf::commands::run::PreparedHarnessTurn,
-    invocation_id: &AgentInvocationId,
+    run_id: &RunId,
     headless: bool,
 ) -> Result<ExitStatus> {
     let mut launch = turn.config;
     launch.task_prompt = turn.input;
-    launch.cwd = Some(cwd.to_path_buf());
-    launch.run_context = crate::engine::agent::AgentRunContext::Inherit;
-    launch.env.insert(
-        crate::durable::AGENT_INVOCATION_ENV.to_string(),
-        invocation_id.as_str().to_string(),
-    );
+    launch.cwd = Some(ask.origin.cwd.clone());
+    let agent = launch.agent.clone().unwrap_or_else(|| {
+        crate::engine::load_config_or_default(Some(&ask.origin.cwd))
+            .agent()
+            .to_string()
+    });
+    let (provider, model) = crate::engine::parse_agent(&agent);
+    let capture = begin_capture(
+        ask,
+        run_id,
+        provider.clone(),
+        model.clone(),
+        "ask-flow-step",
+    )?;
+    capture.record_input("initial", &launch.task_prompt);
     let process = crate::engine::ProcessConfig {
         auto: headless,
         stream: false,
+        capture: Some(capture.into()),
         ..Default::default()
     };
     let capabilities = crate::engine::AgentCapabilities::default();
@@ -478,24 +379,50 @@ async fn run_flow_step_harness(
     Ok(ExitStatus::from_raw(result.exit_code << 8))
 }
 
-/// The prompt for an Intervention (free-text thread with the User). FlowStep
-/// gates never reach here — they run the skill's harness via `flow_step_harness_turn`.
-async fn ask_prompt(store: &SharedStore, ask: &Ask) -> Result<String> {
-    let invocations = store.ask_invocations(&ask.id).await?;
-    let mut history = Vec::with_capacity(invocations.len());
-    for invocation in invocations {
-        history.push(store.invocation_surface(&invocation.id).await?);
-    }
-    Ok(format!(
-        "Resolve durable Ask {id}.\n\nRequest:\n{request}\n\nOrigin: {kind} {work}\nOrigin cwd: {cwd}\nTarget: {target}\nPrevious Ask Invocations:\n{invocations}\n\nYou are responsible only for this intervention; do not adopt the originating Work. Inspect or mutate the origin cwd as needed. Settlement is explicit and mandatory:\n- `lf ask resolve {id} \"<concise verified summary>\"` on success\n- `lf ask decline {id} \"<reason>\"` when the request should not be fulfilled\n- `lf ask release {id} \"<reason>\"` when unfinished\n- for a parent-targeted Ask that genuinely needs the absent User, `lf ask escalate {id} --user`\nA final response, clean exit, Ctrl-D, window close, or process exit never settles the Ask.",
+fn begin_capture(
+    ask: &Ask,
+    run_id: &RunId,
+    provider: String,
+    model: Option<String>,
+    surface: &str,
+) -> Result<crate::run_record::CaptureHandle> {
+    crate::run_record::CaptureHandle::begin_with_verified_parent(
+        crate::run_record::RunSpec {
+            harness: provider,
+            model,
+            surface: surface.to_string(),
+            cwd: ask.origin.cwd.clone(),
+            repo: Some(ask.origin.cwd.clone()),
+            worktree: Some(ask.origin.cwd.clone()),
+            skill: match &ask.request {
+                crate::durable::AskBody::FlowStep { skill, .. } => Some(skill.clone()),
+                crate::durable::AskBody::Intervention { .. } => None,
+            },
+            subjects: vec![
+                crate::run_record::SubjectAttribution::declared(format!("ask:{}", ask.id)),
+                crate::run_record::SubjectAttribution::declared(format!(
+                    "{}:{}",
+                    ask.origin.work.kind(),
+                    ask.origin.work.id()
+                )),
+            ],
+        },
+        run_id.clone(),
+        ask.origin.source_run_id.clone(),
+    )
+    .map_err(Into::into)
+}
+
+fn ask_prompt(ask: &Ask) -> String {
+    format!(
+        "Resolve durable Ask {id}.\n\nRequest:\n{request}\n\nOrigin: {kind} {work}\nOrigin cwd: {cwd}\nTarget: {target}\n\nYou are responsible only for this intervention; do not adopt the originating Work. Inspect or mutate the origin cwd as needed. Settlement is explicit and mandatory:\n- `lf ask resolve {id} \"<concise verified summary>\"` on success\n- `lf ask decline {id} \"<reason>\"` when the request should not be fulfilled\n- `lf ask release {id} \"<reason>\"` when unfinished\n- for a parent-targeted Ask that genuinely needs the absent User, `lf ask escalate {id} --user`\nA final response, clean exit, Ctrl-D, window close, or process exit never settles the Ask.",
         id = ask.id,
         request = ask.request,
         kind = ask.origin.work.kind(),
         work = ask.origin.work.id(),
         cwd = ask.origin.cwd.display(),
         target = ask.target,
-        invocations = serde_json::to_string_pretty(&history)?,
-    ))
+    )
 }
 
 fn interrupted_result(result: &Result<ExitStatus>) -> bool {
@@ -504,19 +431,16 @@ fn interrupted_result(result: &Result<ExitStatus>) -> bool {
     })
 }
 
-pub(crate) fn session_name(invocation_id: &AgentInvocationId) -> String {
-    format!("lf-ask-{}", &invocation_id.as_str()[11..23])
+pub(crate) fn session_name(run_id: &RunId) -> String {
+    format!("lf-ask-{}", &run_id.as_str()[4..16])
 }
 
-pub(crate) async fn observe_surface(surface: &InvocationSurface) -> ContainmentObservation {
-    let Some(attach) = surface.attach_argv.as_ref() else {
-        return ContainmentObservation::Unprovable;
-    };
-    let Some(session) = tmux_target(attach) else {
-        return ContainmentObservation::Unprovable;
+pub(crate) async fn observe_surface(surface: &AskSession) -> Result<bool> {
+    let Some(session) = tmux_target(&surface.attach_argv) else {
+        return Err(anyhow!("Ask session does not identify a tmux target"));
     };
     let Some(home) = HomeRoute::parse(&surface.home_route) else {
-        return ContainmentObservation::Unprovable;
+        return Err(anyhow!("Ask session has an invalid Home route"));
     };
     if let Some(destination) = home.ssh_destination() {
         let mut command = tokio::process::Command::new("ssh");
@@ -530,16 +454,16 @@ pub(crate) async fn observe_surface(surface: &InvocationSurface) -> ContainmentO
             .output()
             .await;
         match output {
-            Ok(output) if output.status.success() => ContainmentObservation::Present,
-            Ok(output) if output.status.code() == Some(1) => ContainmentObservation::Absent,
-            _ => ContainmentObservation::Unprovable,
+            Ok(output) if output.status.success() => Ok(true),
+            Ok(output) if output.status.code() == Some(1) => Ok(false),
+            Ok(output) => Err(anyhow!(
+                "remote tmux session probe failed: {}",
+                output.status
+            )),
+            Err(error) => Err(error.into()),
         }
     } else {
-        match crate::engine::process::tmux_session_exists(session).await {
-            Ok(true) => ContainmentObservation::Present,
-            Ok(false) => ContainmentObservation::Absent,
-            Err(_) => ContainmentObservation::Unprovable,
-        }
+        crate::engine::process::tmux_session_exists(session).await
     }
 }
 
@@ -593,20 +517,17 @@ pub(crate) fn tmux_target(argv: &[String]) -> Option<&str> {
 
 pub(crate) struct AskLane {
     parent: WorkRef,
-    context: RunContext,
     retry_at: Option<tokio::time::Instant>,
 }
 
 impl AskLane {
-    pub(crate) fn new(parent: WorkRef, context: RunContext) -> Self {
+    pub(crate) fn new(parent: WorkRef) -> Self {
         Self {
             parent,
-            context,
             retry_at: None,
         }
     }
 
-    /// Reconcile the next parent-directed Ask and report whether any remain unresolved.
     pub(crate) async fn reconcile(&mut self, store: &SharedStore) -> Result<bool> {
         let retrying = self
             .retry_at
@@ -614,20 +535,13 @@ impl AskLane {
         if !retrying {
             self.retry_at = None;
         }
-        let asks = pending_attention(
-            store,
-            Some(&self.context),
-            &AskTarget::Parent(self.parent.clone()),
-        )
-        .await?
-        .into_iter()
-        .map(|attention| attention.ask)
-        .collect::<Vec<_>>();
-        if let Some(ask) = asks.iter().find(|ask| ask.state == AskState::Claimed) {
+        let asks = pending_attention(store, &AskTarget::Parent(self.parent.clone()))
+            .await?
+            .into_iter()
+            .map(|attention| attention.ask)
+            .collect::<Vec<_>>();
+        if asks.iter().any(|ask| ask.state == AskState::Claimed) {
             self.retry_at = None;
-            ask.active_invocation_id
-                .as_ref()
-                .ok_or_else(|| anyhow!("claimed Ask {} has no active Invocation", ask.id))?;
             return Ok(true);
         }
         let Some(ask) = asks.into_iter().find(|ask| ask.state == AskState::Queued) else {
@@ -637,17 +551,13 @@ impl AskLane {
         if retrying {
             return Ok(true);
         }
-        let (route, surface) = launch_identity(&ask, true);
-        let claim = store
-            .claim_ask(Some(&self.context), &ask.id, route, surface)
-            .await?;
+        let claim = store.claim_ask(&ask.id).await?;
         if !claim.needs_launch {
             return Ok(true);
         }
-        if let Err(error) = launch_claimed(store, &ask, &claim.invocation_id, true).await {
+        if let Err(error) = launch_claimed(store, &ask, &claim.run_id, true).await {
             self.retry_at = Some(tokio::time::Instant::now() + RETRY_DELAY);
             tracing::warn!(ask_id = %ask.id, %error, "failed to launch parent Ask session");
-            return Ok(true);
         }
         Ok(true)
     }
@@ -655,30 +565,39 @@ impl AskLane {
 
 #[cfg(test)]
 mod tests {
+    use std::ffi::OsString;
     use std::os::unix::process::ExitStatusExt;
     use std::process::ExitStatus;
 
-    use super::{attention_state, interrupted_result, session_name, tmux_target, AttentionState};
+    use super::{
+        absence_is_authoritative, attention_state, begin_capture, interrupted_result, session_name,
+        tmux_target, AttentionState, LAUNCH_GRACE_SECONDS,
+    };
     use crate::durable::{
-        AgentInvocation, AgentInvocationId, Ask, AskBody, AskId, AskOrigin, AskState, AskTarget,
-        HomeId, InvocationRoute, RunId, WorkRef,
+        Ask, AskBody, AskId, AskOrigin, AskState, AskTarget, HomeId, RunId, WorkRef,
     };
     use crate::id::WaveId;
 
-    fn invocation() -> AgentInvocation {
-        AgentInvocation {
-            id: AgentInvocationId::new(),
-            supervising_run_id: Some(RunId::new()),
-            answer_ask_id: Some(AskId::new()),
-            route: InvocationRoute {
-                provider: "codex".to_string(),
-                model: None,
-                account_id: None,
-            },
-            surface: "ask_tui".to_string(),
-            resume_token: None,
-            started_at: time::OffsetDateTime::now_utc(),
-            ended_at: None,
+    struct EnvironmentRestore(Vec<(&'static str, Option<OsString>)>);
+
+    impl EnvironmentRestore {
+        fn capture(keys: &[&'static str]) -> Self {
+            Self(
+                keys.iter()
+                    .map(|key| (*key, std::env::var_os(key)))
+                    .collect(),
+            )
+        }
+    }
+
+    impl Drop for EnvironmentRestore {
+        fn drop(&mut self) {
+            for (key, value) in self.0.drain(..).rev() {
+                match value {
+                    Some(value) => std::env::set_var(key, value),
+                    None => std::env::remove_var(key),
+                }
+            }
         }
     }
 
@@ -687,9 +606,7 @@ mod tests {
             id: AskId::new(),
             origin: AskOrigin {
                 work: WorkRef::Wave(WaveId::new()),
-                run_id: RunId::new(),
-                turn_id: None,
-                invocation_id: None,
+                source_run_id: Some(RunId::new()),
                 home_id: HomeId::new(),
                 cwd: "/tmp".into(),
             },
@@ -698,7 +615,9 @@ mod tests {
                 prompt: "help".to_string(),
             },
             state,
-            active_invocation_id: None,
+            active_run_id: None,
+            ready_at: None,
+            presented_at: None,
             result: None,
             terminal_author: None,
             asked_at: time::OffsetDateTime::now_utc(),
@@ -709,29 +628,32 @@ mod tests {
     #[test]
     fn attention_distinguishes_queued_ready_and_active() {
         assert_eq!(
-            attention_state(&ask(AskState::Queued), None, (false, false)),
+            attention_state(&ask(AskState::Queued)),
             AttentionState::Queued
         );
-        let invocation = invocation();
-        assert_eq!(
-            attention_state(&ask(AskState::Claimed), Some(&invocation), (true, false)),
-            AttentionState::NotPresented
-        );
-        assert_eq!(
-            attention_state(&ask(AskState::Claimed), Some(&invocation), (true, true)),
-            AttentionState::Active
-        );
-        assert_eq!(
-            attention_state(&ask(AskState::Claimed), Some(&invocation), (false, false)),
-            AttentionState::Claimed
-        );
+        let mut claimed = ask(AskState::Claimed);
+        assert_eq!(attention_state(&claimed), AttentionState::Claimed);
+        claimed.ready_at = Some(time::OffsetDateTime::now_utc());
+        assert_eq!(attention_state(&claimed), AttentionState::NotPresented);
+        claimed.presented_at = Some(time::OffsetDateTime::now_utc());
+        assert_eq!(attention_state(&claimed), AttentionState::Active);
+    }
+
+    #[test]
+    fn a_new_claim_gets_launch_grace_before_absence_is_stale() {
+        let now = time::OffsetDateTime::now_utc();
+        let mut claimed = ask(AskState::Claimed);
+        claimed.ready_at = Some(now);
+        assert!(!absence_is_authoritative(&claimed, now));
+
+        claimed.ready_at = Some(now - time::Duration::seconds(LAUNCH_GRACE_SECONDS));
+        assert!(absence_is_authoritative(&claimed, now));
     }
 
     #[test]
     fn ask_session_and_tmux_attach_are_exact() {
-        let session = AgentInvocationId::new();
-        let name = session_name(&session);
-        assert!(name.starts_with("lf-ask-"));
+        let run_id = RunId::new();
+        let name = session_name(&run_id);
         let argv = vec![
             "tmux".to_string(),
             "attach-session".to_string(),
@@ -739,6 +661,74 @@ mod tests {
             name.clone(),
         ];
         assert_eq!(tmux_target(&argv), Some(name.as_str()));
+    }
+
+    #[test]
+    fn ask_capture_uses_only_a_verified_source_run_as_parent() {
+        let _lock = crate::journal::test_env_lock();
+        let home = tempfile::tempdir().unwrap();
+        let _environment = EnvironmentRestore::capture(&[
+            "LF_HOME",
+            crate::durable::RUN_ID_ENV,
+            crate::run_record::RUN_DIR_ENV,
+        ]);
+        std::env::set_var("LF_HOME", home.path());
+        std::env::remove_var(crate::durable::RUN_ID_ENV);
+        std::env::remove_var(crate::run_record::RUN_DIR_ENV);
+        let mut ask = ask(AskState::Claimed);
+        let parent = crate::run_record::CaptureHandle::begin(crate::run_record::RunSpec {
+            harness: "codex".to_string(),
+            model: Some("gpt-5".to_string()),
+            surface: "parent".to_string(),
+            cwd: home.path().to_path_buf(),
+            repo: None,
+            worktree: None,
+            skill: None,
+            subjects: Vec::new(),
+        })
+        .unwrap();
+        let parent_run_id = parent.run_id();
+        ask.origin.source_run_id = Some(parent_run_id.clone());
+        let run_id = RunId::new();
+
+        let capture = begin_capture(
+            &ask,
+            &run_id,
+            "codex".to_string(),
+            Some("gpt-5".to_string()),
+            "ask",
+        )
+        .unwrap();
+        let directory = capture.artifact_dir();
+        let manifest: crate::run_record::RunManifest =
+            serde_json::from_slice(&std::fs::read(directory.join("manifest.json")).unwrap())
+                .unwrap();
+
+        assert_eq!(manifest.run_id, run_id);
+        assert_eq!(manifest.parent_run_id, Some(parent_run_id));
+        assert!(manifest
+            .subjects
+            .iter()
+            .any(|subject| subject.selector == format!("ask:{}", ask.id)));
+        assert!(!directory.join("owner.json").exists());
+        capture.finish("completed").unwrap();
+        parent.finish("completed").unwrap();
+        assert!(directory.join("terminal.json").is_file());
+
+        ask.origin.source_run_id = Some(RunId::new());
+        let capture = begin_capture(
+            &ask,
+            &RunId::new(),
+            "codex".to_string(),
+            Some("gpt-5".to_string()),
+            "ask",
+        )
+        .unwrap();
+        let manifest: crate::run_record::RunManifest = serde_json::from_slice(
+            &std::fs::read(capture.artifact_dir().join("manifest.json")).unwrap(),
+        )
+        .unwrap();
+        assert!(manifest.parent_run_id.is_none());
     }
 
     #[test]

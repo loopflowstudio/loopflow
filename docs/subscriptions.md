@@ -30,7 +30,7 @@ Claude or Codex account.
 lf auth connect claude personal@example.com --chrome-profile personal@example.com
 lf auth connect codex work@example.com --chrome-profile work@example.com
 
-lf auth import claude personal@example.com    # adopt the ambient Claude login
+lf auth import claude --email personal@example.com  # adopt the ambient Claude login
 lf auth disconnect claude --email personal@
 ```
 
@@ -49,7 +49,8 @@ Connect creates a **local managed identity**, not a new Claude or Codex account:
    `~/.lf/loopflow.db`.
 
 If verification fails, the staging login is discarded and an existing identity
-is left unchanged. `lf auth import claude` is the explicit exception: it copies
+is left unchanged. `lf auth import claude --email <email>` is the explicit
+exception: it copies
 the ambient Claude login from `~/.claude` or the macOS Keychain into a new
 isolated account home, then performs the same login verification.
 
@@ -84,8 +85,6 @@ same account ID so fallback and resume do not silently change identities.
 lf auth status                   # every connected service
 lf auth accounts claude          # cached subscription state
 lf auth accounts --verify        # compare every credential with its provider
-lf usage                         # subscription windows plus provider usage
-lf telemetry-daily               # repository maintainer health and budget report
 ```
 
 `auth accounts --verify` records a revoked credential as missing and prints
@@ -128,7 +127,7 @@ Without either route, every automatically eligible managed identity is a
 candidate. With no managed candidate, the provider CLI can use its ambient
 default login.
 
-## Select accounts for one invocation
+## Select accounts for one launch
 
 Prefer an account while keeping the normal route as fallback:
 
@@ -156,13 +155,13 @@ is ordinary syntax for the target `lf`.
 
 ```bash
 # Offer all origin accounts and let the target lf choose.
-lf ssh my-company task pursue
+lf ssh my-company implement
 
 # Prefer this exact identity from the origin.
-lf ssh --account personal@ my-company task pursue
+lf ssh --account personal@ my-company implement
 
 # Resolve this preference from the target's combined catalog.
-lf ssh my-company --account work@ task pursue
+lf ssh my-company --account work@ implement
 ```
 
 There is no explicit `-- lf`. `lf ssh` does not run arbitrary remote programs;
@@ -192,10 +191,10 @@ inspection shows `local` or `forwarded` provenance. Forwarded identities are
 read-only: connect, disconnect, and edit their routes on the machine that owns
 them.
 
-Invocation selectors govern foreground work. A Wave resident that survives the
-SSH command sheds forwarded state before detaching and selects from routes
-stored on its own machine. Configure the target repository route for durable
-account choice:
+Launch selectors govern foreground work. A Wave resident that survives the SSH
+command sheds forwarded state before detaching and selects from routes stored
+on its own machine. Configure the target repository route for durable account
+choice:
 
 ```bash
 lf ssh my-company route set codex work@

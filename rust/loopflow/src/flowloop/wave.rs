@@ -59,10 +59,11 @@ use tokio::sync::mpsc;
 use tokio::time::Instant;
 
 use crate::chat::types::{ConversationEvent, Lifecycle};
-use crate::durable::{RunContext, WorkRef};
+use crate::durable::WorkRef;
 use crate::engine::flow::{available_flow_names, load_goal, render_goal, GoalRenderContext};
 use crate::engine::wave_config::{read_wave_config, WaveCronDef};
 use crate::harness::{default_create_harness, ApprovalPolicy, Harness, SendCurrentOutcome};
+use crate::id::WaveId;
 use crate::store::{open_store, storage_config_from_env, Store};
 use crate::wave::journal::{MessageDestination, MessageId, MessageOp, PendingMessage};
 use crate::wave::playhead::{BodyProvenance, StepKind, StepOutcome, StepRef};
@@ -91,12 +92,12 @@ pub const CRON_GRACE: chrono::Duration = chrono::Duration::hours(24);
 const HEARTBEAT_PROMPT: &str = "Heartbeat: re-read your goal and memory, then take the next \
      orchestration skill. If nothing needs doing, say so in one line.";
 
-fn finish_capture(capture: Option<&crate::trace::CaptureHandle>, outcome: &str) {
+fn finish_capture(capture: Option<&crate::run_record::CaptureHandle>, outcome: &str) {
     let Some(capture) = capture else {
         return;
     };
-    if let Err(error) = capture.finish(outcome, false) {
-        tracing::warn!(%error, %outcome, "failed to finalize trace capture");
+    if let Err(error) = capture.finish(outcome) {
+        tracing::warn!(%error, %outcome, "failed to finalize Run record");
     }
 }
 
@@ -285,28 +286,37 @@ fn wave_pass_seed(
 }
 
 async fn wave_metric_context(
-    control: Option<&WaveControl>,
+    planning: Option<&WavePlanning>,
     origin_repo: &Path,
     wave_name: &str,
 ) -> String {
+    // Unplanned loop tests must not open the developer's ambient registry;
+    // planning and metric tests cover the enriched path.
+    #[cfg(test)]
+    if planning.is_none() {
+        return crate::ops::metrics::metric_prompt_section(
+            "metric-portfolio",
+            Err(anyhow!("local registry is unavailable")),
+        );
+    }
     let result = async {
-        let store = match control {
-            Some(control) => control.store.clone(),
+        let store = match planning {
+            Some(planning) => planning.store.clone(),
             None => Arc::new(
                 crate::store::open_existing_store()
                     .await
                     .ok_or_else(|| anyhow!("local registry is unavailable"))?,
             ),
         };
-        let wave = match control {
-            Some(control) => {
-                let WorkRef::Wave(wave_id) = &control.context.work else {
-                    return Err(anyhow!("ambient Wave Run does not carry a Wave identity"));
+        let wave = match planning {
+            Some(planning) => {
+                let WorkRef::Wave(wave_id) = &planning.work else {
+                    return Err(anyhow!("resident planning does not carry a Wave identity"));
                 };
                 store
                     .get_wave(wave_id)
                     .await?
-                    .ok_or_else(|| anyhow!("ambient Wave is absent from the registry"))?
+                    .ok_or_else(|| anyhow!("resident Wave is absent from the registry"))?
             }
             None => {
                 let locator = crate::wave::WaveLocator::discover(origin_repo, wave_name)?;
@@ -482,7 +492,7 @@ pub async fn run_loop(
     wave: String,
     config: LoopConfig,
 ) -> Result<()> {
-    let control = wave_control(&wave).await?;
+    let planning = wave_planning(&wave).await?;
     let prepare_origin = origin_repo.clone();
     let prepare_resident = resident_repo.clone();
     let backend = BodyBackend::Harness {
@@ -506,42 +516,37 @@ pub async fn run_loop(
         wave,
         config,
         backend,
-        control,
+        planning,
     )
     .await
 }
 
-struct WaveControl {
+struct WavePlanning {
     store: Arc<Store>,
-    context: RunContext,
+    work: WorkRef,
 }
 
-async fn wave_control(wave: &str) -> Result<Option<WaveControl>> {
-    if std::env::var_os(crate::durable::RUN_ID_ENV).is_none()
-        && std::env::var_os(crate::durable::RUN_CONTEXT_ENV).is_none()
-    {
+async fn wave_planning(wave: &str) -> Result<Option<WavePlanning>> {
+    let Some(wave_id) = std::env::var_os(crate::engine::wave_context::WAVE_ID_ENV) else {
         return Ok(None);
-    }
-    let store = Arc::new(open_store(&storage_config_from_env()?).await?);
-    let context = crate::ops::required_run_context(&store).await?;
-    let WorkRef::Wave(wave_id) = &context.work else {
-        return Err(anyhow!(
-            "ambient Run {} does not own Wave Work",
-            context.run_id
-        ));
     };
+    let wave_id = WaveId::parse(&wave_id.to_string_lossy())
+        .map_err(|error| anyhow!("invalid resident Wave identity: {error}"))?;
+    let store = Arc::new(open_store(&storage_config_from_env()?).await?);
     let registered = store
-        .get_wave(wave_id)
+        .get_wave(&wave_id)
         .await?
-        .ok_or_else(|| anyhow!("Wave {wave_id} is absent from the control store"))?;
+        .ok_or_else(|| anyhow!("Wave {wave_id} is absent from the planning store"))?;
     if registered.name() != wave {
         return Err(anyhow!(
-            "ambient Run {} owns Wave '{}', not '{wave}'",
-            context.run_id,
+            "resident Wave identity names '{}', not '{wave}'",
             registered.name()
         ));
     }
-    Ok(Some(WaveControl { store, context }))
+    Ok(Some(WavePlanning {
+        store,
+        work: WorkRef::Wave(wave_id),
+    }))
 }
 
 #[allow(clippy::too_many_arguments)]
@@ -553,11 +558,11 @@ async fn run_loop_with(
     wave: String,
     config: LoopConfig,
     backend: BodyBackend,
-    control: Option<WaveControl>,
+    planning: Option<WavePlanning>,
 ) -> Result<()> {
-    let ask_lane = control.as_ref().map(|control| {
-        crate::ops::ask::AskLane::new(control.context.work.clone(), control.context.clone())
-    });
+    let ask_lane = planning
+        .as_ref()
+        .map(|planning| crate::ops::ask::AskLane::new(planning.work.clone()));
     let mut wave_loop = WaveLoop {
         client,
         resident_repo,
@@ -572,7 +577,7 @@ async fn run_loop_with(
         idle_since: Instant::now(),
         cron_last_fired: HashMap::new(),
         provider_session: None,
-        control,
+        planning,
         ask_lane,
         end: None,
     };
@@ -629,17 +634,17 @@ struct WaveLoop {
     idle_since: Instant,
     cron_last_fired: HashMap<String, DateTime<Utc>>,
     provider_session: Option<ProviderSessionRef>,
-    control: Option<WaveControl>,
+    planning: Option<WavePlanning>,
     ask_lane: Option<crate::ops::ask::AskLane>,
     end: Option<LoopEnd>,
 }
 
 impl WaveLoop {
     async fn service_resolvers(&mut self) {
-        let (Some(control), Some(ask_lane)) = (&self.control, self.ask_lane.as_mut()) else {
+        let (Some(planning), Some(ask_lane)) = (&self.planning, self.ask_lane.as_mut()) else {
             return;
         };
-        if let Err(error) = ask_lane.reconcile(&control.store).await {
+        if let Err(error) = ask_lane.reconcile(&planning.store).await {
             tracing::warn!(%error, "failed to reconcile Wave Ask lane");
         }
     }
@@ -764,80 +769,6 @@ impl WaveLoop {
         self.run_pass(content, answers, destination, inbox_rx).await;
     }
 
-    async fn capture_control(
-        &mut self,
-        provider: &str,
-        model: Option<&str>,
-    ) -> Result<(
-        Option<crate::durable::Basis>,
-        Option<crate::trace::SupervisedInvocation>,
-    )> {
-        let Some(control) = &self.control else {
-            return Ok((None, None));
-        };
-        let epoch = control.store.current_epoch(&control.context.work).await?;
-        let mut run = control
-            .store
-            .current_run(&control.context.work)
-            .await?
-            .ok_or_else(|| anyhow!("Wave Run authority disappeared before Invocation"))?;
-        if run.id != control.context.run_id {
-            anyhow::bail!(
-                "Wave Run {} was replaced before Invocation by {}",
-                control.context.run_id,
-                run.id
-            );
-        }
-        let process_group = crate::engine::process::current_process_group_id()
-            .ok_or_else(|| anyhow!("Wave resident has no isolated process group"))?;
-        if run.state == crate::durable::RunState::Reserved {
-            let receipt = control
-                .store
-                .advance_run(
-                    &control.context,
-                    crate::durable::RunAdvance::RunStarting {
-                        containment: crate::durable::Containment::ProcessGroup {
-                            id: i64::from(process_group),
-                        },
-                        cwd: self.resident_repo.clone(),
-                    },
-                )
-                .await?;
-            let crate::durable::AdvanceReceipt::Run(started) = receipt else {
-                unreachable!("RunStarting returns a Run receipt")
-            };
-            run = started;
-        }
-        let receipt = control
-            .store
-            .advance_run(
-                &control.context,
-                crate::durable::RunAdvance::InvocationStarting {
-                    route: crate::durable::InvocationRoute {
-                        provider: provider.to_string(),
-                        model: model.map(str::to_string),
-                        account_id: None,
-                    },
-                    surface: "headless".to_string(),
-                    resume_token: None,
-                    answer_ask_id: None,
-                },
-            )
-            .await?;
-        let crate::durable::AdvanceReceipt::Invocation(invocation) = receipt else {
-            unreachable!("InvocationStarting returns an Invocation receipt")
-        };
-        Ok((
-            Some(epoch.current_basis),
-            Some(crate::trace::SupervisedInvocation {
-                invocation_id: invocation.id,
-                supervising_run_id: run.id,
-                account_id: None,
-                resume_token: None,
-            }),
-        ))
-    }
-
     async fn run_pass(
         &mut self,
         wake: String,
@@ -863,7 +794,7 @@ impl WaveLoop {
             invocation.get_or_insert(key);
             let completed_index = step.index;
             let metric_context =
-                wave_metric_context(self.control.as_ref(), &self.origin_repo, &self.wave).await;
+                wave_metric_context(self.planning.as_ref(), &self.origin_repo, &self.wave).await;
             let seed = wave_pass_seed(
                 &self.resident_repo,
                 &self.origin_repo,
@@ -1000,7 +931,7 @@ impl WaveLoop {
             #[cfg(test)]
             BodyBackend::Process(_) => unreachable!("live skill requires a harness backend"),
         };
-        let prepared = match prepared {
+        let mut prepared = match prepared {
             Ok(prepared) => prepared,
             Err(err) => {
                 let body_id = body.body_id.clone();
@@ -1015,64 +946,36 @@ impl WaveLoop {
         };
         body.harness = Some(prepared.harness.clone());
         body.model = prepared.model.clone();
-        let (basis, control) = match self
-            .capture_control(&prepared.harness, prepared.model.as_deref())
-            .await
-        {
-            Ok(control) => control,
-            Err(error) => {
+        let capture = match crate::run_record::CaptureHandle::begin(crate::run_record::RunSpec {
+            harness: prepared.harness.clone(),
+            model: prepared.model.clone(),
+            surface: "headless".to_string(),
+            cwd: self.resident_repo.clone(),
+            repo: Some(self.origin_repo.clone()),
+            worktree: Some(self.resident_repo.clone()),
+            skill: Some(step.step.clone()),
+            subjects: vec![crate::run_record::SubjectAttribution::declared(format!(
+                "wave:{}",
+                self.wave
+            ))],
+        }) {
+            Ok(capture) => Some(capture),
+            Err(err) => {
                 let body_id = body.body_id.clone();
                 self.open_body(body, answers).await;
                 self.finish_failed_pass(
                     &body_id,
-                    &format!("failed to establish Wave Run Invocation: {error}"),
+                    &format!("failed to publish Run manifest: {err}"),
                 )
                 .await;
                 return;
             }
         };
-
-        let capture = match crate::journal::trace_capture_context(
-            &self.resident_repo,
-            Some(step.flow.clone()),
-            Some(step.step.clone()),
-        ) {
-            Ok(context) => match crate::trace::CaptureHandle::begin(
-                context,
-                prepared.context.clone(),
-                crate::trace::CaptureStart {
-                    provider: prepared.harness.clone(),
-                    model: prepared.model.clone(),
-                    surface: "headless".to_string(),
-                    input_op: "initial".to_string(),
-                    gather_ms: prepared.context_gather_ms,
-                    render_ms: prepared.context_render_ms,
-                    raw_provider: true,
-                    basis,
-                    supervision: control,
-                },
-            ) {
-                Ok(capture) => Some(capture),
-                Err(err) => {
-                    let body_id = body.body_id.clone();
-                    self.open_body(body, answers).await;
-                    self.finish_failed_pass(
-                        &body_id,
-                        &format!("failed to establish trace capture: {err}"),
-                    )
-                    .await;
-                    return;
-                }
-            },
-            Err(_) if cfg!(test) => None,
-            Err(_) => {
-                let body_id = body.body_id.clone();
-                self.open_body(body, answers).await;
-                self.finish_failed_pass(&body_id, "trace capture identity is unavailable")
-                    .await;
-                return;
-            }
-        };
+        if let Some(capture) = &capture {
+            capture.record_input("initial", &prepared.input);
+            prepared.config.env.extend(capture.environment());
+            capture.mark_spawn_requested();
+        }
 
         let (event_tx, mut event_rx) = mpsc::unbounded_channel();
         let (raw_tx, mut raw_rx) = mpsc::unbounded_channel();
@@ -1097,50 +1000,16 @@ impl WaveLoop {
                 return;
             }
         };
-        let resume_session_id =
-            provider_session_id_for_harness(self.provider_session.as_ref(), &prepared.harness);
-        let prepared_invocation = match capture.as_ref() {
-            Some(capture) if prepared.harness == "codex" && resume_session_id.is_none() => {
-                let process = crate::engine::ProcessConfig {
-                    auto: true,
-                    stream: true,
-                    capture: Some(capture.clone()),
-                    ..Default::default()
-                };
-                match crate::engine::agent::prepare_agent_invocation(
-                    &prepared.config,
-                    &process,
-                    capture,
-                    None,
-                ) {
-                    Ok(prepared) => prepared,
-                    Err(error) => {
-                        let _ = capture.finish("failed", true);
-                        let body_id = body.body_id.clone();
-                        self.open_body(body, answers).await;
-                        self.finish_failed_pass(
-                            &body_id,
-                            &format!("failed to prepare Codex execution contract: {error}"),
-                        )
-                        .await;
-                        return;
-                    }
-                }
-            }
-            _ => None,
-        };
         if capture.is_some() {
             harness.set_raw_provider_sender(Some(raw_tx));
         }
+        let resume_session_id =
+            provider_session_id_for_harness(self.provider_session.as_ref(), &prepared.harness);
         if resume_session_id.is_none() {
             self.provider_session = None;
         }
         harness.set_provider_session_id(resume_session_id);
-        let start = match &prepared_invocation {
-            Some(prepared_invocation) => harness.start_prepared(prepared_invocation).await,
-            None => harness.start(&prepared.config).await,
-        };
-        if let Err(err) = start {
+        if let Err(err) = harness.start(&prepared.config).await {
             finish_capture(capture.as_ref(), "failed");
             let body_id = body.body_id.clone();
             self.open_body(body, answers).await;
@@ -1186,6 +1055,7 @@ impl WaveLoop {
         let mut timeout = Box::pin(tokio::time::sleep(self.config.pass_timeout));
         let mut ask_poll = tokio::time::interval(Duration::from_millis(200));
         ask_poll.set_missed_tick_behavior(tokio::time::MissedTickBehavior::Delay);
+        let mut raw_open = capture.is_some();
         loop {
             tokio::select! {
                 biased;
@@ -1218,9 +1088,11 @@ impl WaveLoop {
                         }
                     }
                 }
-                raw = raw_rx.recv(), if capture.is_some() => {
-                    if let (Some(raw), Some(capture)) = (raw, capture.as_ref()) {
-                        capture.record_raw(raw.stream, &raw.line);
+                raw = raw_rx.recv(), if raw_open => {
+                    match (raw, capture.as_ref()) {
+                        (Some(raw), Some(capture)) => capture.record_raw(raw.stream, &raw.line),
+                        (None, _) => raw_open = false,
+                        _ => {}
                     }
                 }
                 event = event_rx.recv() => {
@@ -1347,7 +1219,7 @@ impl WaveLoop {
                     return true;
                 }
                 // Live delivery improves latency; it does not advance the
-                // Turn's immutable starting Basis. Keep the message pending so
+                // Turn's immutable starting input. Keep the message pending so
                 // a later boundary can incorporate it durably.
                 self.send(vec![ResidentDelta::MessagesRequeued { ids: vec![id] }])
                     .await;
@@ -1877,7 +1749,7 @@ mod tests {
         backend: BodyBackend,
         seeds: Arc<Mutex<Vec<String>>>,
         passes: mpsc::UnboundedReceiver<String>,
-        control: Option<WaveControl>,
+        planning: Option<WavePlanning>,
     ) -> TestLoop {
         let runtime =
             WaveRuntime::open("ship".into(), tmp.path().to_path_buf()).expect("open runtime");
@@ -1922,7 +1794,7 @@ mod tests {
             "ship".into(),
             config,
             backend,
-            control,
+            planning,
         ));
         TestLoop {
             runtime,
@@ -1935,13 +1807,16 @@ mod tests {
     }
 
     async fn wait_for(what: &str, cond: impl Fn() -> bool) {
-        for _ in 0..500 {
+        let deadline = Instant::now() + Duration::from_secs(30);
+        loop {
             if cond() {
                 return;
             }
+            if Instant::now() >= deadline {
+                panic!("condition not met in time: {what}");
+            }
             tokio::time::sleep(Duration::from_millis(5)).await;
         }
-        panic!("condition not met in time: {what}");
     }
 
     fn init_test_git_repo(path: &Path) {
@@ -2172,14 +2047,8 @@ mod tests {
                         ..crate::engine::AgentConfig::default()
                     },
                     input: format!("{skill}\n{seed}"),
-                    context: crate::trace::PreparedTurnContext::from_prompts(
-                        "",
-                        &format!("{skill}\n{seed}"),
-                    ),
                     harness: "fake".to_string(),
                     model: None,
-                    context_gather_ms: 0,
-                    context_render_ms: 0,
                 })
             }),
             create: Box::new(move |_name, _approval, events| {
@@ -2292,14 +2161,8 @@ mod tests {
                         ..crate::engine::AgentConfig::default()
                     },
                     input: format!("{skill}\n{seed}"),
-                    context: crate::trace::PreparedTurnContext::from_prompts(
-                        "",
-                        &format!("{skill}\n{seed}"),
-                    ),
                     harness: "fake".to_string(),
                     model: None,
-                    context_gather_ms: 0,
-                    context_render_ms: 0,
                 })
             }),
             create: Box::new(move |_name, _approval, events| {
@@ -2373,14 +2236,8 @@ mod tests {
                         ..crate::engine::AgentConfig::default()
                     },
                     input: format!("{skill}\n{seed}"),
-                    context: crate::trace::PreparedTurnContext::from_prompts(
-                        "",
-                        &format!("{skill}\n{seed}"),
-                    ),
                     harness: "fake".to_string(),
                     model: None,
-                    context_gather_ms: 0,
-                    context_render_ms: 0,
                 })
             }),
             create: Box::new(move |_name, _approval, events| {
@@ -2766,8 +2623,21 @@ mod tests {
     /// supervisor.rs).
     #[tokio::test]
     async fn failure_cap_reports_failed_and_exits_the_resident() {
-        let mut loop_ = boot(Duration::from_millis(30), "exit 1").await;
-        // Heartbeats keep opening passes; every pass exits nonzero.
+        let mut loop_ = boot(Duration::from_secs(600), "exit 1").await;
+        loop_
+            .runtime
+            .deliver(MessageOp::Message, "failure 1".into())
+            .expect("first failure wake");
+        for attempt in 1..=MAX_CONSECUTIVE_PASS_FAILURES {
+            loop_.next_seed().await;
+            if attempt < MAX_CONSECUTIVE_PASS_FAILURES {
+                loop_
+                    .runtime
+                    .deliver(MessageOp::Message, format!("failure {}", attempt + 1))
+                    .expect("next failure wake");
+            }
+        }
+
         wait_for("loop failed", || {
             matches!(loop_.runtime.loop_state(), LoopState::Failed { .. })
         })
@@ -2776,9 +2646,10 @@ mod tests {
             unreachable!()
         };
         assert!(reason.contains("consecutive wave failures"), "{reason}");
-        assert!(
-            loop_.pass_count() >= MAX_CONSECUTIVE_PASS_FAILURES as usize,
-            "the cap took the full ladder"
+        assert_eq!(
+            loop_.pass_count(),
+            MAX_CONSECUTIVE_PASS_FAILURES as usize,
+            "the cap took exactly the full ladder"
         );
 
         // …and the resident's loop ends with that error (process exits 1).
@@ -2794,9 +2665,12 @@ mod tests {
     async fn non_catalog_harness_prepare_failure_counts_toward_cap() {
         let attempts = Arc::new(Mutex::new(0_u32));
         let prepare_attempts = attempts.clone();
+        let (attempt_tx, mut attempt_rx) = mpsc::unbounded_channel();
         let backend = BodyBackend::Harness {
             prepare: Box::new(move |_skill, _seed, _wave, _max_turns| {
-                *prepare_attempts.lock().expect("attempts lock") += 1;
+                let mut attempts = prepare_attempts.lock().expect("attempts lock");
+                *attempts += 1;
+                attempt_tx.send(*attempts).expect("record prepare attempt");
                 Err(anyhow!("provider configuration is invalid"))
             }),
             create: Box::new(|_name, _approval, _events| {
@@ -2805,7 +2679,7 @@ mod tests {
         };
         let mut loop_ = boot_backend(
             tempfile::tempdir().expect("tempdir"),
-            test_config(Duration::from_millis(30)),
+            test_config(Duration::from_secs(600)),
             backend,
             Arc::new(Mutex::new(Vec::new())),
             mpsc::unbounded_channel().1,
@@ -2813,6 +2687,19 @@ mod tests {
         )
         .await;
 
+        loop_
+            .runtime
+            .deliver(MessageOp::Message, "failure 1".into())
+            .expect("first failure wake");
+        for expected in 1..=MAX_CONSECUTIVE_PASS_FAILURES {
+            assert_eq!(attempt_rx.recv().await.expect("prepare attempt"), expected);
+            if expected < MAX_CONSECUTIVE_PASS_FAILURES {
+                loop_
+                    .runtime
+                    .deliver(MessageOp::Message, format!("failure {}", expected + 1))
+                    .expect("next failure wake");
+            }
+        }
         wait_for("prepare failures exhaust the cap", || {
             matches!(loop_.runtime.loop_state(), LoopState::Failed { .. })
         })

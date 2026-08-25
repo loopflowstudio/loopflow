@@ -174,15 +174,15 @@ pub fn prepare_launch_prompt(
         agent: Some(agent),
         max_turns,
         resume_token: None,
+        provider_account_id: None,
+        provider_account_authority_home: None,
         cwd: Some(cwd.unwrap_or(repo_root)),
-        run_context: crate::engine::agent::AgentRunContext::Inherit,
         write_scope: crate::engine::agent::AgentWriteScope::Configured,
         execution_boundary: None,
         skip_permissions: yolo_mode,
         structured_replies: structured_replies_for_context(&client_context, action_style),
         directive_relay: None,
         env: Default::default(),
-        replay_safe: false,
     };
 
     Ok(PreparedLaunchPrompt {

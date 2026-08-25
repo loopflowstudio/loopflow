@@ -15,8 +15,8 @@ selection. Follow the repo style guide.
 ## Work
 
 - Honor every Steer included in the seed and summarize how it changes the
-  execution plan. The boundary Basis is fixed; provider acceptance alone is
-  not application.
+  execution plan. Do not create a separate acknowledgement mutation for inputs
+  already present in the seed.
 - Own execution in this process and worktree. Operational Loopflow children such
   as `lf commit`, `lf pr land`, `lf rebase`, and direct skill or flow calls are
   part of that execution and remain available. Do not boot a server, create a

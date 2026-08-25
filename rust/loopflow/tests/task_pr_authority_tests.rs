@@ -144,10 +144,11 @@ fn submit_refuses_when_registry_missing_before_any_push() {
 
     let _task = register_task(home.path(), repo.path(), branch, &base);
 
-    // The registry vanishes. Ambient Run context still marks this as an agent entry
+    // The registry vanishes. Ambient Run identity still marks this as an agent entry
     // point, so the missing registry is missing authority — not "no tasks here."
     std::fs::remove_file(home.path().join("loopflow.db")).expect("remove registry");
-    let _ambient = AmbientVarGuard::set(loopflow::durable::RUN_CONTEXT_ENV, "agent");
+    let run_id = loopflow::durable::RunId::new();
+    let _ambient = AmbientVarGuard::set(loopflow::durable::RUN_ID_ENV, run_id.as_str());
 
     let err = submit(
         repo.path(),

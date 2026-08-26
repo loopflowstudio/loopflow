@@ -341,6 +341,21 @@ pub(crate) fn prepare_agent_writer(
     worktree: &Path,
     env: &BTreeMap<String, String>,
 ) -> OpsResult<Option<AgentWriterGuard>> {
+    prepare_agent_writer_with_policy(worktree, env, false)
+}
+
+pub(crate) fn prepare_exclusive_agent_writer(
+    worktree: &Path,
+    env: &BTreeMap<String, String>,
+) -> OpsResult<Option<AgentWriterGuard>> {
+    prepare_agent_writer_with_policy(worktree, env, true)
+}
+
+fn prepare_agent_writer_with_policy(
+    worktree: &Path,
+    env: &BTreeMap<String, String>,
+    exclusive: bool,
+) -> OpsResult<Option<AgentWriterGuard>> {
     if absolute_git_dir(worktree).is_err() {
         return Ok(None);
     }
@@ -355,7 +370,9 @@ pub(crate) fn prepare_agent_writer(
     // Establish the writer first. A rebase racing this preflight will then see
     // the live writer and refuse, instead of creating an operation in the gap
     // between an agent's operation check and its writer claim.
-    refuse_other_writers(worktree, &writer_id, "launch an agent")?;
+    if exclusive {
+        refuse_other_writers(worktree, &writer_id, "start ci-fix")?;
+    }
     let requested_operation = env
         .get(LF_GIT_OPERATION_ID_ENV)
         .cloned()
@@ -642,7 +659,10 @@ fn validate_id(value: &str, label: &str) -> OpsResult<()> {
 
 #[cfg(test)]
 mod tests {
-    use super::{begin_rebase_operation, establish_writer, prepare_agent_writer, writer_path};
+    use super::{
+        begin_rebase_operation, establish_writer, prepare_agent_writer,
+        prepare_exclusive_agent_writer, writer_path,
+    };
     use std::collections::BTreeMap;
     use std::ffi::OsString;
     use std::path::Path;
@@ -774,7 +794,7 @@ mod tests {
     }
 
     #[test]
-    fn agent_launch_refuses_an_independent_live_writer() {
+    fn exclusive_agent_launch_refuses_an_independent_live_writer() {
         let _env_lock = crate::journal::test_env_lock();
         let _restore = EnvRestore::capture(&[
             "LF_AGENT_INVOCATION_ID",
@@ -798,12 +818,12 @@ mod tests {
         let first = prepare_agent_writer(&repo, &BTreeMap::new())
             .unwrap()
             .expect("first agent owns the worktree");
-        let error = prepare_agent_writer(&repo, &BTreeMap::new())
-            .expect_err("second agent must not share the worktree");
+        let error = prepare_exclusive_agent_writer(&repo, &BTreeMap::new())
+            .expect_err("exclusive agent must not share the worktree");
 
         assert!(error
             .to_string()
-            .contains("refusing to launch an agent while independent writer"));
+            .contains("refusing to start ci-fix while independent writer"));
         drop(first);
     }
 }

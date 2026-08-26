@@ -21,6 +21,7 @@ use crate::store::{open_store, storage_config_from_env, SharedStore};
 use crate::task::{CiCheck, CiIncident, CiObservation, CiRepairAttempt, CiState};
 
 use super::error::{OpsError, OpsResult};
+use super::git_operation::{prepare_exclusive_agent_writer, LF_WORKTREE_WRITER_ID_ENV};
 use super::land::{arm, LandOptions};
 use super::pr::{merge_gate_state, observe_pr_by_number, PrInfo, PrObservation, PrReadFreshness};
 use super::progress::{NullProgress, Progress};
@@ -223,6 +224,14 @@ fn prepare_ci_fix(
     failing_checks: &[CiCheck],
 ) -> OpsResult<PreparedRepair> {
     verify_repair_start(landing, incident)?;
+    let writer_guard =
+        prepare_exclusive_agent_writer(&landing.worktree, &std::collections::BTreeMap::new())?
+            .ok_or_else(|| {
+                OpsError::Message("ci-fix worktree is not a Git repository".to_string())
+            })?;
+    // Close the check/acquire race before fetching evidence. The writer record
+    // keeps rebases out until this prepared repair either runs or is cancelled.
+    verify_repair_start(landing, incident)?;
     let skill = load_skill("ci-fix", &landing.worktree)
         .map_err(|error| OpsError::Message(format!("ci-fix skill not found: {error}")))?
         .content
@@ -286,7 +295,7 @@ fn prepare_ci_fix(
         hosted_evidence,
     );
     let config = load_config_or_default(Some(&landing.worktree));
-    let launch = AgentConfig {
+    let mut launch = AgentConfig {
         task_prompt: prompt,
         agent: Some(config.agent().to_string()),
         cwd: Some(landing.worktree.clone()),
@@ -295,6 +304,10 @@ fn prepare_ci_fix(
         skip_permissions: true,
         ..Default::default()
     };
+    launch.env.insert(
+        LF_WORKTREE_WRITER_ID_ENV.to_string(),
+        writer_guard.writer_id().to_string(),
+    );
     let mut process = ci_fix_process_config();
     let capture = begin_agent_capture(&launch, &process)
         .map_err(|error| OpsError::Message(error.to_string()))?;
@@ -318,6 +331,7 @@ fn prepare_ci_fix(
     let incident = incident.clone();
     let operation_capture = capture.clone();
     let operation = Box::new(move || {
+        let _writer_guard = writer_guard;
         let result = launch_agent(&launch, &process, &capabilities);
         let capture_outcome = match &result {
             Ok(result) if result.exit_code == 0 => "completed",

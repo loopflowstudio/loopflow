@@ -969,6 +969,21 @@ struct ActionsRunRef {
     job_id: Option<String>,
 }
 
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+enum HostedLogMode {
+    Inspect,
+    Repair,
+}
+
+impl HostedLogMode {
+    fn flag(self) -> &'static str {
+        match self {
+            Self::Inspect => "--log",
+            Self::Repair => "--log-failed",
+        }
+    }
+}
+
 impl ActionsRunRef {
     fn parse(value: &str) -> Option<Self> {
         let trimmed = value.trim();
@@ -1004,28 +1019,31 @@ fn is_numeric(value: &str) -> bool {
 
 /// Fetch the failed hosted step for one immutable GitHub Actions check URL.
 pub(crate) fn failed_check_log(repo: &Path, name: &str, url: &str) -> OpsResult<String> {
-    _failed_check_log(repo, name, url, None)
+    _failed_check_log(repo, name, url, HostedLogMode::Inspect)
 }
 
 pub(super) fn bounded_failed_check_log(repo: &Path, name: &str, url: &str) -> OpsResult<String> {
-    _failed_check_log(repo, name, url, Some(FAILED_CHECK_LOG_MAX_CHARS))
+    _failed_check_log(repo, name, url, HostedLogMode::Repair)
 }
 
-fn _failed_check_log(
-    repo: &Path,
-    name: &str,
-    url: &str,
-    max_chars: Option<usize>,
-) -> OpsResult<String> {
-    let run_ref = ActionsRunRef::parse(url).ok_or_else(|| {
-        let source = if url.trim().is_empty() {
-            "the check has no details URL".to_string()
-        } else {
-            format!("{url} is not a GitHub Actions run or job URL")
-        };
-        OpsError::Message(format!(
-            "exact hosted failure evidence is unavailable for {name}: {source}"
-        ))
+fn _failed_check_log(repo: &Path, name: &str, url: &str, mode: HostedLogMode) -> OpsResult<String> {
+    let run_ref = ActionsRunRef::parse(url).ok_or_else(|| match mode {
+        HostedLogMode::Inspect if url.trim().is_empty() => {
+            OpsError::Message("No details URL for this check; open the PR checks tab.".to_string())
+        }
+        HostedLogMode::Inspect => OpsError::Message(format!(
+            "Logs not available via gh for this check. Open: {url}"
+        )),
+        HostedLogMode::Repair => {
+            let source = if url.trim().is_empty() {
+                "the check has no details URL".to_string()
+            } else {
+                format!("{url} is not a GitHub Actions run or job URL")
+            };
+            OpsError::Message(format!(
+                "exact hosted failure evidence is unavailable for {name}: {source}"
+            ))
+        }
     })?;
 
     let mut command = Command::new("gh");
@@ -1033,36 +1051,70 @@ fn _failed_check_log(
         .arg("run")
         .arg("view")
         .arg(&run_ref.run_id)
-        .arg("--log-failed");
+        .arg(mode.flag());
     if let Some(job_id) = &run_ref.job_id {
         command.arg("--job").arg(job_id);
     }
     command.current_dir(repo);
-    let output =
-        command_output_with_timeout(&mut command, FAILED_CHECK_LOG_TIMEOUT).map_err(|error| {
+    let output = command_output_with_timeout(&mut command, FAILED_CHECK_LOG_TIMEOUT).map_err(
+        |error| match mode {
+            HostedLogMode::Inspect => OpsError::Message(format!(
+                "Couldn't fetch logs (run {}): {error}\nThe run may be missing, expired (>90 days), or private. Open: {url}",
+                run_ref.run_id
+            )),
+            HostedLogMode::Repair => {
             OpsError::Message(format!(
                 "exact hosted failure evidence is unavailable for {name}: {error}. Open {url}"
             ))
-        })?;
+            }
+        },
+    )?;
     if !output.status.success() {
-        return Err(OpsError::CommandFailed {
-            command: format!("gh run view {} --log-failed", run_ref.run_id),
-            stderr: format!(
-                "exact hosted failure evidence is unavailable for {name}: {}. Open {url}",
-                stderr_from_output(&output)
-            ),
+        let stderr = stderr_from_output(&output);
+        return Err(match mode {
+            HostedLogMode::Inspect => OpsError::Message(format!(
+                "Couldn't fetch logs (run {}): {stderr}\nThe run may be missing, expired (>90 days), or private. Open: {url}",
+                run_ref.run_id
+            )),
+            HostedLogMode::Repair => {
+                let job = run_ref
+                    .job_id
+                    .as_deref()
+                    .map(|job_id| format!(" --job {job_id}"))
+                    .unwrap_or_default();
+                OpsError::CommandFailed {
+                    command: format!(
+                        "gh run view {} {}{job}",
+                        run_ref.run_id,
+                        mode.flag()
+                    ),
+                    stderr: format!(
+                        "exact hosted failure evidence is unavailable for {name}: {stderr}. Open {url}"
+                    ),
+                }
+            }
         });
     }
     let log = String::from_utf8_lossy(&output.stdout);
-    if log.trim().is_empty() {
+    if mode == HostedLogMode::Repair && log.trim().is_empty() {
         return Err(OpsError::Message(format!(
             "exact hosted failure evidence is empty for {name}; open {url}"
         )));
     }
-    let log = max_chars
-        .map(|max_chars| bounded_log_tail(&log, max_chars))
-        .unwrap_or_else(|| log.to_string());
-    Ok(format!("### {name}\nSource: {url}\n\n{log}\n"))
+    match mode {
+        HostedLogMode::Inspect => {
+            let mut rendered = format!("### {name}\n\n{log}");
+            if !rendered.ends_with('\n') {
+                rendered.push('\n');
+            }
+            rendered.push('\n');
+            Ok(rendered)
+        }
+        HostedLogMode::Repair => {
+            let log = bounded_log_tail(&log, FAILED_CHECK_LOG_MAX_CHARS);
+            Ok(format!("### {name}\nSource: {url}\n\n{log}\n"))
+        }
+    }
 }
 
 fn command_output_with_timeout(command: &mut Command, timeout: Duration) -> OpsResult<Output> {

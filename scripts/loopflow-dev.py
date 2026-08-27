@@ -207,10 +207,10 @@ def cmd_run_debug(repo: Path = REPO_ROOT) -> int:
     _install_dev_app()
     print("Logs: ~/Library/Logs/Loopflow/")
     print(f"Stream log: {LOOPFLOW_STREAM_LOG}")
-    # The app resolves `lf` from its own bundle before PATH, so the dashboard
-    # reads this branch's ledger surfaces (`lf runs/trace/doctor --json`) rather
-    # than whatever `lf` happens to be installed.
-    print(f"Bundled lf: {DEV_APP}/Contents/MacOS/lf")
+    # The app resolves the active machine `lf` before its validation-only
+    # bundled fallback, so selected development Homes use their compatible
+    # installed binary.
+    print(f"Bundled fallback lf: {DEV_APP}/Contents/MacOS/lf")
     print("Telemetry dashboard: Go → Telemetry (⌘1)")
     _print_run_debug_checklist()
     print("Press Ctrl+C to quit")

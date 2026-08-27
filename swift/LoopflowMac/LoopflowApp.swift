@@ -255,7 +255,11 @@ private extension View {
                             ?? window.frame.height
                         window.setContentSize(NSSize(width: width, height: height))
                     }
-                    try? await Task.sleep(nanoseconds: UInt64(delay * 1_000_000_000))
+                    do {
+                        try await Task.sleep(for: .seconds(delay))
+                    } catch {
+                        return
+                    }
                     if window.isVisible {
                         do {
                             _ = try SnapshotService().snapshotWindow(window, to: path)

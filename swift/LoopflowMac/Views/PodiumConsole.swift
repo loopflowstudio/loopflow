@@ -76,7 +76,9 @@ struct PodiumConsole<Content: View>: View {
                     .padding(.trailing, Spacing.lg)
                     .accessibilityIdentifier("podium-console-error")
             }
-            if visibleWaves.isEmpty, !model.waves.isLoading {
+            if visibleWaves.isEmpty,
+               !model.waves.isLoading,
+               model.waves.errorMessage == nil {
                 Text("No Waves found.")
                     .font(Typography.caption())
                     .foregroundStyle(.white.opacity(0.58))

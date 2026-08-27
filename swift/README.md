@@ -86,7 +86,9 @@ codebase tree, and registry health.
   `lf ls/status/roadmap/ps/activity/usage/doctor/tokens --json`; the app does not
   maintain a second roadmap or lifecycle database. Unavailable per-Wave evidence
   renders its reason, and refresh failures leave the last successful roadmap or
-  Activity history visible.
+  Activity history visible. The Mac resolves the active machine `lf` entry gate
+  first so reads match the selected Home and its schema; the bundled helper is
+  the offline fallback when Loopflow is not installed.
 - **Per-Wave SSE** owns live motion. `WaveChatConnection` first reads
   `lf chat --history --json`, then connects only to the selected Wave's
   `/events` stream and upserts its replay before continuing live.
@@ -149,9 +151,10 @@ xcodebuild -project LoopflowSwift.xcodeproj \
   build
 ```
 
-The generated app target builds validation-only `lf` and `lfd` helpers from
-the same checkout into `Loopflow.app/Contents/MacOS`. A runnable app never
-borrows a different `lf` from PATH.
+The generated app target builds validation-only `lf` and `lfd` fallback helpers
+from the same checkout into `Loopflow.app/Contents/MacOS`. A runnable app uses
+the active machine entry gate when present so a selected development Home is
+read by its matching binary.
 
 Keep `Package.swift` and `project.yml` in sync.
 

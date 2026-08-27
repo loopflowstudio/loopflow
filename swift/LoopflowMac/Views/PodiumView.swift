@@ -31,7 +31,11 @@ struct PodiumView: View {
         let model = PodiumModel(query: query, repoPath: startingRepoPath)
         PodiumFixture.applyIfRequested(to: model)
         _model = State(initialValue: model)
-        _surface = State(initialValue: model.repoPath == nil ? .work : .sessions)
+        _surface = State(
+            initialValue: AppTestMode.startsOnWorkSurface || model.repoPath == nil
+                ? .work
+                : .sessions
+        )
     }
 
     var body: some View {

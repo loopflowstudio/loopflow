@@ -125,14 +125,48 @@ struct LocalWaveAgentLauncherTests {
 
     // MARK: - Bundled binary boundary
 
-    @Test("a missing bundled helper never falls through to PATH")
-    func missingBundledHelperFails() {
+    @Test("the active machine lf precedes the bundled fallback")
+    func activeMachineLfPrecedesBundle() throws {
+        let directory = FileManager.default.temporaryDirectory
+            .appendingPathComponent("loopflow-control-lf-\(UUID().uuidString)", isDirectory: true)
+        defer { try? FileManager.default.removeItem(at: directory) }
+        try FileManager.default.createDirectory(at: directory, withIntermediateDirectories: true)
+        let installed = directory.appendingPathComponent("lf")
+        try Data().write(to: installed)
+        try FileManager.default.setAttributes(
+            [.posixPermissions: 0o755],
+            ofItemAtPath: installed.path
+        )
+
+        let resolved = try LocalWaveAgentLauncher.controlLfPath(
+            searchPath: directory.path,
+            bundled: URL(fileURLWithPath: "/Applications/Loopflow.app/Contents/MacOS/lf")
+        )
+
+        #expect(resolved == installed.path)
+    }
+
+    @Test("a missing machine lf uses the bundled offline fallback")
+    func missingMachineLfUsesBundle() throws {
+        let bundled = URL(fileURLWithPath: "/bin/sh")
+        let resolved = try LocalWaveAgentLauncher.controlLfPath(
+            searchPath: "/path/that/does/not/exist",
+            bundled: bundled
+        )
+
+        #expect(resolved == bundled.path)
+    }
+
+    @Test("a missing machine and bundled helper fails clearly")
+    func missingControlHelpersFail() {
         #expect {
-            try LocalWaveAgentLauncher.bundledLfPath(bundled: nil)
+            try LocalWaveAgentLauncher.controlLfPath(
+                searchPath: "/path/that/does/not/exist",
+                bundled: nil
+            )
         } throws: { error in
             guard error is LocalLfError else { return false }
             return error.localizedDescription.contains("missing its executable bundled lf helper")
-                && error.localizedDescription.contains("PATH fallback is disabled")
         }
     }
 

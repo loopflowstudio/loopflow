@@ -2,9 +2,9 @@
 //
 // GUI-launched apps inherit a minimal PATH (/usr/bin:/bin:/usr/sbin:/sbin) that
 // doesn't include Homebrew, ~/.local/bin, or ~/.cargo/bin. Anything Loopflow
-// shells out to — tmux, git, and the bundled lf — inherits that, so execvp can't
-// find user-installed binaries. Pipe child envs through `enrichedPath` so they
-// resolve the same binaries the user's shell would.
+// shells out to — tmux, git, and the active lf entry gate — inherits that, so
+// execvp can't find user-installed binaries. Pipe child envs through
+// `enrichedPath` so they resolve the same binaries the user's shell would.
 
 import Foundation
 

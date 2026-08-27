@@ -51,7 +51,7 @@ LOOPFLOW_STREAM_LOG = DEV_LOG_DIR / f"{REPO_ROOT.name}.loopflow-run-debug.log"
 
 def _app_environment(repo: Path) -> dict[str, str]:
     env = {"LOOPFLOW_DEV_WAVE_REPO": str(repo)}
-    for key in ("LF_HOME", "LF_DB_PATH"):
+    for key in ("LF_CONTROL_HOME", "LF_CONTROL_DB_PATH", "LF_HOME", "LF_DB_PATH"):
         if value := os.environ.get(key):
             env[key] = value
     return env

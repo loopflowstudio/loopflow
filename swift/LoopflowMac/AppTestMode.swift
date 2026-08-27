@@ -133,6 +133,18 @@ enum AppTestMode: String {
         return env["LOOPFLOW_UI_TEST_SNAPSHOT_PATH"] == nil ? nil : .primary
     }
 
+    /// Start primary Wave and roadmap captures on the Work surface even when
+    /// the user's saved scope points at a repository and would normally open
+    /// Sessions. This only drives capture mode; ordinary launches still restore
+    /// the user's last surface.
+    static var startsOnWorkSurface: Bool {
+        guard current() != nil else { return false }
+        switch ProcessInfo.processInfo.environment["LOOPFLOW_UI_TEST_VIEW"] {
+        case "wave", "roadmap": return true
+        default: return false
+        }
+    }
+
     /// Website captures are deliberately light even when the laptop is dark.
     /// Ordinary UI tests and production keep the user's appearance setting.
     static var forcesLightAppearance: Bool {

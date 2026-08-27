@@ -143,6 +143,9 @@ final class PodiumStateTests: XCTestCase {
         forEachWidth(detailState: "error") { app in
             XCTAssertTrue(waitFor(app, id: "podium-work-unavailable"))
             XCTAssertTrue(exists(app, id: "podium-console-path"))
+            XCTAssertTrue(exists(app, id: "podium-console-error"))
+            XCTAssertTrue(exists(app, id: "podium-activity-error"))
+            XCTAssertFalse(exists(app, id: "podium-console-empty"))
             XCTAssertFalse(exists(app, id: "podium-work-empty"))
             XCTAssertFalse(exists(app, id: "podium-activity-empty"))
         }

@@ -23,21 +23,28 @@ enum PodiumFixture {
             case .mockWaves:
                 let fixture = try loadRoadmap(sourceFile: sourceFile)
                 let reading: PodiumReading<RoadmapSnapshot>
+                let waves: PodiumReading<[Wave]>
                 let processActivity: PodiumReading<ActivitySnapshot>
                 let workActivity: PodiumReading<WorkActivitySnapshot>
                 switch MockWaveFixture.detailState {
                 case .selected:
                     reading = .available(fixture.roadmap)
+                    waves = .available(fixture.waves)
                     processActivity = .available(try loadProcessActivity(sourceFile: sourceFile))
                     workActivity = .available(try loadWorkActivity(sourceFile: sourceFile))
                 case .loading:
                     reading = .loading
+                    waves = .loading
                     processActivity = .loading
                     workActivity = .loading
                 case .error:
                     reading = .unavailable(
                         lastGood: nil,
                         reason: "the local registry is unreachable"
+                    )
+                    waves = .unavailable(
+                        lastGood: nil,
+                        reason: "the Wave fleet is unavailable"
                     )
                     processActivity = .unavailable(
                         lastGood: nil,
@@ -50,7 +57,7 @@ enum PodiumFixture {
                 }
                 model.applyFixture(
                     roadmap: reading,
-                    waves: .available(fixture.waves),
+                    waves: waves,
                     processActivity: processActivity,
                     workActivity: workActivity,
                     repos: fixture.repos,

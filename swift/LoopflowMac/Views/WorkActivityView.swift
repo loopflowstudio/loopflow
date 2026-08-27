@@ -79,10 +79,19 @@ struct WorkActivityView: View {
 
     @ViewBuilder
     private var content: some View {
-        if model.workActivity.value == nil, model.workActivity.errorMessage == nil {
-            ProgressView("Reading Activity…")
-                .frame(maxWidth: .infinity, maxHeight: .infinity)
-                .accessibilityIdentifier("podium-activity-loading")
+        if model.workActivity.value == nil {
+            if model.workActivity.errorMessage == nil {
+                ProgressView("Reading Activity…")
+                    .frame(maxWidth: .infinity, maxHeight: .infinity)
+                    .accessibilityIdentifier("podium-activity-loading")
+            } else {
+                ContentUnavailableView(
+                    "Activity unavailable",
+                    systemImage: "exclamationmark.triangle",
+                    description: Text("The latest Activity read failed. The reason is shown above.")
+                )
+                .accessibilityIdentifier("podium-activity-error")
+            }
         } else if let items = model.workActivity.value?.items, !items.isEmpty {
             ScrollView {
                 LazyVStack(alignment: .leading, spacing: 0) {

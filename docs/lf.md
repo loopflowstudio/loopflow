@@ -1058,13 +1058,17 @@ lf release status             # workflow + GitHub Release status
 ```
 
 `release.targets.<name>.publisher` is an argv list for the credentialed host
-publisher. `lf release run` appends `check` before changing release state, then
-downloads the successful hosted build and invokes it with `publish --tag ...
---artifacts ...` from an exact-tag worktree. No merged changes is a successful
-no-op. An incomplete latest tag resumes; it never cuts a newer tag around a
-failed publication. Use `{repo}` in a publisher argument to name the current
-synchronized repository; `LF_RELEASE_SOURCE_REPO` names the leased exact-tag
-worktree during publication.
+publisher. `lf release run` invokes that command with `check`, then with
+`prepare --tag ... --artifacts ... --output ...` before tagging, and finally
+with `publish --tag ... --artifacts ...` after tagging. The candidate phase
+builds the merged commit under a disposable ref, validates the installer and
+migration authority, notarizes the DMG, and records the exact artifact hashes.
+Only that prepared candidate receives the immutable version tag. Publication
+consumes the prepared bytes from an exact-tag worktree. No merged changes is a
+successful no-op. An incomplete latest tag resumes; it never cuts a newer tag
+around a failed publication. Use `{repo}` in a publisher argument to name the
+current synchronized repository; `LF_RELEASE_SOURCE_REPO` names the leased
+candidate or exact-tag worktree.
 
 | Path | What it holds |
 |------|--------------|

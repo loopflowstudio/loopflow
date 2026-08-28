@@ -115,6 +115,25 @@ layer and never loads Work. CLI and controller callers resolve Work identity,
 Wave memory, and controller state, then pass ordinary launch inputs into the
 kernel.
 
+Release delivery also separates proof from authority:
+
+```text
+merged release commit
+        |
+        v
+candidate ref --> hosted matrix --> signed artifact receipt
+                                           |
+                                           v
+                                  immutable version tag
+                                           |
+                                           v
+                                      publication
+```
+
+The candidate ref and receipt are disposable recovery state. The version tag
+is created only after the exact commit and artifact hashes are proven; retries
+after that point publish the same bytes under the same tag.
+
 Each area page starts with a real command or artifact, follows its request or
 data flow, and ends with the contracts that neighboring areas may rely on.
 

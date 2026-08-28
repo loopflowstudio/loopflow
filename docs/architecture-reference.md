@@ -253,6 +253,7 @@ workflow.
 | `.lf/skills/`, `.lf/flows/`, `.lf/config.yaml` | Repository-owned execution definitions | Authored and reviewed with code |
 | `wave/<name>/GOAL.md`, `MEMORY.md`, `metrics/` | Wave intent, curated memory, metric contracts | Authored and reviewed with code |
 | `.lf/journal/waves/<name>/journal.jsonl` | Wave conversation/resident events | Append-only with crash-tail repair |
+| `.lf/releases/<tag>/<commit>-<run>/` | Prepared release bytes and their candidate receipt | Replace one exact candidate atomically; retain through retry, remove after publication |
 | `$LF_HOME/runs/<prefix>/<run-id>/` | Run manifest, event streams, terminal receipt | Publish once, append streams, settle once |
 | Home provider directories | Provider-native login and resume state | Owned by provider adapters |
 | Git directory `loopflow/` receipts | writer/rebase/PR mutation coordination | Kernel-locked receipt files |

@@ -87,7 +87,7 @@ def test_publisher_accepts_published_identity_when_home_preflight_refuses(tmp_pa
     publish_release._validate_release_candidate(binary, tmp_path)
 
 
-def test_publisher_completes_all_stages_before_marking_release_published(
+def test_publisher_prepares_exact_artifacts_before_marking_release_published(
     tmp_path: Path, monkeypatch: pytest.MonkeyPatch
 ):
     artifact_dir = tmp_path / "artifacts"
@@ -133,13 +133,27 @@ def test_publisher_completes_all_stages_before_marking_release_published(
     monkeypatch.setattr(publish_release, "_write_receipt", receipts.append)
     monkeypatch.setenv("LF_RELEASE_WORKFLOW_RUN_ID", "42")
 
-    receipt = publish_release.publish_release("v1.2.3", artifact_dir)
+    prepared_dir = tmp_path / "prepared"
+    candidate = publish_release.prepare_release("v1.2.3", artifact_dir, prepared_dir)
+    (prepared_dir / "Loopflow.dmg").write_bytes(b"corrupt")
+    candidate = publish_release.prepare_release("v1.2.3", artifact_dir, prepared_dir)
+    prepare_commands = len(commands)
+    receipt = publish_release.publish_release("v1.2.3", prepared_dir)
 
+    assert candidate.source_commit == "abc123"
+    assert candidate.completed_stages == (
+        "artifacts_verified",
+        "installer_verified",
+        "dmg_notarized",
+        "website_candidate_verified",
+    )
     assert receipt.workflow_run_id == "42"
     assert receipt.source_commit == "abc123"
     assert receipt.completed_stages == (
         "artifacts_verified",
+        "installer_verified",
         "dmg_notarized",
+        "website_candidate_verified",
         "github_draft_staged",
         "crate_published",
         "versioned_dmg_uploaded",
@@ -153,13 +167,17 @@ def test_publisher_completes_all_stages_before_marking_release_published(
         "install.sh",
         "SHA256SUMS",
     }
-    checksum_lines = (artifact_dir / "SHA256SUMS").read_text().splitlines()
+    checksum_lines = (prepared_dir / "SHA256SUMS").read_text().splitlines()
     assert {line.split(maxsplit=1)[1] for line in checksum_lines} == {
         *(f"lf-{target}.tar.gz" for target in publish_release.TARGETS),
         "Loopflow.dmg",
         "install.sh",
     }
     assert receipts == [receipt]
+    assert not any(
+        command[:3] == ["lf", "release", "publish"]
+        for command in commands[:prepare_commands]
+    )
     deploy = next(command for command in commands if "deploy_website.py" in command[1])
     assert deploy[1] == str(publish_release.CONTROL_ROOT / "scripts/deploy_website.py")
     assert deploy[-2:] == ["--repo", str(tmp_path)]

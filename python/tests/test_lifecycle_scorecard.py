@@ -318,8 +318,6 @@ def test_task_loop_trust_emits_one_exact_window_observation(tmp_path: Path) -> N
         "source_window_start": "2026-07-15T00:00:00Z",
         "source_window_end": "2026-07-22T00:00:00Z",
         "complete": True,
-        "eligible": 4,
-        "successful": 2,
     }
 
 
@@ -386,8 +384,6 @@ def test_task_loop_trust_counts_a_pr_that_settles_after_its_epoch_starts(
         connection, repo, started, ended
     )
 
-    assert observation["eligible"] == 2
-    assert observation["successful"] == 1
     assert observation["value"] == 0.5
 
 
@@ -425,8 +421,6 @@ def test_task_loop_trust_ignores_manual_repair_from_an_earlier_epoch(
         connection, repo, started, ended
     )
 
-    assert observation["eligible"] == 1
-    assert observation["successful"] == 1
     assert observation["value"] == 1.0
 
 

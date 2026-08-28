@@ -414,9 +414,7 @@ print(json.dumps({"report": {"ok": True}, "metric_observations": [], "text": "sc
                     "value":0.5,
                     "source_window_start":"2026-08-14T09:00:00Z",
                     "source_window_end":"2026-08-21T09:00:00Z",
-                    "complete":true,
-                    "eligible":4,
-                    "successful":2
+                    "complete":true
                 }],
                 "text":"Lifecycle scorecard"
             }"#,
@@ -456,9 +454,7 @@ print(json.dumps({
         "value": 1.0,
         "source_window_start": start.isoformat(),
         "source_window_end": end.isoformat(),
-        "complete": True,
-        "eligible": 1,
-        "successful": 1
+        "complete": True
     }],
     "text": "scorecard text\n"
 }))

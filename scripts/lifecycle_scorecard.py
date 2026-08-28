@@ -344,8 +344,6 @@ def task_loop_trust_observation(
         "source_window_start": source_window_start,
         "source_window_end": source_window_end,
         "complete": True,
-        "eligible": len(eligible),
-        "successful": successful,
     }
 
 

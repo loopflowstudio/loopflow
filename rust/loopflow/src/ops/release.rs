@@ -141,6 +141,8 @@ struct GhRunListEntry {
     database_id: u64,
     #[serde(default, rename = "headBranch")]
     head_branch: Option<String>,
+    #[serde(default, rename = "headSha")]
+    head_sha: Option<String>,
     #[serde(default, rename = "displayTitle")]
     display_title: Option<String>,
     status: String,
@@ -300,6 +302,25 @@ struct ReleaseWorkflowResult {
     url: Option<String>,
 }
 
+#[derive(Debug, Clone)]
+struct ReleaseCandidate {
+    tag: String,
+    commit: String,
+    branch: String,
+}
+
+impl ReleaseCandidate {
+    fn new(target: &ReleaseTarget, tag: &str, commit: &str) -> Self {
+        let target_name = sanitize_ref_segment(&target.name);
+        let tag_name = sanitize_ref_segment(tag);
+        Self {
+            tag: tag.to_string(),
+            commit: commit.to_string(),
+            branch: format!("release-candidate/{target_name}/{tag_name}/{commit}"),
+        }
+    }
+}
+
 #[derive(Debug, Deserialize)]
 struct GhReleaseView {
     #[serde(rename = "isDraft")]
@@ -368,11 +389,14 @@ pub fn release_status(repo: &Path, target_name: Option<&str>) -> OpsResult<Relea
 
     let latest_tag = latest_tag_optional(&main_repo, &target)?;
     let (notes_status, workflow, release_exists) = match latest_tag.as_deref() {
-        Some(tag) => (
-            Some(release_notes_status(&main_repo, tag, &target)?),
-            find_workflow_run(&main_repo, tag, &target)?,
-            github_release_exists(&main_repo, tag)?,
-        ),
+        Some(tag) => {
+            let candidate = release_candidate_for_tag(&main_repo, tag, &target)?;
+            (
+                Some(release_notes_status(&main_repo, tag, &target)?),
+                find_workflow_run(&main_repo, &candidate, &target)?,
+                github_release_exists(&main_repo, tag)?,
+            )
+        }
         None => (None, None, false),
     };
 
@@ -566,9 +590,9 @@ pub fn release_publish(
 /// 2) bump manifests, run repo preparation, and generate notes in a worktree
 /// 3) commit, open PR, and enqueue auto-merge
 /// 4) wait for merge queue completion
-/// 5) tag merged commit and push
-/// 6) wait for the credential-free release build
-/// 7) run the repo publisher, when configured
+/// 5) build the merged commit under a provisional candidate ref
+/// 6) prepare the publisher's signed artifact set, when configured
+/// 7) tag the proven commit and publish those exact artifacts
 pub fn release_run(
     repo: &Path,
     version_input: &str,
@@ -597,7 +621,8 @@ pub fn release_run(
         if !target.publisher.is_empty()
             && github_release_state(&main_repo, tag)? != GitHubReleaseState::Published
         {
-            let run = find_workflow_run(&main_repo, tag, &target)?.ok_or_else(|| {
+            let candidate = release_candidate_for_tag(&main_repo, tag, &target)?;
+            let run = find_workflow_run(&main_repo, &candidate, &target)?.ok_or_else(|| {
                 OpsError::Message(format!(
                     "latest release {tag} is incomplete and has no hosted build to resume"
                 ))
@@ -673,10 +698,67 @@ pub fn release_run(
         return resume_existing_release(&main_repo, &new_tag, &target, progress);
     }
 
-    let wt_name = release_worktree_name(&target, &version);
+    let latest_candidate = find_latest_candidate_workflow(&main_repo, &new_tag, &target)?;
+    let mut resumed_candidate = None;
+    let mut retry_after = None;
+    if let Some(run) = latest_candidate {
+        let commit = run
+            .head_sha
+            .clone()
+            .expect("candidate workflow was selected with a head SHA");
+        let conclusion = run
+            .conclusion
+            .as_deref()
+            .unwrap_or("unknown")
+            .to_lowercase();
+        let build_failed = run.status == "completed" && conclusion != "success";
+        let preparation_missing = run.status == "completed"
+            && conclusion == "success"
+            && !target.publisher.is_empty()
+            && !publisher_artifact_dir(&main_repo, &new_tag, &commit, run.database_id)
+                .join("candidate.json")
+                .is_file();
+        if !build_failed && !preparation_missing {
+            resumed_candidate = Some(commit);
+        } else {
+            let main_ref = format!("origin/{default_branch}");
+            let current_main = run_stdout(&main_repo, "git", &["rev-parse", &main_ref])?;
+            if current_main == commit {
+                if preparation_missing {
+                    resumed_candidate = Some(commit);
+                } else {
+                    let url = run
+                        .url
+                        .unwrap_or_else(|| "workflow URL unavailable".to_string());
+                    return Err(OpsError::Message(format!(
+                        "release candidate for {new_tag} failed: {conclusion} ({url}); no merged fix is available"
+                    )));
+                }
+            } else {
+                let reason = if build_failed {
+                    format!("failed build ({conclusion})")
+                } else {
+                    "incomplete publisher preparation".to_string()
+                };
+                progress.status(&format!(
+                    "Retrying {new_tag} after {reason} with merged fixes..."
+                ));
+                retry_after = Some(commit);
+            }
+        }
+    }
+
+    let mut wt_name = release_worktree_name(&target, &version);
+    if let Some(commit) = retry_after.as_deref() {
+        let revision = commit.get(..9).unwrap_or(commit);
+        wt_name.push_str("-retry-");
+        wt_name.push_str(revision);
+    }
     let branch = release_branch_name(&main_repo, &wt_name)?;
     let existing_pr = find_release_pr(&main_repo, &branch)?;
-    let merged_commit = if let Some(pr) = existing_pr {
+    let merged_commit = if let Some(commit) = resumed_candidate {
+        commit
+    } else if let Some(pr) = existing_pr {
         match pr.state.as_str() {
             "MERGED" => pr.merge_commit.map(|commit| commit.oid).ok_or_else(|| {
                 OpsError::Message(format!(
@@ -737,15 +819,28 @@ pub fn release_run(
         )?
     };
 
-    progress.status(&format!("Tagging {}...", target_tag(&target, &version)));
-    let tag = tag_and_push_ref(&main_repo, &version, &target, Some(&merged_commit))?;
+    let tag = target_tag(&target, &version);
+    let candidate = ReleaseCandidate::new(&target, &tag, &merged_commit);
+    progress.status(&format!("Building release candidate for {tag}..."));
+    let workflow = wait_for_candidate_workflow(&main_repo, &candidate, &target, progress)?;
+    let prepared_artifacts = if target.publisher.is_empty() {
+        None
+    } else {
+        Some(prepare_publisher(
+            &main_repo, &candidate, &target, &workflow, progress,
+        )?)
+    };
 
-    progress.status(&format!("Waiting for release pipeline for {tag}..."));
-    let workflow = wait_for_release_workflow(&main_repo, &tag, &target, progress)?;
-    if !target.publisher.is_empty() {
-        run_publisher(&main_repo, &tag, &target, &workflow, progress)?;
+    progress.status(&format!("Tagging proven candidate {tag}..."));
+    let tag = tag_and_push_ref(&main_repo, &version, &target, Some(&merged_commit))?;
+    if let Some(artifacts) = prepared_artifacts.as_deref() {
+        run_publisher(&main_repo, &tag, &target, &workflow, artifacts, progress)?;
+        delete_prepared_artifacts(artifacts, progress);
+    } else if target.completion == ReleaseCompletion::GithubRelease {
+        wait_for_release_workflow(&main_repo, &candidate, &target, progress, false)?;
     }
     let release_exists = github_release_exists(&main_repo, &tag)?;
+    delete_candidate_ref(&main_repo, &candidate);
 
     Ok(ReleaseRunOutcome::Released(ReleaseReceipt {
         target: target.name,
@@ -764,12 +859,16 @@ fn resume_existing_release(
     target: &ReleaseTarget,
     progress: &impl Progress,
 ) -> OpsResult<ReleaseRunOutcome> {
-    let workflow = wait_for_release_workflow(repo, tag, target, progress)?;
+    let candidate = release_candidate_for_tag(repo, tag, target)?;
+    let workflow = wait_for_release_workflow(repo, &candidate, target, progress, false)?;
     if !target.publisher.is_empty() {
-        run_publisher(repo, tag, target, &workflow, progress)?;
+        let artifacts = prepare_publisher(repo, &candidate, target, &workflow, progress)?;
+        run_publisher(repo, tag, target, &workflow, &artifacts, progress)?;
+        delete_prepared_artifacts(&artifacts, progress);
     }
     let commit = local_tag_sha(repo, tag)?
         .ok_or_else(|| OpsError::Message(format!("release tag {tag} is not present locally")))?;
+    delete_candidate_ref(repo, &candidate);
 
     Ok(ReleaseRunOutcome::Resumed(ReleaseReceipt {
         target: target.name.clone(),
@@ -794,6 +893,28 @@ fn publish_worktree_name(target: &ReleaseTarget, tag: &str) -> String {
     format!("publish-{target_name}-{tag}")
 }
 
+fn prepare_worktree_name(target: &ReleaseTarget, candidate: &ReleaseCandidate) -> String {
+    let mut name =
+        publish_worktree_name(target, &candidate.tag).replacen("publish-", "prepare-", 1);
+    let revision = candidate.commit.get(..9).unwrap_or(&candidate.commit);
+    name.push('-');
+    name.push_str(revision);
+    name
+}
+
+fn sanitize_ref_segment(value: &str) -> String {
+    value
+        .chars()
+        .map(|character| {
+            if character.is_ascii_alphanumeric() || matches!(character, '-' | '_') {
+                character
+            } else {
+                '-'
+            }
+        })
+        .collect()
+}
+
 fn run_publisher_check(
     repo: &Path,
     target: &ReleaseTarget,
@@ -813,11 +934,115 @@ fn run_publisher_check(
     Ok(())
 }
 
+fn prepare_publisher(
+    repo: &Path,
+    candidate: &ReleaseCandidate,
+    target: &ReleaseTarget,
+    workflow: &ReleaseWorkflowResult,
+    progress: &impl Progress,
+) -> OpsResult<PathBuf> {
+    let publisher = expand_publisher_command(repo, &target.publisher);
+    let Some((program, args)) = publisher.split_first() else {
+        return Err(OpsError::Message(
+            "release candidate preparation requires a publisher".to_string(),
+        ));
+    };
+    if workflow.database_id == 0 {
+        return Err(OpsError::Message(format!(
+            "release workflow for {} did not expose a run id",
+            candidate.tag
+        )));
+    }
+
+    let artifact_dir = publisher_artifact_dir(
+        repo,
+        &candidate.tag,
+        &candidate.commit,
+        workflow.database_id,
+    );
+
+    let hosted_artifacts = tempfile::tempdir()?;
+    let run_id = workflow.database_id.to_string();
+    progress.status(&format!(
+        "Downloading candidate artifacts for {}...",
+        candidate.tag
+    ));
+    run_stdout(
+        repo,
+        "gh",
+        &[
+            "run",
+            "download",
+            &run_id,
+            "--dir",
+            hosted_artifacts.path().to_string_lossy().as_ref(),
+        ],
+    )?;
+
+    let wt_name = prepare_worktree_name(target, candidate);
+    let wt_path = worktree_path(repo, &wt_name);
+    let lease = acquire_worktree_lease(
+        repo,
+        &wt_path,
+        &format!("release candidate preparation for {}", candidate.tag),
+    )?;
+    progress.status(&format!("Preparing signed candidate {}...", candidate.tag));
+    let wt = create_named_worktree(repo, &wt_name, Some(&candidate.commit), false)?;
+    let prepare_result = {
+        let mut cmd = Command::new(program);
+        cmd.args(args)
+            .arg("prepare")
+            .arg("--tag")
+            .arg(&candidate.tag)
+            .arg("--artifacts")
+            .arg(hosted_artifacts.path())
+            .arg("--output")
+            .arg(&artifact_dir)
+            .env("LF_RELEASE_MAIN_REPO", repo)
+            .env("LF_RELEASE_SOURCE_REPO", &wt.path)
+            .env(
+                "LF_RELEASE_WORKFLOW_RUN_ID",
+                workflow.database_id.to_string(),
+            )
+            .current_dir(&wt.path);
+        run_command(&mut cmd).map_err(|err| OpsError::CommandFailed {
+            command: err.command_line(),
+            stderr: err.stderr,
+        })
+    };
+    cleanup_release_worktree(repo, &wt.path, &wt.branch, Some(&lease), progress);
+    prepare_result?;
+
+    if !artifact_dir.join("candidate.json").is_file() {
+        return Err(OpsError::Message(format!(
+            "publisher prepared {} without writing candidate.json",
+            candidate.tag
+        )));
+    }
+    Ok(artifact_dir)
+}
+
+fn publisher_artifact_dir(repo: &Path, tag: &str, commit: &str, run_id: u64) -> PathBuf {
+    repo.join(".lf/releases")
+        .join(sanitize_ref_segment(tag))
+        .join(format!("{commit}-{run_id}"))
+}
+
+fn delete_prepared_artifacts(path: &Path, progress: &impl Progress) {
+    if let Err(error) = fs::remove_dir_all(path) {
+        progress.warning(&format!(
+            "Release completed, but prepared artifacts at {} could not be removed: {error}",
+            path.display()
+        ));
+    }
+}
+
 fn run_publisher(
     repo: &Path,
     tag: &str,
     target: &ReleaseTarget,
     workflow: &ReleaseWorkflowResult,
+    artifact_dir: &Path,
     progress: &impl Progress,
 ) -> OpsResult<()> {
     let publisher = expand_publisher_command(repo, &target.publisher);
@@ -834,21 +1059,6 @@ fn run_publisher(
     let wt_path = worktree_path(repo, &wt_name);
     let lease = acquire_worktree_lease(repo, &wt_path, &format!("release publisher for {tag}"))?;
 
-    let artifact_dir = tempfile::tempdir()?;
-    let run_id = workflow.database_id.to_string();
-    progress.status(&format!("Downloading release artifacts for {tag}..."));
-    run_stdout(
-        repo,
-        "gh",
-        &[
-            "run",
-            "download",
-            &run_id,
-            "--dir",
-            artifact_dir.path().to_string_lossy().as_ref(),
-        ],
-    )?;
-
     progress.status(&format!(
         "Materializing tagged publisher worktree {wt_name}..."
     ));
@@ -860,7 +1070,7 @@ fn run_publisher(
             .arg("--tag")
             .arg(tag)
             .arg("--artifacts")
-            .arg(artifact_dir.path())
+            .arg(artifact_dir)
             .env("LF_RELEASE_MAIN_REPO", repo)
             .env("LF_RELEASE_SOURCE_REPO", &wt.path)
             .env(
@@ -1793,13 +2003,50 @@ fn wait_for_pr_merge(
     }
 }
 
-fn wait_for_release_workflow(
+fn wait_for_candidate_workflow(
     repo: &Path,
-    tag: &str,
+    candidate: &ReleaseCandidate,
     target: &ReleaseTarget,
     progress: &impl Progress,
 ) -> OpsResult<ReleaseWorkflowResult> {
-    if target.publisher.is_empty() && target.completion == ReleaseCompletion::Tag {
+    let Some(workflow_name) = target.workflow.as_deref() else {
+        return Ok(ReleaseWorkflowResult {
+            database_id: 0,
+            url: None,
+        });
+    };
+
+    ensure_candidate_ref(repo, candidate)?;
+    if find_workflow_run(repo, candidate, target)?.is_none() {
+        run_stdout(
+            repo,
+            "gh",
+            &[
+                "workflow",
+                "run",
+                workflow_name,
+                "--ref",
+                &candidate.branch,
+                "-f",
+                &format!("tag={}", candidate.tag),
+            ],
+        )?;
+    }
+
+    wait_for_release_workflow(repo, candidate, target, progress, true)
+}
+
+fn wait_for_release_workflow(
+    repo: &Path,
+    candidate: &ReleaseCandidate,
+    target: &ReleaseTarget,
+    progress: &impl Progress,
+    accept_build_success: bool,
+) -> OpsResult<ReleaseWorkflowResult> {
+    if target.publisher.is_empty()
+        && target.workflow.is_none()
+        && target.completion == ReleaseCompletion::Tag
+    {
         return Ok(ReleaseWorkflowResult {
             database_id: 0,
             url: None,
@@ -1814,8 +2061,8 @@ fn wait_for_release_workflow(
     let mut saw_workflow = false;
 
     loop {
-        let workflow = find_workflow_run(repo, tag, target)?;
-        let release_exists = github_release_exists(repo, tag)?;
+        let workflow = find_workflow_run(repo, candidate, target)?;
+        let release_exists = github_release_exists(repo, &candidate.tag)?;
 
         if target.publisher.is_empty()
             && target.completion == ReleaseCompletion::GithubRelease
@@ -1835,7 +2082,8 @@ fn wait_for_release_workflow(
                     .unwrap_or_else(|| "unknown".to_string())
                     .to_lowercase();
                 if conclusion == "success" {
-                    if !target.publisher.is_empty()
+                    if accept_build_success
+                        || !target.publisher.is_empty()
                         || target.completion == ReleaseCompletion::Workflow
                     {
                         return Ok(ReleaseWorkflowResult {
@@ -1848,7 +2096,8 @@ fn wait_for_release_workflow(
                         .url
                         .unwrap_or_else(|| "(workflow URL unavailable)".to_string());
                     return Err(OpsError::Message(format!(
-                        "release workflow failed for {tag}: {conclusion} ({url})"
+                        "release workflow failed for {}: {conclusion} ({url})",
+                        candidate.tag
                     )));
                 }
             }
@@ -1857,7 +2106,8 @@ fn wait_for_release_workflow(
             && started.elapsed() >= no_workflow_grace
         {
             progress.status(&format!(
-                "No release workflow detected for {tag}; tag push complete"
+                "No release workflow detected for {}; tag push complete",
+                candidate.tag
             ));
             return Ok(ReleaseWorkflowResult {
                 database_id: 0,
@@ -1867,13 +2117,16 @@ fn wait_for_release_workflow(
 
         if started.elapsed() >= timeout {
             return Err(OpsError::Message(format!(
-                "timed out waiting for {:?} completion for {tag}",
-                target.completion
+                "timed out waiting for {:?} completion for {}",
+                target.completion, candidate.tag
             )));
         }
 
         if attempt.is_multiple_of(6) {
-            progress.status(&format!("Release workflow for {tag} still running..."));
+            progress.status(&format!(
+                "Release workflow for {} still running...",
+                candidate.tag
+            ));
         }
         attempt += 1;
         thread::sleep(poll);
@@ -1888,7 +2141,8 @@ fn release_completion_satisfied(repo: &Path, tag: &str, target: &ReleaseTarget) 
         return Ok(true);
     }
 
-    let Some(run) = find_workflow_run(repo, tag, target)? else {
+    let candidate = release_candidate_for_tag(repo, tag, target)?;
+    let Some(run) = find_workflow_run(repo, &candidate, target)? else {
         return Ok(false);
     };
     if run.status != "completed" {
@@ -2912,6 +3166,57 @@ fn local_tag_sha(repo: &Path, tag: &str) -> OpsResult<Option<String>> {
     }
 }
 
+fn release_candidate_for_tag(
+    repo: &Path,
+    tag: &str,
+    target: &ReleaseTarget,
+) -> OpsResult<ReleaseCandidate> {
+    let commit = local_tag_sha(repo, tag)?
+        .ok_or_else(|| OpsError::Message(format!("release tag {tag} is not present locally")))?;
+    Ok(ReleaseCandidate::new(target, tag, &commit))
+}
+
+fn ensure_candidate_ref(repo: &Path, candidate: &ReleaseCandidate) -> OpsResult<()> {
+    ensure_commit_local(repo, &candidate.commit)?;
+    if let Some(remote_sha) = remote_branch_sha(repo, &candidate.branch)? {
+        if remote_sha == candidate.commit {
+            return Ok(());
+        }
+        return Err(OpsError::Message(format!(
+            "release candidate {} exists at {remote_sha}, expected {}",
+            candidate.branch, candidate.commit
+        )));
+    }
+
+    let refspec = format!("{}:refs/heads/{}", candidate.commit, candidate.branch);
+    run_stdout(repo, "git", &["push", "origin", &refspec])?;
+    Ok(())
+}
+
+fn delete_candidate_ref(repo: &Path, candidate: &ReleaseCandidate) {
+    let Ok(Some(remote_sha)) = remote_branch_sha(repo, &candidate.branch) else {
+        return;
+    };
+    if remote_sha != candidate.commit {
+        eprintln!(
+            "Candidate ref {} moved to {remote_sha}; leaving it untouched",
+            candidate.branch
+        );
+        return;
+    }
+    let output = run_output(
+        repo,
+        "git",
+        &["push", "origin", "--delete", &candidate.branch],
+    );
+    if !matches!(output, Ok(output) if output.status.success()) {
+        eprintln!(
+            "Release completed, but candidate ref {} could not be removed",
+            candidate.branch
+        );
+    }
+}
+
 /// Ensure `sha` exists in `repo`'s local object database, fetching from
 /// origin if it doesn't.
 ///
@@ -2959,16 +3264,90 @@ fn remote_tag_sha(repo: &Path, tag: &str) -> OpsResult<Option<String>> {
     Ok(sha)
 }
 
+fn remote_branch_sha(repo: &Path, branch: &str) -> OpsResult<Option<String>> {
+    let ref_name = format!("refs/heads/{branch}");
+    let output = run_output(repo, "git", &["ls-remote", "--heads", "origin", &ref_name])?;
+    if !output.status.success() {
+        return Err(OpsError::CommandFailed {
+            command: format!("git ls-remote --heads origin {ref_name}"),
+            stderr: String::from_utf8_lossy(&output.stderr).to_string(),
+        });
+    }
+
+    Ok(String::from_utf8_lossy(&output.stdout)
+        .lines()
+        .next()
+        .and_then(|line| line.split_whitespace().next())
+        .map(str::to_string))
+}
+
 fn find_workflow_run(
+    repo: &Path,
+    candidate: &ReleaseCandidate,
+    target: &ReleaseTarget,
+) -> OpsResult<Option<GhRunListEntry>> {
+    let runs = list_workflow_runs(repo, target)?;
+
+    let matching = runs
+        .iter()
+        .find(|run| {
+            run.head_branch.as_deref() == Some(&candidate.branch)
+                && run.head_sha.as_deref() == Some(&candidate.commit)
+        })
+        .cloned()
+        .or_else(|| {
+            runs.iter()
+                .find(|run| {
+                    run.head_branch.as_deref() == Some(&candidate.tag)
+                        && run
+                            .head_sha
+                            .as_deref()
+                            .is_none_or(|sha| sha == candidate.commit)
+                })
+                .cloned()
+        })
+        .or_else(|| {
+            runs.into_iter().find(|run| {
+                run.display_title
+                    .as_deref()
+                    .is_some_and(|title| title.contains(&candidate.tag))
+                    && run
+                        .head_sha
+                        .as_deref()
+                        .is_none_or(|sha| sha == candidate.commit)
+            })
+        });
+
+    Ok(matching)
+}
+
+fn find_latest_candidate_workflow(
     repo: &Path,
     tag: &str,
     target: &ReleaseTarget,
 ) -> OpsResult<Option<GhRunListEntry>> {
+    if target.workflow.is_none() {
+        return Ok(None);
+    }
+    let prefix = format!(
+        "release-candidate/{}/{}/",
+        sanitize_ref_segment(&target.name),
+        sanitize_ref_segment(tag)
+    );
+    Ok(list_workflow_runs(repo, target)?.into_iter().find(|run| {
+        run.head_branch
+            .as_deref()
+            .is_some_and(|branch| branch.starts_with(&prefix))
+            && run.head_sha.is_some()
+    }))
+}
+
+fn list_workflow_runs(repo: &Path, target: &ReleaseTarget) -> OpsResult<Vec<GhRunListEntry>> {
     let mut args = vec![
         "run".to_string(),
         "list".to_string(),
         "--json".to_string(),
-        "databaseId,headBranch,displayTitle,status,conclusion,url".to_string(),
+        "databaseId,headBranch,headSha,displayTitle,status,conclusion,url".to_string(),
         "--limit".to_string(),
         "50".to_string(),
     ];
@@ -2981,20 +3360,7 @@ fn find_workflow_run(
     let output = run_stdout(repo, "gh", arg_refs.as_slice())?;
     let runs: Vec<GhRunListEntry> = serde_json::from_str(&output)
         .map_err(|err| OpsError::Parse(format!("failed to parse workflow run list: {err}")))?;
-
-    let matching = runs
-        .iter()
-        .find(|run| run.head_branch.as_deref() == Some(tag))
-        .cloned()
-        .or_else(|| {
-            runs.into_iter().find(|run| {
-                run.display_title
-                    .as_deref()
-                    .is_some_and(|title| title.contains(tag))
-            })
-        });
-
-    Ok(matching)
+    Ok(runs)
 }
 
 fn github_release_exists(repo: &Path, tag: &str) -> OpsResult<bool> {

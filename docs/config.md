@@ -140,24 +140,28 @@ release:
 
 `lf release run patch --target cli` selects changes from the exact
 `cli/v<previous>..HEAD` git range, prepares an isolated release PR, tags its
-merged commit, and waits for the configured completion evidence. `area` scopes
-the range. `manifests` use Loopflow's built-in semantic-version adapters;
-omit them to auto-detect supported manifests.
+merged commit only after the configured workflow proves that exact candidate,
+and waits for the configured completion evidence. `area` scopes the range.
+`manifests` use Loopflow's built-in semantic-version adapters; omit them to
+auto-detect supported manifests.
 
 `verify` runs during `lf release run`, after Loopflow resolves the version and
 exact change range but before it prepares release changes. `lf release check`
 only reads that evidence; it does not execute repository hooks. `prepare` runs
 after manifest bumps inside the isolated release worktree. Both hook types
-accept `{target}`, `{version}`, and `{previous_tag}` placeholders. Put
-compilation, signing, packaging, migration, registry upload, deployment, smoke
-tests, and secret use in these repo-owned commands or the workflow—not in
-built-in release policy.
+accept `{target}`, `{version}`, and `{previous_tag}` placeholders. The
+configured workflow runs before the version tag and owns credential-free
+compilation, packaging, migration checks, and smoke tests. A configured
+publisher owns host signing and candidate preparation before the tag, then
+registry upload, deployment, and finalization after it. Keep those details in
+repo-owned commands—not in built-in release policy.
 
 Completion is explicit:
 
 - `tag` — pushing the tag completes the release.
-- `workflow` — the configured GitHub Actions workflow must succeed.
-- `github-release` — a GitHub Release for the tag must exist.
+- `workflow` — the configured pre-tag candidate workflow must succeed.
+- `github-release` — after candidate proof and tagging, a GitHub Release for
+  the tag must exist.
 
 Without `completion`, targets with `workflow` use `workflow`; other targets use
 `tag`. The first release requires an explicit `X.Y.Z`; bump keywords require a

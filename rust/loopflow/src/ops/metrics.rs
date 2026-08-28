@@ -148,7 +148,7 @@ async fn compose_persisted_portfolio(
 }
 
 #[derive(Debug, Clone, Deserialize)]
-#[serde(tag = "kind", rename_all = "snake_case", deny_unknown_fields)]
+#[serde(tag = "kind", rename_all = "snake_case")]
 pub(crate) enum MetricProducerObservation {
     Observed {
         wave: String,

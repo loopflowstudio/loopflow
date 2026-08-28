@@ -619,23 +619,19 @@ impl SqliteStore {
         let mut conn = self.conn.lock().expect("store mutex poisoned");
         let tx = conn.transaction_with_behavior(TransactionBehavior::Immediate)?;
         write_project_child_control_basis(&tx, project_id, basis)?;
-        let now = now_unix();
         tx.execute(
             "INSERT INTO project_child_controls (
-                project_id, run_id, token_hash, steer_sequence, issued_at, refreshed_at
-             ) VALUES (?1, ?2, ?3, ?4, ?5, ?5)
+                project_id, run_id, token_hash, steer_sequence
+             ) VALUES (?1, ?2, ?3, ?4)
              ON CONFLICT(project_id) DO UPDATE SET
                 run_id=excluded.run_id,
                 token_hash=excluded.token_hash,
-                steer_sequence=excluded.steer_sequence,
-                issued_at=excluded.issued_at,
-                refreshed_at=excluded.refreshed_at",
+                steer_sequence=excluded.steer_sequence",
             params![
                 project_id.as_str(),
                 run_id.as_str(),
                 token.hash(),
                 control_steer_sequence(basis)?,
-                now,
             ],
         )?;
         tx.commit()?;
@@ -655,14 +651,13 @@ impl SqliteStore {
         write_project_child_control_basis(&tx, project_id, basis)?;
         tx.execute(
             "UPDATE project_child_controls
-             SET steer_sequence=?4, refreshed_at=?5
+             SET steer_sequence=?4
              WHERE project_id=?1 AND run_id=?2 AND token_hash=?3",
             params![
                 project_id.as_str(),
                 run_id.as_str(),
                 token.hash(),
                 control_steer_sequence(basis)?,
-                now_unix(),
             ],
         )?;
         tx.commit()?;
@@ -674,7 +669,7 @@ impl SqliteStore {
         task_id: &TaskId,
         run_id: &RunId,
         token: &ProjectChildControlToken,
-    ) -> StoreResult<ProjectChildControlBasis> {
+    ) -> StoreResult<()> {
         let conn = self.conn.lock().expect("store mutex poisoned");
         let project_id = conn.query_row(
             "SELECT project_id FROM tasks WHERE id=?1",
@@ -695,15 +690,21 @@ impl SqliteStore {
                 "Project {project_id} child-control basis is stale after new direction; continue Project Work to its next phase before resuming child Tasks"
             )));
         }
-        let position = project_control_position(&conn, &project_id)?.ok_or_else(|| {
-            StoreError::InvalidAuthority(format!(
+        let has_position = conn
+            .query_row(
+                "SELECT 1 FROM work_flow_positions
+                 WHERE work_kind='project' AND work_id=?1",
+                [project_id.as_str()],
+                |_| Ok(()),
+            )
+            .optional()?
+            .is_some();
+        if !has_position {
+            return Err(StoreError::InvalidAuthority(format!(
                 "Project {project_id} has no durable flow position for child control; restart Project Work before pursuit"
-            ))
-        })?;
-        Ok(ProjectChildControlBasis {
-            position,
-            steer_sequence: steer_sequence as u64,
-        })
+            )));
+        }
+        Ok(())
     }
 
     pub(crate) fn release_project_child_control(
@@ -711,13 +712,14 @@ impl SqliteStore {
         project_id: &ProjectId,
         run_id: &RunId,
         token: &ProjectChildControlToken,
-    ) -> StoreResult<bool> {
+    ) -> StoreResult<()> {
         let conn = self.conn.lock().expect("store mutex poisoned");
-        Ok(conn.execute(
+        conn.execute(
             "DELETE FROM project_child_controls
              WHERE project_id=?1 AND run_id=?2 AND token_hash=?3",
             params![project_id.as_str(), run_id.as_str(), token.hash()],
-        )? == 1)
+        )?;
+        Ok(())
     }
 
     pub fn append_steer(
@@ -2004,16 +2006,7 @@ fn write_project_child_control_basis(
     basis: &ProjectChildControlBasis,
 ) -> StoreResult<()> {
     let expected_work = WorkRef::Project(project_id.clone());
-    if basis.position.work != expected_work {
-        return Err(StoreError::InvalidAuthority(
-            "Project child-control basis belongs to different Work".to_string(),
-        ));
-    }
-    if basis.position.flow.trim().is_empty() || basis.position.step.trim().is_empty() {
-        return Err(StoreError::InvalidData(
-            "Project child-control flow and step cannot be empty".to_string(),
-        ));
-    }
+    validate_flow_position(&expected_work, &basis.position)?;
     if basis.position.human {
         return Err(StoreError::InvalidAuthority(
             "human Project flow positions cannot control child Tasks".to_string(),
@@ -2027,26 +2020,43 @@ fn write_project_child_control_basis(
             "Project {project_id} direction changed while its child-control basis was being prepared"
         )));
     }
+    write_flow_position_in(conn, &basis.position)
+}
+
+fn validate_flow_position(work: &WorkRef, position: &FlowPosition) -> StoreResult<()> {
+    if &position.work != work {
+        return Err(StoreError::InvalidAuthority(
+            "flow position does not belong to this Work".to_string(),
+        ));
+    }
+    if position.flow.trim().is_empty() || position.step.trim().is_empty() {
+        return Err(StoreError::InvalidData(
+            "flow and step cannot be empty".to_string(),
+        ));
+    }
+    Ok(())
+}
+
+fn write_flow_position_in(conn: &Connection, position: &FlowPosition) -> StoreResult<()> {
     conn.execute(
         "INSERT INTO work_flow_positions (
             work_kind, work_id, flow, step, node_id, human, step_index, iteration, updated_at
-         ) VALUES ('project', ?1, ?2, ?3, ?4, 0, ?5, ?6, ?7)
+         ) VALUES (?1, ?2, ?3, ?4, ?5, ?6, ?7, ?8, ?9)
          ON CONFLICT(work_kind, work_id) DO UPDATE SET
-            flow=excluded.flow,
-            step=excluded.step,
-            node_id=excluded.node_id,
-            human=excluded.human,
-            step_index=excluded.step_index,
+            flow=excluded.flow, step=excluded.step, node_id=excluded.node_id,
+            human=excluded.human, step_index=excluded.step_index,
             iteration=excluded.iteration,
             updated_at=excluded.updated_at",
         params![
-            project_id.as_str(),
-            basis.position.flow,
-            basis.position.step,
-            basis.position.node_id,
-            i64::from(basis.position.step_index),
-            i64::from(basis.position.iteration),
-            basis.position.updated_at.unix_timestamp(),
+            position.work.kind(),
+            position.work.id(),
+            position.flow,
+            position.step,
+            position.node_id,
+            position.human,
+            i64::from(position.step_index),
+            i64::from(position.iteration),
+            position.updated_at.unix_timestamp()
         ],
     )?;
     Ok(())
@@ -2092,45 +2102,6 @@ fn control_steer_sequence(basis: &ProjectChildControlBasis) -> StoreResult<i64> 
     i64::try_from(basis.steer_sequence).map_err(|_| {
         StoreError::InvalidData("Project child-control Steer sequence is too large".to_string())
     })
-}
-
-fn project_control_position(
-    conn: &Connection,
-    project_id: &ProjectId,
-) -> StoreResult<Option<FlowPosition>> {
-    conn.query_row(
-        "SELECT flow, step, node_id, human, step_index, iteration, updated_at
-         FROM work_flow_positions WHERE work_kind='project' AND work_id=?1",
-        [project_id.as_str()],
-        |row| {
-            Ok((
-                row.get::<_, String>(0)?,
-                row.get::<_, String>(1)?,
-                row.get::<_, Option<String>>(2)?,
-                row.get::<_, bool>(3)?,
-                row.get::<_, i64>(4)?,
-                row.get::<_, i64>(5)?,
-                row.get::<_, i64>(6)?,
-            ))
-        },
-    )
-    .optional()?
-    .map(
-        |(flow, step, node_id, human, step_index, iteration, updated_at)| {
-            Ok(FlowPosition {
-                work: WorkRef::Project(project_id.clone()),
-                flow,
-                step,
-                node_id,
-                human,
-                step_index: u32::try_from(step_index).map_err(invalid_durable)?,
-                iteration: u32::try_from(iteration).map_err(invalid_durable)?,
-                updated_at: OffsetDateTime::from_unix_timestamp(updated_at)
-                    .map_err(invalid_durable)?,
-            })
-        },
-    )
-    .transpose()
 }
 
 fn tool_response_in(

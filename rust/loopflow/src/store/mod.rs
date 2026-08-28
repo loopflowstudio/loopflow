@@ -1447,15 +1447,14 @@ mod tests {
             .begin_project_child_control(&project.id, &first_run, &basis("project/clarify", 0, 0))
             .await
             .unwrap();
-        let first = store
+        store
             .authorize_project_child_control(&task.id, &first_run, &first_token)
             .await
             .expect("clarify carries exact child control");
-        let repeated = store
+        store
             .authorize_project_child_control(&task.id, &first_run, &first_token)
             .await
             .expect("an identical retry is idempotent");
-        assert_eq!(first, repeated);
 
         let unrelated = store
             .authorize_project_child_control(&unrelated_task.id, &first_run, &first_token)
@@ -1481,13 +1480,10 @@ mod tests {
             .advance_project_child_control(&project.id, &first_run, &first_token, &pursue)
             .await
             .unwrap();
-        assert_eq!(
-            store
-                .authorize_project_child_control(&task.id, &first_run, &first_token)
-                .await
-                .expect("pursue resumes the existing child through the same authority path"),
-            pursue
-        );
+        store
+            .authorize_project_child_control(&task.id, &first_run, &first_token)
+            .await
+            .expect("pursue resumes the existing child through the same authority path");
 
         let recovery_run = RunId::new();
         let recovery_basis = basis("project/mutate", 2, 1);
@@ -1501,23 +1497,20 @@ mod tests {
             .expect_err("process recovery revokes the prior controller");
         assert!(superseded.to_string().contains("was superseded"));
         for _ in 0..2 {
-            assert_eq!(
-                store
-                    .authorize_project_child_control(&task.id, &recovery_run, &recovery_token)
-                    .await
-                    .expect("recovered controller remains retry-safe"),
-                recovery_basis
-            );
+            store
+                .authorize_project_child_control(&task.id, &recovery_run, &recovery_token)
+                .await
+                .expect("recovered controller remains retry-safe");
         }
 
-        assert!(store
+        store
             .release_project_child_control(&project.id, &recovery_run, &recovery_token)
             .await
-            .unwrap());
-        assert!(!store
+            .unwrap();
+        store
             .release_project_child_control(&project.id, &recovery_run, &recovery_token)
             .await
-            .unwrap());
+            .unwrap();
         let missing = store
             .authorize_project_child_control(&task.id, &recovery_run, &recovery_token)
             .await

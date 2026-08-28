@@ -340,7 +340,7 @@ impl Store {
         task_id: &TaskId,
         run_id: &RunId,
         token: &ProjectChildControlToken,
-    ) -> StoreResult<ProjectChildControlBasis> {
+    ) -> StoreResult<()> {
         let task_id = task_id.clone();
         let run_id = run_id.clone();
         let token = token.clone();
@@ -355,7 +355,7 @@ impl Store {
         project_id: &ProjectId,
         run_id: &RunId,
         token: &ProjectChildControlToken,
-    ) -> StoreResult<bool> {
+    ) -> StoreResult<()> {
         let project_id = project_id.clone();
         let run_id = run_id.clone();
         let token = token.clone();

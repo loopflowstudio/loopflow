@@ -104,7 +104,6 @@ pub(crate) async fn authorize_task_resume(store: &SharedStore, task: &Task) -> O
         (Some(run_id), Some(token)) => store
             .authorize_project_child_control(&task.id, &run_id, &token)
             .await
-            .map(|_| ())
             .map_err(child_error),
         (Some(_), None) => Err(child_error(
             "in-Run Task resume has no Project child-control capability; restart the owning Project controller before pursuit",

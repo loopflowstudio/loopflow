@@ -194,16 +194,15 @@ async fn run_project_inner(store: SharedStore, project_id: ProjectId) -> Result<
             &prepared.control_basis,
         )
         .await?;
-        let capture = Some(capture);
         let (event_tx, mut event_rx) = mpsc::unbounded_channel();
         let mut harness =
             default_create_harness(&harness_name, ApprovalPolicy::AutoApprove, event_tx)
                 .inspect_err(|_| {
-                    finish_capture(capture.as_ref(), "failed");
+                    finish_capture(&capture, "failed");
                 })?;
         harness.set_provider_session_id(project.state.provider_session_id.clone());
         if let Err(error) = harness.start(&prepared.turn.config).await {
-            finish_capture(capture.as_ref(), "failed");
+            finish_capture(&capture, "failed");
             return Err(error);
         }
         project.state.provider = harness_name;
@@ -212,9 +211,7 @@ async fn run_project_inner(store: SharedStore, project_id: ProjectId) -> Result<
             let _ = harness.stop().await;
             return Err(error.into());
         }
-        if let Some(capture) = &capture {
-            capture.set_provider_session_id(project.state.provider_session_id.clone());
-        }
+        capture.set_provider_session_id(project.state.provider_session_id.clone());
         let mut active_steers = prepared.steers.clone();
 
         start_project_flow_turn(
@@ -270,13 +267,11 @@ async fn run_project_inner(store: SharedStore, project_id: ProjectId) -> Result<
                             &mut project,
                             harness.as_mut(),
                             "provider event stream closed",
-                            capture.as_ref(),
+                            &capture,
                         )
                         .await;
                     };
-                    if let Some(capture) = &capture {
-                        capture.record_conversation(event.clone());
-                    }
+                    capture.record_conversation(event.clone());
                     let provider_session_id = harness.provider_session_id();
                     if provider_session_id != project.state.provider_session_id {
                         project.state.provider_session_id = provider_session_id;
@@ -298,7 +293,7 @@ async fn run_project_inner(store: SharedStore, project_id: ProjectId) -> Result<
                                     &mut project,
                                     harness.as_mut(),
                                     &reason,
-                                    capture.as_ref(),
+                                    &capture,
                                 )
                                 .await;
                             }
@@ -308,7 +303,7 @@ async fn run_project_inner(store: SharedStore, project_id: ProjectId) -> Result<
                                     &mut project,
                                     harness.as_mut(),
                                     &error.to_string(),
-                                    capture.as_ref(),
+                                    &capture,
                                 )
                                 .await;
                             }
@@ -348,7 +343,7 @@ async fn run_project_inner(store: SharedStore, project_id: ProjectId) -> Result<
                                     &mut project,
                                     harness.as_mut(),
                                     &mut flow,
-                                    capture.as_ref(),
+                                    Some(&capture),
                                     &control,
                                     prepared,
                                 )
@@ -391,7 +386,7 @@ async fn run_project_inner(store: SharedStore, project_id: ProjectId) -> Result<
                                     &mut project,
                                     harness.as_mut(),
                                     &mut flow,
-                                    capture.as_ref(),
+                                    Some(&capture),
                                     &control,
                                     prepared,
                                 )
@@ -402,7 +397,7 @@ async fn run_project_inner(store: SharedStore, project_id: ProjectId) -> Result<
                             project.state.last_state_fingerprint = Some(outcome.fingerprint);
                             store.put_project_controller_state(&project.state).await?;
                             let _ = harness.stop().await;
-                            finish_capture(capture.as_ref(), "completed");
+                            finish_capture(&capture, "completed");
                             control.release(&store, &project.id).await?;
                             if project_run_must_remain_resident(
                                 &store,
@@ -437,7 +432,7 @@ async fn run_project_inner(store: SharedStore, project_id: ProjectId) -> Result<
                                 &mut project,
                                 harness.as_mut(),
                                 &reason,
-                                capture.as_ref(),
+                                &capture,
                             )
                             .await;
                         }
@@ -659,7 +654,7 @@ async fn start_project_flow_turn(
     project: &mut ControlledProject,
     harness: &mut dyn Harness,
     flow: &mut Playhead,
-    capture: Option<&crate::run_record::CaptureHandle>,
+    queued_capture: Option<&crate::run_record::CaptureHandle>,
     control: &ProjectChildControl,
     prepared: PreparedProjectStep,
 ) -> Result<()> {
@@ -668,7 +663,7 @@ async fn start_project_flow_turn(
         .await?;
     let wave = owning_wave(store, project).await?;
     open_project_flow_body(flow, wave.repo())?;
-    if let Some(capture) = capture {
+    if let Some(capture) = queued_capture {
         capture.record_input("queued", &prepared.turn.input);
     }
     apply_input(harness, prepared.turn.input).await?;
@@ -847,8 +842,7 @@ async fn apply_input(harness: &mut dyn Harness, input: String) -> Result<()> {
     harness.send_input(&input).await
 }
 
-fn finish_capture(capture: Option<&crate::run_record::CaptureHandle>, outcome: &str) {
-    let Some(capture) = capture else { return };
+fn finish_capture(capture: &crate::run_record::CaptureHandle, outcome: &str) {
     if let Err(error) = capture.finish(outcome) {
         tracing::warn!(%error, "failed to finish Project Run record");
     }
@@ -859,7 +853,7 @@ async fn finish_failed(
     project: &mut ControlledProject,
     harness: &mut dyn Harness,
     error: &str,
-    capture: Option<&crate::run_record::CaptureHandle>,
+    capture: &crate::run_record::CaptureHandle,
 ) -> Result<()> {
     finish_capture(capture, "failed");
     let _ = harness.stop().await;

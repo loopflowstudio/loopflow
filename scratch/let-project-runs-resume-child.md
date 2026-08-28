@@ -1,98 +1,123 @@
-# Restore Project child-resume authority
+# 5 Whys: Project Runs could not reliably resume child Tasks
 
-## Finish line
+## The Problem
 
-A Project controller reaches `project/pursue`, invokes the existing
-`lf task resume` path for its parked Task, and receives an idempotent success.
-The same mutation is refused for another Project, for superseded controller
-authority, and after new Project direction makes the active phase stale.
+A live Project controller followed `project/pursue` and called the ordinary
+`lf task resume` path, but the mutation failed because its Run had no durable
+Turn Basis; the child stayed parked even though the Project was otherwise able
+to continue provider work.
 
-The distinguishing proof is a deterministic fixture that crosses both a
-Project phase transition and controller-process replacement, then exercises
-the same authorization entry point used by Task resume. Merely accepting a
-generic `LF_RUN_ID`, trusting Run-record subject attribution, or adding a
-special resume bypass does not count.
+## Chain
 
-## Observations
+Missing Turn row → live Project did not require trace capture → control reused
+best-effort evidence → tests constructed the authority they meant to prove →
+parent-to-child mutation authority had no explicit owner
 
-- The reported 2026-08-19 failure came from the retired SQL
-  Run/Invocation/Turn/Basis lifecycle. Main removed that lifecycle in #1237;
-  generic Home-local Run records are now evidence and causality only.
-- Current Project and Task controllers both publish their Run manifest before
-  starting the harness. Capture publication failure already ends the Project
-  before any provider phase starts.
-- A Project provider inherits `LF_RUN_ID`, but `lf task resume` currently uses
-  it only as `Author::Run` provenance. No scoped Work-mutation authority is
-  checked before the Task controller launch.
-- Task controller launch is already retry-safe on one machine: the stable tmux
-  session name makes a repeated resume a no-op when the controller is live.
-- Project Steers remain an ordered durable stream with a contiguous sequence.
-  That sequence is the smallest current equivalent of the former Turn Basis:
-  a phase prepared at sequence N must stop controlling children after steer
-  N+1 arrives.
-- Run-record subject attribution cannot safely fill the gap. The current
-  architecture explicitly makes attribution non-authoritative, and a generic
-  Run id alone does not prove Project ownership.
-- `resume_task_async` performs PR reconciliation and merge-intent cleanup before
-  its inner process-launch helper. Authority therefore has to be checked at the
-  command entry as well as immediately before launch; checking only the helper
-  would allow a refused caller to mutate Task state first.
-- Wave pursuit still described direct Task resume as a root override, but the
-  current authority model permits only the immediate Project controller or a
-  local User. The builtin guidance now routes parked Tasks through their owning
-  Project.
+**Problem**: On 2026-08-19, Stability & Security iteration 36 recommended
+resuming LOO-224, but `lf task resume LOO-224 --json` failed with `Run ... has
+no durable Turn Basis for child control`. The refusal preserved the Task, PR,
+worktree, and unresolved wait, but stranded the recommended action.
 
-## Hypothesis
+**Why 1**: The child-control validator queried `agent_turns` for the calling
+Project Run and found no row whose Basis could authorize the Task mutation.
 
-Issue one opaque Project child-control capability from planning SQLite before
-the first provider turn. Store only its hash, binding it to the exact Project,
-controller Run, flow step/iteration, and Project Steer sequence. Rebind the
-same capability at every Project phase boundary; replace it when a recovered
-controller publishes a new Run. `lf task resume` accepts local User authority
-unchanged, but an in-Run caller must present this capability and match the
-Task's immediate parent Project and current Project Steer sequence.
+↳ *Could we have caught this earlier?* A fixture that launched the real
+Project runner and invoked the public resume path would have failed. The tests
+instead proved the validator against manually assembled Run, Invocation, and
+Turn rows.
 
-This keeps `RunId` as provenance rather than authority: the random capability
-and its planning-store binding grant the mutation. It also avoids resurrecting
-the deleted SQL execution lifecycle.
+**Why 2**: A Project provider process was allowed to be healthy without a
+durable Turn row. `CaptureHandle::begin` was the operation that wrote the
+initial Turn, while Project capture was explicitly best-effort: missing runtime
+context returned no capture (silently until the 2026-08-21 repair), while
+capture-publication errors logged a warning and let the harness continue.
+Later phases called `begin_turn_at` only when that optional capture existed.
+Process replacement therefore had no invariant requiring child-control Basis
+publication before provider work resumed.
 
-## Material assumption
+↳ *What process allowed this?* Project liveness and trace availability were
+reviewed as separate concerns, but the authority query quietly coupled them.
+The 2026-08-21 runtime-context repair explicitly preserved Project-best-effort
+capture without an end-to-end child-control proof.
 
-LOO-227's requested “Turn Basis” is interpreted on current main as the exact
-Project flow step plus the ordered Project Steer frontier. Reintroducing the
-retired AgentInvocation/Turn schema would conflict with #1237 and is larger
-than restoring this surface.
+**Why 3**: The 2026-07-22 child-fencing change reused the trace Turn's Basis to
+fence stale Project direction. That Basis contained the right data, but the row
+carrying it belonged to execution evidence, not to a control capability whose
+issuance and refresh the Project controller owned.
 
-## Near misses
+↳ *What assumption was wrong?* “A live Project Run has a current durable Turn”
+was treated as an invariant. The runner's error policy made the opposite true:
+trace capture could be absent without making the Project fail.
 
-- Authorize every in-Run caller that names the Task's Project.
-- Parse Project identity from Run-record subjects.
-- Treat a missing capability as User authority.
-- Mint a capability only in `project/pursue`; clarify or mutate can transition
-  into supervision without restarting the provider process.
-- Special-case `lf task resume` after it reaches the launcher.
+**Why 4**: Coverage concentrated on mutation-sink safety. It proved that no
+Turn was denied, a current Turn was accepted, stale direction was denied, and
+unrelated parents were denied. It did not cross the issuer and consumer
+boundary: initial Project launch, phase transition, controller-process
+replacement, and ordinary `lf task resume` in one deterministic behavior
+fixture. The validator was correct for states that the real runner was not
+required to create.
 
-## Verification
+↳ *Why was that assumption encoded?* Reusing an existing Basis avoided a new
+authority concept and made the storage-level fence small. The simplification
+was local: it hid the lifecycle contract between the Project runner, trace
+capture, and Task command.
 
-- `project_control_resumes_the_same_task_idempotently` drives the ordinary
-  `resume_task_async` path twice with the capability issued for
-  `project/pursue`; both calls return the existing Task Work.
-- `in_run_task_resume_requires_project_control_before_mutation` proves a generic
-  Run without the capability is refused before its active PR row changes.
-- `project_child_control_survives_phase_and_process_recovery_exactly` crosses a
-  phase transition and controller replacement, then proves same-Project retry,
-  unrelated-Project denial, Steer-frontier staleness, superseded-Run denial,
-  and actionable missing-basis failure.
-- Capability propagation replaces ambient identity at the provider boundary,
-  while durable child tmux sessions scrub the capability before launch.
-- `cargo fmt --check` and `cargo clippy --all-targets -- -D warnings` pass.
-- `uv run pytest python/tests/test_materialize_rust_tests.py -q` passes (3
-  tests).
-- Release-equivalent materialization advances the disposable package to
-  `0.12.15`, canonicalizes all five drafts, and passes
-  `project_child_control_survives_phase_and_process_recovery_exactly`.
-- The full Rust library run reached 1,504 passes, including every new fixture.
-  Its 11 failures were shared-machine evidence: an unsettled concurrent install
-  switch, a locked live ledger, and an unrelated legacy migration fixture. The
-  repository gate itself remains unavailable while three other active
-  worktrees exceed the resource envelope; none is safe to reap from this Run.
+**Why 5 (Root)**: Parent-to-child mutation authority was inferred from generic
+execution evidence instead of being modeled as explicit durable control state
+owned by the immediate parent controller. With no first-class issuance,
+refresh, recovery, and revocation contract, Project liveness and Task-control
+authority could drift independently. The 2026-08-25 SQL-lifecycle deletion
+then removed the accidental carrier entirely; its launch/replay proofs did not
+exercise Project-to-existing-Task resume, so no replacement contract was
+forced before the architecture changed.
+
+## Unanswered Whys
+
+| Branch Point | Unexplored Question | Priority |
+|--------------|---------------------|----------|
+| Why 2 | Which exact 2026-08-19 condition omitted capture: missing runtime context, capture publication failure, or controller recovery? The contract allowed all three, so the answer does not change the root cause. | Medium |
+| Why 4 | Which other parent-child mutation entry points still infer permission from optional execution evidence or caller attribution? | High |
+| Why 5 | How should architecture-reduction reviews inventory authorization consumers before deleting their storage lifecycle? | High |
+
+## Fixes
+
+| Level | Fix | Prevents |
+|-------|-----|----------|
+| Immediate | Issue an opaque Project child-control capability before provider launch, store only its hash, and require it on the existing Task-resume path before any mutation. | A healthy Project reaching pursuit without usable resume authority. |
+| Structural | Bind the capability to exact Project Work, controller Run, flow position, and Steer frontier; refresh it at phase boundaries, replace it on process recovery, and scrub it before the child process starts. | Cross-Project control, stale-direction writes, superseded controllers, and authority leakage into the child. |
+| Systemic | Treat execution records as evidence only. Require each parent-child mutation edge to name an explicit authority issuer and prove launch, phase transition, process replacement, stale direction, unrelated parent, retry, and lifecycle deletion through its public command path. | Future control paths whose validators are safe in isolation but whose controllers cannot reliably produce the required authority. |
+
+## Changes to Implement
+
+- [x] Add durable Project child-control capability issuance, refresh, recovery
+  replacement, authorization, and revocation in planning SQLite.
+- [x] Check authority at `resume_task_async` entry before PR reconciliation can
+  mutate state, then check again at the launch boundary.
+- [x] Keep local User control intact while denying an in-Run caller with a
+  missing capability, an unrelated Project, a stale Steer frontier, or a
+  superseded controller Run.
+- [x] Prove the ordinary resume path is idempotent and add a release-materialized
+  fixture spanning phase transition plus controller-process replacement.
+- [ ] Inventory the remaining Wave→Project and Project→Task mutation paths and
+  move any permission inferred from Run attribution or optional evidence onto
+  an explicit controller-owned capability lifecycle.
+- [ ] Add an architecture-reduction gate that requires a public behavior proof
+  for every authorization consumer of a lifecycle or schema being deleted.
+
+## Evidence
+
+- Commit `026dc10c7` introduced `validate_control_caller`, which selected the
+  latest `agent_turns` Basis for the supervising Project Run.
+- In that implementation, `project/runner.rs` created the row through optional
+  `CaptureHandle::begin`; capture failure warned and returned `None`, and later
+  phase turns were recorded only under `if let Some(capture)`.
+- Commit `9151b1596` repaired missing runtime context for User-launched Work
+  bodies while explicitly preserving Project-best-effort capture. Its proof did
+  not exercise Project child resume.
+- Commit `5f7f66833` removed the SQL Invocation/Turn lifecycle and declared
+  generic Run identity to be evidence and causality only. Its focused proofs
+  covered launch, capture, replay, and accounts, not Project-to-existing-Task
+  resume.
+- The restoration fixture now crosses Project phase and process replacement;
+  the command fixture invokes `resume_task_async` twice and returns the same
+  Task Work. Unrelated, stale, superseded, and missing authority remain denied.

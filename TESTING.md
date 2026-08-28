@@ -231,8 +231,21 @@ cargo test -p loopflow store
 cargo test -p loopflow harness::conformance_tests
 ```
 
-After Run-record or schema changes, run `lf runs --json`, `lf usage --json`, and
-`lf doctor --json` against a fresh local Home.
+After capture-schema changes, audit the long-lived Home through the candidate
+promotion boundary:
+
+```bash
+scripts/dev-lf install preflight --json 2>/dev/null | jq '.candidate_compatibility.captures'
+```
+
+Preflight makes a SQLite-consistent copy, applies the candidate migrations only
+to that copy, then reads every complete legacy capture it names from the Home's
+real trace root. Historical captures must report `compatible`; unsupported,
+truncated, corrupt, unsafe, or missing complete captures refuse promotion.
+Partial captures remain visible in `partial_captures` and are not reclassified.
+
+Run `lf runs --json`, `lf usage --json`, and `lf doctor --json` against the same
+long-lived Home after promotion.
 
 ## E2E Tests
 

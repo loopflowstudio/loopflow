@@ -1149,9 +1149,9 @@ pub enum InstallCommand {
         switch: String,
     },
     /// Preview whether this build may replace the global lf (read-only).
-    /// Reads the shared store's migration frontier and validates executable
-    /// planning references against this binary; mutates nothing and exits
-    /// non-zero on refusal so a caller can gate on it.
+    /// Reads the shared store's migration frontier, persisted legacy captures,
+    /// and executable planning references against this binary; mutates nothing
+    /// and exits non-zero on refusal so a caller can gate on it.
     #[command(hide = true)]
     Preflight {
         /// Emit the structured PromotionPreview as JSON.

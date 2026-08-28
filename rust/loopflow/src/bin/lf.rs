@@ -1328,6 +1328,7 @@ fn main() -> anyhow::Result<()> {
         Some(Commands::Install {
             cmd: InstallCommand::RecoverSwitch { .. }
                 | InstallCommand::AdvanceSwitch { .. }
+                | InstallCommand::Preflight { .. }
                 | InstallCommand::LocalPreflight { .. }
                 | InstallCommand::Promote { .. }
         })

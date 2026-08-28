@@ -9,10 +9,11 @@
 //!
 //! The candidate binary (the one running this command) reads the shared store's
 //! applied frontier and its own migration registry, applies its migrations to
-//! an isolated snapshot, resolves every placed open Work's
-//! executable lifecycle, and renders a verdict. `promote` consumes that verdict
-//! under the machine-global promotion lock, retains immutable rollback bytes,
-//! and activates the candidate before any migration advances the frontier.
+//! an isolated snapshot, resolves every placed open Work's executable
+//! lifecycle, reads every complete legacy capture named by that snapshot, and
+//! renders a verdict. `promote` consumes that verdict under the machine-global
+//! promotion lock, retains immutable rollback bytes, and activates the
+//! candidate before any migration advances the frontier.
 //!
 //! Compatibility is not re-derived: `classify_compatibility` calls the exact
 //! `store::migrations` functions the runtime trusts at open time, so a reject
@@ -109,7 +110,68 @@ pub struct ExecutableFailure {
 pub enum ExecutableCompatibility {
     Compatible { references: usize },
     Incompatible { failures: Vec<ExecutableFailure> },
-    Unreadable { reason: String },
+}
+
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Deserialize, Serialize)]
+#[serde(rename_all = "snake_case")]
+#[non_exhaustive]
+pub enum CaptureFailureKind {
+    Missing,
+    UnsafePath,
+    Unreadable,
+    Truncated,
+    UnsupportedSchema,
+    Corrupt,
+}
+
+impl CaptureFailureKind {
+    fn label(self) -> &'static str {
+        match self {
+            Self::Missing => "missing",
+            Self::UnsafePath => "unsafe_path",
+            Self::Unreadable => "unreadable",
+            Self::Truncated => "truncated",
+            Self::UnsupportedSchema => "unsupported_schema",
+            Self::Corrupt => "corrupt",
+        }
+    }
+}
+
+#[derive(Debug, Clone, PartialEq, Eq, Deserialize, Serialize)]
+pub struct CaptureFailure {
+    pub invocation_id: String,
+    pub conversation_path: String,
+    pub kind: CaptureFailureKind,
+    pub reason: String,
+}
+
+#[derive(Debug, Clone, PartialEq, Eq, Deserialize, Serialize)]
+#[serde(tag = "kind", rename_all = "snake_case")]
+#[non_exhaustive]
+pub enum CaptureCompatibility {
+    Compatible {
+        complete_captures: usize,
+        partial_captures: usize,
+    },
+    Incompatible {
+        complete_captures: usize,
+        partial_captures: usize,
+        failures: Vec<CaptureFailure>,
+    },
+}
+
+/// The audits derived from one migrated SQLite-consistent candidate snapshot.
+#[derive(Debug, Clone, PartialEq, Eq, Deserialize, Serialize)]
+#[serde(tag = "kind", rename_all = "snake_case")]
+#[non_exhaustive]
+pub enum CandidateCompatibility {
+    Checked {
+        executable: ExecutableCompatibility,
+        captures: CaptureCompatibility,
+    },
+    Unreadable {
+        reason: String,
+    },
 }
 
 /// The promotion decision. `Reject` carries every failing reason at once so one
@@ -128,7 +190,7 @@ pub struct PromotionPreview {
     pub candidate: CandidateIdentity,
     pub database_path: String,
     pub compatibility: Compatibility,
-    pub executable_compatibility: ExecutableCompatibility,
+    pub candidate_compatibility: CandidateCompatibility,
     pub verdict: Verdict,
 }
 
@@ -169,7 +231,7 @@ pub fn decide(
     authority: MigrationAuthority,
     pending_migration_drafts: &[&str],
     compatibility: &Compatibility,
-    executable_compatibility: &ExecutableCompatibility,
+    candidate_compatibility: &CandidateCompatibility,
 ) -> Verdict {
     let mut reasons = Vec::new();
     let mut migrate = false;
@@ -203,29 +265,52 @@ pub fn decide(
         },
     }
 
-    match executable_compatibility {
-        ExecutableCompatibility::Compatible { .. } => {}
-        ExecutableCompatibility::Incompatible { failures } => {
-            let first = failures
-                .first()
-                .map(|failure| {
-                    format!(
-                        "{} {} flow {:?} in {}: {}",
-                        failure.work_kind,
-                        failure.work_id,
-                        failure.flow,
-                        failure.catalog_root,
-                        failure.reason
-                    )
-                })
-                .unwrap_or_else(|| "no failure detail was recorded".to_string());
-            reasons.push(format!(
-                "candidate cannot execute {} persisted lifecycle reference(s) after migration; first failure: {first}",
-                failures.len()
-            ));
+    match candidate_compatibility {
+        CandidateCompatibility::Checked {
+            executable,
+            captures,
+        } => {
+            if let ExecutableCompatibility::Incompatible { failures } = executable {
+                let first = failures
+                    .first()
+                    .map(|failure| {
+                        format!(
+                            "{} {} flow {:?} in {}: {}",
+                            failure.work_kind,
+                            failure.work_id,
+                            failure.flow,
+                            failure.catalog_root,
+                            failure.reason
+                        )
+                    })
+                    .unwrap_or_else(|| "no failure detail was recorded".to_string());
+                reasons.push(format!(
+                    "candidate cannot execute {} persisted lifecycle reference(s) after migration; first failure: {first}",
+                    failures.len()
+                ));
+            }
+
+            if let CaptureCompatibility::Incompatible { failures, .. } = captures {
+                let first = failures
+                    .first()
+                    .map(|failure| {
+                        format!(
+                            "{} at {} ({}): {}",
+                            failure.invocation_id,
+                            failure.conversation_path,
+                            failure.kind.label(),
+                            failure.reason
+                        )
+                    })
+                    .unwrap_or_else(|| "no failure detail was recorded".to_string());
+                reasons.push(format!(
+                    "candidate cannot read {} complete persisted capture(s) after migration; first failure: {first}",
+                    failures.len()
+                ));
+            }
         }
-        ExecutableCompatibility::Unreadable { reason } => reasons.push(format!(
-            "persisted lifecycle compatibility is unreadable, so promotion fails closed: {reason}"
+        CandidateCompatibility::Unreadable { reason } => reasons.push(format!(
+            "migrated candidate evidence is unreadable, so promotion fails closed: {reason}"
         )),
     }
 
@@ -403,72 +488,182 @@ fn _validate_executable_steps(
     Ok(())
 }
 
-/// Validate installed-state semantics against a migrated snapshot, never the
-/// live database. A migration may repair a persisted flow name, so checking the
-/// pre-migration rows would reject the candidate the migration makes valid.
-fn _read_executable_compatibility(store_path: &Path) -> ExecutableCompatibility {
-    let directory = match tempfile::tempdir() {
-        Ok(directory) => directory,
-        Err(error) => {
-            return ExecutableCompatibility::Unreadable {
-                reason: format!("create candidate validation directory: {error}"),
-            }
-        }
-    };
-    let candidate_path = directory.path().join("candidate.db");
-    if let Err(error) = _copy_store_for_candidate(store_path, &candidate_path) {
-        return ExecutableCompatibility::Unreadable {
-            reason: format!("copy shared store for candidate validation: {error}"),
-        };
-    }
-    let connection = match rusqlite::Connection::open(&candidate_path) {
-        Ok(connection) => connection,
-        Err(error) => {
-            return ExecutableCompatibility::Unreadable {
-                reason: format!("open candidate validation store: {error}"),
-            }
-        }
-    };
-    if let Err(error) = migrations::apply_sqlite(&connection) {
-        return ExecutableCompatibility::Unreadable {
-            reason: format!("apply candidate migrations to validation store: {error}"),
-        };
-    }
-    _executable_compatibility(&connection)
+#[derive(Debug, Clone, Copy)]
+enum CandidateSchema {
+    Published,
+    InstalledDevelopment,
 }
 
-fn _read_local_executable_compatibility(store_path: &Path) -> ExecutableCompatibility {
-    let directory = match tempfile::tempdir() {
-        Ok(directory) => directory,
-        Err(error) => {
-            return ExecutableCompatibility::Unreadable {
-                reason: format!("create local candidate validation directory: {error}"),
+impl CandidateSchema {
+    fn label(self) -> &'static str {
+        match self {
+            Self::Published => "candidate",
+            Self::InstalledDevelopment => "local candidate",
+        }
+    }
+
+    fn apply(self, connection: &rusqlite::Connection) -> Result<()> {
+        match self {
+            Self::Published => migrations::apply_sqlite(connection).map_err(anyhow::Error::from),
+            Self::InstalledDevelopment => migrations::apply_installed_development_sqlite(
+                connection,
+                build_info::migration_draft_manifest(),
+            )
+            .map_err(anyhow::Error::from),
+        }
+    }
+}
+
+/// Validate installed-state semantics against one migrated SQLite-consistent
+/// snapshot, never the live database. The snapshot's rows name artifacts in the
+/// real Home trace root; migrations may repair persisted rows but never rewrite
+/// immutable conversation files.
+fn _read_candidate_compatibility(
+    store_path: &Path,
+    schema: CandidateSchema,
+) -> CandidateCompatibility {
+    let label = schema.label();
+    let checked = (|| -> Result<(ExecutableCompatibility, CaptureCompatibility)> {
+        let directory =
+            tempfile::tempdir().with_context(|| format!("create {label} validation directory"))?;
+        let candidate_path = directory.path().join("candidate.db");
+        _copy_store_for_candidate(store_path, &candidate_path)
+            .with_context(|| format!("copy shared store for {label} validation"))?;
+        let connection = rusqlite::Connection::open(&candidate_path)
+            .with_context(|| format!("open {label} validation store"))?;
+        schema
+            .apply(&connection)
+            .with_context(|| format!("apply {label} migrations to validation store"))?;
+        let artifact_root = store_path
+            .parent()
+            .with_context(|| {
+                format!(
+                    "{label} store has no Home directory: {}",
+                    store_path.display()
+                )
+            })?
+            .join("traces");
+        Ok((
+            _executable_compatibility(&connection)?,
+            _capture_compatibility(&connection, &artifact_root)?,
+        ))
+    })();
+
+    match checked {
+        Ok((executable, captures)) => CandidateCompatibility::Checked {
+            executable,
+            captures,
+        },
+        Err(error) => CandidateCompatibility::Unreadable {
+            reason: format!("{error:#}"),
+        },
+    }
+}
+
+fn _capture_compatibility(
+    connection: &rusqlite::Connection,
+    artifact_root: &Path,
+) -> Result<CaptureCompatibility> {
+    let partial_captures = connection
+        .query_row(
+            "SELECT COUNT(*) FROM agent_invocations WHERE capture_status='partial'",
+            [],
+            |row| row.get::<_, i64>(0),
+        )
+        .context("count partial persisted captures")? as usize;
+    let mut statement = connection
+        .prepare(
+            "SELECT id, conversation_path
+             FROM agent_invocations
+             WHERE capture_status='complete'
+             ORDER BY id",
+        )
+        .context("read complete persisted captures")?;
+    let captures = statement
+        .query_map([], |row| {
+            Ok((row.get::<_, String>(0)?, row.get::<_, String>(1)?))
+        })
+        .context("query complete persisted captures")?
+        .collect::<Result<Vec<_>, _>>()
+        .context("read complete persisted capture rows")?;
+    let complete_captures = captures.len();
+    let mut failures = Vec::new();
+    for (invocation_id, conversation_path) in captures {
+        let path = match crate::trace::resolve_artifact_from(artifact_root, &conversation_path) {
+            Ok(path) => path,
+            Err(error) => {
+                failures.push(CaptureFailure {
+                    invocation_id,
+                    conversation_path,
+                    kind: CaptureFailureKind::UnsafePath,
+                    reason: error.to_string(),
+                });
+                continue;
+            }
+        };
+        if !path.is_file() {
+            failures.push(CaptureFailure {
+                invocation_id,
+                conversation_path,
+                kind: CaptureFailureKind::Missing,
+                reason: format!("conversation artifact is missing at {}", path.display()),
+            });
+            continue;
+        }
+        match crate::trace::read_conversation_status_classified(&path) {
+            Ok(read) if read.incomplete_tail => failures.push(CaptureFailure {
+                invocation_id,
+                conversation_path,
+                kind: CaptureFailureKind::Truncated,
+                reason: "conversation artifact has an unterminated event tail".to_string(),
+            }),
+            Ok(_) => {}
+            Err(crate::trace::ConversationReadError::UnsupportedSchema { version }) => {
+                failures.push(CaptureFailure {
+                    invocation_id,
+                    conversation_path,
+                    kind: CaptureFailureKind::UnsupportedSchema,
+                    reason: format!("unsupported trace schema version: {version}"),
+                });
+            }
+            Err(crate::trace::ConversationReadError::Io { context, source }) => {
+                failures.push(CaptureFailure {
+                    invocation_id,
+                    conversation_path,
+                    kind: CaptureFailureKind::Unreadable,
+                    reason: format!("{context}: {source}"),
+                });
+            }
+            Err(crate::trace::ConversationReadError::Store(error)) => {
+                failures.push(CaptureFailure {
+                    invocation_id,
+                    conversation_path,
+                    kind: CaptureFailureKind::Corrupt,
+                    reason: error.to_string(),
+                });
+            }
+            Err(crate::trace::ConversationReadError::Serialization(error)) => {
+                failures.push(CaptureFailure {
+                    invocation_id,
+                    conversation_path,
+                    kind: CaptureFailureKind::Corrupt,
+                    reason: error.to_string(),
+                });
             }
         }
-    };
-    let candidate_path = directory.path().join("candidate.db");
-    if let Err(error) = _copy_store_for_candidate(store_path, &candidate_path) {
-        return ExecutableCompatibility::Unreadable {
-            reason: format!("copy disposable store for candidate validation: {error}"),
-        };
     }
-    let connection = match rusqlite::Connection::open(&candidate_path) {
-        Ok(connection) => connection,
-        Err(error) => {
-            return ExecutableCompatibility::Unreadable {
-                reason: format!("open local candidate validation store: {error}"),
-            }
-        }
-    };
-    if let Err(error) = migrations::apply_installed_development_sqlite(
-        &connection,
-        build_info::migration_draft_manifest(),
-    ) {
-        return ExecutableCompatibility::Unreadable {
-            reason: format!("apply local candidate migrations to validation store: {error}"),
-        };
+    if failures.is_empty() {
+        Ok(CaptureCompatibility::Compatible {
+            complete_captures,
+            partial_captures,
+        })
+    } else {
+        Ok(CaptureCompatibility::Incompatible {
+            complete_captures,
+            partial_captures,
+            failures,
+        })
     }
-    _executable_compatibility(&connection)
 }
 
 fn _local_store_is_exact(store_path: &Path) -> Result<String> {
@@ -485,15 +680,9 @@ fn _local_store_is_exact(store_path: &Path) -> Result<String> {
         .unwrap_or_else(|| "uninitialized".to_string()))
 }
 
-fn _executable_compatibility(connection: &rusqlite::Connection) -> ExecutableCompatibility {
-    let references = match _read_executable_references(connection) {
-        Ok(references) => references,
-        Err(error) => {
-            return ExecutableCompatibility::Unreadable {
-                reason: format!("read placed Work lifecycle references: {error}"),
-            }
-        }
-    };
+fn _executable_compatibility(connection: &rusqlite::Connection) -> Result<ExecutableCompatibility> {
+    let references =
+        _read_executable_references(connection).context("read placed Work lifecycle references")?;
     let mut failures = Vec::new();
     for (work_kind, work_id, flow, catalog_root) in &references {
         let catalog_path = Path::new(catalog_root);
@@ -519,11 +708,11 @@ fn _executable_compatibility(connection: &rusqlite::Connection) -> ExecutableCom
         }
     }
     if failures.is_empty() {
-        ExecutableCompatibility::Compatible {
+        Ok(ExecutableCompatibility::Compatible {
             references: references.len(),
-        }
+        })
     } else {
-        ExecutableCompatibility::Incompatible { failures }
+        Ok(ExecutableCompatibility::Incompatible { failures })
     }
 }
 
@@ -533,19 +722,20 @@ pub fn build_preview(store_path: &Path) -> PromotionPreview {
     let candidate = CandidateIdentity::current();
     let database_path = store_path.display().to_string();
     let compatibility = read_store_evidence(store_path);
-    let executable_compatibility = _read_executable_compatibility(store_path);
+    let candidate_compatibility =
+        _read_candidate_compatibility(store_path, CandidateSchema::Published);
     let pending_migration_drafts = build_info::pending_migration_drafts();
     let verdict = decide(
         candidate.authority,
         &pending_migration_drafts,
         &compatibility,
-        &executable_compatibility,
+        &candidate_compatibility,
     );
     PromotionPreview {
         candidate,
         database_path,
         compatibility,
-        executable_compatibility,
+        candidate_compatibility,
         verdict,
     }
 }
@@ -553,10 +743,11 @@ pub fn build_preview(store_path: &Path) -> PromotionPreview {
 fn build_local_preview(store_path: &Path) -> PromotionPreview {
     let candidate = CandidateIdentity::current();
     let database_path = store_path.display().to_string();
-    let executable_compatibility = _read_local_executable_compatibility(store_path);
-    let compatibility = match (_local_store_is_exact(store_path), &executable_compatibility) {
+    let candidate_compatibility =
+        _read_candidate_compatibility(store_path, CandidateSchema::InstalledDevelopment);
+    let compatibility = match (_local_store_is_exact(store_path), &candidate_compatibility) {
         (Ok(frontier), _) => Compatibility::Exact { frontier },
-        (Err(_), ExecutableCompatibility::Unreadable { reason }) => Compatibility::Incompatible {
+        (Err(_), CandidateCompatibility::Unreadable { reason }) => Compatibility::Incompatible {
             reason: reason.clone(),
         },
         (Err(_), _) => Compatibility::AheadPending {
@@ -572,13 +763,13 @@ fn build_local_preview(store_path: &Path) -> PromotionPreview {
         MigrationAuthority::Published,
         &[],
         &compatibility,
-        &executable_compatibility,
+        &candidate_compatibility,
     );
     PromotionPreview {
         candidate,
         database_path,
         compatibility,
-        executable_compatibility,
+        candidate_compatibility,
         verdict,
     }
 }
@@ -608,31 +799,68 @@ fn render_human(preview: &PromotionPreview) {
         Compatibility::Incompatible { reason } => println!("  INCOMPATIBLE: {reason}"),
         Compatibility::Unreadable { reason } => println!("  UNREADABLE: {reason}"),
     }
-    match &preview.executable_compatibility {
-        ExecutableCompatibility::Compatible { references } => {
-            println!("  lifecycles     {references} executable reference(s) resolve")
-        }
-        ExecutableCompatibility::Incompatible { failures } => {
-            println!(
-                "  lifecycles     {} executable reference(s) do not resolve",
-                failures.len()
-            );
-            for failure in failures.iter().take(10) {
-                println!(
-                    "    - {} {} flow {:?} in {}: {}",
-                    failure.work_kind,
-                    failure.work_id,
-                    failure.flow,
-                    failure.catalog_root,
-                    failure.reason
-                );
+    match &preview.candidate_compatibility {
+        CandidateCompatibility::Checked {
+            executable,
+            captures,
+        } => {
+            match executable {
+                ExecutableCompatibility::Compatible { references } => {
+                    println!("  lifecycles     {references} executable reference(s) resolve")
+                }
+                ExecutableCompatibility::Incompatible { failures } => {
+                    println!(
+                        "  lifecycles     {} executable reference(s) do not resolve",
+                        failures.len()
+                    );
+                    for failure in failures.iter().take(10) {
+                        println!(
+                            "    - {} {} flow {:?} in {}: {}",
+                            failure.work_kind,
+                            failure.work_id,
+                            failure.flow,
+                            failure.catalog_root,
+                            failure.reason
+                        );
+                    }
+                    if failures.len() > 10 {
+                        println!("    - ... and {} more", failures.len() - 10);
+                    }
+                }
             }
-            if failures.len() > 10 {
-                println!("    - ... and {} more", failures.len() - 10);
+            match captures {
+                CaptureCompatibility::Compatible {
+                    complete_captures,
+                    partial_captures,
+                } => println!(
+                    "  captures       {complete_captures} complete capture(s) readable; {partial_captures} partial capture(s) retained"
+                ),
+                CaptureCompatibility::Incompatible {
+                    complete_captures,
+                    partial_captures,
+                    failures,
+                } => {
+                    println!(
+                        "  captures       {} of {complete_captures} complete capture(s) unreadable; {partial_captures} partial capture(s) retained",
+                        failures.len()
+                    );
+                    for failure in failures.iter().take(10) {
+                        println!(
+                            "    - {} at {} ({}): {}",
+                            failure.invocation_id,
+                            failure.conversation_path,
+                            failure.kind.label(),
+                            failure.reason
+                        );
+                    }
+                    if failures.len() > 10 {
+                        println!("    - ... and {} more", failures.len() - 10);
+                    }
+                }
             }
         }
-        ExecutableCompatibility::Unreadable { reason } => {
-            println!("  lifecycles     UNREADABLE: {reason}")
+        CandidateCompatibility::Unreadable { reason } => {
+            println!("  candidate      UNREADABLE: {reason}")
         }
     }
     match &preview.verdict {
@@ -687,13 +915,19 @@ pub fn local_preflight(store_path: &Path, json: bool) -> Result<()> {
 #[cfg(test)]
 mod compatibility_tests {
     use super::{
-        _read_local_executable_compatibility, decide, read_store_evidence, Compatibility,
-        ExecutableCompatibility, Verdict,
+        _read_candidate_compatibility, decide, read_store_evidence, CandidateCompatibility,
+        CandidateSchema, CaptureCompatibility, Compatibility, ExecutableCompatibility, Verdict,
     };
     use crate::build_info::MigrationAuthority::{Published, ValidationOnly};
 
-    fn executable() -> ExecutableCompatibility {
-        ExecutableCompatibility::Compatible { references: 0 }
+    fn candidate() -> CandidateCompatibility {
+        CandidateCompatibility::Checked {
+            executable: ExecutableCompatibility::Compatible { references: 0 },
+            captures: CaptureCompatibility::Compatible {
+                complete_captures: 0,
+                partial_captures: 0,
+            },
+        }
     }
 
     #[test]
@@ -703,11 +937,11 @@ mod compatibility_tests {
             latest_known: "current".to_string(),
         };
         assert_eq!(
-            decide(Published, &[], &compatibility, &executable()),
+            decide(Published, &[], &compatibility, &candidate()),
             Verdict::PromoteAndMigrate
         );
         assert!(matches!(
-            decide(ValidationOnly, &[], &compatibility, &executable()),
+            decide(ValidationOnly, &[], &compatibility, &candidate()),
             Verdict::Reject { .. }
         ));
     }
@@ -738,11 +972,30 @@ mod compatibility_tests {
         let directory = tempfile::tempdir().unwrap();
         let store = directory.path().join("loopflow.db");
         crate::store::sqlite::SqliteStore::open_as_promotion_boundary(&store).unwrap();
-        let compatibility = _read_local_executable_compatibility(&store);
+        let compatibility =
+            _read_candidate_compatibility(&store, CandidateSchema::InstalledDevelopment);
         assert!(
-            matches!(compatibility, ExecutableCompatibility::Compatible { .. }),
+            matches!(compatibility, CandidateCompatibility::Checked { .. }),
             "{compatibility:?}"
         );
+    }
+
+    #[test]
+    fn one_unreadable_candidate_snapshot_produces_one_blocker() {
+        let Verdict::Reject { reasons } = decide(
+            Published,
+            &[],
+            &Compatibility::Exact {
+                frontier: "current".to_string(),
+            },
+            &CandidateCompatibility::Unreadable {
+                reason: "copy shared store: disk I/O error".to_string(),
+            },
+        ) else {
+            panic!("an unreadable candidate snapshot must fail closed");
+        };
+        assert_eq!(reasons.len(), 1);
+        assert!(reasons[0].contains("copy shared store"));
     }
 }
 

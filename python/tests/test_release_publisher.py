@@ -73,6 +73,20 @@ def test_publisher_rejects_validation_only_control_plane(
         publish_release._validate_release_candidate(binary, tmp_path)
 
 
+def test_publisher_accepts_published_identity_when_home_preflight_refuses(tmp_path: Path):
+    binary = tmp_path / "lf"
+    binary.write_text(
+        "#!/bin/sh\n"
+        "echo '{\"candidate\":{\"authority\":\"published\"},"
+        "\"verdict\":{\"kind\":\"reject\"}}'\n"
+        "echo 'Error: promotion preflight refused' >&2\n"
+        "exit 1\n"
+    )
+    binary.chmod(0o755)
+
+    publish_release._validate_release_candidate(binary, tmp_path)
+
+
 def test_publisher_completes_all_stages_before_marking_release_published(
     tmp_path: Path, monkeypatch: pytest.MonkeyPatch
 ):
@@ -93,6 +107,7 @@ def test_publisher_completes_all_stages_before_marking_release_published(
         cwd: Path = tmp_path,
         capture: bool = False,
         env: dict[str, str] | None = None,
+        check: bool = True,
     ) -> subprocess.CompletedProcess[str]:
         commands.append(command)
         if command[:3] == ["git", "tag", "--points-at"]:

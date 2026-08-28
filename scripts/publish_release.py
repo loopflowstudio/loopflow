@@ -63,12 +63,13 @@ def _run(
     cwd: Path = ROOT,
     capture: bool = False,
     env: dict[str, str] | None = None,
+    check: bool = True,
 ) -> subprocess.CompletedProcess[str]:
     print(f"$ {shlex.join(cmd)}", flush=True)
     return subprocess.run(
         cmd,
         cwd=cwd,
-        check=True,
+        check=check,
         capture_output=capture,
         text=True,
         env=env,
@@ -148,6 +149,7 @@ def _validate_release_candidate(binary: Path, scratch: Path) -> None:
         [str(binary), "install", "preflight", "--json"],
         capture=True,
         env={**os.environ, "LF_CONTROL_DB_PATH": str(scratch / "uninitialized.db")},
+        check=False,
     )
     try:
         candidate = json.loads(result.stdout)["candidate"]

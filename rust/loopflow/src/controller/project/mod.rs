@@ -71,9 +71,40 @@ struct PreparedProjectStep {
 }
 
 #[derive(Debug)]
-struct ProjectChildControl {
+pub(crate) struct ProjectChildControl {
     run_id: RunId,
     token: ProjectChildControlToken,
+}
+
+impl ProjectChildControl {
+    #[cfg(test)]
+    pub(crate) fn run_id(&self) -> &RunId {
+        &self.run_id
+    }
+
+    #[cfg(test)]
+    pub(crate) fn token(&self) -> &ProjectChildControlToken {
+        &self.token
+    }
+
+    pub(crate) async fn advance(
+        &self,
+        store: &SharedStore,
+        project_id: &ProjectId,
+        basis: &ProjectChildControlBasis,
+    ) -> Result<()> {
+        store
+            .advance_project_child_control(project_id, &self.run_id, &self.token, basis)
+            .await
+            .map_err(project_child_control_error)
+    }
+
+    async fn release(&self, store: &SharedStore, project_id: &ProjectId) -> Result<()> {
+        store
+            .release_project_child_control(project_id, &self.run_id, &self.token)
+            .await?;
+        Ok(())
+    }
 }
 
 pub(crate) async fn run(store: SharedStore, project_id: ProjectId) -> Result<()> {
@@ -89,6 +120,51 @@ async fn owning_wave(store: &SharedStore, project: &ControlledProject) -> Result
         .get_wave(&project.wave_id)
         .await?
         .ok_or_else(|| anyhow!("owning Wave {} is not registered", project.wave_id))
+}
+
+pub(crate) async fn publish_project_controller(
+    store: &SharedStore,
+    project: &Project,
+    wave: &Wave,
+    turn: &mut crate::lf::commands::run::PreparedHarnessTurn,
+    basis: &ProjectChildControlBasis,
+) -> Result<(crate::run_record::CaptureHandle, ProjectChildControl)> {
+    let capture = crate::run_record::CaptureHandle::begin_with_context(
+        crate::run_record::RunSpec {
+            harness: turn.harness.clone(),
+            model: turn.model.clone(),
+            surface: "headless".to_string(),
+            cwd: Path::new(wave.repo()).to_path_buf(),
+            repo: Some(Path::new(wave.repo()).to_path_buf()),
+            worktree: Some(Path::new(wave.repo()).to_path_buf()),
+            skill: Some(basis.position.step.clone()),
+            subjects: vec![
+                crate::run_record::SubjectAttribution::declared(format!(
+                    "wave:{}",
+                    wave.name()
+                )),
+                crate::run_record::SubjectAttribution::declared(format!(
+                    "project:{}",
+                    project.plan.slug
+                )),
+            ],
+        },
+        &turn.context,
+    )?;
+    let run_id = capture.run_id();
+    let token = store
+        .begin_project_child_control(&project.id, &run_id, basis)
+        .await
+        .map_err(project_child_control_error)?;
+    let control = ProjectChildControl { run_id, token };
+    capture.record_input("initial", &turn.input);
+    turn.config.env.extend(capture.environment());
+    turn.config.env.insert(
+        PROJECT_CHILD_CONTROL_ENV.to_string(),
+        control.token.as_str().to_string(),
+    );
+    capture.mark_spawn_requested();
+    Ok((capture, control))
 }
 
 async fn run_project_inner(store: SharedStore, project_id: ProjectId) -> Result<()> {
@@ -110,41 +186,14 @@ async fn run_project_inner(store: SharedStore, project_id: ProjectId) -> Result<
             prepare_project_flow_step(&store, &mut project, &wave, &flow, &observations).await?;
         let mut active_planning = prepared.planning.clone();
         let (harness_name, _) = crate::engine::config::parse_agent(&project.state.agent);
-        let capture = crate::run_record::CaptureHandle::begin_with_context(
-            crate::run_record::RunSpec {
-                harness: prepared.turn.harness.clone(),
-                model: prepared.turn.model.clone(),
-                surface: "headless".to_string(),
-                cwd: Path::new(wave.repo()).to_path_buf(),
-                repo: Some(Path::new(wave.repo()).to_path_buf()),
-                worktree: Some(Path::new(wave.repo()).to_path_buf()),
-                skill: flow.current().map(|step| step.step.clone()),
-                subjects: vec![
-                    crate::run_record::SubjectAttribution::declared(format!(
-                        "wave:{}",
-                        wave.name()
-                    )),
-                    crate::run_record::SubjectAttribution::declared(format!(
-                        "project:{}",
-                        project.plan.slug
-                    )),
-                ],
-            },
-            &prepared.turn.context,
-        )?;
-        let run_id = capture.run_id();
-        let token = store
-            .begin_project_child_control(&project.id, &run_id, &prepared.control_basis)
-            .await
-            .map_err(project_child_control_error)?;
-        let control = ProjectChildControl { run_id, token };
-        capture.record_input("initial", &prepared.turn.input);
-        prepared.turn.config.env.extend(capture.environment());
-        prepared.turn.config.env.insert(
-            PROJECT_CHILD_CONTROL_ENV.to_string(),
-            control.token.as_str().to_string(),
-        );
-        capture.mark_spawn_requested();
+        let (capture, control) = publish_project_controller(
+            &store,
+            &project,
+            &wave,
+            &mut prepared.turn,
+            &prepared.control_basis,
+        )
+        .await?;
         let capture = Some(capture);
         let (event_tx, mut event_rx) = mpsc::unbounded_channel();
         let mut harness =
@@ -354,13 +403,7 @@ async fn run_project_inner(store: SharedStore, project_id: ProjectId) -> Result<
                             store.put_project_controller_state(&project.state).await?;
                             let _ = harness.stop().await;
                             finish_capture(capture.as_ref(), "completed");
-                            store
-                                .release_project_child_control(
-                                    &project.id,
-                                    &control.run_id,
-                                    &control.token,
-                                )
-                                .await?;
+                            control.release(&store, &project.id).await?;
                             if project_run_must_remain_resident(
                                 &store,
                                 &mut ask_lane,
@@ -620,15 +663,9 @@ async fn start_project_flow_turn(
     control: &ProjectChildControl,
     prepared: PreparedProjectStep,
 ) -> Result<()> {
-    store
-        .advance_project_child_control(
-            &project.id,
-            &control.run_id,
-            &control.token,
-            &prepared.control_basis,
-        )
-        .await
-        .map_err(project_child_control_error)?;
+    control
+        .advance(store, &project.id, &prepared.control_basis)
+        .await?;
     let wave = owning_wave(store, project).await?;
     open_project_flow_body(flow, wave.repo())?;
     if let Some(capture) = capture {

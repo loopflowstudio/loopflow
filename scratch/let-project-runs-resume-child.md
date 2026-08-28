@@ -118,6 +118,9 @@ forced before the architecture changed.
   generic Run identity to be evidence and causality only. Its focused proofs
   covered launch, capture, replay, and accounts, not Project-to-existing-Task
   resume.
-- The restoration fixture now crosses Project phase and process replacement;
-  the command fixture invokes `resume_task_async` twice and returns the same
-  Task Work. Unrelated, stale, superseded, and missing authority remain denied.
+- The restoration command fixture now enters through the Project runner's
+  production publication boundary, which creates the generic Run and exact
+  control capability together before provider work. It crosses phase and
+  process replacement through `resume_task_async`, returns the same Task Work
+  on retry and recovery, and denies stale and superseded authority. The store
+  fixture separately keeps unrelated and missing authority denied.

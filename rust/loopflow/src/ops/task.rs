@@ -5032,7 +5032,7 @@ mod tests {
     use crate::child::ChildRef;
     use crate::controller::task::TaskLifecyclePhase;
     use crate::durable::{
-        AskBody, AskOrigin, AskState, AskTarget, FlowPosition, ProjectChildControlBasis, RunId,
+        AskBody, AskOrigin, AskState, AskTarget, Author, FlowPosition, ProjectChildControlBasis,
         WorkRef, WorkStatus,
     };
     use crate::engine::AgentExecutionBoundary;
@@ -5446,7 +5446,7 @@ mod tests {
     #[cfg(unix)]
     #[tokio::test]
     #[allow(clippy::await_holding_lock)] // the env lock is the test serializer
-    async fn project_control_resumes_the_same_task_idempotently() {
+    async fn project_runner_control_resumes_task_across_phase_and_process_recovery() {
         use std::os::unix::fs::PermissionsExt;
 
         let _env_lock = crate::journal::test_env_lock();
@@ -5514,29 +5514,79 @@ mod tests {
         std::env::set_var("LF_CONTROL_HOME", database_path.parent().unwrap());
         std::env::set_var("LF_CONTROL_DB_PATH", &database_path);
 
-        let run_id = RunId::new();
-        let token = store
-            .begin_project_child_control(
-                &task.project_id,
-                &run_id,
-                &ProjectChildControlBasis {
-                    position: FlowPosition {
-                        work: WorkRef::Project(task.project_id.clone()),
-                        flow: "project".to_string(),
-                        step: "project/pursue".to_string(),
-                        node_id: None,
-                        human: false,
-                        step_index: 1,
-                        iteration: 0,
-                        updated_at: time::OffsetDateTime::now_utc(),
-                    },
-                    steer_sequence: 0,
-                },
+        let project = store.get_project(&task.project_id).await.unwrap().unwrap();
+        let wave = store.get_wave(&task.wave_id).await.unwrap().unwrap();
+        let basis = |step: &str, step_index: u32, steer_sequence: u64| ProjectChildControlBasis {
+            position: FlowPosition {
+                work: WorkRef::Project(task.project_id.clone()),
+                flow: "project".to_string(),
+                step: step.to_string(),
+                node_id: None,
+                human: false,
+                step_index,
+                iteration: 0,
+                updated_at: time::OffsetDateTime::now_utc(),
+            },
+            steer_sequence,
+        };
+        let clarify_basis = basis("project/clarify", 0, 0);
+        let mut clarify_turn = crate::lf::commands::run::prepare_harness_turn(
+            "project/clarify",
+            "Clarify the Project before supervising Tasks.",
+            wave.name(),
+            None,
+        )
+        .unwrap();
+        let (first_capture, first_control) = crate::controller::project::publish_project_controller(
+            &store,
+            &project,
+            &wave,
+            &mut clarify_turn,
+            &clarify_basis,
+        )
+        .await
+        .unwrap();
+        assert_eq!(
+            clarify_turn
+                .config
+                .env
+                .get(crate::durable::RUN_ID_ENV)
+                .map(String::as_str),
+            Some(first_control.run_id().as_str())
+        );
+        assert_eq!(
+            clarify_turn
+                .config
+                .env
+                .get(crate::durable::PROJECT_CHILD_CONTROL_ENV)
+                .map(String::as_str),
+            Some(first_control.token().as_str())
+        );
+        std::env::set_var(crate::durable::RUN_ID_ENV, first_control.run_id().as_str());
+        std::env::set_var(
+            crate::durable::PROJECT_CHILD_CONTROL_ENV,
+            first_control.token().as_str(),
+        );
+
+        let project_work = WorkRef::Project(task.project_id.clone());
+        store
+            .append_steer(
+                &project_work,
+                Author::User,
+                "resume the parked Task during pursuit",
             )
             .await
             .unwrap();
-        std::env::set_var(crate::durable::RUN_ID_ENV, run_id.as_str());
-        std::env::set_var(crate::durable::PROJECT_CHILD_CONTROL_ENV, token.as_str());
+        let stale = resume_task_async(&task.plan.identifier, None, None)
+            .await
+            .expect_err("new Project direction must stale the prepared phase");
+        assert!(stale.to_string().contains("basis is stale"));
+
+        let pursue_basis = basis("project/pursue", 1, 1);
+        first_control
+            .advance(&store, &task.project_id, &pursue_basis)
+            .await
+            .unwrap();
 
         for _ in 0..2 {
             let resumed = resume_task_async(&task.plan.identifier, None, None)
@@ -5549,6 +5599,48 @@ mod tests {
                     if resumed_work == &work
             ));
         }
+
+        let mut recovered_turn = crate::lf::commands::run::prepare_harness_turn(
+            "project/pursue",
+            "Resume Project pursuit after controller process loss.",
+            wave.name(),
+            None,
+        )
+        .unwrap();
+        let (recovered_capture, recovered_control) =
+            crate::controller::project::publish_project_controller(
+                &store,
+                &project,
+                &wave,
+                &mut recovered_turn,
+                &pursue_basis,
+            )
+            .await
+            .unwrap();
+        let superseded = resume_task_async(&task.plan.identifier, None, None)
+            .await
+            .expect_err("process recovery must supersede the prior controller");
+        assert!(superseded.to_string().contains("was superseded"));
+
+        std::env::set_var(
+            crate::durable::RUN_ID_ENV,
+            recovered_control.run_id().as_str(),
+        );
+        std::env::set_var(
+            crate::durable::PROJECT_CHILD_CONTROL_ENV,
+            recovered_control.token().as_str(),
+        );
+        let resumed = resume_task_async(&task.plan.identifier, None, None)
+            .await
+            .expect("the recovered Project controller resumes the same Task");
+        assert!(matches!(
+            resumed.receipt,
+            super::super::child::WorkControlReceipt::Resume { work: ref resumed_work }
+                if resumed_work == &work
+        ));
+
+        first_capture.finish("failed").unwrap();
+        recovered_capture.finish("failed").unwrap();
     }
 
     #[tokio::test]

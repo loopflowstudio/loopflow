@@ -223,3 +223,30 @@ Activity empty copy to successful reads.
 - Capturing before the live reads settle. The legacy nanoseconds sleep returned
   early for long delays here; the duration-based sleep now holds the declared
   capture interval and returns on cancellation instead of taking a false frame.
+- Using obsolete capture variable names. The current knobs are
+  `LOOPFLOW_UI_TEST_DELAY`, `LOOPFLOW_UI_TEST_WIDTH`, and
+  `LOOPFLOW_UI_TEST_HEIGHT`; `..._SNAPSHOT_*` names silently use the 2.5-second
+  default and capture the healthy live query while it is still loading.
+
+## Slice Review — 2026-08-27
+
+| Claim | Planned behavior | Implemented behavior | Proof | Result |
+|---|---|---|---|---|
+| Installed authority | The configured app reads the Home selected by the machine installation, independent of inherited routing variables and PATH. | Reads and controls both resolve `~/.lf-machine/install/gates/1/lf`; only a machine with no install receipt uses the bundled validation helper. | Exact installed app launched with all `LF_*` routing removed and `PATH=/usr/bin:/bin`; launcher suite passed 14 authority/control behaviors. | pass |
+| Populated fleet | A cold launch exposes the real local Wave roster. | `RegistryQuery` receives `lf ls --all --json` through the machine gate. | `/tmp/loo-274-review-settled.png` shows **5 Waves**; the exact gate independently returned the same five Loopflow Waves. | pass |
+| Populated roadmap | Roadmap loading terminates with the selected store's real Work. | `RegistryQuery` receives `lf roadmap --all --json` through the same gate. | The installed-app capture shows populated Work rows; the exact gate returned product with 3 Projects and 88 Tasks. | pass |
+| Terminal Activity state | Activity must leave `Reading Activity…` even when its DTO cannot decode. | A failed first read becomes `Activity unavailable` with the subprocess/decode reason. | The installed-app capture shows the current missing-`run_id` reason and the terminal unavailable state. | pass |
+| Failed reads are not empty | Unavailable fleet, roadmap, or Activity evidence must not claim healthy emptiness. | Empty copy is restricted to successful empty readings; the error fixture makes every affected reading unavailable. | Live capture shows no Activity empty claim; `PodiumStateTests.testUnavailableIsNotRenderedAsEmpty` pins all three surfaces. | pass |
+
+The exact-head capture checksum is
+`0518ce7c1e8a9cc1764049f2f3ef3ed88ef55568a87496f85d31835df99cfe53`.
+Focused review proofs passed: `uv run pytest python/tests/test_loopflow_dev.py`,
+`swift test --package-path swift --filter LocalWaveAgentLauncherTests`, and
+`swift test --package-path swift --filter PodiumModelTests` (28 Swift tests
+across the two filters).
+
+Disposition: the restoration slice is coherent and its applicable Done When
+claims hold through the configured installed app. The Activity `run_id` wire
+repair, an unversioned install-authority API, the disposable newer-Home gate,
+and the broader `PodiumReading` audit remain explicit prevention work rather
+than hidden conditions of this repair.

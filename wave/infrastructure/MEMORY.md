@@ -41,6 +41,32 @@ Renamed from `systems` in the 2026-07-08 wave/project/task restructure. Steers L
   Linear moves an issue, historical Task Runs retain their evidence but lose
   automated PR and completion authority; fail closed before side effects and
   preserve the full Work, Run, Steer, and PR history for remediation.
+- **A live parent Run is not proof of child-control authority** (learned
+  2026-08-22). A relaunched Project can have a healthy provider process yet
+  lack the durable Turn Basis required to reserve its Task Run. Wave-level
+  Task control then correctly fails because only the immediate parent may act.
+  Preserve the existing Task, Work, and PR; do not retry into duplicate Runs
+  or publications. Wake pursuit only when a basis-bearing immediate-parent Run
+  exists. A Turn without `LF_AGENT_INVOCATION_ID` also cannot open a parent Ask,
+  so report that escalation boundary explicitly rather than silently spinning.
+- **Historical continuity currently short-circuits daily telemetry** (observed
+  2026-08-23). `telemetry-daily` stops in `doctor` on the same eight 2026-08-04
+  through 2026-08-11 gap days before its scorecard runs. LOO-241 owns making
+  continuity obligation-aware. Fresh receipts are new evidence for that Task,
+  not grounds for duplicate daily Tasks; retry its Work only from a Turn with
+  valid Run execution context.
+- **Release orchestration and product publication are separate evidence**
+  (observed 2026-08-23). A cron receipt proves only the scheduled target's
+  terminal state. `lf release status` remained at tag `v0.12.14` with a
+  successful hosted workflow and gate-safe notes but no GitHub Release after
+  both successful and failed `release-run` receipts. Judge the release KR by
+  the product state and keep same-tag recovery singular; LOO-261 owns the known
+  clean-host candidate-validation boundary.
+- **Incomplete release synchronization still consumes caller edits**
+  (reproduced 2026-08-23). The scheduled retry left `main` clean after removing
+  two pre-run Infrastructure memory edits. LOO-266 owns preserving the caller
+  branch, index, and working bytes across every release exit; do not file a
+  second repair Task for later instances of the same failure.
 
 ## Model (design settled)
 

@@ -41,6 +41,22 @@ entered through the production Project controller-publication function and the
 ordinary async resume core. Mutating a live parked Task only to manufacture
 review evidence was intentionally not attempted.
 
+## Boundary follow-up
+
+The parent-to-child inventory in `scratch/questions.md` does not invalidate
+this slice. LOO-227's observable contract is the immediate Project's authority
+to resume an existing parked Task. Shared Wave overrides such as `task steer`
+are a distinct control boundary: applying only the Project token there would
+remove documented Wave behavior without supplying an exact Wave capability.
+The branch therefore leaves those commands unchanged rather than creating a
+partial authority hierarchy.
+
+`git diff --quiet 45e9db406..HEAD -- rust python scripts tests` returned zero,
+proving the inventory pass changed no executable source after the first slice
+review. The explicit Project capability remains a coherent endpoint for this
+Task; a later Wave-control design can compose above it without reopening the
+resume path or treating Run attribution as authority.
+
 ## Verification
 
 - `cargo test -p loopflow project_child_control_survives_phase_and_process_recovery_exactly -- --nocapture`

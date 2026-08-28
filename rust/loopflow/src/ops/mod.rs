@@ -32,7 +32,6 @@ pub(crate) use ask_comments::publish_pending_ask_comments;
 pub(crate) use child::ambient_author;
 pub(crate) use commit::{checkpoint_task_restart, checkpoint_task_worktree};
 pub use commit::{commit_workflow, commit_workflow_traced, CommitOptions};
-pub(crate) use cron::cron_receipt_ids;
 pub use cron::{
     add_cron, daily_time_of, default_launch_agents_dir, latest_cron_receipt, list_cron_receipts,
     list_crons, parse_schedule, parse_wait_duration, receipt_is_stale, receipt_root,
@@ -41,6 +40,7 @@ pub use cron::{
     CronReceipt, CronSchedule, CronSource, CronSpec, CronSyncResult, CronTargetKind, InstalledCron,
     SystemLaunchctl,
 };
+pub(crate) use cron::{cron_receipt_ids, list_cron_obligations, CronObligation};
 pub use error::{OpsError, OpsResult};
 pub use flow::execute_flow_ops;
 pub use land::{arm, mark_ready, submit, LandOptions};

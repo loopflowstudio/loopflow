@@ -636,6 +636,13 @@ that PR. `--wave` and `--repo owner/repo` filter the same local report.
 path, and the latest known and applied migrations. Those fields still print
 when the database is too new or came from a divergent development build.
 
+The `continuity` check reads installed cron activation and scheduled receipts.
+Only the latest due interval for each cron is live: a missing receipt names the
+cron, Home, expected interval, and `lf cron history` command. Pre-activation and
+older ledger gaps remain visible history without keeping every later doctor
+red. A failed target still proves the scheduler fired; its own receipt and
+target error remain the actionable evidence.
+
 ## Measuring Codebase Weight
 
 ```bash
@@ -958,10 +965,12 @@ lf cron history --wave infrastructure --days 35
 checkout, target catalog, and fixed-daily schedules without changing launchd.
 `sync` repeats those checks before changing
 launchd, refuses a Home that does not own the Wave placement, and prunes jobs
-removed from the declaration. Jobs execute through the installed release `lf`
-with a secret-free host environment. Each firing writes a running receipt
-before the target starts and atomically replaces it with `succeeded` or
-`failed`; an interrupted runner remains visibly stale. Logs stay under
+removed from the declaration. It preserves each unchanged job's activation
+timestamp; changing its Home, schedule, target, or identity starts a new
+obligation. Jobs execute through the installed release `lf` with a secret-free
+host environment. Each firing writes a running receipt before the target starts
+and atomically replaces it with `succeeded` or `failed`; an interrupted runner
+remains visibly stale. Logs stay under
 `<repo>/.lf/logs/`, while receipts survive checkout replacement under
 `<LF_HOME>/cron/receipts/`.
 

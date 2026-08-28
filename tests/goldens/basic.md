@@ -4,7 +4,7 @@
 You are running inside loopflow. Loopflow owns git, worktrees, delegation, and
 release plumbing. Route those operations through `lf`, not around it. Doing them
 by hand breaks the machinery loopflow relies on: worktree placement, release
-state, and Run authority.
+state, and execution authority.
 
 ## Git, Worktrees, GitHub -> `lf`
 
@@ -40,20 +40,15 @@ four publish the PR headlessly and open no browser:
   Stops there: no auto-merge. Your merge click on GitHub is the one required
   gate — the button unlocks once checks pass. (GitHub blocks approving your own
   PR, so the gate is the merge click, not a review approval.) Use this as the
-  default finish for anything a person should land by hand. **A managed Task
-  rejects `submit`:** a Task already has exactly one shipping decision — its
-  `finally` review — so a GitHub merge click would be a competing second gate.
-  Ship a Task with `lf pr land` instead.
+  default finish for anything a person should land by hand, including tracked
+  Task work.
 - **`lf pr arm`** — prepare the exact head, request auto-merge, and return. Task
   disposition is recorded but is never applied before an authoritative merge.
 - **`lf pr land`** — run the same arm step, then join the one durable watcher for
   the PR. It observes GitHub, repairs failing required checks once per failed
   head, re-arms material repairs, and returns only after merge or an actionable
-  durable block. Inside a managed Task, `lf pr land` is the one shipping
-  declaration: its `finally` review is the sole human shipping decision, and
-  Loopflow arms the exact reviewed head after approval instead of adding a human
-  merge click. Bare `land` leaves the Task open; `-c` completes it after merge,
-  and `--next <slug>` rotates it after merge.
+  durable block. Bare `land` leaves a Task open; `-c` completes it after merge,
+  and `--next <slug>` rotates its serial PR chain after merge.
 
 **`lf pr open`** is the one command that *presents* — it publishes, then opens
 the PR for review (the GitHub page in the browser). It is a human-initiated
@@ -107,7 +102,9 @@ orchestration is unavailable, report the exact blocker once and continue inline
 whenever the seed remains computable.
 
 A one-shot operation is a direct skill or flow run. Durable delegated work
-starts from an existing Linear task with `lf task run <issue-id>`.
+starts from an existing Linear task with `lf task prepare <issue-id>`; use
+`lf task run <issue-id>` when the built-in controller should pursue it end to
+end.
 When dependent work must begin before another Task PR merges, start a separate
 Task with `--stack-on <parent-task>`. Do not rotate the parent Task onto a second
 simultaneously open PR; its multi-PR history remains serial. The child binds to
@@ -150,25 +147,87 @@ A Work names one stable Home authority, whose SSH route may change without
 moving the Work.
 
 ```bash
-lf --as task:DES-123 implement                  # one skill in the Task worktree
 lf home id                                      # this machine's HomeId
-lf work place wave <wave-id> <home-id>          # only while no Run is live
+lf work place wave <wave-id> <home-id>          # change durable placement
 lf start <wave>                                 # start it on this machine
 lf stop <wave>                                  # stop it on this machine
 lf ssh <home-id> status <wave> --json           # inspect it on that Home
 lf ssh <home-id> start <wave>                   # start it on that Home
 ```
 
-Use `--as task:...`, `--as project:...`, or `--as wave:...` only with one
-named skill. In a plain terminal it starts a supervised User Run at that
-Work's placement. Inside a Run it is an exact identity assertion; a mismatch
-fails. It never binds a multi-step flow.
-
 `lf ssh` runs only the target machine's `lf`; the inner `lf` and `--` separator
 are implicit. Foreground commands can choose from origin-forwarded and
 target-local subscription accounts. Durable processes scrub forwarded provider,
 GitHub, PM, and secret authority before detaching and use credentials installed
 on their machine.
+
+## Work Directly On Behalf Of Existing Work
+
+Run one bounded skill with an existing Task, Project, or Wave as its subject:
+
+```bash
+lf task prepare LOO-267
+lf project prepare runtime-model
+lf --task LOO-267 research \
+  "Research the runtime model; write scratch/research-runtime-model.md"
+lf --task LOO-267 research \
+  "Research design handoff; write scratch/research-design-handoff.md"
+lf --project context project/clarify \
+  "Reconcile the KRs with the current evidence"
+```
+
+`lf task prepare` ensures tracked Task Work, its one worktree, and serial PR
+identity without installing or starting an end-to-end controller. `--task`,
+`--project`, and `--wave` start one supervised skill Run about the most specific
+selected Work. A Task implies its Project and Wave; a Project implies its Wave.
+Broader selectors may be supplied as qualifiers and must match. These commands
+never bind a flow, load or advance controller state, resume a provider session,
+or grant exclusive ownership. Task binding supplies the Task seed and uses its
+existing worktree as cwd. Project and Wave binding use the owning Wave
+repository; Projects do not own worktrees, so repository changes still belong
+in a Task. Zero, one, or many generic Runs may concern the same Work. Each has
+its own Run id; Work attribution is provenance, never a reservation or mutation
+lease.
+
+The worktree is shared durable context. Every Run assembled from a Task
+worktree receives the recursive UTF-8 Markdown tree under `scratch/` as a
+launch-time snapshot. Give parallel contributions distinct paths. A direct
+bound skill leaves its edits uncommitted and must never stage or claim unrelated
+dirty files merely because it finished first. After the bounded Runs finish,
+inspect the shared tree. When the complete set is one coherent checkpoint, use
+the ordinary `lf commit`/PR workflow to share it.
+
+Use Task, Project, or Wave controller commands when the built-in automation
+should choose and run subsequent work. Use `--task`, `--project`, or `--wave`
+with a skill when a human or parent already knows the one bounded contribution
+to make.
+
+A parent follows the same path without borrowing the Task's controller process:
+launch the exact `--task ...` contributions, wait for the artifacts it needs,
+inspect the shared tree, then invoke the explicit Task command. The generic Run
+ids remain provenance; they never become Task planning leases.
+
+When accumulated research or changed Task direction invalidates the current
+attempt, update the Task definition, wait for the exact contributions you need,
+then start its built-in controller over from a new kickoff:
+
+```bash
+lf task restart LOO-267 "Reconcile the new runtime evidence"
+```
+
+Restart force-refreshes the Task, checkpoints and pushes its complete current
+worktree, preserves its identity/worktree/PR history, clears provider
+continuation, and replaces controller state at its configured first flow in a
+fresh provider session. Existing scratch may be an older poor design;
+reconcile all of it as evidence instead of treating it as approved direction.
+If the stable controller session is live, restart interrupts and replaces that
+registered process. If it is absent, restart simply starts one. Generic Runs
+about the Task remain independent evidence and never block restart.
+
+Explicit flow selections are instructions, including when they differ from the
+default end-to-end Task script. Run them. The default feature flow carries the
+design review policy; commands do not reject an operator's off-script flow or
+try to prove that the “right” process requested it.
 
 ## Speak
 

@@ -4,15 +4,15 @@ use time::OffsetDateTime;
 use crate::child::ChildRef;
 use crate::durable::{
     AbandonReceipt, Ask, AskBody, AskClaim, AskId, AskOrigin, AskResult, AskState, AskTarget,
-    Author, FlowPosition, Home, HomeId, Placement, ProjectId, RunId, Steer, SteerId, SteerReceipt,
-    TaskId, ToolResponseId, ToolResponseReceipt, ToolResponseWrite, WorkRef, WorkStatus,
+    Author, Home, HomeId, Placement, ProjectId, RunId, Steer, SteerId, SteerReceipt, TaskId,
+    ToolResponseId, ToolResponseReceipt, ToolResponseWrite, WorkRef, WorkStatus,
 };
 use crate::id::WaveId;
-use crate::project::Project;
 use crate::store::durable::{AskCommentTransition, AskCommentWrite};
 use crate::store::rows::now_unix;
 use crate::store::{StoreError, StoreResult};
-use crate::task::Task;
+use crate::work::project::Project;
+use crate::work::task::Task;
 
 use super::SqliteStore;
 
@@ -137,54 +137,6 @@ impl SqliteStore {
         Ok(placement)
     }
 
-    pub fn set_flow_position(
-        &self,
-        work: &WorkRef,
-        position: &FlowPosition,
-    ) -> StoreResult<FlowPosition> {
-        let mut conn = self.conn.lock().expect("store mutex poisoned");
-        let tx = conn.transaction_with_behavior(TransactionBehavior::Immediate)?;
-        require_ready_work(&tx, work)?;
-        if &position.work != work {
-            return Err(StoreError::InvalidAuthority(
-                "flow position does not belong to this Work".to_string(),
-            ));
-        }
-        if position.flow.trim().is_empty() || position.step.trim().is_empty() {
-            return Err(StoreError::InvalidData(
-                "flow and step cannot be empty".to_string(),
-            ));
-        }
-        if position.human && position.node_id.is_none() {
-            return Err(StoreError::InvalidData(
-                "human flow positions require a stable node id".to_string(),
-            ));
-        }
-        tx.execute(
-            "INSERT INTO work_flow_positions (
-                work_kind, work_id, flow, step, node_id, human, step_index, iteration, updated_at
-             ) VALUES (?1, ?2, ?3, ?4, ?5, ?6, ?7, ?8, ?9)
-             ON CONFLICT(work_kind, work_id) DO UPDATE SET
-                flow=excluded.flow, step=excluded.step, node_id=excluded.node_id,
-                human=excluded.human, step_index=excluded.step_index,
-                iteration=excluded.iteration,
-                updated_at=excluded.updated_at",
-            params![
-                work.kind(),
-                work.id(),
-                position.flow,
-                position.step,
-                position.node_id,
-                position.human,
-                i64::from(position.step_index),
-                i64::from(position.iteration),
-                position.updated_at.unix_timestamp()
-            ],
-        )?;
-        tx.commit()?;
-        Ok(position.clone())
-    }
-
     pub fn create_ask(
         &self,
         origin: &AskOrigin,
@@ -261,7 +213,6 @@ impl SqliteStore {
             });
         }
 
-        validate_flow_step_position(&tx, &ask)?;
         let run_id = RunId::new();
         if tx.execute(
             "UPDATE ask_exchanges
@@ -337,7 +288,6 @@ impl SqliteStore {
                 "Ask Run {run_id} was not presented"
             )));
         }
-        validate_flow_step_position(&tx, &ask)?;
         let now = now_unix();
         let author = match ask.target {
             AskTarget::User => Author::User,
@@ -1533,49 +1483,6 @@ fn validate_ask_body(request: &AskBody) -> StoreResult<()> {
     }
 }
 
-fn validate_flow_step_position(conn: &Connection, ask: &Ask) -> StoreResult<()> {
-    let AskBody::FlowStep {
-        flow,
-        node_id,
-        skill,
-        iteration,
-    } = &ask.request
-    else {
-        return Ok(());
-    };
-    let position = conn
-        .query_row(
-            "SELECT flow, step, node_id, human, iteration
-             FROM work_flow_positions WHERE work_kind=?1 AND work_id=?2",
-            params![ask.origin.work.kind(), ask.origin.work.id()],
-            |row| {
-                Ok((
-                    row.get::<_, String>(0)?,
-                    row.get::<_, String>(1)?,
-                    row.get::<_, Option<String>>(2)?,
-                    row.get::<_, bool>(3)?,
-                    row.get::<_, i64>(4)?,
-                ))
-            },
-        )
-        .optional()?;
-    if position.as_ref()
-        != Some(&(
-            flow.clone(),
-            skill.clone(),
-            Some(node_id.clone()),
-            true,
-            i64::from(*iteration),
-        ))
-    {
-        return Err(StoreError::InvalidAuthority(format!(
-            "Ask {} no longer matches the persisted human flow position",
-            ask.id
-        )));
-    }
-    Ok(())
-}
-
 fn validate_ask_result(result: &AskResult) -> StoreResult<()> {
     if result.text().trim().is_empty() {
         return Err(StoreError::InvalidData(
@@ -1700,20 +1607,40 @@ fn normalize_optional_reason(value: Option<&str>) -> StoreResult<Option<String>>
         .transpose()
 }
 
-fn cancel_pending_asks_for_work(
+pub(super) fn cancel_pending_asks_for_work(
     conn: &Connection,
     work: &WorkRef,
     reason: &str,
     terminal_at: i64,
 ) -> StoreResult<()> {
+    cancel_pending_asks(conn, work, reason, terminal_at, false)
+}
+
+pub(super) fn cancel_pending_flow_asks_for_work(
+    conn: &Connection,
+    work: &WorkRef,
+    reason: &str,
+    terminal_at: i64,
+) -> StoreResult<()> {
+    cancel_pending_asks(conn, work, reason, terminal_at, true)
+}
+
+fn cancel_pending_asks(
+    conn: &Connection,
+    work: &WorkRef,
+    reason: &str,
+    terminal_at: i64,
+    flow_only: bool,
+) -> StoreResult<()> {
     let mut statement = conn.prepare(
         "SELECT id FROM ask_exchanges
          WHERE origin_work_kind=?1 AND origin_work_id=?2
            AND state IN ('queued', 'claimed')
+           AND (?3=0 OR request_kind='flow_step')
          ORDER BY asked_at, rowid",
     )?;
     let ids = statement
-        .query_map(params![work.kind(), work.id()], |row| {
+        .query_map(params![work.kind(), work.id(), flow_only], |row| {
             row.get::<_, String>(0)
         })?
         .collect::<Result<Vec<_>, _>>()?;
@@ -1721,11 +1648,12 @@ fn cancel_pending_asks_for_work(
     conn.execute(
         "UPDATE ask_exchanges
          SET state='cancelled', active_run_id=NULL,
-             result_kind='cancelled', result_text=?3,
-             terminal_author_kind=NULL, terminal_author_id=NULL, terminal_at=?4
+             result_kind='cancelled', result_text=?4,
+             terminal_author_kind=NULL, terminal_author_id=NULL, terminal_at=?5
          WHERE origin_work_kind=?1 AND origin_work_id=?2
-           AND state IN ('queued', 'claimed')",
-        params![work.kind(), work.id(), reason, terminal_at],
+           AND state IN ('queued', 'claimed')
+           AND (?3=0 OR request_kind='flow_step')",
+        params![work.kind(), work.id(), flow_only, reason, terminal_at],
     )?;
     for id in ids {
         let id = AskId::parse(&id).map_err(invalid_durable)?;
@@ -1767,10 +1695,6 @@ fn require_ready_work(conn: &Connection, work: &WorkRef) -> StoreResult<()> {
 pub(crate) fn reopen_work_in(conn: &Connection, work: &WorkRef) -> StoreResult<()> {
     let now = now_unix();
     cancel_pending_asks_for_work(conn, work, "owning Work reopened", now)?;
-    conn.execute(
-        "DELETE FROM work_flow_positions WHERE work_kind=?1 AND work_id=?2",
-        params![work.kind(), work.id()],
-    )?;
     let (table, id) = work_table(work);
     if conn.execute(
         &format!(
@@ -2025,9 +1949,9 @@ fn decode_steer(fields: SteerFields, work: WorkRef) -> StoreResult<Steer> {
 mod durable_store_tests {
     use crate::durable::{AskBody, AskOrigin, AskTarget, Author, WorkRef};
     use crate::id::WaveId;
-    use crate::project::ProjectId;
     use crate::store::sqlite::SqliteStore;
-    use crate::task::TaskId;
+    use crate::work::project::ProjectId;
+    use crate::work::task::TaskId;
 
     /// A registered Wave is the cheapest real Work and needs no PM binding.
     fn _store_with_wave() -> (tempfile::TempDir, SqliteStore, WorkRef) {

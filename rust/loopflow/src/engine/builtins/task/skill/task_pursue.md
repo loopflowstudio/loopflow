@@ -15,16 +15,26 @@ selection. Follow the repo style guide.
 ## Work
 
 - Honor every Steer included in the seed and summarize how it changes the
-  execution plan. Do not create a separate acknowledgement mutation for inputs
+  execution plan. The boundary Basis is fixed; provider acceptance alone is
+  not application. Do not create a separate acknowledgement mutation for inputs
   already present in the seed.
-- Own execution in this process and worktree. Operational Loopflow children such
-  as `lf commit`, `lf pr land`, `lf rebase`, and direct skill or flow calls are
-  part of that execution and remain available. Do not boot a server, create a
+- Own this bounded attempt in the supplied worktree. Operational Loopflow children such
+   as `lf commit`, `lf pr land`, `lf rebase`, and direct skill or flow calls are
+  part of that attempt and remain available. Integration is accepted through
+  the Task Basis and worktree mutation boundary, not process seniority. Do not boot a server, create a
   second Task, or delegate the task seed. If scoped PM reads fail,
   note the failure and continue from the seed rather than repairing auth.
 - Delegate only bounded, independent checks through the execution tools already
   available to this process, and keep responsibility for integrating the result.
-- Implement the smallest coherent slice described by the design doc.
+- Implement the smallest coherent slice described by the design doc. Check it
+  against both its focused proof and the complete target architecture. Update
+  only `This slice` and the slice ledger; never replace the north star with a
+  local implementation plan.
+- Before adding a type, store, writer, or launch path, identify the existing
+  concept that should own the behavior and what becomes obsolete. A v2,
+  Legacy/New split, adapter, fallback, dual write, or parallel authority is
+  blocking unless the reviewed design explicitly justifies it and names its
+  deletion point.
 - Use a relevant Project metric when one already covers the outcome. While
   building feature work, notice signals that could help the Project steer and
   propose the useful ones back to it: name the outcome, the candidate measure,
@@ -51,5 +61,9 @@ selection. Follow the repo style guide.
   under a known project. Filing does not authorize launching it in this task.
 - Report consequential progress through the Task; its linked events
   keep the owning Wave informed without copying raw tool chatter.
+
+If implementation produces a counterexample to the design's authority model,
+deletion path, or full-system proof, stop dependent work and return to design
+review. Do not note the contradiction and continue building on it.
 
 Stay scoped to the task. Put unresolved ambiguity in `scratch/questions.md`.

@@ -76,7 +76,7 @@ path = "src/bin/lf.rs"
     )
     _write(
         tmp_path,
-        "rust/loopflow/src/wave/server.rs",
+        "rust/loopflow/src/controller/wave/server.rs",
         'fn router() { Router::new().route("/health", get(health)); }\n',
     )
     _write(tmp_path, "rust/loopflow/src/lfd/mod.rs", "fn router() {}\n")
@@ -185,7 +185,7 @@ path = "src/bin/keeper.rs"
 
 
 def test_new_http_route_must_name_its_process_owner(repo: Path) -> None:
-    server = repo / "rust/loopflow/src/wave/server.rs"
+    server = repo / "rust/loopflow/src/controller/wave/server.rs"
     server.write_text(
         'fn router() { Router::new().route("/health", get(health))'
         '.route("/events", get(events)); }\n'

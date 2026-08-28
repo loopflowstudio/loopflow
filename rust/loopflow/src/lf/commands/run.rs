@@ -9,7 +9,7 @@ use crate::lf::output::{format_context_header, format_reproducible_command, Colo
 use crate::lf::Cli;
 use anyhow::{anyhow, Result};
 use std::io::IsTerminal;
-use std::path::PathBuf;
+use std::path::{Path, PathBuf};
 use std::time::Instant;
 use tracing::{debug, info, instrument, trace, warn};
 
@@ -24,7 +24,7 @@ use tracing::{debug, info, instrument, trace, warn};
 #[instrument(skip(cli), fields(skill = ?skill, has_message = message.is_some()))]
 pub fn run(skill: Option<&str>, message: Option<&str>, cli: &Cli) -> Result<()> {
     let mut built = build_prompt(skill, message, cli)?;
-    built.subject = cli.as_work.clone();
+    built.subject = cli.work_subject_selector();
 
     print_context_header(&built, cli);
     launch_prompt(&built, cli)
@@ -52,16 +52,13 @@ pub fn run_bound(
             binding.context,
         ),
     };
-    let mut built = build_prompt(Some(skill), Some(&message), cli)?;
+    let mut built = build_bound_prompt_at(skill, &message, cli, &binding.cwd)?;
     built.agent_config.cwd = Some(binding.cwd.clone());
     built.agent_config.env.insert(
-        crate::engine::wave_context::WAVE_ID_ENV.to_string(),
+        crate::work::wave::context::WAVE_ID_ENV.to_string(),
         binding.wave_id.to_string(),
     );
-    built.subject = cli
-        .as_work
-        .clone()
-        .or_else(|| Some(format!("{}:{}", binding.work.kind(), binding.work.id())));
+    built.subject = Some(format!("{}:{}", binding.work.kind(), binding.work.id()));
 
     print_context_header(&built, cli);
     launch_prompt(&built, cli)
@@ -88,6 +85,7 @@ struct PromptBuild {
 pub(crate) struct PreparedHarnessTurn {
     pub config: AgentConfig,
     pub input: String,
+    pub context: crate::trace::PreparedTurnContext,
     pub harness: String,
     pub model: Option<String>,
 }
@@ -107,6 +105,22 @@ pub(crate) fn prepare_harness_turn(
     prepare_runner_turn(skill, message, &cli)
 }
 
+pub(crate) fn prepare_harness_turn_at(
+    skill: &str,
+    message: &str,
+    wave: &str,
+    max_turns: Option<u32>,
+    repo_root: &Path,
+) -> Result<PreparedHarnessTurn> {
+    let cli = Cli {
+        batch: true,
+        wave: Some(wave.to_string()),
+        max_turns,
+        ..Cli::default()
+    };
+    prepare_runner_turn_at(skill, message, &cli, repo_root.to_path_buf(), true)
+}
+
 pub(crate) fn prepare_wave_harness_turn(
     skill: &str,
     message: &str,
@@ -121,27 +135,32 @@ pub(crate) fn prepare_wave_harness_turn(
         max_turns,
         ..Cli::default()
     };
-    let mut prepared = prepare_runner_turn_at(skill, message, &cli, origin_repo.to_path_buf())?;
+    let mut prepared =
+        prepare_runner_turn_at(skill, message, &cli, origin_repo.to_path_buf(), true)?;
     prepared.config.cwd = Some(resident_repo.to_path_buf());
     Ok(prepared)
 }
 
-pub(crate) fn prepare_interactive_harness_turn(
+pub(crate) fn prepare_interactive_harness_turn_at(
     skill: &str,
     message: &str,
     wave: &str,
+    repo_root: &Path,
 ) -> Result<PreparedHarnessTurn> {
     let cli = Cli {
         interactive: true,
         wave: Some(wave.to_string()),
         ..Cli::default()
     };
-    prepare_runner_turn(skill, message, &cli)
+    // A durable human gate must receive the exact Task basis. Native vendor
+    // skill launches replace the assembled prompt with a sigil and would lose
+    // scratch documents that the human is here to review.
+    prepare_runner_turn_at(skill, message, &cli, repo_root.to_path_buf(), false)
 }
 
 fn prepare_runner_turn(skill: &str, message: &str, cli: &Cli) -> Result<PreparedHarnessTurn> {
     let repo_root = find_repo_root()?;
-    prepare_runner_turn_at(skill, message, cli, repo_root)
+    prepare_runner_turn_at(skill, message, cli, repo_root, true)
 }
 
 fn prepare_runner_turn_at(
@@ -149,12 +168,24 @@ fn prepare_runner_turn_at(
     message: &str,
     cli: &Cli,
     repo_root: PathBuf,
+    use_native_skill_launch: bool,
 ) -> Result<PreparedHarnessTurn> {
-    let mut built = build_prompt_at(Some(skill), Some(message), cli, repo_root)?;
+    let mut built = build_prompt_at(
+        Some(skill),
+        Some(message),
+        cli,
+        repo_root,
+        use_native_skill_launch,
+        Some((
+            crate::trace::ContextAssetKind::Goal,
+            crate::trace::ContextScope::Step,
+        )),
+    )?;
     let input = std::mem::take(&mut built.agent_config.task_prompt);
     Ok(PreparedHarnessTurn {
         config: built.agent_config,
         input,
+        context: built.context,
         harness: built.harness,
         model: built.model,
     })
@@ -164,7 +195,29 @@ fn build_prompt(skill: Option<&str>, message: Option<&str>, cli: &Cli) -> Result
     let start = Instant::now();
     let repo_root = find_repo_root()?;
     debug!(elapsed_ms = start.elapsed().as_millis(), "found repo root");
-    build_prompt_at(skill, message, cli, repo_root)
+    build_prompt_at(skill, message, cli, repo_root, true, None)
+}
+
+fn build_bound_prompt_at(
+    skill: &str,
+    message: &str,
+    cli: &Cli,
+    repo_root: &Path,
+) -> Result<PromptBuild> {
+    // A Work-bound launch carries context that cannot be reconstructed by a
+    // vendor skill sigil: the selected Work seed and the Task worktree's exact
+    // scratch snapshot. Keep the assembled prompt on interactive surfaces too.
+    build_prompt_at(
+        Some(skill),
+        Some(message),
+        cli,
+        repo_root.to_path_buf(),
+        false,
+        Some((
+            crate::trace::ContextAssetKind::Goal,
+            crate::trace::ContextScope::Task,
+        )),
+    )
 }
 
 fn build_prompt_at(
@@ -172,6 +225,8 @@ fn build_prompt_at(
     message: Option<&str>,
     cli: &Cli,
     repo_root: PathBuf,
+    use_native_skill_launch: bool,
+    message_context: Option<(crate::trace::ContextAssetKind, crate::trace::ContextScope)>,
 ) -> Result<PromptBuild> {
     let config_start = Instant::now();
     let config = load_config_or_default(Some(&repo_root));
@@ -210,6 +265,13 @@ fn build_prompt_at(
         Surface::Headless
     };
 
+    let wave = cli
+        .wave
+        .clone()
+        .or_else(crate::work::wave::context::resolve_ambient_wave_name);
+    let wave_memory = wave
+        .as_deref()
+        .and_then(|wave| crate::work::wave::context::gather_wave_memory(&repo_root, wave));
     let prepared = prepare_launch_prompt(
         &config,
         LaunchPromptInput {
@@ -219,7 +281,8 @@ fn build_prompt_at(
             surface,
             directions: cli.direction.clone(),
             docs: cli.docs.clone(),
-            wave: cli.wave.clone(),
+            wave,
+            wave_memory,
             message: message.map(|value| value.to_string()),
             no_loopflow: cli.no_loopflow,
             agent: cli.model.clone(),
@@ -271,7 +334,7 @@ fn build_prompt_at(
     // the session from that point. Headless launches keep the fully assembled
     // prompt so every context source remains explicit and attributable.
     if let Some(skill_name) = skill_name.as_deref() {
-        if is_interactive && should_launch_via_skill(skill_name) {
+        if is_interactive && use_native_skill_launch && should_launch_via_skill(skill_name) {
             let sync_start = Instant::now();
             crate::engine::sync_skills(&SkillSyncOptions::default())?;
             debug!(
@@ -290,15 +353,16 @@ fn build_prompt_at(
             );
             agent_config.system_prompt.clear();
             agent_config.task_prompt = prompt.clone();
-        } else if is_interactive {
+        } else if is_interactive && use_native_skill_launch {
             warn!(
                 skill = skill_name,
-                "external skill skill uses assembled prompt fallback"
+                "external skill uses assembled prompt fallback"
             );
         }
     }
 
-    let components = prepared.components;
+    let mut components = prepared.components;
+    components.message_context = message_context;
     let deduplicated_docs = prepared.deduplicated_docs;
     let effective_system =
         crate::engine::agent::system_prompt_with_structured_replies(&agent_config);
@@ -604,9 +668,13 @@ fn begin_run_capture(
             prepared_config,
             &built.capabilities,
         );
-        crate::run_record::CaptureHandle::begin_with_launch(spec, launch)
+        crate::run_record::CaptureHandle::begin_with_launch_and_context(
+            spec,
+            launch,
+            &built.context,
+        )
     } else {
-        crate::run_record::CaptureHandle::begin(spec)
+        crate::run_record::CaptureHandle::begin_with_context(spec, &built.context)
     }
     .map_err(|error| anyhow!("failed to publish Run manifest before agent launch: {error}"))?;
     capture.record_input("initial", &built.context.task.text);
@@ -922,9 +990,10 @@ pub fn split_skill_args(args: &[String]) -> Result<(String, Vec<String>)> {
 #[cfg(test)]
 mod tests {
     use super::{
-        attributed_context, begin_run_capture, is_interactive_run, is_interactive_run_with_tty,
-        launch_headless_prompt, prepare_wave_harness_turn, should_launch_via_skill,
-        skill_launch_seed, split_skill_args, PromptBuild,
+        attributed_context, begin_run_capture, build_bound_prompt_at, is_interactive_run,
+        is_interactive_run_with_tty, launch_headless_prompt, launch_prompt,
+        prepare_wave_harness_turn, should_launch_via_skill, skill_launch_seed, split_skill_args,
+        PromptBuild,
     };
     use crate::durable::RunId;
     use crate::engine::agent::{launch_agent, AgentCapabilities, AgentConfig, ProcessConfig};
@@ -1118,6 +1187,168 @@ printf '%s\n' '{"type":"result","subtype":"success","usage":{"input_tokens":7,"o
         assert!(registry_blocker.is_dir());
     }
 
+    #[cfg(unix)]
+    #[test]
+    fn two_task_research_runs_leave_distinct_uncommitted_artifacts_for_the_next_prompt() {
+        fn research_build(
+            repo: &std::path::Path,
+            output: &std::path::Path,
+            content: &str,
+            delay: &str,
+            log_name: &str,
+        ) -> PromptBuild {
+            let task = "research one bounded part of LOO-267";
+            let mut env = std::collections::BTreeMap::new();
+            env.insert(
+                "LF_TEST_RESEARCH_OUTPUT".to_string(),
+                output.display().to_string(),
+            );
+            env.insert("LF_TEST_RESEARCH_CONTENT".to_string(), content.to_string());
+            env.insert("LF_TEST_RESEARCH_DELAY".to_string(), delay.to_string());
+            PromptBuild {
+                repo_root: repo.to_path_buf(),
+                config: Config::default(),
+                agent_config: AgentConfig {
+                    task_prompt: task.to_string(),
+                    agent: Some("gemini".to_string()),
+                    cwd: Some(repo.to_path_buf()),
+                    skip_permissions: true,
+                    env,
+                    ..AgentConfig::default()
+                },
+                process: ProcessConfig {
+                    auto: true,
+                    ..ProcessConfig::default()
+                },
+                capabilities: AgentCapabilities::default(),
+                components: PromptComponents::default(),
+                context: crate::trace::PreparedTurnContext::from_prompts("", task),
+                prompt: task.to_string(),
+                harness: "gemini".to_string(),
+                model: None,
+                skill_name: Some("research".to_string()),
+                log_name: log_name.to_string(),
+                subject: Some("task:LOO-267".to_string()),
+            }
+        }
+
+        let _lock = crate::journal::test_env_lock();
+        let home = tempfile::tempdir().unwrap();
+        let bin = home.path().join("bin");
+        std::fs::create_dir(&bin).unwrap();
+        let provider = bin.join("gemini");
+        std::fs::write(
+            &provider,
+            r#"#!/bin/sh
+if [ "${1:-}" = "--version" ]; then
+  printf '%s\n' 'gemini test'
+  exit 0
+fi
+sleep "$LF_TEST_RESEARCH_DELAY"
+mkdir -p "$(dirname "$LF_TEST_RESEARCH_OUTPUT")"
+temporary="$LF_TEST_RESEARCH_OUTPUT.$LF_RUN_ID.tmp"
+printf '%s\n' "$LF_TEST_RESEARCH_CONTENT" > "$temporary"
+mv "$temporary" "$LF_TEST_RESEARCH_OUTPUT"
+printf '%s\n' '{"type":"result","subtype":"success","usage":{"input_tokens":7,"output_tokens":3}}'
+"#,
+        )
+        .unwrap();
+        std::fs::set_permissions(&provider, std::fs::Permissions::from_mode(0o755)).unwrap();
+
+        // A suite launched from a live agent session must not inherit that
+        // session's execution identity.
+        let ambient_identity = [
+            crate::durable::RUN_ID_ENV,
+            crate::run_record::RUN_DIR_ENV,
+            crate::run_record::PARENT_RUN_ID_ENV,
+            "LF_WAVE_ID",
+            "LF_ACCOUNT_LEASE",
+        ];
+        let keys: Vec<&'static str> = ["PATH", "LF_BIN", "LF_HOME"]
+            .into_iter()
+            .chain(ambient_identity)
+            .collect();
+        let _environment = EnvironmentRestore::capture(&keys);
+        for name in ambient_identity {
+            std::env::remove_var(name);
+        }
+        std::env::set_var(
+            "PATH",
+            format!(
+                "{}:{}",
+                bin.display(),
+                std::env::var("PATH").unwrap_or_default()
+            ),
+        );
+        std::env::set_var("LF_BIN", std::env::current_exe().unwrap());
+        std::env::set_var("LF_HOME", home.path());
+
+        let repo = loopflow_test_support::TestRepo::new();
+        repo.create_file(".lf/skills/proof.md", "inspect every research artifact");
+        repo.stage_all();
+        repo.commit("test basis");
+        let head = crate::engine::git::rev_parse(repo.path(), "HEAD").unwrap();
+        let runtime = repo.path().join("scratch/research-runtime-model.md");
+        let handoff = repo.path().join("scratch/research-design-handoff.md");
+        let first = research_build(
+            repo.path(),
+            &runtime,
+            "runtime evidence bytes",
+            "0.2",
+            "runtime-research",
+        );
+        let second = research_build(
+            repo.path(),
+            &handoff,
+            "handoff evidence bytes",
+            "0",
+            "handoff-research",
+        );
+        let cli = Cli::default();
+
+        std::thread::scope(|scope| {
+            let first = scope.spawn(|| launch_prompt(&first, &cli));
+            let second = scope.spawn(|| launch_prompt(&second, &cli));
+            first.join().unwrap().unwrap();
+            second.join().unwrap().unwrap();
+        });
+
+        assert_eq!(
+            std::fs::read_to_string(&runtime).unwrap(),
+            "runtime evidence bytes\n"
+        );
+        assert_eq!(
+            std::fs::read_to_string(&handoff).unwrap(),
+            "handoff evidence bytes\n"
+        );
+        assert_eq!(
+            crate::engine::git::rev_parse(repo.path(), "HEAD").unwrap(),
+            head
+        );
+        assert!(std::process::Command::new("git")
+            .args(["diff", "--cached", "--quiet"])
+            .current_dir(repo.path())
+            .status()
+            .unwrap()
+            .success());
+        assert_eq!(
+            crate::run_record::observed_run_ids(&["task:LOO-267".to_string()])
+                .unwrap()
+                .len(),
+            2
+        );
+
+        let built = build_bound_prompt_at("proof", "reconcile", &cli, repo.path()).unwrap();
+        assert!(built
+            .agent_config
+            .task_prompt
+            .contains("runtime evidence bytes"));
+        assert!(built
+            .agent_config
+            .task_prompt
+            .contains("handoff evidence bytes"));
+    }
+
     #[test]
     fn wave_harness_loads_canonical_skill_and_executes_in_resident_worktree() {
         let origin = loopflow_test_support::TestRepo::new();
@@ -1142,6 +1373,86 @@ printf '%s\n' '{"type":"result","subtype":"success","usage":{"input_tokens":7,"o
         assert_eq!(prepared.config.cwd.as_deref(), Some(resident.path()));
         assert!(prepared.input.contains("canonical skill instructions"));
         assert!(!prepared.input.contains("stale resident skill instructions"));
+    }
+
+    #[test]
+    fn worktree_harness_preloads_committed_and_untracked_scratch_with_provenance() {
+        let repo = loopflow_test_support::TestRepo::new();
+        repo.create_file(".lf/skills/proof.md", "inspect the complete basis");
+        repo.create_file("scratch/a-committed.md", "committed evidence bytes");
+        repo.stage_all();
+        repo.commit("committed basis");
+        repo.create_file("scratch/z-untracked.md", "untracked evidence bytes");
+
+        let cli = Cli {
+            batch: true,
+            wave: Some("ship".to_string()),
+            ..Cli::default()
+        };
+        let built = build_bound_prompt_at("proof", "continue", &cli, repo.path()).unwrap();
+
+        let committed = built
+            .agent_config
+            .task_prompt
+            .find("committed evidence bytes")
+            .unwrap();
+        let untracked = built
+            .agent_config
+            .task_prompt
+            .find("untracked evidence bytes")
+            .unwrap();
+        assert!(committed < untracked);
+        assert!(built.context.task.assets.iter().any(|asset| {
+            asset.kind == ContextAssetKind::Scratch
+                && asset.source_path.as_deref() == Some("scratch/a-committed.md")
+        }));
+        assert!(built.context.task.assets.iter().any(|asset| {
+            asset.kind == ContextAssetKind::Scratch
+                && asset.source_path.as_deref() == Some("scratch/z-untracked.md")
+        }));
+    }
+
+    #[test]
+    fn interactive_bound_skill_keeps_the_assembled_scratch_snapshot() {
+        let repo = loopflow_test_support::TestRepo::new();
+        repo.create_file(".lf/skills/proof.md", "inspect the complete basis");
+        repo.create_file("scratch/research-runtime.md", "runtime evidence bytes");
+        repo.stage_all();
+        repo.commit("bound basis");
+        let cli = Cli {
+            interactive: true,
+            ..Cli::default()
+        };
+
+        let built = build_bound_prompt_at(
+            "proof",
+            "<lf:work kind=\"task\" id=\"task_test\">Task seed</lf:work>",
+            &cli,
+            repo.path(),
+        )
+        .unwrap();
+        repo.create_file(
+            "scratch/research-runtime.md",
+            "evidence published after launch",
+        );
+
+        assert!(built
+            .agent_config
+            .task_prompt
+            .contains("runtime evidence bytes"));
+        assert!(!built
+            .agent_config
+            .task_prompt
+            .contains("evidence published after launch"));
+        assert!(built
+            .agent_config
+            .task_prompt
+            .contains("inspect the complete basis"));
+        assert!(built.agent_config.task_prompt.contains("Task seed"));
+        assert!(built.context.task.assets.iter().any(|asset| {
+            asset.kind == ContextAssetKind::Scratch
+                && asset.source_path.as_deref() == Some("scratch/research-runtime.md")
+        }));
     }
 
     #[test]

@@ -514,12 +514,11 @@ fn ordinary_pr_publishes_when_no_registry_exists() {
     );
 }
 
-/// LOO-162 — a managed Task has exactly one shipping decision: its `finally`
-/// review, declared with `lf pr land`. `lf pr submit` (assign for a human merge
-/// click) would be a competing second gate, so it must refuse **before any push
-/// or `gh pr` mutation**, and name the land declaration as the path forward.
+/// Delivery commands act on Task Work directly. They do not require or infer a
+/// controller decision, so a person can submit a Task created with `prepare`
+/// or take over a Task whose controller is absent.
 #[test]
-fn managed_task_submit_refuses_before_any_push() {
+fn managed_task_submit_assigns_for_human_review() {
     let home = tempfile::TempDir::new().expect("temp home");
     let repo = TestRepo::new();
     let base = repo.head_sha();
@@ -536,36 +535,32 @@ fn managed_task_submit_refuses_before_any_push() {
     repo.create_file("task.txt", "task work\n");
     repo.stage_all();
     repo.commit("task commit");
-    // Deliberately NOT pushed: the refusal must precede the first push.
+    // Deliberately not pushed: submit owns integration and publication.
 
     let _task = register_task(home.path(), repo.path(), branch, &base);
 
-    let err = submit(
+    submit(
         repo.path(),
         &land_options(true, "managed submit"),
         &NullProgress,
     )
-    .expect_err("managed Task submit must refuse before any push");
-    let message = err.to_string();
-    assert!(
-        message.contains("second shipping gate"),
-        "refusal must explain the competing gate, got: {message}"
-    );
-    assert!(
-        message.contains("lf pr land"),
-        "refusal must name the land declaration, got: {message}"
-    );
+    .expect("managed Task submits for human review");
 
     assert!(
-        !remote_branch_exists(&repo, branch),
-        "the branch must never reach the remote when submit is refused"
+        remote_branch_exists(&repo, branch),
+        "submit must publish the Task branch"
     );
-    assert_no_gh_pr_mutation(&log_path);
+    let log = fs::read_to_string(&log_path).unwrap_or_default();
+    assert!(
+        log.contains("pr ready") && log.contains("pr edit --add-assignee @me"),
+        "submit must prepare the Task PR for a human merge, got log:\n{log}"
+    );
+    assert!(
+        !log.contains("pr merge"),
+        "submit must not arm or merge the Task PR, got log:\n{log}"
+    );
 }
 
-/// The refusal is scoped to managed Tasks: an ordinary non-Task worktree still
-/// `submit`s — pushing the branch and marking the PR ready — so the LOO-162 gate
-/// does not over-block the separation-of-duties workflow for plain PRs.
 #[test]
 fn ordinary_submit_still_assigns_for_review() {
     let home = tempfile::TempDir::new().expect("temp home");

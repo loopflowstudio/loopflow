@@ -30,7 +30,7 @@ pub fn set_wave_paused(repo: &Path, name: &str, paused: bool) -> Result<WaveInte
     let repo =
         crate::engine::worktrees::main_repo_root(repo).unwrap_or_else(|_| repo.to_path_buf());
 
-    let config = crate::engine::wave_config::try_read_wave_config(&repo, &name)?;
+    let config = crate::work::wave::config::try_read_wave_config(&repo, &name)?;
     if config.is_none() {
         return Err(anyhow!(
             "Wave '{name}' has no authored goal at {}",
@@ -38,7 +38,7 @@ pub fn set_wave_paused(repo: &Path, name: &str, paused: bool) -> Result<WaveInte
         ));
     }
 
-    crate::engine::wave_config::update_wave_paused(&repo, &name, paused)
+    crate::work::wave::config::update_wave_paused(&repo, &name, paused)
         .map_err(anyhow::Error::msg)?;
     Ok(WaveIntentReceipt { wave: name, paused })
 }

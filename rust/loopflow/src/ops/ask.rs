@@ -259,7 +259,7 @@ pub(crate) async fn serve(
     }
     let result = match &ask.request {
         crate::durable::AskBody::FlowStep { .. } => {
-            let turn = crate::task::runner::flow_step_harness_turn(&store, &ask).await?;
+            let turn = crate::controller::task::flow_step_harness_turn(&store, &ask).await?;
             run_flow_step_harness(&ask, turn, &run_id, headless).await
         }
         crate::durable::AskBody::Intervention { .. } => {
@@ -326,7 +326,18 @@ async fn run_provider(
         ..Default::default()
     };
     let (provider, model) = crate::engine::parse_agent(agent);
-    let capture = begin_capture(ask, run_id, provider.clone(), model.clone(), "ask")?;
+    let context = crate::trace::PreparedTurnContext::from_prompts(
+        &crate::engine::agent::system_prompt_with_structured_replies(&launch),
+        &launch.task_prompt,
+    );
+    let capture = begin_capture(
+        ask,
+        run_id,
+        provider.clone(),
+        model.clone(),
+        "ask",
+        &context,
+    )?;
     capture.record_input("initial", prompt);
     let process = crate::engine::ProcessConfig {
         auto: headless,
@@ -348,6 +359,7 @@ async fn run_flow_step_harness(
     run_id: &RunId,
     headless: bool,
 ) -> Result<ExitStatus> {
+    let context = turn.context;
     let mut launch = turn.config;
     launch.task_prompt = turn.input;
     launch.cwd = Some(ask.origin.cwd.clone());
@@ -363,6 +375,7 @@ async fn run_flow_step_harness(
         provider.clone(),
         model.clone(),
         "ask-flow-step",
+        &context,
     )?;
     capture.record_input("initial", &launch.task_prompt);
     let process = crate::engine::ProcessConfig {
@@ -385,30 +398,33 @@ fn begin_capture(
     provider: String,
     model: Option<String>,
     surface: &str,
+    context: &crate::trace::PreparedTurnContext,
 ) -> Result<crate::run_record::CaptureHandle> {
-    crate::run_record::CaptureHandle::begin_with_verified_parent(
-        crate::run_record::RunSpec {
-            harness: provider,
-            model,
-            surface: surface.to_string(),
-            cwd: ask.origin.cwd.clone(),
-            repo: Some(ask.origin.cwd.clone()),
-            worktree: Some(ask.origin.cwd.clone()),
-            skill: match &ask.request {
-                crate::durable::AskBody::FlowStep { skill, .. } => Some(skill.clone()),
-                crate::durable::AskBody::Intervention { .. } => None,
-            },
-            subjects: vec![
-                crate::run_record::SubjectAttribution::declared(format!("ask:{}", ask.id)),
-                crate::run_record::SubjectAttribution::declared(format!(
-                    "{}:{}",
-                    ask.origin.work.kind(),
-                    ask.origin.work.id()
-                )),
-            ],
+    let spec = crate::run_record::RunSpec {
+        harness: provider,
+        model,
+        surface: surface.to_string(),
+        cwd: ask.origin.cwd.clone(),
+        repo: Some(ask.origin.cwd.clone()),
+        worktree: Some(ask.origin.cwd.clone()),
+        skill: match &ask.request {
+            crate::durable::AskBody::FlowStep { skill, .. } => Some(skill.clone()),
+            crate::durable::AskBody::Intervention { .. } => None,
         },
+        subjects: vec![
+            crate::run_record::SubjectAttribution::declared(format!("ask:{}", ask.id)),
+            crate::run_record::SubjectAttribution::declared(format!(
+                "{}:{}",
+                ask.origin.work.kind(),
+                ask.origin.work.id()
+            )),
+        ],
+    };
+    crate::run_record::CaptureHandle::begin_with_verified_parent_and_context(
+        spec,
         run_id.clone(),
         ask.origin.source_run_id.clone(),
+        context,
     )
     .map_err(Into::into)
 }
@@ -690,6 +706,7 @@ mod tests {
         let parent_run_id = parent.run_id();
         ask.origin.source_run_id = Some(parent_run_id.clone());
         let run_id = RunId::new();
+        let context = crate::trace::PreparedTurnContext::from_prompts("system", "task");
 
         let capture = begin_capture(
             &ask,
@@ -697,6 +714,7 @@ mod tests {
             "codex".to_string(),
             Some("gpt-5".to_string()),
             "ask",
+            &context,
         )
         .unwrap();
         let directory = capture.artifact_dir();
@@ -722,6 +740,7 @@ mod tests {
             "codex".to_string(),
             Some("gpt-5".to_string()),
             "ask",
+            &context,
         )
         .unwrap();
         let manifest: crate::run_record::RunManifest = serde_json::from_slice(

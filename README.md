@@ -76,8 +76,12 @@ reviewed repository file, not live server state.
 Delegate durable work — the same verbs whether the caller is you or the wave:
 
 ```bash
-lf task run INF-123                                   # durable Task Work, own worktree
-lf task steer INF-123 "take the smaller approach"     # queue durable direction; restart if stopped
+lf task prepare INF-123                               # durable Task Work + worktree, no controller
+lf project prepare runtime-model                      # durable Project Work, no controller
+lf task run INF-123                                   # start end-to-end Task automation
+lf task steer INF-123 "take the smaller approach"     # queue direction; wake its controller if installed
+lf --task INF-123 research "write scratch/runtime.md"    # one independent Task-bound Run
+lf task restart INF-123 "reconcile all scratch first" # checkpoint and begin a new kickoff
 lf task status INF-123 --json                         # inspect durable state
 lf pr arm -c                                          # request exact-head auto-merge and return
 lf pr land -c                                         # watch, repair CI, merge, then complete the Task

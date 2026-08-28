@@ -46,19 +46,6 @@ CREATE TABLE tool_responses (
     UNIQUE (work_kind, work_id, request_id)
 );
 
-CREATE TABLE work_flow_positions (
-    work_kind TEXT NOT NULL CHECK (work_kind IN ('wave', 'project', 'task')),
-    work_id TEXT NOT NULL CHECK (length(trim(work_id)) > 0),
-    flow TEXT NOT NULL,
-    step TEXT NOT NULL,
-    node_id TEXT,
-    human INTEGER NOT NULL CHECK (human IN (0, 1)),
-    step_index INTEGER NOT NULL CHECK (step_index >= 0),
-    iteration INTEGER NOT NULL CHECK (iteration >= 0),
-    updated_at INTEGER NOT NULL,
-    PRIMARY KEY (work_kind, work_id)
-);
-
 CREATE TABLE ask_exchanges (
     id TEXT PRIMARY KEY,
     origin_work_kind TEXT NOT NULL CHECK (origin_work_kind IN ('wave', 'project', 'task')),

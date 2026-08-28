@@ -1019,48 +1019,53 @@ fn apply_sqlite_transaction(
 }
 
 pub(crate) fn validate_persisted_json(conn: &rusqlite::Connection) -> StoreResult<()> {
-    let mut failures = validate_json_column::<crate::task::PmWritebackState>(
+    let mut failures = validate_json_column::<crate::work::task::PmWritebackState>(
         conn,
         "tasks",
         "id",
         "pm_writeback_json",
     )?;
-    failures.extend(validate_json_column::<crate::task::TaskGateProposal>(
+    let tables = user_tables(conn)?;
+    let (controller_table, controller_key) =
+        if tables.iter().any(|table| table == "task_controller_state") {
+            ("task_controller_state", "task_id")
+        } else {
+            ("tasks", "id")
+        };
+    failures.extend(validate_json_column::<
+        crate::controller::task::TaskGateProposal,
+    >(
         conn,
-        "tasks",
-        "id",
+        controller_table,
+        controller_key,
         "gate_proposal_json",
     )?);
-    failures.extend(validate_json_column::<crate::task::CiObservation>(
+    failures.extend(validate_json_column::<crate::work::task::CiObservation>(
         conn,
         "task_prs",
         "id",
         "ci_observation",
     )?);
-    failures.extend(validate_json_column::<crate::task::GithubObservation>(
-        conn,
-        "task_prs",
-        "id",
-        "github_observation",
-    )?);
-    failures.extend(validate_json_column::<crate::task::TaskEventKind>(
+    failures.extend(
+        validate_json_column::<crate::work::task::GithubObservation>(
+            conn,
+            "task_prs",
+            "id",
+            "github_observation",
+        )?,
+    );
+    failures.extend(validate_json_column::<crate::work::task::TaskEventKind>(
         conn,
         "task_events",
         "id",
         "kind_json",
     )?);
-    failures.extend(validate_json_column::<crate::project::ProjectEventKind>(
-        conn,
-        "project_events",
-        "id",
-        "kind_json",
-    )?);
-    failures.extend(validate_json_column::<crate::project::ChildEventPayload>(
-        conn,
-        "observation_outbox",
-        "id",
-        "payload_json",
-    )?);
+    failures.extend(validate_json_column::<
+        crate::work::project::ProjectEventKind,
+    >(conn, "project_events", "id", "kind_json")?);
+    failures.extend(validate_json_column::<
+        crate::work::project::ChildEventPayload,
+    >(conn, "observation_outbox", "id", "payload_json")?);
     failures.extend(validate_json_column::<Vec<String>>(
         conn,
         "ci_incidents",
@@ -1910,8 +1915,9 @@ mod tests {
         apply_sqlite, apply_sqlite_transaction, apply_sqlite_with_backup, backup_before_migration,
         latest_applied_version_sqlite, latest_known_version, latest_version_sqlite,
         migration_checksum, migration_sql_for_test, pending_migrations, product_schema,
-        validate_foreign_keys, validate_installed_development_sqlite, validate_persisted_json,
-        validate_set, validate_sqlite, Migration, MigrationId, DIVERGENT_MIGRATIONS, MIGRATIONS,
+        user_tables, validate_foreign_keys, validate_installed_development_sqlite,
+        validate_persisted_json, validate_set, validate_sqlite, Migration, MigrationId,
+        DIVERGENT_MIGRATIONS, MIGRATIONS,
     };
 
     const REOPEN_REPAIR_NAME: &str = "retire_obsolete_pm_reopen_writebacks";
@@ -2382,7 +2388,12 @@ mod tests {
             )
             .unwrap();
         assert_eq!(state, ("ready".to_string(), None));
-        for table in ["waits", "work_truth", "epoch_revisions"] {
+        for table in [
+            "waits",
+            "work_truth",
+            "epoch_revisions",
+            "work_flow_positions",
+        ] {
             let exists: bool = conn
                 .query_row(
                     "SELECT EXISTS(
@@ -2394,12 +2405,7 @@ mod tests {
                 .unwrap();
             assert!(!exists, "{table} must be deleted");
         }
-        for table in [
-            "steers",
-            "tool_responses",
-            "work_flow_positions",
-            "ask_exchanges",
-        ] {
+        for table in ["steers", "tool_responses", "ask_exchanges"] {
             let rows: i64 = conn
                 .query_row(&format!("SELECT COUNT(*) FROM {table}"), [], |row| {
                     row.get(0)
@@ -3771,25 +3777,48 @@ mod tests {
             conn.execute_batch(&migration_sql_for_test(GATE_PROPOSAL_REPAIR_NAME))
                 .unwrap();
         }
-        assert_eq!(
+        let controller_table_exists = user_tables(&conn)
+            .unwrap()
+            .iter()
+            .any(|table| table == "task_controller_state");
+        let current_gate = if controller_table_exists {
+            conn.query_row(
+                "SELECT controller.gate_proposal_json
+                 FROM task_controller_state controller
+                 JOIN tasks ON tasks.id = controller.task_id
+                 WHERE tasks.external_issue_id='issue-current'",
+                [],
+                |row| row.get::<_, String>(0),
+            )
+        } else {
             conn.query_row(
                 "SELECT gate_proposal_json FROM tasks WHERE external_issue_id='issue-current'",
                 [],
                 |row| row.get::<_, String>(0),
             )
-            .unwrap(),
+        }
+        .unwrap();
+        assert_eq!(
+            current_gate,
             "{\"done\":false,\"reason\":\"current\",\"future\":\"preserved\"}"
         );
-        assert_eq!(
+        let stale_gate_count = if controller_table_exists {
+            conn.query_row(
+                "SELECT COUNT(*) FROM task_controller_state
+                 WHERE json_type(gate_proposal_json, '$.status') IS NOT NULL",
+                [],
+                |row| row.get::<_, i64>(0),
+            )
+        } else {
             conn.query_row(
                 "SELECT COUNT(*) FROM tasks
                  WHERE json_type(gate_proposal_json, '$.status') IS NOT NULL",
                 [],
                 |row| row.get::<_, i64>(0),
             )
-            .unwrap(),
-            0
-        );
+        }
+        .unwrap();
+        assert_eq!(stale_gate_count, 0);
         validate_foreign_keys(&conn).unwrap();
         validate_persisted_json(&conn).unwrap();
         conn.pragma_update(None, "foreign_keys", "ON").unwrap();
@@ -3801,18 +3830,34 @@ mod tests {
                  WHERE external_issue_id='issue-reopen'",
                 [],
             )?;
-            conn.execute(
-                "UPDATE tasks
-                 SET gate_proposal_json='{\"reason\":\"missing done\"}'
-                 WHERE external_issue_id='issue-completed'",
-                [],
-            )?;
+            if controller_table_exists {
+                conn.execute(
+                    "UPDATE task_controller_state
+                     SET gate_proposal_json='{\"reason\":\"missing done\"}'
+                     WHERE task_id=(
+                         SELECT id FROM tasks WHERE external_issue_id='issue-completed'
+                     )",
+                    [],
+                )?;
+            } else {
+                conn.execute(
+                    "UPDATE tasks
+                     SET gate_proposal_json='{\"reason\":\"missing done\"}'
+                     WHERE external_issue_id='issue-completed'",
+                    [],
+                )?;
+            }
             Ok(())
         })
         .unwrap_err();
         let message = error.to_string();
         assert!(message.contains("tasks.pm_writeback_json"));
-        assert!(message.contains("tasks.gate_proposal_json"));
+        let gate_column = if controller_table_exists {
+            "task_controller_state.gate_proposal_json"
+        } else {
+            "tasks.gate_proposal_json"
+        };
+        assert!(message.contains(gate_column));
         assert_eq!(
             conn.query_row(
                 "SELECT pm_writeback_json FROM tasks WHERE external_issue_id='issue-reopen'",
@@ -3834,11 +3879,20 @@ mod tests {
             .unwrap();
         assert!(matches!(
             reopen.pm_writeback,
-            crate::task::PmWritebackState::Current
+            crate::work::task::PmWritebackState::Current
         ));
-        let mut decisions = tasks
-            .iter()
-            .map(|task| task.gate_proposal.as_ref().unwrap().done)
+        let conn = rusqlite::Connection::open(&path).unwrap();
+        let mut statement = conn
+            .prepare("SELECT gate_proposal_json FROM task_controller_state")
+            .unwrap();
+        let mut decisions = statement
+            .query_map([], |row| row.get::<_, String>(0))
+            .unwrap()
+            .map(|json| {
+                serde_json::from_str::<crate::controller::task::TaskGateProposal>(&json.unwrap())
+                    .unwrap()
+                    .done
+            })
             .collect::<Vec<_>>();
         decisions.sort_unstable();
         assert_eq!(decisions, vec![false, false, false, false, false, true]);
@@ -4473,7 +4527,7 @@ mod tests {
     }
 
     #[test]
-    fn stable_work_schema_keeps_plural_asks_without_execution_authority() {
+    fn stable_work_schema_keeps_asks_without_a_global_flow_cursor() {
         let conn = open();
         apply_sqlite(&conn).unwrap();
         apply_current_work_schema(&conn);
@@ -4492,13 +4546,16 @@ mod tests {
         for deleted in ["kickoff_reviewer", "iterate_reviewer", "gate_reviewer"] {
             assert!(!task_columns.contains(&deleted.to_string()));
         }
-        let position_columns = columns(&conn, "work_flow_positions");
-        for present in ["work_kind", "work_id", "node_id", "human"] {
-            assert!(position_columns.contains(&present.to_string()));
-        }
-        for deleted in ["epoch_id", "interactive"] {
-            assert!(!position_columns.contains(&deleted.to_string()));
-        }
+        assert!(!conn
+            .query_row(
+                "SELECT EXISTS(
+                    SELECT 1 FROM sqlite_master
+                    WHERE type='table' AND name='work_flow_positions'
+                )",
+                [],
+                |row| row.get::<_, bool>(0),
+            )
+            .unwrap());
 
         let ask_columns = columns(&conn, "ask_exchanges");
         assert!(ask_columns.contains(&"source_run_id".to_string()));
@@ -4972,7 +5029,7 @@ mod tests {
 
         let repo = std::path::Path::new(env!("CARGO_MANIFEST_DIR")).join("../..");
         for flow in ["slice", "slice", "ship-5whys"] {
-            let invocation = crate::wave::playhead::QueuedInvocation::load(&repo, flow)
+            let invocation = crate::controller::wave::playhead::QueuedInvocation::load(&repo, flow)
                 .expect("every repaired persisted loop flow resolves");
             assert_eq!(invocation.flow, flow);
         }

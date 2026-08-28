@@ -7,17 +7,18 @@ use std::path::Path;
 use std::process::Command;
 
 use loopflow::child::ChildRef;
+use loopflow::controller::wave::metrics::{
+    load_metric_contract, MetricObservation, ObservationAcceptance,
+};
 use loopflow::id::WaveId;
 use loopflow::planning::{LinearIssueId, LinearProjectId, ProjectPlan, TaskPlan};
-use loopflow::project::{Project, ProjectEventKind, ProjectId};
 use loopflow::store::sqlite::SqliteStore;
 use loopflow::store::{open_store, PmSnapshotRow, StorageConfig};
-use loopflow::task::{
-    Observation, PmWritebackState, PrMergeMode, Task, TaskId, TaskLifecyclePhase,
-    TaskLifecyclePlan, TaskPr, TaskPrId,
+use loopflow::work::project::{Project, ProjectEventKind, ProjectId};
+use loopflow::work::task::{
+    Observation, PmWritebackState, PrMergeMode, Task, TaskId, TaskPr, TaskPrId,
 };
-use loopflow::wave::metrics::{load_metric_contract, MetricObservation, ObservationAcceptance};
-use loopflow::wave::Wave;
+use loopflow::work::wave::Wave;
 use time::OffsetDateTime;
 
 const PREVIOUS_RELEASE_TASK_PR_FIXTURE: &str = include_str!("fixtures/store_0_12_8_task_pr.sql");
@@ -50,12 +51,6 @@ fn test_project(wave: &Wave, slug: &str, updated_at: OffsetDateTime) -> Project 
             pm_snapshot_synced_at: updated_at.unix_timestamp(),
         },
         wave_id: wave.id().clone(),
-        iteration: 2,
-        observation_cursor: 0,
-        last_state_fingerprint: None,
-        agent: "codex".to_string(),
-        provider: "codex".to_string(),
-        provider_session_id: None,
         abandon_intent: None,
         created_at: updated_at,
         updated_at,
@@ -212,12 +207,6 @@ fn seed_stale_project_work(home: &Path, abandon_stale_project: bool) {
             pm_snapshot_synced_at: now.unix_timestamp() - 1,
         },
         wave_id: wave.id().clone(),
-        iteration: 1,
-        observation_cursor: 0,
-        last_state_fingerprint: None,
-        agent: "codex".to_string(),
-        provider: "codex".to_string(),
-        provider_session_id: None,
         abandon_intent: None,
         created_at: now,
         updated_at: now,
@@ -237,16 +226,6 @@ fn seed_stale_project_work(home: &Path, abandon_stale_project: bool) {
         project_id: stale.id.clone(),
         worktree: home.join("repo.w2-127"),
         workspace_slug: "w2-127".to_string(),
-        lifecycle: TaskLifecyclePlan::defaults(),
-        lifecycle_phase: TaskLifecyclePhase::Loop,
-        phase_epoch: 1,
-        phase_cursor: 0,
-        phase_iteration: 0,
-        gate_cycle: 0,
-        gate_proposal: None,
-        agent: "codex".to_string(),
-        provider: "codex".to_string(),
-        provider_session_id: None,
         abandon_intent: None,
         created_at: now,
         updated_at: now,
@@ -297,12 +276,6 @@ fn seed_stale_project_work(home: &Path, abandon_stale_project: bool) {
             pm_snapshot_synced_at: now.unix_timestamp(),
         },
         wave_id: wave.id().clone(),
-        iteration: 1,
-        observation_cursor: 0,
-        last_state_fingerprint: None,
-        agent: "codex".to_string(),
-        provider: "codex".to_string(),
-        provider_session_id: None,
         abandon_intent: None,
         created_at: now,
         updated_at: now,

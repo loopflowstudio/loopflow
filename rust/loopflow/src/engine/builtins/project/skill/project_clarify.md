@@ -2,7 +2,8 @@
 description: Keep one Linear Project's definition and KRs computable.
 action_style: procedural
 ---
-Clarify the exact Linear Project named in the seed.
+Clarify the exact Linear Project named in the seed. The Run records one attempt;
+the Project Basis, not Run attribution, governs planning changes.
 
 Read its current durable direction, the authoritative cache-only PM snapshot, its
 definition and KRs, filed Tasks, linked Task observations, and the owning

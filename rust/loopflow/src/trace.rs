@@ -238,14 +238,14 @@ pub struct ContextDecision {
     pub asset_position: Option<u32>,
 }
 
-#[derive(Debug, Clone)]
+#[derive(Debug, Clone, Serialize)]
 pub struct RenderedPromptChannel {
     pub text: String,
     pub tokens: u64,
     pub assets: Vec<ContextAsset>,
 }
 
-#[derive(Debug, Clone)]
+#[derive(Debug, Clone, Serialize)]
 pub struct PreparedTurnContext {
     pub system: Option<RenderedPromptChannel>,
     pub task: RenderedPromptChannel,

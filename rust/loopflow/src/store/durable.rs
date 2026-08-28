@@ -1,8 +1,8 @@
 use crate::child::ChildRef;
 use crate::durable::{
-    AbandonReceipt, Ask, AskBody, AskClaim, AskId, AskOrigin, AskResult, AskTarget, Author,
-    FlowPosition, Home, HomeId, Placement, RunId, Steer, SteerReceipt, ToolResponseReceipt,
-    ToolResponseWrite, WorkRef, WorkStatus,
+    AbandonReceipt, Ask, AskBody, AskClaim, AskId, AskOrigin, AskResult, AskTarget, Author, Home,
+    HomeId, Placement, RunId, Steer, SteerReceipt, ToolResponseReceipt, ToolResponseWrite, WorkRef,
+    WorkStatus,
 };
 
 use super::{run_sqlite, Store, StoreResult};
@@ -94,18 +94,6 @@ impl Store {
         let work = work.clone();
         let home_id = home_id.clone();
         run_sqlite(&self.sqlite, move |store| store.place_work(&work, &home_id)).await
-    }
-
-    pub async fn set_flow_position(
-        &self,
-        work: &WorkRef,
-        position: FlowPosition,
-    ) -> StoreResult<FlowPosition> {
-        let work = work.clone();
-        run_sqlite(&self.sqlite, move |store| {
-            store.set_flow_position(&work, &position)
-        })
-        .await
     }
 
     pub async fn create_ask(
@@ -361,9 +349,9 @@ mod tests {
     use crate::durable::{AskBody, AskOrigin, AskResult, AskState, AskTarget, WorkRef};
     use crate::id::WaveId;
     use crate::planning::{LinearProjectId, ProjectPlan};
-    use crate::project::{Project, ProjectId};
     use crate::store::{open_store, StorageConfig, StoreError};
-    use crate::wave::Wave;
+    use crate::work::project::{Project, ProjectId};
+    use crate::work::wave::Wave;
 
     async fn wave_work() -> (super::Store, WorkRef) {
         let directory = tempfile::tempdir().unwrap().keep();
@@ -391,12 +379,6 @@ mod tests {
                 pm_snapshot_synced_at: now.unix_timestamp(),
             },
             wave_id: wave.id().clone(),
-            iteration: 0,
-            observation_cursor: 0,
-            last_state_fingerprint: None,
-            agent: "codex".to_string(),
-            provider: "codex".to_string(),
-            provider_session_id: None,
             abandon_intent: None,
             created_at: now,
             updated_at: now,

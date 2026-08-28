@@ -3,6 +3,7 @@ use std::sync::Arc;
 use std::time::{Duration, Instant};
 
 use crate::child::ChildRef;
+use crate::controller::project::State as ProjectControllerState;
 use crate::durable::{Author, WorkStatus};
 use crate::engine::config::{load_config_or_default, parse_agent};
 use crate::engine::git::{current_branch, get_default_branch, is_clean, worktree_root};
@@ -12,10 +13,10 @@ use crate::engine::process::{
 use crate::id::WaveId;
 use crate::ops::{OpsError, OpsResult};
 use crate::planning::{LinearProjectId, ProjectPlan};
-use crate::project::{Project, ProjectId};
 use crate::store::{open_existing_store, SharedStore, Store};
-use crate::task::Task;
-use crate::wave::Wave;
+use crate::work::project::{Project, ProjectId};
+use crate::work::task::Task;
+use crate::work::wave::Wave;
 
 #[derive(Debug, Clone, PartialEq, Eq, serde::Serialize)]
 pub struct ProjectSnapshot {
@@ -26,14 +27,14 @@ pub struct ProjectSnapshot {
     pub wave: String,
     pub status: WorkStatus,
     pub reason: String,
-    pub iteration: u32,
-    pub observation_cursor: i64,
+    pub iteration: Option<u32>,
+    pub observation_cursor: Option<i64>,
     pub pending_observations: u32,
-    pub agent: String,
-    pub provider: String,
+    pub agent: Option<String>,
+    pub provider: Option<String>,
     pub provider_session_id: Option<String>,
-    pub latest_event: Option<crate::project::ProjectEvent>,
-    pub last_failure: Option<crate::project::HistoricalFailure>,
+    pub latest_event: Option<crate::work::project::ProjectEvent>,
+    pub last_failure: Option<crate::work::project::HistoricalFailure>,
     pub created_at: time::OffsetDateTime,
     pub updated_at: time::OffsetDateTime,
 }
@@ -87,6 +88,26 @@ async fn project_work_status(store: &Store, project: &Project) -> OpsResult<Work
         .map_err(|error| project_error(error.to_string()))
 }
 
+fn default_project_controller_state(
+    project: &Project,
+    repo: &Path,
+    now: time::OffsetDateTime,
+) -> ProjectControllerState {
+    let config = load_config_or_default(Some(repo));
+    let agent = config.agent().to_string();
+    let (provider, _) = parse_agent(&agent);
+    ProjectControllerState {
+        project_id: project.id.clone(),
+        iteration: 0,
+        observation_cursor: 0,
+        last_state_fingerprint: None,
+        agent,
+        provider,
+        provider_session_id: None,
+        updated_at: now,
+    }
+}
+
 fn project_session_name(project: &Project) -> String {
     format!(
         "lf-project-{}-{}",
@@ -102,7 +123,7 @@ async fn project_session_live(project: &Project) -> OpsResult<bool> {
 }
 
 pub(crate) fn require_registered_wave(repo: &Path, wave: &str) -> OpsResult<Wave> {
-    let locator = crate::wave::WaveLocator::discover(repo, wave)
+    let locator = crate::work::wave::WaveLocator::discover(repo, wave)
         .map_err(|error| project_error(error.to_string()))?;
     let wave = wave.to_string();
     block_on_project(async move {
@@ -140,6 +161,21 @@ pub fn project_run(repo: &Path, project_id: &str, directive: Option<String>) -> 
                 existing.plan.slug, existing.plan.slug,
             )));
         }
+        if store
+            .project_controller_state(&existing.id)
+            .await
+            .map_err(|error| project_error(error.to_string()))?
+            .is_none()
+        {
+            store
+                .put_project_controller_state(&default_project_controller_state(
+                    &existing,
+                    repo,
+                    time::OffsetDateTime::now_utc(),
+                ))
+                .await
+                .map_err(|error| project_error(error.to_string()))?;
+        }
         let live = project_session_live(&existing).await?;
         Ok(Some((existing, live)))
     })? {
@@ -158,7 +194,7 @@ pub fn project_run(repo: &Path, project_id: &str, directive: Option<String>) -> 
 
     let resolved =
         crate::ops::task_pm::resolve_project(&repo, project_id, crate::ops::pm::PmRefresh::Auto)?;
-    let project = reserve_project(&repo, resolved, directive)?;
+    let project = reserve_project(&repo, resolved, directive, true)?;
     block_on_project(async move {
         let store = project_store().await?;
         if project_session_live(&project).await? {
@@ -169,17 +205,58 @@ pub fn project_run(repo: &Path, project_id: &str, directive: Option<String>) -> 
     })
 }
 
+pub fn project_prepare(
+    repo: &Path,
+    project_id: &str,
+    directive: Option<String>,
+) -> OpsResult<Project> {
+    let directive = normalize_directive(directive)?;
+    if let Some(existing) = block_on_project(async {
+        let store = project_store().await?;
+        let Some(existing) = store
+            .get_project_by_project(project_id)
+            .await
+            .map_err(|error| project_error(format!("failed to read Project: {error}")))?
+        else {
+            return Ok(None);
+        };
+        if matches!(
+            project_work_status(&store, &existing).await?,
+            WorkStatus::Done | WorkStatus::Abandoned
+        ) {
+            return Ok(None);
+        }
+        if directive.is_some() {
+            return Err(project_error(format!(
+                "Project {} already exists; use `lf project steer {} <new-direction>`",
+                existing.plan.slug, existing.plan.slug,
+            )));
+        }
+        Ok(Some(existing))
+    })? {
+        return Ok(existing);
+    }
+
+    let repo = ensure_clean_main(repo, "Project prepare")?;
+    let resolved =
+        crate::ops::task_pm::resolve_project(&repo, project_id, crate::ops::pm::PmRefresh::Auto)?;
+    reserve_project(&repo, resolved, directive, false)
+}
+
 pub(crate) fn reserve_project(
     repo: &Path,
     resolved: crate::ops::task_pm::ResolvedProject,
     directive: Option<String>,
+    install_controller: bool,
 ) -> OpsResult<Project> {
-    let locator = crate::wave::WaveLocator::discover(repo, &resolved.snapshot.wave)
+    let locator = crate::work::wave::WaveLocator::discover(repo, &resolved.snapshot.wave)
         .map_err(|error| project_error(error.to_string()))?;
-    let config = load_config_or_default(Some(repo));
-    let agent = config.agent();
-    let (provider, _) = parse_agent(agent);
-    let agent = agent.to_string();
+    let controller_route = install_controller.then(|| {
+        let config = load_config_or_default(Some(repo));
+        let agent = config.agent().to_string();
+        let (provider, _) = parse_agent(&agent);
+        (agent, provider)
+    });
     let directive = directive.unwrap_or_else(|| {
         format!(
             "Pursue {}.\n\n{}",
@@ -197,6 +274,28 @@ pub(crate) fn reserve_project(
                 project_work_status(&store, existing).await?,
                 WorkStatus::Done | WorkStatus::Abandoned
             ) {
+                if let Some((agent, provider)) = controller_route.as_ref() {
+                    if store
+                        .project_controller_state(&existing.id)
+                        .await
+                        .map_err(|error| project_error(error.to_string()))?
+                        .is_none()
+                    {
+                        store
+                            .put_project_controller_state(&ProjectControllerState {
+                                project_id: existing.id.clone(),
+                                iteration: 0,
+                                observation_cursor: 0,
+                                last_state_fingerprint: None,
+                                agent: agent.clone(),
+                                provider: provider.clone(),
+                                provider_session_id: None,
+                                updated_at: time::OffsetDateTime::now_utc(),
+                            })
+                            .await
+                            .map_err(|error| project_error(error.to_string()))?;
+                    }
+                }
                 return Ok(existing.clone());
             }
         }
@@ -219,12 +318,6 @@ pub(crate) fn reserve_project(
                 .unwrap_or_else(ProjectId::new),
             plan,
             wave_id: wave.id().clone(),
-            iteration: 0,
-            observation_cursor: 0,
-            last_state_fingerprint: None,
-            agent,
-            provider,
-            provider_session_id: None,
             abandon_intent: None,
             created_at: predecessor
                 .as_ref()
@@ -255,6 +348,23 @@ pub(crate) fn reserve_project(
             }
             return Err(project_error(format!("failed to reserve Project: {error}")));
         }
+        if let Some((agent, provider)) = controller_route {
+            store
+                .put_project_controller_state(&ProjectControllerState {
+                    project_id: project.id.clone(),
+                    iteration: 0,
+                    observation_cursor: 0,
+                    last_state_fingerprint: None,
+                    agent,
+                    provider,
+                    provider_session_id: None,
+                    updated_at: now,
+                })
+                .await
+                .map_err(|error| {
+                    project_error(format!("failed to install Project controller: {error}"))
+                })?;
+        }
         Ok(project)
     })
 }
@@ -277,7 +387,7 @@ pub(crate) fn ensure_project_for_task(
     repo: &Path,
     resolved: crate::ops::task_pm::ResolvedProject,
 ) -> OpsResult<Project> {
-    let project = reserve_project(repo, resolved, None)?;
+    let project = reserve_project(repo, resolved, None, false)?;
     Ok(project)
 }
 
@@ -330,9 +440,9 @@ pub fn project_start(
     directive: Option<String>,
 ) -> OpsResult<Project> {
     let main = ensure_clean_main(repo, "Project start")?;
-    let wave = crate::engine::wave_context::resolve_managed_wave_sync(Some(&main), wave).map_err(
+    let wave = crate::work::wave::context::resolve_managed_wave_sync(Some(&main), wave).map_err(
         |err| match err {
-            crate::engine::wave_context::WaveResolveError::NoContext => {
+            crate::work::wave::context::WaveResolveError::NoContext => {
                 project_error("cannot determine wave; pass --wave <name>")
             }
             other => project_error(other.to_string()),
@@ -441,6 +551,10 @@ pub fn project_snapshot(project: &Project) -> OpsResult<ProjectSnapshot> {
             .await
             .map_err(|error| project_error(error.to_string()))?;
         let reason = status.reason().to_string();
+        let controller = store
+            .project_controller_state(&project.id)
+            .await
+            .map_err(|error| project_error(error.to_string()))?;
         Ok(ProjectSnapshot {
             id: project.id.to_string(),
             external_project_id: project.plan.id.as_str().to_string(),
@@ -449,12 +563,12 @@ pub fn project_snapshot(project: &Project) -> OpsResult<ProjectSnapshot> {
             wave: wave.name().to_string(),
             status,
             reason,
-            iteration: project.iteration,
-            observation_cursor: project.observation_cursor,
+            iteration: controller.as_ref().map(|state| state.iteration),
+            observation_cursor: controller.as_ref().map(|state| state.observation_cursor),
             pending_observations,
-            agent: project.agent,
-            provider: project.provider,
-            provider_session_id: project.provider_session_id,
+            agent: controller.as_ref().map(|state| state.agent.clone()),
+            provider: controller.as_ref().map(|state| state.provider.clone()),
+            provider_session_id: controller.and_then(|state| state.provider_session_id),
             latest_event,
             last_failure: store
                 .latest_project_failure(&project.id)
@@ -477,7 +591,12 @@ fn queue_project_steer(project: &str, message: String) -> OpsResult<ProjectContr
         let receipt =
             super::child::append_steer(&store, ChildRef::Project(project.id.clone()), &message)
                 .await?;
-        if !project_session_live(&project).await? {
+        let has_controller = store
+            .project_controller_state(&project.id)
+            .await
+            .map_err(|error| project_error(error.to_string()))?
+            .is_some();
+        if has_controller && !project_session_live(&project).await? {
             launch_project_process(&store, &project).await?;
         }
         Ok(ProjectControlResult {
@@ -506,16 +625,44 @@ pub fn project_resume(
 ) -> OpsResult<ProjectControlResult> {
     block_on_project(async move {
         let store = project_store().await?;
-        let mut project = store
+        let project = store
             .get_project_by_project(project)
             .await
             .map_err(|error| project_error(error.to_string()))?
             .ok_or_else(|| project_error(format!("no Project exists for {project:?}")))?;
+        if store
+            .project_controller_state(&project.id)
+            .await
+            .map_err(|error| project_error(error.to_string()))?
+            .is_none()
+        {
+            let wave = owning_wave(&store, &project).await?;
+            store
+                .put_project_controller_state(&default_project_controller_state(
+                    &project,
+                    Path::new(wave.repo()),
+                    time::OffsetDateTime::now_utc(),
+                ))
+                .await
+                .map_err(|error| {
+                    project_error(format!("failed to install Project controller: {error}"))
+                })?;
+        }
         if let Some(model) = model {
             let request = super::child::handoff_request(&model, reason.as_deref())?;
-            if project.agent != request.agent {
-                project = store
-                    .handoff_project_body(&project.id, &request)
+            let controller = store
+                .project_controller_state(&project.id)
+                .await
+                .map_err(|error| project_error(error.to_string()))?
+                .ok_or_else(|| {
+                    project_error(format!(
+                        "Project {} has no end-to-end controller state",
+                        project.plan.slug
+                    ))
+                })?;
+            if controller.agent != request.agent {
+                store
+                    .handoff_project_controller(&project.id, &request)
                     .await
                     .map_err(|error| project_error(error.to_string()))?;
             }
@@ -616,10 +763,18 @@ pub(crate) async fn wake_project(project_id: &ProjectId) -> OpsResult<()> {
         .await
         .map_err(|error| project_error(error.to_string()))?
         .ok_or_else(|| project_error(format!("Project {project_id} not found")))?;
+    if store
+        .project_controller_state(&project.id)
+        .await
+        .map_err(|error| project_error(error.to_string()))?
+        .is_none()
+    {
+        return Ok(());
+    }
     // A wake is a supervisor restart: a Task observation arrived and the Project
     // may want to judge it. That is never a reason to revive a Project whose end
     // was already decided.
-    if let Some(bar) = project.supervisor_restart_bar() {
+    if let Some(bar) = crate::controller::project::automatic_restart_bar(&project) {
         tracing::info!(project = %project_id, "not waking Project: {bar}");
         return Ok(());
     }
@@ -636,7 +791,7 @@ pub(crate) async fn wake_task_project_route(_store: &Store, task: &Task) -> OpsR
 /// Persist the child's ancestry before the authored promotion flow creates its
 /// first Initiative or Project. Completion records the promotion occurrence.
 pub fn prepare_promotion(repo: &Path, parent: &str, child: &str) -> OpsResult<()> {
-    let origin = crate::engine::wave_context::wave_origin(repo);
+    let origin = crate::work::wave::context::wave_origin(repo);
     block_on_project(async {
         let store = open_existing_store().await.ok_or_else(|| {
             OpsError::Message(
@@ -654,9 +809,9 @@ async fn prepare_promotion_with_store(
     parent: &str,
     child: &str,
 ) -> OpsResult<()> {
-    let parent_locator = crate::wave::WaveLocator::discover(repo, parent)
+    let parent_locator = crate::work::wave::WaveLocator::discover(repo, parent)
         .map_err(|error| project_error(error.to_string()))?;
-    let child_locator = crate::wave::WaveLocator::discover(repo, child)
+    let child_locator = crate::work::wave::WaveLocator::discover(repo, child)
         .map_err(|error| project_error(error.to_string()))?;
     let parent = store
         .get_wave_at(&parent_locator)
@@ -700,7 +855,7 @@ async fn prepare_promotion_with_store(
 /// Complete the mechanical half of an authored project-promotion flow: record
 /// the promotion and ancestry, start the child residency, and wait for its endpoint.
 pub fn complete_promotion(repo: &Path, parent: &str, child: &str) -> OpsResult<String> {
-    let origin = crate::engine::wave_context::wave_origin(repo);
+    let origin = crate::work::wave::context::wave_origin(repo);
     let goal = origin.join("wave").join(child).join("GOAL.md");
     if !goal.is_file() {
         return Err(OpsError::Message(format!(
@@ -720,14 +875,16 @@ pub fn complete_promotion(repo: &Path, parent: &str, child: &str) -> OpsResult<S
         })?;
         record_promotion(&store, &origin, parent, child).await?;
 
-        if crate::wave::server::live_endpoint(&origin, child)
+        if crate::controller::wave::server::live_endpoint(&origin, child)
             .await
             .is_none()
         {
             launch_residency(&origin, child).await?;
         }
         for _ in 0..100 {
-            if let Some(endpoint) = crate::wave::server::live_endpoint(&origin, child).await {
+            if let Some(endpoint) =
+                crate::controller::wave::server::live_endpoint(&origin, child).await
+            {
                 wake_child_observer(&endpoint, parent, child).await;
                 return Ok(promotion_session_name(&origin, child));
             }
@@ -762,9 +919,9 @@ async fn wake_child_observer(endpoint: &str, parent: &str, wave: &str) {
 }
 
 async fn record_promotion(store: &Store, repo: &Path, parent: &str, child: &str) -> OpsResult<()> {
-    let parent_locator = crate::wave::WaveLocator::discover(repo, parent)
+    let parent_locator = crate::work::wave::WaveLocator::discover(repo, parent)
         .map_err(|error| OpsError::Message(error.to_string()))?;
-    let child_locator = crate::wave::WaveLocator::discover(repo, child)
+    let child_locator = crate::work::wave::WaveLocator::discover(repo, child)
         .map_err(|error| OpsError::Message(error.to_string()))?;
     let parent = store
         .get_wave_at(&parent_locator)
@@ -975,12 +1132,6 @@ mod tests {
                 pm_snapshot_synced_at: now.unix_timestamp(),
             },
             wave_id: WaveId::new(),
-            iteration: 1,
-            observation_cursor: 0,
-            last_state_fingerprint: None,
-            agent: "claude".to_string(),
-            provider: "claude".to_string(),
-            provider_session_id: None,
             abandon_intent: None,
             created_at: now,
             updated_at: now,
@@ -1040,7 +1191,9 @@ mod tests {
             .unwrap();
 
         let child = store
-            .get_wave_at(&crate::wave::WaveLocator::discover(tmp.path(), "infrastructure").unwrap())
+            .get_wave_at(
+                &crate::work::wave::WaveLocator::discover(tmp.path(), "infrastructure").unwrap(),
+            )
             .await
             .unwrap()
             .unwrap();
@@ -1077,7 +1230,8 @@ mod tests {
             .await
             .unwrap();
 
-        let locator = crate::wave::WaveLocator::discover(tmp.path(), "release-stability").unwrap();
+        let locator =
+            crate::work::wave::WaveLocator::discover(tmp.path(), "release-stability").unwrap();
         let child = store.get_wave_at(&locator).await.unwrap().unwrap();
         assert_eq!(child.parent_wave_id(), Some(parent.id()));
         let promoted_at = child.promoted_at().expect("promotion occurrence");

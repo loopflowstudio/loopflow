@@ -18,21 +18,20 @@ use crate::child::{
 use crate::durable::Author;
 use crate::id::WaveId;
 use crate::planning::{LinearIssueId, LinearProjectId, ProjectPlan, TaskPlan};
-use crate::project::{
-    ChildEventPayload, ObservationOutboxRow, Project, ProjectEvent, ProjectEventKind, ProjectId,
-};
 use crate::store::rows::now_unix;
 use crate::store::{StoreError, StoreResult};
-use crate::task::{
+use crate::work::project::{
+    ChildEventPayload, ObservationOutboxRow, Project, ProjectEvent, ProjectEventKind, ProjectId,
+};
+use crate::work::task::{
     AfterMerge, CiObservation, GithubObservation, GithubPr, LinearObservationApply,
     LinearObservationOutcome, PrMergeRequest, PrPhase, PrPresentation, PrPublication, Task,
-    TaskEvent, TaskEventKind, TaskId, TaskLifecyclePhase, TaskLifecyclePlan, TaskLinearObservation,
-    TaskPhasePlan, TaskPr, TaskPrId, TaskPrRepairKind,
+    TaskEvent, TaskEventKind, TaskId, TaskLinearObservation, TaskPr, TaskPrId, TaskPrRepairKind,
 };
 
 use super::durable::{
     create_project_work, create_task_work, reopen_work_in, validate_work_completion_readiness_in,
-    work_for_child_in, work_status_in,
+    work_for_child_in,
 };
 use super::SqliteStore;
 
@@ -210,47 +209,6 @@ impl SqliteStore {
         complete_task_work_in(&transaction, task)?;
         transaction.commit()?;
         Ok(())
-    }
-
-    pub fn handoff_task_body(
-        &self,
-        task_id: &TaskId,
-        request: &ChildBodyHandoffRequest,
-    ) -> StoreResult<Task> {
-        validate_handoff_request(request)?;
-        let mut conn = self.conn.lock().expect("store mutex poisoned");
-        let transaction = conn.transaction_with_behavior(TransactionBehavior::Immediate)?;
-        let mut task = transaction
-            .query_row(TASK_SELECT, params![task_id.as_str()], map_task_row)
-            .optional()?
-            .ok_or(StoreError::NotFound)?;
-        let work = work_for_child_in(&transaction, &ChildRef::Task(task.id.clone()))?;
-        validate_handoff_state(
-            "Task",
-            &task.plan.identifier,
-            &work_status_in(&transaction, &work)?,
-            task.abandon_intent.as_ref(),
-        )?;
-        let handoff = apply_handoff(
-            &mut task.agent,
-            &mut task.provider,
-            &mut task.provider_session_id,
-            request,
-        );
-        task.updated_at = OffsetDateTime::now_utc();
-        validate_task(&task)?;
-        let parameters = task_control_params(&task);
-        transaction.execute(
-            TASK_UPDATE,
-            rusqlite::params_from_iter(parameters.iter().map(|value| value.as_ref())),
-        )?;
-        insert_task_event_in(
-            &transaction,
-            &task,
-            &TaskEventKind::BodyHandedOff { handoff },
-        )?;
-        transaction.commit()?;
-        Ok(task)
     }
 
     pub fn task(&self, task_id: &TaskId) -> StoreResult<Option<Task>> {
@@ -765,20 +723,6 @@ impl SqliteStore {
         Ok(())
     }
 
-    pub(crate) fn update_project_progress(&self, project: &Project) -> StoreResult<()> {
-        validate_project(project)?;
-        let conn = self.conn.lock().expect("store mutex poisoned");
-        let parameters = project_params(project);
-        if conn.execute(
-            PROJECT_PROGRESS_UPDATE,
-            rusqlite::params_from_iter(parameters.iter().map(|value| value.as_ref())),
-        )? == 0
-        {
-            return Err(StoreError::NotFound);
-        }
-        Ok(())
-    }
-
     pub(crate) fn adopt_project_plan(
         &self,
         project_id: &ProjectId,
@@ -816,7 +760,7 @@ impl SqliteStore {
         validate_project(&project)?;
         let parameters = project_params(&project);
         if transaction.execute(
-            PROJECT_PROGRESS_UPDATE,
+            PROJECT_UPDATE,
             rusqlite::params_from_iter(parameters.iter().map(|value| value.as_ref())),
         )? == 0
         {
@@ -832,7 +776,7 @@ impl SqliteStore {
         let transaction = conn.transaction_with_behavior(TransactionBehavior::Immediate)?;
         let parameters = project_params(project);
         if transaction.execute(
-            PROJECT_PROGRESS_UPDATE,
+            PROJECT_UPDATE,
             rusqlite::params_from_iter(parameters.iter().map(|value| value.as_ref())),
         )? == 0
         {
@@ -872,7 +816,7 @@ impl SqliteStore {
         validate_work_completion_readiness_in(&transaction, &work)?;
         let parameters = project_params(project);
         if transaction.execute(
-            PROJECT_PROGRESS_UPDATE,
+            PROJECT_UPDATE,
             rusqlite::params_from_iter(parameters.iter().map(|value| value.as_ref())),
         )? == 0
         {
@@ -898,51 +842,6 @@ impl SqliteStore {
         }
         transaction.commit()?;
         Ok(event)
-    }
-
-    pub fn handoff_project_body(
-        &self,
-        project_id: &ProjectId,
-        request: &ChildBodyHandoffRequest,
-    ) -> StoreResult<Project> {
-        validate_handoff_request(request)?;
-        let mut conn = self.conn.lock().expect("store mutex poisoned");
-        let transaction = conn.transaction_with_behavior(TransactionBehavior::Immediate)?;
-        let mut project = transaction
-            .query_row(
-                PROJECT_SELECT,
-                params![project_id.as_str()],
-                map_project_row,
-            )
-            .optional()?
-            .ok_or(StoreError::NotFound)?;
-        let work = work_for_child_in(&transaction, &ChildRef::Project(project.id.clone()))?;
-        validate_handoff_state(
-            "Project",
-            &project.plan.slug,
-            &work_status_in(&transaction, &work)?,
-            project.abandon_intent.as_ref(),
-        )?;
-        let handoff = apply_handoff(
-            &mut project.agent,
-            &mut project.provider,
-            &mut project.provider_session_id,
-            request,
-        );
-        project.updated_at = OffsetDateTime::now_utc();
-        validate_project(&project)?;
-        let parameters = project_control_params(&project);
-        transaction.execute(
-            PROJECT_UPDATE,
-            rusqlite::params_from_iter(parameters.iter().map(|value| value.as_ref())),
-        )?;
-        insert_project_event_in(
-            &transaction,
-            &project,
-            &ProjectEventKind::BodyHandedOff { handoff },
-        )?;
-        transaction.commit()?;
-        Ok(project)
     }
 
     pub fn project(&self, project_id: &ProjectId) -> StoreResult<Option<Project>> {
@@ -1065,7 +964,7 @@ impl SqliteStore {
     pub fn latest_project_failure(
         &self,
         project_id: &ProjectId,
-    ) -> StoreResult<Option<crate::project::HistoricalFailure>> {
+    ) -> StoreResult<Option<crate::work::project::HistoricalFailure>> {
         let conn = self.conn.lock().expect("store mutex poisoned");
         let event = conn
             .query_row(
@@ -1079,7 +978,7 @@ impl SqliteStore {
             .optional()?;
         Ok(event
             .as_ref()
-            .and_then(crate::project::HistoricalFailure::from_event))
+            .and_then(crate::work::project::HistoricalFailure::from_event))
     }
 
     pub fn pending_observations(
@@ -1195,9 +1094,9 @@ impl SqliteStore {
             params![now, observation.id],
         )?;
         transaction.execute(
-            "UPDATE projects
+            "UPDATE project_controller_state
              SET observation_cursor=MAX(observation_cursor, ?1), updated_at=?2
-             WHERE id=?3",
+             WHERE project_id=?3",
             params![observation.id, now, project_id.as_str()],
         )?;
         transaction.commit()?;
@@ -1210,16 +1109,7 @@ fn validate_task(task: &Task) -> StoreResult<()> {
         .map_err(|error| StoreError::InvalidData(error.to_string()))
 }
 
-// A controller-proven Task completion is its own authority boundary. It must
-// not fabricate a Run merely to reuse the agent-owned `done` transition.
 fn complete_task_work_in(conn: &Connection, task: &Task) -> StoreResult<()> {
-    let proposal = task
-        .gate_proposal
-        .as_ref()
-        .filter(|proposal| proposal.done)
-        .ok_or_else(|| {
-            StoreError::InvalidData("completed Task requires a done gate proposal".to_string())
-        })?;
     let state: String = conn.query_row(
         "SELECT work_state FROM tasks WHERE id=?1",
         [task.id.as_str()],
@@ -1256,7 +1146,7 @@ fn complete_task_work_in(conn: &Connection, task: &Task) -> StoreResult<()> {
         conn,
         task,
         &TaskEventKind::Completed {
-            summary: proposal.reason.clone(),
+            summary: "Task completed".to_string(),
         },
     )?;
     Ok(())
@@ -1271,7 +1161,7 @@ fn resolve_current_task(key: &str, mut tasks: Vec<Task>) -> StoreResult<Option<T
     Ok(tasks.pop())
 }
 
-fn validate_handoff_request(request: &ChildBodyHandoffRequest) -> StoreResult<()> {
+pub(super) fn validate_handoff_request(request: &ChildBodyHandoffRequest) -> StoreResult<()> {
     if request.agent.trim().is_empty() || request.provider.trim().is_empty() {
         return Err(StoreError::InvalidData(
             "body handoff requires an agent and provider".to_string(),
@@ -1285,7 +1175,7 @@ fn validate_handoff_request(request: &ChildBodyHandoffRequest) -> StoreResult<()
     Ok(())
 }
 
-fn validate_handoff_state(
+pub(super) fn validate_handoff_state(
     kind: &str,
     label: &str,
     status: &crate::durable::WorkStatus,
@@ -1308,7 +1198,7 @@ fn validate_handoff_state(
     Ok(())
 }
 
-fn apply_handoff(
+pub(super) fn apply_handoff(
     agent: &mut String,
     provider: &mut String,
     provider_session_id: &mut Option<String>,
@@ -1417,58 +1307,27 @@ const TASK_INSERT: &str = "INSERT INTO tasks (
     id, project_id, external_issue_id, issue_identifier, issue_title,
     issue_description, pm_snapshot_synced_at, pm_writeback_json,
     worktree, workspace_slug,
-    agent, provider, provider_session_id, abandon_requested_at, abandon_reason,
-    iterate_flow, phase_cursor, phase_iteration,
-    kickoff_flow, gate_flow,
-    lifecycle_phase, phase_epoch, gate_cycle, gate_proposal_json,
-    created_at, updated_at
+    abandon_requested_at, abandon_reason, created_at, updated_at
 ) VALUES (
-    ?1, ?2, ?3, ?4, ?5, ?6, ?7, ?8, ?9, ?10, ?11, ?12, ?13, ?14, ?15, ?16,
-    ?17, ?18, ?19, ?20, ?21, ?22, ?23, ?24, ?25, ?26
+    ?1, ?2, ?3, ?4, ?5, ?6, ?7, ?8, ?9, ?10, ?11, ?12, ?13, ?14
 )";
 const TASK_COLUMNS: &str = "SELECT
     t.id, t.external_issue_id, t.issue_identifier, t.issue_title, t.issue_description,
     p.wave_id, t.worktree, t.workspace_slug,
-    t.agent, t.provider, t.provider_session_id, t.created_at, t.updated_at,
-    t.pm_snapshot_synced_at, t.pm_writeback_json, t.project_id,
-    t.abandon_requested_at, t.abandon_reason,
-    t.iterate_flow, t.phase_cursor, t.phase_iteration,
-    t.kickoff_flow, t.gate_flow,
-    t.lifecycle_phase, t.phase_epoch, t.gate_cycle, t.gate_proposal_json
+    t.created_at, t.updated_at, t.pm_snapshot_synced_at, t.pm_writeback_json,
+    t.project_id, t.abandon_requested_at, t.abandon_reason
     FROM tasks t JOIN projects p ON p.id=t.project_id";
 pub(super) const TASK_SELECT: &str = "SELECT
     t.id, t.external_issue_id, t.issue_identifier, t.issue_title, t.issue_description,
     p.wave_id, t.worktree, t.workspace_slug,
-    t.agent, t.provider, t.provider_session_id, t.created_at, t.updated_at,
-    t.pm_snapshot_synced_at, t.pm_writeback_json, t.project_id,
-    t.abandon_requested_at, t.abandon_reason,
-    t.iterate_flow, t.phase_cursor, t.phase_iteration,
-    t.kickoff_flow, t.gate_flow,
-    t.lifecycle_phase, t.phase_epoch, t.gate_cycle, t.gate_proposal_json
+    t.created_at, t.updated_at, t.pm_snapshot_synced_at, t.pm_writeback_json,
+    t.project_id, t.abandon_requested_at, t.abandon_reason
     FROM tasks t JOIN projects p ON p.id=t.project_id WHERE t.id=?1";
 const TASK_UPDATE: &str = "UPDATE tasks SET
     project_id=?2, external_issue_id=?3, issue_identifier=?4,
     issue_title=?5, issue_description=?6, pm_snapshot_synced_at=?7,
-    pm_writeback_json=?8, worktree=?9, workspace_slug=?10, agent=?11, provider=?12,
-    provider_session_id=?13, abandon_requested_at=?14, abandon_reason=?15,
-    iterate_flow=?16,
-    lifecycle_phase=CASE WHEN ?22>=phase_epoch THEN ?21 ELSE lifecycle_phase END,
-    phase_cursor=CASE
-        WHEN ?22>phase_epoch OR
-             (?22=phase_epoch AND (?18>phase_iteration OR
-                                   (?18=phase_iteration AND ?17>phase_cursor)))
-        THEN ?17 ELSE phase_cursor
-    END,
-    phase_iteration=CASE
-        WHEN ?22>phase_epoch THEN ?18
-        WHEN ?22=phase_epoch THEN MAX(phase_iteration, ?18)
-        ELSE phase_iteration
-    END,
-    kickoff_flow=?19, gate_flow=?20,
-    phase_epoch=MAX(phase_epoch, ?22),
-    gate_cycle=CASE WHEN ?22>=phase_epoch THEN ?23 ELSE gate_cycle END,
-    gate_proposal_json=CASE WHEN ?22>=phase_epoch THEN ?24 ELSE gate_proposal_json END,
-    created_at=?25, updated_at=?26
+    pm_writeback_json=?8, worktree=?9, workspace_slug=?10,
+    abandon_requested_at=?11, abandon_reason=?12, created_at=?13, updated_at=?14
     WHERE id=?1";
 const TASK_PR_COLUMNS: &str = "SELECT
     id, task_id, sequence, slug, branch, base_commit,
@@ -1529,9 +1388,6 @@ fn task_params(task: &Task) -> Vec<Box<dyn ToSql>> {
         ),
         Box::new(task.worktree.display().to_string()),
         Box::new(task.workspace_slug.clone()),
-        Box::new(task.agent.clone()),
-        Box::new(task.provider.clone()),
-        Box::new(task.provider_session_id.clone()),
         Box::new(
             task.abandon_intent
                 .as_ref()
@@ -1542,17 +1398,6 @@ fn task_params(task: &Task) -> Vec<Box<dyn ToSql>> {
                 .as_ref()
                 .map(|intent| intent.reason.clone()),
         ),
-        Box::new(task.lifecycle.loop_.flow.clone()),
-        Box::new(i64::from(task.phase_cursor)),
-        Box::new(i64::from(task.phase_iteration)),
-        Box::new(task.lifecycle.first.flow.clone()),
-        Box::new(task.lifecycle.finally.flow.clone()),
-        Box::new(task.lifecycle_phase.storage_str().to_string()),
-        Box::new(i64::from(task.phase_epoch)),
-        Box::new(i64::from(task.gate_cycle)),
-        Box::new(task.gate_proposal.as_ref().map(|proposal| {
-            serde_json::to_string(proposal).expect("Task gate proposal must serialize")
-        })),
         Box::new(task.created_at.unix_timestamp()),
         Box::new(task.updated_at.unix_timestamp()),
     ]
@@ -1837,7 +1682,7 @@ fn settle_task_pr_merged_in(
             .unwrap_or_else(OffsetDateTime::now_utc);
         let observation = GithubObservation {
             checked_at,
-            result: crate::task::GithubObservationResult::Partial {
+            result: crate::work::task::GithubObservationResult::Partial {
                 reason: format!(
                     "GitHub merged_at conflicts with first accepted value {accepted_at}"
                 ),
@@ -1889,8 +1734,8 @@ fn invalid_column(
 
 pub(super) fn map_task_row(row: &rusqlite::Row<'_>) -> rusqlite::Result<Task> {
     let abandon_intent = match (
-        row.get::<_, Option<i64>>(16)?,
-        row.get::<_, Option<String>>(17)?,
+        row.get::<_, Option<i64>>(13)?,
+        row.get::<_, Option<String>>(14)?,
     ) {
         (Some(requested_at), Some(reason)) => Some(AbandonIntent {
             requested_at: crate::store::rows::unix_to_datetime(requested_at),
@@ -1905,39 +1750,20 @@ pub(super) fn map_task_row(row: &rusqlite::Row<'_>) -> rusqlite::Result<Task> {
             identifier: row.get(2)?,
             title: row.get(3)?,
             description: row.get(4)?,
-            pm_snapshot_synced_at: row.get(13)?,
+            pm_snapshot_synced_at: row.get(10)?,
         },
-        pm_writeback: serde_json::from_str(&row.get::<_, String>(14)?)
-            .map_err(|error| invalid_column(14, error))?,
+        pm_writeback: serde_json::from_str(&row.get::<_, String>(11)?)
+            .map_err(|error| invalid_column(11, error))?,
         wave_id: row.get(5)?,
-        project_id: ProjectId::from_raw(row.get::<_, String>(15)?),
+        project_id: ProjectId::from_raw(row.get::<_, String>(12)?),
         worktree: PathBuf::from(row.get::<_, String>(6)?),
         workspace_slug: row.get(7)?,
-        lifecycle: TaskLifecyclePlan {
-            first: TaskPhasePlan { flow: row.get(21)? },
-            loop_: TaskPhasePlan { flow: row.get(18)? },
-            finally: TaskPhasePlan { flow: row.get(22)? },
-        },
-        lifecycle_phase: TaskLifecyclePhase::from_storage_str(&row.get::<_, String>(23)?)
-            .map_err(|error| invalid_column(23, error))?,
-        phase_epoch: row.get::<_, i64>(24)? as u32,
-        phase_cursor: row.get::<_, i64>(19)? as u32,
-        phase_iteration: row.get::<_, i64>(20)? as u32,
-        gate_cycle: row.get::<_, i64>(25)? as u32,
-        gate_proposal: row
-            .get::<_, Option<String>>(26)?
-            .map(|json| serde_json::from_str(&json))
-            .transpose()
-            .map_err(|error| invalid_column(26, error))?,
-        agent: row.get(8)?,
-        provider: row.get(9)?,
-        provider_session_id: row.get(10)?,
         abandon_intent,
-        created_at: crate::store::rows::unix_to_datetime(row.get(11)?),
-        updated_at: crate::store::rows::unix_to_datetime(row.get(12)?),
+        created_at: crate::store::rows::unix_to_datetime(row.get(8)?),
+        updated_at: crate::store::rows::unix_to_datetime(row.get(9)?),
         // Runtime freshness is derived when reconciliation decides whether the
         // durable GitHub observation can be reused.
-        observation: crate::task::Observation::NotRequired,
+        observation: crate::work::task::Observation::NotRequired,
     })
 }
 
@@ -2106,45 +1932,28 @@ fn task_events_after_in(
 const PROJECT_INSERT: &str = "INSERT INTO projects (
     id, wave_id, external_project_id, project_slug, project_name,
     project_prompt_context, pm_snapshot_synced_at,
-    iteration, observation_cursor, last_state_fingerprint,
-    agent, provider, provider_session_id, abandon_requested_at, abandon_reason,
+    abandon_requested_at, abandon_reason,
     created_at, updated_at
 ) VALUES (
-    ?1, ?2, ?3, ?4, ?5, ?6, ?7, ?8, ?9, ?10,
-    ?11, ?12, ?13, ?14, ?15, ?16, ?17
+    ?1, ?2, ?3, ?4, ?5, ?6, ?7, ?8, ?9, ?10, ?11
 )";
 const PROJECT_COLUMNS: &str = "SELECT
     id, external_project_id, project_slug, project_name, project_prompt_context,
-    wave_id, pm_snapshot_synced_at,
-    iteration, observation_cursor, last_state_fingerprint, agent, provider,
-    provider_session_id, abandon_requested_at, abandon_reason, created_at, updated_at
+    wave_id, pm_snapshot_synced_at, abandon_requested_at, abandon_reason,
+    created_at, updated_at
     FROM projects";
-const PROJECT_SELECT: &str = "SELECT
+pub(super) const PROJECT_SELECT: &str = "SELECT
     id, external_project_id, project_slug, project_name, project_prompt_context,
-    wave_id, pm_snapshot_synced_at,
-    iteration, observation_cursor, last_state_fingerprint, agent, provider,
-    provider_session_id, abandon_requested_at, abandon_reason, created_at, updated_at
+    wave_id, pm_snapshot_synced_at, abandon_requested_at, abandon_reason,
+    created_at, updated_at
     FROM projects WHERE id=?1";
 const PROJECT_UPDATE: &str = "UPDATE projects SET
     wave_id=?2, external_project_id=?3, project_slug=?4, project_name=?5,
-    project_prompt_context=?6, pm_snapshot_synced_at=?7, agent=?11, provider=?12,
-    provider_session_id=?13, abandon_requested_at=?14, abandon_reason=?15,
-    created_at=?16, updated_at=?17
+    project_prompt_context=?6, pm_snapshot_synced_at=?7,
+    abandon_requested_at=?8, abandon_reason=?9,
+    created_at=?10, updated_at=?11
     WHERE id=?1";
-const PROJECT_REOPEN_UPDATE: &str = "UPDATE projects SET
-    wave_id=?2, external_project_id=?3, project_slug=?4, project_name=?5,
-    project_prompt_context=?6, pm_snapshot_synced_at=?7, iteration=?8,
-    observation_cursor=?9, last_state_fingerprint=?10, agent=?11, provider=?12,
-    provider_session_id=?13, abandon_requested_at=?14, abandon_reason=?15,
-    created_at=?16, updated_at=?17
-    WHERE id=?1";
-const PROJECT_PROGRESS_UPDATE: &str = "UPDATE projects SET
-    wave_id=?2, external_project_id=?3, project_slug=?4, project_name=?5,
-    project_prompt_context=?6, pm_snapshot_synced_at=?7, iteration=?8,
-    observation_cursor=?9, last_state_fingerprint=?10, agent=?11, provider=?12,
-    provider_session_id=?13, abandon_requested_at=?14, abandon_reason=?15,
-    created_at=?16, updated_at=?17
-    WHERE id=?1";
+const PROJECT_REOPEN_UPDATE: &str = PROJECT_UPDATE;
 fn project_params(project: &Project) -> Vec<Box<dyn ToSql>> {
     vec![
         Box::new(project.id.as_str().to_string()),
@@ -2154,12 +1963,6 @@ fn project_params(project: &Project) -> Vec<Box<dyn ToSql>> {
         Box::new(project.plan.name.clone()),
         Box::new(project.plan.prompt_context.clone()),
         Box::new(project.plan.pm_snapshot_synced_at),
-        Box::new(i64::from(project.iteration)),
-        Box::new(project.observation_cursor),
-        Box::new(project.last_state_fingerprint.clone()),
-        Box::new(project.agent.clone()),
-        Box::new(project.provider.clone()),
-        Box::new(project.provider_session_id.clone()),
         Box::new(
             project
                 .abandon_intent
@@ -2181,10 +1984,10 @@ fn project_control_params(project: &Project) -> Vec<Box<dyn ToSql>> {
     project_params(project)
 }
 
-fn map_project_row(row: &rusqlite::Row<'_>) -> rusqlite::Result<Project> {
+pub(super) fn map_project_row(row: &rusqlite::Row<'_>) -> rusqlite::Result<Project> {
     let abandon_intent = match (
-        row.get::<_, Option<i64>>(13)?,
-        row.get::<_, Option<String>>(14)?,
+        row.get::<_, Option<i64>>(7)?,
+        row.get::<_, Option<String>>(8)?,
     ) {
         (Some(requested_at), Some(reason)) => Some(AbandonIntent {
             requested_at: crate::store::rows::unix_to_datetime(requested_at),
@@ -2202,15 +2005,9 @@ fn map_project_row(row: &rusqlite::Row<'_>) -> rusqlite::Result<Project> {
             pm_snapshot_synced_at: row.get(6)?,
         },
         wave_id: row.get(5)?,
-        iteration: row.get::<_, i64>(7)? as u32,
-        observation_cursor: row.get(8)?,
-        last_state_fingerprint: row.get(9)?,
-        agent: row.get(10)?,
-        provider: row.get(11)?,
-        provider_session_id: row.get(12)?,
         abandon_intent,
-        created_at: crate::store::rows::unix_to_datetime(row.get(15)?),
-        updated_at: crate::store::rows::unix_to_datetime(row.get(16)?),
+        created_at: crate::store::rows::unix_to_datetime(row.get(9)?),
+        updated_at: crate::store::rows::unix_to_datetime(row.get(10)?),
     })
 }
 
@@ -2288,7 +2085,7 @@ pub(super) fn insert_task_event_in(
     })
 }
 
-fn insert_project_event_in(
+pub(super) fn insert_project_event_in(
     conn: &Connection,
     project: &Project,
     kind: &ProjectEventKind,

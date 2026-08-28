@@ -7,7 +7,7 @@ use loopflow::id::WaveId;
 use loopflow::ops::pm::{canonical_wave_title_path, list_local_waves};
 use loopflow::store::sqlite::SqliteStore;
 use loopflow::store::PmSnapshotRow;
-use loopflow::wave::{Wave, WaveLocator};
+use loopflow::work::wave::{Wave, WaveLocator};
 
 fn git(repo: &Path, args: &[&str]) {
     let output = Command::new("git")

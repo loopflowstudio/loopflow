@@ -102,14 +102,13 @@ Renamed from `systems` in the 2026-07-08 wave/project/task restructure. Steers L
   synthetic Run to reuse a Run-owned terminal transition. Prove this boundary
   with a zero-agent-boundary fixture and repeated reads that count Runs and
   completion events.
-- **Phase-owned state needs the same freshness boundary in memory and storage**
-  (learned 2026-07-20). Passive reconciliation may advance a durable Task to
-  finally while its active Run still holds a pre-final snapshot. Refresh a gate
-  proposal only within the same finally epoch; first/loop snapshots keep no
-  proposal and the store's `phase_epoch` fence preserves newer durable truth.
-  Validation runs before SQL, so a persistence fence cannot repair a torn local
-  refresh. Terminal Work remains authoritative over stale resumable failure
-  observations.
+- **Task resident state is an optional execution overlay** (revised
+  2026-08-27). Lifecycle playhead, gate proposal, provider choice, and
+  continuation live in `task_residents`, not Task identity. The supported
+  resident has one stable local session and restart stops that route before
+  resetting it. Generic Task-bound Runs remain legal and gain no resident or
+  worktree authority from attribution; there is no phase generation or stale
+  writer fence to turn one process into “the Task.”
 - **Durable Ask is the only blocking human-input primitive** (decided
   2026-07-21). Interactive Task phases are advisory: the runner makes one launch
   attempt and advances independently of launcher success, UI lifetime, or

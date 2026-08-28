@@ -220,7 +220,6 @@ pub(crate) fn normalize_task_pr_copy(
     }
 
     let task_link = context.task_link();
-    let task_cycle = context.cycle().as_str();
     let pr_lifecycle = match lifecycle {
         TaskPrCopyLifecycle::Published => format!(
             "PR {} is published for review; no Task settlement is requested.",
@@ -242,7 +241,7 @@ pub(crate) fn normalize_task_pr_copy(
         }
     };
     let managed = format!(
-        "{TASK_PR_CONTEXT_START}\n> [!NOTE]\n> **Task:** {task_link}\n> **Task cycle:** {task_cycle}\n> **PR lifecycle:** {pr_lifecycle}\n{TASK_PR_CONTEXT_END}"
+        "{TASK_PR_CONTEXT_START}\n> [!NOTE]\n> **Task:** {task_link}\n> **PR lifecycle:** {pr_lifecycle}\n{TASK_PR_CONTEXT_END}"
     );
     let reviewer_context = _strip_managed_task_context(&copy.body);
     let body = if reviewer_context.is_empty() {
@@ -1494,7 +1493,6 @@ mod tests {
         MergeGateReading, PrCopy, RequiredChecks, TaskPrCopyLifecycle,
     };
     use crate::ops::task::TaskPrContext;
-    use crate::task::TaskLifecyclePlan;
 
     fn check(name: &str, bucket: &str) -> GhCheck {
         GhCheck {
@@ -1700,14 +1698,11 @@ mod tests {
         assert_eq!(pr_number_from_url("https://example.com/not-a-pr"), None);
     }
 
-    fn task_pr_context(first_flow: &str) -> TaskPrContext {
-        let mut lifecycle = TaskLifecyclePlan::defaults();
-        lifecycle.first.flow = first_flow.to_string();
+    fn task_pr_context() -> TaskPrContext {
         TaskPrContext {
             title: "Make Task PR copy explain intent and lifecycle".to_string(),
             identifier: "LOO-249".to_string(),
             url: "https://linear.app/loopflow/issue/LOO-249/task-pr-copy".to_string(),
-            lifecycle,
             sequence: 1,
         }
     }
@@ -1719,7 +1714,7 @@ mod tests {
                 title: "pr copy: explain the review contract".to_string(),
                 body: "## Evaluate\n\n`cargo test -p loopflow task_pr_copy`".to_string(),
             },
-            Some(&task_pr_context("incident")),
+            Some(&task_pr_context()),
             &TaskPrCopyLifecycle::Completes,
         )
         .expect("normalize Task PR copy");
@@ -1733,7 +1728,6 @@ mod tests {
             "<!-- loopflow:task-pr-context:start -->\n\
 > [!NOTE]\n\
 > **Task:** [LOO-249 — Make Task PR copy explain intent and lifecycle](https://linear.app/loopflow/issue/LOO-249/task-pr-copy)\n\
-> **Task cycle:** fix\n\
 > **PR lifecycle:** Merging PR 1 completes the Task.\n\
 <!-- loopflow:task-pr-context:end -->\n\n\
 ## Evaluate\n\n`cargo test -p loopflow task_pr_copy`"
@@ -1748,13 +1742,13 @@ mod tests {
                 body: "Linear Task: [OLD-1](https://example.com/old)\n\nReviewer proof."
                     .to_string(),
             },
-            Some(&task_pr_context("task-design")),
+            Some(&task_pr_context()),
             &TaskPrCopyLifecycle::Published,
         )
         .expect("publish Task PR copy");
         let continued = normalize_task_pr_copy(
             published,
-            Some(&task_pr_context("task-design")),
+            Some(&task_pr_context()),
             &TaskPrCopyLifecycle::Continues {
                 next_slug: Some("follow-up-proof".to_string()),
             },
@@ -1771,7 +1765,6 @@ mod tests {
         assert!(continued.body.contains(
             "Merging PR 1 leaves the Task open and names `follow-up-proof` as the next serial PR."
         ));
-        assert!(continued.body.contains("> **Task cycle:** feature"));
         assert!(continued.body.ends_with("Reviewer proof."));
         assert!(!continued.body.contains("Linear Task: [OLD-1]"));
     }

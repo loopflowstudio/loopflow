@@ -10,7 +10,7 @@ use crate::pr_landing::{
     LandingClaim, LandingPlacement, LandingSupervisor, PrLanding, PrLandingId,
 };
 use crate::store::{StoreError, StoreResult};
-use crate::task::{AfterMerge, TaskId};
+use crate::work::task::{AfterMerge, TaskId};
 
 fn timestamp(value: OffsetDateTime) -> i64 {
     value.unix_timestamp()

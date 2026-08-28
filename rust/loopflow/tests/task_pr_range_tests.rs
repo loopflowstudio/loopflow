@@ -20,7 +20,7 @@ use loopflow::ops::{
     arm as land, create_or_update_pr, rebase_with_recovery, submit, LandOptions, NullProgress,
     PrOptions, RebaseOptions,
 };
-use loopflow::task::{
+use loopflow::work::task::{
     AfterMerge, GithubPr, PrMergeMode, PrMergeRequest, PrPresentation, PrPublication,
 };
 use loopflow_test_support::TestRepo;

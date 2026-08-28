@@ -20,8 +20,8 @@ use std::fs;
 use std::path::PathBuf;
 use std::time::Instant;
 
-use loopflow::wave::runtime::{TurnBroadcast, WaveRuntime};
-use loopflow::wave::wire::ResidentDelta;
+use loopflow::controller::wave::runtime::{TurnBroadcast, WaveRuntime};
+use loopflow::controller::wave::wire::ResidentDelta;
 
 /// A turn's worth of deltas, sized from the real product journal: 657 deltas
 /// carrying 3149 characters — a mean of ~4.8 characters per delta.

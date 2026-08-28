@@ -6,8 +6,8 @@ use serde::{Deserialize, Serialize};
 use time::OffsetDateTime;
 
 use crate::id::WaveId;
-use crate::project::ProjectId;
-use crate::task::TaskId;
+use crate::work::project::ProjectId;
+use crate::work::task::TaskId;
 
 macro_rules! prefixed_uuid_id {
     ($name:ident, $prefix:literal, $error:ty, $invalid:path) => {

@@ -16,10 +16,11 @@ use crate::store::{
     ProviderAccountSelection, RoutingState, RunEventRow, StoreError, StoreResult,
     WaveLocatorUpdate,
 };
-use crate::wave::{Wave, WaveLocator};
+use crate::work::wave::{Wave, WaveLocator};
 
 mod children;
 mod ci_incidents;
+mod controller;
 mod durable;
 mod metrics;
 mod pr_landings;
@@ -1748,7 +1749,7 @@ mod frontier_tests {
         prior_known_version,
     };
     use crate::store::FrontierAdvance::{self, Authorized, Forbidden};
-    use crate::wave::Wave;
+    use crate::work::wave::Wave;
     use std::path::{Path, PathBuf};
 
     /// The machine home whose `.lf/loopflow.db` `may_apply_migrations` treats as

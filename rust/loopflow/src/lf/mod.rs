@@ -117,13 +117,17 @@ pub struct Cli {
     #[arg(long = "max-turns")]
     pub max_turns: Option<u32>,
 
-    /// Wave name for wave/ scoping
+    /// Select Wave Work, or qualify a selected Project or Task
     #[arg(short = 'w', long = "wave", short_alias = 'W')]
     pub wave: Option<String>,
 
-    /// Bind a direct named skill to existing task, project, or wave Work
-    #[arg(long = "as", value_name = "KIND:SELECTOR")]
-    pub as_work: Option<String>,
+    /// Select Project Work, or qualify a selected Task
+    #[arg(long = "project", value_name = "SELECTOR")]
+    pub project: Option<String>,
+
+    /// Select Task Work
+    #[arg(long = "task", value_name = "ISSUE")]
+    pub task: Option<String>,
 
     /// Exclude loopflow operating guidance
     #[arg(long = "no-loopflow")]
@@ -154,6 +158,19 @@ impl Cli {
     /// Get diff setting: Some(true) if --diff, Some(false) if --no-diff, None if neither.
     pub fn diff_setting(&self) -> Option<bool> {
         Self::toggle_setting(self.diff, self.no_diff)
+    }
+
+    /// The most specific Work selected for a direct skill Run.
+    pub fn work_subject_selector(&self) -> Option<String> {
+        self.task
+            .as_ref()
+            .map(|task| format!("task:{task}"))
+            .or_else(|| {
+                self.project
+                    .as_ref()
+                    .map(|project| format!("project:{project}"))
+            })
+            .or_else(|| self.wave.as_ref().map(|wave| format!("wave:{wave}")))
     }
 }
 
@@ -868,6 +885,15 @@ pub struct WaveTargetArgs {
 
 #[derive(Subcommand, Debug)]
 pub enum ProjectCommand {
+    /// Ensure tracked Project Work without starting a controller
+    Prepare {
+        /// Linear Project UUID or unique slug
+        project_id: String,
+        #[arg(long)]
+        directive: Option<String>,
+        #[arg(long)]
+        json: bool,
+    },
     /// Create a Linear Project first, then start its durable Project
     Start {
         title: String,
@@ -949,6 +975,19 @@ pub enum ProjectCommand {
 
 #[derive(Subcommand, Debug)]
 pub enum TaskCommand {
+    /// Ensure tracked Task Work and its worktree without starting a controller
+    Prepare {
+        issue: String,
+        #[arg(long)]
+        name: Option<String>,
+        /// Fork this Task's worktree from another Task's active PR
+        #[arg(long = "stack-on", value_name = "PARENT_TASK")]
+        stack_on: Option<String>,
+        #[arg(long)]
+        directive: Option<String>,
+        #[arg(long)]
+        json: bool,
+    },
     /// Ensure its Project, then start or return the existing Linear task
     Run {
         issue: String,
@@ -1072,6 +1111,13 @@ pub enum TaskCommand {
         model: Option<String>,
         #[arg(long, requires = "model")]
         reason: Option<String>,
+        #[arg(long)]
+        json: bool,
+    },
+    /// Begin a new Task kickoff in a fresh provider session
+    Restart {
+        issue: String,
+        advice: Option<String>,
         #[arg(long)]
         json: bool,
     },
@@ -1956,11 +2002,31 @@ mod tests {
     }
 
     #[test]
-    fn direct_work_selector_is_a_global_skill_flag() {
-        let before = Cli::try_parse_from(["lf", "--as", "task:LOO-123", "implement"])
-            .expect("parse selector before skill");
-        assert_eq!(before.as_work.as_deref(), Some("task:LOO-123"));
+    fn hierarchical_work_selectors_choose_the_most_specific_subject() {
+        let before = Cli::try_parse_from([
+            "lf",
+            "--wave",
+            "intelligence",
+            "--project",
+            "context",
+            "--task",
+            "LOO-123",
+            "implement",
+        ])
+        .expect("parse selectors before skill");
+        assert_eq!(before.wave.as_deref(), Some("intelligence"));
+        assert_eq!(before.project.as_deref(), Some("context"));
+        assert_eq!(before.task.as_deref(), Some("LOO-123"));
+        assert_eq!(
+            before.work_subject_selector().as_deref(),
+            Some("task:LOO-123")
+        );
         assert!(matches!(before.command, Some(Commands::External(_))));
+    }
+
+    #[test]
+    fn removed_as_work_selector_is_rejected() {
+        assert!(Cli::try_parse_from(["lf", "--as", "task:LOO-123", "implement"]).is_err());
     }
 
     #[test]
@@ -2397,6 +2463,70 @@ mod tests {
     }
 
     #[test]
+    fn task_prepare_accepts_worktree_options_without_controller_flows() {
+        let cli = Cli::try_parse_from([
+            "lf",
+            "task",
+            "prepare",
+            "INF-123",
+            "--name",
+            "runtime-research",
+            "--stack-on",
+            "INF-122",
+            "--directive",
+            "collect both reports",
+            "--json",
+        ])
+        .expect("parse task prepare");
+        let Some(Commands::Task {
+            cmd:
+                TaskCommand::Prepare {
+                    issue,
+                    name,
+                    stack_on,
+                    directive,
+                    json,
+                },
+        }) = cli.command
+        else {
+            panic!("expected task prepare command");
+        };
+        assert_eq!(issue, "INF-123");
+        assert_eq!(name.as_deref(), Some("runtime-research"));
+        assert_eq!(stack_on.as_deref(), Some("INF-122"));
+        assert_eq!(directive.as_deref(), Some("collect both reports"));
+        assert!(json);
+    }
+
+    #[test]
+    fn project_prepare_accepts_existing_planning_identity() {
+        let cli = Cli::try_parse_from([
+            "lf",
+            "project",
+            "prepare",
+            "runtime-model",
+            "--directive",
+            "collect evidence",
+            "--json",
+        ])
+        .expect("parse project prepare");
+        let Some(Commands::Project {
+            cmd:
+                ProjectCommand::Prepare {
+                    project_id,
+                    directive,
+                    json,
+                },
+        }) = cli.command
+        else {
+            panic!("expected project prepare command");
+        };
+        assert_eq!(project_id, "runtime-model");
+        assert_eq!(directive.as_deref(), Some("collect evidence"));
+        assert!(json);
+    }
+
+    #[test]
     fn task_run_accepts_lifecycle_flow_overrides() {
         let cli = Cli::try_parse_from([
             "lf",
@@ -2743,6 +2873,29 @@ mod tests {
             "quota exhausted",
         ])
         .is_err());
+    }
+
+    #[test]
+    fn task_restart_accepts_optional_advice() {
+        let cli = Cli::try_parse_from([
+            "lf",
+            "task",
+            "restart",
+            "LOO-267",
+            "replace the old runtime model",
+            "--json",
+        ])
+        .expect("parse Task restart");
+        assert!(matches!(
+            cli.command,
+            Some(Commands::Task {
+                cmd: TaskCommand::Restart {
+                    issue,
+                    advice: Some(advice),
+                    json: true,
+                }
+            }) if issue == "LOO-267" && advice == "replace the old runtime model"
+        ));
     }
 
     #[test]

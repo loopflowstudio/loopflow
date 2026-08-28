@@ -31,7 +31,9 @@ coordination across the parent relationship.
 A Wave directing a task is the internal case:
 
 ```bash
-lf task run INF-123                                  # start a durable Task Work
+lf task prepare INF-123                              # tracked Work, no controller
+lf --task INF-123 research "write scratch/api.md"    # independent bounded Run
+lf task run INF-123                                  # start built-in Task automation
 lf task steer INF-123 "take the smaller approach"    # queue durable direction
 lf task status INF-123 --json                        # inspect durable state
 lf task wait INF-123 --until terminal                # block until it settles
@@ -39,8 +41,8 @@ lf task wait INF-123 --until terminal                # block until it settles
 
 ## The nouns
 
-Delegation follows one supervision path: **Wave → Project → Task**. These
-are stable planning records. A Wave coordinates and remembers; a Project
+Tracked Work follows **Wave → Project → Task**. These are stable planning
+records, not a process hierarchy. A Wave coordinates and remembers; a Project
 pursues measurable KRs; only Task Work owns a worktree, and every file-writing
 change happens there, advancing through serial PRs to `main`. Work is `ready`,
 `done`, or `abandoned`; process liveness and attention are separate evidence.
@@ -51,9 +53,15 @@ Run identity does not reserve Work, authorize a worktree mutation, or prove a
 process signal-safe. Tasks are Linear issues, so durable delegated work starts
 from an existing issue and the roadmap remains the queue.
 
+Built-in Wave, Project, and Task controllers form a layer above these records.
+An agent may instead compose `lf task prepare`, a `--task`/`--project`/`--wave`
+skill Run, Work input, and delivery commands itself; it need not install a
+controller to act for Work.
+
 ## Delegate
 
 ```bash
+lf task prepare INF-123                      # ensure Work and worktree only
 lf task run INF-123                          # run an existing Linear issue
 lf task start <project-id> "add passkeys"    # create the issue, then run it
 pbpaste | lf task start <project-id>         # report from stdin; first line is the title
@@ -74,9 +82,10 @@ merge, then replays only child-authored commits onto `main`.
 ## Steer
 
 Task and Project Steer appends direction to durable Work before doing anything
-else. A stopped controller is relaunched; a running controller reads the new
-direction at its next boundary. It does not inject text into an active provider
-turn:
+else. If the Work has a controller, a stopped controller is relaunched and a
+running controller reads the new direction at its next boundary. Controller-free
+Work simply retains the direction for the next bounded Run or future controller.
+Steer does not inject text into an active provider turn:
 
 ```bash
 lf task steer INF-123 "support passkeys too"       # durable direction
@@ -129,7 +138,7 @@ lands it:
 
 ```bash
 lf pr publish    # make work visible mid-stream; the agent's default verb
-lf pr submit     # ordinary non-Task PR: done, a human clicks merge
+lf pr submit     # done, a human clicks merge
 lf pr arm        # request exact-head auto-merge and return
 lf pr land       # watch, repair CI, and return only after merge
 ```

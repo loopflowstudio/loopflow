@@ -8,7 +8,7 @@ use loopflow::engine::worktrees::create_named_worktree;
 use loopflow::ops::{
     arm as land, create_or_update_pr, submit, LandOptions, NullProgress, OpsError, PrOptions,
 };
-use loopflow::task::{AfterMerge, PrMergeMode, PrPhase};
+use loopflow::work::task::{AfterMerge, PrMergeMode, PrPhase};
 use loopflow_test_support::TestRepo;
 use support::{
     codex_app_server_script, counting_open_script, presentation_attempts, register_task, EnvGuard,
@@ -212,34 +212,6 @@ fi
 if [ "$1 $2" = "pr merge" ]; then
   touch "$auto_state"
   exit 0
-fi
-exit 0
-"#
-    )
-}
-
-fn gh_ready_failure_script(log_path: &str) -> String {
-    format!(
-        r#"#!/bin/sh
-if [ "$1" = "--version" ]; then
-  exit 0
-fi
-echo "$@" >> "{log_path}"
-if [ "$1 $2" = "pr list" ]; then
-  echo '[]'
-  exit 0
-fi
-if [ "$1 $2" = "pr create" ]; then
-  echo 'https://example.com/pr/1'
-  exit 0
-fi
-if [ "$1 $2" = "pr view" ]; then
-  echo 'https://example.com/pr/1'
-  exit 0
-fi
-if [ "$1 $2" = "pr ready" ]; then
-  echo 'ready failed' >&2
-  exit 1
 fi
 exit 0
 "#
@@ -881,12 +853,10 @@ fn submit_assigns_reviewer_and_skips_auto_merge() {
     assert!(!log.contains("merge --auto"));
 }
 
-/// LOO-162 — `submit` (assign for a human merge click) is a competing second
-/// shipping gate, so a managed Task rejects it before any push, gh mutation, or
-/// durable merge request. The Task's one shipping decision is its `finally`
-/// review, declared with `lf pr land`.
+/// Managed Task delivery is independent of the end-to-end controller. An
+/// explicit submit records a user-owned merge request and stops before merge.
 #[test]
-fn submit_refuses_a_managed_task_before_any_mutation() {
+fn submit_records_user_merge_for_a_managed_task() {
     let home = tempfile::TempDir::new().expect("temp home");
     let repo = TestRepo::new();
     let base = repo.head_sha();
@@ -898,14 +868,14 @@ fn submit_refuses_a_managed_task_before_any_mutation() {
     push_branch(&repo, branch);
 
     let log_path = repo.bare_path().join("gh.log");
-    let script = gh_ready_failure_script(log_path.to_string_lossy().as_ref());
+    let script = gh_land_script(log_path.to_string_lossy().as_ref());
     let _env = EnvGuard::with_lf_home(
         &[("gh", script.as_str()), ("open", noop_open_script())],
         home.path(),
     );
     let task = register_task(home.path(), repo.path(), branch, &base);
 
-    let result = submit(
+    submit(
         repo.path(),
         &LandOptions {
             strict: true,
@@ -920,33 +890,22 @@ fn submit_refuses_a_managed_task_before_any_mutation() {
             agent: None,
         },
         &NullProgress,
-    );
-
-    match result {
-        Err(OpsError::Message(message)) => {
-            assert!(
-                message.contains("second shipping gate") && message.contains("lf pr land"),
-                "refusal must explain the competing gate and name land: {message}"
-            );
-        }
-        other => panic!("managed Task submit must refuse with a message, got: {other:?}"),
-    }
+    )
+    .expect("managed Task submits for human review");
     let runtime = tokio::runtime::Runtime::new().expect("task runtime");
     let pr = runtime
         .block_on(task.store.active_task_pr(&task.task.id))
         .expect("read active PR")
         .expect("active PR");
-    assert!(
-        pr.merge_request().is_none(),
-        "a refused submit must not leave a settlement owner"
-    );
-    // Refused before any gh mutation: no ready, no assignment.
+    let request = pr.merge_request().expect("user merge request");
+    assert_eq!(request.mode, PrMergeMode::User);
+
     let log = fs::read_to_string(&log_path).unwrap_or_default();
     assert!(
-        !log.contains("pr ready"),
-        "no gh mutation before refusal: {log}"
+        log.contains("pr ready") && log.contains("pr edit --add-assignee @me"),
+        "submit must prepare the Task PR for human review: {log}"
     );
-    assert!(!log.contains("pr edit --add-assignee @me"));
+    assert!(!log.contains("merge --auto"));
 }
 
 #[test]
@@ -1108,7 +1067,7 @@ fn latest_land_disposition_wins_before_merge() {
     assert!(presentation.body.starts_with(
         "<!-- loopflow:task-pr-context:start -->\n> [!NOTE]\n> **Task:** [INF-123 — Prove Task PR transitions](https://linear.app/loopflow/issue/INF-123/prove-task-pr-transitions)"
     ));
-    assert!(presentation.body.contains("> **Task cycle:** feature"));
+    assert!(!presentation.body.contains("Task cycle:"));
     assert!(presentation.body.contains(
         "> **PR lifecycle:** Merging PR 1 leaves the Task open and names `follow-up-proof` as the next serial PR."
     ));
@@ -1427,7 +1386,6 @@ fn pr_arm_publishes_without_create_flag_and_leaves_worktree_in_place() {
             "test body",
         ])
         .current_dir(&worktree)
-        .env_remove("LF_WORKTREE_WRITER_ID")
         .env_remove("LF_GIT_OPERATION_ID")
         .env_remove("LF_TRACE_ID")
         .env_remove("LF_PROCESS_ID")
@@ -1510,7 +1468,6 @@ fn lf_pr_land_waits_for_authoritative_merged_observation() {
             "Observe GitHub before returning.",
         ])
         .current_dir(&worktree)
-        .env_remove("LF_WORKTREE_WRITER_ID")
         .env_remove("LF_GIT_OPERATION_ID")
         .env_remove("LF_TRACE_ID")
         .env_remove("LF_PROCESS_ID")

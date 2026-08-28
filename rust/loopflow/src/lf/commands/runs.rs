@@ -5,10 +5,10 @@ use std::path::Path;
 
 use anyhow::{anyhow, Result};
 
+use crate::controller::wave::journal::short_id;
 use crate::lf::commands::WorkFilter;
 use crate::lf::output::{format_cost, truncate, Colors};
 pub use crate::run_record::{AttributionSource, RunSnapshot, RunUsage, SubjectAttribution};
-use crate::wave::journal::short_id;
 
 const WINDOW_DAYS: i64 = 7;
 const MAX_RUNS: usize = 50;

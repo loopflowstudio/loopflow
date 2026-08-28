@@ -54,6 +54,12 @@ struct Args {
 
 fn main() -> Result<(), Box<dyn Error>> {
     let args = Args::parse();
+    let wave = args
+        .wave
+        .or_else(loopflow::work::wave::context::resolve_ambient_wave_name);
+    let wave_memory = wave
+        .as_deref()
+        .and_then(|wave| loopflow::work::wave::context::gather_wave_memory(&args.repo, wave));
 
     let opts = GatherContextOpts {
         repo_root: args.repo.clone(),
@@ -67,7 +73,8 @@ fn main() -> Result<(), Box<dyn Error>> {
         include_diff: args.diff,
         include_diff_files: args.diff_files,
         include_clipboard: args.clipboard,
-        wave: args.wave,
+        wave,
+        wave_memory,
         related_repos: Vec::new(),
     };
 

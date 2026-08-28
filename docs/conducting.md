@@ -106,9 +106,9 @@ node uses a `FlowStep` Ask between autonomous steps and advances only after
 explicit resolution.
 
 Human Task nodes park the playhead and appear in the same User Ask queue.
-Opening one runs the authored skill with fenced Task writer authority in its
-worktree. Release or ordinary exit requeues it; decline returns to autonomous
-work; presentation and handback never advance it.
+Opening one runs the authored skill in the Task worktree. Release or ordinary
+exit requeues it; decline returns to autonomous work; presentation and handback
+never advance it.
 
 ## The Mac app
 

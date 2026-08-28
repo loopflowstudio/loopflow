@@ -11,10 +11,11 @@ use secrecy::SecretString;
 use serde::{Deserialize, Serialize};
 use tokio::sync::{watch, Mutex};
 
+use crate::controller::wave::{self, registry};
 use crate::durable::{HomeId, WorkRef};
 use crate::id::WaveId;
 use crate::store::SharedStore;
-use crate::wave::{self, registry, Wave};
+use crate::work::wave::Wave;
 
 pub(crate) const RECONCILE_INTERVAL: Duration = Duration::from_secs(30);
 const STARTUP_TIMEOUT: Duration = Duration::from_secs(10);
@@ -410,10 +411,10 @@ pub(crate) async fn waves_for_home(
     home_id: &HomeId,
     repo: Option<&str>,
 ) -> Result<Vec<Wave>> {
-    let machine = crate::engine::machine::MachineIdentity::detect(home_id.clone());
+    let machine = crate::controller::wave::placement::MachineIdentity::detect(home_id.clone());
     let mut assigned = Vec::new();
     for wave in store.list_waves(repo).await? {
-        let config = match crate::engine::wave_config::try_read_wave_config(
+        let config = match crate::work::wave::config::try_read_wave_config(
             Path::new(wave.repo()),
             wave.name(),
         ) {
@@ -423,7 +424,8 @@ pub(crate) async fn waves_for_home(
                 continue;
             }
         };
-        let decision = crate::engine::machine::wave_start_decision(config.as_ref(), &machine);
+        let decision =
+            crate::controller::wave::placement::wave_start_decision(config.as_ref(), &machine);
         if !decision.should_start() {
             tracing::info!(wave = wave.name(), reason = %decision, "skipping Wave at Home startup");
             continue;
@@ -463,7 +465,7 @@ mod tests {
     use crate::durable::{HomeId, WorkRef};
     use crate::id::WaveId;
     use crate::store::{open_store, StorageConfig};
-    use crate::wave::{Wave, WaveLocator};
+    use crate::work::wave::{Wave, WaveLocator};
 
     use super::{waves_for_home, HostedWave, WaveHost, WaveStartState, WaveStartup};
 
@@ -577,7 +579,7 @@ mod tests {
             .await
             .expect("observe remote Home");
         let off_wave = store
-            .get_wave_at(&crate::wave::WaveLocator::discover(&repo, "off").unwrap())
+            .get_wave_at(&crate::work::wave::WaveLocator::discover(&repo, "off").unwrap())
             .await
             .expect("read disabled Wave")
             .expect("disabled Wave exists");
@@ -586,7 +588,9 @@ mod tests {
             .await
             .expect("disable Wave on this Home");
         let remote_wave = store
-            .get_wave_at(&crate::wave::WaveLocator::discover(&repo, "remote-placement").unwrap())
+            .get_wave_at(
+                &crate::work::wave::WaveLocator::discover(&repo, "remote-placement").unwrap(),
+            )
             .await
             .expect("read remote Wave")
             .expect("remote Wave exists");
@@ -642,9 +646,11 @@ mod tests {
         restarted.reconcile().await;
 
         assert_eq!(restarted.active_count().await, 0);
-        assert!(crate::wave::server::live_endpoint(&repo, wave.name())
-            .await
-            .is_none());
+        assert!(
+            crate::controller::wave::server::live_endpoint(&repo, wave.name())
+                .await
+                .is_none()
+        );
     }
 
     #[tokio::test]
@@ -691,12 +697,13 @@ mod tests {
     #[tokio::test]
     async fn explicit_start_reports_the_listener_failure_and_stays_enabled() {
         let _env_lock = crate::journal::test_env_lock();
-        let _restore = EnvRestore::capture(&["LF_BIN", crate::wave::discord::TOKEN_ENV]);
+        let _restore =
+            EnvRestore::capture(&["LF_BIN", crate::controller::wave::discord::TOKEN_ENV]);
         std::env::set_var(
             "LF_BIN",
             std::env::current_exe().expect("resolve test executable"),
         );
-        std::env::remove_var(crate::wave::discord::TOKEN_ENV);
+        std::env::remove_var(crate::controller::wave::discord::TOKEN_ENV);
         let directory = tempfile::tempdir().expect("create temp directory");
         let repo = directory.path().join("repo");
         std::fs::create_dir_all(repo.join("wave/product")).expect("create Wave directory");
@@ -734,7 +741,7 @@ mod tests {
         };
 
         assert!(
-            reason.contains(crate::wave::discord::TOKEN_ENV),
+            reason.contains(crate::controller::wave::discord::TOKEN_ENV),
             "startup should preserve the actionable listener error: {reason}"
         );
         assert!(

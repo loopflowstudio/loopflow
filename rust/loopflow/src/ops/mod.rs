@@ -21,6 +21,7 @@ mod rebase;
 mod release;
 mod run;
 pub mod task;
+pub mod task_actions;
 pub(crate) mod task_pm;
 pub(crate) mod telemetry;
 pub mod trace;
@@ -29,7 +30,7 @@ pub(crate) mod util;
 pub use abandon::{abandon_branch, AbandonOptions};
 pub(crate) use ask_comments::publish_pending_ask_comments;
 pub(crate) use child::ambient_author;
-pub(crate) use commit::checkpoint_task_worktree;
+pub(crate) use commit::{checkpoint_task_restart, checkpoint_task_worktree};
 pub use commit::{commit_workflow, commit_workflow_traced, CommitOptions};
 pub(crate) use cron::cron_receipt_ids;
 pub use cron::{
@@ -61,6 +62,6 @@ pub use release::{
 };
 pub(crate) use run::{launch_work, WorkLaunch, TASK_ACCOUNT_ID_ENV, TASK_RESUME_TOKEN_ENV};
 #[doc(hidden)]
-pub use run::{resolve_work_binding, WorkBinding};
+pub use run::{resolve_work_binding, resolve_work_selection, WorkBinding, WorkSelection};
 pub use trace::{hash_prompt, trace_enabled, MockResponses, OpTrace, Tracer};
 pub use util::normalize_wave_name;

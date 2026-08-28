@@ -361,19 +361,6 @@ impl std::fmt::Display for WorkStatus {
 }
 
 #[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
-pub struct FlowPosition {
-    pub work: WorkRef,
-    pub flow: String,
-    pub step: String,
-    pub node_id: Option<String>,
-    pub human: bool,
-    pub step_index: u32,
-    pub iteration: u32,
-    #[serde(with = "time::serde::rfc3339")]
-    pub updated_at: OffsetDateTime,
-}
-
-#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
 pub struct AbandonReceipt {
     pub work: WorkRef,
     pub reason: String,

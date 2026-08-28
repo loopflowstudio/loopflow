@@ -22,7 +22,7 @@ use loopflow::id::WaveId;
 use loopflow::lf::Cli;
 use loopflow::store::sqlite::SqliteStore;
 use loopflow::store::PmSnapshotRow;
-use loopflow::wave::Wave;
+use loopflow::work::wave::Wave;
 
 // ─── Command registry ───────────────────────────────────────────────────
 

@@ -402,7 +402,7 @@ print(json.dumps({"report": {"ok": True}, "metric_observations": [], "text": "sc
     }
 
     #[test]
-    fn telemetry_envelope_decodes_project_metric_observation() {
+    fn telemetry_envelope_accepts_older_producer_annotations() {
         let envelope: TelemetryScorecardEnvelope = serde_json::from_str(
             r#"{
                 "report":{"schema_version":1},
@@ -456,9 +456,7 @@ print(json.dumps({
         "value": 1.0,
         "source_window_start": start.isoformat(),
         "source_window_end": end.isoformat(),
-        "complete": True,
-        "eligible": 1,
-        "successful": 1
+        "complete": True
     }],
     "text": "scorecard text\n"
 }))

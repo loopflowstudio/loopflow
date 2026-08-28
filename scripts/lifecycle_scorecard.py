@@ -321,6 +321,13 @@ def task_loop_trust_observation(
         for row in rows
         if row["worktree"] is not None and belongs_to_repo(row["worktree"], repo)
     ]
+    if not eligible:
+        return {
+            **identity,
+            "kind": "unavailable",
+            "source_as_of": source_window_end,
+            "reason": "No eligible settled Tasks in the source window",
+        }
     successful = sum(
         1
         for row in eligible
@@ -333,12 +340,10 @@ def task_loop_trust_observation(
     return {
         **identity,
         "kind": "observed",
-        "value": successful / len(eligible) if eligible else 0.0,
+        "value": successful / len(eligible),
         "source_window_start": source_window_start,
         "source_window_end": source_window_end,
-        "complete": bool(eligible),
-        "eligible": len(eligible),
-        "successful": successful,
+        "complete": True,
     }
 
 

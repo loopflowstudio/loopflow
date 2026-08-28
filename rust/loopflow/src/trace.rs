@@ -610,14 +610,6 @@ enum LegacyTraceSchemaVersion {
 }
 
 impl LegacyTraceSchemaVersion {
-    const CURRENT: Self = Self::V1;
-
-    const fn version(self) -> u32 {
-        match self {
-            Self::V1 => 1,
-        }
-    }
-
     fn parse(version: u64) -> Result<Self, ConversationReadError> {
         match version {
             1 => Ok(Self::V1),
@@ -625,8 +617,6 @@ impl LegacyTraceSchemaVersion {
         }
     }
 }
-
-const LEGACY_TRACE_SCHEMA_VERSION: u32 = LegacyTraceSchemaVersion::CURRENT.version();
 
 #[derive(Debug, Clone, Serialize, Deserialize)]
 pub(crate) struct RecordedConversationEvent {
@@ -939,7 +929,7 @@ mod tests {
     use super::{
         read_conversation_status_classified, ContextAssetKind, ContextAssetSpec, ContextChannel,
         ContextScope, LegacyTraceSchemaVersion, PreparedTurnContext, RecordedConversationEvent,
-        RecordedConversationPayload, LEGACY_TRACE_SCHEMA_VERSION,
+        RecordedConversationPayload,
     };
 
     fn _conversation_error(line: &str) -> String {
@@ -1048,10 +1038,10 @@ mod tests {
         let event: RecordedConversationEvent = serde_json::from_str(expected).unwrap();
 
         assert_eq!(
-            LegacyTraceSchemaVersion::parse(u64::from(LEGACY_TRACE_SCHEMA_VERSION)).unwrap(),
-            LegacyTraceSchemaVersion::CURRENT
+            LegacyTraceSchemaVersion::parse(1).unwrap(),
+            LegacyTraceSchemaVersion::V1
         );
-        assert_eq!(event.schema_version, LEGACY_TRACE_SCHEMA_VERSION);
+        assert_eq!(event.schema_version, 1);
         assert_eq!(serde_json::to_string(&event).unwrap(), expected);
     }
 

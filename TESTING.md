@@ -238,11 +238,12 @@ promotion boundary:
 scripts/dev-lf install preflight --json 2>/dev/null | jq '.candidate_compatibility.captures'
 ```
 
-Preflight makes a SQLite-consistent copy, applies the candidate migrations only
-to that copy, then reads every complete legacy capture it names from the Home's
-real trace root. Historical captures must report `compatible`; unsupported,
-truncated, corrupt, unsafe, or missing complete captures refuse promotion.
-Partial captures remain visible in `partial_captures` and are not reclassified.
+Preflight makes a SQLite-consistent copy, reads every complete legacy capture
+it names from the Home's real trace root, then applies candidate migrations and
+validates executable references in the resulting schema. Historical captures
+must report `compatible`; unsupported, truncated, corrupt, unsafe, or missing
+complete captures refuse promotion. Partial captures remain visible in
+`partial_captures` and are not reclassified.
 
 Run `lf runs --json`, `lf usage --json`, and `lf doctor --json` against the same
 long-lived Home after promotion.

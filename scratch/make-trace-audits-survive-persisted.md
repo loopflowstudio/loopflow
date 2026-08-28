@@ -103,6 +103,16 @@ but its integration fixture exercised only unsupported-schema and truncated
 failures. The fixture now includes a structurally corrupt persisted event and
 asserts that the partial invocation is absent from the complete-failure set.
 
+## Rebase resolution — 2026-08-28
+
+Main replaced the old trace writer and ordinary readers with three-file Run
+records while the release ledger still retained legacy `agent_invocations` and
+their immutable conversation paths. The resolution restores only the versioned
+legacy reader needed by candidate promotion, not the retired writer or CLI
+surfaces. Candidate promotion audits those legacy references from its
+SQLite-consistent copy before development migrations may deliberately retire
+their SQL index, then audits executable references in the resulting schema.
+
 # 5 Whys: usage unification made persisted traces unreadable
 
 ## The Problem

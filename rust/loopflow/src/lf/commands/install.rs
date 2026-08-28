@@ -304,7 +304,7 @@ pub fn decide(
                     })
                     .unwrap_or_else(|| "no failure detail was recorded".to_string());
                 reasons.push(format!(
-                    "candidate cannot read {} complete persisted capture(s) after migration; first failure: {first}",
+                    "candidate cannot read {} complete persisted capture(s) at the promotion boundary; first failure: {first}",
                     failures.len()
                 ));
             }
@@ -404,9 +404,45 @@ fn _copy_store_for_candidate(source_path: &Path, destination_path: &Path) -> Res
 
 fn _read_executable_references(
     conn: &rusqlite::Connection,
+    schema: CandidateSchema,
 ) -> rusqlite::Result<Vec<(String, String, String, String)>> {
-    let mut statement = conn.prepare(
-        "SELECT 'wave', w.id, 'wave', w.repo
+    let query = match schema {
+        CandidateSchema::Published => {
+            "SELECT 'wave', w.id, 'wave', w.repo
+         FROM work_placements placement
+         JOIN waves w ON w.id=placement.wave_id
+         JOIN epochs e ON e.wave_id=w.id AND e.state='open'
+         UNION
+         SELECT 'project', p.id, 'project', w.repo
+         FROM work_placements placement
+         JOIN projects p ON p.id=placement.project_id
+         JOIN waves w ON w.id=p.wave_id
+         JOIN epochs e ON e.project_id=p.id AND e.state='open'
+         UNION
+         SELECT 'task', t.id, COALESCE(t.kickoff_flow, ''), t.worktree
+         FROM work_placements placement
+         JOIN tasks t ON t.id=placement.task_id
+         JOIN projects p ON p.id=t.project_id
+         JOIN waves w ON w.id=p.wave_id
+         JOIN epochs e ON e.task_id=t.id AND e.state='open'
+         UNION
+         SELECT 'task', t.id, COALESCE(t.iterate_flow, ''), t.worktree
+         FROM work_placements placement
+         JOIN tasks t ON t.id=placement.task_id
+         JOIN projects p ON p.id=t.project_id
+         JOIN waves w ON w.id=p.wave_id
+         JOIN epochs e ON e.task_id=t.id AND e.state='open'
+         UNION
+         SELECT 'task', t.id, COALESCE(t.gate_flow, ''), t.worktree
+         FROM work_placements placement
+         JOIN tasks t ON t.id=placement.task_id
+         JOIN projects p ON p.id=t.project_id
+         JOIN waves w ON w.id=p.wave_id
+         JOIN epochs e ON e.task_id=t.id AND e.state='open'
+         ORDER BY 1, 2, 3, 4"
+        }
+        CandidateSchema::InstalledDevelopment => {
+            "SELECT 'wave', w.id, 'wave', w.repo
          FROM work_placements placement
          JOIN waves w ON w.id=placement.wave_id
          WHERE placement.enabled=1 AND w.work_state='ready'
@@ -440,8 +476,10 @@ fn _read_executable_references(
          JOIN projects p ON p.id=t.project_id
          JOIN waves w ON w.id=p.wave_id
          WHERE placement.enabled=1 AND t.work_state='ready'
-         ORDER BY 1, 2, 3, 4",
-    )?;
+         ORDER BY 1, 2, 3, 4"
+        }
+    };
+    let mut statement = conn.prepare(query)?;
     let references = statement
         .query_map([], |row| {
             Ok((row.get(0)?, row.get(1)?, row.get(2)?, row.get(3)?))
@@ -514,10 +552,10 @@ impl CandidateSchema {
     }
 }
 
-/// Validate installed-state semantics against one migrated SQLite-consistent
-/// snapshot, never the live database. The snapshot's rows name artifacts in the
-/// real Home trace root; migrations may repair persisted rows but never rewrite
-/// immutable conversation files.
+/// Validate installed-state semantics against one SQLite-consistent snapshot,
+/// never the live database. Legacy capture references are audited before a
+/// candidate migration may deliberately retire their SQL index; executable
+/// references are audited after migration in the candidate's schema.
 fn _read_candidate_compatibility(
     store_path: &Path,
     schema: CandidateSchema,
@@ -531,9 +569,6 @@ fn _read_candidate_compatibility(
             .with_context(|| format!("copy shared store for {label} validation"))?;
         let connection = rusqlite::Connection::open(&candidate_path)
             .with_context(|| format!("open {label} validation store"))?;
-        schema
-            .apply(&connection)
-            .with_context(|| format!("apply {label} migrations to validation store"))?;
         let artifact_root = store_path
             .parent()
             .with_context(|| {
@@ -543,10 +578,11 @@ fn _read_candidate_compatibility(
                 )
             })?
             .join("traces");
-        Ok((
-            _executable_compatibility(&connection)?,
-            _capture_compatibility(&connection, &artifact_root)?,
-        ))
+        let captures = _capture_compatibility(&connection, &artifact_root)?;
+        schema
+            .apply(&connection)
+            .with_context(|| format!("apply {label} migrations to validation store"))?;
+        Ok((_executable_compatibility(&connection, schema)?, captures))
     })();
 
     match checked {
@@ -564,6 +600,22 @@ fn _capture_compatibility(
     connection: &rusqlite::Connection,
     artifact_root: &Path,
 ) -> Result<CaptureCompatibility> {
+    let indexed = connection
+        .query_row(
+            "SELECT EXISTS (
+                 SELECT 1 FROM sqlite_master
+                 WHERE type='table' AND name='agent_invocations'
+             )",
+            [],
+            |row| row.get::<_, bool>(0),
+        )
+        .context("inspect legacy persisted capture index")?;
+    if !indexed {
+        return Ok(CaptureCompatibility::Compatible {
+            complete_captures: 0,
+            partial_captures: 0,
+        });
+    }
     let partial_captures = connection
         .query_row(
             "SELECT COUNT(*) FROM agent_invocations WHERE capture_status='partial'",
@@ -617,7 +669,9 @@ fn _capture_compatibility(
                 kind: CaptureFailureKind::Truncated,
                 reason: "conversation artifact has an unterminated event tail".to_string(),
             }),
-            Ok(_) => {}
+            Ok(read) => {
+                let _ = read.events.len();
+            }
             Err(crate::trace::ConversationReadError::UnsupportedSchema { version }) => {
                 failures.push(CaptureFailure {
                     invocation_id,
@@ -680,9 +734,12 @@ fn _local_store_is_exact(store_path: &Path) -> Result<String> {
         .unwrap_or_else(|| "uninitialized".to_string()))
 }
 
-fn _executable_compatibility(connection: &rusqlite::Connection) -> Result<ExecutableCompatibility> {
-    let references =
-        _read_executable_references(connection).context("read placed Work lifecycle references")?;
+fn _executable_compatibility(
+    connection: &rusqlite::Connection,
+    schema: CandidateSchema,
+) -> Result<ExecutableCompatibility> {
+    let references = _read_executable_references(connection, schema)
+        .context("read placed Work lifecycle references")?;
     let mut failures = Vec::new();
     for (work_kind, work_id, flow, catalog_root) in &references {
         let catalog_path = Path::new(catalog_root);

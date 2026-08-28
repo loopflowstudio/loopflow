@@ -73,6 +73,15 @@ fn prepare_pr(
     }
     let (repo_root, main_repo) = resolve_repos(repo, options.worktree.as_deref())?;
     crate::ops::pr::reject_control_plane_pr(&repo_root)?;
+    // Refuse a managed submit before even the shared range diagnostics: those
+    // diagnostics may heal a stale recorded base. Ordinary non-Task submit is
+    // an explicit no-op here and keeps the existing range checks unchanged.
+    if matches!(finalize, Finalize::UserMerge) {
+        crate::ops::task::reject_managed_task_submit(&repo_root)?;
+        crate::ops::task::verify_task_pr_range(&repo_root)?;
+        crate::ops::task::require_task_pr_range_nonempty(&repo_root)?;
+        crate::ops::task::validate_task_pr_next_slug(options.next_slug.as_deref())?;
+    }
     if options.complete && (!options.strict || is_clean(&repo_root)?) {
         if let Some(issue) = crate::ops::task::find_discardable_task_successor(&repo_root)? {
             // Rotation left one unpublished branch at its recorded base after
@@ -106,7 +115,9 @@ fn prepare_pr(
         .ok_or_else(|| OpsError::Message("not on a branch".to_string()))?;
     // Prove the Task PR range before preparing the exact local tree. Submit and
     // land make no remote mutation until the owned integration pushes once.
-    crate::ops::task::verify_task_pr_range(&repo_root)?;
+    if !matches!(finalize, Finalize::UserMerge) {
+        crate::ops::task::verify_task_pr_range(&repo_root)?;
+    }
     {
         let _mutation = crate::ops::task::lock_task_pr_mutation(&repo_root)?;
         if matches!(finalize, Finalize::AutoMerge) && matches!(integration, Integration::Required) {
@@ -115,9 +126,8 @@ fn prepare_pr(
             } else {
                 crate::work::task::AfterMerge::ContinueTask
             };
-            if let Some((number, head)) = crate::ops::task::matching_task_pr_merge_request(
+            if let Some((number, head)) = crate::ops::task::matching_task_pr_auto_merge_request(
                 &repo_root,
-                crate::work::task::PrMergeMode::Auto,
                 after_merge,
                 options.next_slug.as_deref(),
             )? {
@@ -162,7 +172,9 @@ fn prepare_pr(
     }
     // Refuse an already-empty Task before scratch cleanup can manufacture a
     // bookkeeping-only `.gitkeep` commit or any GitHub command observes it.
-    crate::ops::task::require_task_pr_range_nonempty(&repo_root)?;
+    if !matches!(finalize, Finalize::UserMerge) {
+        crate::ops::task::require_task_pr_range_nonempty(&repo_root)?;
+    }
     let pr_exists = if options.local {
         false
     } else {
@@ -250,20 +262,18 @@ fn prepare_pr(
         None => crate::ops::pr::current_pr(&repo_root)?,
     };
     crate::ops::task::attach_task_github_pr(&repo_root, pr.as_ref())?;
-    crate::ops::task::request_task_pr_merge(
-        &repo_root,
-        match finalize {
-            Finalize::AutoMerge => crate::work::task::PrMergeMode::Auto,
-            Finalize::UserMerge => crate::work::task::PrMergeMode::User,
-        },
-        pr.as_ref().and_then(|pr| pr.head_sha.as_deref()),
-        if options.complete {
-            crate::work::task::AfterMerge::CompleteTask
-        } else {
-            crate::work::task::AfterMerge::ContinueTask
-        },
-        options.next_slug.as_deref(),
-    )?;
+    if matches!(finalize, Finalize::AutoMerge) {
+        crate::ops::task::request_task_pr_auto_merge(
+            &repo_root,
+            pr.as_ref().and_then(|pr| pr.head_sha.as_deref()),
+            if options.complete {
+                crate::work::task::AfterMerge::CompleteTask
+            } else {
+                crate::work::task::AfterMerge::ContinueTask
+            },
+            options.next_slug.as_deref(),
+        )?;
+    }
     if let Err(finalize_error) = finalize_remote(
         &repo_root,
         pr_title.as_deref(),

@@ -11,7 +11,8 @@ use loopflow::ops::{
 use loopflow::work::task::{AfterMerge, PrMergeMode, PrPhase};
 use loopflow_test_support::TestRepo;
 use support::{
-    codex_app_server_script, counting_open_script, presentation_attempts, register_task, EnvGuard,
+    codex_app_server_script, counting_open_script, presentation_attempts, register_task,
+    register_unrun_task, EnvGuard,
 };
 
 fn push_branch(repo: &TestRepo, name: &str) {
@@ -853,61 +854,6 @@ fn submit_assigns_reviewer_and_skips_auto_merge() {
     assert!(!log.contains("merge --auto"));
 }
 
-/// Managed Task delivery is independent of the end-to-end controller. An
-/// explicit submit records a user-owned merge request and stops before merge.
-#[test]
-fn submit_records_user_merge_for_a_managed_task() {
-    let home = tempfile::TempDir::new().expect("temp home");
-    let repo = TestRepo::new();
-    let base = repo.head_sha();
-    let branch = "jack/task-managed-submit";
-    repo.create_branch(branch);
-    repo.create_file("feature.txt", "feature");
-    repo.stage_all();
-    repo.commit("feature work");
-    push_branch(&repo, branch);
-
-    let log_path = repo.bare_path().join("gh.log");
-    let script = gh_land_script(log_path.to_string_lossy().as_ref());
-    let _env = EnvGuard::with_lf_home(
-        &[("gh", script.as_str()), ("open", noop_open_script())],
-        home.path(),
-    );
-    let task = register_task(home.path(), repo.path(), branch, &base);
-
-    submit(
-        repo.path(),
-        &LandOptions {
-            strict: true,
-            local: false,
-            create_pr: true,
-            complete: false,
-            next_slug: None,
-            worktree: None,
-            commit_message: None,
-            pr_title: Some("test title".to_string()),
-            pr_body: Some("test body".to_string()),
-            agent: None,
-        },
-        &NullProgress,
-    )
-    .expect("managed Task submits for human review");
-    let runtime = tokio::runtime::Runtime::new().expect("task runtime");
-    let pr = runtime
-        .block_on(task.store.active_task_pr(&task.task.id))
-        .expect("read active PR")
-        .expect("active PR");
-    let request = pr.merge_request().expect("user merge request");
-    assert_eq!(request.mode, PrMergeMode::User);
-
-    let log = fs::read_to_string(&log_path).unwrap_or_default();
-    assert!(
-        log.contains("pr ready") && log.contains("pr edit --add-assignee @me"),
-        "submit must prepare the Task PR for human review: {log}"
-    );
-    assert!(!log.contains("merge --auto"));
-}
-
 #[test]
 fn land_clears_the_durable_request_when_auto_arm_fails() {
     let home = tempfile::TempDir::new().expect("temp home");
@@ -1111,7 +1057,7 @@ fn latest_land_disposition_wins_before_merge() {
 }
 
 #[test]
-fn repeated_identical_land_preserves_the_armed_task_request() {
+fn controller_free_task_land_records_and_replays_only_auto_settlement() {
     let home = tempfile::TempDir::new().expect("temp home");
     let repo = TestRepo::new();
     let log_path = home.path().join("gh.log");
@@ -1127,7 +1073,9 @@ fn repeated_identical_land_preserves_the_armed_task_request() {
     repo.stage_all();
     repo.commit("feature work");
     repo.push_new_branch(branch);
-    let task = register_task(home.path(), repo.path(), branch, &base);
+    // Prepared Task Work has no controller state. Its delivery invariant still
+    // permits only an automatic, exact-head settlement request.
+    let task = register_unrun_task(home.path(), repo.path(), branch, &base);
     let options = LandOptions {
         strict: true,
         local: false,

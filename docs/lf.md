@@ -166,7 +166,7 @@ Ops skills — raw prompt logic around mechanical git, PR, and release commands:
 | `rebase-conflicts` | Resolve conflicts after the mechanical rebase stops |
 | `pr-message` | Generate a PR title and body without publishing |
 | `pr-publish` | Generate PR copy and call `lf pr publish` |
-| `pr-submit` | Prepare a PR for a human to land |
+| `pr-submit` | Prepare an ordinary non-Task PR for a human to land |
 | `pr-land` | Prepare and land a PR through Loopflow's git machinery |
 | `release-run` | Run the full release workflow (notes, PR, tag, status) |
 | `release-notes` | Write narrative `RELEASE_NOTES.md` from release context |
@@ -388,7 +388,7 @@ explicit command.
 
 Every Task-owned PR keeps the Linear Task name at the start of its title and a
 direct `Linear Task: [KEY](URL)` link in its body. Loopflow restores those
-anchors whenever it publishes, refreshes, submits, or lands a serial PR. If the
+anchors whenever it publishes, refreshes, arms, or lands a serial PR. If the
 cached PM snapshot has no provider URL, run `lf pm sync --wave <wave>` before
 publishing.
 
@@ -780,16 +780,18 @@ fails — the PR is already published and its URL printed.
 ### lf pr submit
 
 Prepare the exact PR head, assign it to you, and stop for your merge click.
-Nothing merges automatically. Task and non-Task branches use the same command.
+Nothing merges automatically. `submit` is for ordinary non-Task PRs.
 
 ```bash
 lf pr submit
 ```
 
-Inside a managed Task worktree, `submit` records a user-owned exact-head merge
-request in the Task PR state. It does not install, advance, or consult a Task
-controller. Use `-c` to complete the Task after merge or `--next <slug>` to
-rotate its serial PR chain.
+A managed Task worktree **rejects `submit` before any mutation**: a Task already
+has exactly one shipping decision — its `finally` review — so a GitHub merge
+click would be a competing second gate. Ship a Task with `lf pr land` (`-c` to
+complete, `--next <slug>` to rotate), which arms the merge mechanically once the
+gate approves. The refusal follows durable Task ownership; it does not require
+a live controller.
 
 ### lf pr arm
 

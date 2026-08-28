@@ -514,11 +514,11 @@ fn ordinary_pr_publishes_when_no_registry_exists() {
     );
 }
 
-/// Delivery commands act on Task Work directly. They do not require or infer a
-/// controller decision, so a person can submit a Task created with `prepare`
-/// or take over a Task whose controller is absent.
+/// LOO-247 — a managed Task has exactly one shipping decision: its `finally`
+/// review, declared with `lf pr land`. `lf pr submit` would add a human merge
+/// click, so it must refuse before local integration, push, or `gh pr` mutation.
 #[test]
-fn managed_task_submit_assigns_for_human_review() {
+fn managed_task_submit_refuses_before_any_mutation() {
     let home = tempfile::TempDir::new().expect("temp home");
     let repo = TestRepo::new();
     let base = repo.head_sha();
@@ -530,35 +530,69 @@ fn managed_task_submit_assigns_for_human_review() {
         home.path(),
     );
 
+    // Advance main before cutting the Task branch, while deliberately keeping
+    // the older recorded base. The shared range verifier would heal this
+    // metadata if submit reached it, so the assertion below proves the refusal
+    // really precedes every durable mutation rather than only PR writes.
+    repo.create_file("upstream.txt", "upstream work\n");
+    repo.stage_all();
+    repo.commit("advance main");
+    repo.push();
+
     let branch = "jack/managed-submit";
     repo.create_branch(branch);
     repo.create_file("task.txt", "task work\n");
     repo.stage_all();
     repo.commit("task commit");
-    // Deliberately not pushed: submit owns integration and publication.
+    let task = register_task(home.path(), repo.path(), branch, &base);
+    let head_before = repo.head_sha();
+    repo.create_file("uncommitted.txt", "preserve this work\n");
 
-    let _task = register_task(home.path(), repo.path(), branch, &base);
-
-    submit(
+    let err = submit(
         repo.path(),
         &land_options(true, "managed submit"),
         &NullProgress,
     )
-    .expect("managed Task submits for human review");
+    .expect_err("managed Task submit must refuse before mutation");
+    let message = err.to_string();
+    assert!(
+        message.contains("second shipping gate") && message.contains("lf pr land"),
+        "refusal must explain the competing gate and name land: {message}"
+    );
 
     assert!(
-        remote_branch_exists(&repo, branch),
-        "submit must publish the Task branch"
+        !remote_branch_exists(&repo, branch),
+        "a refused submit must not publish the Task branch"
     );
-    let log = fs::read_to_string(&log_path).unwrap_or_default();
+    assert_eq!(
+        repo.head_sha(),
+        head_before,
+        "a refused submit must not commit or rebase local work"
+    );
+    let status = Command::new("git")
+        .args(["status", "--short"])
+        .current_dir(repo.path())
+        .output()
+        .expect("read worktree status");
+    let status = String::from_utf8(status.stdout).expect("utf-8 worktree status");
     assert!(
-        log.contains("pr ready") && log.contains("pr edit --add-assignee @me"),
-        "submit must prepare the Task PR for a human merge, got log:\n{log}"
+        status.contains("?? uncommitted.txt"),
+        "the caller's dirty worktree must remain untouched: {status}"
+    );
+    let pr = tokio::runtime::Runtime::new()
+        .expect("task runtime")
+        .block_on(task.store.active_task_pr(&task.task.id))
+        .expect("read active PR")
+        .expect("active PR");
+    assert_eq!(
+        pr.base_commit, base,
+        "a refused submit must not heal the recorded Task PR base"
     );
     assert!(
-        !log.contains("pr merge"),
-        "submit must not arm or merge the Task PR, got log:\n{log}"
+        pr.merge_request().is_none(),
+        "a refused submit must not leave a settlement owner"
     );
+    assert_no_gh_pr_mutation(&log_path);
 }
 
 #[test]

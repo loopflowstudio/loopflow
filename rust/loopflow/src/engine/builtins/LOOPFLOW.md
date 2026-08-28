@@ -13,7 +13,7 @@ Use the top-level `lf` command suites for mechanical git and GitHub operations.
 lf commit -m "message" -p     # commit and push
 lf pr publish --title "..."        # push + create/update PR, print state+URL (no browser)
 lf pr open --title "..."           # publish, then open the PR for human review
-lf pr submit                     # prep + mark ready + assign to you; you click merge
+lf pr submit                     # non-Task: prep + assign for your merge click
 lf pr arm                       # request exact-head auto-merge and return
 lf pr land                      # watch CI, repair, and finish after merge
 lf pr land -c                   # finish merged, then complete the owning Task
@@ -39,8 +39,9 @@ four publish the PR headlessly and open no browser:
   Stops there: no auto-merge. Your merge click on GitHub is the one required
   gate — the button unlocks once checks pass. (GitHub blocks approving your own
   PR, so the gate is the merge click, not a review approval.) Use this as the
-  default finish for anything a person should land by hand, including tracked
-  Task work.
+  default finish for ordinary non-Task work a person should land by hand. A
+  managed Task instead follows one sequence: publish evidence, review in
+  `finally`, then `lf pr land`; `submit` refuses the competing merge click.
 - **`lf pr arm`** — prepare the exact head, request auto-merge, and return. Task
   disposition is recorded but is never applied before an authoritative merge.
 - **`lf pr land`** — run the same arm step, then join the one durable watcher for

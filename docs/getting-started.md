@@ -152,14 +152,14 @@ Wave goals, and directions.
 ```bash
 lf pr publish   # push + create or update PR (no browser)
 lf pr open      # publish, then open the PR for review
-lf pr submit    # prepare the exact head; you click merge
+lf pr submit    # non-Task PR: prepare the exact head; you click merge
 lf pr arm       # arm exact-head auto-merge and return
 lf pr land      # watch, repair CI, and return after GitHub merges
 ```
 
-Use the same delivery verbs for Task and non-Task branches. They act on the
-branch and Task PR record when present; they do not require end-to-end
-controller state.
+A managed Task ships only with `lf pr land` — its `finally` review is the single
+shipping decision, and `submit` (a human merge click) is refused inside a Task.
+This follows durable Task ownership and does not require a live controller.
 
 ---
 

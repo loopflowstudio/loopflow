@@ -214,7 +214,7 @@ lf --task INF-123 research "write scratch/runtime.md"
 lf --task INF-123 research "write scratch/prompts.md"
 lf commit -m "Reconcile Task research"
 lf pr publish
-lf pr submit
+lf pr land -c
 lf task status INF-123 --json
 ```
 
@@ -222,9 +222,10 @@ lf task status INF-123 --json
 serial PR identity. It installs no end-to-end controller. Each `--task` command
 is an independent Run in that worktree; several may overlap and write distinct
 scratch paths. Any caller may then use the ordinary Work and delivery commands.
-Those commands act on delivery facts, not on proof that a controller ran its
-expected Flow. `submit`, `arm`, and `land` therefore work the same whether the
-Task was pursued piecemeal, by the built-in controller, or by another system.
+Those commands act on durable delivery facts, not controller liveness. Managed
+Task worktrees refuse `submit`; publish evidence during work and declare the
+reviewed outcome with `land`, whether the Task was pursued piecemeal, by the
+built-in controller, or by another system.
 
 ### End-to-end controllers
 

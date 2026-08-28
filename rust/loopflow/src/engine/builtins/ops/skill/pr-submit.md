@@ -2,17 +2,17 @@
 requires: code on branch
 produces: PR ready, assigned to a human to merge
 ---
-Submit the current branch for a human to land. Rebase, clear scratch, create/update the PR, mark it ready, and assign it — then stop. Nothing merges until a human clicks merge.
+Submit an ordinary non-Task branch for a human to land. Rebase, clear scratch, create/update the PR, mark it ready, and assign it — then stop. Nothing merges until a human clicks merge.
 
-Use `pr-submit` (not `pr-land`) whenever a person should land the work by hand.
-`pr-land` is for headless/auto runs where loopflow merges hands-off;
-`pr-submit` leaves the one required merge click to a human. (GitHub blocks
+Use `pr-submit` when a person should land an ordinary non-Task PR by hand.
+`pr-submit` leaves the required merge click to that human. (GitHub blocks
 approving your own PR, so the gate is the merge click, not a review approval —
 the button unlocks once checks pass.)
 
-Tracked Tasks use the same command. Delivery state records the user-owned
-exact-head merge request, but `pr-submit` does not install, advance, or inspect
-an end-to-end controller.
+**Managed Tasks reject `pr-submit` before mutation.** Their `finally` review is
+already the human shipping decision. Publish evidence, then ship the reviewed
+Task with `pr-land` (`-c` to complete, `--next <slug>` to rotate). This follows
+durable Task ownership, not a live controller.
 
 ## Orientation
 
@@ -36,9 +36,6 @@ re-derive what these already record.
 ```
 lf pr submit [--create-pr] [-m "commit message"] [--title "..."] [--body "..."]
 ```
-
-Inside a managed Task worktree, `-c` completes the Task after the human merge
-and `--next <slug>` rotates its serial PR chain after merge.
 
 **Do not run git commit, git push, gh pr create, or gh pr ready directly.** `lf pr submit` does all of this. Running those commands manually skips the assignment and leaves the PR in an inconsistent state.
 
@@ -93,7 +90,7 @@ If `lf pr submit` fails due to rebase conflicts, launch a sub-agent to run the
 
 ## Notes
 
-- The PR is left ready and assigned — the assignee's merge click lands it. Don't enable auto-merge or merge on their behalf.
+- An ordinary PR is left ready and assigned — the assignee's merge click lands it. Don't enable auto-merge or merge on their behalf.
 - If the PR already has a good title and body, run `lf pr submit` without `--title`/`--body` to keep existing content.
 
 ## Adaptation

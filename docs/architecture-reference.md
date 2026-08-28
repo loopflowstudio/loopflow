@@ -547,10 +547,11 @@ Task row ----> managed worktree ----> commits
    launches its current Flow through the same execution components.
 3. `lf commit` snapshots the worktree. `lf pr publish` creates or refreshes the
    current PR without opening a browser.
-4. `lf pr submit` leaves the exact-head merge click to a human. `lf pr arm`
-   requests exact-head auto-merge and returns; `lf pr land` watches through
-   merge. All three operate on Task delivery state when it exists and require
-   no controller judgment or Flow receipt.
+4. Managed Task worktrees refuse `lf pr submit`: the `finally` review is their
+   one human shipping decision. `lf pr arm` requests exact-head auto-merge and
+   returns; `lf pr land` declares the reviewed outcome and watches through
+   merge. These operations follow durable Task delivery state and require no
+   live controller.
 5. PR landing is fenced by exact PR head and landing generation. A failing head
    may admit one repair; a moved head requires fresh evidence.
 6. Merge either completes the Task or rotates its serial chain to a new branch

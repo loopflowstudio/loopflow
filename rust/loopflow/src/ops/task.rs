@@ -1398,6 +1398,10 @@ fn parse_pr_slug(value: &str) -> OpsResult<String> {
     Ok(value.to_string())
 }
 
+pub(crate) fn validate_task_pr_next_slug(next_slug: Option<&str>) -> OpsResult<()> {
+    next_slug.map(parse_pr_slug).transpose().map(|_| ())
+}
+
 async fn task_for_worktree(store: &SharedStore, repo: &Path) -> OpsResult<Option<Task>> {
     let checkout = repo.canonicalize().unwrap_or_else(|_| repo.to_path_buf());
     let worktree_keys: BTreeSet<String> = store
@@ -1503,6 +1507,28 @@ pub(crate) fn guard_task_mutation(repo: &Path) -> OpsResult<()> {
     block_on_task(async move {
         let _ = resolve_managed_task(repo).await?;
         Ok(())
+    })
+}
+
+/// Refuse `lf pr submit` inside a managed Task worktree, before any mutation.
+///
+/// `submit` marks a PR ready and assigns it for a human merge click. A managed
+/// Task already carries exactly one shipping judgment — its `finally`/`ship`
+/// gate, reviewed in the provider-backed conversation and declared with
+/// `lf pr land`. A second GitHub-side merge click would be a competing gate,
+/// so it is rejected rather than layered on top. Ordinary non-Task PRs are an
+/// explicit no-op and keep `submit` unchanged.
+pub(crate) fn reject_managed_task_submit(repo: &Path) -> OpsResult<()> {
+    block_on_task(async move {
+        let ManagedTask::Managed { task, .. } = resolve_managed_task(repo).await? else {
+            return Ok(());
+        };
+        Err(task_error(format!(
+            "`lf pr submit` would add a second shipping gate, and managed Task {} already has one: its `finally` review. \
+             Declare the reviewed outcome with `lf pr land -c` (merge completes the Task) or `lf pr land --next <slug>` (another serial PR follows); \
+             Loopflow arms the merge mechanically once required checks pass.",
+            task.plan.identifier
+        )))
     })
 }
 
@@ -1708,9 +1734,8 @@ fn _validate_task_pr_copy(context: &TaskPrContext, title: &str, body: &str) -> O
 /// The exact clean Task settlement already represented by local HEAD and the
 /// stored GitHub head. `land` uses this read before any head mutation so a
 /// replay can observe an already-armed request instead of clearing it.
-pub(crate) fn matching_task_pr_merge_request(
+pub(crate) fn matching_task_pr_auto_merge_request(
     repo: &Path,
-    mode: PrMergeMode,
     after_merge: AfterMerge,
     next_slug: Option<&str>,
 ) -> OpsResult<Option<(u32, String)>> {
@@ -1743,7 +1768,7 @@ pub(crate) fn matching_task_pr_merge_request(
         };
         if pr.presentation().is_none()
             || github.head_sha.as_deref() != Some(head.as_str())
-            || request.mode != mode
+            || request.mode != PrMergeMode::Auto
             || request.after_merge != after_merge
             || request.next_slug != next_slug
         {
@@ -1836,11 +1861,12 @@ async fn clear_task_pr_merge(
     Ok(true)
 }
 
-/// Persist the explicit merge request before `submit` assigns or `land` arms
-/// GitHub. Repeating the same mode/head request preserves its first timestamp.
-pub(crate) fn request_task_pr_merge(
+/// Persist an exact-head automatic merge request before `land` arms GitHub.
+/// Repeating the same request preserves its first timestamp. Human merge
+/// requests remain readable as historical state but cannot be written through
+/// the managed Task delivery API.
+pub(crate) fn request_task_pr_auto_merge(
     repo: &Path,
-    mode: PrMergeMode,
     head_sha: Option<&str>,
     after_merge: AfterMerge,
     next_slug: Option<&str>,
@@ -1893,32 +1919,19 @@ pub(crate) fn request_task_pr_merge(
                 task.plan.identifier, head_sha
             )));
         }
-        if publication
-            .merge
-            .as_ref()
-            .is_some_and(|request| request.mode == PrMergeMode::Auto)
-            && mode == PrMergeMode::User
-        {
-            let number = publication
-                .github
-                .as_ref()
-                .expect("merge request validation requires GitHub PR")
-                .number;
-            crate::ops::pr::disable_auto_merge(repo, number)?;
-        }
         let now = time::OffsetDateTime::now_utc();
         let requested_at = publication
             .merge
             .as_ref()
             .filter(|request| {
-                request.mode == mode
+                request.mode == PrMergeMode::Auto
                     && request.head_sha == head_sha
                     && request.after_merge == after_merge
                     && request.next_slug == next_slug
             })
             .map_or(now, |request| request.requested_at);
         publication.merge = Some(PrMergeRequest {
-            mode,
+            mode: PrMergeMode::Auto,
             requested_at,
             head_sha: head_sha.clone(),
             after_merge,

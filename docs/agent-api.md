@@ -138,10 +138,13 @@ lands it:
 
 ```bash
 lf pr publish    # make work visible mid-stream; the agent's default verb
-lf pr submit     # done, a human clicks merge
+lf pr submit     # non-Task PR: done, a human clicks merge
 lf pr arm        # request exact-head auto-merge and return
 lf pr land       # watch, repair CI, and return only after merge
 ```
+
+Managed Task worktrees refuse `submit`. Publish evidence during work, review
+the Task outcome in its `finally` flow, then declare it with `lf pr land`.
 
 `lf pr open` is the one presenting verb — it opens a browser. Agents reach for
 it only when a human asked to see the PR.

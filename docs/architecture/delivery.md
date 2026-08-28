@@ -77,9 +77,10 @@ lf pr land                                     # prepared and auto-merged
 `land` integrate current main, clear merge-time scratch state, collapse
 checkpoint history into one authored commit, verify once, and push the exact
 head. `arm` requests GitHub auto-merge and returns. `land` watches through
-merge. `submit` performs the same preparation but leaves the exact-head merge
-to a human. These delivery commands inspect Task delivery state when present;
-they do not require a controller or certify that a particular Flow ran.
+merge. Managed Task worktrees refuse `submit`: their `finally` review is the
+single human shipping decision, declared with `land`. The refusal and landing
+path inspect durable Task delivery state; they do not require a live controller.
+Ordinary non-Task PRs retain `submit` for a human merge click.
 
 `lf pr open` is the presenting verb; it opens the review surface after
 publishing. Headless Task flows use publish, arm, or land.

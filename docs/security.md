@@ -68,10 +68,12 @@ network, browser, MCP, or credential boundary around the whole process tree.
 
 Skills can edit, commit, push, land a PR, deploy, or update GitHub and Linear
 when the matching tool and credential are present. A gate may decide that work
-is ready to ship. `lf pr submit` leaves the exact-head merge to a human;
-`arm` and `land` request GitHub auto-merge. GitHub remains authoritative for
-whether a PR merged. Release authority is separate and depends on the target's
-configured publisher workflow and credentials.
+is ready to ship. Managed Task worktrees refuse `lf pr submit`: their `finally`
+review is the human shipping decision, and `land` requests exact-head
+auto-merge. Ordinary non-Task PRs may use `submit` to leave the exact-head merge
+to a human. GitHub remains authoritative for whether a PR merged. Release
+authority is separate and depends on the target's configured publisher workflow
+and credentials.
 
 ## Understand account authority over SSH
 

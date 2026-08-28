@@ -142,7 +142,7 @@ pub fn run(
     let cmd = std::iter::once("lf".to_string())
         .chain(lf_args)
         .collect::<Vec<_>>();
-    let mut extra_env = vec![(crate::engine::machine::SSH_TARGET_ENV, target.dest.as_str())];
+    let mut extra_env = vec![(crate::engine::process::SSH_TARGET_ENV, target.dest.as_str())];
     if let Some(home_id) = target.home_id.as_ref().map(HomeId::as_str) {
         extra_env.push((EXPECTED_HOME_ID_ENV, home_id));
     }
@@ -182,7 +182,7 @@ fn bind_home_start_wave_ids(target: &SshTarget, lf_args: &[String]) -> anyhow::R
         .filter_map(|binding| binding.split_once('=').map(|(name, _)| name.to_string()))
         .collect::<std::collections::HashSet<_>>();
     let runtime = tokio::runtime::Runtime::new().context("failed to create async runtime")?;
-    let repo = crate::engine::repo::find_repo_root().ok();
+    let repo = crate::repo::find_repo_root().ok();
     let bindings = runtime.block_on(async {
         let Some(store) = crate::store::open_existing_store().await else {
             return Ok::<_, anyhow::Error>(Vec::new());
@@ -195,7 +195,7 @@ fn bind_home_start_wave_ids(target: &SshTarget, lf_args: &[String]) -> anyhow::R
             if existing.contains(&name) {
                 continue;
             }
-            match crate::engine::wave_context::resolve_managed_wave(
+            match crate::work::wave::context::resolve_managed_wave(
                 Some(&store),
                 repo.as_deref(),
                 Some(&name),
@@ -204,7 +204,7 @@ fn bind_home_start_wave_ids(target: &SshTarget, lf_args: &[String]) -> anyhow::R
             .await
             {
                 Ok(wave) => bindings.push(format!("{}={}", wave.name(), wave.id())),
-                Err(crate::engine::wave_context::WaveResolveError::UnknownExplicit(_)) => {}
+                Err(crate::work::wave::context::WaveResolveError::UnknownExplicit(_)) => {}
                 Err(error) => return Err(anyhow!(error)),
             }
         }
@@ -936,7 +936,7 @@ mod tests {
             "mini-heart",
             "src/loopflow",
             &cmd,
-            &[(crate::engine::machine::SSH_TARGET_ENV, "mini-heart")],
+            &[(crate::engine::process::SSH_TARGET_ENV, "mini-heart")],
         );
 
         assert!(preamble.contains("export GH_TOKEN='gh-secret'"));

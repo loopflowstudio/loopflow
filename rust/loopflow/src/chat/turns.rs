@@ -1,8 +1,8 @@
 //! Turn vocabulary: `ChatTurn`, the wire type Loopflow consumes.
 //!
 //! The wave's loop runs each turn as a bounded `wave` child inside
-//! the RESIDENT process (see [`crate::flowloop::wave`]) and reports it as
-//! resident wire deltas ([`crate::wave::wire`]), folded by the listener's
+//! the RESIDENT process (see [`crate::controller::wave::runner`]) and reports it as
+//! resident wire deltas ([`crate::controller::wave::wire`]), folded by the listener's
 //! runtime into journaled, broadcast turns.
 //!
 //! Mapping:
@@ -14,9 +14,9 @@
 use serde::{Deserialize, Serialize};
 
 use crate::chat::types::{ConversationItem, Lifecycle};
-use crate::project::{ProjectEventKind, ProjectObservation};
-use crate::task::{TaskEventKind, TaskObservation};
-use crate::wave::playhead::{now_rfc3339, BodyProvenance};
+use crate::controller::wave::playhead::{now_rfc3339, BodyProvenance};
+use crate::work::project::{ProjectEventKind, ProjectObservation};
+use crate::work::task::{TaskEventKind, TaskObservation};
 
 /// Who authored a turn. Mirrors Swift `MessageRole` (user/assistant).
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize)]
@@ -108,7 +108,7 @@ pub struct ChatTurn {
 
 /// One live increment to an open turn: the `turn-delta` SSE frame. The listener
 /// broadcasts one per non-finalizing content delta instead of re-serializing the
-/// whole `ChatTurn` (see `crate::wave::runtime` — that whole-turn-per-token
+/// whole `ChatTurn` (see `crate::controller::wave::runtime` — that whole-turn-per-token
 /// re-broadcast was O(prose²) on the wire). The client applies it with
 /// [`ChatTurn::absorb_item`] against the turn named by `turn_id`, reconstructing
 /// exactly what the listener holds; the finalized whole `turn` frame then

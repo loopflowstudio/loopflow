@@ -5,23 +5,18 @@ use std::sync::{Mutex, OnceLock};
 
 use loopflow::id::WaveId;
 use loopflow::planning::{LinearIssueId, LinearProjectId, ProjectPlan, TaskPlan};
-use loopflow::project::{Project, ProjectId};
 use loopflow::store::{
     open_store, PmSnapshotRow, StorageConfig, Store, CONTROL_DB_PATH_ENV, CONTROL_HOME_ENV,
 };
-use loopflow::task::{PmWritebackState, Task, TaskId, TaskPr, TaskPrId};
-use loopflow::wave::Wave;
+use loopflow::work::project::{Project, ProjectId};
+use loopflow::work::task::{PmWritebackState, Task, TaskId, TaskPr, TaskPrId};
+use loopflow::work::wave::Wave;
 use tempfile::TempDir;
 use time::OffsetDateTime;
 
 /// Ambient execution identity a live agent process exports. Tests must never inherit the
 /// real Run that invoked the suite.
-const AMBIENT_AGENT_ENV: [&str; 4] = [
-    "LF_RUN_ID",
-    "LF_WAVE_ID",
-    "LF_ACCOUNT_LEASE",
-    "LF_WORKTREE_WRITER_ID",
-];
+const AMBIENT_AGENT_ENV: [&str; 3] = ["LF_RUN_ID", "LF_WAVE_ID", "LF_ACCOUNT_LEASE"];
 
 fn env_lock() -> &'static Mutex<()> {
     static LOCK: OnceLock<Mutex<()>> = OnceLock::new();
@@ -293,12 +288,6 @@ fn register_task_fixture(
             pm_snapshot_synced_at: now.unix_timestamp(),
         },
         wave_id: wave.id().clone(),
-        iteration: 1,
-        observation_cursor: 0,
-        last_state_fingerprint: None,
-        agent: "codex".to_string(),
-        provider: "codex".to_string(),
-        provider_session_id: Some("task-pr-project".to_string()),
         abandon_intent: None,
         created_at: now,
         updated_at: now,
@@ -317,20 +306,10 @@ fn register_task_fixture(
         project_id: project.id.clone(),
         worktree: worktree.to_path_buf(),
         workspace_slug: "task-pr-proof".to_string(),
-        lifecycle: loopflow::task::TaskLifecyclePlan::defaults(),
-        lifecycle_phase: loopflow::task::TaskLifecyclePhase::Loop,
-        phase_epoch: 1,
-        phase_cursor: 0,
-        phase_iteration: 0,
-        gate_cycle: 0,
-        gate_proposal: None,
-        agent: "codex".to_string(),
-        provider: "codex".to_string(),
-        provider_session_id: None,
         abandon_intent: None,
         created_at: now,
         updated_at: now,
-        observation: loopflow::task::Observation::NotRequired,
+        observation: loopflow::work::task::Observation::NotRequired,
     };
     let pr = TaskPr {
         id: TaskPrId::new(),

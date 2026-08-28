@@ -20,7 +20,7 @@ struct WorkProjection {
 #[serde(tag = "kind", rename_all = "snake_case")]
 enum WorkReceipt {
     Placed(Placement),
-    Relocated(crate::wave::relocate::WaveRelocationReceipt),
+    Relocated(crate::controller::wave::relocate::WaveRelocationReceipt),
     Enabled(Placement),
     Disabled(Placement),
     Steer(SteerReceipt),
@@ -67,7 +67,7 @@ async fn run_async(command: &WorkCommand, repo: &Path) -> anyhow::Result<()> {
                 return Err(anyhow!("only Wave Work has a repository locator"));
             }
             let wave_id = WaveId::parse(id)?;
-            let receipt = crate::wave::relocate::relocate_wave(
+            let receipt = crate::controller::wave::relocate::relocate_wave(
                 &store,
                 &wave_id,
                 repo,
@@ -201,9 +201,9 @@ async fn require_work_repository(store: &Store, work: &WorkRef, repo: &Path) -> 
         .get_wave(&wave_id)
         .await?
         .ok_or_else(|| anyhow!("Wave {wave_id} is not registered"))?;
-    let locator = crate::wave::WaveLocator::discover(repo, wave.name())?;
+    let locator = crate::work::wave::WaveLocator::discover(repo, wave.name())?;
     let local = store.get_wave_at(&locator).await?;
-    if local.as_ref().map(crate::wave::Wave::id) != Some(&wave_id) {
+    if local.as_ref().map(crate::work::wave::Wave::id) != Some(&wave_id) {
         return Err(anyhow!(
             "{} {} belongs to repository {}, not invoking repository {}",
             work.kind(),

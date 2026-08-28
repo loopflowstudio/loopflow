@@ -11,10 +11,10 @@ use crate::lf::commands::runs::{collect_run_activity_since, RunSnapshot};
 use crate::lf::commands::util::parse_since;
 use crate::lf::commands::waves::PrMergeRequestSnapshot;
 use crate::lf::commands::WorkFilter;
-use crate::project::Project;
 use crate::store::sqlite::SqliteStore;
-use crate::task::{GithubPr, Task, TaskPr, TaskPrId};
-use crate::wave::Wave;
+use crate::work::project::Project;
+use crate::work::task::{GithubPr, Task, TaskPr, TaskPrId};
+use crate::work::wave::Wave;
 
 const MAX_LIMIT: usize = 200;
 
@@ -527,7 +527,7 @@ fn print_snapshot(snapshot: &WorkActivitySnapshot) {
 #[cfg(test)]
 mod tests {
     use super::*;
-    use crate::task::{
+    use crate::work::task::{
         AfterMerge, GithubPr, PrMergeMode, PrMergeRequest, PrPresentation, PrPublication, TaskId,
         TaskPrId,
     };

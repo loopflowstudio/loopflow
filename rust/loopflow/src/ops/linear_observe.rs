@@ -11,7 +11,7 @@ use time::OffsetDateTime;
 
 use crate::pm::{IssueComment, IssueObservation};
 use crate::store::{Store, StoreResult};
-use crate::task::{
+use crate::work::task::{
     LinearFollowUp, LinearObservationApply, LinearObservationOutcome, Task, TaskLinearObservation,
 };
 
@@ -102,7 +102,7 @@ mod tests {
     use super::{is_human_comment, plan_apply};
     use crate::planning::{LinearIssueId, TaskPlan};
     use crate::pm::{IssueComment, IssueObservation};
-    use crate::task::{Task, TaskId, TaskLinearObservation};
+    use crate::work::task::{Task, TaskId, TaskLinearObservation};
 
     const VIEWER: &str = "user-loopflow";
 
@@ -138,25 +138,15 @@ mod tests {
                 description: "Old body".to_string(),
                 pm_snapshot_synced_at: 1,
             },
-            pm_writeback: crate::task::PmWritebackState::Current,
+            pm_writeback: crate::work::task::PmWritebackState::Current,
             wave_id: crate::id::WaveId::new(),
-            project_id: crate::project::ProjectId::new(),
+            project_id: crate::work::project::ProjectId::new(),
             worktree: "/tmp/task".into(),
             workspace_slug: "ship-it".to_string(),
-            lifecycle: crate::task::TaskLifecyclePlan::defaults(),
-            lifecycle_phase: crate::task::TaskLifecyclePhase::Loop,
-            phase_epoch: 1,
-            phase_cursor: 0,
-            phase_iteration: 0,
-            gate_cycle: 0,
-            gate_proposal: None,
-            agent: "codex".to_string(),
-            provider: "codex".to_string(),
-            provider_session_id: None,
             abandon_intent: None,
             created_at: now,
             updated_at: now,
-            observation: crate::task::Observation::NotRequired,
+            observation: crate::work::task::Observation::NotRequired,
         }
     }
 

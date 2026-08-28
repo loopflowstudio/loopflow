@@ -29,22 +29,20 @@ use std::io::BufRead;
 use std::path::{Path, PathBuf};
 use std::sync::Arc;
 
-use crate::engine::wave_context::{
-    read_endpoint_pointer, resolve_managed_wave, wave_origin, WaveResolveError,
+use crate::controller::wave::chat::{
+    ChatAction, ChatBacking, ChatHistorySnapshot, ChatHistoryState, ChatMessageSource,
+    PostMessageErrorResponse, WaveChatMessage,
 };
+use crate::controller::wave::journal::{
+    fold_thread, journal_path, read_events_with_state, MessageOp, ReadOnlyJournalState,
+};
+use crate::controller::wave::server::{endpoint_path, HUMAN_THREAD_REPLAY_LIMIT};
 use crate::lf::commands::thread;
 use crate::lf::commands::util::{find_repo_root, message_text};
 use crate::lf::WaveTargetArgs;
 use crate::store::{open_existing_store, SharedStore};
-use crate::wave::chat::{
-    ChatAction, ChatBacking, ChatHistorySnapshot, ChatHistoryState, ChatMessageSource,
-    PostMessageErrorResponse, WaveChatMessage,
-};
-use crate::wave::journal::{
-    fold_thread, journal_path, read_events_with_state, MessageOp, ReadOnlyJournalState,
-};
-use crate::wave::server::HUMAN_THREAD_REPLAY_LIMIT;
-use crate::wave::Wave;
+use crate::work::wave::context::{resolve_managed_wave, wave_origin, WaveResolveError};
+use crate::work::wave::Wave;
 use anyhow::{anyhow, bail, Result};
 
 #[derive(Debug, Clone, Copy)]
@@ -391,7 +389,7 @@ impl CliContext {
         Self {
             store: open_existing_store().await.map(Arc::new),
             repo: find_repo_root().ok(),
-            env_wave_id: std::env::var(crate::engine::wave_context::WAVE_ID_ENV)
+            env_wave_id: std::env::var(crate::work::wave::context::WAVE_ID_ENV)
                 .ok()
                 .filter(|value| !value.is_empty()),
         }
@@ -499,7 +497,10 @@ pub(crate) async fn resolve_target(
         .or(main_repo);
     if endpoint.is_none() {
         if let Some(root) = &repo_root {
-            endpoint = read_endpoint_pointer(root, &target_name);
+            endpoint = std::fs::read_to_string(endpoint_path(root, &target_name))
+                .ok()
+                .map(|value| value.trim().to_string())
+                .filter(|value| !value.is_empty());
         }
     }
 
@@ -583,16 +584,18 @@ pub(crate) async fn get_json(endpoint: &str, path: &str) -> Result<serde_json::V
 mod tests {
     use super::*;
 
+    use crate::controller::wave::journal::{EventKind, MessageOp};
+    use crate::controller::wave::runtime::InboxItem;
     use crate::lf::commands::fixtures::{boot_server, make_wave, temp_store};
-    use crate::wave::journal::{EventKind, MessageOp};
-    use crate::wave::runtime::InboxItem;
 
     #[test]
     fn durable_history_is_bounded_and_does_not_need_a_listener() {
         let tmp = tempfile::tempdir().expect("tempdir");
-        let runtime =
-            crate::wave::runtime::WaveRuntime::open("ship".to_string(), tmp.path().to_path_buf())
-                .expect("open wave journal");
+        let runtime = crate::controller::wave::runtime::WaveRuntime::open(
+            "ship".to_string(),
+            tmp.path().to_path_buf(),
+        )
+        .expect("open wave journal");
         for index in 0..15 {
             runtime
                 .deliver(MessageOp::Message, format!("message {index}"))
@@ -621,16 +624,20 @@ mod tests {
     fn serverless_history_keeps_the_imported_local_epoch() {
         let tmp = tempfile::tempdir().expect("tempdir");
         let path = journal_path(tmp.path(), "ship");
-        let (mut journal, _) = crate::wave::journal::Journal::open(&path).expect("legacy journal");
+        let (mut journal, _) =
+            crate::controller::wave::journal::Journal::open(&path).expect("legacy journal");
         journal.append(|_| EventKind::UserMessage {
-            id: crate::wave::journal::MessageId("legacy-message".into()),
+            id: crate::controller::wave::journal::MessageId("legacy-message".into()),
             op: MessageOp::Message,
             text: "read me after migration".into(),
         });
         drop(journal);
         drop(
-            crate::wave::runtime::WaveRuntime::open("ship".into(), tmp.path().to_path_buf())
-                .expect("migrate journal"),
+            crate::controller::wave::runtime::WaveRuntime::open(
+                "ship".into(),
+                tmp.path().to_path_buf(),
+            )
+            .expect("migrate journal"),
         );
 
         let snapshot = history_snapshot(tmp.path(), "ship", 12, Some("chat-epoch-legacy-1"));
@@ -646,19 +653,21 @@ mod tests {
     #[test]
     fn serverless_history_keeps_discord_epoch_without_shadow_transcript() {
         let tmp = tempfile::tempdir().expect("tempdir");
-        let local =
-            crate::wave::runtime::WaveRuntime::open("ship".into(), tmp.path().to_path_buf())
-                .expect("open local epoch");
+        let local = crate::controller::wave::runtime::WaveRuntime::open(
+            "ship".into(),
+            tmp.path().to_path_buf(),
+        )
+        .expect("open local epoch");
         local
             .try_deliver_authored(MessageOp::Message, "local history".into())
             .expect("write local message");
         drop(local);
 
-        let binding = crate::wave::journal::DiscordChatBinding {
+        let binding = crate::controller::wave::journal::DiscordChatBinding {
             guild_id: "guild".into(),
             channel_id: "channel".into(),
         };
-        let discord = crate::wave::runtime::WaveRuntime::open_with_backing(
+        let discord = crate::controller::wave::runtime::WaveRuntime::open_with_backing(
             "ship".into(),
             tmp.path().to_path_buf(),
             ChatBacking::discord(&binding),
@@ -667,9 +676,11 @@ mod tests {
         let discord_epoch = discord.active_conversation_epoch();
         drop(discord);
 
-        let local_again =
-            crate::wave::runtime::WaveRuntime::open("ship".into(), tmp.path().to_path_buf())
-                .expect("open next local epoch");
+        let local_again = crate::controller::wave::runtime::WaveRuntime::open(
+            "ship".into(),
+            tmp.path().to_path_buf(),
+        )
+        .expect("open next local epoch");
         assert_eq!(local_again.active_conversation_epoch().number, 3);
         drop(local_again);
 
@@ -769,7 +780,7 @@ mod tests {
         store.create_wave(&wave).await.expect("seed wave");
         std::fs::create_dir_all(tmp.path().join("wave/ship")).expect("wave dir");
         std::fs::write(
-            crate::wave::server::endpoint_path(tmp.path(), "ship"),
+            crate::controller::wave::server::endpoint_path(tmp.path(), "ship"),
             "127.0.0.1:4242",
         )
         .expect("endpoint pointer");
@@ -991,9 +1002,9 @@ mod tests {
         };
         assert_eq!(msg.op, MessageOp::Message);
         // The journal row is unattributed too.
-        let (_, events) = crate::wave::journal::Journal::open(&crate::wave::journal::journal_path(
-            &origin, "goals",
-        ))
+        let (_, events) = crate::controller::wave::journal::Journal::open(
+            &crate::controller::wave::journal::journal_path(&origin, "goals"),
+        )
         .expect("journal");
         assert!(events.iter().any(|event| matches!(
             &event.kind,

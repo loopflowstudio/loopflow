@@ -5,7 +5,7 @@ use std::process::Command;
 
 use loopflow::durable::WorkStatus;
 use loopflow::ops::task::{task_interrupt, task_status, task_steer};
-use loopflow::task::{GithubPr, Observation, PrPublication};
+use loopflow::work::task::{GithubPr, Observation, PrPublication};
 use loopflow_test_support::TestRepo;
 use support::{register_task, EnvGuard, RegisteredTask};
 use time::{Duration, OffsetDateTime};

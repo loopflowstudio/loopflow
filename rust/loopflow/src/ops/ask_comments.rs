@@ -108,13 +108,10 @@ mod tests {
     use crate::planning::{LinearIssueId, LinearProjectId, ProjectPlan, TaskPlan};
     use crate::pm::linear::LinearClient;
     use crate::pm::test_server::{self, json_response};
-    use crate::project::{Project, ProjectId};
     use crate::store::{open_store, StorageConfig};
-    use crate::task::{
-        Observation, PmWritebackState, Task, TaskId, TaskLifecyclePhase, TaskLifecyclePlan, TaskPr,
-        TaskPrId,
-    };
-    use crate::wave::Wave;
+    use crate::work::project::{Project, ProjectId};
+    use crate::work::task::{Observation, PmWritebackState, Task, TaskId, TaskPr, TaskPrId};
+    use crate::work::wave::Wave;
 
     #[tokio::test]
     async fn ask_request_and_result_comments_commit_first_and_retry_without_duplicates() {
@@ -140,12 +137,6 @@ mod tests {
                 pm_snapshot_synced_at: now.unix_timestamp(),
             },
             wave_id: wave.id().clone(),
-            iteration: 0,
-            observation_cursor: 0,
-            last_state_fingerprint: None,
-            agent: "codex".to_string(),
-            provider: "codex".to_string(),
-            provider_session_id: None,
             abandon_intent: None,
             created_at: now,
             updated_at: now,
@@ -165,16 +156,6 @@ mod tests {
             project_id: project.id.clone(),
             worktree: directory.path().join("task"),
             workspace_slug: "ask-comments".to_string(),
-            lifecycle: TaskLifecyclePlan::standard("task-design", "task", "ship"),
-            lifecycle_phase: TaskLifecyclePhase::Loop,
-            phase_epoch: 1,
-            phase_cursor: 0,
-            phase_iteration: 0,
-            gate_cycle: 0,
-            gate_proposal: None,
-            agent: "codex".to_string(),
-            provider: "codex".to_string(),
-            provider_session_id: None,
             abandon_intent: None,
             created_at: now,
             updated_at: now,

@@ -11,6 +11,7 @@ use std::sync::{Arc, Mutex, OnceLock};
 use std::time::Duration;
 
 use serde::{Deserialize, Serialize};
+use sha2::{Digest, Sha256};
 use time::OffsetDateTime;
 use uuid::Uuid;
 
@@ -98,6 +99,13 @@ pub enum AttributionSource {
     Inherited,
 }
 
+#[derive(Debug, Clone, Serialize, Deserialize, PartialEq, Eq)]
+pub struct RunContextRef {
+    pub path: String,
+    pub content_sha256: String,
+    pub bytes: u64,
+}
+
 #[derive(Debug, Clone, Serialize, Deserialize)]
 pub struct RunManifest {
     pub schema_version: u32,
@@ -114,6 +122,7 @@ pub struct RunManifest {
     pub skill: Option<String>,
     pub subjects: Vec<SubjectAttribution>,
     pub launch: Option<RunLaunchRequest>,
+    pub context: Option<RunContextRef>,
     pub runtime_path: Option<PathBuf>,
     pub runtime_digest: Option<String>,
     pub host: String,
@@ -137,6 +146,12 @@ struct EventEnvelope {
     observed_at: OffsetDateTime,
     #[serde(flatten)]
     event: RunEvent,
+}
+
+#[derive(Serialize)]
+struct RunContextArtifact<'a> {
+    schema_version: u32,
+    context: &'a crate::trace::PreparedTurnContext,
 }
 
 #[derive(Debug, Serialize, Deserialize)]
@@ -482,7 +497,7 @@ pub(crate) fn resolve_manifest(
 pub(crate) fn read_run_snapshot(dir: &Path) -> std::io::Result<RunSnapshot> {
     let manifest = read_manifest(dir)?;
     validate_manifest_path(dir, &manifest)?;
-    let mut evidence_gaps = 0;
+    let mut evidence_gaps = usize::from(!context_ref_is_valid(dir, manifest.context.as_ref()));
     let terminal = match fs::read(dir.join("terminal.json")) {
         Ok(bytes) => match serde_json::from_slice::<TerminalReceipt>(&bytes) {
             Ok(receipt)
@@ -528,6 +543,20 @@ pub(crate) fn read_run_snapshot(dir: &Path) -> std::io::Result<RunSnapshot> {
         model: manifest.model,
         surface: manifest.surface,
     })
+}
+
+fn context_ref_is_valid(dir: &Path, context: Option<&RunContextRef>) -> bool {
+    let Some(context) = context else {
+        return true;
+    };
+    if context.path != "context.json" {
+        return false;
+    }
+    let Ok(bytes) = fs::read(dir.join(&context.path)) else {
+        return false;
+    };
+    bytes.len() as u64 == context.bytes
+        && hex::encode(Sha256::digest(&bytes)) == context.content_sha256
 }
 
 fn validate_manifest_path(dir: &Path, manifest: &RunManifest) -> std::io::Result<()> {
@@ -816,12 +845,32 @@ fn max_u64(values: impl Iterator<Item = Option<u64>>, gaps: &mut usize) -> Optio
 pub(crate) struct CaptureHandle(Arc<Mutex<RunCapture>>);
 
 impl CaptureHandle {
+    #[cfg(test)]
     pub(crate) fn begin(spec: RunSpec) -> StoreResult<Self> {
         Self::begin_with_id(spec, RunId::new())
     }
 
     pub(crate) fn begin_with_launch(spec: RunSpec, launch: RunLaunchRequest) -> StoreResult<Self> {
-        Self::begin_with_id_and_parent(spec, RunId::new(), None, true, Some(launch))
+        let context = crate::trace::PreparedTurnContext::from_prompts(
+            &launch.system_prompt,
+            &launch.task_prompt,
+        );
+        Self::begin_with_id_and_parent(spec, RunId::new(), None, true, Some(launch), Some(&context))
+    }
+
+    pub(crate) fn begin_with_launch_and_context(
+        spec: RunSpec,
+        launch: RunLaunchRequest,
+        context: &crate::trace::PreparedTurnContext,
+    ) -> StoreResult<Self> {
+        Self::begin_with_id_and_parent(spec, RunId::new(), None, true, Some(launch), Some(context))
+    }
+
+    pub(crate) fn begin_with_context(
+        spec: RunSpec,
+        context: &crate::trace::PreparedTurnContext,
+    ) -> StoreResult<Self> {
+        Self::begin_with_id_and_parent(spec, RunId::new(), None, true, None, Some(context))
     }
 
     pub(crate) fn begin_replay_at(
@@ -831,19 +880,32 @@ impl CaptureHandle {
         parent_run_id: RunId,
     ) -> StoreResult<Self> {
         let parent_run_id = verified_parent(lf_home, parent_run_id);
-        Self::begin_at_with_id(lf_home, spec, RunId::new(), parent_run_id, Some(launch))
+        let context = crate::trace::PreparedTurnContext::from_prompts(
+            &launch.system_prompt,
+            &launch.task_prompt,
+        );
+        Self::begin_at_with_id(
+            lf_home,
+            spec,
+            RunId::new(),
+            parent_run_id,
+            Some(launch),
+            Some(&context),
+        )
     }
 
+    #[cfg(test)]
     pub(crate) fn begin_with_id(spec: RunSpec, run_id: RunId) -> StoreResult<Self> {
-        Self::begin_with_id_and_parent(spec, run_id, None, true, None)
+        Self::begin_with_id_and_parent(spec, run_id, None, true, None, None)
     }
 
-    pub(crate) fn begin_with_verified_parent(
+    pub(crate) fn begin_with_verified_parent_and_context(
         spec: RunSpec,
         run_id: RunId,
         parent_run_id: Option<RunId>,
+        context: &crate::trace::PreparedTurnContext,
     ) -> StoreResult<Self> {
-        Self::begin_with_id_and_parent(spec, run_id, parent_run_id, false, None)
+        Self::begin_with_id_and_parent(spec, run_id, parent_run_id, false, None, Some(context))
     }
 
     fn begin_with_id_and_parent(
@@ -852,6 +914,7 @@ impl CaptureHandle {
         parent_run_id: Option<RunId>,
         inherit_parent: bool,
         launch: Option<RunLaunchRequest>,
+        context: Option<&crate::trace::PreparedTurnContext>,
     ) -> StoreResult<Self> {
         #[cfg(test)]
         let home = std::env::var_os("LF_HOME")
@@ -866,12 +929,12 @@ impl CaptureHandle {
         } else {
             parent_run_id.and_then(|candidate| verified_parent(&home, candidate))
         };
-        Self::begin_at_with_id(&home, spec, run_id, parent_run_id, launch)
+        Self::begin_at_with_id(&home, spec, run_id, parent_run_id, launch, context)
     }
 
     #[cfg(test)]
     pub(crate) fn begin_at(lf_home: &Path, spec: RunSpec) -> StoreResult<Self> {
-        Self::begin_at_with_id(lf_home, spec, RunId::new(), inherited_parent(), None)
+        Self::begin_at_with_id(lf_home, spec, RunId::new(), inherited_parent(), None, None)
     }
 
     #[cfg(test)]
@@ -880,12 +943,17 @@ impl CaptureHandle {
         spec: RunSpec,
         launch: RunLaunchRequest,
     ) -> StoreResult<Self> {
+        let context = crate::trace::PreparedTurnContext::from_prompts(
+            &launch.system_prompt,
+            &launch.task_prompt,
+        );
         Self::begin_at_with_id(
             lf_home,
             spec,
             RunId::new(),
             inherited_parent(),
             Some(launch),
+            Some(&context),
         )
     }
 
@@ -895,8 +963,9 @@ impl CaptureHandle {
         run_id: RunId,
         parent_run_id: Option<RunId>,
         launch: Option<RunLaunchRequest>,
+        context: Option<&crate::trace::PreparedTurnContext>,
     ) -> StoreResult<Self> {
-        let capture = RunCapture::begin(lf_home, spec, run_id, parent_run_id, launch)
+        let capture = RunCapture::begin(lf_home, spec, run_id, parent_run_id, launch, context)
             .map_err(record_error)?;
         Ok(Self(Arc::new(Mutex::new(capture))))
     }
@@ -1047,11 +1116,26 @@ impl RunCapture {
         run_id: RunId,
         parent_run_id: Option<RunId>,
         launch: Option<RunLaunchRequest>,
+        context: Option<&crate::trace::PreparedTurnContext>,
     ) -> std::io::Result<Self> {
         let (runtime_path, runtime_digest) = runtime_identity();
         let account_id = launch
             .as_ref()
             .and_then(|request| request.account_id.clone());
+        let context_bytes = context
+            .map(|context| {
+                serde_json::to_vec_pretty(&RunContextArtifact {
+                    schema_version: SCHEMA_VERSION,
+                    context,
+                })
+                .map_err(std::io::Error::other)
+            })
+            .transpose()?;
+        let context_ref = context_bytes.as_ref().map(|bytes| RunContextRef {
+            path: "context.json".to_string(),
+            content_sha256: hex::encode(Sha256::digest(bytes)),
+            bytes: bytes.len() as u64,
+        });
         let manifest = RunManifest {
             schema_version: SCHEMA_VERSION,
             run_id: run_id.clone(),
@@ -1066,12 +1150,13 @@ impl RunCapture {
             skill: spec.skill,
             subjects: spec.subjects,
             launch,
+            context: context_ref,
             runtime_path,
             runtime_digest,
             host: gethostname::gethostname().to_string_lossy().into_owned(),
             boot_id: boot_id(),
         };
-        let dir = publish_manifest(lf_home, &manifest)?;
+        let dir = publish_manifest(lf_home, &manifest, context_bytes.as_deref())?;
         let recorder = RunRecorder::start(&dir, &run_id);
         Ok(Self {
             manifest,
@@ -1324,7 +1409,58 @@ fn record_dir(lf_home: &Path, run_id: &RunId) -> Option<PathBuf> {
     Some(lf_home.join("runs").join(prefix).join(run_id.as_str()))
 }
 
-fn publish_manifest(lf_home: &Path, manifest: &RunManifest) -> std::io::Result<PathBuf> {
+#[cfg(test)]
+pub(crate) fn observed_run_ids(selectors: &[String]) -> std::io::Result<Vec<RunId>> {
+    observed_run_ids_at(&crate::store::lf_home_dir(), selectors)
+}
+
+#[cfg(test)]
+fn observed_run_ids_at(lf_home: &Path, selectors: &[String]) -> std::io::Result<Vec<RunId>> {
+    let root = lf_home.join("runs");
+    let mut prefixes = match fs::read_dir(&root) {
+        Ok(entries) => entries.filter_map(Result::ok).collect::<Vec<_>>(),
+        Err(error) if error.kind() == std::io::ErrorKind::NotFound => return Ok(Vec::new()),
+        Err(error) => return Err(error),
+    };
+    prefixes.sort_by_key(|entry| entry.path());
+
+    let mut observed = Vec::new();
+    for prefix in prefixes {
+        let Ok(entries) = fs::read_dir(prefix.path()) else {
+            continue;
+        };
+        let mut runs = entries.filter_map(Result::ok).collect::<Vec<_>>();
+        runs.sort_by_key(|entry| entry.path());
+        for run in runs {
+            let Ok(bytes) = fs::read(run.path().join("manifest.json")) else {
+                continue;
+            };
+            let Ok(manifest) = serde_json::from_slice::<RunManifest>(&bytes) else {
+                continue;
+            };
+            if manifest.subjects.iter().any(|subject| {
+                selectors
+                    .iter()
+                    .any(|selector| selector == &subject.selector)
+            }) {
+                observed.push((manifest.created_at, manifest.run_id));
+            }
+        }
+    }
+    observed.sort_by(|left, right| {
+        left.0
+            .cmp(&right.0)
+            .then_with(|| left.1.as_str().cmp(right.1.as_str()))
+    });
+    observed.dedup_by(|left, right| left.1 == right.1);
+    Ok(observed.into_iter().map(|(_, run_id)| run_id).collect())
+}
+
+fn publish_manifest(
+    lf_home: &Path,
+    manifest: &RunManifest,
+    context: Option<&[u8]>,
+) -> std::io::Result<PathBuf> {
     let run_id = manifest.run_id.as_str();
     let published =
         record_dir(lf_home, &manifest.run_id).expect("Run ids always contain a UUID prefix");
@@ -1334,6 +1470,9 @@ fn publish_manifest(lf_home: &Path, manifest: &RunManifest) -> std::io::Result<P
     create_private_dir(parent)?;
     let staging = parent.join(format!(".{run_id}.staging"));
     create_private_dir_exclusive(&staging)?;
+    if let Some(context) = context {
+        write_private_exclusive(&staging.join("context.json"), context)?;
+    }
     write_private_exclusive(
         &staging.join("manifest.json"),
         &serde_json::to_vec_pretty(manifest).map_err(std::io::Error::other)?,
@@ -1468,8 +1607,8 @@ mod tests {
     use std::io::Write;
 
     use super::{
-        read_run_snapshot, scan_runs_since, CaptureHandle, RunLaunchRequest, RunManifest, RunSpec,
-        SubjectAttribution, TerminalReceipt,
+        observed_run_ids_at, read_run_snapshot, scan_runs_since, CaptureHandle, RunLaunchRequest,
+        RunManifest, RunSpec, SubjectAttribution, TerminalReceipt,
     };
     use crate::chat::types::{ConversationEvent, TurnUsage};
     use crate::engine::stream::{ResultSubtype, StreamEvent};
@@ -1514,6 +1653,39 @@ mod tests {
         let bytes = fs::read(capture.artifact_dir().join("manifest.json")).unwrap();
         let manifest: RunManifest = serde_json::from_slice(&bytes).unwrap();
         assert_eq!(manifest.launch, Some(expected));
+        let context_ref = manifest.context.expect("manifest references exact context");
+        let context = fs::read(capture.artifact_dir().join(&context_ref.path)).unwrap();
+        assert_eq!(context_ref.bytes, context.len() as u64);
+        assert_eq!(
+            context_ref.content_sha256,
+            hex::encode(<sha2::Sha256 as sha2::Digest>::digest(&context))
+        );
+        let context: serde_json::Value = serde_json::from_slice(&context).unwrap();
+        assert_eq!(
+            context.pointer("/context/system/text").unwrap(),
+            "system context\r\nwith unicode λ\n \t"
+        );
+        assert_eq!(
+            context.pointer("/context/task/text").unwrap(),
+            "authored task\n\nwith trailing space "
+        );
+        assert_eq!(
+            read_run_snapshot(&capture.artifact_dir())
+                .unwrap()
+                .evidence_gaps,
+            0
+        );
+        fs::write(
+            capture.artifact_dir().join(&context_ref.path),
+            b"tampered context",
+        )
+        .unwrap();
+        assert_eq!(
+            read_run_snapshot(&capture.artifact_dir())
+                .unwrap()
+                .evidence_gaps,
+            1
+        );
         assert!(bytes
             .windows(b"engineering".len())
             .any(|window| window == b"engineering"));
@@ -1592,6 +1764,29 @@ mod tests {
         let unchanged: TerminalReceipt =
             serde_json::from_slice(&fs::read(dir.join("terminal.json")).unwrap()).unwrap();
         assert_eq!(unchanged.outcome, "completed");
+    }
+
+    #[test]
+    fn two_runs_about_one_task_keep_distinct_identity_and_shared_provenance() {
+        let home = tempfile::tempdir().unwrap();
+        let selector = "task:LOO-267".to_string();
+        let mut first = spec(home.path());
+        first.skill = Some("research".to_string());
+        first.subjects = vec![SubjectAttribution::declared(selector.clone())];
+        let second = first.clone();
+
+        let first = CaptureHandle::begin_at(home.path(), first).unwrap();
+        let second = CaptureHandle::begin_at(home.path(), second).unwrap();
+        let first_id = first.run_id();
+        let second_id = second.run_id();
+
+        assert_ne!(first_id, second_id);
+        let observed = observed_run_ids_at(home.path(), &[selector]).unwrap();
+        assert_eq!(observed.len(), 2);
+        assert!(observed.contains(&first_id));
+        assert!(observed.contains(&second_id));
+        assert!(!first.artifact_dir().join("terminal.json").exists());
+        assert!(!second.artifact_dir().join("terminal.json").exists());
     }
 
     #[test]

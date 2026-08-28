@@ -47,6 +47,7 @@ pub(crate) fn configure_agent_env(command: &mut tokio::process::Command, config:
     }
     command
         .envs(&config.env)
+        .env_remove(crate::ops::git_operation::LEGACY_WORKTREE_WRITER_ID_ENV)
         .env_remove("LOOPFLOW_DIRECTIVE_FILE");
     if let Some(path) = &config.directive_relay {
         command.env("LOOPFLOW_DIRECTIVE_FILE", path);
@@ -86,6 +87,7 @@ mod environment_tests {
     use std::path::Path;
 
     use super::{configure_agent_env, set_vendor_std_env};
+    use crate::engine::agent::AgentConfig;
 
     #[test]
     fn vendor_receives_control_context_but_not_ordinary_store_context() {
@@ -157,6 +159,26 @@ mod environment_tests {
             Some(OsString::from("/fresh/run"))
         );
         assert_eq!(environment[crate::run_record::PARENT_RUN_ID_ENV], None);
+    }
+
+    #[test]
+    fn provider_drops_legacy_worktree_writer_authority() {
+        let mut command = tokio::process::Command::new("vendor");
+        command.env("LF_WORKTREE_WRITER_ID", "writer_stale");
+        let mut config = AgentConfig::default();
+        config.env.insert(
+            "LF_WORKTREE_WRITER_ID".to_string(),
+            "writer_explicit".to_string(),
+        );
+
+        configure_agent_env(&mut command, &config);
+
+        let environment = command
+            .as_std()
+            .get_envs()
+            .map(|(key, value)| (key.to_string_lossy().to_string(), value.map(OsString::from)))
+            .collect::<std::collections::HashMap<_, _>>();
+        assert_eq!(environment["LF_WORKTREE_WRITER_ID"], None);
     }
 }
 

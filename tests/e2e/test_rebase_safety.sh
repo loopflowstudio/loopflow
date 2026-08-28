@@ -172,17 +172,18 @@ git -C "$REPO" merge-base --is-ancestor origin/main HEAD
 test "$(git -C "$REPO" rev-parse HEAD)" != "$published_head"
 echo "PASS publication stayed integration-free until explicit rebase"
 
-# A provider-owned writer id is reentrant for nested Loopflow integration.
+# A provider receives no worktree authority; nested integration takes its own
+# short mutation lock.
 create_clean_repo nested
 export SENTINEL_MODE=nested_rebase SENTINEL_LOG="$TMP_ROOT/nested.log"
 : >"$SENTINEL_LOG"
 (cd "$REPO" && "$LF_BIN" : run-nested-rebase >/dev/null)
 test "$(wc -l <"$SENTINEL_LOG" | tr -d ' ')" = 1
-grep -Eq '^nested_rebase writer_[^ ]+ missing$' "$SENTINEL_LOG"
+grep -Eq '^nested_rebase missing missing$' "$SENTINEL_LOG"
 test "$(git --git-dir="$REMOTE" rev-parse refs/heads/feature)" = "$(git -C "$REPO" rev-parse HEAD)"
 
-# A provider holding the worktree writer claim excludes integration before Git
-# moves. This uses the real launch boundary rather than a public test-only lease.
+# A live provider does not reserve the worktree. A separate rebase can take the
+# short mutation lock and complete while the provider remains alive.
 create_clean_repo writer
 export SENTINEL_MODE=hold SENTINEL_LOG="$TMP_ROOT/writer.log"
 export SENTINEL_READY="$TMP_ROOT/writer.ready" SENTINEL_RELEASE="$TMP_ROOT/writer.release"
@@ -193,19 +194,17 @@ writer_owner=$!
 for _ in $(seq 1 200); do [ -e "$SENTINEL_READY" ] && break; sleep 0.05; done
 test -e "$SENTINEL_READY"
 writer_head=$(git -C "$REPO" rev-parse HEAD)
-set +e
 (cd "$REPO" && "$LF_BIN" rebase >"$TMP_ROOT/writer.rebase.out" 2>&1)
 writer_rebase_status=$?
-set -e
-test "$writer_rebase_status" -ne 0
-grep -q 'independent writer' "$TMP_ROOT/writer.rebase.out"
-test "$(git -C "$REPO" rev-parse HEAD)" = "$writer_head"
+test "$writer_rebase_status" -eq 0
+test "$(git -C "$REPO" rev-parse HEAD)" != "$writer_head"
+test "$(git --git-dir="$REMOTE" rev-parse refs/heads/feature)" = "$(git -C "$REPO" rev-parse HEAD)"
 test ! -e "$(git -C "$REPO" rev-parse --absolute-git-dir)/loopflow/rebase-owner.json"
 : >"$SENTINEL_RELEASE"
 set +e
 wait "$writer_owner"
 set -e
-echo "PASS independent agent writer blocked integration before Git moved"
+echo "PASS live provider held no worktree authority"
 
 # Hold the first recovery provider open. Foreign rebase and skill invocations
 # must refuse while preserving the exact conflict and launching no second agent.
@@ -251,7 +250,7 @@ export SENTINEL_MODE=resolve SENTINEL_LOG="$TMP_ROOT/authorized.log"
 : >"$SENTINEL_LOG"
 (cd "$REPO" && "$LF_BIN" rebase >/dev/null)
 test "$(wc -l <"$SENTINEL_LOG" | tr -d ' ')" = 1
-grep -Eq '^resolve writer_[^ ]+ gitop_[^ ]+$' "$SENTINEL_LOG"
+grep -Eq '^resolve missing gitop_[^ ]+$' "$SENTINEL_LOG"
 test "$(git --git-dir="$REMOTE" rev-parse refs/heads/feature)" = "$(git -C "$REPO" rev-parse HEAD)"
 test ! -d "$(git -C "$REPO" rev-parse --absolute-git-dir)/rebase-merge"
 test ! -d "$(git -C "$REPO" rev-parse --absolute-git-dir)/rebase-apply"

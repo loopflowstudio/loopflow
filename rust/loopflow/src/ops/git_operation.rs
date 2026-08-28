@@ -10,31 +10,12 @@ use uuid::Uuid;
 use crate::engine::git::{absolute_git_dir, current_branch, intervention_state, rev_parse};
 use crate::ops::error::{OpsError, OpsResult};
 
-pub(crate) const LF_WORKTREE_WRITER_ID_ENV: &str = "LF_WORKTREE_WRITER_ID";
+pub(crate) const LEGACY_WORKTREE_WRITER_ID_ENV: &str = "LF_WORKTREE_WRITER_ID";
 pub(crate) const LF_GIT_OPERATION_ID_ENV: &str = "LF_GIT_OPERATION_ID";
 
 /// Recorded as the target of a sequencer Loopflow adopted rather than started,
 /// where the real rebase target is unknowable after the fact.
 const RAW_TARGET_REF: &str = "unknown raw rebase target";
-
-#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
-#[serde(transparent)]
-struct WorktreeWriterId(String);
-
-impl WorktreeWriterId {
-    fn new() -> Self {
-        Self(format!("writer_{}", Uuid::new_v4()))
-    }
-
-    fn parse(value: &str) -> OpsResult<Self> {
-        validate_id(value, "worktree writer")?;
-        Ok(Self(value.to_string()))
-    }
-
-    fn as_str(&self) -> &str {
-        &self.0
-    }
-}
 
 #[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
 #[serde(transparent)]
@@ -64,7 +45,6 @@ impl GitOperationId {
 #[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
 pub(crate) struct GitOperationOwner {
     id: GitOperationId,
-    writer_id: WorktreeWriterId,
     root_pid: u32,
     run_id: Option<String>,
     process_id: Option<String>,
@@ -81,43 +61,11 @@ impl GitOperationOwner {
     }
 }
 
-#[derive(Debug, Serialize, Deserialize)]
-struct WorktreeWriterOwner {
-    id: WorktreeWriterId,
-    pid: u32,
-    worktree: PathBuf,
-}
-
-#[derive(Debug)]
-struct WorktreeWriterLease {
-    path: PathBuf,
-    _file: File,
-}
-
-impl Drop for WorktreeWriterLease {
-    fn drop(&mut self) {
-        let _ = fs::remove_file(&self.path);
-    }
-}
-
-#[derive(Debug)]
-pub(crate) struct AgentWriterGuard {
-    writer_id: WorktreeWriterId,
-    _lease: Option<WorktreeWriterLease>,
-}
-
-impl AgentWriterGuard {
-    pub(crate) fn writer_id(&self) -> &str {
-        self.writer_id.as_str()
-    }
-}
-
 #[derive(Debug)]
 pub(crate) struct RebaseOperation {
     file: File,
     path: PathBuf,
     owner: GitOperationOwner,
-    _writer_lease: Option<WorktreeWriterLease>,
 }
 
 impl RebaseOperation {
@@ -134,16 +82,10 @@ impl RebaseOperation {
     }
 
     pub(crate) fn scoped_env(&self) -> BTreeMap<String, String> {
-        BTreeMap::from([
-            (
-                LF_WORKTREE_WRITER_ID_ENV.to_string(),
-                self.owner.writer_id.as_str().to_string(),
-            ),
-            (
-                LF_GIT_OPERATION_ID_ENV.to_string(),
-                self.owner.id.as_str().to_string(),
-            ),
-        ])
+        BTreeMap::from([(
+            LF_GIT_OPERATION_ID_ENV.to_string(),
+            self.owner.id.as_str().to_string(),
+        )])
     }
 
     pub(crate) fn complete(self) -> OpsResult<()> {
@@ -187,9 +129,6 @@ pub(crate) fn begin_rebase_operation(
     refuse_intervention(worktree)?;
 
     let worktree = canonical(worktree);
-    let (writer_id, writer_lease) = establish_writer(&worktree, inherited_writer_id()?)?;
-    refuse_other_writers(&worktree, &writer_id)?;
-
     let path = operation_path(&worktree)?;
     let mut file = create_record(&path)?;
     match FileExt::try_lock_exclusive(&file) {
@@ -207,14 +146,9 @@ pub(crate) fn begin_rebase_operation(
             "refusing to rebase from detached HEAD".to_string(),
         ));
     }
-    let owner = new_owner(&worktree, writer_id, target_ref)?;
+    let owner = new_owner(&worktree, target_ref)?;
     write_json(&mut file, &owner)?;
-    Ok(RebaseOperation {
-        file,
-        path,
-        owner,
-        _writer_lease: writer_lease,
-    })
+    Ok(RebaseOperation { file, path, owner })
 }
 
 pub(crate) fn authorize_rebase_control(
@@ -293,15 +227,11 @@ fn adopt_operation(
     mut file: File,
     stored: Option<GitOperationOwner>,
 ) -> OpsResult<OperationAuthorization> {
-    let (writer_id, writer_lease) = establish_writer(worktree, inherited_writer_id()?)?;
-    refuse_other_writers(worktree, &writer_id)?;
-
     let mut owner = match stored {
         Some(owner) => owner,
-        None => new_owner(worktree, writer_id.clone(), RAW_TARGET_REF)?,
+        None => new_owner(worktree, RAW_TARGET_REF)?,
     };
     owner.id = GitOperationId::new();
-    owner.writer_id = writer_id;
     owner.root_pid = std::process::id();
     owner.run_id = std::env::var(crate::journal::LF_TRACE_ID_ENV).ok();
     owner.process_id = std::env::var(crate::journal::LF_PROCESS_ID_ENV).ok();
@@ -310,18 +240,12 @@ fn adopt_operation(
         file,
         path,
         owner,
-        _writer_lease: writer_lease,
     }))
 }
 
-fn new_owner(
-    worktree: &Path,
-    writer_id: WorktreeWriterId,
-    target_ref: &str,
-) -> OpsResult<GitOperationOwner> {
+fn new_owner(worktree: &Path, target_ref: &str) -> OpsResult<GitOperationOwner> {
     Ok(GitOperationOwner {
         id: GitOperationId::new(),
-        writer_id,
         root_pid: std::process::id(),
         run_id: std::env::var(crate::journal::LF_TRACE_ID_ENV).ok(),
         process_id: std::env::var(crate::journal::LF_PROCESS_ID_ENV).ok(),
@@ -333,35 +257,21 @@ fn new_owner(
     })
 }
 
-pub(crate) fn prepare_agent_writer(
+pub(crate) fn prepare_agent_launch(
     worktree: &Path,
     env: &BTreeMap<String, String>,
-) -> OpsResult<Option<AgentWriterGuard>> {
+) -> OpsResult<()> {
     if absolute_git_dir(worktree).is_err() {
-        return Ok(None);
+        return Ok(());
     }
 
-    let inherited_writer = env
-        .get(LF_WORKTREE_WRITER_ID_ENV)
-        .cloned()
-        .or_else(|| std::env::var(LF_WORKTREE_WRITER_ID_ENV).ok())
-        .map(|value| WorktreeWriterId::parse(&value))
-        .transpose()?;
-    let (writer_id, lease) = establish_writer(worktree, inherited_writer)?;
-    // Establish the writer first. A rebase racing this preflight will then see
-    // the live writer and refuse, instead of creating an operation in the gap
-    // between an agent's operation check and its writer claim.
     let requested_operation = env
         .get(LF_GIT_OPERATION_ID_ENV)
         .cloned()
         .or_else(|| std::env::var(LF_GIT_OPERATION_ID_ENV).ok())
         .map(|value| GitOperationId::parse(&value))
         .transpose()?;
-    fence_agent_launch(worktree, requested_operation.as_ref())?;
-    Ok(Some(AgentWriterGuard {
-        writer_id,
-        _lease: lease,
-    }))
+    fence_agent_launch(worktree, requested_operation.as_ref())
 }
 
 fn fence_agent_launch(
@@ -405,88 +315,6 @@ fn fence_agent_launch(
     }
 }
 
-fn establish_writer(
-    worktree: &Path,
-    inherited: Option<WorktreeWriterId>,
-) -> OpsResult<(WorktreeWriterId, Option<WorktreeWriterLease>)> {
-    if let Some(id) = inherited {
-        let path = writer_path(worktree, &id)?;
-        if !path.exists() {
-            return Err(revoked_writer_error(&id));
-        }
-        let mut file = open_existing_record(&path)?;
-        return match FileExt::try_lock_exclusive(&file) {
-            Err(error) if is_contended(&error) => {
-                let owner = read_json::<WorktreeWriterOwner>(&mut file)
-                    .map_err(|_| revoked_writer_error(&id))?;
-                if owner.id != id {
-                    Err(revoked_writer_error(&id))
-                } else {
-                    Ok((id, None))
-                }
-            }
-            Err(error) => Err(error.into()),
-            Ok(()) => Err(revoked_writer_error(&id)),
-        };
-    }
-
-    let id = WorktreeWriterId::new();
-    let path = writer_path(worktree, &id)?;
-    let mut file = create_record(&path)?;
-    match FileExt::try_lock_exclusive(&file) {
-        Err(error) if is_contended(&error) => Ok((id, None)),
-        Err(error) => Err(error.into()),
-        Ok(()) => {
-            let owner = WorktreeWriterOwner {
-                id: id.clone(),
-                pid: std::process::id(),
-                worktree: worktree.to_path_buf(),
-            };
-            write_json(&mut file, &owner)?;
-            Ok((id.clone(), Some(WorktreeWriterLease { path, _file: file })))
-        }
-    }
-}
-
-fn refuse_other_writers(worktree: &Path, own_id: &WorktreeWriterId) -> OpsResult<()> {
-    let dir = writers_dir(worktree)?;
-    if !dir.exists() {
-        return Ok(());
-    }
-    for entry in fs::read_dir(&dir)? {
-        let path = entry?.path();
-        if path.extension().and_then(|value| value.to_str()) != Some("json") {
-            continue;
-        }
-        if path.file_stem().and_then(|value| value.to_str()) == Some(own_id.as_str()) {
-            continue;
-        }
-        let mut file = open_record(&path)?;
-        match FileExt::try_lock_exclusive(&file) {
-            Err(error) if is_contended(&error) => {
-                let label = read_json::<WorktreeWriterOwner>(&mut file)
-                    .map(|owner| format!("{} (pid {})", owner.id.as_str(), owner.pid))
-                    .unwrap_or_else(|_| path.display().to_string());
-                return Err(OpsError::Message(format!(
-                    "refusing to rebase while independent writer {label} holds this worktree"
-                )));
-            }
-            Err(error) => return Err(error.into()),
-            Ok(()) => {
-                fs::remove_file(path)?;
-            }
-        }
-    }
-    Ok(())
-}
-
-fn revoked_writer_error(id: &WorktreeWriterId) -> OpsError {
-    OpsError::Message(format!(
-        "worktree writer {} was revoked because its lock no longer exists; start a fresh operation",
-        id.as_str()
-    ))
-}
-
 fn refuse_intervention(worktree: &Path) -> OpsResult<()> {
     if let Some(state) = intervention_state(worktree)? {
         return Err(OpsError::Message(format!(
@@ -502,14 +330,6 @@ fn operation_path(worktree: &Path) -> OpsResult<PathBuf> {
         .join("rebase-owner.json"))
 }
 
-fn writers_dir(worktree: &Path) -> OpsResult<PathBuf> {
-    Ok(absolute_git_dir(worktree)?.join("loopflow").join("writers"))
-}
-
-fn writer_path(worktree: &Path, id: &WorktreeWriterId) -> OpsResult<PathBuf> {
-    Ok(writers_dir(worktree)?.join(format!("{}.json", id.as_str())))
-}
-
 fn open_record(path: &Path) -> io::Result<File> {
     OpenOptions::new()
         .create(true)
@@ -519,22 +339,11 @@ fn open_record(path: &Path) -> io::Result<File> {
         .open(path)
 }
 
-fn open_existing_record(path: &Path) -> io::Result<File> {
-    OpenOptions::new().read(true).write(true).open(path)
-}
-
 fn create_record(path: &Path) -> OpsResult<File> {
     if let Some(parent) = path.parent() {
         fs::create_dir_all(parent)?;
     }
     Ok(open_record(path)?)
-}
-
-fn inherited_writer_id() -> OpsResult<Option<WorktreeWriterId>> {
-    std::env::var(LF_WORKTREE_WRITER_ID_ENV)
-        .ok()
-        .map(|value| WorktreeWriterId::parse(&value))
-        .transpose()
 }
 
 fn canonical(worktree: &Path) -> PathBuf {
@@ -598,90 +407,4 @@ fn validate_id(value: &str, label: &str) -> OpsResult<()> {
         return Err(OpsError::Message(format!("invalid {label} id")));
     }
     Ok(())
-}
-
-#[cfg(test)]
-mod tests {
-    use super::{begin_rebase_operation, establish_writer, prepare_agent_writer, writer_path};
-    use std::collections::BTreeMap;
-    use std::ffi::OsString;
-    use std::path::Path;
-    use std::process::Command;
-
-    struct EnvRestore(Vec<(&'static str, Option<OsString>)>);
-
-    impl EnvRestore {
-        fn capture(names: &[&'static str]) -> Self {
-            Self(
-                names
-                    .iter()
-                    .map(|name| (*name, std::env::var_os(name)))
-                    .collect(),
-            )
-        }
-    }
-
-    impl Drop for EnvRestore {
-        fn drop(&mut self) {
-            for (name, value) in &self.0 {
-                match value {
-                    Some(value) => std::env::set_var(name, value),
-                    None => std::env::remove_var(name),
-                }
-            }
-        }
-    }
-
-    fn git(repo: &Path, args: &[&str]) {
-        let output = Command::new("git")
-            .current_dir(repo)
-            .args(args)
-            .output()
-            .unwrap();
-        assert!(
-            output.status.success(),
-            "git {} failed: {}",
-            args.join(" "),
-            String::from_utf8_lossy(&output.stderr)
-        );
-    }
-
-    #[test]
-    fn live_writer_lock_blocks_rebase_until_released() {
-        let _env_lock = crate::journal::test_env_lock();
-        let _restore = EnvRestore::capture(&["LF_WORKTREE_WRITER_ID"]);
-        let directory = tempfile::tempdir().unwrap();
-        let repo = directory.path().join("repo");
-        std::fs::create_dir(&repo).unwrap();
-        git(&repo, &["init", "-b", "main"]);
-        git(&repo, &["config", "user.email", "test@example.com"]);
-        git(&repo, &["config", "user.name", "Loopflow Test"]);
-        std::fs::write(repo.join("README.md"), "proof\n").unwrap();
-        git(&repo, &["add", "."]);
-        git(&repo, &["commit", "-m", "proof"]);
-
-        std::env::remove_var("LF_WORKTREE_WRITER_ID");
-        let guard = prepare_agent_writer(&repo, &BTreeMap::new())
-            .unwrap()
-            .expect("Git repo gets a writer");
-        let stale_id = guard.writer_id.clone();
-        let stale_path = writer_path(&repo, &stale_id).unwrap();
-        assert!(stale_path.exists());
-
-        let error = begin_rebase_operation(&repo, "main")
-            .expect_err("an OS-locked writer blocks independent mutation");
-        assert!(error.to_string().contains("holds this worktree"));
-        assert!(stale_path.exists());
-
-        drop(guard);
-        assert!(
-            !stale_path.exists(),
-            "releasing the writer removes its record"
-        );
-        let error = establish_writer(&repo, Some(stale_id))
-            .expect_err("a released process cannot recreate its writer token");
-        assert!(error.to_string().contains("was revoked"));
-        let operation = begin_rebase_operation(&repo, "main").unwrap();
-        operation.complete().unwrap();
-    }
 }

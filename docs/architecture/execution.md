@@ -36,7 +36,7 @@ provider route --> credential lease --> harness subprocess
 | --- | --- | --- | --- |
 | Dispatch | argv, environment, cwd | selected command and launch flags | [`lf/mod.rs`](../../rust/loopflow/src/lf/mod.rs) |
 | Discover | Skill or Flow name | one concrete source | [`lf/discovery.rs`](../../rust/loopflow/src/lf/discovery.rs) |
-| Prepare | agent docs, Skill, directions, Work context, explicit docs/diff/message | system and task prompts | [`engine/prompt.rs`](../../rust/loopflow/src/engine/prompt.rs) |
+| Prepare | agent docs, Skill, directions, preassembled context, explicit docs/diff/message | system and task prompts | [`engine/prompt.rs`](../../rust/loopflow/src/engine/prompt.rs) |
 | Route | profile, account health, model request | harness, account, model, credential | [`provider_account.rs`](../../rust/loopflow/src/provider_account.rs) and [`provider_account/lease.rs`](../../rust/loopflow/src/provider_account/lease.rs) |
 | Spawn | prompt, route, environment | provider process and normalized stream | [`harness/`](../../rust/loopflow/src/harness/) |
 | Record | launch facts and normalized events | immutable record plus disposable read model | [`run_record.rs`](../../rust/loopflow/src/run_record.rs) |
@@ -44,7 +44,7 @@ provider route --> credential lease --> harness subprocess
 ## Add optional Work attribution
 
 ```bash
-LF_DB_PATH=/unreadable lf --as task:LOO-265 implement
+LF_DB_PATH=/unreadable lf --task LOO-265 implement
 ```
 
 The Task selector can enrich the prompt when planning storage is available. It
@@ -65,6 +65,11 @@ The prompt engine assembles only declared or explicit context:
 - the Skill and requested directions;
 - Wave goal, memory, and selected Work context when available;
 - explicit documents, changed-file bodies, diff, clipboard, and user message.
+
+Execution does not resolve planning state. The CLI or controller resolves
+Wave/Work context first—through [`work/`](../../rust/loopflow/src/work/) when
+applicable—and passes plain prompt inputs to the engine. A direct Skill run
+therefore remains valid when planning storage is absent or unreadable.
 
 Prompt attribution can report where tokens came from. It is observation, not a
 lease over the repository or planning state.
@@ -90,6 +95,7 @@ the provider subprocess starts:
 ```text
 $LF_HOME/runs/<first-two-uuid-chars>/<run-id>/
   manifest.json       required; immutable
+  context.json        optional; immutable exact provider strings and attributed assets
   events.jsonl        optional; append-only lifecycle, conversation, provider, and usage evidence
   terminal.json       optional; immutable terminal proof
 ```
@@ -97,15 +103,19 @@ $LF_HOME/runs/<first-two-uuid-chars>/<run-id>/
 Manifest creation is the only required new persistence step:
 
 1. Build `RunSpec` from facts available at launch.
-2. Write `manifest.json` inside a private staging directory.
-3. Sync the file, rename the directory atomically, then sync its parent.
-4. Export `LF_RUN_ID` and `LF_RUN_DIR` to the child.
-5. Export `LF_PARENT_RUN_ID` only for a verified local parent.
-6. Spawn the provider.
+2. When prepared context is available, write `context.json` with the exact
+   system/task strings, ordered attribution, hashes, byte ranges, token counts,
+   and inclusion decisions.
+3. Write `manifest.json` with the context path, hash, and byte count inside the
+   same private staging directory.
+4. Sync the files, rename the directory atomically, then sync its parent.
+5. Export `LF_RUN_ID` and `LF_RUN_DIR` to the child.
+6. Export `LF_PARENT_RUN_ID` only for a verified local parent.
+7. Spawn the provider.
 
 The manifest records launch identity and attribution: Run and optional parent,
-time, harness/model/surface, cwd/repository/worktree, Skill, subjects, runtime
-artifact, host, and boot identity when available. It records no liveness,
+time, harness/model/surface, cwd/repository/worktree, Skill, subjects, optional
+context reference, runtime artifact, host, and boot identity when available. It records no liveness,
 credential, mutable Work state, or signal target.
 
 Core types:

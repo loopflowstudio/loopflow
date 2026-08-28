@@ -4,6 +4,11 @@ use std::sync::Arc;
 
 use anyhow::{anyhow, Result};
 
+pub(crate) const DISCORD_TOKEN_ENV: &str = "LF_DISCORD_TOKEN";
+/// The SSH destination by which the current foreground `lf` was reached.
+/// It is invocation context, not durable Home identity.
+pub(crate) const SSH_TARGET_ENV: &str = "LF_SSH_TARGET";
+
 /// Owns a child process group until its work is known to be complete.
 ///
 /// The child must be spawned into a fresh process group whose id is its pid.
@@ -351,6 +356,44 @@ pub(crate) async fn tmux_session_exists(session_name: &str) -> Result<bool> {
     tmux_session_exists_with_timeout(&mut command, TMUX_LIVENESS_TIMEOUT).await
 }
 
+pub(crate) async fn send_tmux_input(session_name: &str, input: &str) -> Result<()> {
+    let target = format!("={session_name}");
+    let status = tokio::process::Command::new("tmux")
+        .args(["send-keys", "-t", &target, "-l", "--", input])
+        .status()
+        .await?;
+    if !status.success() {
+        return Err(anyhow!(
+            "failed to send input to tmux session {session_name}"
+        ));
+    }
+    let status = tokio::process::Command::new("tmux")
+        .args(["send-keys", "-t", &target, "Enter"])
+        .status()
+        .await?;
+    if !status.success() {
+        return Err(anyhow!(
+            "failed to submit input to tmux session {session_name}"
+        ));
+    }
+    Ok(())
+}
+
+pub(crate) async fn stop_tmux_session(session_name: &str) -> Result<()> {
+    let target = format!("={session_name}");
+    let status = tokio::process::Command::new("tmux")
+        .args(["kill-session", "-t", &target])
+        .status()
+        .await?;
+    if status.success() {
+        return Ok(());
+    }
+    if !tmux_session_exists(session_name).await? {
+        return Ok(());
+    }
+    Err(anyhow!("failed to stop tmux session {session_name}"))
+}
+
 async fn tmux_session_exists_with_timeout(
     command: &mut tokio::process::Command,
     timeout: std::time::Duration,
@@ -563,13 +606,13 @@ fn forwarded_authority_env_names() -> Vec<String> {
         "LF_FORWARDED_PM_TOKEN".to_string(),
         "LF_FORWARDED_PM_PROVIDER".to_string(),
         "LF_FORWARDED_SECRET_NAMES".to_string(),
-        crate::engine::machine::SSH_TARGET_ENV.to_string(),
+        crate::engine::process::SSH_TARGET_ENV.to_string(),
         "LF_LINEAR_WEBHOOK_SECRET".to_string(),
         "LF_LINEAR_VIEWER_ID".to_string(),
         "LF_GITHUB_WEBHOOK_SECRET".to_string(),
         "LF_GITHUB_WEBHOOK_URL".to_string(),
         "LF_LFD_ALLOW_NON_LOOPBACK".to_string(),
-        crate::wave::discord::TOKEN_ENV.to_string(),
+        DISCORD_TOKEN_ENV.to_string(),
         "GH_TOKEN".to_string(),
         "OPENCODE_API_KEY".to_string(),
         "CLAUDE_CODE_OAUTH_TOKEN".to_string(),
@@ -603,7 +646,7 @@ mod tests {
     use super::{
         extend_session_control_context, forwarded_authority_env_names, lf_session_shell_command,
         pin_control_binary, select_binary_override, select_current_home_binary, select_lfd_binary,
-        tmux_session_exists_with_timeout,
+        tmux_session_exists_with_timeout, DISCORD_TOKEN_ENV,
     };
     use crate::build_info::BuildProvenance;
     use crate::child::ChildExecutionContext;
@@ -813,10 +856,10 @@ mod tests {
     fn discord_chat_token_is_scrubbed_from_durable_provider_children() {
         assert!(forwarded_authority_env_names()
             .iter()
-            .any(|name| name == crate::wave::discord::TOKEN_ENV));
+            .any(|name| name == DISCORD_TOKEN_ENV));
         let command = lf_session_shell_command(&["lf".into(), "wave".into()], &[]);
         assert!(command.contains("unset "));
-        assert!(command.contains(crate::wave::discord::TOKEN_ENV));
+        assert!(command.contains(DISCORD_TOKEN_ENV));
     }
 
     #[test]

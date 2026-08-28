@@ -30,7 +30,10 @@ Make the behavior concrete: data structures, public functions, interactions, edg
 Classify the shape:
 
 - **Additive series:** identify independently valuable increments. Keep later increments at intent level; each gets its own design when launched.
-- **Indivisible change:** detail the full architecture and explicitly state that implementation proceeds in internal slices but ships as one PR.
+- **Indivisible change:** detail the full architecture and explicitly state
+  that implementation proceeds in internal slices but ships as one PR. Keep
+  the target architecture, integration/deletion path, forbidden near-misses,
+  and full proof intact while `This slice` moves.
 
 ### 3. Size-check
 
@@ -49,6 +52,12 @@ Tighten the artifact to:
 - **Key functions** — signatures and intent.
 - **Constraints** — choices that would force a rewrite if guessed wrong.
 - **Done when** — focused behavioral proof and expected outcome.
+- **Current system** — concepts, authorities, writers, and paths that the change
+  reshapes or deletes.
+- **Forbidden outcomes** — duplicate representations, compatibility layers, or
+  locally passing states that still violate the intended architecture.
+- **Internal slices** — ordered coherent cuts, one marked `This slice`, plus a
+  durable evidence ledger that never replaces the full design.
 - **Measure** — only when a meaningful before/after quantity exists.
 
 For an additive series, describe the keystone fully and list the intended follow-ups precisely enough for `launch-plan` to encode. Do not file them yet. Before finishing, reread the artifact and present the consequential scope, keystone boundary, follow-ups, and open assumptions.

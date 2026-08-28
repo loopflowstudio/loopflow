@@ -1058,8 +1058,8 @@ pub async fn serve(
              gate this listener at the network boundary"
         );
     }
-    let discord_token =
-        config_value(&repo_root, crate::wave::discord::TOKEN_ENV).map(SecretString::new);
+    let discord_token = config_value(&repo_root, crate::controller::wave::discord::TOKEN_ENV)
+        .map(SecretString::new);
     let state = build_state(
         repo_root.clone(),
         store,

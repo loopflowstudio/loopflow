@@ -18,22 +18,22 @@ use anyhow::{anyhow, Result};
 use serde::{Deserialize, Serialize};
 
 use crate::child::{ChildRef, ObservationRecipient};
+use crate::controller::wave::metrics::{
+    MetricContractIssueDto, MetricEvidenceDto, MetricFreshnessDto, MetricPortfolioDto,
+    MetricReadingDto, MetricStage, MetricTarget, MetricUnknownCauseDto,
+};
+use crate::controller::wave::server::live_endpoint;
 use crate::durable::{Home, WorkRef, WorkStatus};
 use crate::engine::wave_home::{HomeActionDto, HomeRuntimeDto, HomeState};
 use crate::lf::commands::runs::{format_tokens, RunSnapshot};
 use crate::lf::output::Colors;
 use crate::pm::{PmItem, PmKr, PmPortfolioValidator, PmProject, PmSnapshot, ProjectFlowPlan};
-use crate::project::Project;
 use crate::store::{open_existing_store, SharedStore};
-use crate::task::{
+use crate::work::project::Project;
+use crate::work::task::{
     AfterMerge, CiObservation, CiState, PrMergeMode, PrMergeRequest, PrPhase, Task, TaskPr,
 };
-use crate::wave::metrics::{
-    MetricContractIssueDto, MetricEvidenceDto, MetricFreshnessDto, MetricPortfolioDto,
-    MetricReadingDto, MetricStage, MetricTarget, MetricUnknownCauseDto,
-};
-use crate::wave::server::live_endpoint;
-use crate::wave::Wave;
+use crate::work::wave::Wave;
 
 /// One wave's registry snapshot — the `lf ls` row and the `wave` field of
 /// `lf status`. Wire type consumed by Loopflow: every field is required or
@@ -214,7 +214,7 @@ pub struct ProjectRuntimeSnapshot {
     pub iteration: u32,
     pub pending_observations: u32,
     pub provider: String,
-    pub last_failure: Option<crate::project::HistoricalFailure>,
+    pub last_failure: Option<crate::work::project::HistoricalFailure>,
 }
 
 #[derive(Debug, Clone, Serialize, Deserialize)]
@@ -243,7 +243,7 @@ pub enum TaskAttentionLevel {
     Unknown,
 }
 
-pub use crate::task::actions::{
+pub use crate::ops::task_actions::{
     ci_failure_reason, derive_task_actions, TaskAction, TaskActionEvidence, TaskActionModel,
 };
 
@@ -653,9 +653,9 @@ pub fn roadmap(wave: Option<&str>, json: bool, all: bool) -> Result<()> {
         // UUID or repository-scoped registered name). Roadmap is the one
         // command where `NoContext` is a valid default — it lists every wave.
         // A stale UUID is a loud error, never a silent drop to global scope.
-        let env_wave_id = std::env::var(crate::engine::wave_context::WAVE_ID_ENV).ok();
-        let repo = crate::engine::repo::find_repo_root().ok();
-        let waves = match crate::engine::wave_context::resolve_managed_wave(
+        let env_wave_id = std::env::var(crate::work::wave::context::WAVE_ID_ENV).ok();
+        let repo = crate::repo::find_repo_root().ok();
+        let waves = match crate::work::wave::context::resolve_managed_wave(
             Some(&store),
             repo.as_deref(),
             wave,
@@ -664,7 +664,7 @@ pub fn roadmap(wave: Option<&str>, json: bool, all: bool) -> Result<()> {
         .await
         {
             Ok(wave) => vec![wave],
-            Err(crate::engine::wave_context::WaveResolveError::NoContext) => {
+            Err(crate::work::wave::context::WaveResolveError::NoContext) => {
                 let waves = store
                     .list_waves(None)
                     .await
@@ -886,8 +886,8 @@ async fn resolve_status_wave(store: &SharedStore, requested: Option<&str>) -> Re
     // One shared rule for `--wave` and ambient `LF_WAVE_ID`: durable UUID or
     // repository-scoped registered name. Status consumes the resolved row
     // directly, so no second lookup can cross repositories.
-    let repo = crate::engine::repo::find_repo_root().ok();
-    crate::engine::wave_context::resolve_managed_wave(
+    let repo = crate::repo::find_repo_root().ok();
+    crate::work::wave::context::resolve_managed_wave(
         Some(&**store),
         repo.as_deref(),
         requested,
@@ -959,7 +959,7 @@ pub(crate) async fn snapshot_wave(store: &SharedStore, wave: &Wave) -> Result<Wa
     let paused = if wave.is_retired() {
         false
     } else {
-        match crate::engine::wave_config::try_read_wave_config(&goal_repo, wave.name()) {
+        match crate::work::wave::config::try_read_wave_config(&goal_repo, wave.name()) {
             Ok(config) => config.and_then(|config| config.paused).unwrap_or(false),
             Err(error) => {
                 tracing::warn!(wave = wave.name(), %error, "Wave policy is unavailable");
@@ -1010,7 +1010,7 @@ pub(crate) async fn snapshot_wave(store: &SharedStore, wave: &Wave) -> Result<Wa
         goal: if wave.is_retired() {
             wave.name().to_string()
         } else {
-            crate::engine::wave_config::read_wave_summary(&goal_repo, wave.name())
+            crate::work::wave::config::read_wave_summary(&goal_repo, wave.name())
                 .unwrap_or_else(|_| wave.name().to_string())
         },
         repo,
@@ -1029,17 +1029,22 @@ pub(crate) async fn snapshot_wave(store: &SharedStore, wave: &Wave) -> Result<Wa
     })
 }
 
-fn snapshot_task_runtime(task: &Task, status: WorkStatus) -> TaskRuntimeSnapshot {
+async fn snapshot_task_runtime(
+    store: &SharedStore,
+    task: &Task,
+    status: WorkStatus,
+) -> Result<TaskRuntimeSnapshot> {
     let routing_project_id = Some(task.project_id.to_string());
-    TaskRuntimeSnapshot {
+    let controller = store.task_controller_state(&task.id).await?;
+    Ok(TaskRuntimeSnapshot {
         work_id: task.id.to_string(),
         project_id: task.project_id.to_string(),
         routing_project_id,
         reason: status.reason().to_string(),
         status,
         updated_at: format_time(task.updated_at).unwrap_or_default(),
-        provider: task.provider.clone(),
-    }
+        provider: controller.map(|state| state.provider).unwrap_or_default(),
+    })
 }
 
 async fn snapshot_project_runtime(
@@ -1062,14 +1067,15 @@ async fn snapshot_project_runtime(
             .map_err(|err| anyhow!("failed to read Project observation outbox: {err}"))?
             .len() as u32
     };
+    let controller = store.project_controller_state(&project.id).await?;
     Ok(ProjectRuntimeSnapshot {
         work_id: project.id.to_string(),
         reason: status.reason().to_string(),
         status,
         updated_at: format_time(project.updated_at).unwrap_or_default(),
-        iteration: project.iteration,
+        iteration: controller.as_ref().map_or(0, |state| state.iteration),
         pending_observations,
-        provider: project.provider.clone(),
+        provider: controller.map_or_else(String::new, |state| state.provider),
         last_failure: store
             .latest_project_failure(&project.id)
             .await
@@ -1339,7 +1345,7 @@ async fn snapshot_task_detail(
     let runtime = match task {
         Some(task) => {
             let status = child_work_status(store, &ChildRef::Task(task.id.clone())).await?;
-            Some(snapshot_task_runtime(task, status))
+            Some(snapshot_task_runtime(store, task, status).await?)
         }
         None => None,
     };
@@ -1831,7 +1837,7 @@ fn next_move_for_task(
 /// errors). Kept minimal — `lf status` with no arg is a convenience, not the
 /// resolution surface `lf chat` owns.
 fn ambient_wave() -> Option<String> {
-    std::env::var(crate::engine::wave_context::WAVE_ID_ENV)
+    std::env::var(crate::work::wave::context::WAVE_ID_ENV)
         .ok()
         .map(|value| value.trim().to_string())
         .filter(|value| !value.is_empty())
@@ -1861,7 +1867,7 @@ fn format_time(ts: time::OffsetDateTime) -> Option<String> {
         .ok()
 }
 
-fn historical_failure_line(failure: &crate::project::HistoricalFailure) -> String {
+fn historical_failure_line(failure: &crate::work::project::HistoricalFailure) -> String {
     format!(
         "last failure at {}: {}",
         format_time(failure.occurred_at).unwrap_or_else(|| failure.occurred_at.to_string()),
@@ -2644,17 +2650,17 @@ mod tests {
         LocalProgressEvidenceState, NextMove, NextMoveOwner, TaskAttentionEvidence,
         TaskAttentionLevel, TaskRuntimeSnapshot,
     };
-    use crate::durable::WorkStatus;
-    use crate::planning::{LinearProjectId, ProjectPlan};
-    use crate::project::{Project, ProjectEventKind, ProjectId};
-    use crate::store::sqlite::SqliteStore;
-    use crate::store::Store;
-    use crate::task::{CiObservation, CiState, PrMergeMode, PrMergeRequest, PrPhase};
-    use crate::wave::metrics::{
+    use crate::controller::wave::metrics::{
         MetricEvidenceDto, MetricFreshnessDto, MetricIdentity, MetricPortfolioDto,
         MetricReadingDto, MetricStage, MetricTarget, MetricUnknownCauseDto,
     };
-    use crate::wave::Wave;
+    use crate::durable::WorkStatus;
+    use crate::planning::{LinearProjectId, ProjectPlan};
+    use crate::store::sqlite::SqliteStore;
+    use crate::store::Store;
+    use crate::work::project::{Project, ProjectEventKind, ProjectId};
+    use crate::work::task::{CiObservation, CiState, PrMergeMode, PrMergeRequest, PrPhase};
+    use crate::work::wave::Wave;
 
     #[tokio::test]
     async fn status_surfaces_keep_credential_failure_in_history() {
@@ -2678,12 +2684,6 @@ mod tests {
                 pm_snapshot_synced_at: now.unix_timestamp(),
             },
             wave_id: wave.id().clone(),
-            iteration: 2,
-            observation_cursor: 0,
-            last_state_fingerprint: None,
-            agent: "codex".to_string(),
-            provider: "codex".to_string(),
-            provider_session_id: None,
             abandon_intent: None,
             created_at: now,
             updated_at: now,
@@ -2905,7 +2905,7 @@ mod tests {
                 mode,
                 requested_at: OffsetDateTime::now_utc(),
                 head_sha: passing.head_sha.clone(),
-                after_merge: crate::task::AfterMerge::ContinueTask,
+                after_merge: crate::work::task::AfterMerge::ContinueTask,
                 next_slug: None,
             };
             let next = next_move_for_task(
@@ -2926,7 +2926,7 @@ mod tests {
         let ci = CiObservation {
             head_sha: "head".to_string(),
             state: CiState::Failing,
-            failing_checks: vec![crate::task::CiCheck {
+            failing_checks: vec![crate::work::task::CiCheck {
                 name: "scratch-clear".to_string(),
                 url: None,
             }],
@@ -2936,7 +2936,7 @@ mod tests {
             mode: PrMergeMode::User,
             requested_at: OffsetDateTime::now_utc(),
             head_sha: ci.head_sha.clone(),
-            after_merge: crate::task::AfterMerge::ContinueTask,
+            after_merge: crate::work::task::AfterMerge::ContinueTask,
             next_slug: None,
         };
 

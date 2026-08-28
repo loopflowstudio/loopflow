@@ -102,8 +102,9 @@ Make the change easy to review.
 3. **Write PR copy for ops handoff**
 
    The PR body is written for an engineer picking this up cold. Loopflow adds
-   the canonical Task title, Linear link, Task cycle, PR sequence, and merge
-   disposition at publication; do not repeat or guess them in the handoff copy.
+   the canonical Task title, Linear link, PR sequence, and merge disposition at
+   publication; do not repeat or guess them in the handoff copy. Controller
+   phase is not part of the Task contract shown to reviewers.
 
    Structure:
    - **Evaluate** — lead with concrete commands or steps and the observable result. If there are metrics, show "Before: X, After: Y."

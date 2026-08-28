@@ -3,9 +3,9 @@ mod support;
 use std::process::Command;
 
 use loopflow::ops::task::{task_snapshot, task_status};
+use loopflow::ops::task_actions::TaskAction;
 use loopflow::store::PmSnapshotRow;
-use loopflow::task::actions::TaskAction;
-use loopflow::task::TaskEventKind;
+use loopflow::work::task::TaskEventKind;
 use loopflow_test_support::TestRepo;
 use support::{register_unrun_task, EnvGuard};
 

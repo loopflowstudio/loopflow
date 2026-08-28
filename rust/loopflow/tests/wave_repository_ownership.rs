@@ -1,19 +1,16 @@
 use std::path::Path;
 use std::process::Command;
 
+use loopflow::controller::wave::journal;
+use loopflow::controller::wave::relocate::relocate_wave;
 use loopflow::durable::{HomeId, WorkRef, WorkStatus};
-use loopflow::engine::wave_context::{resolve_managed_wave, WaveResolveError};
 use loopflow::id::WaveId;
 use loopflow::planning::{LinearIssueId, LinearProjectId, ProjectPlan, TaskPlan};
-use loopflow::project::{Project, ProjectId};
 use loopflow::store::{open_store, PmSnapshotRow, StorageConfig};
-use loopflow::task::{
-    Observation, PmWritebackState, Task, TaskId, TaskLifecyclePhase, TaskLifecyclePlan, TaskPr,
-    TaskPrId,
-};
-use loopflow::wave::journal;
-use loopflow::wave::relocate::relocate_wave;
-use loopflow::wave::{Wave, WaveLocator};
+use loopflow::work::project::{Project, ProjectId};
+use loopflow::work::task::{Observation, PmWritebackState, Task, TaskId, TaskPr, TaskPrId};
+use loopflow::work::wave::context::{resolve_managed_wave, WaveResolveError};
+use loopflow::work::wave::{Wave, WaveLocator};
 use time::OffsetDateTime;
 
 fn repository(path: &Path) {
@@ -94,12 +91,6 @@ fn project(wave: &Wave) -> Project {
             pm_snapshot_synced_at: now.unix_timestamp(),
         },
         wave_id: wave.id().clone(),
-        iteration: 1,
-        observation_cursor: 0,
-        last_state_fingerprint: None,
-        agent: "codex".to_string(),
-        provider: "codex".to_string(),
-        provider_session_id: None,
         abandon_intent: None,
         created_at: now,
         updated_at: now,
@@ -123,16 +114,6 @@ fn task(wave: &Wave, project: &Project, repo: &Path) -> (Task, TaskPr) {
         project_id: project.id.clone(),
         worktree: repo.join("task-worktree"),
         workspace_slug: "repository-owned-waves".to_string(),
-        lifecycle: TaskLifecyclePlan::defaults(),
-        lifecycle_phase: TaskLifecyclePhase::Loop,
-        phase_epoch: 1,
-        phase_cursor: 0,
-        phase_iteration: 0,
-        gate_cycle: 0,
-        gate_proposal: None,
-        agent: "codex".to_string(),
-        provider: "codex".to_string(),
-        provider_session_id: None,
         abandon_intent: None,
         created_at: now,
         updated_at: now,

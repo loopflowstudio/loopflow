@@ -8,7 +8,7 @@ use crate::engine::{check_cli_available, codex_permission_args, workspace_add_di
 use crate::provider_auth::Provider;
 
 pub fn find_repo_root() -> Result<PathBuf> {
-    crate::engine::repo::find_repo_root()
+    crate::repo::find_repo_root()
 }
 
 pub(crate) fn parse_since(value: &str, now: OffsetDateTime) -> Result<OffsetDateTime> {

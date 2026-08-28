@@ -1,15 +1,17 @@
 # Planning
 
-Planning preserves purpose across provider processes. A Wave chooses Projects;
-a Project pursues measurable KRs; a Task performs one concrete change. Their
-controllers own distinct loops, while Skill boundaries reuse the discovery,
-prompt, provider, harness, and Run-evidence path described in
-[Execution](execution.md).
+Tracked Work preserves purpose across provider processes. A Wave contains
+Projects; a Project defines a measured bet; a Task carries one concrete change
+and its delivery identity. This layer is useful without a long-lived agent.
+Controllers form a separate layer above it and may pursue that Work end to end.
 
 ```bash
 lf start product
 lf project run <project-id>
 lf task run INF-123
+lf task prepare INF-124
+lf --task INF-124 research "write scratch/runtime.md"
+lf project prepare <project-id>
 ```
 
 ## The planning model
@@ -28,7 +30,7 @@ Wave
 | Wave | durable context, memory, cadence, conversation, project selection | project KRs or Task worktrees |
 | Project | one measured bet, definition, KRs, closure judgment | memory, cadence, nested Projects |
 | Task | one implementation, investigation, document, or shipped change | a second concurrent PR in the same serial chain |
-| Work | durable status, Flow playhead, inputs, failure/progress for one Wave/Project/Task | provider-process liveness |
+| Work | durable identity, status, authored inputs, and domain facts for one Wave/Project/Task | Flow playhead, provider continuation, or process liveness |
 | Run | one provider-launch record | current Work state or control capability |
 
 Every Project belongs to exactly one Wave. Projects do not contain Projects.
@@ -36,10 +38,33 @@ Only a Task owns a delivery worktree.
 
 The shared durable types live in
 [`durable.rs`](../../rust/loopflow/src/durable.rs): `WorkRef`, `WorkStatus`,
-`FlowPosition`, `Steer`, `Ask`, `Home`, and `Placement`. Wave, Project, and Task
-domain models add their own facts under [`wave/`](../../rust/loopflow/src/wave/),
-[`project/`](../../rust/loopflow/src/project/), and
-[`task/`](../../rust/loopflow/src/task/).
+`Steer`, `Ask`, `Home`, and `Placement`. Wave, Project, and Task domain models
+add their facts under [`work/`](../../rust/loopflow/src/work/). Controller flow
+positions and flow-step interactions live under
+[`controller/`](../../rust/loopflow/src/controller/).
+
+## Use tracked Work directly
+
+```bash
+lf task prepare INF-123
+lf --task INF-123 research "write scratch/runtime.md"
+lf --task INF-123 research "write scratch/prompts.md"
+lf task steer INF-123 "reconcile both reports"
+lf commit -m "Reconcile Task research"
+lf pr publish
+```
+
+`lf task prepare` ensures Task Work, its single worktree, and the first serial
+PR record. It does not install or start controller state. `--task` resolves that
+worktree, preloads all recursive scratch Markdown, launches one ordinary Run,
+and leaves edits uncommitted. Two such Runs may overlap; neither owns the Task,
+advances a playhead, or reserves the worktree. Give concurrent writers distinct
+paths and compose a coherent checkpoint through the ordinary delivery verbs.
+
+`lf project prepare` provides the same controller-free boundary for Project
+Work. Project-bound and Wave-bound Runs use the owning Wave repository because
+those Work kinds have no private worktree. A human, parent agent, cron job, or
+another automation system can build its own workflow from these same commands.
 
 ## Compose Skills with a Flow
 
@@ -62,15 +87,15 @@ A Flow is an ordered graph of:
 - human nodes, which stop at an explicit interaction boundary.
 
 Flow YAML is the authored definition.
-[`FlowPosition`](../../rust/loopflow/src/durable.rs) is the durable playhead for
-Work. A process reads the current position, executes one boundary, and advances
-only after that boundary returns the required result.
+The owning controller persists its playhead. A process reads the current
+controller position, executes one boundary through ordinary execution APIs,
+and advances only after that boundary returns the required result.
 
 Direct TTY flows can use the current conversation for a human node. Headless
 Task flows create a typed Ask, park the playhead, and advance only after an
 explicit result.
 
-## Run a durable Work boundary
+## Run one controller boundary
 
 ```text
 load current Work facts
@@ -102,13 +127,17 @@ The planning algorithm is deliberately boundary-based:
 7. Rebuild from durable facts before the next boundary.
 
 A crash loses in-memory judgment. It does not lose Work identity, accepted
-inputs, Flow position, Task worktree, or provider observations. The next
-process resumes from those facts and launches a fresh Run when needed.
+inputs, controller cursor, Task worktree, or provider observations. The next
+controller process resumes from those facts and launches a fresh Run when
+needed.
 
-Project and Task controller implementations live in
-[`project/runner.rs`](../../rust/loopflow/src/project/runner.rs) and
-[`task/runner.rs`](../../rust/loopflow/src/task/runner.rs). Wave listener and
-resident behavior lives under [`wave/`](../../rust/loopflow/src/wave/).
+## End-to-end controllers
+
+Project and Task controller implementations live under
+[`controller/project/`](../../rust/loopflow/src/controller/project/) and
+[`controller/task/`](../../rust/loopflow/src/controller/task/). Wave listener,
+runtime, and resident behavior lives under
+[`controller/wave/`](../../rust/loopflow/src/controller/wave/).
 
 ## Work state
 
@@ -125,9 +154,13 @@ process; one Work may launch many Runs over time; an unterminated Run does not
 make Work “running.” Reopen returns the same stable Work to `Ready` after
 clearing transient input defined by that domain.
 
-Monotonic phase, iteration, and cursor fields prevent an older process from
-rolling progress backward. Domain-specific races use narrower fences: Ask
-claim ids, exact PR heads, landing generations, or OS locks.
+Project and Task controller playheads carry phase, iteration, and cursor state
+for their own end-to-end loops. They live in controller-owned rows keyed by
+Work id; they are not Project or Task fields and grant no Work mutation
+authority. There is no phase epoch, writer token, active-Run slot, or Task
+ownership lease.
+Domain-specific races use narrow boundaries: Ask claim ids, exact PR heads,
+landing generations, or OS locks.
 
 ## Steer
 
@@ -136,10 +169,11 @@ lf task steer INF-123 "keep the public name"
 lf work steer task task_... "show the failing fixture"
 ```
 
-A Task or Project Steer is ordered authored input addressed to stable Work. A
-stopped controller is relaunched; a running controller reads it at its next
-boundary. The receipt proves storage, not that a provider read or applied the
-correction. Wave Chat has a separate optional live transport.
+A Task or Project Steer is ordered authored input addressed to stable Work.
+Controller-aware convenience commands may wake the built-in controller; an
+arbitrary caller can simply read the Steer on its next Run. The receipt proves
+storage, not that a provider read or applied the correction. Wave Chat has a
+separate live transport.
 
 `Author::Run` may store an opaque Run id as provenance. The store does not need
 to resolve that Run record, and resolution would not grant mutation authority.
@@ -163,11 +197,11 @@ Ask is a separate blocking protocol:
 Ask results are typed: answer, decline, or a Flow-node resolution. Ask does not
 enter the Steer queue, and Steer never impersonates a blocking answer.
 
-## Resident planning
+## Controller topology
 
 ```text
 lfd
-  `-- Wave listener
+  `-- Wave controller
         |-- conversation and event journal
         `-- resident loop
               `-- Project controller
@@ -176,17 +210,20 @@ lfd
 ```
 
 The Wave listener owns its HTTP surface, journal, and the resident child it
-directly spawned. The resident, Project controller, Task controller, and Ask
-runner are separate launch loops because their recovery and settlement rules
-differ. They share execution components rather than one universal runner. The
-resident refreshes portfolio evidence and chooses the next useful Project
-boundary. Project Work refreshes its definition, KRs, metrics, and Tasks before
-deciding. Task Work executes its Flow and delivery steps.
+directly spawned. The Wave, Project, and Task controllers and Ask runner are
+separate launch loops because their recovery and settlement rules differ. They
+share execution components rather than one universal runner.
+The Wave resident refreshes portfolio evidence and chooses the next useful
+Project boundary. Project Work refreshes its definition, KRs, metrics, and Tasks
+before deciding. A Task controller may execute its end-to-end Flow and delivery
+steps; independent Task-bound Runs may do bounded work in the same worktree
+without loading or advancing controller state.
 
-Deterministic controller session names reduce duplicate local launches. They
-are supervision policy, not durable Run ownership. If a controller or provider
-disappears, the parent records resumable planning failure and returns judgment
-to the next boundary.
+Deterministic controller session names reduce accidental duplicate built-in
+launches. They are routing policy for that automation implementation, not
+durable Task or Run ownership. Other Task-bound Runs remain valid. If a
+controller or provider disappears, a later command may start a fresh process
+from durable Task and worktree facts.
 
 ## Boundary contracts
 
@@ -202,5 +239,5 @@ to the next boundary.
 ## Next
 
 [Delivery →](delivery.md) follows Task Work through Git and GitHub.
-[Homes and processes →](homes.md) explains how resident loops are placed and
+[Homes and processes →](homes.md) explains how controller processes are placed and
 supervised.

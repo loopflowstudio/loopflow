@@ -13,9 +13,8 @@ use loopflow::ops::{
 use loopflow::profile::{ProviderRoute, RouteScope};
 use loopflow::provider_auth::Provider;
 use loopflow::store::{CredentialState, ProviderAccount, ProviderAccountId, RoutingState};
-use loopflow::task::{
+use loopflow::work::task::{
     AfterMerge, GithubPr, PrMergeMode, PrMergeRequest, PrPhase, PrPresentation, PrPublication,
-    TaskGateProposal, TaskLifecyclePlan,
 };
 use loopflow_test_support::TestRepo;
 use support::{
@@ -506,7 +505,7 @@ fn github_failure_leaves_publication_intent_observable() {
     assert!(presentation.body.contains(
         "> **Task:** [INF-123 — Prove Task PR transitions](https://linear.app/loopflow/issue/INF-123/prove-task-pr-transitions)"
     ));
-    assert!(presentation.body.contains("> **Task cycle:** feature"));
+    assert!(!presentation.body.contains("Task cycle:"));
     assert!(presentation.body.contains(
         "> **PR lifecycle:** PR 1 is published for review; no Task settlement is requested."
     ));
@@ -563,7 +562,6 @@ fn configured_feature_generation_adds_task_intent_and_lifecycle_to_pr_copy() {
         "<!-- loopflow:task-pr-context:start -->\n\
 > [!NOTE]\n\
 > **Task:** [INF-123 — Prove Task PR transitions](https://linear.app/loopflow/issue/INF-123/prove-task-pr-transitions)\n\
-> **Task cycle:** feature\n\
 > **PR lifecycle:** PR 1 is published for review; no Task settlement is requested.\n\
 <!-- loopflow:task-pr-context:end -->\n\n\
 ## Evaluate\n\n\
@@ -578,7 +576,7 @@ Task publication now combines generated review guidance with durable Task contex
 }
 
 #[test]
-fn configured_fix_generation_names_the_task_cycle() {
+fn task_pr_generation_does_not_require_a_controller() {
     let home = tempfile::TempDir::new().expect("temp home");
     let gh = write_gh_script("[]", None);
     let agent = codex_script(
@@ -596,12 +594,8 @@ fn configured_fix_generation_names_the_task_cycle() {
     repo.stage_all();
     repo.commit("add configured fix generation proof");
     repo.push_new_branch(branch);
-    let mut registered = register_task(home.path(), repo.path(), branch, &base);
-    registered.task.lifecycle = TaskLifecyclePlan::standard("incident", "slice", "ship-demo");
+    let registered = register_task(home.path(), repo.path(), branch, &base);
     let runtime = tokio::runtime::Runtime::new().expect("update Task runtime");
-    runtime
-        .block_on(registered.store.update_task(&registered.task))
-        .expect("persist fix lifecycle");
 
     create_or_update_pr(
         repo.path(),
@@ -624,8 +618,7 @@ fn configured_fix_generation_names_the_task_cycle() {
         .and_then(|publication| publication.presentation.as_ref())
         .expect("generated fix Task PR copy");
     assert_eq!(presentation.title, "INF-123: Prove Task PR transitions");
-    assert!(presentation.body.contains("> **Task cycle:** fix"));
-    assert!(!presentation.body.contains("Task flow:"));
+    assert!(!presentation.body.contains("Task cycle:"));
     assert!(presentation.body.contains(
         "> **PR lifecycle:** PR 1 is published for review; no Task settlement is requested."
     ));
@@ -723,7 +716,7 @@ fn serial_task_pr_publication_restores_task_context() {
     assert!(
         matches!(
             persisted_task.observation,
-            loopflow::task::Observation::Fresh { .. }
+            loopflow::work::task::Observation::Fresh { .. }
         ),
         "manual merge reconciliation should use the bounded REST observation: {persisted_task:?}"
     );
@@ -731,7 +724,7 @@ fn serial_task_pr_publication_restores_task_context() {
     assert!(
         matches!(
             cached_task.observation,
-            loopflow::task::Observation::NotRequired
+            loopflow::work::task::Observation::NotRequired
         ),
         "partial timing evidence must not degrade Task correctness: {cached_task:?}"
     );
@@ -791,11 +784,6 @@ fn serial_task_pr_publication_restores_task_context() {
         next.branch
     );
 
-    let durable_task = runtime
-        .block_on(task.store.get_task(&task.task.id))
-        .expect("read rotated Task")
-        .expect("Task remains present");
-    assert!(durable_task.gate_proposal.is_none());
     assert!(!matches!(
         runtime.block_on(task.store.work_status(&work)).unwrap(),
         WorkStatus::Done
@@ -828,7 +816,7 @@ fn serial_task_pr_publication_restores_task_context() {
     assert!(presentation.body.starts_with(
         "<!-- loopflow:task-pr-context:start -->\n> [!NOTE]\n> **Task:** [INF-123 — Prove Task PR transitions](https://linear.app/loopflow/issue/INF-123/prove-task-pr-transitions)"
     ));
-    assert!(presentation.body.contains("> **Task cycle:** feature"));
+    assert!(!presentation.body.contains("Task cycle:"));
     assert!(presentation.body.contains(
         "> **PR lifecycle:** PR 2 is published for review; no Task settlement is requested."
     ));
@@ -839,7 +827,7 @@ fn serial_task_pr_publication_restores_task_context() {
 }
 
 #[test]
-fn completing_land_requires_an_approved_final_gate_for_an_empty_successor() {
+fn completing_land_discards_an_empty_successor_without_a_controller() {
     let home = tempfile::TempDir::new().expect("temp home");
     let log_path = home.path().join("gh.log");
     let script = gh_merged_pr_logging_script(log_path.to_string_lossy().as_ref());
@@ -898,10 +886,6 @@ fn completing_land_requires_an_approved_final_gate_for_an_empty_successor() {
         pr_body: None,
         agent: None,
     };
-    let pre_final = land(repo.path(), &options, &NullProgress)
-        .expect_err("an empty pre-final successor must not complete");
-    assert!(pre_final.to_string().contains("PR range is empty"));
-
     let work = runtime
         .block_on(
             task.store
@@ -912,72 +896,10 @@ fn completing_land_requires_an_approved_final_gate_for_an_empty_successor() {
         runtime.block_on(task.store.work_status(&work)).unwrap(),
         WorkStatus::Done
     ));
-    let mut final_task = runtime
-        .block_on(task.store.get_task(&task.task.id))
-        .expect("read Task")
-        .expect("Task exists");
-    final_task
-        .enter_finally(TaskGateProposal {
-            done: false,
-            reason: "review the already-merged slice".to_string(),
-        })
-        .expect("enter finally");
-    let conn =
-        rusqlite::Connection::open(home.path().join("loopflow.db")).expect("open Task registry");
-    conn.execute(
-        "UPDATE tasks SET lifecycle_phase='gate', phase_epoch=?2, gate_cycle=?3, \
-         gate_proposal_json=?4 WHERE id=?1",
-        rusqlite::params![
-            final_task.id.as_str(),
-            final_task.phase_epoch,
-            final_task.gate_cycle,
-            serde_json::to_string(&final_task.gate_proposal).expect("serialize gate proposal")
-        ],
-    )
-    .expect("persist finally phase");
     fs::create_dir_all(repo.path().join("scratch")).expect("recreate scratch after rotation");
     fs::write(repo.path().join("scratch/review.md"), "final gate evidence")
         .expect("write final evidence");
     let calls_before = fs::read_to_string(&log_path).expect("read setup calls");
-
-    let refusal = land(repo.path(), &options, &NullProgress)
-        .expect_err("a continue proposal must not complete the Task");
-    assert!(
-        refusal
-            .to_string()
-            .contains("final gate did not approve completion"),
-        "expected an actionable completion-authority refusal, got: {refusal}"
-    );
-    assert!(
-        repo.path().join("scratch/review.md").exists(),
-        "refused completion must preserve final review evidence"
-    );
-    assert!(!matches!(
-        runtime.block_on(task.store.work_status(&work)).unwrap(),
-        WorkStatus::Done
-    ));
-    let refused = runtime
-        .block_on(task.store.get_task(&task.task.id))
-        .expect("read refused Task")
-        .expect("refused Task exists");
-    assert!(refused
-        .gate_proposal
-        .as_ref()
-        .is_some_and(|gate| !gate.done));
-
-    let approved_reason = "final review approved the merged slice";
-    final_task.gate_proposal = Some(TaskGateProposal {
-        done: true,
-        reason: approved_reason.to_string(),
-    });
-    conn.execute(
-        "UPDATE tasks SET gate_proposal_json=?2 WHERE id=?1",
-        rusqlite::params![
-            final_task.id.as_str(),
-            serde_json::to_string(&final_task.gate_proposal).expect("serialize approval")
-        ],
-    )
-    .expect("persist approved proposal");
 
     let result = land(repo.path(), &options, &NullProgress).expect("complete final Task");
 
@@ -995,18 +917,6 @@ fn completing_land_requires_an_approved_final_gate_for_an_empty_successor() {
     assert_eq!(
         runtime.block_on(task.store.work_status(&work)).unwrap(),
         WorkStatus::Done
-    );
-    let completed = runtime
-        .block_on(task.store.get_task(&task.task.id))
-        .expect("read completed Task")
-        .expect("completed Task exists");
-    assert_eq!(
-        completed.gate_proposal,
-        Some(TaskGateProposal {
-            done: true,
-            reason: approved_reason.to_string(),
-        }),
-        "completion must preserve the reviewed proposal"
     );
     let prs = runtime
         .block_on(task.store.task_prs(&task.task.id))
@@ -1272,7 +1182,7 @@ fn observed_merge_completes_a_pr_marked_to_complete_the_task() {
     assert!(
         matches!(
             persisted_task.observation,
-            loopflow::task::Observation::Fresh { .. }
+            loopflow::work::task::Observation::Fresh { .. }
         ),
         "completion should use the bounded REST observation: {persisted_task:?}"
     );
@@ -1401,7 +1311,12 @@ fn repeated_status_of_merged_task_records_completion_once() {
     );
     let completion_count = second_events
         .iter()
-        .filter(|event| matches!(event.kind, loopflow::task::TaskEventKind::Completed { .. }))
+        .filter(|event| {
+            matches!(
+                event.kind,
+                loopflow::work::task::TaskEventKind::Completed { .. }
+            )
+        })
         .count();
     assert_eq!(completion_count, 1);
 }

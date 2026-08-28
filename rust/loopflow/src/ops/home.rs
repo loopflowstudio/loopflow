@@ -2,10 +2,10 @@
 
 use std::path::Path;
 
+use crate::controller::wave::server::live_endpoint;
 use crate::durable::Home;
 use crate::engine::wave_home::{resolve_home_relative_repo, HomeRoute, HomeRuntimeDto, HomeState};
 use crate::lf::commands::ssh::{capture_home_command, SshCaptureError};
-use crate::wave::server::live_endpoint;
 
 pub async fn probe_home(wave: &str, home: &Home, repo: &Path) -> HomeRuntimeDto {
     if home.route == "local" {

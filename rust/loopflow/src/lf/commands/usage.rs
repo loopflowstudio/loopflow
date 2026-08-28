@@ -5,9 +5,9 @@ use std::path::Path;
 use anyhow::{anyhow, Result};
 use time::OffsetDateTime;
 
+use crate::controller::wave::journal::short_id;
 use crate::lf::output::{format_cost, format_int, truncate, Colors};
 use crate::run_record::RunSnapshot;
-use crate::wave::journal::short_id;
 
 const REPO_WIDTH: usize = 18;
 const RUN_WIDTH: usize = 22;

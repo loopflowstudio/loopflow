@@ -1525,7 +1525,11 @@ fn _begin_implicit_capture(
             crate::run_record::RunLaunchRequest::from_prepared(launch, capabilities),
         )
     } else {
-        crate::run_record::CaptureHandle::begin(spec)
+        let context = crate::trace::PreparedTurnContext::from_prompts(
+            &system_prompt_with_structured_replies(launch),
+            &launch.task_prompt,
+        );
+        crate::run_record::CaptureHandle::begin_with_context(spec, &context)
     };
     capture
         .map(|capture| {
@@ -1584,19 +1588,14 @@ fn _launch_codex_harness_once(
 
     let mut config = launch.clone();
     let prompt = std::mem::take(&mut config.task_prompt);
-    let writer_worktree = config.cwd.clone().or_else(|| std::env::current_dir().ok());
-    let writer_guard = writer_worktree
-        .as_deref()
-        .map(|cwd| crate::ops::git_operation::prepare_agent_writer(cwd, &config.env))
-        .transpose()
-        .map_err(|error| CoreError::ExecutionFailed(error.to_string()))?
-        .flatten();
-    if let Some(guard) = writer_guard.as_ref() {
-        config
-            .env
-            .entry(crate::ops::git_operation::LF_WORKTREE_WRITER_ID_ENV.to_string())
-            .or_insert_with(|| guard.writer_id().to_string());
+    let launch_worktree = config.cwd.clone().or_else(|| std::env::current_dir().ok());
+    if let Some(cwd) = launch_worktree.as_deref() {
+        crate::ops::git_operation::prepare_agent_launch(cwd, &config.env)
+            .map_err(|error| CoreError::ExecutionFailed(error.to_string()))?;
     }
+    config
+        .env
+        .remove(crate::ops::git_operation::LEGACY_WORKTREE_WRITER_ID_ENV);
 
     let runtime = tokio::runtime::Builder::new_current_thread()
         .enable_all()
@@ -1771,22 +1770,17 @@ fn _launch_agent_once(
     }
 
     let mut scoped_env = launch.env.clone();
-    let writer_worktree = launch.cwd.clone().or_else(|| std::env::current_dir().ok());
-    let writer_guard = writer_worktree
-        .as_deref()
-        .map(|cwd| crate::ops::git_operation::prepare_agent_writer(cwd, &scoped_env))
-        .transpose()
-        .map_err(|error| CoreError::ExecutionFailed(error.to_string()))?
-        .flatten();
-    if let Some(guard) = writer_guard.as_ref() {
-        scoped_env
-            .entry(crate::ops::git_operation::LF_WORKTREE_WRITER_ID_ENV.to_string())
-            .or_insert_with(|| guard.writer_id().to_string());
+    let launch_worktree = launch.cwd.clone().or_else(|| std::env::current_dir().ok());
+    if let Some(cwd) = launch_worktree.as_deref() {
+        crate::ops::git_operation::prepare_agent_launch(cwd, &scoped_env)
+            .map_err(|error| CoreError::ExecutionFailed(error.to_string()))?;
     }
     for name in EXECUTION_IDENTITY_ENV {
         cmd.env_remove(name);
     }
+    scoped_env.remove(crate::ops::git_operation::LEGACY_WORKTREE_WRITER_ID_ENV);
     cmd.envs(&scoped_env);
+    cmd.env_remove(crate::ops::git_operation::LEGACY_WORKTREE_WRITER_ID_ENV);
 
     // Shell integration sets LOOPFLOW_DIRECTIVE_FILE so top-level `lf` commands
     // can request parent-shell actions (for example auto-cd after `lf wt switch`).

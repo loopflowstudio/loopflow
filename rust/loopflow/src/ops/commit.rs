@@ -5,7 +5,9 @@ use serde_json::json;
 
 use crate::engine::agent::{launch_agent, AgentCapabilities, AgentConfig, ProcessConfig};
 use crate::engine::config::load_config_or_default;
-use crate::engine::git::{commit, current_branch, is_clean, push, push_with_upstream, stage_all};
+use crate::engine::git::{
+    commit, current_branch, is_clean, push, push_with_upstream, rev_parse, stage_all,
+};
 use crate::engine::load_skill;
 
 use crate::ops::error::{OpsError, OpsResult};
@@ -60,6 +62,45 @@ pub(crate) async fn checkpoint_task_worktree(
     .await
     .map_err(|join_error| anyhow::anyhow!("Task worktree checkpoint panicked: {join_error}"))?;
     outcome.map_err(anyhow::Error::from)
+}
+
+pub(crate) fn checkpoint_task_restart(worktree: &Path, task_identifier: &str) -> OpsResult<String> {
+    let _mutation = crate::ops::task::lock_task_pr_mutation(worktree)?;
+    if !is_clean(worktree)? {
+        stage_all(worktree)?;
+        verify_restart_preimage(worktree)?;
+    }
+    let options = CommitOptions {
+        add: false,
+        push: false,
+        create_draft_pr: false,
+        task: task_identifier.to_string(),
+        flow_parents: Vec::new(),
+        message: Some(format!("checkpoint: restart {task_identifier}")),
+        agent: None,
+    };
+    commit_workflow(worktree, &options, &NullProgress)?;
+    crate::ops::task::clear_task_pr_merge_before_head_mutation(worktree, false)?;
+    push_with_upstream_if_needed_locked(worktree)?;
+    rev_parse(worktree, "HEAD").map_err(OpsError::Git)
+}
+
+fn verify_restart_preimage(worktree: &Path) -> OpsResult<()> {
+    let unstaged = std::process::Command::new("git")
+        .args(["diff", "--quiet", "--no-ext-diff"])
+        .current_dir(worktree)
+        .status()?;
+    let untracked = std::process::Command::new("git")
+        .args(["ls-files", "--others", "--exclude-standard", "-z"])
+        .current_dir(worktree)
+        .output()?;
+    if !unstaged.success() || !untracked.stdout.is_empty() {
+        return Err(OpsError::Message(
+            "Task worktree changed while restart prepared its checkpoint; review the staged snapshot and retry"
+                .to_string(),
+        ));
+    }
+    Ok(())
 }
 
 pub fn commit_workflow(
@@ -286,6 +327,10 @@ pub(crate) fn push_with_upstream_if_needed(repo: &Path) -> OpsResult<()> {
     // publication remains a no-op and preserves the request.
     let _mutation = crate::ops::task::lock_task_pr_mutation(repo)?;
     crate::ops::task::clear_task_pr_merge_before_head_mutation(repo, false)?;
+    push_with_upstream_if_needed_locked(repo)
+}
+
+fn push_with_upstream_if_needed_locked(repo: &Path) -> OpsResult<()> {
     let output = std::process::Command::new("git")
         .arg("rev-parse")
         .arg("--abbrev-ref")

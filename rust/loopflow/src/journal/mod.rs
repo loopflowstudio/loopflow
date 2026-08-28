@@ -401,7 +401,7 @@ fn ensure_run_context(
     }
 
     let main_repo = main_repo_root(repo_root).ok();
-    let attribution = crate::engine::wave_context::run_attribution(main_repo.as_deref());
+    let attribution = crate::work::wave::context::run_attribution(main_repo.as_deref());
     let wave_name = attribution.wave;
     if let Some(failure) = attribution.failure.as_deref() {
         debug!(
@@ -764,7 +764,7 @@ mod tests {
     };
     use crate::engine::git::is_clean;
     use crate::id::{ExecId, TraceId, WaveId};
-    use crate::wave::Wave;
+    use crate::work::wave::Wave;
     use loopflow_test_support::TestRepo;
     use std::path::PathBuf;
     use std::process::{Command, Stdio};
@@ -1033,7 +1033,7 @@ mod tests {
             .expect("ledger")
             .create_wave(&wave)
             .expect("explicit wave row");
-        std::env::set_var(crate::engine::wave_context::WAVE_ID_ENV, wave.id().as_str());
+        std::env::set_var(crate::work::wave::context::WAVE_ID_ENV, wave.id().as_str());
 
         emit(
             &worktree,
@@ -1057,7 +1057,7 @@ mod tests {
             .list_run_events_since(0)
             .expect("events");
         assert_eq!(events[0].wave.as_deref(), Some("context"));
-        std::env::remove_var(crate::engine::wave_context::WAVE_ID_ENV);
+        std::env::remove_var(crate::work::wave::context::WAVE_ID_ENV);
     }
 
     /// W2-239: a stale ambient UUID (registry has no row for it) is propagated
@@ -1082,10 +1082,10 @@ mod tests {
             .create_wave(&registered)
             .expect("registered wave row");
         let stale_id = WaveId::new();
-        std::env::set_var(crate::engine::wave_context::WAVE_ID_ENV, stale_id.as_str());
+        std::env::set_var(crate::work::wave::context::WAVE_ID_ENV, stale_id.as_str());
 
         // `with_runtime` resolves once and records wave + failure; mirror that.
-        let attribution = crate::engine::wave_context::run_attribution(Some(&worktree));
+        let attribution = crate::work::wave::context::run_attribution(Some(&worktree));
         assert_eq!(
             attribution.wave, None,
             "stale identity attributes to no wave"
@@ -1136,7 +1136,7 @@ mod tests {
         assert_eq!(started.wave, None);
         assert_eq!(started.error.as_deref(), Some(failure.as_str()));
 
-        std::env::remove_var(crate::engine::wave_context::WAVE_ID_ENV);
+        std::env::remove_var(crate::work::wave::context::WAVE_ID_ENV);
     }
 
     #[test]

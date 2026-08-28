@@ -115,6 +115,12 @@ If major open questions remain, note them in the doc rather than leaving them im
 
 Make the doc comprehensive enough that the implementing agent can work from it without further input. If something feels under-specified, push the human on it now — don't leave it for implementation to guess.
 
+For an indivisible architectural change, preserve one complete north star while
+the current internal slice changes. Confirm the current-system map, target
+authority, integration and deletion path, full-system proof, and forbidden
+near-misses. A detailed preexisting Task or scratch document is input to this
+review, never evidence that this review already happened.
+
 ## Wave alignment
 
 If wave context is present:

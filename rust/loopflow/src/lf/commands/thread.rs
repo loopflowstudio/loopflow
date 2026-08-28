@@ -26,11 +26,13 @@ use crate::chat::turns::{
     ChatRole, ChatTurn, ChildActivityKind, ChildActivitySubject, ChildControlActivity, TurnDelta,
 };
 use crate::chat::types::{ConversationItem, Lifecycle};
+use crate::controller::wave::chat::{
+    ChatBacking, ChatMessageSource, ConversationEpoch, WaveChatMessage,
+};
+use crate::controller::wave::journal::ellipsize;
+use crate::controller::wave::subscription::{stream_events, Frame};
 use crate::lf::commands::chat::{resolve_target, CliContext};
 use crate::lf::WaveTargetArgs;
-use crate::wave::chat::{ChatBacking, ChatMessageSource, ConversationEpoch, WaveChatMessage};
-use crate::wave::journal::ellipsize;
-use crate::wave::subscription::{stream_events, Frame};
 
 /// Reconnect backoff: floor doubling to the ceiling, reset once a connect
 /// actually streams a frame (the server opens every subscription with a
@@ -311,7 +313,7 @@ mod tests {
     use super::*;
 
     fn frames(raw: &str) -> Vec<Frame> {
-        use crate::wave::subscription::SseFrameParser;
+        use crate::controller::wave::subscription::SseFrameParser;
 
         let mut parser = SseFrameParser::default();
         let mut out = Vec::new();
@@ -775,8 +777,8 @@ mod tests {
     /// frames arrive as parsed SSE frames.
     #[tokio::test]
     async fn stream_events_delivers_replay_then_live_frames() {
-        use crate::wave::runtime::WaveRuntime;
-        use crate::wave::server;
+        use crate::controller::wave::runtime::WaveRuntime;
+        use crate::controller::wave::server;
         use std::sync::{Arc, Mutex};
 
         let tmp = tempfile::tempdir().expect("tempdir");
@@ -787,7 +789,7 @@ mod tests {
         let app = server::router_with_observer(
             runtime.clone(),
             server::ResidentDoor::new("test-token"),
-            Arc::new(crate::wave::registry::ObserverSlot::new(
+            Arc::new(crate::controller::wave::registry::ObserverSlot::new(
                 runtime.clone(),
                 None,
             )),
@@ -800,11 +802,17 @@ mod tests {
 
         for i in 0..20 {
             runtime
-                .deliver(crate::wave::journal::MessageOp::Message, format!("old {i}"))
+                .deliver(
+                    crate::controller::wave::journal::MessageOp::Message,
+                    format!("old {i}"),
+                )
                 .expect("older user turn");
         }
         runtime
-            .deliver(crate::wave::journal::MessageOp::Message, "replayed".into())
+            .deliver(
+                crate::controller::wave::journal::MessageOp::Message,
+                "replayed".into(),
+            )
             .expect("user turn");
         let seen: Arc<Mutex<Vec<Frame>>> = Arc::new(Mutex::new(Vec::new()));
         let sink = seen.clone();
@@ -833,7 +841,7 @@ mod tests {
         }
         runtime
             .deliver(
-                crate::wave::journal::MessageOp::Message,
+                crate::controller::wave::journal::MessageOp::Message,
                 "live after subscribe".into(),
             )
             .expect("live user turn");

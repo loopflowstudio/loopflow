@@ -332,23 +332,26 @@ fn _read_executable_references(
          JOIN waves w ON w.id=p.wave_id
          WHERE placement.enabled=1 AND p.work_state='ready'
          UNION
-         SELECT 'task', t.id, COALESCE(t.kickoff_flow, ''), t.worktree
+         SELECT 'task', t.id, r.kickoff_flow, t.worktree
          FROM work_placements placement
          JOIN tasks t ON t.id=placement.task_id
+         JOIN task_controller_state r ON r.task_id=t.id
          JOIN projects p ON p.id=t.project_id
          JOIN waves w ON w.id=p.wave_id
          WHERE placement.enabled=1 AND t.work_state='ready'
          UNION
-         SELECT 'task', t.id, COALESCE(t.iterate_flow, ''), t.worktree
+         SELECT 'task', t.id, r.iterate_flow, t.worktree
          FROM work_placements placement
          JOIN tasks t ON t.id=placement.task_id
+         JOIN task_controller_state r ON r.task_id=t.id
          JOIN projects p ON p.id=t.project_id
          JOIN waves w ON w.id=p.wave_id
          WHERE placement.enabled=1 AND t.work_state='ready'
          UNION
-         SELECT 'task', t.id, COALESCE(t.gate_flow, ''), t.worktree
+         SELECT 'task', t.id, r.gate_flow, t.worktree
          FROM work_placements placement
          JOIN tasks t ON t.id=placement.task_id
+         JOIN task_controller_state r ON r.task_id=t.id
          JOIN projects p ON p.id=t.project_id
          JOIN waves w ON w.id=p.wave_id
          WHERE placement.enabled=1 AND t.work_state='ready'
@@ -735,10 +738,11 @@ mod compatibility_tests {
         let directory = tempfile::tempdir().unwrap();
         let store = directory.path().join("loopflow.db");
         crate::store::sqlite::SqliteStore::open_as_promotion_boundary(&store).unwrap();
-        assert!(matches!(
-            _read_local_executable_compatibility(&store),
-            ExecutableCompatibility::Compatible { .. }
-        ));
+        let compatibility = _read_local_executable_compatibility(&store);
+        assert!(
+            matches!(compatibility, ExecutableCompatibility::Compatible { .. }),
+            "{compatibility:?}"
+        );
     }
 }
 

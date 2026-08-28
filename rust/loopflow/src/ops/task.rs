@@ -5026,14 +5026,14 @@ mod tests {
     use super::{
         apply_merged_task_landing, apply_task_flow_override, launch_task_process,
         lock_task_pr_mutation, preflight_task_execution, probe_task_execution_boundary,
-        resolve_task_start_input, resume_task_async, task_event_launch_refusal,
-        task_execution_boundary, TaskControllerState, TaskFlowOverrides,
+        resolve_task_lifecycle, resolve_task_start_input, resume_task_async,
+        task_event_launch_refusal, task_execution_boundary, TaskControllerState, TaskFlowOverrides,
     };
     use crate::child::ChildRef;
     use crate::controller::task::TaskLifecyclePhase;
     use crate::durable::{
-        AskBody, AskOrigin, AskState, AskTarget, Author, FlowPosition, ProjectChildControlBasis,
-        WorkRef, WorkStatus,
+        AskBody, AskOrigin, AskState, AskTarget, Author, ProjectChildControlBasis, WorkRef,
+        WorkStatus,
     };
     use crate::engine::AgentExecutionBoundary;
     use crate::planning::{LinearIssueId, LinearProjectId, ProjectPlan, TaskPlan};
@@ -5466,6 +5466,7 @@ mod tests {
             store,
             mut task,
             work,
+            ..
         } = task_fixture("LOO-227", "slice").await;
         let repository = _database.path().join("repo");
         std::fs::create_dir(&repository).unwrap();
@@ -5517,16 +5518,10 @@ mod tests {
         let project = store.get_project(&task.project_id).await.unwrap().unwrap();
         let wave = store.get_wave(&task.wave_id).await.unwrap().unwrap();
         let basis = |step: &str, step_index: u32, steer_sequence: u64| ProjectChildControlBasis {
-            position: FlowPosition {
-                work: WorkRef::Project(task.project_id.clone()),
-                flow: "project".to_string(),
-                step: step.to_string(),
-                node_id: None,
-                human: false,
-                step_index,
-                iteration: 0,
-                updated_at: time::OffsetDateTime::now_utc(),
-            },
+            flow: "project".to_string(),
+            step: step.to_string(),
+            step_index,
+            iteration: 0,
             steer_sequence,
         };
         let clarify_basis = basis("project/clarify", 0, 0);
@@ -5537,15 +5532,16 @@ mod tests {
             None,
         )
         .unwrap();
-        let (first_capture, first_control) = crate::controller::project::publish_project_controller(
-            &store,
-            &project,
-            &wave,
-            &mut clarify_turn,
-            &clarify_basis,
-        )
-        .await
-        .unwrap();
+        let (first_capture, first_control) =
+            crate::controller::project::publish_project_controller(
+                &store,
+                &project,
+                &wave,
+                &mut clarify_turn,
+                &clarify_basis,
+            )
+            .await
+            .unwrap();
         assert_eq!(
             clarify_turn
                 .config

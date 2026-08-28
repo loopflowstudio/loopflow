@@ -1108,7 +1108,7 @@ mod tests {
     use crate::build_info::{BuildProvenance, MigrationAuthority};
     use crate::child::ChildRef;
     use crate::controller::task::State as TaskControllerState;
-    use crate::durable::{Author, FlowPosition, ProjectChildControlBasis, RunId, WorkRef};
+    use crate::durable::{Author, ProjectChildControlBasis, RunId, WorkRef};
     use crate::id::WaveId;
     use crate::planning::{LinearIssueId, LinearProjectId, ProjectPlan, TaskPlan};
     use crate::profile::EmailAddress;
@@ -1429,16 +1429,10 @@ mod tests {
             .unwrap();
 
         let basis = |step: &str, step_index: u32, steer_sequence: u64| ProjectChildControlBasis {
-            position: FlowPosition {
-                work: WorkRef::Project(project.id.clone()),
-                flow: "project".to_string(),
-                step: step.to_string(),
-                node_id: None,
-                human: false,
-                step_index,
-                iteration: 0,
-                updated_at: OffsetDateTime::from_unix_timestamp(1_700_000_000).unwrap(),
-            },
+            flow: "project".to_string(),
+            step: step.to_string(),
+            step_index,
+            iteration: 0,
             steer_sequence,
         };
 

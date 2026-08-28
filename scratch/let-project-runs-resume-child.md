@@ -124,6 +124,10 @@ parked-Task resume contract:
   generic Run identity to be evidence and causality only. Its focused proofs
   covered launch, capture, replay, and accounts, not Project-to-existing-Task
   resume.
+- The rebased controller-state boundary also removes generic
+  `work_flow_positions`. The capability row now owns its exact Project flow,
+  step, index, iteration, and Steer frontier instead of recreating that retired
+  shared state.
 - The restoration command fixture now enters through the Project runner's
   production publication boundary, which creates the generic Run and exact
   control capability together before provider work. It crosses phase and

@@ -6,5 +6,9 @@ CREATE TABLE project_child_controls (
     project_id TEXT PRIMARY KEY REFERENCES projects(id) ON DELETE CASCADE,
     run_id TEXT NOT NULL CHECK (length(trim(run_id)) > 0),
     token_hash TEXT NOT NULL CHECK (length(token_hash) = 64),
+    flow TEXT NOT NULL CHECK (length(trim(flow)) > 0),
+    step TEXT NOT NULL CHECK (length(trim(step)) > 0),
+    step_index INTEGER NOT NULL CHECK (step_index >= 0),
+    iteration INTEGER NOT NULL CHECK (iteration >= 0),
     steer_sequence INTEGER NOT NULL CHECK (steer_sequence >= 0)
 );

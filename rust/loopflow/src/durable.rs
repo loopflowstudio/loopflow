@@ -110,7 +110,10 @@ impl std::fmt::Debug for ProjectChildControlToken {
 
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub(crate) struct ProjectChildControlBasis {
-    pub position: FlowPosition,
+    pub flow: String,
+    pub step: String,
+    pub step_index: u32,
+    pub iteration: u32,
     pub steer_sequence: u64,
 }
 

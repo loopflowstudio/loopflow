@@ -13,8 +13,8 @@ use crate::controller::wave::playhead::{
     BodyProvenance, Playhead, PlayheadEvent, QueuedInvocation, StepKind, StepOutcome,
 };
 use crate::durable::{
-    render_steers, FlowPosition, ProjectChildControlBasis, ProjectChildControlToken, RunId, Steer,
-    SteerId, WorkStatus, PROJECT_CHILD_CONTROL_ENV,
+    render_steers, ProjectChildControlBasis, ProjectChildControlToken, RunId, Steer, SteerId,
+    WorkStatus, PROJECT_CHILD_CONTROL_ENV,
 };
 use crate::harness::{default_create_harness, drain_turn_failure_reason, ApprovalPolicy, Harness};
 use crate::store::SharedStore;
@@ -137,12 +137,9 @@ pub(crate) async fn publish_project_controller(
             cwd: Path::new(wave.repo()).to_path_buf(),
             repo: Some(Path::new(wave.repo()).to_path_buf()),
             worktree: Some(Path::new(wave.repo()).to_path_buf()),
-            skill: Some(basis.position.step.clone()),
+            skill: Some(basis.step.clone()),
             subjects: vec![
-                crate::run_record::SubjectAttribution::declared(format!(
-                    "wave:{}",
-                    wave.name()
-                )),
+                crate::run_record::SubjectAttribution::declared(format!("wave:{}", wave.name())),
                 crate::run_record::SubjectAttribution::declared(format!(
                     "project:{}",
                     project.plan.slug
@@ -575,22 +572,16 @@ async fn prepare_project_flow_step(
     let mut prepared =
         crate::lf::commands::run::prepare_harness_turn(&step.step, &seed, wave.name(), None)?;
     prepared.config.agent = Some(project.state.agent.clone());
-    let steer_sequence = u64::try_from(steers.len())
-        .map_err(|_| anyhow!("Project Steer sequence is too large"))?;
+    let steer_sequence =
+        u64::try_from(steers.len()).map_err(|_| anyhow!("Project Steer sequence is too large"))?;
     Ok(PreparedProjectStep {
         turn: prepared,
         steers: steers.iter().map(|steer| steer.id.clone()).collect(),
         control_basis: ProjectChildControlBasis {
-            position: FlowPosition {
-                work,
-                flow: step.flow,
-                step: step.step,
-                node_id: None,
-                human: false,
-                step_index: step.index,
-                iteration: step.iteration,
-                updated_at: time::OffsetDateTime::now_utc(),
-            },
+            flow: step.flow,
+            step: step.step,
+            step_index: step.index,
+            iteration: step.iteration,
             steer_sequence,
         },
         planning,

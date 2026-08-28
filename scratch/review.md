@@ -32,5 +32,5 @@ liberal across checkout skew. The focused
 
 ## Disposition
 
-The behavior and source now match the Task outcome. Publishing remains subject
-to Loopflow restoring Task ownership for this retained post-merge worktree.
+The behavior and source match the Task outcome. Loopflow published the reviewed
+follow-up as PR #1254.

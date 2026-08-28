@@ -25,7 +25,6 @@ Streaming logs (long-running commands):
 from __future__ import annotations
 
 import argparse
-import os
 import shutil
 import subprocess
 import sys
@@ -50,11 +49,7 @@ LOOPFLOW_STREAM_LOG = DEV_LOG_DIR / f"{REPO_ROOT.name}.loopflow-run-debug.log"
 
 
 def _app_environment(repo: Path) -> dict[str, str]:
-    env = {"LOOPFLOW_DEV_WAVE_REPO": str(repo)}
-    for key in ("LF_CONTROL_HOME", "LF_CONTROL_DB_PATH", "LF_HOME", "LF_DB_PATH"):
-        if value := os.environ.get(key):
-            env[key] = value
-    return env
+    return {"LOOPFLOW_DEV_WAVE_REPO": str(repo)}
 
 
 def run(cmd: list[str], cwd: Path | None = None, check: bool = True) -> subprocess.CompletedProcess:
@@ -207,9 +202,8 @@ def cmd_run_debug(repo: Path = REPO_ROOT) -> int:
     _install_dev_app()
     print("Logs: ~/Library/Logs/Loopflow/")
     print(f"Stream log: {LOOPFLOW_STREAM_LOG}")
-    # The app resolves the active machine `lf` before its validation-only
-    # bundled fallback, so selected development Homes use their compatible
-    # installed binary.
+    # The app resolves the install-owned machine gate before its validation-only
+    # bundled fallback, so executable and store selection stay one authority.
     print(f"Bundled fallback lf: {DEV_APP}/Contents/MacOS/lf")
     print("Telemetry dashboard: Go → Telemetry (⌘1)")
     _print_run_debug_checklist()

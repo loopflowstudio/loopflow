@@ -87,16 +87,17 @@ consequence and made the broken surface look healthy.
 
 | Level | Fix | Prevents |
 |-------|-----|----------|
-| Immediate | Preserve `LF_CONTROL_HOME` / `LF_CONTROL_DB_PATH`, resolve the active machine `lf` before the offline bundle, and render unavailable fleet/Activity states without empty copy. | This reported instance and its misleading presentation |
+| Immediate | Resolve the fixed OS-account machine gate before the offline bundle, and render unavailable fleet/Activity states without empty copy. | This reported instance and its misleading presentation |
 | Structural | Give Dev launch and the Mac one install-owned local-control authority containing the selected Home and exact entry gate; remove independent environment allowlists and executable search rules. | Any helper/store provenance mismatch across release and development Homes |
 | Structural | Render `PodiumReading` exhaustively through one shared state boundary and make fixtures vary fleet, roadmap, and Activity failure independently. | Unavailable or unknown evidence silently becoming healthy empty state |
 | Systemic | Gate the installed Dev app with a disposable populated development Home whose schema is intentionally ahead of the validation-only bundle, and require nonzero fleet/roadmap plus terminal failure presentation. | Future feature combinations that unit and DTO fixture tests cannot see |
 
 ## Changes to Implement
 
-- [ ] Define the install-owned local-control authority: selected Home identity,
-  database, exact machine entry gate, and an explicitly typed offline fallback.
-- [ ] Make Dev assembly and Mac process launch consume that authority, then
+- [x] Define the install-owned local-control authority: the fixed machine gate
+  reads the active receipt that binds the exact executable and store; an
+  explicit bundled-offline case applies only when no installation exists.
+- [x] Make Dev launch and Mac process launch consume that authority, then
   delete the manual `LF_*` forwarding list and arbitrary PATH scan.
 - [ ] Add an installed-Dev-app integration proof using a disposable populated
   development Home newer than the validation-only bundled helper.
@@ -105,9 +106,10 @@ consequence and made the broken surface look healthy.
 - [ ] Track the missing Activity `run_id` wire mismatch separately; keep its
   current explicit unavailable state until the shared DTO contract is repaired.
 
-The next prevention should establish the install-owned authority boundary
-before expanding UI coverage. Otherwise tests would only pin the current PATH
-workaround rather than make incompatible executable/store pairs impossible.
+With the install-owned authority boundary established, the next prevention is
+the installed-Dev-app integration gate. It should create a disposable populated
+development Home newer than the validation-only helper and require the receipt-
+selected gate to load it without any `LF_*` routing environment.
 
 ## Restoration Record
 
@@ -164,24 +166,24 @@ not the binary that owns an installed development store.
 
 ### Restored model
 
-Resolve `lf` from the GUI-enriched PATH first. `~/.local/bin/lf` is Loopflow's
-machine entry gate, so it dispatches to the binary matching the active install
-and store. Keep the bundled helper only as the no-install fallback. Preserve the
-selected-Home environment so development launches retain their explicit
-authority. Restrict fleet and Activity empty copy to successful reads.
+Resolve the fixed OS-account gate at `~/.lf-machine/install/gates/1/lf`. Its
+active install receipt selects the compatible executable and store together,
+regardless of PATH or inherited Home variables. Keep the validation-only
+bundled helper as an explicitly typed no-install fallback. Restrict fleet and
+Activity empty copy to successful reads.
 
 ### Restoration proof
 
 - `uv run python scripts/loopflow-dev.py run` rebuilt, signed, and launched
-  `~/Applications/Loopflow Dev.app` with the selected control Home preserved.
-- The installed-bundle capture at `/tmp/loo-274-installed-restored.png` ran
-  `~/Applications/Loopflow Dev.app/Contents/MacOS/Loopflow` with
-  `LOOPFLOW_UI_TEST_MODE=live`, the real `LF_CONTROL_HOME` /
-  `LF_CONTROL_DB_PATH`, and the machine entry gate first on `PATH`. After a
-  40-second settle it showed five Waves and populated Work rows, matching
-  `lf ls --all --json` and `lf roadmap --all --json` from the selected
-  development store. It is byte-identical to the independent source-build
-  proof (`sha256 7c6e6dd98991885511077c7b9d5d193578f037fd508d8e2bd93e5cf07860a714`).
+  `~/Applications/Loopflow Dev.app` with only the development repository
+  override; the machine install receipt supplied the active Home.
+- The installed-bundle capture at `/tmp/loo-274-installed-authority.png` ran
+  `~/Applications/Loopflow Dev.app/Contents/MacOS/Loopflow` with every `LF_*`
+  routing variable removed and `PATH=/usr/bin:/bin`. After a 40-second settle it
+  showed the five Loopflow Waves and populated Work rows. The exact machine gate
+  under the same hostile environment reported five Loopflow Waves; roadmap
+  reported product with three Projects and 88 Tasks. The capture checksum is
+  `0518ce7c1e8a9cc1764049f2f3ef3ed88ef55568a87496f85d31835df99cfe53`.
 - Activity left `Reading Activity…`. Its current wire mismatch surfaced as
   `Activity unavailable` with the exact missing-`run_id` decode reason, and did
   not render `No Activity in this window`. This distinguishes restoration from
@@ -189,16 +191,19 @@ authority. Restrict fleet and Activity empty copy to successful reads.
 - `/usr/bin/time -p lf activity --since 7d --limit 50 --json` returned 50 items
   in 6.67 seconds. The command completes with populated JSON; the visible Mac
   failure is a named DTO mismatch rather than an empty ledger.
-- Focused proof: `uv run pytest python/tests/test_loopflow_dev.py` passed; Swift
-  launcher and Podium model filters passed 24 tests. The documented signed
-  `xcodebuild build-for-testing` gate compiled and signed the app plus
-  `LoopflowUITests`, including `PodiumStateTests`.
+- Focused proof: `uv run pytest python/tests/test_loopflow_dev.py` passed, and
+  `swift test --package-path swift --filter LocalWaveAgentLauncherTests` passed
+  14 authority and launcher behaviors. The earlier restoration pass also
+  compiled and signed the app plus `LoopflowUITests`; gate owns rerunning that
+  broader build against the final branch content.
 
 ### Review
 
 - Reads and controls share `controlLfPath()`; there is no second Mac query
-  implementation. The active machine entry gate owns installed-Home selection,
-  and the validation-only bundle remains the offline fallback.
+  implementation. `LocalControlAuthority` selects either the receipt-backed
+  machine gate or the validation-only offline fallback. It never scans PATH,
+  and a receipt with a missing or non-executable gate fails rather than falling
+  through to another store.
 - No database migration or user-state edit was needed. The fallback and active
   stores remain intact, and the stale Xcode process was left untouched.
 - Capture targeting changes only automated capture mode. Ordinary launches

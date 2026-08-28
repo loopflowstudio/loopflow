@@ -17,18 +17,14 @@ sys.modules[MODULE_NAME] = loopflow_dev
 SPEC.loader.exec_module(loopflow_dev)
 
 
-def test_app_environment_preserves_selected_control_home(
+def test_app_environment_does_not_override_machine_install_authority(
     monkeypatch: pytest.MonkeyPatch,
 ) -> None:
     monkeypatch.setenv("LF_CONTROL_HOME", "/tmp/selected-home")
     monkeypatch.setenv("LF_CONTROL_DB_PATH", "/tmp/selected-home/loopflow.db")
-    monkeypatch.delenv("LF_HOME", raising=False)
-    monkeypatch.delenv("LF_DB_PATH", raising=False)
+    monkeypatch.setenv("LF_HOME", "/tmp/ambient-home")
+    monkeypatch.setenv("LF_DB_PATH", "/tmp/ambient-home/loopflow.db")
 
     environment = loopflow_dev._app_environment(Path("/tmp/repo"))
 
-    assert environment == {
-        "LOOPFLOW_DEV_WAVE_REPO": "/tmp/repo",
-        "LF_CONTROL_HOME": "/tmp/selected-home",
-        "LF_CONTROL_DB_PATH": "/tmp/selected-home/loopflow.db",
-    }
+    assert environment == {"LOOPFLOW_DEV_WAVE_REPO": "/tmp/repo"}

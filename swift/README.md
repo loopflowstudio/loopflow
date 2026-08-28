@@ -86,9 +86,9 @@ codebase tree, and registry health.
   `lf ls/status/roadmap/ps/activity/usage/doctor/tokens --json`; the app does not
   maintain a second roadmap or lifecycle database. Unavailable per-Wave evidence
   renders its reason, and refresh failures leave the last successful roadmap or
-  Activity history visible. The Mac resolves the active machine `lf` entry gate
-  first so reads match the selected Home and its schema; the bundled helper is
-  the offline fallback when Loopflow is not installed.
+  Activity history visible. The Mac resolves the fixed OS-account `lf` entry
+  gate first, so one install receipt supplies the executable and store together;
+  the bundled helper is the typed offline fallback when Loopflow is not installed.
 - **Per-Wave SSE** owns live motion. `WaveChatConnection` first reads
   `lf chat --history --json`, then connects only to the selected Wave's
   `/events` stream and upserts its replay before continuing live.
@@ -123,10 +123,12 @@ only the selected Wave's `lf wave` process; it has no machine-wide service or
 remote-connection mode.
 
 The dev app bundles the current source `lf` with release Home selection and
-validation-only migration authority. Its operator views therefore read the
-real Home without allowing an unpromoted build to advance the shared database
-frontier. Ordinary source-built `lf` commands keep their isolated `.lf-dev`
-Home.
+validation-only migration authority. When Loopflow is installed, operator reads
+use the fixed machine entry gate and the exact executable/store pair from its
+active receipt. The Dev launcher forwards only its repository override; ambient
+Home variables cannot split that pair. Without an installation, the bundled
+helper remains a read-only offline fallback. Ordinary source-built `lf` commands
+keep their isolated `.lf-dev` Home.
 
 | Command | What it does |
 | --- | --- |
@@ -153,8 +155,8 @@ xcodebuild -project LoopflowSwift.xcodeproj \
 
 The generated app target builds validation-only `lf` and `lfd` fallback helpers
 from the same checkout into `Loopflow.app/Contents/MacOS`. A runnable app uses
-the active machine entry gate when present so a selected development Home is
-read by its matching binary.
+`~/.lf-machine/install/gates/1/lf` when present, so the active receipt selects
+both the matching binary and store without PATH or inherited Home conventions.
 
 Keep `Package.swift` and `project.yml` in sync.
 

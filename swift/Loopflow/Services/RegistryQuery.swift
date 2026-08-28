@@ -10,8 +10,8 @@
 // This runs `lf ls/status/roadmap/ps/activity --json` as a subprocess and decodes the wire
 // snapshots (mirrors of the Rust types in `lf/commands/waves.rs` and
 // `lf/commands/runs.rs`) into the app models the stores hold. The subprocess
-// runner is injected: on macOS it execs the active machine `lf`, with the app's
-// bundled helper as an offline fallback. There is no HTTP fallback for reads;
+// runner is injected: on macOS it execs the install-owned machine `lf` gate,
+// with the app's bundled helper as an offline fallback. There is no HTTP fallback for reads;
 // remote reads need to become proxied `lf` queries.
 
 import Foundation

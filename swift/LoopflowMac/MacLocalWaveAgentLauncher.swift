@@ -17,6 +17,63 @@ struct TaskStartReceipt: Decodable, Sendable, Equatable {
     let wave: String
 }
 
+enum LocalControlAuthority: Equatable {
+    case installedMachine(executable: URL)
+    case bundledOffline(executable: URL)
+
+    var executable: URL {
+        switch self {
+        case .installedMachine(let executable), .bundledOffline(let executable): executable
+        }
+    }
+
+    static func resolve(
+        accountHome: URL = FileManager.default.homeDirectoryForCurrentUser,
+        bundled: URL? = Bundle.main.url(forAuxiliaryExecutable: "lf")
+    ) throws -> Self {
+        let installRoot = accountHome
+            .appendingPathComponent(".lf-machine", isDirectory: true)
+            .appendingPathComponent("install", isDirectory: true)
+        let gate = installRoot
+            .appendingPathComponent("gates", isDirectory: true)
+            .appendingPathComponent("1", isDirectory: true)
+            .appendingPathComponent("lf", isDirectory: false)
+        var isDirectory = ObjCBool(false)
+        if FileManager.default.fileExists(atPath: gate.path, isDirectory: &isDirectory) {
+            guard !isDirectory.boolValue,
+                  FileManager.default.isExecutableFile(atPath: gate.path)
+            else {
+                throw LocalLfError(
+                    errorDescription: "Loopflow's installed machine entry gate is not executable at \(gate.path). "
+                        + "Repair or reinstall Loopflow."
+                )
+            }
+            return .installedMachine(executable: gate)
+        }
+
+        let hasInstallReceipt = ["active.json", "switch.json"].contains { name in
+            FileManager.default.fileExists(
+                atPath: installRoot.appendingPathComponent(name, isDirectory: false).path
+            )
+        }
+        if hasInstallReceipt {
+            throw LocalLfError(
+                errorDescription: "Loopflow's machine install receipt exists, but its entry gate is missing at "
+                    + "\(gate.path). Repair or reinstall Loopflow."
+            )
+        }
+
+        guard let bundled, FileManager.default.isExecutableFile(atPath: bundled.path) else {
+            throw LocalLfError(
+                errorDescription: "Loopflow has no installed machine entry gate at \(gate.path) "
+                    + "and this app is missing its executable offline lf helper at Contents/MacOS/lf. "
+                    + "Rebuild or reinstall Loopflow."
+            )
+        }
+        return .bundledOffline(executable: bundled)
+    }
+}
+
 enum LocalWaveAgentLauncher {
     /// Stop the listener through the same `lf` lifecycle surface the CLI uses.
     /// The server performs resident, registry, and discovery-file cleanup.
@@ -129,37 +186,17 @@ enum LocalWaveAgentLauncher {
 
     /// Return the active machine control binary, or the bundled offline fallback.
     ///
-    /// Loopflow's enriched GUI PATH leads with `~/.local/bin`, whose `lf` is the
-    /// machine entry gate. It dispatches to the binary that owns the selected
-    /// installed Home, including an installed development store with draft
-    /// migrations a release-provenance helper cannot interpret.
+    /// The fixed OS-account gate reads the active install receipt and dispatches
+    /// to the binary that owns its store. PATH and inherited Home variables are
+    /// process configuration, not install authority.
     static func controlLfPath(
-        searchPath: String = GUIProcessEnvironment.enrichedPath(
-            from: ProcessInfo.processInfo.environment["PATH"]
-        ),
+        accountHome: URL = FileManager.default.homeDirectoryForCurrentUser,
         bundled: URL? = Bundle.main.url(forAuxiliaryExecutable: "lf")
     ) throws -> String {
-        for directory in searchPath.split(separator: ":") {
-            let candidate = URL(fileURLWithPath: String(directory), isDirectory: true)
-                .appendingPathComponent("lf", isDirectory: false)
-            if FileManager.default.isExecutableFile(atPath: candidate.path) {
-                return candidate.path
-            }
-        }
-        return try bundledLfPath(bundled: bundled)
-    }
-
-    /// Return the control binary shipped with this exact Mac client build.
-    static func bundledLfPath(
-        bundled: URL? = Bundle.main.url(forAuxiliaryExecutable: "lf")
-    ) throws -> String {
-        guard let bundled, FileManager.default.isExecutableFile(atPath: bundled.path) else {
-            throw LocalLfError(
-                errorDescription: "Loopflow.app is missing its executable bundled lf helper at Contents/MacOS/lf. "
-                    + "No active machine lf was found; rebuild or reinstall Loopflow."
-            )
-        }
-        return bundled.path
+        try LocalControlAuthority.resolve(
+            accountHome: accountHome,
+            bundled: bundled
+        ).executable.path
     }
 
     /// Run an `lf` query verb (`ls`, `status`, `runs`, …) and return its

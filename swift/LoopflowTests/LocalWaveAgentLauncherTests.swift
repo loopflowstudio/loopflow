@@ -125,48 +125,129 @@ struct LocalWaveAgentLauncherTests {
 
     // MARK: - Bundled binary boundary
 
-    @Test("the active machine lf precedes the bundled fallback")
-    func activeMachineLfPrecedesBundle() throws {
-        let directory = FileManager.default.temporaryDirectory
-            .appendingPathComponent("loopflow-control-lf-\(UUID().uuidString)", isDirectory: true)
-        defer { try? FileManager.default.removeItem(at: directory) }
-        try FileManager.default.createDirectory(at: directory, withIntermediateDirectories: true)
-        let installed = directory.appendingPathComponent("lf")
+    @Test("the install-owned machine gate supplies executable and store authority")
+    func installedMachineGatePrecedesBundle() throws {
+        let accountHome = FileManager.default.temporaryDirectory
+            .appendingPathComponent("loopflow-control-home-\(UUID().uuidString)", isDirectory: true)
+        defer { try? FileManager.default.removeItem(at: accountHome) }
+        let installed = accountHome
+            .appendingPathComponent(".lf-machine/install/gates/1", isDirectory: true)
+            .appendingPathComponent("lf")
+        try FileManager.default.createDirectory(
+            at: installed.deletingLastPathComponent(),
+            withIntermediateDirectories: true
+        )
         try Data().write(to: installed)
         try FileManager.default.setAttributes(
             [.posixPermissions: 0o755],
             ofItemAtPath: installed.path
         )
 
-        let resolved = try LocalWaveAgentLauncher.controlLfPath(
-            searchPath: directory.path,
+        let authority = try LocalControlAuthority.resolve(
+            accountHome: accountHome,
             bundled: URL(fileURLWithPath: "/Applications/Loopflow.app/Contents/MacOS/lf")
         )
 
-        #expect(resolved == installed.path)
+        #expect(authority == .installedMachine(executable: installed))
     }
 
-    @Test("a missing machine lf uses the bundled offline fallback")
-    func missingMachineLfUsesBundle() throws {
+    @Test("an account-local bin cannot replace install authority")
+    func accountLocalBinCannotReplaceInstallAuthority() throws {
+        let accountHome = FileManager.default.temporaryDirectory
+            .appendingPathComponent("loopflow-control-home-\(UUID().uuidString)", isDirectory: true)
+        defer { try? FileManager.default.removeItem(at: accountHome) }
+        let unrelatedDirectory = accountHome
+            .appendingPathComponent(".local", isDirectory: true)
+            .appendingPathComponent("bin", isDirectory: true)
+        try FileManager.default.createDirectory(
+            at: unrelatedDirectory,
+            withIntermediateDirectories: true
+        )
+        let unrelated = unrelatedDirectory.appendingPathComponent("lf")
+        try Data().write(to: unrelated)
+        try FileManager.default.setAttributes(
+            [.posixPermissions: 0o755],
+            ofItemAtPath: unrelated.path
+        )
         let bundled = URL(fileURLWithPath: "/bin/sh")
-        let resolved = try LocalWaveAgentLauncher.controlLfPath(
-            searchPath: "/path/that/does/not/exist",
+
+        let authority = try LocalControlAuthority.resolve(
+            accountHome: accountHome,
             bundled: bundled
         )
 
-        #expect(resolved == bundled.path)
+        #expect(authority == .bundledOffline(executable: bundled))
+    }
+
+    @Test("a missing machine install uses the typed bundled offline fallback")
+    func missingMachineInstallUsesBundle() throws {
+        let bundled = URL(fileURLWithPath: "/bin/sh")
+        let authority = try LocalControlAuthority.resolve(
+            accountHome: URL(fileURLWithPath: "/path/that/does/not/exist", isDirectory: true),
+            bundled: bundled
+        )
+
+        #expect(authority == .bundledOffline(executable: bundled))
+    }
+
+    @Test("a broken installed gate fails instead of reading a different store")
+    func brokenInstalledGateFails() throws {
+        let accountHome = FileManager.default.temporaryDirectory
+            .appendingPathComponent("loopflow-control-home-\(UUID().uuidString)", isDirectory: true)
+        defer { try? FileManager.default.removeItem(at: accountHome) }
+        let gate = accountHome
+            .appendingPathComponent(".lf-machine/install/gates/1", isDirectory: true)
+            .appendingPathComponent("lf")
+        try FileManager.default.createDirectory(
+            at: gate.deletingLastPathComponent(),
+            withIntermediateDirectories: true
+        )
+        try Data().write(to: gate)
+
+        #expect {
+            try LocalControlAuthority.resolve(
+                accountHome: accountHome,
+                bundled: URL(fileURLWithPath: "/bin/sh")
+            )
+        } throws: { error in
+            error.localizedDescription.contains("machine entry gate is not executable")
+        }
+    }
+
+    @Test("a receipt with no machine gate fails instead of reading a different store")
+    func missingInstalledGateFails() throws {
+        let accountHome = FileManager.default.temporaryDirectory
+            .appendingPathComponent("loopflow-control-home-\(UUID().uuidString)", isDirectory: true)
+        defer { try? FileManager.default.removeItem(at: accountHome) }
+        let installRoot = accountHome
+            .appendingPathComponent(".lf-machine", isDirectory: true)
+            .appendingPathComponent("install", isDirectory: true)
+        try FileManager.default.createDirectory(
+            at: installRoot,
+            withIntermediateDirectories: true
+        )
+        try Data("{}".utf8).write(to: installRoot.appendingPathComponent("active.json"))
+
+        #expect {
+            try LocalControlAuthority.resolve(
+                accountHome: accountHome,
+                bundled: URL(fileURLWithPath: "/bin/sh")
+            )
+        } throws: { error in
+            error.localizedDescription.contains("install receipt exists")
+        }
     }
 
     @Test("a missing machine and bundled helper fails clearly")
     func missingControlHelpersFail() {
         #expect {
-            try LocalWaveAgentLauncher.controlLfPath(
-                searchPath: "/path/that/does/not/exist",
+            try LocalControlAuthority.resolve(
+                accountHome: URL(fileURLWithPath: "/path/that/does/not/exist", isDirectory: true),
                 bundled: nil
             )
         } throws: { error in
             guard error is LocalLfError else { return false }
-            return error.localizedDescription.contains("missing its executable bundled lf helper")
+            return error.localizedDescription.contains("missing its executable offline lf helper")
         }
     }
 

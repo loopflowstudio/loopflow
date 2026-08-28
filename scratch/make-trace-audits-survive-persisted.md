@@ -77,7 +77,7 @@
   the copy from the real Home trace root. Its verdict distinguishes missing,
   unsafe, unreadable, truncated, unsupported-schema, and corrupt captures while
   reporting partial rows without reclassifying them.
-- The exact published-head Home preflight resolved 98 lifecycle references and
+- The post-compression reviewed-head Home preflight resolved 98 lifecycle references and
   read 3,681 of 3,681 complete captures. It retained 71 partial captures
   separately. Its refusals were unrelated to capture compatibility: the
   expected validation-only build authority and pending development migrations.
@@ -98,8 +98,8 @@
 | Historical schema-v1 usage is readable | Normalize the six observed `usage` and `turn_usage` shapes at one reader boundary | Exact-field normalization produces current `usage_checkpoint` events only after current decoding fails | `conversation_reader_normalizes_every_persisted_usage_variant`; six-line historical fixture | pass |
 | Current vocabulary and strictness remain | Recognize `usage_checkpoint`; reject unknown fields, nulls, and schema versions without defaults | Current wire fixture is frozen; the normalizer accepts only recorded field sets; one module-private wire DTO validates every version-1 artifact and no legacy writer exists | `conversation_reader_accepts_frozen_usage_checkpoint_wire_shape`; focused rejection tests; source review | pass |
 | Broken and partial captures stay distinct | Unsupported, truncated, corrupt, and partial captures must not become readable history | Complete-capture failures carry distinct kinds; partial rows are counted and never opened or reclassified | `candidate_audits_persisted_capture_schemas_on_the_migrated_home_copy`: 4 complete, 3 typed failures, 1 separate partial | pass |
-| The long-lived Home survives candidate migration | Audit the real artifact corpus through a SQLite-consistent copy | Candidate preflight audits legacy references before migration may retire their SQL index, then validates executable references in the candidate schema | Exact published-head `scripts/dev-lf install preflight --json`: 3,681/3,681 complete readable, 71 partial, 98 lifecycle references; only authority and pending-development-migration refusals remained | pass |
-| Current ledger auditing is not coupled to retired artifacts | `lf doctor` must audit the migrated Home without historical capture decode failures | `lf doctor` audits current Run records; candidate preflight is the sole production caller of the versioned legacy reader | Source call graph plus the exact published-head preflight above | pass |
+| The long-lived Home survives candidate migration | Audit the real artifact corpus through a SQLite-consistent copy | Candidate preflight audits legacy references before migration may retire their SQL index, then validates executable references in the candidate schema | Post-compression `scripts/dev-lf install preflight --json`: 3,681/3,681 complete readable, 71 partial, 98 lifecycle references; only authority and pending-development-migration refusals remained | pass |
+| Current ledger auditing is not coupled to retired artifacts | `lf doctor` must audit the migrated Home without historical capture decode failures | `lf doctor` audits current Run records; candidate preflight is the sole production caller of the versioned legacy reader | Source call graph plus the post-compression preflight above | pass |
 
 Review found and fixed one missing proof: promotion classified corrupt captures
 but its integration fixture exercised only unsupported-schema and truncated
@@ -124,6 +124,13 @@ typed failures, and the stable `compatible`/`incompatible` JSON verdict. The
 schema-v1 dispatcher and recorded-event DTO also remain because they validate
 immutable artifacts on the long-lived Home; they are not an active writer or a
 second trace authority.
+
+Review found one compression-induced naming collision: the audit result was
+initially called `ConversationStatus`, duplicating the active chat lifecycle
+type. It is now `ConversationArtifactStatus`; the former name has one owner
+again. Negative source search found no active `agent_invocations` writer, no
+second legacy conversation DTO, and no caller of the versioned reader outside
+candidate promotion.
 
 ## Rebase resolution — 2026-08-28
 

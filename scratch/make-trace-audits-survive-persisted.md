@@ -105,6 +105,24 @@ but its integration fixture exercised only unsupported-schema and truncated
 failures. The fixture now includes a structurally corrupt persisted event and
 asserts that the partial invocation is absent from the complete-failure set.
 
+## Compression review — 2026-08-28
+
+The production caller needs one fact from a readable artifact: whether the
+final JSONL line is complete or truncated. The reader previously retained every
+decoded event in a `Vec`, and promotion read `events.len()` only to keep that
+storage alive. It now returns `ConversationStatus::{Complete, Truncated}` while
+still decoding every line through the exact versioned schema boundary. The
+recorded-event wire types are module-private; only the status and classified
+error cross into candidate promotion.
+
+The tagged promotion DTOs remain intentionally. `CandidateCompatibility`
+distinguishes failure to construct the one migrated snapshot from results of
+the two audits derived from it, while `CaptureCompatibility` preserves counts,
+typed failures, and the stable `compatible`/`incompatible` JSON verdict. The
+schema-v1 dispatcher and recorded-event DTO also remain because they validate
+immutable artifacts on the long-lived Home; they are not an active writer or a
+second trace authority.
+
 ## Rebase resolution — 2026-08-28
 
 Main replaced the old trace writer and ordinary readers with three-file Run

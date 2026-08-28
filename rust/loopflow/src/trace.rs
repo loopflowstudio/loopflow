@@ -618,20 +618,20 @@ impl LegacyTraceSchemaVersion {
     }
 }
 
-#[derive(Debug, Clone, Serialize, Deserialize)]
-pub(crate) struct RecordedConversationEvent {
-    pub schema_version: u32,
-    pub seq: u64,
+#[derive(Debug, Serialize, Deserialize)]
+struct RecordedConversationEvent {
+    schema_version: u32,
+    seq: u64,
     #[serde(with = "time::serde::rfc3339")]
-    pub ts: OffsetDateTime,
-    pub turn_id: Option<String>,
-    pub payload: RecordedConversationPayload,
+    ts: OffsetDateTime,
+    turn_id: Option<String>,
+    payload: RecordedConversationPayload,
 }
 
-#[derive(Debug, Clone, Serialize, Deserialize)]
+#[derive(Debug, Serialize, Deserialize)]
 #[serde(tag = "type", rename_all = "snake_case")]
 #[non_exhaustive]
-pub(crate) enum RecordedConversationPayload {
+enum RecordedConversationPayload {
     UserInput {
         op: String,
         text: String,
@@ -656,10 +656,10 @@ pub(crate) enum RecordedConversationPayload {
     },
 }
 
-#[derive(Debug)]
-pub(crate) struct ConversationRead {
-    pub events: Vec<RecordedConversationEvent>,
-    pub incomplete_tail: bool,
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub(crate) enum ConversationStatus {
+    Complete,
+    Truncated,
 }
 
 #[derive(Debug, thiserror::Error)]
@@ -863,15 +863,25 @@ fn _decode_versioned_conversation_event(
     Ok(serde_json::from_value(value)?)
 }
 
+fn _decode_conversation_event(
+    line: &str,
+) -> Result<RecordedConversationEvent, ConversationReadError> {
+    match serde_json::from_str::<RecordedConversationEvent>(line) {
+        Ok(event) => {
+            LegacyTraceSchemaVersion::parse(u64::from(event.schema_version))?;
+            Ok(event)
+        }
+        Err(error) => _decode_versioned_conversation_event(line, error),
+    }
+}
+
 pub(crate) fn read_conversation_status_classified(
     path: &Path,
-) -> Result<ConversationRead, ConversationReadError> {
+) -> Result<ConversationStatus, ConversationReadError> {
     let file = fs::File::open(path).map_err(|source| ConversationReadError::Io {
         context: format!("open {}", path.display()),
         source,
     })?;
-    let mut events = Vec::new();
-    let mut incomplete_tail = false;
     let mut reader = BufReader::new(file);
     loop {
         let mut line = String::new();
@@ -887,22 +897,17 @@ pub(crate) fn read_conversation_status_classified(
         if line.trim().is_empty() {
             continue;
         }
-        match serde_json::from_str::<RecordedConversationEvent>(&line) {
-            Ok(event) => {
-                LegacyTraceSchemaVersion::parse(u64::from(event.schema_version))?;
-                events.push(event);
+        match _decode_conversation_event(&line) {
+            Ok(_) => {}
+            Err(ConversationReadError::Serialization(error))
+                if !line.ends_with('\n') && error.is_eof() =>
+            {
+                return Ok(ConversationStatus::Truncated);
             }
-            Err(error) if !line.ends_with('\n') && error.is_eof() => {
-                incomplete_tail = true;
-                break;
-            }
-            Err(error) => events.push(_decode_versioned_conversation_event(&line, error)?),
+            Err(error) => return Err(error),
         }
     }
-    Ok(ConversationRead {
-        events,
-        incomplete_tail,
-    })
+    Ok(ConversationStatus::Complete)
 }
 
 pub(crate) fn resolve_artifact_from(
@@ -926,10 +931,12 @@ pub(crate) fn resolve_artifact_from(
 
 #[cfg(test)]
 mod tests {
+    use crate::chat::types::ConversationEvent;
+
     use super::{
-        read_conversation_status_classified, ContextAssetKind, ContextAssetSpec, ContextChannel,
-        ContextScope, LegacyTraceSchemaVersion, PreparedTurnContext, RecordedConversationEvent,
-        RecordedConversationPayload,
+        _decode_conversation_event, read_conversation_status_classified, ContextAssetKind,
+        ContextAssetSpec, ContextChannel, ContextScope, ConversationStatus,
+        LegacyTraceSchemaVersion, PreparedTurnContext, RecordedConversationPayload,
     };
 
     fn _conversation_error(line: &str) -> String {
@@ -964,7 +971,7 @@ mod tests {
     }
 
     #[test]
-    fn conversation_reader_keeps_complete_crash_tail() {
+    fn conversation_reader_classifies_final_crash_tail_as_truncated() {
         let directory = tempfile::tempdir().unwrap();
         let path = directory.path().join("events.jsonl");
         std::fs::write(
@@ -972,9 +979,10 @@ mod tests {
             "{\"schema_version\":1,\"seq\":0,\"ts\":\"2026-07-10T00:00:00Z\",\"turn_id\":null,\"payload\":{\"type\":\"capture_error\",\"message\":\"x\"}}\n{\"schema_version\":",
         )
         .unwrap();
-        let read = read_conversation_status_classified(&path).unwrap();
-        assert_eq!(read.events.len(), 1);
-        assert!(read.incomplete_tail);
+        assert_eq!(
+            read_conversation_status_classified(&path).unwrap(),
+            ConversationStatus::Truncated
+        );
     }
 
     #[test]
@@ -987,12 +995,13 @@ mod tests {
         )
         .unwrap();
 
-        let read = read_conversation_status_classified(&path).unwrap();
-        assert!(!read.incomplete_tail);
-        assert_eq!(read.events.len(), 6);
-        let checkpoints = read
-            .events
-            .into_iter()
+        assert_eq!(
+            read_conversation_status_classified(&path).unwrap(),
+            ConversationStatus::Complete
+        );
+        let checkpoints = include_str!("../tests/fixtures/trace/historical_usage_variants.jsonl")
+            .lines()
+            .map(|line| _decode_conversation_event(line).unwrap())
             .map(|record| match record.payload {
                 RecordedConversationPayload::Conversation { event } => match *event {
                     ConversationEvent::UsageCheckpoint {
@@ -1032,17 +1041,21 @@ mod tests {
     }
 
     #[test]
-    fn conversation_usage_checkpoint_wire_shape_is_frozen_for_current_schema() {
+    fn conversation_reader_accepts_frozen_usage_checkpoint_wire_shape() {
         let expected =
             include_str!("../tests/fixtures/trace/current_usage_checkpoint.jsonl").trim_end();
-        let event: RecordedConversationEvent = serde_json::from_str(expected).unwrap();
+        let event = _decode_conversation_event(expected).unwrap();
 
         assert_eq!(
             LegacyTraceSchemaVersion::parse(1).unwrap(),
             LegacyTraceSchemaVersion::V1
         );
         assert_eq!(event.schema_version, 1);
-        assert_eq!(serde_json::to_string(&event).unwrap(), expected);
+        assert!(matches!(
+            event.payload,
+            RecordedConversationPayload::Conversation { event }
+                if matches!(*event, ConversationEvent::UsageCheckpoint { .. })
+        ));
     }
 
     #[test]

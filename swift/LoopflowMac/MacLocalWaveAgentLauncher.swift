@@ -17,20 +17,13 @@ struct TaskStartReceipt: Decodable, Sendable, Equatable {
     let wave: String
 }
 
-enum LocalControlAuthority: Equatable {
-    case installedMachine(executable: URL)
-    case bundledOffline(executable: URL)
-
-    var executable: URL {
-        switch self {
-        case .installedMachine(let executable), .bundledOffline(let executable): executable
-        }
-    }
-
-    static func resolve(
+enum LocalWaveAgentLauncher {
+    /// Return the receipt-backed machine control binary, or the offline helper
+    /// when no machine installation exists.
+    static func controlLfPath(
         accountHome: URL = FileManager.default.homeDirectoryForCurrentUser,
         bundled: URL? = Bundle.main.url(forAuxiliaryExecutable: "lf")
-    ) throws -> Self {
+    ) throws -> String {
         let installRoot = accountHome
             .appendingPathComponent(".lf-machine", isDirectory: true)
             .appendingPathComponent("install", isDirectory: true)
@@ -48,7 +41,7 @@ enum LocalControlAuthority: Equatable {
                         + "Repair or reinstall Loopflow."
                 )
             }
-            return .installedMachine(executable: gate)
+            return gate.path
         }
 
         let hasInstallReceipt = ["active.json", "switch.json"].contains { name in
@@ -70,11 +63,9 @@ enum LocalControlAuthority: Equatable {
                     + "Rebuild or reinstall Loopflow."
             )
         }
-        return .bundledOffline(executable: bundled)
+        return bundled.path
     }
-}
 
-enum LocalWaveAgentLauncher {
     /// Stop the listener through the same `lf` lifecycle surface the CLI uses.
     /// The server performs resident, registry, and discovery-file cleanup.
     static func stopWave(repoPath: String, waveName: String) throws {
@@ -182,21 +173,6 @@ enum LocalWaveAgentLauncher {
 
     static func taskInterruptCommand(lfPath: String, issue: String) -> [String] {
         [lfPath, "task", "interrupt", issue]
-    }
-
-    /// Return the active machine control binary, or the bundled offline fallback.
-    ///
-    /// The fixed OS-account gate reads the active install receipt and dispatches
-    /// to the binary that owns its store. PATH and inherited Home variables are
-    /// process configuration, not install authority.
-    static func controlLfPath(
-        accountHome: URL = FileManager.default.homeDirectoryForCurrentUser,
-        bundled: URL? = Bundle.main.url(forAuxiliaryExecutable: "lf")
-    ) throws -> String {
-        try LocalControlAuthority.resolve(
-            accountHome: accountHome,
-            bundled: bundled
-        ).executable.path
     }
 
     /// Run an `lf` query verb (`ls`, `status`, `runs`, …) and return its

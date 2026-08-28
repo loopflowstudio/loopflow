@@ -143,12 +143,12 @@ struct LocalWaveAgentLauncherTests {
             ofItemAtPath: installed.path
         )
 
-        let authority = try LocalControlAuthority.resolve(
+        let resolved = try LocalWaveAgentLauncher.controlLfPath(
             accountHome: accountHome,
             bundled: URL(fileURLWithPath: "/Applications/Loopflow.app/Contents/MacOS/lf")
         )
 
-        #expect(authority == .installedMachine(executable: installed))
+        #expect(resolved == installed.path)
     }
 
     @Test("an account-local bin cannot replace install authority")
@@ -171,23 +171,23 @@ struct LocalWaveAgentLauncherTests {
         )
         let bundled = URL(fileURLWithPath: "/bin/sh")
 
-        let authority = try LocalControlAuthority.resolve(
+        let resolved = try LocalWaveAgentLauncher.controlLfPath(
             accountHome: accountHome,
             bundled: bundled
         )
 
-        #expect(authority == .bundledOffline(executable: bundled))
+        #expect(resolved == bundled.path)
     }
 
-    @Test("a missing machine install uses the typed bundled offline fallback")
+    @Test("a missing machine install uses the bundled offline fallback")
     func missingMachineInstallUsesBundle() throws {
         let bundled = URL(fileURLWithPath: "/bin/sh")
-        let authority = try LocalControlAuthority.resolve(
+        let resolved = try LocalWaveAgentLauncher.controlLfPath(
             accountHome: URL(fileURLWithPath: "/path/that/does/not/exist", isDirectory: true),
             bundled: bundled
         )
 
-        #expect(authority == .bundledOffline(executable: bundled))
+        #expect(resolved == bundled.path)
     }
 
     @Test("a broken installed gate fails instead of reading a different store")
@@ -205,7 +205,7 @@ struct LocalWaveAgentLauncherTests {
         try Data().write(to: gate)
 
         #expect {
-            try LocalControlAuthority.resolve(
+            try LocalWaveAgentLauncher.controlLfPath(
                 accountHome: accountHome,
                 bundled: URL(fileURLWithPath: "/bin/sh")
             )
@@ -229,7 +229,7 @@ struct LocalWaveAgentLauncherTests {
         try Data("{}".utf8).write(to: installRoot.appendingPathComponent("active.json"))
 
         #expect {
-            try LocalControlAuthority.resolve(
+            try LocalWaveAgentLauncher.controlLfPath(
                 accountHome: accountHome,
                 bundled: URL(fileURLWithPath: "/bin/sh")
             )
@@ -241,7 +241,7 @@ struct LocalWaveAgentLauncherTests {
     @Test("a missing machine and bundled helper fails clearly")
     func missingControlHelpersFail() {
         #expect {
-            try LocalControlAuthority.resolve(
+            try LocalWaveAgentLauncher.controlLfPath(
                 accountHome: URL(fileURLWithPath: "/path/that/does/not/exist", isDirectory: true),
                 bundled: nil
             )

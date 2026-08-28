@@ -88,7 +88,7 @@ codebase tree, and registry health.
   renders its reason, and refresh failures leave the last successful roadmap or
   Activity history visible. The Mac resolves the fixed OS-account `lf` entry
   gate first, so one install receipt supplies the executable and store together;
-  the bundled helper is the typed offline fallback when Loopflow is not installed.
+  the bundled helper is the offline fallback when Loopflow is not installed.
 - **Per-Wave SSE** owns live motion. `WaveChatConnection` first reads
   `lf chat --history --json`, then connects only to the selected Wave's
   `/events` stream and upserts its replay before continuing live.

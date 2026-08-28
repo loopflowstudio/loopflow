@@ -94,9 +94,9 @@ consequence and made the broken surface look healthy.
 
 ## Changes to Implement
 
-- [x] Define the install-owned local-control authority: the fixed machine gate
-  reads the active receipt that binds the exact executable and store; an
-  explicit bundled-offline case applies only when no installation exists.
+- [x] Use the install-owned local-control authority: the fixed machine gate
+  reads the active receipt that binds the exact executable and store; the
+  bundled offline path applies only when no installation exists.
 - [x] Make Dev launch and Mac process launch consume that authority, then
   delete the manual `LF_*` forwarding list and arbitrary PATH scan.
 - [ ] Add an installed-Dev-app integration proof using a disposable populated
@@ -169,7 +169,7 @@ not the binary that owns an installed development store.
 Resolve the fixed OS-account gate at `~/.lf-machine/install/gates/1/lf`. Its
 active install receipt selects the compatible executable and store together,
 regardless of PATH or inherited Home variables. Keep the validation-only
-bundled helper as an explicitly typed no-install fallback. Restrict fleet and
+bundled helper as an explicit no-install fallback. Restrict fleet and
 Activity empty copy to successful reads.
 
 ### Restoration proof
@@ -199,8 +199,8 @@ Activity empty copy to successful reads.
 
 ### Review
 
-- Reads and controls share `controlLfPath()`; there is no second Mac query
-  implementation. `LocalControlAuthority` selects either the receipt-backed
+- Reads and controls share `controlLfPath()`; there is no second Mac query or
+  Swift-owned authority type. The function selects either the receipt-backed
   machine gate or the validation-only offline fallback. It never scans PATH,
   and a receipt with a missing or non-executable gate fails rather than falling
   through to another store.

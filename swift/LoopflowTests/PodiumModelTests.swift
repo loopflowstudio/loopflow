@@ -264,6 +264,34 @@ struct PodiumModelTests {
         ])
     }
 
+    @Test("Unavailable Activity stays visible while the same scope retries")
+    func unavailableActivityStaysVisibleDuringRetry() async throws {
+        let fixture = try PodiumTestFixture.load()
+        let deferred = DeferredActivityResponse()
+        let query = RegistryQuery { args, _ in
+            #expect(args.first == "activity")
+            return await deferred.response()
+        }
+        let model = PodiumModel(query: query)
+
+        let failedRefresh = Task { await model.refreshWorkActivity() }
+        await deferred.waitUntilRequested()
+        await deferred.release("{}")
+        await failedRefresh.value
+        let failure = try #require(model.workActivity.errorMessage)
+
+        let retry = Task { await model.refreshWorkActivity() }
+        await deferred.waitUntilRequested()
+
+        #expect(model.workActivity.errorMessage == failure)
+        #expect(!model.workActivity.isLoading)
+
+        let success = try #require(String(data: fixture.workActivityData, encoding: .utf8))
+        await deferred.release(success)
+        await retry.value
+        #expect(model.workActivity.value?.items.count == fixture.workActivity.items.count)
+    }
+
     @Test("A late Activity query cannot replace evidence for a newer selection")
     func staleActivityQueryDoesNotReplaceNewSelection() async throws {
         let fixture = try PodiumTestFixture.load()

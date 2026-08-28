@@ -257,9 +257,10 @@ final class PodiumModel {
             return
         }
 
-        let previous = workActivityScope == scope ? workActivity.value : nil
+        let sameScope = workActivityScope == scope
+        let previous = sameScope ? workActivity.value : nil
+        if !sameScope { workActivity = .loading }
         workActivityScope = scope
-        if previous == nil { workActivity = .loading }
 
         let result = await readWorkActivity(scope: scope)
 

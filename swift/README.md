@@ -127,8 +127,8 @@ validation-only migration authority. When Loopflow is installed, operator reads
 use the fixed machine entry gate and the exact executable/store pair from its
 active receipt. The Dev launcher forwards only its repository override; ambient
 Home variables cannot split that pair. Without an installation, the bundled
-helper remains a read-only offline fallback. Ordinary source-built `lf` commands
-keep their isolated `.lf-dev` Home.
+helper remains the validation-only offline fallback. Ordinary source-built `lf`
+commands keep their isolated `.lf-dev` Home.
 
 | Command | What it does |
 | --- | --- |

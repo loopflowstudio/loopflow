@@ -177,17 +177,21 @@ Activity empty copy to successful reads.
 - `uv run python scripts/loopflow-dev.py run` rebuilt, signed, and launched
   `~/Applications/Loopflow Dev.app` with only the development repository
   override; the machine install receipt supplied the active Home.
-- The installed-bundle capture at `/tmp/loo-274-installed-authority.png` ran
+- The installed-bundle capture at `/tmp/loo-274-gate-retry.png` ran
   `~/Applications/Loopflow Dev.app/Contents/MacOS/Loopflow` with every `LF_*`
   routing variable removed and `PATH=/usr/bin:/bin`. After a 40-second settle it
   showed the five Loopflow Waves and populated Work rows. The exact machine gate
   under the same hostile environment reported five Loopflow Waves; roadmap
   reported product with three Projects and 88 Tasks. The capture checksum is
-  `0518ce7c1e8a9cc1764049f2f3ef3ed88ef55568a87496f85d31835df99cfe53`.
+  `3e7aab97d12f5ed1aa3bb0635d6e88eeb408fe896863a0f00938b3ac237e5130`.
 - Activity left `Reading Activity…`. Its current wire mismatch surfaced as
   `Activity unavailable` with the exact missing-`run_id` decode reason, and did
   not render `No Activity in this window`. This distinguishes restoration from
   the reported indefinitely loading or plausibly empty surface.
+- A gate capture first caught Activity back in `Reading Activity…`: each
+  same-scope retry reset an unavailable reading to loading before the command
+  finished. Retries now preserve the current terminal reading until new evidence
+  arrives; the second 40-second capture above remained explicitly unavailable.
 - `/usr/bin/time -p lf activity --since 7d --limit 50 --json` returned 50 items
   in 6.67 seconds. The command completes with populated JSON; the visible Mac
   failure is a named DTO mismatch rather than an empty ledger.
@@ -236,14 +240,18 @@ Activity empty copy to successful reads.
 | Populated fleet | A cold launch exposes the real local Wave roster. | `RegistryQuery` receives `lf ls --all --json` through the machine gate. | `/tmp/loo-274-review-settled.png` shows **5 Waves**; the exact gate independently returned the same five Loopflow Waves. | pass |
 | Populated roadmap | Roadmap loading terminates with the selected store's real Work. | `RegistryQuery` receives `lf roadmap --all --json` through the same gate. | The installed-app capture shows populated Work rows; the exact gate returned product with 3 Projects and 88 Tasks. | pass |
 | Terminal Activity state | Activity must leave `Reading Activity…` even when its DTO cannot decode. | A failed first read becomes `Activity unavailable` with the subprocess/decode reason. | The installed-app capture shows the current missing-`run_id` reason and the terminal unavailable state. | pass |
+| Activity retry stability | A periodic retry must not hide the last terminal Activity state while its subprocess is running. | Same-scope refreshes retain the existing reading; a scope change alone resets to loading. | `PodiumModelTests.unavailableActivityStaysVisibleDuringRetry` holds a retry open and observes the prior failure; the 40-second live capture remains unavailable across multiple retries. | pass |
 | Failed reads are not empty | Unavailable fleet, roadmap, or Activity evidence must not claim healthy emptiness. | Empty copy is restricted to successful empty readings; the error fixture makes every affected reading unavailable. | Live capture shows no Activity empty claim; `PodiumStateTests.testUnavailableIsNotRenderedAsEmpty` pins all three surfaces. | pass |
 
 The exact-head capture checksum is
-`0518ce7c1e8a9cc1764049f2f3ef3ed88ef55568a87496f85d31835df99cfe53`.
+`3e7aab97d12f5ed1aa3bb0635d6e88eeb408fe896863a0f00938b3ac237e5130`.
 Focused review proofs passed: `uv run pytest python/tests/test_loopflow_dev.py`,
 `swift test --package-path swift --filter LocalWaveAgentLauncherTests`, and
-`swift test --package-path swift --filter PodiumModelTests` (28 Swift tests
-across the two filters).
+`swift test --package-path swift --filter PodiumModelTests` (14 tests in the
+final focused filter). Before the bounded retry fix, gate also passed 205 Python
+tests and the 230-test full Swift suite; the final tree passed the Swift
+platform-boundary check, Mac package build, eight distinct render proofs, and
+the signed macOS `build-for-testing` check.
 
 Disposition: the restoration slice is coherent and its applicable Done When
 claims hold through the configured installed app. The Activity `run_id` wire

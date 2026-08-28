@@ -1428,20 +1428,18 @@ mod tests {
             .await
             .unwrap();
 
-        let basis = |step: &str, step_index: u32, steer_sequence: u64| {
-            ProjectChildControlBasis {
-                position: FlowPosition {
-                    work: WorkRef::Project(project.id.clone()),
-                    flow: "project".to_string(),
-                    step: step.to_string(),
-                    node_id: None,
-                    human: false,
-                    step_index,
-                    iteration: 0,
-                    updated_at: OffsetDateTime::now_utc(),
-                },
-                steer_sequence,
-            }
+        let basis = |step: &str, step_index: u32, steer_sequence: u64| ProjectChildControlBasis {
+            position: FlowPosition {
+                work: WorkRef::Project(project.id.clone()),
+                flow: "project".to_string(),
+                step: step.to_string(),
+                node_id: None,
+                human: false,
+                step_index,
+                iteration: 0,
+                updated_at: OffsetDateTime::from_unix_timestamp(1_700_000_000).unwrap(),
+            },
+            steer_sequence,
         };
 
         let first_run = RunId::new();
@@ -1463,7 +1461,9 @@ mod tests {
             .authorize_project_child_control(&unrelated_task.id, &first_run, &first_token)
             .await
             .expect_err("one Project cannot control another Project's Task");
-        assert!(unrelated.to_string().contains("no active child-control basis"));
+        assert!(unrelated
+            .to_string()
+            .contains("no active child-control basis"));
 
         let project_work = WorkRef::Project(project.id.clone());
         store

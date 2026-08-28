@@ -70,6 +70,12 @@ struct PreparedProjectStep {
     planning: crate::ops::task_pm::ResolvedProject,
 }
 
+#[derive(Debug)]
+struct ProjectChildControl {
+    run_id: RunId,
+    token: ProjectChildControlToken,
+}
+
 pub(crate) async fn run(store: SharedStore, project_id: ProjectId) -> Result<()> {
     let result = run_project_inner(store.clone(), project_id.clone()).await;
     if let Err(error) = &result {
@@ -126,20 +132,17 @@ async fn run_project_inner(store: SharedStore, project_id: ProjectId) -> Result<
             },
             &prepared.turn.context,
         )?;
-        let control_run_id = capture.run_id();
-        let control_token = store
-            .begin_project_child_control(
-                &project.id,
-                &control_run_id,
-                &prepared.control_basis,
-            )
+        let run_id = capture.run_id();
+        let token = store
+            .begin_project_child_control(&project.id, &run_id, &prepared.control_basis)
             .await
             .map_err(project_child_control_error)?;
+        let control = ProjectChildControl { run_id, token };
         capture.record_input("initial", &prepared.turn.input);
         prepared.turn.config.env.extend(capture.environment());
         prepared.turn.config.env.insert(
             PROJECT_CHILD_CONTROL_ENV.to_string(),
-            control_token.as_str().to_string(),
+            control.token.as_str().to_string(),
         );
         capture.mark_spawn_requested();
         let capture = Some(capture);
@@ -171,8 +174,7 @@ async fn run_project_inner(store: SharedStore, project_id: ProjectId) -> Result<
             harness.as_mut(),
             &mut flow,
             None,
-            &control_run_id,
-            &control_token,
+            &control,
             prepared,
         )
         .await?;
@@ -298,8 +300,7 @@ async fn run_project_inner(store: SharedStore, project_id: ProjectId) -> Result<
                                     harness.as_mut(),
                                     &mut flow,
                                     capture.as_ref(),
-                                    &control_run_id,
-                                    &control_token,
+                                    &control,
                                     prepared,
                                 )
                                 .await?;
@@ -342,8 +343,7 @@ async fn run_project_inner(store: SharedStore, project_id: ProjectId) -> Result<
                                     harness.as_mut(),
                                     &mut flow,
                                     capture.as_ref(),
-                                    &control_run_id,
-                                    &control_token,
+                                    &control,
                                     prepared,
                                 )
                                 .await?;
@@ -357,8 +357,8 @@ async fn run_project_inner(store: SharedStore, project_id: ProjectId) -> Result<
                             store
                                 .release_project_child_control(
                                     &project.id,
-                                    &control_run_id,
-                                    &control_token,
+                                    &control.run_id,
+                                    &control.token,
                                 )
                                 .await?;
                             if project_run_must_remain_resident(
@@ -617,15 +617,14 @@ async fn start_project_flow_turn(
     harness: &mut dyn Harness,
     flow: &mut Playhead,
     capture: Option<&crate::run_record::CaptureHandle>,
-    control_run_id: &RunId,
-    control_token: &ProjectChildControlToken,
+    control: &ProjectChildControl,
     prepared: PreparedProjectStep,
 ) -> Result<()> {
     store
         .advance_project_child_control(
             &project.id,
-            control_run_id,
-            control_token,
+            &control.run_id,
+            &control.token,
             &prepared.control_basis,
         )
         .await

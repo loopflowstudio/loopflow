@@ -33,6 +33,14 @@ special resume bypass does not count.
 - Run-record subject attribution cannot safely fill the gap. The current
   architecture explicitly makes attribution non-authoritative, and a generic
   Run id alone does not prove Project ownership.
+- `resume_task_async` performs PR reconciliation and merge-intent cleanup before
+  its inner process-launch helper. Authority therefore has to be checked at the
+  command entry as well as immediately before launch; checking only the helper
+  would allow a refused caller to mutate Task state first.
+- Wave pursuit still described direct Task resume as a root override, but the
+  current authority model permits only the immediate Project controller or a
+  local User. The builtin guidance now routes parked Tasks through their owning
+  Project.
 
 ## Hypothesis
 
@@ -63,3 +71,28 @@ than restoring this surface.
 - Mint a capability only in `project/pursue`; clarify or mutate can transition
   into supervision without restarting the provider process.
 - Special-case `lf task resume` after it reaches the launcher.
+
+## Verification
+
+- `project_control_resumes_the_same_task_idempotently` drives the ordinary
+  `resume_task_async` path twice with the capability issued for
+  `project/pursue`; both calls return the existing Task Work.
+- `in_run_task_resume_requires_project_control_before_mutation` proves a generic
+  Run without the capability is refused before its active PR row changes.
+- `project_child_control_survives_phase_and_process_recovery_exactly` crosses a
+  phase transition and controller replacement, then proves same-Project retry,
+  unrelated-Project denial, Steer-frontier staleness, superseded-Run denial,
+  and actionable missing-basis failure.
+- Capability propagation replaces ambient identity at the provider boundary,
+  while durable child tmux sessions scrub the capability before launch.
+- `cargo fmt --check` and `cargo clippy --all-targets -- -D warnings` pass.
+- `uv run pytest python/tests/test_materialize_rust_tests.py -q` passes (3
+  tests).
+- Release-equivalent materialization advances the disposable package to
+  `0.12.15`, canonicalizes all five drafts, and passes
+  `project_child_control_survives_phase_and_process_recovery_exactly`.
+- The full Rust library run reached 1,504 passes, including every new fixture.
+  Its 11 failures were shared-machine evidence: an unsettled concurrent install
+  switch, a locked live ledger, and an unrelated legacy migration fixture. The
+  repository gate itself remains unavailable while three other active
+  worktrees exceed the resource envelope; none is safe to reap from this Run.

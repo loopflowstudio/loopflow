@@ -81,16 +81,13 @@ pub(crate) struct ProjectChildControlToken(String);
 
 impl ProjectChildControlToken {
     pub(crate) fn new() -> Self {
-        Self(format!(
-            "pctl_{}",
-            uuid::Uuid::new_v4().simple()
-        ))
+        Self(format!("pctl_{}", uuid::Uuid::new_v4().simple()))
     }
 
     pub(crate) fn parse(value: &str) -> Result<Self, DurableDataError> {
-        let suffix = value.strip_prefix("pctl_").ok_or_else(|| {
-            DurableDataError::InvalidId("expected pctl_ id".to_string())
-        })?;
+        let suffix = value
+            .strip_prefix("pctl_")
+            .ok_or_else(|| DurableDataError::InvalidId("expected pctl_ id".to_string()))?;
         uuid::Uuid::parse_str(suffix)
             .map_err(|error| DurableDataError::InvalidId(error.to_string()))?;
         Ok(Self(value.to_string()))

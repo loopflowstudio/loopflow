@@ -4904,6 +4904,7 @@ pub(crate) async fn resume_task_async(
         .await
         .map_err(|error| task_error(format!("failed to resolve task: {error}")))?
         .ok_or_else(|| task_error(format!("no Task exists for {issue:?}")))?;
+    super::child::authorize_task_resume(&store, &task).await?;
     let stored_controller = store
         .task_controller_state(&task.id)
         .await
@@ -5025,12 +5026,15 @@ mod tests {
     use super::{
         apply_merged_task_landing, apply_task_flow_override, launch_task_process,
         lock_task_pr_mutation, preflight_task_execution, probe_task_execution_boundary,
-        resolve_task_lifecycle, resolve_task_start_input, task_event_launch_refusal,
+        resolve_task_start_input, resume_task_async, task_event_launch_refusal,
         task_execution_boundary, TaskControllerState, TaskFlowOverrides,
     };
     use crate::child::ChildRef;
     use crate::controller::task::TaskLifecyclePhase;
-    use crate::durable::{AskBody, AskOrigin, AskState, AskTarget, WorkRef, WorkStatus};
+    use crate::durable::{
+        AskBody, AskOrigin, AskState, AskTarget, FlowPosition, ProjectChildControlBasis, RunId,
+        WorkRef, WorkStatus,
+    };
     use crate::engine::AgentExecutionBoundary;
     use crate::planning::{LinearIssueId, LinearProjectId, ProjectPlan, TaskPlan};
     use crate::pm::ProjectFlowPlan;
@@ -5397,6 +5401,154 @@ mod tests {
             .unwrap();
 
         assert_eq!(resolved.id, task.id);
+    }
+
+    #[tokio::test]
+    #[allow(clippy::await_holding_lock)] // the env lock is the test serializer
+    async fn in_run_task_resume_requires_project_control_before_mutation() {
+        let _env_lock = crate::journal::test_env_lock();
+        let _restore = EnvRestore::capture(&[
+            "LF_HOME",
+            "LF_DB_PATH",
+            "LF_CONTROL_HOME",
+            "LF_CONTROL_DB_PATH",
+            crate::durable::RUN_ID_ENV,
+            crate::durable::PROJECT_CHILD_CONTROL_ENV,
+        ]);
+        let TaskFixture {
+            _database,
+            database_path,
+            store,
+            task,
+            ..
+        } = task_fixture("LOO-227", "slice").await;
+        std::env::set_var("LF_HOME", database_path.parent().unwrap());
+        std::env::set_var("LF_DB_PATH", &database_path);
+        std::env::set_var("LF_CONTROL_HOME", database_path.parent().unwrap());
+        std::env::set_var("LF_CONTROL_DB_PATH", &database_path);
+        std::env::set_var(
+            crate::durable::RUN_ID_ENV,
+            crate::durable::RunId::new().as_str(),
+        );
+        std::env::remove_var(crate::durable::PROJECT_CHILD_CONTROL_ENV);
+        let before = store.active_task_pr(&task.id).await.unwrap();
+
+        let error = resume_task_async(&task.plan.identifier, None, None)
+            .await
+            .expect_err("an unscoped Run must fail before resume mutates the Task");
+
+        assert!(error
+            .to_string()
+            .contains("has no Project child-control capability"));
+        assert_eq!(store.active_task_pr(&task.id).await.unwrap(), before);
+    }
+
+    #[cfg(unix)]
+    #[tokio::test]
+    #[allow(clippy::await_holding_lock)] // the env lock is the test serializer
+    async fn project_control_resumes_the_same_task_idempotently() {
+        use std::os::unix::fs::PermissionsExt;
+
+        let _env_lock = crate::journal::test_env_lock();
+        let _restore = EnvRestore::capture(&[
+            "PATH",
+            "LF_BIN",
+            "LF_HOME",
+            "LF_DB_PATH",
+            "LF_CONTROL_HOME",
+            "LF_CONTROL_DB_PATH",
+            crate::durable::RUN_ID_ENV,
+            crate::durable::PROJECT_CHILD_CONTROL_ENV,
+        ]);
+        let TaskFixture {
+            _database,
+            database_path,
+            store,
+            mut task,
+            work,
+        } = task_fixture("LOO-227", "slice").await;
+        let repository = _database.path().join("repo");
+        std::fs::create_dir(&repository).unwrap();
+        for arguments in [
+            &["init", "-b", "main"][..],
+            &["config", "user.email", "test@example.com"][..],
+            &["config", "user.name", "Loopflow Test"][..],
+        ] {
+            assert!(std::process::Command::new("git")
+                .current_dir(&repository)
+                .args(arguments)
+                .status()
+                .unwrap()
+                .success());
+        }
+        std::fs::write(repository.join("README.md"), "resume proof\n").unwrap();
+        for arguments in [&["add", "."][..], &["commit", "-m", "fixture"][..]] {
+            assert!(std::process::Command::new("git")
+                .current_dir(&repository)
+                .args(arguments)
+                .status()
+                .unwrap()
+                .success());
+        }
+        let head = crate::engine::git::rev_parse(&repository, "HEAD").unwrap();
+        task.worktree = repository;
+        store.update_task(&task).await.unwrap();
+        rusqlite::Connection::open(&database_path)
+            .unwrap()
+            .execute(
+                "UPDATE task_prs SET branch='main', base_commit=?2 WHERE task_id=?1",
+                rusqlite::params![task.id.as_str(), head],
+            )
+            .unwrap();
+
+        let bin = _database.path().join("bin");
+        std::fs::create_dir(&bin).unwrap();
+        let tmux = bin.join("tmux");
+        std::fs::write(&tmux, "#!/bin/sh\nexit 0\n").unwrap();
+        std::fs::set_permissions(&tmux, std::fs::Permissions::from_mode(0o700)).unwrap();
+        let path = std::env::var("PATH").unwrap_or_default();
+        std::env::set_var("PATH", format!("{}:{path}", bin.display()));
+        std::env::set_var("LF_BIN", std::env::current_exe().unwrap());
+        std::env::set_var("LF_HOME", database_path.parent().unwrap());
+        std::env::set_var("LF_DB_PATH", &database_path);
+        std::env::set_var("LF_CONTROL_HOME", database_path.parent().unwrap());
+        std::env::set_var("LF_CONTROL_DB_PATH", &database_path);
+
+        let run_id = RunId::new();
+        let token = store
+            .begin_project_child_control(
+                &task.project_id,
+                &run_id,
+                &ProjectChildControlBasis {
+                    position: FlowPosition {
+                        work: WorkRef::Project(task.project_id.clone()),
+                        flow: "project".to_string(),
+                        step: "project/pursue".to_string(),
+                        node_id: None,
+                        human: false,
+                        step_index: 1,
+                        iteration: 0,
+                        updated_at: time::OffsetDateTime::now_utc(),
+                    },
+                    steer_sequence: 0,
+                },
+            )
+            .await
+            .unwrap();
+        std::env::set_var(crate::durable::RUN_ID_ENV, run_id.as_str());
+        std::env::set_var(crate::durable::PROJECT_CHILD_CONTROL_ENV, token.as_str());
+
+        for _ in 0..2 {
+            let resumed = resume_task_async(&task.plan.identifier, None, None)
+                .await
+                .expect("Project pursuit resumes through the ordinary Task path");
+            assert_eq!(resumed.task_id, task.id.to_string());
+            assert!(matches!(
+                resumed.receipt,
+                super::super::child::WorkControlReceipt::Resume { work: ref resumed_work }
+                    if resumed_work == &work
+            ));
+        }
     }
 
     #[tokio::test]

@@ -74,8 +74,10 @@ its available status/next owner.
   `lf task run <child> --stack-on <parent> --directive "..."`. It gets a
   separate worktree and worker; same-Task PRs remain serial.
 - Supervise active work with `lf task status`, `lf task steer`, `lf task
-  interrupt`, `lf task wait`, and `lf task resume` when root inspection or
-  override is needed. This never replaces the Task's Project.
+  interrupt`, and `lf task wait` when root inspection or override is needed.
+  Route a parked Task's resume through its owning Project; only that immediate
+  Project controller carries child-resume authority. This never replaces the
+  Task's Project.
   Independent tasks may run in parallel; never create a second session for one
   issue.
 - Use `lf project run <linear-project-id> --directive "<delegation brief>"` to

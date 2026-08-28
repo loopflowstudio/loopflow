@@ -601,6 +601,7 @@ pub(crate) async fn start_tmux_session(
 
 fn forwarded_authority_env_names() -> Vec<String> {
     let mut names = vec![
+        crate::durable::PROJECT_CHILD_CONTROL_ENV.to_string(),
         crate::provider_account::lease::ACCOUNT_LEASE_ENV.to_string(),
         crate::provider_account::lease::ACCOUNT_SELECTION_ENV.to_string(),
         "LF_FORWARDED_PM_TOKEN".to_string(),
@@ -812,7 +813,8 @@ mod tests {
         assert!(command.starts_with(
             "if [ -n \"${LF_FORWARDED_SECRET_NAMES:-}\" ]; then unset $LF_FORWARDED_SECRET_NAMES; fi; unset "
         ));
-        assert!(command.contains("LF_WAVE_ID LF_RUN_ID LF_INSTALL_SWITCH"));
+        assert!(command.contains("LF_WAVE_ID LF_RUN_ID LF_PROJECT_CHILD_CONTROL"));
+        assert!(command.contains("LF_PROJECT_CHILD_CONTROL LF_INSTALL_SWITCH"));
         assert!(command.contains("LF_INSTALL_SWITCH LF_BIN"));
         assert!(command.contains("LF_ACCOUNT_LEASE LF_ACCOUNT_SELECTION"));
         assert!(command.contains("LF_DISCORD_TOKEN"));
@@ -844,6 +846,9 @@ mod tests {
             None => std::env::remove_var("LF_FORWARDED_SECRET_NAMES"),
         }
         assert!(names.iter().any(|name| name == "LF_ACCOUNT_LEASE"));
+        assert!(names
+            .iter()
+            .any(|name| name == crate::durable::PROJECT_CHILD_CONTROL_ENV));
         assert!(names.iter().any(|name| name == "GH_TOKEN"));
         assert!(names.iter().any(|name| name == "LF_LINEAR_WEBHOOK_SECRET"));
         assert!(names.iter().any(|name| name == "LF_LFD_ALLOW_NON_LOOPBACK"));

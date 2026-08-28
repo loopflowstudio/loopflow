@@ -82,7 +82,7 @@ pub(crate) async fn resume_task(
     Ok(work)
 }
 
-async fn authorize_task_resume(store: &SharedStore, task: &Task) -> OpsResult<()> {
+pub(crate) async fn authorize_task_resume(store: &SharedStore, task: &Task) -> OpsResult<()> {
     let run_id = std::env::var_os(RUN_ID_ENV)
         .map(|value| {
             value

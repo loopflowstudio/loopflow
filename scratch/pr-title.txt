@@ -1,0 +1,1 @@
+Trace audits survive persisted capture schemas

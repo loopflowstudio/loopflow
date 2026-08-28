@@ -52,7 +52,7 @@ The current application tables group by owner:
 | Owner | Tables | Purpose |
 | --- | --- | --- |
 | Tracked Work | `waves`, `projects`, `project_events`, `tasks`, `task_events` | stable identity, status, progress, history |
-| Controller automation | `project_controller_state`, `task_controller_state` | end-to-end playheads, provider continuation, controller observations |
+| Controller automation | `project_controller_state`, `project_child_controls`, `task_controller_state` | end-to-end playheads, scoped child-resume authority, provider continuation, controller observations |
 | Task delivery | `task_prs`, `task_pr_repair_incidents`, `task_linear_observations`, `task_linear_ingested_comments` | serial PRs and provider observations |
 | Work input | `steers`, `tool_responses`, `work_placements` | corrections, tool answers, Home placement |
 | Ask | `ask_exchanges`, `ask_linear_comment_outbox` | blocking requests, answering fence, results, publication |

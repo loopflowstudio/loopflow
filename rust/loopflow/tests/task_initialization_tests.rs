@@ -2,17 +2,138 @@ mod support;
 
 use std::process::Command;
 
-use loopflow::ops::task::{task_snapshot, task_status};
+use loopflow::id::WaveId;
+use loopflow::ops::task::{
+    task_run, task_snapshot, task_status, TaskFlowOverrides, TaskLaunchOptions,
+};
 use loopflow::ops::task_actions::TaskAction;
-use loopflow::store::PmSnapshotRow;
+use loopflow::store::{open_store, PmSnapshotRow, StorageConfig};
 use loopflow::work::task::TaskEventKind;
 use loopflow_test_support::TestRepo;
 use support::{register_unrun_task, EnvGuard};
+
+fn materialize_status_truth(home: &std::path::Path) {
+    let runtime = tokio::runtime::Runtime::new().expect("status truth fixture runtime");
+    runtime
+        .block_on(open_store(&StorageConfig::sqlite(home.join("loopflow.db"))))
+        .expect("open status truth fixture registry");
+}
+
+fn seed_new_task_snapshot(home: &std::path::Path, repo: &TestRepo) {
+    repo.create_file(
+        ".lf/config.yaml",
+        "pm:\n  provider: linear\n  linear_team: team-loo\n",
+    );
+    repo.create_file(
+        "wave/task-launch/GOAL.md",
+        "---\npm:\n  linear_initiative: initiative-task-launch\n---\n\n## Objective\n\nProve Task launch validation.\n",
+    );
+    repo.stage_all();
+    repo.commit("seed Task launch snapshot");
+    repo.push();
+
+    let payload = serde_json::json!({
+        "projects": [{
+            "id": "project-task-launch",
+            "slug": "task-launch",
+            "name": "Task launch",
+            "summary": "Validate lifecycle plans before persistence.",
+            "definition": "Invalid lifecycle plans never create managed Tasks.",
+            "flows": {"first": null, "loop": null, "finally": null},
+            "krs": [],
+            "initiative_ids": ["initiative-task-launch"],
+            "team_ids": ["team-loo"]
+        }],
+        "items": [{
+            "id": "issue-new-task",
+            "identifier": "LOO-NEW",
+            "url": null,
+            "name": "Reject an unavailable lifecycle",
+            "description": "The Task must not be persisted.",
+            "rank": 1,
+            "completed": false,
+            "project_id": "project-task-launch",
+            "project": "task-launch",
+            "team_id": "team-loo",
+            "assignee": null
+        }]
+    });
+    materialize_status_truth(home);
+    let runtime = tokio::runtime::Runtime::new().expect("new Task snapshot runtime");
+    let store = runtime
+        .block_on(open_store(&StorageConfig::sqlite(home.join("loopflow.db"))))
+        .expect("open new Task registry");
+    let wave_id = WaveId::new();
+    let database = rusqlite::Connection::open(home.join("loopflow.db"))
+        .expect("open new Task registry fixture");
+    database
+        .execute(
+            "INSERT INTO waves (\
+                 id, name, repo, created_at, parent_wave_id, promoted_at,\
+                 retired_at, superseded_by_wave_id, retirement_reason\
+             ) VALUES (?1, ?2, ?3, ?4, NULL, NULL, NULL, NULL, NULL)",
+            rusqlite::params![
+                wave_id.as_str(),
+                "task-launch",
+                std::fs::canonicalize(repo.path())
+                    .expect("canonical Task launch repository")
+                    .display()
+                    .to_string(),
+                time::OffsetDateTime::now_utc().unix_timestamp(),
+            ],
+        )
+        .expect("seed Task launch Wave");
+    runtime
+        .block_on(store.put_pm_snapshot(PmSnapshotRow {
+            wave_id,
+            provider: "linear".to_string(),
+            initiative: "initiative-task-launch".to_string(),
+            synced_at: time::OffsetDateTime::now_utc().unix_timestamp(),
+            payload: serde_json::to_string(&payload).expect("serialize Task launch snapshot"),
+        }))
+        .expect("seed new Task snapshot");
+}
+
+#[test]
+fn new_task_launch_rejects_an_unavailable_flow_before_persistence() {
+    let home = tempfile::tempdir().expect("Task home");
+    let _env = EnvGuard::with_lf_home(&[], home.path());
+    let repo = TestRepo::new();
+    seed_new_task_snapshot(home.path(), &repo);
+
+    let error = task_run(
+        repo.path(),
+        "LOO-NEW",
+        TaskLaunchOptions {
+            flows: TaskFlowOverrides {
+                loop_: Some("removed-task-flow".to_string()),
+                ..TaskFlowOverrides::default()
+            },
+            ..TaskLaunchOptions::default()
+        },
+    )
+    .expect_err("an unavailable flow must reject the launch request");
+
+    let error = error.to_string();
+    assert!(error.contains("removed-task-flow"), "launch error: {error}");
+    assert!(error.contains("flow not found"), "launch error: {error}");
+    let database = rusqlite::Connection::open(home.path().join("loopflow.db"))
+        .expect("open rejected Task registry");
+    let task_count: i64 = database
+        .query_row("SELECT count(*) FROM tasks", [], |row| row.get(0))
+        .expect("count rejected Tasks");
+    let pr_count: i64 = database
+        .query_row("SELECT count(*) FROM task_prs", [], |row| row.get(0))
+        .expect("count rejected Task PRs");
+    assert_eq!(task_count, 0, "the rejected launch persists no Task");
+    assert_eq!(pr_count, 0, "the rejected launch persists no Task PR");
+}
 
 #[test]
 fn initializing_worktree_keeps_status_wait_and_roadmap_readable() {
     let home = tempfile::tempdir().expect("Task home");
     let _env = EnvGuard::with_lf_home(&[], home.path());
+    materialize_status_truth(home.path());
     let repo = TestRepo::new();
     let base = repo.head_sha();
     let branch = "jack/initializing-task";
@@ -173,6 +294,7 @@ fn initializing_worktree_keeps_status_wait_and_roadmap_readable() {
 fn missing_worktree_status_is_actionable_and_read_only() {
     let home = tempfile::tempdir().expect("Task home");
     let _env = EnvGuard::with_lf_home(&[], home.path());
+    materialize_status_truth(home.path());
     let (task, missing_path, branch) = {
         let repo = TestRepo::new();
         let base = repo.head_sha();

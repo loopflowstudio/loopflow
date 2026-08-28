@@ -5090,11 +5090,16 @@ mod tests {
     ) -> TaskFixture {
         let database = tempfile::tempdir().unwrap();
         let database_path = database.path().join("registry.db");
-        let store = std::sync::Arc::new(
-            open_store(&StorageConfig::sqlite(database_path.clone()))
-                .await
-                .unwrap(),
-        );
+        let store = open_store(&StorageConfig::sqlite(database_path.clone()))
+            .await
+            .unwrap();
+        rusqlite::Connection::open(&database_path)
+            .unwrap()
+            .execute_batch(&crate::store::migrations::migration_sql_for_test(
+                "status_truth",
+            ))
+            .unwrap();
+        let store = std::sync::Arc::new(store);
         let now = time::OffsetDateTime::now_utc();
         let wave = Wave::new(
             crate::id::WaveId::new(),

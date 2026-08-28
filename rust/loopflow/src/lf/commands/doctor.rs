@@ -8,7 +8,10 @@
 //! and the old process-grained run view once spliced one process's label onto
 //! another's cost.
 //!
-//! Checks are pure functions of the rows, so they are tested without a store.
+//! A failing check names either a directly violated durable invariant or the
+//! owner, due interval, and evidence query for a missed obligation. Observer
+//! silence without that authority remains non-failing history. Checks are pure
+//! functions of their evidence, so they are tested without a store.
 
 use std::collections::{BTreeSet, HashMap, HashSet};
 use std::path::Path;

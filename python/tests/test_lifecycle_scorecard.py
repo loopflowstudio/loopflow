@@ -323,6 +323,33 @@ def test_task_loop_trust_emits_one_exact_window_observation(tmp_path: Path) -> N
     }
 
 
+def test_task_loop_trust_without_eligible_tasks_is_unavailable(
+    tmp_path: Path,
+) -> None:
+    repo = tmp_path / "loopflow"
+    repo.mkdir()
+    connection = _task_loop_connection()
+    started = datetime(2026, 7, 15, tzinfo=timezone.utc)
+    ended = datetime(2026, 7, 22, tzinfo=timezone.utc)
+    connection.execute(
+        "INSERT INTO performance_evidence_authority VALUES (1, ?)",
+        (int(started.timestamp()) - 1,),
+    )
+
+    observation = scorecard.task_loop_trust_observation(
+        connection, repo, started, ended
+    )
+
+    assert observation == {
+        "wave": "product",
+        "metric_id": "task-loop-trust",
+        "instrument": "lifecycle-scorecard",
+        "kind": "unavailable",
+        "source_as_of": "2026-07-22T00:00:00Z",
+        "reason": "No eligible settled Tasks in the source window",
+    }
+
+
 def test_task_loop_trust_counts_a_pr_that_settles_after_its_epoch_starts(
     tmp_path: Path,
 ) -> None:

@@ -146,6 +146,12 @@ Contracts define no command, query, schedule, secret, or KR copy. Product code
 registered as the named instrument pushes pre-aggregated, revision-bound
 observations into the local store.
 
+Emit an observed value only when durable authority covers the exact source
+window and defines a non-empty eligible population. Mark partial capture
+incomplete so readers report Unknown; report an empty population or failed
+source read as Unavailable with the reason. Never encode an absent denominator
+as zero. Only a complete observation can meet or miss a target.
+
 ```bash
 lf status <wave>            # owner, value, target, window, freshness, reason
 lf status <wave> --json     # the shared metric_portfolio DTO

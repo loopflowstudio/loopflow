@@ -106,8 +106,18 @@ currently violated obligation.
   receipts while preserving historical events.
 - [x] Prove the real `doctor` → telemetry-scorecard path on a
   copied-production-shaped store.
-- [ ] Audit remaining absence-based `lf doctor` and lifecycle scorecard gates.
+- [x] Audit remaining absence-based `lf doctor` and lifecycle scorecard gates.
   For each red state, record the durable authority, owner, expected interval,
   and evidence query; reclassify any claim without that denominator as history
   or unknown. Encode this rule in the health-check authoring guidance, without
   extracting a generic evaluator until a second concrete check needs it.
+
+## Audit Result
+
+Every remaining `lf doctor` failure reports either a direct invariant violation
+or an error reading its named authority. Lifecycle scorecard rows already keep
+missing samples and absent authority Unknown. One producer boundary still
+synthesized an incomplete observed `0.0` for the undefined ratio `0 / 0` when
+no settled Task was eligible. Emit the existing Unavailable observation with a
+source-window reason instead; no new metric state or generic evaluator is
+needed.

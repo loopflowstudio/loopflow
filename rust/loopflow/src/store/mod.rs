@@ -1108,7 +1108,7 @@ mod tests {
     use crate::build_info::{BuildProvenance, MigrationAuthority};
     use crate::child::ChildRef;
     use crate::controller::task::State as TaskControllerState;
-    use crate::durable::{Author, WorkRef};
+    use crate::durable::{Author, FlowPosition, ProjectChildControlBasis, RunId, WorkRef};
     use crate::id::WaveId;
     use crate::planning::{LinearIssueId, LinearProjectId, ProjectPlan, TaskPlan};
     use crate::profile::EmailAddress;
@@ -1395,6 +1395,136 @@ mod tests {
                 .collect::<Vec<_>>(),
             ["inspect the failing test", "preserve the public behavior"]
         );
+    }
+
+    #[tokio::test]
+    async fn project_child_control_survives_phase_and_process_recovery_exactly() {
+        let directory = tempfile::tempdir().unwrap();
+        let store = open_store(&StorageConfig::sqlite(directory.path().join("registry.db")))
+            .await
+            .unwrap();
+        let wave = make_wave("/repo");
+        store.create_wave(&wave).await.unwrap();
+        let project = make_project(&wave);
+        store.create_project(&project).await.unwrap();
+        let task = make_task(&wave, &project);
+        store
+            .create_task(&task, &make_task_pr(&task))
+            .await
+            .unwrap();
+
+        let mut unrelated_project = make_project(&wave);
+        unrelated_project.plan.id = LinearProjectId::new("unrelated-project-uuid").unwrap();
+        unrelated_project.plan.slug = "unrelated-project".to_string();
+        unrelated_project.plan.name = "Unrelated Project".to_string();
+        store.create_project(&unrelated_project).await.unwrap();
+        let mut unrelated_task = make_task(&wave, &unrelated_project);
+        unrelated_task.plan.id = LinearIssueId::new("unrelated-issue-uuid").unwrap();
+        unrelated_task.plan.identifier = "INF-999".to_string();
+        unrelated_task.worktree = PathBuf::from("/repo.inf-999");
+        unrelated_task.workspace_slug = "task-unrelated".to_string();
+        store
+            .create_task(&unrelated_task, &make_task_pr(&unrelated_task))
+            .await
+            .unwrap();
+
+        let basis = |step: &str, step_index: u32, steer_sequence: u64| {
+            ProjectChildControlBasis {
+                position: FlowPosition {
+                    work: WorkRef::Project(project.id.clone()),
+                    flow: "project".to_string(),
+                    step: step.to_string(),
+                    node_id: None,
+                    human: false,
+                    step_index,
+                    iteration: 0,
+                    updated_at: OffsetDateTime::now_utc(),
+                },
+                steer_sequence,
+            }
+        };
+
+        let first_run = RunId::new();
+        let first_token = store
+            .begin_project_child_control(&project.id, &first_run, &basis("project/clarify", 0, 0))
+            .await
+            .unwrap();
+        let first = store
+            .authorize_project_child_control(&task.id, &first_run, &first_token)
+            .await
+            .expect("clarify carries exact child control");
+        let repeated = store
+            .authorize_project_child_control(&task.id, &first_run, &first_token)
+            .await
+            .expect("an identical retry is idempotent");
+        assert_eq!(first, repeated);
+
+        let unrelated = store
+            .authorize_project_child_control(&unrelated_task.id, &first_run, &first_token)
+            .await
+            .expect_err("one Project cannot control another Project's Task");
+        assert!(unrelated.to_string().contains("no active child-control basis"));
+
+        let project_work = WorkRef::Project(project.id.clone());
+        store
+            .append_steer(&project_work, Author::User, "resume the parked Task")
+            .await
+            .unwrap();
+        let stale = store
+            .authorize_project_child_control(&task.id, &first_run, &first_token)
+            .await
+            .expect_err("new direction fences the prior phase basis");
+        assert!(stale.to_string().contains("basis is stale"));
+
+        let pursue = basis("project/pursue", 1, 1);
+        store
+            .advance_project_child_control(&project.id, &first_run, &first_token, &pursue)
+            .await
+            .unwrap();
+        assert_eq!(
+            store
+                .authorize_project_child_control(&task.id, &first_run, &first_token)
+                .await
+                .expect("pursue resumes the existing child through the same authority path"),
+            pursue
+        );
+
+        let recovery_run = RunId::new();
+        let recovery_basis = basis("project/mutate", 2, 1);
+        let recovery_token = store
+            .begin_project_child_control(&project.id, &recovery_run, &recovery_basis)
+            .await
+            .unwrap();
+        let superseded = store
+            .authorize_project_child_control(&task.id, &first_run, &first_token)
+            .await
+            .expect_err("process recovery revokes the prior controller");
+        assert!(superseded.to_string().contains("was superseded"));
+        for _ in 0..2 {
+            assert_eq!(
+                store
+                    .authorize_project_child_control(&task.id, &recovery_run, &recovery_token)
+                    .await
+                    .expect("recovered controller remains retry-safe"),
+                recovery_basis
+            );
+        }
+
+        assert!(store
+            .release_project_child_control(&project.id, &recovery_run, &recovery_token)
+            .await
+            .unwrap());
+        assert!(!store
+            .release_project_child_control(&project.id, &recovery_run, &recovery_token)
+            .await
+            .unwrap());
+        let missing = store
+            .authorize_project_child_control(&task.id, &recovery_run, &recovery_token)
+            .await
+            .expect_err("a Project without a phase basis fails before further pursuit");
+        assert!(missing
+            .to_string()
+            .contains("restart Project Work before pursuit"));
     }
 
     #[tokio::test]

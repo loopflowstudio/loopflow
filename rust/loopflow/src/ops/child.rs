@@ -3,7 +3,10 @@
 use std::time::Duration;
 
 use crate::child::{ChildBodyHandoffRequest, ChildRef};
-use crate::durable::{AbandonReceipt, Author, RunId, SteerReceipt, WorkRef, RUN_ID_ENV};
+use crate::durable::{
+    AbandonReceipt, Author, ProjectChildControlToken, RunId, SteerReceipt, WorkRef,
+    PROJECT_CHILD_CONTROL_ENV, RUN_ID_ENV,
+};
 use crate::store::SharedStore;
 use crate::work::task::Task;
 
@@ -43,6 +46,7 @@ pub(crate) async fn resume_task(
     model: Option<String>,
     reason: Option<String>,
 ) -> OpsResult<WorkRef> {
+    authorize_task_resume(store, &task).await?;
     let mut controller = store
         .task_controller_state(&task.id)
         .await
@@ -76,6 +80,39 @@ pub(crate) async fn resume_task(
         .map_err(child_error)?;
     super::task::resume_inactive_process(store, &mut task).await?;
     Ok(work)
+}
+
+async fn authorize_task_resume(store: &SharedStore, task: &Task) -> OpsResult<()> {
+    let run_id = std::env::var_os(RUN_ID_ENV)
+        .map(|value| {
+            value
+                .into_string()
+                .map_err(|_| child_error("LF_RUN_ID is not valid UTF-8"))
+                .and_then(|value| RunId::parse(&value).map_err(child_error))
+        })
+        .transpose()?;
+    let token = std::env::var_os(PROJECT_CHILD_CONTROL_ENV)
+        .map(|value| {
+            value
+                .into_string()
+                .map_err(|_| child_error("Project child-control capability is not valid UTF-8"))
+                .and_then(|value| ProjectChildControlToken::parse(&value).map_err(child_error))
+        })
+        .transpose()?;
+    match (run_id, token) {
+        (None, None) => Ok(()),
+        (Some(run_id), Some(token)) => store
+            .authorize_project_child_control(&task.id, &run_id, &token)
+            .await
+            .map(|_| ())
+            .map_err(child_error),
+        (Some(_), None) => Err(child_error(
+            "in-Run Task resume has no Project child-control capability; restart the owning Project controller before pursuit",
+        )),
+        (None, Some(_)) => Err(child_error(
+            "Project child-control capability has no exact Run identity; restart the owning Project controller",
+        )),
+    }
 }
 
 pub(crate) async fn append_steer(

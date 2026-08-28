@@ -3,12 +3,14 @@
 use std::path::PathBuf;
 
 use serde::{Deserialize, Serialize};
+use sha2::{Digest, Sha256};
 use time::OffsetDateTime;
 
 use crate::id::WaveId;
 
 /// The exact active Run named by an in-Run process.
 pub const RUN_ID_ENV: &str = "LF_RUN_ID";
+pub(crate) const PROJECT_CHILD_CONTROL_ENV: &str = "LF_PROJECT_CHILD_CONTROL";
 
 macro_rules! durable_id {
     ($name:ident, $prefix:literal) => {
@@ -73,6 +75,47 @@ durable_id!(HomeId, "home_");
 durable_id!(SteerId, "steer_");
 durable_id!(ToolResponseId, "response_");
 durable_id!(CronReceiptId, "cron_");
+
+#[derive(Clone, PartialEq, Eq)]
+pub(crate) struct ProjectChildControlToken(String);
+
+impl ProjectChildControlToken {
+    pub(crate) fn new() -> Self {
+        Self(format!(
+            "pctl_{}",
+            uuid::Uuid::new_v4().simple()
+        ))
+    }
+
+    pub(crate) fn parse(value: &str) -> Result<Self, DurableDataError> {
+        let suffix = value.strip_prefix("pctl_").ok_or_else(|| {
+            DurableDataError::InvalidId("expected pctl_ id".to_string())
+        })?;
+        uuid::Uuid::parse_str(suffix)
+            .map_err(|error| DurableDataError::InvalidId(error.to_string()))?;
+        Ok(Self(value.to_string()))
+    }
+
+    pub(crate) fn as_str(&self) -> &str {
+        &self.0
+    }
+
+    pub(crate) fn hash(&self) -> String {
+        hex::encode(Sha256::digest(self.0.as_bytes()))
+    }
+}
+
+impl std::fmt::Debug for ProjectChildControlToken {
+    fn fmt(&self, formatter: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+        formatter.write_str("ProjectChildControlToken(<redacted>)")
+    }
+}
+
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub(crate) struct ProjectChildControlBasis {
+    pub position: FlowPosition,
+    pub steer_sequence: u64,
+}
 
 impl ProjectId {
     pub(crate) fn from_raw(value: impl Into<String>) -> Self {

@@ -1,7 +1,8 @@
 use crate::child::ChildRef;
 use crate::durable::{
-    AbandonReceipt, Ask, AskBody, AskClaim, AskId, AskOrigin, AskResult, AskTarget, Author, Home,
-    HomeId, Placement, RunId, Steer, SteerReceipt, ToolResponseReceipt, ToolResponseWrite, WorkRef,
+    AbandonReceipt, Ask, AskBody, AskClaim, AskId, AskOrigin, AskResult, AskTarget, Author,
+    FlowPosition, Home, HomeId, Placement, ProjectChildControlBasis, ProjectChildControlToken,
+    ProjectId, RunId, Steer, SteerReceipt, TaskId, ToolResponseReceipt, ToolResponseWrite, WorkRef,
     WorkStatus,
 };
 
@@ -298,6 +299,68 @@ impl Store {
         let target = target.clone();
         run_sqlite(&self.sqlite, move |store| {
             store.work_steers_for_child(&target)
+        })
+        .await
+    }
+
+    pub(crate) async fn begin_project_child_control(
+        &self,
+        project_id: &ProjectId,
+        run_id: &RunId,
+        basis: &ProjectChildControlBasis,
+    ) -> StoreResult<ProjectChildControlToken> {
+        let project_id = project_id.clone();
+        let run_id = run_id.clone();
+        let basis = basis.clone();
+        run_sqlite(&self.sqlite, move |store| {
+            store.begin_project_child_control(&project_id, &run_id, &basis)
+        })
+        .await
+    }
+
+    pub(crate) async fn advance_project_child_control(
+        &self,
+        project_id: &ProjectId,
+        run_id: &RunId,
+        token: &ProjectChildControlToken,
+        basis: &ProjectChildControlBasis,
+    ) -> StoreResult<()> {
+        let project_id = project_id.clone();
+        let run_id = run_id.clone();
+        let token = token.clone();
+        let basis = basis.clone();
+        run_sqlite(&self.sqlite, move |store| {
+            store.advance_project_child_control(&project_id, &run_id, &token, &basis)
+        })
+        .await
+    }
+
+    pub(crate) async fn authorize_project_child_control(
+        &self,
+        task_id: &TaskId,
+        run_id: &RunId,
+        token: &ProjectChildControlToken,
+    ) -> StoreResult<ProjectChildControlBasis> {
+        let task_id = task_id.clone();
+        let run_id = run_id.clone();
+        let token = token.clone();
+        run_sqlite(&self.sqlite, move |store| {
+            store.authorize_project_child_control(&task_id, &run_id, &token)
+        })
+        .await
+    }
+
+    pub(crate) async fn release_project_child_control(
+        &self,
+        project_id: &ProjectId,
+        run_id: &RunId,
+        token: &ProjectChildControlToken,
+    ) -> StoreResult<bool> {
+        let project_id = project_id.clone();
+        let run_id = run_id.clone();
+        let token = token.clone();
+        run_sqlite(&self.sqlite, move |store| {
+            store.release_project_child_control(&project_id, &run_id, &token)
         })
         .await
     }

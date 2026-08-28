@@ -12,7 +12,10 @@ use crate::child::ChildRef;
 use crate::controller::wave::playhead::{
     BodyProvenance, Playhead, PlayheadEvent, QueuedInvocation, StepKind, StepOutcome,
 };
-use crate::durable::{render_steers, Steer, SteerId, WorkStatus};
+use crate::durable::{
+    render_steers, FlowPosition, ProjectChildControlBasis, ProjectChildControlToken, RunId, Steer,
+    SteerId, WorkStatus, PROJECT_CHILD_CONTROL_ENV,
+};
 use crate::harness::{default_create_harness, drain_turn_failure_reason, ApprovalPolicy, Harness};
 use crate::store::SharedStore;
 use crate::work::project::{ChildEventPayload, Project, ProjectEventKind, ProjectId};
@@ -63,6 +66,7 @@ async fn controlled_project(
 struct PreparedProjectStep {
     turn: crate::lf::commands::run::PreparedHarnessTurn,
     steers: Vec<SteerId>,
+    control_basis: ProjectChildControlBasis,
     planning: crate::ops::task_pm::ResolvedProject,
 }
 
@@ -122,8 +126,21 @@ async fn run_project_inner(store: SharedStore, project_id: ProjectId) -> Result<
             },
             &prepared.turn.context,
         )?;
+        let control_run_id = capture.run_id();
+        let control_token = store
+            .begin_project_child_control(
+                &project.id,
+                &control_run_id,
+                &prepared.control_basis,
+            )
+            .await
+            .map_err(project_child_control_error)?;
         capture.record_input("initial", &prepared.turn.input);
         prepared.turn.config.env.extend(capture.environment());
+        prepared.turn.config.env.insert(
+            PROJECT_CHILD_CONTROL_ENV.to_string(),
+            control_token.as_str().to_string(),
+        );
         capture.mark_spawn_requested();
         let capture = Some(capture);
         let (event_tx, mut event_rx) = mpsc::unbounded_channel();
@@ -154,6 +171,8 @@ async fn run_project_inner(store: SharedStore, project_id: ProjectId) -> Result<
             harness.as_mut(),
             &mut flow,
             None,
+            &control_run_id,
+            &control_token,
             prepared,
         )
         .await?;
@@ -279,6 +298,8 @@ async fn run_project_inner(store: SharedStore, project_id: ProjectId) -> Result<
                                     harness.as_mut(),
                                     &mut flow,
                                     capture.as_ref(),
+                                    &control_run_id,
+                                    &control_token,
                                     prepared,
                                 )
                                 .await?;
@@ -321,6 +342,8 @@ async fn run_project_inner(store: SharedStore, project_id: ProjectId) -> Result<
                                     harness.as_mut(),
                                     &mut flow,
                                     capture.as_ref(),
+                                    &control_run_id,
+                                    &control_token,
                                     prepared,
                                 )
                                 .await?;
@@ -331,6 +354,13 @@ async fn run_project_inner(store: SharedStore, project_id: ProjectId) -> Result<
                             store.put_project_controller_state(&project.state).await?;
                             let _ = harness.stop().await;
                             finish_capture(capture.as_ref(), "completed");
+                            store
+                                .release_project_child_control(
+                                    &project.id,
+                                    &control_run_id,
+                                    &control_token,
+                                )
+                                .await?;
                             if project_run_must_remain_resident(
                                 &store,
                                 &mut ask_lane,
@@ -507,9 +537,24 @@ async fn prepare_project_flow_step(
     let mut prepared =
         crate::lf::commands::run::prepare_harness_turn(&step.step, &seed, wave.name(), None)?;
     prepared.config.agent = Some(project.state.agent.clone());
+    let steer_sequence = u64::try_from(steers.len())
+        .map_err(|_| anyhow!("Project Steer sequence is too large"))?;
     Ok(PreparedProjectStep {
         turn: prepared,
         steers: steers.iter().map(|steer| steer.id.clone()).collect(),
+        control_basis: ProjectChildControlBasis {
+            position: FlowPosition {
+                work,
+                flow: step.flow,
+                step: step.step,
+                node_id: None,
+                human: false,
+                step_index: step.index,
+                iteration: step.iteration,
+                updated_at: time::OffsetDateTime::now_utc(),
+            },
+            steer_sequence,
+        },
         planning,
     })
 }
@@ -572,8 +617,19 @@ async fn start_project_flow_turn(
     harness: &mut dyn Harness,
     flow: &mut Playhead,
     capture: Option<&crate::run_record::CaptureHandle>,
+    control_run_id: &RunId,
+    control_token: &ProjectChildControlToken,
     prepared: PreparedProjectStep,
 ) -> Result<()> {
+    store
+        .advance_project_child_control(
+            &project.id,
+            control_run_id,
+            control_token,
+            &prepared.control_basis,
+        )
+        .await
+        .map_err(project_child_control_error)?;
     let wave = owning_wave(store, project).await?;
     open_project_flow_body(flow, wave.repo())?;
     if let Some(capture) = capture {
@@ -581,6 +637,12 @@ async fn start_project_flow_turn(
     }
     apply_input(harness, prepared.turn.input).await?;
     Ok(())
+}
+
+fn project_child_control_error(error: crate::store::StoreError) -> anyhow::Error {
+    anyhow!(
+        "Project child-control authority could not establish the exact phase basis before pursuit: {error}. Restart Project Work after resolving new direction or stale controller state"
+    )
 }
 
 fn finish_project_flow_turn(flow: &mut Playhead, status: Lifecycle) -> Result<bool> {

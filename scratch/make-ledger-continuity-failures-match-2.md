@@ -46,4 +46,3 @@ Checkout-only annotations do not become fields in the durable metric model.
 - Current output contains only durable metric fields, while the decoder still
   accepts the previous checkout's annotations.
 - The focused task-loop trust and telemetry-envelope proofs pass.
-

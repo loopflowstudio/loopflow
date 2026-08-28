@@ -7,4 +7,3 @@
   reconciling #1254 to the owning final lifecycle; do not mutate it out of band.
 - LOO-219 still owns why the August 4–11 ledger events were absent. That
   historical capture question cannot change the cadence denominator.
-

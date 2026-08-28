@@ -87,7 +87,7 @@ forced before the architecture changed.
 | Structural | Bind the capability to exact Project Work, controller Run, flow position, and Steer frontier; refresh it at phase boundaries, replace it on process recovery, and scrub it before the child process starts. | Cross-Project control, stale-direction writes, superseded controllers, and authority leakage into the child. |
 | Systemic | Treat execution records as evidence only. Require each parent-child mutation edge to name an explicit authority issuer and prove launch, phase transition, process replacement, stale direction, unrelated parent, retry, and lifecycle deletion through its public command path. | Future control paths whose validators are safe in isolation but whose controllers cannot reliably produce the required authority. |
 
-## Changes to Implement
+## LOO-227 Implementation
 
 - [x] Add durable Project child-control capability issuance, refresh, recovery
   replacement, authorization, and revocation in planning SQLite.
@@ -98,10 +98,16 @@ forced before the architecture changed.
   superseded controller Run.
 - [x] Prove the ordinary resume path is idempotent and add a release-materialized
   fixture spanning phase transition plus controller-process replacement.
-- [ ] Inventory the remaining Wave→Project and Project→Task mutation paths and
-  move any permission inferred from Run attribution or optional evidence onto
-  an explicit controller-owned capability lifecycle.
-- [ ] Add an architecture-reduction gate that requires a public behavior proof
+
+## Follow-up Designs
+
+The incident exposed two broader control-model questions outside LOO-227's
+parked-Task resume contract:
+
+- Design Wave-owned authority across Wave→Project and Wave→Task before
+  tightening shared controls such as `task steer` or `task run`. The mutation
+  inventory and counterexample are recorded in `scratch/questions.md`.
+- Design an architecture-reduction gate that requires a public behavior proof
   for every authorization consumer of a lifecycle or schema being deleted.
 
 ## Evidence

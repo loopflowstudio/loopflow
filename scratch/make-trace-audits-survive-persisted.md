@@ -16,13 +16,14 @@
 - The worktree began clean at `e9eea10ba`, one authored commit ahead of its
   merge base. That commit already contains a candidate normalization in
   `trace.rs` plus fixtures for six historical usage shapes.
-- The candidate only runs after current `RecordedConversationEvent`
-  deserialization fails, and rewrites recognized schema-v1 records in memory;
-  the current emitter remains `usage_checkpoint`.
+- The historical normalizer only runs after current
+  `RecordedConversationEvent` deserialization fails, and rewrites recognized
+  schema-v1 records in memory. The active conversation vocabulary remains
+  `usage_checkpoint`.
 - The candidate requires exact historical field sets and rejects null usage
   values. The ordinary reader still treats only a truncated final JSON line as
   an incomplete tail.
-- `cargo test -p loopflow conversation_reader -- --nocapture` passes all four
+- `cargo test -p loopflow --lib conversation_reader -- --nocapture` passes all five
   focused reader tests, including normalization, corruption rejection, unknown
   schema rejection, and truncated-tail classification.
 - `scripts/dev-lf doctor --json` is not real-ledger proof: development source
@@ -68,9 +69,9 @@
   half: exactly 8 invocations are still `capturing` after a terminal Run event.
   Those 8 account for the entire remaining integrity-failure count.
 - Review found one compatibility boundary: recognized schema-v1 variants are
-  normalized only after current deserialization fails. The current emitter and
-  `--jsonl` artifact output remain unchanged, and unsupported schema history
-  still errors.
+  normalized only after current deserialization fails. The active vocabulary
+  remains `usage_checkpoint`, no legacy artifact writer was restored by the
+  rebase, and unsupported schema history still errors.
 - Candidate preflight now makes one SQLite-consistent copy, migrates it, checks
   placed lifecycle references, and reads every complete conversation named by
   the copy from the real Home trace root. Its verdict distinguishes missing,
@@ -95,7 +96,7 @@
 | Claim | Planned behavior | Implemented behavior | Proof | Result |
 |---|---|---|---|---|
 | Historical schema-v1 usage is readable | Normalize the six observed `usage` and `turn_usage` shapes at one reader boundary | Exact-field normalization produces current `usage_checkpoint` events only after current decoding fails | `conversation_reader_normalizes_every_persisted_usage_variant`; six-line historical fixture | pass |
-| Current vocabulary and strictness remain | Emit only `usage_checkpoint`; reject unknown fields, nulls, and schema versions without defaults | Current wire fixture is frozen; the normalizer accepts only recorded field sets; no legacy DTO or emitter variant exists | `conversation_usage_checkpoint_wire_shape_is_frozen_for_current_schema`; focused rejection tests; source review | pass |
+| Current vocabulary and strictness remain | Recognize `usage_checkpoint`; reject unknown fields, nulls, and schema versions without defaults | Current wire fixture is frozen; the normalizer accepts only recorded field sets; one module-private wire DTO validates every version-1 artifact and no legacy writer exists | `conversation_reader_accepts_frozen_usage_checkpoint_wire_shape`; focused rejection tests; source review | pass |
 | Broken and partial captures stay distinct | Unsupported, truncated, corrupt, and partial captures must not become readable history | Complete-capture failures carry distinct kinds; partial rows are counted and never opened or reclassified | `candidate_audits_persisted_capture_schemas_on_the_migrated_home_copy`: 4 complete, 3 typed failures, 1 separate partial | pass |
 | The long-lived Home survives candidate migration | Audit the real artifact corpus through a SQLite-consistent copy | Candidate preflight audits legacy references before migration may retire their SQL index, then validates executable references in the candidate schema | Exact published-head `scripts/dev-lf install preflight --json`: 3,681/3,681 complete readable, 71 partial, 98 lifecycle references; only authority and pending-development-migration refusals remained | pass |
 | Current ledger auditing is not coupled to retired artifacts | `lf doctor` must audit the migrated Home without historical capture decode failures | `lf doctor` audits current Run records; candidate preflight is the sole production caller of the versioned legacy reader | Source call graph plus the exact published-head preflight above | pass |
@@ -110,10 +111,11 @@ asserts that the partial invocation is absent from the complete-failure set.
 The production caller needs one fact from a readable artifact: whether the
 final JSONL line is complete or truncated. The reader previously retained every
 decoded event in a `Vec`, and promotion read `events.len()` only to keep that
-storage alive. It now returns `ConversationStatus::{Complete, Truncated}` while
-still decoding every line through the exact versioned schema boundary. The
-recorded-event wire types are module-private; only the status and classified
-error cross into candidate promotion.
+storage alive. It now returns
+`ConversationArtifactStatus::{Complete, Truncated}` while still decoding every
+line through the exact versioned schema boundary. The recorded-event wire types
+are module-private; only the artifact status and classified error cross into
+candidate promotion.
 
 The tagged promotion DTOs remain intentionally. `CandidateCompatibility`
 distinguishes failure to construct the one migrated snapshot from results of

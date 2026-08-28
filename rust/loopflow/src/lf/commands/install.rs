@@ -663,13 +663,15 @@ fn _capture_compatibility(
             continue;
         }
         match crate::trace::read_conversation_status_classified(&path) {
-            Ok(crate::trace::ConversationStatus::Truncated) => failures.push(CaptureFailure {
-                invocation_id,
-                conversation_path,
-                kind: CaptureFailureKind::Truncated,
-                reason: "conversation artifact has an unterminated event tail".to_string(),
-            }),
-            Ok(crate::trace::ConversationStatus::Complete) => {}
+            Ok(crate::trace::ConversationArtifactStatus::Truncated) => {
+                failures.push(CaptureFailure {
+                    invocation_id,
+                    conversation_path,
+                    kind: CaptureFailureKind::Truncated,
+                    reason: "conversation artifact has an unterminated event tail".to_string(),
+                })
+            }
+            Ok(crate::trace::ConversationArtifactStatus::Complete) => {}
             Err(crate::trace::ConversationReadError::UnsupportedSchema { version }) => {
                 failures.push(CaptureFailure {
                     invocation_id,

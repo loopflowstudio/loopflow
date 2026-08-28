@@ -657,7 +657,7 @@ enum RecordedConversationPayload {
 }
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
-pub(crate) enum ConversationStatus {
+pub(crate) enum ConversationArtifactStatus {
     Complete,
     Truncated,
 }
@@ -877,7 +877,7 @@ fn _decode_conversation_event(
 
 pub(crate) fn read_conversation_status_classified(
     path: &Path,
-) -> Result<ConversationStatus, ConversationReadError> {
+) -> Result<ConversationArtifactStatus, ConversationReadError> {
     let file = fs::File::open(path).map_err(|source| ConversationReadError::Io {
         context: format!("open {}", path.display()),
         source,
@@ -902,12 +902,12 @@ pub(crate) fn read_conversation_status_classified(
             Err(ConversationReadError::Serialization(error))
                 if !line.ends_with('\n') && error.is_eof() =>
             {
-                return Ok(ConversationStatus::Truncated);
+                return Ok(ConversationArtifactStatus::Truncated);
             }
             Err(error) => return Err(error),
         }
     }
-    Ok(ConversationStatus::Complete)
+    Ok(ConversationArtifactStatus::Complete)
 }
 
 pub(crate) fn resolve_artifact_from(
@@ -935,7 +935,7 @@ mod tests {
 
     use super::{
         _decode_conversation_event, read_conversation_status_classified, ContextAssetKind,
-        ContextAssetSpec, ContextChannel, ContextScope, ConversationStatus,
+        ContextAssetSpec, ContextChannel, ContextScope, ConversationArtifactStatus,
         LegacyTraceSchemaVersion, PreparedTurnContext, RecordedConversationPayload,
     };
 
@@ -981,7 +981,7 @@ mod tests {
         .unwrap();
         assert_eq!(
             read_conversation_status_classified(&path).unwrap(),
-            ConversationStatus::Truncated
+            ConversationArtifactStatus::Truncated
         );
     }
 
@@ -997,7 +997,7 @@ mod tests {
 
         assert_eq!(
             read_conversation_status_classified(&path).unwrap(),
-            ConversationStatus::Complete
+            ConversationArtifactStatus::Complete
         );
         let checkpoints = include_str!("../tests/fixtures/trace/historical_usage_variants.jsonl")
             .lines()

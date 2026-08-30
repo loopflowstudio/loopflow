@@ -1,27 +1,58 @@
-# v0.12.14
+# v0.12.15
 
 <!-- loopflow:release-notes=narrative;gate=safe -->
 
-v0.12.14 makes PR landing a completion lifecycle instead of an auto-merge request. `lf pr land` now owns an exact PR head through CI repair, confirmed merge, and Task settlement, preventing completion or branch rotation from racing ahead of GitHub. Upgrade when automated shipping needs to recover from CI failures and finish against authoritative merge state; use `lf pr arm` when request-and-return behavior is still the right fit.
+v0.12.15 makes local execution and release operations recoverable from recorded evidence instead of ambient state. You can promote an unpublished build without disturbing the reliable published Home, compose bounded Runs around tracked Work without handing ownership to a controller, and inspect or replay a Run from its Home-local record. Release tags now attest to an exact candidate that already passed hosted validation and publisher preparation, so a failed candidate can be fixed and retried without consuming the version.
 
-## Finish only after the PR merges
+## Try local builds without risking the published Home
 
-Landing now follows the PR until GitHub reports a merge or an actionable blocker. Task state changes happen after that confirmation, so the repository and Loopflow no longer disagree about whether work has shipped.
+Local promotion now switches the CLI, daemon, and app as one artifact set while preserving the published installation as a fallback. Development data lives in a disposable Home forked from the published Home, and every persisted switch phase can recover after interruption.
 
-- `lf pr land` watches the exact PR head through merge instead of returning after it requests auto-merge.
-- Task completion and serial PR rotation occur only after GitHub confirms the merge.
-- If the head changes during landing, Loopflow re-arms the new head rather than treating the earlier request as sufficient.
-- `lf pr land -c` completes the owning Task after the watched merge succeeds.
+- `uv run python scripts/install.py local --use` builds and promotes the local artifact set.
+- Add `--fresh` to fork a new development Home; otherwise Loopflow reuses a compatible one.
+- `uv run python scripts/install.py refresh` returns every surface to the published installation without importing development data.
+- Development builds embed dependency-ordered draft migrations and apply only an exact append-only prefix to the disposable store.
+- Promotion preflight can recover a published candidate's identity even when the release host's live Home is incompatible with that artifact.
 
-## Repair CI under one durable owner
+## Share tracked Work without controller ownership
 
-CI recovery is now part of the landing lifecycle itself. Persisted landing generations and incident records let supervision resume safely after interruption without launching competing repair paths.
+Wave, Project, and Task records now describe durable Work independently from the automation that may pursue it. Humans, bounded agents, cron jobs, and alternate orchestration can use the same execution and delivery primitives without impersonating or advancing an end-to-end controller.
 
-- A failed head can launch one bounded `ci-fix` repair for that failure identity.
-- Fenced supervisor claims, heartbeats, and Home daemon recovery preserve ownership across process restarts.
-- The Task runner's separate CI repair flow has been removed, leaving landing responsible for repair and post-merge settlement.
+- `lf task prepare` and `lf project prepare` establish tracked Work without starting controller automation.
+- `--task`, `--project`, and `--wave` bind independent Runs to existing Work while preserving each Run's own provenance.
+- Multiple independent Runs can concern the same Task; Work attribution is no longer a provider writer lease.
+- `lf task restart` checkpoints the worktree and resets controller progress while preserving Task, worktree, and PR identity.
+- Managed Tasks can follow the human-submit path without requiring a live controller, and landing collapses intermediate checkpoints before publishing the verified head.
+
+## Inspect and replay the Run that actually happened
+
+Provider execution now produces a Home-local Run record: an immutable manifest published before spawn, an append-only event stream, and one exclusive terminal receipt. This replaces the SQL-backed Invocation/Turn execution control plane and makes identity evidence and causality rather than a mutation lease.
+
+- `lf runs <id>` reads the Run summary, while `lf runs <id> --events` exposes its recorded events.
+- `lf replay <id>` launches a new child Run through the ordinary harness from the recorded execution contract and preserves the source relationship.
+- Run evidence records the effective prompts, agent and model, stable non-secret account identity, turn cap, browser capability, permission mode, filesystem boundary, provider output, conversation, retries, and provider-authored cumulative usage.
+- Replay resolves the exact recorded account on the selected Home and fails closed when the schema, account, or managed-Run evidence cannot support the launch; it does not record credential bytes, environment values, resume tokens, callbacks, repository contents, or process ownership as replay inputs.
+- `lf trace --events` and `lf doctor` now understand the measured historical usage shapes without accepting unknown or partial records as valid current data.
+- Ended Runs from retired CI controllers remain readable with their unknown trigger JSON preserved byte-for-byte, while unknown nonterminal triggers remain invalid and cannot reserve new Runs.
+
+## Tag only candidates that have already passed
+
+The release tag is now the attestation, not the starting gun. Loopflow builds from a provisional exact-commit candidate ref, verifies the workflow by branch and head SHA, prepares publication artifacts, and only then pushes the immutable version tag.
+
+- Nightly and release candidates share one credential-free package matrix, with candidate binaries reporting their intended final version before the tag exists.
+- Publisher preparation stores artifacts and receipts under `.lf/releases/`, binding the candidate tag, source commit, workflow run, completed proof stages, and artifact hashes.
+- Publication revalidates the receipt and every artifact before upload, then removes successful candidate state.
+- A failed build leaves the repository untagged and preserves its candidate evidence, so the same version can be retried after a fix merges.
+- Tag pushes no longer trigger release builds; hosted builds use the explicit candidate-dispatch contract, while credentialed signing and publication remain on the maintained publisher host.
 
 ## Operational notes
 
-- `lf pr land` is now a watched command. Use `lf pr arm` for the previous one-shot behavior that requests exact-head auto-merge and returns.
-- Submit, arm, and land preparation collapse authored history into one tree-identical commit before publishing. Expect the prepared PR head and authored commit history to change while the resulting tree remains the same.
+- Work-bound Runs share a worktree but are not file-edit transactions. Give concurrent contributions distinct paths and reconcile them before checkpointing.
+- Replay uses current credentials and current repository contents as live launch inputs even though the execution contract itself is immutable. Exact-account replay refuses rather than silently choosing another identity.
+- Local promotion retains the published fallback and never imports development data during `refresh`; use `--fresh` when a clean fork is required.
+
+## Small changes
+
+- Cron continuity now checks the latest due local-time interval for an exactly matching scheduled receipt. Historical ledger gaps remain visible without permanently blocking `lf doctor` or the telemetry scorecard.
+- Scheduled receipts prove the scheduler fired even when the target failed; manual receipts do not satisfy continuity.
+- Wave memory now retains the release-recovery evidence restored during main reconciliation, and the list Wave starts from its current Linear-backed context.

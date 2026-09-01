@@ -1,13 +1,13 @@
 [project]
 name = "loopflow"
-version = "0.12.14"
+version = "0.12.15"
 description = "Run LLM coding agents from reusable prompt files"
 readme = "README.md"
 requires-python = ">=3.8"
 license = "MIT"
 authors = [{ name = "Jack" }]
 keywords = [
-    "llm", "claude", "codex", "gemini", "ai", "coding", "cli",
+    "llm", "claude", "codex", "ai", "coding", "cli",
     "agents", "automation", "workflow", "prompts"
 ]
 classifiers = [

@@ -1,0 +1,1637 @@
+//! The wave server's HTTP surface — a thin view over in-process state.
+//!
+//! Every endpoint reads or nudges [`WaveRuntime`]; none of them own logic. The
+//! timeline is served as-is, live events stream over SSE, and a POSTed message
+//! is journaled and broadcast to the resident's subscription. Discovery is a
+//! dumb pointer file, not a transport: `wave/<name>/.wave-endpoint` holds
+//! `127.0.0.1:<port>` and nothing else; `.wave-resident-token` beside it holds
+//! this boot's resident token (see [`crate::controller::wave::wire`]).
+//!
+//! This module is VENDOR-FREE: the loop lives in the resident process
+//! ([`crate::controller::wave::resident`]), which publishes through the resident door
+//! (`/resident/attach`, `/resident/deltas`, `/resident/context` — token-gated)
+//! and listens on its own wave's `/events?inbox=true` subscription. The
+//! listener holds every pen; the resident holds the vendor.
+//!
+//! Wire contract (snake_case, stable — a Loopflow worker builds against it):
+//! - `GET /health` → `{status, loop_state, wave, turns, paused, uptime_seconds}`;
+//!   `status` is listener liveness — always `serving` while this process
+//!   answers; `loop_state` is the resident's state (`idle | turning | interrupting
+//!   | failed`), or null before any resident has attached; a listener whose resident died reads
+//!   `status: "serving", loop_state: "failed"`.
+//! - `GET /conversation` → `{turns: [Turn]}`; includes the open turn (status
+//!   `running`), if one is in progress, after the finalized thread. Optional
+//!   `?limit=N` tails the last N turns (open turn included) — `wave_context`
+//!   passes 12; absent means the whole thread.
+//! - `GET /events` → SSE, the served mind's thread. Human subscriptions replay
+//!   the most recent 12 turns by default; optional `?limit=N` overrides that
+//!   tail while every subsequent turn still streams live. Resident inbox
+//!   subscriptions remain complete.
+//!   Event names:
+//!   - `state`: data is the loop-state name (`idle | turning | interrupting |
+//!     failed`), sent once on subscribe (before the turn replay) and again on
+//!     every transition — the composer keys its verb off it.
+//!   - `turn`: data is a `Turn` JSON; the thread replays on connect (including
+//!     the open turn), then streams live. Turn ids repeat: an in-progress turn
+//!     is re-sent whole as it grows and finalization sends the terminal turn
+//!     under the same id — each frame replaces the client's previous state
+//!     for that id (upsert, never append-if-seen).
+//!   - `inbox` (only with `?inbox=true`, the resident's subscription): data
+//!     is an [`InboxFrame`] — a resident-directed human message, typed Task or
+//!     Project observation, promotion wake, or control op. The pending queue
+//!     (journaled inputs not yet named in any `answers`) replays on
+//!     connect, then live ops stream; a bare interrupt rides live-only with
+//!     `id: null` (nothing journaled). The default
+//!     stream is byte-identical to the pre-resident wire.
+//! - The resident door (token-gated via the `x-lf-resident-token` header —
+//!   401 without this boot's token):
+//!   - `POST /resident/attach {pid}` → `{wave}` — registers the
+//!     resident's pid for liveness and revives a `failed` loop (a fresh
+//!     resident IS the revival).
+//!   - `POST /resident/deltas {deltas: [...]}` → `{accepted}` — ordered turn
+//!     deltas, applied to the journal fold
+//!     ([`WaveRuntime::apply_resident_delta`]).
+//!   - `GET /resident/context` → `{playhead, provider_session}` — the
+//!     pre-turn snapshot and optional typed provider thread; serving it drains
+//!     pending child observations first.
+//! - `POST /messages {id?, op, text}` → `{message, state, epoch}`. `op` is
+//!   required — `"message"` (queued; the next turn answers it), `"steer"`
+//!   (into the live turn when the harness supports it, else degrades to a
+//!   queued message), `"interrupt"` (cancel the open turn; non-empty text
+//!   becomes the next turn — "interrupt & send"; while idle, an interrupt is
+//!   a no-op success). `text` may be empty only for `interrupt` (400
+//!   otherwise). A local epoch journals immediately; a Discord epoch uses
+//!   `id` as an enforced provider nonce and returns the source-bearing provider
+//!   message, which the adapter then queues from its canonical Discord id.
+//!   `message` is null only for a bare interrupt (nothing was said); `state` is the
+//!   loop-state name when the request was accepted — ops are applied by the
+//!   loop asynchronously, so watch the stream's `state` events for the
+//!   outcome.
+//! - `POST /observations` optionally accepts a promotion latency nudge, verifies
+//!   it against the durable occurrence and registry parentage, drains the same
+//!   durable promotion through polling when the request is lost, and journals
+//!   it plus authoritative child observations idempotently before waking or
+//!   queueing the resident.
+//!   Loopback-only internal door; child Work never writes the Wave journal.
+//! - `POST /stop` → 202 and requests graceful listener shutdown. The listener
+//!   remains the sole owner of resident, registry, and discovery-file cleanup.
+//!
+//! `Turn` is [`crate::chat::turns::ChatTurn`].
+
+use std::collections::{HashSet, VecDeque};
+use std::convert::Infallible;
+use std::path::{Path, PathBuf};
+use std::sync::{Arc, Mutex};
+
+use axum::extract::{DefaultBodyLimit, Query, State};
+use axum::http::{HeaderMap, StatusCode};
+use axum::response::sse::{Event, KeepAlive, Sse};
+use axum::response::IntoResponse;
+use axum::routing::{get, post};
+use axum::{Json, Router};
+use futures_util::stream::{self, Stream, StreamExt};
+use secrecy::{ExposeSecret, SecretString};
+use serde::{Deserialize, Serialize};
+use subtle::ConstantTimeEq;
+use time::OffsetDateTime;
+use tokio::sync::{broadcast, watch};
+use tokio_stream::wrappers::errors::BroadcastStreamRecvError;
+use tokio_stream::wrappers::BroadcastStream;
+
+use crate::chat::turns::ChatTurn;
+use crate::controller::wave::chat::{
+    ChatBacking, ChatBackingHealth, ChatHistorySnapshot, ChatHistoryState, ChatMessageSource,
+    ConversationEpoch, PostMessageErrorResponse, PostMessageResponse, WaveChatMessage,
+};
+use crate::controller::wave::discord::{DiscordError, DiscordProjection};
+use crate::controller::wave::journal::{MessageOp, PendingMessage};
+use crate::controller::wave::playhead::PlayheadView;
+use crate::controller::wave::registry::{process_alive, ObserverSlot, StoreObserver};
+use crate::controller::wave::runtime::{
+    ChatWriteError, InboxItem, TurnBroadcast, TurnDeltaFrame, TurnFrame, WaveRuntime,
+};
+use crate::controller::wave::state::LoopState;
+use crate::controller::wave::supervisor::SupervisorHandle;
+use crate::controller::wave::wire::{
+    AttachRequest, AttachResponse, ContextResponse, InboxFrame, PostDeltasRequest,
+    PostDeltasResponse, RESIDENT_TOKEN_FILE, RESIDENT_TOKEN_HEADER,
+};
+
+/// Basename of the discovery pointer under `wave/<name>/`.
+pub const ENDPOINT_FILE: &str = ".wave-endpoint";
+
+/// The resident door's server-side state: this boot's token and the seat —
+/// the attached resident's pid, for liveness probing. Shared with the
+/// supervisor ([`crate::controller::wave::supervisor`]), which probes attached pids and
+/// clears the seat when the resident dies.
+///
+/// The token is held as a [`SecretString`] and compared in constant time
+/// ([`subtle::ConstantTimeEq`]) — never `==`, never surfaced in `Debug` or a
+/// log.
+#[derive(Debug, Clone)]
+pub struct ResidentDoor {
+    token: SecretString,
+    seat: Arc<Mutex<Option<u32>>>,
+}
+
+impl ResidentDoor {
+    pub fn new(token: impl Into<String>) -> Self {
+        Self {
+            token: SecretString::new(token.into()),
+            seat: Arc::new(Mutex::new(None)),
+        }
+    }
+
+    /// The attached resident's pid, if one has attached and not been cleared.
+    pub fn seat_pid(&self) -> Option<u32> {
+        *self.seat.lock().expect("resident seat lock poisoned")
+    }
+
+    /// Record the resident occupying the seat (attach, or spawn).
+    pub fn record_pid(&self, pid: u32) {
+        *self.seat.lock().expect("resident seat lock poisoned") = Some(pid);
+    }
+
+    /// The resident died: free the seat.
+    pub fn clear_seat(&self) {
+        *self.seat.lock().expect("resident seat lock poisoned") = None;
+    }
+
+    fn authorize(&self, headers: &HeaderMap) -> Result<(), (StatusCode, String)> {
+        let presented = headers
+            .get(RESIDENT_TOKEN_HEADER)
+            .and_then(|value| value.to_str().ok())
+            .unwrap_or_default();
+        if token_matches(&self.token, presented) {
+            return Ok(());
+        }
+        Err((
+            StatusCode::UNAUTHORIZED,
+            format!("missing or wrong {RESIDENT_TOKEN_HEADER}"),
+        ))
+    }
+}
+
+/// Constant-time compare of a presented token against a stored secret — the
+/// door's only equality check. Length inequality short-circuits; equal-length
+/// inputs compare in constant time.
+fn token_matches(expected: &SecretString, provided: &str) -> bool {
+    expected
+        .expose_secret()
+        .as_bytes()
+        .ct_eq(provided.as_bytes())
+        .into()
+}
+
+/// A fresh per-boot resident token.
+pub fn generate_resident_token() -> String {
+    format!(
+        "{}{}",
+        uuid::Uuid::new_v4().simple(),
+        uuid::Uuid::new_v4().simple()
+    )
+}
+
+/// One-shot lifecycle door for `POST /stop`. The listener owns the receiver;
+/// the HTTP surface only requests shutdown, leaving cleanup to `run_listener`.
+#[derive(Debug, Clone)]
+pub struct ShutdownDoor {
+    requested: watch::Sender<bool>,
+}
+
+impl ShutdownDoor {
+    pub fn new() -> Self {
+        let (requested, _) = watch::channel(false);
+        Self { requested }
+    }
+
+    fn request(&self) {
+        self.requested.send_replace(true);
+    }
+
+    pub async fn wait(&self) {
+        let mut receiver = self.requested.subscribe();
+        if *receiver.borrow() {
+            return;
+        }
+        let _ = receiver.changed().await;
+    }
+}
+
+impl Default for ShutdownDoor {
+    fn default() -> Self {
+        Self::new()
+    }
+}
+
+#[derive(Debug, Serialize)]
+struct HealthBody {
+    /// Listener liveness: always `"serving"` while this process answers. The
+    /// resident's condition is `loop_state` — a listener whose resident
+    /// died is `status: "serving", loop_state: "failed"`.
+    status: String,
+    /// Resident loop state name, or null for a listener with no resident
+    /// (before any resident attaches).
+    loop_state: Option<String>,
+    wave: String,
+    turns: usize,
+    /// Whether the wave is paused (GOAL.md `paused: true`): the listener
+    /// refuses to start turns while set, though it keeps serving and queueing.
+    paused: bool,
+    uptime_seconds: i64,
+    active_epoch: ConversationEpoch,
+    chat_backing_health: ChatBackingHealth,
+}
+
+/// `GET /conversation` query. `limit` is explicitly Optional: `None` serves
+/// the whole thread, `Some(n)` tails the last n turns.
+#[derive(Debug, Deserialize)]
+struct ConversationQuery {
+    limit: Option<usize>,
+    epoch: Option<String>,
+}
+
+/// `POST /messages` request body. `op` is required — explicit, never inferred.
+/// `id` becomes the Discord nonce when the active epoch is provider-backed.
+#[derive(Debug, Deserialize)]
+#[serde(deny_unknown_fields)]
+struct PostMessage {
+    id: Option<String>,
+    op: MessageOp,
+    text: String,
+}
+
+#[derive(Debug, Deserialize)]
+#[serde(deny_unknown_fields)]
+struct ObservationRequest {
+    promotion: Option<PromotionRequest>,
+}
+
+#[derive(Debug, Deserialize)]
+#[serde(deny_unknown_fields)]
+struct PromotionRequest {
+    parent: String,
+}
+
+/// `GET /events` query. `inbox` is explicitly Optional: `true` adds the
+/// resident's `inbox` frames (pending replay + live ops) to the subscription;
+/// absent/false leaves the wire byte-identical to the pre-resident stream.
+/// `limit` bounds only the initial turn replay; live turns are never dropped.
+#[derive(Debug, Deserialize)]
+struct EventsQuery {
+    inbox: Option<bool>,
+    limit: Option<usize>,
+}
+
+pub(crate) const HUMAN_THREAD_REPLAY_LIMIT: usize = 12;
+
+/// Server state: the runtime, the resident door, the shared observer slot (for the
+/// context door's freshness poll), the supervisor handle (to signal an
+/// attach), and when the server started (for uptime).
+#[derive(Clone)]
+struct ServerState {
+    runtime: Arc<WaveRuntime>,
+    resident: ResidentDoor,
+    observer: Arc<ObserverSlot>,
+    supervisor: Option<SupervisorHandle>,
+    shutdown: ShutdownDoor,
+    discord: Option<DiscordProjection>,
+    started_at: OffsetDateTime,
+}
+
+/// Request-body ceiling for the wave routes. Loopback + token gate this, but
+/// an unbounded body is a needless same-user allocation.
+const MAX_BODY_BYTES: usize = 1_048_576;
+
+/// Build the router over a running [`WaveRuntime`].
+///
+/// `observer` seeds the late-installable store poller. `GET /resident/context`
+/// freshens it before serving. `supervisor` lets the attach door stand the
+/// respawn ladder down (`None` in tests without a supervisor).
+pub fn router(
+    runtime: Arc<WaveRuntime>,
+    resident: ResidentDoor,
+    observer: Option<Arc<StoreObserver>>,
+    supervisor: Option<SupervisorHandle>,
+    shutdown: ShutdownDoor,
+) -> Router {
+    let observer = Arc::new(ObserverSlot::new(runtime.clone(), observer));
+    router_with_observer(runtime, resident, observer, supervisor, shutdown)
+}
+
+pub(crate) fn router_with_observer(
+    runtime: Arc<WaveRuntime>,
+    resident: ResidentDoor,
+    observer: Arc<ObserverSlot>,
+    supervisor: Option<SupervisorHandle>,
+    shutdown: ShutdownDoor,
+) -> Router {
+    router_with_chat_projection(runtime, resident, observer, supervisor, shutdown, None)
+}
+
+pub(crate) fn router_with_chat_projection(
+    runtime: Arc<WaveRuntime>,
+    resident: ResidentDoor,
+    observer: Arc<ObserverSlot>,
+    supervisor: Option<SupervisorHandle>,
+    shutdown: ShutdownDoor,
+    discord: Option<DiscordProjection>,
+) -> Router {
+    let state = ServerState {
+        runtime,
+        resident,
+        observer,
+        supervisor,
+        shutdown,
+        discord,
+        started_at: OffsetDateTime::now_utc(),
+    };
+    Router::new()
+        .route("/health", get(health_handler))
+        .route("/stop", post(stop_handler))
+        .route("/conversation", get(conversation_handler))
+        .route("/playhead", get(playhead_handler))
+        .route("/events", get(events_handler))
+        .route("/messages", post(messages_handler))
+        .route("/observations", post(observations_handler))
+        .route("/resident/attach", post(resident_attach_handler))
+        .route("/resident/deltas", post(resident_deltas_handler))
+        .route("/resident/context", get(resident_context_handler))
+        .layer(DefaultBodyLimit::max(MAX_BODY_BYTES))
+        .with_state(state)
+}
+
+async fn observations_handler(
+    State(state): State<ServerState>,
+    request: Option<Json<ObservationRequest>>,
+) -> Result<StatusCode, (StatusCode, String)> {
+    let observer = state.observer.acquire().await.ok_or_else(|| {
+        (
+            StatusCode::SERVICE_UNAVAILABLE,
+            "child observations require the shared Loopflow registry".to_string(),
+        )
+    })?;
+    if let Some(promotion) = request.and_then(|Json(request)| request.promotion) {
+        observer
+            .deliver_promotion(&promotion.parent)
+            .await
+            .map_err(|error| {
+                (
+                    StatusCode::CONFLICT,
+                    format!("promotion wake does not match registry truth: {error}"),
+                )
+            })?;
+    }
+    observer.poll_once().await;
+    Ok(StatusCode::NO_CONTENT)
+}
+
+async fn stop_handler(State(state): State<ServerState>) -> StatusCode {
+    state.shutdown.request();
+    StatusCode::ACCEPTED
+}
+
+async fn playhead_handler(
+    State(state): State<ServerState>,
+) -> Result<Json<PlayheadView>, (StatusCode, String)> {
+    state
+        .runtime
+        .ensure_playhead()
+        .map(Json)
+        .map_err(|err| (StatusCode::INTERNAL_SERVER_ERROR, err.to_string()))
+}
+
+async fn health_handler(State(state): State<ServerState>) -> Json<HealthBody> {
+    // `loop_state` is null until a resident has ever been spawned or attached —
+    // A listener with no resident has no Loop to report on.
+    let loop_state = state
+        .runtime
+        .resident_expected()
+        .then(|| state.runtime.loop_state().name().to_string());
+    let active_epoch = state.runtime.active_conversation_epoch();
+    let chat_backing_health = if matches!(active_epoch.backing, ChatBacking::Local) {
+        ChatBackingHealth::Ready
+    } else if let Some(discord) = &state.discord {
+        discord.health()
+    } else {
+        ChatBackingHealth::Blocked {
+            detail: "Discord projection is not available on this listener".to_string(),
+        }
+    };
+    Json(HealthBody {
+        status: "serving".to_string(),
+        loop_state,
+        wave: state.runtime.name().to_string(),
+        turns: state.runtime.thread_len(),
+        paused: state.runtime.paused(),
+        uptime_seconds: (OffsetDateTime::now_utc() - state.started_at).whole_seconds(),
+        active_epoch,
+        chat_backing_health,
+    })
+}
+
+// -- The resident door (token-gated; see crate::controller::wave::wire) --
+
+async fn resident_attach_handler(
+    State(state): State<ServerState>,
+    headers: HeaderMap,
+    Json(body): Json<AttachRequest>,
+) -> Result<Json<AttachResponse>, (StatusCode, String)> {
+    state.resident.authorize(&headers)?;
+    // Seat exclusivity: one loop per wave. A live seat already probed alive
+    // refuses the attach naming it — a second resident would split-brain the
+    // wire. A dead/absent seat is free (takeover after a crash rides the same
+    // door; the supervisor's own seat probe frees a dead pid on its cadence).
+    // `--force` is `lf wave`'s boot flag, not the door's business.
+    if let Some(seated) = state.resident.seat_pid() {
+        if seated != body.pid && process_alive(seated).await {
+            return Err((
+                StatusCode::CONFLICT,
+                format!(
+                    "wave '{}' already has a live resident on the seat (pid {seated}); \
+                     stop it before attaching, or use `lf wave <name> --force` to take over",
+                    state.runtime.name()
+                ),
+            ));
+        }
+    }
+    state.resident.record_pid(body.pid);
+    state.runtime.set_resident_expected();
+    // Tell the keeper: an attached resident stands the respawn ladder down
+    // (the fresh resident IS the revival) and is watched by pid probe.
+    if let Some(supervisor) = &state.supervisor {
+        supervisor.on_attach(body.pid);
+    }
+    // A fresh resident IS the revival: a failed loop goes idle on attach.
+    if matches!(state.runtime.loop_state(), LoopState::Failed { .. }) {
+        state
+            .runtime
+            .transition(LoopState::Idle, "resident attached");
+    }
+    state
+        .runtime
+        .ensure_playhead()
+        .map_err(|err| (StatusCode::INTERNAL_SERVER_ERROR, err.to_string()))?;
+    tracing::info!(pid = body.pid, "resident attached");
+    Ok(Json(AttachResponse {
+        wave: state.runtime.name().to_string(),
+    }))
+}
+
+async fn resident_deltas_handler(
+    State(state): State<ServerState>,
+    headers: HeaderMap,
+    Json(body): Json<PostDeltasRequest>,
+) -> Result<Json<PostDeltasResponse>, (StatusCode, String)> {
+    state.resident.authorize(&headers)?;
+    let accepted = body.deltas.len() as u64;
+    for delta in body.deltas {
+        state.runtime.apply_resident_delta(delta);
+    }
+    Ok(Json(PostDeltasResponse { accepted }))
+}
+
+async fn resident_context_handler(
+    State(state): State<ServerState>,
+    headers: HeaderMap,
+) -> Result<Json<ContextResponse>, (StatusCode, String)> {
+    state.resident.authorize(&headers)?;
+    // Drain child observations before the resident captures its next turn.
+    state.observer.poll_once().await;
+    let playhead = state
+        .runtime
+        .ensure_playhead()
+        .map_err(|err| (StatusCode::INTERNAL_SERVER_ERROR, err.to_string()))?;
+    Ok(Json(ContextResponse {
+        playhead,
+        provider_session: state.runtime.latest_provider_session(),
+    }))
+}
+
+async fn conversation_handler(
+    State(state): State<ServerState>,
+    Query(query): Query<ConversationQuery>,
+) -> Result<Json<ChatHistorySnapshot>, (StatusCode, String)> {
+    if query.limit == Some(0) {
+        return Err((StatusCode::BAD_REQUEST, "limit must be at least 1".into()));
+    }
+    // The tail is taken inside the runtime lock: a `?limit=N` request clones
+    // only the N turns it serves, not the whole thread.
+    let active_epoch = state.runtime.active_conversation_epoch();
+    let epochs = state.runtime.conversation_epochs();
+    let selected_epoch = match query.epoch.as_deref() {
+        Some(id) => epochs
+            .iter()
+            .find(|epoch| epoch.id == id)
+            .cloned()
+            .ok_or_else(|| (StatusCode::NOT_FOUND, format!("unknown chat epoch '{id}'")))?,
+        None => active_epoch.clone(),
+    };
+    let fetch_limit = query.limit.map(|limit| limit.saturating_add(1));
+    let (state_value, detail, mut messages) = match &selected_epoch.backing {
+        ChatBacking::Local => (
+            ChatHistoryState::Available,
+            None,
+            state
+                .runtime
+                .chat_messages(Some(&selected_epoch.id), fetch_limit),
+        ),
+        ChatBacking::Discord { .. }
+            if state
+                .runtime
+                .is_imported_conversation_epoch(&selected_epoch.id) =>
+        {
+            (
+                ChatHistoryState::Unavailable,
+                Some(
+                    "Legacy Discord history has no safe provider boundary; open the channel in Discord"
+                        .to_string(),
+                ),
+                Vec::new(),
+            )
+        }
+        ChatBacking::Discord { .. } => match &state.discord {
+            Some(discord) => match discord
+                .history(&state.runtime, &selected_epoch, fetch_limit)
+                .await
+            {
+                Ok(messages) => (ChatHistoryState::Available, None, messages),
+                Err(error) => (
+                    ChatHistoryState::Unavailable,
+                    Some(error.to_string()),
+                    Vec::new(),
+                ),
+            },
+            None => (
+                ChatHistoryState::Unavailable,
+                Some("Discord history requires the active Wave listener".to_string()),
+                Vec::new(),
+            ),
+        },
+    };
+    let truncated = query.limit.is_some_and(|limit| messages.len() > limit);
+    messages = tail_wave_messages(messages, query.limit);
+    Ok(Json(ChatHistorySnapshot {
+        epochs,
+        selected_epoch_id: Some(selected_epoch.id),
+        state: state_value,
+        detail,
+        messages,
+        truncated,
+    }))
+}
+
+/// The door is opaque on resident ops: this handler validates SHAPE only —
+/// `text` may be empty only for
+/// `interrupt` — then hands the op to the runtime uninterpreted
+/// ([`WaveRuntime::try_deliver`]). What steer or interrupt *means* lives with the
+/// resident, not the ear. Honest partial: the `{turn, state}` echo still
+/// leaks that a bare interrupt appends nothing (`turn: null`), but that fact
+/// comes back from the runtime's return, not from the door interpreting.
+async fn messages_handler(
+    State(state): State<ServerState>,
+    Json(body): Json<PostMessage>,
+) -> axum::response::Response {
+    if body.text.trim().is_empty() && !matches!(body.op, MessageOp::Interrupt) {
+        return (
+            StatusCode::BAD_REQUEST,
+            Json(PostMessageErrorResponse {
+                error: "text is required for every op but interrupt".to_string(),
+                epoch: state.runtime.active_conversation_epoch(),
+            }),
+        )
+            .into_response();
+    }
+    let active_epoch = state.runtime.active_conversation_epoch();
+    if !body.text.trim().is_empty() && matches!(active_epoch.backing, ChatBacking::Discord { .. }) {
+        if let Some(discord) = &state.discord {
+            let request_id = body
+                .id
+                .as_deref()
+                .filter(|id| !id.trim().is_empty())
+                .map(str::to_string)
+                .unwrap_or_else(|| uuid::Uuid::new_v4().to_string());
+            return match discord
+                .post_authored(&state.runtime, body.op, body.text.trim(), &request_id)
+                .await
+            {
+                Ok(message) => Json(PostMessageResponse {
+                    message: Some(message),
+                    state: state.runtime.loop_state().name().to_string(),
+                    epoch: active_epoch,
+                })
+                .into_response(),
+                Err(error) => {
+                    let status = if matches!(error, DiscordError::MessageTooLong { .. }) {
+                        StatusCode::BAD_REQUEST
+                    } else {
+                        StatusCode::BAD_GATEWAY
+                    };
+                    (
+                        status,
+                        Json(PostMessageErrorResponse {
+                            error: format!("message was not accepted: {error}"),
+                            epoch: active_epoch,
+                        }),
+                    )
+                        .into_response()
+                }
+            };
+        }
+    }
+    let turn = match state.runtime.try_deliver_authored(body.op, body.text) {
+        Ok(turn) => turn,
+        Err(error) => {
+            let status = match &error {
+                ChatWriteError::OpenDiscord => StatusCode::CONFLICT,
+                ChatWriteError::Journal(_) => StatusCode::INTERNAL_SERVER_ERROR,
+            };
+            return (
+                status,
+                Json(PostMessageErrorResponse {
+                    error: format!("message was not accepted: {error}"),
+                    epoch: state.runtime.active_conversation_epoch(),
+                }),
+            )
+                .into_response();
+        }
+    };
+    let message = turn.map(|turn| state.runtime.committed_local_message(turn));
+    Json(PostMessageResponse {
+        message,
+        state: state.runtime.loop_state().name().to_string(),
+        epoch: state.runtime.active_conversation_epoch(),
+    })
+    .into_response()
+}
+
+/// The served mind's thread as SSE. Human subscriptions open with epoch and
+/// backing health, then carry source-bearing `message` frames and plain
+/// `message-delta` increments. Resident inbox subscriptions keep the private
+/// `turn`/`turn-delta` wire. Both emit `resync` when a turn broadcast lags so
+/// the client reconnects for a fresh atomic snapshot. Snapshot and
+/// subscription are atomic in the runtime (broadcasts share the append lock),
+/// so no live frame is older than the replayed snapshot.
+///
+/// There is no secondary routing scope inside a Wave listener.
+async fn events_handler(
+    State(state): State<ServerState>,
+    Query(query): Query<EventsQuery>,
+) -> axum::response::Response {
+    let shutdown = state.shutdown.clone();
+    let include_inbox = query.inbox == Some(true);
+    let replay_limit = if include_inbox {
+        query.limit
+    } else {
+        Some(query.limit.unwrap_or(HUMAN_THREAD_REPLAY_LIMIT))
+    };
+    let sub = state.runtime.subscribe_with_snapshot(replay_limit);
+    let epoch = sub.epoch.clone();
+    let (discord_replay, discord_seen, backing_health) =
+        if !include_inbox && matches!(epoch.backing, ChatBacking::Discord { .. }) {
+            match &state.discord {
+                Some(discord) => {
+                    let fetch_limit = replay_limit.unwrap_or(HUMAN_THREAD_REPLAY_LIMIT).max(100);
+                    match discord
+                        .history(&state.runtime, &epoch, Some(fetch_limit))
+                        .await
+                    {
+                        Ok(messages) => {
+                            let seen = discord_message_ids(&messages);
+                            let replay = tail_wave_messages(messages, replay_limit)
+                                .into_iter()
+                                .map(|message| Ok(wave_message_event(&message)))
+                                .collect();
+                            (replay, seen, discord.health())
+                        }
+                        Err(error) => {
+                            let health = match discord.health() {
+                                blocked @ ChatBackingHealth::Blocked { .. } => blocked,
+                                _ => ChatBackingHealth::Retrying {
+                                    detail: error.to_string(),
+                                },
+                            };
+                            (Vec::new(), HashSet::new(), health)
+                        }
+                    }
+                }
+                None => (
+                    Vec::new(),
+                    HashSet::new(),
+                    ChatBackingHealth::Blocked {
+                        detail: "Discord history requires the active Wave listener".to_string(),
+                    },
+                ),
+            }
+        } else {
+            (Vec::new(), HashSet::new(), ChatBackingHealth::Ready)
+        };
+    // The resident's subscription replays the pending queue after the
+    // thread — its boot inbox. Consumption is validated at the resident
+    // door, so a stale replay can never double-consume.
+    let inbox_replay: Vec<Result<Event, Infallible>> = if include_inbox {
+        sub.pending
+            .iter()
+            .map(|message| {
+                let frame = if let Some(observation) = sub.tasks.get(&message.id) {
+                    InboxFrame::Task {
+                        observation: observation.clone(),
+                    }
+                } else if let Some(observation) = sub.projects.get(&message.id) {
+                    InboxFrame::Project {
+                        observation: observation.clone(),
+                    }
+                } else if let Some(wake) = sub.promotions.get(&message.id) {
+                    InboxFrame::Promotion {
+                        parent_wave_id: wake.parent_wave_id.clone(),
+                        parent: wake.parent.clone(),
+                    }
+                } else {
+                    pending_inbox_frame(message)
+                };
+                Ok(inbox_event(&frame))
+            })
+            .collect()
+    } else {
+        Vec::new()
+    };
+    let turn_replay: Vec<Result<Event, Infallible>> = if include_inbox {
+        sub.turns
+            .into_iter()
+            .map(|turn| Ok(turn_event(&turn)))
+            .collect()
+    } else if matches!(epoch.backing, ChatBacking::Local) {
+        sub.turns
+            .into_iter()
+            .filter_map(|turn| local_message_event(&epoch, turn).map(Ok))
+            .collect()
+    } else {
+        discord_replay
+    };
+    let epoch_replay = (!include_inbox)
+        .then(|| Ok(conversation_epoch_event(&epoch)))
+        .into_iter();
+    let replay = stream::iter(
+        epoch_replay
+            .chain((!include_inbox).then(|| Ok(backing_health_event(&backing_health))))
+            .chain(std::iter::once(Ok(state_event(&sub.state))))
+            .chain(sub.playhead.into_iter().map(|p| Ok(playhead_event(&p))))
+            .chain(turn_replay)
+            .chain(inbox_replay),
+    );
+    // The resident keeps private turn frames; human chat converts the same
+    // broadcasts into source-bearing messages. Both make lag an explicit
+    // `resync`, never a silent drop.
+    let live_turns: BoxedEventStream = if include_inbox {
+        Box::pin(turn_event_stream(sub.turn_rx))
+    } else if matches!(epoch.backing, ChatBacking::Local) {
+        Box::pin(chat_message_event_stream(sub.turn_rx, epoch))
+    } else if let Some(discord) = state.discord.clone() {
+        Box::pin(discord_message_event_stream(
+            discord,
+            state.runtime.clone(),
+            epoch,
+            discord_seen,
+            backing_health,
+        ))
+    } else {
+        Box::pin(stream::empty())
+    };
+    // Lagged: fine — the next transition carries the current state.
+    let live_states = live_stream(sub.state_rx, |s| state_event(&s));
+    let live_playhead = live_stream(sub.playhead_rx, |p| playhead_event(&p));
+    let mut live: BoxedEventStream = Box::pin(stream::select(
+        live_turns,
+        stream::select(live_states, live_playhead),
+    ));
+    if include_inbox {
+        // Lagged: the pending fold is the durable queue; a resident that
+        // falls behind resubscribes.
+        let live_inbox = live_stream(sub.inbox_rx, |item| inbox_event(&inbox_item_frame(&item)));
+        live = Box::pin(stream::select(live, live_inbox));
+    }
+    // Axum's graceful shutdown waits for open responses. End this long-lived
+    // response when /stop fires so the listener can finish before asking the
+    // resident to leave; otherwise each side waits for the other forever.
+    let merged: BoxedEventStream = Box::pin(replay.chain(live).take_until(async move {
+        shutdown.wait().await;
+    }));
+    axum::response::IntoResponse::into_response(Sse::new(merged).keep_alive(KeepAlive::default()))
+}
+
+type BoxedEventStream =
+    std::pin::Pin<Box<dyn Stream<Item = Result<Event, Infallible>> + Send + 'static>>;
+
+/// One live SSE stream off a broadcast receiver: each value becomes an event,
+/// a lagged receiver drops silently (every stream's durable state resyncs on
+/// reconnect — see each call site for what backs it).
+fn live_stream<T, F>(
+    rx: broadcast::Receiver<T>,
+    to_event: F,
+) -> impl Stream<Item = Result<Event, Infallible>> + Send + 'static
+where
+    T: Clone + Send + 'static,
+    F: Fn(T) -> Event + Send + 'static,
+{
+    BroadcastStream::new(rx).filter_map(move |res| {
+        let out = res.ok().map(|value| Ok(to_event(value)));
+        async move { out }
+    })
+}
+
+/// The live turn substream: whole turns as `turn` frames (replace-by-id),
+/// in-turn increments as `turn-delta` frames (absorb-by-id). Unlike the other
+/// live streams this one must NOT silently drop on lag: a client grows its open
+/// turn from deltas, so a swallowed increment leaves its reconstruction
+/// permanently short a fragment — a silently corrupt transcript. Instead a lag
+/// emits an explicit `resync` frame and ends the substream; the client
+/// reconnects to `/events` for a fresh atomic snapshot
+/// ([`WaveRuntime::subscribe_with_snapshot`]), the only resync with no
+/// snapshot-vs-stream cursor race. Whole frames at turn open and finalize
+/// re-baseline the reconstruction for free between resyncs.
+fn turn_event_stream(
+    rx: broadcast::Receiver<TurnBroadcast>,
+) -> impl Stream<Item = Result<Event, Infallible>> + Send + 'static {
+    stream::unfold(Some(BroadcastStream::new(rx)), |state| async move {
+        let mut inner = state?;
+        let recv = inner.next().await?;
+        match turn_wire_frame(recv) {
+            TurnWireFrame::Whole(frame) => Some((
+                Ok(Event::default().event("turn").data(frame.json.as_str())),
+                Some(inner),
+            )),
+            TurnWireFrame::Delta(frame) => Some((
+                Ok(Event::default()
+                    .event("turn-delta")
+                    .data(frame.json.as_str())),
+                Some(inner),
+            )),
+            // Lag: signal an explicit resync, then end the substream (state
+            // `None`) so the next poll returns nothing and the client reconnects.
+            TurnWireFrame::Resync => {
+                Some((Ok(Event::default().event("resync").data("reconnect")), None))
+            }
+        }
+    })
+}
+
+fn chat_message_event_stream(
+    rx: broadcast::Receiver<TurnBroadcast>,
+    epoch: ConversationEpoch,
+) -> impl Stream<Item = Result<Event, Infallible>> + Send + 'static {
+    stream::unfold(Some(BroadcastStream::new(rx)), move |state| {
+        let epoch = epoch.clone();
+        async move {
+            let mut inner = state?;
+            loop {
+                let recv = inner.next().await?;
+                match recv {
+                    Ok(TurnBroadcast::Whole(frame)) => {
+                        if let Some(event) = local_message_event(&epoch, frame.turn.clone()) {
+                            return Some((Ok(event), Some(inner)));
+                        }
+                    }
+                    Ok(TurnBroadcast::Delta(frame)) => {
+                        let Some(journal_seq) = turn_id_seq(&frame.delta.turn_id) else {
+                            continue;
+                        };
+                        if journal_seq <= epoch.journal_seq {
+                            continue;
+                        }
+                        return Some((
+                            Ok(Event::default().event("message-delta").data(
+                                serde_json::to_string(&frame.delta)
+                                    .expect("TurnDelta serializes to JSON"),
+                            )),
+                            Some(inner),
+                        ));
+                    }
+                    Err(BroadcastStreamRecvError::Lagged(_)) => {
+                        return Some((
+                            Ok(Event::default().event("resync").data("reconnect")),
+                            None,
+                        ));
+                    }
+                }
+            }
+        }
+    })
+}
+
+struct DiscordMessageStreamState {
+    projection: DiscordProjection,
+    runtime: Arc<WaveRuntime>,
+    epoch: ConversationEpoch,
+    seen: HashSet<String>,
+    pending: VecDeque<WaveChatMessage>,
+    health: ChatBackingHealth,
+}
+
+fn discord_message_event_stream(
+    projection: DiscordProjection,
+    runtime: Arc<WaveRuntime>,
+    epoch: ConversationEpoch,
+    seen: HashSet<String>,
+    health: ChatBackingHealth,
+) -> impl Stream<Item = Result<Event, Infallible>> + Send + 'static {
+    let state = DiscordMessageStreamState {
+        projection,
+        runtime,
+        epoch,
+        seen,
+        pending: VecDeque::new(),
+        health,
+    };
+    stream::unfold(state, |mut state| async move {
+        loop {
+            if let Some(message) = state.pending.pop_front() {
+                return Some((Ok(wave_message_event(&message)), state));
+            }
+            let provider_health = state.projection.health();
+            if provider_health != state.health {
+                state.health = provider_health;
+                return Some((Ok(backing_health_event(&state.health)), state));
+            }
+            tokio::time::sleep(std::time::Duration::from_secs(2)).await;
+            match state
+                .projection
+                .history(&state.runtime, &state.epoch, Some(100))
+                .await
+            {
+                Ok(messages) => {
+                    for message in messages {
+                        let Some(id) = discord_message_id(&message) else {
+                            continue;
+                        };
+                        if state.seen.insert(id.to_string()) {
+                            state.pending.push_back(message);
+                        }
+                    }
+                }
+                Err(error) => {
+                    let health = match state.projection.health() {
+                        blocked @ ChatBackingHealth::Blocked { .. } => blocked,
+                        _ => ChatBackingHealth::Retrying {
+                            detail: error.to_string(),
+                        },
+                    };
+                    if health != state.health {
+                        state.health = health;
+                        return Some((Ok(backing_health_event(&state.health)), state));
+                    }
+                }
+            }
+        }
+    })
+}
+
+/// One turn broadcast poll resolved to what it becomes on the wire. A lag is
+/// `Resync`, NEVER a silently dropped frame — that distinction is the whole
+/// point of this substream, so it is pinned by a unit test.
+enum TurnWireFrame {
+    Whole(Arc<TurnFrame>),
+    Delta(Arc<TurnDeltaFrame>),
+    Resync,
+}
+
+fn turn_wire_frame(recv: Result<TurnBroadcast, BroadcastStreamRecvError>) -> TurnWireFrame {
+    match recv {
+        Ok(TurnBroadcast::Whole(frame)) => TurnWireFrame::Whole(frame),
+        Ok(TurnBroadcast::Delta(frame)) => TurnWireFrame::Delta(frame),
+        Err(BroadcastStreamRecvError::Lagged(_)) => TurnWireFrame::Resync,
+    }
+}
+
+fn turn_event(turn: &ChatTurn) -> Event {
+    Event::default()
+        .event("turn")
+        .data(serde_json::to_string(turn).expect("ChatTurn serializes to JSON"))
+}
+
+fn conversation_epoch_event(epoch: &ConversationEpoch) -> Event {
+    Event::default()
+        .event("epoch")
+        .data(serde_json::to_string(epoch).expect("ConversationEpoch serializes to JSON"))
+}
+
+fn backing_health_event(health: &ChatBackingHealth) -> Event {
+    Event::default()
+        .event("backing-health")
+        .data(serde_json::to_string(health).expect("ChatBackingHealth serializes to JSON"))
+}
+
+fn wave_message_event(message: &WaveChatMessage) -> Event {
+    Event::default()
+        .event("message")
+        .data(serde_json::to_string(message).expect("WaveChatMessage serializes to JSON"))
+}
+
+fn discord_message_ids(messages: &[WaveChatMessage]) -> HashSet<String> {
+    messages
+        .iter()
+        .filter_map(discord_message_id)
+        .map(str::to_string)
+        .collect()
+}
+
+fn discord_message_id(message: &WaveChatMessage) -> Option<&str> {
+    match &message.source {
+        ChatMessageSource::Discord { message_id, .. } => Some(message_id),
+        ChatMessageSource::Local { .. } => None,
+    }
+}
+
+fn tail_wave_messages(
+    messages: Vec<WaveChatMessage>,
+    limit: Option<usize>,
+) -> Vec<WaveChatMessage> {
+    let take = limit.unwrap_or(messages.len()).min(messages.len());
+    messages[messages.len() - take..].to_vec()
+}
+
+fn local_message_event(epoch: &ConversationEpoch, turn: ChatTurn) -> Option<Event> {
+    let journal_seq = turn_id_seq(&turn.id)?;
+    if journal_seq <= epoch.journal_seq {
+        return None;
+    }
+    let message = WaveChatMessage {
+        epoch_id: epoch.id.clone(),
+        source: ChatMessageSource::Local { journal_seq },
+        turn,
+    };
+    Some(
+        Event::default()
+            .event("message")
+            .data(serde_json::to_string(&message).expect("WaveChatMessage serializes to JSON")),
+    )
+}
+
+fn turn_id_seq(turn_id: &str) -> Option<u64> {
+    turn_id.strip_prefix("turn-")?.parse().ok()
+}
+
+fn playhead_event(playhead: &PlayheadView) -> Event {
+    Event::default()
+        .event("playhead")
+        .data(serde_json::to_string(playhead).expect("PlayheadView serializes to JSON"))
+}
+
+fn state_event(state: &LoopState) -> Event {
+    Event::default().event("state").data(state.name())
+}
+
+fn inbox_event(frame: &InboxFrame) -> Event {
+    Event::default()
+        .event("inbox")
+        .data(serde_json::to_string(frame).expect("InboxFrame serializes to JSON"))
+}
+
+fn pending_inbox_frame(message: &PendingMessage) -> InboxFrame {
+    InboxFrame::Message {
+        id: message.id.0.clone(),
+        op: message.op,
+        text: message.text.clone(),
+        source: message.source.clone(),
+    }
+}
+
+fn inbox_item_frame(item: &InboxItem) -> InboxFrame {
+    match item {
+        InboxItem::Message(message) => pending_inbox_frame(message),
+        InboxItem::Task(observation) => InboxFrame::Task {
+            observation: observation.clone(),
+        },
+        InboxItem::Project(observation) => InboxFrame::Project {
+            observation: observation.clone(),
+        },
+        InboxItem::Promotion {
+            parent_wave_id,
+            parent,
+        } => InboxFrame::Promotion {
+            parent_wave_id: parent_wave_id.clone(),
+            parent: parent.clone(),
+        },
+        InboxItem::Interrupt => InboxFrame::Interrupt,
+        InboxItem::Skip => InboxFrame::Skip,
+    }
+}
+
+/// Path to the discovery pointer for a wave.
+pub fn endpoint_path(repo_root: &Path, wave: &str) -> PathBuf {
+    repo_root.join("wave").join(wave).join(ENDPOINT_FILE)
+}
+
+/// How long the boot-time probe waits for an existing endpoint to answer.
+const ENDPOINT_PROBE_TIMEOUT: std::time::Duration = std::time::Duration::from_secs(2);
+
+/// Probe an existing discovery pointer: `Some(addr)` when a live wave server
+/// for `wave` answers `GET /health` at the recorded address. This is the
+/// file-level one-brain floor — it works with no registry store at all
+/// (observed live: a second unregistered server overwrote the pointer and,
+/// on shutdown, deleted it, leaving the first server undiscoverable). A
+/// missing/unreadable file, a dead address, or an answer for a different
+/// wave is a stale pointer — `None`, safe to overwrite.
+pub async fn live_endpoint(repo_root: &Path, wave: &str) -> Option<String> {
+    let addr = std::fs::read_to_string(endpoint_path(repo_root, wave)).ok()?;
+    let addr = addr.trim().to_string();
+    if addr.is_empty() {
+        return None;
+    }
+    let client = reqwest::Client::builder()
+        .timeout(ENDPOINT_PROBE_TIMEOUT)
+        .build()
+        .ok()?;
+    let body: serde_json::Value = client
+        .get(format!("http://{addr}/health"))
+        .send()
+        .await
+        .ok()?
+        .json()
+        .await
+        .ok()?;
+    (body.get("wave").and_then(serde_json::Value::as_str) == Some(wave)).then_some(addr)
+}
+
+/// Publish the loopback endpoint so Loopflow can find the server. Writes ONLY
+/// `127.0.0.1:<port>` — a pointer, never message content.
+pub fn write_endpoint(
+    repo_root: &Path,
+    wave: &str,
+    addr: std::net::SocketAddr,
+) -> std::io::Result<()> {
+    let path = endpoint_path(repo_root, wave);
+    if let Some(parent) = path.parent() {
+        std::fs::create_dir_all(parent)?;
+    }
+    std::fs::write(path, addr.to_string())
+}
+
+/// Remove the discovery pointer on shutdown — only when it still holds this
+/// server's own address. A takeover that overwrote the file owns it now;
+/// deleting it here would leave that live server undiscoverable. Best-effort.
+pub fn remove_endpoint(repo_root: &Path, wave: &str, own_addr: &str) {
+    let path = endpoint_path(repo_root, wave);
+    match std::fs::read_to_string(&path) {
+        Ok(contents) if contents.trim() == own_addr => {
+            let _ = std::fs::remove_file(path);
+        }
+        _ => {}
+    }
+}
+
+/// Path to the resident-token file for a wave (beside `.wave-endpoint`).
+pub fn resident_token_path(repo_root: &Path, wave: &str) -> PathBuf {
+    repo_root.join("wave").join(wave).join(RESIDENT_TOKEN_FILE)
+}
+
+/// Publish this boot's resident token so the internal resident can present it
+/// — the same filesystem-trust domain as
+/// the endpoint pointer. Owner-only on unix.
+pub fn write_resident_token(repo_root: &Path, wave: &str, token: &str) -> std::io::Result<()> {
+    let path = resident_token_path(repo_root, wave);
+    if let Some(parent) = path.parent() {
+        std::fs::create_dir_all(parent)?;
+    }
+    std::fs::write(&path, token)?;
+    #[cfg(unix)]
+    {
+        use std::os::unix::fs::PermissionsExt;
+        std::fs::set_permissions(&path, std::fs::Permissions::from_mode(0o600))?;
+    }
+    Ok(())
+}
+
+/// Read the current resident token for attachment.
+pub fn read_resident_token(repo_root: &Path, wave: &str) -> Option<String> {
+    let token = std::fs::read_to_string(resident_token_path(repo_root, wave)).ok()?;
+    let token = token.trim().to_string();
+    (!token.is_empty()).then_some(token)
+}
+
+/// Remove the token file on shutdown — only while it still holds this boot's
+/// token (a takeover owns the file now). Best-effort.
+pub fn remove_resident_token(repo_root: &Path, wave: &str, own_token: &str) {
+    let path = resident_token_path(repo_root, wave);
+    match std::fs::read_to_string(&path) {
+        Ok(contents) if contents.trim() == own_token => {
+            let _ = std::fs::remove_file(path);
+        }
+        _ => {}
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+    use crate::chat::turns::ChatTurn;
+    use crate::controller::wave::journal::{
+        journal_path, read_events, EventKind, JournalAppendStage,
+    };
+    use crate::id::WaveId;
+    use crate::store::{open_store, SharedStore};
+    use crate::work::wave::Wave;
+
+    fn whole_broadcast(id: &str) -> TurnBroadcast {
+        let turn = ChatTurn::user(id.to_string(), "hi".to_string());
+        let json = serde_json::to_string(&turn).expect("serialize");
+        TurnBroadcast::Whole(Arc::new(TurnFrame { turn, json }))
+    }
+
+    #[test]
+    fn post_message_response_fixture_round_trips() {
+        let fixture = include_str!(concat!(
+            env!("CARGO_MANIFEST_DIR"),
+            "/../../tests/fixtures/dto/post_message_response.json"
+        ));
+        let response: PostMessageResponse =
+            serde_json::from_str(fixture).expect("decode post message response fixture");
+        let encoded = serde_json::to_string(&response).expect("encode post message response");
+        let decoded: PostMessageResponse =
+            serde_json::from_str(&encoded).expect("re-decode post message response");
+        assert_eq!(decoded, response);
+    }
+
+    #[test]
+    fn post_message_error_response_fixture_round_trips() {
+        let fixture = include_str!(concat!(
+            env!("CARGO_MANIFEST_DIR"),
+            "/../../tests/fixtures/dto/post_message_error_response.json"
+        ));
+        let response: PostMessageErrorResponse =
+            serde_json::from_str(fixture).expect("decode post message error fixture");
+        let encoded = serde_json::to_string(&response).expect("encode post message error");
+        let decoded: PostMessageErrorResponse =
+            serde_json::from_str(&encoded).expect("re-decode post message error");
+        assert_eq!(decoded, response);
+    }
+
+    #[test]
+    fn a_lagged_turn_broadcast_maps_to_resync_not_a_dropped_frame() {
+        // The distinction this substream exists for: a lag becomes an explicit
+        // resync, never a silently swallowed increment.
+        assert!(matches!(
+            turn_wire_frame(Err(BroadcastStreamRecvError::Lagged(3))),
+            TurnWireFrame::Resync
+        ));
+        assert!(matches!(
+            turn_wire_frame(Ok(whole_broadcast("turn-1"))),
+            TurnWireFrame::Whole(_)
+        ));
+    }
+
+    #[tokio::test]
+    async fn turn_stream_signals_one_resync_then_ends_on_lag() {
+        // A capacity-2 channel overfilled before any read: the receiver lags.
+        let (tx, rx) = broadcast::channel::<TurnBroadcast>(2);
+        for i in 0..8 {
+            let _ = tx.send(whole_broadcast(&format!("turn-{i}")));
+        }
+        drop(tx);
+
+        let mut stream = Box::pin(turn_event_stream(rx));
+        // Exactly one frame — the resync — then the substream ends. A silent
+        // drop would surface the retained tail instead of telling the client to
+        // reconnect; ending is what forces the fresh atomic snapshot.
+        assert!(
+            stream.next().await.is_some(),
+            "a lagged turn stream signals resync, not silence"
+        );
+        assert!(
+            stream.next().await.is_none(),
+            "the substream ends after resync so the client reconnects"
+        );
+    }
+
+    #[test]
+    fn write_and_remove_endpoint_roundtrips() {
+        let tmp = tempfile::tempdir().expect("tempdir");
+        let addr: std::net::SocketAddr = "127.0.0.1:54321".parse().unwrap();
+        write_endpoint(tmp.path(), "ship", addr).expect("write endpoint");
+
+        let path = endpoint_path(tmp.path(), "ship");
+        assert_eq!(std::fs::read_to_string(&path).unwrap(), "127.0.0.1:54321");
+
+        remove_endpoint(tmp.path(), "ship", "127.0.0.1:54321");
+        assert!(!path.exists());
+    }
+
+    /// A server taken over by `--force` must not delete the pointer the new
+    /// server wrote: remove only what still holds our own address.
+    #[test]
+    fn remove_endpoint_leaves_a_foreign_pointer_untouched() {
+        let tmp = tempfile::tempdir().expect("tempdir");
+        let addr: std::net::SocketAddr = "127.0.0.1:50000".parse().unwrap();
+        write_endpoint(tmp.path(), "ship", addr).expect("write endpoint");
+
+        remove_endpoint(tmp.path(), "ship", "127.0.0.1:50001");
+        let path = endpoint_path(tmp.path(), "ship");
+        assert_eq!(
+            std::fs::read_to_string(&path).unwrap(),
+            "127.0.0.1:50000",
+            "foreign pointer survives our shutdown"
+        );
+    }
+
+    /// The token file round-trips and removal honors ownership, like the
+    /// endpoint pointer.
+    #[test]
+    fn resident_token_file_roundtrips_and_respects_ownership() {
+        let tmp = tempfile::tempdir().expect("tempdir");
+        assert!(read_resident_token(tmp.path(), "ship").is_none());
+        write_resident_token(tmp.path(), "ship", "tok-1").expect("write");
+        assert_eq!(
+            read_resident_token(tmp.path(), "ship").as_deref(),
+            Some("tok-1")
+        );
+
+        // A foreign token (takeover) survives our shutdown; our own doesn't.
+        remove_resident_token(tmp.path(), "ship", "tok-other");
+        assert_eq!(
+            read_resident_token(tmp.path(), "ship").as_deref(),
+            Some("tok-1")
+        );
+        remove_resident_token(tmp.path(), "ship", "tok-1");
+        assert!(read_resident_token(tmp.path(), "ship").is_none());
+    }
+
+    #[tokio::test]
+    async fn stop_route_requests_listener_shutdown() {
+        let tmp = tempfile::tempdir().expect("tempdir");
+        let runtime = WaveRuntime::open("ship".into(), tmp.path().to_path_buf()).expect("open");
+        let shutdown = ShutdownDoor::new();
+        let requested = shutdown.clone();
+        let observer = Arc::new(ObserverSlot::new(runtime.clone(), None));
+        let app = router_with_observer(
+            runtime,
+            ResidentDoor::new("resident"),
+            observer,
+            None,
+            shutdown,
+        );
+        let listener = tokio::net::TcpListener::bind("127.0.0.1:0").await.unwrap();
+        let addr = listener.local_addr().unwrap();
+        let server = tokio::spawn(async move {
+            axum::serve(listener, app).await.ok();
+        });
+
+        let response = reqwest::Client::new()
+            .post(format!("http://{addr}/stop"))
+            .send()
+            .await
+            .unwrap();
+        assert_eq!(response.status(), reqwest::StatusCode::ACCEPTED);
+        requested.wait().await;
+        server.abort();
+    }
+
+    #[tokio::test]
+    async fn message_write_failures_are_not_accepted_and_can_be_retried() {
+        let tmp = tempfile::tempdir().expect("tempdir");
+        let runtime = WaveRuntime::open("ship".into(), tmp.path().to_path_buf()).expect("open");
+        let app = router_with_observer(
+            runtime.clone(),
+            ResidentDoor::new("resident"),
+            Arc::new(ObserverSlot::new(runtime.clone(), None)),
+            None,
+            ShutdownDoor::new(),
+        );
+        let listener = tokio::net::TcpListener::bind("127.0.0.1:0")
+            .await
+            .expect("bind");
+        let addr = listener.local_addr().expect("address");
+        let server = tokio::spawn(async move {
+            axum::serve(listener, app).await.ok();
+        });
+        let client = reqwest::Client::new();
+        let url = format!("http://{addr}/messages");
+        let body = serde_json::json!({"op": "message", "text": "keep this"});
+        let mut turn_rx = runtime.subscribe_turns();
+        let mut inbox_rx = runtime.subscribe_inbox();
+
+        for failure in [JournalAppendStage::Write, JournalAppendStage::Flush] {
+            runtime.fail_next_journal_append(failure);
+            let response = client
+                .post(&url)
+                .json(&body)
+                .send()
+                .await
+                .expect("failed append response");
+            assert_eq!(response.status(), StatusCode::INTERNAL_SERVER_ERROR);
+            assert!(response
+                .text()
+                .await
+                .expect("error body")
+                .contains("message was not accepted"));
+            assert!(runtime.thread_snapshot().is_empty());
+            assert!(runtime.pending_messages().is_empty());
+            assert_eq!(
+                read_events(&journal_path(tmp.path(), "ship")).len(),
+                1,
+                "only the epoch boundary exists"
+            );
+            assert!(matches!(
+                turn_rx.try_recv(),
+                Err(broadcast::error::TryRecvError::Empty)
+            ));
+            assert!(matches!(
+                inbox_rx.try_recv(),
+                Err(broadcast::error::TryRecvError::Empty)
+            ));
+        }
+
+        let response = client
+            .post(&url)
+            .json(&body)
+            .send()
+            .await
+            .expect("retry response");
+        assert_eq!(response.status(), StatusCode::OK);
+        let accepted: serde_json::Value = response.json().await.expect("accepted body");
+        assert_eq!(accepted["message"]["turn"]["id"], "turn-2");
+        assert_eq!(accepted["message"]["turn"]["role"], "user");
+        assert_eq!(accepted["message"]["turn"]["text"], "keep this");
+        assert_eq!(accepted["message"]["source"]["kind"], "local");
+        assert_eq!(runtime.thread_snapshot().len(), 1);
+        assert_eq!(runtime.pending_messages().len(), 1);
+
+        let events = read_events(&journal_path(tmp.path(), "ship"));
+        assert_eq!(events.len(), 2);
+        assert!(matches!(events[1].kind, EventKind::UserMessage { .. }));
+        server.abort();
+        let _ = server.await;
+        drop(runtime);
+
+        let reopened = WaveRuntime::open("ship".into(), tmp.path().to_path_buf()).expect("reopen");
+        let transcript = reopened.thread_snapshot();
+        assert_eq!(transcript.len(), 1);
+        assert_eq!(transcript[0].id, "turn-2");
+        assert_eq!(transcript[0].text, "keep this");
+    }
+
+    #[tokio::test]
+    async fn discord_backing_rejects_compose_with_open_action_and_no_local_write() {
+        let tmp = tempfile::tempdir().expect("tempdir");
+        let binding = crate::controller::wave::journal::DiscordChatBinding {
+            guild_id: "guild".into(),
+            channel_id: "channel".into(),
+        };
+        let runtime = WaveRuntime::open_with_backing(
+            "ship".into(),
+            tmp.path().to_path_buf(),
+            ChatBacking::discord(&binding),
+        )
+        .expect("open Discord epoch");
+        let app = router_with_observer(
+            runtime.clone(),
+            ResidentDoor::new("resident"),
+            Arc::new(ObserverSlot::new(runtime.clone(), None)),
+            None,
+            ShutdownDoor::new(),
+        );
+        let listener = tokio::net::TcpListener::bind("127.0.0.1:0")
+            .await
+            .expect("bind");
+        let addr = listener.local_addr().expect("address");
+        let server = tokio::spawn(async move {
+            axum::serve(listener, app).await.ok();
+        });
+        let client = reqwest::Client::new();
+        let before = read_events(&journal_path(tmp.path(), "ship"));
+
+        let response = client
+            .post(format!("http://{addr}/messages"))
+            .json(&serde_json::json!({"op": "message", "text": "shadow"}))
+            .send()
+            .await
+            .expect("compose response");
+        assert_eq!(response.status(), StatusCode::CONFLICT);
+        let rejection: serde_json::Value = response.json().await.expect("rejection JSON");
+        assert_eq!(
+            rejection["epoch"]["backing"]["open"]["kind"],
+            "open_discord"
+        );
+        assert_eq!(
+            rejection["epoch"]["backing"]["open"]["url"],
+            "https://discord.com/channels/guild/channel"
+        );
+        assert_eq!(
+            read_events(&journal_path(tmp.path(), "ship")),
+            before,
+            "Discord rejection appends no local turn"
+        );
+        assert!(runtime.pending_messages().is_empty());
+
+        let interrupt = client
+            .post(format!("http://{addr}/messages"))
+            .json(&serde_json::json!({"op": "interrupt", "text": ""}))
+            .send()
+            .await
+            .expect("bare interrupt response");
+        assert_eq!(interrupt.status(), StatusCode::OK);
+        let interrupt: serde_json::Value = interrupt.json().await.expect("interrupt JSON");
+        assert!(interrupt["message"].is_null());
+
+        let conversation: serde_json::Value = client
+            .get(format!("http://{addr}/conversation"))
+            .send()
+            .await
+            .expect("conversation response")
+            .json()
+            .await
+            .expect("conversation JSON");
+        assert_eq!(conversation["epochs"][0]["backing"]["kind"], "discord");
+        assert_eq!(
+            conversation["selected_epoch_id"],
+            conversation["epochs"][0]["id"]
+        );
+        assert_eq!(conversation["state"], "unavailable");
+        assert_eq!(conversation["messages"], serde_json::json!([]));
+        server.abort();
+    }
+
+    #[tokio::test]
+    #[allow(clippy::await_holding_lock)] // the env guard serializes the shared registry path
+    async fn observation_nudge_acquires_registry_that_appears_after_server_start() {
+        let _env = crate::journal::TestLedgerGuard::new();
+        let tmp = tempfile::tempdir().expect("tempdir");
+        let runtime = WaveRuntime::open("ship".into(), tmp.path().to_path_buf()).expect("open");
+        let observer = Arc::new(ObserverSlot::new(runtime.clone(), None));
+        let app = router_with_observer(
+            runtime.clone(),
+            ResidentDoor::new("resident"),
+            observer,
+            None,
+            ShutdownDoor::new(),
+        );
+        let listener = tokio::net::TcpListener::bind("127.0.0.1:0").await.unwrap();
+        let addr = listener.local_addr().unwrap();
+        let server = tokio::spawn(async move {
+            axum::serve(listener, app).await.ok();
+        });
+
+        let response = reqwest::Client::new()
+            .post(format!("http://{addr}/observations"))
+            .json(&serde_json::json!({}))
+            .send()
+            .await
+            .unwrap();
+        assert_eq!(response.status(), reqwest::StatusCode::SERVICE_UNAVAILABLE);
+
+        let store: SharedStore = Arc::new(
+            open_store(&crate::store::storage_config_from_env().expect("store config"))
+                .await
+                .expect("create registry"),
+        );
+        let parent = Wave::new(
+            WaveId::new(),
+            "platform".to_string(),
+            tmp.path().display().to_string(),
+        );
+        let mut child = Wave::new(
+            WaveId::new(),
+            "ship".to_string(),
+            tmp.path().display().to_string(),
+        );
+        child
+            .record_promotion(parent.id(), OffsetDateTime::now_utc())
+            .expect("record promotion");
+        store.create_wave(&parent).await.expect("store parent");
+        store.create_wave(&child).await.expect("store child");
+
+        for _ in 0..2 {
+            let response = reqwest::Client::new()
+                .post(format!("http://{addr}/observations"))
+                .json(&serde_json::json!({"promotion": {"parent": "platform"}}))
+                .send()
+                .await
+                .expect("promotion nudge");
+            assert_eq!(response.status(), reqwest::StatusCode::NO_CONTENT);
+        }
+        assert_eq!(runtime.pending_messages().len(), 1);
+        assert_eq!(
+            read_events(&journal_path(tmp.path(), "ship"))
+                .iter()
+                .filter(|event| matches!(&event.kind, EventKind::PromotionObserved { .. }))
+                .count(),
+            1
+        );
+        server.abort();
+    }
+
+    /// A pointer to a dead address is stale: the probe says no live server.
+    #[tokio::test]
+    async fn live_endpoint_is_none_for_a_stale_pointer() {
+        let tmp = tempfile::tempdir().expect("tempdir");
+        assert!(live_endpoint(tmp.path(), "ship").await.is_none(), "no file");
+
+        // A port nothing listens on: bind, learn the address, drop it.
+        let listener = tokio::net::TcpListener::bind("127.0.0.1:0").await.unwrap();
+        let dead = listener.local_addr().unwrap();
+        drop(listener);
+        write_endpoint(tmp.path(), "ship", dead).expect("write endpoint");
+        assert!(
+            live_endpoint(tmp.path(), "ship").await.is_none(),
+            "dead address is stale"
+        );
+    }
+}

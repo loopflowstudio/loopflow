@@ -1,6 +1,6 @@
 ---
 requires: none
-produces: scratch/research.md
+produces: scratch/research-<topic>-<short-run-id>.md | explicitly named scratch/*.md
 ---
 Map the territory. Understand what exists before deciding what to change.
 
@@ -68,7 +68,17 @@ Research first, then analysis. Understand what exists before evaluating it. If y
 
 ## Output
 
-Write `scratch/research.md`:
+Write one new research artifact. If the directive names an exact `scratch/*.md`
+path, use it. Otherwise derive
+`scratch/research-<topic>-<short-run-id>.md`, using the final eight id
+characters of `LF_RUN_ID` when available. Never overwrite an existing artifact;
+choose a new specific path instead. Publish the complete file atomically so a concurrent
+scratch snapshot sees all of it or none of it. Independent research Runs edit
+only their own named artifacts, never the canonical design. In a direct bound
+Run, leave the artifact uncommitted and unpushed so the caller can reconcile all
+concurrent contributions before one coherent checkpoint.
+
+Use this shape:
 
 ```markdown
 # Research: <area>

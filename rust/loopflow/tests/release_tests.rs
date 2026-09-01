@@ -33,6 +33,109 @@ fn write_gh_failed_release_script() -> &'static str {
     "#!/bin/sh\nif [ \"$1\" = \"--version\" ]; then\n  echo 'gh version 2.0.0'\n  exit 0\nfi\ncase \"$1 $2\" in\n  'release view') exit 1;;\n  'run list') cat <<'JSON'\n[{\"databaseId\":42,\"headBranch\":\"v0.9.1\",\"status\":\"completed\",\"conclusion\":\"failure\",\"url\":\"https://example.com/run/42\"}]\nJSON\n    exit 0;;\n  'pr list') echo '[]'; exit 0;;\nesac\necho \"unexpected gh invocation: $@\" >&2\nexit 1\n"
 }
 
+fn write_gh_candidate_release_script(log_path: &str, conclusion: &str) -> String {
+    format!(
+        r#"#!/bin/sh
+log="{log_path}"
+armed="{log_path}.armed"
+dispatched="{log_path}.dispatched"
+dispatch_count_file="{log_path}.dispatch-count"
+branch_file="{log_path}.branch"
+commit_file="{log_path}.commit"
+configured_conclusion="{conclusion}"
+if [ "$1" = "--version" ]; then
+  exit 0
+fi
+printf '%s\n' "$*" >> "$log"
+case "$1 $2" in
+  'run list')
+    previous="$(git rev-list -n 1 v0.9.1)"
+    if [ -f "$dispatched" ]; then
+      branch="$(cat "$branch_file")"
+      commit="$(cat "$commit_file")"
+      run_conclusion="$configured_conclusion"
+      if [ "$run_conclusion" = failure-then-success ] && [ "$(cat "$dispatch_count_file")" -gt 1 ]; then
+        run_conclusion=success
+      elif [ "$run_conclusion" = failure-then-success ]; then
+        run_conclusion=failure
+      fi
+      printf '[{{"databaseId":84,"headBranch":"%s","headSha":"%s","displayTitle":"Release candidate v0.9.2","status":"completed","conclusion":"%s","url":"https://example.com/run/84"}},{{"databaseId":42,"headBranch":"v0.9.1","headSha":"%s","status":"completed","conclusion":"success","url":"https://example.com/run/42"}}]\n' "$branch" "$commit" "$run_conclusion" "$previous"
+    else
+      printf '[{{"databaseId":42,"headBranch":"v0.9.1","headSha":"%s","status":"completed","conclusion":"success","url":"https://example.com/run/42"}}]\n' "$previous"
+    fi
+    exit 0;;
+  'workflow run')
+    shift 2
+    branch=''
+    tag=''
+    while [ "$#" -gt 0 ]; do
+      case "$1" in
+        --ref) branch="$2"; shift 2 ;;
+        -f)
+          case "$2" in
+            tag=*) tag="${{2#tag=}}" ;;
+          esac
+          shift 2 ;;
+        *) shift ;;
+      esac
+    done
+    [ "$tag" = v0.9.2 ] || {{ echo "unexpected candidate tag: $tag" >&2; exit 51; }}
+    if git ls-remote --tags origin refs/tags/v0.9.2 | grep -q .; then
+      echo 'version tag existed before candidate proof' >&2
+      exit 52
+    fi
+    remote="$(git ls-remote --heads origin "refs/heads/$branch" | cut -f1)"
+    [ -n "$remote" ] || {{ echo "candidate ref $branch is missing" >&2; exit 53; }}
+    case "$branch" in
+      release-candidate/default/v0-9-2/*) ;;
+      *) echo "unexpected candidate ref: $branch" >&2; exit 54 ;;
+    esac
+    commit="$remote"
+    printf '%s' "$branch" > "$branch_file"
+    printf '%s' "$commit" > "$commit_file"
+    count=0
+    [ ! -f "$dispatch_count_file" ] || count="$(cat "$dispatch_count_file")"
+    count=$((count + 1))
+    printf '%s' "$count" > "$dispatch_count_file"
+    : > "$dispatched"
+    exit 0;;
+  'pr list')
+    case " $* " in
+      *' --head '*)
+        head="$(git rev-parse HEAD)"
+        printf '[{{"number":1176,"state":"OPEN","mergeCommit":null,"url":"https://example.com/pr/1176","headRefOid":"%s"}}]\n' "$head"
+        ;;
+      *) echo '[]' ;;
+    esac
+    exit 0;;
+  'pr view')
+    head="$(git rev-parse HEAD)"
+    if [ -f "$armed" ]; then
+      printf '{{"state":"MERGED","mergeStateStatus":"UNKNOWN","mergeCommit":{{"oid":"%s"}},"url":"https://example.com/pr/1176"}}\n' "$head"
+    else
+      printf '{{"state":"OPEN","mergeStateStatus":"CLEAN","mergeCommit":null,"url":"https://example.com/pr/1176"}}\n'
+    fi
+    exit 0;;
+  'api graphql') echo 'false'; exit 0;;
+  'pr merge') : > "$armed"; exit 0;;
+  'run download') exit 0;;
+  'release view')
+    if [ "$3" = v0.9.1 ]; then
+      echo '{{"isDraft":false}}'
+      exit 0
+    fi
+    if [ -f "{log_path}.published" ]; then
+      echo '{{"isDraft":false}}'
+      exit 0
+    fi
+    exit 1;;
+esac
+echo "unexpected gh invocation: $*" >&2
+exit 1
+"#
+    )
+}
+
 fn write_gh_dropped_auto_merge_script(log_path: &str) -> String {
     format!(
         r#"#!/bin/sh
@@ -180,6 +283,26 @@ fn wait_for_path(path: &std::path::Path) {
         );
         thread::sleep(Duration::from_millis(20));
     }
+}
+
+fn prepare_candidate_release_repo(repo: &TestRepo) -> String {
+    fs::create_dir_all(repo.path().join(".lf")).expect("create config dir");
+    fs::write(
+        repo.path().join(".lf/config.yaml"),
+        "release:\n  targets:\n    default:\n      workflow: release.yml\n",
+    )
+    .expect("write release config");
+    git(repo, &["add", ".lf/config.yaml"]);
+    git(repo, &["commit", "-m", "Configure release workflow"]);
+    git(repo, &["push", "origin", "HEAD"]);
+    git(repo, &["tag", "v0.9.1"]);
+    git(repo, &["push", "origin", "v0.9.1"]);
+
+    fs::write(repo.path().join("feature.txt"), "release me\n").expect("write feature");
+    git(repo, &["add", "feature.txt"]);
+    git(repo, &["commit", "-m", "Add release change"]);
+    git(repo, &["push", "origin", "HEAD"]);
+    git_output(repo, &["rev-parse", "HEAD"])
 }
 
 #[test]
@@ -725,6 +848,176 @@ fn release_run_checks_the_host_local_publisher_role() {
 }
 
 #[test]
+fn release_run_proves_the_candidate_before_pushing_the_version_tag() {
+    let repo = TestRepo::new();
+    let head = prepare_candidate_release_repo(&repo);
+    let state = tempfile::tempdir().expect("release state");
+    let log_path = state.path().join("gh.log");
+    let gh_script = write_gh_candidate_release_script(&log_path.to_string_lossy(), "success");
+    let _env = EnvGuard::new(&[("gh", gh_script.as_str())]);
+
+    let outcome = release_run(repo.path(), "patch", None, &NullProgress)
+        .expect("proven candidate should be tagged");
+
+    let ReleaseRunOutcome::Released(receipt) = outcome else {
+        panic!("expected a released receipt");
+    };
+    assert_eq!(receipt.tag, "v0.9.2");
+    assert_eq!(receipt.commit, head);
+    assert_eq!(receipt.workflow_run_id, 84);
+    assert_eq!(
+        git_output_bare(&repo, &["rev-parse", "refs/tags/v0.9.2"]),
+        head
+    );
+    assert!(
+        git_output_bare(
+            &repo,
+            &[
+                "for-each-ref",
+                "--format=%(refname)",
+                "refs/heads/release-candidate/",
+            ],
+        )
+        .is_empty(),
+        "successful release should remove its provisional ref"
+    );
+}
+
+#[test]
+fn release_run_prepares_signed_artifacts_before_pushing_the_version_tag() {
+    let repo = TestRepo::new();
+    prepare_candidate_release_repo(&repo);
+    let state = tempfile::tempdir().expect("release state");
+    let log_path = state.path().join("gh.log");
+    let allow_preparation = state.path().join("allow-preparation");
+    let publisher = repo.path().join("publisher.sh");
+    fs::write(
+        &publisher,
+        format!(
+            r#"#!/bin/sh
+case "$1" in
+  check) exit 0 ;;
+  prepare)
+    if git ls-remote --tags origin refs/tags/v0.9.2 | grep -q .; then
+      echo 'version tag existed before publisher preparation' >&2
+      exit 61
+    fi
+    shift
+    while [ "$#" -gt 0 ]; do
+      case "$1" in
+        --output) output="$2"; shift 2 ;;
+        *) shift ;;
+      esac
+    done
+    [ -f '{}' ] || {{ echo 'candidate signing failed' >&2; exit 63; }}
+    mkdir -p "$output"
+    printf '{{}}\n' > "$output/candidate.json"
+    exit 0 ;;
+  publish)
+    git ls-remote --tags origin refs/tags/v0.9.2 | grep -q . || {{
+      echo 'version tag missing during publication' >&2
+      exit 62
+    }}
+    : > '{}.published'
+    exit 0 ;;
+esac
+exit 2
+"#,
+            allow_preparation.display(),
+            log_path.display(),
+        ),
+    )
+    .expect("write publisher");
+    fs::write(
+        repo.path().join(".lf/config.yaml"),
+        "release:\n  targets:\n    default:\n      workflow: release.yml\n      publisher: [\"sh\", \"{repo}/publisher.sh\"]\n",
+    )
+    .expect("configure publisher");
+    git(&repo, &["add", ".lf/config.yaml", "publisher.sh"]);
+    git(&repo, &["commit", "-m", "Configure candidate publisher"]);
+    git(&repo, &["push", "origin", "HEAD"]);
+    let head = git_output(&repo, &["rev-parse", "HEAD"]);
+    let gh_script = write_gh_candidate_release_script(&log_path.to_string_lossy(), "success");
+    let _env = EnvGuard::new(&[("gh", gh_script.as_str())]);
+
+    let error = release_run(repo.path(), "patch", None, &NullProgress)
+        .expect_err("failed candidate signing must stop before tagging");
+    assert!(error.to_string().contains("candidate signing failed"));
+    assert!(git_output_bare(
+        &repo,
+        &["for-each-ref", "--format=%(refname)", "refs/tags/v0.9.2"],
+    )
+    .is_empty());
+
+    fs::write(allow_preparation, "").expect("allow candidate preparation");
+    let outcome = release_run(repo.path(), "patch", None, &NullProgress)
+        .expect("prepared candidate should publish");
+
+    let ReleaseRunOutcome::Released(receipt) = outcome else {
+        panic!("expected a released receipt");
+    };
+    assert_eq!(receipt.commit, head);
+    assert!(receipt.release_exists);
+}
+
+#[test]
+fn failed_candidate_build_reuses_the_version_after_a_fix_merges() {
+    let repo = TestRepo::new();
+    prepare_candidate_release_repo(&repo);
+    let state = tempfile::tempdir().expect("release state");
+    let log_path = state.path().join("gh.log");
+    let gh_script =
+        write_gh_candidate_release_script(&log_path.to_string_lossy(), "failure-then-success");
+    let _env = EnvGuard::new(&[("gh", gh_script.as_str())]);
+
+    let error = release_run(repo.path(), "patch", None, &NullProgress)
+        .expect_err("failed candidate must stop before tagging");
+
+    assert!(error
+        .to_string()
+        .contains("release workflow failed for v0.9.2"));
+    assert!(
+        git_output_bare(
+            &repo,
+            &["for-each-ref", "--format=%(refname)", "refs/tags/v0.9.2"],
+        )
+        .is_empty(),
+        "failed candidate must leave the version available"
+    );
+    assert!(
+        !git_output_bare(
+            &repo,
+            &[
+                "for-each-ref",
+                "--format=%(refname)",
+                "refs/heads/release-candidate/",
+            ],
+        )
+        .is_empty(),
+        "failed candidate ref should remain inspectable"
+    );
+
+    fs::write(repo.path().join("repair.txt"), "repair candidate\n").expect("write repair");
+    git(&repo, &["add", "repair.txt"]);
+    git(&repo, &["commit", "-m", "Repair release candidate"]);
+    git(&repo, &["push", "origin", "HEAD"]);
+    let repaired_head = git_output(&repo, &["rev-parse", "HEAD"]);
+
+    let outcome = release_run(repo.path(), "patch", None, &NullProgress)
+        .expect("merged fix should retry the unconsumed version");
+
+    let ReleaseRunOutcome::Released(receipt) = outcome else {
+        panic!("expected a released receipt");
+    };
+    assert_eq!(receipt.tag, "v0.9.2");
+    assert_eq!(receipt.commit, repaired_head);
+    assert_eq!(
+        git_output_bare(&repo, &["rev-parse", "refs/tags/v0.9.2"]),
+        repaired_head
+    );
+}
+
+#[test]
 fn release_run_rearms_a_dropped_auto_merge_for_the_exact_head() {
     let repo = TestRepo::new();
     git(&repo, &["tag", "v0.9.1"]);
@@ -828,9 +1121,7 @@ fn release_run_reintegrates_a_dirty_existing_pr() {
         write_gh_dirty_release_script(&log_path.to_string_lossy(), release_branch, &main_branch);
     let lf_script = "#!/bin/sh\ncat > RELEASE_NOTES.md <<'EOF'\n# v0.9.2\n\n<!-- loopflow:release-notes=narrative;gate=safe -->\n\nRegenerated release notes.\nEOF\n";
     let _env = EnvGuard::new(&[("gh", gh_script.as_str()), ("lf", lf_script)]);
-    std::env::set_var("LF_RUN_CONTEXT", "agent");
     std::env::set_var("LF_RUN_ID", "run_stale");
-    std::env::set_var("LF_AGENT_INVOCATION_ID", "invocation_stale");
     std::env::set_var("LF_WAVE_ID", "wave_stale");
 
     let outcome = release_run(repo.path(), "patch", None, &NullProgress)
@@ -963,6 +1254,17 @@ fn active_tagged_publisher_blocks_concurrent_cleanup_until_exit() {
             r#"#!/bin/sh
 case "$1" in
   check) exit 0 ;;
+  prepare)
+    shift
+    while [ "$#" -gt 0 ]; do
+      case "$1" in
+        --output) output="$2"; shift 2 ;;
+        *) shift ;;
+      esac
+    done
+    mkdir -p "$output"
+    printf '{{}}\n' > "$output/candidate.json"
+    exit 0 ;;
   publish)
     worktree="$LF_RELEASE_SOURCE_REPO"
     [ -e "$worktree/.git" ] || {{ echo 'tagged source missing' >&2; exit 41; }}

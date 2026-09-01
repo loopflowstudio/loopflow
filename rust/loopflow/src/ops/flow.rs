@@ -58,7 +58,7 @@ pub fn execute_flow_ops(repo: &Path, item: &Op, progress: &impl Progress) -> Ops
             push,
             no_add,
         }) => {
-            crate::ops::task::guard_task_mutation_authority(repo)?;
+            crate::ops::task::guard_task_mutation(repo)?;
             commit_workflow(
                 repo,
                 &CommitOptions {
@@ -350,12 +350,12 @@ fn unsupported() -> OpsError {
 #[cfg(test)]
 mod tests {
     use super::*;
+    use crate::controller::wave::metrics::MetricEvidenceDto;
     use crate::id::WaveId;
     use crate::ops::NullProgress;
     use crate::pm::{PmKr, PmProject, ProjectFlowPlan};
     use crate::store::{open_store, storage_config_from_env};
-    use crate::wave::metrics::MetricEvidenceDto;
-    use crate::wave::Wave;
+    use crate::work::wave::Wave;
 
     #[test]
     fn authored_flow_cannot_dispatch_evidence_receipt_command() {

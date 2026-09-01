@@ -30,13 +30,15 @@ That command is responsible for:
 - archiving the generated root `RELEASE_NOTES.md` to `release/v<version>/NOTES.md`
 - creating and landing the release PR
 - waiting for merge queue completion
-- tagging the merged commit
+- building the exact merged commit under a provisional candidate ref
+- preparing and signing the publisher's exact artifact set
+- tagging that commit only after its workflow and publisher preparation succeed
 - waiting for the target's configured completion evidence
 
-The repository owns `verify` and `prepare` commands plus the selected workflow
-under `release.targets` in `.lf/config.yaml`. Keep builds, signing, packaging,
-migrations, registry uploads, deployments, smoke tests, and secret handling in
-those repo-owned commands or workflows.
+The repository owns `verify` and `prepare` commands, the selected candidate
+workflow, and the publisher under `release.targets` in `.lf/config.yaml`. Keep
+credential-free builds and smoke tests in the workflow. Keep signing,
+publication, deployment, and secret handling in the publisher.
 
 ## Re-entry
 

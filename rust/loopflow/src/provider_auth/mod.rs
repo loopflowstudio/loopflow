@@ -3782,7 +3782,6 @@ mod tests {
         assert_eq!("oc".parse::<Provider>(), Ok(Provider::OpenCodeZen));
         assert_eq!("linear".parse::<Provider>(), Ok(Provider::Linear));
         assert_eq!("lin".parse::<Provider>(), Ok(Provider::Linear));
-        assert!("gemini".parse::<Provider>().is_err());
     }
 
     #[test]

@@ -15,12 +15,12 @@ struct PortfolioRepoStateTests {
         let mine = makeWave(
             id: "mine",
             repoPath: repo.path,
-            status: .running(runID: "run_mine")
+            status: .ready
         )
         let other = makeWave(
             id: "other",
             repoPath: URL(fileURLWithPath: "/tmp/portfolio-other").normalizedFilePath,
-            status: .running(runID: "run_other")
+            status: .ready
         )
         state.applyConnectedWaves([mine, other])
 
@@ -36,10 +36,10 @@ struct PortfolioRepoStateTests {
         // Status varies, but the row's lens carries state — so the list stays in
         // one alphabetical order and never reorders as processes start and stop.
         state.applyConnectedWaves([
-            makeWave(id: "running-b", repoPath: repo.path, status: .running(runID: "run_b")),
+            makeWave(id: "running-b", repoPath: repo.path, status: .ready),
             makeWave(id: "idle", repoPath: repo.path, status: .ready),
             makeWave(id: "paused", repoPath: repo.path, status: .done),
-            makeWave(id: "running-a", repoPath: repo.path, status: .running(runID: "run_a")),
+            makeWave(id: "running-a", repoPath: repo.path, status: .ready),
         ])
 
         #expect(state.waves.map(\.id) == ["idle", "paused", "running-a", "running-b"])
@@ -79,8 +79,8 @@ struct PortfolioRepoStateTests {
         [{
           "id":"goals",
           "name":"goals",
-          "status":{"running":{"run_id":"run_00000000000000000000000000000001"}},
-          "current":{"state":"working","reason":"working","owner":"work","controls":["attach","steer","interrupt","stop"],"progress_age_secs":0,"deadline_in_secs":1800,"step":null,"liveness":{"state":"present","observed_at":"1970-01-01T00:00:00Z","fresh":true}},
+          "status":"ready",
+
           "goal":"ship goals",
           "repo":"\(originPath)",
           "active_tasks":0,

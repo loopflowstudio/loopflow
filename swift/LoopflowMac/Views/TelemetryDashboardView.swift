@@ -2,8 +2,7 @@ import Charts
 import Loopflow
 import SwiftUI
 
-/// Where provider-billed output went. Every chart reads the same Rust-derived
-/// `lf usage --json` snapshot as `lf top` and the Podium.
+/// Direct Run usage evidence beside codebase size and local ledger health.
 struct TelemetryDashboardView: View {
     @Environment(\.palette) private var palette
 
@@ -11,7 +10,7 @@ struct TelemetryDashboardView: View {
     /// shape of the thing (a rewrite, a vendored tree), where a month shows noise.
     private static let codebaseDays = 365
 
-    @State private var usage: UsageSnapshot?
+    @State private var usage: [RunSnapshot] = []
     @State private var doctor: DoctorReport?
     @State private var codebase: CodeNode?
     @State private var growth: [CodeSnapshot] = []
@@ -23,10 +22,9 @@ struct TelemetryDashboardView: View {
     @State private var codebaseError: String?
     @State private var isLoading = true
 
-    /// Repos the ledger has seen, by absolute path. The codebase charts measure
-    /// one repo at a time; the spend charts are machine-wide.
+    /// Repos recent Run manifests name, by absolute path.
     private var repos: [String] {
-        Array(Set(usage?.readings.compactMap(\.scope.repo) ?? [])).sorted()
+        Array(Set(usage.compactMap(\.repo))).sorted()
     }
 
     var body: some View {
@@ -37,22 +35,11 @@ struct TelemetryDashboardView: View {
                 LazyVStack(alignment: .leading, spacing: Spacing.xl) {
                     ledgerHealth
 
-                    UsageProjectionStrip(interval: usage?.global?.interval(seconds: 300))
-
                     chartCard(
-                        "Provider output · 24 hours",
-                        subtitle: "Five-minute buckets. Output includes reasoning; the reasoning series is only its reported breakdown."
+                        "Direct Run usage · 30 days",
+                        subtitle: "Provider-authored cumulative counters. Dashes are unknown; final receipts and evidence gaps remain explicit."
                     ) {
-                        OutputHistoryChart(buckets: usage?.globalHistory ?? [])
-                            .frame(height: 260)
-                    }
-
-                    chartCard(
-                        "Output by Work · 24 hours",
-                        subtitle: "One Rust rollup across Waves, Projects, and Tasks."
-                    ) {
-                        WorkUsageChart(snapshot: usage, repo: selectedRepo)
-                            .frame(height: 260)
+                        DirectRunUsageList(runs: usage, repo: selectedRepo)
                     }
 
                     chartCard(
@@ -194,10 +181,8 @@ struct TelemetryDashboardView: View {
     }
 
     private var totalLabel: String {
-        guard let interval = usage?.global?.interval(seconds: 86_400) else {
-            return "— output tokens"
-        }
-        return "\(interval.outputTokens.formatted()) output tokens · 24h"
+        let gaps = usage.reduce(0) { $0 + $1.evidenceGaps }
+        return "\(usage.count) Runs · \(gaps) evidence gaps"
     }
 
     @ViewBuilder
@@ -312,74 +297,73 @@ struct TelemetryDashboardView: View {
     }
 }
 
-private struct UsageProjectionStrip: View {
+private struct DirectRunUsageList: View {
     @Environment(\.palette) private var palette
-    let interval: UsageInterval?
+    let runs: [RunSnapshot]
+    let repo: String?
+
+    private var visible: [RunSnapshot] {
+        runs.filter { repo == nil || $0.repo == repo }.prefix(30).map { $0 }
+    }
 
     var body: some View {
+        if visible.isEmpty {
+            EmptyChartHint(message: "No direct Run usage in this window")
+        } else {
+            VStack(spacing: 0) {
+                row("WORK", "RUN", "INPUT", "OUTPUT", "FINAL", "GAPS", heading: true)
+                ForEach(visible) { run in
+                    Divider()
+                    row(
+                        work(run),
+                        run.skill ?? run.harness,
+                        tokens(run.usage.inputTokens),
+                        tokens(run.usage.outputTokens),
+                        "\(run.usage.finalStreams)/\(run.usage.streams)",
+                        run.evidenceGaps.formatted(),
+                        heading: false
+                    )
+                    .help(run.id)
+                }
+            }
+        }
+    }
+
+    private func tokens(_ value: Int?) -> String {
+        value?.formatted() ?? "—"
+    }
+
+    private func work(_ run: RunSnapshot) -> String {
+        for kind in ["task", "project", "wave"] {
+            if let subject = run.subjects.first(where: {
+                $0.selector.hasPrefix("\(kind):")
+            })?.selector.dropFirst(kind.count + 1) {
+                return "\(kind)/\(subject)"
+            }
+        }
+        return "—"
+    }
+
+    private func row(
+        _ work: String,
+        _ run: String,
+        _ input: String,
+        _ output: String,
+        _ finality: String,
+        _ gaps: String,
+        heading: Bool
+    ) -> some View {
         HStack(spacing: Spacing.md) {
-            tile(
-                "GENERATION · 5M",
-                interval.map { "\($0.outputTokens.formatted()) output" } ?? "—",
-                interval.map { String(format: "%.1f TOK/s", $0.outputTokensPerSecond) } ?? "provider output"
-            )
-            tile(
-                "INPUT / CACHE · 5M",
-                tokenValue(interval?.inputTokens, suffix: " input"),
-                "\(tokenValue(interval?.cacheReadTokens, suffix: " read")) · \(tokenValue(interval?.cacheWriteTokens, suffix: " write"))"
-            )
-            tile(
-                "COST · 5M",
-                interval?.costUsd.map { String(format: "$%.2f", $0) } ?? "—",
-                "provider receipt"
-            )
-            tile(
-                "CONTEXT PRESSURE",
-                pressure,
-                contextDetail
-            )
+            Text(work).frame(maxWidth: .infinity, alignment: .leading)
+            Text(run).frame(maxWidth: .infinity, alignment: .leading)
+            Text(input).frame(width: 100, alignment: .trailing)
+            Text(output).frame(width: 100, alignment: .trailing)
+            Text(finality).frame(width: 70, alignment: .trailing)
+            Text(gaps).frame(width: 60, alignment: .trailing)
         }
-    }
-
-    private var pressure: String {
-        guard let peak = interval?.peakInputTokens,
-              let window = interval?.contextWindowTokens,
-              window > 0
-        else { return "—" }
-        return String(format: "%.0f%%", Double(peak) * 100 / Double(window))
-    }
-
-    private var contextDetail: String {
-        guard let peak = interval?.peakInputTokens,
-              let window = interval?.contextWindowTokens
-        else { return "peak request / window" }
-        return "\(peak.formatted()) / \(window.formatted())"
-    }
-
-    private func tokenValue(_ value: UInt64?, suffix: String) -> String {
-        value.map { "\($0.formatted())\(suffix)" } ?? "—\(suffix)"
-    }
-
-    private func tile(_ label: String, _ value: String, _ detail: String) -> some View {
-        VStack(alignment: .leading, spacing: 3) {
-            Text(label)
-                .font(Typography.caption(10))
-                .foregroundStyle(palette.textSecondary)
-            Text(value)
-                .font(Typography.code(15))
-                .foregroundStyle(palette.text)
-            Text(detail)
-                .font(Typography.caption(10))
-                .foregroundStyle(palette.textSecondary)
-                .lineLimit(1)
-        }
-        .frame(maxWidth: .infinity, alignment: .leading)
-        .padding(Spacing.md)
-        .background(palette.surface, in: RoundedRectangle(cornerRadius: CornerRadius.md))
-        .overlay {
-            RoundedRectangle(cornerRadius: CornerRadius.md)
-                .stroke(palette.border, lineWidth: 1)
-        }
+        .font(heading ? Typography.caption(10) : Typography.code(12))
+        .foregroundStyle(heading ? palette.textSecondary : palette.text)
+        .padding(.vertical, Spacing.sm)
     }
 }
 
@@ -395,100 +379,6 @@ private func compactTokens(_ tokens: Int) -> String {
         return String(format: "%.1fk", Double(tokens) / 1_000)
     default:
         return "\(tokens)"
-    }
-}
-
-// MARK: - Provider output
-
-private struct OutputHistoryChart: View {
-    @Environment(\.palette) private var palette
-    let buckets: [UsageBucket]
-
-    var body: some View {
-        if buckets.isEmpty {
-            EmptyChartHint()
-        } else {
-            Chart(buckets) { bucket in
-                AreaMark(
-                    x: .value(
-                        "Time",
-                        Date(timeIntervalSince1970: TimeInterval(bucket.startedAt))
-                    ),
-                    y: .value("Output tokens", bucket.outputTokens)
-                )
-                .foregroundStyle(Color.loopflowBurgundy.opacity(0.72))
-            }
-            .chartYAxis {
-                AxisMarks { value in
-                    AxisGridLine().foregroundStyle(palette.border)
-                    AxisValueLabel {
-                        if let tokens = value.as(UInt64.self) {
-                            Text(compactTokens(Int(clamping: tokens)))
-                        }
-                    }
-                }
-            }
-        }
-    }
-}
-
-private struct WorkUsageChart: View {
-    @Environment(\.palette) private var palette
-    let snapshot: UsageSnapshot?
-    let repo: String?
-
-    private struct Bar: Identifiable {
-        let id: String
-        let label: String
-        let kind: String
-        let tokens: UInt64
-    }
-
-    private var bars: [Bar] {
-        (snapshot?.readings ?? [])
-            .filter { reading in
-                [.wave, .project, .task].contains(reading.scope.kind)
-                    && (repo == nil || reading.scope.repo == repo)
-            }
-            .compactMap { reading in
-                guard let interval = reading.interval(seconds: 86_400),
-                      interval.outputTokens > 0
-                else { return nil }
-                return Bar(
-                    id: reading.id,
-                    label: reading.scope.label,
-                    kind: reading.scope.kind.rawValue.capitalized,
-                    tokens: interval.outputTokens
-                )
-            }
-            .sorted { $0.tokens > $1.tokens }
-            .prefix(18)
-            .map { $0 }
-    }
-
-    var body: some View {
-        if bars.isEmpty {
-            EmptyChartHint(message: "No attributed output in this window")
-        } else {
-            Chart(bars) { bar in
-                BarMark(
-                    x: .value("Output tokens", bar.tokens),
-                    y: .value("Work", bar.label)
-                )
-                .foregroundStyle(by: .value("Kind", bar.kind))
-            }
-            .chartLegend(position: .bottom, spacing: Spacing.sm)
-            .chartXAxis {
-                AxisMarks { value in
-                    AxisGridLine().foregroundStyle(palette.border)
-                    AxisValueLabel {
-                        if let tokens = value.as(UInt64.self) {
-                            Text(compactTokens(Int(clamping: tokens)))
-                        }
-                    }
-                }
-            }
-        }
     }
 }
 

@@ -17,26 +17,23 @@ use std::path::Path;
 use anyhow::{anyhow, Result};
 use serde::{Deserialize, Serialize};
 
-use crate::child::{
-    observe_current_work, work_status_reason, ChildRef, CurrentWorkObservation, CurrentWorkState,
-    ObservationRecipient,
-};
-use crate::durable::{Home, RunLivenessState, WorkRef, WorkStatus};
-use crate::engine::wave_home::{HomeActionDto, HomeRuntimeDto, HomeState};
-use crate::lf::commands::runs::{format_tokens, SkillRunEntry};
-use crate::lf::output::Colors;
-use crate::pm::{PmItem, PmKr, PmPortfolioValidator, PmProject, PmSnapshot, ProjectFlowPlan};
-use crate::project::Project;
-use crate::store::{open_existing_store, SharedStore};
-use crate::task::{
-    AfterMerge, CiObservation, CiState, PrMergeMode, PrMergeRequest, PrPhase, Task, TaskPr,
-};
-use crate::wave::metrics::{
+use crate::child::{ChildRef, ObservationRecipient};
+use crate::controller::wave::metrics::{
     MetricContractIssueDto, MetricEvidenceDto, MetricFreshnessDto, MetricPortfolioDto,
     MetricReadingDto, MetricStage, MetricTarget, MetricUnknownCauseDto,
 };
-use crate::wave::server::live_endpoint;
-use crate::wave::Wave;
+use crate::controller::wave::server::live_endpoint;
+use crate::durable::{Home, WorkRef, WorkStatus};
+use crate::engine::wave_home::{HomeActionDto, HomeRuntimeDto, HomeState};
+use crate::lf::commands::runs::{format_tokens, RunSnapshot};
+use crate::lf::output::Colors;
+use crate::pm::{PmItem, PmKr, PmPortfolioValidator, PmProject, PmSnapshot, ProjectFlowPlan};
+use crate::store::{open_existing_store, SharedStore};
+use crate::work::project::Project;
+use crate::work::task::{
+    AfterMerge, CiObservation, CiState, PrMergeMode, PrMergeRequest, PrPhase, Task, TaskPr,
+};
+use crate::work::wave::Wave;
 
 /// One wave's registry snapshot — the `lf ls` row and the `wave` field of
 /// `lf status`. Wire type consumed by Loopflow: every field is required or
@@ -45,9 +42,8 @@ use crate::wave::Wave;
 pub struct WaveSnapshot {
     pub id: String,
     pub name: String,
-    /// Current Work lifecycle derived from Epoch, Run, and Wait facts.
+    /// Current planning lifecycle derived from stable Work and concrete facts.
     pub status: WorkStatus,
-    pub current: CurrentWorkObservation,
     pub goal: String,
     /// Primary repo path.
     pub repo: String,
@@ -75,9 +71,8 @@ pub struct WaveSnapshot {
     pub home: Home,
 }
 
-/// `lf status <wave>` snapshot: native work hierarchy, the wave's runs, what
-/// needs attention, and — when a server is live — loop state. Wire type; no
-/// defaults.
+/// `lf status <wave>` snapshot: native Work hierarchy, the Wave's Runs, and —
+/// when a server is live — loop state. Wire type; no defaults.
 #[derive(Debug, Serialize, Deserialize)]
 pub struct WaveDetailSnapshot {
     pub wave: WaveSnapshot,
@@ -91,10 +86,8 @@ pub struct WaveDetailSnapshot {
     /// Durable Project Work that cannot join the current PM plan, including
     /// non-terminal Tasks stranded under a terminal historical Project.
     pub unavailable_projects: Vec<UnavailableProjectEvidence>,
-    /// This wave's agent-backed skill runs, newest first.
-    pub runs: Evidence<SkillRunEntry>,
-    /// Work whose next move belongs to someone other than itself.
-    pub attention: Evidence<AttentionItem>,
+    /// This Wave's Home-local Run records, newest first.
+    pub runs: Evidence<RunSnapshot>,
     /// The Wave's Home probed for liveness: state, evidence, attach endpoint, and
     /// the one contextual action a conductor surface should offer. Probed for the
     /// focused Wave only — `lf ls` stays placement-only.
@@ -130,33 +123,6 @@ impl<T> Evidence<T> {
             },
         }
     }
-}
-
-#[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize)]
-#[serde(rename_all = "snake_case")]
-pub enum AttentionKind {
-    Project,
-    Task,
-}
-
-/// One Work item waiting on somebody, derived from durable state.
-#[derive(Debug, Clone, Serialize, Deserialize)]
-pub struct AttentionItem {
-    pub kind: AttentionKind,
-    /// Work id — the drill-down key.
-    pub id: String,
-    /// Project slug or Task identifier.
-    pub subject: String,
-    /// Who has to move next.
-    pub owner: NextMoveOwner,
-    /// Why, in Work's durable words — or the audit finding when durable state
-    /// and the machine disagree.
-    pub reason: String,
-    /// RFC3339 time Work entered this state; empty when unrecorded.
-    pub since: String,
-    /// How long it has been waiting. `null` when `since` cannot be read — an
-    /// unknown age is never a zero one.
-    pub age_secs: Option<i64>,
 }
 
 #[derive(Debug, Clone, Serialize, Deserialize)]
@@ -205,8 +171,7 @@ pub struct NextMove {
 }
 
 #[derive(Debug, Clone, Serialize, Deserialize)]
-pub struct BoundarySeedSnapshot {
-    pub basis: String,
+pub struct DirectionSnapshot {
     pub text: String,
 }
 
@@ -219,8 +184,7 @@ pub struct ProjectRuntimeSnapshot {
     pub iteration: u32,
     pub pending_observations: u32,
     pub provider: String,
-    pub current: CurrentWorkObservation,
-    pub last_failure: Option<crate::project::HistoricalFailure>,
+    pub last_failure: Option<crate::work::project::HistoricalFailure>,
 }
 
 #[derive(Debug, Clone, Serialize, Deserialize)]
@@ -235,43 +199,23 @@ pub struct TaskRuntimeSnapshot {
     pub reason: String,
     pub updated_at: String,
     pub provider: String,
-    pub current: CurrentWorkObservation,
 }
 
-/// The compact Task attention signal shared by terminal and app surfaces. The
-/// names are deliberately the product's visual vocabulary: consumers do not
-/// reinterpret Work/process combinations into their own colors.
+/// A Task's derived operating condition. Sessions own human action; this state
+/// only lets Work surfaces explain whether the Task is clear, waiting on
+/// another actor, blocked, or unreadable.
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize)]
 #[serde(rename_all = "snake_case")]
-pub enum TaskAttentionLevel {
-    Green,
-    Red,
-    Blue,
-    Black,
+pub enum TaskConditionState {
+    Waiting,
+    Blocked,
+    Clear,
     Unknown,
 }
 
-pub use crate::task::actions::{
+pub use crate::ops::task_actions::{
     ci_failure_reason, derive_task_actions, TaskAction, TaskActionEvidence, TaskActionModel,
 };
-
-#[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize)]
-#[serde(rename_all = "snake_case")]
-pub enum TaskProcessEvidenceState {
-    Observed,
-    NotExpected,
-    NotApplicable,
-    Unavailable,
-}
-
-/// Raw process constituent behind the attention fold. `alive` is present only
-/// when this machine could look; absence never means dead.
-#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
-pub struct TaskProcessEvidence {
-    pub state: TaskProcessEvidenceState,
-    pub alive: Option<bool>,
-    pub reason: Option<String>,
-}
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize)]
 #[serde(rename_all = "snake_case")]
@@ -294,33 +238,26 @@ pub struct LocalProgressEvidence {
     pub reason: Option<String>,
 }
 
-struct TaskAttentionEvidence {
-    process: TaskProcessEvidence,
+struct TaskConditionEvidence {
     local_progress: LocalProgressEvidence,
-    user_ask: bool,
+    human_session: bool,
 }
 
-/// A Task's shared attention projection and the evidence that proves it.
+/// A Task's shared condition and the evidence that proves it.
 #[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
-pub struct TaskAttentionSnapshot {
-    pub level: TaskAttentionLevel,
+pub struct TaskConditionSnapshot {
+    pub state: TaskConditionState,
     pub reason: String,
-    /// RFC3339 time process/workspace evidence was sampled.
+    /// RFC3339 time local workspace evidence was sampled.
     pub observed_at: String,
     /// Age of the durable Work evidence at that sample, if Work exists.
     pub evidence_age_secs: Option<i64>,
-    pub next_owner: NextMoveOwner,
-    pub actions: TaskActionModel,
-    pub pm_completed: bool,
-    pub work_status: Option<WorkStatus>,
-    pub process: TaskProcessEvidence,
     pub local_progress: LocalProgressEvidence,
-    pub active_pr_phase: Option<PrPhase>,
 }
 
 /// Stable references for one Task, shared verbatim by `lf status` and
 /// `lf roadmap`. The issue URL is cached PM evidence. Workspace evidence comes
-/// from the durable Task and outlives its process and final PR.
+/// from the durable Task and outlives its execution and final PR.
 #[derive(Debug, Clone, Serialize, Deserialize)]
 pub struct TaskReferenceSnapshot {
     pub issue_url: Option<String>,
@@ -341,9 +278,10 @@ pub struct TaskDetailSnapshot {
     pub task: PmTaskSummary,
     pub reference: TaskReferenceSnapshot,
     pub runtime: Option<TaskRuntimeSnapshot>,
-    pub direction: Option<BoundarySeedSnapshot>,
+    pub direction: Option<DirectionSnapshot>,
     pub next_move: NextMove,
-    pub attention: TaskAttentionSnapshot,
+    pub condition: TaskConditionSnapshot,
+    pub actions: TaskActionModel,
     pub prs: Vec<PrSnapshot>,
     pub active_pr: Option<String>,
 }
@@ -444,7 +382,7 @@ impl PrSnapshot {
 pub struct ProjectDetailSnapshot {
     pub project: PmProjectSummary,
     pub runtime: Option<ProjectRuntimeSnapshot>,
-    pub direction: Option<BoundarySeedSnapshot>,
+    pub direction: Option<DirectionSnapshot>,
     pub next_move: NextMove,
     pub tasks: Vec<TaskDetailSnapshot>,
 }
@@ -457,7 +395,6 @@ pub struct UnavailableProjectEvidence {
     pub project_id: String,
     pub project_slug: String,
     pub status: WorkStatus,
-    pub current: CurrentWorkObservation,
     pub owner: NextMoveOwner,
     pub reason: String,
     pub recovery: String,
@@ -472,36 +409,29 @@ pub struct UnavailableTaskEvidence {
     pub task_id: String,
     pub task_identifier: String,
     pub status: WorkStatus,
-    pub current: CurrentWorkObservation,
     pub owner: NextMoveOwner,
     pub reason: String,
     pub recovery: String,
 }
 
-/// Where a row's next move sends the reader's attention. A coarse view lens over
-/// the same primitives `lf status` exposes (durable intent × liveness ×
-/// ownership) — deliberately *not* a runtime-state taxonomy. It is derived once,
-/// here in Rust, and stamped on the wire so CLI, Mac, and iOS bucket identically
-/// without each re-deriving the rule.
+/// Where a row sits in the plan, derived once so every surface buckets it
+/// identically.
 ///
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize)]
 #[serde(rename_all = "snake_case")]
 pub enum RoadmapSection {
-    /// A live body is advancing this work itself.
+    /// This Work's own planner must move next.
     Now,
-    /// Someone other than the running body must move: review, a User, the
-    /// supervising Project or Wave — or the process died mid-flight.
-    NeedsAttention,
+    /// Someone else must move: a Session, User, CI, or supervising Work.
+    Waiting,
     /// Filed, not started, not complete — ready for someone to pick up.
     Available,
     /// Done or dormant: terminal Work and completed plan rows.
     Later,
 }
 
-/// `lf roadmap` — the machine-wide intent plane. Every Wave's plan joined to
-/// whatever live execution evidence exists, bucketed by attention section. Wire
-/// type consumed by Loopflow; every field required or explicitly Optional, no
-/// serde defaults.
+/// `lf roadmap` — every Wave's plan joined to durable Work and local delivery
+/// evidence, bucketed by planning section.
 #[derive(Debug, Clone, Serialize, Deserialize)]
 pub struct RoadmapSnapshot {
     /// RFC3339 time this read was taken.
@@ -514,7 +444,7 @@ pub struct WaveRoadmap {
     pub wave: WaveSnapshot,
     /// The same Project-owned live evidence carried by focused Wave status.
     pub metric_portfolio: MetricPortfolioDto,
-    /// The Wave's plan joined to live evidence, or the reason there is none — a
+    /// The Wave's plan joined to Work evidence, or the reason there is none — a
     /// Wave with no local PM snapshot reads "unavailable", never an empty plan.
     pub projects: Evidence<RoadmapProject>,
     /// Durable Project Work that failed to join an otherwise readable plan,
@@ -535,7 +465,7 @@ struct RoadmapProjectSnapshots {
     metric_portfolio: MetricPortfolioDto,
 }
 
-/// One Project in the roadmap: its plan, live Project Work evidence when a
+/// One Project in the roadmap: its plan, durable Project Work when a
 /// loop exists, its section, and its Tasks. Reuses the same leaf snapshots
 /// `lf status` emits; adds the derived `section`.
 #[derive(Debug, Clone, Serialize, Deserialize)]
@@ -547,16 +477,16 @@ pub struct RoadmapProject {
     pub tasks: Vec<RoadmapTask>,
 }
 
-/// One Task in the roadmap: plan row, live Task Work evidence when a Task
-/// exists, its section, and its active PR. `runtime: None` is a Task nobody has
-/// started — never confused with a dead process.
+/// One Task in the roadmap: plan row, durable Task Work when it exists, its
+/// section, and its active PR. `runtime: None` is a Task nobody has started.
 #[derive(Debug, Clone, Serialize, Deserialize)]
 pub struct RoadmapTask {
     pub task: PmTaskSummary,
     pub reference: TaskReferenceSnapshot,
     pub runtime: Option<TaskRuntimeSnapshot>,
     pub next_move: NextMove,
-    pub attention: TaskAttentionSnapshot,
+    pub condition: TaskConditionSnapshot,
+    pub actions: TaskActionModel,
     pub active_pr: Option<PrSnapshot>,
     pub section: RoadmapSection,
 }
@@ -603,7 +533,7 @@ pub fn ls(json: bool, all: bool) -> Result<()> {
     })
 }
 
-/// `lf status [wave]` — one wave's work hierarchy, runs, attention, and loop.
+/// `lf status [wave]` — one Wave's Work hierarchy, Runs, and loop.
 pub fn status(wave: Option<&str>, json: bool) -> Result<()> {
     let rt = tokio::runtime::Runtime::new()?;
     rt.block_on(async {
@@ -638,14 +568,12 @@ pub fn status(wave: Option<&str>, json: bool) -> Result<()> {
         let metric_portfolio = wave_metric_portfolio(&store, &wave, &planning, now()).await?;
         let project_snapshots =
             snapshot_projects(&store, stored_projects, stored_tasks, planning, true).await?;
-        let attention = Evidence::complete(attention(&project_snapshots.projects, now()));
         // Probe the focused Wave's Home once so the detail carries live evidence
         // and the single contextual action (Open/Attach, Start, or reason).
         let home_runtime =
             crate::ops::home::probe_home(wave.name(), &snapshot.home, Path::new(wave.repo())).await;
         let status = WaveDetailSnapshot {
-            runs: Evidence::from_result(crate::lf::commands::runs::wave_runs(wave.id())),
-            attention,
+            runs: Evidence::from_result(crate::lf::commands::runs::wave_runs(wave.name())),
             wave: snapshot,
             loop_state,
             projects: project_snapshots.projects,
@@ -689,9 +617,9 @@ pub fn roadmap(wave: Option<&str>, json: bool, all: bool) -> Result<()> {
         // UUID or repository-scoped registered name). Roadmap is the one
         // command where `NoContext` is a valid default — it lists every wave.
         // A stale UUID is a loud error, never a silent drop to global scope.
-        let env_wave_id = std::env::var(crate::engine::wave_context::WAVE_ID_ENV).ok();
-        let repo = crate::engine::repo::find_repo_root().ok();
-        let waves = match crate::engine::wave_context::resolve_managed_wave(
+        let env_wave_id = std::env::var(crate::work::wave::context::WAVE_ID_ENV).ok();
+        let repo = crate::repo::find_repo_root().ok();
+        let waves = match crate::work::wave::context::resolve_managed_wave(
             Some(&store),
             repo.as_deref(),
             wave,
@@ -700,7 +628,7 @@ pub fn roadmap(wave: Option<&str>, json: bool, all: bool) -> Result<()> {
         .await
         {
             Ok(wave) => vec![wave],
-            Err(crate::engine::wave_context::WaveResolveError::NoContext) => {
+            Err(crate::work::wave::context::WaveResolveError::NoContext) => {
                 let waves = store
                     .list_waves(None)
                     .await
@@ -813,7 +741,7 @@ async fn wave_roadmap_projects(
         }
     };
     // `probe_pr_empty: false` — PR emptiness is `lf status`'s execution detail.
-    // Roadmap's bounded Git reads belong only to the shared attention evidence.
+    // Roadmap's bounded Git reads belong only to the shared Task condition.
     match snapshot_projects(store, projects, tasks, planning, false).await {
         Ok(snapshots) => Ok(RoadmapProjectSnapshots {
             projects: Evidence::complete(
@@ -871,15 +799,14 @@ fn roadmap_task(detail: TaskDetailSnapshot) -> RoadmapTask {
         reference: detail.reference,
         runtime: detail.runtime,
         next_move: detail.next_move,
-        attention: detail.attention,
+        condition: detail.condition,
+        actions: detail.actions,
         active_pr,
         section,
     }
 }
 
-/// A Task's section, from the same primitives the row already carries. Order is
-/// load-bearing: a dead process outranks a terminal record (an audit finding),
-/// and terminal Work is `Later` before its owner is consulted.
+/// A Task's section, from the same planning primitives the row already carries.
 fn task_section(task: &TaskDetailSnapshot) -> RoadmapSection {
     let Some(runtime) = &task.runtime else {
         return if task.task.completed {
@@ -888,18 +815,12 @@ fn task_section(task: &TaskDetailSnapshot) -> RoadmapSection {
             RoadmapSection::Available
         };
     };
-    if matches!(
-        runtime.current.state,
-        CurrentWorkState::Stalled | CurrentWorkState::Stopped | CurrentWorkState::Unobservable
-    ) {
-        return RoadmapSection::NeedsAttention;
-    }
     if work_status_is_terminal(&runtime.status) {
         return RoadmapSection::Later;
     }
     match task.next_move.owner {
         NextMoveOwner::Task => RoadmapSection::Now,
-        _ => RoadmapSection::NeedsAttention,
+        _ => RoadmapSection::Waiting,
     }
 }
 
@@ -915,18 +836,12 @@ fn project_section(project: &ProjectDetailSnapshot) -> RoadmapSection {
             RoadmapSection::Available
         };
     };
-    if matches!(
-        runtime.current.state,
-        CurrentWorkState::Stalled | CurrentWorkState::Stopped | CurrentWorkState::Unobservable
-    ) {
-        return RoadmapSection::NeedsAttention;
-    }
     if work_status_is_terminal(&runtime.status) {
         return RoadmapSection::Later;
     }
     match project.next_move.owner {
         NextMoveOwner::Project => RoadmapSection::Now,
-        _ => RoadmapSection::NeedsAttention,
+        _ => RoadmapSection::Waiting,
     }
 }
 
@@ -936,8 +851,8 @@ async fn resolve_status_wave(store: &SharedStore, requested: Option<&str>) -> Re
     // One shared rule for `--wave` and ambient `LF_WAVE_ID`: durable UUID or
     // repository-scoped registered name. Status consumes the resolved row
     // directly, so no second lookup can cross repositories.
-    let repo = crate::engine::repo::find_repo_root().ok();
-    crate::engine::wave_context::resolve_managed_wave(
+    let repo = crate::repo::find_repo_root().ok();
+    crate::work::wave::context::resolve_managed_wave(
         Some(&**store),
         repo.as_deref(),
         requested,
@@ -945,84 +860,6 @@ async fn resolve_status_wave(store: &SharedStore, requested: Option<&str>) -> Re
     )
     .await
     .map_err(|err| anyhow!("{err}"))
-}
-
-/// What in this wave is waiting on somebody. Two rules, both read from Work:
-///
-/// 1. Work's next move belongs to someone other than itself, or
-/// 2. Work claims a live Run whose process the machine cannot find — the
-///    kind of disagreement an audit surface exists to show.
-///
-/// Plan rows with no active Work are not attention: an unstarted backlog item is not
-/// waiting on you.
-fn attention(projects: &[ProjectDetailSnapshot], now: time::OffsetDateTime) -> Vec<AttentionItem> {
-    let mut items = Vec::new();
-    for project in projects {
-        if let Some(runtime) = &project.runtime {
-            let unhealthy = matches!(
-                runtime.current.state,
-                CurrentWorkState::Stalled
-                    | CurrentWorkState::Stopped
-                    | CurrentWorkState::Unobservable
-            );
-            let self_owned = matches!(project.next_move.owner, NextMoveOwner::Project);
-            if unhealthy || !(self_owned || work_status_is_terminal(&runtime.status)) {
-                items.push(AttentionItem {
-                    kind: AttentionKind::Project,
-                    id: runtime.work_id.clone(),
-                    subject: project.project.slug.clone(),
-                    owner: if unhealthy {
-                        NextMoveOwner::Wave
-                    } else {
-                        project.next_move.owner
-                    },
-                    reason: if unhealthy {
-                        runtime.current.reason.clone()
-                    } else {
-                        runtime.reason.clone()
-                    },
-                    since: runtime.updated_at.clone(),
-                    age_secs: age_secs(&runtime.updated_at, now),
-                });
-            }
-        }
-        for task in &project.tasks {
-            let Some(runtime) = &task.runtime else {
-                continue;
-            };
-            let unhealthy = matches!(
-                runtime.current.state,
-                CurrentWorkState::Stalled
-                    | CurrentWorkState::Stopped
-                    | CurrentWorkState::Unobservable
-            );
-            if !unhealthy && matches!(task.next_move.owner, NextMoveOwner::Task) {
-                continue;
-            }
-            if !unhealthy && work_status_is_terminal(&runtime.status) {
-                continue;
-            }
-            items.push(AttentionItem {
-                kind: AttentionKind::Task,
-                id: runtime.work_id.clone(),
-                subject: task.task.identifier.clone(),
-                owner: if unhealthy {
-                    NextMoveOwner::Wave
-                } else {
-                    task.next_move.owner
-                },
-                reason: if unhealthy {
-                    runtime.current.reason.clone()
-                } else {
-                    runtime.reason.clone()
-                },
-                since: runtime.updated_at.clone(),
-                age_secs: age_secs(&runtime.updated_at, now),
-            });
-        }
-    }
-    items.sort_by_key(|item| std::cmp::Reverse(item.age_secs));
-    items
 }
 
 fn age_secs(since: &str, now: time::OffsetDateTime) -> Option<i64> {
@@ -1044,7 +881,7 @@ pub(crate) async fn snapshot_wave(store: &SharedStore, wave: &Wave) -> Result<Wa
     let paused = if wave.is_retired() {
         false
     } else {
-        match crate::engine::wave_config::try_read_wave_config(&goal_repo, wave.name()) {
+        match crate::work::wave::config::try_read_wave_config(&goal_repo, wave.name()) {
             Ok(config) => config.and_then(|config| config.paused).unwrap_or(false),
             Err(error) => {
                 tracing::warn!(wave = wave.name(), %error, "Wave policy is unavailable");
@@ -1088,17 +925,14 @@ pub(crate) async fn snapshot_wave(store: &SharedStore, wave: &Wave) -> Result<Wa
         .work_status(&WorkRef::Wave(wave.id().clone()))
         .await
         .map_err(|error| anyhow!("failed to read Wave Work status: {error}"))?;
-    let work = WorkRef::Wave(wave.id().clone());
-    let current = observe_current_work(store, &work, &status, now()).await?;
     Ok(WaveSnapshot {
         id: wave.id().to_string(),
         name: wave.name().to_string(),
         status,
-        current,
         goal: if wave.is_retired() {
             wave.name().to_string()
         } else {
-            crate::engine::wave_config::read_wave_summary(&goal_repo, wave.name())
+            crate::work::wave::config::read_wave_summary(&goal_repo, wave.name())
                 .unwrap_or_else(|_| wave.name().to_string())
         },
         repo,
@@ -1121,23 +955,17 @@ async fn snapshot_task_runtime(
     store: &SharedStore,
     task: &Task,
     status: WorkStatus,
-    now: time::OffsetDateTime,
 ) -> Result<TaskRuntimeSnapshot> {
-    let work = store
-        .work_for_child(&ChildRef::Task(task.id.clone()))
-        .await
-        .map_err(|error| anyhow!("failed to resolve Task Work: {error}"))?;
-    let current = observe_current_work(store, &work, &status, now).await?;
     let routing_project_id = Some(task.project_id.to_string());
+    let controller = store.task_controller_state(&task.id).await?;
     Ok(TaskRuntimeSnapshot {
         work_id: task.id.to_string(),
         project_id: task.project_id.to_string(),
         routing_project_id,
-        reason: current.reason.clone(),
+        reason: status.reason().to_string(),
         status,
         updated_at: format_time(task.updated_at).unwrap_or_default(),
-        provider: task.provider.clone(),
-        current,
+        provider: controller.map(|state| state.provider).unwrap_or_default(),
     })
 }
 
@@ -1145,7 +973,6 @@ async fn snapshot_project_runtime(
     store: &SharedStore,
     project: &Project,
     status: WorkStatus,
-    now: time::OffsetDateTime,
 ) -> Result<ProjectRuntimeSnapshot> {
     let pending_observations = if work_status_is_terminal(&status) {
         store
@@ -1162,20 +989,15 @@ async fn snapshot_project_runtime(
             .map_err(|err| anyhow!("failed to read Project observation outbox: {err}"))?
             .len() as u32
     };
-    let work = store
-        .work_for_child(&ChildRef::Project(project.id.clone()))
-        .await
-        .map_err(|error| anyhow!("failed to resolve Project Work: {error}"))?;
-    let current = observe_current_work(store, &work, &status, now).await?;
+    let controller = store.project_controller_state(&project.id).await?;
     Ok(ProjectRuntimeSnapshot {
         work_id: project.id.to_string(),
-        reason: current.reason.clone(),
+        reason: status.reason().to_string(),
         status,
         updated_at: format_time(project.updated_at).unwrap_or_default(),
-        iteration: project.iteration,
+        iteration: controller.as_ref().map_or(0, |state| state.iteration),
         pending_observations,
-        provider: project.provider.clone(),
-        current,
+        provider: controller.map_or_else(String::new, |state| state.provider),
         last_failure: store
             .latest_project_failure(&project.id)
             .await
@@ -1264,7 +1086,7 @@ async fn snapshot_projects(
             find_project_index(&details, project.plan.id.as_str(), &project.plan.slug)
         else {
             if !work_status_is_terminal(&status) {
-                unavailable_projects.push(unavailable_project(store, project, status).await?);
+                unavailable_projects.push(unavailable_project(project, status));
             }
             continue;
         };
@@ -1272,8 +1094,7 @@ async fn snapshot_projects(
             continue;
         }
         details[index].next_move = next_move_for_project(&status);
-        details[index].runtime =
-            Some(snapshot_project_runtime(store, project, status, now()).await?);
+        details[index].runtime = Some(snapshot_project_runtime(store, project, status).await?);
         details[index].direction =
             current_direction(store, ChildRef::Project(project.id.clone())).await?;
     }
@@ -1314,14 +1135,13 @@ async fn snapshot_projects(
                 None => {
                     let parent_status =
                         child_work_status(store, &ChildRef::Project(parent.id.clone())).await?;
-                    unavailable_projects
-                        .push(unavailable_project(store, parent, parent_status).await?);
+                    unavailable_projects.push(unavailable_project(parent, parent_status));
                     unavailable_projects.len() - 1
                 }
             };
             unavailable_projects[unavailable_index]
                 .tasks
-                .push(unavailable_task(store, runtime_task, status).await?);
+                .push(unavailable_task(runtime_task, status));
             continue;
         };
         if details[project_index].tasks.iter().any(|detail| {
@@ -1375,16 +1195,12 @@ async fn snapshot_projects(
     })
 }
 
-async fn unavailable_project(
-    store: &SharedStore,
-    project: &Project,
-    status: WorkStatus,
-) -> Result<UnavailableProjectEvidence> {
+fn unavailable_project(project: &Project, status: WorkStatus) -> UnavailableProjectEvidence {
     const REASON: &str = "Project is absent from the current PM snapshot";
     let recovery = if work_status_is_terminal(&status) {
         format!(
             "Settle the listed Tasks; Project Work is already {}",
-            work_status_label(&status)
+            status.label()
         )
     } else {
         format!(
@@ -1392,44 +1208,32 @@ async fn unavailable_project(
             project.plan.slug
         )
     };
-    let current = snapshot_project_runtime(store, project, status.clone(), now())
-        .await?
-        .current;
-    Ok(UnavailableProjectEvidence {
+    UnavailableProjectEvidence {
         work_id: project.id.to_string(),
         project_id: project.plan.id.as_str().to_string(),
         project_slug: project.plan.slug.clone(),
         status,
-        current,
         owner: NextMoveOwner::Wave,
         reason: REASON.to_string(),
         recovery,
         tasks: Vec::new(),
-    })
+    }
 }
 
-async fn unavailable_task(
-    store: &SharedStore,
-    task: &Task,
-    status: WorkStatus,
-) -> Result<UnavailableTaskEvidence> {
+fn unavailable_task(task: &Task, status: WorkStatus) -> UnavailableTaskEvidence {
     const REASON: &str = "Task's owning Project is absent from the current PM snapshot";
-    let current = snapshot_task_runtime(store, task, status.clone(), now())
-        .await?
-        .current;
-    Ok(UnavailableTaskEvidence {
+    UnavailableTaskEvidence {
         work_id: task.id.to_string(),
         task_id: task.plan.id.as_str().to_string(),
         task_identifier: task.plan.identifier.clone(),
         status,
-        current,
         owner: NextMoveOwner::Wave,
         reason: REASON.to_string(),
         recovery: format!(
             "lf work abandon task {} --reason \"Project is absent from the current PM snapshot\"",
             task.id
         ),
-    })
+    }
 }
 
 fn project_index(projects: &[ProjectDetailSnapshot], id: &str, slug: &str) -> Result<usize> {
@@ -1463,7 +1267,7 @@ async fn snapshot_task_detail(
     let runtime = match task {
         Some(task) => {
             let status = child_work_status(store, &ChildRef::Task(task.id.clone())).await?;
-            Some(snapshot_task_runtime(store, task, status, observed_at).await?)
+            Some(snapshot_task_runtime(store, task, status).await?)
         }
         None => None,
     };
@@ -1502,14 +1306,8 @@ async fn snapshot_task_detail(
             reason: "Task is ready to start".to_string(),
         },
     };
-    let process = task_process_evidence(runtime.as_ref());
-    let local_progress = task_local_progress(
-        task,
-        runtime.as_ref(),
-        active,
-        &process,
-        worktree_blocker.as_ref(),
-    );
+    let local_progress =
+        task_local_progress(task, runtime.as_ref(), active, worktree_blocker.as_ref());
     let completion_refusal = match (task, runtime.as_ref()) {
         (Some(task), Some(runtime)) if !work_status_is_terminal(&runtime.status) => {
             crate::ops::task::task_completion_gate(store, task)
@@ -1526,7 +1324,7 @@ async fn snapshot_task_detail(
                 crate::ops::task::no_active_pr_resume_refusal(&task.plan.identifier, active, latest)
             })
         });
-    let (action_evidence, user_ask) = match task {
+    let (action_evidence, human_session) = match task {
         Some(task) => {
             let predecessor_phase = match active.and_then(|pr| pr.parent_pr_id.as_ref()) {
                 Some(parent_id) => store.get_task_pr(parent_id).await?.map(|pr| pr.phase()),
@@ -1535,7 +1333,10 @@ async fn snapshot_task_detail(
             let work = store
                 .work_for_child(&ChildRef::Task(task.id.clone()))
                 .await?;
-            let user_ask = store.has_pending_user_ask_for_work(&work).await?;
+            let human_session = store
+                .flow_position(&work)
+                .await?
+                .is_some_and(|position| position.human);
             let work_status = store.work_status(&work).await?;
             (
                 Some(TaskActionEvidence {
@@ -1551,33 +1352,30 @@ async fn snapshot_task_detail(
                     completion_refusal: completion_refusal.as_deref(),
                     resume_refusal: resume_refusal.as_deref(),
                     ci: active.and_then(|pr| pr.fresh_ci()),
-                    current_state: runtime
-                        .as_ref()
-                        .expect("Task runtime exists when action evidence is derived")
-                        .current
-                        .state,
                     predecessor_phase,
                     abandon_intent: task.abandon_intent.is_some(),
-                    local_progress_unsettled: local_progress.unsettled,
                     launch_refusal: launch_refusal.as_deref(),
                 }),
-                user_ask,
+                human_session,
             )
         }
         None => (None, false),
     };
-    let attention = derive_task_attention(
-        item.completed,
+    let condition = derive_task_condition(
         runtime.as_ref(),
         &next_move,
-        TaskAttentionEvidence {
-            process,
+        TaskConditionEvidence {
             local_progress,
-            user_ask,
+            human_session,
         },
         action_evidence.as_ref(),
         observed_at,
     );
+    let actions = action_evidence
+        .as_ref()
+        .map_or_else(TaskActionModel::no_task, |evidence| {
+            derive_task_actions(evidence)
+        });
     let direction = match task {
         Some(task) => current_direction(store, ChildRef::Task(task.id.clone())).await?,
         None => None,
@@ -1588,13 +1386,14 @@ async fn snapshot_task_detail(
         runtime,
         direction,
         next_move,
-        attention,
+        condition,
+        actions,
         prs: prs
             .iter()
             .map(|pr| {
                 // PR emptiness is an execution-plane fact (`lf status`); it costs
                 // an additional Git comparison, so `lf roadmap` opts out. The
-                // attention fold already carries the progress evidence it needs.
+                // Task condition already carries the progress evidence it needs.
                 let empty = match (task, active) {
                     (Some(task), Some(active)) if probe_pr_empty && active.id == pr.id => {
                         task_pr_empty(task, pr)
@@ -1608,49 +1407,10 @@ async fn snapshot_task_detail(
     })
 }
 
-fn task_process_evidence(runtime: Option<&TaskRuntimeSnapshot>) -> TaskProcessEvidence {
-    let Some(runtime) = runtime else {
-        return TaskProcessEvidence {
-            state: TaskProcessEvidenceState::NotApplicable,
-            alive: None,
-            reason: None,
-        };
-    };
-    if !work_status_is_running(&runtime.status) {
-        return TaskProcessEvidence {
-            state: TaskProcessEvidenceState::NotExpected,
-            alive: None,
-            reason: None,
-        };
-    }
-    match runtime.current.liveness.as_ref() {
-        Some(liveness) if liveness.fresh && liveness.state == RunLivenessState::Present => {
-            TaskProcessEvidence {
-                state: TaskProcessEvidenceState::Observed,
-                alive: Some(true),
-                reason: None,
-            }
-        }
-        Some(liveness) if liveness.fresh && liveness.state == RunLivenessState::Absent => {
-            TaskProcessEvidence {
-                state: TaskProcessEvidenceState::Observed,
-                alive: Some(false),
-                reason: Some("the owning Home proved the Task process is gone".into()),
-            }
-        }
-        _ => TaskProcessEvidence {
-            state: TaskProcessEvidenceState::Unavailable,
-            alive: None,
-            reason: Some("the owning Home has no fresh Task liveness evidence".into()),
-        },
-    }
-}
-
 fn task_local_progress(
     task: Option<&Task>,
     runtime: Option<&TaskRuntimeSnapshot>,
     active_pr: Option<&TaskPr>,
-    process: &TaskProcessEvidence,
     worktree_blocker: Option<&crate::ops::task::TaskWorktreeBlocker>,
 ) -> LocalProgressEvidence {
     let Some(task) = task else {
@@ -1669,7 +1429,6 @@ fn task_local_progress(
             .expect("Task runtime exists when the durable Task exists"),
         &task.worktree,
         active_pr.map(|pr| pr.base_commit.as_str()),
-        process,
         worktree_blocker,
     )
 }
@@ -1678,14 +1437,9 @@ fn inspect_task_local_progress(
     status: &WorkStatus,
     worktree: &Path,
     active_pr_base: Option<&str>,
-    process: &TaskProcessEvidence,
     worktree_blocker: Option<&crate::ops::task::TaskWorktreeBlocker>,
 ) -> LocalProgressEvidence {
-    let recovery_required = if work_status_is_running(status) {
-        process.alive.map(|alive| !alive)
-    } else {
-        Some(false)
-    };
+    let recovery_required = Some(false);
     if let Some(blocker) = worktree_blocker {
         return LocalProgressEvidence {
             state: LocalProgressEvidenceState::Missing,
@@ -1762,97 +1516,76 @@ fn inspect_task_local_progress(
     }
 }
 
-fn derive_task_attention(
-    pm_completed: bool,
+fn derive_task_condition(
     runtime: Option<&TaskRuntimeSnapshot>,
     next_move: &NextMove,
-    evidence: TaskAttentionEvidence,
+    evidence: TaskConditionEvidence,
     action_evidence: Option<&TaskActionEvidence>,
     observed_at: time::OffsetDateTime,
-) -> TaskAttentionSnapshot {
-    let TaskAttentionEvidence {
-        process,
+) -> TaskConditionSnapshot {
+    let TaskConditionEvidence {
         local_progress,
-        user_ask,
+        human_session,
     } = evidence;
     let active_pr_phase = action_evidence
         .and_then(|e| e.latest_pr_phase)
         .filter(|phase| phase.is_active());
-    let live = process.alive == Some(true);
-    let user_attention = next_move.owner == NextMoveOwner::User;
-    let (level, reason) = if user_ask {
+    let launch_blocked = action_evidence.is_some_and(|evidence| evidence.launch_refusal.is_some());
+    let delivery_owned_by_active_pr = local_progress.dirty == Some(false)
+        && local_progress.recovery_required == Some(false)
+        && local_progress.authored_commits == Some(true)
+        && matches!(active_pr_phase, Some(PrPhase::Open | PrPhase::Publishing));
+    let (state, reason) = if human_session {
         (
-            TaskAttentionLevel::Blue,
-            "Waiting for your answer".to_string(),
+            TaskConditionState::Waiting,
+            "Waiting for your review".to_string(),
         )
-    } else if live && user_attention {
-        (TaskAttentionLevel::Red, next_move.reason.clone())
-    } else if live {
-        (TaskAttentionLevel::Green, next_move.reason.clone())
-    } else if user_attention {
-        (TaskAttentionLevel::Red, next_move.reason.clone())
-    } else if process.state == TaskProcessEvidenceState::Unavailable
-        && runtime.is_some_and(|runtime| work_status_is_running(&runtime.status))
-    {
-        (
-            TaskAttentionLevel::Unknown,
-            process
-                .reason
-                .clone()
-                .unwrap_or_else(|| "Task body evidence is unavailable".into()),
-        )
+    } else if launch_blocked {
+        (TaskConditionState::Blocked, next_move.reason.clone())
     } else if local_progress.state == LocalProgressEvidenceState::Missing
         && local_progress.recovery_required == Some(false)
     {
         (
-            TaskAttentionLevel::Black,
+            TaskConditionState::Clear,
             local_progress
                 .reason
                 .clone()
                 .unwrap_or_else(|| "Task worktree is initializing".into()),
         )
-    } else if local_progress.unsettled == Some(true) {
+    } else if local_progress.unsettled == Some(true) && !delivery_owned_by_active_pr {
         let reason = if local_progress.dirty == Some(true) {
-            "Task body stopped with uncommitted work".to_string()
+            "Task has uncommitted work".to_string()
         } else if local_progress.authored_commits == Some(true) {
             match active_pr_phase {
                 Some(PrPhase::Open) | Some(PrPhase::Publishing) => next_move.reason.clone(),
-                _ => "Task body stopped with unsettled commits".to_string(),
+                _ => "Task has unsettled commits".to_string(),
             }
         } else if let Some(reason) = &local_progress.reason {
             reason.clone()
         } else {
-            "no live Task body; local progress requires recovery".to_string()
+            "local Task progress requires recovery".to_string()
         };
-        (TaskAttentionLevel::Red, reason)
+        (TaskConditionState::Blocked, reason)
     } else if local_progress.unsettled.is_none() {
         (
-            TaskAttentionLevel::Unknown,
+            TaskConditionState::Unknown,
             local_progress
                 .reason
                 .clone()
                 .unwrap_or_else(|| "local Task progress is unavailable".into()),
         )
+    } else if next_move.owner != NextMoveOwner::Task {
+        (TaskConditionState::Waiting, next_move.reason.clone())
     } else {
-        (TaskAttentionLevel::Black, next_move.reason.clone())
+        (TaskConditionState::Clear, next_move.reason.clone())
     };
-    let actions = match action_evidence {
-        None => TaskActionModel::no_task(),
-        Some(evidence) => derive_task_actions(evidence),
-    };
-    TaskAttentionSnapshot {
-        level,
+    TaskConditionSnapshot {
+        state,
         reason,
         observed_at: format_time(observed_at)
-            .expect("Task attention observation time formats as RFC 3339"),
+            .expect("Task condition observation time formats as RFC 3339"),
         evidence_age_secs: runtime.and_then(|runtime| age_secs(&runtime.updated_at, observed_at)),
-        next_owner: next_move.owner,
-        actions,
-        pm_completed,
-        work_status: runtime.map(|runtime| runtime.status.clone()),
-        process,
         local_progress,
-        active_pr_phase,
     }
 }
 
@@ -1893,19 +1626,16 @@ fn task_pr_empty(task: &Task, pr: &TaskPr) -> Option<bool> {
 async fn current_direction(
     store: &SharedStore,
     target: ChildRef,
-) -> Result<Option<BoundarySeedSnapshot>> {
-    let seed = store
-        .boundary_seed_for_child(&target)
+) -> Result<Option<DirectionSnapshot>> {
+    let steers = store
+        .work_steers_for_child(&target)
         .await
-        .map_err(|err| anyhow!("failed to read boundary seed: {err}"))?;
-    let text = seed.render();
+        .map_err(|err| anyhow!("failed to read Work steers: {err}"))?;
+    let text = crate::durable::render_steers(&steers);
     if text.is_empty() {
         return Ok(None);
     }
-    Ok(Some(BoundarySeedSnapshot {
-        basis: format!("{}:{}", seed.basis.epoch_id, seed.basis.revision),
-        text,
-    }))
+    Ok(Some(DirectionSnapshot { text }))
 }
 
 fn project_summary(project: PmProject) -> PmProjectSummary {
@@ -1955,14 +1685,12 @@ fn next_move_for_unstarted_project(project: &PmProject) -> NextMove {
 
 fn next_move_for_project(status: &WorkStatus) -> NextMove {
     let owner = match status {
-        WorkStatus::Ready | WorkStatus::Running { .. } | WorkStatus::Waiting { .. } => {
-            NextMoveOwner::Project
-        }
+        WorkStatus::Ready => NextMoveOwner::Project,
         WorkStatus::Done | WorkStatus::Abandoned => NextMoveOwner::Wave,
     };
     NextMove {
         owner,
-        reason: work_status_reason(status),
+        reason: status.reason().to_string(),
     }
 }
 
@@ -1983,11 +1711,7 @@ fn next_move_for_task(
     if pr_phase == Some(PrPhase::Open) {
         if pr_presentation_current == Some(false) {
             return NextMove {
-                owner: if work_status_is_running(status) {
-                    NextMoveOwner::Task
-                } else {
-                    NextMoveOwner::Project
-                },
+                owner: NextMoveOwner::Project,
                 reason: "refresh reviewer-facing PR copy for the current head before settlement"
                     .to_string(),
             };
@@ -1995,13 +1719,6 @@ fn next_move_for_task(
         if let Some(ci) = ci {
             let repairable_failure =
                 ci.state == CiState::Failing && !ci.only_land_time_preconditions();
-            let fixing = work_status_is_running(status) && repairable_failure;
-            if fixing {
-                return NextMove {
-                    owner: NextMoveOwner::Task,
-                    reason: "fixing CI".to_string(),
-                };
-            }
             if repairable_failure {
                 return NextMove {
                     owner: NextMoveOwner::Ci,
@@ -2031,24 +1748,14 @@ fn next_move_for_task(
             };
         }
         return NextMove {
-            owner: if work_status_is_running(status) {
-                NextMoveOwner::Task
-            } else {
-                NextMoveOwner::Project
-            },
+            owner: NextMoveOwner::Project,
             reason: "PR is published but settlement is not armed with `lf pr land -c`".to_string(),
         };
     }
-    let owner = match status {
-        WorkStatus::Running { .. } => NextMoveOwner::Task,
-        WorkStatus::Ready
-        | WorkStatus::Waiting { .. }
-        | WorkStatus::Done
-        | WorkStatus::Abandoned => NextMoveOwner::Project,
-    };
+    let owner = NextMoveOwner::Project;
     NextMove {
         owner,
-        reason: work_status_reason(status),
+        reason: status.reason().to_string(),
     }
 }
 
@@ -2056,7 +1763,7 @@ fn next_move_for_task(
 /// errors). Kept minimal — `lf status` with no arg is a convenience, not the
 /// resolution surface `lf chat` owns.
 fn ambient_wave() -> Option<String> {
-    std::env::var(crate::engine::wave_context::WAVE_ID_ENV)
+    std::env::var(crate::work::wave::context::WAVE_ID_ENV)
         .ok()
         .map(|value| value.trim().to_string())
         .filter(|value| !value.is_empty())
@@ -2086,7 +1793,7 @@ fn format_time(ts: time::OffsetDateTime) -> Option<String> {
         .ok()
 }
 
-fn historical_failure_line(failure: &crate::project::HistoricalFailure) -> String {
+fn historical_failure_line(failure: &crate::work::project::HistoricalFailure) -> String {
     format!(
         "last failure at {}: {}",
         format_time(failure.occurred_at).unwrap_or_else(|| failure.occurred_at.to_string()),
@@ -2130,7 +1837,7 @@ fn print_wave_table(snapshots: &[WaveSnapshot]) {
             "{name:<16}  {repo:<28}  {status:<8}  {enabled:<7}  {turns:<7}  {live:<5}  {tasks:>5}  {projects:>8}  {home:<16}  {endpoint}",
             name = truncate(&wave.name, 16),
             repo = truncate_start(&wave.repo, 28),
-            status = current_work_label(wave.current.state),
+            status = wave.status.label(),
             enabled = if wave.enabled { "yes" } else { "no" },
             turns = if wave.paused { "paused" } else { "enabled" },
             live = if wave.live { "yes" } else { "no" },
@@ -2140,33 +1847,6 @@ fn print_wave_table(snapshots: &[WaveSnapshot]) {
             endpoint = wave.endpoint.as_deref().unwrap_or("-"),
         );
     }
-}
-
-fn work_status_label(status: &WorkStatus) -> &'static str {
-    match status {
-        WorkStatus::Ready => "ready",
-        WorkStatus::Running { .. } => "running",
-        WorkStatus::Waiting { .. } => "waiting",
-        WorkStatus::Done => "done",
-        WorkStatus::Abandoned => "abandoned",
-    }
-}
-
-fn current_work_label(state: CurrentWorkState) -> &'static str {
-    match state {
-        CurrentWorkState::Working => "working",
-        CurrentWorkState::Stalled => "stalled",
-        CurrentWorkState::Stopped => "stopped",
-        CurrentWorkState::Unobservable => "unobservable",
-        CurrentWorkState::Ready => "ready",
-        CurrentWorkState::Waiting => "waiting",
-        CurrentWorkState::Done => "done",
-        CurrentWorkState::Abandoned => "abandoned",
-    }
-}
-
-fn work_status_is_running(status: &WorkStatus) -> bool {
-    matches!(status, WorkStatus::Running { .. })
 }
 
 fn work_status_is_terminal(status: &WorkStatus) -> bool {
@@ -2213,7 +1893,7 @@ fn print_status(status: &WaveDetailSnapshot) {
         status = if wave.retired_at.is_some() {
             "retired"
         } else {
-            current_work_label(wave.current.state)
+            wave.status.label()
         },
         loop_state = status
             .loop_state
@@ -2261,9 +1941,9 @@ fn print_status(status: &WaveDetailSnapshot) {
         for project in &status.projects {
             let (project_status, iteration, reason) = match &project.runtime {
                 Some(runtime) => (
-                    current_work_label(runtime.current.state),
+                    runtime.status.label(),
                     runtime.iteration,
-                    runtime.current.reason.as_str(),
+                    runtime.reason.as_str(),
                 ),
                 None => ("unstarted", 0, project.next_move.reason.as_str()),
             };
@@ -2283,10 +1963,7 @@ fn print_status(status: &WaveDetailSnapshot) {
             }
             for task in &project.tasks {
                 let (task_status, reason) = match &task.runtime {
-                    Some(runtime) => (
-                        current_work_label(runtime.current.state),
-                        runtime.current.reason.as_str(),
-                    ),
+                    Some(runtime) => (runtime.status.label(), runtime.reason.as_str()),
                     None if task.task.completed => ("completed", task.next_move.reason.as_str()),
                     None => ("unstarted", task.next_move.reason.as_str()),
                 };
@@ -2314,7 +1991,6 @@ fn print_status(status: &WaveDetailSnapshot) {
         }
     }
     print_unavailable_projects(&status.unavailable_projects);
-    print_attention(&status.attention);
     print_runs(&status.runs);
 }
 
@@ -2575,7 +2251,7 @@ fn print_unavailable_projects(projects: &[UnavailableProjectEvidence]) {
         println!(
             "    {slug:<24}  {status:<10}  {owner:<8}  {work}  {reason}",
             slug = truncate(&project.project_slug, 24),
-            status = current_work_label(project.current.state),
+            status = project.status.label(),
             owner = owner_label(&project.owner),
             work = project.work_id,
             reason = project.reason,
@@ -2585,7 +2261,7 @@ fn print_unavailable_projects(projects: &[UnavailableProjectEvidence]) {
             println!(
                 "      {identifier:<12}  {status:<10}  {owner:<8}  {work}  {reason}",
                 identifier = truncate(&task.task_identifier, 12),
-                status = current_work_label(task.current.state),
+                status = task.status.label(),
                 owner = owner_label(&task.owner),
                 work = task.work_id,
                 reason = task.reason,
@@ -2595,43 +2271,23 @@ fn print_unavailable_projects(projects: &[UnavailableProjectEvidence]) {
     }
 }
 
-fn print_attention(attention: &Evidence<AttentionItem>) {
-    match attention {
-        Evidence::Unavailable { reason } => println!("  attention unavailable: {reason}"),
-        Evidence::Ok { items, .. } if items.is_empty() => println!("  attention  nothing waiting"),
-        Evidence::Ok { items, .. } => {
-            println!("  attention");
-            for item in items {
-                println!(
-                    "    {subject:<14}  {owner:<8}  {age:>7}  {reason}",
-                    subject = truncate(&item.subject, 14),
-                    owner = owner_label(&item.owner),
-                    age = item
-                        .age_secs
-                        .map(format_age)
-                        .unwrap_or_else(|| "-".to_string()),
-                    reason = item.reason,
-                );
-            }
-        }
-    }
-}
-
-fn print_runs(runs: &Evidence<SkillRunEntry>) {
+fn print_runs(runs: &Evidence<RunSnapshot>) {
     match runs {
         Evidence::Unavailable { reason } => println!("  runs unavailable: {reason}"),
         Evidence::Ok { items, .. } if items.is_empty() => {
-            println!("  runs       no skills in the ledger window")
+            println!("  runs       no Run records in the window")
         }
         Evidence::Ok { items, truncated } => {
             println!("  runs");
             for run in items {
                 println!(
-                    "    {label:<24}  {status:<8}  ctx {context:>7}  tok {tokens:>7}  {age:>7} ago",
-                    label = truncate(&run.label(), 24),
-                    status = run.status,
-                    context = format_tokens(run.supplied_context_tokens),
-                    tokens = format_tokens(run.total_tokens()),
+                    "    {label:<24}  {status:<12}  tok {tokens:>7}  {age:>7} ago",
+                    label = truncate(run.label(), 24),
+                    status = run.status(),
+                    tokens = run
+                        .total_tokens()
+                        .map(format_tokens)
+                        .unwrap_or_else(|| "-".to_string()),
                     age = format_age(now().unix_timestamp() - run.started),
                 );
             }
@@ -2654,17 +2310,16 @@ struct RoadmapRow {
     owner: NextMoveOwner,
     pr: Option<String>,
     workspace: Option<String>,
-    attention: Option<TaskAttentionLevel>,
+    condition: Option<TaskConditionState>,
     reason: String,
 }
 
-fn task_attention_label(level: TaskAttentionLevel) -> &'static str {
-    match level {
-        TaskAttentionLevel::Green => "green",
-        TaskAttentionLevel::Red => "red",
-        TaskAttentionLevel::Blue => "blue",
-        TaskAttentionLevel::Black => "black",
-        TaskAttentionLevel::Unknown => "unknown",
+fn task_condition_label(state: TaskConditionState) -> &'static str {
+    match state {
+        TaskConditionState::Waiting => "waiting",
+        TaskConditionState::Blocked => "blocked",
+        TaskConditionState::Clear => "clear",
+        TaskConditionState::Unknown => "unknown",
     }
 }
 
@@ -2686,8 +2341,8 @@ fn task_roadmap_row(task: &RoadmapTask, now: time::OffsetDateTime) -> RoadmapRow
             .workspace
             .as_ref()
             .map(|workspace| workspace.slug.clone()),
-        attention: Some(task.attention.level),
-        reason: task.attention.reason.clone(),
+        condition: Some(task.condition.state),
+        reason: task.condition.reason.clone(),
     }
 }
 
@@ -2734,7 +2389,7 @@ fn task_identifier_label(
 fn section_label(section: RoadmapSection) -> &'static str {
     match section {
         RoadmapSection::Now => "NOW",
-        RoadmapSection::NeedsAttention => "NEEDS ATTENTION",
+        RoadmapSection::Waiting => "WAITING",
         RoadmapSection::Available => "AVAILABLE",
         RoadmapSection::Later => "LATER",
     }
@@ -2753,7 +2408,7 @@ fn print_roadmap(roadmap: &RoadmapSnapshot) {
             bold = colors.bold,
             reset = colors.reset,
             name = wave.wave.name,
-            status = current_work_label(wave.wave.current.state),
+            status = wave.wave.status.label(),
         );
         let project_names = match &wave.projects {
             Evidence::Ok { items, .. } => items
@@ -2787,7 +2442,7 @@ fn print_roadmap(roadmap: &RoadmapSnapshot) {
                     owner: project.next_move.owner,
                     pr: None,
                     workspace: None,
-                    attention: None,
+                    condition: None,
                     reason: project.next_move.reason.clone(),
                 });
             }
@@ -2801,7 +2456,7 @@ fn print_roadmap(roadmap: &RoadmapSnapshot) {
         }
         for section in [
             RoadmapSection::Now,
-            RoadmapSection::NeedsAttention,
+            RoadmapSection::Waiting,
             RoadmapSection::Available,
             RoadmapSection::Later,
         ] {
@@ -2813,7 +2468,7 @@ fn print_roadmap(roadmap: &RoadmapSnapshot) {
             println!("  {}", section_label(section));
             for row in in_section {
                 println!(
-                    "    {id}  {rank:>4}  {owner:<8}  {age:>5}  {signal:<7}  {workspace:<20}  {pr:<24}  {title}",
+                    "    {id}  {rank:>4}  {owner:<8}  {age:>5}  {condition:<7}  {workspace:<20}  {pr:<24}  {title}",
                     id = task_identifier_label(
                         &row.id,
                         row.issue_url.as_deref(),
@@ -2829,9 +2484,9 @@ fn print_roadmap(roadmap: &RoadmapSnapshot) {
                         .age_secs
                         .map(format_age)
                         .unwrap_or_else(|| "-".to_string()),
-                    signal = row
-                        .attention
-                        .map(task_attention_label)
+                    condition = row
+                        .condition
+                        .map(task_condition_label)
                         .unwrap_or("-"),
                     workspace = truncate(row.workspace.as_deref().unwrap_or("-"), 20),
                     pr = truncate(row.pr.as_deref().unwrap_or("-"), 24),
@@ -2889,58 +2544,33 @@ fn truncate_start(value: &str, width: usize) -> String {
 
 #[cfg(test)]
 mod tests {
-    use std::path::PathBuf;
     use std::sync::Arc;
-    use std::time::Duration;
-
     use time::OffsetDateTime;
 
     use super::{
-        derive_task_attention, historical_failure_line, metric_portfolio_text, next_move_for_task,
+        derive_task_condition, historical_failure_line, metric_portfolio_text, next_move_for_task,
         snapshot_project_runtime, truncate_start, LocalProgressEvidence,
-        LocalProgressEvidenceState, NextMove, NextMoveOwner, TaskAttentionEvidence,
-        TaskAttentionLevel, TaskProcessEvidence, TaskProcessEvidenceState, TaskRuntimeSnapshot,
+        LocalProgressEvidenceState, NextMove, NextMoveOwner, TaskConditionEvidence,
+        TaskConditionState, TaskRuntimeSnapshot,
     };
-    use crate::child::{observe, CurrentWorkEvidence, CurrentWorkIntent};
-    use crate::durable::{
-        BoundaryState, Containment, RunAdvance, RunLivenessEvidence, RunLivenessState, RunTrigger,
-        WorkStatus,
-    };
-    use crate::planning::{LinearProjectId, ProjectPlan};
-    use crate::project::{Project, ProjectEventKind, ProjectId};
-    use crate::store::sqlite::SqliteStore;
-    use crate::store::Store;
-    use crate::task::{CiObservation, CiState, PrMergeMode, PrMergeRequest, PrPhase};
-    use crate::wave::metrics::{
+    use crate::controller::wave::metrics::{
         MetricEvidenceDto, MetricFreshnessDto, MetricIdentity, MetricPortfolioDto,
         MetricReadingDto, MetricStage, MetricTarget, MetricUnknownCauseDto,
     };
-    use crate::wave::Wave;
+    use crate::durable::WorkStatus;
+    use crate::ops::task_actions::TaskActionEvidence;
+    use crate::planning::{LinearProjectId, ProjectPlan};
+    use crate::store::sqlite::SqliteStore;
+    use crate::store::Store;
+    use crate::work::project::{Project, ProjectEventKind, ProjectId};
+    use crate::work::task::{CiObservation, CiState, PrMergeMode, PrMergeRequest, PrPhase};
+    use crate::work::wave::Wave;
 
     #[tokio::test]
     async fn status_surfaces_keep_credential_failure_in_history() {
         let directory = tempfile::tempdir().unwrap();
         let path = directory.path().join("registry.db");
         let sqlite = SqliteStore::new(&path).unwrap();
-        let connection = rusqlite::Connection::open(&path).unwrap();
-        let status_truth_is_materialized = connection
-            .query_row(
-                "SELECT EXISTS(
-                    SELECT 1 FROM sqlite_master
-                    WHERE type='table' AND name='run_liveness'
-                 )",
-                [],
-                |row| row.get::<_, bool>(0),
-            )
-            .unwrap();
-        if !status_truth_is_materialized {
-            connection
-                .execute_batch(&crate::store::migrations::migration_sql_for_test(
-                    "status_truth",
-                ))
-                .unwrap();
-        }
-        drop(connection);
         let now = OffsetDateTime::now_utc();
         let wave = Wave::new(
             crate::id::WaveId::new(),
@@ -2958,44 +2588,19 @@ mod tests {
                 pm_snapshot_synced_at: now.unix_timestamp(),
             },
             wave_id: wave.id().clone(),
-            iteration: 2,
-            observation_cursor: 0,
-            last_state_fingerprint: None,
-            agent: "codex".to_string(),
-            provider: "codex".to_string(),
-            provider_session_id: None,
             abandon_intent: None,
             created_at: now,
             updated_at: now,
         };
         sqlite.insert_project(&project).unwrap();
-        let work = sqlite
-            .work_for_child(&crate::child::ChildRef::Project(project.id.clone()))
-            .unwrap();
-        let (_, failed_lease) = sqlite.reserve_run(&work, &RunTrigger::User).unwrap();
-        sqlite
-            .advance_run(
-                &failed_lease,
-                &RunAdvance::RunStarting {
-                    containment: Containment::Tmux {
-                        name: "credential-ghost".to_string(),
-                    },
-                    cwd: PathBuf::from("/repo"),
-                },
-            )
-            .unwrap();
         let failure = sqlite
-            .append_project_event_for_run(
+            .append_project_event(
                 &project.id,
-                &failed_lease,
                 &ProjectEventKind::Failed {
                     error: "project runner failed: credential is missing".to_string(),
                     resumable: true,
                 },
             )
-            .unwrap();
-        sqlite
-            .finish_run(&failed_lease, BoundaryState::Failed)
             .unwrap();
         rusqlite::Connection::open(&path)
             .unwrap()
@@ -3004,41 +2609,24 @@ mod tests {
                 [failure.id],
             )
             .unwrap();
-
-        let (_, successful_lease) = sqlite.reserve_run(&work, &RunTrigger::User).unwrap();
-        sqlite
-            .advance_run(
-                &successful_lease,
-                &RunAdvance::RunStarting {
-                    containment: Containment::Tmux {
-                        name: "healthy-successor".to_string(),
-                    },
-                    cwd: PathBuf::from("/repo"),
-                },
-            )
-            .unwrap();
-        sqlite
-            .finish_run(&successful_lease, BoundaryState::Succeeded)
-            .unwrap();
-        let successful_run = sqlite.run_by_id(&successful_lease.run_id).unwrap();
-
         let store = Arc::new(Store::from_sqlite_for_test(sqlite));
-        let status = store.work_status(&work).await.unwrap();
-        let runtime = snapshot_project_runtime(&store, &project, status, now)
+        let status = store
+            .work_status(&crate::durable::WorkRef::Project(project.id.clone()))
+            .await
+            .unwrap();
+        let runtime = snapshot_project_runtime(&store, &project, status)
             .await
             .unwrap();
         let historical = runtime.last_failure.unwrap();
 
         assert_eq!(runtime.status, WorkStatus::Ready);
-        assert_eq!(runtime.current.state, crate::child::CurrentWorkState::Ready);
-        assert_eq!(runtime.current.reason, "ready");
-        assert!(!runtime.current.reason.contains("credential"));
-        assert_eq!(historical.run_id, Some(failed_lease.run_id));
+        assert_eq!(runtime.reason, "ready");
+        assert!(!runtime.reason.contains("credential"));
         assert_eq!(
             historical.message,
             "project runner failed: credential is missing"
         );
-        assert!(historical.occurred_at < successful_run.created_at);
+        assert!(historical.occurred_at < now);
         assert!(historical_failure_line(&historical).starts_with("last failure at "));
     }
 
@@ -3137,42 +2725,21 @@ mod tests {
     }
 
     #[test]
-    fn only_a_durable_ask_marks_a_running_task_as_waiting_on_the_user() {
+    fn task_condition_distinguishes_clear_work_from_external_waits() {
         let runtime = TaskRuntimeSnapshot {
             work_id: "task-1".to_string(),
             project_id: "project-1".to_string(),
             routing_project_id: Some("project-1".to_string()),
-            status: WorkStatus::Running {
-                run_id: crate::durable::RunId::new(),
-            },
-            reason: "Run is active".to_string(),
+            status: WorkStatus::Ready,
+            reason: "ready".to_string(),
             updated_at: "2026-07-21T00:00:00Z".to_string(),
             provider: "codex".to_string(),
-            current: observe(
-                &CurrentWorkEvidence {
-                    intent: CurrentWorkIntent::Active,
-                    liveness: Some(RunLivenessEvidence {
-                        state: RunLivenessState::Present,
-                        observed_at: Some(OffsetDateTime::UNIX_EPOCH),
-                        fresh: true,
-                    }),
-                    progress_age: Duration::ZERO,
-                    step: Some("demo".to_string()),
-                    reason: "Run is active".to_string(),
-                },
-                Duration::from_secs(30 * 60),
-            ),
         };
         let next_move = NextMove {
             owner: NextMoveOwner::Task,
-            reason: "Run is active".to_string(),
+            reason: "Task is ready".to_string(),
         };
-        let evidence = |user_ask| TaskAttentionEvidence {
-            process: TaskProcessEvidence {
-                state: TaskProcessEvidenceState::Observed,
-                alive: Some(true),
-                reason: None,
-            },
+        let evidence = |human_session| TaskConditionEvidence {
             local_progress: LocalProgressEvidence {
                 state: LocalProgressEvidenceState::Observed,
                 unsettled: Some(false),
@@ -3181,19 +2748,17 @@ mod tests {
                 recovery_required: Some(false),
                 reason: None,
             },
-            user_ask,
+            human_session,
         };
 
-        let advisory = derive_task_attention(
-            false,
+        let advisory = derive_task_condition(
             Some(&runtime),
             &next_move,
             evidence(false),
             None,
             OffsetDateTime::now_utc(),
         );
-        let asked = derive_task_attention(
-            false,
+        let human = derive_task_condition(
             Some(&runtime),
             &next_move,
             evidence(true),
@@ -3201,9 +2766,75 @@ mod tests {
             OffsetDateTime::now_utc(),
         );
 
-        assert_eq!(advisory.level, TaskAttentionLevel::Green);
-        assert_eq!(asked.level, TaskAttentionLevel::Blue);
-        assert_eq!(asked.reason, "Waiting for your answer");
+        assert_eq!(advisory.state, TaskConditionState::Clear);
+        assert_eq!(human.state, TaskConditionState::Waiting);
+        assert_eq!(human.reason, "Waiting for your review");
+
+        let delegated = derive_task_condition(
+            Some(&runtime),
+            &NextMove {
+                owner: NextMoveOwner::Project,
+                reason: "Waiting for Project selection".to_string(),
+            },
+            evidence(false),
+            None,
+            OffsetDateTime::now_utc(),
+        );
+        assert_eq!(delegated.state, TaskConditionState::Waiting);
+        assert_eq!(delegated.reason, "Waiting for Project selection");
+
+        let user_handoff = derive_task_condition(
+            Some(&runtime),
+            &NextMove {
+                owner: NextMoveOwner::User,
+                reason: "Merge the pull request".to_string(),
+            },
+            evidence(false),
+            None,
+            OffsetDateTime::now_utc(),
+        );
+        assert_eq!(user_handoff.state, TaskConditionState::Waiting);
+    }
+
+    #[test]
+    fn active_pr_delivery_does_not_turn_a_manual_handoff_into_a_blocker() {
+        let local_progress = LocalProgressEvidence {
+            state: LocalProgressEvidenceState::Observed,
+            unsettled: Some(true),
+            dirty: Some(false),
+            authored_commits: Some(true),
+            recovery_required: Some(false),
+            reason: None,
+        };
+        let action_evidence = TaskActionEvidence {
+            status: WorkStatus::Ready,
+            latest_pr_phase: Some(PrPhase::Open),
+            latest_pr_after_merge: None,
+            latest_pr_merge_request: None,
+            latest_pr_presentation_current: Some(true),
+            completion_refusal: None,
+            resume_refusal: None,
+            ci: None,
+            predecessor_phase: None,
+            abandon_intent: false,
+            launch_refusal: None,
+        };
+        let condition = derive_task_condition(
+            None,
+            &NextMove {
+                owner: NextMoveOwner::User,
+                reason: "Merge the pull request".to_string(),
+            },
+            TaskConditionEvidence {
+                local_progress,
+                human_session: false,
+            },
+            Some(&action_evidence),
+            OffsetDateTime::now_utc(),
+        );
+
+        assert_eq!(condition.state, TaskConditionState::Waiting);
+        assert_eq!(condition.reason, "Merge the pull request");
     }
 
     #[test]
@@ -3242,7 +2873,7 @@ mod tests {
                 mode,
                 requested_at: OffsetDateTime::now_utc(),
                 head_sha: passing.head_sha.clone(),
-                after_merge: crate::task::AfterMerge::ContinueTask,
+                after_merge: crate::work::task::AfterMerge::ContinueTask,
                 next_slug: None,
             };
             let next = next_move_for_task(
@@ -3263,7 +2894,7 @@ mod tests {
         let ci = CiObservation {
             head_sha: "head".to_string(),
             state: CiState::Failing,
-            failing_checks: vec![crate::task::CiCheck {
+            failing_checks: vec![crate::work::task::CiCheck {
                 name: "scratch-clear".to_string(),
                 url: None,
             }],
@@ -3273,7 +2904,7 @@ mod tests {
             mode: PrMergeMode::User,
             requested_at: OffsetDateTime::now_utc(),
             head_sha: ci.head_sha.clone(),
-            after_merge: crate::task::AfterMerge::ContinueTask,
+            after_merge: crate::work::task::AfterMerge::ContinueTask,
             next_slug: None,
         };
 

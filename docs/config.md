@@ -1,6 +1,21 @@
 # Configuration
 
-Configure loopflow via CLI flags, global config (`~/.lf/config.yaml`), or repo config (`.lf/config.yaml`). Precedence: CLI flags > repo config > global config.
+Start with a one-run override; keep it in repo config only when the choice
+should apply to everyone:
+
+```bash
+lf gate -m codex --docs docs/api.md
+```
+
+```yaml
+# .lf/config.yaml
+agent: codex
+docs: [docs/api.md]
+```
+
+CLI flags override repo config (`.lf/config.yaml`), which overrides global
+config (`~/.lf/config.yaml`). Additive lists such as `docs` combine across
+config files.
 
 ## Quick Reference
 
@@ -18,7 +33,7 @@ Configure loopflow via CLI flags, global config (`~/.lf/config.yaml`), or repo c
 | Chrome automation | `--chrome` | `chrome: true` |
 | Yolo mode (skip permissions) | — | `yolo: true` |
 | Claude/Codex/OpenCode launch surface | `--tui` / `--ide` | `session.launch: tui` |
-| Detached Ask terminal | `LF_EXTERNAL_TERMINAL=Ghostty` | global-only `session.terminal: Ghostty` |
+| Human FlowStep terminal | `LF_EXTERNAL_TERMINAL=Ghostty` | global-only `session.terminal: Ghostty` |
 
 ## Context Assembly
 
@@ -59,7 +74,7 @@ For most settings, repo overrides global. For additive settings (`docs`, `contex
 agent: claude:opus
 direction: clarity
 session:
-  terminal: Ghostty       # opens `lf ask` sessions on this Home
+  terminal: Ghostty       # presents human FlowStep sessions on this Home
 
 # .lf/config.yaml (repo)
 agent: codex        # overrides global
@@ -125,24 +140,28 @@ release:
 
 `lf release run patch --target cli` selects changes from the exact
 `cli/v<previous>..HEAD` git range, prepares an isolated release PR, tags its
-merged commit, and waits for the configured completion evidence. `area` scopes
-the range. `manifests` use Loopflow's built-in semantic-version adapters;
-omit them to auto-detect supported manifests.
+merged commit only after the configured workflow proves that exact candidate,
+and waits for the configured completion evidence. `area` scopes the range.
+`manifests` use Loopflow's built-in semantic-version adapters; omit them to
+auto-detect supported manifests.
 
 `verify` runs during `lf release run`, after Loopflow resolves the version and
 exact change range but before it prepares release changes. `lf release check`
 only reads that evidence; it does not execute repository hooks. `prepare` runs
 after manifest bumps inside the isolated release worktree. Both hook types
-accept `{target}`, `{version}`, and `{previous_tag}` placeholders. Put
-compilation, signing, packaging, migration, registry upload, deployment, smoke
-tests, and secret use in these repo-owned commands or the workflow—not in
-built-in release policy.
+accept `{target}`, `{version}`, and `{previous_tag}` placeholders. The
+configured workflow runs before the version tag and owns credential-free
+compilation, packaging, migration checks, and smoke tests. A configured
+publisher owns host signing and candidate preparation before the tag, then
+registry upload, deployment, and finalization after it. Keep those details in
+repo-owned commands—not in built-in release policy.
 
 Completion is explicit:
 
 - `tag` — pushing the tag completes the release.
-- `workflow` — the configured GitHub Actions workflow must succeed.
-- `github-release` — a GitHub Release for the tag must exist.
+- `workflow` — the configured pre-tag candidate workflow must succeed.
+- `github-release` — after candidate proof and tagging, a GitHub Release for
+  the tag must exist.
 
 Without `completion`, targets with `workflow` use `workflow`; other targets use
 `tag`. The first release requires an explicit `X.Y.Z`; bump keywords require a
@@ -248,7 +267,7 @@ agent: codex          # harness default
 # agent: claude:opus  # harness plus model
 ```
 
-Harnesses: `claude`, `codex`, `gemini`, `opencode`. Use `harness:model` for specific models.
+Harnesses: `claude`, `codex`, `opencode`. Use `harness:model` for specific models.
 
 Four built-in skills intentionally default to Claude: `kickoff`,
 `review-design`, `review-slice`, and `prompt`. Every other unconfigured
@@ -259,16 +278,13 @@ Loopflow starts every Codex CLI and interactive run on the standard service tier
 even when the user's Codex config selects Fast mode. In an interactive Codex
 TUI, run `/fast` to opt into Fast mode for that session.
 
-Gemini is supported for direct `lf` commands. Wave, Project, and Tasks
-require `claude`, `codex`, or `opencode`.
-
-OpenCode model strings use `provider/model` form. Bare `opencode` resolves to
-the Loopflow-owned `opencode/glm-5.2` default, which Loopflow sends explicitly
-so OpenCode config cannot silently fall back to a lower-capability model:
+Bare harness names use the model selected by that provider account. Add
+`harness:model` only when the invocation must pin a specific model. OpenCode
+model strings use `provider/model` form:
 
 ```yaml
-agent: opencode                          # Loopflow default: opencode/glm-5.2
-agent: opencode:opencode/glm-5.2         # same default, explicit
+agent: opencode                          # user's OpenCode default
+agent: opencode:opencode/glm-5.2         # explicit model
 agent: opencode:moonshotai/kimi-k2       # explicit provider/model
 ```
 
@@ -280,7 +296,7 @@ Optional list of harnesses exposed in Loopflow's model picker and settings.
 supported_harnesses:
   - claude
   - codex
-  - gemini
+  - opencode
 ```
 
 This list is additive across global and repo config.
@@ -343,8 +359,8 @@ If vendor config is less permissive, Loopflow warns and supplies its default.
 
 `yolo: true` is the explicit Loopflow bypass: Claude uses
 `--dangerously-skip-permissions`, Codex uses
-`--dangerously-bypass-approvals-and-sandbox`, Gemini uses `--yolo`, and OpenCode
-uses `permission: "allow"` via `OPENCODE_CONFIG_CONTENT`.
+`--dangerously-bypass-approvals-and-sandbox`, and OpenCode uses
+`permission: "allow"` via `OPENCODE_CONFIG_CONTENT`.
 
 Durable Task provider turns are the exception. Their assigned worktree is a
 hard write boundary, so `yolo` and a more permissive vendor config cannot widen

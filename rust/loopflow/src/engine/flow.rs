@@ -1525,7 +1525,7 @@ Do it quickly.
         fs::write(
             skills_dir.join("fast.md"),
             r#"---
-default_agent: gemini:2.5-pro
+default_agent: codex:o3
 ---
 # Fast Skill
 Do it quickly.
@@ -1534,7 +1534,7 @@ Do it quickly.
         .unwrap();
 
         let skill = load_skill("fast", tmp.path()).unwrap();
-        assert_eq!(skill.default_agent, Some("gemini:2.5-pro".to_string()));
+        assert_eq!(skill.default_agent, Some("codex:o3".to_string()));
     }
 
     #[test]

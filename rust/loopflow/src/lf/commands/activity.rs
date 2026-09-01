@@ -7,14 +7,14 @@ use serde::{Deserialize, Serialize};
 use time::OffsetDateTime;
 
 use crate::durable::{Author, Steer, SteerId, WorkRef};
-use crate::lf::commands::runs::{collect_run_activity_since, SkillRunEntry};
+use crate::lf::commands::runs::{collect_run_activity_since, RunSnapshot};
 use crate::lf::commands::util::parse_since;
 use crate::lf::commands::waves::PrMergeRequestSnapshot;
 use crate::lf::commands::WorkFilter;
-use crate::project::Project;
 use crate::store::sqlite::SqliteStore;
-use crate::task::{GithubPr, Task, TaskPr, TaskPrId};
-use crate::wave::Wave;
+use crate::work::project::Project;
+use crate::work::task::{GithubPr, Task, TaskPr, TaskPrId};
+use crate::work::wave::Wave;
 
 const MAX_LIMIT: usize = 200;
 
@@ -43,14 +43,10 @@ pub struct WorkActivityEntry {
 pub enum WorkActivityFact {
     WorkCreated,
     RunStarted {
-        invocation_id: String,
-        trace_id: String,
-        exec_id: String,
+        run_id: String,
     },
     RunFinished {
-        invocation_id: String,
-        trace_id: String,
-        exec_id: String,
+        run_id: String,
         status: String,
     },
     PrStarted {
@@ -171,7 +167,7 @@ fn build_snapshot(
         }
     }
 
-    let runs = collect_run_activity_since(store, filter, since)?;
+    let runs = collect_run_activity_since(filter, since)?;
     for run in runs {
         if let Some(work) = catalog.resolve_run(&run) {
             entries.extend(run_entries(&run, work, since));
@@ -269,25 +265,24 @@ impl WorkCatalog {
         Ok(catalog)
     }
 
-    fn resolve_run(&self, run: &SkillRunEntry) -> Option<&WorkOwner> {
-        if let Some(task) = run.task.as_deref() {
+    fn resolve_run(&self, run: &RunSnapshot) -> Option<&WorkOwner> {
+        if let Some(task) = run.subject("task") {
             return unique_match(self.owners.values().filter(|owner| {
                 owner.task.as_deref() == Some(task)
                     && run
-                        .project
-                        .as_deref()
+                        .subject("project")
                         .is_none_or(|value| owner.project.as_deref() == Some(value))
-                    && run.wave.as_deref().is_none_or(|value| value == owner.wave)
+                    && run.subject("wave").is_none_or(|value| value == owner.wave)
             }));
         }
-        if let Some(project) = run.project.as_deref() {
+        if let Some(project) = run.subject("project") {
             return unique_match(self.owners.values().filter(|owner| {
                 owner.task.is_none()
                     && owner.project.as_deref() == Some(project)
-                    && run.wave.as_deref().is_none_or(|value| value == owner.wave)
+                    && run.subject("wave").is_none_or(|value| value == owner.wave)
             }));
         }
-        let wave = run.wave.as_deref()?;
+        let wave = run.subject("wave")?;
         unique_match(
             self.owners
                 .values()
@@ -339,13 +334,8 @@ fn activity_entry(
     }
 }
 
-fn run_entries(run: &SkillRunEntry, work: &WorkOwner, since: i64) -> Vec<WorkActivityEntry> {
-    let label = run
-        .flow
-        .as_deref()
-        .filter(|flow| *flow != run.skill)
-        .map(|flow| format!("{flow}/{}", run.skill))
-        .unwrap_or_else(|| run.skill.clone());
+fn run_entries(run: &RunSnapshot, work: &WorkOwner, since: i64) -> Vec<WorkActivityEntry> {
+    let label = run.label();
     let mut entries = Vec::new();
     if run.started >= since {
         entries.push(activity_entry(
@@ -354,9 +344,7 @@ fn run_entries(run: &SkillRunEntry, work: &WorkOwner, since: i64) -> Vec<WorkAct
             format!("{label} started"),
             work,
             WorkActivityFact::RunStarted {
-                invocation_id: run.id.clone(),
-                trace_id: run.trace_id.clone(),
-                exec_id: run.exec_id.clone(),
+                run_id: run.id.clone(),
             },
         ));
     }
@@ -364,13 +352,11 @@ fn run_entries(run: &SkillRunEntry, work: &WorkOwner, since: i64) -> Vec<WorkAct
         entries.push(activity_entry(
             format!("run:{}:finished", run.id),
             ended,
-            format!("{label} finished {}", run.status),
+            format!("{label} finished {}", run.status()),
             work,
             WorkActivityFact::RunFinished {
-                invocation_id: run.id.clone(),
-                trace_id: run.trace_id.clone(),
-                exec_id: run.exec_id.clone(),
-                status: run.status.clone(),
+                run_id: run.id.clone(),
+                status: run.status().to_string(),
             },
         ));
     }
@@ -541,7 +527,7 @@ fn print_snapshot(snapshot: &WorkActivitySnapshot) {
 #[cfg(test)]
 mod tests {
     use super::*;
-    use crate::task::{
+    use crate::work::task::{
         AfterMerge, GithubPr, PrMergeMode, PrMergeRequest, PrPresentation, PrPublication, TaskId,
         TaskPrId,
     };
@@ -676,37 +662,24 @@ mod tests {
     }
 
     #[test]
-    fn run_start_and_finish_are_distinct_traceable_claims() {
-        let run = SkillRunEntry {
-            id: "invocation-1".to_string(),
-            trace_id: "trace-1".to_string(),
-            exec_id: "exec-1".to_string(),
-            parent_exec_id: None,
-            repo: "/repo".to_string(),
-            worktree: "/repo.task".to_string(),
-            wave: Some("live".to_string()),
-            project: Some("control".to_string()),
-            task: Some("W2-1".to_string()),
-            flow: Some("task_pursue".to_string()),
-            skill: "implement".to_string(),
-            status: "complete".to_string(),
+    fn run_start_and_finish_name_the_same_generic_run() {
+        let run = RunSnapshot {
+            id: "run_00000000000000000000000000000001".to_string(),
+            parent_run_id: None,
+            repo: Some("/repo".to_string()),
+            worktree: Some("/repo.task".to_string()),
+            subjects: vec![crate::run_record::SubjectAttribution::declared(
+                "task:W2-1".to_string(),
+            )],
+            skill: Some("implement".to_string()),
+            outcome: Some("completed".to_string()),
             started: 10,
             ended: Some(20),
-            turns: 1,
-            system_tokens: 0,
-            task_tokens: 0,
-            supplied_context_tokens: 0,
-            input_tokens: None,
-            output_tokens: None,
-            reasoning_tokens: None,
-            cache_read_tokens: None,
-            cache_write_tokens: None,
-            cost_usd: None,
-            duration_secs: Some(10.0),
-            provider: "codex".to_string(),
+            usage: crate::run_record::RunUsage::empty(),
+            evidence_gaps: 0,
+            harness: "codex".to_string(),
             model: None,
             surface: "cli".to_string(),
-            capture_status: "complete".to_string(),
         };
 
         let entries = run_entries(&run, &task_owner("W2-1", "control", "live"), 0);
@@ -717,14 +690,10 @@ mod tests {
         assert!(matches!(
             &entries[1].fact,
             WorkActivityFact::RunFinished {
-                invocation_id,
-                trace_id,
-                exec_id,
+                run_id,
                 status,
-            } if invocation_id == "invocation-1"
-                && trace_id == "trace-1"
-                && exec_id == "exec-1"
-                && status == "complete"
+            } if run_id == "run_00000000000000000000000000000001"
+                && status == "completed"
         ));
     }
 

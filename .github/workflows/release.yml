@@ -1,13 +1,19 @@
 name: Release build
 
+run-name: Release candidate ${{ inputs.tag }}
+
 on:
-  push:
-    tags:
-      - "v*"
   workflow_dispatch:
+    inputs:
+      tag:
+        description: Proposed release tag
+        required: true
+        type: string
 
 # GitHub is the heterogeneous build farm. Loopflow's release publisher runs on
 # the maintained cron host and owns every credentialed side effect.
 jobs:
   packages:
-    uses: ./.github/workflows/nightly-packages.yml
+    uses: ./.github/workflows/package-build.yml
+    with:
+      release_tag: ${{ inputs.tag }}

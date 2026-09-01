@@ -117,13 +117,29 @@ pub struct Cli {
     #[arg(long = "max-turns")]
     pub max_turns: Option<u32>,
 
-    /// Wave name for wave/ scoping
+    /// Select Wave Work, or qualify a selected Project or Task
     #[arg(short = 'w', long = "wave", short_alias = 'W')]
     pub wave: Option<String>,
 
-    /// Bind a direct named skill to existing task, project, or wave Work
-    #[arg(long = "as", value_name = "KIND:SELECTOR")]
+    /// Select Project Work, or qualify a selected Task
+    #[arg(long = "project", value_name = "SELECTOR")]
+    pub project: Option<String>,
+
+    /// Select Task Work
+    #[arg(long = "task", value_name = "ISSUE")]
+    pub task: Option<String>,
+
+    /// Select one Work for a direct Skill or inline prompt
+    #[arg(
+        long = "as",
+        value_name = "WORK",
+        conflicts_with_all = ["wave", "project", "task"]
+    )]
     pub as_work: Option<String>,
+
+    /// Keep a Work-bound internal launch in this exact checkout.
+    #[arg(long = "__cwd", value_name = "PATH", hide = true)]
+    pub bound_cwd: Option<PathBuf>,
 
     /// Exclude loopflow operating guidance
     #[arg(long = "no-loopflow")]
@@ -154,6 +170,21 @@ impl Cli {
     /// Get diff setting: Some(true) if --diff, Some(false) if --no-diff, None if neither.
     pub fn diff_setting(&self) -> Option<bool> {
         Self::toggle_setting(self.diff, self.no_diff)
+    }
+
+    /// The most specific Work selected for a direct skill Run.
+    pub fn work_subject_selector(&self) -> Option<String> {
+        self.as_work.clone().or_else(|| {
+            self.task
+                .as_ref()
+                .map(|task| format!("task:{task}"))
+                .or_else(|| {
+                    self.project
+                        .as_ref()
+                        .map(|project| format!("project:{project}"))
+                })
+                .or_else(|| self.wave.as_ref().map(|wave| format!("wave:{wave}")))
+        })
     }
 }
 
@@ -196,10 +227,18 @@ pub enum Commands {
         #[command(flatten)]
         screenshot: ScreenshotArgs,
     },
-    /// Request a durable Ask session from the parent or User
+    /// Internal provider callback that records one native interactive session.
+    #[command(name = "__provider-session", hide = true)]
+    ProviderSession,
+    /// Open a durable human session and wait for the human to complete it
     Ask {
         #[command(flatten)]
         ask: AskArgs,
+    },
+    /// Inspect and continue Sessions
+    Session {
+        #[command(subcommand)]
+        cmd: SessionCommand,
     },
     /// Internal installer transaction entry point.
     #[command(hide = true)]
@@ -357,11 +396,6 @@ pub enum Commands {
         #[command(subcommand)]
         cmd: TaskCommand,
     },
-    /// Inspect, attach, and hand back provider or opaque AgentInvocations
-    Invocation {
-        #[command(subcommand)]
-        cmd: InvocationCommand,
-    },
     /// Inspect and control stable Wave, Project, or Task Work
     Work {
         #[command(subcommand)]
@@ -383,20 +417,23 @@ pub enum Commands {
         #[arg(long, value_name = "DAYS")]
         days: Option<u32>,
     },
-    /// Show subscription state per account and token spend by repo/provider
+    /// Show direct provider-authored usage from Home-local Run records
     Usage {
-        /// Emit one additive row per provider-measured Turn as JSON
+        /// Emit Run usage evidence as JSON
         #[arg(long)]
         json: bool,
-        /// Spend window, in days
+        /// Run window, in days (zero means all time)
         #[arg(long, default_value_t = 30)]
         days: u32,
-        /// Poll every account now, even the freshly observed ones
-        #[arg(long, short = 'r')]
-        refresh: bool,
-        /// Skip polling entirely; show only stored observations
+        /// Limit to Runs attributed to one Wave
         #[arg(long)]
-        cached: bool,
+        wave: Option<String>,
+        /// Limit to Runs attributed to one Project
+        #[arg(long)]
+        project: Option<String>,
+        /// Limit to Runs attributed to one Task
+        #[arg(long)]
+        task: Option<String>,
     },
     /// Internal: render the repository maintainer scorecard for telemetry-daily
     #[command(name = "__telemetry-scorecard", hide = true)]
@@ -425,18 +462,12 @@ pub enum Commands {
         /// Emit the versioned activity snapshot as JSON
         #[arg(long)]
         json: bool,
-        /// Rank siblings by cumulative completed tokens or live rate
-        #[arg(long, value_enum, default_value_t)]
-        sort: commands::top::ActivitySort,
     },
     /// Refresh live Loopflow call trees on a terminal; print once when redirected
     Top {
         /// Emit one versioned activity snapshot as JSON
         #[arg(long)]
         json: bool,
-        /// Rank siblings by cumulative completed tokens or live rate
-        #[arg(long, value_enum, default_value = "rate")]
-        sort: commands::top::ActivitySort,
     },
     /// Reap registered orphan providers and remove dead process receipts
     Prune {
@@ -444,60 +475,6 @@ pub enum Commands {
         #[arg(long)]
         dry_run: bool,
         /// Emit the versioned prune report as JSON
-        #[arg(long)]
-        json: bool,
-    },
-    /// Inspect supplied agent context and its contributing assets
-    Context {
-        /// Window in days
-        #[arg(long, default_value_t = 30)]
-        days: u32,
-        /// Inclusive window start as a Unix timestamp (overrides --days)
-        #[arg(long)]
-        started_after: Option<i64>,
-        /// Exclusive window end as a Unix timestamp
-        #[arg(long)]
-        started_before: Option<i64>,
-        /// Filter by wave
-        #[arg(long)]
-        wave: Vec<String>,
-        /// Filter by attributed Linear Project slug
-        #[arg(long)]
-        project: Vec<String>,
-        /// Filter by attributed Linear Task identifier
-        #[arg(long)]
-        task: Vec<String>,
-        /// Filter by absolute main-repo path
-        #[arg(long)]
-        repo: Vec<String>,
-        /// Filter by flow
-        #[arg(long)]
-        flow: Vec<String>,
-        /// Filter by skill
-        #[arg(long)]
-        skill: Vec<String>,
-        /// Filter by provider
-        #[arg(long)]
-        provider: Vec<String>,
-        /// Filter by model
-        #[arg(long)]
-        model: Vec<String>,
-        /// Filter by invocation surface
-        #[arg(long)]
-        surface: Vec<String>,
-        /// Filter by invocation outcome
-        #[arg(long)]
-        outcome: Vec<String>,
-        /// Filter by capture state
-        #[arg(long)]
-        capture_state: Vec<String>,
-        /// Include only invocations with observed steering turns
-        #[arg(long)]
-        steered_only: bool,
-        /// Include only invocations containing a current file instruction revision
-        #[arg(long)]
-        current_revision_only: bool,
-        /// Emit the Context Lab snapshot as JSON
         #[arg(long)]
         json: bool,
     },
@@ -520,7 +497,7 @@ pub enum Commands {
         #[arg(long)]
         all: bool,
     },
-    /// Show one wave's Project/Task hierarchy, runs, attention, and live loop
+    /// Show one Wave's Project/Task hierarchy, Runs, and live loop
     /// state from the registry. Defaults to the ambient wave (`LF_WAVE_ID`).
     Status {
         /// Wave name (default: the ambient wave)
@@ -530,7 +507,7 @@ pub enum Commands {
         json: bool,
     },
     /// Show the current repository's roadmap: every open Task across the repo's
-    /// Waves, joined to live evidence and bucketed into Now / Needs attention /
+    /// Waves, joined to live evidence and bucketed into Now / Waiting /
     /// Available / Later. `--wave` scopes it; `--all` spans every repository on
     /// this machine. Local-only, deterministic.
     Roadmap {
@@ -567,6 +544,15 @@ pub enum Commands {
     },
     /// Show recent agent-backed skill runs with context and token evidence
     Runs {
+        /// Inspect one Run by full id or unambiguous displayed prefix
+        #[arg(conflicts_with_all = ["task", "project", "wave"])]
+        run: Option<String>,
+        /// Print the Run's append-only event stream verbatim
+        #[arg(long, requires = "run", conflicts_with_all = ["json", "resume"])]
+        events: bool,
+        /// Resume the Run's provider-native interactive session
+        #[arg(long, requires = "run", conflicts_with_all = ["events", "json"])]
+        resume: bool,
         /// Drill to one roadmap Task by its Linear issue identifier (e.g. W2-122)
         #[arg(long)]
         task: Option<String>,
@@ -579,37 +565,11 @@ pub enum Commands {
         /// Emit the run history as JSON
         #[arg(long)]
         json: bool,
-        #[command(subcommand)]
-        cmd: Option<RunsCommand>,
     },
-    /// Show recent lf process executions (all repos, local-only)
-    Execs {
-        /// Emit the process history as JSON
-        #[arg(long)]
-        json: bool,
-    },
-    /// Reconstruct one process tree from an exec or trace address
-    Trace {
-        /// Exec id from `lf execs` or trace id from Context Lab
-        exec_id: String,
-        /// Emit the process tree as JSON
-        #[arg(long)]
-        json: bool,
-        /// Include exact prompt and normalized conversation bodies for one address
-        #[arg(long, requires = "json", conflicts_with = "events")]
-        content: bool,
-        /// Render the normalized recorded conversation
-        #[arg(long, conflicts_with = "json")]
-        events: bool,
-        /// Stream stored event objects as JSONL
-        #[arg(long, requires = "events")]
-        jsonl: bool,
-        /// Select one AgentInvocation by id prefix
-        #[arg(long)]
-        invocation: Option<String>,
-        /// Select one turn by id prefix (with --content)
-        #[arg(long, requires = "content")]
-        turn: Option<String>,
+    /// Launch the exact provider request recorded by a prior Run as a child Run.
+    Replay {
+        /// Full Run id or an unambiguous displayed prefix
+        run: String,
     },
     /// Converse with a served mind's thread; --follow replays it and --steer
     /// reaches the live body.
@@ -720,170 +680,72 @@ pub enum Commands {
 
 #[derive(Args, Debug, Default)]
 pub struct AskArgs {
-    /// Route a new Ask to the User instead of the parent Work
-    #[arg(long)]
-    pub user: bool,
-
-    /// Queue a new Ask and return its id without waiting
-    #[arg(long)]
-    pub noblock: bool,
-
-    /// Emit a typed JSON receipt
-    #[arg(long)]
-    pub json: bool,
-
-    /// The intervention requested by this Ask
-    #[arg(trailing_var_arg = true, value_name = "REQUEST")]
-    pub request: Vec<String>,
-
-    #[command(subcommand)]
-    pub command: Option<AskCommand>,
+    /// What the human-facing session should work through
+    #[arg(trailing_var_arg = true, value_name = "QUESTION")]
+    pub question: Vec<String>,
 }
 
 #[derive(Subcommand, Debug)]
-pub enum AskCommand {
-    /// Join the current or named Ask until it settles
-    Wait {
-        ask_id: Option<crate::durable::AskId>,
-        #[arg(long)]
-        json: bool,
-    },
-    /// List parent or User attention from the durable ledger
+pub enum SessionCommand {
+    /// List Sessions
     List {
         #[arg(long)]
-        user: bool,
-        /// List unresolved Asks created by the ambient Work
-        #[arg(long, visible_alias = "mine", conflicts_with = "user")]
-        outgoing: bool,
-        #[arg(long)]
         json: bool,
-        /// Include Asks from every repository on this machine, not just the
-        /// current repository (worktrees collapse to their main checkout).
+        /// Include waiting steps from every repository on this machine
         #[arg(long)]
         all: bool,
     },
-    /// Claim or reopen an Ask and present its session in a sibling terminal
+    /// Open or resume one session in this terminal
     Open {
-        ask_id: crate::durable::AskId,
-        /// Prepare and return the exact Ask surface without presenting it
-        #[arg(long, requires = "json")]
-        prepare: bool,
+        id: String,
         #[arg(long)]
         json: bool,
+        /// Stop Loopflow-owned clients before resuming here
+        #[arg(long, conflicts_with = "try_open")]
+        replace: bool,
+        /// Ask the provider to resume even when another client is active
+        #[arg(long = "try", conflicts_with = "replace")]
+        try_open: bool,
     },
-    /// Confirm that a target presented the exact active Ask Invocation
-    Presented {
-        ask_id: crate::durable::AskId,
-        invocation_id: crate::durable::AgentInvocationId,
-        #[arg(long)]
-        json: bool,
-    },
-    /// Resolve one Ask from its active Invocation
-    Resolve {
-        ask_id: crate::durable::AskId,
-        #[arg(value_name = "SUMMARY")]
+    /// Complete an interactive or ad-hoc Ask session
+    Complete { id: String },
+    /// Mark the active session ready for human action
+    Ready {
+        #[arg(value_name = "SUMMARY", required = true, num_args = 1..)]
         summary: Vec<String>,
-        #[arg(long)]
-        json: bool,
     },
-    /// Decline one Ask from its active Invocation
-    Decline {
-        ask_id: crate::durable::AskId,
-        #[arg(value_name = "REASON")]
-        reason: Vec<String>,
-        #[arg(long)]
-        json: bool,
+    /// Approve a ready Task FlowStep and continue the Task
+    Approve {
+        id: String,
+        #[arg(value_name = "SUMMARY", required = true, num_args = 1..)]
+        summary: Vec<String>,
     },
-    /// Close one Ask's active Invocation without settling it
-    Release {
-        ask_id: crate::durable::AskId,
-        #[arg(value_name = "REASON")]
-        reason: Vec<String>,
-        #[arg(long)]
-        json: bool,
+    /// Iterate on a Task FlowStep with new direction
+    Iterate {
+        id: String,
+        #[arg(value_name = "DIRECTION", required = true, num_args = 1..)]
+        direction: Vec<String>,
     },
-    /// Transfer a parent Ask to the User without changing its identity
-    Escalate {
-        ask_id: crate::durable::AskId,
-        #[arg(long, required = true)]
-        user: bool,
-        #[arg(long)]
-        json: bool,
+    /// Run the exact human skill in its durable terminal
+    #[command(name = "serve-flow", hide = true)]
+    ServeFlow {
+        task_id: crate::work::task::TaskId,
+        flow: String,
+        node_id: String,
+        skill: String,
+        iteration: u32,
     },
-    /// Withdraw an Ask as its requester or the User
-    Cancel {
-        ask_id: crate::durable::AskId,
-        #[arg(value_name = "REASON")]
-        reason: Vec<String>,
-        #[arg(long)]
-        json: bool,
-    },
-    /// Run one Ask provider inside its detached session
-    #[command(hide = true)]
-    Serve {
-        ask_id: crate::durable::AskId,
-        #[arg(long)]
-        headless: bool,
-    },
-}
-
-#[derive(Subcommand, Debug)]
-pub enum RunsCommand {
-    /// Tombstone terminal captures whose conversation artifacts are gone, and
-    /// finalize orphaned `capturing` invocations. Dry-run by default; `--apply`
-    /// writes. This repairs capture lifecycle state and may remove unclaimed
-    /// artifacts; `lf doctor` observes recovery without requiring reconciliation.
-    Reconcile {
-        /// Apply the tombstone/finalize transitions (default: dry-run report)
-        #[arg(long)]
-        apply: bool,
-        /// Reconcile recent missing captures too (default: age-guard <48h as
-        /// candidates to investigate, not tombstone)
-        #[arg(long)]
-        all: bool,
-        /// Emit the reconciliation report as JSON
-        #[arg(long)]
-        json: bool,
-    },
-}
-
-#[derive(Subcommand, Debug)]
-pub enum InvocationCommand {
-    /// List AgentInvocations supervised by Runs
-    List {
-        /// Include only invocations whose supervising Run may still be live
-        #[arg(long)]
-        active: bool,
-        #[arg(long)]
-        json: bool,
-    },
-    /// Show one AgentInvocation and its generic attach route
-    Status {
-        invocation_id: String,
-        #[arg(long)]
-        json: bool,
-    },
-    /// Return the generic attach descriptor without changing Run state
-    Attach {
-        invocation_id: String,
-        #[arg(long)]
-        json: bool,
-    },
-    /// Record explicit terminal evidence for an opaque invocation boundary
-    Handback {
-        invocation_id: String,
-        #[arg(long, value_parser = ["succeeded", "failed", "interrupted", "unknown"])]
-        outcome: String,
-        #[arg(long)]
-        json: bool,
-    },
-    /// Exec the AgentInvocation's generic attach route
-    Present { invocation_id: String },
+    /// Run one ad-hoc human Ask in its durable terminal
+    #[command(name = "serve-ask", hide = true)]
+    ServeAsk { id: String },
+    /// Stop one exact native provider Run after its human boundary settles
+    #[command(name = "stop-run", hide = true)]
+    StopRun { run_id: crate::durable::RunId },
 }
 
 #[derive(Subcommand, Debug)]
 pub enum WorkCommand {
-    /// Show current Epoch, Basis, Run, and Wait projection
+    /// Show current Work state and placement
     Status {
         #[arg(value_parser = ["wave", "project", "task"])]
         kind: String,
@@ -891,7 +753,7 @@ pub enum WorkCommand {
         #[arg(long)]
         json: bool,
     },
-    /// Record Wave Work's Home. Refuses while the Work has a live Run.
+    /// Record Wave Work's Home
     Place {
         #[arg(value_parser = ["wave"])]
         kind: String,
@@ -928,7 +790,7 @@ pub enum WorkCommand {
         #[arg(long)]
         json: bool,
     },
-    /// Append authored direction with User or active Run provenance
+    /// Append authored direction with User or generic Run provenance
     Steer {
         #[arg(value_parser = ["wave", "project", "task"])]
         kind: String,
@@ -937,24 +799,7 @@ pub enum WorkCommand {
         #[arg(long)]
         json: bool,
     },
-    /// Retired: use `lf ask list`
-    #[command(hide = true)]
-    Asks {
-        #[arg(value_parser = ["wave", "project", "task"])]
-        kind: Option<String>,
-        id: Option<String>,
-        #[arg(long)]
-        json: bool,
-    },
-    /// Retired: use `lf ask open` and settle inside the Ask session
-    #[command(hide = true)]
-    Answer {
-        ask_id: crate::durable::AskId,
-        text: String,
-        #[arg(long)]
-        json: bool,
-    },
-    /// Interrupt the current Turn or opaque Invocation boundary
+    /// Refuse interruption until Work has an exact process owner
     Interrupt {
         #[arg(value_parser = ["wave", "project", "task"])]
         kind: String,
@@ -962,7 +807,7 @@ pub enum WorkCommand {
         #[arg(long)]
         json: bool,
     },
-    /// Abandon the current Epoch from an authenticated User surface
+    /// Abandon the Work
     Abandon {
         #[arg(value_parser = ["wave", "project", "task"])]
         kind: String,
@@ -1012,6 +857,15 @@ pub struct WaveTargetArgs {
 
 #[derive(Subcommand, Debug)]
 pub enum ProjectCommand {
+    /// Ensure tracked Project Work without starting a controller
+    Prepare {
+        /// Linear Project UUID or unique slug
+        project_id: String,
+        #[arg(long)]
+        directive: Option<String>,
+        #[arg(long)]
+        json: bool,
+    },
     /// Create a Linear Project first, then start its durable Project
     Start {
         title: String,
@@ -1093,6 +947,19 @@ pub enum ProjectCommand {
 
 #[derive(Subcommand, Debug)]
 pub enum TaskCommand {
+    /// Ensure tracked Task Work and its worktree without starting a controller
+    Prepare {
+        issue: String,
+        #[arg(long)]
+        name: Option<String>,
+        /// Fork this Task's worktree from another Task's active PR
+        #[arg(long = "stack-on", value_name = "PARENT_TASK")]
+        stack_on: Option<String>,
+        #[arg(long)]
+        directive: Option<String>,
+        #[arg(long)]
+        json: bool,
+    },
     /// Ensure its Project, then start or return the existing Linear task
     Run {
         issue: String,
@@ -1219,6 +1086,13 @@ pub enum TaskCommand {
         #[arg(long)]
         json: bool,
     },
+    /// Begin a new Task kickoff in a fresh provider session
+    Restart {
+        issue: String,
+        advice: Option<String>,
+        #[arg(long)]
+        json: bool,
+    },
     /// Explicitly recover an abandoned Task on the same worktree (User only)
     Recover {
         issue: String,
@@ -1246,23 +1120,10 @@ pub enum InstallCommand {
         #[arg(long)]
         switch: String,
     },
-    /// Continue one interrupted Home upgrade from its staged candidate.
-    #[command(hide = true)]
-    Recover {
-        /// The durable Home upgrade receipt to continue.
-        #[arg(long)]
-        upgrade: String,
-        /// Wait for the original coordinator before taking over.
-        #[arg(long, hide = true)]
-        parent_pid: Option<u32>,
-        /// Exact start time of the original coordinator process.
-        #[arg(long, hide = true)]
-        parent_started_at: Option<i64>,
-    },
     /// Preview whether this build may replace the global lf (read-only).
-    /// Reads the shared store's migration frontier and live-body count against
-    /// this binary's own registry; mutates nothing and exits non-zero on a
-    /// refusal so a caller can gate on it.
+    /// Reads the shared store's migration frontier and validates executable
+    /// planning references against this binary; mutates nothing and exits
+    /// non-zero on refusal so a caller can gate on it.
     #[command(hide = true)]
     Preflight {
         /// Emit the structured PromotionPreview as JSON.
@@ -1283,16 +1144,10 @@ pub enum InstallCommand {
         #[arg(long)]
         switch: String,
     },
-    /// Relaunch enabled child Work through the receipt-selected candidate.
-    #[command(hide = true)]
-    ReconcileSwitch {
-        #[arg(long)]
-        switch: String,
-    },
     /// Promote this build to the global CLI: content-address it into ~/.lf/bin
     /// and atomically repoint the target symlink, under the exclusive promotion
-    /// lock. Refuses — leaving every target unchanged — on incompatible or
-    /// live-body evidence.
+    /// lock. Refuses — leaving every target unchanged — on incompatible
+    /// schema or persisted executable evidence.
     #[command(hide = true)]
     Promote {
         /// Promote this exact unpublished local lf into a disposable installed Home.
@@ -2119,11 +1974,45 @@ mod tests {
     }
 
     #[test]
-    fn direct_work_selector_is_a_global_skill_flag() {
-        let before = Cli::try_parse_from(["lf", "--as", "task:LOO-123", "implement"])
-            .expect("parse selector before skill");
-        assert_eq!(before.as_work.as_deref(), Some("task:LOO-123"));
+    fn hierarchical_work_selectors_choose_the_most_specific_subject() {
+        let before = Cli::try_parse_from([
+            "lf",
+            "--wave",
+            "intelligence",
+            "--project",
+            "context",
+            "--task",
+            "LOO-123",
+            "implement",
+        ])
+        .expect("parse selectors before skill");
+        assert_eq!(before.wave.as_deref(), Some("intelligence"));
+        assert_eq!(before.project.as_deref(), Some("context"));
+        assert_eq!(before.task.as_deref(), Some("LOO-123"));
+        assert_eq!(
+            before.work_subject_selector().as_deref(),
+            Some("task:LOO-123")
+        );
         assert!(matches!(before.command, Some(Commands::External(_))));
+    }
+
+    #[test]
+    fn direct_work_selector_accepts_an_inline_question() {
+        let cli = Cli::try_parse_from([
+            "lf",
+            "--batch",
+            "--as",
+            "project:mac-surface-ux",
+            ":",
+            "Which KR matters?",
+        ])
+        .expect("parse bound inline prompt");
+
+        assert_eq!(cli.as_work.as_deref(), Some("project:mac-surface-ux"));
+        assert!(matches!(
+            cli.command,
+            Some(Commands::Inline { prompt }) if prompt == vec!["Which KR matters?"]
+        ));
     }
 
     #[test]
@@ -2183,6 +2072,24 @@ mod tests {
                 && project == "control-room"
                 && task == "W2-140"
         ));
+    }
+
+    #[test]
+    fn runs_resume_requires_one_run_and_excludes_record_output() {
+        let cli = Cli::try_parse_from(["lf", "runs", "abc123", "--resume"])
+            .expect("parse provider session resume");
+        assert!(matches!(
+            cli.command,
+            Some(Commands::Runs {
+                run: Some(run),
+                resume: true,
+                events: false,
+                json: false,
+                ..
+            }) if run == "abc123"
+        ));
+        assert!(Cli::try_parse_from(["lf", "runs", "--resume"]).is_err());
+        assert!(Cli::try_parse_from(["lf", "runs", "abc123", "--resume", "--events"]).is_err());
     }
 
     #[test]
@@ -2560,6 +2467,70 @@ mod tests {
     }
 
     #[test]
+    fn task_prepare_accepts_worktree_options_without_controller_flows() {
+        let cli = Cli::try_parse_from([
+            "lf",
+            "task",
+            "prepare",
+            "INF-123",
+            "--name",
+            "runtime-research",
+            "--stack-on",
+            "INF-122",
+            "--directive",
+            "collect both reports",
+            "--json",
+        ])
+        .expect("parse task prepare");
+        let Some(Commands::Task {
+            cmd:
+                TaskCommand::Prepare {
+                    issue,
+                    name,
+                    stack_on,
+                    directive,
+                    json,
+                },
+        }) = cli.command
+        else {
+            panic!("expected task prepare command");
+        };
+        assert_eq!(issue, "INF-123");
+        assert_eq!(name.as_deref(), Some("runtime-research"));
+        assert_eq!(stack_on.as_deref(), Some("INF-122"));
+        assert_eq!(directive.as_deref(), Some("collect both reports"));
+        assert!(json);
+    }
+
+    #[test]
+    fn project_prepare_accepts_existing_planning_identity() {
+        let cli = Cli::try_parse_from([
+            "lf",
+            "project",
+            "prepare",
+            "runtime-model",
+            "--directive",
+            "collect evidence",
+            "--json",
+        ])
+        .expect("parse project prepare");
+        let Some(Commands::Project {
+            cmd:
+                ProjectCommand::Prepare {
+                    project_id,
+                    directive,
+                    json,
+                },
+        }) = cli.command
+        else {
+            panic!("expected project prepare command");
+        };
+        assert_eq!(project_id, "runtime-model");
+        assert_eq!(directive.as_deref(), Some("collect evidence"));
+        assert!(json);
+    }
+
+    #[test]
     fn task_run_accepts_lifecycle_flow_overrides() {
         let cli = Cli::try_parse_from([
             "lf",
@@ -2630,87 +2601,6 @@ mod tests {
     }
 
     #[test]
-    fn context_accepts_repeatable_invocation_set_filters() {
-        let cli = Cli::try_parse_from([
-            "lf",
-            "context",
-            "--started-after",
-            "100",
-            "--started-before",
-            "200",
-            "--repo",
-            "/src/a",
-            "--repo",
-            "/src/b",
-            "--project",
-            "context",
-            "--task",
-            "W2-71",
-            "--outcome",
-            "failed",
-            "--capture-state",
-            "partial",
-            "--steered-only",
-            "--current-revision-only",
-            "--json",
-        ])
-        .expect("parse context query");
-        let Some(Commands::Context {
-            started_after,
-            started_before,
-            repo,
-            project,
-            task,
-            outcome,
-            capture_state,
-            steered_only,
-            current_revision_only,
-            json,
-            ..
-        }) = cli.command
-        else {
-            panic!("expected context command");
-        };
-
-        assert_eq!(started_after, Some(100));
-        assert_eq!(started_before, Some(200));
-        assert_eq!(repo, ["/src/a", "/src/b"]);
-        assert_eq!(project, ["context"]);
-        assert_eq!(task, ["W2-71"]);
-        assert_eq!(outcome, ["failed"]);
-        assert_eq!(capture_state, ["partial"]);
-        assert!(steered_only);
-        assert!(current_revision_only);
-        assert!(json);
-    }
-
-    #[test]
-    fn trace_content_requires_json_and_accepts_an_exact_address() {
-        let cli = Cli::try_parse_from([
-            "lf",
-            "trace",
-            "run-1",
-            "--json",
-            "--content",
-            "--invocation",
-            "invocation-1",
-            "--turn",
-            "turn-1",
-        ])
-        .expect("parse trace content");
-        assert!(matches!(
-            cli.command,
-            Some(Commands::Trace {
-                content: true,
-                invocation: Some(invocation),
-                turn: Some(turn),
-                ..
-            }) if invocation == "invocation-1" && turn == "turn-1"
-        ));
-        assert!(Cli::try_parse_from(["lf", "trace", "run-1", "--content"]).is_err());
-    }
-
-    #[test]
     fn task_completion_and_pr_dispositions_parse() {
         let complete = Cli::try_parse_from([
             "lf",
@@ -2758,23 +2648,11 @@ mod tests {
     #[test]
     fn top_is_a_first_class_machine_dashboard() {
         let cli = Cli::try_parse_from(["lf", "top"]).expect("parse top");
-        assert!(matches!(
-            cli.command,
-            Some(Commands::Top {
-                json: false,
-                sort: commands::top::ActivitySort::Rate,
-            })
-        ));
+        assert!(matches!(cli.command, Some(Commands::Top { json: false })));
 
-        let cli =
-            Cli::try_parse_from(["lf", "ps", "--json", "--sort", "tokens"]).expect("parse ps");
-        assert!(matches!(
-            cli.command,
-            Some(Commands::Ps {
-                json: true,
-                sort: commands::top::ActivitySort::Tokens,
-            })
-        ));
+        let cli = Cli::try_parse_from(["lf", "ps", "--json"]).expect("parse ps");
+        assert!(matches!(cli.command, Some(Commands::Ps { json: true })));
+        assert!(Cli::try_parse_from(["lf", "ps", "--sort", "tokens"]).is_err());
 
         let cli = Cli::try_parse_from(["lf", "prune", "--dry-run", "--json"])
             .expect("parse process prune");
@@ -2785,6 +2663,26 @@ mod tests {
                 json: true,
             })
         ));
+    }
+
+    #[test]
+    fn usage_exposes_the_direct_run_window_and_work_drill() {
+        let cli =
+            Cli::try_parse_from(["lf", "usage", "--days", "7", "--task", "LOO-265", "--json"])
+                .expect("parse direct usage");
+        assert!(matches!(
+            cli.command,
+            Some(Commands::Usage {
+                json: true,
+                days: 7,
+                wave: None,
+                project: None,
+                task: Some(task),
+            })
+                if task == "LOO-265"
+        ));
+        assert!(Cli::try_parse_from(["lf", "usage", "--refresh"]).is_err());
+        assert!(Cli::try_parse_from(["lf", "usage", "--cached"]).is_err());
     }
 
     #[test]
@@ -2987,6 +2885,29 @@ mod tests {
     }
 
     #[test]
+    fn task_restart_accepts_optional_advice() {
+        let cli = Cli::try_parse_from([
+            "lf",
+            "task",
+            "restart",
+            "LOO-267",
+            "replace the old runtime model",
+            "--json",
+        ])
+        .expect("parse Task restart");
+        assert!(matches!(
+            cli.command,
+            Some(Commands::Task {
+                cmd: TaskCommand::Restart {
+                    issue,
+                    advice: Some(advice),
+                    json: true,
+                }
+            }) if issue == "LOO-267" && advice == "replace the old runtime model"
+        ));
+    }
+
+    #[test]
     fn task_recover_accepts_an_optional_audited_reason() {
         let cli = Cli::try_parse_from([
             "lf",
@@ -3009,30 +2930,6 @@ mod tests {
             }) if issue == "PRD-9" && reason == "the abandoned work is still valid"
         ));
     }
-    #[test]
-    fn cli_parses_generic_invocation_contract() {
-        let cli = Cli::try_parse_from([
-            "lf",
-            "invocation",
-            "handback",
-            "invocation_1",
-            "--outcome",
-            "unknown",
-            "--json",
-        ])
-        .expect("parse Invocation handback");
-        assert!(matches!(
-            cli.command,
-            Some(Commands::Invocation {
-                cmd: InvocationCommand::Handback {
-                    invocation_id,
-                    outcome,
-                    json: true,
-                }
-            }) if invocation_id == "invocation_1" && outcome == "unknown"
-        ));
-    }
-
     #[test]
     fn cli_parses_stable_work_controls() {
         let cli = Cli::try_parse_from([
@@ -3057,29 +2954,6 @@ mod tests {
             }) if kind == "task" && id == "task_1" && message == "inspect the failure"
         ));
 
-        let asks = Cli::try_parse_from(["lf", "work", "asks", "project", "project_1"])
-            .expect("parse Work asks");
-        assert!(matches!(
-            asks.command,
-            Some(Commands::Work {
-                cmd: WorkCommand::Asks { kind: Some(kind), id: Some(id), json: false }
-            }) if kind == "project" && id == "project_1"
-        ));
-        let answer = Cli::try_parse_from([
-            "lf",
-            "work",
-            "answer",
-            "ask_00000000000000000000000000000001",
-            "keep the durable exchange",
-            "--json",
-        ])
-        .expect("parse Work answer");
-        assert!(matches!(
-            answer.command,
-            Some(Commands::Work {
-                cmd: WorkCommand::Answer { text, json: true, .. }
-            }) if text == "keep the durable exchange"
-        ));
         assert!(Cli::try_parse_from(["lf", "work", "continue", "task", "task_1"]).is_err());
         assert!(Cli::try_parse_from(["lf", "work", "escalate", "task", "task_1"]).is_err());
 
@@ -3127,147 +3001,81 @@ mod tests {
     }
 
     #[test]
-    fn cli_parses_ask_and_wait_as_shell_arguments() {
-        let ask = Cli::try_parse_from(["lf", "ask", "--user", "--noblock", "Connect Linear"])
-            .expect("parse Ask request");
+    fn cli_separates_ask_completion_from_flow_decisions() {
+        let ask = Cli::try_parse_from(["lf", "ask", "Review", "this", "branch"])
+            .expect("parse human Ask");
         assert!(matches!(
             ask.command,
-            Some(Commands::Ask { ask })
-                if ask.request == ["Connect Linear"]
-                    && ask.user
-                    && ask.noblock
-                    && ask.command.is_none()
+            Some(Commands::Ask { ask }) if ask.question == ["Review", "this", "branch"]
         ));
-        let wait =
-            Cli::try_parse_from(["lf", "ask", "wait", "ask_00000000000000000000000000000001"])
-                .expect("parse Ask wait");
+
+        let ready = Cli::try_parse_from(["lf", "session", "ready", "Ready for review"])
+            .expect("parse session readiness");
         assert!(matches!(
-            wait.command,
-            Some(Commands::Ask { ask })
-                if matches!(ask.command, Some(AskCommand::Wait { ask_id: Some(_), .. }))
+            ready.command,
+            Some(Commands::Session {
+                cmd: SessionCommand::Ready { summary }
+            }) if summary == ["Ready for review"]
         ));
-        let outgoing = Cli::try_parse_from(["lf", "ask", "list", "--outgoing", "--json"])
-            .expect("parse outgoing Ask list");
+
+        let approve = Cli::try_parse_from(["lf", "session", "approve", "task_flow", "Verified"])
+            .expect("parse explicit FlowStep decision");
         assert!(matches!(
-            outgoing.command,
-            Some(Commands::Ask { ask })
-                if matches!(
-                    ask.command,
-                    Some(AskCommand::List {
-                        outgoing: true,
-                        user: false,
-                        json: true,
-                        all: false
-                    })
-                )
+            approve.command,
+            Some(Commands::Session {
+                cmd: SessionCommand::Approve { id, summary }
+            }) if id == "task_flow" && summary == ["Verified"]
         ));
-        assert!(Cli::try_parse_from(["lf", "ask", "list", "--outgoing", "--user"]).is_err());
-        let prepare = Cli::try_parse_from([
+
+        let iterate = Cli::try_parse_from([
             "lf",
-            "ask",
-            "open",
-            "ask_00000000000000000000000000000001",
-            "--prepare",
-            "--json",
+            "session",
+            "iterate",
+            "task_flow",
+            "Needs another pass",
         ])
-        .expect("parse app presentation preparation");
+        .expect("parse explicit FlowStep iteration");
         assert!(matches!(
-            prepare.command,
-            Some(Commands::Ask { ask })
-                if matches!(
-                    ask.command,
-                    Some(AskCommand::Open {
-                        prepare: true,
-                        json: true,
-                        ..
-                    })
-                )
-        ));
-        assert!(Cli::try_parse_from([
-            "lf",
-            "ask",
-            "open",
-            "ask_00000000000000000000000000000001",
-            "--prepare",
-        ])
-        .is_err());
-        let presented = Cli::try_parse_from([
-            "lf",
-            "ask",
-            "presented",
-            "ask_00000000000000000000000000000001",
-            "invocation_00000000000000000000000000000001",
-            "--json",
-        ])
-        .expect("parse exact presentation confirmation");
-        assert!(matches!(
-            presented.command,
-            Some(Commands::Ask { ask })
-                if matches!(
-                    ask.command,
-                    Some(AskCommand::Presented { json: true, .. })
-                )
+            iterate.command,
+            Some(Commands::Session {
+                cmd: SessionCommand::Iterate { id, direction }
+            }) if id == "task_flow" && direction == ["Needs another pass"]
         ));
 
         for args in [
-            vec!["lf", "ask", "list", "--user", "--json"],
-            vec![
-                "lf",
-                "ask",
-                "open",
-                "ask_00000000000000000000000000000001",
-                "--json",
-            ],
-            vec![
-                "lf",
-                "ask",
-                "resolve",
-                "ask_00000000000000000000000000000001",
-                "--json",
-                "verified",
-            ],
-            vec![
-                "lf",
-                "ask",
-                "decline",
-                "ask_00000000000000000000000000000001",
-                "--json",
-                "unsafe",
-            ],
-            vec![
-                "lf",
-                "ask",
-                "release",
-                "ask_00000000000000000000000000000001",
-                "--json",
-                "unfinished",
-            ],
-            vec![
-                "lf",
-                "ask",
-                "escalate",
-                "ask_00000000000000000000000000000001",
-                "--user",
-                "--json",
-            ],
-            vec![
-                "lf",
-                "ask",
-                "cancel",
-                "ask_00000000000000000000000000000001",
-                "--json",
-            ],
+            vec!["lf", "session", "ready"],
+            vec!["lf", "session", "approve", "task_flow"],
+            vec!["lf", "session", "iterate", "task_flow"],
         ] {
-            Cli::try_parse_from(args).expect("parse Ask command");
+            assert!(Cli::try_parse_from(args).is_err());
         }
-        for args in [
-            ["lf", "ask", "resolve", "verified"],
-            ["lf", "ask", "decline", "unsafe"],
-            ["lf", "ask", "release", "unfinished"],
-            ["lf", "ask", "escalate", "--user"],
-        ] {
-            Cli::try_parse_from(args).expect_err("Ask mutations require ASK_ID");
-        }
+
+        let open = Cli::try_parse_from(["lf", "session", "open", "run_123", "--replace"])
+            .expect("parse replacement open");
+        assert!(matches!(
+            open.command,
+            Some(Commands::Session {
+                cmd: SessionCommand::Open {
+                    id,
+                    replace: true,
+                    try_open: false,
+                    json: false,
+                }
+            }) if id == "run_123"
+        ));
+        assert!(
+            Cli::try_parse_from(["lf", "session", "open", "run_123", "--replace", "--try",])
+                .is_err()
+        );
+
+        let complete = Cli::try_parse_from(["lf", "session", "complete", "run_123"])
+            .expect("parse interactive completion");
+        assert!(matches!(
+            complete.command,
+            Some(Commands::Session {
+                cmd: SessionCommand::Complete { id }
+            }) if id == "run_123"
+        ));
     }
 
     #[test]

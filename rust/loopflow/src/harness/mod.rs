@@ -21,7 +21,7 @@ use async_trait::async_trait;
 use tokio::sync::mpsc;
 
 use crate::chat::types::ConversationEvent;
-use crate::engine::agent::{AgentConfig, AgentRunContext};
+use crate::engine::agent::AgentConfig;
 
 pub(crate) fn configure_vendor_std_env(command: &mut std::process::Command) -> Result<()> {
     let (control_bin, control_home, control_db) = vendor_control_context()?;
@@ -41,21 +41,13 @@ pub(crate) fn configure_vendor_tokio_env(command: &mut tokio::process::Command) 
     Ok(())
 }
 
-pub(crate) fn configure_agent_run_context(
-    command: &mut tokio::process::Command,
-    run_context: AgentRunContext,
-) {
-    if run_context != AgentRunContext::Detached {
-        return;
+pub(crate) fn configure_agent_env(command: &mut tokio::process::Command, config: &AgentConfig) {
+    for name in crate::engine::agent::EXECUTION_IDENTITY_ENV {
+        command.env_remove(name);
     }
     command
-        .env_remove(crate::durable::RUN_ID_ENV)
-        .env_remove(crate::durable::AGENT_INVOCATION_ENV);
-}
-
-pub(crate) fn configure_agent_env(command: &mut tokio::process::Command, config: &AgentConfig) {
-    command
         .envs(&config.env)
+        .env_remove(crate::ops::git_operation::LEGACY_WORKTREE_WRITER_ID_ENV)
         .env_remove("LOOPFLOW_DIRECTIVE_FILE");
     if let Some(path) = &config.directive_relay {
         command.env("LOOPFLOW_DIRECTIVE_FILE", path);
@@ -94,8 +86,8 @@ mod environment_tests {
     use std::ffi::OsString;
     use std::path::Path;
 
-    use super::{configure_agent_run_context, set_vendor_std_env};
-    use crate::engine::agent::AgentRunContext;
+    use super::{configure_agent_env, set_vendor_std_env};
+    use crate::engine::agent::AgentConfig;
 
     #[test]
     fn vendor_receives_control_context_but_not_ordinary_store_context() {
@@ -135,14 +127,23 @@ mod environment_tests {
     }
 
     #[test]
-    fn detached_agent_drops_run_identity() {
+    fn agent_receives_only_fresh_generic_run_identity() {
         let mut command = tokio::process::Command::new("vendor");
         command
-            .env(crate::durable::RUN_CONTEXT_ENV, "agent")
             .env(crate::durable::RUN_ID_ENV, "run_stale")
-            .env(crate::durable::AGENT_INVOCATION_ENV, "invocation_core");
+            .env(crate::run_record::RUN_DIR_ENV, "/stale/run")
+            .env(crate::run_record::PARENT_RUN_ID_ENV, "run_stale_parent");
+        let mut config = crate::engine::agent::AgentConfig::default();
+        config.env.insert(
+            crate::durable::RUN_ID_ENV.to_string(),
+            "run_fresh".to_string(),
+        );
+        config.env.insert(
+            crate::run_record::RUN_DIR_ENV.to_string(),
+            "/fresh/run".to_string(),
+        );
 
-        configure_agent_run_context(&mut command, AgentRunContext::Detached);
+        configure_agent_env(&mut command, &config);
 
         let environment = command
             .as_std()
@@ -150,11 +151,34 @@ mod environment_tests {
             .map(|(key, value)| (key.to_string_lossy().to_string(), value.map(OsString::from)))
             .collect::<std::collections::HashMap<_, _>>();
         assert_eq!(
-            environment[crate::durable::RUN_CONTEXT_ENV],
-            Some(OsString::from("agent"))
+            environment[crate::durable::RUN_ID_ENV],
+            Some(OsString::from("run_fresh"))
         );
-        assert_eq!(environment[crate::durable::RUN_ID_ENV], None);
-        assert_eq!(environment[crate::durable::AGENT_INVOCATION_ENV], None);
+        assert_eq!(
+            environment[crate::run_record::RUN_DIR_ENV],
+            Some(OsString::from("/fresh/run"))
+        );
+        assert_eq!(environment[crate::run_record::PARENT_RUN_ID_ENV], None);
+    }
+
+    #[test]
+    fn provider_drops_legacy_worktree_writer_authority() {
+        let mut command = tokio::process::Command::new("vendor");
+        command.env("LF_WORKTREE_WRITER_ID", "writer_stale");
+        let mut config = AgentConfig::default();
+        config.env.insert(
+            "LF_WORKTREE_WRITER_ID".to_string(),
+            "writer_explicit".to_string(),
+        );
+
+        configure_agent_env(&mut command, &config);
+
+        let environment = command
+            .as_std()
+            .get_envs()
+            .map(|(key, value)| (key.to_string_lossy().to_string(), value.map(OsString::from)))
+            .collect::<std::collections::HashMap<_, _>>();
+        assert_eq!(environment["LF_WORKTREE_WRITER_ID"], None);
     }
 }
 
@@ -179,21 +203,6 @@ pub fn is_terminal_harness_error(code: &str) -> bool {
     matches!(code, "codex_disconnected" | "opencode_disconnected")
 }
 
-/// A failure whose root cause is a disconnected or truncated stream — the class
-/// that should route to a backup provider rather than blindly retrying the same
-/// one. Covers both the harness's own event-stream drop (`opencode_disconnected`,
-/// session-terminal) and the upstream truncation surfaces (`opencode_hollow_body`,
-/// `opencode_decode_gap`, turn-terminal). The runner records the code from the
-/// trailing `Error` event; the supervisor reads it to decide retry vs. handoff.
-pub(crate) fn is_disconnect_class_failure(code: &str) -> bool {
-    matches!(
-        code,
-        opencode::OPENCODE_DISCONNECTED_CODE
-            | opencode_mapping::HOLLOW_BODY_CODE
-            | opencode_mapping::DECODE_GAP_CODE
-    )
-}
-
 /// Drain events trailing a `TurnCompleted { Failed }` to extract an actionable
 /// error code. The opencode mapping emits usage before completion, then an
 /// `Error { code }` for hollow-body, decode-gap, and disconnect failures. The
@@ -215,62 +224,6 @@ pub(crate) fn drain_turn_failure_reason(
             fallback.to_string()
         }
         Err(_) => fallback.to_string(),
-    }
-}
-
-/// What the runner should do after a body failure, based on whether it's a
-/// disconnect-class failure and whether a backup agent is available.
-#[derive(Debug, Clone, PartialEq, Eq)]
-pub(crate) enum RecoveryDecision {
-    /// Not a disconnect-class failure — normal failure handling.
-    Normal,
-    /// Hand the next generation to the backup agent. The caller finishes the
-    /// current process, calls `handoff_{task,project}_body`, and returns Ok so
-    /// the supervisor relaunches with the new agent.
-    HandoffToBackup { agent: String, provider: String },
-    /// The turn was replay-safe (no durable side effects) — allow the
-    /// supervisor to respawn the same agent for one bounded retry.
-    AllowRetry,
-    /// Not replay-safe and no backup configured — stop with a non-convergence
-    /// record. Never silently re-run a side-effecting body.
-    Stop,
-}
-
-/// Classify a body failure and decide the recovery path.
-///
-/// `failure_reason` is the string from `drain_turn_failure_reason` (format:
-/// `"code: message"`). `backup_agent` is the wave's configured backup from
-/// GOAL.md frontmatter. `turn_had_durable_side_effect` is true if the failed
-/// turn completed a Command or File tool item (making a same-agent retry
-/// unsafe — the side effect would double-apply).
-pub(crate) fn classify_disconnect_recovery(
-    failure_reason: &str,
-    current_agent: &str,
-    turn_had_durable_side_effect: bool,
-    backup_agent: Option<&str>,
-) -> RecoveryDecision {
-    let code = failure_reason.split(':').next().unwrap_or("").trim();
-
-    if !is_disconnect_class_failure(code) {
-        return RecoveryDecision::Normal;
-    }
-
-    if let Some(backup) = backup_agent {
-        let backup = backup.trim();
-        if !backup.is_empty() && current_agent != backup {
-            let provider = backup.split_once(':').map(|(p, _)| p).unwrap_or(backup);
-            let provider = canonical_harness(provider).unwrap_or(provider);
-            return RecoveryDecision::HandoffToBackup {
-                agent: backup.to_string(),
-                provider: provider.to_string(),
-            };
-        }
-    }
-
-    if !turn_had_durable_side_effect {
-        RecoveryDecision::AllowRetry
-    } else {
-        RecoveryDecision::Stop
     }
 }
 
@@ -463,16 +416,6 @@ mod tests {
     }
 
     #[test]
-    fn disconnect_class_failure_covers_all_three_opencode_codes() {
-        assert!(is_disconnect_class_failure("opencode_disconnected"));
-        assert!(is_disconnect_class_failure("opencode_hollow_body"));
-        assert!(is_disconnect_class_failure("opencode_decode_gap"));
-        // A generic opencode error is not a disconnect-class failure.
-        assert!(!is_disconnect_class_failure("opencode_error"));
-        assert!(!is_disconnect_class_failure("codex_disconnected"));
-    }
-
-    #[test]
     fn hollow_and_decode_gap_are_turn_terminal_not_session_terminal() {
         // The hollow-body and decode-gap codes fail the turn, not the session:
         // the harness process may still be alive (the upstream stream
@@ -481,82 +424,6 @@ mod tests {
         // handoff that reuses the opencode server.
         assert!(!is_terminal_harness_error("opencode_hollow_body"));
         assert!(!is_terminal_harness_error("opencode_decode_gap"));
-    }
-
-    #[test]
-    fn recovery_classifier_routes_to_backup_when_configured() {
-        let decision = classify_disconnect_recovery(
-            "opencode_disconnected: stream died",
-            "opencode:glm-5.2",
-            false,
-            Some("claude:opus"),
-        );
-        assert_eq!(
-            decision,
-            RecoveryDecision::HandoffToBackup {
-                agent: "claude:opus".to_string(),
-                provider: "claude".to_string(),
-            }
-        );
-    }
-
-    #[test]
-    fn recovery_classifier_routes_to_backup_even_with_durable_side_effect() {
-        // A durable side effect makes retry unsafe, but the backup is still the
-        // preferred path — it re-reads current state rather than replaying.
-        let decision = classify_disconnect_recovery(
-            "opencode_hollow_body: hollow turn",
-            "opencode:glm-5.2",
-            true,
-            Some("claude:opus"),
-        );
-        assert!(matches!(decision, RecoveryDecision::HandoffToBackup { .. }));
-    }
-
-    #[test]
-    fn recovery_classifier_allows_retry_when_replay_safe_and_no_backup() {
-        let decision = classify_disconnect_recovery(
-            "opencode_disconnected: stream died",
-            "opencode:glm-5.2",
-            false,
-            None,
-        );
-        assert_eq!(decision, RecoveryDecision::AllowRetry);
-    }
-
-    #[test]
-    fn recovery_classifier_stops_when_not_replay_safe_and_no_backup() {
-        let decision = classify_disconnect_recovery(
-            "opencode_hollow_body: hollow turn",
-            "opencode:glm-5.2",
-            true,
-            None,
-        );
-        assert_eq!(decision, RecoveryDecision::Stop);
-    }
-
-    #[test]
-    fn recovery_classifier_skips_backup_already_in_use() {
-        // If the session is already running the backup agent, don't hand off
-        // again (prevents ping-pong). Fall through to replay-safety check.
-        let decision = classify_disconnect_recovery(
-            "opencode_disconnected: stream died",
-            "claude:opus",
-            false,
-            Some("claude:opus"),
-        );
-        assert_eq!(decision, RecoveryDecision::AllowRetry);
-    }
-
-    #[test]
-    fn recovery_classifier_returns_normal_for_non_disconnect_failures() {
-        let decision = classify_disconnect_recovery(
-            "provider turn failed",
-            "opencode:glm-5.2",
-            false,
-            Some("claude:opus"),
-        );
-        assert_eq!(decision, RecoveryDecision::Normal);
     }
 
     #[tokio::test]

@@ -5,334 +5,288 @@ title: Architecture
 
 # Architecture
 
-Start here. Each row names one Loopflow concept, the source allowed to decide
-it, the structure that represents it, where it persists, the process holding
-its pen, and the public door callers use. Later sections explain the sequences;
-they do not introduce another ownership model.
+Loopflow turns one reusable instruction into one observed model-provider run.
+Everything else composes that path, gives it durable purpose, delivers its
+changes, places it on a machine, or projects what happened.
 
-```text
-User intent
-├── Skill ── Flow
-└── Work: Wave ── Project ── Task
-    ├── Steer
-    ├── Wait
-    └── Epoch / Basis
-        ├── Ask / Result
-        │   └── AgentInvocation
-        └── Run / Containment
-            └── AgentInvocation
-                └── Turn
-```
+This guide is for developers changing Loopflow. It starts with the smallest
+complete path, then opens into the six areas that own the system. Command
+syntax lives in the [`lf` reference](lf.md); the exhaustive checked inventory
+lives in [Architecture Reference](architecture-reference.md).
 
-## The map
-
-<!-- architecture-map:start -->
-| Concept | Truth and authority | Data structure | Persistence | Process owner | Public surface | External edge |
-| --- | --- | --- | --- | --- | --- | --- |
-| **User** — the human or external harness perspective | User-attributed actions author root input and decide effects that require human intervention. User is actor provenance, not a control credential. | [`Author`](../rust/loopflow/src/durable.rs) | No User row; authored effects persist on the concept they change. | `lf` | `lf :`, `lf desktop` | `exec:open`, `exec:osascript`, `exec:pbpaste`, `exec:id` |
-| **Skill** — one reusable prompt with assembled context | Repository/builtin Skill Markdown is authoritative; discovery selects one source. | [`Skill`](../rust/loopflow/src/engine/flow.rs), [`SkillSource`](../rust/loopflow/src/lf/discovery.rs) | `.lf/skills/`, builtin Skill files, installed vendor Skill directories | `lf-prompt` | `lf skill`, `lf sync-skills`, `lf list` (Skill/Flow catalog) | `exec:python3` |
-| **Flow** — an ordered composition of Skills | Repository/builtin Flow YAML and the current playhead decide the next step. | [`Flow`](../rust/loopflow/src/engine/flow.rs), [`FlowPosition`](../rust/loopflow/src/durable.rs) | `.lf/flows/` | `lf __flow-step` | `lf flow` | — |
-| **Wave** — durable operating context with goal, memory, cadence, chat, and project selection | The Wave UUID is durable identity; canonical repository plus normalized slug is its mutable human locator. `wave/<name>/GOAL.md` and `MEMORY.md` own repository intent; the Linear Initiative owns shared planning membership. | [`Wave`](../rust/loopflow/src/wave/types.rs), [`WaveLocator`](../rust/loopflow/src/wave/types.rs), [`CanonicalRepo`](../rust/loopflow/src/repository.rs), [`WaveConfig`](../rust/loopflow/src/engine/wave_config.rs) | `waves`; `wave/<name>/`; `.lf/journal/waves/<name>/journal.jsonl`; an in-flight relocation receipt under `.lf/tmp/wave-relocations/` | `lf __resident` behind the Wave listener; listener and relocation share the repository locator lock | `lf wave`, `lf start`, `lf stop`, `lf pause`, `lf resume`, `lf chat`, `lf ls`, `lf status`, `lf roadmap`, `lf cron`, `lf work relocate wave`; `wave GET /health`, `wave GET /conversation`, `wave GET /events`, `wave GET /playhead`, `wave POST /messages`, `wave POST /observations`, `wave POST /stop`, `wave POST /resident/attach`, `wave POST /resident/deltas`, `wave GET /resident/context` | Discord when configured |
-| **Project** — one measured bet inside exactly one Wave | The Linear Project definition and KRs are planning truth; the Project Work row owns pursuit lifecycle only. | [`Project`](../rust/loopflow/src/project/mod.rs), [`PmProject`](../rust/loopflow/src/pm/mod.rs) | `projects`, `project_events`, `observation_outbox`; Linear Project content | Project runner inside its Run | `lf project` | Linear |
-| **Live metric** — one reviewed measurement contract owned by exactly one Project, plus revision-bound current evidence | `wave/<name>/metrics/*.md` owns meaning and Project ownership; an accepted instrument observation owns its source-time fact; [`MetricPortfolioDto`](../rust/loopflow/src/wave/metrics.rs) is the sole derived reading shared across surfaces. Metrics inform KRs but never complete them. | [`MetricContract`](../rust/loopflow/src/wave/metrics.rs), [`MetricObservation`](../rust/loopflow/src/wave/metrics.rs), [`MetricPortfolioDto`](../rust/loopflow/src/wave/metrics.rs) | `wave/<name>/metrics/`, `metric_instruments`, `metric_observations` | Metric instruments write observations; foreground and resident Rust readers derive bounded portfolios. | Status/roadmap JSON, Wave and Project prompts, the shared Swift DTO, and Mac Wave detail expose the same `metric_portfolio`. | — |
-| **Task** — concrete work inside exactly one Project | The Linear Issue owns directive/status; Task Work owns execution lifecycle, one delivery worktree, and its serial PR chain. Git owns commits/branches; GitHub owns PR/check/merge truth. | [`Task`](../rust/loopflow/src/task/mod.rs), [`TaskPr`](../rust/loopflow/src/task/mod.rs) | `tasks`, `task_events`, `task_prs`, `task_pr_repair_incidents`, `performance_evidence_authority`, `task_linear_observations`, `task_linear_ingested_comments`; Linear Issue; Git worktree | Task runner inside its Run; foreground mechanical operations record delivery evidence. | `lf task`, `lf pr`, `lf wt`, `lf rebase`, `lf commit` | Linear |
-| **PR landing** — one watched attempt to merge an exact PR head | GitHub is authoritative for the PR head, required checks, and merge. One landing generation admits one supervisor and one repair per failed-head identity. | [`PrLanding`](../rust/loopflow/src/pr_landing.rs), [`CiIncident`](../rust/loopflow/src/task/mod.rs) | `pr_landings`, `ci_incidents` | Healthy Home daemon when it claims the generation; otherwise the invoking `lf pr land` process | `lf pr arm`, `lf pr land`, `lf ci`; `lfd POST /landings/claim` | `provider:github`, model provider for `ci-fix`, `exec:git`, `exec:gh` |
-| **PM projection** — locally readable current planning snapshot | Linear remains authoritative; the Wave UUID keys the projection so locator changes preserve it. Sync atomically replaces the projection and reads never author through it. | [`PmSnapshotRow`](../rust/loopflow/src/store/mod.rs), [`PmWave`](../rust/loopflow/src/pm/mod.rs) | `pm_snapshots` | Foreground PM sync or Home webhook reconciliation | `lf pm` | `provider:linear` |
-| **Epoch / Basis** — one attempt at Work truth and its authored-input revision | The Work controller opens/settles Epochs; only committed Steers advance Basis. Terminal Work outranks stale Run observations. | [`Epoch`](../rust/loopflow/src/durable.rs), [`Basis`](../rust/loopflow/src/durable.rs), [`DoneProposal`](../rust/loopflow/src/durable.rs) | `epochs`, `epoch_revisions`, `work_truth`, `work_flow_positions`, `done_proposals` | Current Work controller; active Run proposes completion against an exact Basis | `lf work`, `lf activity` | — |
-| **Steer** — durable authored correction to one Work | User or a current Run writes it; incorporation is proven at a later successful Basis boundary. Live send is latency only. | [`Steer`](../rust/loopflow/src/durable.rs), [`Send`](../rust/loopflow/src/durable.rs) | `steers`, `sends`, `tool_responses` | Store transaction, then best-effort provider delivery | Work-specific `steer` commands and `lf work steer` | Model provider when delivery is live |
-| **Ask** — one durable blocking request, typed result, and replaceable Ask Invocations | The target selects answering perspective; the active AgentInvocation id fences the first terminal result. The Ask owns queue state and its active Invocation reference; AgentInvocation owns presentation, provider/process state, and history. | [`Ask`](../rust/loopflow/src/durable.rs), [`AskResult`](../rust/loopflow/src/durable.rs), [`AgentInvocation`](../rust/loopflow/src/durable.rs) | `ask_exchanges`, `ask_linear_comment_outbox` | The asking command blocks without consuming turns; Ask Invocations claim and settle it; Linear comments publish later. | `lf ask` | Linear comments for Task exchanges |
-| **Wait** — durable reason Work is not Ready | The Work controller records the unresolved input/time/event/child/capability/effect condition. | [`Wait`](../rust/loopflow/src/durable.rs), [`WaitOn`](../rust/loopflow/src/durable.rs) | `waits` | Home scheduler resolves it and may reserve the next Run | Project/Task wait and status surfaces | — |
-| **Home / Placement / Runtime generation** — stable execution authority, the Work-to-Home decision, and the one installed runtime generation | `HomeId` is identity; its SSH route is mutable evidence. Placement changes only while no Run is live. The owning Home records fresh tri-state Run liveness. A published candidate owns one crash-recoverable upgrade receipt and advances the generation only after old containment drains. | [`Home`](../rust/loopflow/src/durable.rs), [`Placement`](../rust/loopflow/src/durable.rs), [`RunLivenessEvidence`](../rust/loopflow/src/durable.rs), [`HomeUpgradeReceipt`](../rust/loopflow/src/lf/commands/install.rs) | `homes`, `work_placements`, `run_liveness`, `home_runtime_generations`, `home_upgrades`, `home_upgrade_work`; Home-local SQLite. `~/.lf/upgrades/*.json` is only the previous-schema compatibility/recovery bridge and is removed after durable settlement. | `lfd` owns eligible Wave listeners and Run liveness reconciliation on one Home; hidden `lf install` transport lets the staged candidate own an upgrade transaction | `lf home`, `lf ssh`; `lfd GET /health`, `lfd GET /status`, `lfd POST /waves/start`, `lfd POST /waves/stop`, `lfd POST /waves/reconcile`, `lfd POST /linear/webhook`, `lfd POST /github/webhook` | `exec:ssh`, `exec:launchctl`, `exec:systemctl`, `exec:/bin/ps`, `exec:/usr/bin/open`, `exec:/usr/bin/osascript` |
-| **Run / Containment** — one scheduler claim and physical execution boundary for an Epoch | The Run id names the current execution generation. Store transitions reject stale or ended ids; containment, never invocation order, is the interrupt/recovery target. | [`Run`](../rust/loopflow/src/durable.rs), [`Containment`](../rust/loopflow/src/durable.rs), [`RunContext`](../rust/loopflow/src/durable.rs) | `runs` | `lf __work` for Project/Task bodies; tmux or one process group contains the Run | Project/Task lifecycle surfaces | `exec:lf`, `exec:tmux`, `exec:kill`, `exec:lsof`, `exec:ps`, `exec:sh` |
-| **Browser capture** — one isolated, bounded screenshot transaction | The requested source, viewport, and output name the transaction; only a validated PNG replaces the output. The standalone shell identity and fresh process group keep capture separate from the user's browser and bound to its owner. | [`ScreenshotArgs`](../rust/loopflow/src/lf/mod.rs), [`ProcessGroupGuard`](../rust/loopflow/src/engine/process.rs) | Output PNG only; no control-store state | `lf __screenshot-supervisor` owns one `chrome-headless-shell` process group and observes the public command through a control pipe | `lf screenshot` | `exec:chrome-headless-shell` |
-| **AgentInvocation / Turn** — one replaceable provider conversation and one measured model boundary | The harness reports provider identity and boundaries; supervising Run is provenance, not authority. | [`AgentInvocation`](../rust/loopflow/src/durable.rs), [`Turn`](../rust/loopflow/src/durable.rs), [`InvocationRoute`](../rust/loopflow/src/durable.rs) | `agent_invocations`, `agent_turns` | Provider harness process supervised by a Run or explicit User launch | `lf invocation` | `provider:claude`, `provider:codex`, `provider:opencodezen`; `exec:claude`, `exec:codex`, `exec:opencode` |
-| **Trace / Context / Usage** — append-only evidence of what processes and providers did | Provider request receipts accumulate into one Turn checkpoint stream; Rust derives generation, input/cache, cost, and context projections without another counter. Trace assets preserve provenance without becoming Work truth. | [`TurnUsage`](../rust/loopflow/src/chat/types.rs), [`TurnUsageSample`](../rust/loopflow/src/store/mod.rs), [`UsageSnapshot`](../rust/loopflow/src/usage.rs), [`ContextAsset`](../rust/loopflow/src/trace.rs) | `turn_usage_samples`, `run_events`, `context_assets`, `context_decisions`, `blob_tokens` | Each Loopflow/harness process records its own evidence. The repository `telemetry-daily` Flow reads it into the maintainer scorecard and publishes pre-aggregated Project metric observations through the typed Rust writer. | `lf tokens`, `lf usage`, `lf ps`, `lf top`, `lf prune`, `lf context`, `lf doctor`, `lf runs`, `lf execs`, `lf trace` | `exec:which` |
-| **Provider account / route** — credential authority and ordered provider selection on one Home | Provider token/account rows and Access Profiles own routing; credentials stay in provider homes, encrypted storage, Doppler, or forwarded foreground leases. | [`Provider`](../rust/loopflow/src/provider_auth/mod.rs), [`AccessProfile`](../rust/loopflow/src/profile.rs), [`ProviderRoute`](../rust/loopflow/src/profile.rs), [`ProviderAccount`](../rust/loopflow/src/store/mod.rs) | `access_profiles`, `account_access_profiles`, `provider_accounts`, `provider_account_limits`, `provider_routes`, `provider_session_accounts`, `provider_tokens`, `provider_deliveries` | The foreground auth command owns provider login process groups and passive browser handoff; durable processes use credentials installed on their Home | `lf auth`, `lf profile`, `lf route` | `provider:doppler`, `exec:doppler`, `exec:security`, `exec:secret-tool` |
-| **Schema frontier** — ordered definition of durable control storage | Released migration bytes are immutable authority; drafts join only through deterministic release materialization. | [`Migration`](../rust/loopflow/src/store/migrations.rs), [`MigrationId`](../rust/loopflow/src/store/migrations.rs) | `schema_migrations`; canonical and draft migration files | Store open validates/applies; release cut publishes | `scripts/install.py refresh`, `lf release` | — |
-<!-- architecture-map:end -->
-
-The public API column covers top-level command families, not every subcommand or
-Rust function. [`lf` reference](lf.md) owns argument-level detail. DTOs emitted
-by `--json` are required-field projections; Rust/Swift fixture tests own their
-wire parity.
-
-## Execution generations
-
-One non-ended Run owns an Epoch's execution generation and physical
-containment. `LF_RUN_ID` names that public generation; store transitions verify
-that it is still current before accepting Run-authored writes.
-
-A Reserved Run has no containment. Active and Stopping Runs have one complete
-tmux or process-group identity. An Ended Run retains any containment it
-acquired. Interrupt and recovery target that containment directly.
-
-An AgentInvocation records one provider conversation: provider, model, account,
-surface, resume token, timestamps, and Turns. Its optional supervising Run is
-provenance. Starting another conversation does not rotate the Run id, reserve
-another scheduler slot, or change the interrupt target.
-
-If a provider conversation fails while its runner remains live, the Run may
-start another AgentInvocation. If containment is lost, recovery ends the
-observed Run and reserves a new Run whose recovery trigger points to it.
-
-## Durable input
-
-Steer changes authored Work input and advances Basis. Provider injection is a
-best-effort fast path; a later successful boundary is the semantic receipt.
+## Run one Skill
 
 ```bash
-lf task steer INF-123 "keep the public name"
-lf work steer task task_... "show the failing fixture"
+lf implement
 ```
 
-### Ask creation and terminal result
-
-An intervention Ask is Turn-local tool I/O. A `FlowStep` Ask is the durable body
-of an authored human flow node between provider Invocations. Neither enters the
-Steer queue or moves Work Basis.
-
-```bash
-lf ask "Which behavior should this proof cover?"  # blocks in the child Turn
-lf ask wait                                       # recover after shell loss
-
-lf ask list --outgoing                            # this Work's unresolved requests
-lf ask list --user --json                         # User attention projection
-lf ask open ask_...                                # claim or reattach one Ask session
-lf ask open ask_... --prepare --json               # app obtains exact attach route
-lf ask presented ask_... invocation_... --json     # exact presentation fence
-```
-
-The Ask keeps its identity while Invocations come and go:
+That command discovers `implement`, assembles its context, chooses a provider,
+publishes a Run manifest, launches the provider, records direct evidence, and
+settles once. It needs no Wave, Project, Task, daemon, or readable planning
+database.
 
 ```text
-Ask(id, origin Work/Run/optional Turn+Invocation/Home/cwd, target, request, state, result)
-AgentInvocation(answer Ask id, route/surface, presentation, outcome)
+request
+  |
+  v
+lf CLI --> Skill discovery --> prompt --> provider route --> harness
+                                                          |
+                                                          v
+                                               Home-local Run record
+                                               manifest + JSONL + terminal
 ```
 
-The Invocation id is the attempt identity. No second Ask lifecycle mirrors
-its route, surface, containment, timing, provider outcome, or handback.
-
-The origin is captured when the Ask is created. Its cwd is the active Run's
-actual execution directory, not a path reconstructed later. A Turn,
-Invocation, Run, or Work may own several unresolved intervention Asks; each
-creation mints an id even when its request text duplicates another Ask.
-Flow-step identity is its expanded flow, stable node id, and skill. Typed
-settlement is first-writer-wins.
-
-The target is selected when the Ask is created:
-
-- a child routes to its immediate parent Work;
-- `--user` routes explicitly to the User perspective;
-- a root without `--user` fails instead of silently spending User attention.
-
-The target selects the perspective and context used to answer the Ask; it does
-not authorize one Work over another. The current Run id is actor provenance and
-a stale-generation fence. The active Ask Invocation id fences terminal results.
-
-An unresolved Ask remains actionable while its Epoch is open. Completing or
-abandoning the Epoch cancels it without erasing history. Provider, shell,
-waiter, or runner loss never invents success.
-
-`lf ask` commits before it wakes the parent, polls without consuming model
-tokens, retries the wake, and prints the typed terminal result to stdout. The
-provider sees an ordinary long-running shell command; Loopflow needs no
-provider-specific injected tool or mid-turn message transport.
-
-Each Task Ask creation and terminal result also enqueues a Linear issue comment
-in the same transaction. Linear publishes afterward: failures remain in the
-durable outbox for retry and cannot roll back or delay settlement. Ask
-attempts and presentation failures do not create comments.
-
-Opening an Ask claims one attempt, records its AgentInvocation under the origin
-Run, and starts it in the captured cwd. The Ask id selects the request and the
-ambient AgentInvocation id must match the Ask's active Invocation. A flow-step
-Invocation additionally receives the step's current Run context;
-intervention Invocations never do. `Ready` means its exact attach route exists;
-presentation moves it to `Active`. Resolve or decline completes it. Release,
-ordinary exit, or an observed signal closes it and requeues the same Ask. Proven
-local disappearance marks it lost and requeues; unreachable remote liveness
-remains claimed.
-
-Loopflow.app is a projection over that same queue. It may prepare an Ask session,
-present the returned `InvocationSurface` in embedded Ghostty or an attach-capable
-external target, and then confirm the exact Ask/Invocation pair. Swift owns no
-Ask lifecycle, session identity, or queue state.
-
-## Flow execution
-
-Task flows run serially. A Turn blocked inside `lf ask` remains the current
-Turn, and the Task remains Running because its Run and containment are still
-live. A headless Task that reaches `human: true` records the playhead, ends its
-provider Invocation, and queues one User `FlowStep` Ask without starting a
-provider merely to wait. Resolve completes that node; decline returns to the
-preceding autonomous step with the reason; release or incomplete exit requeues
-without advancing.
-
-Project and Wave core conversations no longer receive child questions as
-Steers or special control turns. Their Ask lane claims parent-targeted
-Asks and starts narrow, detached AgentInvocations without receiving the parent
-Run context or disturbing its core conversation.
-
-Direct TTY flows use their present conversation for human nodes. Headless Task
-flows use the detached Ask session above. Skill frontmatter never selects either
-surface, and Invocation handback is not Task flow evidence.
-
-## Processes
+Before the provider starts, the current Home contains:
 
 ```text
-Loopflow.app / external harness / shell
-                    │
-                    ▼
-                   lf ─────────────── Linear · GitHub · provider auth
-                    │
-          Home-local SQLite
-                    │
-                    ▼
-             lfd / WaveHost
-                    │ starts eligible placed Waves
-                    ▼
-          Wave listener ── Wave resident
-                    │             │
-                    │       provider harness
-                    ▼
-           Project or Task Run
-                    │
-          Task worktree ── GitHub PR
+$LF_HOME/runs/<prefix>/<run-id>/
+  manifest.json
 ```
 
-The Wave listener owns journal, HTTP, discovery, and typed child observations.
-The resident owns cadence and its provider process; it sends ordered deltas and
-never writes the journal directly. `lfd` is Home keeper machinery, not an agent
-or remote-control authority. Crossing Homes is an explicit foreground `lf ssh`
-hop whose target proves its Home identity.
+While it runs, Loopflow may append lifecycle, conversation, tool, raw provider,
+and usage evidence to `events.jsonl`. When the harness returns, it creates
+`terminal.json` once. Planning SQLite may be unreadable; the launch still
+works. Missing telemetry may make the record incomplete; it never changes the
+provider result.
 
-Wave selection always resolves `(canonical repository, slug)` to one UUID.
-Bare-slug diagnostics fail when more than one repository owns the slug; no
-read or mutation chooses one by order. A scoped lookup repairs an equivalent
-legacy path spelling to the canonical repository in one transaction.
-`lf work relocate wave <uuid>` is the only semantic locator mutation: it fences
-the Wave chord, moves authored files and the journal, commits the new locator
-transactionally, and leaves PM, Work, Run, and Home-placement rows joined to the
-unchanged UUID. A target-local `.lf/tmp/wave-relocations/<uuid>.json` receipt
-bridges the filesystem/SQLite commit boundary; retrying after a committed crash
-finishes verified source cleanup, then removes the receipt. Repository moves
-also require compatible configured PM Teams so relocation cannot impersonate
-the separate `lf pm reteam` operation.
+The implementation follows the same order as the diagram:
 
-## Truth and projections
-
-The map is the ownership index. Truth remains distributed across Home-local
-SQLite, repository files and Git, the Wave journal, Linear, GitHub, and provider
-homes or Doppler; none is a fallback authority for another.
-
-Intentional copies stay read projections:
-
-<!-- architecture-projections:start -->
-| Projection | Authority copied | Freshness and consumer |
+| Stage | Concrete owner | Produces |
 | --- | --- | --- |
-| [`PmSnapshotRow`](../rust/loopflow/src/store/mod.rs) / `pm_snapshots` | Linear planning | Atomic sync or Project-phase refresh replacement; `lf status`, `lf roadmap`, and the Mac app read it but never author through it. |
-| [`TaskLinearObservation`](../rust/loopflow/src/task/mod.rs) / `task_linear_observations` | Linear Issue state | Reconciliation records provider evidence before applying lifecycle changes. |
-| [`GithubObservation`](../rust/loopflow/src/task/mod.rs) / `task_prs`, `ci_incidents` | GitHub PR/check state | Webhook or foreground reads update Task delivery evidence; GitHub remains merge truth. |
-| `tests/fixtures/dto/` | Rust `lf --json` DTOs | Rust and Swift fixture tests reject required-field or enum drift. |
-| `tests/fixtures/migrations/` | Ordinal-free migration drafts and the Python canonicalizer | Rust build/runtime and Python release tests reject ordering, body-byte, checksum, and graph-error drift. |
-<!-- architecture-projections:end -->
+| Parse and dispatch | [`lf/mod.rs`](../rust/loopflow/src/lf/mod.rs) | One command and launch context |
+| Find the Skill | [`lf/discovery.rs`](../rust/loopflow/src/lf/discovery.rs) | One selected Skill source |
+| Assemble context | [`engine/prompt.rs`](../rust/loopflow/src/engine/prompt.rs) | System and task prompts |
+| Select credentials and route | [`provider_account.rs`](../rust/loopflow/src/provider_account.rs) | Harness, account, model, credential |
+| Launch and normalize | [`harness/`](../rust/loopflow/src/harness/) | Provider output and usage events |
+| Publish and settle evidence | [`run_record.rs`](../rust/loopflow/src/run_record.rs) | One immutable manifest and terminal receipt |
 
-`lf status` and `lf roadmap` derive lifecycle from Epoch, Run, and Wait. Pending
-User attention is a live projection over queued Asks, active Invocations, and
-exact Invocation attach routes rather than stored attention flags. `lf trace
---json` includes Invocations, Turns, Asks, and typed results. Invocation attach
-DTOs carry attach and handback data only; provider conversation rows no longer
-carry Work attention or reviewer policy.
+[Follow the complete execution path →](architecture/execution.md)
 
-## Compatibility seams
+## Add one capability at a time
 
-Compatibility survives only when it crosses immutable external history. Each
-seam names its translation and deletion boundary; none is a second current
-model.
+The Skill runner is useful by itself. The rest of Loopflow grows outward by
+adding one kind of capability at each layer. Tracked Work and autonomous
+controllers are separate layers: Work remains fully operable when no
+controller is installed or running, while controllers consume the same Work,
+execution, and delivery operations available to any caller.
 
-<!-- architecture-shims:start -->
-| Seam | Current concept | Source and removal boundary |
+```text
+one Skill run
+    |
+    +-- Flow: compose Skills, mechanical operations, and human boundaries
+    |
+    +-- Work: preserve purpose and input across independent processes
+    |
+    +-- Task delivery: bind concrete Work to one active remote branch, worktree, and PR
+    |
+    +-- Controllers: pursue Work end to end using the layers above
+    |
+    +-- Home: place execution, credentials, services, files, and locks
+    |
+    `-- Views: project planning, Run, provider, Git, and OS evidence
+```
+
+| Area | What it adds | Start here |
 | --- | --- | --- |
-| `shim:pre-run-promotion` | Session-era active leases become Run drain evidence during one-way store promotion. | [`read_legacy_active_runs`](../rust/loopflow/src/lf/commands/install.rs); remove only when no supported installed frontier predates Run. |
-| `shim:legacy-chat-import` | Old journal turns become one immutable Wave conversation epoch. | [`ConversationEpochImport`](../rust/loopflow/src/wave/journal.rs); remove only when old journals are no longer supported. |
-| `shim:retired-op` / `lf op` | Rejected namespace returns the surviving top-level command name. | [`Commands`](../rust/loopflow/src/lf/mod.rs); remove when external callers no longer need the diagnostic tombstone. |
-| `shim:rams-alias` | Installed `rams/rams` command resolves to the Skill model. | [`SkillSource`](../rust/loopflow/src/lf/discovery.rs); remove when the external single-file command is no longer supported. |
-| `shim:local-refresh-wrapper` | Old script entrypoint forwards to the single `scripts/install.py refresh` implementation. | [`pull-local-bin.sh`](../scripts/pull-local-bin.sh); remove after external automation uses the current command. |
-| `shim:retired-app-replacement` | Promotion removes the previously shipped app bundle after the current app commits. | [`AppPromotion`](../rust/loopflow/src/lf/commands/install.rs); remove after the retired bundle name is outside supported installs. |
-<!-- architecture-shims:end -->
+| Execution | Skill discovery, prompt assembly, provider routing, harnesses, Run records | [Execution](architecture/execution.md) |
+| Planning | Flow composition, Wave/Project/Task Work, Steer, questions, human FlowSteps, resident loops | [Planning](architecture/planning.md) |
+| Delivery | Managed worktrees, commits, one active Task branch/PR, CI repair, merge | [Delivery](architecture/delivery.md) |
+| Homes | Placement, `lfd`, Wave listeners, SSH routing, machine install | [Homes and processes](architecture/homes.md) |
+| Data | Truth owners, SQLite, files, external systems, projections, consistency | [Data and persistence](architecture/data.md) |
+| Codebase | Source territories, public surfaces, processes, extension points | [Codebase map](architecture/codebase.md) |
 
-## Historical-only vocabulary
+The source tree makes the planning boundary literal:
 
-The scanner matches exact phrases, not overloaded words. Provider resume
-sessions, tmux sessions, and `session.launch` are current. The authored chat
-reference `project:<slug>` is also current; it is not the old Linear-label PM
-model.
+```text
+work/                          controller/
+wave/{mod,config,context,      wave/{runner,resident,server,
+      memory}                       placement,...}
+project                       project/{mod,state}
+task                          task/{mod,state}
+                              runner + store
 
-<!-- architecture-vocabulary:start -->
-| Retired term | Allowed scopes | Current language |
+execution kernel: engine/ + harness/ + Run records
+composition surfaces: lf/ + bin/
+```
+
+`work` never imports `controller`. The execution kernel works without either
+layer and never loads Work. CLI and controller callers resolve Work identity,
+Wave memory, and controller state, then pass ordinary launch inputs into the
+kernel.
+
+Release delivery also separates proof from authority:
+
+```text
+merged release commit
+        |
+        v
+candidate ref --> hosted matrix --> signed artifact receipt
+                                           |
+                                           v
+                                  immutable version tag
+                                           |
+                                           v
+                                      publication
+```
+
+The candidate ref and receipt are disposable recovery state. The version tag
+is created only after the exact commit and artifact hashes are proven; retries
+after that point publish the same bytes under the same tag.
+
+Each area page starts with a real command or artifact, follows its request or
+data flow, and ends with the contracts that neighboring areas may rely on.
+
+## The whole system
+
+```text
+                                      shared truth
+                              Linear     GitHub     providers
+                                 ^          ^           ^
+                                 |          |           |
+human / agent --> lf CLI --------+----------+-----------+
+                    |
+          +---------+----------+
+          |                    |
+          v                    v
+  authored definitions    tracked Work
+  Skills / Flows /       Wave -> Project -> Task
+  goals / memory                  |
+          |                       +---------> Task delivery
+          |                       |                ^
+          |                       v                |
+          +------------> end-to-end controllers --+
+          |                       |
+          +-----------------------+ Skill boundary
+                                  v
+                       shared execution components
+              discovery / prompt / route / harness
+                              |
+                              v
+                    Home-local Run record
+                              |
+                              v
+                  status / roadmap / usage / app
+
+another machine is another Home; cross it explicitly with `lf ssh`
+```
+
+There is no central Loopflow server. A Home owns its processes, credentials,
+planning store, Run records, and OS locks. Repository files carry authored
+definitions and memory. Linear and GitHub keep shared planning and delivery
+truth. Readers join those sources; they do not replace them with a universal
+ledger.
+
+## Core models
+
+```text
+Wave
+  `-- Project
+        `-- Task
+              `-- one active remote branch and PR
+
+Flow = ordered Skill | Op | Xor | human boundaries
+Run  = evidence for one mediated harness launch
+
+WorkRef = Wave | Project | Task
+WorkStatus = Ready | Done | Abandoned
+```
+
+| Model | Represents | Primary truth |
 | --- | --- | --- |
-| `Project Session`, `Task Session`, `project_sessions`, `task_sessions` | `rust/loopflow/src/store/migrations/`, `rust/loopflow/src/store/migrations.rs`, `rust/loopflow/src/store/tests/fixtures/`, `rust/loopflow/src/lf/commands/install.rs`, `release/` | Project/Task **Work**, Epoch, and Run. |
-| `session context`, `LF_SESSION` | — | Run context and the exact Run id/invocation variables. |
-| `lf radio`, `agent bus` | `release/` | Typed Work observations, Steer, and Ask. |
-| `pm.linear_project`, `projects/<slug>.md` | `release/` | `pm.linear_initiative`; Linear Initiative → Project → Issue. |
-| `machine-local host`, `machine-global command`, `machine-global mutation`, `machine-global reservation` | — | Home-local keeper, command, mutation, or reservation. |
-<!-- architecture-vocabulary:end -->
+| Skill | Reusable instructions plus declared context needs | Repository override, builtin, or installed Markdown |
+| Flow | Ordered Skill and mechanical nodes, Xor routing, human boundaries | Repository or builtin YAML plus a caller-owned playhead |
+| Run | Evidence from one mediated provider launch | One immutable Home-local record |
+| Wave | Durable operating context with goal, memory, cadence, chat, and project selection | Repository Wave files, local identity, Linear Initiative membership |
+| Project | One measured bet inside exactly one Wave | Linear Project plus bounded local Work state |
+| Task | One concrete change, investigation, or document | Linear Issue, local delivery state, Git, GitHub |
+| Work | Shared durable planning state for one Wave, Project, or Task | Rows keyed directly by stable Work identity |
+| Steer | Ordered authored correction to Work | Append-only Work input |
+| Human session | Unresolved Ask or Task FlowStep bound to one ordinary provider Run | Boundary record, exact Run id, and provider-native history |
+| Home | Stable machine authority whose route may change | Home identity and observed SSH route |
+| Placement | Assignment of one Work to one Home | `(WorkRef, HomeId)` |
 
-Canonical migrations, migration fixtures, and release notes retain historical
-names because changing shipped evidence would rewrite history. Operational docs
-and current runtime source do not.
+Run identity records causality and provenance. It never grants Work mutation,
+credential, Git, or process-signal authority.
 
-## Invariants
+A provider-backed Flow boundary launches or continues a harness and therefore
+produces Run evidence. Mechanical, routing, and human boundaries need not
+create a Run.
 
-- Wave → Project → Task is the complete planning hierarchy: no recursive or
-  orphan Projects.
-- A Wave UUID is stable across rename and repository rehome; repository-scoped
-  locators are unique, and bare slugs are never mutation authority.
-- Linear owns current Project/Task planning; SQLite projections never become an
-  authoring fallback.
-- Active Project Work adopts one complete refreshed Linear plan between provider
-  turns; a refresh or ownership failure stops before the next turn rather than
-  serving the prior plan.
-- One non-ended Run exists per Epoch; only its current opaque lease writes as
-  Work.
-- Run containment, not invocation ordering, is the interrupt and recovery
-  target.
-- Every Turn belongs to one AgentInvocation; an intervention Ask captures its
-  Turn.
-- Durable Ask is the only human-input primitive that blocks a Work Turn.
-- A human flow node runs as a writable Ask Invocation in its Task
-  worktree; presentation or process exit never advances the node.
-- One Turn may own several unresolved intervention Asks; explicit Ask ids select precise mutations.
-- An Ask result is typed, authorized, immutable, and first-writer-wins.
-- Ask never allocates an Epoch revision or enters Steer delivery.
-- Interrupted Turns and terminal Epochs expose no actionable Ask attention.
-- Controller evidence may settle Work without inventing an AgentInvocation or
-  Run.
-- DTO fields are required unless their type is explicitly optional.
-- No Session-as-Work, control Launch, Feedback/Continue channel, reviewer flag,
-  or invocation-attention column participates in the current runtime.
+## Follow the common paths
 
-## Drift proof
+### Direct work
 
 ```bash
-uv run python scripts/check_architecture.py
+lf debug -c
+lf gate --diff-files
 ```
 
-The bounded check materializes the live schema (including drafts), discovers
-root CLI families, binaries/internal process commands, both local HTTP routers,
-provider kinds, literal Rust subprocess edges, read projections, declared
-shims, and exact stale vocabulary. Every discovered item must occur exactly
-once in the map or its named inventory. It validates the map's source links and
-reports mapped/discovered counts. The vocabulary scan covers active top-level
-docs, product docs, prompts, scripts, website code, production Python/Rust/Swift
-trees, migration SQL, and release history. Generated `website/docs/` is excluded
-because the authoritative `docs/` source is already scanned. Historical
-allowances must shelter at least one current match, so dead scopes fail instead
-of becoming a permanent allowlist; declared compatibility seams must retain
-their exact source marker. The check does not pretend to interpret every Rust
-type or sentence.
+These commands need the execution area only: discover, prompt, route, launch,
+record, return.
 
-CI runs the same command for every proposed merge. The weekly Architecture
-Drift workflow retains the JSON result as time-based evidence. A new owner,
-projection, shim, or API either maps to an existing concept or updates this page
-in the same change.
+### Tracked work without a controller
+
+```bash
+lf task prepare INF-123
+lf --task INF-123 research "write scratch/runtime.md"
+lf --task INF-123 research "write scratch/prompts.md"
+lf commit -m "Reconcile Task research"
+lf pr publish
+lf pr submit
+lf task status INF-123 --json
+```
+
+`prepare` creates or reuses tracked Task Work, its one worktree, and the active
+serial PR identity. It installs no end-to-end controller. Each `--task` command
+is an independent Run in that worktree; several may overlap and write distinct
+scratch paths. Any caller may then use the ordinary Work and delivery commands.
+Those commands act on delivery facts, not on proof that a controller ran its
+expected Flow. `submit`, `arm`, and `land` therefore work the same whether the
+Task was pursued piecemeal, by the built-in controller, or by another system.
+
+### End-to-end controllers
+
+```bash
+lf start product
+lf task run INF-123
+lf chat --steer "ship invoices first"
+lf status product
+```
+
+The Home keeper starts the placed Wave listener. Its resident loop refreshes
+current planning evidence and chooses the next Project or Task boundary. Wave,
+Project, and Task retain distinct controllers. Direct questions use ordinary
+fresh bound Runs. A Task human FlowStep starts the node's ordinary bound Skill
+command as a provider Run. A detached PTY cradle may keep the first client
+alive before a UI arrives; opening the Session replaces it with a native
+provider resume.
+
+### Another machine
+
+```bash
+lf ssh build-home runs --json
+lf ssh build-home start product
+```
+
+The origin transports one command. The target resolves its own Home state and
+runs the same `lf`. Reads are local unless this hop is explicit.
+
+## How to read the code
+
+Start with the area that owns the behavior, then follow the object passed to
+the next area. Do not begin with the storage implementation unless storage is
+the behavior.
+
+| If you are changing… | Read |
+| --- | --- |
+| provider launch, retries, usage, or telemetry | [Execution](architecture/execution.md) |
+| Flow semantics, Work state, Steer, questions, human FlowSteps, Project/Task loops | [Planning](architecture/planning.md) |
+| worktrees, commits, PR ranges, checks, or landing | [Delivery](architecture/delivery.md) |
+| daemons, remote execution, placement, process control, promotion | [Homes and processes](architecture/homes.md) |
+| schema, files, projections, DTOs, or consistency | [Data and persistence](architecture/data.md) |
+| module ownership, APIs, binaries, routes, or code size | [Codebase map](architecture/codebase.md) |
+
+For exhaustive lookup, open the [checked architecture reference](architecture-reference.md).
+Its maps are machine-verified against CLI families, process boundaries, live
+SQLite tables, HTTP routes, providers, subprocess edges, projections,
+compatibility seams, and retired vocabulary.

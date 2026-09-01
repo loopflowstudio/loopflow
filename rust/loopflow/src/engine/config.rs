@@ -36,7 +36,7 @@ pub struct SummaryConfig {
 }
 
 fn default_summary_agent() -> String {
-    "gemini".to_string()
+    default_agent().to_string()
 }
 
 /// Autoprune configuration.
@@ -113,7 +113,7 @@ pub enum LaunchTarget {
 pub struct SessionConfig {
     #[serde(default)]
     pub launch: LaunchTarget,
-    /// Home-local terminal application used to present detached Ask sessions.
+    /// Home-local terminal application used to present detached human sessions.
     #[serde(default)]
     pub terminal: Option<String>,
 }
@@ -301,26 +301,12 @@ impl Config {
 }
 
 /// Parse agent string like 'claude:opus' into (harness, model).
-///
-/// Applies smart defaults when no model is specified:
-/// - claude -> opus (Claude Opus 4.5)
-/// - gemini -> 2.5-pro (Gemini 2.5 Pro)
-/// - codex -> None (let Codex CLI pick its default)
-/// - opencode -> opencode/glm-5.2 (Loopflow-owned default, sent explicitly so
-///   OpenCode config cannot silently fall back to a lower-capability model)
 pub fn parse_agent(agent: &str) -> (String, Option<String>) {
     if let Some((harness, model)) = agent.split_once(':') {
         return (harness.to_string(), Some(model.to_string()));
     }
 
-    let harness = agent.to_string();
-    let default_model = match harness.as_str() {
-        "claude" => Some("opus".to_string()),
-        "gemini" => Some("2.5-pro".to_string()),
-        "opencode" => Some("opencode/glm-5.2".to_string()),
-        _ => None,
-    };
-    (harness, default_model)
+    (agent.to_string(), None)
 }
 
 /// Load YAML file, returning None if not present or empty.
@@ -458,37 +444,16 @@ mod tests {
 
     #[test]
     fn parse_agent_with_complex_model() {
-        let (harness, model) = parse_agent("gemini:2.5-pro");
-        assert_eq!(harness, "gemini");
-        assert_eq!(model, Some("2.5-pro".to_string()));
-    }
-
-    #[test]
-    fn parse_agent_claude_default() {
-        let (harness, model) = parse_agent("claude");
-        assert_eq!(harness, "claude");
-        assert_eq!(model, Some("opus".to_string()));
-    }
-
-    #[test]
-    fn parse_agent_codex_no_default() {
-        let (harness, model) = parse_agent("codex");
-        assert_eq!(harness, "codex");
-        assert_eq!(model, None);
-    }
-
-    #[test]
-    fn parse_agent_gemini_default() {
-        let (harness, model) = parse_agent("gemini");
-        assert_eq!(harness, "gemini");
-        assert_eq!(model, Some("2.5-pro".to_string()));
-    }
-
-    #[test]
-    fn parse_agent_opencode_default() {
-        let (harness, model) = parse_agent("opencode");
+        let (harness, model) = parse_agent("opencode:moonshotai/kimi-k2");
         assert_eq!(harness, "opencode");
-        assert_eq!(model, Some("opencode/glm-5.2".to_string()));
+        assert_eq!(model, Some("moonshotai/kimi-k2".to_string()));
+    }
+
+    #[test]
+    fn bare_harnesses_defer_model_selection_to_the_provider() {
+        for harness in ["claude", "codex", "opencode"] {
+            assert_eq!(parse_agent(harness), (harness.to_string(), None));
+        }
     }
 
     #[test]
@@ -734,7 +699,7 @@ summaries:
         assert_eq!(config.summaries[0].tokens, Some(5000));
         assert_eq!(config.summaries[0].agent, "claude");
         assert_eq!(config.summaries[1].path, "tests/");
-        assert_eq!(config.summaries[1].agent, "gemini"); // default
+        assert_eq!(config.summaries[1].agent, default_agent());
     }
 
     #[test]

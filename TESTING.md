@@ -50,14 +50,14 @@ uv run python scripts/resource_envelope.py --recover
 ```
 
 The resource preflight names the owner and budget for every worktree build,
-gate-artifact root, the Loopflow trace store, uv cache, Cargo cache, and free
-disk. Budgets live in `performance/budgets.json`: 64 GiB free, 12 GiB per
-worktree build, 128 GiB across builds, 16 GiB each for traces and uv, and four
-low-priority verification workers. Recovery removes only allowlisted build
+gate-artifact root, the Home-local Run record store, uv cache, Cargo cache, and
+free disk. Budgets live in `performance/budgets.json`: 64 GiB free, 12 GiB per
+worktree build, 128 GiB across builds, 16 GiB each for Run records and uv, and
+four low-priority verification workers. Recovery removes only allowlisted build
 roots from inactive worktrees, old disposable gate output, and entries accepted
-by `uv cache prune`. It never removes source, a worktree, trace evidence, gate
-receipts, or SQLite state. Unresolved pressure stops before product tests run
-and prints the supported next action.
+by `uv cache prune`. It never removes source, a worktree, gate receipts, Run
+bundles, or SQLite state. Unresolved pressure stops before product tests run and
+prints the local path that needs an explicit retention decision.
 
 Every phase runs under a printed wall-clock limit. A phase that overruns is
 killed—process group and all—and reported as `VERIFICATION BUDGET`, so
@@ -222,18 +222,17 @@ Fresh-store coverage exercises the live SQLite schema. Existing incompatible
 databases are rejected with a direct delete-and-recreate instruction; there is
 no historical upgrade chain.
 
-Trace capture has focused storage, prompt-accounting, harness, and reader
-checks:
+Run records have focused storage, harness, reducer, and reader checks:
 
 ```bash
-cargo test -p loopflow trace
+cargo test -p loopflow run_record
 cargo test -p loopflow journal
 cargo test -p loopflow store
 cargo test -p loopflow harness::conformance_tests
 ```
 
-After schema or capture changes, run `lf trace`, `lf context --json`, and
-`lf doctor --json` against a fresh local ledger.
+After Run-record or schema changes, run `lf runs --json`, `lf usage --json`, and
+`lf doctor --json` against a fresh local Home.
 
 ## E2E Tests
 

@@ -332,7 +332,7 @@ mod tests {
         for contract in [
             "User explicitly confirms",
             "headless surface",
-            "run `lf ask`",
+            "run `lf ask \"<exact request>\"`",
             "closing, detaching, provider exit, or lack of response",
         ] {
             assert!(demo.contains(contract), "demo omits {contract:?}");

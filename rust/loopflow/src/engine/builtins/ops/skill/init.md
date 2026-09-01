@@ -18,8 +18,8 @@ The launch prompt identifies the reviewer.
 - **Parent reviewer:** inspect the same state, but make only repo-scoped,
   reversible changes through the review protocol with the Task. Never guess a
   human preference. OAuth, personal config, placement, and external object
-  creation require a narrow `lf ask --user` when they genuinely block the
-  assigned path; otherwise report their exact next commands and return.
+  creation require the present User. When absent, report the exact blocker and
+  next commands; do not manufacture a human session.
 
 Never expose credential values. Use Loopflow's auth commands; do not read
 tokens from dotfiles or environment variables.

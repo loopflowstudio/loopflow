@@ -2,7 +2,6 @@
 //! leases for Claude and Codex.
 
 pub mod lease;
-pub mod recovery;
 
 use std::collections::HashSet;
 use std::fs;
@@ -135,6 +134,9 @@ enum AccountRouteAuthority {
         store: SharedStore,
         home: PathBuf,
     },
+    Direct {
+        home: PathBuf,
+    },
     Lease {
         client: lease::AccountLeaseClient,
         access_token: String,
@@ -190,7 +192,9 @@ pub(crate) struct ProviderAccountRoute {
 impl std::fmt::Debug for ProviderAccountRoute {
     fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
         let credential = match self.authority {
-            AccountRouteAuthority::Local { .. } => "native_home",
+            AccountRouteAuthority::Local { .. } | AccountRouteAuthority::Direct { .. } => {
+                "native_home"
+            }
             AccountRouteAuthority::Lease { .. } => "access_token",
         };
         f.debug_struct("ProviderAccountRoute")
@@ -212,7 +216,10 @@ impl ProviderAccountRoute {
     }
 
     pub(crate) fn uses_native_home(&self) -> bool {
-        matches!(self.authority, AccountRouteAuthority::Local { .. })
+        matches!(
+            self.authority,
+            AccountRouteAuthority::Local { .. } | AccountRouteAuthority::Direct { .. }
+        )
     }
 
     /// Prove that this route can authenticate before durable Work is reserved.
@@ -222,7 +229,7 @@ impl ProviderAccountRoute {
     /// secret-bearing representation to persist or log.
     pub(crate) async fn verify_ready(&self) -> Result<(), ProviderAccountError> {
         match &self.authority {
-            AccountRouteAuthority::Local { home, .. } => {
+            AccountRouteAuthority::Local { home, .. } | AccountRouteAuthority::Direct { home } => {
                 crate::provider_auth::prepare_provider_account_access_token(self.provider, home)
                     .await
                     .map_err(|error| ProviderAccountError::ForwardingCredential {
@@ -254,13 +261,19 @@ impl ProviderAccountRoute {
             command.env_remove(name);
         }
         match (self.provider, &self.authority) {
-            (Provider::Claude, AccountRouteAuthority::Local { home, .. }) => {
+            (
+                Provider::Claude,
+                AccountRouteAuthority::Local { home, .. } | AccountRouteAuthority::Direct { home },
+            ) => {
                 command.env("CLAUDE_CONFIG_DIR", home);
             }
             (Provider::Claude, AccountRouteAuthority::Lease { access_token, .. }) => {
                 command.env("CLAUDE_CODE_OAUTH_TOKEN", access_token);
             }
-            (Provider::Codex, AccountRouteAuthority::Local { home, .. }) => {
+            (
+                Provider::Codex,
+                AccountRouteAuthority::Local { home, .. } | AccountRouteAuthority::Direct { home },
+            ) => {
                 command.env("CODEX_HOME", home);
             }
             (Provider::Codex, AccountRouteAuthority::Lease { access_token, .. }) => {
@@ -291,6 +304,7 @@ impl ProviderAccountRoute {
             AccountRouteAuthority::Lease { client, .. } => {
                 client.pin_session(self.provider, provider_session_id, &self.account_id)?;
             }
+            AccountRouteAuthority::Direct { .. } => {}
         }
         Ok(())
     }
@@ -307,6 +321,7 @@ impl ProviderAccountRoute {
             AccountRouteAuthority::Lease { client, .. } => {
                 client.record_health(self.provider, &self.account_id, signal)?;
             }
+            AccountRouteAuthority::Direct { .. } => {}
         }
         Ok(())
     }
@@ -359,6 +374,7 @@ impl ProviderAccountRoute {
                             &route.account_id,
                             &reason,
                         )?,
+                    AccountRouteAuthority::Direct { .. } => {}
                 }
                 Ok(())
             })
@@ -569,6 +585,7 @@ pub(crate) async fn prepare_account_access_token(
     Ok(access_token)
 }
 
+#[cfg(test)]
 pub(crate) async fn resolve_provider_account(
     provider: Provider,
     provider_session_id: Option<&str>,
@@ -593,6 +610,12 @@ pub(crate) async fn resolve_provider_account_exact(
     }
     let store = route_store().await?;
     let Some(store) = store else {
+        if let Some(account_id) = exact_account_id {
+            return Err(ProviderAccountError::NoEligibleAccount {
+                provider,
+                accounts: format!("'{account_id}' is not available on this Home"),
+            });
+        }
         return Ok(None);
     };
 
@@ -600,10 +623,22 @@ pub(crate) async fn resolve_provider_account_exact(
     let Some(candidates) =
         provider_route_account_ids(&store, routed_repo_id.as_ref(), provider).await?
     else {
+        if let Some(account_id) = exact_account_id {
+            return Err(ProviderAccountError::NoEligibleAccount {
+                provider,
+                accounts: format!("'{account_id}' is outside the configured account route"),
+            });
+        }
         return Ok(None);
     };
 
     if candidates.is_empty() {
+        if let Some(account_id) = exact_account_id {
+            return Err(ProviderAccountError::NoEligibleAccount {
+                provider,
+                accounts: format!("'{account_id}' is outside the configured account route"),
+            });
+        }
         return Ok(None);
     }
     let candidates = match exact_account_id {
@@ -1029,15 +1064,89 @@ pub(crate) async fn provider_route_account_ids(
     Ok((!accounts.is_empty()).then_some(accounts))
 }
 
-pub(crate) fn resolve_provider_account_blocking(
+pub(crate) fn resolve_provider_account_exact_blocking(
     provider: Provider,
     provider_session_id: Option<String>,
+    exact_account_id: Option<ProviderAccountId>,
 ) -> Result<Option<ProviderAccountRoute>, ProviderAccountError> {
     _run_blocking_account(provider, "route", move |runtime| {
-        runtime.block_on(resolve_provider_account(
+        runtime.block_on(resolve_provider_account_exact(
             provider,
             provider_session_id.as_deref(),
+            exact_account_id.as_ref(),
         ))
+    })
+}
+
+/// Resolve one recorded account without consulting planning routes or SQLite.
+///
+/// A forwarded credential grant wins when it contains the exact account.
+/// Otherwise the account's deterministic credential Home on the Run's Home is
+/// the authority. This path deliberately does not apply current repository
+/// routing or account-health policy: replay names the account it requires.
+pub(crate) fn resolve_recorded_provider_account_blocking(
+    provider: Provider,
+    provider_session_id: Option<String>,
+    account_id: ProviderAccountId,
+    lf_home: PathBuf,
+) -> Result<Option<ProviderAccountRoute>, ProviderAccountError> {
+    _run_blocking_account(provider, "recorded-route", move |runtime| {
+        runtime.block_on(async move {
+            ensure_supported(provider)?;
+            if let Some(client) = lease::AccountLeaseClient::from_env()? {
+                let forwarded = client.describe()?;
+                if forwarded
+                    .grant(provider)
+                    .is_some_and(|grant| grant.accounts.contains(&account_id))
+                {
+                    let resolution =
+                        client.resolve_exact(provider, &account_id, provider_session_id.clone())?;
+                    let route = ProviderAccountRoute {
+                        provider,
+                        account_id: resolution.account_id.clone(),
+                        resume_requested_session: resolution.resume_requested_session,
+                        authority: AccountRouteAuthority::Lease {
+                            client,
+                            access_token: resolution.access_token().to_string(),
+                        },
+                    };
+                    route.verify_ready().await?;
+                    return Ok(Some(route));
+                }
+                if forwarded.restricted {
+                    return Err(ProviderAccountError::NoEligibleAccount {
+                        provider,
+                        accounts: format!(
+                            "'{account_id}' is not included in the forwarded credential grant"
+                        ),
+                    });
+                }
+            }
+
+            let home = lf_home
+                .join("accounts")
+                .join(provider.as_str())
+                .join(account_id.as_str());
+            if !home.is_dir() {
+                return Err(ProviderAccountError::NoEligibleAccount {
+                    provider,
+                    accounts: format!(
+                        "'{account_id}' has no credential Home at {}",
+                        home.display()
+                    ),
+                });
+            }
+            let operator_home = dirs::home_dir().unwrap_or_else(|| PathBuf::from("."));
+            ensure_account_home_at(&operator_home, &home, provider)?;
+            let route = ProviderAccountRoute {
+                provider,
+                account_id,
+                resume_requested_session: false,
+                authority: AccountRouteAuthority::Direct { home },
+            };
+            route.verify_ready().await?;
+            Ok(Some(route))
+        })
     })
 }
 
@@ -1567,6 +1676,99 @@ mod account_first_tests {
             .unwrap()
             .last_selected_at
             .is_some());
+    }
+
+    #[allow(clippy::await_holding_lock)]
+    #[tokio::test]
+    async fn blocking_pin_honors_exact_account_without_changing_dynamic_selection() {
+        let _lock = crate::journal::test_env_lock();
+        let temp = tempdir().unwrap();
+        let _restore = EnvRestore::capture(&[
+            "LF_HOME",
+            "LF_CONTROL_HOME",
+            "LF_CONTROL_DB_PATH",
+            lease::ACCOUNT_LEASE_ENV,
+        ]);
+        std::env::set_var("LF_HOME", temp.path());
+        std::env::set_var("LF_CONTROL_HOME", temp.path());
+        std::env::remove_var("LF_CONTROL_DB_PATH");
+        std::env::remove_var(lease::ACCOUNT_LEASE_ENV);
+        let store = Arc::new(
+            open_store(&StorageConfig::sqlite(temp.path().join("loopflow.db")))
+                .await
+                .unwrap(),
+        );
+        let first = account(Provider::Codex, "first", temp.path());
+        let requested = account(Provider::Codex, "requested", temp.path());
+        store.upsert_provider_account(&first).await.unwrap();
+        store.upsert_provider_account(&requested).await.unwrap();
+        store
+            .set_provider_route(&ProviderRoute {
+                scope: RouteScope::Default,
+                provider: Provider::Codex,
+                accounts: vec![first.account_id.clone(), requested.account_id.clone()],
+                created_at: now_unix(),
+                updated_at: now_unix(),
+            })
+            .await
+            .unwrap();
+
+        let mut dynamic = crate::engine::AgentConfig {
+            agent: Some("codex".to_string()),
+            ..crate::engine::AgentConfig::default()
+        };
+        crate::engine::agent::pin_provider_account_id_blocking(&mut dynamic).unwrap();
+        assert_eq!(dynamic.provider_account_id, Some(first.account_id));
+
+        let mut exact = crate::engine::AgentConfig {
+            agent: Some("codex".to_string()),
+            provider_account_id: Some(requested.account_id.clone()),
+            ..crate::engine::AgentConfig::default()
+        };
+        crate::engine::agent::pin_provider_account_id_blocking(&mut exact).unwrap();
+        assert_eq!(exact.provider_account_id, Some(requested.account_id));
+    }
+
+    #[test]
+    fn recorded_account_resolves_from_its_home_without_planning_sqlite() {
+        let _lock = crate::journal::test_env_lock();
+        let home = tempdir().unwrap();
+        let _restore = EnvRestore::capture(&[
+            "LF_HOME",
+            "LF_DB_PATH",
+            "LF_CONTROL_HOME",
+            "LF_CONTROL_DB_PATH",
+            lease::ACCOUNT_LEASE_ENV,
+        ]);
+        std::env::set_var("LF_HOME", home.path());
+        std::env::remove_var("LF_CONTROL_HOME");
+        std::env::remove_var("LF_CONTROL_DB_PATH");
+        std::env::remove_var(lease::ACCOUNT_LEASE_ENV);
+        let registry = home.path().join("unreadable-registry");
+        fs::create_dir(&registry).unwrap();
+        std::env::set_var("LF_DB_PATH", &registry);
+
+        let account_id = parse_account_id("recorded").unwrap();
+        let account_home = home.path().join("accounts/claude/recorded");
+        fs::create_dir_all(&account_home).unwrap();
+        fs::write(
+            account_home.join(".credentials.json"),
+            r#"{"claudeAiOauth":{"accessToken":"test-token","expiresAt":4102444800000}}"#,
+        )
+        .unwrap();
+
+        let route = resolve_recorded_provider_account_blocking(
+            Provider::Claude,
+            None,
+            account_id.clone(),
+            home.path().to_path_buf(),
+        )
+        .unwrap()
+        .unwrap();
+
+        assert_eq!(route.account_id(), &account_id);
+        assert!(route.uses_native_home());
+        assert!(registry.is_dir());
     }
 
     #[allow(clippy::await_holding_lock)]

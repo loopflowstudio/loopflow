@@ -2,16 +2,18 @@ use std::fs;
 use std::path::Path;
 use std::process::{Command, Output};
 
+use chrono::{Local, Timelike};
+use loopflow::durable::{CronReceiptId, HomeId};
+use loopflow::ops::{CronOutcome, CronReceipt, CronSource, CronTargetKind};
 use loopflow::store::sqlite::SqliteStore;
-use loopflow::trace::{
-    AgentInvocationRow, AgentTurnRow, RecordedConversationEvent, RecordedConversationPayload,
-};
+use loopflow::store::RunEventRow;
 use time::OffsetDateTime;
 
 fn run_lf(home: &Path, args: &[&str]) -> Output {
     Command::new(env!("CARGO_BIN_EXE_lf"))
         .args(args)
         .current_dir(home)
+        .env("HOME", home)
         .env("LF_HOME", home)
         .env("LF_DB_PATH", home.join("loopflow.db"))
         .env("NO_COLOR", "1")
@@ -20,128 +22,104 @@ fn run_lf(home: &Path, args: &[&str]) -> Output {
         .env_remove("LF_TRACE_ID")
         .env_remove("LF_PROCESS_ID")
         .env_remove("LF_WAVE_ID")
-        .env_remove("LF_RUN_CONTEXT")
         .env_remove("LF_RUN_ID")
+        .env_remove("LF_RUN_CONTEXT")
+        .env_remove("LF_RUN_LEASE")
         .env_remove("LF_AGENT_INVOCATION_ID")
         .output()
         .unwrap()
 }
 
-fn capture_check(output: &Output) -> serde_json::Value {
+fn continuity_check(output: &Output) -> serde_json::Value {
     let report: serde_json::Value = serde_json::from_slice(&output.stdout).unwrap();
     report["checks"]
         .as_array()
         .unwrap()
         .iter()
-        .find(|check| check["name"] == "capture")
+        .find(|check| check["name"] == "continuity")
         .unwrap()
         .clone()
 }
 
-fn text_check_detail<'a>(output: &'a Output, mark: &str, name: &str) -> &'a str {
-    let prefix = format!("{mark}  {name:<13} ");
-    std::str::from_utf8(&output.stdout)
-        .unwrap()
-        .lines()
-        .find_map(|line| line.strip_prefix(&prefix))
-        .unwrap()
-}
-
-fn normalize_storage_snapshot(detail: &str) -> String {
-    let Some((prefix, storage_and_metrics)) = detail.split_once("; storage ") else {
-        return detail.to_string();
-    };
-    let (_, metrics) = storage_and_metrics.split_once("; ").unwrap();
-    format!("{prefix}; storage <snapshot>; {metrics}")
-}
-
-fn insert_capture(
-    store: &SqliteStore,
-    home: &Path,
-    id: &str,
-    ended_at: i64,
-    capture_status: &str,
-    incomplete_reason: Option<&str>,
-) -> (AgentInvocationRow, std::path::PathBuf) {
-    let artifact_dir = format!("run-{id}/process-{id}/{id}");
-    let conversation_path = format!("{artifact_dir}/conversation.jsonl");
-    let task_prompt_path = format!("{artifact_dir}/0001-task.md");
-    let absolute_artifact_dir = home.join("traces").join(&artifact_dir);
-    let absolute_conversation_path = home.join("traces").join(&conversation_path);
-    fs::create_dir_all(&absolute_artifact_dir).unwrap();
-    fs::write(home.join("traces").join(&task_prompt_path), "task\n").unwrap();
-    let event = RecordedConversationEvent {
-        schema_version: 1,
-        seq: 1,
-        ts: OffsetDateTime::from_unix_timestamp(ended_at).unwrap(),
-        turn_id: None,
-        payload: RecordedConversationPayload::LegacyText {
-            stream: "assistant".to_string(),
-            text: "captured".to_string(),
-        },
-    };
-    let mut conversation = serde_json::to_vec(&event).unwrap();
-    conversation.push(b'\n');
-    fs::write(&absolute_conversation_path, &conversation).unwrap();
-
-    let invocation = AgentInvocationRow {
-        id: id.to_string(),
-        run_id: format!("run-{id}"),
-        answer_ask_id: None,
-        process_id: format!("process-{id}"),
-        started_at: ended_at - 1,
-        ended_at: Some(ended_at),
-        repo: "/src/loopflow".to_string(),
-        worktree: "/src/loopflow.keep-daily-telemetry-actionable-after".to_string(),
-        wave: Some("infrastructure".to_string()),
-        flow: None,
-        skill: Some("implement".to_string()),
-        project: Some("stability-security".to_string()),
-        task: Some("LOO-219".to_string()),
-        provider: "codex".to_string(),
-        model: Some("gpt-5".to_string()),
-        surface: "headless".to_string(),
-        capture_status: capture_status.to_string(),
-        incomplete_reason: incomplete_reason.map(str::to_string),
-        outcome: "completed".to_string(),
-        artifact_dir,
-        conversation_path,
-        provider_events_path: None,
-        provider_session_id: None,
-        provider_session_path: None,
-        conversation_event_count: 1,
-        conversation_bytes: conversation.len() as i64,
-        supervision: None,
-    };
-    let turn = AgentTurnRow {
-        id: format!("turn-{id}"),
-        invocation_id: id.to_string(),
-        ordinal: 1,
-        provider_turn_id: None,
-        started_at: ended_at - 1,
-        ended_at: Some(ended_at),
-        status: "completed".to_string(),
-        input_op: "initial".to_string(),
-        context_coverage: "unknown".to_string(),
-        tokenizer: "cl100k_base".to_string(),
-        system_prompt_path: None,
-        task_prompt_path,
-        system_tokens: 0,
-        task_tokens: 0,
-        supplied_context_tokens: 0,
-        usage: None,
-        context_gather_ms: 0,
-        context_render_ms: 0,
-        context_persist_ms: 0,
-        first_event_seq: Some(1),
-        last_event_seq: Some(1),
-        root_output: Some("captured".to_string()),
-        basis: None,
-    };
+fn insert_run_event(store: &SqliteStore, id: &str, ts: i64) {
     store
-        .insert_trace_capture(&invocation, &turn, &[], &[])
+        .insert_run_event(&RunEventRow {
+            run_id: id.to_string(),
+            process_id: id.to_string(),
+            parent_process_id: None,
+            seq: 0,
+            ts,
+            repo: Some("/src/loopflow".to_string()),
+            worktree: Some("/src/loopflow".to_string()),
+            wave: Some("infrastructure".to_string()),
+            node: "run".to_string(),
+            event: "completed".to_string(),
+            command: Some(r#"["lf","flow","telemetry-daily"]"#.to_string()),
+            flow: Some("telemetry-daily".to_string()),
+            skill: None,
+            step_index: None,
+            error: None,
+        })
         .unwrap();
-    (invocation, absolute_conversation_path)
+}
+
+fn install_current_telemetry_obligation(home: &Path) {
+    let now = Local::now();
+    let scheduled = now - chrono::Duration::minutes(5);
+    let schedule = format!("0 {} {} * * *", scheduled.minute(), scheduled.hour());
+    let started_at = scheduled.with_second(0).unwrap().timestamp() + 10;
+    let home_id = HomeId::parse("home_11111111111111111111111111111111").unwrap();
+    let launch_agents = home.join("Library/LaunchAgents");
+    fs::create_dir_all(&launch_agents).unwrap();
+    fs::write(
+        launch_agents.join("loopflow.cron.infrastructure.telemetry-daily.plist"),
+        format!(
+            r#"<plist><dict>
+<key>LoopflowWave</key><string>infrastructure</string>
+<key>LoopflowFlow</key><string>telemetry-daily</string>
+<key>LoopflowTargetKind</key><string>flow</string>
+<key>LoopflowSchedule</key><string>{schedule}</string>
+<key>LoopflowHomeId</key><string>{home_id}</string>
+<key>LoopflowActivatedAt</key><string>1787419431</string>
+<key>LoopflowRepo</key><string>{repo}</string>
+<key>LoopflowLfPath</key><string>/usr/local/bin/lf</string>
+<key>LoopflowLfHome</key><string>{lf_home}</string>
+<key>LoopflowDbPath</key><string>{database}</string>
+<key>LoopflowPath</key><string>/usr/bin:/bin</string>
+</dict></plist>
+"#,
+            repo = home.display(),
+            lf_home = home.display(),
+            database = home.join("loopflow.db").display(),
+        ),
+    )
+    .unwrap();
+    let receipt = CronReceipt {
+        schema_version: 1,
+        id: CronReceiptId::new(),
+        runner_pid: 123,
+        home_id,
+        wave: "infrastructure".to_string(),
+        flow: "telemetry-daily".to_string(),
+        target_kind: CronTargetKind::Flow,
+        source: CronSource::Scheduled,
+        schedule,
+        repo: home.to_path_buf(),
+        lf_path: "/usr/local/bin/lf".into(),
+        log_path: home.join("cron.log"),
+        started_at,
+        finished_at: Some(started_at + 60),
+        outcome: CronOutcome::Succeeded,
+        exit_code: Some(0),
+        error: None,
+    };
+    let receipt_dir = home.join("cron/receipts/infrastructure/telemetry-daily");
+    fs::create_dir_all(&receipt_dir).unwrap();
+    fs::write(
+        receipt_dir.join(format!("{}-{}.json", receipt.started_at, receipt.id)),
+        serde_json::to_vec_pretty(&receipt).unwrap(),
+    )
+    .unwrap();
 }
 
 #[test]
@@ -167,96 +145,81 @@ fn doctor_json_reports_the_build_revision_and_freshness_check() {
 }
 
 #[test]
-fn doctor_formats_accept_recovered_history_and_reject_a_recurrence() {
+fn copied_production_history_does_not_block_the_telemetry_scorecard() {
     let home = tempfile::tempdir().unwrap();
     let store = SqliteStore::new(&home.path().join("loopflow.db")).unwrap();
-    let now = OffsetDateTime::now_utc().unix_timestamp();
-    let (historical, historical_file) = insert_capture(
+    insert_run_event(
         &store,
-        home.path(),
-        "historical-loss",
-        now - 100 * 3600,
-        "partial",
-        Some("No space left on device"),
-    );
-    insert_capture(
-        &store,
-        home.path(),
-        "recovery",
-        now - 49 * 3600,
-        "complete",
-        None,
-    );
-    let historical_bytes = fs::read(&historical_file).unwrap();
-
-    let text = run_lf(home.path(), &["doctor"]);
-    assert!(
-        text.status.success(),
-        "recovered text doctor failed: {}{}",
-        String::from_utf8_lossy(&text.stdout),
-        String::from_utf8_lossy(&text.stderr)
-    );
-    let json = run_lf(home.path(), &["doctor", "--json"]);
-    assert!(json.status.success());
-    let recovered = capture_check(&json);
-    assert_eq!(recovered["status"], "ok");
-    let recovered_detail = recovered["detail"].as_str().unwrap();
-    assert!(recovered_detail.contains("capture recovered"));
-    assert!(recovered_detail.contains("1 partial capture(s)"));
-    assert_eq!(
-        text_check_detail(&text, "ok  ", "capture"),
-        recovered_detail
-    );
-
-    let historical_after = store
-        .agent_invocations_since(0)
+        "august-03",
+        OffsetDateTime::parse(
+            "2026-08-03T12:00:00Z",
+            &time::format_description::well_known::Rfc3339,
+        )
         .unwrap()
-        .into_iter()
-        .find(|invocation| invocation.id == historical.id)
-        .unwrap();
-    assert_eq!(historical_after, historical);
-    assert_eq!(fs::read(&historical_file).unwrap(), historical_bytes);
+        .unix_timestamp(),
+    );
+    let now = OffsetDateTime::now_utc().unix_timestamp();
+    let mut timestamp = OffsetDateTime::parse(
+        "2026-08-12T12:00:00Z",
+        &time::format_description::well_known::Rfc3339,
+    )
+    .unwrap()
+    .unix_timestamp();
+    let mut ordinal = 12;
+    while timestamp <= now {
+        insert_run_event(&store, &format!("after-gap-{ordinal}"), timestamp);
+        timestamp += 86_400;
+        ordinal += 1;
+    }
+    let original_events = store.list_run_events_since(0).unwrap();
+    install_current_telemetry_obligation(home.path());
+    fs::create_dir_all(home.path().join(".lf/flows")).unwrap();
+    fs::create_dir_all(home.path().join("scripts")).unwrap();
+    fs::write(
+        home.path().join(".lf/flows/telemetry-daily.yaml"),
+        "- op: doctor\n- op: __telemetry-scorecard\n",
+    )
+    .unwrap();
+    fs::write(
+        home.path().join("scripts/lifecycle_scorecard.py"),
+        r#"import json
+import pathlib
+import sys
 
-    let (recurrence, _) = insert_capture(
-        &store,
-        home.path(),
-        "recurring-loss",
-        OffsetDateTime::now_utc().unix_timestamp(),
-        "partial",
-        Some("No space left on device"),
+pathlib.Path(sys.argv[2]).joinpath("scorecard-ran").write_text("reached")
+print(json.dumps({"report": {"ok": True}, "metric_observations": [], "text": "scorecard reached\n"}))
+"#,
+    )
+    .unwrap();
+
+    let doctor = run_lf(home.path(), &["doctor", "--json"]);
+    assert!(
+        doctor.status.success(),
+        "lf doctor failed: {}{}",
+        String::from_utf8_lossy(&doctor.stdout),
+        String::from_utf8_lossy(&doctor.stderr)
     );
-    let text = run_lf(home.path(), &["doctor"]);
-    assert!(!text.status.success());
-    let json = run_lf(home.path(), &["doctor", "--json"]);
-    assert!(!json.status.success());
-    let recurring = capture_check(&json);
-    assert_eq!(recurring["status"], "fail");
-    let recurring_detail = recurring["detail"].as_str().unwrap();
-    for expected in [
-        "capture active loss",
-        "task LOO-219",
-        recurrence.id.as_str(),
-        "via codex",
-        "No space left on device",
-        "storage",
-        "available",
-        ".lf",
-        "traces",
-    ] {
-        assert!(
-            recurring_detail.contains(expected),
-            "missing {expected:?}: {recurring_detail}"
-        );
+    let continuity = continuity_check(&doctor);
+    assert_eq!(continuity["status"], "ok");
+    let detail = continuity["detail"].as_str().unwrap();
+    assert!(detail.contains("8 historical ledger gap-day(s) predate first cron activation"));
+    for day in 4..=11 {
+        assert!(detail.contains(&format!("2026-08-{day:02}")), "{detail}");
     }
-    let text_detail = text_check_detail(&text, "FAIL", "capture");
-    for expected in ["storage", "available", ".lf", "traces"] {
-        assert!(
-            text_detail.contains(expected),
-            "missing {expected:?}: {text_detail}"
-        );
-    }
+
+    let telemetry = run_lf(home.path(), &["--batch", "flow", "telemetry-daily"]);
+    assert!(
+        telemetry.status.success(),
+        "telemetry-daily failed: {}{}",
+        String::from_utf8_lossy(&telemetry.stdout),
+        String::from_utf8_lossy(&telemetry.stderr)
+    );
     assert_eq!(
-        normalize_storage_snapshot(text_detail),
-        normalize_storage_snapshot(recurring_detail)
+        fs::read_to_string(home.path().join("scorecard-ran")).unwrap(),
+        "reached"
     );
+    let events_after_telemetry = store.list_run_events_since(0).unwrap();
+    for original in original_events {
+        assert!(events_after_telemetry.contains(&original));
+    }
 }

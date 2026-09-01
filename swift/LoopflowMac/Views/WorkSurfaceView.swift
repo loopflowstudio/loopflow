@@ -19,7 +19,6 @@ struct WorkSurfaceView: View {
     @State private var controlError: String?
     @State private var activeControlId: String?
     @State private var workspaceSelection: WorkTaskSelection?
-    @State private var interruptSelection: WorkTaskSelection?
 
     private var snapshot: RoadmapSnapshot? { model.roadmap.value }
     private var queryError: String? { model.roadmap.errorMessage }
@@ -46,28 +45,10 @@ struct WorkSurfaceView: View {
                 task: selection.task.task,
                 reference: selection.task.reference,
                 runtime: selection.task.runtime,
-                attention: selection.task.attention,
                 repoPath: selection.wave.repo,
                 terminalStore: terminalStore,
                 initialSection: .changes
             )
-        }
-        .confirmationDialog(
-            interruptSelection.map { "Interrupt \($0.task.task.identifier)?" } ?? "Interrupt Task?",
-            isPresented: Binding(
-                get: { interruptSelection != nil },
-                set: { if !$0 { interruptSelection = nil } }
-            ),
-            titleVisibility: .visible
-        ) {
-            Button("Interrupt Task", role: .destructive) {
-                guard let selection = interruptSelection else { return }
-                interruptSelection = nil
-                perform(.interrupt, on: selection)
-            }
-            Button("Cancel", role: .cancel) { interruptSelection = nil }
-        } message: {
-            Text("Queues the audited Task interrupt. Task Work and its worktree remain durable.")
         }
     }
 
@@ -129,7 +110,7 @@ struct WorkSurfaceView: View {
         let sections = nowSections(from: visibleWaves)
         if sections.isEmpty {
             ContentUnavailableView(
-                "Nothing needs attention",
+                "Nothing needs action",
                 systemImage: "checkmark.circle",
                 description: Text("No live or stopped work across these Waves. Open the console to walk the plan.")
             )
@@ -144,9 +125,6 @@ struct WorkSurfaceView: View {
                         onSelect: { row in model.select(.task(id: row.task.id)) },
                         onTaskAction: { row, action in
                             perform(action, on: WorkTaskSelection(wave: row.wave, task: row.task))
-                        },
-                        onInterrupt: { row in
-                            interruptSelection = WorkTaskSelection(wave: row.wave, task: row.task)
                         },
                         onOpenWorktree: openWorktree
                     )
@@ -163,7 +141,7 @@ struct WorkSurfaceView: View {
             scrollingDetail(identifier: "podium-detail-wave") {
                 HStack(alignment: .top, spacing: Spacing.md) {
                     VStack(alignment: .leading, spacing: Spacing.xxs) {
-                        surfaceHeader(roadmap.wave.name, subtitle: roadmap.wave.current.state.label)
+                        surfaceHeader(roadmap.wave.name, subtitle: roadmap.wave.status.label)
                         if roadmap.wave.paused {
                             pausedChip(roadmap.wave.id)
                         }
@@ -206,9 +184,6 @@ struct WorkSurfaceView: View {
                             onSelect: { row in model.select(.task(id: row.task.id)) },
                             onTaskAction: { row, action in
                                 perform(action, on: WorkTaskSelection(wave: row.wave, task: row.task))
-                            },
-                            onInterrupt: { row in
-                                interruptSelection = WorkTaskSelection(wave: row.wave, task: row.task)
                             },
                             onOpenWorktree: openWorktree
                         )
@@ -266,9 +241,6 @@ struct WorkSurfaceView: View {
                             onAction: { action in
                                 perform(action, on: WorkTaskSelection(wave: found.wave.wave, task: task))
                             },
-                            onInterrupt: {
-                                interruptSelection = WorkTaskSelection(wave: found.wave.wave, task: task)
-                            },
                             onOpenWorktree: openWorktree
                         )
                     }
@@ -309,10 +281,10 @@ struct WorkSurfaceView: View {
                             .font(Typography.caption(10).weight(.semibold))
                             .foregroundStyle(task.section.color)
                     }
-                    Text(task.attention.reason)
+                    Text(task.condition.reason)
                         .font(Typography.body(13))
                         .foregroundStyle(palette.textSecondary)
-                        .accessibilityLabel(taskAttentionAccessibilityLabel(task))
+                        .accessibilityLabel(taskConditionAccessibilityLabel(task))
                     WorkChannelChips(task: task)
                     TaskActionCluster(
                         task: task,
@@ -320,9 +292,6 @@ struct WorkSurfaceView: View {
                         controlsDisabled: activeControlId != nil,
                         onAction: { action in
                             perform(action, on: WorkTaskSelection(wave: found.wave.wave, task: task))
-                        },
-                        onInterrupt: {
-                            interruptSelection = WorkTaskSelection(wave: found.wave.wave, task: task)
                         },
                         onOpenWorktree: openWorktree
                     )
@@ -414,16 +383,13 @@ struct WorkSurfaceView: View {
     private enum TaskControl {
         case run
         case resume
-        case interrupt
     }
 
     private func perform(_ action: RoadmapTaskAction, on selection: WorkTaskSelection) {
         switch action {
-        case .attach:
-            workspaceSelection = selection
         case .run:
             perform(TaskControl.run, on: selection)
-        case .resume, .recover:
+        case .resume:
             perform(TaskControl.resume, on: selection)
         case .openPr:
             if let github = selection.task.activePr?.publication?.github {
@@ -446,8 +412,6 @@ struct WorkSurfaceView: View {
                         try LocalWaveAgentLauncher.runTask(repoPath: repo, issue: issue)
                     case .resume:
                         try LocalWaveAgentLauncher.resumeTask(repoPath: repo, issue: issue)
-                    case .interrupt:
-                        try LocalWaveAgentLauncher.interruptTask(repoPath: repo, issue: issue)
                     }
                 }.value
                 await model.refresh()

@@ -26,31 +26,42 @@ struct MultiplexerStoreTests {
     func loadJumpsToOpenSession() throws {
         let store = MultiplexerStore()
         let first = store.focusedPaneId
-        store.load(sessionId: "ask-1")
+        store.load(sessionId: "session-1")
         let second = try #require(store.split(first, axis: .vertical))
 
-        store.load(sessionId: "ask-1")
+        store.load(sessionId: "session-1")
 
         #expect(store.focusedPaneId == first)
         #expect(store.layout.allPanes.count == 2)
         #expect(store.layout.allPanes.count {
-            $0.content == .session(id: "ask-1")
+            $0.content == .session(id: "session-1")
         } == 1)
         #expect(first != second.id)
     }
 
-    @Test("loading from an occupied pane creates a second pane")
-    func loadSplitsOccupiedPane() {
+    @Test("loading from an occupied pane replaces its session")
+    func loadReplacesOccupiedPane() {
         let store = MultiplexerStore()
-        store.load(sessionId: "ask-1")
+        store.load(sessionId: "session-1")
+
+        store.load(sessionId: "ask-2")
+
+        #expect(store.layout.allPanes.map(\.content) == [.session(id: "ask-2")])
+        #expect(store.focusedPane.content == .session(id: "ask-2"))
+    }
+
+    @Test("an explicit split keeps the first session when another is selected")
+    func explicitSplitKeepsBothSessions() throws {
+        let store = MultiplexerStore()
+        store.load(sessionId: "session-1")
+        _ = try #require(store.split(store.focusedPaneId, axis: .vertical))
 
         store.load(sessionId: "ask-2")
 
         #expect(store.layout.allPanes.map(\.content) == [
-            .session(id: "ask-1"),
+            .session(id: "session-1"),
             .session(id: "ask-2"),
         ])
-        #expect(store.focusedPane.content == .session(id: "ask-2"))
     }
 
     @Test("new shell uses the empty pane then splits an occupied pane")
@@ -80,11 +91,38 @@ struct MultiplexerStoreTests {
         #expect(store.focusedPaneId == second.id)
     }
 
-    @Test("close never removes the last pane")
-    func closeKeepsLastPane() {
+    @Test("close removes the left pane as well as the right")
+    func closeLeftPane() throws {
+        let store = MultiplexerStore()
+        let first = store.focusedPaneId
+        let second = try #require(store.split(first, axis: .vertical))
+
+        store.close(first)
+
+        #expect(store.layout.allPanes.map(\.id) == [second.id])
+        #expect(store.focusedPaneId == second.id)
+    }
+
+    @Test("close clears the final terminal and undo restores it")
+    func closeClearsLastTerminal() {
+        let store = MultiplexerStore()
+        store.load(sessionId: "session-1")
+        store.close(store.focusedPaneId)
+
+        #expect(store.layout.allPanes.count == 1)
+        #expect(store.focusedPane.content == .empty)
+
+        store.undoClose()
+        #expect(store.focusedPane.content == .session(id: "session-1"))
+    }
+
+    @Test("close leaves the final empty pane alone")
+    func closeKeepsLastEmptyPane() {
         let store = MultiplexerStore()
         store.close(store.focusedPaneId)
+
         #expect(store.layout.allPanes.count == 1)
+        #expect(store.focusedPane.content == .empty)
     }
 
     @Test("zoom keeps the tree intact and toggles off")
@@ -101,16 +139,16 @@ struct MultiplexerStoreTests {
         #expect(store.zoomedPaneId == nil)
     }
 
-    @Test("settled sessions leave no stale session pane")
-    func settledSessionCollapses() {
+    @Test("completed sessions leave an empty workspace")
+    func completedSessionClearsPane() {
         let store = MultiplexerStore()
-        store.load(sessionId: "ask-1")
+        store.load(sessionId: "session-1")
 
         store.reconcileSessions([])
 
         #expect(store.layout.allPanes.count == 1)
-        #expect(store.focusedPane.content == .shell)
-        #expect(store.pane(forSessionId: "ask-1") == nil)
+        #expect(store.focusedPane.content == .empty)
+        #expect(store.pane(forSessionId: "session-1") == nil)
     }
 
     @Test("focus left follows visual geometry instead of tree order")

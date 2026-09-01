@@ -4,139 +4,231 @@ import Testing
 @testable import Loopflow
 @testable import LoopflowMac
 
-// Reconcile Sessions against polls, open queued Asks serially, and
-// survive a failed open. Behavior only — the injected RegistryQuery runner
-// stands in for `lf`, so nothing spawns.
 @Suite("Sessions store")
 @MainActor
 struct SessionsStoreTests {
-    @Test("refresh runs the Ask query in the opened repository")
-    func refreshUsesRepoScope() async throws {
+    @Test("refresh reads Task flow sessions in the opened repository")
+    func refreshUsesRepoScope() async {
         let store = SessionsStore(
             scope: .repo("/tmp/scoped-repo"),
             query: RegistryQuery { args, cwd in
-                #expect(args == ["ask", "list", "--user", "--json"])
+                #expect(args == ["session", "list", "--json"])
                 #expect(cwd == "/tmp/scoped-repo")
-                return "[\(entry(id: "scoped", attention: "claimed", surface: true))]"
+                return "[\(session(id: "review", state: "active"))]"
             }
         )
 
         await store.refresh()
 
         #expect(store.hasLoaded)
-        #expect(store.sessions.map(\.id) == ["scoped"])
+        #expect(store.sessions.map(\.id) == ["review"])
+        #expect(store.sessions.first?.label == "Design the control surface")
+        #expect(store.sessions.first?.step == "review-design")
     }
 
-    @Test("reconcile adds, updates, and drops settled sessions")
-    func reconcileAddsUpdatesRemoves() async throws {
-        // Runner only ever needs to answer "ask open" if the opener races; a
-        // surface is fine. The assertions below read synchronous post-reconcile
-        // state, before the opener Task runs.
-        let store = SessionsStore(
-            scope: .repo("/tmp/repo"),
-            query: RegistryQuery { _, _ in surfaceJSON(invId: "inv-x") }
-        )
-
+    @Test("reconcile adopts liveness and removes Tasks that advanced")
+    func reconcileTracksTheTaskPlayhead() throws {
+        let store = SessionsStore(scope: .repo("/tmp/repo"))
         store.reconcile(try records([
-            entry(id: "a", attention: "queued", surface: false),
-            entry(id: "b", attention: "claimed", surface: true, invId: "inv-b"),
+            session(id: "a", state: "waiting"),
+            session(id: "b", state: "active"),
         ]))
-        #expect(store.sessions.count == 2)
-        #expect(item(store, "a")?.state == .pending)  // no surface → awaits opener
-        #expect(item(store, "b")?.surface != nil)      // surface present → attaches now
 
-        // 'a' gains a surface on the next poll; 'b' settled and left the queue.
-        store.reconcile(try records([
-            entry(id: "a", attention: "claimed", surface: true, invId: "inv-a"),
-        ]))
+        #expect(item(store, "a")?.state == .pending)
+        #expect(item(store, "b")?.surface != nil)
+
+        store.reconcile(try records([session(id: "a", state: "active")]))
+
         #expect(store.sessions.map(\.id) == ["a"])
-        #expect(item(store, "a")?.surface != nil)      // adopted the surface
+        #expect(item(store, "a")?.surface?.id == "a")
     }
 
-    @Test("queued Asks open one at a time, open-first, never twice")
-    func opensSeriallyOpenFirst() async throws {
-        let probe = OpenProbe()
+    @Test("selecting one waiting Task recovers only that terminal")
+    func opensOnlyTheSelectedSession() async throws {
         let store = SessionsStore(
             scope: .repo("/tmp/repo"),
             query: RegistryQuery { args, _ in
-                guard args.count >= 3, args[1] == "open" else { return "[]" }
-                let id = args[2]
-                await probe.begin(id)
-                try? await Task.sleep(nanoseconds: 15_000_000)
-                await probe.end()
-                return surfaceJSON(invId: "inv-\(id)")
+                #expect(args.first == "session")
+                #expect(args.dropFirst().first == "open")
+                return session(id: args[2], state: "active")
             }
         )
-
         store.reconcile(try records([
-            entry(id: "q1", attention: "queued", surface: false),
-            entry(id: "q2", attention: "queued", surface: false),
-            entry(id: "open1", attention: "claimed", surface: false),  // recover, no spawn
-            entry(id: "q3", attention: "queued", surface: false),
+            session(id: "first", state: "waiting"),
+            session(id: "second", state: "waiting"),
         ]))
 
-        await settle(store) { store.sessions.allSatisfy { $0.surface != nil } }
+        let opened = await store.select("second")
 
-        #expect(await probe.maxConcurrent == 1)                    // strictly serial
-        #expect(await probe.order.first == "open1")                // open-ones first
-        #expect(await probe.counts.count == 4)                     // each opened…
-        #expect(await probe.counts.values.allSatisfy { $0 == 1 })  // …exactly once
+        #expect(opened?.id == "second")
+        #expect(item(store, "first")?.state == .pending)
+        #expect(item(store, "second")?.surface?.openArgv.suffix(3) == ["session", "open", "second"])
     }
 
-    @Test("a failed open marks its session and the opener keeps going")
-    func failureDoesNotStallBoard() async throws {
+    @Test("Selecting an interactive Session replaces its active provider client")
+    func interactiveSelectionUsesReplace() async throws {
         let store = SessionsStore(
             scope: .repo("/tmp/repo"),
             query: RegistryQuery { args, _ in
-                guard args.count >= 3, args[1] == "open" else { return "[]" }
-                let id = args[2]
-                try? await Task.sleep(nanoseconds: 5_000_000)
-                if id == "bad" { throw StubError() }
-                return surfaceJSON(invId: "inv-\(id)")
+                #expect(args == ["session", "open", "native", "--json", "--replace"])
+                return session(id: "native", state: "closed", kind: "interactive")
             }
         )
-
         store.reconcile(try records([
-            entry(id: "bad", attention: "queued", surface: false),
-            entry(id: "ok1", attention: "queued", surface: false),
-            entry(id: "ok2", attention: "queued", surface: false),
+            session(id: "native", state: "active", kind: "interactive"),
         ]))
 
-        await settle(store) {
-            store.sessions.allSatisfy { $0.surface != nil || $0.error != nil }
-        }
+        let opened = await store.select("native")
 
-        #expect(item(store, "bad")?.error != nil)
-        #expect(item(store, "ok1")?.surface != nil)
-        #expect(item(store, "ok2")?.surface != nil)
-    }
-}
-
-// MARK: - Helpers
-
-private struct StubError: Error {}
-
-private actor OpenProbe {
-    private(set) var inFlight = 0
-    private(set) var maxConcurrent = 0
-    private(set) var order: [String] = []
-    private(set) var counts: [String: Int] = [:]
-
-    func begin(_ id: String) {
-        inFlight += 1
-        maxConcurrent = max(maxConcurrent, inFlight)
-        order.append(id)
-        counts[id, default: 0] += 1
+        #expect(opened?.id == "native")
+        #expect(item(store, "native")?.surface != nil)
     }
 
-    func end() { inFlight -= 1 }
-}
+    @Test("Polling preserves an open interactive Session terminal")
+    func reconcilePreservesInteractiveSurface() async throws {
+        let store = SessionsStore(
+            scope: .repo("/tmp/repo"),
+            query: RegistryQuery { args, _ in
+                #expect(args == ["session", "open", "native", "--json", "--replace"])
+                return session(id: "native", state: "closed", kind: "interactive")
+            }
+        )
+        store.reconcile(try records([
+            session(id: "native", state: "closed", kind: "interactive"),
+        ]))
 
-@MainActor
-private func settle(_ store: SessionsStore, until: () -> Bool) async {
-    for _ in 0..<400 {  // ~2s ceiling
-        if until() { return }
-        try? await Task.sleep(nanoseconds: 5_000_000)
+        _ = await store.select("native")
+        store.reconcile(try records([
+            session(id: "native", state: "active", kind: "interactive"),
+        ]))
+
+        #expect(item(store, "native")?.surface?.state == .active)
+    }
+
+    @Test("Completing an interactive Session removes it from Sessions")
+    func completionRemovesInteractiveSession() async throws {
+        let calls = SessionCalls()
+        let store = SessionsStore(
+            scope: .repo("/tmp/repo"),
+            query: RegistryQuery { args, cwd in
+                await calls.append(args)
+                #expect(cwd == "/tmp/repo")
+                if args == ["session", "complete", "native"] {
+                    return "Session native completed"
+                }
+                #expect(args == ["session", "list", "--json"])
+                return "[]"
+            }
+        )
+        store.reconcile(try records([
+            session(id: "native", state: "active", kind: "interactive"),
+        ]))
+
+        let completed = await store.complete("native")
+
+        #expect(completed)
+        #expect(store.sessions.isEmpty)
+        #expect(await calls.values == [
+            ["session", "complete", "native"],
+            ["session", "list", "--json"],
+        ])
+    }
+
+    @Test("Completing a ready Ask resumes its caller")
+    func completionRemovesAskSession() async throws {
+        let calls = SessionCalls()
+        let store = SessionsStore(
+            scope: .repo("/tmp/repo"),
+            query: RegistryQuery { args, cwd in
+                await calls.append(args)
+                #expect(cwd == "/tmp/repo")
+                if args == ["session", "complete", "ask"] {
+                    return "Ask session completed: Ready for review"
+                }
+                #expect(args == ["session", "list", "--json"])
+                return "[]"
+            }
+        )
+        store.reconcile(try records([
+            session(id: "ask", state: "ready", kind: "ask"),
+        ]))
+
+        let completed = await store.complete("ask")
+
+        #expect(completed)
+        #expect(store.sessions.isEmpty)
+        #expect(await calls.values == [
+            ["session", "complete", "ask"],
+            ["session", "list", "--json"],
+        ])
+    }
+
+    @Test("A ready FlowStep stays visible until its decision")
+    func readyDoesNotDisappear() throws {
+        let store = SessionsStore(scope: .repo("/tmp/repo"))
+        store.reconcile(try records([session(id: "review", state: "ready")]))
+
+        #expect(store.sessions.map(\.id) == ["review"])
+        #expect(store.sessions.first?.statusLabel == "READY")
+        #expect(store.sessions.first?.record.readySummary == "Ready for review")
+    }
+
+    @Test("Only a FlowStep decision removes a ready FlowStep")
+    func resolutionNamesTheSession() async throws {
+        let calls = SessionCalls()
+        let store = SessionsStore(
+            scope: .repo("/tmp/repo"),
+            query: RegistryQuery { args, cwd in
+                await calls.append(args)
+                #expect(cwd == "/tmp/repo")
+                if args == ["session", "approve", "review", "Ready for review"] {
+                    return "Task FlowStep approved"
+                }
+                #expect(args == ["session", "list", "--json"])
+                return "[]"
+            }
+        )
+        store.reconcile(try records([session(id: "review", state: "ready")]))
+
+        let decided = await store.decideFlow(
+            "review",
+            approving: true,
+            text: "Ready for review"
+        )
+
+        #expect(decided)
+        #expect(store.sessions.isEmpty)
+        #expect(await calls.values == [
+            ["session", "approve", "review", "Ready for review"],
+            ["session", "list", "--json"],
+        ])
+    }
+
+    @Test("Session scope collapses a linked worktree to its main repository")
+    func sessionScopeUsesMainRepository() throws {
+        let root = FileManager.default.temporaryDirectory
+            .appendingPathComponent("session-scope-\(UUID().uuidString)", isDirectory: true)
+        let main = root.appendingPathComponent("loopflow", isDirectory: true)
+        let worktree = root.appendingPathComponent("loopflow.feature", isDirectory: true)
+        defer { try? FileManager.default.removeItem(at: root) }
+        try FileManager.default.createDirectory(at: main, withIntermediateDirectories: true)
+        try runGit(["init", "-q"], at: main)
+        try runGit(
+            [
+                "-c", "user.email=t@t", "-c", "user.name=t",
+                "commit", "-q", "--allow-empty", "-m", "init",
+            ],
+            at: main
+        )
+        try runGit(["worktree", "add", "-q", worktree.path], at: main)
+
+        let scope = SessionScope.repo(worktree.path).resolvingRepository()
+
+        #expect(
+            URL(fileURLWithPath: scope.repoPath).resolvingSymlinksInPath().path
+                == main.resolvingSymlinksInPath().path
+        )
+        #expect(scope.label == "loopflow")
     }
 }
 
@@ -145,77 +237,45 @@ private func item(_ store: SessionsStore, _ id: String) -> SessionItem? {
     store.sessions.first { $0.id == id }
 }
 
-private func records(_ entries: [String]) throws -> [AskAttentionRecord] {
-    let json = "[\(entries.joined(separator: ","))]"
-    return try JSONDecoder().decode([AskAttentionRecord].self, from: Data(json.utf8))
+private func records(_ entries: [String]) throws -> [SessionRecord] {
+    try JSONDecoder().decode(
+        [SessionRecord].self,
+        from: Data("[\(entries.joined(separator: ","))]".utf8)
+    )
 }
 
-private func entry(id: String, attention: String, surface: Bool, invId: String = "inv") -> String {
-    let state = attention == "queued" ? "queued" : "claimed"
-    let surfaceField = surface ? surfaceJSON(invId: invId) : "null"
-    return """
+private func session(id: String, state: String, kind: String = "flow") -> String {
+    """
     {
-      "ask": {
-        "id": "\(id)",
-        "origin": { "work": { "kind": "task", "id": "task-\(id)" } },
-        "target": { "kind": "user" },
-        "request": { "kind": "intervention", "prompt": "Question \(id)" },
-        "state": "\(state)",
-        "active_invocation_id": null,
-        "result": null,
-        "terminal_author": null,
-        "asked_at": "2026-07-19T22:00:01Z",
-        "terminal_at": null
-      },
-      "surface": \(surfaceField),
-      "attention": "\(attention)"
+      "id": "\(id)",
+      "kind": "\(kind)",
+      "work": { "kind": "task", "id": "task-\(id)" },
+      "title": "Design the control surface",
+      "detail": "review-design",
+      "cwd": "/tmp/repo.\(id)",
+      "state": "\(state)",
+      "ready_summary": \(state == "ready" ? "\"Ready for review\"" : "null"),
+      "open_argv": ["lf", "session", "open", "\(id)"]
     }
     """
 }
 
-private func surfaceJSON(invId: String) -> String {
-    """
-    {
-      "invocation": {
-        "id": "\(invId)",
-        "supervising_run_id": "run2",
-        "answer_ask_id": null,
-        "route": { "provider": "opaque", "model": null, "account_id": null },
-        "surface": "terminal",
-        "resume_token": null,
-        "started_at": "2026-07-17T12:00:00Z",
-        "ended_at": null
-      },
-      "run": {
-        "id": "run2",
-        "work": { "kind": "task", "id": "task5" },
-        "epoch_id": "e",
-        "home_id": "h",
-        "runtime_generation": 8,
-        "state": "active",
-        "trigger": { "kind": "user" },
-        "retry_of": null,
-        "containment": { "kind": "tmux", "name": "lf-task" },
-        "cwd": "/tmp",
-        "created_at": "2026-07-17T11:59:59Z",
-        "started_at": "2026-07-17T12:00:00Z",
-        "ended_at": null
-      },
-      "work": { "kind": "task", "id": "task5" },
-      "wave_id": "00000000-0000-4000-8000-000000000006",
-      "home_route": "jack@local",
-      "handback": null,
-      "attach_argv": ["tmux", "attach-session", "-t", "lf-task"],
-      "current": {
-        "state": "live",
-        "reason": "the owning Home verified the supervising Run",
-        "liveness": {
-          "state": "present",
-          "observed_at": "2026-07-17T12:00:01Z",
-          "fresh": true
-        }
-      }
+private func runGit(_ args: [String], at directory: URL) throws {
+    let process = Process()
+    process.executableURL = URL(fileURLWithPath: "/usr/bin/env")
+    process.arguments = ["git", "-C", directory.path] + args
+    process.standardOutput = Pipe()
+    process.standardError = Pipe()
+    try process.run()
+    process.waitUntilExit()
+    try #require(process.terminationStatus == 0, "git \(args.joined(separator: " "))")
+}
+
+private actor SessionCalls {
+    private(set) var values: [[String]] = []
+
+    func append(_ value: [String]) {
+        values.append(value)
     }
-    """
 }
 #endif

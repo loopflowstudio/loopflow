@@ -25,7 +25,7 @@ def _write(root: Path, path: str, text: str) -> None:
 def repo(tmp_path: Path) -> Path:
     _write(
         tmp_path,
-        "docs/architecture.md",
+        "docs/architecture-reference.md",
         (
             """# Architecture
 
@@ -76,7 +76,7 @@ path = "src/bin/lf.rs"
     )
     _write(
         tmp_path,
-        "rust/loopflow/src/wave/server.rs",
+        "rust/loopflow/src/controller/wave/server.rs",
         'fn router() { Router::new().route("/health", get(health)); }\n',
     )
     _write(tmp_path, "rust/loopflow/src/lfd/mod.rs", "fn router() {}\n")
@@ -185,7 +185,7 @@ path = "src/bin/keeper.rs"
 
 
 def test_new_http_route_must_name_its_process_owner(repo: Path) -> None:
-    server = repo / "rust/loopflow/src/wave/server.rs"
+    server = repo / "rust/loopflow/src/controller/wave/server.rs"
     server.write_text(
         'fn router() { Router::new().route("/health", get(health))'
         '.route("/events", get(events)); }\n'
@@ -209,7 +209,7 @@ def test_new_provider_must_join_an_external_edge(repo: Path) -> None:
 
 
 def test_one_owner_cannot_be_mapped_twice(repo: Path) -> None:
-    architecture_doc = repo / "docs/architecture.md"
+    architecture_doc = repo / "docs/architecture-reference.md"
     architecture_doc.write_text(
         architecture_doc.read_text().replace(
             "<!-- architecture-map:end -->",
@@ -221,7 +221,7 @@ def test_one_owner_cannot_be_mapped_twice(repo: Path) -> None:
 
 
 def test_one_concept_name_cannot_describe_two_rows(repo: Path) -> None:
-    architecture_doc = repo / "docs/architecture.md"
+    architecture_doc = repo / "docs/architecture-reference.md"
     architecture_doc.write_text(
         architecture_doc.read_text().replace(
             "<!-- architecture-map:end -->",
@@ -252,7 +252,7 @@ def test_generated_website_docs_do_not_duplicate_the_authoritative_scan(repo: Pa
 
 
 def test_named_historical_sql_scope_accepts_retired_language(repo: Path) -> None:
-    architecture_doc = repo / "docs/architecture.md"
+    architecture_doc = repo / "docs/architecture-reference.md"
     architecture_doc.write_text(
         architecture_doc.read_text().replace(
             "| `Project Session` | — | Project Work |",
@@ -266,7 +266,7 @@ def test_named_historical_sql_scope_accepts_retired_language(repo: Path) -> None
 
 
 def test_unused_historical_scope_fails(repo: Path) -> None:
-    architecture_doc = repo / "docs/architecture.md"
+    architecture_doc = repo / "docs/architecture-reference.md"
     architecture_doc.write_text(
         architecture_doc.read_text().replace(
             "| `Project Session` | — | Project Work |",
@@ -284,7 +284,7 @@ def test_new_compatibility_marker_must_join_the_seam_inventory(repo: Path) -> No
 
 
 def test_declared_compatibility_seam_needs_a_source_marker(repo: Path) -> None:
-    architecture_doc = repo / "docs/architecture.md"
+    architecture_doc = repo / "docs/architecture-reference.md"
     architecture_doc.write_text(
         architecture_doc.read_text().replace(
             "<!-- architecture-shims:end -->",
@@ -303,7 +303,7 @@ def test_new_dto_projection_must_join_the_projection_inventory(repo: Path) -> No
 
 
 def test_dead_authoritative_link_fails(repo: Path) -> None:
-    architecture_doc = repo / "docs/architecture.md"
+    architecture_doc = repo / "docs/architecture-reference.md"
     architecture_doc.write_text(
         architecture_doc.read_text().replace("wave/types.rs", "wave/missing.rs")
     )

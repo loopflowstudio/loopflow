@@ -125,10 +125,10 @@ fn verified_webhooks_drive_task_control_exactly_once() {
     let work = rt
         .block_on(task.store.work_for_child(&target))
         .expect("work");
-    let seed = rt
-        .block_on(task.store.boundary_seed(&work))
-        .expect("boundary seed");
-    assert_eq!(seed.steers.len(), 2);
-    assert!(seed.steers[0].text.contains("New title"));
-    assert!(seed.steers[1].text.contains("please prioritize"));
+    let steers = rt
+        .block_on(task.store.work_steers(&work))
+        .expect("Work steers");
+    assert_eq!(steers.len(), 2);
+    assert!(steers[0].text.contains("New title"));
+    assert!(steers[1].text.contains("please prioritize"));
 }

@@ -11,7 +11,6 @@ use serde::{Deserialize, Serialize};
 use time::OffsetDateTime;
 use tracing::{debug, warn};
 
-use crate::durable::{RunId, WorkRef, RUN_ID_ENV};
 use crate::engine::worktrees::main_repo_root;
 use crate::id::{ExecId, TraceId};
 use crate::store::sqlite::SqliteStore;
@@ -355,70 +354,6 @@ pub fn open_ledger() -> Result<SqliteStore, crate::store::StoreError> {
     SqliteStore::new(&ledger_db_path()?)
 }
 
-/// Return explicit launch identity for durable trace capture.
-pub fn trace_capture_context(
-    worktree: &Path,
-    flow: Option<String>,
-    skill: Option<String>,
-) -> Result<crate::trace::TraceCaptureContext, TraceCaptureContextError> {
-    let context = current_context().ok_or(TraceCaptureContextError::MissingJournalRunContext)?;
-    let (project, task) = child_work_attribution();
-    Ok(crate::trace::TraceCaptureContext {
-        run_id: context.run_id,
-        process_id: context.process_id,
-        repo: context
-            .repo
-            .map(PathBuf::from)
-            .unwrap_or_else(|| worktree.to_path_buf()),
-        worktree: worktree.to_path_buf(),
-        wave: context.wave,
-        project,
-        task,
-        flow,
-        skill,
-    })
-}
-
-#[derive(Debug, PartialEq, Eq, thiserror::Error)]
-#[non_exhaustive]
-pub enum TraceCaptureContextError {
-    #[error(
-        "journal Run context is missing; Work-owned provider entrypoints must enter repo runtime before trace capture starts"
-    )]
-    MissingJournalRunContext,
-}
-
-fn child_work_attribution() -> (Option<String>, Option<String>) {
-    let Some(value) = std::env::var_os(RUN_ID_ENV) else {
-        return (None, None);
-    };
-    let Ok(run_id) = RunId::parse(&value.to_string_lossy()) else {
-        return (None, None);
-    };
-    let Ok(store) = open_ledger() else {
-        return (None, None);
-    };
-    let Ok(lease) = store.run_context(&run_id) else {
-        return (None, None);
-    };
-    match lease.work {
-        WorkRef::Project(id) => store
-            .project(&id)
-            .ok()
-            .flatten()
-            .map_or((None, None), |project| (Some(project.plan.slug), None)),
-        WorkRef::Task(id) => store.task(&id).ok().flatten().map_or((None, None), |task| {
-            let project = store
-                .project(&task.project_id)
-                .ok()
-                .flatten()
-                .map(|project| project.plan.slug);
-            (project, Some(task.plan.identifier))
-        }),
-        WorkRef::Wave(_) => (None, None),
-    }
-}
-
 #[cfg(not(test))]
 fn ledger_db_path() -> Result<PathBuf, crate::store::StoreError> {
     crate::store::database_path_from_env()
@@ -466,7 +401,7 @@ fn ensure_run_context(
     }
 
     let main_repo = main_repo_root(repo_root).ok();
-    let attribution = crate::engine::wave_context::run_attribution(main_repo.as_deref());
+    let attribution = crate::work::wave::context::run_attribution(main_repo.as_deref());
     let wave_name = attribution.wave;
     if let Some(failure) = attribution.failure.as_deref() {
         debug!(
@@ -829,7 +764,7 @@ mod tests {
     };
     use crate::engine::git::is_clean;
     use crate::id::{ExecId, TraceId, WaveId};
-    use crate::wave::Wave;
+    use crate::work::wave::Wave;
     use loopflow_test_support::TestRepo;
     use std::path::PathBuf;
     use std::process::{Command, Stdio};
@@ -930,25 +865,6 @@ mod tests {
         assert_ne!(resolved, ambient_home.path().join("loopflow.db"));
         assert!(!ambient_db.exists());
         assert!(!ambient_home.path().join("loopflow.db").exists());
-    }
-
-    #[test]
-    fn trace_capture_context_names_missing_journal_run_context() {
-        let _guard = journal_test_guard();
-        let repo = TestRepo::new();
-
-        let error = super::trace_capture_context(
-            repo.path(),
-            Some("task-design".to_string()),
-            Some("review-design".to_string()),
-        )
-        .expect_err("trace capture requires an active journal Run context");
-
-        assert_eq!(
-            error,
-            super::TraceCaptureContextError::MissingJournalRunContext
-        );
-        assert!(error.to_string().contains("journal Run context is missing"));
     }
 
     fn started_fields(
@@ -1117,7 +1033,7 @@ mod tests {
             .expect("ledger")
             .create_wave(&wave)
             .expect("explicit wave row");
-        std::env::set_var(crate::engine::wave_context::WAVE_ID_ENV, wave.id().as_str());
+        std::env::set_var(crate::work::wave::context::WAVE_ID_ENV, wave.id().as_str());
 
         emit(
             &worktree,
@@ -1141,7 +1057,7 @@ mod tests {
             .list_run_events_since(0)
             .expect("events");
         assert_eq!(events[0].wave.as_deref(), Some("context"));
-        std::env::remove_var(crate::engine::wave_context::WAVE_ID_ENV);
+        std::env::remove_var(crate::work::wave::context::WAVE_ID_ENV);
     }
 
     /// W2-239: a stale ambient UUID (registry has no row for it) is propagated
@@ -1166,10 +1082,10 @@ mod tests {
             .create_wave(&registered)
             .expect("registered wave row");
         let stale_id = WaveId::new();
-        std::env::set_var(crate::engine::wave_context::WAVE_ID_ENV, stale_id.as_str());
+        std::env::set_var(crate::work::wave::context::WAVE_ID_ENV, stale_id.as_str());
 
         // `with_runtime` resolves once and records wave + failure; mirror that.
-        let attribution = crate::engine::wave_context::run_attribution(Some(&worktree));
+        let attribution = crate::work::wave::context::run_attribution(Some(&worktree));
         assert_eq!(
             attribution.wave, None,
             "stale identity attributes to no wave"
@@ -1220,7 +1136,7 @@ mod tests {
         assert_eq!(started.wave, None);
         assert_eq!(started.error.as_deref(), Some(failure.as_str()));
 
-        std::env::remove_var(crate::engine::wave_context::WAVE_ID_ENV);
+        std::env::remove_var(crate::work::wave::context::WAVE_ID_ENV);
     }
 
     #[test]

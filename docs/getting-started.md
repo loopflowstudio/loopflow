@@ -39,7 +39,12 @@ scratch          867 ▏
 clipboard        634 ▏
 ```
 
-The `-c` flag pastes your clipboard. `lf` assembles context—operating guidance, scratch notes, and clipboard—and passes it to the coding agent. Add repo docs explicitly with `--docs` and changed file bodies with `--diff-files`.
+The `-c` flag pastes your clipboard. `lf` assembles context—operating guidance,
+scratch notes, and clipboard—and passes it to the coding agent. Before the
+provider starts, Loopflow publishes one immutable Run manifest under this
+Home's `$LF_HOME/runs/`; conversation, usage, and terminal evidence accumulate
+there without becoming a lock on the repository or planning system. Add repo
+docs explicitly with `--docs` and changed file bodies with `--diff-files`.
 
 `LOOPFLOW.md` ships as default operating guidance for every run; opt out with `--no-loopflow`.
 
@@ -139,28 +144,29 @@ Focus on input validation and auth boundaries.
 lf audit    # runs your custom skill
 ```
 
-The [Prompt Authoring guide](https://loopflow.studio/docs/prompts) covers prompt
-contracts, evidence loops, Wave goals, and directions.
+The [Authoring guide](authoring.md) covers prompt contracts, evidence loops,
+Wave goals, and directions.
 
 ### Shipping
 
 ```bash
 lf pr publish   # push + create or update PR (no browser)
 lf pr open      # publish, then open the PR for review
-lf pr submit    # non-Task PR: prepare the exact head; you click merge
+lf pr submit    # prepare the exact head; you click merge
 lf pr arm       # arm exact-head auto-merge and return
 lf pr land      # watch, repair CI, and return after GitHub merges
 ```
 
-A managed Task ships only with `lf pr land` — its `finally` review is the single
-shipping decision, and `submit` (a human merge click) is refused inside a Task.
+Use the same delivery verbs for Task and non-Task branches. They act on the
+branch and Task PR record when present; they do not require end-to-end
+controller state.
 
 ---
 
 ## Scale with Waves
 
-Ready to automate? Waves remain available continuously and run a complete flow
-when chat, child observations, crons, or a heartbeat wake them.
+Ready to automate? Waves remain available continuously and choose another
+bounded pass when chat, child observations, crons, or a heartbeat wake them.
 
 `lf` skills are manual building blocks. A Wave is a named agent that reads its
 Linear Projects and tasks, starts durable Tasks, and supervises their
@@ -174,7 +180,7 @@ Project → Task work map; the app starts the Wave's resident process when
 needed. From the CLI, `lf start shipper` does the same start.
 
 The Wave creates or selects a Linear task, starts it with `lf task run
-<issue-id>`, and stays steerable while the Task runs in its immutable
+<issue-id>`, and stays steerable while the Task runs in its stable
 worktree. `lf pr land` keeps the PR under one durable watcher through CI repair
 and merge; review feedback returns to the same Task and linked events land in
 the Wave thread.
@@ -187,7 +193,9 @@ tmux ls               # live agent sessions
 tmux attach -r -t <name> # inspect one; never mutate the session directly
 ```
 
-Use `lf ask list`, then `lf ask open <ask-id>`, for requested interventions that need an exact session.
+Use `lf session list`, then `lf session open <session-id>`, for every unresolved
+interactive Run, Ask, or Task FlowStep. Finish it with the kind-specific action
+shown in the [Sessions lifecycle](../README.md#sessions).
 
 Use `lf prompt: draft wave/shipper/GOAL.md` to author the loop contract. Use
 `lf design` to explore an uncertain operating context, or write it by hand.
@@ -199,8 +207,9 @@ Once `wave/` files exist, `lf wave <name>` runs them and Loopflow picks them up.
 
 ## Go Remote
 
-Run agents while you sleep. A Home is a stable machine identity; its SSH route
-can change. Bootstrap the remote identity once:
+Run agents while you sleep. A Home is a stable machine identity with local
+planning, process, journal, and Run evidence; its SSH route can change.
+Bootstrap the remote identity once:
 
 ```bash
 lf ssh jack@mini.local home id --json
@@ -214,6 +223,10 @@ lf ssh <home-id> start shipper
 `lf ssh <home-id> start shipper` executes the same operation on the named Home,
 which proves its identity before changing lifecycle state. One Home keeper
 serves every Wave running there.
+
+Reads follow the same rule: `lf runs`, `lf usage`, `lf ls`, and `lf status`
+read the executing Home. Prefix the command with `lf ssh <home-id>` to read
+another Home. Loopflow does not silently aggregate or replicate Run records.
 
 Foreground `lf ssh` commands can choose from subscription accounts installed on
 the origin and target. A resident that outlives SSH sheds forwarded credentials

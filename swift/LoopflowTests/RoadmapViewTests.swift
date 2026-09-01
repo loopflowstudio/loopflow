@@ -12,15 +12,14 @@ struct RoadmapViewTests {
         let project = try #require(snapshot.waves.first?.projects.items.first)
         let tasks = project.tasks
 
-        // A live body with no lifecycle move waiting on it falls back to Attach.
-        #expect(roadmapTaskAction(tasks[0]) == .attach)
-        #expect(roadmapTaskCanInterrupt(tasks[0]))
+        // No exact process evidence means planning offers Resume, never an
+        // inferred attach or interrupt action.
+        #expect(roadmapTaskAction(tasks[0]) == .resume)
 
         // An explicit User merge request advertises Open PR: the server
         // recommends the exact head, and the app does not re-derive it.
-        #expect(tasks[1].attention.actions.recommended == .openPr)
+        #expect(tasks[1].actions.recommended == .openPr)
         #expect(roadmapTaskAction(tasks[1]) == .openPr)
-        #expect(!roadmapTaskCanInterrupt(tasks[1]))
 
         // No Task Work yet, and a terminal Task offers nothing.
         #expect(roadmapTaskAction(tasks[2]) == .run)
@@ -31,7 +30,7 @@ struct RoadmapViewTests {
     func recommendedActionCarriesItsReason() throws {
         let snapshot = try loadRoadmapFixture()
         let project = try #require(snapshot.waves.first?.projects.items.first)
-        let openingPR = project.tasks[1].attention.actions
+        let openingPR = project.tasks[1].actions
 
         #expect(openingPR.recommended == .openPr)
         #expect(openingPR.reason == "merge head abc1234 on GitHub")

@@ -4,11 +4,11 @@ import Testing
 @testable import Loopflow
 @testable import LoopflowMac
 
-/// The fader collapses two evidence channels — output signal and human
-/// attention — into four phases, and each phase owns exactly one press verb.
+/// The fader collapses two evidence channels — process activity and human
+/// waiting Sessions — into four phases, and each phase owns one press verb.
 @Suite("Fader switch")
 struct FaderSwitchTests {
-    @Test("A human-owed stop wins over any sibling output")
+    @Test("A human-owed stop wins over any sibling activity")
     func humanStopWins() {
         for signal in [PodiumSignalState.off, .producing, .blocked, .waiting, .unknown] {
             #expect(
@@ -18,7 +18,7 @@ struct FaderSwitchTests {
         }
     }
 
-    @Test("Output signal maps onto the collapsed phase set")
+    @Test("Process signal maps onto the collapsed phase set")
     func signalCollapse() {
         #expect(ConsoleSignal.phase(humanStop: false, agentRunning: false, signal: .producing) == .producing)
         #expect(ConsoleSignal.phase(humanStop: false, agentRunning: false, signal: .blocked) == .waiting)

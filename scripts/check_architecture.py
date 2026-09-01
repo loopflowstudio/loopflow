@@ -24,12 +24,12 @@ from dataclasses import asdict, dataclass
 from pathlib import Path
 
 REPO_ROOT = Path(__file__).resolve().parent.parent
-ARCHITECTURE = Path("docs/architecture.md")
+ARCHITECTURE = Path("docs/architecture-reference.md")
 MIGRATIONS = Path("rust/loopflow/src/store/migrations")
 MIGRATIONS_RS = Path("rust/loopflow/src/store/migrations.rs")
 LF_MOD = Path("rust/loopflow/src/lf/mod.rs")
 CRATE_MANIFEST = Path("rust/loopflow/Cargo.toml")
-WAVE_SERVER = Path("rust/loopflow/src/wave/server.rs")
+WAVE_SERVER = Path("rust/loopflow/src/controller/wave/server.rs")
 LFD_SERVER = Path("rust/loopflow/src/lfd/mod.rs")
 PROVIDERS = Path("rust/loopflow/src/provider_auth/mod.rs")
 FLOWS = Path(".lf/flows")

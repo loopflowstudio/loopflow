@@ -13,47 +13,10 @@ struct WaveLensTests {
         #expect(lens.reason.contains("listener answered"))
     }
 
-    @Test("a verified Run without a listener is red, not invented green")
-    func activeRunWithoutListenerIsRed() {
+    @Test("listener absence is not invented as live evidence")
+    func absentListenerIsNotLiveEvidence() {
         let lens = WaveLens.forWave(
             live: false,
-            current: current(.working, reason: "Run process answered"),
-            activeTasks: 0,
-            activeProjects: 0
-        )
-        #expect(lens.color == .red)
-        #expect(lens.reason == "Run process answered")
-    }
-
-    @Test("a live listener cannot erase canonically stopped Work")
-    func liveListenerPreservesStoppedWork() {
-        let lens = WaveLens.forWave(
-            live: true,
-            current: current(.stopped, reason: "the owning Home proved the Run is gone"),
-            activeTasks: 0,
-            activeProjects: 0
-        )
-        #expect(lens.color == .red)
-        #expect(lens.reason == "the owning Home proved the Run is gone · Wave listener still answered")
-    }
-
-    @Test("a live listener cannot make unobservable Work green")
-    func liveListenerPreservesUnobservableWork() {
-        let lens = WaveLens.forWave(
-            live: true,
-            current: current(.unobservable, reason: "the owning Home could not verify the Run"),
-            activeTasks: 0,
-            activeProjects: 0
-        )
-        #expect(lens.color == .unknown)
-        #expect(lens.reason == "the owning Home could not verify the Run · Wave listener answered")
-    }
-
-    @Test("a recorded running status is not live evidence")
-    func recordedRunningStatusIsNotLiveEvidence() {
-        let lens = WaveLens.forWave(
-            live: false,
-            current: nil,
             activeTasks: 0,
             activeProjects: 0
         )
@@ -129,22 +92,20 @@ struct WaveLensTests {
         #expect(stopped.reason == "Paused · listener is stopped")
     }
 
-    // MARK: - The shared level maps 1:1, and unknown is lit (never off/black)
+    // MARK: - Task conditions map 1:1, and unknown is lit (never off/black)
 
-    @Test("attention levels map to lens colors one-to-one")
+    @Test("Task conditions map to lens colors one-to-one")
     func levelsMapOneToOne() {
-        #expect(WaveLensColor(.green) == .green)
-        #expect(WaveLensColor(.red) == .red)
-        #expect(WaveLensColor(.blue) == .blue)
-        #expect(WaveLensColor(.black) == .black)
+        #expect(WaveLensColor(.blocked) == .red)
+        #expect(WaveLensColor(.waiting) == .blue)
+        #expect(WaveLensColor(.clear) == .black)
         #expect(WaveLensColor(.unknown) == .unknown)
     }
 
-    @Test("a User Ask is blue and wins over a live Project body")
-    func projectBlueWinsOverLiveBody() throws {
+    @Test("a human Task step is blue and wins over Project planning state")
+    func projectBlueWinsOverPlanningState() throws {
         let lens = WaveLens.forProject(
-            runtime: try makeRuntime(alive: true, reason: "implementing"),
-            tasks: [try makeTask(level: "blue", reason: "Waiting for your answer")]
+            tasks: [try makeTask(state: "waiting", reason: "Waiting for your answer")]
         )
         #expect(lens.color == .blue)
         #expect(lens.reason == "Waiting for your answer")
@@ -157,86 +118,71 @@ struct WaveLensTests {
         #expect(WaveLensColor.unknown.glow != WaveLensColor.black.glow)
     }
 
-    // MARK: - Task row (shared attention, verbatim)
+    // MARK: - Task row (shared condition, verbatim)
 
     @Test("task lens is the shared level and reason, verbatim")
     func taskLensIsVerbatim() throws {
-        let attention = try makeAttention(level: "red", reason: "merge head abc1234 on GitHub")
-        let lens = WaveLens.forTask(attention)
+        let condition = try makeCondition(
+            state: "blocked",
+            reason: "local Task progress requires recovery"
+        )
+        let lens = WaveLens.forTask(condition)
         #expect(lens.color == .red)
-        #expect(lens.reason == "merge head abc1234 on GitHub")
+        #expect(lens.reason == "local Task progress requires recovery")
     }
 
     @Test("unavailable task evidence stays unknown with its reason, never black")
     func unavailableTaskIsUnknown() throws {
-        let attention = try makeAttention(level: "unknown", reason: "failed to inspect Task worktree")
-        let lens = WaveLens.forTask(attention)
+        let condition = try makeCondition(state: "unknown", reason: "failed to inspect Task worktree")
+        let lens = WaveLens.forTask(condition)
         #expect(lens.color == .unknown)
         #expect(lens.reason == "failed to inspect Task worktree")
     }
 
     @Test("the shared W2-123 fixture maps every state verbatim")
     func sharedFixtureMapsVerbatim() throws {
-        let tasks = try loadAttentionFixture()
+        let tasks = try loadConditionFixture()
         for (_, task) in tasks {
-            let lens = WaveLens.forTask(task.attention)
-            #expect(lens.color == WaveLensColor(task.attention.level))
-            #expect(lens.reason == task.attention.reason)
+            let lens = WaveLens.forTask(task.condition)
+            #expect(lens.color == WaveLensColor(task.condition.state))
+            #expect(lens.reason == task.condition.reason)
         }
         // The unavailable row is the one that must not collapse to black.
         let unavailable = try #require(tasks["unavailable"])
-        #expect(WaveLens.forTask(unavailable.attention).color == .unknown)
+        #expect(WaveLens.forTask(unavailable.condition).color == .unknown)
         // Off-and-clean rows are genuinely black — the fixture proves both.
-        #expect(WaveLens.forTask(try #require(tasks["clean_backlog"]).attention).color == .black)
-        #expect(WaveLens.forTask(try #require(tasks["completed"]).attention).color == .black)
-        #expect(WaveLens.forTask(try #require(tasks["live_advancing"]).attention).color == .green)
+        #expect(WaveLens.forTask(try #require(tasks["clean_backlog"]).condition).color == .black)
+        #expect(WaveLens.forTask(try #require(tasks["completed"]).condition).color == .black)
     }
 
-    // MARK: - Project row (derived from runtime + Task attention)
+    // MARK: - Project row (derived from Task conditions)
 
-    @Test("a live project body advancing is green")
-    func projectLiveIsGreen() throws {
+    @Test("a red Task wins over a black sibling")
+    func projectRedWinsOverBlackTask() throws {
         let lens = WaveLens.forProject(
-            runtime: try makeRuntime(alive: true, reason: "implementing the projection"),
-            tasks: [try makeTask(level: "green", reason: "advancing")]
-        )
-        #expect(lens.color == .green)
-        #expect(lens.reason == "implementing the projection")
-    }
-
-    @Test("a task needing attention wins over a live project body")
-    func projectRedWinsOverLiveBody() throws {
-        let lens = WaveLens.forProject(
-            runtime: try makeRuntime(alive: true, reason: "implementing"),
             tasks: [
-                try makeTask(level: "green", reason: "advancing"),
-                try makeTask(level: "red", reason: "awaiting review"),
+                try makeTask(state: "clear", reason: "ready"),
+                try makeTask(state: "blocked", reason: "awaiting review"),
             ]
         )
         #expect(lens.color == .red)
         #expect(lens.reason == "awaiting review")
     }
 
-    @Test("with no live body the most demanding task attention wins")
-    func projectFoldsTaskAttention() throws {
-        let redOverGreen = WaveLens.forProject(runtime: nil, tasks: [
-            try makeTask(level: "green", reason: "advancing"),
-            try makeTask(level: "red", reason: "stuck"),
+    @Test("the most demanding Task condition wins")
+    func projectFoldsTaskCondition() throws {
+        let redOverBlack = WaveLens.forProject(tasks: [
+            try makeTask(state: "clear", reason: "ready"),
+            try makeTask(state: "blocked", reason: "stuck"),
         ])
-        #expect(redOverGreen.color == .red)
-
-        let greenOverBlack = WaveLens.forProject(runtime: nil, tasks: [
-            try makeTask(level: "black", reason: "done"),
-            try makeTask(level: "green", reason: "advancing"),
-        ])
-        #expect(greenOverBlack.color == .green)
+        #expect(redOverBlack.color == .red)
     }
 
     @Test("unreadable task evidence surfaces as unknown, not a silent black")
     func projectUnknownNeverBlack() throws {
-        let lens = WaveLens.forProject(runtime: nil, tasks: [
-            try makeTask(level: "black", reason: "done"),
-            try makeTask(level: "unknown", reason: "failed to inspect Task worktree"),
+        let lens = WaveLens.forProject(tasks: [
+            try makeTask(state: "clear", reason: "done"),
+            try makeTask(state: "unknown", reason: "failed to inspect Task worktree"),
         ])
         #expect(lens.color == .unknown)
         #expect(lens.reason == "failed to inspect Task worktree")
@@ -244,8 +190,8 @@ struct WaveLensTests {
 
     @Test("a project with only clean tasks is genuinely black")
     func projectAllCleanIsBlack() throws {
-        let lens = WaveLens.forProject(runtime: nil, tasks: [
-            try makeTask(level: "black", reason: "Linear Task is complete"),
+        let lens = WaveLens.forProject(tasks: [
+            try makeTask(state: "clear", reason: "Linear Task is complete"),
         ])
         #expect(lens.color == .black)
         #expect(lens.reason == "Linear Task is complete")
@@ -253,7 +199,7 @@ struct WaveLensTests {
 
     @Test("a project with no runtime and no tasks is off")
     func projectEmptyIsBlack() {
-        let lens = WaveLens.forProject(runtime: nil, tasks: [])
+        let lens = WaveLens.forProject(tasks: [])
         #expect(lens.color == .black)
         #expect(!lens.reason.isEmpty)
     }
@@ -270,8 +216,8 @@ struct WaveLensTests {
             ),
             WaveLens.forWave(live: false, activeTasks: 1, activeProjects: 0),
             WaveLens.forWave(live: false, activeTasks: 0, activeProjects: 0),
-            WaveLens.forTask(try makeAttention(level: "unknown", reason: "unread")),
-            WaveLens.forProject(runtime: nil, tasks: []),
+            WaveLens.forTask(try makeCondition(state: "unknown", reason: "unread")),
+            WaveLens.forProject(tasks: []),
         ]
         for lens in lenses {
             #expect(!lens.reason.isEmpty)
@@ -280,60 +226,35 @@ struct WaveLensTests {
 
     // MARK: - Fixtures
 
-    private func current(
-        _ state: CurrentWorkState,
-        reason: String
-    ) -> CurrentWorkObservation {
-        CurrentWorkObservation(
-            state: state,
-            reason: reason,
-            owner: .work,
-            controls: [],
-            progressAgeSeconds: 0,
-            deadlineInSeconds: 30,
-            step: nil,
-            liveness: RunLivenessEvidence(
-                state: .present,
-                observedAt: "2026-07-15T00:00:00Z",
-                fresh: true
-            )
-        )
-    }
-
-    private func loadAttentionFixture(sourceFile: String = #filePath) throws -> [String: RoadmapTask] {
+    private func loadConditionFixture(sourceFile: String = #filePath) throws -> [String: RoadmapTask] {
         let fixture = URL(fileURLWithPath: sourceFile)
             .deletingLastPathComponent()
             .deletingLastPathComponent()
             .deletingLastPathComponent()
-            .appendingPathComponent("tests/fixtures/dto/task_attention_states.json")
+            .appendingPathComponent("tests/fixtures/dto/task_condition_states.json")
         return try JSONDecoder().decode(
             [String: RoadmapTask].self,
             from: Data(contentsOf: fixture)
         )
     }
 
-    private func makeAttention(level: String, reason: String) throws -> TaskAttentionSnapshot {
+    private func makeCondition(state: String, reason: String) throws -> TaskConditionSnapshot {
         let json = """
-        {"level":"\(level)","reason":"\(reason)","observed_at":"2026-07-15T00:00:00Z","evidence_age_secs":null,"next_owner":"task","actions":{"recommended":null,"reason":"Task is ready to start"},"pm_completed":false,"work_status":null,"process":{"state":"not_applicable","alive":null,"reason":null},"local_progress":{"state":"not_applicable","unsettled":false,"dirty":null,"authored_commits":null,"recovery_required":null,"reason":null},"active_pr_phase":null}
+        {"state":"\(state)","reason":"\(reason)","observed_at":"2026-07-15T00:00:00Z","evidence_age_secs":null,"local_progress":{"state":"not_applicable","unsettled":false,"dirty":null,"authored_commits":null,"recovery_required":null,"reason":null}}
         """
-        return try JSONDecoder().decode(TaskAttentionSnapshot.self, from: Data(json.utf8))
+        return try JSONDecoder().decode(TaskConditionSnapshot.self, from: Data(json.utf8))
     }
 
-    private func makeTask(level: String, reason: String) throws -> WaveTaskWork {
+    private func makeTask(state: String, reason: String) throws -> WaveTaskWork {
         let json = """
         {"task":{"id":"\(reason)","identifier":"W2-1","name":"n","description":"","rank":1,"completed":false,"assignee":null},
         "reference":{"issue_url":null,"workspace":null},"runtime":null,"directive":null,
         "next_move":{"owner":"task","reason":"\(reason)"},
-        "attention":{"level":"\(level)","reason":"\(reason)","observed_at":"2026-07-15T00:00:00Z","evidence_age_secs":null,"next_owner":"task","actions":{"recommended":null,"reason":"Task is ready to start"},"pm_completed":false,"work_status":null,"process":{"state":"not_applicable","alive":null,"reason":null},"local_progress":{"state":"not_applicable","unsettled":false,"dirty":null,"authored_commits":null,"recovery_required":null,"reason":null},"active_pr_phase":null},
+        "condition":{"state":"\(state)","reason":"\(reason)","observed_at":"2026-07-15T00:00:00Z","evidence_age_secs":null,"local_progress":{"state":"not_applicable","unsettled":false,"dirty":null,"authored_commits":null,"recovery_required":null,"reason":null}},
+        "actions":{"recommended":null,"reason":"Task is ready to start"},
         "prs":[],"active_pr":null}
         """
         return try JSONDecoder().decode(WaveTaskWork.self, from: Data(json.utf8))
     }
 
-    private func makeRuntime(alive: Bool, reason: String) throws -> ProjectRuntimeSnapshot {
-        let json = """
-        {"work_id":"project-1","status":{"running":{"run_id":"run_00000000000000000000000000000006"}},"reason":"\(reason)","updated_at":"2026-07-15T00:00:00Z","iteration":1,"pending_observations":0,"provider":"codex","current":{"state":"\(alive ? "working" : "stopped")","reason":"\(reason)","owner":"\(alive ? "work" : "loopflow")","controls":\(alive ? "[\"attach\",\"steer\",\"interrupt\",\"stop\"]" : "[\"resume\",\"stop\"]"),"progress_age_secs":\(alive ? "60" : "null"),"deadline_in_secs":\(alive ? "1740" : "null"),"step":"iteration 1","liveness":{"state":"\(alive ? "present" : "absent")","observed_at":"2026-07-15T00:00:00Z","fresh":true}},"last_failure":null}
-        """
-        return try JSONDecoder().decode(ProjectRuntimeSnapshot.self, from: Data(json.utf8))
-    }
 }

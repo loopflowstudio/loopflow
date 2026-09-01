@@ -25,6 +25,7 @@ local-bin/
 .lf/logs/
 .lf/locks/
 .lf/prompts/
+.lf/releases/
 .lf/journal/
 .lf/summaries/
 .lf/tmp/

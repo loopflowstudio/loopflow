@@ -11,7 +11,6 @@ public struct Wave: Sendable, Identifiable, Hashable {
     public let name: String
     public let repo: String
     public let status: WorkStatus
-    public let current: CurrentWorkObservation?
     public let live: Bool
     public let paused: Bool
     public let enabled: Bool
@@ -27,7 +26,6 @@ public struct Wave: Sendable, Identifiable, Hashable {
         name: String,
         repo: String,
         status: WorkStatus,
-        current: CurrentWorkObservation? = nil,
         live: Bool = false,
         paused: Bool = false,
         enabled: Bool = true,
@@ -42,7 +40,6 @@ public struct Wave: Sendable, Identifiable, Hashable {
         self.name = name
         self.repo = repo
         self.status = status
-        self.current = current
         self.live = live
         self.paused = paused
         self.enabled = enabled

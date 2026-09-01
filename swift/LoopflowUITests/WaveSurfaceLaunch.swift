@@ -12,6 +12,7 @@ struct WaveSurfaceLaunch {
     var mode: String = "mock-waves"
     var detailState: String?
     var selectBranch: String?
+    var sessionKind: String?
     /// A fixed window width, so the narrow and wide legs of the
     /// selectable-without-clipping proof are deterministic.
     var width: Double?
@@ -26,6 +27,9 @@ struct WaveSurfaceLaunch {
         }
         if let selectBranch {
             app.launchEnvironment["LOOPFLOW_UI_TEST_SELECT_BRANCH"] = selectBranch
+        }
+        if let sessionKind {
+            app.launchEnvironment["LOOPFLOW_UI_TEST_SESSION_KIND"] = sessionKind
         }
         if let width {
             app.launchEnvironment["LOOPFLOW_UI_TEST_WIDTH"] = String(Int(width))

@@ -1,0 +1,36 @@
+/* Portable-only additions. The shared docs system lives in website/static/style.css. */
+
+.portable-docs .docs-hero {
+    min-height: 100vh;
+}
+
+.portable-docs .docs-nav-public-link {
+    display: none;
+}
+
+@media print {
+    .portable-docs > nav,
+    .portable-docs .docs-nav,
+    .portable-docs .docs-outline,
+    .portable-docs .docs-md-link,
+    .portable-docs .docs-pager,
+    .portable-docs > footer {
+        display: none;
+    }
+
+    .portable-docs .docs-hero {
+        padding: 0;
+        background: white;
+        border: 0;
+    }
+
+    .portable-docs .docs-layout {
+        display: block;
+        max-width: 760px;
+        padding: 0;
+    }
+
+    .portable-docs .docs-content a {
+        color: inherit;
+    }
+}

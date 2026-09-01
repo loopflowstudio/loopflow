@@ -11,10 +11,11 @@ use secrecy::SecretString;
 use serde::{Deserialize, Serialize};
 use tokio::sync::{watch, Mutex};
 
-use crate::durable::{ContainmentObservation, HomeId, WorkRef};
+use crate::controller::wave::{self, registry};
+use crate::durable::{HomeId, WorkRef};
 use crate::id::WaveId;
 use crate::store::SharedStore;
-use crate::wave::{self, registry, Wave};
+use crate::work::wave::Wave;
 
 pub(crate) const RECONCILE_INTERVAL: Duration = Duration::from_secs(30);
 const STARTUP_TIMEOUT: Duration = Duration::from_secs(10);
@@ -253,7 +254,6 @@ impl WaveHost {
         if let Some(hosted) = tasks.remove(wave_id) {
             hosted.task.abort();
         }
-        self.reconcile_run_slot(&wave).await?;
         let config = registry::RegistryConfig {
             store: self.store.clone(),
             wave: wave.clone(),
@@ -344,36 +344,6 @@ impl WaveHost {
         }
     }
 
-    async fn reconcile_run_slot(&self, wave: &Wave) -> Result<()> {
-        let work = WorkRef::Wave(wave.id().clone());
-        let Some(run) = self.store.current_run(&work).await? else {
-            return Ok(());
-        };
-        self.store.ensure_local_run(&run).await?;
-        let observation = match &run.containment {
-            Some(containment) => crate::engine::process::containment_observation(containment).await,
-            None => ContainmentObservation::Unprovable,
-        };
-        if observation != ContainmentObservation::Absent {
-            return Err(anyhow!(
-                "Wave {} already has Run {} in {:?}; containment is {:?}",
-                wave.name(),
-                run.id,
-                run.state,
-                observation
-            ));
-        }
-        self.store
-            .recover_run(&run.id, ContainmentObservation::Absent)
-            .await?;
-        tracing::warn!(
-            wave = wave.name(),
-            run = %run.id,
-            "recovered Wave Run after its containment disappeared"
-        );
-        Ok(())
-    }
-
     pub(crate) async fn shutdown(&self) {
         let wave_ids = self.waves.lock().await.keys().cloned().collect::<Vec<_>>();
         for wave_id in wave_ids {
@@ -441,10 +411,10 @@ pub(crate) async fn waves_for_home(
     home_id: &HomeId,
     repo: Option<&str>,
 ) -> Result<Vec<Wave>> {
-    let machine = crate::engine::machine::MachineIdentity::detect(home_id.clone());
+    let machine = crate::controller::wave::placement::MachineIdentity::detect(home_id.clone());
     let mut assigned = Vec::new();
     for wave in store.list_waves(repo).await? {
-        let config = match crate::engine::wave_config::try_read_wave_config(
+        let config = match crate::work::wave::config::try_read_wave_config(
             Path::new(wave.repo()),
             wave.name(),
         ) {
@@ -454,7 +424,8 @@ pub(crate) async fn waves_for_home(
                 continue;
             }
         };
-        let decision = crate::engine::machine::wave_start_decision(config.as_ref(), &machine);
+        let decision =
+            crate::controller::wave::placement::wave_start_decision(config.as_ref(), &machine);
         if !decision.should_start() {
             tracing::info!(wave = wave.name(), reason = %decision, "skipping Wave at Home startup");
             continue;
@@ -491,10 +462,10 @@ mod tests {
     use std::process::Command;
     use std::sync::Arc;
 
-    use crate::durable::{Containment, HomeId, RunAdvance, RunState, RunTrigger, WorkRef};
+    use crate::durable::{HomeId, WorkRef};
     use crate::id::WaveId;
     use crate::store::{open_store, StorageConfig};
-    use crate::wave::{Wave, WaveLocator};
+    use crate::work::wave::{Wave, WaveLocator};
 
     use super::{waves_for_home, HostedWave, WaveHost, WaveStartState, WaveStartup};
 
@@ -543,108 +514,6 @@ mod tests {
                 String::from_utf8_lossy(&output.stderr)
             );
         }
-    }
-
-    async fn wave_host_with_run(
-        process_group: i64,
-    ) -> (tempfile::TempDir, WaveHost, Wave, crate::durable::RunId) {
-        let directory = tempfile::tempdir().expect("create temp directory");
-        let repo = directory.path().join("repo");
-        std::fs::create_dir_all(repo.join("wave/product")).expect("create Wave directory");
-        std::fs::write(repo.join("wave/product/GOAL.md"), "Product Wave.\n")
-            .expect("write Wave goal");
-        let store = Arc::new(
-            open_store(&StorageConfig::sqlite(directory.path().join("registry.db")))
-                .await
-                .expect("open store"),
-        );
-        let local = store.local_home().await.expect("read local Home");
-        let locator = WaveLocator::discover(&repo, "product").expect("discover Wave locator");
-        let wave = Wave::new(
-            WaveId::new(),
-            "product".to_string(),
-            locator.repo().to_string(),
-        );
-        store.create_wave(&wave).await.expect("create Wave");
-        let work = WorkRef::Wave(wave.id().clone());
-        let (run, lease) = store
-            .reserve_run(&work, RunTrigger::User)
-            .await
-            .expect("reserve Wave Run");
-        store
-            .advance_run(
-                &lease,
-                RunAdvance::RunStarting {
-                    containment: Containment::ProcessGroup { id: process_group },
-                    cwd: repo,
-                },
-            )
-            .await
-            .expect("start Wave Run");
-        (
-            directory,
-            WaveHost::new(local.id, store, None),
-            wave,
-            run.id,
-        )
-    }
-
-    async fn wave_host_with_aged_reserved_run(
-    ) -> (tempfile::TempDir, WaveHost, Wave, crate::durable::RunId) {
-        let directory = tempfile::tempdir().expect("create temp directory");
-        let repo = directory.path().join("repo");
-        std::fs::create_dir_all(repo.join("wave/product")).expect("create Wave directory");
-        std::fs::write(repo.join("wave/product/GOAL.md"), "Product Wave.\n")
-            .expect("write Wave goal");
-        let database = directory.path().join("registry.db");
-        let store = Arc::new(
-            open_store(&StorageConfig::sqlite(database.clone()))
-                .await
-                .expect("open store"),
-        );
-        let connection = rusqlite::Connection::open(&database).expect("open raw store");
-        let enablement_is_materialized = connection
-            .query_row(
-                "SELECT EXISTS(
-                    SELECT 1 FROM pragma_table_info('work_placements') WHERE name='enabled'
-                 )",
-                [],
-                |row| row.get::<_, bool>(0),
-            )
-            .expect("inspect Work enablement schema");
-        if !enablement_is_materialized {
-            connection
-                .execute_batch(&crate::store::migrations::migration_sql_for_test(
-                    "work_enablement",
-                ))
-                .expect("apply Work enablement draft");
-        }
-        drop(connection);
-        let local = store.local_home().await.expect("read local Home");
-        let locator = WaveLocator::discover(&repo, "product").expect("discover Wave locator");
-        let wave = Wave::new(
-            WaveId::new(),
-            "product".to_string(),
-            locator.repo().to_string(),
-        );
-        store.create_wave(&wave).await.expect("create Wave");
-        let (run, _) = store
-            .reserve_run(&WorkRef::Wave(wave.id().clone()), RunTrigger::User)
-            .await
-            .expect("reserve Wave Run");
-        rusqlite::Connection::open(database)
-            .expect("open raw store")
-            .execute(
-                "UPDATE runs SET created_at=1 WHERE id=?1",
-                [run.id.as_str()],
-            )
-            .expect("age reserved Run");
-        (
-            directory,
-            WaveHost::new(local.id, store, None),
-            wave,
-            run.id,
-        )
     }
 
     #[tokio::test]
@@ -710,7 +579,7 @@ mod tests {
             .await
             .expect("observe remote Home");
         let off_wave = store
-            .get_wave_at(&crate::wave::WaveLocator::discover(&repo, "off").unwrap())
+            .get_wave_at(&crate::work::wave::WaveLocator::discover(&repo, "off").unwrap())
             .await
             .expect("read disabled Wave")
             .expect("disabled Wave exists");
@@ -719,7 +588,9 @@ mod tests {
             .await
             .expect("disable Wave on this Home");
         let remote_wave = store
-            .get_wave_at(&crate::wave::WaveLocator::discover(&repo, "remote-placement").unwrap())
+            .get_wave_at(
+                &crate::work::wave::WaveLocator::discover(&repo, "remote-placement").unwrap(),
+            )
             .await
             .expect("read remote Wave")
             .expect("remote Wave exists");
@@ -775,9 +646,11 @@ mod tests {
         restarted.reconcile().await;
 
         assert_eq!(restarted.active_count().await, 0);
-        assert!(crate::wave::server::live_endpoint(&repo, wave.name())
-            .await
-            .is_none());
+        assert!(
+            crate::controller::wave::server::live_endpoint(&repo, wave.name())
+                .await
+                .is_none()
+        );
     }
 
     #[tokio::test]
@@ -822,14 +695,15 @@ mod tests {
 
     #[allow(clippy::await_holding_lock)]
     #[tokio::test]
-    async fn wave_start_returns_the_listener_preflight_error() {
+    async fn explicit_start_reports_the_listener_failure_and_stays_enabled() {
         let _env_lock = crate::journal::test_env_lock();
-        let _restore = EnvRestore::capture(&["LF_BIN", crate::wave::discord::TOKEN_ENV]);
+        let _restore =
+            EnvRestore::capture(&["LF_BIN", crate::controller::wave::discord::TOKEN_ENV]);
         std::env::set_var(
             "LF_BIN",
             std::env::current_exe().expect("resolve test executable"),
         );
-        std::env::remove_var(crate::wave::discord::TOKEN_ENV);
+        std::env::remove_var(crate::controller::wave::discord::TOKEN_ENV);
         let directory = tempfile::tempdir().expect("create temp directory");
         let repo = directory.path().join("repo");
         std::fs::create_dir_all(repo.join("wave/product")).expect("create Wave directory");
@@ -867,7 +741,7 @@ mod tests {
         };
 
         assert!(
-            reason.contains(crate::wave::discord::TOKEN_ENV),
+            reason.contains(crate::controller::wave::discord::TOKEN_ENV),
             "startup should preserve the actionable listener error: {reason}"
         );
         assert!(
@@ -877,100 +751,6 @@ mod tests {
                 .expect("read start intent")
                 .enabled,
             "an explicit start remains enabled even when the runtime fails"
-        );
-    }
-
-    #[tokio::test]
-    async fn restart_releases_a_wave_run_with_a_gone_process_group() {
-        let absent_group = i64::from(i32::MAX);
-        assert_eq!(
-            crate::engine::process::process_group_observation(absent_group),
-            crate::durable::ContainmentObservation::Absent
-        );
-        let (_directory, host, wave, prior_run_id) = wave_host_with_run(absent_group).await;
-
-        host.reconcile_run_slot(&wave)
-            .await
-            .expect("recover stale Wave Run");
-
-        let work = WorkRef::Wave(wave.id().clone());
-        assert!(host.store.current_run(&work).await.unwrap().is_none());
-        let (next, _) = host
-            .store
-            .reserve_run(
-                &work,
-                RunTrigger::Recovery {
-                    prior_run_id: prior_run_id.clone(),
-                },
-            )
-            .await
-            .expect("reserve replacement Wave Run");
-        assert_eq!(next.retry_of, Some(prior_run_id));
-    }
-
-    #[tokio::test]
-    async fn elapsed_time_never_releases_a_reserved_wave_without_containment() {
-        let (_directory, host, wave, run_id) = wave_host_with_aged_reserved_run().await;
-
-        let error = host
-            .reconcile_run_slot(&wave)
-            .await
-            .expect_err("age is not containment-absence evidence");
-
-        assert!(error.to_string().contains(run_id.as_str()));
-        assert!(error.to_string().contains("Unprovable"));
-        let current = host
-            .store
-            .current_run(&WorkRef::Wave(wave.id().clone()))
-            .await
-            .unwrap()
-            .expect("reserved Run remains current");
-        assert_eq!(current.id, run_id);
-        assert_eq!(current.state, RunState::Reserved);
-    }
-
-    #[tokio::test]
-    async fn restart_keeps_a_live_wave_run_fenced() {
-        let process_group = crate::engine::process::current_process_group_id()
-            .expect("test process has a process group");
-        let (_directory, host, wave, run_id) = wave_host_with_run(i64::from(process_group)).await;
-
-        let error = host
-            .reconcile_run_slot(&wave)
-            .await
-            .expect_err("live Wave Run must remain fenced");
-
-        assert!(error.to_string().contains(run_id.as_str()));
-        assert!(error.to_string().contains("Present"));
-        let current = host
-            .store
-            .current_run(&WorkRef::Wave(wave.id().clone()))
-            .await
-            .unwrap()
-            .expect("live Run remains current");
-        assert_eq!(current.id, run_id);
-        assert_eq!(current.state, RunState::Active);
-    }
-
-    #[tokio::test]
-    async fn restart_keeps_unprovable_wave_containment_fenced() {
-        let (_directory, host, wave, run_id) = wave_host_with_run(i64::MAX).await;
-
-        let error = host
-            .reconcile_run_slot(&wave)
-            .await
-            .expect_err("unprovable Wave Run must remain fenced");
-
-        assert!(error.to_string().contains(run_id.as_str()));
-        assert!(error.to_string().contains("Unprovable"));
-        assert_eq!(
-            host.store
-                .current_run(&WorkRef::Wave(wave.id().clone()))
-                .await
-                .unwrap()
-                .expect("unprovable Run remains current")
-                .id,
-            run_id
         );
     }
 }

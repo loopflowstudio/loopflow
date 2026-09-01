@@ -30,7 +30,7 @@ class ResourcePolicy:
     minimum_free_disk_bytes: int
     maximum_worktree_build_bytes: int
     maximum_aggregate_build_bytes: int
-    maximum_trace_bytes: int
+    maximum_run_record_bytes: int
     maximum_uv_cache_bytes: int
     maximum_cargo_cache_bytes: int
     maximum_gate_artifact_bytes: int
@@ -223,19 +223,20 @@ def collect_snapshot(repo: Path, policy: ResourcePolicy) -> ResourceSnapshot:
         )
 
     authority_home = _authority_home()
+    run_root = authority_home / "runs"
     sources.append(
         _measure_source(
-            id="trace:home",
-            kind="trace",
+            id="runs:home",
+            kind="runs",
             owner="Loopflow Home",
             root=authority_home,
-            paths=(authority_home / "traces",),
-            budget=policy.maximum_trace_bytes,
+            paths=(run_root,),
+            budget=policy.maximum_run_record_bytes,
             disposable=False,
             active=True,
             action=(
-                "run `lf runs reconcile` to inspect unclaimed artifacts; retained captures "
-                "need an explicit retention decision and are never auto-deleted"
+                f"inspect {run_root}; Run records are durable local evidence and are never "
+                "auto-deleted"
             ),
             issues=measurement_issues,
         )
@@ -704,7 +705,7 @@ def _print_report(report: ResourceReport) -> None:
 
 def _parse_args(argv: Optional[list[str]] = None) -> argparse.Namespace:
     parser = argparse.ArgumentParser(
-        description="Measure Loopflow build, cache, trace, disk, and CPU budgets."
+        description="Measure Loopflow build, cache, Run record, disk, and CPU budgets."
     )
     parser.add_argument("--json", action="store_true", help="emit the complete report as JSON")
     parser.add_argument(

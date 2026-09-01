@@ -14,7 +14,7 @@ lf implement
 Put unattended or untrusted work behind an OS boundary you control:
 
 ```bash
-lf ssh build-vm task pursue
+lf ssh build-vm implement
 ```
 
 `lf ssh` connects to an existing environment. It does not copy the repository
@@ -68,8 +68,10 @@ network, browser, MCP, or credential boundary around the whole process tree.
 
 Skills can edit, commit, push, land a PR, deploy, or update GitHub and Linear
 when the matching tool and credential are present. A gate may decide that work
-is ready to ship. The LLM session still performs the merge or release action;
-the GitHub merge button is not a separate lifecycle authority.
+is ready to ship. `lf pr submit` leaves the exact-head merge to a human;
+`arm` and `land` request GitHub auto-merge. GitHub remains authoritative for
+whether a PR merged. Release authority is separate and depends on the target's
+configured publisher workflow and credentials.
 
 ## Understand account authority over SSH
 
@@ -81,13 +83,13 @@ subscription accounts installed on either one:
 
 ```bash
 # Offer the origin's accounts and include accounts installed on the target.
-lf ssh my-company task pursue
+lf ssh my-company implement
 
 # Prefer an account installed on the origin.
-lf ssh --account jack@personal my-company task pursue
+lf ssh --account jack@personal my-company implement
 
 # Select from the target lf's combined local and forwarded catalog.
-lf ssh my-company --account jack@company task pursue
+lf ssh my-company --account jack@company implement
 ```
 
 The target does not need its own Claude or Codex login for the first two
@@ -174,7 +176,7 @@ resident starts.
 ### What crosses SSH for other credentials
 
 GitHub, Linear, and OpenCode Zen each have one effective credential for an
-invocation rather than a routable catalog. `lf ssh` forwards the origin
+launch rather than a routable catalog. `lf ssh` forwards the origin
 credential automatically when one is available. If the origin does not provide
 one, the target can use its native credential.
 
@@ -188,7 +190,7 @@ local file fallback.
 SSH agent forwarding remains off unless requested:
 
 ```bash
-lf ssh --forward-agent build-vm task pursue
+lf ssh --forward-agent build-vm implement
 ```
 
 Forward one Doppler secret by name:
@@ -207,11 +209,13 @@ the configured model provider as part of an agent run. Browser tools, MCP
 servers, GitHub, Linear, and other integrations receive the data sent to them
 by their commands.
 
-Loopflow keeps a local execution ledger plus prompt and conversation artifacts.
-Trace directories are owner-only (`0700`) and artifact files are `0600`.
-`lf trace --content` deliberately reads the exact captured prompt and
-conversation. Provider or tool output can contain sensitive material, so treat
-the trace store as sensitive even though it is local.
+Loopflow keeps Home-local Run records with prompt, conversation, and raw
+provider evidence under `$LF_HOME/runs/`. Bundle directories are owner-only
+(`0700`) and artifact files are `0600`. Provider or tool output can contain
+sensitive material, so treat the Run store as sensitive even though it is
+local. The bundles are not uploaded to Linear, GitHub, or another Loopflow
+Home. Reading another Home with `lf ssh <home-id> runs` executes the read on
+that machine.
 
 ## Keep network services inside their intended boundary
 

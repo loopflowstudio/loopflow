@@ -1,0 +1,2345 @@
+<!doctype html>
+<html lang="en">
+<head>
+  <meta charset="utf-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1">
+  <meta name="generator" content="scripts/render_architecture_html.py">
+  <meta name="robots" content="noindex,nofollow">
+  <title>Architecture — Loopflow Developer Architecture</title>
+  <link rel="icon" href="https://loopflow.studio/static/logo.svg" type="image/svg+xml">
+  <link rel="stylesheet" href="https://fonts.googleapis.com/css2?family=Instrument+Serif:ital@0;1&family=Inter:wght@400;500;600&family=JetBrains+Mono:wght@400;500&display=swap">
+  <style>
+:root {
+    --burgundy: #722f37;
+    --burgundy-hover: #8b3d47;
+    --wine: #9B1A4A;
+    --wine-hover: #b42058;
+    --info: #0ab3cc;
+    --text: #1a1a1a;
+    --text-secondary: #555555;
+    --bg: #ffffff;
+    --bg-subtle: #f8f8f8;
+    --border: #e5e5e5;
+    --green: #16a34a;
+    --yellow: #92400e;
+    --orange: #c2410c;
+
+    --font-serif: 'Instrument Serif', Georgia, serif;
+    --font-sans: 'Inter', -apple-system, BlinkMacSystemFont, sans-serif;
+    --font-mono: 'JetBrains Mono', ui-monospace, monospace;
+}
+
+* {
+    box-sizing: border-box;
+    margin: 0;
+    padding: 0;
+}
+
+html {
+    overflow-x: hidden;
+}
+
+body {
+    font-family: var(--font-sans);
+    background: var(--bg);
+    color: var(--text);
+    font-size: 16px;
+    line-height: 1.6;
+    -webkit-font-smoothing: antialiased;
+    -moz-osx-font-smoothing: grayscale;
+    overflow-x: hidden;
+    min-height: 100vh;
+}
+
+h1, h2, h3 {
+    color: var(--burgundy);
+}
+
+/* Layout */
+.container {
+    max-width: 980px;
+    margin: 0 auto;
+    padding: 0 24px;
+}
+
+/* Navigation */
+nav {
+    padding: 20px 0;
+    position: sticky;
+    top: 0;
+    background: rgba(255, 255, 255, 0.95);
+    -webkit-backdrop-filter: blur(10px);
+    backdrop-filter: blur(10px);
+    z-index: 100;
+    border-bottom: 1px solid var(--border);
+}
+@supports not ((-webkit-backdrop-filter: blur(10px)) or (backdrop-filter: blur(10px))) {
+    nav {
+        background: var(--bg);
+    }
+}
+nav .container {
+    display: flex;
+    justify-content: space-between;
+    align-items: center;
+}
+.nav-logo {
+    display: flex;
+    align-items: center;
+}
+.nav-logo img {
+    width: 28px;
+    height: 28px;
+}
+.nav-brand-group {
+    display: flex;
+    align-items: center;
+    gap: 10px;
+}
+.nav-title {
+    font-family: var(--font-sans);
+    font-weight: 700;
+    font-size: 18px;
+    color: var(--text);
+    text-decoration: none;
+}
+.nav-links {
+    display: flex;
+    align-items: center;
+    gap: 28px;
+    list-style: none;
+}
+.nav-links a {
+    color: var(--text-secondary);
+    text-decoration: none;
+    font-size: 14px;
+    font-weight: 500;
+    transition: color 0.15s;
+    display: inline-flex;
+    align-items: center;
+    min-height: 44px;
+    padding: 8px 6px;
+}
+.nav-links a:hover {
+    color: var(--text);
+}
+.external-link::after {
+    content: "↗";
+    font-size: 12px;
+    margin-left: 6px;
+}
+.nav-links .btn {
+    margin-left: 4px;
+}
+@media (max-width: 768px) {
+    nav .container {
+        flex-wrap: wrap;
+        gap: 12px;
+    }
+    .nav-title {
+        display: none;
+    }
+    .nav-links {
+        gap: 16px;
+        flex-wrap: wrap;
+        justify-content: center;
+    }
+    .nav-links .btn {
+        margin-left: 0;
+    }
+}
+@media (max-width: 480px) {
+    .nav-links {
+        gap: 12px;
+        font-size: 13px;
+    }
+}
+
+/* Skip Link */
+.skip-link {
+    position: absolute;
+    top: -40px;
+    left: 0;
+    background: var(--burgundy);
+    color: white;
+    padding: 8px 16px;
+    font-size: 14px;
+    font-weight: 500;
+    text-decoration: none;
+    border-radius: 0 0 4px 0;
+    z-index: 1000;
+    transition: top 0.2s;
+}
+.skip-link:focus {
+    top: 0;
+}
+.skip-link:focus:not(:focus-visible) {
+    top: -40px;
+}
+.skip-link:focus-visible {
+    top: 0;
+    outline: 2px solid var(--burgundy);
+    outline-offset: 2px;
+}
+
+/* Hero */
+.hero {
+    padding: 80px 0 40px;
+    text-align: center;
+}
+.hero-centered {
+    text-align: center;
+    max-width: 700px;
+    margin: 0 auto;
+}
+.hero-logo {
+    width: 128px;
+    height: 128px;
+    border-radius: 24px;
+    margin-bottom: 32px;
+}
+.hero-logo-large {
+    width: 220px;
+    height: 220px;
+    border-radius: 36px;
+    margin-bottom: 40px;
+}
+.hero h1 {
+    font-family: var(--font-serif);
+    font-size: clamp(44px, 7vw, 64px);
+    font-weight: 400;
+    line-height: 1.1;
+    letter-spacing: -0.02em;
+    margin-bottom: 16px;
+    color: var(--burgundy);
+}
+.hero .tagline {
+    font-size: 19px;
+    color: var(--text-secondary);
+    max-width: 520px;
+    margin: 0 auto 20px;
+    line-height: 1.5;
+}
+.hero-centered .hero-actions {
+    justify-content: center;
+}
+.hero-actions {
+    display: flex;
+    flex-wrap: wrap;
+    gap: 12px;
+    margin-top: 16px;
+}
+@media (max-width: 768px) {
+    .hero-logo-large {
+        width: 160px;
+        height: 160px;
+        border-radius: 28px;
+        margin-bottom: 28px;
+    }
+}
+/* Buttons */
+.btn {
+    display: inline-flex;
+    align-items: center;
+    justify-content: center;
+    height: 44px;
+    padding: 0 24px;
+    font-size: 14px;
+    font-weight: 600;
+    text-decoration: none;
+    border-radius: 8px;
+    transition: all 0.15s ease;
+}
+.btn-primary,
+a.btn-primary {
+    background: var(--wine);
+    color: white;
+}
+.btn-primary:hover,
+a.btn-primary:hover {
+    background: var(--wine-hover);
+}
+.btn-secondary {
+    background: transparent;
+    color: var(--text);
+    border: 1px solid var(--border);
+}
+.btn-secondary:hover {
+    border-color: #999;
+}
+.btn:focus-visible {
+    outline: 2px solid var(--burgundy);
+    outline-offset: 2px;
+}
+.btn-primary:focus-visible {
+    outline-color: var(--text);
+}
+.btn-group {
+    display: flex;
+    gap: 16px;
+    justify-content: center;
+}
+
+a:focus-visible,
+.btn:focus-visible,
+.copy-btn:focus-visible {
+    outline: 2px solid var(--burgundy);
+    outline-offset: 2px;
+}
+
+/* Maturity Badge */
+.maturity-badge {
+    display: inline-flex;
+    align-items: center;
+    gap: 4px;
+    padding: 4px 10px;
+    border-radius: 12px;
+    font-size: 11px;
+    font-weight: 600;
+    text-transform: uppercase;
+    letter-spacing: 0.5px;
+    margin-bottom: 12px;
+}
+.maturity-experimental {
+    background: rgba(234, 88, 12, 0.1);
+    color: var(--orange);
+}
+
+/* Quick Install */
+.quick-install {
+    padding: 60px 0;
+    background: var(--bg-subtle);
+    border-top: 1px solid var(--border);
+    text-align: center;
+}
+.quick-install h2 {
+    font-family: var(--font-serif);
+    font-size: 24px;
+    font-weight: 400;
+    margin: 32px 0 20px;
+    color: var(--text);
+}
+.install-code-wrapper {
+    display: inline-flex;
+    align-items: center;
+    gap: 8px;
+    max-width: 100%;
+}
+.install-code {
+    background: var(--bg);
+    border: 1px solid var(--border);
+    border-radius: 8px;
+    padding: 16px 24px;
+    font-family: var(--font-mono);
+    font-size: 15px;
+    margin: 0;
+    overflow-x: auto;
+}
+@media (max-width: 480px) {
+    .install-code {
+        padding: 12px 16px;
+        font-size: 13px;
+    }
+}
+.install-code code {
+    color: var(--text);
+}
+.copy-btn {
+    background: var(--bg);
+    border: 1px solid var(--border);
+    border-radius: 8px;
+    padding: 16px 14px;
+    cursor: pointer;
+    transition: all 0.15s;
+    display: flex;
+    align-items: center;
+    justify-content: center;
+}
+.copy-btn:hover {
+    border-color: #999;
+    background: #f0f0f0;
+}
+.copy-btn:focus-visible {
+    outline: 2px solid var(--burgundy);
+    outline-offset: 2px;
+}
+.copy-btn svg {
+    width: 18px;
+    height: 18px;
+    color: var(--text-secondary);
+}
+.quick-install .hero-actions {
+    justify-content: center;
+}
+@media (max-width: 480px) {
+    .install-code-wrapper {
+        max-width: 100%;
+        flex-wrap: wrap;
+        justify-content: center;
+    }
+    .install-code {
+        font-size: 13px;
+        padding: 12px 16px;
+        max-width: 100%;
+        overflow-x: auto;
+    }
+}
+
+/* Hero video */
+.hero-video-section {
+    padding: 0 20px 48px;
+    text-align: center;
+}
+.demo-video {
+    width: 100%;
+    max-width: 980px;
+    margin: 0 auto;
+    display: block;
+    border-radius: 12px;
+    box-shadow: 0 4px 24px rgba(0, 0, 0, 0.08);
+    aspect-ratio: 16 / 10;
+    object-fit: cover;
+    background: #000;
+}
+
+/* Capabilities */
+.capabilities-section {
+    max-width: 980px;
+    margin: 0 auto;
+    padding: 60px 24px;
+}
+.capabilities-section h2 {
+    font-family: var(--font-serif);
+    font-size: 28px;
+    font-weight: 400;
+    margin-bottom: 28px;
+    color: var(--burgundy);
+}
+.capabilities-grid {
+    display: grid;
+    grid-template-columns: 1fr 1fr;
+    gap: 24px 48px;
+}
+@media (max-width: 768px) {
+    .capabilities-grid {
+        grid-template-columns: 1fr;
+    }
+}
+.capability-item h3 {
+    font-family: var(--font-serif);
+    font-size: 20px;
+    color: var(--burgundy);
+    margin-bottom: 4px;
+}
+.capability-item p {
+    font-size: 15px;
+    color: var(--text-secondary);
+    line-height: 1.6;
+}
+
+/* Building blocks */
+.building-blocks-section {
+    max-width: 980px;
+    margin: 0 auto;
+    padding: 60px 24px;
+}
+.building-blocks-section h2 {
+    font-family: var(--font-serif);
+    font-size: 28px;
+    font-weight: 400;
+    margin-bottom: 20px;
+}
+.building-blocks-grid {
+    display: grid;
+    grid-template-columns: 1fr 1fr;
+    gap: 20px;
+}
+@media (max-width: 768px) {
+    .building-blocks-grid {
+        grid-template-columns: 1fr;
+    }
+}
+.building-block-item .code-block {
+    margin: 0;
+}
+.building-block-label {
+    font-size: 14px;
+    color: var(--text-secondary);
+    margin-bottom: 8px;
+    text-transform: uppercase;
+    letter-spacing: 0.05em;
+}
+
+/* Products */
+.products-section {
+    padding: 60px 0;
+    border-top: 1px solid var(--border);
+}
+.products-section h2 {
+    font-family: var(--font-serif);
+    font-size: 28px;
+    font-weight: 400;
+    margin-bottom: 16px;
+    text-align: center;
+}
+.two-products {
+    display: grid;
+    grid-template-columns: 1fr 1fr;
+    gap: 32px;
+    max-width: 900px;
+    margin: 0 auto;
+    padding: 20px 0 0;
+}
+@media (max-width: 768px) {
+    .two-products {
+        grid-template-columns: 1fr;
+    }
+}
+.product-card {
+    border: 1px solid var(--border);
+    border-radius: 12px;
+    padding: 24px;
+    background: var(--bg);
+    min-width: 0;
+}
+.product-card-header {
+    display: flex;
+    align-items: baseline;
+    gap: 8px;
+    margin: 16px 0 8px;
+}
+.product-card h3 {
+    font-family: var(--font-serif);
+    font-size: 22px;
+    color: var(--burgundy);
+}
+.product-note {
+    font-size: 13px;
+    color: var(--text-secondary);
+}
+.product-card p {
+    font-size: 15px;
+    color: var(--text-secondary);
+    line-height: 1.6;
+}
+.product-card img,
+.product-card .terminal {
+    border-radius: 8px;
+    width: 100%;
+    max-width: 100%;
+    margin: 0;
+}
+.product-card img {
+    display: block;
+    height: auto;
+}
+.product-card ul {
+    padding-left: 20px;
+    font-size: 14px;
+    color: var(--text-secondary);
+    line-height: 1.8;
+    margin-top: 12px;
+}
+
+/* Terminal Block */
+.terminal {
+    background: #1e1e1e;
+    border-radius: 12px;
+    overflow: hidden;
+    text-align: left;
+    box-shadow: 0 4px 24px rgba(0, 0, 0, 0.15);
+    max-width: 100%;
+}
+.terminal-header {
+    background: #2d2d2d;
+    padding: 12px 16px;
+    display: flex;
+    align-items: center;
+    gap: 8px;
+}
+.terminal-dot {
+    width: 12px;
+    height: 12px;
+    border-radius: 50%;
+}
+.terminal-dot.red { background: #ff5f56; }
+.terminal-dot.yellow { background: #ffbd2e; }
+.terminal-dot.green { background: #27ca40; }
+.terminal-body {
+    padding: 20px;
+    font-family: var(--font-mono);
+    font-size: 13px;
+    line-height: 1.7;
+    color: #e0e0e0;
+    overflow-x: auto;
+    -webkit-overflow-scrolling: touch;
+}
+.terminal-line {
+    white-space: pre;
+}
+.terminal-line.command::before {
+    content: '$ ';
+    color: #27ca40;
+}
+.terminal-line.output {
+    color: #9e9e9e;
+}
+.terminal-line.comment {
+    color: #6a9955;
+}
+
+/* Page Hero (for subpages) */
+.page-hero {
+    padding: 60px 0 80px;
+    text-align: center;
+}
+.page-hero h1 {
+    font-family: var(--font-serif);
+    font-size: clamp(36px, 6vw, 52px);
+    font-weight: 400;
+    line-height: 1.1;
+    letter-spacing: -0.02em;
+    margin-bottom: 16px;
+}
+.page-hero .tagline {
+    font-size: 18px;
+    color: var(--text-secondary);
+    max-width: 560px;
+    margin: 0 auto 32px;
+    line-height: 1.5;
+}
+
+/* Code Block */
+.code-block {
+    background: var(--bg-subtle);
+    border: 1px solid var(--border);
+    border-radius: 8px;
+    overflow: hidden;
+    margin: 24px 0;
+}
+.code-block-header {
+    background: var(--bg);
+    border-bottom: 1px solid var(--border);
+    padding: 10px 16px;
+    font-size: 12px;
+    color: var(--text-secondary);
+    font-family: var(--font-mono);
+}
+.code-block pre {
+    background: none;
+    padding: 16px;
+    margin: 0;
+    font-family: var(--font-mono);
+    font-size: 13px;
+    line-height: 1.6;
+    overflow-x: auto;
+    color: var(--text);
+}
+.code-block code {
+    color: var(--text);
+    background: none;
+}
+
+/* Footer */
+footer {
+    padding: 32px 0;
+    border-top: 1px solid var(--border);
+}
+footer .container {
+    display: flex;
+    justify-content: space-between;
+    align-items: center;
+}
+footer p {
+    color: var(--text-secondary);
+    font-size: 13px;
+}
+.footer-text {
+    display: flex;
+    flex-direction: column;
+    gap: 4px;
+}
+.built-by {
+    font-size: 12px;
+}
+.built-by a {
+    color: var(--text-secondary);
+    text-decoration: underline;
+    text-decoration-thickness: 1px;
+    text-underline-offset: 2px;
+}
+.built-by a:hover {
+    color: var(--text);
+}
+.built-by a:focus {
+    outline: 2px solid var(--burgundy);
+    outline-offset: 2px;
+}
+.footer-links {
+    display: flex;
+    gap: 20px;
+}
+.footer-links a {
+    color: var(--text-secondary);
+    text-decoration: none;
+    font-size: 13px;
+    transition: color 0.15s;
+    display: inline-flex;
+    align-items: center;
+    min-height: 44px;
+    padding: 8px 4px;
+}
+.footer-links a:hover {
+    color: var(--text);
+}
+.footer-links a:focus {
+    outline: 2px solid var(--burgundy);
+    outline-offset: 2px;
+}
+
+/* Download page */
+.download-hero {
+    padding: 80px 0 120px;
+}
+.download-hero h1 {
+    margin-bottom: 12px;
+}
+.download-hero .tagline {
+    margin-bottom: 48px;
+}
+.install-option h2 {
+    font-family: var(--font-serif);
+    font-size: 24px;
+    font-weight: 500;
+    margin-bottom: 8px;
+}
+.install-option {
+    padding: 24px 26px;
+    border-radius: 16px;
+    border: 1px solid var(--border);
+    background: rgba(255, 255, 255, 0.7);
+    box-shadow: 0 16px 32px rgba(0, 0, 0, 0.08);
+}
+.install-option .install-desc {
+    font-size: 14px;
+    color: var(--text-secondary);
+    margin-bottom: 20px;
+    line-height: 1.5;
+}
+.install-option .system-req {
+    margin-top: 12px;
+    font-size: 13px;
+    color: var(--text-secondary);
+}
+.next-steps-wrapper {
+    margin-top: 24px;
+    padding-top: 20px;
+    border-top: 1px solid var(--border);
+}
+.next-step-label {
+    font-size: 13px;
+    color: var(--text-secondary);
+    margin-bottom: 8px;
+}
+.install-code.next-steps {
+    font-size: 13px;
+    padding: 12px 16px;
+    white-space: pre;
+    overflow-x: auto;
+}
+
+/* ============================================================
+   Docs & Architecture — "systems ledger" redesign
+   Scope: everything below is under .docs-hero, so site-wide
+   tokens (:root) are untouched. Brand thread (burgundy/wine +
+   Instrument Serif title) stays; structure sharpens to an
+   ink-on-drafting-paper engineering reference with a monospace
+   instrument voice. Signature: the wine "authority tick".
+
+   Type discipline — one scale, three voices, three weights:
+     serif   Instrument  page title + deck only
+     sans    Inter       every heading, prose, and UI control
+     mono    JetBrains   micro-labels and code only
+     weights 400 (serif/body) · 500 (labels) · 600 (headings)
+   ============================================================ */
+.docs-hero {
+    /* Docs-scoped palette — does not leak to the marketing site */
+    --d-paper: #f6f6f4;
+    --d-surface: #fdfdfc;
+    --d-ink: #191b1e;
+    --d-body: #43464b;
+    --d-soft: #5f6266;
+    --d-faint: #85888d;
+    --d-rule: #e4e3df;
+    --d-rule-2: #d4d3ce;
+    --d-wine: #8a1b3d;
+    --d-chip-bg: #edece7;
+    --d-chip-border: #dddbd3;
+    --d-code-bg: #1b1d21;
+    --d-code-fg: #e7e8eb;
+
+    /* One type scale — no ad-hoc sizes below this line */
+    --fs-display: clamp(44px, 5vw, 60px);  /* h1                              */
+    --fs-deck: 22px;                        /* deck (serif italic)            */
+    --fs-h2: 27px;                          /* section heading                */
+    --fs-sub: 17px;                         /* h3, pager, directory heading   */
+    --fs-body: 15.5px;                      /* prose                          */
+    --fs-ui: 14px;                          /* nav links, table cells         */
+    --fs-small: 13px;                       /* code, outline, directory text  */
+    --fs-label: 11px;                       /* every mono micro-label         */
+    --ls-label: 0.12em;
+
+    min-height: calc(100vh - 82px);
+    padding: 46px 0 104px;
+    color: var(--d-body);
+    background: var(--d-paper);
+    border-bottom: 1px solid var(--d-rule);
+}
+
+/* Shared micro-label voice — nav headings, breadcrumb, table
+   heads, outline heading, pager direction, directory numbers */
+.docs-nav-heading,
+.docs-nav-area-title,
+.docs-breadcrumb li,
+.docs-content th,
+.docs-outline-heading,
+.docs-pager-direction,
+.docs-directory-number {
+    font-family: var(--font-mono);
+    font-size: var(--fs-label);
+    font-weight: 500;
+    letter-spacing: var(--ls-label);
+    text-transform: uppercase;
+}
+
+.docs-layout {
+    display: grid;
+    grid-template-columns: minmax(198px, 236px) minmax(0, 752px) minmax(158px, 196px);
+    gap: clamp(40px, 5vw, 80px);
+    max-width: 1440px;
+    margin: 0 auto;
+    padding: 0 clamp(24px, 4vw, 64px);
+}
+
+/* ---- Left rail: the index -------------------------------- */
+.docs-nav {
+    display: block;
+    position: sticky;
+    top: 100px;
+    align-self: start;
+    z-index: auto;
+    padding: 0;
+    background: transparent;
+    -webkit-backdrop-filter: none;
+    backdrop-filter: none;
+}
+.docs-nav-disclosure,
+.docs-nav-inner {
+    display: block;
+}
+.docs-nav-disclosure > summary {
+    display: none;
+}
+.docs-nav a.docs-nav-home {
+    display: block;
+    margin-bottom: 26px;
+    padding-bottom: 20px;
+    border-bottom: 1px solid var(--d-rule);
+    color: var(--d-ink);
+    text-decoration: none;
+}
+.docs-nav-wordmark {
+    display: block;
+    font-family: var(--font-serif);
+    font-size: 26px;
+    line-height: 1.05;
+    letter-spacing: -0.01em;
+    color: var(--d-ink);
+}
+.docs-nav-heading {
+    display: block;
+    margin-top: 10px;
+    color: var(--d-soft);
+}
+.docs-nav-area {
+    margin: 0 0 24px;
+}
+.docs-nav-area-title {
+    margin-bottom: 10px;
+    color: var(--d-soft);
+}
+.docs-nav ul {
+    display: block;
+    list-style: none;
+    padding: 0;
+}
+.docs-nav li {
+    display: block;
+    margin: 0;
+}
+.docs-nav a {
+    position: relative;
+    width: 100%;
+    min-height: 32px;
+    padding: 6px 10px 6px 15px;
+    color: var(--d-body);
+    text-decoration: none;
+    font-size: var(--fs-ui);
+    line-height: 1.4;
+    transition: color 0.14s, background 0.14s;
+    display: flex;
+    align-items: center;
+}
+.docs-nav li a::before {
+    content: "";
+    position: absolute;
+    left: 0;
+    top: 50%;
+    width: 2px;
+    height: 0;
+    background: var(--d-wine);
+    transform: translateY(-50%);
+    transition: height 0.15s ease;
+}
+.docs-nav li a:hover {
+    color: var(--d-ink);
+    background: rgba(25, 27, 30, 0.035);
+}
+.docs-nav li a:hover::before {
+    height: 14px;
+}
+.docs-nav li a.active {
+    color: var(--d-wine);
+    font-weight: 600;
+    background: transparent;
+}
+.docs-nav li a.active::before {
+    height: 100%;
+    top: 0;
+    transform: none;
+}
+.docs-nav a:focus-visible {
+    outline: 2px solid var(--d-wine);
+    outline-offset: 2px;
+}
+.docs-nav-child a {
+    padding-left: 26px;
+    color: var(--d-soft);
+}
+.docs-nav-public-link {
+    margin-top: 6px;
+    padding: 14px 10px 0 !important;
+    border-top: 1px solid var(--d-rule);
+    border-left: 0 !important;
+    color: var(--d-soft) !important;
+    font-family: var(--font-mono);
+    font-size: var(--fs-label) !important;
+    letter-spacing: 0.04em;
+}
+.docs-nav-public-link::before { content: none !important; }
+
+/* ---- Content column -------------------------------------- */
+.docs-content {
+    min-width: 0;
+    margin: 0;
+    padding: 0;
+    border: 0;
+    background: transparent;
+    box-shadow: none;
+}
+.docs-breadcrumb,
+.docs-outline,
+.docs-pager {
+    position: static;
+    padding: 0;
+    background: transparent;
+    -webkit-backdrop-filter: none;
+    backdrop-filter: none;
+    border: 0;
+}
+.docs-breadcrumb {
+    margin: 4px 0 34px;
+}
+.docs-breadcrumb ol,
+.docs-content .docs-breadcrumb ol {
+    display: flex;
+    flex-wrap: wrap;
+    align-items: center;
+    gap: 8px;
+    max-width: none;
+    margin: 0;
+    padding: 0;
+    list-style: none;
+    font-size: inherit;
+    line-height: inherit;
+}
+.docs-breadcrumb li {
+    display: inline-flex;
+    align-items: center;
+    margin: 0;
+    color: var(--d-soft);
+}
+.docs-breadcrumb li + li::before {
+    content: "/";
+    margin-right: 8px;
+    color: var(--d-rule-2);
+    letter-spacing: 0;
+}
+.docs-content .docs-breadcrumb a {
+    color: var(--d-soft);
+    text-decoration: none;
+}
+.docs-content .docs-breadcrumb a:hover {
+    color: var(--d-wine);
+}
+
+.docs-page-header {
+    margin-bottom: 46px;
+    padding: 0 0 34px;
+    border-bottom: 1px solid var(--d-rule-2);
+    background: transparent;
+}
+.docs-page-utility {
+    display: flex;
+    align-items: baseline;
+    justify-content: flex-end;
+    gap: 20px;
+    margin-bottom: 18px;
+}
+.docs-md-link {
+    margin: 0 !important;
+    text-align: right;
+}
+.docs-md-link a,
+.docs-md-link .md-link {
+    display: inline-flex;
+    align-items: center;
+    gap: 6px;
+    padding: 5px 11px;
+    border: 1px solid var(--d-rule-2);
+    border-radius: 6px;
+    color: var(--d-soft);
+    font-family: var(--font-mono);
+    font-size: var(--fs-label);
+    letter-spacing: 0.02em;
+    text-decoration: none;
+    transition: color 0.14s, border-color 0.14s, background 0.14s;
+}
+.docs-md-link a::before {
+    content: "{ }";
+    color: var(--d-wine);
+}
+.docs-md-link a:hover {
+    color: var(--d-ink);
+    border-color: var(--d-soft);
+    background: var(--d-surface);
+}
+
+.docs-content h1 {
+    font-family: var(--font-serif);
+    max-width: 20ch;
+    margin: 0;
+    color: var(--d-ink);
+    font-size: var(--fs-display);
+    font-weight: 400;
+    letter-spacing: -0.03em;
+    line-height: 0.98;
+}
+.docs-deck {
+    max-width: 60ch;
+    margin: 20px 0 0 !important;
+    color: var(--d-soft) !important;
+    font-family: var(--font-serif);
+    font-size: var(--fs-deck) !important;
+    font-style: italic;
+    line-height: 1.3 !important;
+}
+
+/* Section headings — technical subheads + the authority tick */
+.docs-content h2 {
+    position: relative;
+    font-family: var(--font-sans);
+    font-size: var(--fs-h2);
+    font-weight: 600;
+    color: var(--d-ink);
+    margin: 64px 0 20px;
+    padding-top: 26px;
+    border-top: 1px solid var(--d-rule);
+    letter-spacing: -0.018em;
+    line-height: 1.2;
+}
+.docs-content h2::before {
+    content: "";
+    position: absolute;
+    top: -1px;
+    left: 0;
+    width: 34px;
+    height: 2px;
+    background: var(--d-wine);
+}
+.docs-content h2:first-of-type {
+    margin-top: 8px;
+}
+.docs-content h3 {
+    color: var(--d-ink);
+    font-family: var(--font-sans);
+    font-size: var(--fs-sub);
+    font-weight: 600;
+    letter-spacing: -0.005em;
+    margin: 36px 0 12px;
+    line-height: 1.35;
+}
+.anchor-link {
+    opacity: 0;
+    margin-left: 0.5em;
+    text-decoration: none;
+    color: var(--d-faint);
+    font-weight: 400;
+    transition: opacity 0.15s;
+}
+h2:hover .anchor-link,
+h3:hover .anchor-link,
+.anchor-link:focus {
+    opacity: 0.6;
+}
+.anchor-link:hover {
+    opacity: 1;
+    color: var(--d-wine);
+}
+
+.docs-content p {
+    max-width: 70ch;
+    color: var(--d-body);
+    font-size: var(--fs-body);
+    line-height: 1.72;
+    margin-bottom: 18px;
+}
+.docs-content ul,
+.docs-content ol {
+    max-width: 70ch;
+    color: var(--d-body);
+    font-size: var(--fs-body);
+    line-height: 1.7;
+    margin-bottom: 20px;
+    padding-left: 24px;
+}
+.docs-content li {
+    margin-bottom: 7px;
+}
+.docs-content li::marker {
+    color: var(--d-wine);
+}
+
+/* Inline identifiers — the typed-value token */
+.docs-content code {
+    font-family: var(--font-mono);
+    font-size: var(--fs-small);
+    color: var(--d-ink);
+    background: var(--d-chip-bg);
+    padding: 1.5px 6px;
+    border-radius: 4px;
+    border: 1px solid var(--d-chip-border);
+    white-space: nowrap;
+}
+.docs-content td code,
+.docs-content a code {
+    color: var(--burgundy);
+}
+
+/* Code blocks — the labeled artifact */
+.docs-content pre {
+    position: relative;
+    background: var(--d-code-bg);
+    border-radius: 8px;
+    padding: 20px 22px;
+    margin: 22px 0 28px;
+    overflow-x: auto;
+    box-shadow: inset 3px 0 0 var(--d-wine);
+    -webkit-overflow-scrolling: touch;
+}
+.docs-content pre code {
+    background: none;
+    border: none;
+    padding: 0;
+    color: var(--d-code-fg);
+    font-size: var(--fs-small);
+    line-height: 1.62;
+    white-space: pre;
+}
+
+/* Tables — the registry */
+.docs-content table {
+    display: block;
+    width: max-content;
+    max-width: 100%;
+    overflow-x: auto;
+    border-collapse: collapse;
+    margin: 24px 0 32px;
+    font-size: var(--fs-ui);
+    border: 1px solid var(--d-rule-2);
+    border-radius: 8px;
+}
+.docs-content th,
+.docs-content td {
+    text-align: left;
+    padding: 12px 15px;
+    border-bottom: 1px solid var(--d-rule);
+    vertical-align: top;
+}
+.docs-content th {
+    color: var(--d-ink);
+    background: var(--d-chip-bg);
+    border-bottom: 1px solid var(--d-rule-2);
+    white-space: nowrap;
+}
+.docs-content tbody tr:last-child td {
+    border-bottom: 0;
+}
+.docs-content tbody tr:hover td {
+    background: rgba(138, 27, 61, 0.028);
+}
+.docs-content td {
+    color: var(--d-body);
+    background: var(--d-surface);
+    line-height: 1.55;
+}
+.docs-content td:first-child {
+    color: var(--d-ink);
+    font-weight: 600;
+}
+
+.docs-content blockquote {
+    margin: 26px 0;
+    padding: 4px 0 4px 22px;
+    border: 0;
+    border-left: 2px solid var(--d-wine);
+    background: transparent;
+    color: var(--d-ink);
+    font-size: var(--fs-body);
+    font-style: italic;
+    line-height: 1.6;
+}
+.docs-content a {
+    color: var(--d-wine);
+    text-decoration: underline;
+    text-decoration-color: rgba(138, 27, 61, 0.35);
+    text-decoration-thickness: 1px;
+    text-underline-offset: 3px;
+    transition: text-decoration-color 0.14s;
+}
+.docs-content a:hover {
+    text-decoration-color: var(--d-wine);
+}
+.docs-content a:focus-visible {
+    outline: 2px solid var(--d-wine);
+    outline-offset: 2px;
+}
+.docs-content hr {
+    border: none;
+    border-top: 1px solid var(--d-rule);
+    margin: 52px 0;
+}
+.docs-content img {
+    max-width: 100%;
+    margin: 22px 0;
+    border: 1px solid var(--d-rule-2);
+    border-radius: 6px;
+}
+
+/* ---- Right rail: on this page ---------------------------- */
+.docs-outline {
+    display: block;
+    position: sticky;
+    top: 100px;
+    align-self: start;
+    max-height: calc(100vh - 130px);
+    min-width: 0;
+    overflow-y: auto;
+}
+.docs-outline-heading {
+    margin-bottom: 12px;
+    color: var(--d-soft);
+}
+.docs-outline ol {
+    display: block;
+    margin: 0;
+    padding: 0 0 0 14px;
+    border-left: 1px solid var(--d-rule);
+    list-style: none;
+}
+.docs-outline li {
+    display: block;
+    margin: 0;
+}
+.docs-outline a {
+    display: block;
+    margin-left: -14px;
+    padding: 5px 2px 5px 14px;
+    border-left: 2px solid transparent;
+    color: var(--d-soft);
+    font-size: var(--fs-small);
+    line-height: 1.45;
+    text-decoration: none;
+    transition: color 0.14s, border-color 0.14s;
+}
+.docs-outline a:hover {
+    color: var(--d-wine);
+    border-left-color: var(--d-wine);
+}
+
+/* ---- Index page: browse by area -------------------------- */
+.docs-directory {
+    margin: 0 0 56px;
+}
+.docs-directory > h2 {
+    margin-top: 0;
+    padding-top: 0;
+    border-top: 0;
+}
+.docs-directory > h2::before { content: none; }
+.docs-directory-list {
+    max-width: none !important;
+    margin: 0 !important;
+    padding: 0 !important;
+    border-top: 1px solid var(--d-rule-2);
+    list-style: none;
+}
+.docs-directory-list > li {
+    display: grid;
+    grid-template-columns: 46px 1fr;
+    gap: 16px;
+    margin: 0;
+    padding: 24px 0 26px;
+    border-bottom: 1px solid var(--d-rule);
+}
+.docs-directory-number {
+    padding-top: 6px;
+    color: var(--d-wine);
+    letter-spacing: 0.04em;
+}
+.docs-directory h3 {
+    margin: 0 0 5px;
+    color: var(--d-ink);
+    font-family: var(--font-sans);
+    font-size: var(--fs-sub);
+    font-weight: 600;
+    letter-spacing: -0.01em;
+}
+.docs-directory p {
+    margin: 0 0 10px;
+    max-width: 62ch;
+    color: var(--d-soft);
+    font-size: var(--fs-small);
+    line-height: 1.55;
+}
+.docs-directory ul {
+    display: flex;
+    flex-wrap: wrap;
+    gap: 4px 18px;
+    margin: 0;
+    padding: 0;
+    list-style: none;
+}
+.docs-content .docs-directory ul {
+    list-style: none;
+}
+.docs-content .docs-directory li::marker {
+    content: "";
+}
+.docs-directory li li {
+    margin: 0;
+}
+.docs-directory a {
+    color: var(--d-body);
+    font-size: var(--fs-small);
+    font-weight: 500;
+    text-decoration: underline;
+    text-decoration-color: var(--d-rule-2);
+    text-underline-offset: 2px;
+}
+.docs-directory a:hover {
+    color: var(--d-wine);
+    text-decoration-color: var(--d-wine);
+}
+
+/* ---- Prev / next pager ----------------------------------- */
+.docs-pager {
+    display: grid;
+    grid-template-columns: repeat(2, minmax(0, 1fr));
+    gap: 16px;
+    margin-top: 76px;
+    padding-top: 26px;
+    border-top: 1px solid var(--d-rule-2);
+}
+.docs-pager-link {
+    display: flex;
+    flex-direction: column;
+    gap: 5px;
+    min-height: 66px;
+    padding: 16px 18px;
+    border: 1px solid var(--d-rule);
+    border-radius: 8px;
+    color: var(--d-body);
+    text-decoration: none !important;
+    transition: border-color 0.14s, background 0.14s;
+}
+.docs-pager-link:hover {
+    border-color: var(--d-rule-2);
+    background: var(--d-surface);
+}
+.docs-pager-next {
+    grid-column: 2;
+    text-align: right;
+    align-items: flex-end;
+}
+.docs-pager-direction {
+    color: var(--d-soft);
+}
+.docs-pager-title {
+    color: var(--d-ink);
+    font-family: var(--font-sans);
+    font-size: var(--fs-sub);
+    font-weight: 600;
+    letter-spacing: -0.01em;
+}
+.docs-pager-link:hover .docs-pager-title {
+    color: var(--d-wine);
+}
+
+/* ---- Responsive ------------------------------------------ */
+@media (max-width: 1120px) {
+    .docs-layout {
+        grid-template-columns: minmax(198px, 228px) minmax(0, 752px);
+    }
+    .docs-outline {
+        display: none;
+    }
+}
+
+@media (max-width: 760px) {
+    .docs-hero {
+        padding-top: 28px;
+    }
+    .docs-layout {
+        grid-template-columns: minmax(0, 1fr);
+        gap: 36px;
+    }
+    .docs-nav {
+        position: static;
+        display: block;
+        padding-bottom: 0;
+        border-bottom: 0;
+    }
+    .docs-nav-disclosure > summary {
+        display: flex;
+        align-items: center;
+        justify-content: space-between;
+        gap: 18px;
+        min-height: 52px;
+        padding: 0 4px 14px;
+        border-bottom: 1px solid var(--d-rule-2);
+        color: var(--d-ink);
+        cursor: pointer;
+        font-family: var(--font-sans);
+        font-size: var(--fs-sub);
+        font-weight: 600;
+        list-style: none;
+    }
+    .docs-nav-disclosure > summary::-webkit-details-marker {
+        display: none;
+    }
+    .docs-nav-disclosure > summary::after {
+        content: "+";
+        color: var(--d-soft);
+        font-family: var(--font-mono);
+        font-size: var(--fs-sub);
+        font-weight: 400;
+    }
+    .docs-nav-disclosure[open] > summary::after {
+        content: "−";
+    }
+    .docs-nav-disclosure > summary span:last-child {
+        color: var(--d-soft);
+        font-family: var(--font-mono);
+        font-size: var(--fs-label);
+        letter-spacing: 0.02em;
+    }
+    .docs-nav-disclosure > summary:focus-visible {
+        outline: 2px solid var(--d-wine);
+        outline-offset: 3px;
+    }
+    .docs-nav .docs-nav-disclosure:not([open]) > .docs-nav-inner {
+        display: none;
+    }
+    .docs-nav-inner {
+        padding: 26px 0 29px;
+        border-bottom: 1px solid var(--d-rule-2);
+    }
+    .docs-nav a.docs-nav-home {
+        margin: 0;
+        padding: 0 0 18px;
+    }
+    .docs-nav-area {
+        margin: 22px 0 0;
+    }
+    .docs-nav a {
+        min-height: 38px;
+    }
+    .docs-breadcrumb {
+        margin-bottom: 22px;
+    }
+    .docs-page-header {
+        margin-bottom: 36px;
+        padding-bottom: 28px;
+    }
+}
+
+@media (max-width: 480px) {
+    .docs-layout {
+        padding: 0 20px;
+    }
+    .docs-page-utility {
+        align-items: flex-start;
+        flex-direction: column-reverse;
+        gap: 12px;
+    }
+    .docs-md-link {
+        text-align: left;
+    }
+    .docs-directory-list > li {
+        grid-template-columns: 34px 1fr;
+        gap: 12px;
+    }
+    .docs-pager {
+        grid-template-columns: 1fr;
+    }
+    .docs-pager-next {
+        grid-column: 1;
+    }
+}
+
+/* Contact section */
+.contact-section {
+    padding: 80px 0;
+    border-top: 1px solid var(--border);
+    text-align: center;
+}
+.contact-section h2 {
+    font-family: var(--font-serif);
+    font-size: 32px;
+    font-weight: 400;
+    margin-bottom: 16px;
+}
+.contact-section p {
+    color: var(--text-secondary);
+    font-size: 16px;
+    max-width: 500px;
+    margin: 0 auto 32px;
+    line-height: 1.6;
+}
+.contact-section .contact-email {
+    font-size: 18px;
+    color: var(--burgundy);
+    text-decoration: none;
+    font-weight: 500;
+}
+.contact-section .contact-email:hover {
+    text-decoration: underline;
+}
+.contact-section .contact-email:focus {
+    outline: 2px solid var(--burgundy);
+    outline-offset: 2px;
+}
+
+/* Vocabulary Grid (2x2 terms) */
+.vocab-section {
+    padding: 80px 0;
+    border-top: 1px solid var(--border);
+}
+.vocab-section h2 {
+    font-family: var(--font-serif);
+    font-size: 28px;
+    font-weight: 400;
+    margin-bottom: 8px;
+    text-align: center;
+}
+.vocab-grid {
+    display: grid;
+    grid-template-columns: repeat(2, 1fr);
+    gap: 24px;
+    max-width: 600px;
+    margin: 0 auto;
+}
+@media (max-width: 640px) {
+    .vocab-grid {
+        grid-template-columns: 1fr;
+    }
+}
+.vocab-grid-3 {
+    grid-template-columns: repeat(3, 1fr);
+    max-width: 900px;
+}
+@media (max-width: 768px) {
+    .vocab-grid-3 {
+        grid-template-columns: 1fr;
+    }
+}
+.term-card {
+    background: rgba(255, 255, 255, 0.7);
+    border: 1px solid var(--border);
+    border-radius: 12px;
+    text-align: center;
+    display: flex;
+    flex-direction: column;
+    transition: transform 0.15s ease, box-shadow 0.15s ease;
+}
+.term-card:hover {
+    transform: translateY(-2px);
+    box-shadow: 0 4px 12px rgba(0, 0, 0, 0.08);
+}
+.term-card > summary {
+    display: flex;
+    flex-direction: column;
+    flex: 1;
+    padding: 24px;
+    cursor: pointer;
+}
+.term-chevron {
+    display: block;
+    width: 16px;
+    height: 16px;
+    margin: 4px auto 0;
+    color: var(--text-secondary);
+    transition: transform 0.15s ease;
+}
+.term-card[open] .term-chevron {
+    transform: rotate(180deg);
+}
+.term-card > summary::-webkit-details-marker {
+    display: none;
+}
+.term-card > summary::after {
+    content: none !important;
+}
+.term-card summary > * {
+    pointer-events: none;
+}
+.term-card summary:focus {
+    outline: 2px solid var(--burgundy);
+    outline-offset: 2px;
+    border-radius: 10px;
+}
+.term-card summary:focus:not(:focus-visible) {
+    outline: none;
+}
+.term-number {
+    display: block;
+    font-size: 14px;
+    font-weight: 600;
+    color: var(--text-secondary);
+    margin-bottom: 12px;
+}
+.term-icon {
+    width: 48px;
+    height: 48px;
+    margin: 0 auto 16px;
+    color: var(--burgundy);
+}
+.term-card h3 {
+    font-family: var(--font-serif);
+    font-size: 22px;
+    font-weight: 500;
+    color: var(--text);
+    margin-bottom: 8px;
+}
+.term-essence {
+    font-size: 14px;
+    color: var(--text-secondary);
+    line-height: 1.5;
+    margin-bottom: 16px;
+}
+.term-details-content {
+    padding: 0 24px 24px;
+    text-align: left;
+    border-top: 1px solid var(--border);
+    animation: term-expand 0.15s ease;
+}
+@keyframes term-expand {
+    from {
+        opacity: 0;
+        transform: translateY(-8px);
+    }
+    to {
+        opacity: 1;
+        transform: translateY(0);
+    }
+}
+@media (prefers-reduced-motion: reduce) {
+    .term-details-content {
+        animation: none;
+    }
+    .term-card {
+        transition: none;
+    }
+    .term-chevron {
+        transition: none;
+    }
+}
+.term-detail-item {
+    margin-top: 16px;
+}
+.term-detail-label {
+    font-size: 12px;
+    font-weight: 600;
+    color: var(--burgundy);
+    text-transform: uppercase;
+    letter-spacing: 0.5px;
+    margin-bottom: 6px;
+}
+.term-detail-text {
+    font-size: 14px;
+    color: var(--text-secondary);
+    line-height: 1.5;
+}
+@media (max-width: 640px) {
+    .term-card summary {
+        padding: 20px;
+    }
+    .term-details-content {
+        padding: 0 20px 20px;
+    }
+}
+
+/* Loopflow showcase (promoted image section) */
+.loopflow-showcase-section {
+    padding: 48px 0 0;
+}
+.loopflow-showcase-figure {
+    margin: 0;
+}
+.loopflow-showcase-img {
+    max-width: 100%;
+    border-radius: 12px;
+    border: 1px solid var(--border);
+    box-shadow: 0 4px 24px rgba(0, 0, 0, 0.08);
+    margin: 0 auto;
+    display: block;
+}
+.loopflow-showcase-caption {
+    text-align: center;
+    color: var(--text-secondary);
+    font-size: 14px;
+    margin-top: 12px;
+}
+.loopflow-showcase-caption p {
+    margin: 4px 0 0;
+}
+.loopflow-showcase-provenance {
+    font-family: var(--font-mono);
+    font-size: 12px;
+}
+.loopflow-showcase-caption a {
+    color: var(--burgundy);
+    text-decoration: underline;
+    text-underline-offset: 2px;
+}
+
+/* Team Page */
+.team-card {
+    display: flex;
+    gap: 48px;
+    align-items: center;
+    max-width: 720px;
+    margin: 0 auto;
+    padding: 48px;
+    background: var(--bg);
+    border: 1px solid var(--border);
+    border-radius: 12px;
+}
+.team-photo {
+    display: block;
+    width: 200px;
+    min-width: 200px;
+    aspect-ratio: 1;
+    border-radius: 50%;
+    object-fit: cover;
+}
+.team-card-body h3 {
+    font-family: var(--font-serif);
+    font-size: 26px;
+    font-weight: 400;
+    margin-bottom: 4px;
+    color: var(--text);
+}
+.team-card-body .team-title {
+    font-size: 13px;
+    font-weight: 600;
+    text-transform: uppercase;
+    letter-spacing: 0.08em;
+    color: var(--text-secondary);
+    margin-bottom: 16px;
+}
+.team-card-body .team-bio {
+    font-size: 15px;
+    line-height: 1.7;
+    color: var(--text-secondary);
+}
+.team-hero {
+    padding-bottom: 40px;
+}
+.team-hero .tagline {
+    margin-bottom: 0;
+}
+.team-section {
+    padding-bottom: 80px;
+}
+@media (max-width: 768px) {
+    .team-card {
+        flex-direction: column;
+        text-align: center;
+        padding: 32px 24px;
+        gap: 24px;
+    }
+    .team-photo {
+        width: 160px;
+        min-width: 160px;
+    }
+}
+
+/* Mac app option (download page) */
+.mac-app-option {
+    margin-top: 2.5rem;
+}
+
+.mac-app-option .btn {
+    margin-top: 0.75rem;
+}
+
+/* Hero subline (homepage) */
+.hero-subline {
+    max-width: 640px;
+    margin: 1rem auto 1.5rem;
+    font-size: 1.05rem;
+    line-height: 1.6;
+    color: var(--text-secondary);
+}
+
+/* Install notes (bottom CTA) */
+.install-note {
+    max-width: 560px;
+    margin: 1rem auto 0.25rem;
+}
+
+/* Inline code outside docs pages (pillars, hero, install notes) */
+.capability-item code,
+.hero-subline code,
+.install-note code {
+    background: var(--bg-subtle);
+    border: 1px solid var(--border);
+    border-radius: 4px;
+    padding: 1px 5px;
+    font-family: var(--font-mono);
+    font-size: 0.9em;
+    color: var(--text);
+}
+
+/* Portable-only additions. The shared docs system lives in website/static/style.css. */
+
+.portable-docs .docs-hero {
+    min-height: 100vh;
+}
+
+.portable-docs .docs-nav-public-link {
+    display: none;
+}
+
+@media print {
+    .portable-docs > nav,
+    .portable-docs .docs-nav,
+    .portable-docs .docs-outline,
+    .portable-docs .docs-md-link,
+    .portable-docs .docs-pager,
+    .portable-docs > footer {
+        display: none;
+    }
+
+    .portable-docs .docs-hero {
+        padding: 0;
+        background: white;
+        border: 0;
+    }
+
+    .portable-docs .docs-layout {
+        display: block;
+        max-width: 760px;
+        padding: 0;
+    }
+
+    .portable-docs .docs-content a {
+        color: inherit;
+    }
+}
+
+  </style>
+</head>
+<body class="portable-docs">
+<a href="#main-content" class="skip-link">Skip to main content</a>
+<script src="https://loopflow.studio/static/docs.js" defer></script>
+<nav aria-label="Main navigation">
+  <div class="container">
+    <div class="nav-brand-group">
+<a href="https://loopflow.studio/" class="nav-logo"><img src="https://loopflow.studio/static/logo.svg" alt="Loopflow"></a><a href="https://loopflow.studio/" class="nav-title">Loopflow</a>    </div>
+    <ul class="nav-links">
+      <li>
+<a href="https://loopflow.studio/docs">Docs</a>      </li>
+      <li>
+<a href="https://github.com/loopflowstudio/loopflow" target="_blank" rel="noopener noreferrer" aria-label="GitHub (opens in new tab)" class="external-link">GitHub</a>      </li>
+      <li>
+<a href="https://loopflow.studio/download" class="btn btn-primary">Install</a>      </li>
+    </ul>
+  </div>
+</nav>
+
+<main id="main-content">  <section class="docs-hero">
+    <div class="docs-layout">
+      <nav aria-label="Developer architecture" class="docs-nav docs-nav-architecture">
+<details open class="docs-nav-disclosure"><summary><span>Browse architecture</span><span>Architecture</span></summary>          <div class="docs-nav-inner">
+<a href="https://loopflow.studio/architecture" class="docs-nav-home"><span class="docs-nav-wordmark">Loopflow source</span><span class="docs-nav-heading">Developer architecture</span></a>            <div class="docs-nav-area">
+              <p class="docs-nav-area-title">Follow the system</p>
+              <ul>
+                <li>
+<a href="https://loopflow.studio/architecture" aria-current="page" class="active">Architecture</a>                </li>
+                <li class="docs-nav-child">
+<a href="https://loopflow.studio/architecture/execution">Execution</a>                </li>
+                <li class="docs-nav-child">
+<a href="https://loopflow.studio/architecture/planning">Planning</a>                </li>
+                <li class="docs-nav-child">
+<a href="https://loopflow.studio/architecture/delivery">Delivery</a>                </li>
+                <li class="docs-nav-child">
+<a href="https://loopflow.studio/architecture/homes">Homes and processes</a>                </li>
+                <li class="docs-nav-child">
+<a href="https://loopflow.studio/architecture/data">Data and persistence</a>                </li>
+                <li class="docs-nav-child">
+<a href="https://loopflow.studio/architecture/codebase">Codebase map</a>                </li>
+                <li class="docs-nav-child">
+<a href="https://loopflow.studio/architecture/reference">Checked reference</a>                </li>
+              </ul>
+            </div>
+<a href="https://loopflow.studio/docs" class="docs-nav-public-link">Public user docs ↗</a>          </div>
+</details>      </nav>
+      <article class="docs-content">
+        <header class="docs-page-header">
+          <div class="docs-page-utility">
+            <p class="docs-md-link">
+<a href="https://loopflow.studio/architecture.md" class="md-link" title="This page as raw markdown, for agents and copying">Markdown source</a>            </p>
+          </div>
+          <h1>Architecture</h1>
+          <p class="docs-deck">A developer's path through the whole system</p>
+        </header>
+<p>Loopflow turns one reusable instruction into one observed model-provider run.
+Everything else composes that path, gives it durable purpose, delivers its
+changes, places it on a machine, or projects what happened.</p>
+<p>This guide is for developers changing Loopflow. It starts with the smallest
+complete path, then opens into the six areas that own the system. Command
+syntax lives in the <a href="https://loopflow.studio/docs/lf"><code>lf</code> reference</a>; the exhaustive checked inventory
+lives in <a href="https://loopflow.studio/architecture/reference">Architecture Reference</a>.</p>
+<h2 id="run-one-skill">Run one Skill<a class="anchor-link" href="#run-one-skill" title="Link to this section">#</a></h2>
+<pre tabindex="0"><code class="language-bash">lf implement
+</code></pre>
+<p>That command discovers <code>implement</code>, assembles its context, chooses a provider,
+publishes a Run manifest, launches the provider, records direct evidence, and
+settles once. It needs no Wave, Project, Task, daemon, or readable planning
+database.</p>
+<pre tabindex="0"><code class="language-text">request
+  |
+  v
+lf CLI --&gt; Skill discovery --&gt; prompt --&gt; provider route --&gt; harness
+                                                          |
+                                                          v
+                                               Home-local Run record
+                                               manifest + JSONL + terminal
+</code></pre>
+<p>Before the provider starts, the current Home contains:</p>
+<pre tabindex="0"><code class="language-text">$LF_HOME/runs/&lt;prefix&gt;/&lt;run-id&gt;/
+  manifest.json
+</code></pre>
+<p>While it runs, Loopflow may append lifecycle, conversation, tool, raw provider,
+and usage evidence to <code>events.jsonl</code>. When the harness returns, it creates
+<code>terminal.json</code> once. Planning SQLite may be unreadable; the launch still
+works. Missing telemetry may make the record incomplete; it never changes the
+provider result.</p>
+<p>The implementation follows the same order as the diagram:</p>
+<table tabindex="0">
+<thead>
+<tr>
+<th>Stage</th>
+<th>Concrete owner</th>
+<th>Produces</th>
+</tr>
+</thead>
+<tbody>
+<tr>
+<td>Parse and dispatch</td>
+<td><a href="https://github.com/loopflowstudio/loopflow/blob/main/rust/loopflow/src/lf/mod.rs"><code>lf/mod.rs</code></a></td>
+<td>One command and launch context</td>
+</tr>
+<tr>
+<td>Find the Skill</td>
+<td><a href="https://github.com/loopflowstudio/loopflow/blob/main/rust/loopflow/src/lf/discovery.rs"><code>lf/discovery.rs</code></a></td>
+<td>One selected Skill source</td>
+</tr>
+<tr>
+<td>Assemble context</td>
+<td><a href="https://github.com/loopflowstudio/loopflow/blob/main/rust/loopflow/src/engine/prompt.rs"><code>engine/prompt.rs</code></a></td>
+<td>System and task prompts</td>
+</tr>
+<tr>
+<td>Select credentials and route</td>
+<td><a href="https://github.com/loopflowstudio/loopflow/blob/main/rust/loopflow/src/provider_account.rs"><code>provider_account.rs</code></a></td>
+<td>Harness, account, model, credential</td>
+</tr>
+<tr>
+<td>Launch and normalize</td>
+<td><a href="https://github.com/loopflowstudio/loopflow/blob/main/rust/loopflow/src/harness"><code>harness/</code></a></td>
+<td>Provider output and usage events</td>
+</tr>
+<tr>
+<td>Publish and settle evidence</td>
+<td><a href="https://github.com/loopflowstudio/loopflow/blob/main/rust/loopflow/src/run_record.rs"><code>run_record.rs</code></a></td>
+<td>One immutable manifest and terminal receipt</td>
+</tr>
+</tbody>
+</table>
+<p><a href="https://loopflow.studio/architecture/execution">Follow the complete execution path →</a></p>
+<h2 id="add-one-capability-at-a-time">Add one capability at a time<a class="anchor-link" href="#add-one-capability-at-a-time" title="Link to this section">#</a></h2>
+<p>The Skill runner is useful by itself. The rest of Loopflow grows outward by
+adding one kind of capability at each layer. Tracked Work and autonomous
+controllers are separate layers: Work remains fully operable when no
+controller is installed or running, while controllers consume the same Work,
+execution, and delivery operations available to any caller.</p>
+<pre tabindex="0"><code class="language-text">one Skill run
+    |
+    +-- Flow: compose Skills, mechanical operations, and human boundaries
+    |
+    +-- Work: preserve purpose and input across independent processes
+    |
+    +-- Task delivery: bind concrete Work to one active remote branch, worktree, and PR
+    |
+    +-- Controllers: pursue Work end to end using the layers above
+    |
+    +-- Home: place execution, credentials, services, files, and locks
+    |
+    `-- Views: project planning, Run, provider, Git, and OS evidence
+</code></pre>
+<table tabindex="0">
+<thead>
+<tr>
+<th>Area</th>
+<th>What it adds</th>
+<th>Start here</th>
+</tr>
+</thead>
+<tbody>
+<tr>
+<td>Execution</td>
+<td>Skill discovery, prompt assembly, provider routing, harnesses, Run records</td>
+<td><a href="https://loopflow.studio/architecture/execution">Execution</a></td>
+</tr>
+<tr>
+<td>Planning</td>
+<td>Flow composition, Wave/Project/Task Work, Steer, questions, human FlowSteps, resident loops</td>
+<td><a href="https://loopflow.studio/architecture/planning">Planning</a></td>
+</tr>
+<tr>
+<td>Delivery</td>
+<td>Managed worktrees, commits, one active Task branch/PR, CI repair, merge</td>
+<td><a href="https://loopflow.studio/architecture/delivery">Delivery</a></td>
+</tr>
+<tr>
+<td>Homes</td>
+<td>Placement, <code>lfd</code>, Wave listeners, SSH routing, machine install</td>
+<td><a href="https://loopflow.studio/architecture/homes">Homes and processes</a></td>
+</tr>
+<tr>
+<td>Data</td>
+<td>Truth owners, SQLite, files, external systems, projections, consistency</td>
+<td><a href="https://loopflow.studio/architecture/data">Data and persistence</a></td>
+</tr>
+<tr>
+<td>Codebase</td>
+<td>Source territories, public surfaces, processes, extension points</td>
+<td><a href="https://loopflow.studio/architecture/codebase">Codebase map</a></td>
+</tr>
+</tbody>
+</table>
+<p>The source tree makes the planning boundary literal:</p>
+<pre tabindex="0"><code class="language-text">work/                          controller/
+wave/{mod,config,context,      wave/{runner,resident,server,
+      memory}                       placement,...}
+project                       project/{mod,state}
+task                          task/{mod,state}
+                              runner + store
+
+execution kernel: engine/ + harness/ + Run records
+composition surfaces: lf/ + bin/
+</code></pre>
+<p><code>work</code> never imports <code>controller</code>. The execution kernel works without either
+layer and never loads Work. CLI and controller callers resolve Work identity,
+Wave memory, and controller state, then pass ordinary launch inputs into the
+kernel.</p>
+<p>Release delivery also separates proof from authority:</p>
+<pre tabindex="0"><code class="language-text">merged release commit
+        |
+        v
+candidate ref --&gt; hosted matrix --&gt; signed artifact receipt
+                                           |
+                                           v
+                                  immutable version tag
+                                           |
+                                           v
+                                      publication
+</code></pre>
+<p>The candidate ref and receipt are disposable recovery state. The version tag
+is created only after the exact commit and artifact hashes are proven; retries
+after that point publish the same bytes under the same tag.</p>
+<p>Each area page starts with a real command or artifact, follows its request or
+data flow, and ends with the contracts that neighboring areas may rely on.</p>
+<h2 id="the-whole-system">The whole system<a class="anchor-link" href="#the-whole-system" title="Link to this section">#</a></h2>
+<pre tabindex="0"><code class="language-text">                                      shared truth
+                              Linear     GitHub     providers
+                                 ^          ^           ^
+                                 |          |           |
+human / agent --&gt; lf CLI --------+----------+-----------+
+                    |
+          +---------+----------+
+          |                    |
+          v                    v
+  authored definitions    tracked Work
+  Skills / Flows /       Wave -&gt; Project -&gt; Task
+  goals / memory                  |
+          |                       +---------&gt; Task delivery
+          |                       |                ^
+          |                       v                |
+          +------------&gt; end-to-end controllers --+
+          |                       |
+          +-----------------------+ Skill boundary
+                                  v
+                       shared execution components
+              discovery / prompt / route / harness
+                              |
+                              v
+                    Home-local Run record
+                              |
+                              v
+                  status / roadmap / usage / app
+
+another machine is another Home; cross it explicitly with `lf ssh`
+</code></pre>
+<p>There is no central Loopflow server. A Home owns its processes, credentials,
+planning store, Run records, and OS locks. Repository files carry authored
+definitions and memory. Linear and GitHub keep shared planning and delivery
+truth. Readers join those sources; they do not replace them with a universal
+ledger.</p>
+<h2 id="core-models">Core models<a class="anchor-link" href="#core-models" title="Link to this section">#</a></h2>
+<pre tabindex="0"><code class="language-text">Wave
+  `-- Project
+        `-- Task
+              `-- one active remote branch and PR
+
+Flow = ordered Skill | Op | Xor | human boundaries
+Run  = evidence for one mediated harness launch
+
+WorkRef = Wave | Project | Task
+WorkStatus = Ready | Done | Abandoned
+</code></pre>
+<table tabindex="0">
+<thead>
+<tr>
+<th>Model</th>
+<th>Represents</th>
+<th>Primary truth</th>
+</tr>
+</thead>
+<tbody>
+<tr>
+<td>Skill</td>
+<td>Reusable instructions plus declared context needs</td>
+<td>Repository override, builtin, or installed Markdown</td>
+</tr>
+<tr>
+<td>Flow</td>
+<td>Ordered Skill and mechanical nodes, Xor routing, human boundaries</td>
+<td>Repository or builtin YAML plus a caller-owned playhead</td>
+</tr>
+<tr>
+<td>Run</td>
+<td>Evidence from one mediated provider launch</td>
+<td>One immutable Home-local record</td>
+</tr>
+<tr>
+<td>Wave</td>
+<td>Durable operating context with goal, memory, cadence, chat, and project selection</td>
+<td>Repository Wave files, local identity, Linear Initiative membership</td>
+</tr>
+<tr>
+<td>Project</td>
+<td>One measured bet inside exactly one Wave</td>
+<td>Linear Project plus bounded local Work state</td>
+</tr>
+<tr>
+<td>Task</td>
+<td>One concrete change, investigation, or document</td>
+<td>Linear Issue, local delivery state, Git, GitHub</td>
+</tr>
+<tr>
+<td>Work</td>
+<td>Shared durable planning state for one Wave, Project, or Task</td>
+<td>Rows keyed directly by stable Work identity</td>
+</tr>
+<tr>
+<td>Steer</td>
+<td>Ordered authored correction to Work</td>
+<td>Append-only Work input</td>
+</tr>
+<tr>
+<td>Human session</td>
+<td>Unresolved Ask or Task FlowStep bound to one ordinary provider Run</td>
+<td>Boundary record, exact Run id, and provider-native history</td>
+</tr>
+<tr>
+<td>Home</td>
+<td>Stable machine authority whose route may change</td>
+<td>Home identity and observed SSH route</td>
+</tr>
+<tr>
+<td>Placement</td>
+<td>Assignment of one Work to one Home</td>
+<td><code>(WorkRef, HomeId)</code></td>
+</tr>
+</tbody>
+</table>
+<p>Run identity records causality and provenance. It never grants Work mutation,
+credential, Git, or process-signal authority.</p>
+<p>A provider-backed Flow boundary launches or continues a harness and therefore
+produces Run evidence. Mechanical, routing, and human boundaries need not
+create a Run.</p>
+<h2 id="follow-the-common-paths">Follow the common paths<a class="anchor-link" href="#follow-the-common-paths" title="Link to this section">#</a></h2>
+<h3 id="direct-work">Direct work<a class="anchor-link" href="#direct-work" title="Link to this section">#</a></h3>
+<pre tabindex="0"><code class="language-bash">lf debug -c
+lf gate --diff-files
+</code></pre>
+<p>These commands need the execution area only: discover, prompt, route, launch,
+record, return.</p>
+<h3 id="tracked-work-without-a-controller">Tracked work without a controller<a class="anchor-link" href="#tracked-work-without-a-controller" title="Link to this section">#</a></h3>
+<pre tabindex="0"><code class="language-bash">lf task prepare INF-123
+lf --task INF-123 research &quot;write scratch/runtime.md&quot;
+lf --task INF-123 research &quot;write scratch/prompts.md&quot;
+lf commit -m &quot;Reconcile Task research&quot;
+lf pr publish
+lf pr submit
+lf task status INF-123 --json
+</code></pre>
+<p><code>prepare</code> creates or reuses tracked Task Work, its one worktree, and the active
+serial PR identity. It installs no end-to-end controller. Each <code>--task</code> command
+is an independent Run in that worktree; several may overlap and write distinct
+scratch paths. Any caller may then use the ordinary Work and delivery commands.
+Those commands act on delivery facts, not on proof that a controller ran its
+expected Flow. <code>submit</code>, <code>arm</code>, and <code>land</code> therefore work the same whether the
+Task was pursued piecemeal, by the built-in controller, or by another system.</p>
+<h3 id="end-to-end-controllers">End-to-end controllers<a class="anchor-link" href="#end-to-end-controllers" title="Link to this section">#</a></h3>
+<pre tabindex="0"><code class="language-bash">lf start product
+lf task run INF-123
+lf chat --steer &quot;ship invoices first&quot;
+lf status product
+</code></pre>
+<p>The Home keeper starts the placed Wave listener. Its resident loop refreshes
+current planning evidence and chooses the next Project or Task boundary. Wave,
+Project, and Task retain distinct controllers. Direct questions use ordinary
+fresh bound Runs. A Task human FlowStep starts the node's ordinary bound Skill
+command as a provider Run. A detached PTY cradle may keep the first client
+alive before a UI arrives; opening the Session replaces it with a native
+provider resume.</p>
+<h3 id="another-machine">Another machine<a class="anchor-link" href="#another-machine" title="Link to this section">#</a></h3>
+<pre tabindex="0"><code class="language-bash">lf ssh build-home runs --json
+lf ssh build-home start product
+</code></pre>
+<p>The origin transports one command. The target resolves its own Home state and
+runs the same <code>lf</code>. Reads are local unless this hop is explicit.</p>
+<h2 id="how-to-read-the-code">How to read the code<a class="anchor-link" href="#how-to-read-the-code" title="Link to this section">#</a></h2>
+<p>Start with the area that owns the behavior, then follow the object passed to
+the next area. Do not begin with the storage implementation unless storage is
+the behavior.</p>
+<table tabindex="0">
+<thead>
+<tr>
+<th>If you are changing…</th>
+<th>Read</th>
+</tr>
+</thead>
+<tbody>
+<tr>
+<td>provider launch, retries, usage, or telemetry</td>
+<td><a href="https://loopflow.studio/architecture/execution">Execution</a></td>
+</tr>
+<tr>
+<td>Flow semantics, Work state, Steer, questions, human FlowSteps, Project/Task loops</td>
+<td><a href="https://loopflow.studio/architecture/planning">Planning</a></td>
+</tr>
+<tr>
+<td>worktrees, commits, PR ranges, checks, or landing</td>
+<td><a href="https://loopflow.studio/architecture/delivery">Delivery</a></td>
+</tr>
+<tr>
+<td>daemons, remote execution, placement, process control, promotion</td>
+<td><a href="https://loopflow.studio/architecture/homes">Homes and processes</a></td>
+</tr>
+<tr>
+<td>schema, files, projections, DTOs, or consistency</td>
+<td><a href="https://loopflow.studio/architecture/data">Data and persistence</a></td>
+</tr>
+<tr>
+<td>module ownership, APIs, binaries, routes, or code size</td>
+<td><a href="https://loopflow.studio/architecture/codebase">Codebase map</a></td>
+</tr>
+</tbody>
+</table>
+<p>For exhaustive lookup, open the <a href="https://loopflow.studio/architecture/reference">checked architecture reference</a>.
+Its maps are machine-verified against CLI families, process boundaries, live
+SQLite tables, HTTP routes, providers, subprocess edges, projections,
+compatibility seams, and retired vocabulary.</p>        <nav aria-label="Documentation pages" class="docs-pager">
+<a href="https://loopflow.studio/architecture/execution" class="docs-pager-link docs-pager-next"><span class="docs-pager-direction">Next</span><span class="docs-pager-title">Execution</span></a>        </nav>
+      </article>
+      <nav aria-label="On this page" class="docs-outline">
+        <p class="docs-outline-heading">On this page</p>
+        <ol>
+          <li>
+<a href="#run-one-skill">Run one Skill</a>          </li>
+          <li>
+<a href="#add-one-capability-at-a-time">Add one capability at a time</a>          </li>
+          <li>
+<a href="#the-whole-system">The whole system</a>          </li>
+          <li>
+<a href="#core-models">Core models</a>          </li>
+          <li>
+<a href="#follow-the-common-paths">Follow the common paths</a>          </li>
+          <li>
+<a href="#how-to-read-the-code">How to read the code</a>          </li>
+        </ol>
+      </nav>
+    </div>
+  </section>
+</main>
+<footer>
+  <div class="container">
+    <div class="footer-text">
+      <p>Loopflow — Living software. Conducted by you.</p>
+      <p class="built-by">
+Built by <a href="https://github.com/loopflowstudio" target="_blank" rel="noopener noreferrer" aria-label="Loopflow Studio (opens in new tab)" class="external-link">Loopflow Studio</a>      </p>
+    </div>
+    <div class="footer-links">
+<a href="https://loopflow.studio/docs">Docs</a><a href="https://github.com/loopflowstudio/loopflow">GitHub</a>    </div>
+  </div>
+</footer>
+
+</body>
+</html>

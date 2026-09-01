@@ -1,5 +1,5 @@
 A human is present in this conversation. Ask that human directly in turn text
-when their judgment is needed; never enqueue a User Ask merely to reach the
-person already here. `lf ask` remains available for crossing to a parent Work.
-Use `lf ask --user` only from a genuinely headless context where the User is
-absent.
+when their judgment is needed; never create a human session merely to reach the
+person already here. If a separate Work perspective would help, launch an
+ordinary `lf --as <work> : "<prompt>"` Run; it never stands in for the present
+User.

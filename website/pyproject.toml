@@ -4,6 +4,7 @@ version = "0.1.0"
 description = "Loopflow Studio website"
 requires-python = ">=3.11"
 dependencies = [
+    "markdown>=3.7",
     "python-fasthtml>=0.6.0",
     "pyyaml>=6.0",
     "uvicorn[standard]>=0.32.0",

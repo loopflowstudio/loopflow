@@ -1,24 +1,16 @@
 use std::path::Path;
 use std::process::Command;
 
-use loopflow::durable::{
-    AdvanceReceipt, Containment, ContainmentObservation, HomeId, InvocationRoute, RunAdvance,
-    RunTrigger, StopCause, WorkRef, WorkStatus,
-};
-use loopflow::engine::wave_context::{resolve_managed_wave, WaveResolveError};
+use loopflow::controller::wave::journal;
+use loopflow::controller::wave::relocate::relocate_wave;
+use loopflow::durable::{HomeId, WorkRef, WorkStatus};
 use loopflow::id::WaveId;
 use loopflow::planning::{LinearIssueId, LinearProjectId, ProjectPlan, TaskPlan};
-use loopflow::project::{Project, ProjectId};
-use loopflow::store::sqlite::SqliteStore;
 use loopflow::store::{open_store, PmSnapshotRow, StorageConfig};
-use loopflow::task::{
-    Observation, PmWritebackState, Task, TaskId, TaskLifecyclePhase, TaskLifecyclePlan, TaskPr,
-    TaskPrId,
-};
-use loopflow::trace::{AgentInvocationRow, AgentTurnRow, SupervisedInvocation};
-use loopflow::wave::journal;
-use loopflow::wave::relocate::relocate_wave;
-use loopflow::wave::{Wave, WaveLocator};
+use loopflow::work::project::{Project, ProjectId};
+use loopflow::work::task::{Observation, PmWritebackState, Task, TaskId, TaskPr, TaskPrId};
+use loopflow::work::wave::context::{resolve_managed_wave, WaveResolveError};
+use loopflow::work::wave::{Wave, WaveLocator};
 use time::OffsetDateTime;
 
 fn repository(path: &Path) {
@@ -99,12 +91,6 @@ fn project(wave: &Wave) -> Project {
             pm_snapshot_synced_at: now.unix_timestamp(),
         },
         wave_id: wave.id().clone(),
-        iteration: 1,
-        observation_cursor: 0,
-        last_state_fingerprint: None,
-        agent: "codex".to_string(),
-        provider: "codex".to_string(),
-        provider_session_id: None,
         abandon_intent: None,
         created_at: now,
         updated_at: now,
@@ -128,16 +114,6 @@ fn task(wave: &Wave, project: &Project, repo: &Path) -> (Task, TaskPr) {
         project_id: project.id.clone(),
         worktree: repo.join("task-worktree"),
         workspace_slug: "repository-owned-waves".to_string(),
-        lifecycle: TaskLifecyclePlan::defaults(),
-        lifecycle_phase: TaskLifecyclePhase::Loop,
-        phase_epoch: 1,
-        phase_cursor: 0,
-        phase_iteration: 0,
-        gate_cycle: 0,
-        gate_proposal: None,
-        agent: "codex".to_string(),
-        provider: "codex".to_string(),
-        provider_session_id: None,
         abandon_intent: None,
         created_at: now,
         updated_at: now,
@@ -173,9 +149,7 @@ fn lf_command(home: &Path, repo: &Path, args: &[&str]) -> std::process::Output {
         .env_remove("LF_DB_PATH")
         .env_remove("LF_CONTROL_HOME")
         .env_remove("LF_CONTROL_DB_PATH")
-        .env_remove("LF_RUN_CONTEXT")
         .env_remove("LF_RUN_ID")
-        .env_remove("LF_AGENT_INVOCATION_ID")
         .env_remove("LF_ACCOUNT_LEASE")
         .output()
         .unwrap()
@@ -195,96 +169,6 @@ fn lf_output(home: &Path, repo: &Path, args: &[&str]) -> std::process::Output {
 fn lf(home: &Path, repo: &Path, args: &[&str]) -> serde_json::Value {
     let output = lf_output(home, repo, args);
     serde_json::from_slice(&output.stdout).unwrap()
-}
-
-fn count_wave_runs(database: &Path, wave_id: &WaveId) -> i64 {
-    rusqlite::Connection::open(database)
-        .unwrap()
-        .query_row(
-            "SELECT COUNT(*)
-             FROM runs
-             JOIN epochs ON epochs.id = runs.epoch_id
-             LEFT JOIN projects ON projects.id = epochs.project_id
-             LEFT JOIN tasks ON tasks.id = epochs.task_id
-             LEFT JOIN projects task_projects ON task_projects.id = tasks.project_id
-             WHERE epochs.wave_id = ?1
-                OR projects.wave_id = ?1
-                OR task_projects.wave_id = ?1",
-            [wave_id.as_str()],
-            |row| row.get(0),
-        )
-        .unwrap()
-}
-
-fn capture_project_invocation(
-    database: &Path,
-    run_id: &loopflow::durable::RunId,
-    invocation_id: &loopflow::durable::AgentInvocationId,
-) {
-    let now = OffsetDateTime::now_utc().unix_timestamp();
-    let invocation = AgentInvocationRow {
-        id: invocation_id.to_string(),
-        run_id: "trace-alpha".to_string(),
-        answer_ask_id: None,
-        process_id: "process-alpha".to_string(),
-        started_at: now - 1,
-        ended_at: Some(now),
-        repo: "/historical/alpha".to_string(),
-        worktree: "/historical/alpha".to_string(),
-        wave: Some("infrastructure".to_string()),
-        flow: Some("project".to_string()),
-        skill: Some("repository-ownership".to_string()),
-        project: Some("architecture".to_string()),
-        task: None,
-        provider: "codex".to_string(),
-        model: Some("gpt-5".to_string()),
-        surface: "headless".to_string(),
-        capture_status: "complete".to_string(),
-        incomplete_reason: None,
-        outcome: "completed".to_string(),
-        artifact_dir: "traces/repository-ownership".to_string(),
-        conversation_path: "traces/repository-ownership/conversation.jsonl".to_string(),
-        provider_events_path: None,
-        provider_session_id: None,
-        provider_session_path: None,
-        conversation_event_count: 1,
-        conversation_bytes: 1,
-        supervision: Some(SupervisedInvocation {
-            invocation_id: invocation_id.clone(),
-            supervising_run_id: run_id.clone(),
-            account_id: None,
-            resume_token: None,
-        }),
-    };
-    let turn = AgentTurnRow {
-        id: "turn-repository-ownership".to_string(),
-        invocation_id: invocation.id.clone(),
-        ordinal: 1,
-        provider_turn_id: None,
-        started_at: now - 1,
-        ended_at: Some(now),
-        status: "completed".to_string(),
-        input_op: "initial".to_string(),
-        context_coverage: "assembled".to_string(),
-        tokenizer: "o200k_base".to_string(),
-        system_prompt_path: None,
-        task_prompt_path: "traces/repository-ownership/task.md".to_string(),
-        system_tokens: 0,
-        task_tokens: 1,
-        supplied_context_tokens: 1,
-        usage: None,
-        context_gather_ms: 1,
-        context_render_ms: 1,
-        context_persist_ms: 1,
-        first_event_seq: None,
-        last_event_seq: None,
-        root_output: None,
-        basis: None,
-    };
-    SqliteStore::new(database)
-        .unwrap()
-        .insert_trace_capture(&invocation, &turn, &[], &[])
-        .unwrap();
 }
 
 #[tokio::test]
@@ -450,57 +334,6 @@ async fn repositories_own_same_named_waves_and_relocation_preserves_identity() {
     let (task, task_pr) = task(&alpha, &project, &repo_a);
     store.create_task(&task, &task_pr).await.unwrap();
     let placement = alpha_placement;
-    let task_work = WorkRef::Task(task.id.clone());
-    let (_, lease) = store
-        .reserve_run(&task_work, RunTrigger::User)
-        .await
-        .unwrap();
-    store
-        .advance_run(
-            &lease,
-            RunAdvance::RunStarting {
-                containment: Containment::ProcessGroup { id: 7 },
-                cwd: repo_a.clone(),
-            },
-        )
-        .await
-        .unwrap();
-    let invocation = store
-        .advance_run(
-            &lease,
-            RunAdvance::InvocationStarting {
-                route: InvocationRoute {
-                    provider: "codex".to_string(),
-                    model: Some("gpt-5".to_string()),
-                    account_id: None,
-                },
-                surface: "headless".to_string(),
-                resume_token: None,
-                answer_ask_id: None,
-            },
-        )
-        .await
-        .unwrap();
-    let AdvanceReceipt::Invocation(invocation) = invocation else {
-        panic!("expected Invocation receipt")
-    };
-    capture_project_invocation(&database, &lease.run_id, &invocation.id);
-
-    let active_error = relocate_wave(&store, alpha.id(), &repo_a, None, Some("platform"))
-        .await
-        .unwrap_err();
-    assert!(active_error.to_string().contains("while Run"));
-    assert_eq!(
-        store.get_wave(alpha.id()).await.unwrap().unwrap().name(),
-        "infrastructure"
-    );
-    assert!(repo_a.join("wave/infrastructure").is_dir());
-    store
-        .stop_run(&lease, StopCause::Requested, ContainmentObservation::Absent)
-        .await
-        .unwrap();
-    let runs_before = count_wave_runs(&database, alpha.id());
-
     let overlap = relocate_wave(
         &store,
         alpha.id(),
@@ -680,7 +513,6 @@ async fn repositories_own_same_named_waves_and_relocation_preserves_identity() {
             .home_id,
         placement.home_id
     );
-    assert_eq!(count_wave_runs(&database, alpha.id()), runs_before);
     assert_eq!(
         store
             .get_project(&project.id)
@@ -697,9 +529,6 @@ async fn repositories_own_same_named_waves_and_relocation_preserves_identity() {
 
     let status = lf(&home, &repo_d, &["status", "platform", "--json"]);
     assert_eq!(status["wave"]["id"], alpha.id().as_str());
-    assert!(status["runs"]["items"].as_array().is_some_and(|items| items
-        .iter()
-        .any(|item| { item.to_string().contains("repository-ownership") })));
 
     let error = relocate_wave(&store, alpha.id(), &repo_b, None, Some("hijacked"))
         .await
@@ -901,7 +730,7 @@ async fn relocation_retires_an_empty_destination_shadow_without_losing_identity(
 }
 
 #[tokio::test]
-async fn relocation_refuses_every_meaningful_destination_history() {
+async fn relocation_refuses_meaningful_destination_history() {
     let tmp = tempfile::tempdir().unwrap();
     let source = tmp.path().join("source");
     let target = tmp.path().join("target");
@@ -915,13 +744,6 @@ async fn relocation_refuses_every_meaningful_destination_history() {
     apply_status_truth(&database);
     let established = registered_wave(&source, "core");
     store.create_wave(&established).await.unwrap();
-
-    let run_shadow = registered_wave(&target, "with-run");
-    store.create_wave(&run_shadow).await.unwrap();
-    store
-        .reserve_run(&WorkRef::Wave(run_shadow.id().clone()), RunTrigger::User)
-        .await
-        .unwrap();
 
     let project_shadow = registered_wave(&target, "with-task");
     store.create_wave(&project_shadow).await.unwrap();
@@ -949,76 +771,6 @@ async fn relocation_refuses_every_meaningful_destination_history() {
         .await
         .unwrap();
 
-    let steer_shadow = registered_wave(&target, "with-steer");
-    store.create_wave(&steer_shadow).await.unwrap();
-    let connection = rusqlite::Connection::open(&database).unwrap();
-    let steer_epoch: String = connection
-        .query_row(
-            "SELECT id FROM epochs WHERE wave_id = ?1 AND state = 'open'",
-            [steer_shadow.id().as_str()],
-            |row| row.get(0),
-        )
-        .unwrap();
-    connection
-        .execute(
-            "INSERT INTO epoch_revisions (epoch_id, rev, kind, source_id, created_at)
-             VALUES (?1, 1, 'steer', 'steer_11111111111111111111111111111111', 2)",
-            [&steer_epoch],
-        )
-        .unwrap();
-    connection
-        .execute(
-            "INSERT INTO steers (
-                 id, epoch_id, rev, author_kind, author_run_id, text, issued_at
-             ) VALUES (
-                 'steer_11111111111111111111111111111111', ?1, 1,
-                 'user', NULL, 'authored direction', 2
-             )",
-            [&steer_epoch],
-        )
-        .unwrap();
-    connection
-        .execute(
-            "UPDATE epochs SET current_rev = 1 WHERE id = ?1",
-            [&steer_epoch],
-        )
-        .unwrap();
-
-    let epoch_shadow = registered_wave(&target, "with-epoch");
-    store.create_wave(&epoch_shadow).await.unwrap();
-    connection
-        .execute(
-            "UPDATE epochs
-             SET state = 'abandoned', terminal_at = 2
-             WHERE wave_id = ?1 AND state = 'open'",
-            [epoch_shadow.id().as_str()],
-        )
-        .unwrap();
-    let second_epoch = "epoch_22222222222222222222222222222222";
-    connection
-        .execute(
-            "INSERT INTO epochs (
-                 id, number, wave_id, project_id, task_id, state, current_rev,
-                 created_at, terminal_at
-             ) VALUES (?1, 2, ?2, NULL, NULL, 'open', 0, 3, NULL)",
-            [second_epoch, epoch_shadow.id().as_str()],
-        )
-        .unwrap();
-    connection
-        .execute(
-            "INSERT INTO epoch_revisions (epoch_id, rev, kind, source_id, created_at)
-             VALUES (?1, 0, 'truth', ?2, 3)",
-            [second_epoch, "truth:epoch-2:0"],
-        )
-        .unwrap();
-    connection
-        .execute(
-            "INSERT INTO work_truth (epoch_id, rev, payload_json, created_at)
-             VALUES (?1, 0, '{\"name\":\"with-epoch\"}', 3)",
-            [second_epoch],
-        )
-        .unwrap();
-
     let receipt_shadow = registered_wave(&target, "with-receipt");
     store.create_wave(&receipt_shadow).await.unwrap();
     let receipt_path = target
@@ -1028,12 +780,9 @@ async fn relocation_refuses_every_meaningful_destination_history() {
     std::fs::write(&receipt_path, "{}\n").unwrap();
 
     for (slug, shadow, evidence) in [
-        ("with-run", &run_shadow, "Runs"),
         ("with-task", &project_shadow, "Tasks"),
         ("with-child", &child_shadow, "child Waves"),
         ("with-pm", &pm_shadow, "PM snapshot"),
-        ("with-steer", &steer_shadow, "authored Steers"),
-        ("with-epoch", &epoch_shadow, "Wave Epochs"),
         ("with-receipt", &receipt_shadow, "relocation receipt"),
     ] {
         let error = relocate_wave(&store, established.id(), &source, Some(&target), Some(slug))

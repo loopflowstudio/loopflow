@@ -1,17 +1,14 @@
 //! Loopflow activity snapshots: `lf ps` once, `lf top` continuously on a TTY.
 
 use std::collections::{HashMap, HashSet};
-use std::fs::File;
-use std::io::{IsTerminal, Read, Seek, SeekFrom, Write};
+use std::io::{IsTerminal, Write};
 use std::path::{Path, PathBuf};
 use std::process::Command;
 use std::thread;
 use std::time::{Duration, Instant};
 
 use anyhow::{anyhow, Context, Result};
-use clap::ValueEnum;
 use serde::{Deserialize, Serialize};
-use time::format_description::well_known::Rfc3339;
 use time::OffsetDateTime;
 
 use crate::harness::opencode_runtime::{
@@ -20,33 +17,20 @@ use crate::harness::opencode_runtime::{
 use crate::journal::{
     read_exec_process_receipts_at, remove_exec_process_receipt_at, ExecProcessReceipt,
 };
-use crate::lf::output::{format_int, truncate};
+use crate::lf::output::truncate;
 use crate::store::{sqlite::SqliteStore, RunEventRow};
-use crate::trace::{AgentInvocationRow, AgentTurnRow};
 
 const SCHEMA_VERSION: u32 = 1;
-const FAST_WINDOW_SECONDS: i64 = 5;
-const SLOW_WINDOW_SECONDS: i64 = 300;
-const DAY_WINDOW_SECONDS: i64 = 86_400;
-const STALLED_AFTER_SECONDS: i64 = 1_800;
 const REFRESH_INTERVAL: Duration = Duration::from_secs(2);
 const PROCESS_START_TOLERANCE_SECONDS: i64 = 3;
 const COMMAND_WIDTH: usize = 82;
-
-#[derive(Debug, Clone, Copy, Default, PartialEq, Eq, ValueEnum)]
-#[non_exhaustive]
-pub enum ActivitySort {
-    #[default]
-    Tokens,
-    Rate,
-}
 
 #[derive(Debug, Clone, Copy, Serialize, Deserialize, PartialEq, Eq)]
 #[serde(rename_all = "snake_case")]
 #[non_exhaustive]
 pub enum ActivityNodeKind {
     Exec,
-    ProviderLaunch,
+    ProviderProcess,
 }
 
 #[derive(Debug, Clone, Copy, Serialize, Deserialize, PartialEq, Eq)]
@@ -68,21 +52,6 @@ impl ActivityState {
     }
 }
 
-#[derive(Debug, Clone, Copy, Default)]
-struct OutputWindows<'a> {
-    fast: Option<&'a crate::usage::UsageInterval>,
-    slow: Option<&'a crate::usage::UsageInterval>,
-    day: Option<&'a crate::usage::UsageInterval>,
-}
-
-fn output_tokens(interval: Option<&crate::usage::UsageInterval>) -> u64 {
-    interval.map_or(0, |interval| interval.output_tokens)
-}
-
-fn output_rate(interval: Option<&crate::usage::UsageInterval>) -> f64 {
-    interval.map_or(0.0, |interval| interval.output_tokens_per_second)
-}
-
 #[derive(Debug, Clone, Serialize, Deserialize, PartialEq)]
 pub struct ActivityNode {
     pub id: String,
@@ -91,13 +60,9 @@ pub struct ActivityNode {
     pub label: String,
     pub repo: Option<String>,
     pub wave: Option<String>,
-    pub project: Option<String>,
-    pub task: Option<String>,
     pub pid: Option<u32>,
     pub started_at: i64,
-    pub last_progress_at: Option<i64>,
     pub state: ActivityState,
-    pub usage_scope_id: String,
 }
 
 #[derive(Debug, Clone, Copy, Serialize, Deserialize, PartialEq, Eq)]
@@ -124,7 +89,6 @@ pub struct ProviderProcess {
 pub struct ActivitySnapshot {
     pub schema_version: u32,
     pub observed_at: i64,
-    pub usage: crate::usage::UsageSnapshot,
     pub nodes: Vec<ActivityNode>,
     pub provider_processes: Vec<ProviderProcess>,
 }
@@ -144,9 +108,6 @@ pub struct ProcessPruneReport {
 #[derive(Debug, Clone)]
 struct ActivityData {
     events: Vec<RunEventRow>,
-    launches: Vec<AgentInvocationRow>,
-    turns: Vec<AgentTurnRow>,
-    usage: crate::usage::UsageSnapshot,
 }
 
 #[derive(Debug, Clone, PartialEq, Eq)]
@@ -167,12 +128,17 @@ struct ProcessSnapshot {
     opencode_servers: Vec<OpenCodeServerEntry>,
 }
 
+#[derive(Debug, Clone)]
+struct OwnedProviderProcess {
+    exec_id: String,
+    process: OsProcess,
+}
+
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 enum ProcessKind {
     Lf,
     Codex,
     Claude,
-    Gemini,
     OpenCode,
 }
 
@@ -182,7 +148,6 @@ impl ProcessKind {
             Self::Lf => "lf",
             Self::Codex => "codex",
             Self::Claude => "claude",
-            Self::Gemini => "gemini",
             Self::OpenCode => "opencode",
         }
     }
@@ -210,22 +175,22 @@ enum ReceiptEvidence {
     Missing,
 }
 
-pub fn run_ps(json: bool, sort: ActivitySort) -> Result<()> {
+pub fn run_ps(json: bool) -> Result<()> {
     let snapshot = load_snapshot()?;
-    print_snapshot(&snapshot, json, sort)
+    print_snapshot(&snapshot, json)
 }
 
-pub fn run_top(json: bool, sort: ActivitySort) -> Result<()> {
+pub fn run_top(json: bool) -> Result<()> {
     let interactive = !json && std::io::stdout().is_terminal();
     if !interactive {
-        return run_ps(json, sort);
+        return run_ps(json);
     }
 
     let mut stdout = std::io::stdout().lock();
     loop {
         let frame_started = Instant::now();
         let snapshot = load_snapshot()?;
-        write!(stdout, "\x1b[H\x1b[J{}", render_snapshot(&snapshot, sort))?;
+        write!(stdout, "\x1b[H\x1b[J{}", render_snapshot(&snapshot))?;
         stdout.flush()?;
         thread::sleep(REFRESH_INTERVAL.saturating_sub(frame_started.elapsed()));
     }
@@ -353,59 +318,23 @@ fn load_snapshot() -> Result<ActivitySnapshot> {
         .filter(|receipt| receipt_matches_live_lf(receipt, &process_by_pid))
         .cloned()
         .collect::<Vec<_>>();
-    let data = read_activity_data(&path, &live_execs, now)?;
+    let data = read_activity_data(&path, &live_execs)?;
     collect_activity(data, processes, now)
 }
 
-fn read_activity_data(
-    path: &Path,
-    live_execs: &[ExecProcessReceipt],
-    now: i64,
-) -> Result<ActivityData> {
+fn read_activity_data(path: &Path, live_execs: &[ExecProcessReceipt]) -> Result<ActivityData> {
     if !path.exists() {
-        return Ok(ActivityData {
-            events: Vec::new(),
-            launches: Vec::new(),
-            turns: Vec::new(),
-            usage: crate::usage::empty_snapshot(now),
-        });
+        return Ok(ActivityData { events: Vec::new() });
     }
     let store = SqliteStore::open_run_ledger_read_only(path)
         .map_err(|error| anyhow!("failed to read run ledger {}: {error}", path.display()))?;
     Ok(store.read_run_ledger_snapshot(|store| {
         let mut events = Vec::new();
-        let mut trace_ids = HashSet::new();
         for receipt in live_execs {
             let exec_events = store.run_events_matching_exec(&receipt.exec_id)?;
-            trace_ids.extend(exec_events.iter().map(|event| event.run_id.clone()));
             events.extend(exec_events);
         }
-        let live_exec_ids = live_execs
-            .iter()
-            .map(|receipt| receipt.exec_id.as_str())
-            .collect::<HashSet<_>>();
-        let mut launches = Vec::new();
-        for trace_id in trace_ids {
-            launches.extend(
-                store
-                    .agent_invocations_matching(&trace_id)?
-                    .into_iter()
-                    .filter(|launch| live_exec_ids.contains(launch.process_id.as_str())),
-            );
-        }
-        let launch_ids = launches
-            .iter()
-            .filter(|launch| launch.ended_at.is_none() && launch.outcome == "running")
-            .map(|launch| launch.id.clone())
-            .collect::<Vec<_>>();
-        let turns = store.agent_turns_for_invocations(&launch_ids)?;
-        let usage = crate::usage::snapshot(store, now)?;
-        Ok(ActivityData {
-            events,
-            launches,
-            turns,
-            usage,
-        })
+        Ok(ActivityData { events })
     })?)
 }
 
@@ -470,7 +399,6 @@ fn process_kind(command: &str) -> Option<ProcessKind> {
         "lf" => Some(ProcessKind::Lf),
         "codex" => Some(ProcessKind::Codex),
         "claude" => Some(ProcessKind::Claude),
-        "gemini" => Some(ProcessKind::Gemini),
         "opencode" if words.iter().skip(1).any(|word| *word == "serve") => {
             Some(ProcessKind::OpenCode)
         }
@@ -504,12 +432,7 @@ fn collect_activity(
     processes: ProcessSnapshot,
     now: i64,
 ) -> Result<ActivitySnapshot> {
-    let ActivityData {
-        events,
-        launches,
-        turns,
-        usage,
-    } = data;
+    let ActivityData { events } = data;
     let execs = collect_execs(&events).into_values().collect::<Vec<_>>();
 
     let process_by_pid = processes
@@ -551,18 +474,8 @@ fn collect_activity(
         })
         .collect::<HashMap<_, _>>();
 
-    let (launch_pid, provider_processes) =
-        claim_provider_processes(&processes, &process_by_pid, &owner_by_pid, &launches);
-    let live_launch_ids = launches
-        .iter()
-        .filter(|launch| launch.ended_at.is_none() && launch.outcome == "running")
-        .map(|launch| launch.id.clone())
-        .collect::<HashSet<_>>();
-    let turns = turns
-        .into_iter()
-        .filter(|turn| live_launch_ids.contains(&turn.invocation_id))
-        .collect::<Vec<_>>();
-    let turns_by_launch = group_turns(&turns);
+    let (owned_providers, provider_processes) =
+        claim_provider_processes(&processes, &process_by_pid, &owner_by_pid);
     let mut nodes = Vec::new();
     for exec in live_execs {
         let evidence = receipt_evidence
@@ -580,45 +493,44 @@ fn collect_activity(
             label: exec.label,
             repo: exec.repo,
             wave: exec.wave,
-            project: None,
-            task: None,
             pid: match evidence {
                 ReceiptEvidence::Present(pid) => Some(pid),
                 ReceiptEvidence::Absent | ReceiptEvidence::Missing => None,
             },
             started_at: exec.started_at,
-            last_progress_at: None,
-            state: ActivityState::Waiting,
-            usage_scope_id: format!("exec:{}", exec.id),
+            state: match evidence {
+                ReceiptEvidence::Present(pid) => process_by_pid
+                    .get(&pid)
+                    .map_or(ActivityState::Waiting, |process| os_activity_state(process)),
+                ReceiptEvidence::Absent | ReceiptEvidence::Missing => ActivityState::Waiting,
+            },
         });
     }
-    for launch in launches
-        .into_iter()
-        .filter(|launch| live_launch_ids.contains(&launch.id))
-    {
-        let launch_turns = turns_by_launch
-            .get(launch.id.as_str())
-            .map_or(&[][..], Vec::as_slice);
-        let last_progress_at = last_progress_at(&launch, launch_turns);
-        let state = launch_state(launch_turns, last_progress_at, now);
-        let pid = launch_pid.get(&launch.id).copied();
+    let exec_context = nodes
+        .iter()
+        .map(|node| (node.id.clone(), (node.repo.clone(), node.wave.clone())))
+        .collect::<HashMap<_, _>>();
+    for owned in owned_providers {
+        let parent_id = exec_node_id(&owned.exec_id);
+        let (repo, wave) = exec_context
+            .get(&parent_id)
+            .cloned()
+            .unwrap_or((None, None));
+        let process = owned.process;
+        let provider = process
+            .kind
+            .expect("owned provider process has a kind")
+            .label();
         nodes.push(ActivityNode {
-            id: launch_node_id(&launch.id),
-            parent_id: Some(exec_node_id(&launch.process_id)),
-            kind: ActivityNodeKind::ProviderLaunch,
-            label: match pid {
-                Some(pid) => format!("{} {pid}", launch.provider),
-                None => launch.provider.clone(),
-            },
-            repo: Some(launch.repo.clone()),
-            wave: launch.wave.clone(),
-            project: launch.project.clone(),
-            task: launch.task.clone(),
-            pid,
-            started_at: launch.started_at,
-            last_progress_at,
-            state,
-            usage_scope_id: format!("invocation:{}", launch.id),
+            id: provider_node_id(process.pid),
+            parent_id: Some(parent_id),
+            kind: ActivityNodeKind::ProviderProcess,
+            label: format!("{provider} {}", process.pid),
+            repo,
+            wave,
+            pid: Some(process.pid),
+            started_at: process.started_at,
+            state: os_activity_state(&process),
         });
     }
 
@@ -627,7 +539,6 @@ fn collect_activity(
     Ok(ActivitySnapshot {
         schema_version: SCHEMA_VERSION,
         observed_at: now,
-        usage,
         nodes,
         provider_processes,
     })
@@ -725,14 +636,13 @@ fn claim_provider_processes(
     snapshot: &ProcessSnapshot,
     process_by_pid: &HashMap<u32, &OsProcess>,
     owner_by_pid: &HashMap<u32, String>,
-    launches: &[AgentInvocationRow],
-) -> (HashMap<String, u32>, Vec<ProviderProcess>) {
+) -> (Vec<OwnedProviderProcess>, Vec<ProviderProcess>) {
     let registry = snapshot
         .opencode_servers
         .iter()
         .map(|entry| (entry.opencode_pid, entry))
         .collect::<HashMap<_, _>>();
-    let mut launch_pid = HashMap::new();
+    let mut owned = Vec::new();
     let mut unclaimed = Vec::new();
     for process in snapshot.processes.iter().filter(|process| {
         process.kind.is_some_and(ProcessKind::is_provider)
@@ -752,24 +662,14 @@ fn claim_provider_processes(
             unclaimed.push(provider_process(process, ProviderClaim::Unclaimed));
             continue;
         };
-        let provider = process.kind.expect("provider process has a kind").label();
-        let candidates = launches
-            .iter()
-            .filter(|launch| {
-                launch.process_id == owner
-                    && launch.ended_at.is_none()
-                    && launch.outcome == "running"
-                    && launch.provider.eq_ignore_ascii_case(provider)
-            })
-            .collect::<Vec<_>>();
-        if candidates.len() == 1 && !launch_pid.contains_key(&candidates[0].id) {
-            launch_pid.insert(candidates[0].id.clone(), process.pid);
-        } else {
-            unclaimed.push(provider_process(process, ProviderClaim::Unclaimed));
-        }
+        owned.push(OwnedProviderProcess {
+            exec_id: owner,
+            process: process.clone(),
+        });
     }
+    owned.sort_by_key(|entry| entry.process.pid);
     unclaimed.sort_by_key(|process| process.pid);
-    (launch_pid, unclaimed)
+    (owned, unclaimed)
 }
 
 fn has_provider_ancestor(process: &OsProcess, process_by_pid: &HashMap<u32, &OsProcess>) -> bool {
@@ -822,117 +722,12 @@ fn provider_process(process: &OsProcess, claim: ProviderClaim) -> ProviderProces
     }
 }
 
-fn group_turns(turns: &[AgentTurnRow]) -> HashMap<&str, Vec<&AgentTurnRow>> {
-    let mut by_launch = HashMap::<&str, Vec<&AgentTurnRow>>::new();
-    for turn in turns {
-        by_launch
-            .entry(turn.invocation_id.as_str())
-            .or_default()
-            .push(turn);
+fn os_activity_state(process: &OsProcess) -> ActivityState {
+    match process.kernel_state.chars().next() {
+        Some('R') => ActivityState::Working,
+        Some('T' | 'U' | 'D' | 'Z') => ActivityState::Stalled,
+        _ => ActivityState::Waiting,
     }
-    by_launch
-}
-
-fn output_windows<'a>(
-    snapshot: &'a crate::usage::UsageSnapshot,
-    scope_id: &str,
-) -> OutputWindows<'a> {
-    let Some(reading) = snapshot
-        .readings
-        .iter()
-        .find(|reading| reading.scope.id == scope_id)
-    else {
-        return OutputWindows::default();
-    };
-    let interval = |window_seconds| {
-        reading
-            .intervals
-            .iter()
-            .find(|interval| interval.window_seconds == window_seconds)
-    };
-    OutputWindows {
-        fast: interval(FAST_WINDOW_SECONDS),
-        slow: interval(SLOW_WINDOW_SECONDS),
-        day: interval(DAY_WINDOW_SECONDS),
-    }
-}
-
-fn last_progress_at(launch: &AgentInvocationRow, turns: &[&AgentTurnRow]) -> Option<i64> {
-    let durable = turns
-        .iter()
-        .flat_map(|turn| [Some(turn.started_at), turn.ended_at])
-        .flatten()
-        .chain(
-            [Some(launch.started_at), launch.ended_at]
-                .into_iter()
-                .flatten(),
-        )
-        .max();
-    if launch.ended_at.is_some() {
-        return durable;
-    }
-    let event = crate::trace::resolve_artifact(&launch.conversation_path)
-        .ok()
-        .and_then(|path| last_recorded_event_at(&path).ok().flatten());
-    durable.into_iter().chain(event).max()
-}
-
-fn last_recorded_event_at(path: &Path) -> Result<Option<i64>> {
-    let Some(line) = read_last_line(path)? else {
-        return Ok(None);
-    };
-    let value = serde_json::from_str::<serde_json::Value>(&line)?;
-    let Some(timestamp) = value.get("ts").and_then(serde_json::Value::as_str) else {
-        return Ok(None);
-    };
-    Ok(Some(
-        OffsetDateTime::parse(timestamp, &Rfc3339)?.unix_timestamp(),
-    ))
-}
-
-fn read_last_line(path: &Path) -> Result<Option<String>> {
-    let mut file = match File::open(path) {
-        Ok(file) => file,
-        Err(error) if error.kind() == std::io::ErrorKind::NotFound => return Ok(None),
-        Err(error) => return Err(error.into()),
-    };
-    let mut position = file.metadata()?.len();
-    let mut reversed = Vec::new();
-    while position > 0 {
-        let count = position.min(8_192) as usize;
-        position -= count as u64;
-        file.seek(SeekFrom::Start(position))?;
-        let mut chunk = vec![0; count];
-        file.read_exact(&mut chunk)?;
-        for byte in chunk.into_iter().rev() {
-            if byte == b'\n' {
-                if !reversed.is_empty() {
-                    reversed.reverse();
-                    return String::from_utf8(reversed).map(Some).map_err(Into::into);
-                }
-            } else if byte != b'\r' {
-                reversed.push(byte);
-            }
-        }
-    }
-    if reversed.is_empty() {
-        Ok(None)
-    } else {
-        reversed.reverse();
-        String::from_utf8(reversed).map(Some).map_err(Into::into)
-    }
-}
-
-fn launch_state(turns: &[&AgentTurnRow], last_progress_at: Option<i64>, now: i64) -> ActivityState {
-    let open_turn = turns.iter().any(|turn| turn.ended_at.is_none());
-    if open_turn {
-        return if last_progress_at.is_some_and(|at| now - at > STALLED_AFTER_SECONDS) {
-            ActivityState::Stalled
-        } else {
-            ActivityState::Working
-        };
-    }
-    ActivityState::Waiting
 }
 
 fn fold_activity_state(nodes: &mut [ActivityNode]) -> Result<()> {
@@ -977,21 +772,15 @@ fn fold_node(
         .get(id)
         .ok_or_else(|| anyhow!("activity node {id} is missing"))?;
     let child_ids = children.get(id).cloned().unwrap_or_default();
-    let mut last_progress = nodes[node_index].last_progress_at;
     let mut child_states = Vec::new();
     for child_id in child_ids {
         fold_node(&child_id, nodes, index, children, done, visiting)?;
         let child = &nodes[*index
             .get(&child_id)
             .ok_or_else(|| anyhow!("activity child {child_id} is missing"))?];
-        last_progress = last_progress
-            .into_iter()
-            .chain(child.last_progress_at)
-            .max();
         child_states.push(child.state);
     }
     let node = &mut nodes[node_index];
-    node.last_progress_at = last_progress;
     if node.kind == ActivityNodeKind::Exec {
         node.state = fold_exec_state(node.state, &child_states);
     }
@@ -1017,33 +806,28 @@ fn exec_node_id(id: &str) -> String {
     format!("exec:{id}")
 }
 
-fn launch_node_id(id: &str) -> String {
-    format!("launch:{id}")
+fn provider_node_id(pid: u32) -> String {
+    format!("provider:{pid}")
 }
 
-fn print_snapshot(snapshot: &ActivitySnapshot, json: bool, sort: ActivitySort) -> Result<()> {
+fn print_snapshot(snapshot: &ActivitySnapshot, json: bool) -> Result<()> {
     if json {
         println!("{}", serde_json::to_string_pretty(snapshot)?);
     } else {
-        print!("{}", render_snapshot(snapshot, sort));
+        print!("{}", render_snapshot(snapshot));
     }
     Ok(())
 }
 
-fn render_snapshot(snapshot: &ActivitySnapshot, sort: ActivitySort) -> String {
+fn render_snapshot(snapshot: &ActivitySnapshot) -> String {
     let mut output = String::new();
-    let aggregate = output_windows(&snapshot.usage, "global");
     output.push_str("LOOPFLOW ACTIVITY\n");
     output.push_str(&format!(
-        "{} output tokens / 24h · 5s {} tok/s · 5m {} tok/s · {} unmeasured live turns\n\n",
-        format_int(output_tokens(aggregate.day)),
-        format_rate(output_rate(aggregate.fast)),
-        format_rate(output_rate(aggregate.slow)),
-        aggregate
-            .fast
-            .map_or(0, |interval| interval.unmeasured_turns),
+        "{} live Loopflow process(es) · {} unattributed provider process(es)\n\n",
+        snapshot.nodes.len(),
+        snapshot.provider_processes.len(),
     ));
-    output.push_str("  TOKENS  TOK/S 5S  TOK/S 5M  ELAPSED    IDLE  STATE      CALL\n");
+    output.push_str("  ELAPSED       PID  STATE      CALL\n");
     if snapshot.nodes.is_empty() {
         output.push_str("  no live call trees recorded in this Home\n");
     } else {
@@ -1061,12 +845,11 @@ fn render_snapshot(snapshot: &ActivitySnapshot, sort: ActivitySort) -> String {
             children.entry(parent).or_default().push(&node.id);
         }
         for nodes in children.values_mut() {
-            sort_node_ids(nodes, &index, &snapshot.usage, sort);
+            nodes.sort_by_key(|id| (index[id].started_at, *id));
         }
         let tree = RenderTree {
             index,
             children,
-            usage: &snapshot.usage,
             now: snapshot.observed_at,
         };
         if let Some(roots) = tree.children.get(&None) {
@@ -1145,37 +928,9 @@ fn render_prune_report(report: &ProcessPruneReport) -> String {
     output
 }
 
-fn sort_node_ids(
-    nodes: &mut [&str],
-    index: &HashMap<&str, &ActivityNode>,
-    usage: &crate::usage::UsageSnapshot,
-    sort: ActivitySort,
-) {
-    nodes.sort_by(|left, right| {
-        let left_node = index[left];
-        let right_node = index[right];
-        let left_windows = output_windows(usage, &left_node.usage_scope_id);
-        let right_windows = output_windows(usage, &right_node.usage_scope_id);
-        let left_tokens = output_tokens(left_windows.day);
-        let right_tokens = output_tokens(right_windows.day);
-        let left_rate = output_tokens(left_windows.fast);
-        let right_rate = output_tokens(right_windows.fast);
-        let order = match sort {
-            ActivitySort::Tokens => right_tokens
-                .cmp(&left_tokens)
-                .then_with(|| right_rate.cmp(&left_rate)),
-            ActivitySort::Rate => right_rate
-                .cmp(&left_rate)
-                .then_with(|| right_tokens.cmp(&left_tokens)),
-        };
-        order.then_with(|| left.cmp(right))
-    });
-}
-
 struct RenderTree<'a> {
     index: HashMap<&'a str, &'a ActivityNode>,
     children: HashMap<Option<&'a str>, Vec<&'a str>>,
-    usage: &'a crate::usage::UsageSnapshot,
     now: i64,
 }
 
@@ -1192,16 +947,11 @@ fn render_node(
         Some(true) => "└─",
         Some(false) => "├─",
     };
-    let usage = output_windows(tree.usage, &node.usage_scope_id);
     output.push_str(&format!(
-        "{:>8}  {:>6}  {:>7}  {:>6}  {:>6}  {:<9}  {}{}{}\n",
-        format_int(output_tokens(usage.day)),
-        format_rate(output_rate(usage.fast)),
-        format_rate(output_rate(usage.slow)),
+        "{:>9}  {:>8}  {:<9}  {}{}{}\n",
         format_duration(tree.now.saturating_sub(node.started_at)),
-        node.last_progress_at
-            .map(|at| format_duration(tree.now.saturating_sub(at)))
-            .unwrap_or_else(|| "—".to_string()),
+        node.pid
+            .map_or_else(|| "—".to_string(), |pid| pid.to_string()),
         node.state.label(),
         prefix,
         connector,
@@ -1217,14 +967,6 @@ fn render_node(
             let last = position + 1 == child_ids.len();
             render_node(child_id, &child_prefix, Some(last), tree, output);
         }
-    }
-}
-
-fn format_rate(rate: f64) -> String {
-    if rate > 0.0 && rate < 0.1 {
-        format!("{rate:.2}")
-    } else {
-        format!("{rate:.1}")
     }
 }
 
@@ -1256,102 +998,6 @@ fn kernel_state_label(state: &str) -> &'static str {
 mod tests {
     use super::*;
 
-    #[test]
-    fn activity_fixture_round_trips_process_and_output_evidence() {
-        let fixture = include_str!("../../../../../tests/fixtures/dto/activity_snapshot.json");
-        let snapshot = serde_json::from_str::<ActivitySnapshot>(fixture).unwrap();
-
-        let global = output_windows(&snapshot.usage, "global");
-        assert_eq!(
-            global.day.expect("global daily usage").output_tokens,
-            48_200
-        );
-        assert_eq!(
-            global
-                .fast
-                .expect("global live usage")
-                .output_tokens_per_second,
-            4.0
-        );
-        let five_minutes = global.slow.expect("global five-minute usage");
-        assert_eq!(five_minutes.input_tokens, Some(100));
-        assert_eq!(five_minutes.cache_read_tokens, Some(350));
-        assert_eq!(five_minutes.peak_input_tokens, Some(120_000));
-        assert_eq!(five_minutes.cost_usd, Some(0.2));
-        assert_eq!(
-            snapshot
-                .nodes
-                .iter()
-                .filter(|node| node.kind == ActivityNodeKind::ProviderLaunch)
-                .map(|node| node.state)
-                .collect::<Vec<_>>(),
-            vec![ActivityState::Working, ActivityState::Stalled]
-        );
-        assert!(snapshot.nodes.iter().all(|node| {
-            node.repo.as_deref() == Some("/src/loopflow") && node.wave.as_deref() == Some("product")
-        }));
-        assert!(snapshot
-            .nodes
-            .iter()
-            .filter(|node| node.kind == ActivityNodeKind::ProviderLaunch)
-            .all(|node| {
-                node.project.as_deref() == Some("loopflow-api")
-                    && node.task.as_deref() == Some("W2-144")
-            }));
-        assert_eq!(
-            snapshot.provider_processes[0].claim,
-            ProviderClaim::Orphaned
-        );
-
-        let encoded = serde_json::to_string(&snapshot).unwrap();
-        assert_eq!(
-            serde_json::from_str::<ActivitySnapshot>(&encoded).unwrap(),
-            snapshot
-        );
-    }
-
-    #[test]
-    fn activity_and_usage_commands_share_one_usage_snapshot() {
-        let directory = tempfile::tempdir().expect("tempdir");
-        let path = directory.path().join("loopflow.db");
-        let store = SqliteStore::new(&path).expect("store");
-        store
-            .apply_migration_for_test("add_turn_usage_samples")
-            .expect("usage sample migration");
-        let now = 10_000;
-        let mut invocation = launch("launch-parity", "exec-parity", "codex", now - 10);
-        invocation.ended_at = Some(now - 1);
-        invocation.outcome = "completed".to_string();
-        let turn = turn("turn-parity", &invocation.id, now - 10, Some(now - 1), None);
-        store
-            .insert_trace_capture(&invocation, &turn, &[], &[])
-            .expect("insert capture");
-        store
-            .record_turn_usage_sample(&crate::store::TurnUsageSample {
-                turn_id: turn.id,
-                observed_at: now - 1,
-                final_receipt: true,
-                usage: crate::chat::types::TurnUsage {
-                    input_tokens: Some(120),
-                    output_tokens: Some(30),
-                    reasoning_tokens: Some(10),
-                    cache_read_tokens: Some(80),
-                    model: Some("gpt-5".to_string()),
-                    cost_usd: Some(0.25),
-                    ..Default::default()
-                },
-            })
-            .expect("record usage");
-
-        let usage_command = crate::usage::snapshot(&store, now).expect("lf usage snapshot");
-        let activity_command = read_activity_data(&path, &[], now).expect("lf ps data");
-
-        assert_eq!(
-            serde_json::to_value(&activity_command.usage).unwrap(),
-            serde_json::to_value(&usage_command).unwrap()
-        );
-    }
-
     fn run_event(
         trace: &str,
         exec: &str,
@@ -1379,80 +1025,6 @@ mod tests {
         }
     }
 
-    fn launch(id: &str, exec: &str, provider: &str, started_at: i64) -> AgentInvocationRow {
-        AgentInvocationRow {
-            id: id.to_string(),
-            run_id: "trace".to_string(),
-            answer_ask_id: None,
-            process_id: exec.to_string(),
-            started_at,
-            ended_at: None,
-            repo: "/src/loopflow".to_string(),
-            worktree: "/src/loopflow".to_string(),
-            wave: Some("product".to_string()),
-            flow: None,
-            skill: None,
-            project: Some("loopflow-api".to_string()),
-            task: Some("W2-144".to_string()),
-            provider: provider.to_string(),
-            model: None,
-            surface: "cli".to_string(),
-            capture_status: "capturing".to_string(),
-            incomplete_reason: None,
-            outcome: "running".to_string(),
-            artifact_dir: format!("trace/{id}"),
-            conversation_path: format!("trace/{id}/conversation.jsonl"),
-            provider_events_path: None,
-            provider_session_id: None,
-            provider_session_path: None,
-            conversation_event_count: 0,
-            conversation_bytes: 0,
-            supervision: None,
-        }
-    }
-
-    fn turn(
-        id: &str,
-        launch: &str,
-        started_at: i64,
-        ended_at: Option<i64>,
-        output: Option<i64>,
-    ) -> AgentTurnRow {
-        AgentTurnRow {
-            id: id.to_string(),
-            invocation_id: launch.to_string(),
-            ordinal: 1,
-            provider_turn_id: None,
-            started_at,
-            ended_at,
-            status: if ended_at.is_some() {
-                "completed"
-            } else {
-                "running"
-            }
-            .to_string(),
-            input_op: "initial".to_string(),
-            context_coverage: "assembled".to_string(),
-            tokenizer: "cl100k_base".to_string(),
-            system_prompt_path: None,
-            task_prompt_path: "task.md".to_string(),
-            system_tokens: 0,
-            task_tokens: 0,
-            supplied_context_tokens: 0,
-            usage: output.map(|output_tokens| crate::chat::types::TurnUsage {
-                output_tokens: Some(output_tokens as u64),
-                ..Default::default()
-            }),
-            context_gather_ms: 0,
-            context_render_ms: 0,
-            context_persist_ms: 0,
-            first_event_seq: None,
-            last_event_seq: None,
-            root_output: None,
-            basis: None,
-        }
-    }
-
     fn process(pid: u32, ppid: u32, started_at: i64, command: &str) -> OsProcess {
         OsProcess {
             pid,
@@ -1475,86 +1047,9 @@ mod tests {
         }
     }
 
-    fn sortable_node(id: &str) -> ActivityNode {
-        ActivityNode {
-            id: id.to_string(),
-            parent_id: None,
-            kind: ActivityNodeKind::Exec,
-            label: id.to_string(),
-            repo: None,
-            wave: None,
-            project: None,
-            task: None,
-            pid: None,
-            started_at: 0,
-            last_progress_at: None,
-            state: ActivityState::Waiting,
-            usage_scope_id: id.to_string(),
-        }
-    }
-
-    fn sortable_reading(id: &str, tokens: u64, fast: u64) -> crate::usage::UsageReading {
-        crate::usage::UsageReading {
-            scope: crate::usage::UsageScope {
-                id: id.to_string(),
-                parent_id: None,
-                kind: crate::usage::UsageScopeKind::Exec,
-                label: id.to_string(),
-                repo: None,
-                wave: None,
-                project: None,
-                task: None,
-                exec_id: Some(id.to_string()),
-                invocation_id: None,
-            },
-            intervals: vec![
-                crate::usage::UsageInterval {
-                    window_seconds: 5,
-                    input_tokens: None,
-                    total_input_tokens: None,
-                    output_tokens: fast,
-                    reasoning_tokens: None,
-                    cache_read_tokens: None,
-                    cache_write_tokens: None,
-                    peak_input_tokens: None,
-                    context_window_tokens: None,
-                    cost_usd: None,
-                    output_tokens_per_second: fast as f64 / 5.0,
-                    measured_turns: 1,
-                    unmeasured_turns: 0,
-                    output_complete: true,
-                },
-                crate::usage::UsageInterval {
-                    window_seconds: 86_400,
-                    input_tokens: None,
-                    total_input_tokens: None,
-                    output_tokens: tokens,
-                    reasoning_tokens: None,
-                    cache_read_tokens: None,
-                    cache_write_tokens: None,
-                    peak_input_tokens: None,
-                    context_window_tokens: None,
-                    cost_usd: None,
-                    output_tokens_per_second: tokens as f64 / 86_400.0,
-                    measured_turns: 1,
-                    unmeasured_turns: 0,
-                    output_complete: true,
-                },
-            ],
-        }
-    }
-
     #[test]
-    fn call_tree_preserves_process_state_and_work_attribution() {
+    fn call_tree_uses_only_live_receipts_and_os_processes() {
         let now = 10_000;
-        let mut completed_launch = launch("launch-finished", "exec-5whys", "codex", 500);
-        completed_launch.ended_at = Some(now - 100);
-        completed_launch.outcome = "completed".to_string();
-        let mut unattributed_launch =
-            launch("launch-unattributed", "exec-5whys", "claude", now - 30);
-        unattributed_launch.wave = None;
-        unattributed_launch.project = None;
-        unattributed_launch.task = None;
         let data = ActivityData {
             events: vec![
                 run_event("trace", "exec-5whys", None, 1_000, "started", "5whys"),
@@ -1567,45 +1062,15 @@ mod tests {
                     "implement",
                 ),
             ],
-            launches: vec![
-                launch("launch-5whys", "exec-5whys", "codex", 1_000),
-                launch("launch-implement", "exec-implement", "codex", 2_000),
-                unattributed_launch,
-                completed_launch,
-            ],
-            turns: vec![
-                turn("turn-a", "launch-5whys", 1_000, Some(now - 600), Some(300)),
-                turn(
-                    "turn-b",
-                    "launch-implement",
-                    9_000,
-                    Some(now - 60),
-                    Some(600),
-                ),
-                turn("turn-open", "launch-implement", now - 30, None, None),
-                turn(
-                    "turn-unattributed",
-                    "launch-unattributed",
-                    now - 30,
-                    None,
-                    None,
-                ),
-                turn(
-                    "turn-finished",
-                    "launch-finished",
-                    now - 200,
-                    Some(now - 100),
-                    Some(5_000),
-                ),
-            ],
-            usage: crate::usage::empty_snapshot(now),
         };
+        let mut working_provider = process(30, 20, 2_001, "codex app-server");
+        working_provider.kernel_state = "R".to_string();
         let processes = ProcessSnapshot {
             processes: vec![
                 process(10, 1, 1_000, "lf 5whys"),
                 process(11, 10, 1_001, "codex app-server"),
                 process(20, 10, 2_000, "lf implement"),
-                process(30, 20, 2_001, "codex app-server"),
+                working_provider,
                 process(40, 1, 9_000, "codex app-server"),
             ],
             receipts: vec![
@@ -1627,31 +1092,11 @@ mod tests {
         let provider = snapshot
             .nodes
             .iter()
-            .find(|node| node.id == "launch:launch-implement")
+            .find(|node| node.id == "provider:30")
             .unwrap();
-        assert_eq!(provider.project.as_deref(), Some("loopflow-api"));
-        assert_eq!(provider.task.as_deref(), Some("W2-144"));
-        let unattributed = snapshot
-            .nodes
-            .iter()
-            .find(|node| node.id == "launch:launch-unattributed")
-            .unwrap();
-        assert_eq!(unattributed.pid, None);
-        assert_eq!(unattributed.wave, None);
-        assert_eq!(unattributed.project, None);
-        assert_eq!(unattributed.task, None);
-        assert_eq!(
-            unattributed.usage_scope_id,
-            "invocation:launch-unattributed"
-        );
-        assert_eq!(
-            output_tokens(output_windows(&snapshot.usage, "global").day),
-            0
-        );
-        assert!(!snapshot
-            .nodes
-            .iter()
-            .any(|node| node.id == "launch:launch-finished"));
+        assert_eq!(provider.parent_id.as_deref(), Some("exec:exec-implement"));
+        assert_eq!(provider.kind, ActivityNodeKind::ProviderProcess);
+        assert_eq!(provider.state, ActivityState::Working);
         assert_eq!(snapshot.provider_processes.len(), 1);
         assert_eq!(snapshot.provider_processes[0].pid, 40);
         assert_eq!(
@@ -1663,12 +1108,13 @@ mod tests {
             serde_json::from_str::<ActivitySnapshot>(&json).unwrap(),
             snapshot
         );
-        let rendered = render_snapshot(&snapshot, ActivitySort::Tokens);
+        let rendered = render_snapshot(&snapshot);
         assert!(rendered.contains("lf 5whys"));
         assert!(rendered.contains("lf implement"));
         assert!(rendered.contains("codex 30"));
         assert!(rendered.contains("├─"));
         assert!(rendered.contains("└─"));
+        assert!(!rendered.contains("TOK/S"));
         assert!(!rendered.contains("\x1b"));
     }
 
@@ -1680,9 +1126,6 @@ mod tests {
                 run_event("trace", "dead", None, 1_000, "started", "old"),
                 run_event("trace", "unknown", None, 2_000, "started", "legacy"),
             ],
-            launches: Vec::new(),
-            turns: Vec::new(),
-            usage: crate::usage::empty_snapshot(now),
         };
         let processes = ProcessSnapshot {
             processes: vec![process(99, 1, 1_000, "opencode serve --port 1234")],
@@ -1696,15 +1139,11 @@ mod tests {
         let snapshot = collect_activity(data, processes, now).unwrap();
         assert!(snapshot.nodes.is_empty());
         assert_eq!(
-            output_tokens(output_windows(&snapshot.usage, "global").day),
-            0
-        );
-        assert_eq!(
             snapshot.provider_processes[0].claim,
             ProviderClaim::Orphaned
         );
         assert_eq!(snapshot.provider_processes[0].command, "opencode serve");
-        let rendered = render_snapshot(&snapshot, ActivitySort::Tokens);
+        let rendered = render_snapshot(&snapshot);
         assert!(rendered.contains("not counted above"));
         assert!(rendered.contains("unclaimed = no exact Loopflow receipt"));
         assert!(rendered.contains("sleeping"));
@@ -1740,28 +1179,5 @@ mod tests {
 
         assert_eq!(receipts, [88]);
         assert_eq!(process_groups, [99]);
-    }
-
-    #[test]
-    fn sibling_sort_uses_the_other_metric_before_stable_id() {
-        let nodes = [sortable_node("a"), sortable_node("b"), sortable_node("c")];
-        let mut usage = crate::usage::empty_snapshot(0);
-        usage.readings.extend([
-            sortable_reading("a", 100, 20),
-            sortable_reading("b", 200, 10),
-            sortable_reading("c", 200, 20),
-        ]);
-        let index = nodes
-            .iter()
-            .map(|node| (node.id.as_str(), node))
-            .collect::<HashMap<_, _>>();
-
-        let mut by_tokens = vec!["a", "b", "c"];
-        sort_node_ids(&mut by_tokens, &index, &usage, ActivitySort::Tokens);
-        assert_eq!(by_tokens, ["c", "b", "a"]);
-
-        let mut by_rate = vec!["a", "b", "c"];
-        sort_node_ids(&mut by_rate, &index, &usage, ActivitySort::Rate);
-        assert_eq!(by_rate, ["c", "a", "b"]);
     }
 }

@@ -1,12 +1,17 @@
 import difflib
+import hashlib
 import json
 import os
+import posixpath
 import re
+from dataclasses import dataclass
 from datetime import datetime, timezone
 from pathlib import Path
+from urllib.parse import urlsplit, urlunsplit
 
 import yaml
 from fasthtml.common import *
+from markdown import markdown as markdown_to_html
 from starlette.responses import JSONResponse, PlainTextResponse, RedirectResponse
 from starlette.routing import Route
 
@@ -14,6 +19,8 @@ from internal_pages import colors_page, design_page, fonts_page
 
 BASE_URL = "https://loopflow.studio"
 RELEASE_TAG = os.environ.get("LOOPFLOW_RELEASE_TAG", "development")
+STATIC_DIR = Path(__file__).parent / "static"
+STYLE_VERSION = hashlib.sha256((STATIC_DIR / "style.css").read_bytes()).hexdigest()[:12]
 
 app, rt = fast_app(
     htmlkw={"lang": "en"},
@@ -27,7 +34,7 @@ app, rt = fast_app(
             rel="stylesheet",
             href="https://fonts.googleapis.com/css2?family=Instrument+Serif:ital@0;1&family=Inter:wght@400;500;600&family=JetBrains+Mono:wght@400;500&display=swap",
         ),
-        Link(rel="stylesheet", href="/static/style.css"),
+        Link(rel="stylesheet", href=f"/static/style.css?v={STYLE_VERSION}"),
     ),
 )
 
@@ -161,7 +168,6 @@ for required_key in (
 
 DOCS_DIR = Path(__file__).parent / "docs"
 CANONICAL_DOCS_DIR = Path(__file__).parent.parent / "docs"
-STATIC_DIR = Path(__file__).parent / "static"
 
 
 def slugify(text: str) -> str:
@@ -173,37 +179,149 @@ def slugify(text: str) -> str:
     return slug.strip("-")
 
 
-DOCS_NAV = [
-    ("Home", "index"),
-    ("Get Started", "getting-started"),
-    ("Waves", "waves"),
-    ("Authoring", "authoring"),
-    ("The Agent API", "agent-api"),
-    ("Conducting", "conducting"),
-    ("Architecture", "architecture"),
-    # Reference
-    ("lf", "lf"),
-    ("Config", "config"),
-    ("Subscriptions", "subscriptions"),
-    ("Security", "security"),
-    ("Troubleshooting", "troubleshooting"),
-]
+@dataclass(frozen=True)
+class DocPage:
+    title: str
+    slug: str
+    description: str
+    parent: str | None = None
 
 
-DOC_DESCRIPTIONS = {
-    "index": "What loopflow is, the model, and where to read next",
-    "getting-started": "Install, first commands, building features, going remote",
-    "waves": "The planning model, goals, memory, KRs, Linear, crons",
-    "authoring": "Writing skills, flows, directions, and goals",
-    "agent-api": "How agents launch, steer, and prove control of other agents",
-    "conducting": "Monitoring and steering many agents; the Mac podium",
-    "architecture": "Concepts, truth owners, persistence, processes, APIs, and provider edges",
-    "lf": "Every command, PR/planning/release operations, the builtin catalog",
-    "config": "Config files, context assembly, models, and launch behavior",
-    "subscriptions": "Claude and Codex identities, routes, health, and remote selection",
-    "security": "Execution boundaries, permissions, and credential trust boundaries",
-    "troubleshooting": "Exact failure → cause → fix",
+@dataclass(frozen=True)
+class DocArea:
+    title: str
+    slug: str
+    description: str
+    pages: tuple[DocPage, ...]
+
+
+DOCS_AREAS = (
+    DocArea(
+        "Start",
+        "start",
+        "Install Loopflow and follow one useful command all the way through.",
+        (
+            DocPage("Overview", "index", "The model and where to read next"),
+            DocPage(
+                "Get started",
+                "getting-started",
+                "Install, run a Skill, build a feature, and go remote",
+            ),
+        ),
+    ),
+    DocArea(
+        "Plan and conduct",
+        "conduct",
+        "Give long-running work a purpose, then observe and redirect it.",
+        (
+            DocPage("Waves", "waves", "Goals, memory, Projects, Tasks, KRs, and cadence"),
+            DocPage(
+                "Conducting",
+                "conducting",
+                "Monitor and steer work from the CLI, tmux, or Mac app",
+            ),
+        ),
+    ),
+    DocArea(
+        "Build and extend",
+        "extend",
+        "Turn your own operating knowledge into reusable Skills and agent workflows.",
+        (
+            DocPage("Authoring", "authoring", "Write Skills, Flows, directions, and goals"),
+            DocPage(
+                "The Agent API",
+                "agent-api",
+                "Launch, steer, observe, and ship work from another agent",
+            ),
+        ),
+    ),
+    DocArea(
+        "Reference",
+        "reference",
+        "Look up exact commands, settings, identities, boundaries, and repairs.",
+        (
+            DocPage("lf command reference", "lf", "Commands, flags, and builtins"),
+            DocPage("Configuration", "config", "Context, models, profiles, and launch behavior"),
+            DocPage(
+                "Subscriptions",
+                "subscriptions",
+                "Provider identities, routes, health, and remote selection",
+            ),
+            DocPage(
+                "Security",
+                "security",
+                "Execution, credential, storage, and network trust boundaries",
+            ),
+            DocPage("Troubleshooting", "troubleshooting", "Exact failure, cause, and fix"),
+        ),
+    ),
+)
+
+ARCHITECTURE_AREA = DocArea(
+    "Developer architecture",
+    "architecture",
+    "Follow one Skill run through the implementation, then open the subsystem you need.",
+    (
+        DocPage("Architecture", "architecture", "A developer's path through the whole system"),
+        DocPage(
+            "Execution",
+            "architecture/execution",
+            "Skill discovery, prompts, providers, harnesses, and Run evidence",
+            parent="architecture",
+        ),
+        DocPage(
+            "Planning",
+            "architecture/planning",
+            "Flows, Work, Steer, Ask, and resident loops",
+            parent="architecture",
+        ),
+        DocPage(
+            "Delivery",
+            "architecture/delivery",
+            "Task worktrees, commits, serial PRs, checks, and merge",
+            parent="architecture",
+        ),
+        DocPage(
+            "Homes and processes",
+            "architecture/homes",
+            "Placement, services, SSH, process authority, and promotion",
+            parent="architecture",
+        ),
+        DocPage(
+            "Data and persistence",
+            "architecture/data",
+            "Truth owners, stores, append-only evidence, and projections",
+            parent="architecture",
+        ),
+        DocPage(
+            "Codebase map",
+            "architecture/codebase",
+            "Source territories, public surfaces, binaries, and extension points",
+            parent="architecture",
+        ),
+        DocPage(
+            "Checked reference",
+            "architecture-reference",
+            "The exhaustive, machine-checked inventory",
+            parent="architecture",
+        ),
+    ),
+)
+
+DOC_PAGES = tuple(page for area in DOCS_AREAS for page in area.pages)
+PUBLIC_DOC_SLUGS = {page.slug for page in DOC_PAGES}
+ARCHITECTURE_PAGES = ARCHITECTURE_AREA.pages
+ARCHITECTURE_SLUGS = {page.slug for page in ARCHITECTURE_PAGES}
+ALL_DOC_PAGES = DOC_PAGES + ARCHITECTURE_PAGES
+DOCS_NAV = [(page.title, page.slug) for page in DOC_PAGES]
+DOC_DESCRIPTIONS = {page.slug: page.description for page in DOC_PAGES}
+DOC_PAGE_BY_SLUG = {page.slug: page for page in ALL_DOC_PAGES}
+DOC_AREA_BY_PAGE = {
+    page.slug: area for area in DOCS_AREAS for page in area.pages
 }
+DOC_AREA_BY_PAGE.update(
+    {page.slug: ARCHITECTURE_AREA for page in ARCHITECTURE_PAGES}
+)
 
 
 def generate_llms_txt() -> str:
@@ -211,15 +329,17 @@ def generate_llms_txt() -> str:
     doc_links = "\n".join(
         f"- [{title}]({BASE_URL}/docs/{slug}.md): {DOC_DESCRIPTIONS.get(slug, title)}"
         for title, slug in DOCS_NAV
+        if doc_path(slug)
     )
     return f"""# Loopflow
-> Persistent agents, no central server. Waves hold a goal, remember what they learn, and stay steerable — and lf is the command humans type and the API agents call to launch, steer, and observe other agents.
+> Durable Work, replaceable agents, no central server. lf is the command humans type and the API agents call to run Skills, conduct Waves, deliver Tasks, and observe Home-local evidence.
 
-Loopflow creates and runs Waves: each coordinates Linear-backed Projects and
-Tasks, keeps one steerable conversation beside the live work map, and folds
-what it learns into memory. State lives in a local SQLite store and
-append-only journals; shared truth lives in Linear and GitHub; remote
-machines are reached over SSH. Install: `curl -fsSL
+Loopflow runs one Skill through a provider and records that launch in an
+immutable Home-local Run record. Stable Wave, Project, and Task Work preserves
+purpose across provider processes. Authored behavior lives in the repository;
+bounded planning state lives on its Home; shared planning and delivery truth
+lives in Linear and GitHub. Reach another Home explicitly with `lf ssh`.
+Install: `curl -fsSL
 https://loopflow.studio/install.sh | sh && lf init`. Every docs page below is
 raw markdown at its `.md` URL (or request the canonical URL with `Accept:
 text/markdown`); the complete corpus is at {BASE_URL}/llms-full.txt.
@@ -253,7 +373,9 @@ def generate_llms_full_txt() -> str:
 
 def generate_sitemap_xml() -> str:
     pages = ["", "/download", "/docs"] + [
-        f"/docs/{slug}" for _, slug in DOCS_NAV if slug != "index"
+        f"/docs/{slug}"
+        for _, slug in DOCS_NAV
+        if slug != "index" and doc_path(slug)
     ]
     entries = []
     for page in pages:
@@ -275,142 +397,101 @@ def generate_sitemap_xml() -> str:
 # (Generated at startup below, after the doc-loading helpers are defined.)
 
 
-def render_markdown(content: str) -> list:
-    # Remove YAML frontmatter
-    content = re.sub(r"^---\n.*?\n---\n", "", content, flags=re.DOTALL)
+def _strip_frontmatter(content: str) -> str:
+    return re.sub(r"^---\r?\n.*?\r?\n---\r?\n", "", content, count=1, flags=re.DOTALL)
 
-    elements = []
-    lines = content.split("\n")
-    i = 0
 
-    while i < len(lines):
-        line = lines[i]
+def _split_doc_source(content: str) -> tuple[str, str]:
+    source = _strip_frontmatter(content).lstrip()
+    match = re.match(r"# ([^\n]+)\n?", source)
+    if not match:
+        return "Documentation", source
+    return match.group(1).strip(), source[match.end() :].lstrip()
 
-        # Code blocks
+
+def _resolve_doc_target(
+    target: str, current_slug: str, architecture: bool = False
+) -> str:
+    if target.startswith(("#", "/", "http://", "https://", "mailto:")):
+        return target
+
+    parsed = urlsplit(target)
+    source_dir = posixpath.dirname(current_slug)
+    resolved = posixpath.normpath(posixpath.join(source_dir, parsed.path))
+
+    if parsed.path.endswith(".md"):
+        if resolved.startswith("../"):
+            repo_path = resolved.removeprefix("../")
+            path = f"https://github.com/loopflowstudio/loopflow/blob/main/{repo_path}"
+        else:
+            slug = resolved.removesuffix(".md")
+            path = (
+                _architecture_href(slug)
+                if architecture and slug in ARCHITECTURE_SLUGS
+                else ("/docs" if slug == "index" else f"/docs/{slug}")
+            )
+        return urlunsplit(("", "", path, parsed.query, parsed.fragment))
+
+    if resolved.startswith("../"):
+        repo_path = resolved.removeprefix("../")
+        path = f"https://github.com/loopflowstudio/loopflow/blob/main/{repo_path}"
+        return urlunsplit(("", "", path, parsed.query, parsed.fragment))
+
+    if Path(parsed.path).suffix.lower() in {".gif", ".jpeg", ".jpg", ".png", ".svg", ".webp"}:
+        path = f"/static/{resolved}"
+        return urlunsplit(("", "", path, parsed.query, parsed.fragment))
+
+    return target
+
+
+def _resolve_markdown_targets(
+    content: str, current_slug: str, architecture: bool = False
+) -> str:
+    pattern = re.compile(r"(!?\[[^\]]*\]\()([^)\s]+)([^)]*\))")
+
+    def replace(match: re.Match[str]) -> str:
+        href = _resolve_doc_target(match.group(2), current_slug, architecture)
+        return f"{match.group(1)}{href}{match.group(3)}"
+
+    return pattern.sub(replace, content)
+
+
+def render_markdown(
+    content: str, current_slug: str = "index", architecture: bool = False
+) -> list:
+    source = _resolve_markdown_targets(
+        _strip_frontmatter(content), current_slug, architecture
+    )
+    html = markdown_to_html(
+        source,
+        extensions=("fenced_code", "sane_lists", "tables", "toc"),
+        extension_configs={
+            "toc": {
+                "permalink": "#",
+                "permalink_class": "anchor-link",
+                "permalink_title": "Link to this section",
+            }
+        },
+        output_format="html5",
+    )
+    html = html.replace("<pre>", '<pre tabindex="0">')
+    html = html.replace("<table>", '<table tabindex="0">')
+    return [NotStr(html)]
+
+
+def _doc_outline(content: str) -> list[tuple[str, str]]:
+    source = _strip_frontmatter(content)
+    headings = []
+    in_fence = False
+    for line in source.splitlines():
         if line.startswith("```"):
-            code_lines = []
-            i += 1
-            while i < len(lines) and not lines[i].startswith("```"):
-                code_lines.append(lines[i])
-                i += 1
-            elements.append(Pre(Code("\n".join(code_lines)), tabindex="0"))
-            i += 1
+            in_fence = not in_fence
             continue
-
-        # Headers
-        if line.startswith("# "):
-            elements.append(H1(line[2:]))
-            i += 1
+        if in_fence or not line.startswith("## "):
             continue
-        if line.startswith("## "):
-            heading_text = line[3:]
-            anchor_id = slugify(heading_text)
-            elements.append(
-                H2(
-                    heading_text,
-                    A(
-                        "#",
-                        href=f"#{anchor_id}",
-                        cls="anchor-link",
-                        **{"aria-label": "Link to section"},
-                    ),
-                    id=anchor_id,
-                )
-            )
-            i += 1
-            continue
-        if line.startswith("### "):
-            heading_text = line[4:]
-            anchor_id = slugify(heading_text)
-            elements.append(
-                H3(
-                    heading_text,
-                    A(
-                        "#",
-                        href=f"#{anchor_id}",
-                        cls="anchor-link",
-                        **{"aria-label": "Link to section"},
-                    ),
-                    id=anchor_id,
-                )
-            )
-            i += 1
-            continue
-
-        # Horizontal rule
-        if line.strip() == "---":
-            elements.append(Hr())
-            i += 1
-            continue
-
-        # Tables
-        if "|" in line and i + 1 < len(lines) and "---" in lines[i + 1]:
-            headers = [h.strip() for h in line.split("|") if h.strip()]
-            i += 2  # Skip header and separator
-            rows = []
-            while i < len(lines) and "|" in lines[i]:
-                cells = [c.strip() for c in lines[i].split("|") if c.strip()]
-                rows.append(cells)
-                i += 1
-            elements.append(
-                Table(
-                    Thead(Tr(*[Th(h) for h in headers])),
-                    Tbody(*[Tr(*[Td(render_inline(c)) for c in row]) for row in rows]),
-                )
-            )
-            continue
-
-        # Unordered lists
-        if line.startswith("- "):
-            items = []
-            while i < len(lines) and lines[i].startswith("- "):
-                items.append(Li(render_inline(lines[i][2:])))
-                i += 1
-            elements.append(Ul(*items))
-            continue
-
-        # Ordered lists
-        if re.match(r"^\d+\. ", line):
-            items = []
-            while i < len(lines) and re.match(r"^\d+\. ", lines[i]):
-                items.append(Li(render_inline(re.sub(r"^\d+\. ", "", lines[i]))))
-                i += 1
-            elements.append(Ol(*items))
-            continue
-
-        # Blockquotes
-        if line.startswith("> "):
-            quote_lines = []
-            while i < len(lines) and lines[i].startswith("> "):
-                quote_lines.append(lines[i][2:])
-                i += 1
-            elements.append(Blockquote(P(" ".join(quote_lines))))
-            continue
-
-        # Paragraphs
-        if line.strip():
-            # Always consume the current line: a prose line may contain "|"
-            # (it wasn't a table — that case is handled above) and must not
-            # stall the loop.
-            para_lines = [line]
-            i += 1
-            while (
-                i < len(lines)
-                and lines[i].strip()
-                and not lines[i].startswith("#")
-                and not lines[i].startswith("```")
-                and not lines[i].startswith("- ")
-                and not lines[i].startswith("> ")
-                and "|" not in lines[i]
-            ):
-                para_lines.append(lines[i])
-                i += 1
-            elements.append(P(render_inline(" ".join(para_lines))))
-            continue
-
-        i += 1
-
-    return elements
+        title = re.sub(r"[`*_]", "", line[3:]).strip()
+        headings.append((title, slugify(title)))
+    return headings
 
 
 def render_inline(text: str) -> NotStr:
@@ -443,23 +524,229 @@ def render_inline(text: str) -> NotStr:
 
 
 def DocsNav(current: str = "index"):
+    groups = []
+    for area in DOCS_AREAS:
+        pages = [page for page in area.pages if doc_path(page.slug)]
+        if not pages:
+            continue
+        groups.append(
+            Div(
+                P(area.title, cls="docs-nav-area-title"),
+                Ul(
+                    *[
+                        Li(
+                            A(
+                                page.title,
+                                href=(
+                                    f"/docs/{page.slug}"
+                                    if page.slug != "index"
+                                    else "/docs"
+                                ),
+                                cls="active" if page.slug == current else None,
+                                **(
+                                    {"aria-current": "page"}
+                                    if page.slug == current
+                                    else {}
+                                ),
+                            ),
+                            cls="docs-nav-child" if page.parent else None,
+                        )
+                        for page in pages
+                    ]
+                ),
+                cls="docs-nav-area",
+                **{"data-area": area.slug},
+            )
+        )
+    current_page = DOC_PAGE_BY_SLUG.get(current)
     return Nav(
-        P("Documentation", cls="docs-nav-heading"),
-        Ul(
-            *[
-                Li(
-                    A(
-                        title,
-                        href=f"/docs/{slug}" if slug != "index" else "/docs",
-                        cls="active" if slug == current else None,
-                        **({"aria-current": "page"} if slug == current else {}),
-                    )
-                )
-                for title, slug in DOCS_NAV
-            ]
+        Details(
+            Summary(
+                Span("Browse docs"),
+                Span(current_page.title if current_page else "Documentation"),
+            ),
+            Div(
+                A(
+                    Span("Loopflow", cls="docs-nav-wordmark"),
+                    Span("Documentation", cls="docs-nav-heading"),
+                    href="/docs",
+                    cls="docs-nav-home",
+                ),
+                *groups,
+                cls="docs-nav-inner",
+            ),
+            cls="docs-nav-disclosure",
+            open=True,
         ),
         cls="docs-nav",
         **{"aria-label": "Documentation"},
+    )
+
+
+def _architecture_href(slug: str, markdown: bool = False) -> str:
+    if slug == "architecture":
+        suffix = ""
+    elif slug == "architecture-reference":
+        suffix = "/reference"
+    else:
+        suffix = f"/{slug.removeprefix('architecture/')}"
+    return f"/architecture{suffix}{'.md' if markdown else ''}"
+
+
+def ArchitectureNav(current: str):
+    pages = [page for page in ARCHITECTURE_PAGES if doc_path(page.slug)]
+    current_page = DOC_PAGE_BY_SLUG[current]
+    return Nav(
+        Details(
+            Summary(Span("Browse architecture"), Span(current_page.title)),
+            Div(
+                A(
+                    Span("Loopflow source", cls="docs-nav-wordmark"),
+                    Span("Developer architecture", cls="docs-nav-heading"),
+                    href="/architecture",
+                    cls="docs-nav-home",
+                ),
+                Div(
+                    P("Follow the system", cls="docs-nav-area-title"),
+                    Ul(
+                        *[
+                            Li(
+                                A(
+                                    page.title,
+                                    href=_architecture_href(page.slug),
+                                    cls="active" if page.slug == current else None,
+                                    **(
+                                        {"aria-current": "page"}
+                                        if page.slug == current
+                                        else {}
+                                    ),
+                                ),
+                                cls="docs-nav-child" if page.parent else None,
+                            )
+                            for page in pages
+                        ]
+                    ),
+                    cls="docs-nav-area",
+                ),
+                A("Public user docs ↗", href="/docs", cls="docs-nav-public-link"),
+                cls="docs-nav-inner",
+            ),
+            cls="docs-nav-disclosure",
+            open=True,
+        ),
+        cls="docs-nav docs-nav-architecture",
+        **{"aria-label": "Developer architecture"},
+    )
+
+
+def DocsBreadcrumb(slug: str, title: str):
+    page = DOC_PAGE_BY_SLUG.get(slug)
+    area = DOC_AREA_BY_PAGE.get(slug)
+    crumbs = [Li(A("Docs", href="/docs"))]
+    if area and slug != "index":
+        crumbs.append(Li(Span(area.title)))
+    if page and page.parent:
+        parent = DOC_PAGE_BY_SLUG[page.parent]
+        crumbs.append(Li(A(parent.title, href=f"/docs/{parent.slug}")))
+    if slug != "index":
+        crumbs.append(Li(Span(title, **{"aria-current": "page"})))
+    return Nav(
+        Ol(*crumbs),
+        cls="docs-breadcrumb",
+        **{"aria-label": "Breadcrumb"},
+    )
+
+
+def ArchitectureBreadcrumb(slug: str, title: str):
+    if slug == "architecture":
+        return None
+    crumbs = [Li(A("Architecture", href="/architecture"))]
+    crumbs.append(Li(Span(title, **{"aria-current": "page"})))
+    return Nav(
+        Ol(*crumbs),
+        cls="docs-breadcrumb",
+        **{"aria-label": "Breadcrumb"},
+    )
+
+
+def DocsOutline(content: str):
+    headings = _doc_outline(content)
+    if len(headings) < 2:
+        return None
+    return Nav(
+        P("On this page", cls="docs-outline-heading"),
+        Ol(*[Li(A(title, href=f"#{anchor}")) for title, anchor in headings]),
+        cls="docs-outline",
+        **{"aria-label": "On this page"},
+    )
+
+
+def DocsDirectory():
+    return Section(
+        H2("Browse by area", id="browse-by-area"),
+        Ol(
+            *[
+                Li(
+                    Span(f"{index:02}", cls="docs-directory-number"),
+                    Div(
+                        H3(area.title),
+                        P(area.description),
+                        Ul(
+                            *[
+                                Li(
+                                    A(
+                                        page.title,
+                                        href=(
+                                            f"/docs/{page.slug}"
+                                            if page.slug != "index"
+                                            else "/docs"
+                                        ),
+                                    )
+                                )
+                                for page in area.pages
+                                if doc_path(page.slug) and page.slug != "index"
+                            ]
+                        ),
+                    ),
+                )
+                for index, area in enumerate(DOCS_AREAS, start=1)
+            ],
+            cls="docs-directory-list",
+        ),
+        cls="docs-directory",
+        **{"aria-labelledby": "browse-by-area"},
+    )
+
+
+def DocsPager(
+    current: str,
+    pages: tuple[DocPage, ...] = DOC_PAGES,
+    architecture: bool = False,
+):
+    pages = [page for page in pages if doc_path(page.slug)]
+    index = next((i for i, page in enumerate(pages) if page.slug == current), None)
+    if index is None:
+        return None
+    previous = pages[index - 1] if index > 0 else None
+    following = pages[index + 1] if index + 1 < len(pages) else None
+
+    def pager_link(page: DocPage, direction: str):
+        return A(
+            Span(direction, cls="docs-pager-direction"),
+            Span(page.title, cls="docs-pager-title"),
+            href=(
+                _architecture_href(page.slug)
+                if architecture
+                else (f"/docs/{page.slug}" if page.slug != "index" else "/docs")
+            ),
+            cls=f"docs-pager-link docs-pager-{direction.lower()}",
+        )
+
+    return Nav(
+        pager_link(previous, "Previous") if previous else None,
+        pager_link(following, "Next") if following else None,
+        cls="docs-pager",
+        **{"aria-label": "Documentation pages"},
     )
 
 
@@ -484,10 +771,13 @@ MARKDOWN_MEDIA_TYPE = "text/markdown; charset=utf-8"
 
 
 def _doc_title(slug: str) -> str:
-    return next((t for t, s in DOCS_NAV if s == slug), slug.title())
+    page = DOC_PAGE_BY_SLUG.get(slug)
+    return page.title if page else slug.title()
 
 
-def markdown_doc_response(slug: str) -> PlainTextResponse | None:
+def markdown_doc_response(
+    slug: str, canonical_path: str | None = None
+) -> PlainTextResponse | None:
     path = doc_path(slug)
     if not path:
         return None
@@ -495,7 +785,7 @@ def markdown_doc_response(slug: str) -> PlainTextResponse | None:
     frontmatter = (
         "---\n"
         f"title: {_doc_title(slug)}\n"
-        f"canonical_url: {BASE_URL}/docs/{slug}\n"
+        f"canonical_url: {BASE_URL}{canonical_path or f'/docs/{slug}'}\n"
         f"last_updated: {updated.date().isoformat()}\n"
         "---\n\n"
     )
@@ -726,29 +1016,61 @@ def get():
     return RedirectResponse("/docs", status_code=302)
 
 
-def _docs_page(slug: str, title: str):
+def _docs_page(slug: str, title: str, architecture: bool = False):
     content = load_doc(slug)
+    heading, body = _split_doc_source(content)
+    page = DOC_PAGE_BY_SLUG.get(slug)
     return (
         Title(title),
+        *(
+            (Meta(name="robots", content="noindex,nofollow"),)
+            if architecture
+            else ()
+        ),
         SkipLink(),
+        Script(src="/static/docs.js", defer=True),
         Navbar(),
         Main(
             Section(
                 Div(
-                    DocsNav(slug),
-                    Div(
-                        P(
-                            A(
-                                "View as Markdown",
-                                href=f"/docs/{slug}.md",
-                                cls="md-link",
-                                title="This page as raw markdown, for agents and copying",
-                            ),
-                            cls="docs-md-link",
+                    ArchitectureNav(slug) if architecture else DocsNav(slug),
+                    Article(
+                        (
+                            ArchitectureBreadcrumb(slug, heading)
+                            if architecture
+                            else DocsBreadcrumb(slug, heading)
                         ),
-                        *render_markdown(content),
+                        Header(
+                            Div(
+                                P(
+                                    A(
+                                        "Markdown source",
+                                        href=(
+                                            _architecture_href(slug, markdown=True)
+                                            if architecture
+                                            else f"/docs/{slug}.md"
+                                        ),
+                                        cls="md-link",
+                                        title="This page as raw markdown, for agents and copying",
+                                    ),
+                                    cls="docs-md-link",
+                                ),
+                                cls="docs-page-utility",
+                            ),
+                            H1(heading),
+                            P(page.description, cls="docs-deck") if page else None,
+                            cls="docs-page-header",
+                        ),
+                        DocsDirectory() if slug == "index" and not architecture else None,
+                        *render_markdown(body, slug, architecture=architecture),
+                        DocsPager(
+                            slug,
+                            pages=ARCHITECTURE_PAGES if architecture else DOC_PAGES,
+                            architecture=architecture,
+                        ),
                         cls="docs-content",
                     ),
+                    DocsOutline(body),
                     cls="docs-layout",
                 ),
                 cls="docs-hero",
@@ -771,16 +1093,70 @@ def get(request, slug: str):
     # Raw markdown: /docs/<slug>.md, or Accept: text/markdown on the canonical URL
     if slug.endswith(".md"):
         slug = slug[:-3]
+        if slug not in PUBLIC_DOC_SLUGS:
+            return markdown_not_found(slug)
         return markdown_doc_response(slug) or markdown_not_found(slug)
     if wants_markdown(request):
+        if slug not in PUBLIC_DOC_SLUGS:
+            return markdown_not_found(slug)
         return markdown_doc_response(slug) or markdown_not_found(slug)
-    if not doc_path(slug):
+    if slug not in PUBLIC_DOC_SLUGS or not doc_path(slug):
         return RedirectResponse("/docs", status_code=302)
     title = _doc_title(slug)
     return (
         *_docs_page(slug, f"{title} — Loopflow Documentation"),
         HttpHeader("Vary", "Accept"),
     )
+
+
+def _architecture_source_slug(route_slug: str) -> str | None:
+    route_slug = route_slug.removesuffix(".md").strip("/")
+    if not route_slug:
+        return "architecture"
+    if route_slug == "reference":
+        return "architecture-reference"
+    candidate = f"architecture/{route_slug}"
+    return candidate if candidate in ARCHITECTURE_SLUGS else None
+
+
+def _architecture_page(request, route_slug: str):
+    markdown = route_slug.endswith(".md") or wants_markdown(request)
+    source_slug = _architecture_source_slug(route_slug)
+    if source_slug is None or not doc_path(source_slug):
+        if markdown:
+            return PlainTextResponse(
+                "# Architecture page not found\n",
+                status_code=404,
+                media_type=MARKDOWN_MEDIA_TYPE,
+            )
+        return RedirectResponse("/architecture", status_code=302)
+    canonical = _architecture_href(source_slug)
+    if markdown:
+        return markdown_doc_response(source_slug, canonical_path=canonical)
+    return (
+        *_docs_page(
+            source_slug,
+            f"{_doc_title(source_slug)} — Loopflow Developer Architecture",
+            architecture=True,
+        ),
+        HttpHeader("Vary", "Accept"),
+        HttpHeader("X-Robots-Tag", "noindex, nofollow"),
+    )
+
+
+@rt("/architecture.md")
+def get(request):
+    return _architecture_page(request, ".md")
+
+
+@rt("/architecture")
+def get(request):
+    return _architecture_page(request, "")
+
+
+@rt("/architecture/{slug:path}")
+def get(request, slug: str):
+    return _architecture_page(request, slug)
 
 
 @rt("/download")

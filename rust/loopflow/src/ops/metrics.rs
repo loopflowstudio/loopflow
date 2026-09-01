@@ -6,13 +6,13 @@ use anyhow::{anyhow, bail, Context, Result};
 use serde::Deserialize;
 use time::OffsetDateTime;
 
-use crate::pm::PmProject;
-use crate::store::Store;
-use crate::wave::metrics::{
+use crate::controller::wave::metrics::{
     compose_metric_portfolio, discover_metric_contracts, load_metric_contract,
     MetricContractDiscovery, MetricObservation, MetricPortfolioDto, ObservationAcceptance,
 };
-use crate::wave::Wave;
+use crate::pm::PmProject;
+use crate::store::Store;
+use crate::work::wave::Wave;
 
 pub(crate) async fn wave_metric_portfolio(
     store: &Store,
@@ -189,7 +189,10 @@ impl MetricProducerObservation {
         }
     }
 
-    fn bind(self, contract: &crate::wave::metrics::MetricContract) -> Result<MetricObservation> {
+    fn bind(
+        self,
+        contract: &crate::controller::wave::metrics::MetricContract,
+    ) -> Result<MetricObservation> {
         let mut observation = match self {
             Self::Observed {
                 value,
@@ -343,12 +346,12 @@ mod tests {
     use tempfile::tempdir;
     use time::Duration;
 
+    use crate::controller::wave::metrics::{
+        load_metric_contract, MetricEvidenceDto, MetricObservation, MetricStage,
+    };
     use crate::id::WaveId;
     use crate::pm::{PmKr, ProjectFlowPlan};
     use crate::store::{open_store, StorageConfig};
-    use crate::wave::metrics::{
-        load_metric_contract, MetricEvidenceDto, MetricObservation, MetricStage,
-    };
 
     use super::*;
 
@@ -385,7 +388,7 @@ mod tests {
     }
 
     fn observed(
-        contract: &crate::wave::metrics::MetricContract,
+        contract: &crate::controller::wave::metrics::MetricContract,
         end: OffsetDateTime,
     ) -> MetricObservation {
         let mut observation = MetricObservation::Observed {

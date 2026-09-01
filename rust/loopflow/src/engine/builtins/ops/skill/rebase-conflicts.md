@@ -51,9 +51,9 @@ lf rebase --continue
 - **Files outside the branch's scope:** Accept main's version. The branch probably touched these incidentally.
 - **Both versions are valid:** Combine manually if both changes make sense.
 - **Ambiguous or high-risk conflicts:** Do not guess. Ask a present human in
-  conversation. In a headless Run, record the ambiguity and use `lf ask` for
-  parent judgment; use `lf ask --user` only when genuine absent-User authority
-  is required.
+  conversation. In a headless Run, record the ambiguity and run
+  `lf ask "<exact request>"`; the human session shares the checkout and blocks
+  until explicit resolution.
 
 `lf rebase --continue` stages the resolved conflict paths and checks that this
 agent owns the operation. Repeat until it reports completion. Loopflow records
@@ -78,6 +78,6 @@ lf rebase --abort
 
 Then:
 - human-present: explain the failure and ask the present User how to proceed
-- headless: note what went wrong in `scratch/questions.md` and request the
-  exact parent intervention with `lf ask`; use `--user` only when no parent can
-  supply the required authority
+- headless: note what went wrong in `scratch/questions.md` and open one exact
+  `lf ask` human session; stop with the exact blocker when the required action
+  cannot be performed through that shared checkout

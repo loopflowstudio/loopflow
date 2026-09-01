@@ -8,7 +8,7 @@ use time::OffsetDateTime;
 
 use crate::child::prefixed_uuid_id;
 use crate::durable::HomeId;
-use crate::task::{AfterMerge, TaskId};
+use crate::work::task::{AfterMerge, TaskId};
 
 pub(crate) const SUPERVISOR_STALE_AFTER: time::Duration = time::Duration::minutes(2);
 

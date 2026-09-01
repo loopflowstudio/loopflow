@@ -41,7 +41,6 @@ struct WaveDetailPane: View {
     let onClose: () -> Void
 
     @Environment(\.palette) private var palette
-    @Environment(\.openWindow) private var openWindow
     @State private var selection: WaveWorkSelection?
     @State private var prefill: WaveComposerPrefill?
     @State private var workRefresh: UInt64 = 0
@@ -96,19 +95,6 @@ struct WaveDetailPane: View {
                 .foregroundStyle(palette.text)
 
             Spacer()
-
-            Button {
-                openWindow(
-                    id: "context-lab",
-                    value: ContextLabRoute.wave(repoPath: repoPath, wave: wave.name)
-                )
-            } label: {
-                Label("Context Lab", systemImage: "text.magnifyingglass")
-                    .font(Typography.caption())
-            }
-            .buttonStyle(.borderless)
-            .help("Study the instructions seen by this Wave's invocations")
-            .accessibilityIdentifier("wave-context-lab")
 
             Button {
                 onClose()
@@ -453,12 +439,12 @@ struct WaveMetricPortfolioView: View {
 
                 Spacer()
 
-                if presentation.needsAttentionCount > 0 {
+                if presentation.requiresWorkCount > 0 {
                     Label(
                         countLabel(
-                            presentation.needsAttentionCount,
-                            singular: "measure needs attention",
-                            plural: "measures need attention"
+                            presentation.requiresWorkCount,
+                            singular: "measure needs work",
+                            plural: "measures need work"
                         ),
                         systemImage: "exclamationmark.circle.fill"
                     )
@@ -557,7 +543,7 @@ struct WaveMetricPortfolioPresentation: Equatable {
     let officialCount: Int
     let candidateCount: Int
     let holdingCount: Int
-    let needsAttentionCount: Int
+    let requiresWorkCount: Int
     let contractIssueCount: Int
 
     init(portfolio: MetricPortfolio) {
@@ -565,7 +551,7 @@ struct WaveMetricPortfolioPresentation: Equatable {
         officialCount = official.count
         candidateCount = portfolio.metrics.count - official.count
         holdingCount = official.count { $0.evidence.isHealthy }
-        needsAttentionCount = official.count - holdingCount
+        requiresWorkCount = official.count - holdingCount
         contractIssueCount = portfolio.contractIssues.count
     }
 
@@ -576,7 +562,7 @@ struct WaveMetricPortfolioPresentation: Equatable {
         case (1, 1):
             return "The official measure currently holds."
         case (1, 0):
-            return "The official measure needs attention."
+            return "The official measure needs work."
         default:
             return "\(holdingCount) of \(officialCount) official measures currently hold."
         }
@@ -847,7 +833,7 @@ private struct WaveProjectWorkView: View {
 
                 Spacer()
 
-                if let status = project.runtime?.current.state.label {
+                if let status = project.runtime?.status.label {
                     Text(status)
                         .font(Typography.caption(10))
                         .foregroundStyle(palette.textSecondary)
@@ -909,9 +895,9 @@ private struct WaveProjectWorkView: View {
     }
 
     /// The Project's lens, derived from its shared runtime and its Tasks'
-    /// attention evidence — the same grammar the Wave and Task rows use.
+    /// conditions — the same grammar the Wave and Task rows use.
     private var projectLens: WaveLens {
-        WaveLens.forProject(runtime: project.runtime, tasks: project.tasks)
+        WaveLens.forProject(tasks: project.tasks)
     }
 
     private var openTaskLabel: String {
@@ -966,7 +952,7 @@ private struct WaveTaskWorkView: View {
 
     var body: some View {
         HStack(alignment: .top, spacing: Spacing.sm) {
-            WaveLensView(lens: WaveLens.forTask(task.attention), diameter: 9, accessibilityId: "task-lens")
+            WaveLensView(lens: WaveLens.forTask(task.condition), diameter: 9, accessibilityId: "task-lens")
                 .frame(width: 14)
                 .padding(.top, 2)
             VStack(alignment: .leading, spacing: Spacing.xxs) {
@@ -979,7 +965,7 @@ private struct WaveTaskWorkView: View {
                         .foregroundStyle(palette.text)
                         .lineLimit(2)
                 }
-                Text("\(task.runtime?.current.state.label ?? "unstarted") · next: \(task.nextMove.owner.rawValue)")
+                Text("\(task.runtime?.status.label ?? "unstarted") · next: \(task.nextMove.owner.rawValue)")
                     .font(Typography.caption(10))
                     .foregroundStyle(palette.textSecondary)
                 if let directive = task.directive {
@@ -1039,7 +1025,7 @@ private struct WaveWorkInspector: View {
                     .foregroundStyle(palette.text)
                 details(
                     directive: project.directive,
-                    status: project.runtime?.current.state.label ?? "unstarted",
+                    status: project.runtime?.status.label ?? "unstarted",
                     reason: project.nextMove.reason,
                     provider: project.runtime?.provider,
                     location: nil,
@@ -1051,8 +1037,8 @@ private struct WaveWorkInspector: View {
                     .foregroundStyle(palette.text)
                 details(
                     directive: task.directive,
-                    status: task.runtime?.current.state.label ?? "unstarted",
-                    reason: task.attention.reason,
+                    status: task.runtime?.status.label ?? "unstarted",
+                    reason: task.condition.reason,
                     provider: task.runtime?.provider,
                     location: taskLocation,
                     prs: task.prs
@@ -1073,7 +1059,6 @@ private struct WaveWorkInspector: View {
                     task: task.task,
                     reference: task.reference,
                     runtime: task.runtime,
-                    attention: task.attention,
                     repoPath: repoPath,
                     terminalStore: terminalStore,
                     initialSection: .changes

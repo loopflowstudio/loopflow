@@ -571,6 +571,16 @@ const MIGRATIONS: &[Migration] = &[
         name: "release",
         sql: include_str!("migrations/0.12.14.001_release.sql"),
     },
+    Migration {
+        id: MigrationId {
+            major: 0,
+            minor: 12,
+            patch: Some(15),
+            ordinal: 1,
+        },
+        name: "release",
+        sql: include_str!("migrations/0.12.15.001_release.sql"),
+    },
 ];
 
 #[doc(hidden)]
@@ -1019,64 +1029,59 @@ fn apply_sqlite_transaction(
 }
 
 pub(crate) fn validate_persisted_json(conn: &rusqlite::Connection) -> StoreResult<()> {
-    let mut failures = validate_json_column::<crate::task::PmWritebackState>(
+    let mut failures = validate_json_column::<crate::work::task::PmWritebackState>(
         conn,
         "tasks",
         "id",
         "pm_writeback_json",
     )?;
-    failures.extend(validate_json_column::<crate::task::TaskGateProposal>(
+    let tables = user_tables(conn)?;
+    let (controller_table, controller_key) =
+        if tables.iter().any(|table| table == "task_controller_state") {
+            ("task_controller_state", "task_id")
+        } else {
+            ("tasks", "id")
+        };
+    failures.extend(validate_json_column::<
+        crate::controller::task::TaskGateProposal,
+    >(
         conn,
-        "tasks",
-        "id",
+        controller_table,
+        controller_key,
         "gate_proposal_json",
     )?);
-    failures.extend(validate_json_column::<crate::task::CiObservation>(
+    failures.extend(validate_json_column::<crate::work::task::CiObservation>(
         conn,
         "task_prs",
         "id",
         "ci_observation",
     )?);
-    failures.extend(validate_json_column::<crate::task::GithubObservation>(
-        conn,
-        "task_prs",
-        "id",
-        "github_observation",
-    )?);
-    failures.extend(validate_json_column::<crate::task::TaskEventKind>(
+    failures.extend(
+        validate_json_column::<crate::work::task::GithubObservation>(
+            conn,
+            "task_prs",
+            "id",
+            "github_observation",
+        )?,
+    );
+    failures.extend(validate_json_column::<crate::work::task::TaskEventKind>(
         conn,
         "task_events",
         "id",
         "kind_json",
     )?);
-    failures.extend(validate_json_column::<crate::project::ProjectEventKind>(
-        conn,
-        "project_events",
-        "id",
-        "kind_json",
-    )?);
-    failures.extend(validate_json_column::<crate::project::ChildEventPayload>(
-        conn,
-        "observation_outbox",
-        "id",
-        "payload_json",
-    )?);
+    failures.extend(validate_json_column::<
+        crate::work::project::ProjectEventKind,
+    >(conn, "project_events", "id", "kind_json")?);
+    failures.extend(validate_json_column::<
+        crate::work::project::ChildEventPayload,
+    >(conn, "observation_outbox", "id", "payload_json")?);
     failures.extend(validate_json_column::<Vec<String>>(
         conn,
         "ci_incidents",
         "identity",
         "failure_set_json",
     )?);
-    failures.extend(validate_json_column::<crate::durable::RunTrigger>(
-        conn,
-        "runs",
-        "id",
-        "trigger_json",
-    )?);
-    failures.extend(validate_json_column::<crate::durable::WaitOn>(
-        conn, "waits", "id", "on_json",
-    )?);
-
     if failures.is_empty() {
         Ok(())
     } else {
@@ -1920,13 +1925,15 @@ mod tests {
         apply_sqlite, apply_sqlite_transaction, apply_sqlite_with_backup, backup_before_migration,
         latest_applied_version_sqlite, latest_known_version, latest_version_sqlite,
         migration_checksum, migration_sql_for_test, pending_migrations, product_schema,
-        validate_foreign_keys, validate_installed_development_sqlite, validate_persisted_json,
-        validate_set, validate_sqlite, Migration, MigrationId, DIVERGENT_MIGRATIONS, MIGRATIONS,
+        user_tables, validate_foreign_keys, validate_installed_development_sqlite,
+        validate_persisted_json, validate_set, validate_sqlite, Migration, MigrationId,
+        DIVERGENT_MIGRATIONS, MIGRATIONS,
     };
 
     const REOPEN_REPAIR_NAME: &str = "retire_obsolete_pm_reopen_writebacks";
     const GATE_PROPOSAL_REPAIR_NAME: &str = "repair_legacy_task_gate_proposals";
     const LEGACY_TASK_FLOW_REPAIR_NAME: &str = "repair_legacy_task_flow";
+    const COMPLETED_TASK_WORK_REPAIR_NAME: &str = "restore_completed_task_work";
     const TURN_USAGE_SAMPLES_NAME: &str = "add_turn_usage_samples";
     const REPOSITORY_OWNED_WAVES_NAME: &str = "repository_owned_waves";
     const REMOVE_TASK_LIFECYCLE_OUTCOME_NAME: &str = "remove_task_lifecycle_outcome";
@@ -2257,21 +2264,6 @@ mod tests {
             0,
             "the durable spine has no compatibility, Agent Bus, or shadow lifecycle tables"
         );
-        let turn_columns = columns(&conn, "agent_turns");
-        assert!(turn_columns.iter().any(|name| name == "epoch_id"));
-        assert!(turn_columns.iter().any(|name| name == "basis_rev"));
-        assert_eq!(
-            conn.query_row(
-                "SELECT COUNT(*) FROM pragma_foreign_key_list('sends')
-                 WHERE \"table\"='agent_turns' AND \"from\"='turn_id' AND \"to\"='id'",
-                [],
-                |row| row.get::<_, i64>(0),
-            )
-            .unwrap(),
-            1,
-            "Send evidence belongs to the sole durable Turn row"
-        );
-
         apply_sqlite(&conn).unwrap();
         assert_eq!(
             applied_versions(&conn).unwrap(),
@@ -2291,6 +2283,14 @@ mod tests {
             .position(|migration| migration.name == name)
             .expect("named migration is registered");
         &MIGRATIONS[..index]
+    }
+
+    fn apply_through(conn: &rusqlite::Connection, name: &str) {
+        let index = MIGRATIONS
+            .iter()
+            .position(|migration| migration.name == name)
+            .expect("named migration is registered");
+        apply_set(conn, &MIGRATIONS[..=index]).unwrap();
     }
 
     fn draft_location(name: &str) -> (usize, &'static str, usize) {
@@ -2348,6 +2348,138 @@ mod tests {
             .map(|offset| body_start + offset)
             .unwrap_or(sql.len());
         sql[body_start..body_end].to_string()
+    }
+
+    fn apply_current_work_schema(conn: &rusqlite::Connection) {
+        if columns(conn, "tasks").contains(&"work_state".to_string()) {
+            return;
+        }
+        let foreign_keys: bool = conn
+            .pragma_query_value(None, "foreign_keys", |row| row.get(0))
+            .unwrap();
+        conn.pragma_update(None, "foreign_keys", "OFF").unwrap();
+        for draft in [
+            "opaque_steer_run_provenance",
+            "stable_work_state",
+            "obsolete_sql_lifecycle",
+        ] {
+            conn.execute_batch(&current_draft_sql(draft)).unwrap();
+        }
+        if foreign_keys {
+            conn.pragma_update(None, "foreign_keys", "ON").unwrap();
+        }
+    }
+
+    #[test]
+    fn stable_work_draft_keeps_definitions_and_clears_execution_state() {
+        let conn = open();
+        conn.execute_batch("PRAGMA foreign_keys = ON").unwrap();
+        apply_before_current_draft(&conn, "stable_work_state");
+        if !columns(&conn, "tasks").contains(&"work_state".to_string()) {
+            conn.execute_batch(&current_draft_sql("opaque_steer_run_provenance"))
+                .unwrap();
+        }
+        conn.execute(
+            "INSERT INTO waves (id, name, repo, created_at, parent_wave_id)
+             VALUES ('wave_keep', 'keep', '/repo', 1700000000, NULL)",
+            [],
+        )
+        .unwrap();
+
+        conn.execute_batch(&current_draft_sql("stable_work_state"))
+            .unwrap();
+
+        let state: (String, Option<i64>) = conn
+            .query_row(
+                "SELECT work_state, work_terminal_at FROM waves WHERE id='wave_keep'",
+                [],
+                |row| Ok((row.get(0)?, row.get(1)?)),
+            )
+            .unwrap();
+        assert_eq!(state, ("ready".to_string(), None));
+        for table in [
+            "waits",
+            "work_truth",
+            "epoch_revisions",
+            "work_flow_positions",
+        ] {
+            let exists: bool = conn
+                .query_row(
+                    "SELECT EXISTS(
+                        SELECT 1 FROM sqlite_master WHERE type='table' AND name=?1
+                     )",
+                    [table],
+                    |row| row.get(0),
+                )
+                .unwrap();
+            assert!(!exists, "{table} must be deleted");
+        }
+        for table in ["steers", "tool_responses", "ask_exchanges"] {
+            let rows: i64 = conn
+                .query_row(&format!("SELECT COUNT(*) FROM {table}"), [], |row| {
+                    row.get(0)
+                })
+                .unwrap();
+            assert_eq!(rows, 0, "{table} must start empty");
+        }
+    }
+
+    #[test]
+    fn obsolete_sql_lifecycle_draft_preserves_only_the_outer_exec_ledger() {
+        let conn = open();
+        conn.execute_batch("PRAGMA foreign_keys = OFF").unwrap();
+        apply_before_current_draft(&conn, "obsolete_sql_lifecycle");
+        if !columns(&conn, "tasks").contains(&"work_state".to_string()) {
+            for draft in ["opaque_steer_run_provenance", "stable_work_state"] {
+                conn.execute_batch(&current_draft_sql(draft)).unwrap();
+            }
+        }
+        conn.execute(
+            "INSERT INTO run_events (run_id, process_id, seq, ts, node, event)
+             VALUES ('trace-keep', 'exec-keep', 0, 1, 'run', 'started')",
+            [],
+        )
+        .unwrap();
+        conn.execute_batch("PRAGMA foreign_keys = ON").unwrap();
+        conn.execute_batch(&current_draft_sql("obsolete_sql_lifecycle"))
+            .unwrap();
+
+        validate_foreign_keys(&conn).unwrap();
+        for table in [
+            "runs",
+            "epochs",
+            "run_liveness",
+            "home_upgrade_work",
+            "home_upgrades",
+            "home_runtime_generations",
+            "agent_invocations",
+            "agent_turns",
+            "turn_usage_samples",
+            "context_assets",
+            "context_decisions",
+            "done_proposals",
+            "sends",
+            "performance_evidence_authority",
+        ] {
+            let exists = conn
+                .query_row(
+                    "SELECT EXISTS(
+                        SELECT 1 FROM sqlite_master WHERE type='table' AND name=?1
+                     )",
+                    [table],
+                    |row| row.get::<_, bool>(0),
+                )
+                .unwrap();
+            assert!(!exists, "{table} must be deleted");
+        }
+        assert!(!columns(&conn, "project_events").contains(&"run_id".to_string()));
+        assert_eq!(
+            conn.query_row("SELECT COUNT(*) FROM run_events", [], |row| {
+                row.get::<_, i64>(0)
+            })
+            .unwrap(),
+            1
+        );
     }
 
     #[test]
@@ -2816,12 +2948,12 @@ mod tests {
         )
         .unwrap();
 
-        apply_sqlite(&conn).unwrap();
+        apply_through(&conn, "capture_pruned_state");
 
         let (status, events, bytes) = conn
             .query_row(
                 "SELECT capture_status, conversation_event_count, conversation_bytes
-                 FROM agent_invocations WHERE id = 'al_history'",
+                 FROM agent_launches WHERE id = 'al_history'",
                 [],
                 |row| {
                     Ok((
@@ -2885,11 +3017,11 @@ mod tests {
             .unwrap();
         }
 
-        apply_sqlite(&conn).unwrap();
+        apply_through(&conn, "capture_terminal_states");
 
         let mut statuses = conn
             .prepare(
-                "SELECT capture_status FROM agent_invocations
+                "SELECT capture_status FROM agent_launches
                  WHERE id LIKE 'history-%' ORDER BY capture_status",
             )
             .unwrap()
@@ -2949,11 +3081,7 @@ mod tests {
         )
         .unwrap();
 
-        let terminal_index = MIGRATIONS
-            .iter()
-            .position(|migration| migration.name == "capture_terminal_states")
-            .expect("capture terminal migration is registered");
-        apply_set(&conn, &MIGRATIONS[..=terminal_index]).unwrap();
+        apply_through(&conn, "capture_terminal_states");
 
         let legacy_trace = conn
             .query_row(
@@ -2982,78 +3110,6 @@ mod tests {
             .unwrap(),
             "explicit-resume"
         );
-    }
-
-    #[test]
-    fn the_trace_rebuild_restores_every_invocation_index() {
-        // A rebuild drops the table, and with it its indexes. Losing one would
-        // silently degrade every `lf runs`/`lf trace` lookup.
-        let conn = open();
-        apply_sqlite(&conn).unwrap();
-
-        let mut indexes = conn
-            .prepare("SELECT name FROM sqlite_master WHERE type = 'index' AND tbl_name = 'agent_invocations'")
-            .unwrap()
-            .query_map([], |row| row.get::<_, String>(0))
-            .unwrap()
-            .collect::<Result<Vec<_>, _>>()
-            .unwrap();
-        indexes.sort();
-        indexes.retain(|name| !name.starts_with("sqlite_autoindex"));
-
-        assert_eq!(
-            indexes,
-            vec![
-                "idx_agent_invocations_one_live_answer",
-                "idx_agent_invocations_process",
-                "idx_agent_invocations_project",
-                "idx_agent_invocations_run",
-                "idx_agent_invocations_supervisor",
-                "idx_agent_invocations_task",
-                "idx_agent_invocations_wave",
-            ]
-        );
-    }
-
-    #[test]
-    fn run_owns_execution_migration_leaves_one_current_schema() {
-        let conn = open();
-        apply_sqlite(&conn).unwrap();
-
-        let old_table_exists: bool = conn
-            .query_row(
-                "SELECT EXISTS(
-                    SELECT 1 FROM sqlite_master
-                    WHERE type='table' AND name='agent_launches'
-                 )",
-                [],
-                |row| row.get(0),
-            )
-            .unwrap();
-        assert!(!old_table_exists);
-
-        let run_columns = columns(&conn, "runs");
-        for column in ["containment_kind", "containment_id", "cwd", "started_at"] {
-            assert!(run_columns.contains(&column.to_string()));
-        }
-
-        let invocation_columns = columns(&conn, "agent_invocations");
-        assert!(invocation_columns.contains(&"supervising_run_id".to_string()));
-        for removed in [
-            "product_run_id",
-            "home_id",
-            "launch_state",
-            "containment_kind",
-            "containment_id",
-            "opaque_epoch_id",
-            "opaque_basis_rev",
-        ] {
-            assert!(!invocation_columns.contains(&removed.to_string()));
-        }
-
-        let turn_columns = columns(&conn, "agent_turns");
-        assert!(turn_columns.contains(&"invocation_id".to_string()));
-        assert!(!turn_columns.contains(&"launch_id".to_string()));
     }
 
     #[test]
@@ -3534,61 +3590,23 @@ mod tests {
         .unwrap();
 
         apply_sqlite(&conn).unwrap();
+        if !_draft_is_canonical(COMPLETED_TASK_WORK_REPAIR_NAME) {
+            conn.execute_batch(&migration_sql_for_test(COMPLETED_TASK_WORK_REPAIR_NAME))
+                .unwrap();
+        }
+        apply_current_work_schema(&conn);
 
-        let task: (String, String, String) = conn
+        let task: (String, String, String, String) = conn
             .query_row(
-                "SELECT id, issue_identifier, workspace_slug
+                "SELECT id, issue_identifier, workspace_slug, work_state
                  FROM tasks WHERE external_issue_id='issue-1'",
                 [],
-                |row| Ok((row.get(0)?, row.get(1)?, row.get(2)?)),
+                |row| Ok((row.get(0)?, row.get(1)?, row.get(2)?, row.get(3)?)),
             )
             .unwrap();
         assert_eq!(task.1, "INF-123");
         assert_eq!(task.2, "inf-123");
-        let task_state: String = conn
-            .query_row(
-                "SELECT state FROM epochs WHERE task_id=?1",
-                [&task.0],
-                |row| row.get(0),
-            )
-            .unwrap();
-        assert_eq!(task_state, "done");
-        let project_id: String = conn
-            .query_row(
-                "SELECT id FROM projects WHERE external_project_id='project-1'",
-                [],
-                |row| row.get(0),
-            )
-            .unwrap();
-        let project_run: (String, String, String, String, String) = conn
-            .query_row(
-                "SELECT agent_invocations.id, runs.state, runs.containment_kind,
-                        runs.containment_id, agent_invocations.provider
-                 FROM agent_invocations
-                JOIN runs ON runs.id = agent_invocations.supervising_run_id
-                 WHERE runs.source_kind = 'project' AND runs.source_id = ?1",
-                [&project_id],
-                |row| {
-                    Ok((
-                        row.get(0)?,
-                        row.get(1)?,
-                        row.get(2)?,
-                        row.get(3)?,
-                        row.get(4)?,
-                    ))
-                },
-            )
-            .unwrap();
-        assert!(project_run.0.starts_with("invocation_"));
-        assert_eq!(
-            (
-                project_run.1.as_str(),
-                project_run.2.as_str(),
-                project_run.3.as_str(),
-                project_run.4.as_str(),
-            ),
-            ("active", "tmux", "project-legacy", "codex")
-        );
+        assert_eq!(task.3, "done");
         let pr: (
             i64,
             String,
@@ -3768,25 +3786,48 @@ mod tests {
             conn.execute_batch(&migration_sql_for_test(GATE_PROPOSAL_REPAIR_NAME))
                 .unwrap();
         }
-        assert_eq!(
+        let controller_table_exists = user_tables(&conn)
+            .unwrap()
+            .iter()
+            .any(|table| table == "task_controller_state");
+        let current_gate = if controller_table_exists {
+            conn.query_row(
+                "SELECT controller.gate_proposal_json
+                 FROM task_controller_state controller
+                 JOIN tasks ON tasks.id = controller.task_id
+                 WHERE tasks.external_issue_id='issue-current'",
+                [],
+                |row| row.get::<_, String>(0),
+            )
+        } else {
             conn.query_row(
                 "SELECT gate_proposal_json FROM tasks WHERE external_issue_id='issue-current'",
                 [],
                 |row| row.get::<_, String>(0),
             )
-            .unwrap(),
+        }
+        .unwrap();
+        assert_eq!(
+            current_gate,
             "{\"done\":false,\"reason\":\"current\",\"future\":\"preserved\"}"
         );
-        assert_eq!(
+        let stale_gate_count = if controller_table_exists {
+            conn.query_row(
+                "SELECT COUNT(*) FROM task_controller_state
+                 WHERE json_type(gate_proposal_json, '$.status') IS NOT NULL",
+                [],
+                |row| row.get::<_, i64>(0),
+            )
+        } else {
             conn.query_row(
                 "SELECT COUNT(*) FROM tasks
                  WHERE json_type(gate_proposal_json, '$.status') IS NOT NULL",
                 [],
                 |row| row.get::<_, i64>(0),
             )
-            .unwrap(),
-            0
-        );
+        }
+        .unwrap();
+        assert_eq!(stale_gate_count, 0);
         validate_foreign_keys(&conn).unwrap();
         validate_persisted_json(&conn).unwrap();
         conn.pragma_update(None, "foreign_keys", "ON").unwrap();
@@ -3798,18 +3839,34 @@ mod tests {
                  WHERE external_issue_id='issue-reopen'",
                 [],
             )?;
-            conn.execute(
-                "UPDATE tasks
-                 SET gate_proposal_json='{\"reason\":\"missing done\"}'
-                 WHERE external_issue_id='issue-completed'",
-                [],
-            )?;
+            if controller_table_exists {
+                conn.execute(
+                    "UPDATE task_controller_state
+                     SET gate_proposal_json='{\"reason\":\"missing done\"}'
+                     WHERE task_id=(
+                         SELECT id FROM tasks WHERE external_issue_id='issue-completed'
+                     )",
+                    [],
+                )?;
+            } else {
+                conn.execute(
+                    "UPDATE tasks
+                     SET gate_proposal_json='{\"reason\":\"missing done\"}'
+                     WHERE external_issue_id='issue-completed'",
+                    [],
+                )?;
+            }
             Ok(())
         })
         .unwrap_err();
         let message = error.to_string();
         assert!(message.contains("tasks.pm_writeback_json"));
-        assert!(message.contains("tasks.gate_proposal_json"));
+        let gate_column = if controller_table_exists {
+            "task_controller_state.gate_proposal_json"
+        } else {
+            "tasks.gate_proposal_json"
+        };
+        assert!(message.contains(gate_column));
         assert_eq!(
             conn.query_row(
                 "SELECT pm_writeback_json FROM tasks WHERE external_issue_id='issue-reopen'",
@@ -3831,11 +3888,20 @@ mod tests {
             .unwrap();
         assert!(matches!(
             reopen.pm_writeback,
-            crate::task::PmWritebackState::Current
+            crate::work::task::PmWritebackState::Current
         ));
-        let mut decisions = tasks
-            .iter()
-            .map(|task| task.gate_proposal.as_ref().unwrap().done)
+        let conn = rusqlite::Connection::open(&path).unwrap();
+        let mut statement = conn
+            .prepare("SELECT gate_proposal_json FROM task_controller_state")
+            .unwrap();
+        let mut decisions = statement
+            .query_map([], |row| row.get::<_, String>(0))
+            .unwrap()
+            .map(|json| {
+                serde_json::from_str::<crate::controller::task::TaskGateProposal>(&json.unwrap())
+                    .unwrap()
+                    .done
+            })
             .collect::<Vec<_>>();
         decisions.sort_unstable();
         assert_eq!(decisions, vec![false, false, false, false, false, true]);
@@ -4303,9 +4369,11 @@ mod tests {
         // on the first read of a table it never created.
         assert!(store.list_run_events_since(0).unwrap().is_empty());
         let conn = rusqlite::Connection::open(&path).unwrap();
+        validate_installed_development_sqlite(&conn, crate::build_info::migration_draft_manifest())
+            .unwrap();
         assert_eq!(
-            latest_version_sqlite(&conn).unwrap(),
-            latest_known_version()
+            applied_versions(&conn).unwrap().last(),
+            Some(&latest_known_version())
         );
     }
 
@@ -4468,97 +4536,51 @@ mod tests {
     }
 
     #[test]
-    fn durable_ask_invocations_enforce_complete_results_and_allow_plural_pending_turns() {
+    fn native_human_session_schema_replaces_ask_with_human_flow_positions() {
         let conn = open();
-        apply_sqlite(&conn).unwrap();
+        apply_installed_development_sqlite(&conn, crate::build_info::migration_draft_manifest())
+            .unwrap();
 
-        let invocation_columns = columns(&conn, "agent_invocations");
-        for deleted in [
-            "attention_kind",
-            "attention_work_kind",
-            "attention_work_id",
-            "attention_at",
-        ] {
-            assert!(!invocation_columns.contains(&deleted.to_string()));
-        }
+        assert!(!conn
+            .query_row(
+                "SELECT EXISTS(
+                    SELECT 1 FROM sqlite_master
+                    WHERE type='table' AND name='agent_invocations'
+                )",
+                [],
+                |row| row.get::<_, bool>(0),
+            )
+            .unwrap());
         let task_columns = columns(&conn, "tasks");
         for deleted in ["kickoff_reviewer", "iterate_reviewer", "gate_reviewer"] {
             assert!(!task_columns.contains(&deleted.to_string()));
         }
-        assert!(!columns(&conn, "work_flow_positions").contains(&"interactive".to_string()));
-        assert!(columns(&conn, "work_flow_positions").contains(&"node_id".to_string()));
-        assert!(columns(&conn, "work_flow_positions").contains(&"human".to_string()));
+        let position_columns = columns(&conn, "work_flow_positions");
+        for present in [
+            "work_kind",
+            "work_id",
+            "node_id",
+            "human",
+            "session_run_id",
+            "ready_summary",
+        ] {
+            assert!(position_columns.contains(&present.to_string()));
+        }
+        for deleted in ["epoch_id", "interactive"] {
+            assert!(!position_columns.contains(&deleted.to_string()));
+        }
 
-        conn.execute_batch("PRAGMA foreign_keys=OFF").unwrap();
-        assert!(conn
-            .execute(
-                "INSERT INTO work_flow_positions (
-                    epoch_id, flow, step, node_id, human,
-                    step_index, iteration, updated_at
-                 ) VALUES ('epoch_human', 'task-design', 'review-design',
-                           NULL, 1, 1, 0, 1)",
-                [],
-            )
-            .is_err());
-        conn.execute(
-            "INSERT INTO ask_exchanges (
-                id, epoch_id, origin_work_kind, origin_work_id, origin_run_id,
-                origin_turn_id, origin_invocation_id, origin_home_id, origin_cwd,
-                target_kind, target_work_kind, target_work_id,
-                request_kind, request_prompt, state, asked_at
-             ) VALUES (
-                'ask_one', 'epoch_one', 'task', 'task_one', 'run_one',
-                'turn_one', 'invocation_one', 'home_one', '/repo',
-                'parent', 'project', 'proj_parent',
-                'intervention', 'Which proof?', 'queued', 1
-             )",
-            [],
-        )
-        .unwrap();
-        conn.execute(
-            "INSERT INTO ask_exchanges (
-                id, epoch_id, origin_work_kind, origin_work_id, origin_run_id,
-                origin_turn_id, origin_invocation_id, origin_home_id, origin_cwd,
-                target_kind, request_kind, request_prompt, state, asked_at
-             ) VALUES (
-                'ask_two', 'epoch_one', 'task', 'task_one', 'run_one',
-                'turn_one', 'invocation_one', 'home_one', '/repo',
-                'user', 'intervention', 'Which proof?', 'queued', 2
-             )",
-            [],
-        )
-        .unwrap();
-        assert!(conn
-            .execute(
-                "UPDATE ask_exchanges
-                 SET result_text='partial' WHERE id='ask_one'",
-                [],
-            )
-            .is_err());
-        conn.execute(
-            "UPDATE ask_exchanges
-             SET state='resolved', result_kind='resolved', result_text='This proof',
-                 terminal_author_kind='user', terminal_at=3
-             WHERE id='ask_one'",
-            [],
-        )
-        .unwrap();
-        conn.execute(
-            "INSERT INTO ask_exchanges (
-                id, epoch_id, origin_work_kind, origin_work_id, origin_run_id,
-                origin_turn_id, origin_invocation_id, origin_home_id, origin_cwd,
-                target_kind, request_kind, request_prompt, state, asked_at
-             ) VALUES (
-                'ask_three', 'epoch_one', 'task', 'task_one', 'run_one',
-                'turn_one', 'invocation_one', 'home_one', '/repo',
-                'user', 'intervention', 'Another?', 'queued', 4
-             )",
-            [],
-        )
-        .unwrap();
-        let invocation_columns = columns(&conn, "agent_invocations");
-        for column in ["answer_ask_id", "ask_ready_at", "ask_presented_at"] {
-            assert!(invocation_columns.contains(&column.to_string()));
+        for table in ["ask_exchanges", "ask_linear_comment_outbox"] {
+            assert!(!conn
+                .query_row(
+                    "SELECT EXISTS(
+                        SELECT 1 FROM sqlite_master
+                        WHERE type='table' AND name=?1
+                    )",
+                    [table],
+                    |row| row.get::<_, bool>(0),
+                )
+                .unwrap());
         }
     }
 
@@ -4906,7 +4928,7 @@ mod tests {
 
         let repo = std::path::Path::new(env!("CARGO_MANIFEST_DIR")).join("../..");
         for flow in ["slice", "slice", "ship-5whys"] {
-            let invocation = crate::wave::playhead::QueuedInvocation::load(&repo, flow)
+            let invocation = crate::controller::wave::playhead::QueuedInvocation::load(&repo, flow)
                 .expect("every repaired persisted loop flow resolves");
             assert_eq!(invocation.flow, flow);
         }

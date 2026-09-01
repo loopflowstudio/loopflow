@@ -12,7 +12,6 @@ use std::path::Path;
 use futures_util::future::try_join_all;
 
 use crate::engine::config::load_repo_config;
-use crate::engine::wave_config::{read_wave_config, update_wave_goal_config, WavePmConfig};
 use crate::ops::error::{OpsError, OpsResult};
 use crate::ops::progress::Progress;
 use crate::ops::util::normalize_wave_name;
@@ -25,9 +24,8 @@ use crate::provider_auth::{
     provider_token_refresh_due, refresh_stored_provider_token, Provider, TokenRefreshError,
 };
 use crate::repository::RepoId;
-use crate::store::{
-    open_existing_store, open_store, PmSnapshotRow, ProviderToken, Store, TaskWriterState,
-};
+use crate::store::{open_existing_store, open_store, PmSnapshotRow, ProviderToken, Store};
+use crate::work::wave::config::{read_wave_config, update_wave_goal_config, WavePmConfig};
 
 // ── Options and results ─────────────────────────────────────────────
 
@@ -154,15 +152,6 @@ pub struct PmReteamMove {
     pub new_identifier: Option<String>,
 }
 
-/// One issue left in place while a Task Run can still write its old id.
-#[derive(Debug, Clone, PartialEq, Eq)]
-pub struct PmReteamDeferral {
-    pub wave: String,
-    pub identifier: String,
-    pub title: String,
-    pub reason: String,
-}
-
 /// One Project narrowed onto the repository Team. Projects keep their id and slug on
 /// a team move (Linear only renumbers issues), so there is no new identifier to
 /// carry — `from_teams` records where it came from for the plan output.
@@ -187,7 +176,6 @@ pub struct PmReteamResult {
     /// off the legacy team).
     pub project_moves: Vec<PmReteamProjectMove>,
     pub moves: Vec<PmReteamMove>,
-    pub deferrals: Vec<PmReteamDeferral>,
     /// Issues already carrying the target Team id (skipped — idempotency).
     pub already: usize,
     /// Durable Tasks whose cached display identifier was reconciled.
@@ -536,12 +524,6 @@ pub async fn linear_client(repo: &Path) -> OpsResult<LinearClient> {
     Ok(resolve_repository_context(repo).await?.client)
 }
 
-pub(crate) async fn linear_issue_client(repo: &Path, issue_id: &str) -> OpsResult<LinearClient> {
-    let context = resolve_repository_context(repo).await?;
-    resolve_owned_issue(repo, &context, issue_id).await?;
-    Ok(context.client)
-}
-
 async fn resolve_context(repo: &Path, wave: &str) -> OpsResult<PmContext> {
     let repository = resolve_repository_context(repo).await?;
     let provider = repository.provider;
@@ -697,7 +679,7 @@ pub(crate) fn format_age(secs: i64) -> String {
 
 async fn snapshot_row(repo: &Path, wave: &str) -> OpsResult<Option<PmSnapshotRow>> {
     let store = pm_store().await?;
-    let locator = crate::wave::WaveLocator::discover(repo, wave)
+    let locator = crate::work::wave::WaveLocator::discover(repo, wave)
         .map_err(|error| OpsError::Message(error.to_string()))?;
     let Some(wave) = store
         .get_wave_at(&locator)
@@ -887,7 +869,7 @@ async fn store_pm_snapshot_with_store(
             "failed to serialize PM snapshot for wave/{wave}: {err}"
         ))
     })?;
-    let registered = crate::wave::registry::ensure_wave_row(store, repo, wave)
+    let registered = crate::controller::wave::registry::ensure_wave_row(store, repo, wave)
         .await
         .map_err(|err| OpsError::Message(format!("failed to register PM Wave: {err}")))?;
     store
@@ -1619,45 +1601,11 @@ fn wave_for_initiative(repo: &Path, initiative_id: &str) -> OpsResult<String> {
 #[derive(Debug, Clone, PartialEq, Eq)]
 enum ReteamClass {
     Already,
-    Defer(String),
     Move,
 }
 
-#[derive(Debug, Clone, Copy)]
-struct ReteamWriterState<'a> {
-    identifier: &'a str,
-    run_id: Option<&'a str>,
-}
-
-impl<'a> From<&'a TaskWriterState> for ReteamWriterState<'a> {
-    fn from(state: &'a TaskWriterState) -> Self {
-        Self {
-            identifier: &state.identifier,
-            run_id: state.run.as_ref().map(|run| run.id.as_str()),
-        }
-    }
-}
-
-impl ReteamWriterState<'_> {
-    fn protection_reason(self) -> Option<String> {
-        self.run_id.map(|run_id| format!("active Run {run_id}"))
-    }
-}
-
-fn classify_reteam_item(
-    item: &PmItem,
-    team_id: &str,
-    writer: Option<ReteamWriterState<'_>>,
-) -> ReteamClass {
-    let already = item.team_id == team_id;
-    let identifier_needs_update = writer.is_some_and(|writer| writer.identifier != item.identifier);
-    if let Some(reason) = writer
-        .filter(|_| !already || identifier_needs_update)
-        .and_then(ReteamWriterState::protection_reason)
-    {
-        return ReteamClass::Defer(reason);
-    }
-    if already {
+fn classify_reteam_item(item: &PmItem, team_id: &str) -> ReteamClass {
+    if item.team_id == team_id {
         return ReteamClass::Already;
     }
     ReteamClass::Move
@@ -1665,30 +1613,6 @@ fn classify_reteam_item(
 
 fn project_needs_reteam(bound_team: &str, project_team_ids: &[String]) -> bool {
     project_team_ids.len() != 1 || project_team_ids[0] != bound_team
-}
-
-/// Refuse the whole apply when any Task Run can still write the old identifier.
-/// The plan is read-only up to this point, so this preserves the hierarchy rather
-/// than moving its Project and idle siblings around the protected Task.
-fn ensure_reteam_apply_safe(deferrals: &[PmReteamDeferral]) -> OpsResult<()> {
-    if deferrals.is_empty() {
-        return Ok(());
-    }
-
-    let protected = deferrals
-        .iter()
-        .map(|deferral| {
-            format!(
-                "{} `{}` (wave/{}; {})",
-                deferral.identifier, deferral.title, deferral.wave, deferral.reason
-            )
-        })
-        .collect::<Vec<_>>()
-        .join("; ");
-    Err(OpsError::Message(format!(
-        "cannot apply reteam while {} Task Run(s) can still write the old identifier: {protected}. No Projects or Tasks were moved; stop those Runs and rerun the dry-run.",
-        deferrals.len()
-    )))
 }
 
 #[derive(Debug)]
@@ -1786,7 +1710,6 @@ async fn apply_or_plan_repository_reteam(
     }
     let mut project_moves = Vec::new();
     let mut moves = Vec::new();
-    let mut deferrals = Vec::new();
     let mut identifier_updates = Vec::new();
     let mut states = Vec::new();
     let mut seen_initiatives = BTreeMap::new();
@@ -1870,32 +1793,26 @@ async fn apply_or_plan_repository_reteam(
                         project.team_ids.join(", ")
                     )));
                 }
-                let writer = store.task_writer_state(&item.id).await.map_err(|error| {
-                    OpsError::Message(format!("failed to read task registry: {error}"))
-                })?;
-                match classify_reteam_item(
-                    &item,
-                    team_id,
-                    writer.as_ref().map(ReteamWriterState::from),
-                ) {
+                let registered_identifier =
+                    store
+                        .task_issue_identifier(&item.id)
+                        .await
+                        .map_err(|error| {
+                            OpsError::Message(format!("failed to read task registry: {error}"))
+                        })?;
+                match classify_reteam_item(&item, team_id) {
                     ReteamClass::Already => {
                         already += 1;
-                        if let Some(writer) =
-                            writer.filter(|writer| writer.identifier != item.identifier)
+                        if let Some(old_identifier) = registered_identifier
+                            .filter(|identifier| identifier != &item.identifier)
                         {
                             identifier_updates.push(ReteamIdentifierUpdate {
                                 issue_id: item.id,
-                                old_identifier: writer.identifier,
+                                old_identifier,
                                 new_identifier: item.identifier,
                             });
                         }
                     }
-                    ReteamClass::Defer(reason) => deferrals.push(PmReteamDeferral {
-                        wave: wave.clone(),
-                        identifier: item.identifier,
-                        title: item.name,
-                        reason,
-                    }),
                     ReteamClass::Move => moves.push(PmReteamMove {
                         wave: wave.clone(),
                         project_id: project.id.clone(),
@@ -1914,8 +1831,6 @@ async fn apply_or_plan_repository_reteam(
     }
 
     if apply {
-        ensure_reteam_apply_safe(&deferrals)?;
-
         // Linear requires the destination Team on a Project before its Issues
         // can move. Expand first; narrowing is the final provider phase.
         for state in &states {
@@ -2069,7 +1984,6 @@ async fn apply_or_plan_repository_reteam(
         applied: apply,
         project_moves,
         moves,
-        deferrals,
         already,
         task_updates,
     })
@@ -2102,7 +2016,7 @@ async fn pm_sync_async(
     let team_id = read_repository_team(repo, provider)?;
 
     if let Some(store) = open_existing_store().await {
-        let origin = crate::engine::wave_context::wave_origin(repo);
+        let origin = crate::work::wave::context::wave_origin(repo);
         for wave in store
             .list_waves(Some(&origin.display().to_string()))
             .await
@@ -2789,7 +2703,7 @@ fn default_team_key(repository: &str) -> String {
 }
 
 fn wave_summary(repo: &Path, wave: &str) -> OpsResult<String> {
-    Ok(crate::engine::wave_config::read_wave_summary(repo, wave)?)
+    Ok(crate::work::wave::config::read_wave_summary(repo, wave)?)
 }
 
 fn matching_wave_id(waves: &[PmWave], title: &str) -> OpsResult<Option<String>> {
@@ -2939,7 +2853,7 @@ async fn canonical_wave_title_path_with_store(
     wave: &str,
     store: &Store,
 ) -> OpsResult<String> {
-    let locator = crate::wave::WaveLocator::discover(repo, wave)
+    let locator = crate::work::wave::WaveLocator::discover(repo, wave)
         .map_err(|error| OpsError::Message(error.to_string()))?;
     let Some(mut current) = store
         .get_wave_at(&locator)
@@ -3010,7 +2924,7 @@ mod tests {
     use crate::id::WaveId;
     use crate::ops::NullProgress;
     use crate::pm::test_server::{self, json_response, QueuedResponse};
-    use crate::wave::Wave;
+    use crate::work::wave::Wave;
     use axum::http::StatusCode;
     use serde_json::{json, Value};
 
@@ -3165,26 +3079,6 @@ mod tests {
     fn write_repo_config(repo: &Path, content: &str) {
         std::fs::create_dir_all(repo.join(".lf")).unwrap();
         std::fs::write(repo.join(".lf/config.yaml"), content).unwrap();
-    }
-
-    fn reteam_item(identifier: &str, team_id: &str, completed: bool) -> PmItem {
-        PmItem {
-            id: format!("uuid-of-{identifier}"),
-            identifier: identifier.to_string(),
-            url: None,
-            name: format!("Task {identifier}"),
-            description: String::new(),
-            rank: 0,
-            completed,
-            project_id: "project-1".to_string(),
-            project: "project-one".to_string(),
-            team_id: team_id.to_string(),
-            assignee: None,
-        }
-    }
-
-    fn reteam_writer<'a>(identifier: &'a str, run_id: Option<&'a str>) -> ReteamWriterState<'a> {
-        ReteamWriterState { identifier, run_id }
     }
 
     #[test]
@@ -3555,46 +3449,6 @@ mod tests {
             1,
             "the resumed migration reuses its first traceability comment"
         );
-    }
-
-    #[test]
-    fn reteam_protects_only_tasks_with_an_active_run() {
-        assert_eq!(
-            classify_reteam_item(
-                &reteam_item("W2-9", "team-old", false),
-                "team-loo",
-                Some(reteam_writer("W2-9", None))
-            ),
-            ReteamClass::Move
-        );
-        assert_eq!(
-            classify_reteam_item(
-                &reteam_item("W2-9", "team-old", false),
-                "team-loo",
-                Some(reteam_writer("W2-9", Some("run-active")))
-            ),
-            ReteamClass::Defer("active Run run-active".to_string())
-        );
-    }
-
-    #[test]
-    fn reteam_reconciles_only_when_already_moved_work_has_no_run() {
-        assert_eq!(
-            classify_reteam_item(
-                &reteam_item("LOO-8", "team-loo", false),
-                "team-loo",
-                Some(reteam_writer("W2-9", None))
-            ),
-            ReteamClass::Already
-        );
-        assert!(matches!(
-            classify_reteam_item(
-                &reteam_item("LOO-8", "team-loo", false),
-                "team-loo",
-                Some(reteam_writer("W2-9", Some("run-active")))
-            ),
-            ReteamClass::Defer(_)
-        ));
     }
 
     #[test]

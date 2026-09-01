@@ -7,15 +7,13 @@ enum CaptureTarget {
     /// The always-present primary window: `wave` is it with a Wave selected,
     /// `roadmap` is it with none. Neither needs opening.
     case primary
-    /// A routed window — it must be opened with the Wave the capture selects.
-    case contextLab
     /// Any other Window scene id. Untyped windows are capturable without
     /// view-specific Swift, so a new site image is a manifest entry.
     case window(id: String)
 
     /// Titles of every window that is not the primary surface, so a capture of
     /// the primary window cannot be won by one that merely opened later.
-    private static let secondaryTitles = ["Context Lab", "Portfolio", "Telemetry", "Task workspace"]
+    private static let secondaryTitles = ["Portfolio", "Telemetry"]
 
     private static func normalizedTitle(_ title: String) -> String {
         title.lowercased().filter(\.isLetter)
@@ -24,7 +22,6 @@ enum CaptureTarget {
     init(view: String) {
         switch view {
         case "wave", "roadmap": self = .primary
-        case "context-lab": self = .contextLab
         default: self = .window(id: view)
         }
     }
@@ -37,8 +34,6 @@ enum CaptureTarget {
         case .primary:
             let title = Self.normalizedTitle(window.title)
             return !Self.secondaryTitles.map(Self.normalizedTitle).contains(title)
-        case .contextLab:
-            return Self.normalizedTitle(window.title) == Self.normalizedTitle("Context Lab")
         case .window(let id):
             return Self.normalizedTitle(window.title) == Self.normalizedTitle(id)
         }
@@ -48,6 +43,7 @@ enum CaptureTarget {
 enum AppTestMode: String {
     case emptyWorkspaces = "empty-workspaces"
     case mockWaves = "mock-waves"
+    case sessionFixtures = "session-fixtures"
     /// Renders through the REAL `lf` registry — the same read path production
     /// uses — while keeping the snapshot/width test knobs armed. Every other
     /// mode bypasses the registry with fixture data; `live` is the honest

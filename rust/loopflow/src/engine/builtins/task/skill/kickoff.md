@@ -53,7 +53,16 @@ re-derive what these already record.
    exception: work explicitly commissioned as infrastructure-only. Then say so
    in the doc instead of inventing a demo.
 
-8. **Write the design.** Update `scratch/<slug>.md` with a concrete, actionable design.
+8. **Write the design.** Update `scratch/<slug>.md` with a concrete, actionable
+   design. Treat every other scratch artifact as evidence to reconcile. It may
+   contain an older or poor design; do not continue it merely because it was
+   present first.
+
+9. **Keep one north star.** For an indivisible change, keep the complete target
+   architecture, integration and deletion path, forbidden near-misses, full
+   proof, and ordered internal slices in this one artifact. Mark `This slice`
+   without replacing the rest of the design, and append evidence to a slice
+   ledger as work proceeds.
 
 ## Output format
 
@@ -100,6 +109,23 @@ One or two sentences, concrete enough to perform at the end of the build.>
 
 <Verification command or observable outcome>
 
+## Forbidden outcomes
+
+<Duplicate authorities, compatibility paths, or locally passing near-misses
+that still violate the target architecture.>
+
+## Internal slices
+
+<Ordered coherent cuts. Keep the complete end state above them.>
+
+## This slice
+
+<The one current executable cut and its focused proof.>
+
+## Slice ledger
+
+<Commits, evidence, findings, and design changes without shrinking the north star.>
+
 ## Measure (if applicable)
 
 <What to measure before and after. Command to run, baseline to capture, what "better" looks like. Skip for changes without quantitative outcomes.>
@@ -128,3 +154,9 @@ If `<lf:wave>` is present, check `wave/<wave>/GOAL.md` (and `MEMORY.md`) in docs
 **Complete over incremental.** Prefer landing an entire architectural chunk in one go. Splitting a coherent change into pieces creates backwards-compatibility adapters, dual states, and integration ambiguity. Only split when pieces are genuinely independent and each delivers something a user or developer would notice on its own.
 
 **Comprehensive over light.** Kickoff outputs get read by humans evaluating the design and by implementing agents executing it. Be thorough — decisions, alternatives, "done when." This isn't a roadmap sketch; it's the spec a future session works from.
+
+**Integrate over layer.** Map current concepts, types, authorities, writers, and
+launch paths before adding another one. Name what the change reshapes and what
+becomes obsolete. A Legacy/New split, v2, adapter, fallback, dual write, or
+parallel store is blocking unless the design explicitly justifies and bounds
+its deletion.

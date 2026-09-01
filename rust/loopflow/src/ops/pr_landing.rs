@@ -15,7 +15,7 @@ use crate::pr_landing::{
     LandingClaim, LandingPlacement, NewPrLanding, PrLanding, PrLandingState, SUPERVISOR_STALE_AFTER,
 };
 use crate::store::{open_store, storage_config_from_env, SharedStore};
-use crate::task::{CiCheck, CiIncident, CiObservation, CiState};
+use crate::work::task::{CiCheck, CiIncident, CiObservation, CiState};
 
 use super::error::{OpsError, OpsResult};
 use super::land::{arm, LandOptions};
@@ -124,7 +124,7 @@ impl LandingDriver for GithubLandingDriver {
             strict: false,
             local: false,
             create_pr: true,
-            complete: landing.after_merge == Some(crate::task::AfterMerge::CompleteTask),
+            complete: landing.after_merge == Some(crate::work::task::AfterMerge::CompleteTask),
             next_slug: landing.next_slug.clone(),
             worktree: Some(landing.worktree.display().to_string()),
             commit_message: Some("ci-fix: repair required checks".to_string()),
@@ -812,10 +812,7 @@ async fn create_landing(
     })?;
     let repo_id = crate::repository::RepoId::discover(&worktree)
         .map_err(|error| OpsError::Message(error.to_string()))?;
-    let task = store
-        .get_task_by_worktree(&worktree.display().to_string())
-        .await
-        .map_err(|error| OpsError::Message(error.to_string()))?;
+    let task = crate::ops::task::task_for_checkout(store, &worktree).await?;
     let (task_id, after_merge, next_slug) = match task {
         Some(task) => {
             let task_pr = store

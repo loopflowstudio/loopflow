@@ -1,4 +1,4 @@
-//! Agent invocation for spawning coding agent runners (Claude, Codex, Gemini, OpenCode).
+//! Agent invocation for spawning coding agent runners (Claude, Codex, OpenCode).
 //!
 //! This module handles building commands and spawning subprocesses for each
 //! supported coding agent. Output can be captured or streamed.
@@ -19,8 +19,12 @@ use crate::engine::error::CoreError;
 use crate::engine::platform::kill_process;
 use crate::engine::stream::{format_event, ParseResult, StreamFormat, StreamParser};
 use crate::engine::structured_reply::{render_structured_reply_guidance, StructuredReply};
-use crate::provider_account::{resolve_provider_account_blocking, RateLimitSignal};
+use crate::provider_account::{
+    resolve_provider_account_exact_blocking, resolve_recorded_provider_account_blocking,
+    ProviderAccountRoute, RateLimitSignal,
+};
 use crate::provider_auth::Provider;
+use crate::store::ProviderAccountId;
 
 /// PID of the current child agent process. The Ctrl+C handler sends SIGTERM
 /// to this process before exiting so the agent doesn't survive as an orphan.
@@ -95,16 +99,9 @@ pub struct LaunchResult {
     pub failure: Option<AgentFailure>,
 }
 
-/// Configuration for launching an agent.
-#[derive(Debug, Clone, Copy, Default, PartialEq, Eq)]
-pub enum AgentRunContext {
-    #[default]
-    Inherit,
-    Detached,
-}
-
 /// Filesystem write boundary for a provider launch.
-#[derive(Debug, Clone, Copy, Default, PartialEq, Eq)]
+#[derive(Debug, Clone, Copy, Default, PartialEq, Eq, serde::Serialize, serde::Deserialize)]
+#[serde(rename_all = "snake_case")]
 pub enum AgentWriteScope {
     /// Respect the provider's configured permissions and Loopflow's ordinary floor.
     #[default]
@@ -115,12 +112,19 @@ pub enum AgentWriteScope {
 
 /// Roots that a managed delivery launch must prove writable before it starts.
 ///
-/// Presence marks a trusted Loopflow Task boundary: the provider receives full
-/// delivery access while the current Run and Invocation ids fence mutations.
-#[derive(Debug, Clone, Default, PartialEq, Eq)]
+/// Presence marks a trusted Loopflow Task boundary.
+#[derive(Debug, Clone, Default, PartialEq, Eq, serde::Serialize, serde::Deserialize)]
 pub struct AgentExecutionBoundary {
     pub writable_roots: Vec<PathBuf>,
 }
+
+pub(crate) const EXECUTION_IDENTITY_ENV: [&str; 5] = [
+    crate::journal::LF_TRACE_ID_ENV,
+    crate::journal::LF_PROCESS_ID_ENV,
+    crate::durable::RUN_ID_ENV,
+    crate::run_record::RUN_DIR_ENV,
+    crate::run_record::PARENT_RUN_ID_ENV,
+];
 
 #[derive(Clone, Default)]
 pub struct AgentConfig {
@@ -134,10 +138,13 @@ pub struct AgentConfig {
     pub max_turns: Option<u32>,
     /// Opaque provider continuation token for this launch.
     pub resume_token: Option<String>,
+    /// Stable managed account identity selected before durable capture.
+    pub provider_account_id: Option<ProviderAccountId>,
+    /// Home whose deterministic account directory resolves a recorded account.
+    /// This is launch authority, not a replay input, and is never serialized.
+    pub provider_account_authority_home: Option<std::path::PathBuf>,
     /// Working directory.
     pub cwd: Option<std::path::PathBuf>,
-    /// Whether the provider process inherits the ambient Run identity.
-    pub run_context: AgentRunContext,
     /// Maximum filesystem write scope granted to the provider.
     pub write_scope: AgentWriteScope,
     /// Exact roots and network access needed beyond `cwd`.
@@ -179,7 +186,11 @@ impl std::fmt::Debug for AgentConfig {
             .field("agent", &self.agent)
             .field("max_turns", &self.max_turns)
             .field("resume_token", &self.resume_token)
-            .field("run_context", &self.run_context)
+            .field("provider_account_id", &self.provider_account_id)
+            .field(
+                "provider_account_authority_home",
+                &self.provider_account_authority_home,
+            )
             .field("write_scope", &self.write_scope)
             .field("execution_boundary", &self.execution_boundary)
             .field("cwd", &self.cwd)
@@ -188,6 +199,53 @@ impl std::fmt::Debug for AgentConfig {
             .field("directive_relay", &self.directive_relay)
             .field("env_keys", &self.env.keys().collect::<Vec<_>>())
             .finish()
+    }
+}
+
+/// Select and pin a managed Claude/Codex account before publishing a Run.
+pub(crate) fn pin_provider_account_id_blocking(launch: &mut AgentConfig) -> Result<(), CoreError> {
+    let (harness, _) = parse_agent(launch.agent());
+    let provider = match harness.as_str() {
+        "claude" => Provider::Claude,
+        "codex" => Provider::Codex,
+        _ if launch.provider_account_id.is_some() => {
+            return Err(CoreError::ExecutionFailed(
+                "managed provider account IDs apply only to Claude and Codex".to_string(),
+            ));
+        }
+        _ => return Ok(()),
+    };
+    let route = resolve_account_route_blocking(provider, launch).map_err(|error| {
+        CoreError::ExecutionFailed(format!("failed to select provider account: {error}"))
+    })?;
+    if let Some(route) = route {
+        launch.provider_account_id = Some(route.account_id().clone());
+    }
+    Ok(())
+}
+
+fn resolve_account_route_blocking(
+    provider: Provider,
+    launch: &AgentConfig,
+) -> Result<Option<ProviderAccountRoute>, crate::provider_account::ProviderAccountError> {
+    match (
+        launch.provider_account_id.clone(),
+        launch.provider_account_authority_home.clone(),
+    ) {
+        (Some(account_id), Some(home)) => resolve_recorded_provider_account_blocking(
+            provider,
+            launch.resume_token.clone(),
+            account_id,
+            home,
+        ),
+        (account_id, None) => resolve_provider_account_exact_blocking(
+            provider,
+            launch.resume_token.clone(),
+            account_id,
+        ),
+        (None, Some(_)) => Err(crate::provider_account::ProviderAccountError::Runtime(
+            "recorded account authority requires an account ID".to_string(),
+        )),
     }
 }
 
@@ -218,8 +276,48 @@ pub struct ProcessConfig {
     pub stream_format: StreamFormat,
     /// Optional timeout for the subprocess.
     pub timeout: Option<Duration>,
-    /// Durable local capture for this provider invocation.
-    pub capture: Option<crate::trace::CaptureHandle>,
+    /// Durable local capture for this harness launch.
+    pub capture: Option<AgentCapture>,
+}
+
+#[derive(Debug, Clone)]
+pub struct AgentCapture(crate::run_record::CaptureHandle);
+
+impl AgentCapture {
+    fn record_raw(&self, stream: &str, line: &str) {
+        self.0.record_raw(stream, line);
+    }
+
+    fn record_stream_event(&self, event: &crate::engine::stream::StreamEvent) {
+        self.0.record_stream_event(event);
+    }
+
+    fn record_conversation(&self, event: crate::chat::types::ConversationEvent) {
+        self.0.record_conversation(event);
+    }
+
+    fn fail_and_begin_attempt(
+        &self,
+        provider: String,
+        model: Option<String>,
+        account_id: Option<ProviderAccountId>,
+    ) {
+        self.0.fail_and_begin_attempt(provider, model, account_id);
+    }
+
+    fn set_provider_session_id(&self, session_id: Option<String>) {
+        self.0.set_provider_session_id(session_id);
+    }
+
+    fn finish(&self, outcome: &str) -> crate::store::StoreResult<()> {
+        self.0.finish(outcome)
+    }
+}
+
+impl From<crate::run_record::CaptureHandle> for AgentCapture {
+    fn from(capture: crate::run_record::CaptureHandle) -> Self {
+        Self(capture)
+    }
 }
 
 /// Agent capability flags.
@@ -525,8 +623,7 @@ pub struct ClaudeArgs {
 impl ClaudeArgs {
     /// Resolve a model string to a Claude `--model` variant.
     ///
-    /// Strips the `claude:` prefix if present, applies defaults (bare `"claude"` → `"opus"`),
-    /// and passes through non-claude model strings unchanged.
+    /// Strips the `claude:` prefix and leaves bare `claude` to the CLI default.
     pub fn resolve_model(model: &str) -> Option<String> {
         let (harness, model_variant) = parse_agent(model);
         if harness == "claude" {
@@ -890,31 +987,6 @@ pub fn build_codex_command(
     cmd
 }
 
-/// Build Gemini CLI command.
-pub fn build_gemini_command(
-    launch: &AgentConfig,
-    process: &ProcessConfig,
-    model_variant: Option<&str>,
-) -> Vec<String> {
-    let mut cmd = vec!["gemini".to_string()];
-
-    if let Some(variant) = model_variant {
-        cmd.push("-m".to_string());
-        cmd.push(variant.to_string());
-    }
-
-    if process.stream {
-        cmd.push("--output-format".to_string());
-        cmd.push("stream-json".to_string());
-    }
-
-    if launch.skip_permissions {
-        cmd.push("--yolo".to_string());
-    }
-
-    cmd
-}
-
 /// Build OpenCode CLI command.
 pub fn build_opencode_command(process: &ProcessConfig, model_variant: Option<&str>) -> Vec<String> {
     // `opencode run` for batch/auto mode, `opencode` for interactive TUI
@@ -983,21 +1055,10 @@ pub fn build_agent_env(launch: &AgentConfig, process: &ProcessConfig) -> BTreeMa
     let mut env = launch.env.clone();
     let agent = launch.agent();
     let (harness, _) = parse_agent(agent);
-    match harness.as_str() {
-        "gemini" => {
-            if let Some(ref context_file) = process.context_file {
-                env.insert(
-                    "GEMINI_SYSTEM_MD".to_string(),
-                    context_file.to_string_lossy().to_string(),
-                );
-            }
+    if harness == "opencode" {
+        if let Some(env_val) = build_opencode_env_for_scope(process, launch.write_scope) {
+            env.insert("OPENCODE_CONFIG_CONTENT".to_string(), env_val);
         }
-        "opencode" => {
-            if let Some(env_val) = build_opencode_env_for_scope(process, launch.write_scope) {
-                env.insert("OPENCODE_CONFIG_CONTENT".to_string(), env_val);
-            }
-        }
-        _ => {}
     }
 
     env
@@ -1010,21 +1071,10 @@ fn apply_harness_env(
     launch: &AgentConfig,
     process: &ProcessConfig,
 ) {
-    match harness {
-        "gemini" => {
-            if let Some(ref context_file) = process.context_file {
-                cmd.env(
-                    "GEMINI_SYSTEM_MD",
-                    context_file.to_string_lossy().to_string(),
-                );
-            }
+    if harness == "opencode" {
+        if let Some(env_val) = build_opencode_env_for_scope(process, launch.write_scope) {
+            cmd.env("OPENCODE_CONFIG_CONTENT", env_val);
         }
-        "opencode" => {
-            if let Some(env_val) = build_opencode_env_for_scope(process, launch.write_scope) {
-                cmd.env("OPENCODE_CONFIG_CONTENT", env_val);
-            }
-        }
-        _ => {}
     }
 }
 
@@ -1039,7 +1089,6 @@ pub fn build_model_command(
     let model_variant = model_variant.as_deref();
     match harness.as_str() {
         "codex" => build_codex_command(launch, process, model_variant),
-        "gemini" => build_gemini_command(launch, process, model_variant),
         "opencode" => build_opencode_command(process, model_variant),
         "claude" => build_claude_command(launch, process, capabilities, model_variant),
         // Unknown harness: fall back to Claude with the full model string as variant.
@@ -1066,13 +1115,48 @@ pub fn launch_agent(
     process: &ProcessConfig,
     capabilities: &AgentCapabilities,
 ) -> Result<LaunchResult, CoreError> {
-    _launch_with_transient_retries(
-        launch,
-        process,
+    let mut launch = launch.clone();
+    pin_provider_account_id_blocking(&mut launch)?;
+    let (harness, model) = parse_agent(launch.agent());
+    let implicit_capture = if process.capture.is_none() {
+        Some(_begin_implicit_capture(
+            &launch,
+            process,
+            capabilities,
+            &harness,
+            model,
+        )?)
+    } else {
+        None
+    };
+    let mut process = process.clone();
+    for name in EXECUTION_IDENTITY_ENV {
+        launch.env.remove(name);
+    }
+    if let Some(capture) = &implicit_capture {
+        process.capture = Some(capture.clone());
+    }
+    if let Some(capture) = &process.capture {
+        launch.env.extend(capture.0.environment());
+        capture.0.mark_spawn_requested();
+    }
+    let result = _launch_with_transient_retries(
+        &launch,
+        &process,
         &TRANSIENT_RETRY_DELAYS,
-        |attempt, retry| _launch_agent_once(attempt, process, capabilities, retry),
+        |attempt, retry| _launch_agent_once(attempt, &process, capabilities, retry),
         thread::sleep,
-    )
+    );
+    if let Some(capture) = implicit_capture {
+        let outcome = match &result {
+            Ok(result) if result.exit_code == 0 => "completed",
+            Ok(_) | Err(_) => "failed",
+        };
+        capture
+            .finish(outcome)
+            .map_err(|error| CoreError::ExecutionFailed(error.to_string()))?;
+    }
+    result
 }
 
 #[derive(Debug)]
@@ -1141,6 +1225,7 @@ fn _launch_with_transient_retries(
         let (delay, failover) = match &failure {
             AgentFailure::AccountSubscriptionLimit { .. } => {
                 account_failure = Some(result.clone());
+                attempt_config.provider_account_id = None;
                 attempt_config.task_prompt = format!(
                     "{LIMIT_FAILOVER_PROMPT}\n\nOriginal task:\n\n{}",
                     launch.task_prompt
@@ -1149,6 +1234,7 @@ fn _launch_with_transient_retries(
             }
             AgentFailure::AccountCredentialInvalidated => {
                 account_failure = Some(result.clone());
+                attempt_config.provider_account_id = None;
                 attempt_config.task_prompt = format!(
                     "{CREDENTIAL_FAILOVER_PROMPT}\n\nOriginal task:\n\n{}",
                     launch.task_prompt
@@ -1363,48 +1449,47 @@ fn _provider_resume_token(result: &LaunchResult) -> Option<String> {
 fn _begin_implicit_capture(
     launch: &AgentConfig,
     process: &ProcessConfig,
+    capabilities: &AgentCapabilities,
     harness: &str,
     model: Option<String>,
-) -> Result<Option<crate::trace::CaptureHandle>, CoreError> {
-    if process.capture.is_some() {
-        return Ok(None);
-    }
-    launch
+) -> Result<AgentCapture, CoreError> {
+    let cwd = launch
         .cwd
-        .as_deref()
-        .and_then(|cwd| {
-            crate::journal::trace_capture_context(cwd, None, None)
-                .ok()
-                .map(|context| {
-                    let system_prompt = process
-                        .context_file
-                        .as_deref()
-                        .and_then(|path| fs::read_to_string(path).ok())
-                        .unwrap_or_else(|| system_prompt_with_structured_replies(launch));
-                    crate::trace::CaptureHandle::begin(
-                        context,
-                        crate::trace::PreparedTurnContext::from_prompts(
-                            &system_prompt,
-                            &launch.task_prompt,
-                        ),
-                        crate::trace::CaptureStart {
-                            provider: harness.to_string(),
-                            model,
-                            surface: if process.auto { "headless" } else { "tui" }.to_string(),
-                            input_op: "initial".to_string(),
-                            gather_ms: 0,
-                            render_ms: 0,
-                            raw_provider: process.auto,
-                            basis: None,
-                            supervision: None,
-                        },
-                    )
-                })
+        .clone()
+        .or_else(|| std::env::current_dir().ok())
+        .ok_or_else(|| {
+            CoreError::ExecutionFailed("agent launch has no working directory".into())
+        })?;
+    let spec = crate::run_record::RunSpec {
+        harness: harness.to_string(),
+        model,
+        surface: if process.auto { "headless" } else { "tui" }.to_string(),
+        cwd: cwd.clone(),
+        repo: Some(cwd.clone()),
+        worktree: Some(cwd),
+        skill: None,
+        subjects: Vec::new(),
+    };
+    let capture = if process.auto {
+        crate::run_record::CaptureHandle::begin_with_launch(
+            spec,
+            crate::run_record::RunLaunchRequest::from_prepared(launch, capabilities),
+        )
+    } else {
+        let context = crate::trace::PreparedTurnContext::from_prompts(
+            &system_prompt_with_structured_replies(launch),
+            &launch.task_prompt,
+        );
+        crate::run_record::CaptureHandle::begin_with_context(spec, &context)
+    };
+    capture
+        .map(|capture| {
+            capture.record_input("initial", &launch.task_prompt);
+            capture.into()
         })
-        .transpose()
         .map_err(|error| {
             CoreError::ExecutionFailed(format!(
-                "failed to establish trace capture before agent launch: {error}"
+                "failed to publish Run manifest before agent launch: {error}"
             ))
         })
 }
@@ -1431,42 +1516,37 @@ fn _launch_codex_harness_once(
     use crate::chat::types::{ConversationEvent, Lifecycle};
     use crate::harness::ApprovalPolicy;
 
-    let implicit_capture = _begin_implicit_capture(launch, process, "codex", model.clone())?;
-    let capture = process.capture.as_ref().or(implicit_capture.as_ref());
-    let account_route =
-        match resolve_provider_account_blocking(Provider::Codex, launch.resume_token.clone()) {
-            Ok(route) => route,
-            Err(error) => {
-                return Ok(AgentAttempt::AccountUnavailable(
-                    CoreError::ExecutionFailed(format!(
-                        "failed to select provider account: {error}"
-                    )),
-                ));
-            }
-        };
+    let capture = process.capture.as_ref();
+    let account_route = match resolve_account_route_blocking(Provider::Codex, launch) {
+        Ok(route) => route,
+        Err(error) => {
+            return Ok(AgentAttempt::AccountUnavailable(
+                CoreError::ExecutionFailed(format!("failed to select provider account: {error}")),
+            ));
+        }
+    };
     if retry {
         if let Some(capture) = capture {
-            capture
-                .fail_and_begin_invocation("codex".to_string(), model, &launch.task_prompt)
-                .map_err(|error| CoreError::ExecutionFailed(error.to_string()))?;
+            capture.fail_and_begin_attempt(
+                "codex".to_string(),
+                model,
+                account_route
+                    .as_ref()
+                    .map(|route| route.account_id().clone()),
+            );
         }
     }
 
     let mut config = launch.clone();
     let prompt = std::mem::take(&mut config.task_prompt);
-    let writer_worktree = config.cwd.clone().or_else(|| std::env::current_dir().ok());
-    let writer_guard = writer_worktree
-        .as_deref()
-        .map(|cwd| crate::ops::git_operation::prepare_agent_writer(cwd, &config.env))
-        .transpose()
-        .map_err(|error| CoreError::ExecutionFailed(error.to_string()))?
-        .flatten();
-    if let Some(guard) = writer_guard.as_ref() {
-        config
-            .env
-            .entry(crate::ops::git_operation::LF_WORKTREE_WRITER_ID_ENV.to_string())
-            .or_insert_with(|| guard.writer_id().to_string());
+    let launch_worktree = config.cwd.clone().or_else(|| std::env::current_dir().ok());
+    if let Some(cwd) = launch_worktree.as_deref() {
+        crate::ops::git_operation::prepare_agent_launch(cwd, &config.env)
+            .map_err(|error| CoreError::ExecutionFailed(error.to_string()))?;
     }
+    config
+        .env
+        .remove(crate::ops::git_operation::LEGACY_WORKTREE_WRITER_ID_ENV);
 
     let runtime = tokio::runtime::Builder::new_current_thread()
         .enable_all()
@@ -1498,7 +1578,8 @@ fn _launch_codex_harness_once(
         if let Some(capture) = capture {
             capture.set_provider_session_id(provider_session_id.clone());
         }
-        let can_failover = account_route.is_some();
+        let can_failover = account_route.is_some()
+            && launch.provider_account_authority_home.is_none();
 
         let drive = async {
             harness
@@ -1602,15 +1683,6 @@ fn _launch_codex_harness_once(
         }
     }
 
-    if let Some(capture) = implicit_capture {
-        let outcome = match &result {
-            Ok(AgentAttempt::Finished { result, .. }) if result.exit_code == 0 => "completed",
-            _ => "failed",
-        };
-        capture
-            .finish(outcome, false)
-            .map_err(|error| CoreError::ExecutionFailed(error.to_string()))?;
-    }
     result
 }
 
@@ -1649,19 +1721,17 @@ fn _launch_agent_once(
     }
 
     let mut scoped_env = launch.env.clone();
-    let writer_worktree = launch.cwd.clone().or_else(|| std::env::current_dir().ok());
-    let writer_guard = writer_worktree
-        .as_deref()
-        .map(|cwd| crate::ops::git_operation::prepare_agent_writer(cwd, &scoped_env))
-        .transpose()
-        .map_err(|error| CoreError::ExecutionFailed(error.to_string()))?
-        .flatten();
-    if let Some(guard) = writer_guard.as_ref() {
-        scoped_env
-            .entry(crate::ops::git_operation::LF_WORKTREE_WRITER_ID_ENV.to_string())
-            .or_insert_with(|| guard.writer_id().to_string());
+    let launch_worktree = launch.cwd.clone().or_else(|| std::env::current_dir().ok());
+    if let Some(cwd) = launch_worktree.as_deref() {
+        crate::ops::git_operation::prepare_agent_launch(cwd, &scoped_env)
+            .map_err(|error| CoreError::ExecutionFailed(error.to_string()))?;
     }
+    for name in EXECUTION_IDENTITY_ENV {
+        cmd.env_remove(name);
+    }
+    scoped_env.remove(crate::ops::git_operation::LEGACY_WORKTREE_WRITER_ID_ENV);
     cmd.envs(&scoped_env);
+    cmd.env_remove(crate::ops::git_operation::LEGACY_WORKTREE_WRITER_ID_ENV);
 
     // Shell integration sets LOOPFLOW_DIRECTIVE_FILE so top-level `lf` commands
     // can request parent-shell actions (for example auto-cd after `lf wt switch`).
@@ -1688,7 +1758,7 @@ fn _launch_agent_once(
         _ => None,
     };
     let account_route = match managed_provider
-        .map(|provider| resolve_provider_account_blocking(provider, launch.resume_token.clone()))
+        .map(|provider| resolve_account_route_blocking(provider, launch))
         .transpose()
     {
         Ok(route) => route.flatten(),
@@ -1715,18 +1785,18 @@ fn _launch_agent_once(
     }
     if retry {
         if let Some(capture) = &process.capture {
-            capture
-                .fail_and_begin_invocation(harness.clone(), model.clone(), &launch.task_prompt)
-                .map_err(|error| CoreError::ExecutionFailed(error.to_string()))?;
+            capture.fail_and_begin_attempt(
+                harness.clone(),
+                model.clone(),
+                account_route
+                    .as_ref()
+                    .map(|route| route.account_id().clone()),
+            );
         }
     }
     apply_harness_env(&harness, &mut cmd, launch, process);
 
-    // Callers that already assembled semantic assets supply a capture handle.
-    // Small internal agent launches (PR copy, commit copy, ops fallback) still
-    // get an exact assembly manifest when they run inside a journaled `lf`.
-    let implicit_capture = _begin_implicit_capture(launch, process, &harness, model.clone())?;
-    let capture = process.capture.as_ref().or(implicit_capture.as_ref());
+    let capture = process.capture.as_ref();
 
     let result = if process.auto && process.stream {
         // Stream mode: capture stdout line by line
@@ -1738,7 +1808,8 @@ fn _launch_agent_once(
         // Interactive mode: inherit stdio
         launch_interactive(&mut cmd, process.timeout)
     };
-    let mut can_failover = account_route.is_some();
+    let mut can_failover =
+        account_route.is_some() && launch.provider_account_authority_home.is_none();
     if let (Some(route), Ok(result)) = (&account_route, &result) {
         let credential_invalidated =
             _find_provider_error(result, credential_invalidated_failure).is_some();
@@ -1759,15 +1830,6 @@ fn _launch_agent_once(
             }
         }
     }
-    if let Some(capture) = implicit_capture {
-        let outcome = match &result {
-            Ok(result) if result.exit_code == 0 => "completed",
-            Ok(_) | Err(_) => "failed",
-        };
-        capture
-            .finish(outcome, !process.auto)
-            .map_err(|error| CoreError::ExecutionFailed(error.to_string()))?;
-    }
     result.map(|result| AgentAttempt::Finished {
         result,
         can_failover,
@@ -1777,7 +1839,7 @@ fn _launch_agent_once(
 fn launch_batch(
     cmd: &mut Command,
     timeout: Option<Duration>,
-    capture: Option<&crate::trace::CaptureHandle>,
+    capture: Option<&AgentCapture>,
 ) -> Result<LaunchResult, CoreError> {
     let start = Instant::now();
     cmd.stdin(Stdio::null());
@@ -1889,7 +1951,7 @@ fn launch_streaming(
     cmd: &mut Command,
     stream_format: StreamFormat,
     timeout: Option<Duration>,
-    capture: Option<&crate::trace::CaptureHandle>,
+    capture: Option<&AgentCapture>,
 ) -> Result<LaunchResult, CoreError> {
     cmd.stdin(Stdio::null());
     cmd.stdout(Stdio::piped());
@@ -2491,26 +2553,6 @@ trust_level = "trusted"
     }
 
     #[test]
-    fn build_gemini_command_yolo() {
-        let launch = AgentConfig {
-            skip_permissions: true,
-            ..default_launch()
-        };
-        let process = auto_process();
-        let cmd = build_gemini_command(&launch, &process, None);
-        assert!(cmd.contains(&"--yolo".to_string()));
-    }
-
-    #[test]
-    fn build_gemini_command_with_model() {
-        let launch = default_launch();
-        let process = auto_process();
-        let cmd = build_gemini_command(&launch, &process, Some("gemini-1.5"));
-        assert!(cmd.contains(&"-m".to_string()));
-        assert!(cmd.contains(&"gemini-1.5".to_string()));
-    }
-
-    #[test]
     fn build_claude_command_with_context_file() {
         let launch = default_launch();
         let process = ProcessConfig {
@@ -2750,11 +2792,7 @@ trust_level = "trusted"
 
     #[test]
     fn claude_args_resolve_model_bare() {
-        // "claude" → default variant "opus"
-        assert_eq!(
-            ClaudeArgs::resolve_model("claude"),
-            Some("opus".to_string())
-        );
+        assert_eq!(ClaudeArgs::resolve_model("claude"), None);
     }
 
     #[test]
@@ -2844,7 +2882,8 @@ trust_level = "trusted"
             cwd: Some("/tmp".into()),
             max_turns: None,
             resume_token: None,
-            run_context: AgentRunContext::Inherit,
+            provider_account_id: None,
+            provider_account_authority_home: None,
             write_scope: AgentWriteScope::Configured,
             execution_boundary: None,
             skip_permissions: false,
@@ -2873,7 +2912,8 @@ trust_level = "trusted"
             cwd: Some("/tmp".into()),
             max_turns: Some(5),
             resume_token: None,
-            run_context: AgentRunContext::Inherit,
+            provider_account_id: None,
+            provider_account_authority_home: None,
             write_scope: AgentWriteScope::Configured,
             execution_boundary: None,
             skip_permissions: true,
@@ -2902,7 +2942,8 @@ trust_level = "trusted"
             cwd: Some("/tmp".into()),
             max_turns: None,
             resume_token: None,
-            run_context: AgentRunContext::Inherit,
+            provider_account_id: None,
+            provider_account_authority_home: None,
             write_scope: AgentWriteScope::Configured,
             execution_boundary: None,
             skip_permissions: false,
@@ -2929,27 +2970,19 @@ trust_level = "trusted"
     }
 
     #[test]
-    fn build_model_command_uses_codex_default_for_bare_codex_model() {
-        let launch = AgentConfig {
-            agent: Some("codex".to_string()),
-            ..default_launch()
-        };
-        let process = auto_process();
-        let cmd = build_model_command(&launch, &process, &AgentCapabilities::default());
-        assert!(!cmd.iter().any(|arg| arg.contains("model=\"codex\"")));
-    }
-
-    #[test]
-    fn build_model_command_uses_loopflow_default_for_bare_opencode() {
-        let launch = AgentConfig {
-            agent: Some("opencode".to_string()),
-            ..default_launch()
-        };
-        let process = auto_process();
-        let cmd = build_model_command(&launch, &process, &AgentCapabilities::default());
-        assert_eq!(cmd.first(), Some(&"opencode".to_string()));
-        assert!(cmd.contains(&"--model".to_string()));
-        assert!(cmd.contains(&"opencode/glm-5.2".to_string()));
+    fn bare_harness_commands_do_not_select_a_model() {
+        for harness in ["claude", "codex", "opencode"] {
+            let launch = AgentConfig {
+                agent: Some(harness.to_string()),
+                ..default_launch()
+            };
+            let cmd = build_model_command(&launch, &auto_process(), &AgentCapabilities::default());
+            assert!(
+                !cmd.iter()
+                    .any(|arg| { arg == "--model" || arg == "-m" || arg.starts_with("model=") }),
+                "bare {harness} selected a model: {cmd:?}"
+            );
+        }
     }
 
     #[test]

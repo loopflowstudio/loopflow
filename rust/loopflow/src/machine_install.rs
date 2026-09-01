@@ -244,58 +244,11 @@ impl InstallSelection {
 }
 
 #[derive(Debug, Clone, PartialEq, Eq, Deserialize, Serialize)]
-pub struct ForkEvidence {
-    pub enabled_work: Vec<crate::durable::WorkRef>,
-    pub drained_run_ids: Vec<String>,
-}
-
-impl ForkEvidence {
-    fn validate(&self) -> Result<()> {
-        let mut work = HashSet::new();
-        for item in &self.enabled_work {
-            validate_work_ref(item)?;
-            if !work.insert(item) {
-                return Err(anyhow!(
-                    "first-fork evidence repeats {} Work {}",
-                    item.kind(),
-                    item.id()
-                ));
-            }
-        }
-        let mut runs = HashSet::new();
-        for run_id in &self.drained_run_ids {
-            crate::durable::RunId::parse(run_id)?;
-            if !runs.insert(run_id) {
-                return Err(anyhow!("first-fork evidence repeats Run {run_id}"));
-            }
-        }
-        Ok(())
-    }
-}
-
-fn validate_work_ref(work: &crate::durable::WorkRef) -> Result<()> {
-    match work {
-        crate::durable::WorkRef::Wave(id) => {
-            crate::id::WaveId::parse(id.as_str())?;
-        }
-        crate::durable::WorkRef::Project(id) => {
-            crate::durable::ProjectId::parse(id.as_str())?;
-        }
-        crate::durable::WorkRef::Task(id) => {
-            crate::durable::TaskId::parse(id.as_str())?;
-        }
-    }
-    Ok(())
-}
-
-#[derive(Debug, Clone, PartialEq, Eq, Deserialize, Serialize)]
 pub struct ActiveInstall {
     pub schema_version: u32,
     pub selection: InstallSelection,
     pub published_fallback: ArtifactSet,
     pub retained_published_sets: Vec<ArtifactSet>,
-    pub first_fork: Option<ForkEvidence>,
-    pub work_dispositions: Vec<WorkDispositionReceipt>,
 }
 
 impl ActiveInstall {
@@ -341,14 +294,6 @@ impl ActiveInstall {
                 self.published_fallback.id
             ));
         }
-        if let Some(first_fork) = &self.first_fork {
-            first_fork.validate()?;
-        }
-        validate_fork_dispositions(
-            "active install",
-            self.first_fork.as_ref(),
-            &self.work_dispositions,
-        )?;
         Ok(())
     }
 }
@@ -362,7 +307,6 @@ pub enum SwitchPhase {
     TargetPrepared,
     Advancing,
     Activated,
-    Reconciling,
     Settled,
 }
 
@@ -374,8 +318,7 @@ impl SwitchPhase {
             Self::TargetPrepared => 2,
             Self::Advancing => 3,
             Self::Activated => 4,
-            Self::Reconciling => 5,
-            Self::Settled => 6,
+            Self::Settled => 5,
         }
     }
 }
@@ -386,88 +329,6 @@ impl SwitchPhase {
 pub enum RecoveryOwner {
     Coordinator,
     Candidate,
-}
-
-#[derive(Debug, Clone, Copy, PartialEq, Eq, Deserialize, Serialize)]
-#[serde(rename_all = "snake_case")]
-#[non_exhaustive]
-pub enum WorkDisposition {
-    Pending,
-    Disabled,
-    Missing,
-    AlreadyDisabled,
-    Terminal,
-    Abandoned,
-}
-
-#[derive(Debug, Clone, PartialEq, Eq, Deserialize, Serialize)]
-pub struct WorkDispositionReceipt {
-    pub work: crate::durable::WorkRef,
-    pub outcome: WorkDisposition,
-}
-
-#[derive(Debug, Clone, PartialEq, Eq, Deserialize, Serialize)]
-pub struct InterruptedWork {
-    pub work: crate::durable::WorkRef,
-    pub prior_run_id: crate::durable::RunId,
-}
-
-fn validate_interrupted_work(owner: &str, interrupted: &[InterruptedWork]) -> Result<()> {
-    let mut work = HashSet::new();
-    let mut runs = HashSet::new();
-    for entry in interrupted {
-        validate_work_ref(&entry.work)?;
-        if !work.insert(&entry.work) {
-            return Err(anyhow!(
-                "{owner} repeats interrupted {} Work {}",
-                entry.work.kind(),
-                entry.work.id()
-            ));
-        }
-        if !runs.insert(&entry.prior_run_id) {
-            return Err(anyhow!(
-                "{owner} repeats interrupted Run {}",
-                entry.prior_run_id
-            ));
-        }
-    }
-    Ok(())
-}
-
-fn validate_work_dispositions(owner: &str, dispositions: &[WorkDispositionReceipt]) -> Result<()> {
-    let mut work = HashSet::new();
-    for disposition in dispositions {
-        validate_work_ref(&disposition.work)?;
-        if !work.insert(&disposition.work) {
-            return Err(anyhow!(
-                "{owner} repeats a disposition for {} Work {}",
-                disposition.work.kind(),
-                disposition.work.id()
-            ));
-        }
-    }
-    Ok(())
-}
-
-fn validate_fork_dispositions(
-    owner: &str,
-    first_fork: Option<&ForkEvidence>,
-    dispositions: &[WorkDispositionReceipt],
-) -> Result<()> {
-    validate_work_dispositions(owner, dispositions)?;
-    let expected = first_fork
-        .map(|evidence| evidence.enabled_work.iter().collect::<HashSet<_>>())
-        .unwrap_or_default();
-    let actual = dispositions
-        .iter()
-        .map(|disposition| &disposition.work)
-        .collect::<HashSet<_>>();
-    if actual != expected {
-        return Err(anyhow!(
-            "{owner} Work dispositions do not match its first-fork evidence"
-        ));
-    }
-    Ok(())
 }
 
 #[derive(Debug, Clone, PartialEq, Eq, Deserialize, Serialize)]
@@ -526,9 +387,6 @@ pub struct SwitchReceipt {
     pub activation: ActivationTargets,
     pub app_was_running: bool,
     pub disposable_store_owned: bool,
-    pub interrupted_work: Vec<InterruptedWork>,
-    pub first_fork: Option<ForkEvidence>,
-    pub work_dispositions: Vec<WorkDispositionReceipt>,
 }
 
 impl SwitchReceipt {
@@ -586,9 +444,8 @@ impl SwitchReceipt {
             .artifact_set
             .artifact(&ArtifactRole::Cli)
             .ok_or_else(|| anyhow!("install switch {} target set has no CLI", self.id))?;
-        let candidate_owned_bootstrap = self.prior.source == InstallSource::Published
-            && self.target.source == InstallSource::Development
-            && self.coordinator == *target_cli;
+        let candidate_owned_bootstrap =
+            self.target.source == InstallSource::Development && self.coordinator == *target_cli;
         if self.coordinator != *prior_cli && !candidate_owned_bootstrap {
             return Err(anyhow!(
                 "install switch {} coordinator matches neither the prior CLI nor its candidate-owned bootstrap",
@@ -611,18 +468,6 @@ impl SwitchReceipt {
                 self.id
             ));
         }
-        validate_interrupted_work(
-            &format!("install switch {}", self.id),
-            &self.interrupted_work,
-        )?;
-        if let Some(first_fork) = &self.first_fork {
-            first_fork.validate()?;
-        }
-        validate_fork_dispositions(
-            &format!("install switch {}", self.id),
-            self.first_fork.as_ref(),
-            &self.work_dispositions,
-        )?;
         if self.target_store_advanced && !self.target_store_advance_started {
             return Err(anyhow!(
                 "install switch {} records a committed advance that never started",
@@ -673,7 +518,6 @@ impl SwitchReceipt {
             || self.coordinator != prior.coordinator
             || self.candidate != prior.candidate
             || self.activation != prior.activation
-            || self.interrupted_work != prior.interrupted_work
             || self.target.installation_id != prior.target.installation_id
             || self.target.source != prior.target.source
             || self.target.store != prior.target.store
@@ -703,19 +547,6 @@ impl SwitchReceipt {
         if prior.disposable_store_owned && !self.disposable_store_owned {
             return Err(anyhow!(
                 "install switch {} cannot forget its disposable store ownership",
-                self.id
-            ));
-        }
-        if let Some(first_fork) = &prior.first_fork {
-            if self.first_fork.as_ref() != Some(first_fork) {
-                return Err(anyhow!(
-                    "install switch {} cannot change its first-fork evidence",
-                    self.id
-                ));
-            }
-        } else if self.first_fork.is_some() && self.phase.order() > SwitchPhase::Quiesced.order() {
-            return Err(anyhow!(
-                "install switch {} captured first-fork evidence after quiescence",
                 self.id
             ));
         }
@@ -1145,13 +976,15 @@ fn authorize_for_switch(
             let actual = fs::canonicalize(executable).with_context(|| {
                 format!("resolve switch startup executable {}", executable.display())
             })?;
+            let actual_sha256 = file_sha256(&actual)?;
             let expected = receipt
                 .target
                 .artifact_set
                 .artifacts
                 .iter()
                 .find(|artifact| {
-                    artifact_matches_runtime_role(&artifact.role, role) && actual == artifact.path
+                    artifact_matches_runtime_role(&artifact.role, role)
+                        && actual_sha256 == artifact.sha256
                 })
                 .ok_or_else(|| {
                     anyhow!(
@@ -1168,13 +1001,14 @@ fn authorize_for_switch(
     };
     let actual = fs::canonicalize(executable)
         .with_context(|| format!("resolve running executable {}", executable.display()))?;
+    let actual_sha256 = file_sha256(&actual)?;
     let Some(expected) = active
         .selection
         .artifact_set
         .artifacts
         .iter()
         .find(|artifact| {
-            artifact_matches_runtime_role(&artifact.role, role) && actual == artifact.path
+            artifact_matches_runtime_role(&artifact.role, role) && actual_sha256 == artifact.sha256
         })
     else {
         if active
@@ -1183,7 +1017,8 @@ fn authorize_for_switch(
             .flat_map(|set| &set.artifacts)
             .chain(&active.published_fallback.artifacts)
             .any(|artifact| {
-                artifact_matches_runtime_role(&artifact.role, role) && actual == artifact.path
+                artifact_matches_runtime_role(&artifact.role, role)
+                    && actual_sha256 == artifact.sha256
             })
         {
             return Err(anyhow!(
@@ -1252,12 +1087,25 @@ pub fn selection_for_executable(
     };
     let actual = fs::canonicalize(executable)
         .with_context(|| format!("resolve running executable {}", executable.display()))?;
-    let Some(expected) = active
+    let actual_size = fs::metadata(&actual)
+        .with_context(|| format!("inspect running executable {}", actual.display()))?
+        .len();
+    let plausible_copies = active
         .selection
         .artifact_set
         .artifacts
         .iter()
-        .find(|artifact| artifact.path == actual)
+        .filter(|artifact| {
+            fs::metadata(&artifact.path).is_ok_and(|metadata| metadata.len() == actual_size)
+        })
+        .collect::<Vec<_>>();
+    if plausible_copies.is_empty() {
+        return Ok(None);
+    }
+    let actual_sha256 = file_sha256(&actual)?;
+    let Some(expected) = plausible_copies
+        .into_iter()
+        .find(|artifact| artifact.sha256 == actual_sha256)
     else {
         return Ok(None);
     };
@@ -1302,21 +1150,9 @@ fn app_bundle_for_executable(path: &Path) -> Result<&Path> {
 }
 
 fn update_tree_digest(root: &Path, path: &Path, digest: &mut Sha256) -> Result<()> {
-    update_tree_digest_excluding(root, path, &HashSet::new(), digest)
-}
-
-fn update_tree_digest_excluding(
-    root: &Path,
-    path: &Path,
-    excluded: &HashSet<&Path>,
-    digest: &mut Sha256,
-) -> Result<()> {
     let relative = path
         .strip_prefix(root)
         .with_context(|| format!("resolve bundle path {}", path.display()))?;
-    if excluded.contains(relative) {
-        return Ok(());
-    }
     let metadata = fs::symlink_metadata(path)
         .with_context(|| format!("inspect bundle path {}", path.display()))?;
     digest.update(relative.as_os_str().as_encoded_bytes());
@@ -1346,7 +1182,7 @@ fn update_tree_digest_excluding(
             .collect::<Result<Vec<_>, _>>()?;
         entries.sort();
         for entry in entries {
-            update_tree_digest_excluding(root, &entry, excluded, digest)?;
+            update_tree_digest(root, &entry, digest)?;
         }
     } else {
         return Err(anyhow!("unsupported app entry {}", path.display()));
@@ -1358,13 +1194,6 @@ fn update_tree_digest_excluding(
 pub(crate) fn tree_sha256(path: &Path) -> Result<String> {
     let mut digest = Sha256::new();
     update_tree_digest(path, path, &mut digest)?;
-    Ok(hex::encode(digest.finalize()))
-}
-
-pub(crate) fn tree_sha256_excluding(path: &Path, excluded: &[&Path]) -> Result<String> {
-    let mut digest = Sha256::new();
-    let excluded = excluded.iter().copied().collect::<HashSet<_>>();
-    update_tree_digest_excluding(path, path, &excluded, &mut digest)?;
     Ok(hex::encode(digest.finalize()))
 }
 
@@ -1527,8 +1356,6 @@ mod tests {
             selection: target,
             retained_published_sets: vec![published_fallback.clone()],
             published_fallback,
-            first_fork: None,
-            work_dispositions: Vec::new(),
         }
     }
 
@@ -1573,9 +1400,6 @@ mod tests {
             },
             app_was_running: false,
             disposable_store_owned: false,
-            interrupted_work: Vec::new(),
-            first_fork: None,
-            work_dispositions: Vec::new(),
         }
     }
 
@@ -1602,6 +1426,58 @@ mod tests {
             .unwrap_err()
             .to_string()
             .contains("digest mismatch"));
+    }
+
+    #[test]
+    fn copied_active_artifact_keeps_its_install_selection() {
+        let directory = tempfile::tempdir().unwrap();
+        let root = directory.path().join("authority");
+        let published = selection(directory.path(), "published", InstallSource::Published);
+        let development = selection(directory.path(), "development", InstallSource::Development);
+        let active = active(development.clone(), published.artifact_set.clone());
+        write_atomic_json(&root, &root.join(ACTIVE_FILE), &active).unwrap();
+
+        let installed_copy = directory.path().join("installed-app-helper-lf");
+        fs::copy(
+            &development
+                .artifact_set
+                .artifact(&ArtifactRole::Cli)
+                .unwrap()
+                .path,
+            &installed_copy,
+        )
+        .unwrap();
+
+        assert_eq!(
+            authorize(&root, &installed_copy, &ArtifactRole::Cli).unwrap(),
+            Some(development)
+        );
+    }
+
+    #[test]
+    fn copied_retained_artifact_cannot_claim_the_active_store() {
+        let directory = tempfile::tempdir().unwrap();
+        let root = directory.path().join("authority");
+        let published = selection(directory.path(), "published", InstallSource::Published);
+        let development = selection(directory.path(), "development", InstallSource::Development);
+        let active = active(development, published.artifact_set.clone());
+        write_atomic_json(&root, &root.join(ACTIVE_FILE), &active).unwrap();
+
+        let inactive_copy = directory.path().join("inactive-lf");
+        fs::copy(
+            &published
+                .artifact_set
+                .artifact(&ArtifactRole::Cli)
+                .unwrap()
+                .path,
+            &inactive_copy,
+        )
+        .unwrap();
+
+        assert!(authorize(&root, &inactive_copy, &ArtifactRole::Cli)
+            .unwrap_err()
+            .to_string()
+            .contains("inactive retained install artifact"));
     }
 
     #[test]
@@ -1668,7 +1544,6 @@ mod tests {
             SwitchPhase::TargetPrepared,
             SwitchPhase::Advancing,
             SwitchPhase::Activated,
-            SwitchPhase::Reconciling,
             SwitchPhase::Settled,
         ] {
             let directory = tempfile::tempdir().unwrap();
@@ -1684,18 +1559,12 @@ mod tests {
             receipt.phase = phase;
             if matches!(
                 phase,
-                SwitchPhase::Advancing
-                    | SwitchPhase::Activated
-                    | SwitchPhase::Reconciling
-                    | SwitchPhase::Settled
+                SwitchPhase::Advancing | SwitchPhase::Activated | SwitchPhase::Settled
             ) {
                 receipt.recovery_owner = RecoveryOwner::Candidate;
                 receipt.target_store_advance_started = true;
             }
-            if matches!(
-                phase,
-                SwitchPhase::Activated | SwitchPhase::Reconciling | SwitchPhase::Settled
-            ) {
+            if matches!(phase, SwitchPhase::Activated | SwitchPhase::Settled) {
                 receipt.target_store_advanced = true;
             }
             if phase == SwitchPhase::Settled {
@@ -1783,7 +1652,7 @@ mod tests {
     }
 
     #[test]
-    fn first_local_switch_may_be_coordinated_by_its_candidate() {
+    fn every_local_switch_may_be_coordinated_by_its_candidate() {
         let directory = tempfile::tempdir().unwrap();
         let published = selection(directory.path(), "published", InstallSource::Published);
         let development = selection(directory.path(), "development", InstallSource::Development);
@@ -1799,15 +1668,11 @@ mod tests {
         let next = selection(directory.path(), "next", InstallSource::Development);
         let mut replacement = switch(receipt.target, next, published.artifact_set);
         replacement.coordinator = replacement.candidate.clone();
-        assert!(replacement
-            .validate()
-            .unwrap_err()
-            .to_string()
-            .contains("matches neither the prior CLI"));
+        replacement.validate().unwrap();
     }
 
     #[test]
-    fn inactive_retained_generation_cannot_start() {
+    fn inactive_retained_artifact_cannot_start() {
         let directory = tempfile::tempdir().unwrap();
         let root = directory.path().join("authority");
         let published = selection(directory.path(), "published", InstallSource::Published);
@@ -1970,44 +1835,6 @@ mod tests {
             read_state(&root).unwrap(),
             MachineInstallState::Switching(found) if *found == receipt
         ));
-    }
-
-    #[test]
-    fn switch_preserves_disposable_store_and_interrupted_work_evidence() {
-        let directory = tempfile::tempdir().unwrap();
-        let root = directory.path().join("authority");
-        let published = selection(directory.path(), "published", InstallSource::Published);
-        let development = selection(directory.path(), "development", InstallSource::Development);
-        let mut receipt = switch(
-            published.clone(),
-            development,
-            published.artifact_set.clone(),
-        );
-        receipt.interrupted_work = vec![InterruptedWork {
-            work: crate::durable::WorkRef::Project(crate::durable::ProjectId::new()),
-            prior_run_id: crate::durable::RunId::new(),
-        }];
-        write_switch(&root, &receipt).unwrap();
-
-        let mut owned = receipt.clone();
-        owned.disposable_store_owned = true;
-        write_switch(&root, &owned).unwrap();
-
-        let mut regressed = owned.clone();
-        regressed.disposable_store_owned = false;
-        assert!(write_switch(&root, &regressed)
-            .unwrap_err()
-            .to_string()
-            .contains("cannot forget its disposable store ownership"));
-
-        let mut duplicated = owned;
-        let duplicate = duplicated.interrupted_work[0].clone();
-        duplicated.interrupted_work.push(duplicate);
-        assert!(duplicated
-            .validate()
-            .unwrap_err()
-            .to_string()
-            .contains("repeats interrupted project Work"));
     }
 
     #[test]

@@ -54,11 +54,13 @@ struct LoopflowApp: App {
             systemScheme: systemScheme
         )
         let launchRepoURL = LaunchArguments.repoURL()
+        let registryQuery = SessionFixture.query ?? RegistryQueryLocal.shared
 
         WindowGroup {
             PodiumView(
                 portfolioService: portfolioService,
-                initialRepoPath: launchRepoURL?.path
+                initialRepoPath: launchRepoURL?.path,
+                query: registryQuery
             )
             .tint(.loopflowBurgundy)
             .preferredColorScheme(theme.preferredScheme)
@@ -67,7 +69,7 @@ struct LoopflowApp: App {
             .uiTestWindowWidth()
             .uiTestSnapshot()
             .task {
-                openCaptureViewIfNeeded(repoURL: launchRepoURL)
+                openCaptureViewIfNeeded()
             }
         }
         .windowStyle(.automatic)
@@ -149,51 +151,15 @@ struct LoopflowApp: App {
         }
         .defaultSize(width: 1180, height: 860)
 
-        WindowGroup("Context Lab", id: "context-lab", for: ContextLabRoute.self) { $route in
-            if let route, route.isWaveScoped {
-                ContextLabView(route: route)
-                .frame(minWidth: 1120, minHeight: 680)
-                .tint(.loopflowBurgundy)
-                .preferredColorScheme(theme.preferredScheme)
-                .environment(\.palette, theme.palette)
-            } else {
-                ContentUnavailableView(
-                    "Open Context Lab from a Wave",
-                    systemImage: "water.waves",
-                    description: Text("Select a Wave, then open Context Lab from its header.")
-                )
-                .frame(minWidth: 720, minHeight: 480)
-                .preferredColorScheme(theme.preferredScheme)
-                .environment(\.palette, theme.palette)
-            }
-        }
-        .windowResizability(.contentMinSize)
-        .defaultSize(width: 1420, height: 900)
-
-        WindowGroup("Task workspace", id: "task-workspace", for: TaskWorkspaceRoute.self) { $route in
-            if let route, route.context.isWaveScoped {
-                TaskWorkspaceWindow(route: route)
-                    .tint(.loopflowBurgundy)
-                    .preferredColorScheme(theme.preferredScheme)
-                    .environment(\.palette, theme.palette)
-            }
-        }
-        .defaultSize(width: 1180, height: 820)
     }
 
     @MainActor
-    private func openCaptureViewIfNeeded(repoURL: URL?) {
+    private func openCaptureViewIfNeeded() {
         guard !didOpenCaptureView, let target = AppTestMode.captureTarget else { return }
         didOpenCaptureView = true
         switch target {
         case .primary:
             break
-        case .contextLab:
-            guard let repoURL, let wave = AppTestMode.selectBranch else { return }
-            openWindow(
-                id: "context-lab",
-                value: ContextLabRoute.wave(repoPath: repoURL.path, wave: wave)
-            )
         case .window(let id):
             openWindow(id: id)
         }
@@ -222,11 +188,11 @@ struct LoopflowApp: App {
                 .queryItems?.first(where: { $0.name == "repo" })?.value
             else { return }
             let repoURL = URL(fileURLWithPath: repoPath)
-            portfolioService.addRepo(repoURL)
-            openWindow(id: "repo", value: repoURL)
+            guard let mainRepo = portfolioService.addRepo(repoURL) else { return }
+            openWindow(id: "repo", value: mainRepo)
         case "portfolio":
             openWindow(id: "portfolio")
-        case "asks":
+        case "sessions":
             NotificationCenter.default.post(name: .openSessions, object: nil)
         default:
             break
@@ -241,8 +207,11 @@ struct LoopflowApp: App {
         panel.allowsMultipleSelection = false
         panel.prompt = "Open Repo"
         guard panel.runModal() == .OK, let url = panel.url else { return }
-        portfolioService.addRepo(url)
-        openWindow(id: "repo", value: url)
+        guard let mainRepo = portfolioService.addRepo(url) else {
+            NSSound.beep()
+            return
+        }
+        openWindow(id: "repo", value: mainRepo)
     }
 }
 

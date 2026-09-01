@@ -4,7 +4,6 @@ use std::time::Duration;
 
 use rusqlite::{params, Connection, OptionalExtension, ToSql, TransactionBehavior};
 
-use crate::chat::types::TurnUsage;
 use crate::id::WaveId;
 use crate::profile::{
     AccessProfile, AccountAccessProfile, EmailAddress, ProfileId, ProviderRoute, RouteScope,
@@ -13,22 +12,15 @@ use crate::provider_auth::Provider;
 use crate::store::rows::{map_wave_row, now_unix};
 use crate::store::token_crypto;
 use crate::store::{
-    AccountLimitRow, AttributedTurnUsage, CredentialState, PmSnapshotRow, ProviderAccount,
-    ProviderAccountId, ProviderAccountSelection, RoutingState, RunEventRow, StoreError,
-    StoreResult, TurnUsageSample, WaveLocatorUpdate,
+    AccountLimitRow, CredentialState, PmSnapshotRow, ProviderAccount, ProviderAccountId,
+    ProviderAccountSelection, RoutingState, RunEventRow, StoreError, StoreResult,
+    WaveLocatorUpdate,
 };
-#[cfg(test)]
-use crate::store::{
-    PerformanceEvidenceSnapshot, TaskFirstProgressEvidenceRow, TaskPrPerformanceEvidenceRow,
-};
-use crate::trace::{
-    AgentInvocationRow, AgentTurnRow, ContextAsset, ContextAssetKind, ContextAssetRow,
-    ContextChannel, ContextDecision, ContextDecisionKind, ContextDecisionRow, ContextScope,
-};
-use crate::wave::{Wave, WaveLocator};
+use crate::work::wave::{Wave, WaveLocator};
 
 mod children;
 mod ci_incidents;
+mod controller;
 mod durable;
 mod metrics;
 mod pr_landings;
@@ -50,84 +42,10 @@ pub(crate) fn read_nonterminal_task_worktrees(path: &Path) -> StoreResult<Vec<Pa
         rusqlite::OpenFlags::SQLITE_OPEN_READ_ONLY | rusqlite::OpenFlags::SQLITE_OPEN_NO_MUTEX,
     )?;
     conn.execute_batch("PRAGMA query_only = ON; PRAGMA busy_timeout = 5000;")?;
-    let mut statement = conn.prepare(
-        "SELECT t.worktree FROM tasks t
-         JOIN epochs e ON e.id=(
-             SELECT latest.id FROM epochs latest
-             WHERE latest.task_id=t.id ORDER BY latest.number DESC LIMIT 1
-         )
-         WHERE e.state='open'",
-    )?;
+    let mut statement = conn.prepare("SELECT worktree FROM tasks WHERE work_state='ready'")?;
     let rows = statement.query_map([], |row| row.get::<_, String>(0))?;
     rows.map(|row| row.map(PathBuf::from).map_err(StoreError::from))
         .collect()
-}
-
-/// Whether an AgentInvocation still owns mutation authority for its writer.
-///
-/// Process liveness is deliberately absent from this proof. A provider process
-/// may outlive its Run or Ask, but it cannot keep mutation authority after the
-/// durable owner settles.
-pub(crate) fn writer_invocation_is_authoritative(
-    path: &Path,
-    invocation_id: &str,
-) -> StoreResult<bool> {
-    let conn = Connection::open_with_flags(
-        path,
-        rusqlite::OpenFlags::SQLITE_OPEN_READ_ONLY | rusqlite::OpenFlags::SQLITE_OPEN_NO_MUTEX,
-    )?;
-    conn.execute_batch("PRAGMA query_only = ON; PRAGMA busy_timeout = 5000;")?;
-    let invocation = conn
-        .query_row(
-            "SELECT i.ended_at, i.supervising_run_id, i.answer_ask_id,
-                    EXISTS (
-                        SELECT 1 FROM agent_turns t
-                        WHERE t.invocation_id=i.id AND t.status='running'
-                    )
-             FROM agent_invocations i WHERE i.id=?1",
-            [invocation_id],
-            |row| {
-                Ok((
-                    row.get::<_, Option<i64>>(0)?,
-                    row.get::<_, Option<String>>(1)?,
-                    row.get::<_, Option<String>>(2)?,
-                    row.get::<_, bool>(3)?,
-                ))
-            },
-        )
-        .optional()?;
-    let Some((ended_at, run_id, ask_id, turn_active)) = invocation else {
-        return Ok(false);
-    };
-    if ended_at.is_some() || !turn_active {
-        return Ok(false);
-    }
-    let Some(run_id) = run_id else {
-        return Ok(false);
-    };
-    let run_active = conn
-        .query_row(
-            "SELECT state='active' FROM runs WHERE id=?1",
-            [&run_id],
-            |row| row.get::<_, bool>(0),
-        )
-        .optional()?
-        .unwrap_or(false);
-    if !run_active {
-        return Ok(false);
-    }
-    let Some(ask_id) = ask_id else {
-        return Ok(true);
-    };
-    Ok(conn
-        .query_row(
-            "SELECT state='claimed' AND active_invocation_id=?2
-             FROM ask_exchanges WHERE id=?1",
-            params![ask_id, invocation_id],
-            |row| row.get::<_, bool>(0),
-        )
-        .optional()?
-        .unwrap_or(false))
 }
 
 fn migrate_plaintext_provider_tokens(conn: &mut Connection) -> StoreResult<()> {
@@ -367,17 +285,6 @@ fn read_provider_route_account(row: &rusqlite::Row) -> rusqlite::Result<Provider
     })
 }
 
-fn to_sqlite_conversion_error(error: impl std::fmt::Display) -> rusqlite::Error {
-    rusqlite::Error::FromSqlConversionFailure(
-        0,
-        rusqlite::types::Type::Text,
-        Box::new(std::io::Error::new(
-            std::io::ErrorKind::InvalidData,
-            error.to_string(),
-        )),
-    )
-}
-
 impl SqliteStore {
     /// Open the store for ordinary use. This never advances the shared release
     /// frontier: against `~/.lf/loopflow.db` it reads and validates but leaves
@@ -389,8 +296,8 @@ impl SqliteStore {
     }
 
     /// Open the shared store as `lf install promote` — the single authorized
-    /// owner of the migration frontier. Applies any pending migration under the
-    /// caller's exclusive promotion lock and drained live-body fence.
+    /// owner of the migration frontier. Applies pending migrations under the
+    /// caller's exclusive promotion lock.
     pub(crate) fn open_as_promotion_boundary(path: &Path) -> StoreResult<Self> {
         Self::open(path, super::FrontierAdvance::Authorized)
     }
@@ -460,7 +367,6 @@ impl SqliteStore {
             }
             _ => false,
         };
-
         // Resolve the frontier authority before touching the filesystem. An
         // ordinary open of a shared store it may not initialize refuses here,
         // before create_dir_all/Connection::open would leave an empty
@@ -470,6 +376,15 @@ impl SqliteStore {
             .map_err(|error| {
                 StoreError::InvalidData(format!("resolve migration authority: {error}"))
             })?;
+        let shared_database = super::same_database_file(path, &home.join(".lf/loopflow.db"))
+            .map_err(|error| {
+                StoreError::InvalidData(format!("resolve shared store identity: {error}"))
+            })?;
+        let initializes_private_development = !installed_development
+            && !shared_database
+            && may_apply_migrations
+            && !crate::build_info::migration_draft_manifest().is_empty()
+            && crate::build_info::provenance() == crate::build_info::BuildProvenance::Development;
         if !may_apply_migrations && !existing_database {
             return Err(StoreError::InvalidData(format!(
                 "shared store {} is not initialized and an ordinary lf may not create it; \
@@ -492,6 +407,11 @@ impl SqliteStore {
 
         if installed_development {
             super::migrations::validate_installed_development_sqlite(
+                &conn,
+                crate::build_info::migration_draft_manifest(),
+            )?;
+        } else if initializes_private_development {
+            super::migrations::apply_installed_development_sqlite(
                 &conn,
                 crate::build_info::migration_draft_manifest(),
             )?;
@@ -681,7 +601,7 @@ impl SqliteStore {
                 wave.retirement_reason(),
             ],
         )?;
-        durable::create_wave_spine(&tx, wave.id(), wave.name(), wave.repo(), created_at)?;
+        durable::create_wave_work(&tx, wave.id(), created_at)?;
         tx.commit()?;
         Ok(())
     }
@@ -1568,39 +1488,11 @@ impl SqliteStore {
                     )));
                 }
             }
-
-            let active_run = tx
-                .query_row(
-                    "SELECT r.id
-                     FROM runs r
-                     JOIN epochs e ON e.id = r.epoch_id
-                     LEFT JOIN projects ep ON ep.id = e.project_id
-                     LEFT JOIN tasks et ON et.id = e.task_id
-                     LEFT JOIN projects tp ON tp.id = et.project_id
-                     WHERE r.state != 'ended'
-                       AND (e.wave_id = ?1 OR ep.wave_id = ?1 OR tp.wave_id = ?1)
-                     LIMIT 1",
-                    params![update.wave_id],
-                    |row| row.get::<_, String>(0),
-                )
-                .optional()?;
-            if let Some(run_id) = active_run {
-                return Err(StoreError::InvalidData(format!(
-                    "cannot relocate Wave {} while Run {run_id} is active",
-                    update.wave_id
-                )));
-            }
         }
 
         for update in updates {
             if let Some(collision) = &update.retire_collision {
                 let retired_at = now_unix();
-                tx.execute(
-                    "UPDATE epochs
-                     SET state = 'abandoned', terminal_at = ?2
-                     WHERE wave_id = ?1 AND state = 'open'",
-                    params![collision, retired_at],
-                )?;
                 tx.execute(
                     "UPDATE work_placements SET enabled = 0 WHERE wave_id = ?1",
                     params![collision],
@@ -1609,7 +1501,9 @@ impl SqliteStore {
                     "UPDATE waves
                      SET retired_at = ?2,
                          superseded_by_wave_id = ?3,
-                         retirement_reason = ?4
+                         retirement_reason = ?4,
+                         work_state = 'abandoned',
+                         work_terminal_at = ?2
                      WHERE id = ?1 AND retired_at IS NULL",
                     params![
                         collision,
@@ -1642,55 +1536,6 @@ impl SqliteStore {
         wave_id: &WaveId,
     ) -> StoreResult<Vec<String>> {
         let mut blockers = Vec::new();
-        let epochs = conn
-            .prepare(
-                "SELECT id, number, state, current_rev
-                 FROM epochs WHERE wave_id = ?1 ORDER BY number",
-            )?
-            .query_map(params![wave_id], |row| {
-                Ok((
-                    row.get::<_, String>(0)?,
-                    row.get::<_, i64>(1)?,
-                    row.get::<_, String>(2)?,
-                    row.get::<_, i64>(3)?,
-                ))
-            })?
-            .collect::<Result<Vec<_>, _>>()?;
-        if epochs.len() != 1 {
-            blockers.push(format!("{} Wave Epochs", epochs.len()));
-        }
-        if let Some((epoch_id, number, state, revision)) = epochs.first() {
-            if *number != 1 || state != "open" {
-                blockers.push(format!("Epoch {number} is {state}"));
-            }
-            if *revision != 0 {
-                blockers.push(format!("Truth revision is {revision}"));
-            }
-            let steers: i64 = conn.query_row(
-                "SELECT COUNT(*) FROM steers WHERE epoch_id = ?1",
-                params![epoch_id],
-                |row| row.get(0),
-            )?;
-            if steers > 0 {
-                blockers.push(format!("{steers} authored Steers"));
-            }
-            let truths: i64 = conn.query_row(
-                "SELECT COUNT(*) FROM work_truth WHERE epoch_id = ?1",
-                params![epoch_id],
-                |row| row.get(0),
-            )?;
-            if truths != 1 {
-                blockers.push(format!("{truths} Truth revisions"));
-            }
-            let runs: i64 = conn.query_row(
-                "SELECT COUNT(*) FROM runs WHERE epoch_id = ?1",
-                params![epoch_id],
-                |row| row.get(0),
-            )?;
-            if runs > 0 {
-                blockers.push(format!("{runs} Runs"));
-            }
-        }
         let projects: i64 = conn.query_row(
             "SELECT COUNT(*) FROM projects WHERE wave_id = ?1",
             params![wave_id],
@@ -1743,15 +1588,13 @@ impl SqliteStore {
     pub fn delete_wave(&self, wave_id: &WaveId) -> StoreResult<()> {
         let mut conn = self.conn.lock().expect("store mutex poisoned");
         let tx = conn.transaction_with_behavior(TransactionBehavior::Immediate)?;
-        tx.execute("DELETE FROM epochs WHERE wave_id = ?1", params![wave_id])?;
         tx.execute("DELETE FROM waves WHERE id = ?1", params![wave_id])?;
         tx.commit()?;
         Ok(())
     }
 
     // Exec ledger (`run_events`): the machine-grain, append-only record of
-    // every process written directly by `lf`. Read by `lf execs` / `lf trace`;
-    // `lf runs` joins it to agent invocations for process lineage.
+    // every process written directly by `lf`.
 
     /// Cached line/token counts for a git blob. Content-addressed, so a hit is
     /// always correct and a miss only costs one tokenization.
@@ -1809,165 +1652,6 @@ impl SqliteStore {
             ],
         )?;
         Ok(())
-    }
-
-    /// Every provider-measured Turn's latest usage since `since_unix`,
-    /// attributed by the invocation that ran it.
-    ///
-    /// Turns with no provider report at all are dropped: they carry no spend to
-    /// aggregate, and keeping them would let a reader mistake silence for zero. Any
-    /// one measurement is enough to keep the turn — a report of cache reads
-    /// alone is still something the provider measured.
-    pub(crate) fn attributed_turn_usage_since(
-        &self,
-        since_unix: i64,
-    ) -> StoreResult<Vec<AttributedTurnUsage>> {
-        let conn = self.conn.lock().expect("store mutex poisoned");
-        let mut stmt = conn.prepare(
-            "SELECT t.id, l.id, l.process_id, l.repo, l.wave, l.flow, l.skill,
-                    l.provider, COALESCE(u.model, l.model), u.observed_at, u.input_tokens,
-                    u.total_input_tokens, u.peak_input_tokens, u.context_window_tokens,
-                    u.output_tokens, u.reasoning_tokens, u.cache_read_tokens,
-                    u.cache_write_tokens, u.cost_usd
-             FROM turn_usage_samples u
-             JOIN agent_turns t ON t.id = u.turn_id
-             JOIN agent_invocations l ON l.id = t.invocation_id
-             WHERE u.observed_at = (
-                    SELECT MAX(latest.observed_at)
-                    FROM turn_usage_samples latest
-                    WHERE latest.turn_id = u.turn_id
-                )
-               AND u.observed_at >= ?1
-             ORDER BY u.observed_at, l.process_id, t.ordinal",
-        )?;
-        let rows = stmt.query_map(params![since_unix], |row| {
-            let model: Option<String> = row.get(8)?;
-            let usage = map_turn_usage(row, 10, model)?.ok_or_else(|| {
-                rusqlite::Error::InvalidColumnType(
-                    10,
-                    "turn_usage_samples".to_string(),
-                    rusqlite::types::Type::Null,
-                )
-            })?;
-            Ok(AttributedTurnUsage {
-                turn_id: row.get(0)?,
-                invocation_id: row.get(1)?,
-                exec_id: row.get(2)?,
-                repo: row.get(3)?,
-                wave: row.get(4)?,
-                flow: row.get(5)?,
-                skill: row.get(6)?,
-                provider: row.get(7)?,
-                at: row.get(9)?,
-                usage,
-            })
-        })?;
-        rows.collect::<rusqlite::Result<Vec<_>>>()
-            .map_err(StoreError::from)
-    }
-
-    /// Record one cumulative provider usage checkpoint. Providers may update
-    /// a checkpoint within the same second; the last value wins. Across
-    /// checkpoints token counters cannot decrease, and a final receipt cannot
-    /// become provisional again.
-    pub fn record_turn_usage_sample(&self, sample: &TurnUsageSample) -> StoreResult<()> {
-        if !sample.usage.is_reported() {
-            return Err(StoreError::InvalidData(
-                "provider emitted an empty usage checkpoint".to_string(),
-            ));
-        }
-        if let (Some(reasoning), Some(output)) =
-            (sample.usage.reasoning_tokens, sample.usage.output_tokens)
-        {
-            if reasoning > output {
-                return Err(StoreError::InvalidData(
-                    "reasoning tokens exceed inclusive output tokens".to_string(),
-                ));
-            }
-        }
-
-        let mut conn = self.conn.lock().expect("store mutex poisoned");
-        let transaction = conn.transaction_with_behavior(TransactionBehavior::Immediate)?;
-        let previous = latest_turn_usage_sample_in(&transaction, &sample.turn_id)?;
-        if let Some(previous) = previous.as_ref() {
-            validate_usage_progress(previous, sample)?;
-        }
-        let usage = &sample.usage;
-        transaction.execute(
-            "INSERT INTO turn_usage_samples (
-                turn_id, observed_at, final_receipt, input_tokens, total_input_tokens,
-                peak_input_tokens, context_window_tokens, output_tokens, reasoning_tokens,
-                cache_read_tokens, cache_write_tokens, model, cost_usd
-             ) VALUES (?1, ?2, ?3, ?4, ?5, ?6, ?7, ?8, ?9, ?10, ?11, ?12, ?13)
-             ON CONFLICT(turn_id, observed_at) DO UPDATE SET
-                final_receipt=excluded.final_receipt,
-                input_tokens=excluded.input_tokens,
-                total_input_tokens=excluded.total_input_tokens,
-                peak_input_tokens=excluded.peak_input_tokens,
-                context_window_tokens=excluded.context_window_tokens,
-                output_tokens=excluded.output_tokens,
-                reasoning_tokens=excluded.reasoning_tokens,
-                cache_read_tokens=excluded.cache_read_tokens,
-                cache_write_tokens=excluded.cache_write_tokens,
-                model=excluded.model,
-                cost_usd=excluded.cost_usd",
-            params![
-                sample.turn_id,
-                sample.observed_at,
-                sample.final_receipt,
-                to_sql_i64(usage.input_tokens, "input_tokens")?,
-                to_sql_i64(usage.total_input_tokens, "total_input_tokens")?,
-                to_sql_i64(usage.peak_input_tokens, "peak_input_tokens")?,
-                to_sql_i64(usage.context_window_tokens, "context_window_tokens")?,
-                to_sql_i64(usage.output_tokens, "output_tokens")?,
-                to_sql_i64(usage.reasoning_tokens, "reasoning_tokens")?,
-                to_sql_i64(usage.cache_read_tokens, "cache_read_tokens")?,
-                to_sql_i64(usage.cache_write_tokens, "cache_write_tokens")?,
-                usage.model,
-                usage.cost_usd,
-            ],
-        )?;
-        if sample.final_receipt {
-            transaction.execute(
-                "DELETE FROM turn_usage_samples AS stale
-                 WHERE stale.final_receipt = 0
-                   AND stale.observed_at < ?1
-                   AND EXISTS (
-                       SELECT 1
-                       FROM turn_usage_samples AS newer
-                       WHERE newer.turn_id = stale.turn_id
-                         AND newer.observed_at > stale.observed_at
-                   )",
-                [sample.observed_at - crate::store::TURN_USAGE_LIVE_RETENTION_SECONDS],
-            )?;
-        }
-        transaction.commit()?;
-        Ok(())
-    }
-
-    /// Usage checkpoints at or after `since_unix`, plus the last checkpoint
-    /// before the boundary for every continuing Turn. The preceding row is a
-    /// baseline only; it prevents a window from claiming earlier output.
-    pub fn turn_usage_samples_since(&self, since_unix: i64) -> StoreResult<Vec<TurnUsageSample>> {
-        let conn = self.conn.lock().expect("store mutex poisoned");
-        let mut statement = conn.prepare(
-            "SELECT turn_id, observed_at, final_receipt, input_tokens,
-                    total_input_tokens, peak_input_tokens, context_window_tokens,
-                    output_tokens, reasoning_tokens, cache_read_tokens,
-                    cache_write_tokens, model, cost_usd
-             FROM turn_usage_samples sample
-             WHERE observed_at >= ?1
-                OR observed_at = (
-                    SELECT MAX(baseline.observed_at)
-                    FROM turn_usage_samples baseline
-                    WHERE baseline.turn_id = sample.turn_id
-                      AND baseline.observed_at < ?1
-                )
-             ORDER BY turn_id, observed_at",
-        )?;
-        let rows = statement.query_map([since_unix], map_turn_usage_sample)?;
-        rows.collect::<rusqlite::Result<Vec<_>>>()
-            .map_err(StoreError::from)
     }
 
     pub fn list_run_events_since(&self, since_unix: i64) -> StoreResult<Vec<RunEventRow>> {
@@ -2045,823 +1729,6 @@ impl SqliteStore {
         }
         Ok(events)
     }
-
-    pub fn insert_trace_capture(
-        &self,
-        invocation: &AgentInvocationRow,
-        turn: &AgentTurnRow,
-        assets: &[ContextAssetRow],
-        decisions: &[ContextDecisionRow],
-    ) -> StoreResult<()> {
-        let mut conn = self.conn.lock().expect("store mutex poisoned");
-        let tx = conn.transaction_with_behavior(TransactionBehavior::Immediate)?;
-        let (supervising_run_id, account_id, resume_token) = invocation
-            .supervision
-            .as_ref()
-            .map(|supervision| {
-                (
-                    Some(supervision.supervising_run_id.as_str()),
-                    supervision.account_id.as_deref(),
-                    supervision.resume_token.as_deref(),
-                )
-            })
-            .unwrap_or((None, None, None));
-        let registered = supervising_run_id.is_some()
-            && tx.query_row(
-                "SELECT EXISTS(
-                        SELECT 1 FROM agent_invocations
-                        WHERE id=?1 AND supervising_run_id=?2
-                     )",
-                params![invocation.id, supervising_run_id],
-                |row| row.get::<_, bool>(0),
-            )?;
-        if registered {
-            tx.execute(
-                "UPDATE agent_invocations SET
-                    run_id=?2, process_id=?3, repo=?4, worktree=?5, wave=?6,
-                    flow=?7, skill=?8, project=?9, task=?10, provider=?11,
-                    model=?12, surface=?13, capture_status=?14,
-                    incomplete_reason=?15, outcome=?16, artifact_dir=?17,
-                    conversation_path=?18, provider_events_path=?19,
-                    provider_session_id=?20, provider_session_path=?21,
-                    conversation_event_count=?22, conversation_bytes=?23
-                 WHERE id=?1 AND supervising_run_id=?24",
-                params![
-                    invocation.id,
-                    invocation.run_id,
-                    invocation.process_id,
-                    invocation.repo,
-                    invocation.worktree,
-                    invocation.wave,
-                    invocation.flow,
-                    invocation.skill,
-                    invocation.project,
-                    invocation.task,
-                    invocation.provider,
-                    invocation.model,
-                    invocation.surface,
-                    invocation.capture_status,
-                    invocation.incomplete_reason,
-                    invocation.outcome,
-                    invocation.artifact_dir,
-                    invocation.conversation_path,
-                    invocation.provider_events_path,
-                    invocation.provider_session_id,
-                    invocation.provider_session_path,
-                    invocation.conversation_event_count,
-                    invocation.conversation_bytes,
-                    supervising_run_id,
-                ],
-            )?;
-        } else {
-            tx.execute(
-                "INSERT INTO agent_invocations (
-                    id, run_id, process_id, started_at, ended_at, repo, worktree, wave, flow,
-                    skill, project, task, provider, model, surface, capture_status,
-                    incomplete_reason, outcome, artifact_dir, conversation_path,
-                    provider_events_path, provider_session_id, provider_session_path,
-                    conversation_event_count, conversation_bytes, supervising_run_id,
-                    account_id, resume_token, answer_ask_id
-                 ) VALUES (?1, ?2, ?3, ?4, ?5, ?6, ?7, ?8, ?9, ?10, ?11, ?12, ?13,
-                    ?14, ?15, ?16, ?17, ?18, ?19, ?20, ?21, ?22, ?23, ?24, ?25,
-                    ?26, ?27, ?28, ?29)",
-                params![
-                    invocation.id,
-                    invocation.run_id,
-                    invocation.process_id,
-                    invocation.started_at,
-                    invocation.ended_at,
-                    invocation.repo,
-                    invocation.worktree,
-                    invocation.wave,
-                    invocation.flow,
-                    invocation.skill,
-                    invocation.project,
-                    invocation.task,
-                    invocation.provider,
-                    invocation.model,
-                    invocation.surface,
-                    invocation.capture_status,
-                    invocation.incomplete_reason,
-                    invocation.outcome,
-                    invocation.artifact_dir,
-                    invocation.conversation_path,
-                    invocation.provider_events_path,
-                    invocation.provider_session_id,
-                    invocation.provider_session_path,
-                    invocation.conversation_event_count,
-                    invocation.conversation_bytes,
-                    supervising_run_id,
-                    account_id,
-                    resume_token,
-                    invocation.answer_ask_id,
-                ],
-            )?;
-        }
-        insert_agent_turn(&tx, turn)?;
-        insert_context_rows(&tx, assets, decisions)?;
-        tx.commit()?;
-        Ok(())
-    }
-
-    pub fn insert_agent_turn_capture(
-        &self,
-        turn: &AgentTurnRow,
-        assets: &[ContextAssetRow],
-        decisions: &[ContextDecisionRow],
-    ) -> StoreResult<()> {
-        let mut conn = self.conn.lock().expect("store mutex poisoned");
-        let tx = conn.transaction_with_behavior(TransactionBehavior::Immediate)?;
-        insert_agent_turn(&tx, turn)?;
-        insert_context_rows(&tx, assets, decisions)?;
-        tx.commit()?;
-        Ok(())
-    }
-
-    pub fn finish_agent_turn_capture(&self, turn: &AgentTurnRow) -> StoreResult<()> {
-        let mut conn = self.conn.lock().expect("store mutex poisoned");
-        let tx = conn.transaction_with_behavior(TransactionBehavior::Immediate)?;
-        update_agent_turn(&tx, turn)?;
-        tx.commit()?;
-        Ok(())
-    }
-
-    pub fn update_agent_invocation_receipt(
-        &self,
-        invocation: &AgentInvocationRow,
-    ) -> StoreResult<()> {
-        let conn = self.conn.lock().expect("store mutex poisoned");
-        conn.execute(
-            "UPDATE agent_invocations
-             SET provider_session_id = ?2, provider_session_path = ?3,
-                 resume_token=CASE WHEN supervising_run_id IS NULL THEN resume_token ELSE ?2 END
-             WHERE id = ?1",
-            params![
-                invocation.id,
-                invocation.provider_session_id,
-                invocation.provider_session_path,
-            ],
-        )?;
-        Ok(())
-    }
-
-    pub fn finish_trace_capture(
-        &self,
-        invocation: &AgentInvocationRow,
-        turn: &AgentTurnRow,
-    ) -> StoreResult<()> {
-        let mut conn = self.conn.lock().expect("store mutex poisoned");
-        let tx = conn.transaction_with_behavior(TransactionBehavior::Immediate)?;
-        tx.execute(
-            "UPDATE agent_invocations SET
-                ended_at = ?2, capture_status = ?3, incomplete_reason = ?4, outcome = ?5,
-                conversation_event_count = ?6, conversation_bytes = ?7,
-                provider_session_id = ?8, provider_session_path = ?9,
-                handback_state=CASE
-                    WHEN supervising_run_id IS NULL THEN handback_state
-                    WHEN ?5='completed' THEN 'succeeded'
-                    WHEN ?5='interrupted' THEN 'interrupted'
-                    ELSE 'failed'
-                END,
-                resume_token=CASE WHEN supervising_run_id IS NULL THEN resume_token ELSE ?8 END
-             WHERE id = ?1",
-            params![
-                invocation.id,
-                invocation.ended_at,
-                invocation.capture_status,
-                invocation.incomplete_reason,
-                invocation.outcome,
-                invocation.conversation_event_count,
-                invocation.conversation_bytes,
-                invocation.provider_session_id,
-                invocation.provider_session_path,
-            ],
-        )?;
-        update_agent_turn(&tx, turn)?;
-        tx.commit()?;
-        Ok(())
-    }
-
-    /// Record that an invocation's referenced conversation artifact is known absent.
-    /// If capture loss also exposed an unclosed owner, close the invocation and its
-    /// running Turns in the same transaction.
-    pub fn prune_invocation_capture(
-        &self,
-        invocation_id: &str,
-        incomplete_reason: &str,
-        ended_at_fallback: i64,
-    ) -> StoreResult<()> {
-        let mut conn = self.conn.lock().expect("store mutex poisoned");
-        let tx = conn.transaction_with_behavior(TransactionBehavior::Immediate)?;
-        let updated = tx.execute(
-            "UPDATE agent_invocations
-             SET capture_status = 'pruned', incomplete_reason = ?2,
-                 ended_at = COALESCE(ended_at, ?3),
-                 outcome = CASE WHEN outcome = 'running' THEN 'interrupted' ELSE outcome END
-             WHERE id = ?1 AND capture_status != 'pruned'",
-            params![invocation_id, incomplete_reason, ended_at_fallback],
-        )?;
-        if updated != 1 {
-            return Err(StoreError::InvalidData(format!(
-                "capture {invocation_id} is already pruned or missing"
-            )));
-        }
-        tx.execute(
-            "UPDATE agent_turns
-             SET status = 'interrupted', ended_at = COALESCE(ended_at, ?2)
-             WHERE invocation_id = ?1 AND status = 'running'",
-            params![invocation_id, ended_at_fallback],
-        )?;
-        tx.commit()?;
-        Ok(())
-    }
-
-    /// Close an intact capture whose owner ended before capture finalization.
-    pub fn interrupt_invocation_capture(
-        &self,
-        invocation_id: &str,
-        incomplete_reason: &str,
-        ended_at_fallback: i64,
-    ) -> StoreResult<()> {
-        let mut conn = self.conn.lock().expect("store mutex poisoned");
-        let tx = conn.transaction_with_behavior(TransactionBehavior::Immediate)?;
-        let updated = tx.execute(
-            "UPDATE agent_invocations
-             SET capture_status = 'interrupted', incomplete_reason = ?2,
-                 ended_at = COALESCE(ended_at, ?3), outcome = 'interrupted'
-             WHERE id = ?1 AND capture_status = 'capturing'",
-            params![invocation_id, incomplete_reason, ended_at_fallback],
-        )?;
-        if updated != 1 {
-            return Err(StoreError::InvalidData(format!(
-                "capture {invocation_id} is no longer capturing"
-            )));
-        }
-        tx.execute(
-            "UPDATE agent_turns
-             SET status = 'interrupted', ended_at = COALESCE(ended_at, ?2)
-             WHERE invocation_id = ?1 AND status = 'running'",
-            params![invocation_id, ended_at_fallback],
-        )?;
-        tx.commit()?;
-        Ok(())
-    }
-
-    /// Acknowledge an aged intact capture write loss without discarding its
-    /// original `incomplete_reason` or artifact references.
-    pub fn lose_invocation_capture(
-        &self,
-        invocation_id: &str,
-        ended_at_fallback: i64,
-    ) -> StoreResult<()> {
-        let mut conn = self.conn.lock().expect("store mutex poisoned");
-        let tx = conn.transaction_with_behavior(TransactionBehavior::Immediate)?;
-        let updated = tx.execute(
-            "UPDATE agent_invocations
-             SET capture_status = 'lost', ended_at = COALESCE(ended_at, ?2),
-                 outcome = CASE WHEN outcome = 'running' THEN 'interrupted' ELSE outcome END
-             WHERE id = ?1 AND capture_status = 'partial'",
-            params![invocation_id, ended_at_fallback],
-        )?;
-        if updated != 1 {
-            return Err(StoreError::InvalidData(format!(
-                "capture {invocation_id} is no longer partial"
-            )));
-        }
-        tx.execute(
-            "UPDATE agent_turns
-             SET status = 'interrupted', ended_at = COALESCE(ended_at, ?2)
-             WHERE invocation_id = ?1 AND status = 'running'",
-            params![invocation_id, ended_at_fallback],
-        )?;
-        tx.commit()?;
-        Ok(())
-    }
-
-    pub fn agent_invocations_matching(&self, run_id: &str) -> StoreResult<Vec<AgentInvocationRow>> {
-        let (operator, value) = exact_or_prefix(run_id);
-        // Invocation timestamps use ledger-second precision. rowid preserves the
-        // append order when a fast flow starts several agents in one second.
-        self.query_agent_invocations(
-            &format!(
-                "SELECT id, run_id, process_id, started_at, ended_at, repo, worktree, wave, flow,
-                    skill, project, task, provider, model, surface, capture_status,
-                    incomplete_reason, outcome, artifact_dir, conversation_path,
-                    provider_events_path, provider_session_id, provider_session_path,
-                    conversation_event_count, conversation_bytes, supervising_run_id,
-                    account_id, resume_token, answer_ask_id
-             FROM agent_invocations WHERE run_id {operator} ?1 ORDER BY started_at, rowid"
-            ),
-            params![value],
-        )
-    }
-
-    pub fn agent_invocations_since(&self, since: i64) -> StoreResult<Vec<AgentInvocationRow>> {
-        self.query_agent_invocations(
-            "SELECT id, run_id, process_id, started_at, ended_at, repo, worktree, wave, flow,
-                    skill, project, task, provider, model, surface, capture_status,
-                    incomplete_reason, outcome, artifact_dir, conversation_path,
-                    provider_events_path, provider_session_id, provider_session_path,
-                    conversation_event_count, conversation_bytes, supervising_run_id,
-                    account_id, resume_token, answer_ask_id
-             FROM agent_invocations WHERE started_at >= ?1 ORDER BY started_at, rowid",
-            params![since],
-        )
-    }
-
-    /// Invocations whose lifecycle reaches `since`, including an invocation
-    /// that started earlier and is still open. Windowed usage readers need the
-    /// latter because its provider receipts can arrive inside the window.
-    pub fn agent_invocations_overlapping_since(
-        &self,
-        since: i64,
-    ) -> StoreResult<Vec<AgentInvocationRow>> {
-        self.query_agent_invocations(
-            "SELECT id, run_id, process_id, started_at, ended_at, repo, worktree, wave, flow,
-                    skill, project, task, provider, model, surface, capture_status,
-                    incomplete_reason, outcome, artifact_dir, conversation_path,
-                    provider_events_path, provider_session_id, provider_session_path,
-                    conversation_event_count, conversation_bytes, supervising_run_id,
-                    account_id, resume_token, answer_ask_id
-             FROM agent_invocations
-             WHERE ended_at IS NULL OR ended_at >= ?1
-             ORDER BY started_at, rowid",
-            params![since],
-        )
-    }
-
-    pub fn agent_invocations_for_wave_since(
-        &self,
-        wave_id: &WaveId,
-        since: i64,
-    ) -> StoreResult<Vec<AgentInvocationRow>> {
-        self.query_agent_invocations(
-            "SELECT ai.id, ai.run_id, ai.process_id, ai.started_at, ai.ended_at,
-                    ai.repo, ai.worktree, ai.wave, ai.flow, ai.skill, ai.project,
-                    ai.task, ai.provider, ai.model, ai.surface, ai.capture_status,
-                    ai.incomplete_reason, ai.outcome, ai.artifact_dir,
-                    ai.conversation_path, ai.provider_events_path,
-                    ai.provider_session_id, ai.provider_session_path,
-                    ai.conversation_event_count, ai.conversation_bytes,
-                    ai.supervising_run_id, ai.account_id, ai.resume_token,
-                    ai.answer_ask_id
-             FROM agent_invocations ai
-             JOIN runs r ON r.id = ai.supervising_run_id
-             JOIN epochs e ON e.id = r.epoch_id
-             LEFT JOIN projects ep ON ep.id = e.project_id
-             LEFT JOIN tasks et ON et.id = e.task_id
-             LEFT JOIN projects tp ON tp.id = et.project_id
-             WHERE ai.started_at >= ?2
-               AND (e.wave_id = ?1 OR ep.wave_id = ?1 OR tp.wave_id = ?1)
-             ORDER BY ai.started_at, ai.rowid",
-            params![wave_id, since],
-        )
-    }
-
-    /// Invocations with a start or finish fact at or after `since`.
-    pub fn agent_invocations_with_activity_since(
-        &self,
-        since: i64,
-    ) -> StoreResult<Vec<AgentInvocationRow>> {
-        self.query_agent_invocations(
-            "SELECT id, run_id, process_id, started_at, ended_at, repo, worktree, wave, flow,
-                    skill, project, task, provider, model, surface, capture_status,
-                    incomplete_reason, outcome, artifact_dir, conversation_path,
-                    provider_events_path, provider_session_id, provider_session_path,
-                    conversation_event_count, conversation_bytes, supervising_run_id,
-                    account_id, resume_token, answer_ask_id
-             FROM agent_invocations
-             WHERE started_at >= ?1 OR ended_at >= ?1
-             ORDER BY started_at, rowid",
-            params![since],
-        )
-    }
-
-    /// Invocations owning a terminal Turn at or after `since`.
-    pub fn agent_invocations_with_turns_ended_since(
-        &self,
-        since: i64,
-    ) -> StoreResult<Vec<AgentInvocationRow>> {
-        self.query_agent_invocations(
-            "SELECT id, run_id, process_id, started_at, ended_at, repo, worktree, wave, flow,
-                    skill, project, task, provider, model, surface, capture_status,
-                    incomplete_reason, outcome, artifact_dir, conversation_path,
-                    provider_events_path, provider_session_id, provider_session_path,
-                    conversation_event_count, conversation_bytes, supervising_run_id,
-                    account_id, resume_token, answer_ask_id
-             FROM agent_invocations
-             WHERE EXISTS (
-                 SELECT 1 FROM agent_turns
-                 WHERE agent_turns.invocation_id = agent_invocations.id
-                   AND agent_turns.ended_at >= ?1
-             )
-             ORDER BY started_at, rowid",
-            params![since],
-        )
-    }
-
-    fn query_agent_invocations(
-        &self,
-        sql: &str,
-        params: impl rusqlite::Params,
-    ) -> StoreResult<Vec<AgentInvocationRow>> {
-        let conn = self.conn.lock().expect("store mutex poisoned");
-        let mut stmt = conn.prepare(sql)?;
-        let rows = stmt.query_map(params, |row| {
-            Ok(AgentInvocationRow {
-                id: row.get(0)?,
-                run_id: row.get(1)?,
-                answer_ask_id: row.get(28)?,
-                process_id: row.get(2)?,
-                started_at: row.get(3)?,
-                ended_at: row.get(4)?,
-                repo: row.get(5)?,
-                worktree: row.get(6)?,
-                wave: row.get(7)?,
-                flow: row.get(8)?,
-                skill: row.get(9)?,
-                project: row.get(10)?,
-                task: row.get(11)?,
-                provider: row.get(12)?,
-                model: row.get(13)?,
-                surface: row.get(14)?,
-                capture_status: row.get(15)?,
-                incomplete_reason: row.get(16)?,
-                outcome: row.get(17)?,
-                artifact_dir: row.get(18)?,
-                conversation_path: row.get(19)?,
-                provider_events_path: row.get(20)?,
-                provider_session_id: row.get(21)?,
-                provider_session_path: row.get(22)?,
-                conversation_event_count: row.get(23)?,
-                conversation_bytes: row.get(24)?,
-                supervision: row
-                    .get::<_, Option<String>>(25)?
-                    .map(|run_id| {
-                        Ok::<_, rusqlite::Error>(crate::trace::SupervisedInvocation {
-                            invocation_id: crate::durable::AgentInvocationId::parse(
-                                &row.get::<_, String>(0)?,
-                            )
-                            .map_err(to_sqlite_conversion_error)?,
-                            supervising_run_id: crate::durable::RunId::parse(&run_id)
-                                .map_err(to_sqlite_conversion_error)?,
-                            account_id: row.get(26)?,
-                            resume_token: row.get(27)?,
-                        })
-                    })
-                    .transpose()?,
-            })
-        })?;
-        rows.collect::<Result<Vec<_>, _>>()
-            .map_err(StoreError::from)
-    }
-
-    pub fn agent_turns_for_invocations(
-        &self,
-        invocation_ids: &[String],
-    ) -> StoreResult<Vec<AgentTurnRow>> {
-        if invocation_ids.is_empty() {
-            return Ok(Vec::new());
-        }
-        let conn = self.conn.lock().expect("store mutex poisoned");
-        let mut turns = Vec::new();
-        for invocation_ids in invocation_ids.chunks(500) {
-            let placeholders = in_placeholders(invocation_ids.len());
-            let sql = format!(
-                "SELECT t.id, t.invocation_id, t.ordinal, t.provider_turn_id, t.started_at,
-                    t.ended_at, t.status, t.input_op, t.context_coverage, t.tokenizer,
-                    t.system_prompt_path, t.task_prompt_path, t.system_tokens, t.task_tokens,
-                    t.supplied_context_tokens, u.input_tokens, u.total_input_tokens,
-                    u.peak_input_tokens, u.context_window_tokens, u.output_tokens,
-                    u.reasoning_tokens, u.cache_read_tokens, u.cache_write_tokens, u.cost_usd,
-                    t.context_gather_ms, t.context_render_ms, t.context_persist_ms,
-                    t.first_event_seq, t.last_event_seq, t.root_output, t.epoch_id, t.basis_rev
-             FROM agent_turns t
-             LEFT JOIN turn_usage_samples u ON u.turn_id=t.id AND u.observed_at=(
-                SELECT MAX(latest.observed_at) FROM turn_usage_samples latest
-                WHERE latest.turn_id=t.id
-             )
-             WHERE t.invocation_id IN ({placeholders})
-             ORDER BY t.started_at, t.rowid, t.ordinal"
-            );
-            let mut stmt = conn.prepare(&sql)?;
-            let rows =
-                stmt.query_map(rusqlite::params_from_iter(invocation_ids), map_agent_turn)?;
-            turns.extend(rows.collect::<Result<Vec<_>, _>>()?);
-        }
-        turns.sort_by_key(|turn| (turn.started_at, turn.ordinal));
-        Ok(turns)
-    }
-
-    #[cfg(test)]
-    pub(crate) fn performance_evidence_since(
-        &self,
-        since: i64,
-    ) -> StoreResult<Option<PerformanceEvidenceSnapshot>> {
-        let conn = self.conn.lock().expect("store mutex poisoned");
-        let schema_available: bool = conn.query_row(
-            "SELECT
-                 EXISTS(SELECT 1 FROM sqlite_schema
-                        WHERE type='table' AND name='performance_evidence_authority')
-                 AND EXISTS(SELECT 1 FROM pragma_table_info('runs')
-                            WHERE name='first_material_at')
-                 AND EXISTS(SELECT 1 FROM pragma_table_info('task_prs')
-                            WHERE name='merged_at')
-                 AND EXISTS(SELECT 1 FROM pragma_table_info('task_prs')
-                            WHERE name='merge_tracking_complete')
-                 AND EXISTS(SELECT 1 FROM pragma_table_info('task_prs')
-                            WHERE name='repair_tracking_complete')
-                 AND EXISTS(SELECT 1 FROM sqlite_schema
-                            WHERE type='table' AND name='task_pr_repair_incidents')",
-            [],
-            |row| row.get(0),
-        )?;
-        if !schema_available {
-            return Ok(None);
-        }
-
-        let authority_started_at = conn.query_row(
-            "SELECT started_at FROM performance_evidence_authority
-             WHERE singleton=1",
-            [],
-            |row| row.get(0),
-        )?;
-
-        let mut run_statement = conn.prepare(
-            "SELECT COALESCE(r.cwd, t.worktree), r.started_at, r.ended_at,
-                    r.first_material_at
-             FROM runs r
-             JOIN epochs e ON e.id=r.epoch_id
-             JOIN tasks t ON t.id=e.task_id
-             WHERE e.task_id IS NOT NULL
-               AND r.started_at IS NOT NULL
-               AND r.ended_at >= ?1
-             ORDER BY r.ended_at, r.id",
-        )?;
-        let task_runs = run_statement
-            .query_map([since], |row| {
-                Ok(TaskFirstProgressEvidenceRow {
-                    worktree: row.get(0)?,
-                    started_at: row.get(1)?,
-                    ended_at: row.get(2)?,
-                    first_material_at: row.get(3)?,
-                })
-            })?
-            .collect::<rusqlite::Result<Vec<_>>>()?;
-
-        let mut pr_statement = conn.prepare(
-            "SELECT t.worktree, pr.merge_requested_at, pr.merged_at,
-                    pr.merge_tracking_complete, pr.repair_tracking_complete,
-                    pr.github_observation,
-                    EXISTS(SELECT 1 FROM task_pr_repair_incidents incident
-                           WHERE incident.task_pr_id=pr.id
-                             AND incident.kind='avoidable_rebase_agent'),
-                    EXISTS(SELECT 1 FROM task_pr_repair_incidents incident
-                           WHERE incident.task_pr_id=pr.id
-                             AND incident.kind='manual_git_repair')
-             FROM task_prs pr
-             JOIN tasks t ON t.id=pr.task_id
-             WHERE pr.merge_requested_at IS NOT NULL
-               AND pr.merge_commit IS NOT NULL
-               AND (
-                   pr.merged_at >= ?1
-                   OR (pr.merge_tracking_complete = 1 AND pr.merged_at IS NULL)
-               )
-             ORDER BY COALESCE(pr.merged_at, pr.merge_requested_at), pr.id",
-        )?;
-        let task_prs = pr_statement
-            .query_map([since], |row| {
-                let observation = row
-                    .get::<_, Option<String>>(5)?
-                    .map(|json| serde_json::from_str::<crate::task::GithubObservation>(&json))
-                    .transpose()
-                    .map_err(to_sqlite_conversion_error)?;
-                Ok(TaskPrPerformanceEvidenceRow {
-                    worktree: row.get(0)?,
-                    requested_at: row.get(1)?,
-                    merged_at: row.get(2)?,
-                    merge_tracking_complete: row.get(3)?,
-                    repair_tracking_complete: row.get(4)?,
-                    merge_observation_complete: observation.is_some_and(|observation| {
-                        matches!(
-                            observation.result,
-                            crate::task::GithubObservationResult::Fresh
-                        )
-                    }),
-                    avoidable_rebase_agent: row.get(6)?,
-                    manual_git_repair: row.get(7)?,
-                })
-            })?
-            .collect::<rusqlite::Result<Vec<_>>>()?;
-
-        Ok(Some(PerformanceEvidenceSnapshot {
-            authority_started_at,
-            task_runs,
-            task_prs,
-        }))
-    }
-
-    pub fn asks_for_turns(&self, turn_ids: &[String]) -> StoreResult<Vec<crate::durable::Ask>> {
-        if turn_ids.is_empty() {
-            return Ok(Vec::new());
-        }
-        let conn = self.conn.lock().expect("store mutex poisoned");
-        let mut asks = Vec::new();
-        for turn_ids in turn_ids.chunks(500) {
-            let placeholders = in_placeholders(turn_ids.len());
-            let sql = format!(
-                "SELECT id FROM ask_exchanges WHERE origin_turn_id IN ({placeholders})
-                 ORDER BY asked_at, rowid"
-            );
-            let mut statement = conn.prepare(&sql)?;
-            let ids = statement
-                .query_map(rusqlite::params_from_iter(turn_ids), |row| {
-                    row.get::<_, String>(0)
-                })?
-                .collect::<Result<Vec<_>, _>>()?;
-            for id in ids {
-                let id = crate::durable::AskId::parse(&id)
-                    .map_err(|error| StoreError::InvalidData(error.to_string()))?;
-                asks.push(durable::ask_by_id_in(&conn, &id)?);
-            }
-        }
-        asks.sort_by_key(|ask| ask.asked_at);
-        Ok(asks)
-    }
-
-    /// One agent turn by its UUID.
-    pub fn agent_turn(&self, id: &str) -> StoreResult<Option<AgentTurnRow>> {
-        let conn = self.conn.lock().expect("store mutex poisoned");
-        let mut stmt = conn.prepare(
-            "SELECT t.id, t.invocation_id, t.ordinal, t.provider_turn_id, t.started_at,
-                    t.ended_at, t.status, t.input_op, t.context_coverage, t.tokenizer,
-                    t.system_prompt_path, t.task_prompt_path, t.system_tokens, t.task_tokens,
-                    t.supplied_context_tokens, u.input_tokens, u.total_input_tokens,
-                    u.peak_input_tokens, u.context_window_tokens, u.output_tokens,
-                    u.reasoning_tokens, u.cache_read_tokens, u.cache_write_tokens, u.cost_usd,
-                    t.context_gather_ms, t.context_render_ms, t.context_persist_ms,
-                    t.first_event_seq, t.last_event_seq, t.root_output, t.epoch_id, t.basis_rev
-             FROM agent_turns t
-             LEFT JOIN turn_usage_samples u ON u.turn_id=t.id AND u.observed_at=(
-                SELECT MAX(latest.observed_at) FROM turn_usage_samples latest
-                WHERE latest.turn_id=t.id
-             )
-             WHERE t.id=?1",
-        )?;
-        let row = stmt.query_row(params![id], map_agent_turn).optional()?;
-        Ok(row)
-    }
-
-    pub fn context_assets_for_turns(
-        &self,
-        turn_ids: &[String],
-    ) -> StoreResult<Vec<ContextAssetRow>> {
-        if turn_ids.is_empty() {
-            return Ok(Vec::new());
-        }
-        let conn = self.conn.lock().expect("store mutex poisoned");
-        let mut assets = Vec::new();
-        for turn_ids in turn_ids.chunks(500) {
-            let placeholders = in_placeholders(turn_ids.len());
-            let sql = format!(
-                "SELECT turn_id, position, channel, kind, scope, label, source_path, included_by,
-                    content_sha256, byte_start, byte_end, bytes, isolated_tokens, attributed_tokens
-             FROM context_assets WHERE turn_id IN ({placeholders})
-             ORDER BY turn_id, position"
-            );
-            let mut stmt = conn.prepare(&sql)?;
-            let rows = stmt.query_map(rusqlite::params_from_iter(turn_ids), |row| {
-                Ok((
-                    row.get::<_, String>(0)?,
-                    row.get::<_, i64>(1)?,
-                    row.get::<_, String>(2)?,
-                    row.get::<_, String>(3)?,
-                    row.get::<_, String>(4)?,
-                    row.get::<_, String>(5)?,
-                    row.get::<_, Option<String>>(6)?,
-                    row.get::<_, String>(7)?,
-                    row.get::<_, String>(8)?,
-                    row.get::<_, i64>(9)?,
-                    row.get::<_, i64>(10)?,
-                    row.get::<_, i64>(11)?,
-                    row.get::<_, i64>(12)?,
-                    row.get::<_, i64>(13)?,
-                ))
-            })?;
-            for row in rows {
-                let (
-                    turn_id,
-                    position,
-                    channel,
-                    kind,
-                    scope,
-                    label,
-                    source_path,
-                    included_by,
-                    content_sha256,
-                    byte_start,
-                    byte_end,
-                    bytes,
-                    isolated_tokens,
-                    attributed_tokens,
-                ) = row?;
-                assets.push(ContextAssetRow {
-                    turn_id,
-                    asset: ContextAsset {
-                        position: position as u32,
-                        channel: ContextChannel::parse(&channel)?,
-                        kind: ContextAssetKind::parse(&kind)?,
-                        scope: ContextScope::parse(&scope)?,
-                        label,
-                        source_path,
-                        included_by,
-                        content_sha256,
-                        byte_start: byte_start as u64,
-                        byte_end: byte_end as u64,
-                        bytes: bytes as u64,
-                        isolated_tokens: isolated_tokens as u64,
-                        attributed_tokens: attributed_tokens as u64,
-                    },
-                });
-            }
-        }
-        assets.sort_by_key(|row| (row.turn_id.clone(), row.asset.position));
-        Ok(assets)
-    }
-    pub fn context_decisions_for_turns(
-        &self,
-        turn_ids: &[String],
-    ) -> StoreResult<Vec<ContextDecisionRow>> {
-        if turn_ids.is_empty() {
-            return Ok(Vec::new());
-        }
-        let conn = self.conn.lock().expect("store mutex poisoned");
-        let mut decisions = Vec::new();
-        for turn_ids in turn_ids.chunks(500) {
-            let placeholders = in_placeholders(turn_ids.len());
-            let sql = format!(
-                "SELECT turn_id, position, kind, scope, label, source_path, decision, reason,
-                    original_bytes, original_tokens, asset_position
-             FROM context_decisions WHERE turn_id IN ({placeholders})
-             ORDER BY turn_id, position"
-            );
-            let mut stmt = conn.prepare(&sql)?;
-            let rows = stmt.query_map(rusqlite::params_from_iter(turn_ids), |row| {
-                Ok((
-                    row.get::<_, String>(0)?,
-                    row.get::<_, i64>(1)?,
-                    row.get::<_, String>(2)?,
-                    row.get::<_, String>(3)?,
-                    row.get::<_, String>(4)?,
-                    row.get::<_, Option<String>>(5)?,
-                    row.get::<_, String>(6)?,
-                    row.get::<_, String>(7)?,
-                    row.get::<_, Option<i64>>(8)?,
-                    row.get::<_, Option<i64>>(9)?,
-                    row.get::<_, Option<i64>>(10)?,
-                ))
-            })?;
-            for row in rows {
-                let (
-                    turn_id,
-                    position,
-                    kind,
-                    scope,
-                    label,
-                    source_path,
-                    decision,
-                    reason,
-                    original_bytes,
-                    original_tokens,
-                    asset_position,
-                ) = row?;
-                decisions.push(ContextDecisionRow {
-                    turn_id,
-                    decision: ContextDecision {
-                        position: position as u32,
-                        kind: ContextAssetKind::parse(&kind)?,
-                        scope: ContextScope::parse(&scope)?,
-                        label,
-                        source_path,
-                        decision: ContextDecisionKind::parse(&decision)?,
-                        reason,
-                        original_bytes: original_bytes.map(|value| value as u64),
-                        original_tokens: original_tokens.map(|value| value as u64),
-                        asset_position: asset_position.map(|value| value as u32),
-                    },
-                });
-            }
-        }
-        decisions.sort_by_key(|row| (row.turn_id.clone(), row.decision.position));
-        Ok(decisions)
-    }
-}
-
-/// `?, ?, ?` for a `WHERE col IN (...)` clause bound by position.
-fn in_placeholders(count: usize) -> String {
-    std::iter::repeat_n("?", count)
-        .collect::<Vec<_>>()
-        .join(", ")
 }
 
 fn exact_or_prefix(value: &str) -> (&'static str, String) {
@@ -2871,505 +1738,18 @@ fn exact_or_prefix(value: &str) -> (&'static str, String) {
         ("LIKE", format!("{}%", value.replace(['%', '_'], "")))
     }
 }
-
-fn to_sql_i64(value: Option<u64>, field: &str) -> StoreResult<Option<i64>> {
-    value
-        .map(|value| {
-            i64::try_from(value).map_err(|_| {
-                StoreError::InvalidData(format!("{field} exceeds SQLite integer range"))
-            })
-        })
-        .transpose()
-}
-
-fn map_turn_usage_sample(row: &rusqlite::Row<'_>) -> rusqlite::Result<TurnUsageSample> {
-    Ok(TurnUsageSample {
-        turn_id: row.get(0)?,
-        observed_at: row.get(1)?,
-        final_receipt: row.get(2)?,
-        usage: TurnUsage {
-            input_tokens: read_u64(row, 3)?,
-            total_input_tokens: read_u64(row, 4)?,
-            peak_input_tokens: read_u64(row, 5)?,
-            context_window_tokens: read_u64(row, 6)?,
-            output_tokens: read_u64(row, 7)?,
-            reasoning_tokens: read_u64(row, 8)?,
-            cache_read_tokens: read_u64(row, 9)?,
-            cache_write_tokens: read_u64(row, 10)?,
-            model: row.get(11)?,
-            cost_usd: row.get(12)?,
-        },
-    })
-}
-
-fn read_u64(row: &rusqlite::Row<'_>, index: usize) -> rusqlite::Result<Option<u64>> {
-    row.get::<_, Option<i64>>(index)?.map_or(Ok(None), |value| {
-        u64::try_from(value).map(Some).map_err(|_| {
-            rusqlite::Error::FromSqlConversionFailure(
-                index,
-                rusqlite::types::Type::Integer,
-                std::io::Error::new(std::io::ErrorKind::InvalidData, "negative token count").into(),
-            )
-        })
-    })
-}
-
-fn latest_turn_usage_sample_in(
-    conn: &rusqlite::Connection,
-    turn_id: &str,
-) -> StoreResult<Option<TurnUsageSample>> {
-    conn.query_row(
-        "SELECT turn_id, observed_at, final_receipt, input_tokens,
-                total_input_tokens, peak_input_tokens, context_window_tokens,
-                output_tokens, reasoning_tokens, cache_read_tokens,
-                cache_write_tokens, model, cost_usd
-         FROM turn_usage_samples
-         WHERE turn_id=?1
-         ORDER BY observed_at DESC
-         LIMIT 1",
-        [turn_id],
-        map_turn_usage_sample,
-    )
-    .optional()
-    .map_err(StoreError::from)
-}
-
-fn validate_usage_progress(
-    previous: &TurnUsageSample,
-    sample: &TurnUsageSample,
-) -> StoreResult<()> {
-    if previous.final_receipt && !sample.final_receipt {
-        return Err(StoreError::InvalidData(
-            "final usage receipt cannot become provisional".to_string(),
-        ));
-    }
-    let counters = [
-        (
-            "input_tokens",
-            previous.usage.input_tokens,
-            sample.usage.input_tokens,
-        ),
-        (
-            "total_input_tokens",
-            previous.usage.total_input_tokens,
-            sample.usage.total_input_tokens,
-        ),
-        (
-            "output_tokens",
-            previous.usage.output_tokens,
-            sample.usage.output_tokens,
-        ),
-        (
-            "reasoning_tokens",
-            previous.usage.reasoning_tokens,
-            sample.usage.reasoning_tokens,
-        ),
-        (
-            "cache_read_tokens",
-            previous.usage.cache_read_tokens,
-            sample.usage.cache_read_tokens,
-        ),
-        (
-            "cache_write_tokens",
-            previous.usage.cache_write_tokens,
-            sample.usage.cache_write_tokens,
-        ),
-    ];
-    for (field, before, after) in counters {
-        if matches!((before, after), (Some(before), Some(after)) if after < before) {
-            return Err(StoreError::InvalidData(format!(
-                "{field} decreased within one Turn"
-            )));
-        }
-    }
-    Ok(())
-}
-
-fn insert_agent_turn(tx: &rusqlite::Transaction<'_>, turn: &AgentTurnRow) -> StoreResult<()> {
-    tx.execute(
-        "INSERT INTO agent_turns (
-            id, invocation_id, ordinal, provider_turn_id, started_at, ended_at, status, input_op,
-            context_coverage, tokenizer, system_prompt_path, task_prompt_path, system_tokens,
-            task_tokens, supplied_context_tokens, context_gather_ms, context_render_ms,
-            context_persist_ms, first_event_seq, last_event_seq, root_output, epoch_id, basis_rev
-         ) VALUES (?1, ?2, ?3, ?4, ?5, ?6, ?7, ?8, ?9, ?10, ?11, ?12, ?13, ?14,
-            ?15, ?16, ?17, ?18, ?19, ?20, ?21, ?22, ?23)",
-        params![
-            turn.id,
-            turn.invocation_id,
-            turn.ordinal,
-            turn.provider_turn_id,
-            turn.started_at,
-            turn.ended_at,
-            turn.status,
-            turn.input_op,
-            turn.context_coverage,
-            turn.tokenizer,
-            turn.system_prompt_path,
-            turn.task_prompt_path,
-            turn.system_tokens,
-            turn.task_tokens,
-            turn.supplied_context_tokens,
-            turn.context_gather_ms,
-            turn.context_render_ms,
-            turn.context_persist_ms,
-            turn.first_event_seq,
-            turn.last_event_seq,
-            turn.root_output,
-            turn.basis.as_ref().map(|basis| basis.epoch_id.as_str()),
-            turn.basis.as_ref().map(|basis| basis.revision as i64),
-        ],
-    )?;
-    if let Some(basis) = &turn.basis {
-        durable::insert_seed_sends_for_turn(tx, &turn.id, basis)?;
-    }
-    Ok(())
-}
-
-fn insert_context_rows(
-    tx: &rusqlite::Transaction<'_>,
-    assets: &[ContextAssetRow],
-    decisions: &[ContextDecisionRow],
-) -> StoreResult<()> {
-    for row in assets {
-        let asset = &row.asset;
-        tx.execute(
-            "INSERT INTO context_assets (
-                turn_id, position, channel, kind, scope, label, source_path, included_by,
-                content_sha256, byte_start, byte_end, bytes, isolated_tokens, attributed_tokens
-             ) VALUES (?1, ?2, ?3, ?4, ?5, ?6, ?7, ?8, ?9, ?10, ?11, ?12, ?13, ?14)",
-            params![
-                row.turn_id,
-                i64::from(asset.position),
-                asset.channel.as_str(),
-                asset.kind.as_str(),
-                asset.scope.as_str(),
-                asset.label,
-                asset.source_path,
-                asset.included_by,
-                asset.content_sha256,
-                asset.byte_start as i64,
-                asset.byte_end as i64,
-                asset.bytes as i64,
-                asset.isolated_tokens as i64,
-                asset.attributed_tokens as i64,
-            ],
-        )?;
-    }
-    for row in decisions {
-        let decision = &row.decision;
-        tx.execute(
-            "INSERT INTO context_decisions (
-                turn_id, position, kind, scope, label, source_path, decision, reason,
-                original_bytes, original_tokens, asset_position
-             ) VALUES (?1, ?2, ?3, ?4, ?5, ?6, ?7, ?8, ?9, ?10, ?11)",
-            params![
-                row.turn_id,
-                i64::from(decision.position),
-                decision.kind.as_str(),
-                decision.scope.as_str(),
-                decision.label,
-                decision.source_path,
-                decision.decision.as_str(),
-                decision.reason,
-                decision.original_bytes.map(|value| value as i64),
-                decision.original_tokens.map(|value| value as i64),
-                decision.asset_position.map(i64::from),
-            ],
-        )?;
-    }
-    Ok(())
-}
-
-fn update_agent_turn(conn: &rusqlite::Connection, turn: &AgentTurnRow) -> StoreResult<()> {
-    conn.execute(
-        "UPDATE agent_turns SET
-            provider_turn_id = ?2, ended_at = ?3, status = ?4,
-            first_event_seq = ?5, last_event_seq = ?6, root_output = ?7
-         WHERE id = ?1",
-        params![
-            turn.id,
-            turn.provider_turn_id,
-            turn.ended_at,
-            turn.status,
-            turn.first_event_seq,
-            turn.last_event_seq,
-            turn.root_output,
-        ],
-    )?;
-    Ok(())
-}
-
-fn map_agent_turn(row: &rusqlite::Row<'_>) -> rusqlite::Result<AgentTurnRow> {
-    Ok(AgentTurnRow {
-        id: row.get(0)?,
-        invocation_id: row.get(1)?,
-        ordinal: row.get(2)?,
-        provider_turn_id: row.get(3)?,
-        started_at: row.get(4)?,
-        ended_at: row.get(5)?,
-        status: row.get(6)?,
-        input_op: row.get(7)?,
-        context_coverage: row.get(8)?,
-        tokenizer: row.get(9)?,
-        system_prompt_path: row.get(10)?,
-        task_prompt_path: row.get(11)?,
-        system_tokens: row.get(12)?,
-        task_tokens: row.get(13)?,
-        supplied_context_tokens: row.get(14)?,
-        usage: map_turn_usage(row, 15, None)?,
-        context_gather_ms: row.get(24)?,
-        context_render_ms: row.get(25)?,
-        context_persist_ms: row.get(26)?,
-        first_event_seq: row.get(27)?,
-        last_event_seq: row.get(28)?,
-        root_output: row.get(29)?,
-        basis: match (
-            row.get::<_, Option<String>>(30)?,
-            row.get::<_, Option<i64>>(31)?,
-        ) {
-            (Some(epoch_id), Some(revision)) => Some(crate::durable::Basis {
-                epoch_id: crate::durable::EpochId::parse(&epoch_id).map_err(|error| {
-                    rusqlite::Error::FromSqlConversionFailure(
-                        30,
-                        rusqlite::types::Type::Text,
-                        Box::new(error),
-                    )
-                })?,
-                revision: revision as u64,
-            }),
-            (None, None) => None,
-            _ => {
-                return Err(rusqlite::Error::InvalidColumnType(
-                    30,
-                    "epoch_id/basis_rev".to_string(),
-                    rusqlite::types::Type::Null,
-                ))
-            }
-        },
-    })
-}
-
-fn map_turn_usage(
-    row: &rusqlite::Row<'_>,
-    start: usize,
-    model: Option<String>,
-) -> rusqlite::Result<Option<TurnUsage>> {
-    let usage = TurnUsage {
-        input_tokens: read_u64(row, start)?,
-        total_input_tokens: read_u64(row, start + 1)?,
-        peak_input_tokens: read_u64(row, start + 2)?,
-        context_window_tokens: read_u64(row, start + 3)?,
-        output_tokens: read_u64(row, start + 4)?,
-        reasoning_tokens: read_u64(row, start + 5)?,
-        cache_read_tokens: read_u64(row, start + 6)?,
-        cache_write_tokens: read_u64(row, start + 7)?,
-        model,
-        cost_usd: row.get(start + 8)?,
-    };
-    Ok(usage.is_reported().then_some(usage))
-}
-
-#[cfg(test)]
-mod contention_tests {
-    use super::{SqliteStore, SQLITE_WRITE_BUSY_TIMEOUT};
-    use crate::chat::types::TurnUsage;
-    use crate::store::{StoreResult, TurnUsageSample};
-    use crate::trace::{AgentInvocationRow, AgentTurnRow};
-    use std::path::Path;
-    use std::sync::atomic::{AtomicBool, Ordering};
-    use std::sync::mpsc;
-    use std::thread;
-    use std::time::{Duration, Instant};
-
-    static WRITE_CONTENDED: AtomicBool = AtomicBool::new(false);
-
-    fn signal_busy(_: i32) -> bool {
-        WRITE_CONTENDED.store(true, Ordering::Release);
-        true
-    }
-
-    fn while_wal_writer_holds_lock<T>(
-        store: &SqliteStore,
-        path: &Path,
-        operation: &str,
-        run: impl FnOnce() -> StoreResult<T>,
-    ) -> T {
-        WRITE_CONTENDED.store(false, Ordering::Release);
-        store
-            .conn
-            .lock()
-            .expect("store mutex poisoned")
-            .busy_handler(Some(signal_busy))
-            .unwrap();
-
-        let path = path.to_path_buf();
-        let writer_run_id = format!("holder-{operation}");
-        let (locked_tx, locked_rx) = mpsc::sync_channel(0);
-        let writer = thread::spawn(move || {
-            let mut connection = rusqlite::Connection::open(path).unwrap();
-            let transaction = connection
-                .transaction_with_behavior(rusqlite::TransactionBehavior::Immediate)
-                .unwrap();
-            transaction
-                .execute(
-                    "INSERT INTO run_events (run_id, process_id, seq, ts, node, event)
-                     VALUES (?1, 'holder', 0, 1, 'flow', 'started')",
-                    [writer_run_id],
-                )
-                .unwrap();
-            locked_tx.send(()).unwrap();
-            let deadline = Instant::now() + Duration::from_secs(1);
-            while !WRITE_CONTENDED.load(Ordering::Acquire) && Instant::now() < deadline {
-                thread::yield_now();
-            }
-            transaction.commit().unwrap();
-            WRITE_CONTENDED.load(Ordering::Acquire)
-        });
-
-        locked_rx.recv().unwrap();
-        let result = run();
-        let contended = writer.join().unwrap();
-        let connection = store.conn.lock().expect("store mutex poisoned");
-        connection.busy_handler(None).unwrap();
-        connection.busy_timeout(SQLITE_WRITE_BUSY_TIMEOUT).unwrap();
-        assert!(
-            contended,
-            "{operation} bypassed the busy handler instead of acquiring write authority first"
-        );
-        result.unwrap()
-    }
-
-    fn invocation() -> AgentInvocationRow {
-        AgentInvocationRow {
-            id: "invocation_contention".to_string(),
-            run_id: "run-contention".to_string(),
-            answer_ask_id: None,
-            process_id: "exec_contention".to_string(),
-            started_at: 1,
-            ended_at: None,
-            repo: "/repo".to_string(),
-            worktree: "/repo/task".to_string(),
-            wave: Some("product".to_string()),
-            flow: Some("task".to_string()),
-            skill: Some("ship-5whys".to_string()),
-            project: Some("loopflow-api".to_string()),
-            task: Some("LOO-238".to_string()),
-            provider: "codex".to_string(),
-            model: Some("gpt-5".to_string()),
-            surface: "headless".to_string(),
-            capture_status: "capturing".to_string(),
-            incomplete_reason: None,
-            outcome: "running".to_string(),
-            artifact_dir: "run/exec/invocation".to_string(),
-            conversation_path: "run/exec/invocation/conversation.jsonl".to_string(),
-            provider_events_path: None,
-            provider_session_id: None,
-            provider_session_path: None,
-            conversation_event_count: 1,
-            conversation_bytes: 10,
-            supervision: None,
-        }
-    }
-
-    fn turn(id: &str, ordinal: i64, status: &str) -> AgentTurnRow {
-        AgentTurnRow {
-            id: id.to_string(),
-            invocation_id: "invocation_contention".to_string(),
-            ordinal,
-            provider_turn_id: None,
-            started_at: ordinal,
-            ended_at: None,
-            status: status.to_string(),
-            input_op: if ordinal == 1 { "initial" } else { "message" }.to_string(),
-            context_coverage: "assembled".to_string(),
-            tokenizer: "cl100k_base".to_string(),
-            system_prompt_path: None,
-            task_prompt_path: format!("run/exec/invocation/turns/{ordinal:04}-task.md"),
-            system_tokens: 0,
-            task_tokens: 2,
-            supplied_context_tokens: 2,
-            usage: None,
-            context_gather_ms: 1,
-            context_render_ms: 1,
-            context_persist_ms: 1,
-            first_event_seq: Some(ordinal - 1),
-            last_event_seq: None,
-            root_output: None,
-            basis: None,
-        }
-    }
-
-    #[test]
-    fn multi_turn_capture_waits_for_concurrent_wal_writers() {
-        let directory = tempfile::tempdir().unwrap();
-        let path = directory.path().join("loopflow.db");
-        let store = SqliteStore::new(&path).expect("materialize the schema");
-        let mut invocation = invocation();
-        let mut first_turn = turn("turn_contention_1", 1, "running");
-
-        while_wal_writer_holds_lock(&store, &path, "capture start", || {
-            store.insert_trace_capture(&invocation, &first_turn, &[], &[])
-        });
-        while_wal_writer_holds_lock(&store, &path, "usage checkpoint", || {
-            store.record_turn_usage_sample(&TurnUsageSample {
-                turn_id: first_turn.id.clone(),
-                observed_at: 2,
-                final_receipt: false,
-                usage: TurnUsage {
-                    input_tokens: Some(10),
-                    output_tokens: Some(1),
-                    ..Default::default()
-                },
-            })
-        });
-
-        first_turn.ended_at = Some(3);
-        first_turn.status = "partial".to_string();
-        let second_turn = turn("turn_contention_2", 2, "running");
-        while_wal_writer_holds_lock(&store, &path, "turn transition", || {
-            store.finish_agent_turn_capture(&first_turn)?;
-            store.insert_agent_turn_capture(&second_turn, &[], &[])
-        });
-
-        invocation.ended_at = Some(4);
-        invocation.capture_status = "complete".to_string();
-        invocation.outcome = "completed".to_string();
-        let mut second_turn = second_turn;
-        second_turn.ended_at = Some(4);
-        second_turn.status = "completed".to_string();
-        while_wal_writer_holds_lock(&store, &path, "capture finish", || {
-            store.finish_trace_capture(&invocation, &second_turn)
-        });
-
-        let invocations = store
-            .agent_invocations_matching(&invocation.run_id)
-            .unwrap();
-        assert_eq!(invocations.len(), 1);
-        assert_eq!(invocations[0].capture_status, "complete");
-        assert_eq!(invocations[0].outcome, "completed");
-        let turns = store
-            .agent_turns_for_invocations(&[invocation.id.clone()])
-            .unwrap();
-        assert_eq!(turns.len(), 2);
-        assert_eq!(turns[0].status, "partial");
-        assert_eq!(turns[1].status, "completed");
-        assert_eq!(
-            turns[0].usage.as_ref().and_then(|usage| usage.input_tokens),
-            Some(10)
-        );
-    }
-}
-
 #[cfg(test)]
 mod frontier_tests {
-    use super::{writer_invocation_is_authoritative, SqliteStore};
+    use super::SqliteStore;
     use crate::build_info::MigrationAuthority::{self, Published, ValidationOnly};
+    use crate::durable::{WorkRef, WorkStatus};
+    use crate::id::WaveId;
     use crate::store::migrations::{
         apply_all_but_head, latest_applied_version_sqlite, latest_known_version,
         prior_known_version,
     };
     use crate::store::FrontierAdvance::{self, Authorized, Forbidden};
+    use crate::work::wave::Wave;
     use std::path::{Path, PathBuf};
 
     /// The machine home whose `.lf/loopflow.db` `may_apply_migrations` treats as
@@ -3406,83 +1786,6 @@ mod frontier_tests {
         latest_applied_version_sqlite(&conn).unwrap()
     }
 
-    #[test]
-    fn writer_authority_follows_the_exact_run_and_ask_not_the_process() {
-        let directory = tempfile::tempdir().unwrap();
-        let path = directory.path().join("authority.db");
-        let connection = rusqlite::Connection::open(&path).unwrap();
-        connection
-            .execute_batch(
-                "CREATE TABLE runs (id TEXT PRIMARY KEY, state TEXT NOT NULL);
-                 CREATE TABLE agent_invocations (
-                    id TEXT PRIMARY KEY,
-                    ended_at INTEGER,
-                    supervising_run_id TEXT,
-                    answer_ask_id TEXT
-                 );
-                 CREATE TABLE agent_turns (
-                    id TEXT PRIMARY KEY,
-                    invocation_id TEXT NOT NULL,
-                    status TEXT NOT NULL
-                 );
-                 CREATE TABLE ask_exchanges (
-                    id TEXT PRIMARY KEY,
-                    state TEXT NOT NULL,
-                    active_invocation_id TEXT
-                 );
-                 INSERT INTO runs VALUES ('run_task', 'active');
-                 INSERT INTO agent_invocations
-                    VALUES ('invocation_task', NULL, 'run_task', NULL);
-                 INSERT INTO agent_turns
-                    VALUES ('turn_task', 'invocation_task', 'running');
-                 INSERT INTO runs VALUES ('run_parent', 'active');
-                 INSERT INTO agent_invocations
-                    VALUES ('invocation_ask', NULL, 'run_parent', 'ask_one');
-                 INSERT INTO agent_turns
-                    VALUES ('turn_ask', 'invocation_ask', 'running');
-                 INSERT INTO ask_exchanges
-                    VALUES ('ask_one', 'claimed', 'invocation_ask');",
-            )
-            .unwrap();
-        drop(connection);
-
-        assert!(writer_invocation_is_authoritative(&path, "invocation_task").unwrap());
-        assert!(writer_invocation_is_authoritative(&path, "invocation_ask").unwrap());
-
-        let connection = rusqlite::Connection::open(&path).unwrap();
-        connection
-            .execute(
-                "UPDATE agent_turns SET status='completed' WHERE id='turn_task'",
-                [],
-            )
-            .unwrap();
-        connection
-            .execute(
-                "UPDATE agent_turns SET status='completed' WHERE id='turn_ask'",
-                [],
-            )
-            .unwrap();
-        drop(connection);
-
-        assert!(!writer_invocation_is_authoritative(&path, "invocation_task").unwrap());
-        assert!(!writer_invocation_is_authoritative(&path, "invocation_ask").unwrap());
-
-        let connection = rusqlite::Connection::open(&path).unwrap();
-        connection
-            .execute(
-                "UPDATE ask_exchanges
-                 SET state='resolved', active_invocation_id=NULL
-                 WHERE id='ask_one'",
-                [],
-            )
-            .unwrap();
-        drop(connection);
-
-        assert!(!writer_invocation_is_authoritative(&path, "invocation_task").unwrap());
-        assert!(!writer_invocation_is_authoritative(&path, "invocation_ask").unwrap());
-        assert!(!writer_invocation_is_authoritative(&path, "invocation_missing").unwrap());
-    }
-
     fn seed_shared_store_at_prior_head(path: &Path) {
         std::fs::create_dir_all(path.parent().unwrap()).unwrap();
         let conn = rusqlite::Connection::open(path).unwrap();
@@ -3510,6 +1813,28 @@ mod frontier_tests {
             .into_iter()
             .map(|event| event.event)
             .collect()
+    }
+
+    #[test]
+    fn private_development_store_opens_with_the_current_work_schema() {
+        let shared = SharedHome::new();
+        let path = shared.home.join("private/loopflow.db");
+        let store = open(&path, ValidationOnly, &shared.home, Forbidden)
+            .expect("private development store opens at the embedded draft frontier");
+        let wave = Wave::new(
+            WaveId::new(),
+            "private-development".to_string(),
+            "/repo".to_string(),
+        );
+
+        store.create_wave(&wave).unwrap();
+
+        assert_eq!(
+            store
+                .work_status(&WorkRef::Wave(wave.id().clone()))
+                .unwrap(),
+            WorkStatus::Ready
+        );
     }
 
     /// (a) An ordinary open of an absent shared store must refuse actionably and

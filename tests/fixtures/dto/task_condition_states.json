@@ -1,0 +1,383 @@
+{
+  "clean_backlog": {
+    "task": {
+      "id": "backlog",
+      "identifier": "W2-A5",
+      "name": "Clean backlog",
+      "description": "",
+      "rank": 5,
+      "completed": false,
+      "assignee": null
+    },
+    "reference": {
+      "issue_url": null,
+      "workspace": null
+    },
+    "runtime": null,
+    "next_move": {
+      "owner": "project",
+      "reason": "Task is ready to start"
+    },
+    "active_pr": null,
+    "section": "available",
+    "actions": {
+      "recommended": null,
+      "reason": "Task is ready to start"
+    },
+    "condition": {
+      "state": "clear",
+      "reason": "Task is ready to start",
+      "observed_at": "2026-07-15T00:01:00Z",
+      "evidence_age_secs": null,
+      "local_progress": {
+        "state": "not_applicable",
+        "unsettled": false,
+        "dirty": null,
+        "authored_commits": null,
+        "recovery_required": null,
+        "reason": null
+      }
+    }
+  },
+  "completed": {
+    "task": {
+      "id": "completed",
+      "identifier": "W2-A6",
+      "name": "Completed",
+      "description": "",
+      "rank": 6,
+      "completed": true,
+      "assignee": null
+    },
+    "reference": {
+      "issue_url": null,
+      "workspace": {
+        "slug": "completed",
+        "branch": "jack/completed",
+        "worktree": "/src/loopflow.completed"
+      }
+    },
+    "runtime": {
+      "work_id": "ts_completed",
+      "project_id": "ps_1",
+      "status": "done",
+      "reason": "done",
+      "updated_at": "2026-07-14T20:00:00Z",
+      "provider": "codex",
+      "routing_project_id": "ps_1"
+    },
+    "next_move": {
+      "owner": "project",
+      "reason": "Linear Task is complete"
+    },
+    "active_pr": null,
+    "section": "later",
+    "actions": {
+      "recommended": "no_action",
+      "reason": "Task is completed"
+    },
+    "condition": {
+      "state": "clear",
+      "reason": "Linear Task is complete",
+      "observed_at": "2026-07-15T00:01:00Z",
+      "evidence_age_secs": 14460,
+      "local_progress": {
+        "state": "observed",
+        "unsettled": false,
+        "dirty": false,
+        "authored_commits": false,
+        "recovery_required": false,
+        "reason": null
+      }
+    }
+  },
+  "stale": {
+    "task": {
+      "id": "stale",
+      "identifier": "W2-A7",
+      "name": "Stale active intent",
+      "description": "",
+      "rank": 7,
+      "completed": false,
+      "assignee": null
+    },
+    "reference": {
+      "issue_url": null,
+      "workspace": {
+        "slug": "stale",
+        "branch": "jack/stale",
+        "worktree": "/src/loopflow.stale"
+      }
+    },
+    "runtime": {
+      "work_id": "ts_stale",
+      "project_id": "ps_1",
+      "status": "ready",
+      "reason": "ready",
+      "updated_at": "2026-07-14T18:00:00Z",
+      "provider": "codex",
+      "routing_project_id": "ps_1"
+    },
+    "next_move": {
+      "owner": "task",
+      "reason": "implementing"
+    },
+    "active_pr": null,
+    "section": "waiting",
+    "actions": {
+      "recommended": "resume",
+      "reason": "resume the parked Task"
+    },
+    "condition": {
+      "state": "blocked",
+      "reason": "local Task progress requires recovery",
+      "observed_at": "2026-07-15T00:01:00Z",
+      "evidence_age_secs": 21660,
+      "local_progress": {
+        "state": "observed",
+        "unsettled": true,
+        "dirty": false,
+        "authored_commits": false,
+        "recovery_required": true,
+        "reason": null
+      }
+    }
+  },
+  "unavailable": {
+    "task": {
+      "id": "unavailable",
+      "identifier": "W2-A8",
+      "name": "Unavailable evidence",
+      "description": "",
+      "rank": 8,
+      "completed": false,
+      "assignee": null
+    },
+    "reference": {
+      "issue_url": null,
+      "workspace": {
+        "slug": "unavailable",
+        "branch": "jack/unavailable",
+        "worktree": "/missing/loopflow.unavailable"
+      }
+    },
+    "runtime": {
+      "work_id": "ts_unavailable",
+      "project_id": "ps_1",
+      "status": "ready",
+      "reason": "ready",
+      "updated_at": "2026-07-14T23:00:00Z",
+      "provider": "codex",
+      "routing_project_id": "ps_1"
+    },
+    "next_move": {
+      "owner": "task",
+      "reason": "implementing"
+    },
+    "active_pr": null,
+    "section": "waiting",
+    "actions": {
+      "recommended": "resume",
+      "reason": "resume the parked Task"
+    },
+    "condition": {
+      "state": "unknown",
+      "reason": "failed to inspect Task worktree",
+      "observed_at": "2026-07-15T00:01:00Z",
+      "evidence_age_secs": 3660,
+      "local_progress": {
+        "state": "unavailable",
+        "unsettled": null,
+        "dirty": null,
+        "authored_commits": null,
+        "recovery_required": true,
+        "reason": "failed to inspect Task worktree"
+      }
+    }
+  },
+  "user_wait": {
+    "task": {
+      "id": "user",
+      "identifier": "W2-A2",
+      "name": "User wait",
+      "description": "",
+      "rank": 2,
+      "completed": false,
+      "assignee": null
+    },
+    "reference": {
+      "issue_url": null,
+      "workspace": {
+        "slug": "user",
+        "branch": "jack/user",
+        "worktree": "/src/loopflow.user"
+      }
+    },
+    "runtime": {
+      "work_id": "task-user",
+      "project_id": "ps_1",
+      "status": "ready",
+      "reason": "ready",
+      "updated_at": "2026-07-14T23:59:00Z",
+      "provider": "codex",
+      "routing_project_id": "ps_1"
+    },
+    "next_move": {
+      "owner": "user",
+      "reason": "choose the recovery boundary"
+    },
+    "active_pr": null,
+    "section": "waiting",
+    "actions": {
+      "recommended": "no_action",
+      "reason": "Waiting for your answer"
+    },
+    "condition": {
+      "state": "waiting",
+      "reason": "choose the recovery boundary",
+      "observed_at": "2026-07-15T00:01:00Z",
+      "evidence_age_secs": 120,
+      "local_progress": {
+        "state": "observed",
+        "unsettled": false,
+        "dirty": false,
+        "authored_commits": false,
+        "recovery_required": false,
+        "reason": null
+      }
+    }
+  },
+  "dirty": {
+    "task": {
+      "id": "dirty",
+      "identifier": "W2-A3",
+      "name": "Dirty worktree",
+      "description": "",
+      "rank": 3,
+      "completed": false,
+      "assignee": null
+    },
+    "reference": {
+      "issue_url": null,
+      "workspace": {
+        "slug": "dirty",
+        "branch": "jack/dirty",
+        "worktree": "/src/loopflow.dirty"
+      }
+    },
+    "runtime": {
+      "work_id": "ts_dirty",
+      "project_id": "ps_1",
+      "status": "ready",
+      "reason": "ready",
+      "updated_at": "2026-07-14T23:50:00Z",
+      "provider": "codex",
+      "routing_project_id": "ps_1"
+    },
+    "next_move": {
+      "owner": "task",
+      "reason": "implementing"
+    },
+    "active_pr": null,
+    "section": "waiting",
+    "actions": {
+      "recommended": "resume",
+      "reason": "resume the parked Task"
+    },
+    "condition": {
+      "state": "blocked",
+      "reason": "Task has uncommitted work",
+      "observed_at": "2026-07-15T00:01:00Z",
+      "evidence_age_secs": 660,
+      "local_progress": {
+        "state": "observed",
+        "unsettled": true,
+        "dirty": true,
+        "authored_commits": false,
+        "recovery_required": true,
+        "reason": null
+      }
+    }
+  },
+  "authored_commits": {
+    "task": {
+      "id": "commits",
+      "identifier": "W2-A4",
+      "name": "Authored commits",
+      "description": "",
+      "rank": 4,
+      "completed": false,
+      "assignee": null
+    },
+    "reference": {
+      "issue_url": null,
+      "workspace": {
+        "slug": "commits",
+        "branch": "jack/commits",
+        "worktree": "/src/loopflow.commits"
+      }
+    },
+    "runtime": {
+      "work_id": "ts_commits",
+      "project_id": "ps_1",
+      "status": "ready",
+      "reason": "ready",
+      "updated_at": "2026-07-14T22:00:00Z",
+      "provider": "codex",
+      "routing_project_id": "ps_1"
+    },
+    "next_move": {
+      "owner": "user",
+      "reason": "merge pull request head head-commits on GitHub"
+    },
+    "active_pr": {
+      "id": "pr_commits",
+      "sequence": 1,
+      "slug": "commits",
+      "branch": "jack/commits",
+      "base_commit": "abc",
+      "phase": "open",
+      "empty": null,
+      "publication": {
+        "requested_at": "2026-07-14T22:00:00Z",
+        "presentation": {
+          "title": "Ship authored commits",
+          "body": "Explains the intent and proof for this head.",
+          "head_sha": "head-commits"
+        },
+        "github": {
+          "number": 123,
+          "url": "https://github.com/loopflowstudio/loopflow/pull/123"
+        },
+        "merge": {
+          "mode": "user",
+          "requested_at": "2026-07-14T22:01:00Z",
+          "head_sha": "head-commits",
+          "after_merge": "continue_task",
+          "next_slug": null
+        }
+      },
+      "merge_commit": null,
+      "abandoned_at": null
+    },
+    "section": "waiting",
+    "actions": {
+      "recommended": "open_pr",
+      "reason": "merge head head-commits on GitHub"
+    },
+    "condition": {
+      "state": "waiting",
+      "reason": "merge pull request head head-commits on GitHub",
+      "observed_at": "2026-07-15T00:01:00Z",
+      "evidence_age_secs": 7260,
+      "local_progress": {
+        "state": "observed",
+        "unsettled": true,
+        "dirty": false,
+        "authored_commits": true,
+        "recovery_required": false,
+        "reason": null
+      }
+    }
+  }
+}

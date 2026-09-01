@@ -6,8 +6,7 @@ Pursue the open KRs.
 
 ## Orientation
 
-Read the exact Linear Project owned by the current Run and the wave's
-GOAL/MEMORY. The
+Read the exact Linear Project named in the seed and the wave's GOAL/MEMORY. The
 project loop owns the KR set, not a product PR. KRs are proof-shaped end
 states; tasks are the concrete work that advances them. Filed tasks live in
 Linear; running work lives in Tasks; merged PRs are closure evidence.
@@ -74,7 +73,8 @@ its available status/next owner.
 ## Work
 
 - Honor every Steer included in the seed and state the resulting priority or
-  plan change. The boundary Basis is fixed; delivery is not application.
+  plan change. Do not create a separate acknowledgement mutation for inputs
+  already present in the seed.
 - Read the filed backlog before creating work. File a concrete task when the
   KR needs it; no rule requires every filed task to start immediately.
 - When one uncertain KR warrants parallel investigation, file independent Tasks
@@ -98,8 +98,8 @@ its available status/next owner.
   repository mutation to a Task.
 - Use `lf task steer`, `interrupt`, `wait`, and `resume`. Do not create another
   worktree or session for review feedback or CI repair.
-- When the choice needs Wave judgment, run `lf ask "<exact question>"` and
-  continue the same Turn after the Ask settles.
+- When the choice needs a separate Wave perspective, launch an ordinary
+  `lf --as wave:<id> : "<exact question>"` Run and use its result.
 - Never start another Project or Wave from Project pursuit, and never collapse
   the remaining Project into one anonymous task.
 - Discovered debt becomes a task under an existing KR unless it

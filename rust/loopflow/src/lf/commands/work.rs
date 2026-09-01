@@ -3,8 +3,7 @@ use serde::Serialize;
 use std::path::Path;
 
 use crate::durable::{
-    EpochReceipt, InterruptReceipt, Placement, ProjectId, Run, SteerReceipt, TaskId, WorkRef,
-    WorkStatus,
+    AbandonReceipt, Placement, ProjectId, SteerReceipt, TaskId, WorkRef, WorkStatus,
 };
 use crate::id::WaveId;
 use crate::lf::WorkCommand;
@@ -13,23 +12,19 @@ use crate::store::{open_store, storage_config_from_env, Store};
 #[derive(Debug, Serialize)]
 struct WorkProjection {
     work: WorkRef,
-    basis: crate::durable::Basis,
     placement: Placement,
     status: WorkStatus,
-    current: crate::child::CurrentWorkObservation,
-    run: Option<Run>,
 }
 
 #[derive(Debug, Serialize)]
 #[serde(tag = "kind", rename_all = "snake_case")]
 enum WorkReceipt {
     Placed(Placement),
-    Relocated(crate::wave::relocate::WaveRelocationReceipt),
+    Relocated(crate::controller::wave::relocate::WaveRelocationReceipt),
     Enabled(Placement),
     Disabled(Placement),
     Steer(SteerReceipt),
-    Interrupted(InterruptReceipt),
-    Abandoned(EpochReceipt),
+    Abandoned(AbandonReceipt),
 }
 
 pub fn run(command: &WorkCommand, repo: &Path) -> anyhow::Result<()> {
@@ -55,7 +50,7 @@ async fn run_async(command: &WorkCommand, repo: &Path) -> anyhow::Result<()> {
             require_work_repository(&store, &work, repo).await?;
             if !matches!(work, WorkRef::Wave(_)) {
                 return Err(anyhow!(
-                    "only Wave Work can move until Project and Task execution uses the shared Run supervisor"
+                    "only Wave Work has independently movable placement"
                 ));
             }
             let placement = store.place_work(&work, home_id).await?;
@@ -72,7 +67,7 @@ async fn run_async(command: &WorkCommand, repo: &Path) -> anyhow::Result<()> {
                 return Err(anyhow!("only Wave Work has a repository locator"));
             }
             let wave_id = WaveId::parse(id)?;
-            let receipt = crate::wave::relocate::relocate_wave(
+            let receipt = crate::controller::wave::relocate::relocate_wave(
                 &store,
                 &wave_id,
                 repo,
@@ -101,36 +96,19 @@ async fn run_async(command: &WorkCommand, repo: &Path) -> anyhow::Result<()> {
             json,
         } => {
             let work = parse_work(kind, id)?;
-            let lease = crate::ops::ambient_run_context(&store).await?;
             require_work_repository(&store, &work, repo).await?;
-            let receipt = if let Some(lease) = lease {
-                store.steer(Some(&lease), &work, message, None).await?
-            } else {
-                store.steer(None, &work, message, None).await?
-            };
+            let author = crate::ops::ambient_author()?;
+            let receipt = store.append_steer(&work, author, message).await?;
             print_receipt(&WorkReceipt::Steer(receipt), *json)?;
         }
-        WorkCommand::Asks { .. } => {
-            return Err(anyhow!("`lf work asks` retired; use `lf ask list`"));
-        }
-        WorkCommand::Answer { ask_id, .. } => {
-            return Err(anyhow!(
-                "`lf work answer` retired; use `lf ask open {ask_id}` and settle from the Ask session"
-            ));
-        }
-        WorkCommand::Interrupt { kind, id, json } => {
+        WorkCommand::Interrupt { kind, id, .. } => {
             let work = parse_work(kind, id)?;
             require_work_repository(&store, &work, repo).await?;
-            let run = store
-                .current_run(&work)
-                .await?
-                .ok_or_else(|| anyhow!("{} {} has no active Run", work.kind(), work.id()))?;
-            let receipt = if let Some(lease) = crate::ops::ambient_run_context(&store).await? {
-                store.interrupt(Some(&lease), &work, &run.id).await?
-            } else {
-                store.interrupt(None, &work, &run.id).await?
-            };
-            print_receipt(&WorkReceipt::Interrupted(receipt), *json)?;
+            return Err(anyhow!(
+                "cannot interrupt {} {}: no exact process owner is recorded",
+                work.kind(),
+                work.id()
+            ));
         }
         WorkCommand::Abandon {
             kind,
@@ -140,13 +118,7 @@ async fn run_async(command: &WorkCommand, repo: &Path) -> anyhow::Result<()> {
         } => {
             let work = parse_work(kind, id)?;
             require_work_repository(&store, &work, repo).await?;
-            if crate::ops::ambient_run_context(&store).await?.is_some() {
-                return Err(anyhow!(
-                    "Run callers cannot abandon Work; use the authenticated User surface"
-                ));
-            }
-            let basis = store.current_epoch(&work).await?.current_basis;
-            let receipt = store.abandon(&work, reason, &basis).await?;
+            let receipt = store.abandon(&work, reason).await?;
             print_receipt(&WorkReceipt::Abandoned(receipt), *json)?;
         }
     }
@@ -183,17 +155,10 @@ async fn set_local_work_enabled(
 
 async fn projection(store: &Store, work: &WorkRef) -> anyhow::Result<WorkProjection> {
     let status = store.work_status(work).await?;
-    let run = store.current_run(work).await?;
-    let current =
-        crate::child::observe_current_work(store, work, &status, time::OffsetDateTime::now_utc())
-            .await?;
     Ok(WorkProjection {
         work: work.clone(),
-        basis: store.current_epoch(work).await?.current_basis,
         placement: store.placement(work).await?,
         status,
-        current,
-        run,
     })
 }
 
@@ -228,9 +193,9 @@ async fn require_work_repository(store: &Store, work: &WorkRef, repo: &Path) -> 
         .get_wave(&wave_id)
         .await?
         .ok_or_else(|| anyhow!("Wave {wave_id} is not registered"))?;
-    let locator = crate::wave::WaveLocator::discover(repo, wave.name())?;
+    let locator = crate::work::wave::WaveLocator::discover(repo, wave.name())?;
     let local = store.get_wave_at(&locator).await?;
-    if local.as_ref().map(crate::wave::Wave::id) != Some(&wave_id) {
+    if local.as_ref().map(crate::work::wave::Wave::id) != Some(&wave_id) {
         return Err(anyhow!(
             "{} {} belongs to repository {}, not invoking repository {}",
             work.kind(),
@@ -265,18 +230,12 @@ fn print_projection(projection: &WorkProjection, json: bool) -> anyhow::Result<(
         println!("{}", serde_json::to_string_pretty(projection)?);
     } else {
         println!(
-            "{} {}  {}\n  enabled: {}\n  home: {}\n  basis: {}:{}\n  run: {}",
+            "{} {}  {}\n  enabled: {}\n  home: {}",
             projection.work.kind(),
             projection.work.id(),
-            projection.current.state,
+            projection.status,
             projection.placement.enabled,
             projection.placement.home_id,
-            projection.basis.epoch_id,
-            projection.basis.revision,
-            projection
-                .run
-                .as_ref()
-                .map_or("none", |run| run.id.as_str()),
         );
     }
     Ok(())
@@ -314,8 +273,7 @@ fn print_receipt(receipt: &WorkReceipt, json: bool) -> anyhow::Result<()> {
                 placement.home_id
             ),
             WorkReceipt::Steer(receipt) => println!("steered {}", receipt.steer.id),
-            WorkReceipt::Interrupted(receipt) => println!("interrupted {}", receipt.run_id),
-            WorkReceipt::Abandoned(receipt) => println!("abandoned {}", receipt.epoch.id),
+            WorkReceipt::Abandoned(receipt) => println!("abandoned {}", receipt.work.id()),
         }
     }
     Ok(())

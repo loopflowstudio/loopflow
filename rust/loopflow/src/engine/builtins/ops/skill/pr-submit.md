@@ -10,11 +10,9 @@ Use `pr-submit` (not `pr-land`) whenever a person should land the work by hand.
 approving your own PR, so the gate is the merge click, not a review approval —
 the button unlocks once checks pass.)
 
-**Managed Tasks reject `pr-submit`.** A Task already carries exactly one
-shipping decision — its `finally` review — so a human merge click would be a
-competing second gate. Ship a Task with `pr-land` (`-c` to complete, `--next
-<slug>` to rotate); `pr-submit` is only for ordinary non-Task PRs a person
-should land by hand.
+Tracked Tasks use the same command. Delivery state records the user-owned
+exact-head merge request, but `pr-submit` does not install, advance, or inspect
+an end-to-end controller.
 
 ## Orientation
 
@@ -39,9 +37,8 @@ re-derive what these already record.
 lf pr submit [--create-pr] [-m "commit message"] [--title "..."] [--body "..."]
 ```
 
-`pr-submit` is for ordinary non-Task PRs. Inside a managed Task worktree it
-refuses before any push and points you at `lf pr land` — the Task's one
-shipping declaration (`-c` to complete, `--next <slug>` to rotate).
+Inside a managed Task worktree, `-c` completes the Task after the human merge
+and `--next <slug>` rotates its serial PR chain after merge.
 
 **Do not run git commit, git push, gh pr create, or gh pr ready directly.** `lf pr submit` does all of this. Running those commands manually skips the assignment and leaves the PR in an inconsistent state.
 

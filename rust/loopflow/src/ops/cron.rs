@@ -56,6 +56,14 @@ impl CronSchedule {
     pub fn expression(&self) -> &str {
         &self.expression
     }
+
+    pub(crate) fn hour(&self) -> u32 {
+        self.hour
+    }
+
+    pub(crate) fn minute(&self) -> u32 {
+        self.minute
+    }
 }
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Deserialize, Serialize)]
@@ -127,6 +135,17 @@ pub struct CronReceipt {
     pub error: Option<String>,
 }
 
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub(crate) struct CronObligation {
+    pub(crate) wave: String,
+    pub(crate) flow: String,
+    pub(crate) target_kind: CronTargetKind,
+    pub(crate) schedule: CronSchedule,
+    pub(crate) home_id: HomeId,
+    pub(crate) activated_at: i64,
+    pub(crate) receipts: Vec<CronReceipt>,
+}
+
 /// Reconcile summary from [`sync_crons`].
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub struct CronSyncResult {
@@ -145,6 +164,7 @@ pub struct InstalledCron {
     pub schedule: String,
     pub target_kind: CronTargetKind,
     pub home_id: HomeId,
+    pub activated_at: i64,
     pub repo: PathBuf,
     pub lf_path: PathBuf,
     pub loaded: bool,
@@ -201,10 +221,21 @@ pub fn add_cron(
     fs::create_dir_all(launch_agents_dir)?;
     fs::create_dir_all(spec.working_directory.join(".lf/logs"))?;
     let path = plist_path(launch_agents_dir, &spec.wave, &spec.flow);
+    let now = Utc::now().timestamp();
+    let activated_at = if path.exists() {
+        let prior = read_cron_obligation(&path)?;
+        if same_obligation(&prior, spec) {
+            prior.activated_at
+        } else {
+            now
+        }
+    } else {
+        now
+    };
     if path.exists() {
         let _ = launchctl.unload(&path);
     }
-    write_private_file(&path, render_plist(spec).as_bytes())?;
+    write_private_file(&path, render_plist(spec, activated_at).as_bytes())?;
     launchctl.load(&path)?;
     inspect_cron(&path, launchctl)
 }
@@ -246,6 +277,29 @@ pub fn list_crons(
     }
     crons.sort_by(|a, b| a.label.cmp(&b.label));
     Ok(crons)
+}
+
+pub(crate) fn list_cron_obligations(launch_agents_dir: &Path) -> OpsResult<Vec<CronObligation>> {
+    let mut obligations = Vec::new();
+    if !launch_agents_dir.is_dir() {
+        return Ok(obligations);
+    }
+    for entry in fs::read_dir(launch_agents_dir)? {
+        let entry = entry?;
+        let path = entry.path();
+        let Some(name) = path.file_name().and_then(|name| name.to_str()) else {
+            continue;
+        };
+        if is_cron_plist(name) {
+            obligations.push(read_cron_obligation(&path)?);
+        }
+    }
+    obligations.sort_by(|left, right| {
+        left.wave
+            .cmp(&right.wave)
+            .then_with(|| left.flow.cmp(&right.flow))
+    });
+    Ok(obligations)
 }
 
 pub fn parse_schedule(value: &str) -> OpsResult<CronSchedule> {
@@ -583,6 +637,7 @@ pub fn resolve_lf_path() -> OpsResult<PathBuf> {
 
 fn inspect_cron(path: &Path, launchctl: &dyn Launchctl) -> OpsResult<InstalledCron> {
     let spec = read_cron_spec(path)?;
+    let obligation = read_cron_obligation(path)?;
     let label = label(&spec.wave, &spec.flow);
     Ok(InstalledCron {
         wave: spec.wave.clone(),
@@ -592,6 +647,7 @@ fn inspect_cron(path: &Path, launchctl: &dyn Launchctl) -> OpsResult<InstalledCr
         schedule: spec.schedule.expression().to_string(),
         target_kind: spec.target_kind,
         home_id: spec.host.home_id.clone(),
+        activated_at: obligation.activated_at,
         repo: spec.working_directory.clone(),
         lf_path: spec.lf_path.clone(),
         loaded: launchctl.is_loaded(&label)?,
@@ -633,6 +689,74 @@ fn read_cron_spec(path: &Path) -> OpsResult<CronSpec> {
             path_env: required("LoopflowPath")?,
         },
     })
+}
+
+fn read_cron_obligation(path: &Path) -> OpsResult<CronObligation> {
+    let content = fs::read_to_string(path)?;
+    let spec = read_cron_spec(path)?;
+    let receipts = read_receipts(
+        &receipt_root(&spec.host.lf_home),
+        &spec.wave,
+        Some(&spec.flow),
+    )?;
+    let activated_at = match plist_string(&content, "LoopflowActivatedAt") {
+        Some(value) => value.parse::<i64>().map_err(|error| {
+            OpsError::Parse(format!(
+                "{} has invalid LoopflowActivatedAt {value:?}: {error}; run `lf cron sync --wave {}`",
+                path.display(),
+                spec.wave
+            ))
+        })?,
+        None => receipts
+            .iter()
+            .filter(|receipt| {
+                receipt.source == CronSource::Scheduled
+                    && receipt.wave == spec.wave
+                    && receipt.flow == spec.flow
+                    && receipt.target_kind == spec.target_kind
+                    && receipt.home_id == spec.host.home_id
+                    && receipt.schedule == spec.schedule.expression()
+            })
+            .map(|receipt| receipt.started_at)
+            .min()
+            .or_else(|| file_timestamp(path))
+            .ok_or_else(|| {
+                OpsError::Message(format!(
+                    "cannot recover activation time for legacy cron {}; run `lf cron sync --wave {}`",
+                    path.display(),
+                    spec.wave
+                ))
+            })?,
+    };
+    Ok(CronObligation {
+        wave: spec.wave,
+        flow: spec.flow,
+        target_kind: spec.target_kind,
+        schedule: spec.schedule,
+        home_id: spec.host.home_id,
+        activated_at,
+        receipts,
+    })
+}
+
+fn same_obligation(prior: &CronObligation, spec: &CronSpec) -> bool {
+    prior.wave == spec.wave
+        && prior.flow == spec.flow
+        && prior.target_kind == spec.target_kind
+        && prior.schedule == spec.schedule
+        && prior.home_id == spec.host.home_id
+}
+
+fn file_timestamp(path: &Path) -> Option<i64> {
+    let metadata = fs::metadata(path).ok()?;
+    let timestamp = metadata.created().or_else(|_| metadata.modified()).ok()?;
+    i64::try_from(
+        timestamp
+            .duration_since(std::time::UNIX_EPOCH)
+            .ok()?
+            .as_secs(),
+    )
+    .ok()
 }
 
 fn spawn_cron_target(spec: &CronSpec) -> std::io::Result<std::process::ExitStatus> {
@@ -803,7 +927,7 @@ fn is_cron_plist(name: &str) -> bool {
         .is_some_and(|name| !name.is_empty())
 }
 
-fn render_plist(spec: &CronSpec) -> String {
+fn render_plist(spec: &CronSpec, activated_at: i64) -> String {
     let interval = format!(
         "    <key>StartCalendarInterval</key>\n    <dict>\n        <key>Hour</key>\n        <integer>{}</integer>\n        <key>Minute</key>\n        <integer>{}</integer>\n    </dict>",
         spec.schedule.hour, spec.schedule.minute
@@ -829,6 +953,7 @@ fn render_plist(spec: &CronSpec) -> String {
         ("LoopflowTargetKind", spec.target_kind.as_str().to_string()),
         ("LoopflowSchedule", spec.schedule.expression.clone()),
         ("LoopflowHomeId", spec.host.home_id.to_string()),
+        ("LoopflowActivatedAt", activated_at.to_string()),
         (
             "LoopflowRepo",
             spec.working_directory.to_string_lossy().to_string(),
@@ -1074,6 +1199,7 @@ mod tests {
         assert!(installed.loaded);
         assert_eq!(installed.schedule, "0 0 3 * * *");
         assert_eq!(installed.home_id, spec.host.home_id);
+        assert!(installed.activated_at > 0);
         assert_eq!(
             fs::metadata(&installed.path).unwrap().permissions().mode() & 0o777,
             0o600
@@ -1095,8 +1221,12 @@ mod tests {
         assert!(content.contains("<key>PATH</key>"));
         assert!(content.contains("<key>LF_HOME</key>"));
         assert!(content.contains("<key>LF_DB_PATH</key>"));
+        assert!(content.contains("<key>LoopflowActivatedAt</key>"));
         assert!(!content.contains("DOPPLER_TOKEN"));
         assert!(!content.contains("LF_RUN_ID"));
+
+        let resynced = add_cron(temp.path(), &spec, &launchctl).unwrap();
+        assert_eq!(resynced.activated_at, installed.activated_at);
 
         assert_eq!(
             list_crons(temp.path(), &launchctl).unwrap(),
@@ -1106,6 +1236,33 @@ mod tests {
         let removed = remove_cron(temp.path(), "reliability", "wave-report", &launchctl).unwrap();
         assert_eq!(removed, Some(installed.clone()));
         assert!(!installed.path.exists());
+    }
+
+    #[test]
+    fn legacy_cron_activation_is_recovered_from_its_first_scheduled_receipt() {
+        let temp = tempfile::TempDir::new().unwrap();
+        let launchctl = FakeLaunchctl::default();
+        let spec = spec(temp.path(), Path::new("/usr/bin/true"));
+        fs::create_dir_all(&spec.working_directory).unwrap();
+        let installed = add_cron(temp.path(), &spec, &launchctl).unwrap();
+        let content = fs::read_to_string(&installed.path).unwrap();
+        let activation = format!(
+            "    <key>LoopflowActivatedAt</key>\n    <string>{}</string>\n",
+            installed.activated_at
+        );
+        fs::write(&installed.path, content.replace(&activation, "")).unwrap();
+        let mut receipt = new_receipt(&spec, &spec.host.home_id, CronSource::Scheduled);
+        receipt.started_at = 1_787_419_441;
+        receipt.finished_at = Some(receipt.started_at + 60);
+        receipt.outcome = CronOutcome::Succeeded;
+        receipt.exit_code = Some(0);
+        write_receipt(&receipt_root(&spec.host.lf_home), &receipt).unwrap();
+
+        let obligations = list_cron_obligations(temp.path()).unwrap();
+
+        assert_eq!(obligations.len(), 1);
+        assert_eq!(obligations[0].activated_at, receipt.started_at);
+        assert_eq!(obligations[0].receipts, vec![receipt]);
     }
 
     #[test]
@@ -1293,7 +1450,7 @@ mod tests {
         let executable = temp.path().join("fake-lf");
         fs::write(
             &executable,
-            "#!/bin/sh\nprintf '%s\\n' \"$@\"\nprintf 'LF_RUN_CONTEXT=%s\\n' \"${LF_RUN_CONTEXT-unset}\"\n",
+            "#!/bin/sh\nprintf '%s\\n' \"$@\"\nprintf 'LF_RUN_ID=%s\\n' \"${LF_RUN_ID-unset}\"\n",
         )
         .unwrap();
         fs::set_permissions(&executable, fs::Permissions::from_mode(0o700)).unwrap();
@@ -1315,7 +1472,7 @@ mod tests {
 
         assert_eq!(
             fs::read_to_string(cron.log_path()).unwrap(),
-            "--wave\nreliability\n--batch\nflow\nwave-report\nLF_RUN_CONTEXT=unset\n"
+            "--wave\nreliability\n--batch\nflow\nwave-report\nLF_RUN_ID=unset\n"
         );
     }
 

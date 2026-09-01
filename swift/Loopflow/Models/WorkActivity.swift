@@ -28,10 +28,21 @@ public struct WorkActivityEntry: Decodable, Sendable, Hashable, Identifiable {
     }
 }
 
+public struct WorkActivityRunIdentity: Sendable, Hashable {
+    public let runId: String?
+    public let invocationId: String?
+    public let traceId: String?
+    public let execId: String?
+
+    public var primaryId: String? {
+        runId ?? invocationId ?? traceId ?? execId
+    }
+}
+
 public enum WorkActivityFact: Decodable, Sendable, Hashable {
     case workCreated
-    case runStarted(invocationId: String, traceId: String, execId: String)
-    case runFinished(invocationId: String, traceId: String, execId: String, status: String)
+    case runStarted(identity: WorkActivityRunIdentity)
+    case runFinished(identity: WorkActivityRunIdentity, status: String)
     case prStarted(id: String)
     case prPublishRequested(id: String, github: GithubPrSnapshot?)
     case prMergeRequested(
@@ -45,6 +56,7 @@ public enum WorkActivityFact: Decodable, Sendable, Hashable {
 
     private enum CodingKeys: String, CodingKey {
         case kind, id, status, request, github, author
+        case runId = "run_id"
         case invocationId = "invocation_id"
         case traceId = "trace_id"
         case execId = "exec_id"
@@ -70,15 +82,11 @@ public enum WorkActivityFact: Decodable, Sendable, Hashable {
             self = .workCreated
         case .runStarted:
             self = .runStarted(
-                invocationId: try container.decode(String.self, forKey: .invocationId),
-                traceId: try container.decode(String.self, forKey: .traceId),
-                execId: try container.decode(String.self, forKey: .execId)
+                identity: try Self._runIdentity(container)
             )
         case .runFinished:
             self = .runFinished(
-                invocationId: try container.decode(String.self, forKey: .invocationId),
-                traceId: try container.decode(String.self, forKey: .traceId),
-                execId: try container.decode(String.self, forKey: .execId),
+                identity: try Self._runIdentity(container),
                 status: try container.decode(String.self, forKey: .status)
             )
         case .prStarted:
@@ -112,19 +120,28 @@ public enum WorkActivityFact: Decodable, Sendable, Hashable {
             )
         }
     }
+
+    private static func _runIdentity(
+        _ container: KeyedDecodingContainer<CodingKeys>
+    ) throws -> WorkActivityRunIdentity {
+        let identity = WorkActivityRunIdentity(
+            runId: try container.decodeIfPresent(String.self, forKey: .runId),
+            invocationId: try container.decodeIfPresent(String.self, forKey: .invocationId),
+            traceId: try container.decodeIfPresent(String.self, forKey: .traceId),
+            execId: try container.decodeIfPresent(String.self, forKey: .execId)
+        )
+        guard identity.runId != nil || identity.invocationId != nil else {
+            throw DecodingError.dataCorruptedError(
+                forKey: .kind,
+                in: container,
+                debugDescription: "Run activity has neither run_id nor invocation_id"
+            )
+        }
+        return identity
+    }
 }
 
 public extension WorkActivityFact {
-    var invocationId: String? {
-        switch self {
-        case .runStarted(let invocationId, _, _),
-             .runFinished(let invocationId, _, _, _):
-            invocationId
-        default:
-            nil
-        }
-    }
-
     var github: GithubPrSnapshot? {
         switch self {
         case .prPublishRequested(_, let github),

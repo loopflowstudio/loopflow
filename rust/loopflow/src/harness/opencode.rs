@@ -116,8 +116,6 @@ impl OpenCodeHarness {
         #[cfg(unix)]
         command.process_group(0);
         super::configure_vendor_tokio_env(&mut command)?;
-        super::configure_agent_run_context(&mut command, config.run_context);
-
         let mut child = command
             .spawn()
             .map_err(|err| anyhow!("failed to spawn opencode serve: {err}"))?;
@@ -966,7 +964,7 @@ mod tests {
     }
 
     #[test]
-    fn build_turn_payload_uses_loopflow_default_for_bare_opencode() {
+    fn build_turn_payload_uses_provider_default_for_bare_opencode() {
         let payload = build_turn_payload(
             "hello",
             &AgentConfig {
@@ -975,13 +973,7 @@ mod tests {
             },
             false,
         );
-        assert_eq!(
-            payload.get("model"),
-            Some(&json!({
-                "providerID": "opencode",
-                "modelID": "glm-5.2"
-            }))
-        );
+        assert!(payload.get("model").is_none());
     }
 
     // The orphaned-leader shape (the reaper's Dead + group-alive arm at the

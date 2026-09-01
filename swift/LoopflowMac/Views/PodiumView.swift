@@ -14,6 +14,7 @@ struct PodiumView: View {
     @Environment(\.palette) private var palette
     @State private var model: PodiumModel
     @State private var surface: PodiumSurface
+    private let query: RegistryQuery
 
     init(
         portfolioService: PortfolioService,
@@ -22,11 +23,13 @@ struct PodiumView: View {
     ) {
         self.portfolioService = portfolioService
         self.initialRepoPath = initialRepoPath
+        self.query = query
         let restoredRepoPath = initialRepoPath == nil && !AppTestMode.shouldBypassRegistry
             ? loadLoopflowState()?.selectedRepoPath
+                .flatMap(PortfolioDiscovery.resolveLaunchRepo)
             : nil
         let startingRepoPath = initialRepoPath
-            .map { PortfolioDiscovery.resolveLaunchRepo($0).path }
+            .flatMap(PortfolioDiscovery.resolveLaunchRepo)
             ?? restoredRepoPath
         let model = PodiumModel(query: query, repoPath: startingRepoPath)
         PodiumFixture.applyIfRequested(to: model)
@@ -48,8 +51,8 @@ struct PodiumView: View {
                 if surface == .sessions, let repoPath = model.repoPath {
                     SessionsView(
                         scope: .repo(repoPath),
-                        initialRecords: model.userAskAttention.value,
-                        onQueueChanged: { await model.refreshUserAskAttention() },
+                        query: query,
+                        initialRecords: model.sessions.value,
                         onShowWork: { surface = .work }
                     )
                     .id(repoPath.normalizedFilePath)
@@ -150,26 +153,16 @@ private struct PodiumBar: View {
             if let summary = model.waveSummary {
                 HStack(spacing: Spacing.md) {
                     compactMetric(summary.waves == 1 ? "Wave" : "Waves", summary.waves)
-                    compactMetric(summary.activeRuns == 1 ? "Run" : "Runs", summary.activeRuns)
-                    if summary.unservedRuns > 0 {
-                        Label(
-                            "\(summary.unservedRuns) without listener",
-                            systemImage: "waveform.slash"
-                        )
-                        .font(Typography.caption(9).weight(.semibold))
-                        .foregroundStyle(Color(hex: 0xF2C36B))
-                        .lineLimit(1)
-                    }
                 }
                 .accessibilityIdentifier("podium-wave-summary")
             }
 
             Spacer(minLength: Spacing.sm)
 
-            UserAskAttentionButton(model: model, onOpen: onOpenSessions)
+            SessionsButton(model: model, onOpen: onOpenSessions)
 
-            TokenOutputInstrument(reading: model.processActivity)
-                .accessibilityIdentifier("podium-token-meter")
+            ProcessActivityInstrument(reading: model.processActivity)
+                .accessibilityIdentifier("podium-process-activity")
         }
         .padding(.horizontal, Spacing.lg)
         .padding(.vertical, Spacing.sm)
@@ -251,17 +244,14 @@ enum PodiumSignalState: Equatable {
     case unknown
 
     static func from(_ snapshot: ActivitySnapshot) -> PodiumSignalState {
-        (snapshot.usage.global?.interval(seconds: 5)?.outputTokensPerSecond ?? 0) > 0
-            ? .producing : .off
+        from(nodes: snapshot.nodes)
     }
 
-    static func from(nodes: [ActivityNode], usage: UsageReading?) -> PodiumSignalState {
-        let providers = nodes.filter { $0.kind == .providerLaunch }
+    static func from(nodes: [ActivityNode]) -> PodiumSignalState {
+        let providers = nodes.filter { $0.kind == .providerProcess }
         if providers.contains(where: { $0.state == .stalled }) { return .blocked }
-        if (usage?.interval(seconds: 5)?.outputTokensPerSecond ?? 0) > 0 {
-            return .producing
-        }
-        if !providers.isEmpty { return .waiting }
+        if providers.contains(where: { $0.state == .working }) { return .producing }
+        if providers.contains(where: { $0.state == .waiting }) { return .waiting }
         return .off
     }
 
@@ -285,16 +275,7 @@ enum PodiumSignalState: Equatable {
     }
 }
 
-enum TokenRateScale {
-    /// A VU-style logarithmic drawing scale. Ten TOK/s reaches the top; the
-    /// adjacent number remains the unscaled measurement.
-    static func level(_ tokensPerSecond: Double) -> Double {
-        guard tokensPerSecond > 0 else { return 0 }
-        return min(log1p(tokensPerSecond) / log(11), 1)
-    }
-}
-
-private struct TokenOutputInstrument: View {
+private struct ProcessActivityInstrument: View {
     let reading: PodiumReading<ActivitySnapshot>
 
     private var snapshot: ActivitySnapshot? { reading.value }
@@ -305,7 +286,7 @@ private struct TokenOutputInstrument: View {
     var body: some View {
         HStack(spacing: Spacing.sm) {
             VStack(alignment: .trailing, spacing: Spacing.xxs) {
-                Text(rateLabel)
+                Text(state.label)
                     .font(Typography.code(12).weight(.bold))
                     .foregroundStyle(.white)
                     .monospacedDigit()
@@ -317,33 +298,22 @@ private struct TokenOutputInstrument: View {
 
             FaderSwitch(
                 phase: ConsoleSignal.phase(humanStop: false, agentRunning: false, signal: state),
-                rate: snapshot?.usage.global?.interval(seconds: 5)?.outputTokensPerSecond ?? 0,
                 width: 20,
                 height: 48,
                 verb: nil,
                 accessibilityId: "podium-master-fader",
-                accessibilityLabel: "Master output"
+                accessibilityLabel: "Provider process activity"
             )
         }
-        .help("Five-second TOK/s across every Wave. \(state.label).")
+        .help("Exact live provider processes across every Wave. \(state.label).")
         .accessibilityElement(children: .ignore)
-        .accessibilityLabel("Output signal")
-        .accessibilityValue("\(rateLabel), \(state.label). \(detailLabel)")
-    }
-
-    private var rateLabel: String {
-        guard let snapshot else { return "— TOK/s" }
-        let rate = snapshot.usage.global?.interval(seconds: 5)?.outputTokensPerSecond ?? 0
-        return "\(rate.formatted(.number.precision(.fractionLength(1)))) TOK/s"
+        .accessibilityLabel("Provider process activity")
+        .accessibilityValue("\(state.label). \(detailLabel)")
     }
 
     private var detailLabel: String {
         guard let snapshot else { return reading.errorMessage ?? "Signal unavailable" }
-        let slowRate = snapshot.usage.global?.interval(seconds: 300)?.outputTokensPerSecond ?? 0
-        if slowRate > 0 {
-            return "\(slowRate.formatted(.number.precision(.fractionLength(1)))) TOK/s · 5m avg"
-        }
-        let day = snapshot.usage.global?.interval(seconds: 86_400)?.outputTokens ?? 0
-        return day > 0 ? "\(day.formatted()) output · 24h" : "No measured output · 24h"
+        let count = snapshot.nodes.filter { $0.kind == .providerProcess }.count
+        return "\(count) exact live provider \(count == 1 ? "process" : "processes")"
     }
 }

@@ -37,8 +37,6 @@ enum PodiumReading<Value> {
 
 struct WaveSummary: Equatable {
     let waves: Int
-    let activeRuns: Int
-    let unservedRuns: Int
 }
 
 @MainActor
@@ -49,7 +47,7 @@ final class PodiumModel {
     private(set) var roadmap: PodiumReading<RoadmapSnapshot> = .loading
     private(set) var waves: PodiumReading<[Wave]> = .loading
     private(set) var processActivity: PodiumReading<ActivitySnapshot> = .loading
-    private(set) var userAskAttention: PodiumReading<[AskAttentionRecord]> = .loading
+    private(set) var sessions: PodiumReading<[SessionRecord]> = .loading
     private(set) var workActivity: PodiumReading<WorkActivitySnapshot> = .loading
     private(set) var workActivityScope = WorkActivityScope(
         wave: nil,
@@ -62,13 +60,13 @@ final class PodiumModel {
 
     private let query: RegistryQuery
     private var usesFixedFixture = false
-    private var askAttentionGeneration = 0
+    private var sessionsGeneration = 0
     private var processActivityRefreshInFlight = false
     private var workActivityGeneration = 0
 
     init(query: RegistryQuery, repoPath: String? = nil) {
         self.query = query
-        self.repoPath = repoPath
+        self.repoPath = repoPath.map(WaveOrigin.resolve)
     }
 
     var visibleRoadmaps: [WaveRoadmap] {
@@ -106,14 +104,7 @@ final class PodiumModel {
 
     var waveSummary: WaveSummary? {
         guard waves.value != nil else { return nil }
-        let registered = visibleWaves.filter(\.isRegistered).map(\.api)
-        return WaveSummary(
-            waves: visibleWaves.count,
-            activeRuns: registered.count { $0.current?.state.hasPresentProcess == true },
-            unservedRuns: registered.count {
-                $0.current?.state.hasPresentProcess == true && !$0.live
-            }
-        )
+        return WaveSummary(waves: visibleWaves.count)
     }
 
     var visibleRepos: [PortfolioRepo] {
@@ -132,13 +123,9 @@ final class PodiumModel {
             return leftIsSelected && !rightIsSelected
         }
         for repo in orderedRepos {
-            guard seen.insert(repoIdentity(repo.path)).inserted else { continue }
-            result.append(repo)
-        }
-        for wave in waves.value ?? [] {
-            let identity = repoIdentity(wave.repo)
+            let identity = repoIdentity(repo.path)
             guard seen.insert(identity).inserted else { continue }
-            result.append(PortfolioRepo(path: identity, lastOpened: .distantPast))
+            result.append(PortfolioRepo(path: identity, lastOpened: repo.lastOpened))
         }
         return result.sorted {
             $0.displayName.localizedCaseInsensitiveCompare($1.displayName) == .orderedAscending
@@ -153,37 +140,27 @@ final class PodiumModel {
 
         let previousRoadmap = roadmap.value
         let previousWaves = waves.value
-        let previousProcessActivity = processActivity.value
-        let previousUserAskAttention = userAskAttention.value
-        let userAskAttentionGeneration = askAttentionGeneration
-        let userAskAttentionRepoPath = repoPath
+        let previousSessions = sessions.value
+        let requestedSessionsGeneration = sessionsGeneration
+        let sessionsRepoPath = repoPath
         if previousRoadmap == nil { roadmap = .loading }
         if previousWaves == nil { waves = .loading }
-        if previousProcessActivity == nil { processActivity = .loading }
-        if previousUserAskAttention == nil { userAskAttention = .loading }
+        if previousSessions == nil { sessions = .loading }
 
         async let roadmapResult = readRoadmap()
         async let wavesResult = readWaves()
-        async let userAskAttentionResult = readUserAskAttention(
-            repoPath: userAskAttentionRepoPath
+        async let sessionsResult = readSessions(
+            repoPath: sessionsRepoPath
         )
-        if !processActivityRefreshInFlight {
-            processActivityRefreshInFlight = true
-            processActivity = reading(
-                from: await readProcessActivity(),
-                lastGood: previousProcessActivity
+        waves = reading(from: await wavesResult, lastGood: previousWaves)
+        let nextSessions = await sessionsResult
+        if sessionsGeneration == requestedSessionsGeneration {
+            sessions = reading(
+                from: nextSessions,
+                lastGood: previousSessions
             )
-            processActivityRefreshInFlight = false
         }
         roadmap = reading(from: await roadmapResult, lastGood: previousRoadmap)
-        waves = reading(from: await wavesResult, lastGood: previousWaves)
-        let nextUserAskAttention = await userAskAttentionResult
-        if askAttentionGeneration == userAskAttentionGeneration {
-            userAskAttention = reading(
-                from: nextUserAskAttention,
-                lastGood: previousUserAskAttention
-            )
-        }
         selectRequestedWaveIfNeeded()
         clearSelectionIfOutsideScope()
         await refreshWorkActivity()
@@ -207,23 +184,25 @@ final class PodiumModel {
         persistedRepos: [PortfolioRepo] = []
     ) async {
         guard !usesFixedFixture else { return }
+        let discoveryRepoPath = initialRepoPath ?? repoPath
         let discovered = await PortfolioDiscovery.repos(
-            initialRepoPath: initialRepoPath,
+            initialRepoPath: discoveryRepoPath,
             persistedRepos: persistedRepos
         )
         await Self.resolveRepoOrigins(discovered.map(\.path))
         repos = discovered
         authoredWavesByRepo = await PortfolioDiscovery.authoredWaves(in: discovered)
         if repoPath == nil, let initialRepoPath {
-            repoPath = PortfolioDiscovery.resolveLaunchRepo(initialRepoPath).path
+            repoPath = PortfolioDiscovery.resolveLaunchRepo(initialRepoPath)
         }
         clearSelectionIfOutsideScope()
     }
 
     func setRepoPath(_ path: String?) {
+        let path = path.map(WaveOrigin.resolve)
         if repoPath?.normalizedFilePath != path?.normalizedFilePath {
-            askAttentionGeneration &+= 1
-            userAskAttention = .loading
+            sessionsGeneration &+= 1
+            sessions = .loading
         }
         repoPath = path
         clearSelectionIfOutsideScope()
@@ -276,18 +255,14 @@ final class PodiumModel {
         workActivity = reading(from: result, lastGood: previous)
     }
 
-    func traceAddress(invocationId: String) async throws -> TraceAddress {
-        try await query.traceAddress(invocationId: invocationId)
-    }
-
-    func refreshUserAskAttention() async {
+    func refreshSessions() async {
         guard !usesFixedFixture else { return }
-        let generation = askAttentionGeneration
+        let generation = sessionsGeneration
         let repoPath = repoPath
-        let previous = userAskAttention.value
-        let result = await readUserAskAttention(repoPath: repoPath)
-        guard askAttentionGeneration == generation else { return }
-        userAskAttention = reading(from: result, lastGood: previous)
+        let previous = sessions.value
+        let result = await readSessions(repoPath: repoPath)
+        guard sessionsGeneration == generation else { return }
+        sessions = reading(from: result, lastGood: previous)
     }
 
     func wave(id: String) -> WaveRoadmap? {
@@ -476,12 +451,12 @@ final class PodiumModel {
         }
     }
 
-    private func readUserAskAttention(
+    private func readSessions(
         repoPath: String?
-    ) async -> Result<[AskAttentionRecord], Error> {
+    ) async -> Result<[SessionRecord], Error> {
         guard let repoPath else { return .success([]) }
         do {
-            return .success(try await query.userAskAttention(cwd: repoPath))
+            return .success(try await query.sessions(cwd: repoPath))
         } catch {
             return .failure(error)
         }

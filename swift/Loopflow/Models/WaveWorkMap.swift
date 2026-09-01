@@ -33,12 +33,13 @@ public struct WaveTaskWork: Decodable, Sendable, Identifiable, Hashable {
     public let runtime: TaskRuntimeSnapshot?
     public let directive: WorkDirectiveSnapshot?
     public let nextMove: WorkNextMove
-    public let attention: TaskAttentionSnapshot
+    public let condition: TaskConditionSnapshot
+    public let actions: TaskActionModel
     public let prs: [PrSnapshot]
     public let activePr: String?
 
     enum CodingKeys: String, CodingKey {
-        case task, reference, runtime, directive, attention, prs
+        case task, reference, runtime, directive, condition, actions, prs
         case nextMove = "next_move"
         case activePr = "active_pr"
     }
@@ -83,65 +84,13 @@ public struct TaskPlanningSnapshot: Decodable, Sendable, Identifiable, Hashable 
     public let assignee: String?
 }
 
-public enum RunLivenessState: String, Codable, Sendable, Hashable {
-    case present, absent, unprovable
-}
-
-public struct RunLivenessEvidence: Codable, Sendable, Hashable {
-    public let state: RunLivenessState
-    public let observedAt: String?
-    public let fresh: Bool
-
-    enum CodingKeys: String, CodingKey {
-        case state, fresh
-        case observedAt = "observed_at"
-    }
-}
-
-public enum CurrentWorkState: String, Codable, Sendable, Hashable {
-    case working, stalled, stopped, unobservable, ready, waiting, done, abandoned
-
-    public var label: String { rawValue }
-
-    public var hasPresentProcess: Bool {
-        self == .working || self == .stalled
-    }
-}
-
-public enum CurrentWorkOwner: String, Codable, Sendable, Hashable {
-    case work, loopflow, user, nobody, unknown
-}
-
-public enum CurrentWorkControl: String, Codable, Sendable, Hashable {
-    case steer, interrupt, stop, extend, resume, decide, abandon, attach
-}
-
-public struct CurrentWorkObservation: Codable, Sendable, Hashable {
-    public let state: CurrentWorkState
-    public let reason: String
-    public let owner: CurrentWorkOwner
-    public let controls: [CurrentWorkControl]
-    public let progressAgeSeconds: UInt64?
-    public let deadlineInSeconds: Int64?
-    public let step: String?
-    public let liveness: RunLivenessEvidence?
-
-    enum CodingKeys: String, CodingKey {
-        case state, reason, owner, controls, step, liveness
-        case progressAgeSeconds = "progress_age_secs"
-        case deadlineInSeconds = "deadline_in_secs"
-    }
-}
-
 public struct HistoricalFailure: Codable, Sendable, Hashable {
     public let message: String
     public let occurredAt: String
-    public let runId: String?
 
     enum CodingKeys: String, CodingKey {
         case message
         case occurredAt = "occurred_at"
-        case runId = "run_id"
     }
 }
 
@@ -153,11 +102,10 @@ public struct ProjectRuntimeSnapshot: Decodable, Sendable, Hashable {
     public let iteration: UInt32
     public let pendingObservations: UInt32
     public let provider: String
-    public let current: CurrentWorkObservation
     public let lastFailure: HistoricalFailure?
 
     enum CodingKeys: String, CodingKey {
-        case status, reason, iteration, provider, current
+        case status, reason, iteration, provider
         case workId = "work_id"
         case updatedAt = "updated_at"
         case pendingObservations = "pending_observations"
@@ -173,10 +121,9 @@ public struct TaskRuntimeSnapshot: Decodable, Sendable, Hashable {
     public let reason: String
     public let updatedAt: String
     public let provider: String
-    public let current: CurrentWorkObservation
 
     enum CodingKeys: String, CodingKey {
-        case status, reason, provider, current
+        case status, reason, provider
         case workId = "work_id"
         case projectId = "project_id"
         case routingProjectId = "routing_project_id"
@@ -205,7 +152,7 @@ public struct TaskWorkspaceSnapshot: Decodable, Sendable, Hashable {
 
 public enum RoadmapSection: String, Decodable, Sendable, Hashable {
     case now
-    case needsAttention = "needs_attention"
+    case waiting
     case available
     case later
 }
@@ -232,12 +179,13 @@ public struct RoadmapTask: Decodable, Sendable, Identifiable, Hashable {
     public let reference: TaskReferenceSnapshot
     public let runtime: TaskRuntimeSnapshot?
     public let nextMove: WorkNextMove
-    public let attention: TaskAttentionSnapshot
+    public let condition: TaskConditionSnapshot
+    public let actions: TaskActionModel
     public let activePr: PrSnapshot?
     public let section: RoadmapSection
 
     enum CodingKeys: String, CodingKey {
-        case task, reference, runtime, attention, section
+        case task, reference, runtime, condition, actions, section
         case nextMove = "next_move"
         case activePr = "active_pr"
     }
@@ -279,14 +227,14 @@ public struct WorkNextMove: Decodable, Sendable, Hashable {
     public let reason: String
 }
 
-public enum TaskAttentionLevel: String, Decodable, Sendable, Hashable {
-    case green, red, blue, black, unknown
+public enum TaskConditionState: String, Decodable, Sendable, Hashable {
+    case waiting, blocked, clear, unknown
 }
 
-/// The six lifecycle actions Task Work can take. Mirrors the Rust
+/// The lifecycle actions Task Work can take. Mirrors the Rust
 /// `TaskAction`; the server computes which are legal, clients never re-derive.
 public enum TaskAction: String, Decodable, Sendable, Hashable {
-    case recover, resume
+    case resume
     case openPr = "open_pr"
     case startNextPr = "start_next_pr"
     case complete
@@ -298,19 +246,6 @@ public enum TaskAction: String, Decodable, Sendable, Hashable {
 public struct TaskActionModel: Decodable, Sendable, Hashable {
     public let recommended: TaskAction?
     public let reason: String
-}
-
-public enum TaskProcessEvidenceState: String, Decodable, Sendable, Hashable {
-    case observed
-    case notExpected = "not_expected"
-    case notApplicable = "not_applicable"
-    case unavailable
-}
-
-public struct TaskProcessEvidence: Decodable, Sendable, Hashable {
-    public let state: TaskProcessEvidenceState
-    public let alive: Bool?
-    public let reason: String?
 }
 
 public enum LocalProgressEvidenceState: String, Decodable, Sendable, Hashable {
@@ -334,28 +269,18 @@ public struct LocalProgressEvidence: Decodable, Sendable, Hashable {
     }
 }
 
-public struct TaskAttentionSnapshot: Decodable, Sendable, Hashable {
-    public let level: TaskAttentionLevel
+public struct TaskConditionSnapshot: Decodable, Sendable, Hashable {
+    public let state: TaskConditionState
     public let reason: String
     public let observedAt: String
     public let evidenceAgeSeconds: Int?
-    public let nextOwner: WorkNextMoveOwner
-    public let actions: TaskActionModel
-    public let pmCompleted: Bool
-    public let workStatus: WorkStatus?
-    public let process: TaskProcessEvidence
     public let localProgress: LocalProgressEvidence
-    public let activePrPhase: PrPhase?
 
     enum CodingKeys: String, CodingKey {
-        case level, reason, actions, process
+        case state, reason
         case observedAt = "observed_at"
         case evidenceAgeSeconds = "evidence_age_secs"
-        case nextOwner = "next_owner"
-        case pmCompleted = "pm_completed"
-        case workStatus = "work_status"
         case localProgress = "local_progress"
-        case activePrPhase = "active_pr_phase"
     }
 }
 
@@ -478,28 +403,5 @@ public enum WorkEvidence<Item: Decodable & Sendable & Hashable>: Decodable, Send
     public var unavailableReason: String? {
         if case let .unavailable(reason) = self { return reason }
         return nil
-    }
-}
-
-public enum WaveAttentionKind: String, Decodable, Sendable, Hashable {
-    case project
-    case task
-}
-
-/// One Work item waiting on somebody. Mirrors Rust `AttentionItem`. `ageSeconds`
-/// is nil when the Work timestamp cannot be read — an unknown age is never
-/// a zero one.
-public struct WaveAttentionItem: Decodable, Sendable, Hashable, Identifiable {
-    public let kind: WaveAttentionKind
-    public let id: String
-    public let subject: String
-    public let owner: WorkNextMoveOwner
-    public let reason: String
-    public let since: String
-    public let ageSeconds: Int?
-
-    enum CodingKeys: String, CodingKey {
-        case kind, id, subject, owner, reason, since
-        case ageSeconds = "age_secs"
     }
 }

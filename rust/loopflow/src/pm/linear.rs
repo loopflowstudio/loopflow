@@ -1035,7 +1035,7 @@ impl LinearClient {
 
     /// Find a previously-created comment by its stable body marker.
     ///
-    /// Ask publication records an attempt before calling Linear. If that call
+    /// Comment publication records an attempt before calling Linear. If that call
     /// succeeds but the local process dies before recording the returned id, a
     /// retry scans the issue's comments and adopts the existing one rather than
     /// creating a duplicate.

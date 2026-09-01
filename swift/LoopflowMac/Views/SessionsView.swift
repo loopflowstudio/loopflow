@@ -31,17 +31,30 @@ enum SessionScope: Hashable, Sendable {
         }
     }
 
-    func includes(_ record: AskAttentionRecord) -> Bool {
+    func resolvingRepository() -> SessionScope {
+        let path = WaveOrigin.resolve(repoPath)
+        return switch self {
+        case .repo:
+            .repo(path)
+        case .wave(_, let id):
+            .wave(repo: path, id: id)
+        case .project(_, let id):
+            .project(repo: path, id: id)
+        case .task(_, let id):
+            .task(repo: path, id: id)
+        }
+    }
+
+    func includes(_ record: SessionRecord) -> Bool {
         switch self {
         case .repo:
             true
         case .wave(_, let id):
-            record.surface?.waveId == id
-                || (record.ask.origin.work.kind == .wave && record.ask.origin.work.id == id)
+            record.work?.kind == .wave && record.work?.id == id
         case .project(_, let id):
-            record.ask.origin.work.kind == .project && record.ask.origin.work.id == id
+            record.work?.kind == .project && record.work?.id == id
         case .task(_, let id):
-            record.ask.origin.work.kind == .task && record.ask.origin.work.id == id
+            record.work?.kind == .task && record.work?.id == id
         }
     }
 }
@@ -50,40 +63,31 @@ struct SessionItem: Identifiable, Equatable {
     enum State: Equatable {
         case pending
         case opening
-        case live(InvocationSurfaceRecord)
+        case live
         case failed(String)
     }
 
-    enum Presentation: Equatable {
-        case needed
-        case confirming
-        case confirmed
-    }
-
-    var record: AskAttentionRecord
+    var record: SessionRecord
     var state: State
-    var presentation = Presentation.needed
 
     var id: String { record.id }
-    var label: String { record.ask.request.label }
-    var work: WorkReference { record.ask.origin.work }
+    var label: String { record.title }
+    var work: WorkReference? { record.work }
 
-    /// The flow step this session is a gate for (e.g. `review-design`) — an
-    /// explicit field, never the task's name.
-    var step: String? {
-        if case .flowStep(_, _, let skill, _) = record.ask.request { return skill }
-        return nil
+    var statusLabel: String {
+        switch record.state {
+        case .waiting: "WAITING"
+        case .active: "ACTIVE"
+        case .ready: "READY"
+        case .closed: "CLOSED"
+        }
     }
 
-    /// A free-text intervention's prompt, when the ask is not a flow step.
-    var interventionPrompt: String? {
-        if case .intervention(let prompt) = record.ask.request { return prompt }
-        return nil
-    }
+    var step: String { record.detail }
 
-    var surface: InvocationSurfaceRecord? {
-        guard case .live(let surface) = state else { return nil }
-        return surface
+    var surface: SessionRecord? {
+        guard case .live = state else { return nil }
+        return record
     }
 
     var error: String? {
@@ -101,15 +105,15 @@ final class SessionsStore: ObservableObject {
     private let scope: SessionScope
     private let query: RegistryQuery
     private let metrics: SessionsLatencyMetrics
-    private var openQueue: [String] = []
-    private var openerRunning = false
     private var hasRecordedSessionsLoad = false
+    private var requestedSessionId: String?
 
     init(
         scope: SessionScope,
         query: RegistryQuery = RegistryQueryLocal.shared,
-        initialRecords: [AskAttentionRecord]? = nil
+        initialRecords: [SessionRecord]? = nil
     ) {
+        let scope = scope.resolvingRepository()
         self.scope = scope
         self.query = query
         metrics = SessionsLatencyMetrics(scope: scope.label)
@@ -123,7 +127,7 @@ final class SessionsStore: ObservableObject {
 
     func refresh() async {
         do {
-            let records = try await query.userAskAttention(cwd: scope.repoPath)
+            let records = try await query.sessions(cwd: scope.repoPath)
             pollError = nil
             reconcile(records)
             hasLoaded = true
@@ -137,7 +141,7 @@ final class SessionsStore: ObservableObject {
         }
     }
 
-    func reconcile(_ records: [AskAttentionRecord]) {
+    func reconcile(_ records: [SessionRecord]) {
         let filtered = records.filter(scope.includes)
         let incoming = Set(filtered.map(\.id))
         sessions.removeAll { !incoming.contains($0.id) }
@@ -145,81 +149,68 @@ final class SessionsStore: ObservableObject {
         for record in filtered {
             if let index = _index(record.id) {
                 sessions[index].record = record
-                if case .pending = sessions[index].state,
-                   let surface = record.surface {
-                    sessions[index].state = .live(surface)
-                }
-                if case .failed = sessions[index].state {
-                    sessions[index].state = .pending
-                    _enqueue(record.id, priority: record.attention != .queued)
+                if record.kind != .interactive {
+                    if record.state != .waiting {
+                        sessions[index].state = .live
+                    } else if case .live = sessions[index].state {
+                        sessions[index].state = .pending
+                    }
                 }
             } else {
-                let state = record.surface.map(SessionItem.State.live) ?? .pending
                 sessions.append(
                     SessionItem(
                         record: record,
-                        state: state
+                        state: record.kind == .interactive || record.state == .waiting
+                            ? .pending
+                            : .live
                     )
                 )
-                if record.surface == nil {
-                    _enqueue(record.id, priority: record.attention != .queued)
-                }
             }
         }
-        _startOpener()
     }
 
-    func prioritize(_ id: String) {
-        guard let index = _index(id), sessions[index].surface == nil else { return }
-        if case .failed = sessions[index].state {
-            sessions[index].state = .pending
-        }
-        openQueue.removeAll { $0 == id }
-        openQueue.insert(id, at: 0)
-        _startOpener()
-    }
-
-    func open(_ id: String) async {
-        guard let index = _index(id) else { return }
+    func recover(_ id: String) async -> SessionRecord? {
+        guard let index = _index(id) else { return nil }
         switch sessions[index].state {
         case .pending, .failed:
             sessions[index].state = .opening
         case .opening, .live:
-            return
+            return nil
         }
         do {
-            let surface = try await query.prepareAskOpen(
-                askId: id,
+            let surface = try await query.openSession(
+                id: id,
+                replacing: sessions[index].record.kind == .interactive,
                 cwd: scope.repoPath
             )
-            guard let latest = _index(id) else { return }
-            sessions[latest].state = .live(surface)
+            guard let latest = _index(id) else { return nil }
+            if case .opening = sessions[latest].state {
+                sessions[latest].record = surface
+                sessions[latest].state = .live
+            }
+            return surface
         } catch {
-            guard let latest = _index(id) else { return }
+            guard let latest = _index(id) else { return nil }
             sessions[latest].state = .failed(error.localizedDescription)
+            return nil
         }
     }
 
-    func confirmPresented(_ id: String) async {
-        guard let index = _index(id),
-              let surface = sessions[index].surface,
-              sessions[index].presentation == .needed
-        else { return }
-        sessions[index].presentation = .confirming
-        do {
-            _ = try await query.confirmAskPresented(
-                askId: id,
-                invocationId: surface.invocation.id,
-                cwd: scope.repoPath
-            )
-            if let latest = _index(id) {
-                sessions[latest].presentation = .confirmed
-            }
-        } catch {
-            if let latest = _index(id) {
-                sessions[latest].presentation = .needed
-            }
+    func select(_ id: String) async -> SessionRecord? {
+        guard let index = _index(id) else { return nil }
+        requestedSessionId = id
+        if let surface = sessions[index].surface {
+            requestedSessionId = nil
+            return surface
         }
+        if case .opening = sessions[index].state {
+            return nil
+        }
+
+        let surface = await recover(id)
+        guard requestedSessionId == id else { return nil }
+        requestedSessionId = nil
+        return surface
     }
 
     func beginPaneLoad(_ id: String) {
@@ -230,34 +221,35 @@ final class SessionsStore: ObservableObject {
         metrics.recordPaneLive(id)
     }
 
-    private func _enqueue(_ id: String, priority: Bool) {
-        guard !openQueue.contains(id) else { return }
-        if priority {
-            openQueue.insert(id, at: 0)
-        } else {
-            openQueue.append(id)
+    func decideFlow(_ id: String, approving: Bool, text: String) async -> Bool {
+        guard _index(id) != nil else { return false }
+        do {
+            try await query.resolveFlowSession(
+                id: id,
+                approving: approving,
+                text: text,
+                cwd: scope.repoPath
+            )
+            await refresh()
+            return true
+        } catch {
+            guard let latest = _index(id) else { return false }
+            sessions[latest].state = .failed(error.localizedDescription)
+            return false
         }
     }
 
-    private func _startOpener() {
-        guard !openerRunning, !openQueue.isEmpty else { return }
-        openerRunning = true
-        Task {
-            while let id = _nextPending() {
-                await open(id)
-            }
-            openerRunning = false
+    func complete(_ id: String) async -> Bool {
+        guard _index(id) != nil else { return false }
+        do {
+            try await query.completeSession(id: id, cwd: scope.repoPath)
+            await refresh()
+            return true
+        } catch {
+            guard let latest = _index(id) else { return false }
+            sessions[latest].state = .failed(error.localizedDescription)
+            return false
         }
-    }
-
-    private func _nextPending() -> String? {
-        while !openQueue.isEmpty {
-            let id = openQueue.removeFirst()
-            if let index = _index(id), case .pending = sessions[index].state {
-                return id
-            }
-        }
-        return nil
     }
 
     private func _index(_ id: String) -> Int? {
@@ -303,7 +295,6 @@ private final class SessionsLatencyMetrics {
 struct SessionsView: View {
     private let scope: SessionScope
     private let multiplexer: MultiplexerStore
-    private let onQueueChanged: () async -> Void
     private let onShowWork: () -> Void
     private let query: RegistryQuery
 
@@ -311,7 +302,6 @@ struct SessionsView: View {
     @State private var layoutSnapshot: LayoutNode
     @State private var focusedPaneId: String
     @State private var zoomedPaneId: String?
-    @State private var pendingSessionId: String?
     /// Session work id → its Wave/Project/Task, resolved from the roadmap so a
     /// row shows what it *is* instead of an opaque `task_…` id.
     @State private var hierarchy: [String: SessionContext] = [:]
@@ -320,12 +310,11 @@ struct SessionsView: View {
     init(
         scope: SessionScope,
         query: RegistryQuery = RegistryQueryLocal.shared,
-        initialRecords: [AskAttentionRecord]? = nil,
-        onQueueChanged: @escaping () async -> Void = {},
+        initialRecords: [SessionRecord]? = nil,
         onShowWork: @escaping () -> Void = {}
     ) {
+        let scope = scope.resolvingRepository()
         self.scope = scope
-        self.onQueueChanged = onQueueChanged
         self.onShowWork = onShowWork
         self.query = query
         let multiplexer = MultiplexerStore()
@@ -373,30 +362,26 @@ struct SessionsView: View {
             focusedPaneId = multiplexer.focusedPaneId
             zoomedPaneId = multiplexer.zoomedPaneId
         }
-        .onChange(of: store.sessions) { _, sessions in
-            guard let pendingSessionId else { return }
-            guard let item = sessions.first(where: { $0.id == pendingSessionId }) else {
-                self.pendingSessionId = nil
-                return
-            }
-            guard item.surface != nil else { return }
-            _load(item)
-            self.pendingSessionId = nil
+        .onChange(of: store.sessions.map(\.id)) { _, ids in
+            multiplexer.reconcileSessions(Set(ids))
         }
         .task {
+            // Sessions are the primary content. Do not hold the list behind
+            // the slower roadmap query used only to enrich its group labels.
+            await store.refresh()
             await _loadHierarchy()
             while !Task.isCancelled {
-                await store.refresh()
-                multiplexer.reconcileSessions(Set(store.sessions.map(\.id)))
-                await onQueueChanged()
-                // Resolve any newly-seen session whose task we don't know yet.
-                if store.sessions.contains(where: { hierarchy[$0.work.id] == nil }) {
-                    await _loadHierarchy()
-                }
                 do {
                     try await Task.sleep(for: .seconds(2))
                 } catch {
                     return
+                }
+                await store.refresh()
+                // Resolve any newly-seen session whose task we don't know yet.
+                if store.sessions.contains(where: { item in
+                    item.work.map { hierarchy[$0.id] == nil } ?? false
+                }) {
+                    await _loadHierarchy()
                 }
             }
         }
@@ -408,21 +393,35 @@ struct SessionsView: View {
         let wave: String
         let project: String
         let identifier: String
-        let taskName: String
+        let workName: String
     }
 
-    /// Resolve every session's task to its Wave/Project/Task via the roadmap.
+    /// Resolve every bound Session to its Wave/Project/Task via the roadmap.
     private func _loadHierarchy() async {
         guard let snapshot = try? await query.roadmap() else { return }
         var index: [String: SessionContext] = [:]
         for wave in snapshot.waves {
+            index[wave.wave.id] = SessionContext(
+                wave: wave.wave.name,
+                project: "Wave",
+                identifier: wave.wave.name,
+                workName: wave.wave.name
+            )
             for project in wave.projects.items {
+                let projectContext = SessionContext(
+                    wave: wave.wave.name,
+                    project: project.project.name,
+                    identifier: project.project.slug,
+                    workName: project.project.name
+                )
+                index[project.project.id] = projectContext
+                if let workId = project.runtime?.workId { index[workId] = projectContext }
                 for task in project.tasks {
                     let context = SessionContext(
                         wave: wave.wave.name,
                         project: project.project.name,
                         identifier: task.task.identifier,
-                        taskName: task.task.name
+                        workName: task.task.name
                     )
                     // A session's work id is the DURABLE id (`task_…`), which the
                     // roadmap carries on `runtime.work_id` — not `task.id` (a UUID).
@@ -489,20 +488,27 @@ struct SessionsView: View {
         .background(palette.surface)
     }
 
-    // The work hierarchy filtered to what has a session: session-bearing tasks
-    // grouped by their Wave › Project.
+    // Group Work-bound sessions by Wave › Project. Unbound Run sessions stay
+    // visible under Other.
     private struct SessionGroup: Identifiable {
         let wave: String
         let project: String
-        let items: [SessionItem]
+        let items: [SessionRowItem]
         var id: String { "\(wave)/\(project)" }
+    }
+
+    private struct SessionRowItem: Identifiable {
+        let item: SessionItem
+        let context: SessionContext?
+        var id: String { "\(item.id)#\(item.record.title)" }
     }
 
     private func _groupedSessions() -> [SessionGroup] {
         var order: [String] = []
-        var buckets: [String: (wave: String, project: String, items: [SessionItem])] = [:]
+        var buckets: [String: (wave: String, project: String, items: [SessionRowItem])] = [:]
         for item in store.sessions {
-            let context = hierarchy[item.work.id]
+            let context = item.work.flatMap { hierarchy[$0.id] }
+            let row = SessionRowItem(item: item, context: context)
             let wave = context?.wave ?? "—"
             let project = context?.project ?? "Other"
             let key = "\(wave)/\(project)"
@@ -510,7 +516,7 @@ struct SessionsView: View {
                 buckets[key] = (wave, project, [])
                 order.append(key)
             }
-            buckets[key]?.items.append(item)
+            buckets[key]?.items.append(row)
         }
         return order.compactMap { key in
             buckets[key].map { SessionGroup(wave: $0.wave, project: $0.project, items: $0.items) }
@@ -525,8 +531,8 @@ struct SessionsView: View {
                 } else {
                     ForEach(_groupedSessions()) { group in
                         _groupHeader(group.wave, project: group.project)
-                        ForEach(group.items) { item in
-                            _sessionRow(item)
+                        ForEach(group.items) { row in
+                            _sessionRow(row)
                         }
                     }
                 }
@@ -537,15 +543,21 @@ struct SessionsView: View {
 
     private func _groupHeader(_ wave: String, project: String) -> some View {
         HStack(spacing: Spacing.xxs) {
-            Text(wave)
-                .font(Typography.caption(9).weight(.bold))
-                .foregroundStyle(Color.loopflowBurgundy)
-            Image(systemName: "chevron.right")
-                .font(.system(size: 6, weight: .bold))
-                .foregroundStyle(palette.textSecondary.opacity(0.5))
-            Text(project)
-                .font(Typography.caption(9).weight(.semibold))
-                .foregroundStyle(palette.textSecondary)
+            if wave == "—" {
+                Text(project)
+                    .font(Typography.caption(9).weight(.bold))
+                    .foregroundStyle(palette.textSecondary)
+            } else {
+                Text(wave)
+                    .font(Typography.caption(9).weight(.bold))
+                    .foregroundStyle(Color.loopflowBurgundy)
+                Image(systemName: "chevron.right")
+                    .font(.system(size: 6, weight: .bold))
+                    .foregroundStyle(palette.textSecondary.opacity(0.5))
+                Text(project)
+                    .font(Typography.caption(9).weight(.semibold))
+                    .foregroundStyle(palette.textSecondary)
+            }
             Spacer()
         }
         .padding(.horizontal, Spacing.sm)
@@ -567,36 +579,27 @@ struct SessionsView: View {
             ContentUnavailableView(
                 "No sessions",
                 systemImage: "checkmark.circle",
-                description: Text("Tasks with an open or queued session appear here, grouped by Wave and Project.")
+                description: Text("Interactive runs and human handoffs appear here until completed.")
             )
             .frame(maxWidth: .infinity)
             .padding(.top, Spacing.xl)
         }
     }
 
-    private func _sectionTitle(_ title: String, count: Int) -> some View {
-        HStack(spacing: Spacing.xxs) {
-            Text(title.uppercased())
-            Text("\(count)").opacity(0.65)
-            Spacer()
-        }
-        .font(Typography.caption(8).weight(.bold))
-        .foregroundStyle(palette.textSecondary)
-        .padding(.horizontal, Spacing.xs)
-        .padding(.top, Spacing.sm)
-    }
-
-    private func _sessionRow(_ item: SessionItem) -> some View {
+    private func _sessionRow(_ row: SessionRowItem) -> some View {
+        let item = row.item
         let pane = _pane(for: item.id)
         let isFocused = pane?.id == focusedPaneId
         let color = pane.map { multiplexer.color(for: $0.id).color }
         return Button {
-            if item.surface != nil {
-                _load(item)
-            } else {
+            if pane == nil {
                 store.beginPaneLoad(item.id)
-                pendingSessionId = item.id
-                store.prioritize(item.id)
+            }
+            Task { @MainActor in
+                guard await store.select(item.id) != nil,
+                      let selected = store.sessions.first(where: { $0.id == item.id })
+                else { return }
+                _load(selected)
             }
         } label: {
             HStack(alignment: .top, spacing: Spacing.sm) {
@@ -605,25 +608,21 @@ struct SessionsView: View {
                     .frame(width: 8, height: 8)
                     .padding(.top, 4)
                 VStack(alignment: .leading, spacing: Spacing.xxs) {
-                    let context = hierarchy[item.work.id]
-                    Text(context?.taskName ?? item.interventionPrompt ?? "Session")
+                    Text(item.record.title)
                         .font(Typography.body(11).weight(.semibold))
                         .foregroundStyle(palette.text)
                         .lineLimit(2)
                     HStack(spacing: Spacing.xs) {
-                        if let identifier = context?.identifier {
-                            Text(identifier)
-                                .font(Typography.caption(9))
-                                .foregroundStyle(palette.textSecondary)
-                        }
-                        if let step = item.step {
-                            Text(step)
-                                .font(Typography.caption(8).weight(.semibold))
-                                .foregroundStyle(palette.textSecondary)
-                                .padding(.horizontal, Spacing.xxs)
-                                .padding(.vertical, 1)
-                                .background(palette.textSecondary.opacity(0.14), in: Capsule())
-                        }
+                        Text(row.context?.identifier ?? item.record.work?.id ?? "Run")
+                            .font(Typography.caption(9))
+                            .foregroundStyle(palette.textSecondary)
+                        Text(item.step)
+                            .font(Typography.caption(8))
+                            .fontWeight(.semibold)
+                            .foregroundStyle(palette.textSecondary)
+                            .padding(.horizontal, Spacing.xxs)
+                            .padding(.vertical, 1)
+                            .background(palette.textSecondary.opacity(0.14), in: Capsule())
                     }
                     .lineLimit(1)
                     if let error = item.error {
@@ -634,7 +633,7 @@ struct SessionsView: View {
                     }
                 }
                 Spacer(minLength: Spacing.xs)
-                Text(isFocused ? "ACTIVE" : _status(item, pane: pane))
+                Text(_status(item, pane: pane))
                     .font(Typography.caption(8).weight(.bold))
                     .foregroundStyle(isFocused ? (color ?? palette.textSecondary) : palette.textSecondary)
             }
@@ -647,6 +646,7 @@ struct SessionsView: View {
         }
         .buttonStyle(.plain)
         .accessibilityLabel("\(item.label), \(_status(item, pane: pane))")
+        .accessibilityIdentifier("session-row-\(item.id)")
     }
 
     private func _pane(for sessionId: String) -> PaneState? {
@@ -656,9 +656,9 @@ struct SessionsView: View {
     private func _status(_ item: SessionItem, pane: PaneState?) -> String {
         if pane != nil { return "OPEN" }
         return switch item.state {
-        case .pending: "QUEUED"
+        case .pending: item.statusLabel
         case .opening: "OPENING…"
-        case .live: "READY"
+        case .live: item.statusLabel
         case .failed: "RETRY"
         }
     }
@@ -672,11 +672,26 @@ struct SessionsView: View {
     }
 
     private func _load(_ item: SessionItem) {
-        if multiplexer.pane(forSessionId: item.id) == nil,
-           pendingSessionId != item.id {
-            store.beginPaneLoad(item.id)
+        if multiplexer.pane(forSessionId: item.id) == nil {
+            _destroySurface(in: multiplexer.focusedPane)
         }
         multiplexer.load(sessionId: item.id)
+    }
+
+    private func _destroySurface(in pane: PaneState) {
+        switch pane.content {
+        case .empty:
+            return
+        case .shell:
+            GhosttyManager.shared.destroySession("shell-pane-\(pane.id)")
+        case .session(let id):
+            guard let item = store.sessions.first(where: { $0.id == id }),
+                  let surface = item.surface
+            else { return }
+            GhosttyManager.shared.destroySession(
+                _terminalSurfaceId(sessionId: surface.id)
+            )
+        }
     }
 
     private func _handle(_ shortcut: SessionsShortcut) {
@@ -686,6 +701,7 @@ struct SessionsView: View {
         case .splitDown:
             _ = multiplexer.split(multiplexer.focusedPaneId, axis: .horizontal)
         case .close:
+            _destroySurface(in: multiplexer.focusedPane)
             multiplexer.close(multiplexer.focusedPaneId)
         case .undoClose:
             multiplexer.undoClose()
@@ -726,6 +742,7 @@ private struct MultiplexerView: View {
             }
         }
         .background(LoopflowPalette.dark.background)
+        .environment(\.colorScheme, .dark)
         .accessibilityIdentifier("sessions-multiplexer")
     }
 }
@@ -838,6 +855,18 @@ private struct SplitDivider: View {
     }
 }
 
+private enum FlowResolutionAction {
+    case approve
+    case iterate
+
+    var title: String {
+        switch self {
+        case .approve: "Approve and continue"
+        case .iterate: "Iterate"
+        }
+    }
+}
+
 private struct SessionPaneView: View {
     let pane: PaneState
     let isFocused: Bool
@@ -846,6 +875,9 @@ private struct SessionPaneView: View {
     let store: MultiplexerStore
     @State private var bellRinging = false
     @State private var terminalTitle: String?
+    @State private var resolutionAction: FlowResolutionAction?
+    @State private var resolutionText = ""
+    @State private var isCompleting = false
 
     private var item: SessionItem? {
         guard case .session(let id) = pane.content else { return nil }
@@ -867,8 +899,12 @@ private struct SessionPaneView: View {
             Rectangle()
                 .strokeBorder(isFocused ? paneColor : Color.clear, lineWidth: 2)
         }
+        .overlay(alignment: .bottomTrailing) {
+            completionAction
+        }
         .accessibilityElement(children: .contain)
         .accessibilityLabel("\(_title), \(isFocused ? "active" : "open")")
+        .accessibilityIdentifier(item.map { "session-pane-\($0.id)" } ?? "session-pane-empty")
         .onReceive(NotificationCenter.default.publisher(for: .ghosttySessionBell)) { notification in
             guard notification.object as? String == _surfaceId else { return }
             bellRinging = true
@@ -885,6 +921,39 @@ private struct SessionPaneView: View {
             bellRinging = false
             terminalTitle = nil
         }
+        .alert(
+            resolutionAction?.title ?? "Task decision",
+            isPresented: Binding(
+                get: { resolutionAction != nil },
+                set: { if !$0 { resolutionAction = nil } }
+            )
+        ) {
+            TextField(
+                resolutionAction == .approve ? "Verified summary" : "Direction",
+                text: $resolutionText
+            )
+            Button(resolutionAction?.title ?? "Continue") {
+                guard let action = resolutionAction, let item else { return }
+                let text = resolutionText.trimmingCharacters(in: .whitespacesAndNewlines)
+                resolutionAction = nil
+                Task { @MainActor in
+                    let decided = await sessions.decideFlow(
+                        item.id,
+                        approving: action == .approve,
+                        text: text
+                    )
+                    if decided {
+                        GhosttyManager.shared.destroySession(_surfaceId)
+                    }
+                }
+            }
+            .disabled(resolutionText.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty)
+            Button("Cancel", role: .cancel) {
+                resolutionAction = nil
+            }
+        } message: {
+            Text("Approve advances the Task. Iterate returns it to autonomous work with your direction. Either action closes this review terminal.")
+        }
     }
 
     private var header: some View {
@@ -898,7 +967,32 @@ private struct SessionPaneView: View {
             if bellRinging {
                 Image(systemName: "bell.fill")
                     .foregroundStyle(Color.statusWarning)
-                    .accessibilityLabel("Needs attention")
+                    .accessibilityLabel("Session ready")
+            }
+            if let item, item.record.kind == .flow {
+                Button {
+                    resolutionText = item.record.readySummary ?? "Approved by User"
+                    resolutionAction = .approve
+                } label: {
+                    Image(systemName: "checkmark.circle")
+                }
+                .disabled(item.record.state != .ready)
+                .help(
+                    item.record.state == .ready
+                        ? "Approve and continue the Task"
+                        : "The session agent has not marked this ready"
+                )
+                .accessibilityLabel("Approve and continue")
+                .accessibilityIdentifier("session-action-approve")
+                Button {
+                    resolutionText = ""
+                    resolutionAction = .iterate
+                } label: {
+                    Image(systemName: "arrow.uturn.backward.circle")
+                }
+                .help("Iterate through autonomous Task work")
+                .accessibilityLabel("Iterate")
+                .accessibilityIdentifier("session-action-iterate")
             }
             Button {
                 _ = store.split(pane.id, axis: .vertical)
@@ -913,12 +1007,13 @@ private struct SessionPaneView: View {
             }
             .help("Split down (⌘⇧D)")
             Button {
+                GhosttyManager.shared.destroySession(_surfaceId)
                 store.close(pane.id)
             } label: {
                 Image(systemName: "xmark")
             }
             .disabled(!store.canClose)
-            .help("Close pane (⌘W)")
+            .help("Close this pane; the Session remains resumable (⌘W)")
             Button {
                 store.toggleZoom(pane.id)
             } label: {
@@ -938,23 +1033,74 @@ private struct SessionPaneView: View {
     }
 
     @ViewBuilder
+    private var completionAction: some View {
+        if let item, item.record.kind != .flow {
+            Button {
+                isCompleting = true
+                Task { @MainActor in
+                    let completed = await sessions.complete(item.id)
+                    guard completed else {
+                        isCompleting = false
+                        return
+                    }
+                    GhosttyManager.shared.destroySession(_surfaceId)
+                    store.close(pane.id)
+                }
+            } label: {
+                HStack(spacing: Spacing.sm) {
+                    if isCompleting {
+                        ProgressView()
+                            .controlSize(.small)
+                            .tint(.white)
+                    } else {
+                        Image(systemName: "checkmark")
+                            .font(.system(size: 14, weight: .bold))
+                    }
+                    Text("Complete")
+                        .font(Typography.body(13).weight(.bold))
+                }
+                .foregroundStyle(.white)
+                .padding(.horizontal, Spacing.xl)
+                .frame(height: 46)
+                .background(Color.statusSuccess, in: Capsule())
+                .overlay {
+                    Capsule().strokeBorder(Color.white.opacity(0.18), lineWidth: 1)
+                }
+                .shadow(color: .black.opacity(0.35), radius: 12, y: 4)
+            }
+            .buttonStyle(.plain)
+            .disabled(isCompleting || (item.record.kind == .ask && item.record.state != .ready))
+            .help(_completionHelp(item))
+            .accessibilityLabel("Complete session")
+            .accessibilityHint(_completionHelp(item))
+            .accessibilityIdentifier("session-action-complete")
+            .padding(Spacing.xxl)
+        }
+    }
+
+    private func _completionHelp(_ item: SessionItem) -> String {
+        switch item.record.kind {
+        case .ask where item.record.state != .ready:
+            "The session agent has not marked this ready"
+        case .ask:
+            "Complete the conversation and resume its blocked caller"
+        case .interactive:
+            "Stop the provider and remove this Session; native history remains resumable"
+        case .flow:
+            ""
+        }
+    }
+
+    @ViewBuilder
     private var content: some View {
         switch pane.content {
         case .empty:
-            ContentUnavailableView(
-                "Select a session",
-                systemImage: "terminal",
-                description: Text("Choose a request from the Sessions list or open a new shell.")
-            )
+            emptyWorkspace
         case .session:
             if let item, let surface = item.surface {
                 _terminal(item: item, surface: surface)
             } else {
-                ContentUnavailableView(
-                    "Session unavailable",
-                    systemImage: "terminal",
-                    description: Text("The Ask may have settled while this pane was open.")
-                )
+                emptyWorkspace
             }
         case .shell:
             GhosttyTerminalView(
@@ -967,49 +1113,57 @@ private struct SessionPaneView: View {
         }
     }
 
+    private var emptyWorkspace: some View {
+        ContentUnavailableView {
+            Label("No session open", systemImage: "terminal")
+        } description: {
+            Text("Choose a session from the sidebar or start a shell.")
+        } actions: {
+            Button {
+                store.newShell()
+            } label: {
+                Label("New shell", systemImage: "plus")
+            }
+            .buttonStyle(.borderedProminent)
+            .tint(Color.loopflowBurgundy)
+            .accessibilityIdentifier("sessions-empty-new-shell")
+        }
+    }
+
     @ViewBuilder
-    private func _terminal(item: SessionItem, surface: InvocationSurfaceRecord) -> some View {
-        let command = LaunchTargetLauncher.command(for: surface, home: surface.home)
+    private func _terminal(item: SessionItem, surface: SessionRecord) -> some View {
         GhosttyTerminalView(
-            workingDirectory: command.cwd,
-            argv: command.argv,
-            env: command.environment,
-            sessionId: _terminalSurfaceId(
-                askId: item.id,
-                invocationId: surface.invocation.id
-            ),
+            workingDirectory: scope.repoPath,
+            argv: surface.openArgv,
+            sessionId: _terminalSurfaceId(sessionId: surface.id),
             isFocused: isFocused,
             onSurfaceCreated: {
                 sessions.recordPaneLive(item.id)
-                Task { await sessions.confirmPresented(item.id) }
             },
             onFocus: { store.setFocusedPane(pane.id) }
         )
-        .id(surface.invocation.id)
+        .id(surface.id)
     }
 
     private var _title: String {
         if let terminalTitle, !terminalTitle.isEmpty { return terminalTitle }
         return switch pane.content {
-        case .empty: "Session"
-        case .session: item?.label ?? "Session"
+        case .empty: "Workspace"
+        case .session: item?.record.detail ?? "Workspace"
         case .shell: "Shell"
         }
     }
 
     private var _surfaceId: String {
         if let item, let surface = item.surface {
-            return _terminalSurfaceId(
-                askId: item.id,
-                invocationId: surface.invocation.id
-            )
+            return _terminalSurfaceId(sessionId: surface.id)
         }
         return "shell-pane-\(pane.id)"
     }
 }
 
-private func _terminalSurfaceId(askId: String, invocationId: String) -> String {
-    "ask-\(askId)-\(invocationId)"
+private func _terminalSurfaceId(sessionId: String) -> String {
+    "human-session-\(sessionId)"
 }
 
 private enum SessionsShortcut {

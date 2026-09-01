@@ -9,9 +9,9 @@ use std::path::Path;
 
 use anyhow::anyhow;
 
-use crate::engine::wave_context::resolve_managed_wave_sync;
 use crate::engine::wave_home::{HomeActionDto, HomeRuntimeDto, HomeState};
 use crate::lf::HomeCommand;
+use crate::work::wave::context::resolve_managed_wave_sync;
 
 /// `lf home <id|observe|probe>` — inspect durable Home identity and reachability.
 pub fn run(cmd: &HomeCommand, repo: &Path) -> anyhow::Result<()> {
@@ -118,7 +118,7 @@ pub fn start(waves: &[String], wave_ids: &[String], json: bool, repo: &Path) -> 
 pub fn stop(name: &str, repo: &Path) -> anyhow::Result<()> {
     let name = crate::ops::util::normalize_wave_name(name)
         .ok_or_else(|| anyhow!("invalid wave name: '{name}'"))?;
-    let locator = crate::wave::WaveLocator::discover(repo, &name)?;
+    let locator = crate::work::wave::WaveLocator::discover(repo, &name)?;
     let runtime = tokio::runtime::Runtime::new()?;
     let stopped = runtime.block_on(async {
         let store = crate::store::open_existing_store()
@@ -142,7 +142,7 @@ pub fn stop(name: &str, repo: &Path) -> anyhow::Result<()> {
             return Ok(stopped);
         }
         store.set_work_enabled(&work, false).await?;
-        crate::wave::request_stop(Path::new(wave.repo()), wave.name()).await
+        crate::controller::wave::request_stop(Path::new(wave.repo()), wave.name()).await
     })?;
     if stopped {
         println!("stopped wave {name}");
@@ -209,7 +209,7 @@ async fn start_inner(
     } else {
         let mut candidates = Vec::with_capacity(normalized_names.len());
         for name in &normalized_names {
-            let locator = crate::wave::WaveLocator::new(repo.clone(), name)?;
+            let locator = crate::work::wave::WaveLocator::new(repo.clone(), name)?;
             let existing_wave = store.get_wave_at(&locator).await?;
             let prior_home = match existing_wave.as_ref() {
                 Some(wave) => Some(
@@ -227,7 +227,7 @@ async fn start_inner(
             let created = existing_wave.is_none();
             let wave_result = match wave_ids.get(&name) {
                 Some(id) => {
-                    crate::wave::registry::ensure_wave_row_with_id(
+                    crate::controller::wave::registry::ensure_wave_row_with_id(
                         &store,
                         repo.as_path(),
                         &name,
@@ -235,7 +235,14 @@ async fn start_inner(
                     )
                     .await
                 }
-                None => crate::wave::registry::ensure_wave_row(&store, repo.as_path(), &name).await,
+                None => {
+                    crate::controller::wave::registry::ensure_wave_row(
+                        &store,
+                        repo.as_path(),
+                        &name,
+                    )
+                    .await
+                }
             };
             let wave = match wave_result {
                 Ok(wave) => wave,
@@ -287,7 +294,7 @@ async fn start_inner(
         Err(error) => {
             let mut outcomes = Vec::with_capacity(selected.len());
             for selection in &selected {
-                let state = match crate::wave::server::live_endpoint(
+                let state = match crate::controller::wave::server::live_endpoint(
                     Path::new(selection.wave.repo()),
                     selection.wave.name(),
                 )
@@ -360,7 +367,7 @@ async fn start_inner(
 }
 
 struct StartSelection {
-    wave: crate::wave::Wave,
+    wave: crate::work::wave::Wave,
     created: bool,
     prior_home: Option<crate::durable::HomeId>,
 }

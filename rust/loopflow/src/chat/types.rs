@@ -151,7 +151,7 @@ impl TurnUsage {
 
 /// Durable, structured failure evidence attached to `ConversationEvent::Error`
 /// for disconnect-class failures. Internal to Rust — not mirrored in Swift or
-/// Python, not in `tests/fixtures/dto/`. Serialized to `conversation.jsonl` via
+/// Python, not in `tests/fixtures/dto/`. Serialized to `events.jsonl` via
 /// `trace.rs::record_conversation` and visible in `lf runs` through the `Debug`
 /// derive. One record names the model, the endpoint that died, when the stream
 /// started and ended, the last event that parsed, and the terminal error class
@@ -281,24 +281,6 @@ impl ConversationEvent {
             Self::Error { .. } => "error",
         }
     }
-
-    pub(crate) fn is_material_progress(&self) -> bool {
-        match self {
-            Self::ItemStarted { .. } | Self::ItemUpdated { .. } | Self::ItemCompleted { .. } => {
-                true
-            }
-            Self::TextDelta { content, .. } | Self::ReasoningDelta { content, .. } => {
-                !content.is_empty()
-            }
-            Self::DiffUpdated { diff, .. } => !diff.is_empty(),
-            Self::SuggestedActions { actions, .. } => !actions.is_empty(),
-            Self::TurnStarted { .. }
-            | Self::TurnCompleted { .. }
-            | Self::UsageCheckpoint { .. }
-            | Self::StatusChanged { .. }
-            | Self::Error { .. } => false,
-        }
-    }
 }
 
 #[cfg(test)]
@@ -323,23 +305,5 @@ mod tests {
         let value = serde_json::to_value(&usage).expect("serialize usage");
         let decoded: TurnUsage = serde_json::from_value(value).expect("deserialize usage");
         assert_eq!(decoded, usage);
-    }
-
-    #[test]
-    fn material_progress_excludes_boundaries_and_empty_deltas() {
-        assert!(!ConversationEvent::TurnStarted {
-            turn_id: "turn-1".to_string(),
-        }
-        .is_material_progress());
-        assert!(!ConversationEvent::TextDelta {
-            turn_id: "turn-1".to_string(),
-            content: String::new(),
-        }
-        .is_material_progress());
-        assert!(ConversationEvent::ReasoningDelta {
-            turn_id: "turn-1".to_string(),
-            content: "considering".to_string(),
-        }
-        .is_material_progress());
     }
 }

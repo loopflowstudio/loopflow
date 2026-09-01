@@ -15,9 +15,7 @@ struct WavesView: View {
 
     /// A repo to pre-select on appear (from `--repo`, a deep link, or the repo
     /// window). Collapsed to its main worktree for reads — the on-disk `wave/`
-    /// dir holds quick-launch templates that live on main by design. The
-    /// `LOOPFLOW_DEV_WAVE_REPO` dev override reads the launched checkout AS-IS
-    /// instead (see `resolveLaunchRepo`).
+    /// dir holds quick-launch templates that live on main by design.
     var initialRepoPath: String? = nil
 
     @Environment(\.palette) private var palette
@@ -360,14 +358,14 @@ struct WavesView: View {
     }
 
     /// Register the launch-provided repo so it shows in the rail, and return its
-    /// read path for pre-selection. Production collapses to the main worktree; the
-    /// `LOOPFLOW_DEV_WAVE_REPO` dev override reads the launched checkout AS-IS.
+    /// main-worktree path for pre-selection.
     private func registerInitialRepoIfNeeded() async -> String? {
         guard let initialRepoPath, !didApplyInitialRepo else { return nil }
         if AppTestMode.shouldBypassRegistry { return nil }
         let readPath = await Task.detached {
-            PortfolioDiscovery.resolveLaunchRepo(initialRepoPath).path
+            PortfolioDiscovery.resolveLaunchRepo(initialRepoPath)
         }.value
+        guard let readPath else { return nil }
         if !portfolioService.repos.contains(where: { $0.path.normalizedFilePath == readPath }) {
             portfolioService.addRepo(URL(fileURLWithPath: readPath))
         }
@@ -376,9 +374,8 @@ struct WavesView: View {
 
     /// Source the rail directly from a `~/src` scan of main (non-worktree) repos,
     /// every time. A launch-provided `initialRepoPath` is merged in via
-    /// `resolveLaunchRepo`: production reads its collapsed main worktree; the
-    /// `LOOPFLOW_DEV_WAVE_REPO` dev override reads the launched checkout AS-IS
-    /// (worktree included) as a single row labeled with the main-repo name.
+    /// `resolveLaunchRepo`, which accepts only Git working-tree roots and always
+    /// collapses a linked worktree to its main checkout.
     /// Runs the git/FS work off the main thread.
     private func refreshRepos() async {
         if AppTestMode.shouldBypassRegistry {
@@ -512,7 +509,11 @@ struct WavesView: View {
     private func restoreStickyRepoSelectionIfNeeded() {
         guard !didRestoreStickyRepo else { return }
         didRestoreStickyRepo = true
-        guard let path = loadLoopflowState()?.selectedRepoPath?.normalizedFilePath else { return }
+        guard let storedPath = loadLoopflowState()?.selectedRepoPath,
+              let path = PortfolioDiscovery.resolveLaunchRepo(storedPath)
+        else {
+            return
+        }
         guard repos.contains(where: { $0.path.normalizedFilePath == path }) else { return }
         selection = .repo(path)
     }

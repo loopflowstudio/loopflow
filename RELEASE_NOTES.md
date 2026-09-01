@@ -1,58 +1,48 @@
-# v0.12.15
+# v0.12.16
 
 <!-- loopflow:release-notes=narrative;gate=safe -->
 
-v0.12.15 makes local execution and release operations recoverable from recorded evidence instead of ambient state. You can promote an unpublished build without disturbing the reliable published Home, compose bounded Runs around tracked Work without handing ownership to a controller, and inspect or replay a Run from its Home-local record. Release tags now attest to an exact candidate that already passed hosted validation and publisher preparation, so a failed candidate can be fixed and retried without consuming the version.
+v0.12.16 makes human interaction a durable part of Loopflow's execution model. Sessions preserve the exact conversation and resolution boundary when a provider, terminal, app, or machine-control process exits, while Wave chat acknowledges messages promptly and delivers one deliberate response instead of a controller transcript. Operators can now resume human work or steer a running Task without confusing process liveness with approval.
 
-## Try local builds without risking the published Home
+## Resume human work without advancing it by accident
 
-Local promotion now switches the CLI, daemon, and app as one artifact set while preserving the published installation as a fallback. Development data lives in a disposable Home forked from the published Home, and every persisted switch phase can recover after interruption.
+Readiness, process exit, and human approval are now separate facts represented by one Session projection. Interactive Runs, ad-hoc human Asks, and Task human FlowSteps remain available across restarts until a person performs the resolution action valid for that kind of Session.
 
-- `uv run python scripts/install.py local --use` builds and promotes the local artifact set.
-- Add `--fresh` to fork a new development Home; otherwise Loopflow reuses a compatible one.
-- `uv run python scripts/install.py refresh` returns every surface to the published installation without importing development data.
-- Development builds embed dependency-ordered draft migrations and apply only an exact append-only prefix to the disposable store.
-- Promotion preflight can recover a published candidate's identity even when the release host's live Home is incompatible with that artifact.
+- `lf session` lists and opens resumable Sessions and exposes readiness, completion, approval, and iteration as distinct actions.
+- Provider exit or terminal pane closure leaves the Session resumable with its provider-native history; it no longer settles the human boundary.
+- Interactive and Ask Sessions finish through Complete, while Task FlowSteps advance only through Approve or Iterate.
+- Task controllers persist their Flow position and use semantic conditions around a single active Task branch and PR, so automation cannot advance merely because its process disappeared.
+- The macOS Sessions surface consumes the same Session DTO, attaches native terminals, and presents only the actions valid for each Session kind.
+- Desktop control follows the machine-selected Home, copied runtime binaries are authenticated by digest, and Work-scoped usage can be filtered against the same durable identity.
 
-## Share tracked Work without controller ownership
+## Use Wave chat as an operator surface
 
-Wave, Project, and Task records now describe durable Work independently from the automation that may pursue it. Humans, bounded agents, cron jobs, and alternate orchestration can use the same execution and delivery primitives without impersonating or advancing an end-to-end controller.
+Discord-backed Waves now treat conversation as durable channel history rather than a queue to consume. The Wave sees authorship, reply relationships, and its own previous posts, allowing it to decide whether a response is warranted and preventing listener restarts from producing duplicate replies.
 
-- `lf task prepare` and `lf project prepare` establish tracked Work without starting controller automation.
-- `--task`, `--project`, and `--wave` bind independent Runs to existing Work while preserving each Run's own provenance.
-- Multiple independent Runs can concern the same Task; Work attribution is no longer a provider writer lease.
-- `lf task restart` checkpoints the worktree and resets controller progress while preserving Task, worktree, and PR identity.
-- Managed Tasks can follow the human-submit path without requiring a live controller, and landing collapses intermediate checkpoints before publishing the verified head.
+- Incoming messages receive an immediate pickup reaction, followed by one completed response and a success reaction.
+- A resumable Discord Gateway connection, REST cursor catch-up, and delivery reconciliation preserve continuity across listener restarts.
+- The shared `wave/chat` contract and `lf reply` keep only the finished reply on the channel; intermediate work remains inside the Run.
+- Wave and Project governance use focused `operate` turns, keeping chat responses deliberate instead of streaming controller activity.
 
-## Inspect and replay the Run that actually happened
+## Steer long-running work while it is live
 
-Provider execution now produces a Home-local Run record: an immutable manifest published before spawn, an append-only event stream, and one exclusive terminal receipt. This replaces the SQL-backed Invocation/Turn execution control plane and makes identity evidence and causality rather than a mutation lease.
+Direction now travels through durable Task and Project event streams and can also reach the active provider session at its next turn boundary. This keeps a correction useful whether the process consumes it immediately or resumes later.
 
-- `lf runs <id>` reads the Run summary, while `lf runs <id> --events` exposes its recorded events.
-- `lf replay <id>` launches a new child Run through the ordinary harness from the recorded execution contract and preserves the source relationship.
-- Run evidence records the effective prompts, agent and model, stable non-secret account identity, turn cap, browser capability, permission mode, filesystem boundary, provider output, conversation, retries, and provider-authored cumulative usage.
-- Replay resolves the exact recorded account on the selected Home and fails closed when the schema, account, or managed-Run evidence cannot support the launch; it does not record credential bytes, environment values, resume tokens, callbacks, repository contents, or process ownership as replay inputs.
-- `lf trace --events` and `lf doctor` now understand the measured historical usage shapes without accepting unknown or partial records as valid current data.
-- Ended Runs from retired CI controllers remain readable with their unknown trigger JSON preserved byte-for-byte, while unknown nonterminal triggers remain invalid and cannot reserve new Runs.
-
-## Tag only candidates that have already passed
-
-The release tag is now the attestation, not the starting gun. Loopflow builds from a provisional exact-commit candidate ref, verifies the workflow by branch and head SHA, prepares publication artifacts, and only then pushes the immutable version tag.
-
-- Nightly and release candidates share one credential-free package matrix, with candidate binaries reporting their intended final version before the tag exists.
-- Publisher preparation stores artifacts and receipts under `.lf/releases/`, binding the candidate tag, source commit, workflow run, completed proof stages, and artifact hashes.
-- Publication revalidates the receipt and every artifact before upload, then removes successful candidate state.
-- A failed build leaves the repository untagged and preserves its candidate evidence, so the same version can be retried after a fix merges.
-- Tag pushes no longer trigger release builds; hosted builds use the explicit candidate-dispatch contract, while credentialed signing and publication remain on the maintained publisher host.
+- `lf task steer <task> "take the smaller approach"` sends durable direction to running work.
+- `lf task interrupt <task>` ends the current turn so execution can restart with that direction.
+- Codex, Claude, and OpenCode harnesses share live current-session delivery support.
+- The standalone steers table and transient consumption model are gone; interruption state and direction live with the Work they affect.
 
 ## Operational notes
 
-- Work-bound Runs share a worktree but are not file-edit transactions. Give concurrent contributions distinct paths and reconcile them before checkpointing.
-- Replay uses current credentials and current repository contents as live launch inputs even though the execution contract itself is immutable. Exact-account replay refuses rather than silently choosing another identity.
-- Local promotion retains the published fallback and never imports development data during `refresh`; use `--fresh` when a clean fork is required.
+- Discord bindings now require **Add Reactions** and **Message Content** permissions.
+- The legacy Ask tables, Ask commands, attention DTOs, and standalone steers table were removed rather than kept behind compatibility shims. Consumers must move to Sessions and Work event streams.
+- Provider-native Claude and OpenCode steering checks remain opt-in; deterministic coverage exercises the shared controller contract.
+- A dedicated responder process and Discord thread-to-Task mapping are not included in this release. Wave replies still run through the existing resident.
+- Settled Task PRs remain as serial delivery history even though each Task now has only one active branch and PR.
 
 ## Small changes
 
-- Cron continuity now checks the latest due local-time interval for an exactly matching scheduled receipt. Historical ledger gaps remain visible without permanently blocking `lf doctor` or the telemetry scorecard.
-- Scheduled receipts prove the scheduler fired even when the target failed; manual receipts do not satisfy continuity.
-- Wave memory now retains the release-recovery evidence restored during main reconciliation, and the list Wave starts from its current Linear-backed context.
+- Temporary SQLite stores are hermetic, preventing migration tests from racing ambient machine state.
+- Installation promotion avoids version-skew re-exec loops and ignores stale placements whose catalog roots no longer exist.
+- Linked worktrees resolve to their main checkout during repository discovery.

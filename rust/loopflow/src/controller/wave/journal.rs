@@ -282,6 +282,12 @@ pub enum EventKind {
         /// `ChatTurn::absorb_item`).
         item: ConversationItem,
     },
+    /// The channel message this assistant turn answers. Unlike `answers`, this
+    /// is a visible conversation relation, not a consumption marker.
+    ChatReplyLinked {
+        turn_id: String,
+        message_id: MessageId,
+    },
     TurnSteered {
         turn_id: String,
         /// Consumption marker for steered messages: these `UserMessage`s were
@@ -611,6 +617,10 @@ impl Narrator {
                     }
                 }
             }
+            EventKind::ChatReplyLinked {
+                turn_id,
+                message_id,
+            } => debug(format!("turn {turn_id} replies to {message_id}")),
             EventKind::TurnSteered { turn_id, answers } => info(format!(
                 "turn {turn_id} steered{}",
                 answers_segment(answers)
@@ -1003,6 +1013,9 @@ pub struct ThreadFold {
     pub discord: Option<DiscordAttachment>,
     /// Outbound intents and receipts, keyed by deterministic delivery id.
     pub discord_deliveries: HashMap<String, DiscordDelivery>,
+    /// Completed assistant turn id → the channel message it explicitly
+    /// answers. Failed/crashed turns never publish a reply relation.
+    pub chat_reply_targets: HashMap<String, MessageId>,
     /// Completed assistant turns and the authored inputs they answered.
     pub completed_claims: HashMap<String, Vec<MessageId>>,
     /// Typed Task observations indexed by their synthetic consumption id.
@@ -1082,6 +1095,7 @@ pub fn fold_thread(events: &[Event]) -> ThreadFold {
     let mut messages: HashMap<MessageId, PendingMessage> = HashMap::new();
     let mut discord: Option<DiscordAttachment> = None;
     let mut discord_deliveries: HashMap<String, DiscordDelivery> = HashMap::new();
+    let mut chat_reply_targets: HashMap<String, MessageId> = HashMap::new();
     let mut completed_claims: HashMap<String, Vec<MessageId>> = HashMap::new();
     let mut tasks: HashMap<MessageId, TaskObservation> = HashMap::new();
     let mut projects: HashMap<MessageId, ProjectObservation> = HashMap::new();
@@ -1090,6 +1104,7 @@ pub fn fold_thread(events: &[Event]) -> ThreadFold {
     // Claims (`answers`) per still-open turn — the crash tail's consumption,
     // exported so the boot janitor can requeue it.
     let mut claims_by_open_turn: HashMap<String, Vec<MessageId>> = HashMap::new();
+    let mut reply_target_by_open_turn: HashMap<String, MessageId> = HashMap::new();
 
     for event in events {
         match &event.kind {
@@ -1122,6 +1137,9 @@ pub fn fold_thread(events: &[Event]) -> ThreadFold {
                 });
             }
             EventKind::UserMessage { id, op, text } => {
+                // Chat is a stream to observe, not a queue to drain: a human
+                // message becomes a thread turn (read back via read_channel), but
+                // is never queued as pending input to consume.
                 let mut turn = ChatTurn::user(format!("turn-{}", event.seq), text.clone());
                 turn.created_at = event.at_rfc3339();
                 turns.push(turn);
@@ -1131,10 +1149,13 @@ pub fn fold_thread(events: &[Event]) -> ThreadFold {
                     text: text.clone(),
                     source: None,
                 };
-                if !consumed_messages.contains(id) {
-                    pending_messages.push(message.clone());
+                messages.insert(id.clone(), message.clone());
+                // Plain chat is observed off the channel tail; only steers and
+                // interrupts fold into pending (a later TurnSteered may consume
+                // them). Retired when steers become task comments.
+                if *op != MessageOp::Message && !consumed_messages.contains(id) {
+                    pending_messages.push(message);
                 }
-                messages.insert(id.clone(), message);
             }
             EventKind::DiscordChatAttached {
                 binding,
@@ -1153,16 +1174,16 @@ pub fn fold_thread(events: &[Event]) -> ThreadFold {
                 turn.created_at = event.at_rfc3339();
                 turns.push(turn);
                 discord_turn_bindings.insert(turn_id, source.binding.clone());
-                let message = PendingMessage {
-                    id: id.clone(),
-                    op: MessageOp::Message,
-                    text: format!("[{}]\n{}", source.uri(), text),
-                    source: Some(source.clone()),
-                };
-                if !consumed_messages.contains(id) {
-                    pending_messages.push(message.clone());
-                }
-                messages.insert(id.clone(), message);
+                // Observed, not queued (see UserMessage).
+                messages.insert(
+                    id.clone(),
+                    PendingMessage {
+                        id: id.clone(),
+                        op: MessageOp::Message,
+                        text: format!("[{}]\n{}", source.uri(), text),
+                        source: Some(source.clone()),
+                    },
+                );
             }
             EventKind::DiscordAuthoredMessage {
                 id,
@@ -1181,10 +1202,12 @@ pub fn fold_thread(events: &[Event]) -> ThreadFold {
                     text: format!("[{}]\n{}", source.uri(), text),
                     source: Some(source.clone()),
                 };
-                if !consumed_messages.contains(id) {
-                    pending_messages.push(message.clone());
+                messages.insert(id.clone(), message.clone());
+                // Observed, not queued (see UserMessage); only an authored steer
+                // folds into pending until a later TurnSteered consumes it.
+                if *op != MessageOp::Message && !consumed_messages.contains(id) {
+                    pending_messages.push(message);
                 }
-                messages.insert(id.clone(), message);
             }
             EventKind::DiscordChatCursorAdvanced {
                 binding,
@@ -1304,6 +1327,20 @@ pub fn fold_thread(events: &[Event]) -> ThreadFold {
                 };
                 turn.absorb_item(item.clone());
             }
+            EventKind::ChatReplyLinked {
+                turn_id,
+                message_id,
+            } => {
+                if open.iter().any(|turn| &turn.id == turn_id) {
+                    reply_target_by_open_turn.insert(turn_id.clone(), message_id.clone());
+                } else {
+                    tracing::warn!(
+                        turn_id,
+                        seq = event.seq,
+                        "ChatReplyLinked for a turn that isn't open"
+                    );
+                }
+            }
             EventKind::TurnFinished {
                 turn_id,
                 status,
@@ -1324,6 +1361,11 @@ pub fn fold_thread(events: &[Event]) -> ThreadFold {
                 let claims = claims_by_open_turn.remove(turn_id).unwrap_or_default();
                 if *status == Lifecycle::Completed {
                     completed_claims.insert(turn_id.clone(), claims);
+                    if let Some(message_id) = reply_target_by_open_turn.remove(turn_id) {
+                        chat_reply_targets.insert(turn_id.clone(), message_id);
+                    }
+                } else {
+                    reply_target_by_open_turn.remove(turn_id);
                 }
                 turns.push(turn);
             }
@@ -1400,6 +1442,7 @@ pub fn fold_thread(events: &[Event]) -> ThreadFold {
         messages,
         discord,
         discord_deliveries,
+        chat_reply_targets,
         completed_claims,
         tasks,
         projects,

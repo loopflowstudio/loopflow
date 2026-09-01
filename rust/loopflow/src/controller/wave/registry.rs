@@ -357,7 +357,7 @@ mod tests {
 
     async fn temp_store(tmp: &std::path::Path) -> SharedStore {
         Arc::new(
-            open_store(&StorageConfig::sqlite(tmp.join("loopflow.db")))
+            crate::store::open_ephemeral_store(&StorageConfig::sqlite(tmp.join("loopflow.db")))
                 .await
                 .expect("open sqlite store"),
         )

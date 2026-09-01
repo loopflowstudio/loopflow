@@ -262,15 +262,16 @@ impl super::SqliteStore {
                 ts.work_state,
                 ts.created_at,
                 EXISTS (
-                    SELECT 1 FROM steers s
-                    WHERE s.work_kind='task' AND s.work_id=ci.task_id
-                      AND s.author_kind='user'
-                      AND s.issued_at * 1000000000 >= CASE
+                    SELECT 1 FROM task_events event
+                    WHERE event.task_id=ci.task_id
+                      AND json_extract(event.kind_json, '$.kind')='steer'
+                      AND json_extract(event.kind_json, '$.author.kind')='user'
+                      AND event.created_at * 1000000000 >= CASE
                           WHEN ci.poll_observed_at IS NULL THEN COALESCE(ci.webhook_received_at, ci.created_at)
                           WHEN ci.webhook_received_at IS NULL THEN ci.poll_observed_at
                           ELSE MIN(ci.poll_observed_at, ci.webhook_received_at)
                       END
-                      AND s.issued_at * 1000000000 <= COALESCE(ci.green_at, ci.merged_at, 9223372036854775807)
+                      AND event.created_at * 1000000000 <= COALESCE(ci.green_at, ci.merged_at, 9223372036854775807)
                 )
              FROM ci_incidents ci
              LEFT JOIN tasks ts ON ts.id=ci.task_id

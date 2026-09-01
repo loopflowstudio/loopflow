@@ -38,17 +38,18 @@ lf session complete <interactive-or-ask-id>
 lf session approve <flowstep-id> "Verified summary"
 lf session iterate <flowstep-id> "Narrow the design"
 lf task steer INF-123 "address the latest feedback"
+lf task interrupt INF-123
 lf task resume INF-123
 lf task resume INF-123 --model codex --reason "Claude quota exhausted"
 ```
 
 Plain `resume` continues the same provider transcript. `--model` keeps the Task
 Work, Steers, worktree, and active PR, but gives the next attempt to the selected
-agent. It refuses while another executor is still writing. There is currently
-no supported cross-process CLI for immediate Task cancellation; wait for the
-writer to stop, then resume. A Task Steer is durable input for the next
-controller boundary; it is not a live provider message or proof that the agent
-applied it.
+agent. It refuses while another executor is still writing. A Task Steer is a
+durable Work comment. A live controller offers new comments to the provider at
+turn boundaries; the next Skill seed remains the fallback. `task interrupt`
+ends the active turn so that boundary arrives immediately. Neither command's
+receipt proves that the provider applied the direction.
 
 During new-Task placement, status reports the declared worktree as initializing.
 If creation does not finish, status keeps the Task identity and names the exact

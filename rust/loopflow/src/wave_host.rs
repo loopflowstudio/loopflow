@@ -464,7 +464,7 @@ mod tests {
 
     use crate::durable::{HomeId, WorkRef};
     use crate::id::WaveId;
-    use crate::store::{open_store, StorageConfig};
+    use crate::store::StorageConfig;
     use crate::work::wave::{Wave, WaveLocator};
 
     use super::{waves_for_home, HostedWave, WaveHost, WaveStartState, WaveStartup};
@@ -527,9 +527,11 @@ mod tests {
         std::fs::create_dir_all(repo.join("wave/remote-placement"))
             .expect("create remotely placed Wave");
         let store = Arc::new(
-            open_store(&StorageConfig::sqlite(directory.path().join("registry.db")))
-                .await
-                .expect("open store"),
+            crate::store::open_ephemeral_store(&StorageConfig::sqlite(
+                directory.path().join("registry.db"),
+            ))
+            .await
+            .expect("open store"),
         );
         let local = store.local_home().await.expect("read local Home");
         std::fs::write(
@@ -617,9 +619,11 @@ mod tests {
         std::fs::write(repo.join("wave/assigned/GOAL.md"), "Assigned here.\n")
             .expect("write Wave goal");
         let store = Arc::new(
-            open_store(&StorageConfig::sqlite(directory.path().join("registry.db")))
-                .await
-                .expect("open store"),
+            crate::store::open_ephemeral_store(&StorageConfig::sqlite(
+                directory.path().join("registry.db"),
+            ))
+            .await
+            .expect("open store"),
         );
         let local = store.local_home().await.expect("read local Home");
         let wave = Wave::new(
@@ -661,9 +665,11 @@ mod tests {
         std::fs::write(repo.join("wave/assigned/GOAL.md"), "Assigned here.\n")
             .expect("write Wave goal");
         let store = Arc::new(
-            open_store(&StorageConfig::sqlite(directory.path().join("registry.db")))
-                .await
-                .expect("open store"),
+            crate::store::open_ephemeral_store(&StorageConfig::sqlite(
+                directory.path().join("registry.db"),
+            ))
+            .await
+            .expect("open store"),
         );
         let local = store.local_home().await.expect("read local Home");
         let wave = Wave::new(
@@ -708,17 +714,16 @@ mod tests {
         let repo = directory.path().join("repo");
         std::fs::create_dir_all(repo.join("wave/product")).expect("create Wave directory");
         let store = Arc::new(
-            open_store(&StorageConfig::sqlite(directory.path().join("registry.db")))
-                .await
-                .expect("open store"),
+            crate::store::open_ephemeral_store(&StorageConfig::sqlite(
+                directory.path().join("registry.db"),
+            ))
+            .await
+            .expect("open store"),
         );
         let local = store.local_home().await.expect("read local Home");
         std::fs::write(
             repo.join("wave/product/GOAL.md"),
-            format!(
-                "---\nchat:\n  provider: discord\n  home_id: \"{}\"\n  guild_id: \"guild\"\n  channel_id: \"channel\"\n---\nDiscord-backed product.\n",
-                local.id
-            ),
+            "---\nchat:\n  provider: discord\n  guild_id: \"guild\"\n  channel_id: \"channel\"\n---\nDiscord-backed product.\n",
         )
         .expect("write Wave goal");
         init_test_git_repo(&repo);

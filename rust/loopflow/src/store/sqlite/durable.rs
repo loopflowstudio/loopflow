@@ -4,14 +4,14 @@ use time::OffsetDateTime;
 use crate::child::ChildRef;
 use crate::durable::{
     AbandonReceipt, Author, FlowPosition, Home, HomeId, Placement, ProjectId, RunId, Steer,
-    SteerId, SteerReceipt, TaskId, ToolResponseId, ToolResponseReceipt, ToolResponseWrite, WorkRef,
+    SteerComment, TaskId, ToolResponseId, ToolResponseReceipt, ToolResponseWrite, WorkRef,
     WorkStatus,
 };
 use crate::id::WaveId;
 use crate::store::rows::now_unix;
 use crate::store::{StoreError, StoreResult};
-use crate::work::project::Project;
-use crate::work::task::Task;
+use crate::work::project::{Project, ProjectEventKind};
+use crate::work::task::{Task, TaskEventKind};
 
 use super::SqliteStore;
 
@@ -320,62 +320,80 @@ impl SqliteStore {
         work_steers_in(&conn, &work)
     }
 
-    pub fn append_steer(
-        &self,
-        work: &WorkRef,
-        author: &Author,
-        text: &str,
-    ) -> StoreResult<SteerReceipt> {
-        let text = text.trim();
-        if text.is_empty() {
-            return Err(StoreError::InvalidData(
-                "Steer text cannot be empty".to_string(),
-            ));
-        }
-        let mut conn = self.conn.lock().expect("store mutex poisoned");
-        let tx = conn.transaction_with_behavior(TransactionBehavior::Immediate)?;
-        let receipt = Self::append_steer_in(&tx, work, author, text)?;
-        tx.commit()?;
-        Ok(receipt)
-    }
-
-    /// Every durable Steer recorded at or after `since`, newest first.
-    ///
-    pub fn list_steers_since(&self, since: i64) -> StoreResult<Vec<Steer>> {
+    /// Steer comments across every Work, issued at or after `since` (unix
+    /// seconds) — the cross-Work `lf activity` timeline. Scans the Task and
+    /// Project event streams for the `Steer` comment; there is no steers table.
+    pub fn steers_since(&self, since: i64) -> StoreResult<Vec<SteerComment>> {
         let conn = self.conn.lock().expect("store mutex poisoned");
-        let mut statement = conn.prepare(
-            "SELECT id, work_kind, work_id, author_kind, author_run_id, text, issued_at
-             FROM steers WHERE issued_at >= ?1 ORDER BY issued_at DESC, id DESC",
+        let mut comments = Vec::new();
+        let mut task_statement = conn.prepare(
+            "SELECT task_id, id, kind_json, created_at FROM task_events
+             WHERE json_extract(kind_json, '$.kind')='steer' AND created_at >= ?1
+             ORDER BY created_at, id",
         )?;
-        let rows = statement.query_map([since], |row| {
+        let task_rows = task_statement.query_map([since], |row| {
             Ok((
                 row.get::<_, String>(0)?,
-                row.get::<_, String>(1)?,
+                row.get::<_, i64>(1)?,
                 row.get::<_, String>(2)?,
-                row.get::<_, String>(3)?,
-                row.get::<_, Option<String>>(4)?,
-                row.get::<_, String>(5)?,
-                row.get::<_, i64>(6)?,
+                row.get::<_, i64>(3)?,
             ))
         })?;
-        let mut steers = Vec::new();
-        for row in rows {
-            let (id, work_kind, work_id, author_kind, author_run_id, text, issued_at) = row?;
-            let work = parse_work_ref(&work_kind, &work_id)?;
-            steers.push(decode_steer(
-                (id, author_kind, author_run_id, text, issued_at),
-                work,
-            )?);
+        for row in task_rows {
+            let (task_id, id, kind_json, created_at) = row?;
+            let kind: TaskEventKind = serde_json::from_str(&kind_json)?;
+            if let TaskEventKind::Steer { author, text } = kind {
+                comments.push(SteerComment {
+                    work: WorkRef::Task(TaskId::parse(&task_id).map_err(invalid_durable)?),
+                    steer: Steer { id, author, text },
+                    issued_at: crate::store::rows::unix_to_datetime(created_at),
+                });
+            }
         }
-        Ok(steers)
+        let mut project_statement = conn.prepare(
+            "SELECT project_id, id, kind_json, created_at FROM project_events
+             WHERE json_extract(kind_json, '$.kind')='steer' AND created_at >= ?1
+             ORDER BY created_at, id",
+        )?;
+        let project_rows = project_statement.query_map([since], |row| {
+            Ok((
+                row.get::<_, String>(0)?,
+                row.get::<_, i64>(1)?,
+                row.get::<_, String>(2)?,
+                row.get::<_, i64>(3)?,
+            ))
+        })?;
+        for row in project_rows {
+            let (project_id, id, kind_json, created_at) = row?;
+            let kind: ProjectEventKind = serde_json::from_str(&kind_json)?;
+            if let ProjectEventKind::Steer { author, text } = kind {
+                comments.push(SteerComment {
+                    work: WorkRef::Project(ProjectId::parse(&project_id).map_err(invalid_durable)?),
+                    steer: Steer { id, author, text },
+                    issued_at: crate::store::rows::unix_to_datetime(created_at),
+                });
+            }
+        }
+        Ok(comments)
     }
 
+    pub fn append_steer(&self, work: &WorkRef, author: &Author, text: &str) -> StoreResult<Steer> {
+        let mut conn = self.conn.lock().expect("store mutex poisoned");
+        let tx = conn.transaction_with_behavior(TransactionBehavior::Immediate)?;
+        let steer = Self::append_steer_in(&tx, work, author, text)?;
+        tx.commit()?;
+        Ok(steer)
+    }
+
+    /// A steer is a durable comment on its Work: `TaskEventKind::Steer` for a
+    /// Task, `ProjectEventKind::Steer` for a Project. There is no steers table —
+    /// the comment rides the Work's own event stream and is read back through it.
     pub(crate) fn append_steer_in(
         tx: &Transaction<'_>,
         work: &WorkRef,
         author: &Author,
         text: &str,
-    ) -> StoreResult<SteerReceipt> {
+    ) -> StoreResult<Steer> {
         let text = text.trim();
         if text.is_empty() {
             return Err(StoreError::InvalidData(
@@ -383,39 +401,112 @@ impl SqliteStore {
             ));
         }
         require_ready_work(tx, work)?;
-        let sequence: i64 = tx.query_row(
-            "SELECT COALESCE(MAX(sequence), 0) + 1 FROM steers
-             WHERE work_kind=?1 AND work_id=?2",
-            params![work.kind(), work.id()],
-            |row| row.get(0),
-        )?;
-        let steer = Steer {
-            id: SteerId::new(),
-            work: work.clone(),
-            author: author.clone(),
-            text: text.to_string(),
-            issued_at: OffsetDateTime::now_utc(),
+        match work {
+            WorkRef::Task(task_id) => {
+                let task = tx.query_row(
+                    super::children::TASK_SELECT,
+                    params![task_id.as_str()],
+                    super::children::map_task_row,
+                )?;
+                let event = super::children::insert_task_event_in(
+                    tx,
+                    &task,
+                    &TaskEventKind::Steer {
+                        author: author.clone(),
+                        text: text.to_string(),
+                    },
+                )?;
+                Ok(Steer {
+                    id: event.id,
+                    author: author.clone(),
+                    text: text.to_string(),
+                })
+            }
+            WorkRef::Project(project_id) => {
+                let project = tx.query_row(
+                    super::children::PROJECT_SELECT,
+                    params![project_id.as_str()],
+                    super::children::map_project_row,
+                )?;
+                let event = super::children::insert_project_event_in(
+                    tx,
+                    &project,
+                    &ProjectEventKind::Steer {
+                        author: author.clone(),
+                        text: text.to_string(),
+                    },
+                )?;
+                Ok(Steer {
+                    id: event.id,
+                    author: author.clone(),
+                    text: text.to_string(),
+                })
+            }
+            WorkRef::Wave(_) => Err(StoreError::InvalidData(
+                "Waves take direction through chat, not steers".to_string(),
+            )),
+        }
+    }
+
+    /// Record an interrupt request as a durable comment on the Work's event
+    /// stream. A live run observes it (past its launch cursor) and ends the
+    /// current turn; with no live run it is inert history.
+    pub fn append_interrupt(&self, work: &WorkRef) -> StoreResult<i64> {
+        let mut conn = self.conn.lock().expect("store mutex poisoned");
+        let tx = conn.transaction_with_behavior(TransactionBehavior::Immediate)?;
+        require_ready_work(&tx, work)?;
+        let id = match work {
+            WorkRef::Task(task_id) => {
+                let task = tx.query_row(
+                    super::children::TASK_SELECT,
+                    params![task_id.as_str()],
+                    super::children::map_task_row,
+                )?;
+                super::children::insert_task_event_in(&tx, &task, &TaskEventKind::Interrupt)?.id
+            }
+            WorkRef::Project(project_id) => {
+                let project = tx.query_row(
+                    super::children::PROJECT_SELECT,
+                    params![project_id.as_str()],
+                    super::children::map_project_row,
+                )?;
+                super::children::insert_project_event_in(
+                    &tx,
+                    &project,
+                    &ProjectEventKind::Interrupt,
+                )?
+                .id
+            }
+            WorkRef::Wave(_) => {
+                return Err(StoreError::InvalidData(
+                    "Waves are not interrupted through the Work event stream".to_string(),
+                ))
+            }
         };
-        let (author_kind, author_run_id) = match &steer.author {
-            Author::User => ("user", None),
-            Author::Run(run_id) => ("run", Some(run_id.as_str())),
+        tx.commit()?;
+        Ok(id)
+    }
+
+    /// The id of the newest interrupt request on the Work, or 0 when there is
+    /// none. A run stamps this at launch and re-reads it; a higher value means a
+    /// new interrupt to act on.
+    pub fn latest_interrupt_id(&self, work: &WorkRef) -> StoreResult<i64> {
+        let conn = self.conn.lock().expect("store mutex poisoned");
+        let (table, column, id) = match work {
+            WorkRef::Task(task_id) => ("task_events", "task_id", task_id.as_str().to_string()),
+            WorkRef::Project(project_id) => (
+                "project_events",
+                "project_id",
+                project_id.as_str().to_string(),
+            ),
+            WorkRef::Wave(_) => return Ok(0),
         };
-        tx.execute(
-            "INSERT INTO steers (
-                id, work_kind, work_id, sequence, author_kind, author_run_id, text, issued_at
-             ) VALUES (?1, ?2, ?3, ?4, ?5, ?6, ?7, ?8)",
-            params![
-                steer.id.as_str(),
-                work.kind(),
-                work.id(),
-                sequence,
-                author_kind,
-                author_run_id,
-                steer.text,
-                steer.issued_at.unix_timestamp(),
-            ],
-        )?;
-        Ok(SteerReceipt { steer })
+        let sql = format!(
+            "SELECT COALESCE(MAX(id), 0) FROM {table}
+             WHERE {column}=?1 AND json_extract(kind_json, '$.kind')='interrupt'"
+        );
+        conn.query_row(&sql, params![id], |row| row.get(0))
+            .map_err(StoreError::from)
     }
 
     pub fn write_tool_response(
@@ -846,25 +937,33 @@ pub(crate) fn work_for_child_in(conn: &Connection, target: &ChildRef) -> StoreRe
 }
 
 fn work_steers_in(conn: &Connection, work: &WorkRef) -> StoreResult<Vec<Steer>> {
-    require_ready_work(conn, work)?;
-    let mut statement = conn.prepare(
-        "SELECT id, author_kind, author_run_id, text, issued_at
-         FROM steers WHERE work_kind=?1 AND work_id=?2 ORDER BY sequence",
-    )?;
-    let rows = statement.query_map(params![work.kind(), work.id()], |row| {
-        Ok((
-            row.get::<_, String>(0)?,
-            row.get::<_, String>(1)?,
-            row.get::<_, Option<String>>(2)?,
-            row.get::<_, String>(3)?,
-            row.get::<_, i64>(4)?,
-        ))
-    })?;
-    let mut steers = Vec::new();
-    for row in rows {
-        steers.push(decode_steer(row?, work.clone())?);
-    }
-    Ok(steers)
+    Ok(match work {
+        WorkRef::Task(task_id) => super::children::task_events_after_in(conn, task_id, 0)?
+            .into_iter()
+            .filter_map(|event| match event.kind {
+                TaskEventKind::Steer { author, text } => Some(Steer {
+                    id: event.id,
+                    author,
+                    text,
+                }),
+                _ => None,
+            })
+            .collect(),
+        WorkRef::Project(project_id) => {
+            super::children::project_events_after_in(conn, project_id, 0)?
+                .into_iter()
+                .filter_map(|event| match event.kind {
+                    ProjectEventKind::Steer { author, text } => Some(Steer {
+                        id: event.id,
+                        author,
+                        text,
+                    }),
+                    _ => None,
+                })
+                .collect()
+        }
+        WorkRef::Wave(_) => Vec::new(),
+    })
 }
 
 fn tool_response_in(
@@ -902,33 +1001,9 @@ fn tool_response_in(
     }))
 }
 
-type SteerFields = (String, String, Option<String>, String, i64);
-
-fn decode_steer(fields: SteerFields, work: WorkRef) -> StoreResult<Steer> {
-    let (id, author_kind, author_run_id, text, issued_at) = fields;
-    let author = match (author_kind.as_str(), author_run_id) {
-        ("user", None) => Author::User,
-        ("run", Some(id)) => Author::Run(RunId::parse(&id).map_err(invalid_durable)?),
-        _ => {
-            return Err(StoreError::InvalidData(
-                "stored Steer author is inconsistent".to_string(),
-            ))
-        }
-    };
-    Ok(Steer {
-        id: SteerId::parse(&id).map_err(invalid_durable)?,
-        work,
-        author,
-        text,
-        issued_at: OffsetDateTime::from_unix_timestamp(issued_at).map_err(|error| {
-            StoreError::InvalidData(format!("invalid Steer timestamp: {error}"))
-        })?,
-    })
-}
-
 #[cfg(test)]
 mod durable_store_tests {
-    use crate::durable::{Author, FlowPosition, RunId, WorkRef};
+    use crate::durable::{FlowPosition, RunId, WorkRef};
     use crate::id::WaveId;
     use crate::store::sqlite::SqliteStore;
 
@@ -959,48 +1034,6 @@ mod durable_store_tests {
 
     fn store_with_wave() -> (tempfile::TempDir, SqliteStore, WorkRef) {
         _store_with_wave()
-    }
-
-    #[test]
-    fn activity_steers_are_ordered_work_facts() {
-        let (dir, store, work) = store_with_wave();
-        let first = store
-            .append_steer(&work, &Author::User, "first direction")
-            .unwrap();
-        let second = store
-            .append_steer(&work, &Author::User, "second direction")
-            .unwrap();
-        let conn = rusqlite::Connection::open(dir.path().join("loopflow.db")).unwrap();
-        conn.execute(
-            "UPDATE steers SET issued_at=1700000001 WHERE id=?1",
-            [first.steer.id.as_str()],
-        )
-        .unwrap();
-        conn.execute(
-            "UPDATE steers SET issued_at=1700000021 WHERE id=?1",
-            [second.steer.id.as_str()],
-        )
-        .unwrap();
-
-        let steers = store.list_steers_since(0).unwrap();
-
-        assert_eq!(
-            steers
-                .iter()
-                .map(|steer| steer.text.as_str())
-                .collect::<Vec<_>>(),
-            ["second direction", "first direction"]
-        );
-        assert!(steers.iter().all(|steer| steer.work == work));
-        assert_eq!(
-            store
-                .list_steers_since(1_700_000_010)
-                .unwrap()
-                .into_iter()
-                .map(|steer| steer.id)
-                .collect::<Vec<_>>(),
-            [second.steer.id]
-        );
     }
 
     #[test]

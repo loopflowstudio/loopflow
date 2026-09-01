@@ -396,11 +396,11 @@ mod tests {
             .all(|path| path.starts_with(home.path())));
         assert!(home
             .path()
-            .join(".agents/skills/wave/clarify/SKILL.md")
+            .join(".agents/skills/wave/operate/SKILL.md")
             .exists());
         assert!(!home
             .path()
-            .join(".agents/skills/wave_clarify/SKILL.md")
+            .join(".agents/skills/wave_operate/SKILL.md")
             .exists());
     }
 

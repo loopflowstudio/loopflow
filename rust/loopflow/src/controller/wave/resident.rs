@@ -351,6 +351,25 @@ impl ListenerClient {
         .await
     }
 
+    /// Read the wave's chat channel after `since` — unified messages including
+    /// the wave's own posts, the read that lets an observe pass see it already
+    /// replied. Retries like the other reads.
+    pub async fn read_channel(
+        &self,
+        since: Option<u64>,
+    ) -> Result<Vec<crate::controller::wave::channel::Message>> {
+        with_retries("read channel", &LISTENER_RETRY_DELAYS, || async {
+            let mut url = format!("http://{}/channel", self.endpoint);
+            if let Some(since) = since {
+                url.push_str(&format!("?since={since}"));
+            }
+            let response = self.http.get(url).send().await.map_err(classify)?;
+            let response = response.error_for_status().map_err(classify)?;
+            response.json().await.map_err(classify)
+        })
+        .await
+    }
+
     /// The pre-turn snapshot (also freshens the listener's store fold).
     /// Retries like [`ListenerClient::send_deltas`] — the listener's poll
     /// can be slow.

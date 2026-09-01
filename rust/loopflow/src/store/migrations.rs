@@ -2161,6 +2161,38 @@ mod tests {
     }
 
     #[test]
+    fn retire_steers_table_draft_drops_the_dead_table() {
+        // Steers became Work comments; the `retire_steers_table` draft drops the
+        // now-dead table. Apply the base set + the whole draft manifest and prove
+        // no `steers` table survives.
+        let conn = rusqlite::Connection::open_in_memory().unwrap();
+        conn.execute_batch(
+            "CREATE TABLE schema_migrations (
+                 version TEXT PRIMARY KEY,
+                 applied_at INTEGER NOT NULL
+             );",
+        )
+        .unwrap();
+        for migration in MIGRATIONS {
+            conn.execute_batch(migration.sql).unwrap();
+        }
+        for draft in crate::build_info::migration_draft_manifest() {
+            conn.execute_batch(draft.sql).unwrap();
+        }
+        let has_steers: bool = conn
+            .query_row(
+                "SELECT EXISTS(SELECT 1 FROM sqlite_master WHERE type='table' AND name='steers')",
+                [],
+                |row| row.get(0),
+            )
+            .unwrap();
+        assert!(
+            !has_steers,
+            "the retire_steers_table draft must drop the dead steers table"
+        );
+    }
+
+    #[test]
     fn the_shipped_set_is_ordered_and_within_the_active_namespace() {
         validate_set(MIGRATIONS).unwrap();
 

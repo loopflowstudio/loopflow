@@ -116,7 +116,7 @@ or native scope. Every signal would need to revalidate that receipt.
 
 `lfd` serves one Home. It reconciles eligible Wave listeners, receives Linear
 and GitHub webhooks, and claims PR landing work. A Wave listener serves its own
-conversation, event, playhead, and resident endpoints.
+channel, conversation, event, playhead, and resident endpoints.
 
 Detached services scrub credentials forwarded from an origin. They use only
 authority installed on the target Home. A foreground SSH launch may offer an

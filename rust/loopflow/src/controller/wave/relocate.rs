@@ -887,7 +887,7 @@ mod tests {
         remove_old_paths, stage_tree, write_recovery, PlannedWaveMove, RelocationPath,
     };
     use crate::id::WaveId;
-    use crate::store::{open_store, StorageConfig, WaveLocatorUpdate};
+    use crate::store::{StorageConfig, WaveLocatorUpdate};
     use crate::work::wave::{Wave, WaveLocator};
     use std::path::{Path, PathBuf};
     use std::process::Command;
@@ -1055,9 +1055,11 @@ mod tests {
             "# infrastructure\n",
         )
         .unwrap();
-        let store = open_store(&StorageConfig::sqlite(tmp.path().join("registry.db")))
-            .await
-            .unwrap();
+        let store = crate::store::open_ephemeral_store(&StorageConfig::sqlite(
+            tmp.path().join("registry.db"),
+        ))
+        .await
+        .unwrap();
         let wave = Wave::new(
             WaveId::new(),
             "infrastructure".to_string(),

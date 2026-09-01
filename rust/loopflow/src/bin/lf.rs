@@ -1784,6 +1784,12 @@ fn main() -> anyhow::Result<()> {
                 *resume,
             ),
             Some(Commands::Replay { run }) => loopflow::lf::commands::replay::run(run),
+            Some(Commands::Reply {
+                wave,
+                text,
+                agent,
+                max_turns,
+            }) => loopflow::lf::commands::reply::run(wave, text, agent.clone(), *max_turns),
             Some(Commands::Chat {
                 text,
                 follow,

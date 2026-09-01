@@ -3,7 +3,7 @@ mod support;
 use std::process::Command;
 
 use loopflow::store::{
-    open_store, CredentialState, ProviderAccount, ProviderAccountId, RoutingState, StorageConfig,
+    CredentialState, ProviderAccount, ProviderAccountId, RoutingState, StorageConfig,
 };
 use support::EnvGuard;
 
@@ -49,9 +49,9 @@ esac
     let _env = EnvGuard::with_lf_home(&[("codex", codex)], home.path());
     let runtime = tokio::runtime::Runtime::new().expect("store runtime");
     let store = runtime
-        .block_on(open_store(&StorageConfig::sqlite(
-            home.path().join("loopflow.db"),
-        )))
+        .block_on(loopflow::store::open_ephemeral_store(
+            &StorageConfig::sqlite(home.path().join("loopflow.db")),
+        ))
         .expect("account store");
     for seeded in [
         account("active", active_home),

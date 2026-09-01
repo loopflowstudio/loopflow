@@ -4,7 +4,6 @@ crons:
   schedule: 0 0 8 * * * *
 chat:
   provider: discord
-  home_id: home_39860354aaca640c2ccb50bf6ca609d8
   guild_id: '1333122108699709535'
   channel_id: '1528936130748223519'
 pm:

@@ -82,11 +82,12 @@ merge, then replays only child-authored commits onto `main`.
 
 ## Steer
 
-Task and Project Steer appends direction to durable Work before doing anything
-else. If the Work has a controller, a stopped controller is relaunched and a
-running controller reads the new direction at its next boundary. Controller-free
-Work simply retains the direction for the next bounded Run or future controller.
-Steer does not inject text into an active provider turn:
+Task and Project Steer appends a durable comment event to the selected Work
+before doing anything else. If the Work has a controller, a stopped controller
+is relaunched. A running controller polls for new comments and asks its provider
+harness to apply them at the next turn boundary; if live insertion is unavailable,
+the next Skill seed reads the complete comment stream. Controller-free Work
+retains the direction for the next bounded Run or future controller:
 
 ```bash
 lf task steer INF-123 "support passkeys too"       # durable direction
@@ -105,12 +106,14 @@ lf session list --json                                # unresolved human Session
 ```
 
 A Steer receipt proves that the direction was stored, not that a provider read
-or applied it. Generic `lf work interrupt`, `lf task interrupt`, and
-`lf project interrupt` refuse because these controllers do not publish an exact
-process owner. Loopflow never guesses signal authority from a Run id, Work id,
-PID, or tmux name. There is currently no supported cross-process CLI for
-immediate Task cancellation. Project Work alone has `lf project attach <id>`
-for an operator who needs the provider's native controls.
+or applied it. `lf task interrupt INF-123` appends a durable interrupt comment;
+the active Task controller observes it and ends the current provider turn so
+the next boundary re-reads direction. With no live controller it is inert.
+Generic `lf work interrupt` and `lf project interrupt` still refuse because
+those surfaces do not publish an exact process owner. Loopflow never guesses
+signal authority from a Run id, Work id, PID, or tmux name. Project Work has
+`lf project attach <id>` for an operator who needs the provider's native
+controls.
 
 Work survives its provider process. `lf task resume INF-123 --model codex`
 selects another provider without losing durable direction, the worktree, or

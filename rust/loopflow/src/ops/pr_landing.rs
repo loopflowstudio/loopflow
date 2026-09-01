@@ -967,7 +967,7 @@ mod tests {
 
     use super::*;
     use crate::store::migrations::migration_sql_for_test;
-    use crate::store::{open_store, StorageConfig};
+    use crate::store::StorageConfig;
 
     struct FakeDriver {
         observations: Mutex<VecDeque<LandingObservation>>,
@@ -1010,7 +1010,7 @@ mod tests {
     async fn store() -> (tempfile::TempDir, SharedStore) {
         let directory = tempfile::tempdir().unwrap();
         let path = directory.path().join("registry.db");
-        open_store(&StorageConfig::sqlite(path.clone()))
+        crate::store::open_ephemeral_store(&StorageConfig::sqlite(path.clone()))
             .await
             .unwrap();
         let conn = rusqlite::Connection::open(&path).unwrap();
@@ -1025,7 +1025,11 @@ mod tests {
             conn.execute_batch(&migration_sql_for_test("pr_landings"))
                 .unwrap();
         }
-        let store = Arc::new(open_store(&StorageConfig::sqlite(path)).await.unwrap());
+        let store = Arc::new(
+            crate::store::open_ephemeral_store(&StorageConfig::sqlite(path))
+                .await
+                .unwrap(),
+        );
         (directory, store)
     }
 

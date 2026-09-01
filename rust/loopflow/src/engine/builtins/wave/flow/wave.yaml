@@ -1,6 +1,5 @@
-# One bounded Wave iteration. The resident plays every skill through the Wave
-# harness; its scheduler, not a loop-bit file, decides when another iteration
-# is useful.
-- wave/clarify
-- wave/pursue
-- wave/mutate
+# One bounded Wave iteration. The resident operates the Wave in a single turn —
+# read, decide, and launch the one or two useful moves — rather than a
+# clarify/pursue/mutate split. Its scheduler, not a loop-bit file, decides when
+# another iteration is useful.
+- wave/operate

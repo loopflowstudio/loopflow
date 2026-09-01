@@ -719,8 +719,8 @@ mod tests {
     use crate::profile::EmailAddress;
     use crate::provider_account::new_account;
     use crate::store::{
-        open_store, CredentialType, ProviderAccountId, ProviderToken, StorageConfig,
-        CONTROL_DB_PATH_ENV, CONTROL_HOME_ENV,
+        CredentialType, ProviderAccountId, ProviderToken, StorageConfig, CONTROL_DB_PATH_ENV,
+        CONTROL_HOME_ENV,
     };
     use std::ffi::OsString;
 
@@ -1140,9 +1140,11 @@ mod tests {
         let capture = temp.path().join("session-env");
         std::env::set_var("LF_TEST_SESSION_ENV", &capture);
 
-        let store = open_store(&StorageConfig::sqlite(temp.path().join("loopflow.db")))
-            .await
-            .unwrap();
+        let store = crate::store::open_ephemeral_store(&StorageConfig::sqlite(
+            temp.path().join("loopflow.db"),
+        ))
+        .await
+        .unwrap();
         let account_home = temp.path().join("accounts/claude/jackstah");
         let account = new_account(
             Provider::Claude,
@@ -1206,9 +1208,11 @@ mod tests {
         let capture = temp.path().join("session-env");
         std::env::set_var("LF_TEST_SESSION_ENV", &capture);
 
-        let store = open_store(&StorageConfig::sqlite(temp.path().join("loopflow.db")))
-            .await
-            .unwrap();
+        let store = crate::store::open_ephemeral_store(&StorageConfig::sqlite(
+            temp.path().join("loopflow.db"),
+        ))
+        .await
+        .unwrap();
         store
             .upsert_provider_token(&ProviderToken {
                 provider: Provider::OpenCodeZen.as_str().to_string(),

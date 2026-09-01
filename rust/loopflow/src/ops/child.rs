@@ -3,7 +3,7 @@
 use std::time::Duration;
 
 use crate::child::{ChildBodyHandoffRequest, ChildRef};
-use crate::durable::{AbandonReceipt, Author, RunId, SteerReceipt, WorkRef, RUN_ID_ENV};
+use crate::durable::{AbandonReceipt, Author, RunId, Steer, WorkRef, RUN_ID_ENV};
 use crate::store::SharedStore;
 use crate::work::task::Task;
 
@@ -14,7 +14,8 @@ pub(crate) const CHILD_STARTUP_GRACE: Duration = Duration::from_secs(10);
 #[derive(Debug, Clone, PartialEq, Eq, serde::Serialize)]
 #[serde(tag = "kind", rename_all = "snake_case")]
 pub enum WorkControlReceipt {
-    Steer { receipt: SteerReceipt },
+    Steer { steer: Steer },
+    Interrupt { work: WorkRef },
     Resume { work: WorkRef },
     Abandon { receipt: AbandonReceipt },
 }
@@ -22,7 +23,8 @@ pub enum WorkControlReceipt {
 impl WorkControlReceipt {
     pub fn label(&self) -> String {
         match self {
-            Self::Steer { receipt } => receipt.steer.id.to_string(),
+            Self::Steer { steer } => steer.id.to_string(),
+            Self::Interrupt { work } => work.id().to_string(),
             Self::Resume { work } => work.id().to_string(),
             Self::Abandon { receipt } => receipt.work.id().to_string(),
         }
@@ -31,6 +33,7 @@ impl WorkControlReceipt {
     pub fn action(&self) -> &'static str {
         match self {
             Self::Steer { .. } => "steered",
+            Self::Interrupt { .. } => "interrupted",
             Self::Resume { .. } => "resumed",
             Self::Abandon { .. } => "abandoned",
         }
@@ -82,13 +85,72 @@ pub(crate) async fn append_steer(
     store: &SharedStore,
     target: ChildRef,
     text: &str,
-) -> OpsResult<SteerReceipt> {
+) -> OpsResult<Steer> {
     let work = store.work_for_child(&target).await.map_err(child_error)?;
     let author = ambient_author()?;
     store
         .append_steer(&work, author, text)
         .await
         .map_err(child_error)
+}
+
+/// Inject steer comments newer than `*cursor` into the live provider turn. A
+/// comment the provider takes (`Sent`) advances the cursor; one it can't take
+/// right now (`NotSteerable` — no active turn, or a driver without live input)
+/// stays for the next skill boundary, whose seed re-reads every steer. Steering
+/// is best-effort live and durable at the boundary, so this never fails the run.
+pub(crate) async fn inject_live_steers(
+    store: &SharedStore,
+    work: &WorkRef,
+    harness: &mut dyn crate::harness::Harness,
+    cursor: &mut i64,
+) {
+    let steers = match store.work_steers(work).await {
+        Ok(steers) => steers,
+        Err(error) => {
+            tracing::warn!(%error, "failed to read steers for live injection");
+            return;
+        }
+    };
+    for steer in &steers {
+        if steer.id <= *cursor {
+            continue;
+        }
+        match harness.send_current(&steer.text).await {
+            crate::harness::SendCurrentOutcome::Sent { .. } => *cursor = steer.id,
+            crate::harness::SendCurrentOutcome::NotSteerable => break,
+            crate::harness::SendCurrentOutcome::Failed { error }
+            | crate::harness::SendCurrentOutcome::Unknown { error, .. } => {
+                tracing::warn!(
+                    %error,
+                    steer = steer.id,
+                    "live steer injection failed; deferring to the next boundary"
+                );
+                break;
+            }
+        }
+    }
+}
+
+/// End the current turn if an interrupt was requested after `*cursor`. The
+/// interrupt is a one-time durable event, so the cursor only advances (a turn
+/// boundary never resets it) — a request is acted on exactly once per run.
+pub(crate) async fn observe_interrupt(
+    store: &SharedStore,
+    work: &WorkRef,
+    harness: &mut dyn crate::harness::Harness,
+    cursor: &mut i64,
+) {
+    match store.latest_interrupt_id(work).await {
+        Ok(id) if id > *cursor => {
+            *cursor = id;
+            if let Err(error) = harness.interrupt().await {
+                tracing::warn!(%error, "interrupt request failed to reach the provider");
+            }
+        }
+        Ok(_) => {}
+        Err(error) => tracing::warn!(%error, "failed to read interrupt requests"),
+    }
 }
 
 pub(crate) fn ambient_author() -> OpsResult<Author> {

@@ -64,7 +64,6 @@ durable_id!(ProjectId, "proj_");
 durable_id!(TaskId, "task_");
 durable_id!(RunId, "run_");
 durable_id!(HomeId, "home_");
-durable_id!(SteerId, "steer_");
 durable_id!(ToolResponseId, "response_");
 durable_id!(CronReceiptId, "cron_");
 
@@ -147,19 +146,23 @@ pub enum Author {
     Run(RunId),
 }
 
+/// A steer projected from a Work's durable comment stream
+/// (`TaskEventKind::Steer` / `ProjectEventKind::Steer`). Not a durable entity —
+/// its identity is the event id, so ordering and change-detection use `id`.
 #[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
 pub struct Steer {
-    pub id: SteerId,
-    pub work: WorkRef,
+    pub id: i64,
     pub author: Author,
     pub text: String,
-    #[serde(with = "time::serde::rfc3339")]
-    pub issued_at: OffsetDateTime,
 }
 
-#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
-pub struct SteerReceipt {
+/// A steer comment surfaced for the cross-Work `lf activity` timeline: the read
+/// model plus the Work it targets and when it was issued.
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub struct SteerComment {
+    pub work: WorkRef,
     pub steer: Steer,
+    pub issued_at: OffsetDateTime,
 }
 
 pub fn render_steers(steers: &[Steer]) -> String {
@@ -229,19 +232,16 @@ pub struct AbandonReceipt {
 #[cfg(test)]
 mod tests {
     use super::{render_steers, Steer, WorkStatus};
-    use crate::durable::{Author, ProjectId, SteerId, WorkRef};
+    use crate::durable::Author;
 
     #[test]
     fn ordered_steers_render_as_one_input_projection() {
-        let work = WorkRef::Project(ProjectId::new());
-        let steer = |text: &str| Steer {
-            id: SteerId::new(),
-            work: work.clone(),
+        let steer = |id: i64, text: &str| Steer {
+            id,
             author: Author::User,
             text: text.to_string(),
-            issued_at: time::OffsetDateTime::UNIX_EPOCH,
         };
-        let steers = vec![steer("first"), steer("second")];
+        let steers = vec![steer(1, "first"), steer(2, "second")];
 
         assert_eq!(
             render_steers(&steers),

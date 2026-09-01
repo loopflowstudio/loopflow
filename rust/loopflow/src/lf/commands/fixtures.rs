@@ -9,12 +9,12 @@ use std::sync::Arc;
 use crate::controller::wave::runtime::{InboxItem, WaveRuntime};
 use crate::controller::wave::server;
 use crate::id::WaveId;
-use crate::store::{open_store, SharedStore, StorageConfig};
+use crate::store::{SharedStore, StorageConfig};
 use crate::work::wave::Wave;
 
 pub(crate) async fn temp_store(dir: &Path) -> SharedStore {
     Arc::new(
-        open_store(&StorageConfig::sqlite(dir.join("loopflow.db")))
+        crate::store::open_ephemeral_store(&StorageConfig::sqlite(dir.join("loopflow.db")))
             .await
             .expect("open sqlite store"),
     )

@@ -1401,7 +1401,7 @@ mod tests {
     async fn routes_clear_ambient_provider_credentials() {
         let temp = tempdir().unwrap();
         let store = Arc::new(
-            open_store(&crate::store::StorageConfig::sqlite(
+            crate::store::open_ephemeral_store(&crate::store::StorageConfig::sqlite(
                 temp.path().join("loopflow.db"),
             ))
             .await
@@ -1460,7 +1460,7 @@ mod tests {
     async fn native_routes_select_independent_provider_homes() {
         let temp = tempdir().unwrap();
         let store = Arc::new(
-            open_store(&crate::store::StorageConfig::sqlite(
+            crate::store::open_ephemeral_store(&crate::store::StorageConfig::sqlite(
                 temp.path().join("loopflow.db"),
             ))
             .await
@@ -1513,7 +1513,7 @@ mod tests {
     async fn hard_rate_limit_cools_the_active_account() {
         let temp = tempdir().unwrap();
         let store = Arc::new(
-            open_store(&crate::store::StorageConfig::sqlite(
+            crate::store::open_ephemeral_store(&crate::store::StorageConfig::sqlite(
                 temp.path().join("loopflow.db"),
             ))
             .await
@@ -1575,7 +1575,7 @@ mod account_first_tests {
 
     use super::*;
     use crate::profile::{ProviderRoute, RouteScope};
-    use crate::store::{open_store, StorageConfig};
+    use crate::store::StorageConfig;
 
     struct EnvRestore(Vec<(&'static str, Option<OsString>)>);
 
@@ -1646,9 +1646,11 @@ mod account_first_tests {
         );
         std::env::remove_var(lease::ACCOUNT_LEASE_ENV);
         let store = Arc::new(
-            open_store(&StorageConfig::sqlite(temp.path().join("loopflow.db")))
-                .await
-                .unwrap(),
+            crate::store::open_ephemeral_store(&StorageConfig::sqlite(
+                temp.path().join("loopflow.db"),
+            ))
+            .await
+            .unwrap(),
         );
         let selected = account(Provider::Claude, "selected", temp.path());
         store.upsert_provider_account(&selected).await.unwrap();
@@ -1694,9 +1696,11 @@ mod account_first_tests {
         std::env::remove_var("LF_CONTROL_DB_PATH");
         std::env::remove_var(lease::ACCOUNT_LEASE_ENV);
         let store = Arc::new(
-            open_store(&StorageConfig::sqlite(temp.path().join("loopflow.db")))
-                .await
-                .unwrap(),
+            crate::store::open_ephemeral_store(&StorageConfig::sqlite(
+                temp.path().join("loopflow.db"),
+            ))
+            .await
+            .unwrap(),
         );
         let first = account(Provider::Codex, "first", temp.path());
         let requested = account(Provider::Codex, "requested", temp.path());
@@ -1787,9 +1791,11 @@ mod account_first_tests {
         std::env::remove_var("LF_CONTROL_DB_PATH");
         std::env::remove_var(lease::ACCOUNT_LEASE_ENV);
         let store = Arc::new(
-            open_store(&StorageConfig::sqlite(temp.path().join("loopflow.db")))
-                .await
-                .unwrap(),
+            crate::store::open_ephemeral_store(&StorageConfig::sqlite(
+                temp.path().join("loopflow.db"),
+            ))
+            .await
+            .unwrap(),
         );
         let first = account(Provider::Codex, "first", temp.path());
         let second = account(Provider::Codex, "second", temp.path());
@@ -1833,9 +1839,11 @@ mod account_first_tests {
     async fn session_resume_is_pinned_by_account_only() {
         let temp = tempdir().unwrap();
         let store = Arc::new(
-            open_store(&StorageConfig::sqlite(temp.path().join("store.db")))
-                .await
-                .unwrap(),
+            crate::store::open_ephemeral_store(&StorageConfig::sqlite(
+                temp.path().join("store.db"),
+            ))
+            .await
+            .unwrap(),
         );
         let first = account(Provider::Codex, "first", temp.path());
         let second = account(Provider::Codex, "second", temp.path());
@@ -1878,9 +1886,11 @@ mod account_first_tests {
     async fn automatic_selection_demotes_only_active_strain() {
         let temp = tempdir().unwrap();
         let store = Arc::new(
-            open_store(&StorageConfig::sqlite(temp.path().join("store.db")))
-                .await
-                .unwrap(),
+            crate::store::open_ephemeral_store(&StorageConfig::sqlite(
+                temp.path().join("store.db"),
+            ))
+            .await
+            .unwrap(),
         );
         let first = account(Provider::Codex, "first", temp.path());
         let second = account(Provider::Codex, "second", temp.path());
@@ -1974,9 +1984,11 @@ mod account_first_tests {
             .is_none());
 
         let store = Arc::new(
-            open_store(&StorageConfig::sqlite(temp.path().join("loopflow.db")))
-                .await
-                .unwrap(),
+            crate::store::open_ephemeral_store(&StorageConfig::sqlite(
+                temp.path().join("loopflow.db"),
+            ))
+            .await
+            .unwrap(),
         );
         assert!(resolve_provider_account(Provider::Claude, None)
             .await
@@ -2022,9 +2034,11 @@ mod account_first_tests {
         std::env::remove_var("LF_CONTROL_DB_PATH");
         std::env::remove_var(lease::ACCOUNT_LEASE_ENV);
         let store = Arc::new(
-            open_store(&StorageConfig::sqlite(temp.path().join("loopflow.db")))
-                .await
-                .unwrap(),
+            crate::store::open_ephemeral_store(&StorageConfig::sqlite(
+                temp.path().join("loopflow.db"),
+            ))
+            .await
+            .unwrap(),
         );
         let limited = account(Provider::Claude, "a-limited", temp.path());
         let healthy = account(Provider::Claude, "z-healthy", temp.path());

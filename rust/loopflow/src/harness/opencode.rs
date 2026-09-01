@@ -1,5 +1,5 @@
 use std::sync::atomic::{AtomicBool, AtomicU32, Ordering};
-use std::sync::Arc;
+use std::sync::{Arc, Mutex};
 use std::time::{Duration, Instant};
 
 use anyhow::{anyhow, Result};
@@ -18,6 +18,7 @@ use crate::engine::config::parse_agent;
 use crate::harness::common::{spawn_stderr_logger, TurnInProgressGuard};
 use crate::harness::{
     opencode_mapping, opencode_runtime, ApprovalPolicy, Harness, HarnessError, RawProviderEvent,
+    SendCurrentOutcome,
 };
 
 pub(crate) const OPENCODE_DISCONNECTED_CODE: &str = "opencode_disconnected";
@@ -47,6 +48,9 @@ pub struct OpenCodeHarness {
     config: Option<AgentConfig>,
     should_seed_prompt: bool,
     turn_in_progress: Arc<AtomicBool>,
+    /// The mapped turn id of the live turn, written by the SSE reader on
+    /// `TurnStarted`. `send_current` reads it as the steer's provider receipt.
+    current_turn_id: Arc<Mutex<Option<String>>>,
     shutdown_requested: Arc<AtomicBool>,
     interrupt_requested: Arc<AtomicBool>,
     child: Option<Child>,
@@ -76,6 +80,7 @@ impl OpenCodeHarness {
             config: None,
             should_seed_prompt: true,
             turn_in_progress: Arc::new(AtomicBool::new(false)),
+            current_turn_id: Arc::new(Mutex::new(None)),
             shutdown_requested: Arc::new(AtomicBool::new(false)),
             interrupt_requested: Arc::new(AtomicBool::new(false)),
             child: None,
@@ -152,6 +157,7 @@ impl OpenCodeHarness {
         let client = self.client.clone();
         let shutdown_requested = self.shutdown_requested.clone();
         let turn_in_progress = self.turn_in_progress.clone();
+        let current_turn_id = self.current_turn_id.clone();
         let interrupt_requested = self.interrupt_requested.clone();
         let approval = self.approval;
         let reader_base_url = base_url.clone();
@@ -256,6 +262,12 @@ impl OpenCodeHarness {
                         let event = match event {
                             ConversationEvent::TurnStarted { turn_id } => {
                                 turn_in_progress.store(true, Ordering::SeqCst);
+                                // Record the live turn id so a mid-turn steer
+                                // reports its provider receipt against it.
+                                *current_turn_id
+                                    .lock()
+                                    .expect("opencode turn id lock poisoned") =
+                                    Some(turn_id.clone());
                                 // An abort that raced turn completion must not
                                 // stamp the next turn.
                                 interrupt_requested.store(false, Ordering::SeqCst);
@@ -437,12 +449,60 @@ impl Harness for OpenCodeHarness {
 
         let payload = build_turn_payload(&turn_content, config, first_turn);
 
-        let message_url = format!("{base_url}/session/{provider_session_id}/message");
+        // `prompt_async` enqueues the turn and returns immediately (204); the
+        // turn's boundary and output arrive over the `/event` SSE stream. The
+        // blocking `/message` endpoint holds the HTTP response open until the
+        // whole turn finishes, which would keep `send_input` (and its `&mut
+        // self` borrow) from returning — leaving no window to call
+        // `send_current` mid-turn.
+        let message_url = format!("{base_url}/session/{provider_session_id}/prompt_async");
         send_request_with_retry(&self.client, Method::POST, &message_url, Some(payload)).await?;
 
         self.should_seed_prompt = false;
         turn_guard.disarm();
         Ok(())
+    }
+
+    async fn send_current(&mut self, content: &str) -> SendCurrentOutcome {
+        let text = content.trim();
+        if text.is_empty() {
+            return SendCurrentOutcome::Failed {
+                error: "steer input is empty".to_string(),
+            };
+        }
+        // A steer only lands in a live turn. Idle, or before the session is up,
+        // it belongs in the next boundary's durable seed.
+        if !self.turn_in_progress.load(Ordering::SeqCst) {
+            return SendCurrentOutcome::NotSteerable;
+        }
+        let (Some(base_url), Some(provider_session_id), Some(config)) = (
+            self.server_base_url.clone(),
+            self.provider_session_id.clone(),
+            self.config.clone(),
+        ) else {
+            return SendCurrentOutcome::NotSteerable;
+        };
+
+        // Deliver the steer as another `prompt_async`. opencode keeps the
+        // session `busy` and runs it as a queued continuation of the live turn,
+        // emitting a single `idle` once the queue drains — so the reader still
+        // sees exactly one turn boundary per `send_input`. No coalescing needed.
+        let payload = build_turn_payload(text, &config, false);
+        let steer_url = format!("{base_url}/session/{provider_session_id}/prompt_async");
+        match send_request_with_retry(&self.client, Method::POST, &steer_url, Some(payload)).await {
+            Ok(_) => {
+                let provider_turn_id = self
+                    .current_turn_id
+                    .lock()
+                    .expect("opencode turn id lock poisoned")
+                    .clone()
+                    .unwrap_or(provider_session_id);
+                SendCurrentOutcome::Sent { provider_turn_id }
+            }
+            Err(error) => SendCurrentOutcome::Failed {
+                error: format!("failed to send opencode steer: {error}"),
+            },
+        }
     }
 
     async fn interrupt(&mut self) -> Result<()> {
@@ -1407,5 +1467,122 @@ mod tests {
         );
         // Three events parsed; the last was the tool completion part update.
         assert_harness_disconnect_evidence(&events, Some("message.part.updated"), Some(2));
+    }
+
+    // -- Live checks against the real `opencode serve` --
+    //
+    // Ignored by default; they spawn `opencode serve` and drive a real model,
+    // so they need the `opencode` CLI on PATH and configured credentials (the
+    // OpenCode Zen default, `opencode/glm-5.2`). Run explicitly with:
+    //   cargo test -p loopflow --lib opencode::tests::live_ -- --ignored --nocapture
+
+    fn live_config() -> AgentConfig {
+        AgentConfig {
+            system_prompt: String::new(),
+            task_prompt: String::new(),
+            agent: Some("opencode".to_string()),
+            cwd: Some(std::env::temp_dir()),
+            max_turns: None,
+            resume_token: None,
+            provider_account_id: None,
+            provider_account_authority_home: None,
+            write_scope: AgentWriteScope::Configured,
+            execution_boundary: None,
+            skip_permissions: false,
+            structured_replies: Vec::new(),
+            directive_relay: None,
+            env: Default::default(),
+        }
+    }
+
+    /// Drain events up to the first `TurnCompleted`, accumulating assistant
+    /// text, and return `(status, text)`.
+    async fn drive_turn(
+        rx: &mut mpsc::UnboundedReceiver<ConversationEvent>,
+    ) -> (Lifecycle, String) {
+        let mut text = String::new();
+        loop {
+            match tokio::time::timeout(Duration::from_secs(180), rx.recv()).await {
+                Ok(Some(ConversationEvent::TextDelta { content, .. })) => text.push_str(&content),
+                Ok(Some(ConversationEvent::ItemCompleted {
+                    item: ConversationItem::Message { text: t, .. },
+                    ..
+                })) => text.push_str(&t),
+                Ok(Some(ConversationEvent::TurnCompleted { status, .. })) => return (status, text),
+                Ok(Some(_)) => {}
+                Ok(None) => panic!("event channel closed before TurnCompleted"),
+                Err(_) => panic!("timed out waiting for a turn"),
+            }
+        }
+    }
+
+    /// Assert no further `TurnCompleted` arrives within a short window — proof
+    /// that the coalesced boundary was the only one for the `send_input`.
+    async fn assert_no_more_completions(rx: &mut mpsc::UnboundedReceiver<ConversationEvent>) {
+        loop {
+            match tokio::time::timeout(Duration::from_secs(5), rx.recv()).await {
+                Ok(Some(ConversationEvent::TurnCompleted { .. })) => {
+                    panic!("a second TurnCompleted arrived; the steer was not coalesced")
+                }
+                Ok(Some(_)) => {}
+                Ok(None) | Err(_) => return,
+            }
+        }
+    }
+
+    #[tokio::test]
+    #[ignore = "drives the real opencode serve; needs opencode CLI + credentials"]
+    async fn live_basic_turn_completes() {
+        let (tx, mut rx) = mpsc::unbounded_channel();
+        let mut harness = OpenCodeHarness::new(tx, ApprovalPolicy::AutoApprove);
+        harness.start(&live_config()).await.expect("start");
+
+        harness
+            .send_input("Reply with exactly: ALPHA")
+            .await
+            .expect("seed turn");
+        let (status, text) = drive_turn(&mut rx).await;
+        assert_eq!(status, Lifecycle::Completed);
+        assert!(text.to_uppercase().contains("ALPHA"), "turn text: {text:?}");
+
+        harness.stop().await.expect("stop");
+    }
+
+    #[tokio::test]
+    #[ignore = "drives the real opencode serve; needs opencode CLI + credentials"]
+    async fn live_send_current_coalesces_into_one_boundary() {
+        let (tx, mut rx) = mpsc::unbounded_channel();
+        let mut harness = OpenCodeHarness::new(tx, ApprovalPolicy::AutoApprove);
+        harness.start(&live_config()).await.expect("start");
+
+        harness
+            .send_input(
+                "Write a slow, detailed 400-word essay about how a bicycle works. \
+                 Take your time and be thorough.",
+            )
+            .await
+            .expect("seed turn");
+        // Inject a steer while the seed turn is still generating.
+        tokio::time::sleep(Duration::from_secs(2)).await;
+        let outcome = harness
+            .send_current("IMPORTANT: also include the exact word PANGOLIN in your reply.")
+            .await;
+        assert!(
+            matches!(outcome, SendCurrentOutcome::Sent { .. }),
+            "steer accepted into the live turn: {outcome:?}"
+        );
+
+        // opencode keeps the session busy across the queued steer and emits one
+        // idle, so the reader must produce exactly one TurnCompleted.
+        let (status, text) = drive_turn(&mut rx).await;
+        assert_eq!(status, Lifecycle::Completed);
+        assert!(
+            text.to_uppercase().contains("PANGOLIN"),
+            "the steer was incorporated: {text:?}"
+        );
+        assert_no_more_completions(&mut rx).await;
+        assert!(!harness.turn_in_progress.load(Ordering::SeqCst));
+
+        harness.stop().await.expect("stop");
     }
 }

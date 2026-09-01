@@ -13,6 +13,10 @@ pub const SURFACE_HEADLESS: &str = include_str!("builtins/surfaces/headless.md")
 /// Shared contract for every surface with a human in the current conversation.
 pub const SURFACE_HUMAN_PRESENT: &str = include_str!("builtins/surfaces/human-present.md");
 
+/// Live chat channel (e.g. Discord): a person is reading, so the reply is a
+/// plain, deliberate, addressed message — never a working transcript.
+pub const SURFACE_CHAT: &str = include_str!("builtins/surfaces/chat.md");
+
 /// Returns the content of a built-in skill, if it exists.
 pub fn get_builtin_skill(name: &str) -> Option<&'static str> {
     BUILTIN_SKILLS.get(name).copied()
@@ -243,18 +247,11 @@ mod tests {
     fn project_guidance_sponsors_metrics_and_task_workers_propose_them() {
         let normalize = |prompt: &str| prompt.split_whitespace().collect::<Vec<_>>().join(" ");
 
-        let project = normalize(get_builtin_skill("project/clarify").expect("project clarify"));
-        assert!(project.contains("Owning a formal metric is explicit sponsorship"));
-        assert!(project.contains("which one or two outcomes the Project most wants to get"));
-        assert!(project.contains("Reject a convenient proxy"));
-        assert!(project.contains("frontier may keep earning work even when Met"));
-        assert!(project.contains("guardrail may enqueue nothing until its alarm trips"));
-
-        let project = normalize(get_builtin_skill("project/pursue").expect("project pursue"));
-        assert!(project.contains("Task worker may propose a metric"));
-        assert!(project.contains("Missed target usually gets roughly one worker"));
-        assert!(project.contains("Met guardrail stays quiet until its alarm trips"));
-        assert!(project.contains("not a utilization quota"));
+        let project = normalize(get_builtin_skill("project/operate").expect("project operate"));
+        assert!(project.contains("For each sponsored metric that moved"));
+        assert!(project.contains("A Met frontier may keep a worker"));
+        assert!(project.contains("a Met guardrail stays quiet until its alarm"));
+        assert!(project.contains("intent graph, not a control plane"));
 
         let task = normalize(get_builtin_skill("task/pursue").expect("task pursue"));
         assert!(task.contains("While building feature work, notice signals"));
@@ -380,12 +377,12 @@ mod tests {
         assert!(!LOOPFLOW_DOC.contains("lf pm show"));
         assert!(!LOOPFLOW_DOC.contains("--detach"));
 
-        let wave = get_builtin_skill("wave/pursue").expect("wave pursue");
+        let wave = get_builtin_skill("wave/operate").expect("wave operate");
         assert!(wave.contains("lf task run <issue-id>"));
         assert!(wave.contains("lf task status"));
-        assert!(wave.contains("stable worktree"));
+        assert!(wave.contains("Always launch work"));
 
-        let project = get_builtin_skill("project/pursue").expect("project pursue");
+        let project = get_builtin_skill("project/operate").expect("project operate");
         assert!(project.contains("lf task run <issue-id>"));
         assert!(!project.contains("lf loop"));
 
@@ -396,17 +393,9 @@ mod tests {
         assert!(!task.contains("lf pm task done"));
         assert!(task.contains("lf pm task create"));
 
-        for (flow, steps) in [
-            ("wave", ["wave/clarify", "wave/pursue", "wave/mutate"]),
-            (
-                "project",
-                ["project/clarify", "project/pursue", "project/mutate"],
-            ),
-        ] {
+        for (flow, step) in [("wave", "wave/operate"), ("project", "project/operate")] {
             let flow = get_builtin_flow(flow).expect("tier flow");
-            for step in steps {
-                assert!(flow.contains(&format!("- {step}")));
-            }
+            assert!(flow.contains(&format!("- {step}")));
             assert!(!flow.contains("loop:"));
         }
 
@@ -497,8 +486,8 @@ mod tests {
         }
 
         for name in [
-            "wave/pursue",
-            "project/pursue",
+            "wave/operate",
+            "project/operate",
             "scan",
             "assess",
             "wave-report",

@@ -1692,8 +1692,8 @@ mod account_first_tests {
     use crate::provider_account::{account_home_path, parse_account_id};
     use crate::provider_auth::Provider;
     use crate::store::{
-        open_store, CredentialState, ProviderAccount, RoutingState, StorageConfig,
-        CONTROL_DB_PATH_ENV, CONTROL_HOME_ENV,
+        CredentialState, ProviderAccount, RoutingState, StorageConfig, CONTROL_DB_PATH_ENV,
+        CONTROL_HOME_ENV,
     };
     use tempfile::tempdir;
 
@@ -1864,9 +1864,11 @@ cp "$LF_TEST_CODEX_AUTH_JSON" "$CODEX_HOME/auth.json"
             ],
         );
         let store = Arc::new(
-            open_store(&StorageConfig::sqlite(temp.path().join("loopflow.db")))
-                .await
-                .unwrap(),
+            crate::store::open_ephemeral_store(&StorageConfig::sqlite(
+                temp.path().join("loopflow.db"),
+            ))
+            .await
+            .unwrap(),
         );
         let account = account(None, "operator@example.com");
         store.upsert_provider_account(&account).await.unwrap();
@@ -1913,9 +1915,11 @@ cp "$LF_TEST_CODEX_AUTH_JSON" "$CODEX_HOME/auth.json"
             ],
         );
         let store = Arc::new(
-            open_store(&StorageConfig::sqlite(temp.path().join("loopflow.db")))
-                .await
-                .unwrap(),
+            crate::store::open_ephemeral_store(&StorageConfig::sqlite(
+                temp.path().join("loopflow.db"),
+            ))
+            .await
+            .unwrap(),
         );
         let account = account(None, "operator@example.com");
         store.upsert_provider_account(&account).await.unwrap();
@@ -1961,9 +1965,11 @@ cp "$LF_TEST_CODEX_AUTH_JSON" "$CODEX_HOME/auth.json"
             &[("Profile 3", "Primary", "operator@example.com")],
         );
         let store = Arc::new(
-            open_store(&StorageConfig::sqlite(temp.path().join("loopflow.db")))
-                .await
-                .unwrap(),
+            crate::store::open_ephemeral_store(&StorageConfig::sqlite(
+                temp.path().join("loopflow.db"),
+            ))
+            .await
+            .unwrap(),
         );
         let account_id = parse_account_id("primary").unwrap();
         let account_home = account_home_path(Provider::Codex, &account_id).unwrap();

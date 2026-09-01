@@ -9,7 +9,7 @@ use futures_util::future::join_all;
 use loopflow::child::ObservationRecipient;
 use loopflow::durable::WorkRef;
 use loopflow::planning::{LinearProjectId, ProjectPlan};
-use loopflow::store::{open_store, StorageConfig};
+use loopflow::store::StorageConfig;
 use loopflow::work::project::{Project, ProjectEventKind, ProjectId};
 use loopflow::work::wave::WaveLocator;
 use time::OffsetDateTime;
@@ -168,9 +168,10 @@ async fn supported_wave_starts_reach_bounded_live_or_rolled_back_states() {
         "unexpected failure: {failure}"
     );
 
-    let store = open_store(&StorageConfig::sqlite(home.join("loopflow.db")))
-        .await
-        .expect("open fresh Home registry");
+    let store =
+        loopflow::store::open_ephemeral_store(&StorageConfig::sqlite(home.join("loopflow.db")))
+            .await
+            .expect("open fresh Home registry");
     let local = store.local_home().await.expect("read Home");
     let good_locator = WaveLocator::discover(&repo, "good").expect("locate good Wave");
     let good = store

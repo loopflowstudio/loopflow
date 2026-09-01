@@ -118,7 +118,7 @@ pub(crate) fn prepare_harness_turn_at(
         max_turns,
         ..Cli::default()
     };
-    prepare_runner_turn_at(skill, message, &cli, repo_root.to_path_buf(), true)
+    prepare_runner_turn_at(skill, message, &cli, repo_root.to_path_buf(), true, None)
 }
 
 pub(crate) fn prepare_wave_harness_turn(
@@ -128,6 +128,7 @@ pub(crate) fn prepare_wave_harness_turn(
     max_turns: Option<u32>,
     origin_repo: &std::path::Path,
     resident_repo: &std::path::Path,
+    surface_override: Option<Surface>,
 ) -> Result<PreparedHarnessTurn> {
     let cli = Cli {
         batch: true,
@@ -135,15 +136,21 @@ pub(crate) fn prepare_wave_harness_turn(
         max_turns,
         ..Cli::default()
     };
-    let mut prepared =
-        prepare_runner_turn_at(skill, message, &cli, origin_repo.to_path_buf(), true)?;
+    let mut prepared = prepare_runner_turn_at(
+        skill,
+        message,
+        &cli,
+        origin_repo.to_path_buf(),
+        true,
+        surface_override,
+    )?;
     prepared.config.cwd = Some(resident_repo.to_path_buf());
     Ok(prepared)
 }
 
 fn prepare_runner_turn(skill: &str, message: &str, cli: &Cli) -> Result<PreparedHarnessTurn> {
     let repo_root = find_repo_root()?;
-    prepare_runner_turn_at(skill, message, cli, repo_root, true)
+    prepare_runner_turn_at(skill, message, cli, repo_root, true, None)
 }
 
 fn prepare_runner_turn_at(
@@ -152,6 +159,7 @@ fn prepare_runner_turn_at(
     cli: &Cli,
     repo_root: PathBuf,
     use_native_skill_launch: bool,
+    surface_override: Option<Surface>,
 ) -> Result<PreparedHarnessTurn> {
     let mut built = build_prompt_at(
         Some(skill),
@@ -163,6 +171,7 @@ fn prepare_runner_turn_at(
             crate::trace::ContextAssetKind::Goal,
             crate::trace::ContextScope::Step,
         )),
+        surface_override,
     )?;
     let input = std::mem::take(&mut built.agent_config.task_prompt);
     Ok(PreparedHarnessTurn {
@@ -178,7 +187,7 @@ fn build_prompt(skill: Option<&str>, message: Option<&str>, cli: &Cli) -> Result
     let start = Instant::now();
     let repo_root = find_repo_root()?;
     debug!(elapsed_ms = start.elapsed().as_millis(), "found repo root");
-    build_prompt_at(skill, message, cli, repo_root, true, None)
+    build_prompt_at(skill, message, cli, repo_root, true, None, None)
 }
 
 fn build_bound_prompt_at(
@@ -200,6 +209,7 @@ fn build_bound_prompt_at(
             crate::trace::ContextAssetKind::Goal,
             crate::trace::ContextScope::Task,
         )),
+        None,
     )
 }
 
@@ -210,6 +220,7 @@ fn build_prompt_at(
     repo_root: PathBuf,
     use_native_skill_launch: bool,
     message_context: Option<(crate::trace::ContextAssetKind, crate::trace::ContextScope)>,
+    surface_override: Option<Surface>,
 ) -> Result<PromptBuild> {
     let config_start = Instant::now();
     let config = load_config_or_default(Some(&repo_root));
@@ -247,13 +258,14 @@ fn build_prompt_at(
     } else {
         config.session.launch
     };
-    let surface = if is_interactive && launch_target == LaunchTarget::Ide {
-        Surface::Ide
-    } else if is_interactive {
-        Surface::Cli
-    } else {
-        Surface::Headless
-    };
+    let surface =
+        surface_override.unwrap_or(if is_interactive && launch_target == LaunchTarget::Ide {
+            Surface::Ide
+        } else if is_interactive {
+            Surface::Cli
+        } else {
+            Surface::Headless
+        });
 
     let wave = cli
         .wave
@@ -1385,6 +1397,7 @@ printf '%s\n' '{"type":"result","subtype":"success","usage":{"input_tokens":7,"o
             Some(4),
             origin.path(),
             resident.path(),
+            None,
         )
         .unwrap();
 
@@ -1518,6 +1531,7 @@ printf '%s\n' '{"type":"result","subtype":"success","usage":{"input_tokens":7,"o
             &cli,
             repo.path().to_path_buf(),
             true,
+            None,
             None,
         )
         .unwrap();

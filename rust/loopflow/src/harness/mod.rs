@@ -311,10 +311,6 @@ pub trait Harness: Send + Sync {
     }
 }
 
-/// Constructor fn: `(harness_kind, approval, event_tx) -> harness`.
-pub type CreateHarnessFn =
-    fn(&str, ApprovalPolicy, mpsc::UnboundedSender<ConversationEvent>) -> Result<Box<dyn Harness>>;
-
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub enum HarnessKind {
     Codex,
@@ -368,7 +364,8 @@ pub type CreateHarness = Box<
             ApprovalPolicy,
             mpsc::UnboundedSender<ConversationEvent>,
         ) -> Result<Box<dyn Harness>>
-        + Send,
+        + Send
+        + Sync,
 >;
 
 pub fn default_create_harness(

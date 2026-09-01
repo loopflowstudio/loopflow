@@ -4385,7 +4385,7 @@ attributes:
         let db_path =
             std::env::temp_dir().join(format!("provider-auth-test-{}.db", Uuid::new_v4().simple()));
         Arc::new(
-            crate::store::open_store(&crate::store::StorageConfig::sqlite(db_path))
+            crate::store::open_ephemeral_store(&crate::store::StorageConfig::sqlite(db_path))
                 .await
                 .expect("open sqlite store"),
         )
@@ -5004,7 +5004,7 @@ attributes:
     #[tokio::test]
     async fn provider_env_vars_includes_opencode_zen_token_for_opencode_harness() {
         let tmp = tempdir().expect("tempdir");
-        let store = crate::store::open_store(&crate::store::StorageConfig::sqlite(
+        let store = crate::store::open_ephemeral_store(&crate::store::StorageConfig::sqlite(
             tmp.path().join("loopflow.db"),
         ))
         .await
@@ -5201,7 +5201,7 @@ printf '{"id":2,"result":{"account":null}}\n'
     #[tokio::test]
     async fn provider_env_vars_returns_correct_vars_for_mixed_credential_types() {
         let tmp = tempdir().expect("tempdir");
-        let store = crate::store::open_store(&crate::store::StorageConfig::sqlite(
+        let store = crate::store::open_ephemeral_store(&crate::store::StorageConfig::sqlite(
             tmp.path().join("loopflow.db"),
         ))
         .await

@@ -329,6 +329,32 @@ impl SqliteStore {
         })
     }
 
+    /// Open a hermetic, fully-migrated store at `path`: the base canonical
+    /// migrations plus this build's exact embedded draft manifest, reading **no**
+    /// process- or machine-global state — no `LF_HOME`, no install selection, no
+    /// shared `~/.lf` identity, no frontier authority. Tests use this so their
+    /// schema is deterministic under parallel execution; the production
+    /// [`Self::open`] path resolves real install/frontier authority and is what
+    /// races when tests mutate ambient env concurrently.
+    pub(crate) fn open_ephemeral(path: &Path) -> StoreResult<Self> {
+        if let Some(parent) = path.parent() {
+            std::fs::create_dir_all(parent).map_err(|error| {
+                StoreError::InvalidData(format!("failed to create db dir: {error}"))
+            })?;
+        }
+        let conn = Connection::open(path)?;
+        conn.busy_timeout(SQLITE_WRITE_BUSY_TIMEOUT)?;
+        conn.execute_batch("PRAGMA journal_mode = WAL; PRAGMA foreign_keys = ON;")?;
+        super::migrations::apply_installed_development_sqlite(
+            &conn,
+            crate::build_info::migration_draft_manifest(),
+        )?;
+        validate_run_events_schema(&conn)?;
+        Ok(Self {
+            conn: Arc::new(Mutex::new(conn)),
+        })
+    }
+
     fn open(path: &Path, advance: super::FrontierAdvance) -> StoreResult<Self> {
         Self::open_with(
             path,

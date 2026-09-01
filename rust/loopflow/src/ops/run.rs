@@ -503,16 +503,18 @@ mod tests {
     use super::*;
     use crate::planning::{LinearIssueId, LinearProjectId, ProjectPlan, TaskPlan};
     use crate::pm::{PmKr, PmProject, PmSnapshot, ProjectFlowPlan};
-    use crate::store::{open_store, PmSnapshotRow, StorageConfig};
+    use crate::store::{PmSnapshotRow, StorageConfig};
     use crate::work::project::Project;
     use crate::work::task::{Observation, PmWritebackState, Task, TaskPr, TaskPrId};
     use crate::work::wave::Wave;
 
     async fn test_store() -> (tempfile::TempDir, SharedStore) {
         let directory = tempfile::tempdir().unwrap();
-        let store = open_store(&StorageConfig::sqlite(directory.path().join("registry.db")))
-            .await
-            .unwrap();
+        let store = crate::store::open_ephemeral_store(&StorageConfig::sqlite(
+            directory.path().join("registry.db"),
+        ))
+        .await
+        .unwrap();
         (directory, Arc::new(store))
     }
 

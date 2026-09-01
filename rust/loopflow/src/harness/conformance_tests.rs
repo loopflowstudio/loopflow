@@ -41,11 +41,16 @@ fn replay_claude_trace(file_name: &str) -> (Vec<ConversationEvent>, Option<Strin
         if line.trim().is_empty() {
             continue;
         }
-        if claude_mapping::process_line(&line, "turn_trace", &tx, &mut state) {
-            saw_turn_completed = true;
-        }
+        // process_line reports the result status; the reader (mirrored here)
+        // owns the terminal TurnCompleted.
+        let result = claude_mapping::process_line(&line, "turn_trace", &tx, &mut state);
         drain_events(&mut rx, &mut events);
-        if saw_turn_completed {
+        if let Some(status) = result {
+            saw_turn_completed = true;
+            events.push(ConversationEvent::TurnCompleted {
+                turn_id: "turn_trace".to_string(),
+                status,
+            });
             break;
         }
     }

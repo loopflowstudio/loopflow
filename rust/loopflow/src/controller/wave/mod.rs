@@ -46,7 +46,9 @@
 //! exists on the machine, child observations wait durably; the listener remains
 //! functional and acquires the registry when it appears.
 
+pub mod channel;
 pub mod chat;
+pub mod chat_reply;
 pub(crate) mod discord;
 pub mod journal;
 pub mod metrics;
@@ -394,29 +396,19 @@ where
 
     let (chat_backing, discord_adapter) = match try_read_wave_chat_config(&repo_root, &wave)? {
         Some(WaveChatConfig::Discord {
-            home_id,
             guild_id,
             channel_id,
         }) => {
-            let registry = registry_config.as_ref().ok_or_else(|| {
-                anyhow!("Discord chat requires the local registry to verify its owner Home")
-            })?;
-            let work = crate::durable::WorkRef::Wave(registry.wave.id().clone());
-            let placement = registry.store.placement(&work).await?;
-            let local_home = registry.store.local_home().await?;
+            // The core Discord path is local: a binding is guild+channel, and the
+            // advisory OS lock in the adapter is the single-owner authority. Which
+            // Home auto-starts this Wave is the general placement layer, not a
+            // Discord-config pin — so no registry/placement lookup here.
             let binding = journal::DiscordChatBinding {
                 guild_id,
                 channel_id,
             };
             let backing = ChatBacking::discord(&binding);
-            let adapter = discord::DiscordAdapter::preflight(
-                binding,
-                &home_id,
-                &placement.home_id,
-                &local_home.id,
-                discord_token,
-            )
-            .await?;
+            let adapter = discord::DiscordAdapter::preflight(binding, discord_token).await?;
             (backing, Some(adapter))
         }
         Some(WaveChatConfig::Local) | None => (ChatBacking::Local, None),
@@ -1499,7 +1491,7 @@ mod tests {
         }
 
         let store = Arc::new(
-            crate::store::open_store(&crate::store::StorageConfig::sqlite(
+            crate::store::open_ephemeral_store(&crate::store::StorageConfig::sqlite(
                 tmp.path().join("registry.db"),
             ))
             .await

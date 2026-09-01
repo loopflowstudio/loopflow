@@ -666,6 +666,17 @@ pub enum TaskEventKind {
     Progress {
         summary: String,
     },
+    /// A durable steer: direction handed to the Task. Folded into the run's
+    /// seed and injected into a live turn; not a report out, so it never
+    /// crosses to the parent Project.
+    Steer {
+        author: crate::durable::Author,
+        text: String,
+    },
+    /// A request to end the Task's current turn so the next one re-reads its
+    /// direction immediately. A live run acts on interrupts issued after it
+    /// launched; there is nothing to interrupt otherwise. Not a report out.
+    Interrupt,
     PrStarted {
         pr_id: TaskPrId,
         sequence: u32,
@@ -699,7 +710,11 @@ impl TaskEventKind {
     pub fn is_project_observable(&self) -> bool {
         !matches!(
             self,
-            Self::WorktreeInitializing { .. } | Self::Started | Self::Progress { .. }
+            Self::WorktreeInitializing { .. }
+                | Self::Started
+                | Self::Progress { .. }
+                | Self::Steer { .. }
+                | Self::Interrupt
         )
     }
 
@@ -793,7 +808,8 @@ pub struct LinearObservationOutcome {
     /// emitted no direction (existing comments are marked seen, not replayed).
     pub baselined: bool,
     pub content_steer_applied: bool,
-    pub follow_ups_created: Vec<crate::durable::SteerId>,
+    /// Event ids of the steer comments this observation appended.
+    pub follow_ups_created: Vec<i64>,
 }
 
 #[cfg(test)]

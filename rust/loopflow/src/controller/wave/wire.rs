@@ -67,6 +67,10 @@ pub enum ResidentDelta {
     TurnOpened { answers: Vec<String> },
     /// A prose fragment of the open turn.
     TurnText { text: String },
+    /// Relate this open assistant turn to the channel message it answers.
+    /// This is a Discord-shaped reply edge, not a consumption claim: the
+    /// message remains readable and the relation survives restart.
+    TurnReplyTo { message_id: String },
     /// A non-prose item (tool / command / file / thought) of the open turn.
     TurnItem { item: ConversationItem },
     /// The open turn finalized. The listener already holds the turn's content
@@ -205,6 +209,9 @@ mod tests {
             ResidentDelta::TurnText {
                 text: "thinking".into(),
             },
+            ResidentDelta::TurnReplyTo {
+                message_id: "msg-2".into(),
+            },
             ResidentDelta::TurnItem {
                 item: ConversationItem::Tool {
                     id: "t-1".into(),
@@ -236,6 +243,19 @@ mod tests {
         }
     }
 
+    #[test]
+    fn resident_delta_fixture_round_trips() {
+        let value: serde_json::Value = serde_json::from_str(include_str!(concat!(
+            env!("CARGO_MANIFEST_DIR"),
+            "/../../tests/fixtures/dto/resident_deltas.json"
+        )))
+        .expect("resident delta fixture JSON");
+        let request: PostDeltasRequest =
+            serde_json::from_value(value.clone()).expect("resident delta fixture decodes");
+
+        assert_eq!(serde_json::to_value(request).unwrap(), value);
+    }
+
     /// No serde defaults: an absent REQUIRED field is a parse error, never a
     /// silent fill-in. Absent `Option` fields decode as `None` — explicitly
     /// Optional is the one sanctioned absence.
@@ -245,6 +265,7 @@ mod tests {
             serde_json::json!({ "kind": "turn_opened" }),
             serde_json::json!({ "kind": "turn_finished" }),
             serde_json::json!({ "kind": "turn_text" }),
+            serde_json::json!({ "kind": "turn_reply_to" }),
             serde_json::json!({ "kind": "loop_state", "to": "failed" }),
             serde_json::json!({ "kind": "messages_requeued" }),
         ] {

@@ -1,6 +1,7 @@
 use std::io::BufRead;
 use std::ops::{Deref, DerefMut};
 use std::path::Path;
+use std::time::Duration;
 
 use anyhow::{anyhow, Result};
 use sha2::{Digest, Sha256};
@@ -24,10 +25,32 @@ mod state;
 pub(crate) use state::State;
 pub use state::{TaskGateProposal, TaskLifecyclePhase, TaskLifecyclePlan, TaskPhasePlan};
 
+/// How often a live Task run checks its comment stream for new steers to inject
+/// into the in-flight turn. A skill can run for hours; this is the latency floor
+/// for a steer reaching a working provider (the boundary seed is the fallback).
+const STEER_POLL_INTERVAL: Duration = Duration::from_secs(5);
+
 #[derive(Debug)]
 struct PreparedTaskStep {
     turn: crate::lf::commands::run::PreparedHarnessTurn,
     position: StepPosition,
+    seeded_steer_id: i64,
+    interrupt_id: i64,
+}
+
+#[derive(Debug, Clone, Copy)]
+struct ControlCursors {
+    steer: i64,
+    interrupt: i64,
+}
+
+impl ControlCursors {
+    fn from_prepared(prepared: &PreparedTaskStep) -> Self {
+        Self {
+            steer: prepared.seeded_steer_id,
+            interrupt: prepared.interrupt_id,
+        }
+    }
 }
 
 #[derive(Debug)]
@@ -198,6 +221,7 @@ async fn run_task_with(
     if let Some(capture) = &capture {
         capture.set_provider_session_id(task_controller_state(&task).provider_session_id.clone());
     }
+    let mut control_cursors = ControlCursors::from_prepared(&prepared);
     start_prepared_task_step(&mut task, harness.as_mut(), &mut flow, None, prepared).await?;
 
     let (attachment_tx, mut attachment_rx) = mpsc::unbounded_channel();
@@ -215,8 +239,23 @@ async fn run_task_with(
     );
     let mut last_text = String::new();
     let mut command_failures = Vec::new();
+    // Steers land as durable comments on this Work; a live turn injects any that
+    // arrive after its seed was folded. The initial cursor comes from that exact
+    // snapshot, so a comment landing between preparation and TurnStarted cannot
+    // be mistaken for seeded direction.
+    let work = WorkRef::Task(task.id.clone());
+    let mut steer_tick = tokio::time::interval(STEER_POLL_INTERVAL);
+    steer_tick.set_missed_tick_behavior(tokio::time::MissedTickBehavior::Delay);
     'runner: loop {
         tokio::select! {
+            _ = steer_tick.tick() => {
+                crate::ops::child::inject_live_steers(
+                    &store, &work, harness.as_mut(), &mut control_cursors.steer,
+                ).await;
+                crate::ops::child::observe_interrupt(
+                    &store, &work, harness.as_mut(), &mut control_cursors.interrupt,
+                ).await;
+            }
             line = attachment_rx.recv() => {
                 if let Some(line) = line {
                     handle_attachment(
@@ -320,6 +359,37 @@ async fn run_task_with(
                         sync_task_state(&mut task, &latest);
                         record_task_flow_position(&mut task, &flow)?;
                         store.put_task_controller_state(&task.state).await?;
+                        if status == Lifecycle::Interrupted {
+                            // Interrupt is the immediacy lever: force a fresh
+                            // boundary for this same step, whose seed re-reads
+                            // every durable comment, instead of parking until a
+                            // separate resume command arrives.
+                            let Some(prepared) = prepare_task_flow_step(
+                                &store,
+                                &mut task,
+                                wave.name(),
+                                &mut flow,
+                            )
+                            .await?
+                            else {
+                                return park_task_at_human(
+                                    Some(harness.as_mut()),
+                                    capture.as_ref(),
+                                )
+                                .await;
+                            };
+                            control_cursors = ControlCursors::from_prepared(&prepared);
+                            start_prepared_task_step(
+                                &mut task,
+                                harness.as_mut(),
+                                &mut flow,
+                                capture.as_ref(),
+                                prepared,
+                            )
+                            .await?;
+                            last_text.clear();
+                            continue 'runner;
+                        }
                         if flow_iteration_completed
                                 && task_controller_state(&task).lifecycle_phase == TaskLifecyclePhase::First
                             {
@@ -349,6 +419,7 @@ async fn run_task_with(
                                         &mut flow,
                                         wave.name(),
                                         capture.as_ref(),
+                                        &mut control_cursors,
                                     )
                                     .await?
                                     else {
@@ -365,7 +436,7 @@ async fn run_task_with(
                             } else {
                                 None
                             };
-                            if !flow_iteration_completed && status != Lifecycle::Interrupted {
+                            if !flow_iteration_completed {
                                 let Some(prepared) = prepare_task_flow_step(
                                     &store,
                                     &mut task,
@@ -380,6 +451,7 @@ async fn run_task_with(
                                     )
                                     .await;
                                 };
+                                control_cursors = ControlCursors::from_prepared(&prepared);
                                 start_prepared_task_step(
                                     &mut task,
                                     harness.as_mut(),
@@ -401,11 +473,6 @@ async fn run_task_with(
                             .map_err(|error| anyhow!(error.to_string()))?;
                             let (stopped_done, stopped_reason) = if let Some(proposal) = approved_gate {
                                 (proposal.done, proposal.reason)
-                            } else if status == Lifecycle::Interrupted {
-                                (
-                                    false,
-                                    "Task flow step interrupted; waiting for resume or another instruction".to_string(),
-                                )
                             } else if let Some(pr) = observed_pr
                                 .as_ref()
                                 .filter(|pr| pr.phase() == PrPhase::Open)
@@ -430,6 +497,7 @@ async fn run_task_with(
                                         )
                                         .await;
                                     };
+                                    control_cursors = ControlCursors::from_prepared(&prepared);
                                     start_prepared_task_step(
                                         &mut task,
                                         harness.as_mut(),
@@ -446,9 +514,7 @@ async fn run_task_with(
                                     "Task flow completed without a PR or any worktree change; another automatic iteration would spin".to_string(),
                                 )
                             };
-                            if task_controller_state(&task).lifecycle_phase == TaskLifecyclePhase::Loop
-                                && status != Lifecycle::Interrupted
-                            {
+                            if task_controller_state(&task).lifecycle_phase == TaskLifecyclePhase::Loop {
                                 task_controller_state_mut(&mut task).enter_finally(TaskGateProposal {
                                     done: stopped_done,
                                     reason: stopped_reason,
@@ -462,6 +528,7 @@ async fn run_task_with(
                                     &mut flow,
                                     wave.name(),
                                     capture.as_ref(),
+                                    &mut control_cursors,
                                 )
                                 .await?
                                 else {
@@ -476,14 +543,7 @@ async fn run_task_with(
                             }
                             store.put_task_controller_state(&task.state).await?;
                             let _ = harness.stop().await;
-                            finish_capture(
-                                capture.as_ref(),
-                                if status == Lifecycle::Interrupted {
-                                    "interrupted"
-                                } else {
-                                    "completed"
-                                },
-                            );
+                            finish_capture(capture.as_ref(), "completed");
                             if !summary.is_empty() {
                                 store.append_task_event(
                                     &task.id,
@@ -531,6 +591,8 @@ async fn prepare_task_flow_step_once(
         .work_for_child(&ChildRef::Task(task.id.clone()))
         .await?;
     let steers = store.work_steers(&work).await?;
+    let seeded_steer_id = steers.last().map_or(0, |steer| steer.id);
+    let interrupt_id = store.latest_interrupt_id(&work).await?;
     let step = flow
         .current()
         .ok_or_else(|| anyhow!("Task flow has no current step"))?;
@@ -576,6 +638,8 @@ async fn prepare_task_flow_step_once(
     Ok(PreparedTaskStep {
         turn: prepared,
         position,
+        seeded_steer_id,
+        interrupt_id,
     })
 }
 
@@ -801,11 +865,13 @@ async fn start_resumed_task_phase(
     flow: &mut Playhead,
     wave_name: &str,
     capture: Option<&crate::run_record::CaptureHandle>,
+    control_cursors: &mut ControlCursors,
 ) -> Result<Option<()>> {
     *flow = resume_task_phase(task)?;
     let Some(prepared) = prepare_task_flow_step(store, task, wave_name, flow).await? else {
         return Ok(None);
     };
+    *control_cursors = ControlCursors::from_prepared(&prepared);
     start_prepared_task_step(task, harness, flow, capture, prepared).await?;
     Ok(Some(()))
 }
@@ -999,11 +1065,11 @@ async fn handle_attachment(
         println!("interrupted active provider turn");
     } else {
         let work = store.work_for_child(&target).await?;
-        let receipt = store
+        let steer = store
             .append_steer(&work, crate::durable::Author::User, line)
             .await?;
         harness.send_input(line).await?;
-        println!("queued {}", receipt.steer.id);
+        println!("queued {}", steer.id);
     }
     Ok(())
 }
@@ -1249,6 +1315,35 @@ fn progress_summary(text: &str) -> String {
 }
 
 #[cfg(test)]
+struct TestLfBinGuard {
+    previous: Option<std::ffi::OsString>,
+    _lock: std::sync::MutexGuard<'static, ()>,
+}
+
+#[cfg(test)]
+impl TestLfBinGuard {
+    fn pin() -> Self {
+        let lock = crate::journal::test_env_lock();
+        let previous = std::env::var_os("LF_BIN");
+        std::env::set_var("LF_BIN", std::env::current_exe().unwrap());
+        Self {
+            previous,
+            _lock: lock,
+        }
+    }
+}
+
+#[cfg(test)]
+impl Drop for TestLfBinGuard {
+    fn drop(&mut self) {
+        match &self.previous {
+            Some(value) => std::env::set_var("LF_BIN", value),
+            None => std::env::remove_var("LF_BIN"),
+        }
+    }
+}
+
+#[cfg(test)]
 mod planning_tests {
     use super::{
         completed_boundary_failure, execution_blocker_at_handoff, preceding_autonomous_step,
@@ -1257,12 +1352,12 @@ mod planning_tests {
     };
     use crate::chat::types::Lifecycle;
     use crate::controller::wave::playhead::{Playhead, QueuedInvocation, StepKind, StepPlan};
-    use crate::durable::{RunId, WorkRef};
+    use crate::durable::{Author, RunId, WorkRef};
     use crate::engine::agent::AgentConfig;
     use crate::engine::OccurrencePolicy;
     use crate::harness::{Harness, SendCurrentOutcome};
     use crate::planning::{LinearIssueId, LinearProjectId, ProjectPlan, TaskPlan};
-    use crate::store::{open_store, SharedStore, StorageConfig};
+    use crate::store::{SharedStore, StorageConfig};
     use crate::work::project::{Project, ProjectId};
     use crate::work::task::{
         Observation, PmWritebackState, Task, TaskEventKind, TaskId, TaskPr, TaskPrId,
@@ -1272,6 +1367,12 @@ mod planning_tests {
     #[derive(Default)]
     struct UnusedHarness {
         stopped: bool,
+    }
+
+    #[derive(Default)]
+    struct RecordingControlHarness {
+        steers: Vec<String>,
+        interrupts: usize,
     }
 
     fn step(name: &str, id: Option<&str>, human: bool) -> StepPlan {
@@ -1328,6 +1429,37 @@ mod planning_tests {
         }
     }
 
+    #[async_trait::async_trait]
+    impl Harness for RecordingControlHarness {
+        async fn start(&mut self, _config: &AgentConfig) -> anyhow::Result<()> {
+            Ok(())
+        }
+
+        async fn send_input(&mut self, _content: &str) -> anyhow::Result<()> {
+            Ok(())
+        }
+
+        async fn send_current(&mut self, content: &str) -> SendCurrentOutcome {
+            self.steers.push(content.to_string());
+            SendCurrentOutcome::Sent {
+                provider_turn_id: "turn-test".to_string(),
+            }
+        }
+
+        async fn interrupt(&mut self) -> anyhow::Result<()> {
+            self.interrupts += 1;
+            Ok(())
+        }
+
+        async fn stop(&mut self) -> anyhow::Result<()> {
+            Ok(())
+        }
+
+        fn provider_session_id(&self) -> Option<String> {
+            None
+        }
+    }
+
     async fn human_task_fixture() -> (SharedStore, ControlledTask, Playhead) {
         let repository =
             std::fs::canonicalize(std::path::Path::new(env!("CARGO_MANIFEST_DIR")).join("../.."))
@@ -1371,7 +1503,7 @@ mod planning_tests {
         let database = tempfile::tempdir().unwrap().keep();
         let database = database.join("registry.db");
         let store = std::sync::Arc::new(
-            open_store(&StorageConfig::sqlite(database.clone()))
+            crate::store::open_ephemeral_store(&StorageConfig::sqlite(database.clone()))
                 .await
                 .unwrap(),
         );
@@ -1553,6 +1685,69 @@ mod planning_tests {
             TaskEventKind::Failed { error, resumable: true }
                 if error == "task process failed: provider stream closed"
         ));
+    }
+
+    #[tokio::test]
+    #[allow(clippy::await_holding_lock)] // the guard serializes LF_BIN for the fixture
+    async fn control_events_after_seed_preparation_remain_live() {
+        let _lf_bin = super::TestLfBinGuard::pin();
+        let (store, mut task, flow) = human_task_fixture().await;
+        let work = WorkRef::Task(task.id.clone());
+        let seeded = store
+            .append_steer(&work, Author::User, "seeded direction")
+            .await
+            .unwrap();
+        let prepared =
+            super::prepare_task_flow_step_once(&store, &mut task, "human-task-proof", &flow)
+                .await
+                .unwrap();
+        assert_eq!(prepared.seeded_steer_id, seeded.id);
+        assert!(prepared.turn.input.contains("seeded direction"));
+
+        let late = store
+            .append_steer(&work, Author::User, "late direction")
+            .await
+            .unwrap();
+        let late_interrupt = store.append_interrupt(&work).await.unwrap();
+        let mut harness = RecordingControlHarness::default();
+        let mut steer_cursor = prepared.seeded_steer_id;
+        let mut interrupt_cursor = prepared.interrupt_id;
+
+        crate::ops::child::inject_live_steers(&store, &work, &mut harness, &mut steer_cursor).await;
+        crate::ops::child::observe_interrupt(&store, &work, &mut harness, &mut interrupt_cursor)
+            .await;
+
+        assert_eq!(harness.steers, vec!["late direction"]);
+        assert_eq!(steer_cursor, late.id);
+        assert_eq!(harness.interrupts, 1);
+        assert_eq!(interrupt_cursor, late_interrupt);
+    }
+
+    #[tokio::test]
+    #[allow(clippy::await_holding_lock)] // the guard serializes LF_BIN for the fixture
+    async fn interrupted_step_restarts_in_place_with_fresh_direction() {
+        let _lf_bin = super::TestLfBinGuard::pin();
+        let (store, mut task, mut flow) = human_task_fixture().await;
+        let interrupted_step = flow.current().unwrap().step.clone();
+        super::open_task_flow_body(&mut flow, &task).unwrap();
+
+        assert!(!super::finish_task_flow_turn(&mut flow, Lifecycle::Interrupted).unwrap());
+        store
+            .append_steer(
+                &WorkRef::Task(task.id.clone()),
+                Author::User,
+                "direction after interrupt",
+            )
+            .await
+            .unwrap();
+
+        let prepared =
+            super::prepare_task_flow_step_once(&store, &mut task, "human-task-proof", &flow)
+                .await
+                .unwrap();
+
+        assert_eq!(flow.current().unwrap().step, interrupted_step);
+        assert!(prepared.turn.input.contains("direction after interrupt"));
     }
 
     async fn park_human_task(

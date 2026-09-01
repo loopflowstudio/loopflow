@@ -6,7 +6,7 @@ use anyhow::{anyhow, Result};
 use serde::{Deserialize, Serialize};
 use time::OffsetDateTime;
 
-use crate::durable::{Author, Steer, SteerId, WorkRef};
+use crate::durable::{Author, SteerComment, WorkRef};
 use crate::lf::commands::runs::{collect_run_activity_since, RunSnapshot};
 use crate::lf::commands::util::parse_since;
 use crate::lf::commands::waves::PrMergeRequestSnapshot;
@@ -71,7 +71,7 @@ pub enum WorkActivityFact {
         github: Option<GithubPr>,
     },
     SteerIssued {
-        id: SteerId,
+        id: i64,
         author: Author,
     },
 }
@@ -175,11 +175,11 @@ fn build_snapshot(
     }
 
     let steers = store
-        .list_steers_since(since)
+        .steers_since(since)
         .map_err(|error| anyhow!("failed to read Steers: {error}"))?;
-    for steer in steers {
-        if let Some(work) = catalog.owners.get(&steer.work) {
-            entries.push(steer_entry(&steer, work));
+    for comment in steers {
+        if let Some(work) = catalog.owners.get(&comment.work) {
+            entries.push(steer_entry(&comment, work));
         }
     }
 
@@ -447,15 +447,20 @@ fn pr_entries(pr: &TaskPr, work: &WorkOwner, since: i64) -> Vec<WorkActivityEntr
     entries
 }
 
-fn steer_entry(steer: &Steer, work: &WorkOwner) -> WorkActivityEntry {
+fn steer_entry(comment: &SteerComment, work: &WorkOwner) -> WorkActivityEntry {
     activity_entry(
-        format!("steer:{}", steer.id),
-        steer.issued_at.unix_timestamp(),
-        format!("Steered: {}", steer.text),
+        format!(
+            "steer:{}:{}:{}",
+            comment.work.kind(),
+            comment.work.id(),
+            comment.steer.id
+        ),
+        comment.issued_at.unix_timestamp(),
+        format!("Steered: {}", comment.steer.text),
         work,
         WorkActivityFact::SteerIssued {
-            id: steer.id.clone(),
-            author: steer.author.clone(),
+            id: comment.steer.id,
+            author: comment.steer.author.clone(),
         },
     )
 }
@@ -571,6 +576,28 @@ mod tests {
             task: Some(identifier.to_string()),
             created_at: None,
         }
+    }
+
+    #[test]
+    fn steer_activity_ids_include_their_work_identity() {
+        let first = task_owner("W2-1", "control", "live");
+        let second = task_owner("W2-2", "control", "live");
+        let comment = |work: WorkRef| SteerComment {
+            work,
+            steer: crate::durable::Steer {
+                id: 1,
+                author: Author::User,
+                text: "direction".to_string(),
+            },
+            issued_at: OffsetDateTime::UNIX_EPOCH,
+        };
+
+        let first_entry = steer_entry(&comment(first.work.clone()), &first);
+        let second_entry = steer_entry(&comment(second.work.clone()), &second);
+
+        assert_ne!(first_entry.id, second_entry.id);
+        assert!(first_entry.id.contains(first.work.id()));
+        assert!(second_entry.id.contains(second.work.id()));
     }
 
     fn catalog(owners: &[WorkOwner]) -> WorkCatalog {

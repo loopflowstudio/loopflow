@@ -51,10 +51,11 @@ The current application tables group by owner:
 
 | Owner | Tables | Purpose |
 | --- | --- | --- |
-| Planning hierarchy | `waves`, `projects`, `project_events`, `tasks`, `task_events` | stable identity, progress, history |
-| Controller automation | `project_controller_state`, `task_controller_state` | Project and Task playheads plus provider continuation |
-| Task delivery | `task_prs`, `task_pr_repair_incidents`, `task_linear_observations`, `task_linear_ingested_comments` | one active branch/PR and provider observations |
-| Work input | `steers`, `tool_responses`, `work_flow_positions`, `work_placements` | corrections, tool answers, playheads, Home placement |
+| Tracked Work | `waves`, `projects`, `project_events`, `tasks`, `task_events` | stable identity, status, progress, comments, interrupts, history |
+| Controller automation | `project_controller_state`, `task_controller_state` | end-to-end playheads, provider continuation, controller observations |
+| Task delivery | `task_prs`, `task_pr_repair_incidents`, `task_linear_observations`, `task_linear_ingested_comments` | serial PRs and provider observations |
+| Work adjuncts | `tool_responses`, `work_flow_positions`, `work_placements` | tool answers, human/flow playheads, and Home placement; Project/Task correction events live in their Work event streams |
+| Ask | `ask_exchanges`, `ask_linear_comment_outbox` | blocking requests, answering fence, results, publication |
 | PM projection | `pm_snapshots`, `observation_outbox` | bounded Linear reads and deferred publication |
 | Metrics | `metric_instruments`, `metric_observations` | registered producers and accepted evidence |
 | PR landing | `pr_landings`, `ci_incidents` | exact-head supervision and bounded repair |

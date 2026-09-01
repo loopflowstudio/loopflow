@@ -278,7 +278,7 @@ impl Store {
         comment_id: String,
         text: String,
         observed_at: OffsetDateTime,
-    ) -> StoreResult<Option<crate::durable::SteerId>> {
+    ) -> StoreResult<Option<i64>> {
         let task_id = task_id.clone();
         run_sqlite(&self.sqlite, move |store| {
             store.apply_linear_comment(&task_id, &comment_id, &text, observed_at)

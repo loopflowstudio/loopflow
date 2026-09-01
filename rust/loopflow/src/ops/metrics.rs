@@ -351,7 +351,7 @@ mod tests {
     };
     use crate::id::WaveId;
     use crate::pm::{PmKr, ProjectFlowPlan};
-    use crate::store::{open_store, StorageConfig};
+    use crate::store::StorageConfig;
 
     use super::*;
 
@@ -458,9 +458,11 @@ mod tests {
         )
         .unwrap();
 
-        let store = open_store(&StorageConfig::sqlite(directory.path().join("registry.db")))
-            .await
-            .unwrap();
+        let store = crate::store::open_ephemeral_store(&StorageConfig::sqlite(
+            directory.path().join("registry.db"),
+        ))
+        .await
+        .unwrap();
         store
             .apply_migration_for_test("project_metric_observations")
             .unwrap();
@@ -543,9 +545,11 @@ mod tests {
             ),
         )
         .unwrap();
-        let store = open_store(&StorageConfig::sqlite(directory.path().join("registry.db")))
-            .await
-            .unwrap();
+        let store = crate::store::open_ephemeral_store(&StorageConfig::sqlite(
+            directory.path().join("registry.db"),
+        ))
+        .await
+        .unwrap();
         let wave = Wave::new(
             WaveId::new(),
             "product".to_string(),
@@ -586,9 +590,11 @@ mod tests {
             ),
         )
         .unwrap();
-        let store = open_store(&StorageConfig::sqlite(directory.path().join("registry.db")))
-            .await
-            .unwrap();
+        let store = crate::store::open_ephemeral_store(&StorageConfig::sqlite(
+            directory.path().join("registry.db"),
+        ))
+        .await
+        .unwrap();
         store
             .apply_migration_for_test("project_metric_observations")
             .unwrap();

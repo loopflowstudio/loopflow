@@ -251,6 +251,13 @@ struct ConversationQuery {
     epoch: Option<String>,
 }
 
+/// `GET /channel?since=<seq>` — the unified channel read. `since` omitted reads
+/// from the start.
+#[derive(Debug, Deserialize)]
+struct ChannelQuery {
+    since: Option<u64>,
+}
+
 /// `POST /messages` request body. `op` is required — explicit, never inferred.
 /// `id` becomes the Discord nonce when the active epoch is provider-backed.
 #[derive(Debug, Deserialize)]
@@ -350,6 +357,7 @@ pub(crate) fn router_with_chat_projection(
         .route("/health", get(health_handler))
         .route("/stop", post(stop_handler))
         .route("/conversation", get(conversation_handler))
+        .route("/channel", get(channel_handler))
         .route("/playhead", get(playhead_handler))
         .route("/events", get(events_handler))
         .route("/messages", post(messages_handler))
@@ -506,6 +514,16 @@ async fn resident_context_handler(
         playhead,
         provider_session: state.runtime.latest_provider_session(),
     }))
+}
+
+/// `GET /channel` — the unified channel read: recent messages as `Message`s
+/// including the wave's own posts. The platform-agnostic read `lf chat` and the
+/// responder both consume.
+async fn channel_handler(
+    State(state): State<ServerState>,
+    Query(query): Query<ChannelQuery>,
+) -> Json<Vec<crate::controller::wave::channel::Message>> {
+    Json(state.runtime.read_channel(query.since))
 }
 
 async fn conversation_handler(
@@ -755,6 +773,18 @@ async fn events_handler(
     } else {
         Vec::new()
     };
+    // Chat is observed, not drained: unanswered chat messages never enter the
+    // pending queue, so they replay from the channel tail here. The observe
+    // loop dedupes by message id and reads-incl-own, so a replayed message it
+    // already answered stays silent.
+    let chat_tail_replay: Vec<Result<Event, Infallible>> = if include_inbox {
+        sub.chat_tail
+            .iter()
+            .map(|message| Ok(inbox_event(&pending_inbox_frame(message))))
+            .collect()
+    } else {
+        Vec::new()
+    };
     let turn_replay: Vec<Result<Event, Infallible>> = if include_inbox {
         sub.turns
             .into_iter()
@@ -777,7 +807,8 @@ async fn events_handler(
             .chain(std::iter::once(Ok(state_event(&sub.state))))
             .chain(sub.playhead.into_iter().map(|p| Ok(playhead_event(&p))))
             .chain(turn_replay)
-            .chain(inbox_replay),
+            .chain(inbox_replay)
+            .chain(chat_tail_replay),
     );
     // The resident keeps private turn frames; human chat converts the same
     // broadcasts into source-bearing messages. Both make lag an explicit
@@ -1423,7 +1454,7 @@ mod tests {
                 .expect("error body")
                 .contains("message was not accepted"));
             assert!(runtime.thread_snapshot().is_empty());
-            assert!(runtime.pending_messages().is_empty());
+            assert!(runtime.read_channel(None).is_empty());
             assert_eq!(
                 read_events(&journal_path(tmp.path(), "ship")).len(),
                 1,
@@ -1452,7 +1483,7 @@ mod tests {
         assert_eq!(accepted["message"]["turn"]["text"], "keep this");
         assert_eq!(accepted["message"]["source"]["kind"], "local");
         assert_eq!(runtime.thread_snapshot().len(), 1);
-        assert_eq!(runtime.pending_messages().len(), 1);
+        assert_eq!(runtime.read_channel(None).len(), 1);
 
         let events = read_events(&journal_path(tmp.path(), "ship"));
         assert_eq!(events.len(), 2);

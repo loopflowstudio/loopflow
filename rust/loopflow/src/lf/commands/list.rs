@@ -284,8 +284,8 @@ mod tests {
         assert!(!rendered
             .lines()
             .any(|line| line == "    collapsed implement → compress"));
-        assert!(rendered.contains("wave/clarify"));
-        assert!(!rendered.contains("wave_clarify"));
+        assert!(rendered.contains("wave/operate"));
+        assert!(!rendered.contains("wave_operate"));
         assert!(rendered.lines().all(|line| line.trim_end() == line));
     }
 }

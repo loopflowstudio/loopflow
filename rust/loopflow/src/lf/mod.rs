@@ -571,6 +571,21 @@ pub enum Commands {
         /// Full Run id or an unambiguous displayed prefix
         run: String,
     },
+    /// Observe wave-chat message(s) and print a reply only if one is warranted.
+    /// A direct capability: no listener, resident, or governance loop.
+    Reply {
+        /// Wave name
+        wave: String,
+        /// Recent message text (reads stdin when omitted)
+        #[arg(trailing_var_arg = true)]
+        text: Vec<String>,
+        /// Override the provider (e.g. `claude`, `codex`); default is configured
+        #[arg(long)]
+        agent: Option<String>,
+        /// Cap provider turns for the reply
+        #[arg(long)]
+        max_turns: Option<u32>,
+    },
     /// Converse with a served mind's thread; --follow replays it and --steer
     /// reaches the live body.
     Chat {
@@ -3332,18 +3347,6 @@ mod tests {
         assert_eq!(text, vec!["hi"]);
         assert_eq!(target.wave.as_deref(), Some("goals"));
 
-        // Chat messages have no machine-authored byline.
-        assert!(Cli::try_parse_from([
-            "lf",
-            "chat",
-            "--wave",
-            "goals",
-            "--from",
-            "ci",
-            "CI failed"
-        ])
-        .is_err());
-
         let cli =
             Cli::try_parse_from(["lf", "chat", "--steer", "change course"]).expect("parse steer");
         let Some(Commands::Chat { text, steer, .. }) = cli.command else {
@@ -3352,10 +3355,6 @@ mod tests {
         assert_eq!(text, vec!["change course"]);
         assert!(steer);
 
-        assert!(
-            Cli::try_parse_from(["lf", "chat", "--steer", "--from", "ci", "change course"])
-                .is_err()
-        );
         assert!(Cli::try_parse_from(["lf", "chat", "--steer", "--parent", "x"]).is_err());
 
         // --wave and --parent are mutually exclusive.

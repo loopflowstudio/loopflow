@@ -2143,7 +2143,7 @@ mod tests {
             issue_identifier: "INF-123".to_string(),
             event_id: 7,
             event: crate::work::task::TaskEventKind::Progress {
-                summary: "Task needs parent attention".to_string(),
+                summary: "Task is waiting on its parent".to_string(),
             },
         };
 
@@ -3220,7 +3220,7 @@ mod tests {
             issue_identifier: "INF-123".into(),
             event_id: 7,
             event: crate::work::task::TaskEventKind::Progress {
-                summary: "Task needs parent attention".into(),
+                summary: "Task is waiting on its parent".into(),
             },
         };
         assert!(rt.deliver_task_observation(observation.clone()));

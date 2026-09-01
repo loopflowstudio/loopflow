@@ -151,11 +151,9 @@ impl SqliteStore {
             &transaction,
             &ChildRef::Task(state.task_id.clone()),
         )?;
-        super::durable::cancel_pending_flow_asks_for_work(
-            &transaction,
-            &work,
-            "Task controller restarted from kickoff",
-            crate::store::rows::now_unix(),
+        transaction.execute(
+            "DELETE FROM work_flow_positions WHERE work_kind=?1 AND work_id=?2",
+            params![work.kind(), work.id()],
         )?;
         put_task_state_on(&transaction, state)?;
         SqliteStore::append_steer_in(&transaction, &work, author, direction)?;

@@ -12,10 +12,11 @@ the demonstration. If it fails, capture the exact gap and leave the work ready
 for another implementation pass.
 
 On a headless surface, run the same demonstration autonomously. If one material
-product judgment blocks the proof and this Work has a parent, run `lf ask` with
-that exact question and continue when the Ask settles. Do not manufacture a
-question merely to create a checkpoint. When no parent route exists, report the
-evidence directly; if the proof genuinely requires absent-User action, request
-that exact intervention with `lf ask --user`.
+product judgment blocks the proof, run `lf ask "<exact request>"`; its human
+session stays visible after the session agent is ready, and only the human can
+Complete it. Do not manufacture a question merely to
+create a checkpoint. If the proof genuinely requires absent-User action beyond
+that session, stop
+with that exact blocker; the Task's declared human FlowStep owns presentation.
 
 Never treat closing, detaching, provider exit, or lack of response as approval.

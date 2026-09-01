@@ -75,12 +75,12 @@ fn load_config_or_default_returns_defaults() {
 #[test]
 fn config_model_with_variant() {
     let temp = TempDir::new().unwrap();
-    write_config(temp.path(), "agent: gemini:2.5-pro");
+    write_config(temp.path(), "agent: claude:opus");
 
     let config = with_clean_home(|| load_config(Some(temp.path())))
         .unwrap()
         .unwrap();
-    assert_eq!(config.agent.as_deref(), Some("gemini:2.5-pro"));
+    assert_eq!(config.agent.as_deref(), Some("claude:opus"));
 }
 
 #[test]

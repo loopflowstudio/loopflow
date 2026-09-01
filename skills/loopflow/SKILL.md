@@ -85,7 +85,7 @@ reconstructing it from processes, worktrees, or Linear:
 
 ```bash
 lf ls --json              # every durable Wave and its Home/runtime evidence
-lf status <wave> --json   # one Wave's Work hierarchy, Runs, and attention
+lf status <wave> --json   # one Wave's Work hierarchy, Runs, and Task conditions
 lf roadmap --json         # current plan across Waves joined to runtime truth
 ```
 

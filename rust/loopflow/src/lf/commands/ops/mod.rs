@@ -2581,14 +2581,6 @@ const SYSTEM_DEPS: &[SystemDep] = &[
         fallback: "npm install -g @openai/codex",
     },
     SystemDep {
-        name: "gemini",
-        command: "gemini",
-        required: false,
-        macos_only: false,
-        brew: None,
-        fallback: "npm install -g @google/gemini-cli",
-    },
-    SystemDep {
         name: "warp",
         command: "warp",
         required: false,

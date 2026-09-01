@@ -4,7 +4,7 @@ use crate::engine::{
     LaunchPromptInput, LaunchTarget, ProcessConfig, PromptComponents, SkillSyncOptions,
     StreamFormat, Surface,
 };
-use crate::lf::commands::util::{find_repo_root, launch_session};
+use crate::lf::commands::util::{find_repo_root, launch_session_with_env};
 use crate::lf::output::{format_context_header, format_reproducible_command, Colors};
 use crate::lf::Cli;
 use anyhow::{anyhow, Result};
@@ -32,7 +32,7 @@ pub fn run(skill: Option<&str>, message: Option<&str>, cli: &Cli) -> Result<()> 
 
 #[doc(hidden)]
 pub fn run_bound(
-    skill: &str,
+    skill: Option<&str>,
     message: Option<&str>,
     cli: &Cli,
     binding: &crate::ops::WorkBinding,
@@ -141,23 +141,6 @@ pub(crate) fn prepare_wave_harness_turn(
     Ok(prepared)
 }
 
-pub(crate) fn prepare_interactive_harness_turn_at(
-    skill: &str,
-    message: &str,
-    wave: &str,
-    repo_root: &Path,
-) -> Result<PreparedHarnessTurn> {
-    let cli = Cli {
-        interactive: true,
-        wave: Some(wave.to_string()),
-        ..Cli::default()
-    };
-    // A durable human gate must receive the exact Task basis. Native vendor
-    // skill launches replace the assembled prompt with a sigil and would lose
-    // scratch documents that the human is here to review.
-    prepare_runner_turn_at(skill, message, &cli, repo_root.to_path_buf(), false)
-}
-
 fn prepare_runner_turn(skill: &str, message: &str, cli: &Cli) -> Result<PreparedHarnessTurn> {
     let repo_root = find_repo_root()?;
     prepare_runner_turn_at(skill, message, cli, repo_root, true)
@@ -199,7 +182,7 @@ fn build_prompt(skill: Option<&str>, message: Option<&str>, cli: &Cli) -> Result
 }
 
 fn build_bound_prompt_at(
-    skill: &str,
+    skill: Option<&str>,
     message: &str,
     cli: &Cli,
     repo_root: &Path,
@@ -208,7 +191,7 @@ fn build_bound_prompt_at(
     // vendor skill sigil: the selected Work seed and the Task worktree's exact
     // scratch snapshot. Keep the assembled prompt on interactive surfaces too.
     build_prompt_at(
-        Some(skill),
+        skill,
         Some(message),
         cli,
         repo_root.to_path_buf(),
@@ -257,7 +240,14 @@ fn build_prompt_at(
 
     info!("preparing launch prompt");
     let prepare_start = Instant::now();
-    let surface = if cli.ide {
+    let launch_target = if cli.ide {
+        LaunchTarget::Ide
+    } else if cli.tui || skill == Some("loopflow") {
+        LaunchTarget::Tui
+    } else {
+        config.session.launch
+    };
+    let surface = if is_interactive && launch_target == LaunchTarget::Ide {
         Surface::Ide
     } else if is_interactive {
         Surface::Cli
@@ -330,11 +320,15 @@ fn build_prompt_at(
 
     let mut agent_config = prepared.config;
     let mut prompt = prepared.prompt;
-    // Interactive handoffs use the vendor skill sigil because the vendor owns
-    // the session from that point. Headless launches keep the fully assembled
-    // prompt so every context source remains explicit and attributable.
+    // IDE deep links use the vendor skill sigil to stay below their URL cap.
+    // Terminal sessions receive the fully assembled prompt from `lf <skill>`;
+    // a positional `/skill` is not a reliable vendor invocation boundary.
     if let Some(skill_name) = skill_name.as_deref() {
-        if is_interactive && use_native_skill_launch && should_launch_via_skill(skill_name) {
+        if is_interactive
+            && launch_target == LaunchTarget::Ide
+            && use_native_skill_launch
+            && should_launch_via_skill(skill_name)
+        {
             let sync_start = Instant::now();
             crate::engine::sync_skills(&SkillSyncOptions::default())?;
             debug!(
@@ -353,7 +347,7 @@ fn build_prompt_at(
             );
             agent_config.system_prompt.clear();
             agent_config.task_prompt = prompt.clone();
-        } else if is_interactive && use_native_skill_launch {
+        } else if is_interactive && launch_target == LaunchTarget::Ide && use_native_skill_launch {
             warn!(
                 skill = skill_name,
                 "external skill uses assembled prompt fallback"
@@ -506,13 +500,35 @@ fn launch_prompt(built: &PromptBuild, cli: &Cli) -> Result<()> {
             "tui"
         };
         let capture = begin_run_capture(built, surface, &built.agent_config)?;
-        let result = launch_session(
+        let provider_session_id = if target == LaunchTarget::Tui && built.harness == "claude" {
+            let run_id = capture.run_id();
+            let raw_id = run_id
+                .as_str()
+                .strip_prefix("run_")
+                .expect("Run IDs always carry the run_ prefix");
+            Some(
+                uuid::Uuid::parse_str(raw_id)
+                    .expect("Run IDs always carry a UUID")
+                    .to_string(),
+            )
+        } else {
+            None
+        };
+        let result = launch_session_with_env(
             target,
             &built.harness,
             built.model.as_deref(),
             &built.repo_root,
             &built.prompt,
+            &capture.environment(),
+            provider_session_id.as_deref(),
         );
+        if let Some(provider_session) =
+            crate::run_record::read_provider_session(&capture.artifact_dir())
+                .map_err(|error| anyhow!("failed to read provider session: {error}"))?
+        {
+            capture.set_provider_session_id(Some(provider_session.provider_session_id));
+        }
         if target == LaunchTarget::Ide && result.is_ok() {
             capture.mark_handoff(surface);
         } else {
@@ -648,6 +664,12 @@ fn begin_run_capture(
         .cwd
         .clone()
         .unwrap_or_else(|| built.repo_root.clone());
+    let subjects = built
+        .subject
+        .clone()
+        .map(crate::run_record::SubjectAttribution::declared)
+        .into_iter()
+        .collect::<Vec<_>>();
     let spec = crate::run_record::RunSpec {
         harness: built.harness.clone(),
         model: built.model.clone(),
@@ -656,12 +678,7 @@ fn begin_run_capture(
         repo: Some(built.repo_root.clone()),
         worktree: Some(built.repo_root.clone()),
         skill: built.skill_name.clone(),
-        subjects: built
-            .subject
-            .clone()
-            .map(crate::run_record::SubjectAttribution::declared)
-            .into_iter()
-            .collect(),
+        subjects,
     };
     let capture = if surface == "headless" {
         let launch = crate::run_record::RunLaunchRequest::from_prepared(
@@ -678,6 +695,7 @@ fn begin_run_capture(
     }
     .map_err(|error| anyhow!("failed to publish Run manifest before agent launch: {error}"))?;
     capture.record_input("initial", &built.context.task.text);
+    crate::ops::human_session::publish_run_binding(&capture.run_id())?;
     Ok(capture)
 }
 
@@ -990,8 +1008,8 @@ pub fn split_skill_args(args: &[String]) -> Result<(String, Vec<String>)> {
 #[cfg(test)]
 mod tests {
     use super::{
-        attributed_context, begin_run_capture, build_bound_prompt_at, is_interactive_run,
-        is_interactive_run_with_tty, launch_headless_prompt, launch_prompt,
+        attributed_context, begin_run_capture, build_bound_prompt_at, build_prompt_at,
+        is_interactive_run, is_interactive_run_with_tty, launch_headless_prompt, launch_prompt,
         prepare_wave_harness_turn, should_launch_via_skill, skill_launch_seed, split_skill_args,
         PromptBuild,
     };
@@ -1037,7 +1055,7 @@ mod tests {
         std::fs::create_dir(&bin).unwrap();
         let evidence = home.path().join("provider-run");
         let implicit_evidence = home.path().join("implicit-provider-run");
-        let provider = bin.join("gemini");
+        let provider = bin.join("opencode");
         std::fs::write(
             &provider,
             r#"#!/bin/sh
@@ -1101,7 +1119,7 @@ printf '%s\n' '{"type":"result","subtype":"success","usage":{"input_tokens":7,"o
             config: Config::default(),
             agent_config: AgentConfig {
                 task_prompt: task.to_string(),
-                agent: Some("gemini".to_string()),
+                agent: Some("opencode".to_string()),
                 cwd: Some(home.path().to_path_buf()),
                 skip_permissions: true,
                 env,
@@ -1115,7 +1133,7 @@ printf '%s\n' '{"type":"result","subtype":"success","usage":{"input_tokens":7,"o
             components: PromptComponents::default(),
             context,
             prompt: task.to_string(),
-            harness: "gemini".to_string(),
+            harness: "opencode".to_string(),
             model: None,
             skill_name: Some("implement".to_string()),
             log_name: "generic-run-proof".to_string(),
@@ -1210,7 +1228,7 @@ printf '%s\n' '{"type":"result","subtype":"success","usage":{"input_tokens":7,"o
                 config: Config::default(),
                 agent_config: AgentConfig {
                     task_prompt: task.to_string(),
-                    agent: Some("gemini".to_string()),
+                    agent: Some("opencode".to_string()),
                     cwd: Some(repo.to_path_buf()),
                     skip_permissions: true,
                     env,
@@ -1224,7 +1242,7 @@ printf '%s\n' '{"type":"result","subtype":"success","usage":{"input_tokens":7,"o
                 components: PromptComponents::default(),
                 context: crate::trace::PreparedTurnContext::from_prompts("", task),
                 prompt: task.to_string(),
-                harness: "gemini".to_string(),
+                harness: "opencode".to_string(),
                 model: None,
                 skill_name: Some("research".to_string()),
                 log_name: log_name.to_string(),
@@ -1236,12 +1254,12 @@ printf '%s\n' '{"type":"result","subtype":"success","usage":{"input_tokens":7,"o
         let home = tempfile::tempdir().unwrap();
         let bin = home.path().join("bin");
         std::fs::create_dir(&bin).unwrap();
-        let provider = bin.join("gemini");
+        let provider = bin.join("opencode");
         std::fs::write(
             &provider,
             r#"#!/bin/sh
 if [ "${1:-}" = "--version" ]; then
-  printf '%s\n' 'gemini test'
+  printf '%s\n' 'opencode test'
   exit 0
 fi
 sleep "$LF_TEST_RESEARCH_DELAY"
@@ -1338,7 +1356,7 @@ printf '%s\n' '{"type":"result","subtype":"success","usage":{"input_tokens":7,"o
             2
         );
 
-        let built = build_bound_prompt_at("proof", "reconcile", &cli, repo.path()).unwrap();
+        let built = build_bound_prompt_at(Some("proof"), "reconcile", &cli, repo.path()).unwrap();
         assert!(built
             .agent_config
             .task_prompt
@@ -1389,7 +1407,7 @@ printf '%s\n' '{"type":"result","subtype":"success","usage":{"input_tokens":7,"o
             wave: Some("ship".to_string()),
             ..Cli::default()
         };
-        let built = build_bound_prompt_at("proof", "continue", &cli, repo.path()).unwrap();
+        let built = build_bound_prompt_at(Some("proof"), "continue", &cli, repo.path()).unwrap();
 
         let committed = built
             .agent_config
@@ -1425,7 +1443,7 @@ printf '%s\n' '{"type":"result","subtype":"success","usage":{"input_tokens":7,"o
         };
 
         let built = build_bound_prompt_at(
-            "proof",
+            Some("proof"),
             "<lf:work kind=\"task\" id=\"task_test\">Task seed</lf:work>",
             &cli,
             repo.path(),
@@ -1483,6 +1501,33 @@ printf '%s\n' '{"type":"result","subtype":"success","usage":{"input_tokens":7,"o
             None,
             false
         ));
+    }
+
+    #[test]
+    fn explicit_tui_skill_launch_uses_the_assembled_prompt() {
+        let repo = loopflow_test_support::TestRepo::new();
+        repo.create_file(
+            ".lf/skills/proof.md",
+            "# Proof\n\nInstructions that must reach the provider.",
+        );
+        let cli = Cli::parse_from(["lf", "--tui", "proof"]);
+
+        let built = build_prompt_at(
+            Some("proof"),
+            Some("verify the result"),
+            &cli,
+            repo.path().to_path_buf(),
+            true,
+            None,
+        )
+        .unwrap();
+
+        assert!(built
+            .prompt
+            .contains("Instructions that must reach the provider."));
+        assert!(built.prompt.contains("verify the result"));
+        assert!(!built.prompt.starts_with("/proof"));
+        assert!(!built.prompt.starts_with("$proof"));
     }
 
     #[test]

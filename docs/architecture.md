@@ -77,7 +77,7 @@ one Skill run
     |
     +-- Work: preserve purpose and input across independent processes
     |
-    +-- Task delivery: bind concrete Work to a worktree and serial PRs
+    +-- Task delivery: bind concrete Work to one active remote branch, worktree, and PR
     |
     +-- Controllers: pursue Work end to end using the layers above
     |
@@ -89,9 +89,8 @@ one Skill run
 | Area | What it adds | Start here |
 | --- | --- | --- |
 | Execution | Skill discovery, prompt assembly, provider routing, harnesses, Run records | [Execution](architecture/execution.md) |
-| Work | Wave/Project/Task identity, status, Steer, Ask, and planning facts | [Planning](architecture/planning.md) |
-| Controllers | Flow playheads and end-to-end Wave/Project/Task automation | [Planning](architecture/planning.md#end-to-end-controllers) |
-| Delivery | Managed worktrees, commits, serial PRs, CI repair, merge | [Delivery](architecture/delivery.md) |
+| Planning | Flow composition, Wave/Project/Task Work, Steer, questions, human FlowSteps, resident loops | [Planning](architecture/planning.md) |
+| Delivery | Managed worktrees, commits, one active Task branch/PR, CI repair, merge | [Delivery](architecture/delivery.md) |
 | Homes | Placement, `lfd`, Wave listeners, SSH routing, machine install | [Homes and processes](architecture/homes.md) |
 | Data | Truth owners, SQLite, files, external systems, projections, consistency | [Data and persistence](architecture/data.md) |
 | Codebase | Source territories, public surfaces, processes, extension points | [Codebase map](architecture/codebase.md) |
@@ -183,7 +182,7 @@ ledger.
 Wave
   `-- Project
         `-- Task
-              `-- serial PRs
+              `-- one active remote branch and PR
 
 Flow = ordered Skill | Op | Xor | human boundaries
 Run  = evidence for one mediated harness launch
@@ -202,7 +201,7 @@ WorkStatus = Ready | Done | Abandoned
 | Task | One concrete change, investigation, or document | Linear Issue, local delivery state, Git, GitHub |
 | Work | Shared durable planning state for one Wave, Project, or Task | Rows keyed directly by stable Work identity |
 | Steer | Ordered authored correction to Work | Append-only Work input |
-| Ask | Durable blocking request with a typed, first-writer-wins result | Ask exchange and active answering-attempt fence |
+| Human session | Unresolved Ask or Task FlowStep bound to one ordinary provider Run | Boundary record, exact Run id, and provider-native history |
 | Home | Stable machine authority whose route may change | Home identity and observed SSH route |
 | Placement | Assignment of one Work to one Home | `(WorkRef, HomeId)` |
 
@@ -254,11 +253,13 @@ lf chat --steer "ship invoices first"
 lf status product
 ```
 
-Controllers build on tracked Work rather than changing its meaning. `lf task
-run` ensures the same Task/worktree substrate, installs Task controller state,
-and starts its end-to-end flow. The Home keeper similarly starts the placed
-Wave listener and its controller. Wave, Project, Task, and Ask retain distinct
-loops; each reuses ordinary execution and delivery operations.
+The Home keeper starts the placed Wave listener. Its resident loop refreshes
+current planning evidence and chooses the next Project or Task boundary. Wave,
+Project, and Task retain distinct controllers. Direct questions use ordinary
+fresh bound Runs. A Task human FlowStep starts the node's ordinary bound Skill
+command as a provider Run. A detached PTY cradle may keep the first client
+alive before a UI arrives; opening the Session replaces it with a native
+provider resume.
 
 ### Another machine
 
@@ -279,8 +280,7 @@ the behavior.
 | If you are changing… | Read |
 | --- | --- |
 | provider launch, retries, usage, or telemetry | [Execution](architecture/execution.md) |
-| Work state, Steer, Ask, or Work-bound Runs | [Planning](architecture/planning.md) |
-| Flow semantics or Wave/Project/Task controllers | [Planning](architecture/planning.md#end-to-end-controllers) |
+| Flow semantics, Work state, Steer, questions, human FlowSteps, Project/Task loops | [Planning](architecture/planning.md) |
 | worktrees, commits, PR ranges, checks, or landing | [Delivery](architecture/delivery.md) |
 | daemons, remote execution, placement, process control, promotion | [Homes and processes](architecture/homes.md) |
 | schema, files, projections, DTOs, or consistency | [Data and persistence](architecture/data.md) |

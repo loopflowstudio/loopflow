@@ -1,24 +1,13 @@
 import Foundation
 
-struct PortfolioLaunchRepo: Sendable {
-    let path: String
-    let mainPath: String
-    let displayName: String
-}
-
 enum PortfolioDiscovery {
-    nonisolated static func resolveLaunchRepo(_ initialPath: String) -> PortfolioLaunchRepo {
+    nonisolated static func resolveLaunchRepo(_ initialPath: String) -> String? {
         let scanner = RepoScanner()
         let dev = ProcessInfo.processInfo.environment["LOOPFLOW_DEV_WAVE_REPO"]
         let devOverride = dev?.isEmpty == false ? dev : nil
-        let readURL = URL(fileURLWithPath: devOverride ?? initialPath)
-        let mainURL = scanner.resolveMainWorktree(readURL)
-        let readPath = devOverride != nil ? readURL.normalizedFilePath : mainURL.normalizedFilePath
-        return PortfolioLaunchRepo(
-            path: readPath,
-            mainPath: mainURL.normalizedFilePath,
-            displayName: mainURL.lastPathComponent
-        )
+        let candidate = URL(fileURLWithPath: devOverride ?? initialPath)
+        guard let mainURL = scanner.mainRepository(candidate) else { return nil }
+        return mainURL.normalizedFilePath
     }
 
     static func repos(
@@ -35,28 +24,18 @@ enum PortfolioDiscovery {
                 result.append(PortfolioRepo(path: path, lastOpened: Date()))
             }
             for repo in persistedRepos {
-                let path = repo.path.normalizedFilePath
+                guard let main = scanner.mainRepository(repo.url) else { continue }
+                let path = main.normalizedFilePath
                 guard seen.insert(path).inserted else { continue }
-                result.append(repo)
+                result.append(PortfolioRepo(path: path, lastOpened: repo.lastOpened))
             }
-            if let initialRepoPath {
-                let launch = resolveLaunchRepo(initialRepoPath)
-                if launch.path == launch.mainPath {
-                    if seen.insert(launch.path).inserted {
-                        result.append(PortfolioRepo(
-                            path: launch.path,
-                            lastOpened: Date(),
-                            displayNameOverride: launch.displayName
-                        ))
-                    }
-                } else {
-                    result.removeAll { $0.path == launch.mainPath || $0.path == launch.path }
-                    result.append(PortfolioRepo(
-                        path: launch.path,
-                        lastOpened: Date(),
-                        displayNameOverride: launch.displayName
-                    ))
-                }
+            if let initialRepoPath,
+               let launch = resolveLaunchRepo(initialRepoPath),
+               seen.insert(launch).inserted {
+                result.append(PortfolioRepo(
+                    path: launch,
+                    lastOpened: Date()
+                ))
             }
             return result
         }.value

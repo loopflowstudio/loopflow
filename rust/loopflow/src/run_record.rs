@@ -8,7 +8,6 @@ use std::os::unix::fs::{OpenOptionsExt, PermissionsExt};
 use std::path::{Path, PathBuf};
 use std::sync::mpsc::{self, SyncSender, TrySendError};
 use std::sync::{Arc, Mutex, OnceLock};
-use std::time::Duration;
 
 use serde::{Deserialize, Serialize};
 use sha2::{Digest, Sha256};
@@ -22,6 +21,7 @@ use crate::store::{StoreError, StoreResult};
 
 pub const RUN_DIR_ENV: &str = "LF_RUN_DIR";
 pub const PARENT_RUN_ID_ENV: &str = "LF_PARENT_RUN_ID";
+pub(crate) const PROVIDER_ACCOUNT_ID_ENV: &str = "LF_PROVIDER_ACCOUNT_ID";
 
 const SCHEMA_VERSION: u32 = 1;
 
@@ -146,6 +146,28 @@ struct EventEnvelope {
     observed_at: OffsetDateTime,
     #[serde(flatten)]
     event: RunEvent,
+}
+
+#[derive(Debug, Clone, Serialize, Deserialize, PartialEq, Eq)]
+pub(crate) struct ProviderSessionRef {
+    schema_version: u32,
+    pub(crate) provider_session_id: String,
+    pub(crate) account_id: Option<crate::store::ProviderAccountId>,
+}
+
+#[derive(Debug, Clone, Serialize, Deserialize, PartialEq, Eq)]
+pub(crate) struct ProviderClientRef {
+    schema_version: u32,
+    pub(crate) pid: u32,
+    #[serde(with = "time::serde::rfc3339")]
+    pub(crate) started_at: OffsetDateTime,
+}
+
+#[derive(Debug, Clone, Serialize, Deserialize, PartialEq, Eq)]
+struct SessionResolution {
+    schema_version: u32,
+    #[serde(with = "time::serde::rfc3339")]
+    resolved_at: OffsetDateTime,
 }
 
 #[derive(Serialize)]
@@ -378,7 +400,7 @@ impl RunRecorder {
         };
         let (acknowledge, drained) = mpsc::channel();
         if sender.try_send(RecorderMessage::Drain(acknowledge)).is_ok() {
-            let _ = drained.recv_timeout(Duration::from_millis(250));
+            let _ = drained.recv_timeout(std::time::Duration::from_millis(250));
         }
     }
 }
@@ -407,6 +429,62 @@ pub fn scan_runs_since(lf_home: &Path, since: i64) -> std::io::Result<Vec<RunSna
             .started
             .cmp(&left.started)
             .then_with(|| right.id.cmp(&left.id))
+    });
+    Ok(runs)
+}
+
+/// Read unresolved native provider Sessions without reducing every Run's events.
+pub(crate) fn scan_unresolved_provider_runs(
+    lf_home: &Path,
+) -> std::io::Result<Vec<(PathBuf, RunManifest)>> {
+    let mut runs = Vec::new();
+    for dir in record_dirs(lf_home)? {
+        let manifest = match read_manifest(&dir).and_then(|manifest| {
+            validate_manifest_path(&dir, &manifest)?;
+            Ok(manifest)
+        }) {
+            Ok(manifest) => manifest,
+            Err(error) => {
+                tracing::warn!(
+                    %error,
+                    record = %dir.display(),
+                    "invalid Run record omitted from Sessions"
+                );
+                continue;
+            }
+        };
+        if manifest.surface != "tui" {
+            continue;
+        }
+        let unresolved = match provider_session_is_resolved(&dir) {
+            Ok(resolved) => !resolved,
+            Err(error) => {
+                tracing::warn!(
+                    %error,
+                    run_id = %manifest.run_id,
+                    "invalid Session resolution omitted"
+                );
+                continue;
+            }
+        };
+        if !unresolved {
+            continue;
+        }
+        match read_provider_session(&dir) {
+            Ok(Some(_)) => runs.push((dir, manifest)),
+            Ok(None) => {}
+            Err(error) => tracing::warn!(
+                %error,
+                run_id = %manifest.run_id,
+                "invalid provider Session omitted"
+            ),
+        }
+    }
+    runs.sort_by(|(_, left), (_, right)| {
+        right
+            .created_at
+            .cmp(&left.created_at)
+            .then_with(|| right.run_id.as_str().cmp(left.run_id.as_str()))
     });
     Ok(runs)
 }
@@ -543,6 +621,178 @@ pub(crate) fn read_run_snapshot(dir: &Path) -> std::io::Result<RunSnapshot> {
         model: manifest.model,
         surface: manifest.surface,
     })
+}
+
+pub(crate) fn read_provider_session(dir: &Path) -> std::io::Result<Option<ProviderSessionRef>> {
+    match fs::read(dir.join("provider-session.json")) {
+        Ok(bytes) => {
+            let session: ProviderSessionRef =
+                serde_json::from_slice(&bytes).map_err(std::io::Error::other)?;
+            if session.schema_version != SCHEMA_VERSION || session.provider_session_id.is_empty() {
+                return Err(std::io::Error::new(
+                    std::io::ErrorKind::InvalidData,
+                    "invalid provider session reference",
+                ));
+            }
+            return Ok(Some(session));
+        }
+        Err(error) if error.kind() == std::io::ErrorKind::NotFound => {}
+        Err(error) => return Err(error),
+    }
+
+    let file = match File::open(dir.join("events.jsonl")) {
+        Ok(file) => file,
+        Err(error) if error.kind() == std::io::ErrorKind::NotFound => return Ok(None),
+        Err(error) => return Err(error),
+    };
+    let mut provider_session = None;
+    for line in BufReader::new(file).lines() {
+        let envelope: EventEnvelope =
+            serde_json::from_str(&line?).map_err(std::io::Error::other)?;
+        if envelope.schema_version != SCHEMA_VERSION {
+            return Err(std::io::Error::new(
+                std::io::ErrorKind::InvalidData,
+                "unsupported Run event schema",
+            ));
+        }
+        if let RunEvent::ProviderSessionObserved {
+            provider_session_id: observed,
+            ..
+        } = envelope.event
+        {
+            provider_session = Some(ProviderSessionRef {
+                schema_version: SCHEMA_VERSION,
+                provider_session_id: observed,
+                account_id: None,
+            });
+        }
+    }
+    Ok(provider_session)
+}
+
+pub(crate) fn write_provider_session(
+    dir: &Path,
+    provider_session_id: &str,
+    account_id: Option<crate::store::ProviderAccountId>,
+) -> std::io::Result<()> {
+    if provider_session_id.is_empty() {
+        return Err(std::io::Error::new(
+            std::io::ErrorKind::InvalidInput,
+            "provider session id cannot be empty",
+        ));
+    }
+    read_manifest(dir)?;
+    let path = dir.join("provider-session.json");
+    let staging = dir.join(format!(".provider-session-{}.staging", Uuid::new_v4()));
+    write_private_exclusive(
+        &staging,
+        &serde_json::to_vec_pretty(&ProviderSessionRef {
+            schema_version: SCHEMA_VERSION,
+            provider_session_id: provider_session_id.to_string(),
+            account_id,
+        })
+        .map_err(std::io::Error::other)?,
+    )?;
+    fs::rename(staging, path)?;
+    sync_dir(dir)
+}
+
+pub(crate) fn read_provider_clients(dir: &Path) -> std::io::Result<Vec<ProviderClientRef>> {
+    let root = dir.join("provider-clients");
+    let entries = match fs::read_dir(&root) {
+        Ok(entries) => entries,
+        Err(error) if error.kind() == std::io::ErrorKind::NotFound => return Ok(Vec::new()),
+        Err(error) => return Err(error),
+    };
+    let mut clients = Vec::new();
+    for entry in entries {
+        let entry = entry?;
+        if !entry.file_type()?.is_file() {
+            continue;
+        }
+        let client: ProviderClientRef =
+            serde_json::from_slice(&fs::read(entry.path())?).map_err(std::io::Error::other)?;
+        if client.schema_version != SCHEMA_VERSION || client.pid <= 1 {
+            return Err(std::io::Error::new(
+                std::io::ErrorKind::InvalidData,
+                "invalid provider client reference",
+            ));
+        }
+        clients.push(client);
+    }
+    clients.sort_by_key(|client| client.pid);
+    Ok(clients)
+}
+
+pub(crate) fn write_provider_client(dir: &Path, pid: u32) -> std::io::Result<()> {
+    if pid <= 1 {
+        return Err(std::io::Error::new(
+            std::io::ErrorKind::InvalidInput,
+            "provider client pid must identify a child process",
+        ));
+    }
+    read_manifest(dir)?;
+    let root = dir.join("provider-clients");
+    fs::create_dir_all(&root)?;
+    let path = root.join(format!("{pid}.json"));
+    let staging = root.join(format!(".{pid}-{}.staging", Uuid::new_v4()));
+    write_private_exclusive(
+        &staging,
+        &serde_json::to_vec_pretty(&ProviderClientRef {
+            schema_version: SCHEMA_VERSION,
+            pid,
+            started_at: OffsetDateTime::now_utc(),
+        })
+        .map_err(std::io::Error::other)?,
+    )?;
+    fs::rename(staging, path)?;
+    sync_dir(&root)
+}
+
+pub(crate) fn remove_provider_client(dir: &Path, pid: u32) -> std::io::Result<()> {
+    let path = dir.join("provider-clients").join(format!("{pid}.json"));
+    match fs::remove_file(path) {
+        Ok(()) => sync_dir(&dir.join("provider-clients")),
+        Err(error) if error.kind() == std::io::ErrorKind::NotFound => Ok(()),
+        Err(error) => Err(error),
+    }
+}
+
+pub(crate) fn provider_session_is_resolved(dir: &Path) -> std::io::Result<bool> {
+    match fs::read(dir.join("session-resolution.json")) {
+        Ok(bytes) => {
+            let resolution: SessionResolution =
+                serde_json::from_slice(&bytes).map_err(std::io::Error::other)?;
+            if resolution.schema_version != SCHEMA_VERSION {
+                return Err(std::io::Error::new(
+                    std::io::ErrorKind::InvalidData,
+                    "unsupported session resolution schema",
+                ));
+            }
+            Ok(true)
+        }
+        Err(error) if error.kind() == std::io::ErrorKind::NotFound => Ok(false),
+        Err(error) => Err(error),
+    }
+}
+
+pub(crate) fn resolve_provider_session(dir: &Path) -> std::io::Result<()> {
+    read_manifest(dir)?;
+    if provider_session_is_resolved(dir)? {
+        return Ok(());
+    }
+    let path = dir.join("session-resolution.json");
+    let staging = dir.join(format!(".session-resolution-{}.staging", Uuid::new_v4()));
+    write_private_exclusive(
+        &staging,
+        &serde_json::to_vec_pretty(&SessionResolution {
+            schema_version: SCHEMA_VERSION,
+            resolved_at: OffsetDateTime::now_utc(),
+        })
+        .map_err(std::io::Error::other)?,
+    )?;
+    fs::rename(staging, path)?;
+    sync_dir(dir)
 }
 
 fn context_ref_is_valid(dir: &Path, context: Option<&RunContextRef>) -> bool {
@@ -845,11 +1095,6 @@ fn max_u64(values: impl Iterator<Item = Option<u64>>, gaps: &mut usize) -> Optio
 pub(crate) struct CaptureHandle(Arc<Mutex<RunCapture>>);
 
 impl CaptureHandle {
-    #[cfg(test)]
-    pub(crate) fn begin(spec: RunSpec) -> StoreResult<Self> {
-        Self::begin_with_id(spec, RunId::new())
-    }
-
     pub(crate) fn begin_with_launch(spec: RunSpec, launch: RunLaunchRequest) -> StoreResult<Self> {
         let context = crate::trace::PreparedTurnContext::from_prompts(
             &launch.system_prompt,
@@ -892,20 +1137,6 @@ impl CaptureHandle {
             Some(launch),
             Some(&context),
         )
-    }
-
-    #[cfg(test)]
-    pub(crate) fn begin_with_id(spec: RunSpec, run_id: RunId) -> StoreResult<Self> {
-        Self::begin_with_id_and_parent(spec, run_id, None, true, None, None)
-    }
-
-    pub(crate) fn begin_with_verified_parent_and_context(
-        spec: RunSpec,
-        run_id: RunId,
-        parent_run_id: Option<RunId>,
-        context: &crate::trace::PreparedTurnContext,
-    ) -> StoreResult<Self> {
-        Self::begin_with_id_and_parent(spec, run_id, parent_run_id, false, None, Some(context))
     }
 
     fn begin_with_id_and_parent(
@@ -1046,6 +1277,16 @@ impl CaptureHandle {
             return;
         };
         self.with_capture(|capture| {
+            let account_id = read_provider_session(&capture.dir)?
+                .and_then(|session| session.account_id)
+                .or_else(|| {
+                    capture
+                        .manifest
+                        .launch
+                        .as_ref()
+                        .and_then(|launch| launch.account_id.clone())
+                });
+            write_provider_session(&capture.dir, &session_id, account_id)?;
             capture.append_event(RunEvent::ProviderSessionObserved {
                 attempt_key: capture.attempt_key(),
                 provider_session_id: session_id,
@@ -1607,8 +1848,11 @@ mod tests {
     use std::io::Write;
 
     use super::{
-        observed_run_ids_at, read_run_snapshot, scan_runs_since, CaptureHandle, RunLaunchRequest,
-        RunManifest, RunSpec, SubjectAttribution, TerminalReceipt,
+        observed_run_ids_at, provider_session_is_resolved, read_provider_clients,
+        read_provider_session, read_run_snapshot, remove_provider_client, resolve_provider_session,
+        scan_runs_since, scan_unresolved_provider_runs, write_provider_client,
+        write_provider_session, CaptureHandle, RunLaunchRequest, RunManifest, RunSpec,
+        SubjectAttribution, TerminalReceipt,
     };
     use crate::chat::types::{ConversationEvent, TurnUsage};
     use crate::engine::stream::{ResultSubtype, StreamEvent};
@@ -1764,6 +2008,103 @@ mod tests {
         let unchanged: TerminalReceipt =
             serde_json::from_slice(&fs::read(dir.join("terminal.json")).unwrap()).unwrap();
         assert_eq!(unchanged.outcome, "completed");
+    }
+
+    #[test]
+    fn provider_session_identity_is_durable_before_the_provider_starts() {
+        let home = tempfile::tempdir().unwrap();
+        let capture = CaptureHandle::begin_at(home.path(), spec(home.path())).unwrap();
+        capture.set_provider_session_id(Some("provider-session".to_string()));
+
+        assert_eq!(
+            read_provider_session(&capture.artifact_dir())
+                .unwrap()
+                .map(|session| session.provider_session_id),
+            Some("provider-session".to_string())
+        );
+    }
+
+    #[test]
+    fn provider_session_preserves_the_selected_account() {
+        let home = tempfile::tempdir().unwrap();
+        let capture = CaptureHandle::begin_at(home.path(), spec(home.path())).unwrap();
+        let account_id = crate::store::ProviderAccountId::parse("primary").unwrap();
+        super::write_provider_session(
+            &capture.artifact_dir(),
+            "provider-session",
+            Some(account_id.clone()),
+        )
+        .unwrap();
+
+        let session = read_provider_session(&capture.artifact_dir())
+            .unwrap()
+            .expect("provider session reference");
+        assert_eq!(session.provider_session_id, "provider-session");
+        assert_eq!(session.account_id, Some(account_id));
+    }
+
+    #[test]
+    fn provider_clients_are_independent_and_remove_exactly() {
+        let home = tempfile::tempdir().unwrap();
+        let capture = CaptureHandle::begin_at(home.path(), spec(home.path())).unwrap();
+        let dir = capture.artifact_dir();
+
+        write_provider_client(&dir, 101).unwrap();
+        write_provider_client(&dir, 202).unwrap();
+        assert_eq!(
+            read_provider_clients(&dir)
+                .unwrap()
+                .into_iter()
+                .map(|client| client.pid)
+                .collect::<Vec<_>>(),
+            [101, 202]
+        );
+
+        remove_provider_client(&dir, 101).unwrap();
+        assert_eq!(read_provider_clients(&dir).unwrap()[0].pid, 202);
+    }
+
+    #[test]
+    fn resolving_a_session_keeps_its_provider_history() {
+        let home = tempfile::tempdir().unwrap();
+        let capture = CaptureHandle::begin_at(home.path(), spec(home.path())).unwrap();
+        let dir = capture.artifact_dir();
+        write_provider_session(&dir, "provider-session", None).unwrap();
+
+        assert!(!provider_session_is_resolved(&dir).unwrap());
+        resolve_provider_session(&dir).unwrap();
+
+        assert!(provider_session_is_resolved(&dir).unwrap());
+        assert_eq!(
+            read_provider_session(&dir)
+                .unwrap()
+                .expect("provider history remains")
+                .provider_session_id,
+            "provider-session"
+        );
+    }
+
+    #[test]
+    fn unresolved_provider_scan_keeps_only_open_tui_runs() {
+        let home = tempfile::tempdir().unwrap();
+
+        let mut open_spec = spec(home.path());
+        open_spec.surface = "tui".to_string();
+        let open = CaptureHandle::begin_at(home.path(), open_spec).unwrap();
+        write_provider_session(&open.artifact_dir(), "open-session", None).unwrap();
+
+        let mut resolved_spec = spec(home.path());
+        resolved_spec.surface = "tui".to_string();
+        let resolved = CaptureHandle::begin_at(home.path(), resolved_spec).unwrap();
+        write_provider_session(&resolved.artifact_dir(), "resolved-session", None).unwrap();
+        resolve_provider_session(&resolved.artifact_dir()).unwrap();
+
+        let headless = CaptureHandle::begin_at(home.path(), spec(home.path())).unwrap();
+        write_provider_session(&headless.artifact_dir(), "headless-session", None).unwrap();
+
+        let runs = scan_unresolved_provider_runs(home.path()).unwrap();
+        assert_eq!(runs.len(), 1);
+        assert_eq!(runs[0].1.run_id, open.run_id());
     }
 
     #[test]

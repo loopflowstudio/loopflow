@@ -94,9 +94,9 @@ impl Store {
         run_sqlite(&self.sqlite, move |store| store.task_by_issue(&issue)).await
     }
 
-    pub async fn get_task_by_worktree(&self, worktree: &str) -> StoreResult<Option<Task>> {
-        let worktree = worktree.to_string();
-        run_sqlite(&self.sqlite, move |store| store.task_by_worktree(&worktree)).await
+    pub async fn get_task_by_branch(&self, branch: &str) -> StoreResult<Option<Task>> {
+        let branch = branch.to_string();
+        run_sqlite(&self.sqlite, move |store| store.task_by_branch(&branch)).await
     }
 
     pub async fn list_tasks(&self, wave_id: Option<&WaveId>) -> StoreResult<Vec<Task>> {

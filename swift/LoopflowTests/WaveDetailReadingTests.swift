@@ -91,7 +91,7 @@ struct WaveDetailReadingTests {
         #expect(presentation.officialCount == 3)
         #expect(presentation.candidateCount == 6)
         #expect(presentation.holdingCount == 1)
-        #expect(presentation.needsAttentionCount == 2)
+        #expect(presentation.requiresWorkCount == 2)
         #expect(presentation.contractIssueCount == 4)
         #expect(presentation.headline == "1 of 3 official measures currently hold.")
     }
@@ -124,27 +124,27 @@ struct WaveDetailReadingTests {
         let openTasks = project.tasks.filter { !$0.task.completed }.count
         #expect(openTasks == 2)
 
-        // Project row lens: derived from Task attention only. A red Task
-        // (INF-123) outranks the black one (INF-124): red > green > unknown > black.
+        // Project row lens: derived from Task condition only. A waiting Task
+        // (INF-123) outranks the clear one (INF-124).
         let projectLens = WaveLens.forProject(tasks: project.tasks)
-        #expect(projectLens.color == .red)
+        #expect(projectLens.color == .blue)
         #expect(projectLens.reason == "merge pull request head 333333333333 on GitHub")
 
-        // Task rows: the shared attention level and reason, verbatim — Swift
+        // Task rows: the shared condition and reason, verbatim — Swift
         // never reconstructs the level from status or process flags.
         let byId = Dictionary(uniqueKeysWithValues: project.tasks.map { ($0.task.identifier, $0) })
         let inf123 = try #require(byId["INF-123"])
         let inf124 = try #require(byId["INF-124"])
 
-        let lens123 = WaveLens.forTask(inf123.attention)
-        #expect(lens123.color == .red)
-        #expect(lens123.color == WaveLensColor(inf123.attention.level))
-        #expect(lens123.reason == inf123.attention.reason)
+        let lens123 = WaveLens.forTask(inf123.condition)
+        #expect(lens123.color == .blue)
+        #expect(lens123.color == WaveLensColor(inf123.condition.state))
+        #expect(lens123.reason == inf123.condition.reason)
 
-        let lens124 = WaveLens.forTask(inf124.attention)
+        let lens124 = WaveLens.forTask(inf124.condition)
         #expect(lens124.color == .black)
-        #expect(lens124.color == WaveLensColor(inf124.attention.level))
-        #expect(lens124.reason == inf124.attention.reason)
+        #expect(lens124.color == WaveLensColor(inf124.condition.state))
+        #expect(lens124.reason == inf124.condition.reason)
 
         // Every rendered lens carries a reason — VoiceOver names the state.
         #expect(!projectLens.reason.isEmpty)

@@ -50,7 +50,9 @@ public final class MultiplexerStore {
         return pane
     }
 
-    public var canClose: Bool { layout.allPanes.count > 1 }
+    public var canClose: Bool {
+        layout.allPanes.count > 1 || focusedPane.content != .empty
+    }
     public var canUndoClose: Bool { closedState != nil }
 
     public func pane(forSessionId sessionId: String) -> PaneState? {
@@ -85,9 +87,8 @@ public final class MultiplexerStore {
     }
 
     public func close(_ paneId: String) {
-        guard layout.allPanes.count > 1,
-              layout.pane(for: paneId) != nil,
-              let updated = layout.removing(paneId)
+        guard let pane = layout.pane(for: paneId),
+              layout.allPanes.count > 1 || pane.content != .empty
         else { return }
 
         closedState = ClosedState(
@@ -97,6 +98,13 @@ public final class MultiplexerStore {
             paneColors: paneColors,
             nextColorIndex: nextColorIndex
         )
+        if layout.allPanes.count == 1 {
+            layout = layout.replacingContent(of: paneId, with: .empty)
+            zoomedPaneId = nil
+            _notify()
+            return
+        }
+        guard let updated = layout.removing(paneId) else { return }
         layout = updated
         paneColors.removeValue(forKey: paneId)
         if zoomedPaneId == paneId { zoomedPaneId = nil }
@@ -124,18 +132,10 @@ public final class MultiplexerStore {
             return
         }
 
-        if focusedPane.content == .empty || focusedPane.content == .shell {
-            layout = layout.replacingContent(
-                of: focusedPaneId,
-                with: .session(id: sessionId)
-            )
-        } else {
-            let pane = PaneState(content: .session(id: sessionId))
-            layout = layout.splitting(focusedPaneId, axis: .vertical, newPane: pane)
-            focusedPaneId = pane.id
-            zoomedPaneId = nil
-            _ = _assignColor(to: pane.id)
-        }
+        layout = layout.replacingContent(
+            of: focusedPaneId,
+            with: .session(id: sessionId)
+        )
         closedState = nil
         _notify()
     }
@@ -199,7 +199,7 @@ public final class MultiplexerStore {
         }
     }
 
-    /// Drops panes for sessions that left the durable attention queue. This is
+    /// Drops panes for Sessions that left the current Session list. This is
     /// reconciliation, not a user close, so it does not create an undo entry.
     public func reconcileSessions(_ sessionIds: Set<String>) {
         let stale = layout.allPanes.filter { pane in
@@ -210,7 +210,7 @@ public final class MultiplexerStore {
 
         for pane in stale {
             if layout.allPanes.count == 1 {
-                layout = .leaf(PaneState(id: pane.id, content: .shell))
+                layout = .leaf(PaneState(id: pane.id, content: .empty))
             } else if let updated = layout.removing(pane.id) {
                 layout = updated
                 paneColors.removeValue(forKey: pane.id)

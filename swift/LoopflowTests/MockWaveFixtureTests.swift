@@ -55,13 +55,13 @@ struct MockWaveFixtureTests {
         #expect(detail.metricPortfolio.metrics.count { $0.stage == .installed } == 1)
         #expect(detail.metricPortfolio.contractIssues.count == 1)
 
-        // Project row lens folds its Tasks' attention: the red Task outranks the black one.
-        #expect(WaveLens.forProject(tasks: project.tasks).color == .red)
+        // Project row lens folds Task conditions: waiting outranks clear.
+        #expect(WaveLens.forProject(tasks: project.tasks).color == .blue)
 
-        // Task rows: the shared attention level verbatim.
+        // Task rows: the shared condition verbatim.
         let byId = Dictionary(uniqueKeysWithValues: project.tasks.map { ($0.task.identifier, $0) })
-        #expect(WaveLens.forTask(try #require(byId["INF-123"]).attention).color == .red)
-        #expect(WaveLens.forTask(try #require(byId["INF-124"]).attention).color == .black)
+        #expect(WaveLens.forTask(try #require(byId["INF-123"]).condition).color == .blue)
+        #expect(WaveLens.forTask(try #require(byId["INF-124"]).condition).color == .black)
     }
 
     // The Proof requires the screenshot fixture to cover empty, loading, error,

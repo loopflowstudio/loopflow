@@ -369,6 +369,27 @@ pub fn current_branch(repo: &Path) -> Result<Option<String>, GitError> {
     }
 }
 
+/// Get the branch this checkout tracks on `origin`.
+pub fn origin_branch(repo: &Path) -> Result<Option<String>, GitError> {
+    let output = run_git(
+        repo,
+        &[
+            "rev-parse",
+            "--abbrev-ref",
+            "--symbolic-full-name",
+            "@{upstream}",
+        ],
+    )?;
+    if !output.status.success() {
+        return Ok(None);
+    }
+    let upstream = String::from_utf8_lossy(&output.stdout).trim().to_string();
+    Ok(upstream
+        .strip_prefix("origin/")
+        .filter(|branch| !branch.is_empty())
+        .map(str::to_string))
+}
+
 /// Resolve the root of the working tree containing `repo`.
 pub fn worktree_root(repo: &Path) -> Result<PathBuf, GitError> {
     let output = run_git(repo, &["rev-parse", "--show-toplevel"])?;
@@ -1630,6 +1651,10 @@ mod tests {
         )
         .expect("get upstream");
         assert_eq!(tracking.trim(), "origin/feature");
+        assert_eq!(
+            origin_branch(repo.path()).unwrap().as_deref(),
+            Some("feature")
+        );
     }
 
     #[test]

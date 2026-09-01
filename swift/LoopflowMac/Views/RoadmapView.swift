@@ -23,9 +23,9 @@ enum RoadmapTaskAction: Equatable {
 /// it from status.
 func roadmapTaskAction(_ task: RoadmapTask) -> RoadmapTaskAction? {
     guard task.runtime != nil else {
-        return task.attention.pmCompleted ? nil : .run
+        return task.task.completed ? nil : .run
     }
-    switch task.attention.actions.recommended {
+    switch task.actions.recommended {
     case .resume: return .resume
     case .openPr:
         if task.activePr?.publication?.github != nil { return .openPr }
@@ -43,7 +43,7 @@ private struct RoadmapTaskSelection: Identifiable {
 }
 
 /// One query, two shapes. Both read the single `lf roadmap` snapshot: NOW
-/// re-shapes it into a flat, cross-wave, attention-grouped list; ROADMAP keeps
+/// re-shapes it into a flat, cross-wave, condition-grouped list; ROADMAP keeps
 /// the Wave › Project › Task tree.
 enum WorkLens: String, CaseIterable, Identifiable {
     case now
@@ -165,7 +165,6 @@ struct RoadmapView: View {
                 task: selection.task.task,
                 reference: selection.task.reference,
                 runtime: selection.task.runtime,
-                attention: selection.task.attention,
                 repoPath: selection.wave.repo,
                 terminalStore: terminalStore,
                 initialSection: .changes
@@ -278,7 +277,7 @@ struct RoadmapView: View {
             case .project:
                 selectedProject?.project.project.definition ?? "Project unavailable"
             case .task:
-                selectedTask?.task.attention.reason ?? "Task unavailable"
+                selectedTask?.task.condition.reason ?? "Task unavailable"
             }
         }
     }
@@ -374,7 +373,7 @@ struct RoadmapView: View {
     private var nowContent: some View {
         if nowSectionsList.isEmpty {
             ContentUnavailableView(
-                "Nothing needs attention",
+                "Nothing needs action",
                 systemImage: "checkmark.circle",
                 description: Text("No live or stopped work across these Waves. Switch to Roadmap for the full plan.")
             )
@@ -934,11 +933,11 @@ struct RoadmapTaskRow: View {
                         .font(Typography.caption(9).weight(.semibold))
                         .foregroundStyle(task.section.color)
                 }
-                Text(task.attention.reason)
+                Text(task.condition.reason)
                     .font(Typography.caption(10))
                     .foregroundStyle(palette.textSecondary)
                     .lineLimit(2)
-                    .accessibilityLabel(taskAttentionAccessibilityLabel(task))
+                    .accessibilityLabel(taskConditionAccessibilityLabel(task))
                 WorkChannelChips(task: task)
                 TaskActionCluster(
                     task: task,
@@ -962,7 +961,7 @@ struct RoadmapTaskRow: View {
     }
 }
 
-/// The shared attention fold plus its orthogonal planning facts. `runtime == nil`
+/// The shared Task condition plus its orthogonal planning facts. `runtime == nil`
 /// means Work has not started.
 struct WorkChannelChips: View {
     let task: RoadmapTask
@@ -970,7 +969,7 @@ struct WorkChannelChips: View {
 
     var body: some View {
         HStack(spacing: Spacing.xs) {
-            channel("Attention", task.attention.level.rawValue, task.attention.level.color)
+            channel("Condition", task.condition.state.rawValue, task.condition.state.color)
             channel("PM", task.task.completed ? "done" : "open",
                     task.task.completed ? Color.statusSuccess : palette.textSecondary)
             if let runtime = task.runtime {
@@ -1074,11 +1073,11 @@ struct NowSectionView: View {
         .accessibilityIdentifier("podium-now-\(section.group.rawValue)")
     }
 
-    private func nowColor(_ group: NowGroup) -> Color {
+    private func nowColor(_ group: TaskConditionState) -> Color {
         switch group {
-        case .readyForReview: .statusInfo
-        case .needsInput: .statusWarning
-        case .stopped: .statusNeutral
+        case .waiting: WaveLensColor.blue.glow
+        case .blocked: .statusError
+        case .clear: .statusNeutral
         case .unknown: .statusWarning
         }
     }
@@ -1118,11 +1117,11 @@ private struct NowRowView: View {
                     .foregroundStyle(palette.textSecondary)
                     .lineLimit(1)
             }
-            Text(task.attention.reason)
+            Text(task.condition.reason)
                 .font(Typography.caption(10))
                 .foregroundStyle(palette.textSecondary)
                 .lineLimit(2)
-                .accessibilityLabel(taskAttentionAccessibilityLabel(task))
+                .accessibilityLabel(taskConditionAccessibilityLabel(task))
             WorkChannelChips(task: task)
             TaskActionCluster(
                 task: task,
@@ -1151,7 +1150,7 @@ extension RoadmapSection {
     var label: String {
         switch self {
         case .now: "Now"
-        case .needsAttention: "Needs attention"
+        case .waiting: "Waiting"
         case .available: "Available"
         case .later: "Later"
         }
@@ -1160,19 +1159,19 @@ extension RoadmapSection {
     var color: Color {
         switch self {
         case .now: .statusSuccess
-        case .needsAttention: .statusWarning
+        case .waiting: .statusWarning
         case .available: .statusInfo
         case .later: .statusNeutral
         }
     }
 }
 
-private extension TaskAttentionLevel {
+private extension TaskConditionState {
     var color: Color {
         switch self {
-        case .red: .statusError
-        case .blue: WaveLensColor.blue.glow
-        case .black: .statusNeutral
+        case .blocked: .statusError
+        case .waiting: WaveLensColor.blue.glow
+        case .clear: .statusNeutral
         case .unknown: .statusWarning
         }
     }

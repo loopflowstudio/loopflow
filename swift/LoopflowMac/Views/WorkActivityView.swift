@@ -189,7 +189,7 @@ struct WorkActivityView: View {
             case .project:
                 model.project(id: work.id)?.project.project.definition
             case .task:
-                model.task(id: work.id)?.task.attention.reason
+                model.task(id: work.id)?.task.condition.reason
             }
         }
     }

@@ -439,12 +439,12 @@ struct WaveMetricPortfolioView: View {
 
                 Spacer()
 
-                if presentation.needsAttentionCount > 0 {
+                if presentation.requiresWorkCount > 0 {
                     Label(
                         countLabel(
-                            presentation.needsAttentionCount,
-                            singular: "measure needs attention",
-                            plural: "measures need attention"
+                            presentation.requiresWorkCount,
+                            singular: "measure needs work",
+                            plural: "measures need work"
                         ),
                         systemImage: "exclamationmark.circle.fill"
                     )
@@ -543,7 +543,7 @@ struct WaveMetricPortfolioPresentation: Equatable {
     let officialCount: Int
     let candidateCount: Int
     let holdingCount: Int
-    let needsAttentionCount: Int
+    let requiresWorkCount: Int
     let contractIssueCount: Int
 
     init(portfolio: MetricPortfolio) {
@@ -551,7 +551,7 @@ struct WaveMetricPortfolioPresentation: Equatable {
         officialCount = official.count
         candidateCount = portfolio.metrics.count - official.count
         holdingCount = official.count { $0.evidence.isHealthy }
-        needsAttentionCount = official.count - holdingCount
+        requiresWorkCount = official.count - holdingCount
         contractIssueCount = portfolio.contractIssues.count
     }
 
@@ -562,7 +562,7 @@ struct WaveMetricPortfolioPresentation: Equatable {
         case (1, 1):
             return "The official measure currently holds."
         case (1, 0):
-            return "The official measure needs attention."
+            return "The official measure needs work."
         default:
             return "\(holdingCount) of \(officialCount) official measures currently hold."
         }
@@ -895,7 +895,7 @@ private struct WaveProjectWorkView: View {
     }
 
     /// The Project's lens, derived from its shared runtime and its Tasks'
-    /// attention evidence — the same grammar the Wave and Task rows use.
+    /// conditions — the same grammar the Wave and Task rows use.
     private var projectLens: WaveLens {
         WaveLens.forProject(tasks: project.tasks)
     }
@@ -952,7 +952,7 @@ private struct WaveTaskWorkView: View {
 
     var body: some View {
         HStack(alignment: .top, spacing: Spacing.sm) {
-            WaveLensView(lens: WaveLens.forTask(task.attention), diameter: 9, accessibilityId: "task-lens")
+            WaveLensView(lens: WaveLens.forTask(task.condition), diameter: 9, accessibilityId: "task-lens")
                 .frame(width: 14)
                 .padding(.top, 2)
             VStack(alignment: .leading, spacing: Spacing.xxs) {
@@ -1038,7 +1038,7 @@ private struct WaveWorkInspector: View {
                 details(
                     directive: task.directive,
                     status: task.runtime?.status.label ?? "unstarted",
-                    reason: task.attention.reason,
+                    reason: task.condition.reason,
                     provider: task.runtime?.provider,
                     location: taskLocation,
                     prs: task.prs
@@ -1059,7 +1059,6 @@ private struct WaveWorkInspector: View {
                     task: task.task,
                     reference: task.reference,
                     runtime: task.runtime,
-                    attention: task.attention,
                     repoPath: repoPath,
                     terminalStore: terminalStore,
                     initialSection: .changes

@@ -106,10 +106,31 @@ lf runs                # recent Home-local Run records
 lf runs run_ab12 --events # inspect one Run's append-only evidence
 lf replay run_ab12     # repeat its recorded provider request as a child Run
 lf usage --days 30     # direct provider-authored usage for those Runs
+lf usage --task LOO-265 # drill usage to one Task's Runs
 lf ps                  # one OS-live Loopflow process snapshot
 lf top                 # refresh elapsed time, process state, and call trees
 lf prune --dry-run     # inspect dead receipts and registered orphan providers
 ```
+
+## Sessions
+
+Finish every kind of Session explicitly:
+
+```bash
+lf session list
+lf session open run_ab12
+lf session complete run_ab12                         # interactive Run
+
+lf session ready "Ready for review"                 # inside an Ask
+lf session complete ask_ab12                         # release its caller
+
+lf session ready "Ready for review"                 # inside a Task FlowStep
+lf session approve <flowstep-id> "Verified summary"
+lf session iterate <flowstep-id> "Narrow the design"
+```
+
+Ready, provider exit, and pane close resolve nothing. Complete resolves an
+interactive Run or Ask. Approve and Iterate act only on Task FlowSteps.
 
 ## The model
 

@@ -53,10 +53,10 @@ struct MultiplexerLayoutTests {
         let b = PaneState(content: .shell)
         let split = LayoutNode.leaf(a).splitting(a.id, axis: .vertical, newPane: b)
 
-        let replaced = split.replacingContent(of: b.id, with: .session(id: "ask-1"))
+        let replaced = split.replacingContent(of: b.id, with: .session(id: "session-1"))
 
         #expect(replaced.allPanes.count == 2)
-        #expect(replaced.pane(for: b.id)?.content == .session(id: "ask-1"))
+        #expect(replaced.pane(for: b.id)?.content == .session(id: "session-1"))
     }
 
     @Test("resizing updates the split between two panes")
@@ -75,7 +75,7 @@ struct MultiplexerLayoutTests {
 
     @Test("a nested tree round-trips through Codable")
     func codableRoundTrip() throws {
-        let a = PaneState(content: .session(id: "ask-1"))
+        let a = PaneState(content: .session(id: "session-1"))
         let b = PaneState(content: .shell)
         let c = PaneState(content: .empty)
         let tree = LayoutNode

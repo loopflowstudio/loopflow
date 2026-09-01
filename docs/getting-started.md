@@ -193,7 +193,9 @@ tmux ls               # live agent sessions
 tmux attach -r -t <name> # inspect one; never mutate the session directly
 ```
 
-Use `lf ask list`, then `lf ask open <ask-id>`, for requested interventions that need an exact session.
+Use `lf session list`, then `lf session open <session-id>`, for every unresolved
+interactive Run, Ask, or Task FlowStep. Finish it with the kind-specific action
+shown in the [Sessions lifecycle](../README.md#sessions).
 
 Use `lf prompt: draft wave/shipper/GOAL.md` to author the loop contract. Use
 `lf design` to explore an uncertain operating context, or write it by hand.

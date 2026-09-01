@@ -227,7 +227,7 @@ level stays there. Put `--` before literal arguments that look like flags.
 
 | Flag | Description |
 |------|-------------|
-| `-m, --model MODEL` | Choose model (e.g., `claude:opus`, `codex`, `gemini`, `opencode`) |
+| `-m, --model MODEL` | Choose model (e.g., `claude:opus`, `codex`, `opencode`) |
 | `-d, --direction DIRECTION` | Apply direction (comma-separated for multiple) |
 
 ## Output Flags
@@ -312,10 +312,13 @@ lf task run DES-123 --directive "fix the parser before the docs"
 lf task run DES-124 --stack-on DES-123
 lf task run DES-125 --first incident --loop ship-5whys --finally ship-demo
 lf task status DES-123
-lf ask list                                           # parent Ask queue
-lf ask list --outgoing                                # this Work's unresolved requests
-lf ask list --user --json                             # User attention projection
-lf ask open ask_...                                   # sibling Ask terminal
+lf --as project:proj_... : "Which KR owns this?"      # ordinary agent perspective
+lf ask "Review this proof with me"                    # block on a human session
+lf session list --json                                # unresolved human Sessions
+lf session open task_...:flow:node:0 --json           # exact native provider resume
+lf session complete <ask-id>                          # finish an ad-hoc Ask
+lf session approve <flowstep-id> "Verified"           # approve a Task FlowStep
+lf session iterate <flowstep-id> "Narrow the design"
 lf task steer DES-123 "rename the flag"
 lf task steer DES-123 "take the smaller approach"
 lf task wait DES-123
@@ -345,25 +348,15 @@ KR edits take effect together on the next phase without replacing the Project
 Work or its direction; an unavailable or invalid plan stops before another
 provider turn and status prints the restart reason.
 Project and Task Work have stable identities and small state:
-`ready`, `done`, or `abandoned`. Process liveness, pending attention, PR state,
-controller state, and Run evidence stay separate. `task prepare` ensures the
+`ready`, `done`, or `abandoned`. Process liveness, Task condition, Sessions,
+PR state, controller state, and Run evidence stay separate. `task prepare` ensures the
 Project and Task Work records, one stable Task worktree, and its first serial PR
 identity without installing end-to-end automation. `task run` uses that same
 substrate, then installs or starts the built-in Task controller.
 Its provider process and transcript are replaceable execution state: plain
 `resume` keeps compatible history; `resume --model <agent>` preserves the same
-Work, durable Steers, worktree, and PR chain while selecting another provider.
-`task restart` instead force-refreshes the Linear Task, checkpoints and pushes
-the complete worktree, clears provider continuation, and replaces the built-in
-controller state at its configured first flow without changing Task, worktree,
-or PR history. Existing scratch is evidence the fresh kickoff may revise or
-replace. Restart interrupts and replaces the stable controller session when it
-is live and simply starts one when it is absent. Generic Runs remain independent evidence
-and never become restart targets. The fresh Run receives recursive scratch plus the active PR's
-committed, staged, unstaged, and untracked state; its manifest references an
-immutable `context.json` with the exact provider strings and attribution.
-`task recover` remains the separate path for explicitly abandoned Work.
-The Task remains resumable through serial PRs, review, and explicit
+Work, durable Steers, worktree, branch, and PR while selecting another provider.
+The Task remains resumable through review and explicit
 completion.
 Wave names are repository-scoped. Relocation requires the UUID because the
 repository and name may both change; it preserves authored Wave files, journal,
@@ -388,7 +381,7 @@ explicit command.
 
 Every Task-owned PR keeps the Linear Task name at the start of its title and a
 direct `Linear Task: [KEY](URL)` link in its body. Loopflow restores those
-anchors whenever it publishes, refreshes, submits, or lands a serial PR. If the
+anchors whenever it publishes, refreshes, submits, or lands the Task PR. If the
 cached PM snapshot has no provider URL, run `lf pm sync --wave <wave>` before
 publishing.
 
@@ -413,57 +406,47 @@ active rebase additionally owns one exact operation id so its recovery child
 can continue that sequencer without authorizing any other Git mutation. A
 surviving unclaimed provider PID has no mutation or signal authority.
 
-A skill that needs judgment runs
-`lf ask "<intervention>"`; the Ask routes to the
-immediate parent Work. `--user` is explicit and never inferred for root Work.
-The ordinary command prints its id and request, then blocks without ending the
-provider process. `--noblock` returns an id and `lf ask wait` joins it
-later. Bare `wait` selects the newest unresolved Ask from the ambient
-Run, then Work; pass an id when the choice must be exact.
-
-An intervention Ask does not change Work state or advance a flow. A human flow
-node uses a `FlowStep` Ask as its authored body: resolve advances that node,
-decline returns to the preceding autonomous step, and release or process exit
-keeps it parked. `lf task steer` and `lf project steer` remain unsolicited
-durable direction.
-
-## Ask sessions
+A skill that needs another Work's perspective launches an ordinary Run directly:
 
 ```bash
-lf ask "Choose the proof"                       # ask the parent; block this shell
-lf ask --user "Connect Linear"                  # explicit absent-User intervention
-lf ask --noblock "Check the release"            # queue and print the Ask id
-lf ask wait [ask_...]                            # join newest outgoing or exact Ask
-lf ask list [--user] [--outgoing] [--json]       # attention or outgoing requests
-lf ask open ask_... [--json]                     # open or reattach a sibling session
-lf ask open ask_... --prepare --json             # return its exact attach descriptor
-lf ask presented ask_... run_... --json          # confirm that exact presentation
-lf ask resolve ask_... "Verified summary" [--json] # explicit success from its Run
-lf ask decline ask_... "Unsafe request" [--json] # explicit refusal
-lf ask release ask_... "Unfinished" [--json]     # close this attempt and requeue
-lf ask escalate ask_... --user [--json]          # transfer one parent Ask
-lf ask cancel ask_... "Withdrawn" [--json]       # requester/User cancellation
+lf --batch --as project:<id> : "Which proof matters?"
 ```
 
-Ask sessions start in the requesting Work's captured cwd. The explicit id
-selects the Ask; the answering harness's generic Run id scopes claim and
-settlement to that Ask only. It grants no general Work or process authority. A
-clean exit, Ctrl-D,
-exiting Ctrl-C, TERM, HUP, or proven local
-disappearance never means success; it requeues the same Ask. Unreachable remote
-liveness stays claimed rather than expiring on time. If the configured external
-terminal fails to open, the attachable attempt remains `not-presented`; repeat
-`open` to present that exact Run.
+A headless Run that needs human judgment runs `lf ask "<request>"`. Loopflow
+starts an ordinary TUI Run in the caller's exact checkout and waits. The session
+agent calls `lf session ready "<summary>"` when its work is ready; this does not
+complete, hide, or release anything. The human runs `lf session complete
+<session-id>` when the conversation is finished. Completion stops the exact
+provider client, removes the Session from the Sessions list, and resumes the caller
+with the ready summary and any filesystem changes.
 
-Loopflow.app uses the same two-part presentation boundary: `open --prepare`
-claims or recovers the Ask session without launching a terminal, then `presented`
-records success only after Ghostty or an external target attaches the exact
-returned Run. A failed venue launch leaves the Ask `not-presented`.
+A Task human FlowStep uses the same surface. It persists its exact playhead and
+starts one ordinary provider Run for its authored Skill:
+
+```bash
+lf session list --json                              # unresolved human Sessions
+lf session open <session-id> --json                 # prepare/recover attachment
+lf session ready "Ready for review"                 # agent state; stays visible
+lf session approve <session-id> "Verified summary"  # approve the FlowStep
+lf session iterate <session-id> "Narrow the design"
+```
+
+The FlowStep session runs `lf --tui --as task:<id> <skill>`. Closing, provider
+exit, or agent readiness never means approval; the persisted Task playhead
+remains waiting. Loopflow.app lists the same sessions, stops the exact
+background client, resumes provider-native history in the selected pane, and
+exposes the FlowStep decision controls. It does not mirror a second Session
+collection or lifecycle.
+
+Human sessions may use a detached PTY cradle to let the first provider client
+start before the desktop is present. That cradle is not Session identity,
+readiness storage, liveness authority, or the attachment surface. The boundary
+record owns resolution; the ordinary Run owns provider identity and history.
 
 `--stack-on` places a new Task worktree on another Task's published PR. Its PR
 targets that parent branch automatically, then collapses onto `main` after the
 parent merges. The two Tasks keep separate identities, worktrees, and workers.
-tmux remains containment and a presentation route, not product identity.
+For managed controllers, tmux remains process containment, not product identity.
 
 ## Placing Work and Reaching Homes
 
@@ -543,7 +526,7 @@ Waves sharing `main`.
 
 ```bash
 lf ls --json                    # every durable Wave and its Home/runtime evidence
-lf status <wave> --json         # Work, Runs, attention, and live metric_portfolio
+lf status <wave> --json         # Work, Runs, conditions, and live metric_portfolio
 lf roadmap --json               # current plan plus that portfolio on every Wave
 lf activity                     # durable Work changes, newest first
 lf activity --task INF-123 --json # filter before the bounded typed snapshot
@@ -551,6 +534,13 @@ lf runs                         # recent Home-local Run records
 lf runs --project parser        # one Project's Runs, filtered before the result cap
 lf runs run_ab12                 # inspect one Run by unambiguous prefix
 lf runs run_ab12 --events        # print its event stream verbatim
+lf usage --project parser        # direct Run usage for one Project
+lf usage --task INF-123 --json   # direct Run evidence for one Task
+lf session list                  # interactive, Ask, and FlowStep sessions
+lf session open run_ab12         # continue a closed native provider session
+lf session open run_ab12 --try   # let the provider arbitrate an active session
+lf session open run_ab12 --replace # stop Loopflow's client, then continue here
+lf session complete run_ab12     # finish it; provider history remains resumable
 lf replay run_ab12               # launch that request as a child Run
 lf usage --days 30              # direct provider-authored usage per Run
 lf usage --days 0 --json        # all RunSnapshot rows; zero means all time
@@ -617,7 +607,9 @@ managed login exists, the provider CLI uses its ambient default credentials.
 
 `lf usage` scans the same Home-local bundles as `lf runs`, ordered newest first.
 `--days` filters by Run start time and defaults to 30; zero selects all recorded
-Runs. JSON is the direct `RunSnapshot` array. Each row preserves provider-authored
+Runs. `--wave`, `--project`, and `--task` apply the same Work attribution drill
+as `lf runs`; the table names the most specific Work on each row. JSON remains
+the filtered direct `RunSnapshot` array. Each row preserves provider-authored
 cumulative counters once per usage stream. Omitted counters stay unknown,
 provider final receipts are counted explicitly, and evidence gaps remain visible.
 Run settlement never invents provider finality.

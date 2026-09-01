@@ -52,8 +52,8 @@ struct DTOFixtureTests {
         #expect(snapshot.items.map(\.subject) == [
             "W2-144", "W2-144", "W2-144", "product", "mac-surface-ux",
         ])
-        if case .runFinished(let runId, let status) = snapshot.items[0].fact {
-            #expect(runId == "run_00000000000000000000000000000001")
+        if case .runFinished(let identity, let status) = snapshot.items[0].fact {
+            #expect(identity.primaryId == "run_00000000000000000000000000000001")
             #expect(status == "ok")
         } else {
             Issue.record("expected a typed Run finish")
@@ -119,12 +119,9 @@ struct DTOFixtureTests {
         #expect(detail.runs.items[0].skill == "task/pursue")
         #expect(detail.runs.items[0].usage.inputTokens == 12000)
         #expect(detail.runs.items[0].outcome == "completed")
-        #expect(detail.attention.items[0].subject == "INF-123")
-        #expect(detail.attention.items[0].owner == .user)
-        #expect(detail.attention.items[0].reason == "merge pull request head 333333333333 on GitHub")
-        #expect(detail.attention.items[0].ageSeconds == 7200)
-        #expect(detail.projects[0].tasks[0].attention.level == .red)
-        #expect(detail.projects[0].tasks[0].attention.reason == "merge pull request head 333333333333 on GitHub")
+        #expect(detail.projects[0].tasks[0].condition.state == .waiting)
+        #expect(detail.projects[0].tasks[0].condition.reason == "merge pull request head 333333333333 on GitHub")
+        #expect(detail.projects[0].tasks[0].actions.recommended == .openPr)
         #expect(detail.metricPortfolio.metrics[0].identity.metricId == "task-loop-trust")
         #expect(detail.metricPortfolio.metrics[0].projectId == detail.projects[0].project.id)
         #expect(detail.metricPortfolio.metrics[0].evidence == .met(
@@ -172,8 +169,8 @@ struct DTOFixtureTests {
         #expect(product.unavailableProjects[0].tasks[0].status == .ready)
         #expect(product.unavailableProjects[0].tasks[0].recovery.contains("lf work abandon task task_40fbeea"))
         let project = try #require(product.projects.items.first)
-        #expect(project.tasks.map(\.section) == [.now, .needsAttention, .available, .later])
-        #expect(project.tasks.map(\.attention.level) == [.black, .red, .black, .black])
+        #expect(project.tasks.map(\.section) == [.now, .waiting, .available, .later])
+        #expect(project.tasks.map(\.condition.state) == [.clear, .waiting, .clear, .clear])
         #expect(project.tasks[0].reference.workspace?.slug == "make-lf-work-the-machine")
         #expect(project.tasks[2].reference.workspace == nil)
         #expect(project.tasks[2].reference.issueUrl == nil)
@@ -234,39 +231,40 @@ struct DTOFixtureTests {
         #expect(activity.kind == .prOpened)
         #expect(activity.title == "Opened PR #1073")
     }
-    @Test("User Ask attention fixture preserves the durable queue projection")
-    func askAttentionFixtureRoundTrips() throws {
-        let attention = try JSONDecoder().decode(
-            [AskAttentionRecord].self,
-            from: loadFixtureData("ask_attention.json")
+    @Test("Sessions fixture preserves the unresolved Session projection")
+    func sessionsFixtureRoundTrips() throws {
+        let sessions = try JSONDecoder().decode(
+            [SessionRecord].self,
+            from: loadFixtureData("sessions.json")
         )
-        let ask = try #require(attention.first)
-        #expect(ask.attention == .queued)
-        #expect(ask.ask.origin.work == .task(
+        let session = try #require(sessions.first)
+        #expect(session.work == .task(
             id: "task_00000000000000000000000000000001"
         ))
-        #expect(ask.ask.request == .intervention(prompt: "Connect Linear for this worktree"))
-        #expect(ask.surface == nil)
+        #expect(session.title == "Simplify cross-Work questions")
+        #expect(session.detail == "review-design")
+        #expect(session.state == .active)
 
-        let encoded = try JSONEncoder().encode(attention)
-        let decoded = try JSONDecoder().decode([AskAttentionRecord].self, from: encoded)
-        #expect(decoded == attention)
+        let encoded = try JSONEncoder().encode(sessions)
+        let decoded = try JSONDecoder().decode([SessionRecord].self, from: encoded)
+        #expect(decoded == sessions)
     }
 
-    @Test("Ask session fixture preserves generic Run identity and attach")
-    func askSessionFixtureRoundTrips() throws {
+    @Test("Flow Session fixture preserves readiness and its open command")
+    func flowSessionFixtureRoundTrips() throws {
         let session = try JSONDecoder().decode(
-            AskSessionRecord.self,
-            from: loadFixtureData("ask_session.json")
+            SessionRecord.self,
+            from: loadFixtureData("session.json")
         )
 
-        #expect(session.askId == "ask_00000000000000000000000000000001")
-        #expect(session.runId == "run_00000000000000000000000000000002")
-        #expect(session.homeRoute == "jack@local")
-        #expect(session.attachArgv == ["tmux", "attach-session", "-t", "lf-ask-000000000000"])
+        #expect(session.state == .ready)
+        #expect(session.readySummary == "The design now matches the human's intent.")
+        #expect(session.openArgv.suffix(3) == [
+            "session", "open", "task_00000000000000000000000000000001:task-design:review_kickoff:0"
+        ])
 
         let encoded = try JSONEncoder().encode(session)
-        let decoded = try JSONDecoder().decode(AskSessionRecord.self, from: encoded)
+        let decoded = try JSONDecoder().decode(SessionRecord.self, from: encoded)
         #expect(decoded == session)
     }
 

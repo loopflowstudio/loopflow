@@ -2,6 +2,7 @@ import Foundation
 
 public enum ActivityNodeKind: String, Codable, Sendable, Hashable {
     case exec
+    case providerLaunch = "provider_launch"
     case providerProcess = "provider_process"
 }
 

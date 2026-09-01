@@ -311,10 +311,11 @@ private struct DirectRunUsageList: View {
             EmptyChartHint(message: "No direct Run usage in this window")
         } else {
             VStack(spacing: 0) {
-                row("RUN", "INPUT", "OUTPUT", "FINAL", "GAPS", heading: true)
+                row("WORK", "RUN", "INPUT", "OUTPUT", "FINAL", "GAPS", heading: true)
                 ForEach(visible) { run in
                     Divider()
                     row(
+                        work(run),
                         run.skill ?? run.harness,
                         tokens(run.usage.inputTokens),
                         tokens(run.usage.outputTokens),
@@ -332,7 +333,19 @@ private struct DirectRunUsageList: View {
         value?.formatted() ?? "—"
     }
 
+    private func work(_ run: RunSnapshot) -> String {
+        for kind in ["task", "project", "wave"] {
+            if let subject = run.subjects.first(where: {
+                $0.selector.hasPrefix("\(kind):")
+            })?.selector.dropFirst(kind.count + 1) {
+                return "\(kind)/\(subject)"
+            }
+        }
+        return "—"
+    }
+
     private func row(
+        _ work: String,
         _ run: String,
         _ input: String,
         _ output: String,
@@ -341,6 +354,7 @@ private struct DirectRunUsageList: View {
         heading: Bool
     ) -> some View {
         HStack(spacing: Spacing.md) {
+            Text(work).frame(maxWidth: .infinity, alignment: .leading)
             Text(run).frame(maxWidth: .infinity, alignment: .leading)
             Text(input).frame(width: 100, alignment: .trailing)
             Text(output).frame(width: 100, alignment: .trailing)

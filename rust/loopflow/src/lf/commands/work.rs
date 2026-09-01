@@ -101,14 +101,6 @@ async fn run_async(command: &WorkCommand, repo: &Path) -> anyhow::Result<()> {
             let receipt = store.append_steer(&work, author, message).await?;
             print_receipt(&WorkReceipt::Steer(receipt), *json)?;
         }
-        WorkCommand::Asks { .. } => {
-            return Err(anyhow!("`lf work asks` retired; use `lf ask list`"));
-        }
-        WorkCommand::Answer { ask_id, .. } => {
-            return Err(anyhow!(
-                "`lf work answer` retired; use `lf ask open {ask_id}` and settle from the Ask session"
-            ));
-        }
         WorkCommand::Interrupt { kind, id, .. } => {
             let work = parse_work(kind, id)?;
             require_work_repository(&store, &work, repo).await?;

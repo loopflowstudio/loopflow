@@ -14,15 +14,13 @@ struct RepoScanner {
             return []
         }
 
-        let mainWorktrees = children
+        return children
             .filter { isDirectory($0) }
             .filter(isMainGitWorktree)
             .map(\.standardizedFileURL)
             .sorted { lhs, rhs in
                 lhs.lastPathComponent.localizedCaseInsensitiveCompare(rhs.lastPathComponent) == .orderedAscending
             }
-
-        return dropWorktreeSiblings(mainWorktrees)
     }
 
     func scanDefaultRoot() -> [URL] {
@@ -30,17 +28,42 @@ struct RepoScanner {
         return scanMainWorktrees(in: root)
     }
 
-    /// Collapse a candidate repo directory to its main worktree. A linked worktree
-    /// resolves to the repo that owns the shared `.git` dir; a main repo (or any
-    /// non-git path) resolves to itself. Loopflow targets the main repo, never a
-    /// worktree.
+    /// Collapse a Git working-tree root to its main worktree.
+    ///
+    /// Non-repositories and plain subdirectories return nil. A linked worktree
+    /// resolves to the checkout that owns the shared `.git` directory.
+    func mainRepository(_ url: URL) -> URL? {
+        guard isDirectory(url),
+              let topLevel = git(["rev-parse", "--show-toplevel"], at: url),
+              canonical(topLevel) == canonical(url.normalizedFilePath),
+              let commonDir = git(
+                  ["rev-parse", "--path-format=absolute", "--git-common-dir"],
+                  at: url
+              )
+        else {
+            return nil
+        }
+        let main = URL(fileURLWithPath: commonDir)
+            .deletingLastPathComponent()
+            .standardizedFileURL
+        guard isDirectory(main),
+              let mainTopLevel = git(["rev-parse", "--show-toplevel"], at: main),
+              canonical(mainTopLevel) == canonical(main.normalizedFilePath)
+        else {
+            return nil
+        }
+        return main
+    }
+
+    /// Preserve the previous forgiving caller contract outside discovery.
     func resolveMainWorktree(_ url: URL) -> URL {
+        mainRepository(url) ?? url.standardizedFileURL
+    }
+
+    private func git(_ args: [String], at url: URL) -> String? {
         let process = Process()
         process.executableURL = URL(fileURLWithPath: "/usr/bin/env")
-        process.arguments = [
-            "git", "-C", url.normalizedFilePath,
-            "rev-parse", "--path-format=absolute", "--git-common-dir",
-        ]
+        process.arguments = ["git", "-C", url.normalizedFilePath] + args
         let output = Pipe()
         process.standardOutput = output
         process.standardError = Pipe()
@@ -48,9 +71,9 @@ struct RepoScanner {
         do {
             try process.run()
             process.waitUntilExit()
-            guard process.terminationStatus == 0 else { return url.standardizedFileURL }
+            guard process.terminationStatus == 0 else { return nil }
         } catch {
-            return url.standardizedFileURL
+            return nil
         }
 
         let data = output.fileHandleForReading.readDataToEndOfFile()
@@ -58,26 +81,13 @@ struct RepoScanner {
             .trimmingCharacters(in: .whitespacesAndNewlines),
             !raw.isEmpty
         else {
-            return url.standardizedFileURL
+            return nil
         }
-
-        // `--git-common-dir` points at the shared `<main-repo>/.git`; its parent
-        // is the main repo root.
-        return URL(fileURLWithPath: raw).deletingLastPathComponent().standardizedFileURL
+        return raw
     }
 
-    /// Belt-and-suspenders on top of the git worktree check: drop a `<base>.<suffix>`
-    /// directory when `<base>` is itself a scanned repo — e.g. `loopflow.goalreview`
-    /// and `loopflow.waves-outward` are worktrees of `loopflow`. Standalone dotted
-    /// names (whose prefix isn't another repo) are kept.
-    private func dropWorktreeSiblings(_ repos: [URL]) -> [URL] {
-        let names = Set(repos.map(\.lastPathComponent))
-        return repos.filter { url in
-            let name = url.lastPathComponent
-            guard let dot = name.firstIndex(of: ".") else { return true }
-            let base = String(name[..<dot])
-            return !names.contains(base)
-        }
+    private func canonical(_ path: String) -> String {
+        URL(fileURLWithPath: path).resolvingSymlinksInPath().standardizedFileURL.path
     }
 
     private func isDirectory(_ url: URL) -> Bool {
@@ -85,20 +95,7 @@ struct RepoScanner {
     }
 
     private func isMainGitWorktree(_ url: URL) -> Bool {
-        let gitMarker = url.appendingPathComponent(".git")
-        var isDirectory = ObjCBool(false)
-        let exists = fileManager.fileExists(atPath: gitMarker.normalizedFilePath, isDirectory: &isDirectory)
-        guard exists else { return false }
-
-        if isDirectory.boolValue {
-            return true
-        }
-
-        guard let content = try? String(contentsOf: gitMarker, encoding: .utf8) else {
-            return false
-        }
-
-        return !content.contains("/.git/worktrees/")
+        guard let main = mainRepository(url) else { return false }
+        return canonical(main.normalizedFilePath) == canonical(url.normalizedFilePath)
     }
 }
-

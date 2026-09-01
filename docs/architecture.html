@@ -2023,7 +2023,7 @@ execution, and delivery operations available to any caller.</p>
     |
     +-- Work: preserve purpose and input across independent processes
     |
-    +-- Task delivery: bind concrete Work to a worktree and serial PRs
+    +-- Task delivery: bind concrete Work to one active remote branch, worktree, and PR
     |
     +-- Controllers: pursue Work end to end using the layers above
     |
@@ -2046,18 +2046,13 @@ execution, and delivery operations available to any caller.</p>
 <td><a href="https://loopflow.studio/architecture/execution">Execution</a></td>
 </tr>
 <tr>
-<td>Work</td>
-<td>Wave/Project/Task identity, status, Steer, Ask, and planning facts</td>
+<td>Planning</td>
+<td>Flow composition, Wave/Project/Task Work, Steer, questions, human FlowSteps, resident loops</td>
 <td><a href="https://loopflow.studio/architecture/planning">Planning</a></td>
 </tr>
 <tr>
-<td>Controllers</td>
-<td>Flow playheads and end-to-end Wave/Project/Task automation</td>
-<td><a href="https://loopflow.studio/architecture/planning#end-to-end-controllers">Planning</a></td>
-</tr>
-<tr>
 <td>Delivery</td>
-<td>Managed worktrees, commits, serial PRs, CI repair, merge</td>
+<td>Managed worktrees, commits, one active Task branch/PR, CI repair, merge</td>
 <td><a href="https://loopflow.studio/architecture/delivery">Delivery</a></td>
 </tr>
 <tr>
@@ -2149,7 +2144,7 @@ ledger.</p>
 <pre tabindex="0"><code class="language-text">Wave
   `-- Project
         `-- Task
-              `-- serial PRs
+              `-- one active remote branch and PR
 
 Flow = ordered Skill | Op | Xor | human boundaries
 Run  = evidence for one mediated harness launch
@@ -2207,9 +2202,9 @@ WorkStatus = Ready | Done | Abandoned
 <td>Append-only Work input</td>
 </tr>
 <tr>
-<td>Ask</td>
-<td>Durable blocking request with a typed, first-writer-wins result</td>
-<td>Ask exchange and active answering-attempt fence</td>
+<td>Human session</td>
+<td>Unresolved Ask or Task FlowStep bound to one ordinary provider Run</td>
+<td>Boundary record, exact Run id, and provider-native history</td>
 </tr>
 <tr>
 <td>Home</td>
@@ -2257,11 +2252,13 @@ lf task run INF-123
 lf chat --steer &quot;ship invoices first&quot;
 lf status product
 </code></pre>
-<p>Controllers build on tracked Work rather than changing its meaning. <code>lf task
-run</code> ensures the same Task/worktree substrate, installs Task controller state,
-and starts its end-to-end flow. The Home keeper similarly starts the placed
-Wave listener and its controller. Wave, Project, Task, and Ask retain distinct
-loops; each reuses ordinary execution and delivery operations.</p>
+<p>The Home keeper starts the placed Wave listener. Its resident loop refreshes
+current planning evidence and chooses the next Project or Task boundary. Wave,
+Project, and Task retain distinct controllers. Direct questions use ordinary
+fresh bound Runs. A Task human FlowStep starts the node's ordinary bound Skill
+command as a provider Run. A detached PTY cradle may keep the first client
+alive before a UI arrives; opening the Session replaces it with a native
+provider resume.</p>
 <h3 id="another-machine">Another machine<a class="anchor-link" href="#another-machine" title="Link to this section">#</a></h3>
 <pre tabindex="0"><code class="language-bash">lf ssh build-home runs --json
 lf ssh build-home start product
@@ -2285,12 +2282,8 @@ the behavior.</p>
 <td><a href="https://loopflow.studio/architecture/execution">Execution</a></td>
 </tr>
 <tr>
-<td>Work state, Steer, Ask, or Work-bound Runs</td>
+<td>Flow semantics, Work state, Steer, questions, human FlowSteps, Project/Task loops</td>
 <td><a href="https://loopflow.studio/architecture/planning">Planning</a></td>
-</tr>
-<tr>
-<td>Flow semantics or Wave/Project/Task controllers</td>
-<td><a href="https://loopflow.studio/architecture/planning#end-to-end-controllers">Planning</a></td>
 </tr>
 <tr>
 <td>worktrees, commits, PR ranges, checks, or landing</td>

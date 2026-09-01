@@ -1,4 +1,4 @@
-//! Agent invocation for spawning coding agent runners (Claude, Codex, Gemini, OpenCode).
+//! Agent invocation for spawning coding agent runners (Claude, Codex, OpenCode).
 //!
 //! This module handles building commands and spawning subprocesses for each
 //! supported coding agent. Output can be captured or streamed.
@@ -623,8 +623,7 @@ pub struct ClaudeArgs {
 impl ClaudeArgs {
     /// Resolve a model string to a Claude `--model` variant.
     ///
-    /// Strips the `claude:` prefix if present, applies defaults (bare `"claude"` → `"opus"`),
-    /// and passes through non-claude model strings unchanged.
+    /// Strips the `claude:` prefix and leaves bare `claude` to the CLI default.
     pub fn resolve_model(model: &str) -> Option<String> {
         let (harness, model_variant) = parse_agent(model);
         if harness == "claude" {
@@ -988,31 +987,6 @@ pub fn build_codex_command(
     cmd
 }
 
-/// Build Gemini CLI command.
-pub fn build_gemini_command(
-    launch: &AgentConfig,
-    process: &ProcessConfig,
-    model_variant: Option<&str>,
-) -> Vec<String> {
-    let mut cmd = vec!["gemini".to_string()];
-
-    if let Some(variant) = model_variant {
-        cmd.push("-m".to_string());
-        cmd.push(variant.to_string());
-    }
-
-    if process.stream {
-        cmd.push("--output-format".to_string());
-        cmd.push("stream-json".to_string());
-    }
-
-    if launch.skip_permissions {
-        cmd.push("--yolo".to_string());
-    }
-
-    cmd
-}
-
 /// Build OpenCode CLI command.
 pub fn build_opencode_command(process: &ProcessConfig, model_variant: Option<&str>) -> Vec<String> {
     // `opencode run` for batch/auto mode, `opencode` for interactive TUI
@@ -1081,21 +1055,10 @@ pub fn build_agent_env(launch: &AgentConfig, process: &ProcessConfig) -> BTreeMa
     let mut env = launch.env.clone();
     let agent = launch.agent();
     let (harness, _) = parse_agent(agent);
-    match harness.as_str() {
-        "gemini" => {
-            if let Some(ref context_file) = process.context_file {
-                env.insert(
-                    "GEMINI_SYSTEM_MD".to_string(),
-                    context_file.to_string_lossy().to_string(),
-                );
-            }
+    if harness == "opencode" {
+        if let Some(env_val) = build_opencode_env_for_scope(process, launch.write_scope) {
+            env.insert("OPENCODE_CONFIG_CONTENT".to_string(), env_val);
         }
-        "opencode" => {
-            if let Some(env_val) = build_opencode_env_for_scope(process, launch.write_scope) {
-                env.insert("OPENCODE_CONFIG_CONTENT".to_string(), env_val);
-            }
-        }
-        _ => {}
     }
 
     env
@@ -1108,21 +1071,10 @@ fn apply_harness_env(
     launch: &AgentConfig,
     process: &ProcessConfig,
 ) {
-    match harness {
-        "gemini" => {
-            if let Some(ref context_file) = process.context_file {
-                cmd.env(
-                    "GEMINI_SYSTEM_MD",
-                    context_file.to_string_lossy().to_string(),
-                );
-            }
+    if harness == "opencode" {
+        if let Some(env_val) = build_opencode_env_for_scope(process, launch.write_scope) {
+            cmd.env("OPENCODE_CONFIG_CONTENT", env_val);
         }
-        "opencode" => {
-            if let Some(env_val) = build_opencode_env_for_scope(process, launch.write_scope) {
-                cmd.env("OPENCODE_CONFIG_CONTENT", env_val);
-            }
-        }
-        _ => {}
     }
 }
 
@@ -1137,7 +1089,6 @@ pub fn build_model_command(
     let model_variant = model_variant.as_deref();
     match harness.as_str() {
         "codex" => build_codex_command(launch, process, model_variant),
-        "gemini" => build_gemini_command(launch, process, model_variant),
         "opencode" => build_opencode_command(process, model_variant),
         "claude" => build_claude_command(launch, process, capabilities, model_variant),
         // Unknown harness: fall back to Claude with the full model string as variant.
@@ -2602,26 +2553,6 @@ trust_level = "trusted"
     }
 
     #[test]
-    fn build_gemini_command_yolo() {
-        let launch = AgentConfig {
-            skip_permissions: true,
-            ..default_launch()
-        };
-        let process = auto_process();
-        let cmd = build_gemini_command(&launch, &process, None);
-        assert!(cmd.contains(&"--yolo".to_string()));
-    }
-
-    #[test]
-    fn build_gemini_command_with_model() {
-        let launch = default_launch();
-        let process = auto_process();
-        let cmd = build_gemini_command(&launch, &process, Some("gemini-1.5"));
-        assert!(cmd.contains(&"-m".to_string()));
-        assert!(cmd.contains(&"gemini-1.5".to_string()));
-    }
-
-    #[test]
     fn build_claude_command_with_context_file() {
         let launch = default_launch();
         let process = ProcessConfig {
@@ -2861,11 +2792,7 @@ trust_level = "trusted"
 
     #[test]
     fn claude_args_resolve_model_bare() {
-        // "claude" → default variant "opus"
-        assert_eq!(
-            ClaudeArgs::resolve_model("claude"),
-            Some("opus".to_string())
-        );
+        assert_eq!(ClaudeArgs::resolve_model("claude"), None);
     }
 
     #[test]
@@ -3043,27 +2970,19 @@ trust_level = "trusted"
     }
 
     #[test]
-    fn build_model_command_uses_codex_default_for_bare_codex_model() {
-        let launch = AgentConfig {
-            agent: Some("codex".to_string()),
-            ..default_launch()
-        };
-        let process = auto_process();
-        let cmd = build_model_command(&launch, &process, &AgentCapabilities::default());
-        assert!(!cmd.iter().any(|arg| arg.contains("model=\"codex\"")));
-    }
-
-    #[test]
-    fn build_model_command_uses_loopflow_default_for_bare_opencode() {
-        let launch = AgentConfig {
-            agent: Some("opencode".to_string()),
-            ..default_launch()
-        };
-        let process = auto_process();
-        let cmd = build_model_command(&launch, &process, &AgentCapabilities::default());
-        assert_eq!(cmd.first(), Some(&"opencode".to_string()));
-        assert!(cmd.contains(&"--model".to_string()));
-        assert!(cmd.contains(&"opencode/glm-5.2".to_string()));
+    fn bare_harness_commands_do_not_select_a_model() {
+        for harness in ["claude", "codex", "opencode"] {
+            let launch = AgentConfig {
+                agent: Some(harness.to_string()),
+                ..default_launch()
+            };
+            let cmd = build_model_command(&launch, &auto_process(), &AgentCapabilities::default());
+            assert!(
+                !cmd.iter()
+                    .any(|arg| { arg == "--model" || arg == "-m" || arg.starts_with("model=") }),
+                "bare {harness} selected a model: {cmd:?}"
+            );
+        }
     }
 
     #[test]

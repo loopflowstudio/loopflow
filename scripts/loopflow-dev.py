@@ -7,6 +7,7 @@ Usage:
 Commands:
     setup           Install/check repo dev environment tools
     build           Build the app
+    install         Build and install without launching
     test            Build and run tests
     run             Build and launch the app
     run-debug       Build and run with stdout visible
@@ -25,6 +26,8 @@ Streaming logs (long-running commands):
 from __future__ import annotations
 
 import argparse
+import hashlib
+import json
 import os
 import shutil
 import subprocess
@@ -47,6 +50,9 @@ LOGIN_KEYCHAIN = Path.home() / "Library" / "Keychains" / "login.keychain-db"
 ENV_SETUP = REPO_ROOT / ".lf" / "env-setup.sh"
 DEV_LOG_DIR = Path.home() / ".lf" / "logs" / "dev"
 LOOPFLOW_STREAM_LOG = DEV_LOG_DIR / f"{REPO_ROOT.name}.loopflow-run-debug.log"
+MACHINE_INSTALL_STATE = Path.home() / ".lf-machine" / "install" / "active.json"
+MACHINE_LF_GATE = Path.home() / ".lf-machine" / "install" / "gates" / "1" / "lf"
+DEV_CONTROL_CONFIG = "LoopflowDevControl.json"
 
 
 def _app_environment(repo: Path) -> dict[str, str]:
@@ -119,7 +125,7 @@ def _stop_loopflow_app(app_path: Path) -> None:
     """Quit Loopflow Dev, falling back to killing the app if a modal blocks quit."""
     executable = app_path / "Contents" / "MacOS" / "Loopflow"
 
-    run(["osascript", "-e", 'tell application id "com.loopflow.mac" to quit'], check=False)
+    run(["osascript", "-e", f'tell application id "{DEV_BUNDLE_ID}" to quit'], check=False)
     if _wait_for_process_exit(str(executable), timeout_seconds=3):
         return
 
@@ -160,6 +166,16 @@ def cmd_build() -> int:
     return run(["swift", "build"], cwd=SWIFT_DIR, check=False).returncode
 
 
+def cmd_install() -> int:
+    """Build and install the app without opening a live operator surface."""
+    result = cmd_build()
+    if result != 0:
+        return result
+    _stop_loopflow_app(DEV_APP)
+    _install_dev_app()
+    return 0
+
+
 def cmd_test() -> int:
     """Build and run tests."""
     print("Building and testing...")
@@ -176,9 +192,10 @@ def cmd_run() -> int:
     if result.returncode != 0:
         return result.returncode
 
+    _stop_loopflow_app(DEV_APP)
     _install_dev_app()
-    # Dev launches read this checkout's wave/ dir as-is; a plain production
-    # launch leaves the override unset and reads the main worktree.
+    # Tell the app which checkout initiated the launch. Repository discovery
+    # collapses linked worktrees to their authoritative main checkout.
     command = ["open", "-n"]
     for key, value in _app_environment(REPO_ROOT).items():
         command.extend(["--env", f"{key}={value}"])
@@ -204,6 +221,7 @@ def cmd_run_debug(repo: Path = REPO_ROOT) -> int:
     if result.returncode != 0:
         return result.returncode
 
+    _stop_loopflow_app(DEV_APP)
     _install_dev_app()
     print("Logs: ~/Library/Logs/Loopflow/")
     print(f"Stream log: {LOOPFLOW_STREAM_LOG}")
@@ -219,8 +237,8 @@ def cmd_run_debug(repo: Path = REPO_ROOT) -> int:
         DEV_APP,
         LOOPFLOW_STREAM_LOG,
         args=["--repo", str(repo)],
-        # Dev launches read the launched checkout's wave/ dir as-is; a plain
-        # production launch leaves this unset and reads the main worktree.
+        # Repository discovery collapses this checkout to its authoritative
+        # main checkout before displaying or reading it.
         env=_app_environment(repo),
     )
 
@@ -239,11 +257,11 @@ def cmd_clean() -> int:
         shutil.rmtree(DEV_APP)
 
     print("Resetting Accessibility permissions...")
-    run(["tccutil", "reset", "Accessibility", "com.loopflow.mac"], check=False)
+    run(["tccutil", "reset", "Accessibility", DEV_BUNDLE_ID], check=False)
     print("Resetting Automation permissions...")
-    run(["tccutil", "reset", "AppleEvents", "com.loopflow.mac"], check=False)
+    run(["tccutil", "reset", "AppleEvents", DEV_BUNDLE_ID], check=False)
     print("Resetting Microphone permissions...")
-    run(["tccutil", "reset", "Microphone", "com.loopflow.mac"], check=False)
+    run(["tccutil", "reset", "Microphone", DEV_BUNDLE_ID], check=False)
     print("Done. Next run will require re-granting permissions.")
     return 0
 
@@ -446,6 +464,7 @@ def _install_dev_app() -> None:
     shutil.copy(SWIFT_DIR / "LoopflowMac" / "Loopflow.sdef", app_dir / "Resources")
     shutil.copy(SWIFT_DIR / "LoopflowMac" / "AppIcon.icns", app_dir / "Resources")
     _copy_bundled_tools(app_dir / "MacOS")
+    _write_dev_control_config(app_dir / "Resources")
 
     identity = _ensure_dev_signing_identity()
     entitlements = SWIFT_DIR / "LoopflowMac" / "Loopflow.entitlements"
@@ -461,6 +480,34 @@ def _apply_dev_identity(plist: Path) -> None:
     run(["plutil", "-replace", "CFBundleIdentifier", "-string", DEV_BUNDLE_ID, str(plist)])
     run(["plutil", "-replace", "CFBundleName", "-string", "Loopflow Dev", str(plist)])
     run(["plutil", "-replace", "CFBundleDisplayName", "-string", "Loopflow Dev", str(plist)])
+
+
+def _write_dev_control_config(resources_dir: Path) -> None:
+    """Point the dev UI at the machine-selected Home's stable CLI gate."""
+    try:
+        state = json.loads(MACHINE_INSTALL_STATE.read_text())
+        artifacts = state["selection"]["artifact_set"]["artifacts"]
+        selected_cli = next(
+            artifact
+            for artifact in artifacts
+            if artifact["role"] == {"kind": "cli"}
+        )
+    except (FileNotFoundError, KeyError, StopIteration, TypeError, json.JSONDecodeError) as error:
+        raise RuntimeError(
+            f"Cannot resolve the machine-selected lf from {MACHINE_INSTALL_STATE}: {error}"
+        ) from error
+
+    if not MACHINE_LF_GATE.is_file() or not os.access(MACHINE_LF_GATE, os.X_OK):
+        raise RuntimeError(f"Machine lf gate is missing or not executable: {MACHINE_LF_GATE}")
+    with MACHINE_LF_GATE.open("rb") as gate:
+        gate_sha256 = hashlib.file_digest(gate, "sha256").hexdigest()
+    if gate_sha256 != selected_cli["sha256"]:
+        raise RuntimeError(
+            f"Machine lf gate {MACHINE_LF_GATE} does not match the active CLI artifact"
+        )
+
+    config = {"lf_path": str(MACHINE_LF_GATE)}
+    (resources_dir / DEV_CONTROL_CONFIG).write_text(json.dumps(config, indent=2) + "\n")
 
 
 def _copy_bundled_tools(app_macos_dir: Path) -> None:
@@ -519,6 +566,7 @@ def cmd_screenshots() -> int:
 COMMANDS = {
     "setup": (cmd_setup, "Install/check repo dev environment tools"),
     "build": (cmd_build, "Build the app"),
+    "install": (cmd_install, "Build and install without launching"),
     "test": (cmd_test, "Build and run tests"),
     "run": (cmd_run, "Build and launch the app"),
     "run-debug": (cmd_run_debug, "Build and run with stdout visible"),

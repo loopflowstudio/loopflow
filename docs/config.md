@@ -33,7 +33,7 @@ config files.
 | Chrome automation | `--chrome` | `chrome: true` |
 | Yolo mode (skip permissions) | — | `yolo: true` |
 | Claude/Codex/OpenCode launch surface | `--tui` / `--ide` | `session.launch: tui` |
-| Detached Ask terminal | `LF_EXTERNAL_TERMINAL=Ghostty` | global-only `session.terminal: Ghostty` |
+| Human FlowStep terminal | `LF_EXTERNAL_TERMINAL=Ghostty` | global-only `session.terminal: Ghostty` |
 
 ## Context Assembly
 
@@ -74,7 +74,7 @@ For most settings, repo overrides global. For additive settings (`docs`, `contex
 agent: claude:opus
 direction: clarity
 session:
-  terminal: Ghostty       # opens `lf ask` sessions on this Home
+  terminal: Ghostty       # presents human FlowStep sessions on this Home
 
 # .lf/config.yaml (repo)
 agent: codex        # overrides global
@@ -267,7 +267,7 @@ agent: codex          # harness default
 # agent: claude:opus  # harness plus model
 ```
 
-Harnesses: `claude`, `codex`, `gemini`, `opencode`. Use `harness:model` for specific models.
+Harnesses: `claude`, `codex`, `opencode`. Use `harness:model` for specific models.
 
 Four built-in skills intentionally default to Claude: `kickoff`,
 `review-design`, `review-slice`, and `prompt`. Every other unconfigured
@@ -278,16 +278,13 @@ Loopflow starts every Codex CLI and interactive run on the standard service tier
 even when the user's Codex config selects Fast mode. In an interactive Codex
 TUI, run `/fast` to opt into Fast mode for that session.
 
-Gemini is supported for direct `lf` commands. Wave, Project, and Tasks
-require `claude`, `codex`, or `opencode`.
-
-OpenCode model strings use `provider/model` form. Bare `opencode` resolves to
-the Loopflow-owned `opencode/glm-5.2` default, which Loopflow sends explicitly
-so OpenCode config cannot silently fall back to a lower-capability model:
+Bare harness names use the model selected by that provider account. Add
+`harness:model` only when the invocation must pin a specific model. OpenCode
+model strings use `provider/model` form:
 
 ```yaml
-agent: opencode                          # Loopflow default: opencode/glm-5.2
-agent: opencode:opencode/glm-5.2         # same default, explicit
+agent: opencode                          # user's OpenCode default
+agent: opencode:opencode/glm-5.2         # explicit model
 agent: opencode:moonshotai/kimi-k2       # explicit provider/model
 ```
 
@@ -299,7 +296,7 @@ Optional list of harnesses exposed in Loopflow's model picker and settings.
 supported_harnesses:
   - claude
   - codex
-  - gemini
+  - opencode
 ```
 
 This list is additive across global and repo config.
@@ -362,8 +359,8 @@ If vendor config is less permissive, Loopflow warns and supplies its default.
 
 `yolo: true` is the explicit Loopflow bypass: Claude uses
 `--dangerously-skip-permissions`, Codex uses
-`--dangerously-bypass-approvals-and-sandbox`, Gemini uses `--yolo`, and OpenCode
-uses `permission: "allow"` via `OPENCODE_CONFIG_CONTENT`.
+`--dangerously-bypass-approvals-and-sandbox`, and OpenCode uses
+`permission: "allow"` via `OPENCODE_CONFIG_CONTENT`.
 
 Durable Task provider turns are the exception. Their assigned worktree is a
 hard write boundary, so `yolo` and a more permissive vendor config cannot widen

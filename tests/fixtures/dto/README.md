@@ -10,14 +10,13 @@ listener↔resident wire (`POST /resident/deltas`, `POST /resident/attach`,
 the same `lf` binary, so only the Rust fixture tests pin them. Swift does not
 consume this wire.
 
-`ask_session.json` pins `lf ask open --prepare --json`: one generic answering
-Run and its exact Home-local attach route.
+`session.json` pins `lf session open --json`: one unresolved Task FlowStep
+session, its explicit readiness state, and its exact Home-local attach route.
 
-`task_attention_states.json` pins the Rust-owned desktop attention fold for
-live advancing, live human wait, dead dirty, dead authored commits, clean
-backlog, completed, stale active intent, and unavailable local evidence. Rust
-and Swift decode the same Task rows; consumers never reconstruct the signal
-from process flags.
+`task_condition_states.json` pins the Rust-owned Task condition fold for clean
+backlog, completion, external and human waits, local recovery blockers, and
+unavailable evidence. Rust and Swift decode the same Task rows; consumers never
+reconstruct the condition from process flags.
 
 `activity_snapshot.json` pins `lf ps --json`: exact live Exec and provider
 processes carry OS-derived state, while a provider without exact ownership

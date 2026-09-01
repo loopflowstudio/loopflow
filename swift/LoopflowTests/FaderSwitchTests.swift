@@ -5,7 +5,7 @@ import Testing
 @testable import LoopflowMac
 
 /// The fader collapses two evidence channels — process activity and human
-/// attention — into four phases, and each phase owns exactly one press verb.
+/// waiting Sessions — into four phases, and each phase owns one press verb.
 @Suite("Fader switch")
 struct FaderSwitchTests {
     @Test("A human-owed stop wins over any sibling activity")

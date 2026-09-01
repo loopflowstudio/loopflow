@@ -105,9 +105,8 @@ starts from an existing Linear task with `lf task prepare <issue-id>`; use
 `lf task run <issue-id>` when the built-in controller should pursue it end to
 end.
 When dependent work must begin before another Task PR merges, start a separate
-Task with `--stack-on <parent-task>`. Do not rotate the parent Task onto a second
-simultaneously open PR; its multi-PR history remains serial. The child binds to
-the parent's active PR at launch and never follows later serial PRs implicitly.
+Task with `--stack-on <parent-task>`. Each Task owns one active remote branch. The child
+binds to the parent's active PR at launch.
 
 When work feels slow or stuck, run `lf top` before guessing. It continuously
 ranks OS-live Loopflow call trees by five-second normalized-output throughput and
@@ -131,7 +130,7 @@ of reconstructing it from processes, worktrees, or Linear:
 
 ```bash
 lf ls --json              # every durable Wave and its Home/runtime evidence
-lf status <wave> --json   # one Wave's Work hierarchy, Runs, and attention
+lf status <wave> --json   # one Wave's Work hierarchy, Runs, and Task conditions
 lf roadmap --json         # current plan across Waves joined to runtime truth
 ```
 
@@ -153,6 +152,11 @@ lf stop <wave>                                  # stop it on this machine
 lf ssh <home-id> status <wave> --json           # inspect it on that Home
 lf ssh <home-id> start <wave>                   # start it on that Home
 ```
+
+Use `--as task:...`, `--as project:...`, or `--as wave:...` with one named
+Skill or `: "question"` for an inline prompt. In a plain terminal it starts a fresh Run at that
+Work's placement. Inside a Run it is an exact identity assertion; a mismatch
+fails. It never binds a multi-step flow.
 
 `lf ssh` runs only the target machine's `lf`; the inner `lf` and `--` separator
 are implicit. Foreground commands can choose from origin-forwarded and
@@ -231,9 +235,13 @@ try to prove that the “right” process requested it.
 ## Speak
 
 Answer a human message in your turn text. When a human is present, keep questions
-in that conversation. `lf ask` crosses to the immediate parent Work; headless
-`lf ask --user` requests genuine intervention from an absent User. An Ask is a
-durable Ask session, not a chat message or textual Answer.
+in that conversation. If a separate Work perspective would help, launch an
+ordinary Run explicitly with `lf --as <work> : "<prompt>"`. There is no separate
+agent-question protocol. In a headless Run, `lf ask "<request>"` opens a durable
+human session in the same checkout and blocks until the human completes it.
+Ask sessions remain visible after their agent marks them ready; Complete
+releases the caller with that summary. Declared Task FlowSteps use the same
+`lf session` surface but retain their explicit Approve/Iterate decision.
 
 When the active skill calls for a durable Wave learning, edit
 `wave/<name>/MEMORY.md` through the ordinary repository workflow. Keep it

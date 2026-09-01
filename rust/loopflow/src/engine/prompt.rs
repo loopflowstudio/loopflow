@@ -1387,11 +1387,11 @@ fn glob_to_regex(pattern: &str) -> String {
 
 /// Files that coding agents load natively. All are skipped from lf docs to
 /// avoid duplication — whichever agent runs will pick up its own file.
-const AGENT_NATIVE_FILES: &[&str] = &["CLAUDE.md", "AGENTS.md", "GEMINI.md"];
+const AGENT_NATIVE_FILES: &[&str] = &["CLAUDE.md", "AGENTS.md"];
 
 /// Remove docs that duplicate any agent's natively-loaded instruction file.
 ///
-/// Skips all known native files (CLAUDE.md, AGENTS.md, GEMINI.md) and any
+/// Skips all known native files (CLAUDE.md and AGENTS.md) and any
 /// files they symlink to (e.g. CLAUDE.md -> STYLE.md also drops STYLE.md).
 pub fn drop_native_instruction_docs(
     components: &mut PromptComponents,
@@ -2070,7 +2070,7 @@ mod tests {
             let prompt = render_full_prompt(components);
             assert!(prompt.contains("A human is present"), "surface {surface:?}");
             assert!(
-                prompt.contains("never enqueue a User Ask"),
+                prompt.contains("never create a human session"),
                 "surface {surface:?}"
             );
         }
@@ -2474,8 +2474,9 @@ mod tests {
         let components = PromptComponents::default();
         let prompt = render_full_prompt(components);
         assert!(prompt.contains("Run mode is headless"));
-        assert!(prompt.contains("requests an Ask session from the\nparent Work"));
-        assert!(prompt.contains("only for genuine absent-User action"));
+        assert!(prompt.contains("launch an ordinary Run explicitly"));
+        assert!(prompt.contains("opens a durable human session"));
+        assert!(prompt.contains("If no human authority is required"));
     }
 
     #[test]

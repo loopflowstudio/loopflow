@@ -1,8 +1,8 @@
 import SwiftUI
 
 /// The operational lens shared by Wave, Project, and Task rows: a small recessed
-/// glass light whose color is the shared attention grammar. Green = a live body
-/// is advancing; red = unhealthy; blue = waiting for the user; black = off and
+/// glass light whose color is the shared operating grammar. Green = a live body
+/// is advancing; red = blocked; blue = waiting on another actor; black = off and
 /// clean, nothing expected to run; unknown = evidence could not be read.
 public enum WaveLensColor: String, Sendable, Hashable {
     case green
@@ -28,13 +28,13 @@ public enum WaveLensColor: String, Sendable, Hashable {
     /// black lens renders as dark glass with no light.
     public var isLit: Bool { self != .black }
 
-    /// The shared attention level, mapped 1:1. W2-123's Rust owns the level; the
-    /// lens renders it, it never reconstructs it from status or process flags.
-    public init(_ level: TaskAttentionLevel) {
-        switch level {
-        case .red: self = .red
-        case .blue: self = .blue
-        case .black: self = .black
+    /// The shared Task condition, mapped 1:1. Rust owns the condition; the lens
+    /// renders it and never reconstructs it from status or process flags.
+    public init(_ state: TaskConditionState) {
+        switch state {
+        case .waiting: self = .blue
+        case .blocked: self = .red
+        case .clear: self = .black
         case .unknown: self = .unknown
         }
     }
@@ -52,25 +52,25 @@ public struct WaveLens: Sendable, Hashable {
         self.reason = reason
     }
 
-    /// Task lens: the shared attention level and reason, verbatim. The API gives
-    /// Tasks a Rust-owned `TaskAttentionSnapshot`, so the lens spends it directly
+    /// Task lens: the shared condition and reason, verbatim. The API gives Tasks
+    /// a Rust-owned `TaskConditionSnapshot`, so the lens spends it directly
     /// and invents nothing.
-    public static func forTask(_ attention: TaskAttentionSnapshot) -> WaveLens {
-        WaveLens(color: WaveLensColor(attention.level), reason: attention.reason)
+    public static func forTask(_ condition: TaskConditionSnapshot) -> WaveLens {
+        WaveLens(color: WaveLensColor(condition.state), reason: condition.reason)
     }
 
-    /// Project lens: derived only from the Project's Tasks' shared attention
-    /// evidence. The most demanding evidence wins (red > blue > unknown > black),
+    /// Project lens: derived only from its Tasks' shared condition evidence. The
+    /// most demanding evidence wins (blocked > waiting > unknown > clear),
     /// so unreadable Task evidence surfaces as unknown, not a silent black.
     public static func forProject(tasks: [WaveTaskWork]) -> WaveLens {
-        let folded = fold(tasks.map(\.attention))
+        let folded = fold(tasks.map(\.condition))
         if let folded { return folded }
         return WaveLens(color: .black, reason: "Off · no active work")
     }
 
     /// Wave lens (list context): derived only from the shared runtime `lf ls`
     /// carries for every row — liveness, lifecycle status, and active-work counts.
-    /// Per-Task attention is a focused `lf status` read, never fetched per row, so
+    /// Per-Task condition is a focused `lf status` read, never fetched per row, so
     /// the list projects from the coarse runtime facts. An unregistered Wave has
     /// no such reading; see `WaveViewModel.lens`, which shows it as unknown rather
     /// than guessing from a local session probe.
@@ -114,15 +114,20 @@ public struct WaveLens: Sendable, Hashable {
         return WaveLens(color: .red, reason: "Expected live · Wave listener did not answer")
     }
 
-    /// Fold Task attention into the parent's single reading. Priority is
-    /// red > blue > unknown > black: failure and user attention outrank unproven
-    /// evidence outranks (never collapses into) an off-and-clean black. Returns
+    /// Fold Task conditions into the parent's single reading. Priority is
+    /// blocked > waiting > unknown > clear: recovery outranks an external wait,
+    /// which outranks unproven evidence and a clear Task. Returns
     /// nil when there are no Tasks to read.
-    private static func fold(_ attentions: [TaskAttentionSnapshot]) -> WaveLens? {
-        guard !attentions.isEmpty else { return nil }
-        for level in [TaskAttentionLevel.red, .blue, .unknown, .black] {
-            if let hit = attentions.first(where: { $0.level == level }) {
-                return WaveLens(color: WaveLensColor(level), reason: hit.reason)
+    private static func fold(_ conditions: [TaskConditionSnapshot]) -> WaveLens? {
+        guard !conditions.isEmpty else { return nil }
+        for state in [
+            TaskConditionState.blocked,
+            .waiting,
+            .unknown,
+            .clear,
+        ] {
+            if let hit = conditions.first(where: { $0.state == state }) {
+                return WaveLens(color: WaveLensColor(state), reason: hit.reason)
             }
         }
         return nil

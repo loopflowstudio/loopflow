@@ -17,12 +17,16 @@ struct TaskStartReceipt: Decodable, Sendable, Equatable {
     let wave: String
 }
 
+private struct DevelopmentControlConfig: Decodable {
+    let lfPath: String
+}
+
 enum LocalWaveAgentLauncher {
     /// Stop the listener through the same `lf` lifecycle surface the CLI uses.
     /// The server performs resident, registry, and discovery-file cleanup.
     static func stopWave(repoPath: String, waveName: String) throws {
         let origin = WaveOrigin.resolve(repoPath)
-        let lfPath = try bundledLfPath()
+        let lfPath = try controlLfPath()
         try runChecked(waveStopCommand(lfPath: lfPath, waveName: waveName), cwd: origin)
     }
 
@@ -35,7 +39,7 @@ enum LocalWaveAgentLauncher {
     /// Task process; the app does not reproduce any of those decisions.
     static func runTask(repoPath: String, issue: String) throws {
         let origin = WaveOrigin.resolve(repoPath)
-        let lfPath = try bundledLfPath()
+        let lfPath = try controlLfPath()
         try runChecked(taskRunCommand(lfPath: lfPath, issue: issue), cwd: origin)
     }
 
@@ -47,7 +51,7 @@ enum LocalWaveAgentLauncher {
         directive: String
     ) throws -> TaskStartReceipt {
         let origin = WaveOrigin.resolve(repoPath)
-        let lfPath = try bundledLfPath()
+        let lfPath = try controlLfPath()
         let stdout = try runCheckedOutput(
             taskStartCommand(
                 lfPath: lfPath,
@@ -64,7 +68,7 @@ enum LocalWaveAgentLauncher {
     /// status record.
     static func resumeTask(repoPath: String, issue: String) throws {
         let origin = WaveOrigin.resolve(repoPath)
-        let lfPath = try bundledLfPath()
+        let lfPath = try controlLfPath()
         try runChecked(taskResumeCommand(lfPath: lfPath, issue: issue), cwd: origin)
     }
 
@@ -72,7 +76,7 @@ enum LocalWaveAgentLauncher {
     /// provider turn is stopped and records the receipt in the shared store.
     static func interruptTask(repoPath: String, issue: String) throws {
         let origin = WaveOrigin.resolve(repoPath)
-        let lfPath = try bundledLfPath()
+        let lfPath = try controlLfPath()
         try runChecked(taskInterruptCommand(lfPath: lfPath, issue: issue), cwd: origin)
     }
 
@@ -82,7 +86,7 @@ enum LocalWaveAgentLauncher {
     /// honored in one place. Only an explicit user review action calls this;
     /// background app work publishes with `lf pr publish`.
     static func reviewPullRequest(worktree: String) throws {
-        let lfPath = try bundledLfPath()
+        let lfPath = try controlLfPath()
         try runChecked(pullRequestReviewCommand(lfPath: lfPath), cwd: worktree)
     }
 
@@ -127,13 +131,39 @@ enum LocalWaveAgentLauncher {
         [lfPath, "task", "interrupt", issue]
     }
 
-    /// Return the control binary shipped with this exact Mac client build.
+    /// Return the CLI that owns the Home this Mac client controls.
     ///
-    /// A missing or stale bundled helper is a malformed app, not permission to
-    /// borrow a different wire contract from PATH or a checkout build.
-    static func bundledLfPath(
-        bundled: URL? = Bundle.main.url(forAuxiliaryExecutable: "lf")
+    /// Installed apps use their registered bundled helper. A development app
+    /// carries an explicit pointer to the machine install gate so Finder and
+    /// scripted launches see the same selected Home as terminal `lf`.
+    static func controlLfPath(
+        bundled: URL? = Bundle.main.url(forAuxiliaryExecutable: "lf"),
+        developmentConfig: URL? = Bundle.main.url(
+            forResource: "LoopflowDevControl",
+            withExtension: "json"
+        )
     ) throws -> String {
+        if let developmentConfig {
+            let config: DevelopmentControlConfig
+            do {
+                let data = try Data(contentsOf: developmentConfig)
+                let decoder = JSONDecoder()
+                decoder.keyDecodingStrategy = .convertFromSnakeCase
+                config = try decoder.decode(DevelopmentControlConfig.self, from: data)
+            } catch {
+                throw LocalLfError(
+                    errorDescription: "Loopflow Dev has an invalid machine control configuration: "
+                        + error.localizedDescription
+                )
+            }
+            guard FileManager.default.isExecutableFile(atPath: config.lfPath) else {
+                throw LocalLfError(
+                    errorDescription: "Loopflow Dev's machine lf is missing or not executable: "
+                        + config.lfPath
+                )
+            }
+            return config.lfPath
+        }
         guard let bundled, FileManager.default.isExecutableFile(atPath: bundled.path) else {
             throw LocalLfError(
                 errorDescription: "Loopflow.app is missing its executable bundled lf helper at Contents/MacOS/lf. "
@@ -145,10 +175,10 @@ enum LocalWaveAgentLauncher {
 
     /// Run an `lf` query verb (`ls`, `status`, `runs`, …) and return its
     /// stdout. Backs `RegistryQuery` on macOS: the wave dashboard reads durable
-    /// facts by shelling the daemonless bundled `lf` over the local store, not
+    /// facts by shelling the daemonless Home `lf` over the local store, not
     /// by streaming a center. Throws on a spawn failure or a non-zero exit.
     static func queryLf(_ subargs: [String], cwd: String?) throws -> String {
-        let lfPath = try bundledLfPath()
+        let lfPath = try controlLfPath()
         guard let result = run([lfPath] + subargs, cwd: cwd) else {
             throw LocalLfError(
                 errorDescription: "Failed to spawn: lf \(subargs.joined(separator: " "))"

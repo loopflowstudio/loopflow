@@ -275,7 +275,7 @@ impl SkillExecutor for CliFlowExecutor<'_> {
                 .as_deref()
                 .expect("validated human flow node has an id");
             anyhow::bail!(
-                "human flow node {node_id} requires an attached User surface; run it through durable Task Work to park it in the User Ask queue"
+                "human flow node {node_id} requires an attached User surface; run it through durable Task Work to park it as a human session"
             );
         }
         if let Some(progress) = ctx.progress {

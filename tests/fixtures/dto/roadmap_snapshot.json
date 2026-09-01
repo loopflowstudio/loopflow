@@ -132,18 +132,17 @@
                   "owner": "task",
                   "reason": "ready"
                 },
-                "attention": {
-                  "level": "black",
+                "active_pr": null,
+                "section": "now",
+                "actions": {
+                  "recommended": "resume",
+                  "reason": "resume the parked Task"
+                },
+                "condition": {
+                  "state": "clear",
                   "reason": "ready",
                   "observed_at": "2026-07-15T00:00:00Z",
                   "evidence_age_secs": 960,
-                  "next_owner": "task",
-                  "actions": {
-                    "recommended": "resume",
-                    "reason": "resume the parked Task"
-                  },
-                  "pm_completed": false,
-                  "work_status": "ready",
                   "local_progress": {
                     "state": "observed",
                     "unsettled": false,
@@ -151,11 +150,8 @@
                     "authored_commits": false,
                     "recovery_required": false,
                     "reason": null
-                  },
-                  "active_pr_phase": null
-                },
-                "active_pr": null,
-                "section": "now"
+                  }
+                }
               },
               {
                 "task": {
@@ -188,28 +184,6 @@
                   "owner": "user",
                   "reason": "merge pull request head abc1234 on GitHub"
                 },
-                "attention": {
-                  "level": "red",
-                  "reason": "merge pull request head abc1234 on GitHub",
-                  "observed_at": "2026-07-15T00:00:00Z",
-                  "evidence_age_secs": 7200,
-                  "next_owner": "user",
-                  "actions": {
-                    "recommended": "open_pr",
-                    "reason": "merge head abc1234 on GitHub"
-                  },
-                  "pm_completed": false,
-                  "work_status": "ready",
-                  "local_progress": {
-                    "state": "observed",
-                    "unsettled": true,
-                    "dirty": false,
-                    "authored_commits": true,
-                    "recovery_required": false,
-                    "reason": null
-                  },
-                  "active_pr_phase": "open"
-                },
                 "active_pr": {
                   "id": "pr-review",
                   "sequence": 1,
@@ -240,7 +214,25 @@
                   "merge_commit": null,
                   "abandoned_at": null
                 },
-                "section": "needs_attention"
+                "section": "waiting",
+                "actions": {
+                  "recommended": "open_pr",
+                  "reason": "merge head abc1234 on GitHub"
+                },
+                "condition": {
+                  "state": "waiting",
+                  "reason": "merge pull request head abc1234 on GitHub",
+                  "observed_at": "2026-07-15T00:00:00Z",
+                  "evidence_age_secs": 7200,
+                  "local_progress": {
+                    "state": "observed",
+                    "unsettled": true,
+                    "dirty": false,
+                    "authored_commits": true,
+                    "recovery_required": false,
+                    "reason": null
+                  }
+                }
               },
               {
                 "task": {
@@ -261,18 +253,17 @@
                   "owner": "project",
                   "reason": "Task is ready to start"
                 },
-                "attention": {
-                  "level": "black",
+                "active_pr": null,
+                "section": "available",
+                "actions": {
+                  "recommended": null,
+                  "reason": "Task is ready to start"
+                },
+                "condition": {
+                  "state": "clear",
                   "reason": "Task is ready to start",
                   "observed_at": "2026-07-15T00:00:00Z",
                   "evidence_age_secs": null,
-                  "next_owner": "project",
-                  "actions": {
-                    "recommended": null,
-                    "reason": "Task is ready to start"
-                  },
-                  "pm_completed": false,
-                  "work_status": null,
                   "local_progress": {
                     "state": "not_applicable",
                     "unsettled": false,
@@ -280,11 +271,8 @@
                     "authored_commits": null,
                     "recovery_required": null,
                     "reason": null
-                  },
-                  "active_pr_phase": null
-                },
-                "active_pr": null,
-                "section": "available"
+                  }
+                }
               },
               {
                 "task": {
@@ -317,18 +305,17 @@
                   "owner": "project",
                   "reason": "Linear Task is complete"
                 },
-                "attention": {
-                  "level": "black",
+                "active_pr": null,
+                "section": "later",
+                "actions": {
+                  "recommended": "no_action",
+                  "reason": "Task is completed"
+                },
+                "condition": {
+                  "state": "clear",
                   "reason": "Linear Task is complete",
                   "observed_at": "2026-07-15T00:00:00Z",
                   "evidence_age_secs": 10800,
-                  "next_owner": "project",
-                  "actions": {
-                    "recommended": "no_action",
-                    "reason": "Task is completed"
-                  },
-                  "pm_completed": true,
-                  "work_status": "done",
                   "local_progress": {
                     "state": "observed",
                     "unsettled": false,
@@ -336,11 +323,8 @@
                     "authored_commits": false,
                     "recovery_required": false,
                     "reason": null
-                  },
-                  "active_pr_phase": null
-                },
-                "active_pr": null,
-                "section": "later"
+                  }
+                }
               }
             ]
           }

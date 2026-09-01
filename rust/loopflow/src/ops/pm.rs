@@ -524,12 +524,6 @@ pub async fn linear_client(repo: &Path) -> OpsResult<LinearClient> {
     Ok(resolve_repository_context(repo).await?.client)
 }
 
-pub(crate) async fn linear_issue_client(repo: &Path, issue_id: &str) -> OpsResult<LinearClient> {
-    let context = resolve_repository_context(repo).await?;
-    resolve_owned_issue(repo, &context, issue_id).await?;
-    Ok(context.client)
-}
-
 async fn resolve_context(repo: &Path, wave: &str) -> OpsResult<PmContext> {
     let repository = resolve_repository_context(repo).await?;
     let provider = repository.provider;

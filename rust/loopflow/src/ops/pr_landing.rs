@@ -812,10 +812,7 @@ async fn create_landing(
     })?;
     let repo_id = crate::repository::RepoId::discover(&worktree)
         .map_err(|error| OpsError::Message(error.to_string()))?;
-    let task = store
-        .get_task_by_worktree(&worktree.display().to_string())
-        .await
-        .map_err(|error| OpsError::Message(error.to_string()))?;
+    let task = crate::ops::task::task_for_checkout(store, &worktree).await?;
     let (task_id, after_merge, next_slug) = match task {
         Some(task) => {
             let task_pr = store

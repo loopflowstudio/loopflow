@@ -22,7 +22,7 @@ Renamed from `systems` in the 2026-07-08 wave/project/task restructure. Steers L
 - **`scripts/test.py --all` cannot green the Loopflow UI suite headlessly** (filed). `xcodebuild` runs 304 app/unit tests to a pass, then `LoopflowUITests-Runner` hangs before establishing its connection and Xcode exits 65. Reproduced with a fresh `derivedDataPath`, so it is not a stale-cache artifact. Treat a `--all` UI failure as unproven, not as a regression, until the runner hang is fixed.
 - **Dotted-root vs dotted-ancestry collision — RESOLVED** by the WaveId decoupling: the dir is a flat `.`-chain, the remote branch carries `/`+author, and ancestry is read from the `Run` record, not the string. The old `branch_names.schema` grammar that caused it is gone.
 - **Run `cargo test` to completion before trusting a green-looking suite.** A failing lib target makes cargo skip every later target, so lib failures mask bin failures — two `bin/lf.rs` tests naming a deleted command had never run at all.
-- **Rust compilation does not validate SQLite column names.** Runtime SQL whose shape depends on a released schema must be shared with a behavior test that prepares and executes it against the materialized migration head. Epoch Work ownership is three exclusive foreign keys (`wave_id`, `project_id`, `task_id`); generic kind/id belongs to explicit routes such as parent Asks, not to Epochs.
+- **Rust compilation does not validate SQLite column names.** Runtime SQL whose shape depends on a released schema must be shared with a behavior test that prepares and executes it against the materialized migration head. Epoch Work ownership is three exclusive foreign keys (`wave_id`, `project_id`, `task_id`); generic kind/id belongs to explicit routes such as synchronous cross-Work questions, not to Epochs.
 - **Source history must reconstruct every applied release frontier** (learned 2026-07-20). One pre-schema-closure local promotion embedded a test-materialized `0.12.4` batch and advanced the shared store while git retained the ten source drafts and omitted the canonical file. Recovery preserved the database, extracted the canonical bytes from the retained immutable binary, matched their checksum to `schema_migrations`, registered the batch, and removed only byte-identical drafts. If a store is ahead by an unknown migration, retain state and old binary bytes; prove the checksum before ratifying history. Since #1123, draft-bearing candidates fail promotion even at an exact frontier, while a schema-complete exact-frontier CLI repair may safely activate with live Runs because it writes no migration.
 - **Tests must survive draft migration materialization** (learned 2026-07-21).
   Release-equivalent Rust tests delete ordinal-free drafts and compile the
@@ -48,8 +48,8 @@ Renamed from `systems` in the 2026-07-08 wave/project/task restructure. Steers L
   Task control then correctly fails because only the immediate parent may act.
   Preserve the existing Task, Work, and PR; do not retry into duplicate Runs
   or publications. Wake pursuit only when a basis-bearing immediate-parent Run
-  exists. A Turn without `LF_AGENT_INVOCATION_ID` also cannot open a parent Ask,
-  so report that escalation boundary explicitly rather than silently spinning.
+  exists. Cross-Work judgment now starts a fresh Work-bound Run and never
+  substitutes for missing immediate-parent control authority.
 - **Historical continuity currently short-circuits daily telemetry** (observed
   2026-08-23). `telemetry-daily` stops in `doctor` on the same eight 2026-08-04
   through 2026-08-11 gap days before its scorecard runs. LOO-241 owns making
@@ -110,13 +110,20 @@ Renamed from `systems` in the 2026-07-08 wave/project/task restructure. Steers L
   resetting it. Generic Task-bound Runs remain legal and gain no resident or
   worktree authority from attribution; there is no phase generation or stale
   writer fence to turn one process into “the Task.”
-- **Durable Ask is the only blocking human-input primitive** (decided
-  2026-07-21). Interactive Task phases are advisory: the runner makes one launch
-  attempt and advances independently of launcher success, UI lifetime, or
-  Invocation handback. A launched surface is read-only while the next writable
-  phase owns the Task worktree; providers without enforceable read-only mode
-  fail closed. Launch failure ends the Invocation once, while a successful
-  launch stays live until optional handback records its evidence.
+- **Phase-owned state needs the same freshness boundary in memory and storage**
+  (learned 2026-07-20). Passive reconciliation may advance a durable Task to
+  finally while its active Run still holds a pre-final snapshot. Refresh a gate
+  proposal only within the same finally epoch; first/loop snapshots keep no
+  proposal and the store's `phase_epoch` fence preserves newer durable truth.
+  Validation runs before SQL, so a persistence fence cannot repair a torn local
+  refresh. Terminal Work remains authoritative over stale resumable failure
+  observations.
+- **A declared human Task FlowStep is the only blocking human-input primitive.**
+  The Task persists one exact flow/node/skill/iteration playhead, launches that
+  named Skill through ordinary `lf --as task:<id>`, and advances only through
+  typed accept/decline settlement. Closing the terminal leaves it waiting.
+   Agent-to-agent questions remain synchronous fresh Runs and own no planning
+   state.
 - **Persisted executable references are an installed-state invariant** (learned
   2026-07-21). Removing or renaming a builtin flow requires a forward migration
   for every surviving Task pin, plus catalog resolution before Run reservation.

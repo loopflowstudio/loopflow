@@ -109,28 +109,6 @@
             "owner": "user",
             "reason": "merge pull request head 333333333333 on GitHub"
           },
-          "attention": {
-            "level": "red",
-            "reason": "merge pull request head 333333333333 on GitHub",
-            "observed_at": "2026-07-13T21:00:00Z",
-            "evidence_age_secs": 7200,
-            "next_owner": "user",
-            "actions": {
-              "recommended": "open_pr",
-              "reason": "merge head 333333333333 on GitHub"
-            },
-            "pm_completed": false,
-            "work_status": "ready",
-            "local_progress": {
-              "state": "observed",
-              "unsettled": true,
-              "dirty": false,
-              "authored_commits": true,
-              "recovery_required": false,
-              "reason": null
-            },
-            "active_pr_phase": "open"
-          },
           "prs": [
             {
               "id": "pr_33333333333333333333333333333333",
@@ -163,7 +141,25 @@
               "abandoned_at": null
             }
           ],
-          "active_pr": "pr_33333333333333333333333333333333"
+          "active_pr": "pr_33333333333333333333333333333333",
+          "actions": {
+            "recommended": "open_pr",
+            "reason": "merge head 333333333333 on GitHub"
+          },
+          "condition": {
+            "state": "waiting",
+            "reason": "merge pull request head 333333333333 on GitHub",
+            "observed_at": "2026-07-13T21:00:00Z",
+            "evidence_age_secs": 7200,
+            "local_progress": {
+              "state": "observed",
+              "unsettled": true,
+              "dirty": false,
+              "authored_commits": true,
+              "recovery_required": false,
+              "reason": null
+            }
+          }
         },
         {
           "task": {
@@ -185,18 +181,17 @@
             "owner": "project",
             "reason": "Task is ready to start"
           },
-          "attention": {
-            "level": "black",
+          "prs": [],
+          "active_pr": null,
+          "actions": {
+            "recommended": null,
+            "reason": "Task is ready to start"
+          },
+          "condition": {
+            "state": "clear",
             "reason": "Task is ready to start",
             "observed_at": "2026-07-13T21:00:00Z",
             "evidence_age_secs": null,
-            "next_owner": "project",
-            "actions": {
-              "recommended": null,
-              "reason": "Task is ready to start"
-            },
-            "pm_completed": false,
-            "work_status": null,
             "local_progress": {
               "state": "not_applicable",
               "unsettled": false,
@@ -204,11 +199,8 @@
               "authored_commits": null,
               "recovery_required": null,
               "reason": null
-            },
-            "active_pr_phase": null
-          },
-          "prs": [],
-          "active_pr": null
+            }
+          }
         }
       ]
     }
@@ -281,8 +273,14 @@
         "repo": "/src/loopflow",
         "worktree": "/src/loopflow.task",
         "subjects": [
-          {"selector": "wave:infrastructure", "source": "declared"},
-          {"selector": "task:INF-123", "source": "declared"}
+          {
+            "selector": "wave:infrastructure",
+            "source": "declared"
+          },
+          {
+            "selector": "task:INF-123",
+            "source": "declared"
+          }
         ],
         "skill": "task/pursue",
         "outcome": "completed",
@@ -306,21 +304,6 @@
         "harness": "codex",
         "model": "gpt-5",
         "surface": "headless"
-      }
-    ]
-  },
-  "attention": {
-    "state": "ok",
-    "truncated": false,
-    "items": [
-      {
-        "kind": "task",
-        "id": "ts_22222222222222222222222222222222",
-        "subject": "INF-123",
-        "owner": "user",
-        "reason": "merge pull request head 333333333333 on GitHub",
-        "since": "2026-07-13T19:00:00Z",
-        "age_secs": 7200
       }
     ]
   },

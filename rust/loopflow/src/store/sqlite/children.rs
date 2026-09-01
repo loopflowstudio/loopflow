@@ -29,10 +29,7 @@ use crate::work::task::{
     TaskEvent, TaskEventKind, TaskId, TaskLinearObservation, TaskPr, TaskPrId, TaskPrRepairKind,
 };
 
-use super::durable::{
-    create_project_work, create_task_work, reopen_work_in, validate_work_completion_readiness_in,
-    work_for_child_in,
-};
+use super::durable::{create_project_work, create_task_work, reopen_work_in, work_for_child_in};
 use super::SqliteStore;
 
 impl SqliteStore {
@@ -230,16 +227,31 @@ impl SqliteStore {
         resolve_current_task(issue, tasks)
     }
 
-    pub fn task_by_worktree(&self, worktree: &str) -> StoreResult<Option<Task>> {
+    pub fn task_by_branch(&self, branch: &str) -> StoreResult<Option<Task>> {
         let conn = self.conn.lock().expect("store mutex poisoned");
-        let query = format!("{TASK_COLUMNS} WHERE t.worktree=?1");
+        let query = format!(
+            "{TASK_COLUMNS} WHERE EXISTS (
+                SELECT 1 FROM task_prs matched
+                WHERE matched.task_id=t.id AND matched.branch=?1
+                  AND matched.abandoned_at IS NULL
+                  AND (
+                    matched.merge_commit IS NULL
+                    OR NOT EXISTS (
+                        SELECT 1 FROM task_prs active
+                        WHERE active.task_id=t.id
+                          AND active.merge_commit IS NULL
+                          AND active.abandoned_at IS NULL
+                    )
+                  )
+            )"
+        );
         let mut statement = conn.prepare(&query)?;
-        let rows = statement.query_map(params![worktree], map_task_row)?;
+        let rows = statement.query_map(params![branch], map_task_row)?;
         let mut tasks = Vec::new();
         for row in rows {
             tasks.push(row?);
         }
-        resolve_current_task(worktree, tasks)
+        resolve_current_task(branch, tasks)
     }
 
     pub fn list_tasks(&self, wave_id: Option<&WaveId>) -> StoreResult<Vec<Task>> {
@@ -813,7 +825,6 @@ impl SqliteStore {
                 )))
             }
         })?;
-        validate_work_completion_readiness_in(&transaction, &work)?;
         let parameters = project_params(project);
         if transaction.execute(
             PROJECT_UPDATE,

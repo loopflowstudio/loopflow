@@ -168,12 +168,13 @@ that a process is still alive.
 lf runs --task LOO-265 --json
 lf runs run_ab12 --events
 lf replay run_ab12
-lf usage --days 30 --json
+lf usage --task LOO-265 --days 30 --json
 ```
 
-`scan_runs_since` reduces record files into `RunSnapshot`. `lf runs`, `lf
-usage`, Work activity, status views, and the Mac app consume that projection.
-There is no authoritative Run index to repair.
+`scan_runs_since` reduces record files into `RunSnapshot`. `lf runs` and `lf
+usage` apply the same Wave/Project/Task attribution drill over that projection;
+Work activity, status views, and the Mac app consume it too. There is no
+authoritative Run index to repair.
 
 Replay resolves one full Run ID or unambiguous prefix, verifies that its
 manifest contains a headless launch request and that the named provider account

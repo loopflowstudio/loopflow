@@ -1,6 +1,8 @@
 # Delivery
 
-A Task binds durable planning to one managed worktree and one serial PR chain.
+A Task binds durable planning to one managed worktree and one active remote
+branch at a time. The current implementation retains settled PRs as a serial
+delivery history.
 Git owns commits and branches. GitHub owns PR heads, checks, and merge. Local
 state records enough evidence to resume the workflow safely.
 
@@ -31,7 +33,7 @@ Task Work ----> managed worktree ----> commits
 | Object | Authority |
 | --- | --- |
 | Task directive and Project membership | Linear Issue |
-| managed worktree path and serial PR state | Task delivery records plus resolved Git repository |
+| managed worktree placement and serial PR state | Task delivery records plus resolved Git repository |
 | commits, branch ancestry, rebase state | Git |
 | PR head, required checks, merge | GitHub |
 | landing supervision and repair admission | exact recorded PR head plus landing generation |
@@ -166,7 +168,10 @@ serial chain to a new branch from fetched main.
 
 ## Boundary contracts
 
-- One Task owns one worktree and one serial PR chain.
+- One Task has one active remote branch. A checkout tracking it identifies the
+  Task; the stored worktree path is placement.
+- Settled PRs may remain as serial history until the one-branch Task model
+  replaces rotation.
 - Simultaneously open dependent work belongs to another stacked Task.
 - Git and GitHub remain authority for their own objects.
 - Locks serialize exact local races, not all activity.

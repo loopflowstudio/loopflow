@@ -43,6 +43,7 @@ enum CaptureTarget {
 enum AppTestMode: String {
     case emptyWorkspaces = "empty-workspaces"
     case mockWaves = "mock-waves"
+    case sessionFixtures = "session-fixtures"
     /// Renders through the REAL `lf` registry — the same read path production
     /// uses — while keeping the snapshot/width test knobs armed. Every other
     /// mode bypasses the registry with fixture data; `live` is the honest

@@ -199,14 +199,19 @@ pub fn prepare_launch_prompt(
 
 fn validate_agent_policy(agent: &str) -> Result<(), CoreError> {
     let (harness, variant) = parse_agent(agent);
-    if harness != "opencode" {
-        return Ok(());
+    match harness.as_str() {
+        "claude" | "codex" => return Ok(()),
+        "opencode" => {}
+        _ => {
+            return Err(CoreError::ExecutionFailed(format!(
+                "unsupported agent harness '{harness}': use 'claude', 'codex', or 'opencode'"
+            )));
+        }
     }
 
-    // `parse_agent` resolves bare `opencode` to the Loopflow-owned
-    // `opencode/glm-5.2` default, so a variant is always present for OpenCode.
-    // Validate explicit selections against the supported set.
-    let variant = variant.expect("parse_agent resolves a default model for the opencode harness");
+    let Some(variant) = variant else {
+        return Ok(());
+    };
     if is_supported_opencode_model_variant(&variant) {
         return Ok(());
     }
@@ -362,7 +367,7 @@ Test skill body.
         fs::write(
             tmp.path().join(".lf/skills/test.md"),
             r#"---
-default_agent: gemini:2.5-pro
+default_agent: claude:sonnet
 ---
 Test skill body.
 "#,
@@ -382,7 +387,7 @@ Test skill body.
         )
         .expect("prepare launch prompt");
 
-        assert_eq!(prepared.config.agent.as_deref(), Some("gemini:2.5-pro"));
+        assert_eq!(prepared.config.agent.as_deref(), Some("claude:sonnet"));
     }
 
     #[test]
@@ -426,7 +431,7 @@ Test skill body.
         fs::write(
             tmp.path().join(".lf/skills/test.md"),
             r#"---
-default_agent: gemini:2.5-pro
+default_agent: claude:sonnet
 ---
 Test skill body.
 "#,
@@ -630,6 +635,25 @@ Test skill body.
     }
 
     #[test]
+    fn prepare_launch_prompt_rejects_unknown_harnesses() {
+        let tmp = create_repo_fixture();
+        let err = prepare_launch_prompt(
+            &default_test_config(),
+            LaunchPromptInput {
+                repo_root: tmp.path().to_path_buf(),
+                agent: Some("retired-agent".to_string()),
+                surface: Surface::Headless,
+                ..LaunchPromptInput::default()
+            },
+        )
+        .expect_err("unknown harness should fail");
+
+        assert!(err
+            .to_string()
+            .contains("unsupported agent harness 'retired-agent'"));
+    }
+
+    #[test]
     fn prepare_launch_prompt_accepts_supported_opencode_variants() {
         let tmp = create_repo_fixture();
         let config = default_test_config();
@@ -651,7 +675,7 @@ Test skill body.
     }
 
     #[test]
-    fn prepare_launch_prompt_accepts_bare_opencode_default() {
+    fn prepare_launch_prompt_accepts_the_users_opencode_default() {
         let tmp = create_repo_fixture();
         let config = default_test_config();
         let prepared = prepare_launch_prompt(
@@ -663,11 +687,8 @@ Test skill body.
                 ..LaunchPromptInput::default()
             },
         )
-        .expect("bare OpenCode should resolve to the Loopflow-owned default");
+        .expect("bare OpenCode should defer to the user's default");
 
-        // The bare agent string is preserved; `parse_agent` resolves the
-        // `opencode/glm-5.2` default at consumption time so explicit selections
-        // still win.
         assert_eq!(prepared.config.agent.as_deref(), Some("opencode"));
     }
 }

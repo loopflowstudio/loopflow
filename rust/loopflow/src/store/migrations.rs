@@ -1933,6 +1933,7 @@ mod tests {
     const REOPEN_REPAIR_NAME: &str = "retire_obsolete_pm_reopen_writebacks";
     const GATE_PROPOSAL_REPAIR_NAME: &str = "repair_legacy_task_gate_proposals";
     const LEGACY_TASK_FLOW_REPAIR_NAME: &str = "repair_legacy_task_flow";
+    const COMPLETED_TASK_WORK_REPAIR_NAME: &str = "restore_completed_task_work";
     const TURN_USAGE_SAMPLES_NAME: &str = "add_turn_usage_samples";
     const REPOSITORY_OWNED_WAVES_NAME: &str = "repository_owned_waves";
     const REMOVE_TASK_LIFECYCLE_OUTCOME_NAME: &str = "remove_task_lifecycle_outcome";
@@ -2358,7 +2359,6 @@ mod tests {
             .unwrap();
         conn.pragma_update(None, "foreign_keys", "OFF").unwrap();
         for draft in [
-            "generic_ask_run_claim",
             "opaque_steer_run_provenance",
             "stable_work_state",
             "obsolete_sql_lifecycle",
@@ -2375,10 +2375,9 @@ mod tests {
         let conn = open();
         conn.execute_batch("PRAGMA foreign_keys = ON").unwrap();
         apply_before_current_draft(&conn, "stable_work_state");
-        if !columns(&conn, "ask_exchanges").contains(&"source_run_id".to_string()) {
-            for draft in ["generic_ask_run_claim", "opaque_steer_run_provenance"] {
-                conn.execute_batch(&current_draft_sql(draft)).unwrap();
-            }
+        if !columns(&conn, "tasks").contains(&"work_state".to_string()) {
+            conn.execute_batch(&current_draft_sql("opaque_steer_run_provenance"))
+                .unwrap();
         }
         conn.execute(
             "INSERT INTO waves (id, name, repo, created_at, parent_wave_id)
@@ -2431,11 +2430,7 @@ mod tests {
         conn.execute_batch("PRAGMA foreign_keys = OFF").unwrap();
         apply_before_current_draft(&conn, "obsolete_sql_lifecycle");
         if !columns(&conn, "tasks").contains(&"work_state".to_string()) {
-            for draft in [
-                "generic_ask_run_claim",
-                "opaque_steer_run_provenance",
-                "stable_work_state",
-            ] {
+            for draft in ["opaque_steer_run_provenance", "stable_work_state"] {
                 conn.execute_batch(&current_draft_sql(draft)).unwrap();
             }
         }
@@ -3595,6 +3590,10 @@ mod tests {
         .unwrap();
 
         apply_sqlite(&conn).unwrap();
+        if !_draft_is_canonical(COMPLETED_TASK_WORK_REPAIR_NAME) {
+            conn.execute_batch(&migration_sql_for_test(COMPLETED_TASK_WORK_REPAIR_NAME))
+                .unwrap();
+        }
         apply_current_work_schema(&conn);
 
         let task: (String, String, String, String) = conn
@@ -3607,7 +3606,7 @@ mod tests {
             .unwrap();
         assert_eq!(task.1, "INF-123");
         assert_eq!(task.2, "inf-123");
-        assert_eq!(task.3, "ready");
+        assert_eq!(task.3, "done");
         let pr: (
             i64,
             String,
@@ -4537,10 +4536,10 @@ mod tests {
     }
 
     #[test]
-    fn stable_work_schema_keeps_asks_without_a_global_flow_cursor() {
+    fn native_human_session_schema_replaces_ask_with_human_flow_positions() {
         let conn = open();
-        apply_sqlite(&conn).unwrap();
-        apply_current_work_schema(&conn);
+        apply_installed_development_sqlite(&conn, crate::build_info::migration_draft_manifest())
+            .unwrap();
 
         assert!(!conn
             .query_row(
@@ -4556,58 +4555,33 @@ mod tests {
         for deleted in ["kickoff_reviewer", "iterate_reviewer", "gate_reviewer"] {
             assert!(!task_columns.contains(&deleted.to_string()));
         }
-        assert!(!conn
-            .query_row(
-                "SELECT EXISTS(
-                    SELECT 1 FROM sqlite_master
-                    WHERE type='table' AND name='work_flow_positions'
-                )",
-                [],
-                |row| row.get::<_, bool>(0),
-            )
-            .unwrap());
-
-        let ask_columns = columns(&conn, "ask_exchanges");
-        assert!(ask_columns.contains(&"source_run_id".to_string()));
-        for deleted in [
-            "epoch_id",
-            "origin_run_id",
-            "origin_turn_id",
-            "origin_invocation_id",
+        let position_columns = columns(&conn, "work_flow_positions");
+        for present in [
+            "work_kind",
+            "work_id",
+            "node_id",
+            "human",
+            "session_run_id",
+            "ready_summary",
         ] {
-            assert!(!ask_columns.contains(&deleted.to_string()));
+            assert!(position_columns.contains(&present.to_string()));
+        }
+        for deleted in ["epoch_id", "interactive"] {
+            assert!(!position_columns.contains(&deleted.to_string()));
         }
 
-        conn.execute_batch("PRAGMA foreign_keys=OFF").unwrap();
-        conn.execute_batch(
-            "INSERT INTO ask_exchanges (
-                id, origin_work_kind, origin_work_id, source_run_id,
-                origin_home_id, origin_cwd,
-                target_kind, target_work_kind, target_work_id,
-                request_kind, request_prompt, state, asked_at
-             ) VALUES
-             (
-                'ask_one', 'task', 'task_one', 'run_one', 'home_one', '/repo',
-                'parent', 'project', 'proj_parent',
-                'intervention', 'Which proof?', 'queued', 1
-             ),
-             (
-                'ask_two', 'task', 'task_one', 'run_one', 'home_one', '/repo',
-                'user', NULL, NULL,
-                'intervention', 'Another proof?', 'queued', 2
-             )",
-        )
-        .unwrap();
-        assert_eq!(
-            conn.query_row(
-                "SELECT COUNT(*) FROM ask_exchanges
-                 WHERE state='queued' AND source_run_id='run_one'",
-                [],
-                |row| row.get::<_, i64>(0),
-            )
-            .unwrap(),
-            2
-        );
+        for table in ["ask_exchanges", "ask_linear_comment_outbox"] {
+            assert!(!conn
+                .query_row(
+                    "SELECT EXISTS(
+                        SELECT 1 FROM sqlite_master
+                        WHERE type='table' AND name=?1
+                    )",
+                    [table],
+                    |row| row.get::<_, bool>(0),
+                )
+                .unwrap());
+        }
     }
 
     #[test]
@@ -4812,91 +4786,6 @@ mod tests {
             .unwrap(),
             None
         );
-    }
-
-    #[test]
-    fn generic_ask_run_claim_keeps_history_and_removes_invocation_authority() {
-        let conn = open();
-        apply_before_current_draft(&conn, "generic_ask_run_claim");
-        conn.execute_batch(
-            "INSERT INTO waves (id, name, repo, created_at)
-                 VALUES ('wave_ask', 'ask', '/repo', 1);
-             INSERT INTO projects (id, wave_id, external_project_id, created_at)
-                 VALUES ('project_ask', 'wave_ask', 'linear-ask', 1);
-             INSERT INTO epochs (
-                 id, number, wave_id, project_id, task_id, state, current_rev,
-                 created_at, terminal_at
-             ) VALUES ('epoch_ask', 1, NULL, 'project_ask', NULL, 'open', 0, 1, NULL);
-             INSERT INTO runs (
-                 id, epoch_id, home_id, state, trigger_json, retry_of,
-                 runtime_generation, source_kind, source_id, created_at,
-                 ended_at, stop_reason, containment_kind, containment_id, cwd,
-                 started_at
-             ) VALUES (
-                 'run_source_bytes', 'epoch_ask', (SELECT id FROM homes LIMIT 1),
-                 'ended', '{\"kind\":\"user\"}', NULL, NULL, 'project',
-                 'project_ask', 1, 2, NULL, NULL, NULL, NULL, NULL
-             );
-             INSERT INTO ask_exchanges (
-                 id, epoch_id, origin_work_kind, origin_work_id, origin_run_id,
-                 origin_turn_id, origin_invocation_id, origin_home_id, origin_cwd,
-                 target_kind, request_kind, request_prompt, state, asked_at
-             ) VALUES (
-                 'ask_generic', 'epoch_ask', 'project', 'project_ask',
-                 'run_source_bytes', NULL, NULL, (SELECT id FROM homes LIMIT 1),
-                 '/repo', 'user', 'intervention', 'Recover safely', 'queued', 2
-             );
-             INSERT INTO agent_invocations (
-                 id, run_id, process_id, started_at, repo, worktree, provider,
-                 surface, capture_status, outcome, artifact_dir,
-                 conversation_path, conversation_event_count, conversation_bytes,
-                 supervising_run_id, answer_ask_id, ask_ready_at, ask_presented_at
-             ) VALUES (
-                 'invocation_ask', 'trace_ask', 'process_ask', 3, '/repo', '/repo',
-                 'codex', 'ask_tui', 'prompt_only', 'running', '', '', 0, 0,
-                 'run_source_bytes', 'ask_generic', 4, 5
-             );
-             UPDATE ask_exchanges
-                SET state='claimed', active_invocation_id='invocation_ask'
-              WHERE id='ask_generic';",
-        )
-        .unwrap();
-
-        conn.execute_batch(&current_draft_sql("generic_ask_run_claim"))
-            .unwrap();
-
-        let ask_columns = columns(&conn, "ask_exchanges");
-        for removed in [
-            "origin_run_id",
-            "origin_turn_id",
-            "origin_invocation_id",
-            "active_invocation_id",
-        ] {
-            assert!(!ask_columns.contains(&removed.to_string()));
-        }
-        for added in ["source_run_id", "active_run_id", "ready_at", "presented_at"] {
-            assert!(ask_columns.contains(&added.to_string()));
-        }
-        assert_eq!(
-            conn.query_row(
-                "SELECT state || ':' || source_run_id || ':' ||
-                        COALESCE(active_run_id, 'none')
-                 FROM ask_exchanges WHERE id='ask_generic'",
-                [],
-                |row| row.get::<_, String>(0),
-            )
-            .unwrap(),
-            "queued:run_source_bytes:none"
-        );
-        assert!(conn
-            .query_row(
-                "SELECT answer_ask_id IS NULL AND ask_ready_at IS NULL
-                        AND ask_presented_at IS NULL
-                 FROM agent_invocations WHERE id='invocation_ask'",
-                [],
-                |row| row.get::<_, bool>(0),
-            )
-            .unwrap());
     }
 
     #[test]

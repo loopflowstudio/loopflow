@@ -7,9 +7,9 @@
 import Loopflow
 import SwiftUI
 
-/// The four operating states the fader can show. Blocked and needs-attention
-/// are collapsed into `.waiting` for now; the blockings Ask queue will refine
-/// that split when it lands.
+/// The four operating states the fader can show. Blocked Work and a waiting
+/// Session are collapsed into `.waiting` for now; richer Task conditions can
+/// refine that split later.
 enum FaderPhase: Equatable {
     case off
     case starting
@@ -45,7 +45,7 @@ enum FaderPhase: Equatable {
     }
 }
 
-/// Collapse exact process activity and the human-attention channel into one phase.
+/// Collapse exact process activity and a waiting Session into one phase.
 /// A human-owed stop wins over sibling activity: one red task turns its wave's
 /// whole column red. `agentRunning` distinguishes a spun-up-but-quiet agent
 /// (starting) from no agent at all (off).

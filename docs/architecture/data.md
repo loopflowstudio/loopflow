@@ -51,11 +51,10 @@ The current application tables group by owner:
 
 | Owner | Tables | Purpose |
 | --- | --- | --- |
-| Tracked Work | `waves`, `projects`, `project_events`, `tasks`, `task_events` | stable identity, status, progress, history |
-| Controller automation | `project_controller_state`, `task_controller_state` | end-to-end playheads, provider continuation, controller observations |
-| Task delivery | `task_prs`, `task_pr_repair_incidents`, `task_linear_observations`, `task_linear_ingested_comments` | serial PRs and provider observations |
-| Work input | `steers`, `tool_responses`, `work_placements` | corrections, tool answers, Home placement |
-| Ask | `ask_exchanges`, `ask_linear_comment_outbox` | blocking requests, answering fence, results, publication |
+| Planning hierarchy | `waves`, `projects`, `project_events`, `tasks`, `task_events` | stable identity, progress, history |
+| Controller automation | `project_controller_state`, `task_controller_state` | Project and Task playheads plus provider continuation |
+| Task delivery | `task_prs`, `task_pr_repair_incidents`, `task_linear_observations`, `task_linear_ingested_comments` | one active branch/PR and provider observations |
+| Work input | `steers`, `tool_responses`, `work_flow_positions`, `work_placements` | corrections, tool answers, playheads, Home placement |
 | PM projection | `pm_snapshots`, `observation_outbox` | bounded Linear reads and deferred publication |
 | Metrics | `metric_instruments`, `metric_observations` | registered producers and accepted evidence |
 | PR landing | `pr_landings`, `ci_incidents` | exact-head supervision and bounded repair |
@@ -138,7 +137,7 @@ Git, Linear, GitHub, and providers. Each workflow chooses the smallest boundary
 that can prove its own transition:
 
 - atomic rename publishes a Run manifest;
-- exclusive create settles a Run or Ask result once;
+- exclusive create publishes one immutable Run record;
 - a SQLite transaction advances one durable domain state;
 - an OS file lock excludes one local critical section;
 - an exact PR head fences check and merge evidence;

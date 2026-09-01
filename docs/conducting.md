@@ -19,7 +19,7 @@ executes; `lf ssh` is the explicit remote boundary.
 
 ```bash
 lf ls                  # every wave, running and stopped, live servers marked
-lf status <wave>       # one wave's Project → Task hierarchy, runs, attention
+lf status <wave>       # one wave's Project → Task hierarchy, Runs, conditions
 lf roadmap             # every open Task across this repository's Waves
 lf roadmap --all       # every repository on this machine
 lf activity            # what changed, newest first, with durable evidence
@@ -32,10 +32,10 @@ The Mac Wave detail renders that Rust-derived evidence without recomputing
 targets or freshness.
 
 `lf roadmap` buckets this repository's work by what it needs: **Now** (live
-and advancing), **Needs attention** (a User-routed Ask or recovery),
-**Available**, **Later**. It overlays live evidence on
-the Linear-backed plan, so the answer to "where is my attention needed" is one
-command. Add `--all` for the machine-wide projection.
+and advancing), **Waiting**, **Available**, **Later**. It overlays live evidence
+on the Linear-backed plan. Each Task carries one semantic condition — clear,
+waiting, blocked, or unknown — while `lf session list` is the separate list of
+unresolved human conversations. Add `--all` for the machine-wide projection.
 
 `lf activity` orders durable Work creation, Run, Task PR, and Steer facts.
 Filter with `--wave`, `--project`, or `--task`; filters apply before `--limit`.
@@ -69,6 +69,7 @@ lf ps              # one OS-live process and call-tree snapshot
 lf top             # continuously refresh elapsed time and process state
 lf prune --dry-run # inspect safely removable process state
 lf usage --days 30 # direct cumulative provider evidence per Run
+lf usage --task INF-123 # the same evidence drilled to one Task
 lf usage --json    # RunSnapshot rows ordered newest first
 lf tokens          # lines and tokens per directory; --days walks history
 lf ci --since 7d   # how failed CI was detected, repaired, and landed
@@ -91,8 +92,8 @@ Reading is half; the system stays steerable while it runs.
 lf chat --steer "ship the parser fix first"   # reach the live wave body, else queue
 lf chat --follow                              # replay and tail the conversation
 lf task steer INF-123 "smaller PR"            # queue durable Task direction
-lf ask list --user --json                     # requested sessions needing attention
-lf ask open ask_...                            # open one Ask session
+lf session list --json                        # unresolved human Sessions
+lf session open <session-id> --json           # recover one exact conversation
 ```
 
 Task and Project steering appends durable direction for the controller's next
@@ -100,15 +101,17 @@ boundary and relaunches it if stopped. Wave Chat may also attempt a live send.
 Neither a stored Steer nor transport acceptance proves that an agent applied
 the direction — see [The Agent API](agent-api.md#steer).
 
-An intervention Ask is targeted tool I/O for one Work. It does not enter the
-Steer queue; the enclosing work advances only when it completes. A human Task
-node uses a `FlowStep` Ask between autonomous steps and advances only after
-explicit resolution.
+`lf ask` is a synchronous boundary with a human. It opens an ordinary TUI Run
+against the caller's exact checkout, enters the Sessions surface, and blocks
+the caller until the human completes the conversation.
+Use `lf --as <work> : "<prompt>"` when only another agent perspective is needed.
 
-Human Task nodes park the playhead and appear in the same User Ask queue.
-Opening one runs the authored skill in the Task worktree. Release or ordinary
-exit requeues it; decline returns to autonomous work; presentation and handback
-never advance it.
+A human Task node persists the exact `FlowPosition` and provider Run between
+autonomous steps. Opening it stops the exact background client and resumes the
+provider-native conversation for the authored `lf --as task:<id>` Skill. The
+agent may mark the session ready, but that does not remove it or advance
+anything. Human Approve advances the playhead; Iterate returns to autonomous
+work with new direction; closing or provider exit never advances it.
 
 ## The Mac app
 
@@ -117,9 +120,10 @@ and the machine-wide roadmap, and it is a pure client over `lf --json` — no
 second database, no machine-wide service. What the CLI reads, it renders:
 
 - **Wave Chat** — the persistent conversation, with send, steer, and interrupt.
-- **Roadmap** — every Task across every wave with lifecycle controls and
-  attention lenses: green (advancing), blue (waiting on you), red (unhealthy),
-  black (settled).
+- **Roadmap** — every Task across every wave with lifecycle controls and one
+  condition: waiting, blocked, clear, or unknown.
+- **Sessions** — interactive Runs, Asks, and Task FlowSteps with their exact
+  provider-native conversation and valid resolution actions.
 - **Task workspace** — changed files, per-file patches, and local inspection tools.
 - **Telemetry** — token spend, codebase growth, registry health.
 
@@ -133,8 +137,10 @@ tmux ls                     # live agent processes
 tmux attach -r -t <name>    # read-only look inside one
 ```
 
-Use `lf ask list` and `lf ask open` when Work asks an exact question. Use
-`lf chat --steer` or `lf task steer` for unsolicited durable direction.
+Use the [Sessions lifecycle](../README.md#sessions) to open and explicitly
+resolve every unresolved human Session.
+Use `lf chat --steer` or `lf task steer` for unsolicited durable direction,
+`lf --as` for another agent perspective, and `lf ask` for a new human boundary.
 
 ## Next
 

@@ -66,7 +66,6 @@ use crate::controller::wave::runtime::InboxItem;
 use crate::controller::wave::supervisor::sleep_until_opt;
 use crate::controller::wave::wire::{ProviderSessionRef, ResidentDelta, ResidentStateTo};
 use crate::durable::WorkRef;
-use crate::engine::flow::{available_flow_names, load_goal, render_goal, GoalRenderContext};
 use crate::harness::{default_create_harness, ApprovalPolicy, Harness, SendCurrentOutcome};
 use crate::id::WaveId;
 use crate::store::{open_store, storage_config_from_env, Store};
@@ -277,9 +276,9 @@ fn wave_pass_seed(
     wake: &str,
     metric_context: &str,
 ) -> String {
-    let seed = build_goal_seed(resident_repo, origin_repo, wave);
+    let context = crate::ops::render_wave_context(resident_repo, origin_repo, wave, metric_context);
     format!(
-        "{}\n\n{}\n\n{seed}\n\n{metric_context}\n\n<lf:wave-executive-loop>\n1. What is most important?\n2. What signals are arriving?\n3. What works?\n4. What does not?\n5. What is the current strategy?\n6. How should strategy adjust?\n\nTreat metrics as evidence, never as automatic KR completion or a composite Wave score.\n</lf:wave-executive-loop>\n\n<wake>\n{wake}\n</wake>",
+        "{}\n\n{}\n\n{context}\n\n<wake>\n{wake}\n</wake>",
         crate::engine::prompt::loopflow_section(),
         orchestration_discipline(wave),
     )
@@ -335,34 +334,6 @@ async fn wave_metric_context(
     }
     .await;
     crate::ops::metrics::metric_prompt_section("metric-portfolio", result)
-}
-
-/// The wave's rendered `GOAL.md` plus current memory, or a minimal-but-real
-/// fallback when there's no `GOAL.md` so the loop still has an identity.
-fn build_goal_seed(resident_repo: &Path, origin_repo: &Path, wave: &str) -> String {
-    let memory =
-        crate::work::wave::context::gather_wave_memory_from(origin_repo, resident_repo, wave)
-            .unwrap_or_default();
-    match load_goal(wave, resident_repo) {
-        Ok(goal) => {
-            let ctx = GoalRenderContext {
-                flows: available_flow_names(origin_repo),
-                memory,
-            };
-            render_goal(&goal, &ctx)
-        }
-        Err(_) => {
-            let mem_block = if memory.trim().is_empty() {
-                "(memory is empty)".to_string()
-            } else {
-                memory
-            };
-            format!(
-                "You are the agent of the '{wave}' wave. Drive the wave's goal \
-                 forward.\n\nCurrent memory:\n{mem_block}"
-            )
-        }
-    }
 }
 
 /// The coordinating-session discipline, promoted into the loop's system
@@ -560,9 +531,6 @@ async fn run_loop_with(
     backend: BodyBackend,
     planning: Option<WavePlanning>,
 ) -> Result<()> {
-    let ask_lane = planning
-        .as_ref()
-        .map(|planning| crate::ops::ask::AskLane::new(planning.work.clone()));
     let mut wave_loop = WaveLoop {
         client,
         resident_repo,
@@ -578,14 +546,10 @@ async fn run_loop_with(
         cron_last_fired: HashMap::new(),
         provider_session: None,
         planning,
-        ask_lane,
         end: None,
     };
-    let mut ask_poll = tokio::time::interval(Duration::from_millis(200));
-    ask_poll.set_missed_tick_behavior(tokio::time::MissedTickBehavior::Delay);
 
     while wave_loop.end.is_none() {
-        wave_loop.service_resolvers().await;
         if !wave_loop.queue.is_empty() {
             wave_loop.start_queued_pass(&mut inbox_rx).await;
             continue;
@@ -610,7 +574,6 @@ async fn run_loop_with(
             _ = sleep_until_opt(Some(heartbeat_at)) => {
                 wave_loop.on_heartbeat(&mut inbox_rx).await;
             }
-            _ = ask_poll.tick(), if wave_loop.ask_lane.is_some() => {}
         }
     }
 
@@ -635,20 +598,10 @@ struct WaveLoop {
     cron_last_fired: HashMap<String, DateTime<Utc>>,
     provider_session: Option<ProviderSessionRef>,
     planning: Option<WavePlanning>,
-    ask_lane: Option<crate::ops::ask::AskLane>,
     end: Option<LoopEnd>,
 }
 
 impl WaveLoop {
-    async fn service_resolvers(&mut self) {
-        let (Some(planning), Some(ask_lane)) = (&self.planning, self.ask_lane.as_mut()) else {
-            return;
-        };
-        if let Err(error) = ask_lane.reconcile(&planning.store).await {
-            tracing::warn!(%error, "failed to reconcile Wave Ask lane");
-        }
-    }
-
     fn heartbeat_deadline(&self) -> Instant {
         self.idle_since + self.config.heartbeat_idle
     }
@@ -866,8 +819,6 @@ impl WaveLoop {
         };
         let mut wait_task = tokio::spawn(async move { child.wait_with_output().await });
         let mut timeout = Box::pin(tokio::time::sleep(self.config.pass_timeout));
-        let mut ask_poll = tokio::time::interval(Duration::from_millis(200));
-        ask_poll.set_missed_tick_behavior(tokio::time::MissedTickBehavior::Delay);
         loop {
             tokio::select! {
                 biased;
@@ -896,9 +847,6 @@ impl WaveLoop {
                             return;
                         }
                     }
-                }
-                _ = ask_poll.tick(), if self.ask_lane.is_some() => {
-                    self.service_resolvers().await;
                 }
                 result = &mut wait_task => {
                     match result {
@@ -1058,8 +1006,6 @@ impl WaveLoop {
         }
 
         let mut timeout = Box::pin(tokio::time::sleep(self.config.pass_timeout));
-        let mut ask_poll = tokio::time::interval(Duration::from_millis(200));
-        ask_poll.set_missed_tick_behavior(tokio::time::MissedTickBehavior::Delay);
         let mut raw_open = capture.is_some();
         loop {
             tokio::select! {
@@ -1190,9 +1136,6 @@ impl WaveLoop {
                             return;
                         }
                     }
-                }
-                _ = ask_poll.tick(), if self.ask_lane.is_some() => {
-                    self.service_resolvers().await;
                 }
             }
         }

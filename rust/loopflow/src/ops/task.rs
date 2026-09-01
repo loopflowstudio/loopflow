@@ -1,4 +1,4 @@
-use std::collections::{BTreeMap, BTreeSet};
+use std::collections::BTreeMap;
 use std::fs::{File, OpenOptions};
 use std::path::{Component, Path, PathBuf};
 use std::process::Command;
@@ -14,7 +14,7 @@ use crate::engine::config::{load_config_or_default, parse_agent};
 use crate::engine::git::{
     checkout, checkout_new_branch_from, cherry_pick_range, current_branch, delete_local_branch,
     fetch, get_default_branch, is_ancestor, is_clean, is_materially_clean, merge_base,
-    push_with_upstream, ref_exists, rev_parse, stash_including_untracked, stash_pop,
+    origin_branch, push_with_upstream, ref_exists, rev_parse, stash_including_untracked, stash_pop,
 };
 use crate::engine::naming::sanitize_for_branch;
 use crate::engine::process::tmux_session_slug;
@@ -1398,38 +1398,18 @@ fn parse_pr_slug(value: &str) -> OpsResult<String> {
     Ok(value.to_string())
 }
 
-async fn task_for_worktree(store: &SharedStore, repo: &Path) -> OpsResult<Option<Task>> {
-    let checkout = repo.canonicalize().unwrap_or_else(|_| repo.to_path_buf());
-    let worktree_keys: BTreeSet<String> = store
-        .list_tasks(None)
+pub(crate) async fn task_for_checkout(store: &SharedStore, repo: &Path) -> OpsResult<Option<Task>> {
+    let branch = match origin_branch(repo).map_err(OpsError::from)? {
+        Some(branch) => Some(branch),
+        None => current_branch(repo).map_err(OpsError::from)?,
+    };
+    let Some(branch) = branch else {
+        return Ok(None);
+    };
+    store
+        .get_task_by_branch(&branch)
         .await
-        .map_err(|error| task_error(format!("failed to inspect Tasks: {error}")))?
-        .into_iter()
-        .filter(|task| {
-            task.worktree
-                .canonicalize()
-                .unwrap_or_else(|_| task.worktree.clone())
-                == checkout
-        })
-        .map(|task| task.worktree.display().to_string())
-        .collect();
-    let mut current = Vec::new();
-    for worktree in worktree_keys {
-        if let Some(task) = store
-            .get_task_by_worktree(&worktree)
-            .await
-            .map_err(|error| task_error(format!("failed to resolve Task worktree: {error}")))?
-        {
-            current.push(task);
-        }
-    }
-    if current.len() > 1 {
-        return Err(task_error(format!(
-            "multiple Tasks claim worktree {}",
-            repo.display()
-        )));
-    }
-    Ok(current.pop())
+        .map_err(|error| task_error(format!("failed to resolve Task branch {branch:?}: {error}")))
 }
 
 /// A managed Task worktree, or an explicit decision
@@ -1445,10 +1425,10 @@ async fn task_for_worktree(store: &SharedStore, repo: &Path) -> OpsResult<Option
 /// Task entry point never degrades to generic PR behavior.
 #[derive(Debug)]
 enum ManagedTask {
-    /// This worktree is not a Task worktree. Task-specific bookkeeping is an
+    /// This checkout does not track a Task branch. Task-specific bookkeeping is an
     /// explicit no-op; the ordinary PR flow continues unchanged.
     Unmanaged,
-    /// The registry is healthy and a Task owns this worktree.
+    /// The registry is healthy and the checkout tracks a Task's current branch.
     /// Boxed so the `Unmanaged` no-op variant stays small.
     Managed { store: SharedStore, task: Box<Task> },
 }
@@ -1476,8 +1456,8 @@ fn task_registry_error(err: RegistryUnavailable) -> OpsError {
 
 /// Resolve the managed Task for a PR entry point at `repo`.
 ///
-/// - Registry opens and a task claims this worktree → [`ManagedTask::Managed`].
-/// - Registry opens and no task claims it → [`ManagedTask::Unmanaged`].
+/// - Registry opens and the checkout tracks a current Task branch → [`ManagedTask::Managed`].
+/// - Registry opens and its tracked branch names no Task → [`ManagedTask::Unmanaged`].
 /// - Registry file missing and no ambient Task id → [`ManagedTask::Unmanaged`]
 ///   (no registry means no tasks exist, so this is provably an ordinary PR).
 /// - Registry missing with an ambient Task id, or present but unopenable → refuse.
@@ -1490,7 +1470,7 @@ async fn resolve_managed_task(repo: &Path) -> OpsResult<ManagedTask> {
         }
         Err(err) => return Err(task_registry_error(err)),
     };
-    match task_for_worktree(&store, repo).await? {
+    match task_for_checkout(&store, repo).await? {
         Some(task) => Ok(ManagedTask::Managed {
             store,
             task: Box::new(task),
@@ -3683,7 +3663,7 @@ pub fn pr_next(repo: &Path, slug: Option<&str>) -> OpsResult<TaskPr> {
     let repo = repo.to_path_buf();
     block_on_task(async move {
         let store = task_store().await?;
-        let mut task = task_for_worktree(&store, &repo)
+        let mut task = task_for_checkout(&store, &repo)
             .await?
             .ok_or_else(|| task_error("no Task owns this worktree"))?;
         // Observe an out-of-band merge before deciding whether to rotate.
@@ -5030,7 +5010,7 @@ mod tests {
     };
     use crate::child::ChildRef;
     use crate::controller::task::TaskLifecyclePhase;
-    use crate::durable::{AskBody, AskOrigin, AskState, AskTarget, WorkRef, WorkStatus};
+    use crate::durable::{WorkRef, WorkStatus};
     use crate::engine::AgentExecutionBoundary;
     use crate::planning::{LinearIssueId, LinearProjectId, ProjectPlan, TaskPlan};
     use crate::pm::ProjectFlowPlan;
@@ -5199,40 +5179,6 @@ mod tests {
             ..
         } = task_fixture("TEST-RESTART", "slice").await;
         let prior_pr = store.active_task_pr(&task.id).await.unwrap().unwrap();
-        let home_id = store.placement(&work).await.unwrap().home_id;
-        let intervention = store
-            .create_ask(
-                AskOrigin {
-                    work: work.clone(),
-                    source_run_id: Some(crate::durable::RunId::new()),
-                    home_id: home_id.clone(),
-                    cwd: task.worktree.clone(),
-                },
-                AskBody::Intervention {
-                    prompt: "Independent research question".to_string(),
-                },
-                AskTarget::User,
-            )
-            .await
-            .unwrap();
-        let flow_step = store
-            .create_ask(
-                AskOrigin {
-                    work: work.clone(),
-                    source_run_id: None,
-                    home_id,
-                    cwd: task.worktree.clone(),
-                },
-                AskBody::FlowStep {
-                    flow: "slice".to_string(),
-                    node_id: "review".to_string(),
-                    skill: "review-slice".to_string(),
-                    iteration: 0,
-                },
-                AskTarget::User,
-            )
-            .await
-            .unwrap();
         controller.provider_session_id = Some("old-provider-session".to_string());
         store.put_task_controller_state(&controller).await.unwrap();
         let prior = task.clone();
@@ -5290,14 +5236,6 @@ mod tests {
             store.latest_task_event(&task.id).await.unwrap().unwrap().kind,
             TaskEventKind::Progress { summary } if summary.contains("restart-head")
         ));
-        assert_eq!(
-            store.ask_by_id(&intervention.id).await.unwrap().state,
-            AskState::Queued
-        );
-        assert_eq!(
-            store.ask_by_id(&flow_step.id).await.unwrap().state,
-            AskState::Cancelled
-        );
     }
 
     #[tokio::test]
@@ -5385,13 +5323,17 @@ mod tests {
             crate::run_record::RUN_DIR_ENV,
             crate::run_record::PARENT_RUN_ID_ENV,
         ]);
-        let TaskFixture { store, task, .. } = task_fixture("TEST-PARENT", "slice").await;
+        let repository = loopflow_test_support::TestRepo::new();
+        repository.create_branch("test/task-recovery-fixture");
+        repository.push_new_branch("test/task-recovery-fixture");
+        let TaskFixture { store, task, .. } =
+            task_fixture_at("TEST-PARENT", "slice", repository.path().to_path_buf()).await;
         let parent_run_id = crate::durable::RunId::new();
         std::env::set_var(crate::durable::RUN_ID_ENV, parent_run_id.as_str());
         std::env::remove_var(crate::run_record::RUN_DIR_ENV);
         std::env::remove_var(crate::run_record::PARENT_RUN_ID_ENV);
 
-        let resolved = super::task_for_worktree(&store, &task.worktree)
+        let resolved = super::task_for_checkout(&store, &task.worktree)
             .await
             .unwrap()
             .unwrap();

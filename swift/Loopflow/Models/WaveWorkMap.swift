@@ -33,12 +33,13 @@ public struct WaveTaskWork: Decodable, Sendable, Identifiable, Hashable {
     public let runtime: TaskRuntimeSnapshot?
     public let directive: WorkDirectiveSnapshot?
     public let nextMove: WorkNextMove
-    public let attention: TaskAttentionSnapshot
+    public let condition: TaskConditionSnapshot
+    public let actions: TaskActionModel
     public let prs: [PrSnapshot]
     public let activePr: String?
 
     enum CodingKeys: String, CodingKey {
-        case task, reference, runtime, directive, attention, prs
+        case task, reference, runtime, directive, condition, actions, prs
         case nextMove = "next_move"
         case activePr = "active_pr"
     }
@@ -151,7 +152,7 @@ public struct TaskWorkspaceSnapshot: Decodable, Sendable, Hashable {
 
 public enum RoadmapSection: String, Decodable, Sendable, Hashable {
     case now
-    case needsAttention = "needs_attention"
+    case waiting
     case available
     case later
 }
@@ -178,12 +179,13 @@ public struct RoadmapTask: Decodable, Sendable, Identifiable, Hashable {
     public let reference: TaskReferenceSnapshot
     public let runtime: TaskRuntimeSnapshot?
     public let nextMove: WorkNextMove
-    public let attention: TaskAttentionSnapshot
+    public let condition: TaskConditionSnapshot
+    public let actions: TaskActionModel
     public let activePr: PrSnapshot?
     public let section: RoadmapSection
 
     enum CodingKeys: String, CodingKey {
-        case task, reference, runtime, attention, section
+        case task, reference, runtime, condition, actions, section
         case nextMove = "next_move"
         case activePr = "active_pr"
     }
@@ -225,8 +227,8 @@ public struct WorkNextMove: Decodable, Sendable, Hashable {
     public let reason: String
 }
 
-public enum TaskAttentionLevel: String, Decodable, Sendable, Hashable {
-    case red, blue, black, unknown
+public enum TaskConditionState: String, Decodable, Sendable, Hashable {
+    case waiting, blocked, clear, unknown
 }
 
 /// The lifecycle actions Task Work can take. Mirrors the Rust
@@ -267,27 +269,18 @@ public struct LocalProgressEvidence: Decodable, Sendable, Hashable {
     }
 }
 
-public struct TaskAttentionSnapshot: Decodable, Sendable, Hashable {
-    public let level: TaskAttentionLevel
+public struct TaskConditionSnapshot: Decodable, Sendable, Hashable {
+    public let state: TaskConditionState
     public let reason: String
     public let observedAt: String
     public let evidenceAgeSeconds: Int?
-    public let nextOwner: WorkNextMoveOwner
-    public let actions: TaskActionModel
-    public let pmCompleted: Bool
-    public let workStatus: WorkStatus?
     public let localProgress: LocalProgressEvidence
-    public let activePrPhase: PrPhase?
 
     enum CodingKeys: String, CodingKey {
-        case level, reason, actions
+        case state, reason
         case observedAt = "observed_at"
         case evidenceAgeSeconds = "evidence_age_secs"
-        case nextOwner = "next_owner"
-        case pmCompleted = "pm_completed"
-        case workStatus = "work_status"
         case localProgress = "local_progress"
-        case activePrPhase = "active_pr_phase"
     }
 }
 
@@ -410,28 +403,5 @@ public enum WorkEvidence<Item: Decodable & Sendable & Hashable>: Decodable, Send
     public var unavailableReason: String? {
         if case let .unavailable(reason) = self { return reason }
         return nil
-    }
-}
-
-public enum WaveAttentionKind: String, Decodable, Sendable, Hashable {
-    case project
-    case task
-}
-
-/// One Work item waiting on somebody. Mirrors Rust `AttentionItem`. `ageSeconds`
-/// is nil when the Work timestamp cannot be read — an unknown age is never
-/// a zero one.
-public struct WaveAttentionItem: Decodable, Sendable, Hashable, Identifiable {
-    public let kind: WaveAttentionKind
-    public let id: String
-    public let subject: String
-    public let owner: WorkNextMoveOwner
-    public let reason: String
-    public let since: String
-    public let ageSeconds: Int?
-
-    enum CodingKeys: String, CodingKey {
-        case kind, id, subject, owner, reason, since
-        case ageSeconds = "age_secs"
     }
 }

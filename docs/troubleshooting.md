@@ -26,14 +26,17 @@ Read its durable state before restarting anything:
 
 ```bash
 lf task status INF-123 --json
-lf ask list --user
+lf session list
 ```
 
 Answer an exact pending question, send unsolicited durable direction through
 Steer, or resume a stopped process through the same Task Work:
 
 ```bash
-lf ask open ask_...
+lf session open <session-id>
+lf session complete <interactive-or-ask-id>
+lf session approve <flowstep-id> "Verified summary"
+lf session iterate <flowstep-id> "Narrow the design"
 lf task steer INF-123 "address the latest feedback"
 lf task resume INF-123
 lf task resume INF-123 --model codex --reason "Claude quota exhausted"
@@ -103,13 +106,14 @@ lf rebase
 The feature branch uses the current remote base even when the sibling default
 checkout has not moved.
 
-## Status says `ready`, but attention is elsewhere
+## Status says `ready`, but the Task is waiting
 
-**Symptom:** Project or Task Work is `ready`, while the roadmap says it needs
-attention or is waiting on a child, Ask, CI, or merge.
+**Symptom:** Project or Task Work is `ready`, while its condition says it is
+waiting on a child, human FlowStep, CI, or merge.
 
-Work status is deliberately small: `ready`, `done`, or `abandoned`. Process
-liveness, pending Ask, child progress, CI, and merge state are separate facts.
+Work status is deliberately small: `ready`, `done`, or `abandoned`. Task
+condition summarizes process liveness, human FlowStep, child progress, CI, and
+merge evidence; unresolved human conversations appear under Sessions.
 Inspect the focused projection instead of inferring a control state from one
 field:
 
@@ -119,7 +123,7 @@ lf project status <project-id> --json
 lf task status INF-123 --json
 ```
 
-Resolve the named fact: answer the Ask, inspect the child, repair CI, merge, or
+Resolve the named fact: open the human session, inspect the child, repair CI, merge, or
 resume the provider. There is no Run slot or PR-limit counter to clear.
 
 ## Context too large

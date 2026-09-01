@@ -76,7 +76,6 @@ done
 
 ensure_command claude
 ensure_command codex
-ensure_command gemini
 ensure_command opencode
 
 if [[ "${#missing[@]}" -eq 0 ]]; then
@@ -91,7 +90,7 @@ fi
 
 if [[ "$DRY_RUN" == "true" ]]; then
   echo "would run apt-get install for missing apt dependencies"
-  echo "would run npm install -g @anthropic-ai/claude-code @openai/codex @google/gemini-cli"
+  echo "would run npm install -g @anthropic-ai/claude-code @openai/codex"
   echo "would download opencode ${OPENCODE_VERSION} binary from anomalyco/opencode releases and verify SHA256"
   exit 0
 fi
@@ -108,8 +107,7 @@ rm -rf /var/lib/apt/lists/*
 
 npm install -g \
   @anthropic-ai/claude-code \
-  @openai/codex \
-  @google/gemini-cli
+  @openai/codex
 npm cache clean --force
 
 arch="$(dpkg --print-architecture)"

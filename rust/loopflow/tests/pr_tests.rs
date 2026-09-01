@@ -641,6 +641,8 @@ fn task_pr_missing_cached_linear_url_refuses_before_remote_mutation() {
     repo.create_file("proof.txt", "identity preflight\n");
     repo.stage_all();
     repo.commit("add identity proof");
+    let remote_head_before = repo.head_sha();
+    push_branch(&repo, branch);
     let task = register_task(home.path(), repo.path(), branch, &base);
     let runtime = tokio::runtime::Runtime::new().expect("task runtime");
     let mut snapshot = runtime
@@ -677,8 +679,13 @@ fn task_pr_missing_cached_linear_url_refuses_before_remote_mutation() {
         .output()
         .expect("inspect remote branch");
     assert!(
-        !remote_branch.status.success(),
-        "identity refusal must happen before push"
+        remote_branch.status.success(),
+        "Task branch must remain remote"
+    );
+    assert_eq!(
+        String::from_utf8_lossy(&remote_branch.stdout).trim(),
+        remote_head_before,
+        "identity refusal must not mutate the remote Task branch"
     );
 }
 
@@ -692,6 +699,7 @@ fn serial_task_pr_publication_restores_task_context() {
     let base = repo.head_sha();
     let branch = "jack/task-pr-proof";
     repo.create_branch(branch);
+    push_branch(&repo, branch);
     point_origin_at_github(&repo);
     let task = register_task(home.path(), repo.path(), branch, &base);
     let mut pr = task.pr.clone();
@@ -841,6 +849,7 @@ fn completing_land_discards_an_empty_successor_without_a_controller() {
     let base = repo.head_sha();
     let branch = "jack/task-pr-proof";
     repo.create_branch(branch);
+    push_branch(&repo, branch);
     point_origin_at_github(&repo);
     let task = register_task(home.path(), repo.path(), branch, &base);
     let mut pr = task.pr.clone();

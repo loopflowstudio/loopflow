@@ -177,7 +177,9 @@ def main(argv: list[str] | None = None) -> int:
             environment = os.environ.copy()
             for name in AMBIENT_WORK_AUTHORITY:
                 environment.pop(name, None)
-            environment["LF_CONTROL_HOME"] = str(worktree / ".lf-test-control")
+            test_home = worktree / ".lf-test-home"
+            environment["LF_HOME"] = str(test_home)
+            environment["LF_CONTROL_HOME"] = str(test_home)
             environment.pop("LF_CONTROL_DB_PATH", None)
             environment.setdefault("CARGO_TARGET_DIR", str(REPO_ROOT / "target"))
             return subprocess.run(args.command, cwd=worktree, env=environment).returncode

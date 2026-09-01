@@ -29,8 +29,8 @@ Wave
 | --- | --- | --- |
 | Wave | durable context, memory, cadence, conversation, project selection | project KRs or Task worktrees |
 | Project | one measured bet, definition, KRs, closure judgment | memory, cadence, nested Projects |
-| Task | one implementation, investigation, document, or shipped change | a second concurrent PR in the same serial chain |
-| Work | durable identity, status, authored inputs, and domain facts for one Wave/Project/Task | Flow playhead, provider continuation, or process liveness |
+| Task | one implementation, investigation, document, or shipped change; one active remote branch, worktree, and PR | another simultaneously active delivery branch |
+| Work | durable status, Flow playhead, inputs, failure/progress for one Wave/Project/Task | provider-process liveness |
 | Run | one provider-launch record | current Work state or control capability |
 
 Every Project belongs to exactly one Wave. Projects do not contain Projects.
@@ -38,33 +38,10 @@ Only a Task owns a delivery worktree.
 
 The shared durable types live in
 [`durable.rs`](../../rust/loopflow/src/durable.rs): `WorkRef`, `WorkStatus`,
-`Steer`, `Ask`, `Home`, and `Placement`. Wave, Project, and Task domain models
-add their facts under [`work/`](../../rust/loopflow/src/work/). Controller flow
-positions and flow-step interactions live under
-[`controller/`](../../rust/loopflow/src/controller/).
-
-## Use tracked Work directly
-
-```bash
-lf task prepare INF-123
-lf --task INF-123 research "write scratch/runtime.md"
-lf --task INF-123 research "write scratch/prompts.md"
-lf task steer INF-123 "reconcile both reports"
-lf commit -m "Reconcile Task research"
-lf pr publish
-```
-
-`lf task prepare` ensures Task Work, its single worktree, and the first serial
-PR record. It does not install or start controller state. `--task` resolves that
-worktree, preloads all recursive scratch Markdown, launches one ordinary Run,
-and leaves edits uncommitted. Two such Runs may overlap; neither owns the Task,
-advances a playhead, or reserves the worktree. Give concurrent writers distinct
-paths and compose a coherent checkpoint through the ordinary delivery verbs.
-
-`lf project prepare` provides the same controller-free boundary for Project
-Work. Project-bound and Wave-bound Runs use the owning Wave repository because
-those Work kinds have no private worktree. A human, parent agent, cron job, or
-another automation system can build its own workflow from these same commands.
+`FlowPosition`, `Steer`, `Home`, and `Placement`. Wave, Project, and Task
+domain models add their own facts under [`wave/`](../../rust/loopflow/src/wave/),
+[`project/`](../../rust/loopflow/src/project/), and
+[`task/`](../../rust/loopflow/src/task/).
 
 ## Compose Skills with a Flow
 
@@ -92,8 +69,10 @@ controller position, executes one boundary through ordinary execution APIs,
 and advances only after that boundary returns the required result.
 
 Direct TTY flows can use the current conversation for a human node. Headless
-Task flows create a typed Ask, park the playhead, and advance only after an
-explicit result.
+Task flows persist the human playhead and start the node's ordinary named Skill
+as a provider Run. Approve advances; Iterate returns to the preceding autonomous
+step with new direction; provider exit leaves the playhead parked and
+provider-native history resumable.
 
 ## Run one controller boundary
 
@@ -107,7 +86,7 @@ refresh provider truth and authored input
 choose next Flow boundary
           |
           v
-invoke Skill / Op / Ask
+invoke Skill / Op / human session
           |
           v
 record one domain transition
@@ -154,13 +133,9 @@ process; one Work may launch many Runs over time; an unterminated Run does not
 make Work “running.” Reopen returns the same stable Work to `Ready` after
 clearing transient input defined by that domain.
 
-Project and Task controller playheads carry phase, iteration, and cursor state
-for their own end-to-end loops. They live in controller-owned rows keyed by
-Work id; they are not Project or Task fields and grant no Work mutation
-authority. There is no phase epoch, writer token, active-Run slot, or Task
-ownership lease.
-Domain-specific races use narrow boundaries: Ask claim ids, exact PR heads,
-landing generations, or OS locks.
+Monotonic phase, iteration, and cursor fields prevent an older process from
+rolling progress backward. Domain-specific races use narrower fences: exact
+human FlowPosition tokens, PR heads, landing generations, or OS locks.
 
 ## Steer
 
@@ -178,24 +153,29 @@ separate live transport.
 `Author::Run` may store an opaque Run id as provenance. The store does not need
 to resolve that Run record, and resolution would not grant mutation authority.
 
-## Ask
+## Questions and human sessions
 
 ```bash
-lf ask "which migration should survive?"
-lf ask list --json
-lf ask open ask_...
+lf --as wave:product : "which Project owns this?"
+lf ask "review which migration should survive"
+lf session list --json
+lf session open <session-id> --json
+lf session complete <session-id>
 ```
 
-Ask is a separate blocking protocol:
+Another agent perspective is an ordinary `lf --as` Run. `lf ask` is reserved for
+human judgment: it blocks the originating Run while a durable TUI agent shares
+its checkout. Agent readiness leaves the session visible. Complete closes that
+conversation and resumes the originating Run with the ready summary.
 
-1. Creation records origin Work, target perspective, prompt, and optional Run
-   provenance.
-2. A claim mints the exact generic Run id allowed to answer this attempt.
-3. Release requeues the Ask.
-4. The first authorized terminal result wins.
-
-Ask results are typed: answer, decline, or a Flow-node resolution. Ask does not
-enter the Steer queue, and Steer never impersonates a blocking answer.
+A human FlowStep is durable because the Task playhead is durable. The Task runs
+`lf --tui --as task:<id> <skill>` and stores that ordinary Run's id beside the
+exact playhead. An ad-hoc Ask persists a small Home-local session record and its
+ordinary Run id while its caller waits. Both project through one `SessionRecord`
+DTO with distinct `ask` and `flow` kinds. The Mac app resumes provider-native
+history and authors the kind's one valid action; it owns no second Session
+state. A thin detached PTY cradle only keeps the initial provider client alive
+before a UI arrives.
 
 ## Controller topology
 
@@ -210,14 +190,14 @@ lfd
 ```
 
 The Wave listener owns its HTTP surface, journal, and the resident child it
-directly spawned. The Wave, Project, and Task controllers and Ask runner are
-separate launch loops because their recovery and settlement rules differ. They
-share execution components rather than one universal runner.
-The Wave resident refreshes portfolio evidence and chooses the next useful
-Project boundary. Project Work refreshes its definition, KRs, metrics, and Tasks
-before deciding. A Task controller may execute its end-to-end Flow and delivery
-steps; independent Task-bound Runs may do bounded work in the same worktree
-without loading or advancing controller state.
+directly spawned. The resident, Project controller, and Task controller remain
+separate launch loops because their recovery rules differ. Other agent
+perspectives reuse ordinary bound execution; human sessions reuse either their
+originating Run or the Task's persisted playhead. The planning controllers share execution components rather
+than one universal runner. The
+resident refreshes portfolio evidence and chooses the next useful Project
+boundary. Project Work refreshes its definition, KRs, metrics, and Tasks before
+deciding. Task Work executes its Flow and delivery steps.
 
 Deterministic controller session names reduce accidental duplicate built-in
 launches. They are routing policy for that automation implementation, not
@@ -231,7 +211,9 @@ from durable Task and worktree facts.
 - Provider processes are replaceable; Work survives them.
 - Every boundary rebuilds from current durable facts.
 - A Flow playhead advances only from the required boundary result.
-- Steer is durable correction; Ask is durable blocking input.
+- Steer is durable correction; another agent perspective is an ordinary Run.
+- An unresolved Session is either an interactive Run, a Task's persisted human
+  FlowPosition, or a Run-owned `lf ask` boundary.
 - Run ids remain evidence and provenance, never planning capabilities.
 - Linear owns shared Project and Task planning truth. Local projections support
   bounded reads and resumable transitions; they do not author provider truth.

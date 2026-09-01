@@ -1,0 +1,16 @@
+[
+  {
+    "id": "task_00000000000000000000000000000001:task-design:review_kickoff:0",
+    "kind": "flow",
+    "work": {
+      "kind": "task",
+      "id": "task_00000000000000000000000000000001"
+    },
+    "title": "Simplify cross-Work questions",
+    "detail": "review-design",
+    "cwd": "/src/loopflow.task",
+    "state": "active",
+    "ready_summary": null,
+    "open_argv": ["lf", "session", "open", "task_00000000000000000000000000000001:task-design:review_kickoff:0"]
+  }
+]

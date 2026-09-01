@@ -1,6 +1,4 @@
 mod abandon;
-pub(crate) mod ask;
-mod ask_comments;
 mod child;
 mod commit;
 pub mod cron;
@@ -8,6 +6,7 @@ mod error;
 mod flow;
 pub(crate) mod git_operation;
 pub mod home;
+pub(crate) mod human_session;
 mod land;
 pub mod linear_observe;
 pub(crate) mod metrics;
@@ -28,7 +27,6 @@ pub mod trace;
 pub(crate) mod util;
 
 pub use abandon::{abandon_branch, AbandonOptions};
-pub(crate) use ask_comments::publish_pending_ask_comments;
 pub(crate) use child::ambient_author;
 pub(crate) use commit::{checkpoint_task_restart, checkpoint_task_worktree};
 pub use commit::{commit_workflow, commit_workflow_traced, CommitOptions};
@@ -61,6 +59,7 @@ pub use release::{
     ReleaseNotesStatus, ReleaseReceipt, ReleaseRunOutcome, ReleaseStatusResult,
 };
 pub(crate) use run::{launch_work, WorkLaunch, TASK_ACCOUNT_ID_ENV, TASK_RESUME_TOKEN_ENV};
+pub(crate) use run::{render_project_context, render_task_context, render_wave_context};
 #[doc(hidden)]
 pub use run::{resolve_work_binding, resolve_work_selection, WorkBinding, WorkSelection};
 pub use trace::{hash_prompt, trace_enabled, MockResponses, OpTrace, Tracer};

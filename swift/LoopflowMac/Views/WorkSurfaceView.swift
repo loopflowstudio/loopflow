@@ -45,7 +45,6 @@ struct WorkSurfaceView: View {
                 task: selection.task.task,
                 reference: selection.task.reference,
                 runtime: selection.task.runtime,
-                attention: selection.task.attention,
                 repoPath: selection.wave.repo,
                 terminalStore: terminalStore,
                 initialSection: .changes
@@ -111,7 +110,7 @@ struct WorkSurfaceView: View {
         let sections = nowSections(from: visibleWaves)
         if sections.isEmpty {
             ContentUnavailableView(
-                "Nothing needs attention",
+                "Nothing needs action",
                 systemImage: "checkmark.circle",
                 description: Text("No live or stopped work across these Waves. Open the console to walk the plan.")
             )
@@ -282,10 +281,10 @@ struct WorkSurfaceView: View {
                             .font(Typography.caption(10).weight(.semibold))
                             .foregroundStyle(task.section.color)
                     }
-                    Text(task.attention.reason)
+                    Text(task.condition.reason)
                         .font(Typography.body(13))
                         .foregroundStyle(palette.textSecondary)
-                        .accessibilityLabel(taskAttentionAccessibilityLabel(task))
+                        .accessibilityLabel(taskConditionAccessibilityLabel(task))
                     WorkChannelChips(task: task)
                     TaskActionCluster(
                         task: task,

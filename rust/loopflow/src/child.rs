@@ -95,9 +95,8 @@ pub struct ChildBodyHandoff {
 }
 
 /// The `lf` binary, store, and home a child Work launch uses, resolved fresh at
-/// the launch boundary from the current Home — never persisted as Work state. A
-/// transient bundle carried from the Ask session to the tmux spawn; Work no longer
-/// pins a binary of its own.
+/// the launch boundary from the current Home — never persisted as Work state.
+/// Work no longer pins a binary of its own.
 #[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
 pub struct ChildExecutionContext {
     pub lf_bin: PathBuf,

@@ -1,11 +1,17 @@
 # Loopflow for macOS
 
 ```bash
-./dev run          # build and launch ~/Applications/Loopflow Dev.app
-./dev run-debug    # launch with logs visible
-./dev test         # run Swift tests
-./dev xcode        # regenerate and open the Xcode project
+uv run python scripts/loopflow-dev.py run          # build and launch
+uv run python scripts/loopflow-dev.py install      # install without launching
+uv run python scripts/loopflow-dev.py run-debug    # launch with logs visible
+uv run python scripts/loopflow-dev.py test         # run Swift tests
 ```
+
+The development app follows the machine-selected Loopflow Home through the
+stable install gate, so launching it from Finder shows the same Waves and
+Sessions as terminal `lf`.
+Repository selectors list only Git main checkouts. Linked worktrees stay visible
+only through the Task Work that owns them.
 
 ```text
 ⌘D          split right
@@ -15,12 +21,34 @@
 ⌘W / ⌘Z     close / restore a pane
 ```
 
-Opening Loopflow to a repository leads with its Sessions queue. Select a request
-to attach its exact Ask Invocation in the focused Ghostty pane; selecting it
-again jumps back to that pane. Each pane owns one native libghostty surface.
-Use **New shell** for a bare terminal and **Waves & roadmap** to return to Work.
-The queue, session preparation, and every `lf ask` mutation run in the opened
-repository rather than a machine-wide aggregate.
+Opening Loopflow to a repository leads with its Sessions queue. Select a session
+to resume its provider-native terminal in the focused Ghostty pane; selecting it again
+jumps back to that pane. Each pane owns one native libghostty surface. Sessions
+include native interactive provider Runs, Task human FlowSteps, and `lf ask`
+calls made by ordinary Runs. Rows use the real prompt or Task title plus the
+actual provider, Skill, or Run detail.
+
+The green **Complete** action stops an interactive provider client and removes
+its Session from the queue while retaining provider-native history. Closing its
+pane stops only the current client; the Session stays resumable. An Ask agent
+can mark itself ready, but the row and terminal remain until the human completes
+the conversation. Task FlowSteps instead expose Approve and Iterate. Closing
+or detaching either human boundary never resolves it.
+
+Task FlowSteps run ordinary `lf --tui --as task:<id> <skill>` provider Runs.
+Ad-hoc Asks run in the originating Run's exact checkout so the session can edit
+files before the caller resumes. A thin detached PTY cradle keeps only the
+initial client alive; selecting a Session stops that client and resumes its
+provider-native history. The app lists, opens, and acts on the shared Rust
+`SessionRecord` projection; it owns no parallel queue.
+Selecting another session replaces the focused pane. Use the split controls
+first when both sessions should remain visible; closing the final pane clears it
+without ending the durable session.
+Completing the selected Session returns the main pane to its empty workspace.
+Use **New shell** there or in the sidebar for a bare terminal, and **Waves &
+roadmap** to return to Work.
+Session reads and preparation run in the opened repository rather than a
+machine-wide aggregate.
 
 The Podium keeps a closable Wave hierarchy above the Sessions and Work surfaces.
 Its Work surface shows machine-wide Now/Roadmap Work beside durable Activity. Selecting a
@@ -33,8 +61,8 @@ The compact Podium bar reads live process evidence from `lf ps --json`. Its
 lamp reflects OS-live state: black is off, green is working, blue is stalled,
 and amber is waiting or unknown. Wave count, active Runs, and
 Run-without-listener warnings come from `lf ls --json`.
-Its User-attention badge reads repo-scoped `lf ask list --user --json` and returns
-to Sessions.
+Its Sessions badge reads repo-scoped `lf session list --json` and returns to
+the Sessions screen.
 Repository scope filters the Work and Wave snapshots locally; live process
 evidence remains machine-wide.
 Each provider node retains its existing repository and Work attribution, so the
@@ -57,15 +85,15 @@ create a parallel local thread. Prior backing epochs remain selectable and
 read-only, and backing delivery trouble stays visible above the transcript.
 Commands, tools, file edits, and loop bookkeeping stay in the journal;
 decisions, deliveries, and human-level failures remain visible. The detail pane
-reads Projects, Tasks, decisions, PR delivery, and attention from
-`lf status --json`.
+reads Projects, Tasks, decisions, PR delivery, and Task conditions from `lf
+status --json`.
 
 Start, resume, attach, or interrupt a Task from the roadmap. Open its worktree
 in Warp, or attach to the running Task agent in the workspace sheet beside its
 changed files, per-file patches, current contents, and embedded shells.
-The attention chip and spoken row use the same `lf roadmap` reason: green is a
-live advancing body, red is a human handoff or local recovery, black is settled
-or unstarted, and unknown means the required evidence could not be read.
+The condition chip and spoken row use the same `lf roadmap` reason: green is a
+live advancing body, blue is waiting, red is blocked, black is settled or
+unstarted, and unknown means the required evidence could not be read.
 
 Open **Go → Telemetry** for token spend, codebase growth, a token-weighted
 codebase tree, and registry health.
@@ -80,8 +108,8 @@ codebase tree, and registry health.
   reports through its Project Work; the Wave retains root inspection and
   override. Waves and Projects remain control-plane processes in main.
 - **Task workspace presentation** reads `lf task changes/diff/file --json`.
-  Lifecycle mutations remain `lf task run/resume/interrupt`; routed questions
-  use the shared `lf ask` queue.
+  Lifecycle mutations remain `lf task run/resume/interrupt`; human nodes use
+  the Task's persisted flow position and provider Run identity.
 - **Registry queries** own durable reads. `RegistryQuery` runs
   `lf ls/status/roadmap/ps/activity/usage/doctor/tokens --json`; the app does not
   maintain a second roadmap or lifecycle database. Unavailable per-Wave evidence
@@ -94,7 +122,7 @@ codebase tree, and registry health.
 ## Code map
 
 - `LoopflowMac/Views/PodiumView.swift` — primary Wave scope, Work, and live process signal
-- `LoopflowMac/Views/SessionsView.swift` — scoped Ask queue and native split multiplexer
+- `LoopflowMac/Views/SessionsView.swift` — every Session in a native split multiplexer
 - `Loopflow/Models/MultiplexerLayout.swift` — immutable pane split tree
 - `Loopflow/Models/MultiplexerStore.swift` — reference-owned layout, focus, color, and undo
 - `LoopflowMac/Views/WorkActivityView.swift` — filtered durable Activity and proof links
@@ -128,14 +156,14 @@ Home.
 
 | Command | What it does |
 | --- | --- |
-| `./dev run` | Build and launch |
-| `./dev run-debug` | Build and run with stdout |
-| `./dev build` | Build only |
-| `./dev test` | Run unit tests |
-| `./dev ui-test` | Generate the project and run UI tests |
-| `./dev xcode` | Generate and open the project |
-| `./dev release` | Build the release app and DMG |
-| `./dev clean` | Remove the development app and reset permissions |
+| `uv run python scripts/loopflow-dev.py run` | Build and launch |
+| `uv run python scripts/loopflow-dev.py install` | Build and install without launching |
+| `uv run python scripts/loopflow-dev.py run-debug` | Build and run with stdout |
+| `uv run python scripts/loopflow-dev.py build` | Build only |
+| `uv run python scripts/loopflow-dev.py test` | Run unit tests |
+| `uv run python scripts/loopflow-dev.py xcode` | Generate and open the Xcode project |
+| `uv run python scripts/loopflow-dev.py release` | Build the release app and DMG |
+| `uv run python scripts/loopflow-dev.py clean` | Remove the development app and reset permissions |
 
 Long-running development commands write logs under `~/.lf/logs/dev/`.
 

@@ -71,9 +71,8 @@ pub struct WaveSnapshot {
     pub home: Home,
 }
 
-/// `lf status <wave>` snapshot: native work hierarchy, the wave's runs, what
-/// needs attention, and — when a server is live — loop state. Wire type; no
-/// defaults.
+/// `lf status <wave>` snapshot: native Work hierarchy, the Wave's Runs, and —
+/// when a server is live — loop state. Wire type; no defaults.
 #[derive(Debug, Serialize, Deserialize)]
 pub struct WaveDetailSnapshot {
     pub wave: WaveSnapshot,
@@ -89,8 +88,6 @@ pub struct WaveDetailSnapshot {
     pub unavailable_projects: Vec<UnavailableProjectEvidence>,
     /// This Wave's Home-local Run records, newest first.
     pub runs: Evidence<RunSnapshot>,
-    /// Work whose next move belongs to someone other than itself.
-    pub attention: Evidence<AttentionItem>,
     /// The Wave's Home probed for liveness: state, evidence, attach endpoint, and
     /// the one contextual action a conductor surface should offer. Probed for the
     /// focused Wave only — `lf ls` stays placement-only.
@@ -126,33 +123,6 @@ impl<T> Evidence<T> {
             },
         }
     }
-}
-
-#[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize)]
-#[serde(rename_all = "snake_case")]
-pub enum AttentionKind {
-    Project,
-    Task,
-}
-
-/// One Work item waiting on somebody, derived from durable state.
-#[derive(Debug, Clone, Serialize, Deserialize)]
-pub struct AttentionItem {
-    pub kind: AttentionKind,
-    /// Work id — the drill-down key.
-    pub id: String,
-    /// Project slug or Task identifier.
-    pub subject: String,
-    /// Who has to move next.
-    pub owner: NextMoveOwner,
-    /// Why, in Work's durable words — or the audit finding when durable state
-    /// and the machine disagree.
-    pub reason: String,
-    /// RFC3339 time Work entered this state; empty when unrecorded.
-    pub since: String,
-    /// How long it has been waiting. `null` when `since` cannot be read — an
-    /// unknown age is never a zero one.
-    pub age_secs: Option<i64>,
 }
 
 #[derive(Debug, Clone, Serialize, Deserialize)]
@@ -231,15 +201,15 @@ pub struct TaskRuntimeSnapshot {
     pub provider: String,
 }
 
-/// The compact Task attention signal shared by terminal and app surfaces. The
-/// names are deliberately the product's visual vocabulary: consumers do not
-/// reinterpret planning and local-progress evidence into their own colors.
+/// A Task's derived operating condition. Sessions own human action; this state
+/// only lets Work surfaces explain whether the Task is clear, waiting on
+/// another actor, blocked, or unreadable.
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize)]
 #[serde(rename_all = "snake_case")]
-pub enum TaskAttentionLevel {
-    Red,
-    Blue,
-    Black,
+pub enum TaskConditionState {
+    Waiting,
+    Blocked,
+    Clear,
     Unknown,
 }
 
@@ -268,26 +238,21 @@ pub struct LocalProgressEvidence {
     pub reason: Option<String>,
 }
 
-struct TaskAttentionEvidence {
+struct TaskConditionEvidence {
     local_progress: LocalProgressEvidence,
-    user_ask: bool,
+    human_session: bool,
 }
 
-/// A Task's shared attention projection and the evidence that proves it.
+/// A Task's shared condition and the evidence that proves it.
 #[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
-pub struct TaskAttentionSnapshot {
-    pub level: TaskAttentionLevel,
+pub struct TaskConditionSnapshot {
+    pub state: TaskConditionState,
     pub reason: String,
     /// RFC3339 time local workspace evidence was sampled.
     pub observed_at: String,
     /// Age of the durable Work evidence at that sample, if Work exists.
     pub evidence_age_secs: Option<i64>,
-    pub next_owner: NextMoveOwner,
-    pub actions: TaskActionModel,
-    pub pm_completed: bool,
-    pub work_status: Option<WorkStatus>,
     pub local_progress: LocalProgressEvidence,
-    pub active_pr_phase: Option<PrPhase>,
 }
 
 /// Stable references for one Task, shared verbatim by `lf status` and
@@ -315,7 +280,8 @@ pub struct TaskDetailSnapshot {
     pub runtime: Option<TaskRuntimeSnapshot>,
     pub direction: Option<DirectionSnapshot>,
     pub next_move: NextMove,
-    pub attention: TaskAttentionSnapshot,
+    pub condition: TaskConditionSnapshot,
+    pub actions: TaskActionModel,
     pub prs: Vec<PrSnapshot>,
     pub active_pr: Option<String>,
 }
@@ -448,17 +414,16 @@ pub struct UnavailableTaskEvidence {
     pub recovery: String,
 }
 
-/// Where a row's next move sends the reader's attention. A coarse view over
-/// durable intent and next-owner evidence, derived once so every surface
-/// buckets identically.
+/// Where a row sits in the plan, derived once so every surface buckets it
+/// identically.
 ///
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize)]
 #[serde(rename_all = "snake_case")]
 pub enum RoadmapSection {
     /// This Work's own planner must move next.
     Now,
-    /// Someone else must move: review, a User, or the supervising Project/Wave.
-    NeedsAttention,
+    /// Someone else must move: a Session, User, CI, or supervising Work.
+    Waiting,
     /// Filed, not started, not complete — ready for someone to pick up.
     Available,
     /// Done or dormant: terminal Work and completed plan rows.
@@ -466,7 +431,7 @@ pub enum RoadmapSection {
 }
 
 /// `lf roadmap` — every Wave's plan joined to durable Work and local delivery
-/// evidence, bucketed by attention section.
+/// evidence, bucketed by planning section.
 #[derive(Debug, Clone, Serialize, Deserialize)]
 pub struct RoadmapSnapshot {
     /// RFC3339 time this read was taken.
@@ -520,7 +485,8 @@ pub struct RoadmapTask {
     pub reference: TaskReferenceSnapshot,
     pub runtime: Option<TaskRuntimeSnapshot>,
     pub next_move: NextMove,
-    pub attention: TaskAttentionSnapshot,
+    pub condition: TaskConditionSnapshot,
+    pub actions: TaskActionModel,
     pub active_pr: Option<PrSnapshot>,
     pub section: RoadmapSection,
 }
@@ -567,7 +533,7 @@ pub fn ls(json: bool, all: bool) -> Result<()> {
     })
 }
 
-/// `lf status [wave]` — one wave's work hierarchy, runs, attention, and loop.
+/// `lf status [wave]` — one Wave's Work hierarchy, Runs, and loop.
 pub fn status(wave: Option<&str>, json: bool) -> Result<()> {
     let rt = tokio::runtime::Runtime::new()?;
     rt.block_on(async {
@@ -602,14 +568,12 @@ pub fn status(wave: Option<&str>, json: bool) -> Result<()> {
         let metric_portfolio = wave_metric_portfolio(&store, &wave, &planning, now()).await?;
         let project_snapshots =
             snapshot_projects(&store, stored_projects, stored_tasks, planning, true).await?;
-        let attention = Evidence::complete(attention(&project_snapshots.projects, now()));
         // Probe the focused Wave's Home once so the detail carries live evidence
         // and the single contextual action (Open/Attach, Start, or reason).
         let home_runtime =
             crate::ops::home::probe_home(wave.name(), &snapshot.home, Path::new(wave.repo())).await;
         let status = WaveDetailSnapshot {
             runs: Evidence::from_result(crate::lf::commands::runs::wave_runs(wave.name())),
-            attention,
             wave: snapshot,
             loop_state,
             projects: project_snapshots.projects,
@@ -777,7 +741,7 @@ async fn wave_roadmap_projects(
         }
     };
     // `probe_pr_empty: false` — PR emptiness is `lf status`'s execution detail.
-    // Roadmap's bounded Git reads belong only to the shared attention evidence.
+    // Roadmap's bounded Git reads belong only to the shared Task condition.
     match snapshot_projects(store, projects, tasks, planning, false).await {
         Ok(snapshots) => Ok(RoadmapProjectSnapshots {
             projects: Evidence::complete(
@@ -835,7 +799,8 @@ fn roadmap_task(detail: TaskDetailSnapshot) -> RoadmapTask {
         reference: detail.reference,
         runtime: detail.runtime,
         next_move: detail.next_move,
-        attention: detail.attention,
+        condition: detail.condition,
+        actions: detail.actions,
         active_pr,
         section,
     }
@@ -855,7 +820,7 @@ fn task_section(task: &TaskDetailSnapshot) -> RoadmapSection {
     }
     match task.next_move.owner {
         NextMoveOwner::Task => RoadmapSection::Now,
-        _ => RoadmapSection::NeedsAttention,
+        _ => RoadmapSection::Waiting,
     }
 }
 
@@ -876,7 +841,7 @@ fn project_section(project: &ProjectDetailSnapshot) -> RoadmapSection {
     }
     match project.next_move.owner {
         NextMoveOwner::Project => RoadmapSection::Now,
-        _ => RoadmapSection::NeedsAttention,
+        _ => RoadmapSection::Waiting,
     }
 }
 
@@ -895,49 +860,6 @@ async fn resolve_status_wave(store: &SharedStore, requested: Option<&str>) -> Re
     )
     .await
     .map_err(|err| anyhow!("{err}"))
-}
-
-/// What in this Wave is waiting on somebody other than its planning owner.
-fn attention(projects: &[ProjectDetailSnapshot], now: time::OffsetDateTime) -> Vec<AttentionItem> {
-    let mut items = Vec::new();
-    for project in projects {
-        if let Some(runtime) = &project.runtime {
-            let self_owned = matches!(project.next_move.owner, NextMoveOwner::Project);
-            if !(self_owned || work_status_is_terminal(&runtime.status)) {
-                items.push(AttentionItem {
-                    kind: AttentionKind::Project,
-                    id: runtime.work_id.clone(),
-                    subject: project.project.slug.clone(),
-                    owner: project.next_move.owner,
-                    reason: runtime.reason.clone(),
-                    since: runtime.updated_at.clone(),
-                    age_secs: age_secs(&runtime.updated_at, now),
-                });
-            }
-        }
-        for task in &project.tasks {
-            let Some(runtime) = &task.runtime else {
-                continue;
-            };
-            if matches!(task.next_move.owner, NextMoveOwner::Task) {
-                continue;
-            }
-            if work_status_is_terminal(&runtime.status) {
-                continue;
-            }
-            items.push(AttentionItem {
-                kind: AttentionKind::Task,
-                id: runtime.work_id.clone(),
-                subject: task.task.identifier.clone(),
-                owner: task.next_move.owner,
-                reason: runtime.reason.clone(),
-                since: runtime.updated_at.clone(),
-                age_secs: age_secs(&runtime.updated_at, now),
-            });
-        }
-    }
-    items.sort_by_key(|item| std::cmp::Reverse(item.age_secs));
-    items
 }
 
 fn age_secs(since: &str, now: time::OffsetDateTime) -> Option<i64> {
@@ -1402,7 +1324,7 @@ async fn snapshot_task_detail(
                 crate::ops::task::no_active_pr_resume_refusal(&task.plan.identifier, active, latest)
             })
         });
-    let (action_evidence, user_ask) = match task {
+    let (action_evidence, human_session) = match task {
         Some(task) => {
             let predecessor_phase = match active.and_then(|pr| pr.parent_pr_id.as_ref()) {
                 Some(parent_id) => store.get_task_pr(parent_id).await?.map(|pr| pr.phase()),
@@ -1411,7 +1333,10 @@ async fn snapshot_task_detail(
             let work = store
                 .work_for_child(&ChildRef::Task(task.id.clone()))
                 .await?;
-            let user_ask = store.has_pending_user_ask_for_work(&work).await?;
+            let human_session = store
+                .flow_position(&work)
+                .await?
+                .is_some_and(|position| position.human);
             let work_status = store.work_status(&work).await?;
             (
                 Some(TaskActionEvidence {
@@ -1431,22 +1356,26 @@ async fn snapshot_task_detail(
                     abandon_intent: task.abandon_intent.is_some(),
                     launch_refusal: launch_refusal.as_deref(),
                 }),
-                user_ask,
+                human_session,
             )
         }
         None => (None, false),
     };
-    let attention = derive_task_attention(
-        item.completed,
+    let condition = derive_task_condition(
         runtime.as_ref(),
         &next_move,
-        TaskAttentionEvidence {
+        TaskConditionEvidence {
             local_progress,
-            user_ask,
+            human_session,
         },
         action_evidence.as_ref(),
         observed_at,
     );
+    let actions = action_evidence
+        .as_ref()
+        .map_or_else(TaskActionModel::no_task, |evidence| {
+            derive_task_actions(evidence)
+        });
     let direction = match task {
         Some(task) => current_direction(store, ChildRef::Task(task.id.clone())).await?,
         None => None,
@@ -1457,13 +1386,14 @@ async fn snapshot_task_detail(
         runtime,
         direction,
         next_move,
-        attention,
+        condition,
+        actions,
         prs: prs
             .iter()
             .map(|pr| {
                 // PR emptiness is an execution-plane fact (`lf status`); it costs
                 // an additional Git comparison, so `lf roadmap` opts out. The
-                // attention fold already carries the progress evidence it needs.
+                // Task condition already carries the progress evidence it needs.
                 let empty = match (task, active) {
                     (Some(task), Some(active)) if probe_pr_empty && active.id == pr.id => {
                         task_pr_empty(task, pr)
@@ -1586,40 +1516,43 @@ fn inspect_task_local_progress(
     }
 }
 
-fn derive_task_attention(
-    pm_completed: bool,
+fn derive_task_condition(
     runtime: Option<&TaskRuntimeSnapshot>,
     next_move: &NextMove,
-    evidence: TaskAttentionEvidence,
+    evidence: TaskConditionEvidence,
     action_evidence: Option<&TaskActionEvidence>,
     observed_at: time::OffsetDateTime,
-) -> TaskAttentionSnapshot {
-    let TaskAttentionEvidence {
+) -> TaskConditionSnapshot {
+    let TaskConditionEvidence {
         local_progress,
-        user_ask,
+        human_session,
     } = evidence;
     let active_pr_phase = action_evidence
         .and_then(|e| e.latest_pr_phase)
         .filter(|phase| phase.is_active());
-    let user_attention = next_move.owner == NextMoveOwner::User;
-    let (level, reason) = if user_ask {
+    let launch_blocked = action_evidence.is_some_and(|evidence| evidence.launch_refusal.is_some());
+    let delivery_owned_by_active_pr = local_progress.dirty == Some(false)
+        && local_progress.recovery_required == Some(false)
+        && local_progress.authored_commits == Some(true)
+        && matches!(active_pr_phase, Some(PrPhase::Open | PrPhase::Publishing));
+    let (state, reason) = if human_session {
         (
-            TaskAttentionLevel::Blue,
-            "Waiting for your answer".to_string(),
+            TaskConditionState::Waiting,
+            "Waiting for your review".to_string(),
         )
-    } else if user_attention {
-        (TaskAttentionLevel::Red, next_move.reason.clone())
+    } else if launch_blocked {
+        (TaskConditionState::Blocked, next_move.reason.clone())
     } else if local_progress.state == LocalProgressEvidenceState::Missing
         && local_progress.recovery_required == Some(false)
     {
         (
-            TaskAttentionLevel::Black,
+            TaskConditionState::Clear,
             local_progress
                 .reason
                 .clone()
                 .unwrap_or_else(|| "Task worktree is initializing".into()),
         )
-    } else if local_progress.unsettled == Some(true) {
+    } else if local_progress.unsettled == Some(true) && !delivery_owned_by_active_pr {
         let reason = if local_progress.dirty == Some(true) {
             "Task has uncommitted work".to_string()
         } else if local_progress.authored_commits == Some(true) {
@@ -1632,34 +1565,27 @@ fn derive_task_attention(
         } else {
             "local Task progress requires recovery".to_string()
         };
-        (TaskAttentionLevel::Red, reason)
+        (TaskConditionState::Blocked, reason)
     } else if local_progress.unsettled.is_none() {
         (
-            TaskAttentionLevel::Unknown,
+            TaskConditionState::Unknown,
             local_progress
                 .reason
                 .clone()
                 .unwrap_or_else(|| "local Task progress is unavailable".into()),
         )
+    } else if next_move.owner != NextMoveOwner::Task {
+        (TaskConditionState::Waiting, next_move.reason.clone())
     } else {
-        (TaskAttentionLevel::Black, next_move.reason.clone())
+        (TaskConditionState::Clear, next_move.reason.clone())
     };
-    let actions = match action_evidence {
-        None => TaskActionModel::no_task(),
-        Some(evidence) => derive_task_actions(evidence),
-    };
-    TaskAttentionSnapshot {
-        level,
+    TaskConditionSnapshot {
+        state,
         reason,
         observed_at: format_time(observed_at)
-            .expect("Task attention observation time formats as RFC 3339"),
+            .expect("Task condition observation time formats as RFC 3339"),
         evidence_age_secs: runtime.and_then(|runtime| age_secs(&runtime.updated_at, observed_at)),
-        next_owner: next_move.owner,
-        actions,
-        pm_completed,
-        work_status: runtime.map(|runtime| runtime.status.clone()),
         local_progress,
-        active_pr_phase,
     }
 }
 
@@ -2065,7 +1991,6 @@ fn print_status(status: &WaveDetailSnapshot) {
         }
     }
     print_unavailable_projects(&status.unavailable_projects);
-    print_attention(&status.attention);
     print_runs(&status.runs);
 }
 
@@ -2346,28 +2271,6 @@ fn print_unavailable_projects(projects: &[UnavailableProjectEvidence]) {
     }
 }
 
-fn print_attention(attention: &Evidence<AttentionItem>) {
-    match attention {
-        Evidence::Unavailable { reason } => println!("  attention unavailable: {reason}"),
-        Evidence::Ok { items, .. } if items.is_empty() => println!("  attention  nothing waiting"),
-        Evidence::Ok { items, .. } => {
-            println!("  attention");
-            for item in items {
-                println!(
-                    "    {subject:<14}  {owner:<8}  {age:>7}  {reason}",
-                    subject = truncate(&item.subject, 14),
-                    owner = owner_label(&item.owner),
-                    age = item
-                        .age_secs
-                        .map(format_age)
-                        .unwrap_or_else(|| "-".to_string()),
-                    reason = item.reason,
-                );
-            }
-        }
-    }
-}
-
 fn print_runs(runs: &Evidence<RunSnapshot>) {
     match runs {
         Evidence::Unavailable { reason } => println!("  runs unavailable: {reason}"),
@@ -2407,16 +2310,16 @@ struct RoadmapRow {
     owner: NextMoveOwner,
     pr: Option<String>,
     workspace: Option<String>,
-    attention: Option<TaskAttentionLevel>,
+    condition: Option<TaskConditionState>,
     reason: String,
 }
 
-fn task_attention_label(level: TaskAttentionLevel) -> &'static str {
-    match level {
-        TaskAttentionLevel::Red => "red",
-        TaskAttentionLevel::Blue => "blue",
-        TaskAttentionLevel::Black => "black",
-        TaskAttentionLevel::Unknown => "unknown",
+fn task_condition_label(state: TaskConditionState) -> &'static str {
+    match state {
+        TaskConditionState::Waiting => "waiting",
+        TaskConditionState::Blocked => "blocked",
+        TaskConditionState::Clear => "clear",
+        TaskConditionState::Unknown => "unknown",
     }
 }
 
@@ -2438,8 +2341,8 @@ fn task_roadmap_row(task: &RoadmapTask, now: time::OffsetDateTime) -> RoadmapRow
             .workspace
             .as_ref()
             .map(|workspace| workspace.slug.clone()),
-        attention: Some(task.attention.level),
-        reason: task.attention.reason.clone(),
+        condition: Some(task.condition.state),
+        reason: task.condition.reason.clone(),
     }
 }
 
@@ -2486,7 +2389,7 @@ fn task_identifier_label(
 fn section_label(section: RoadmapSection) -> &'static str {
     match section {
         RoadmapSection::Now => "NOW",
-        RoadmapSection::NeedsAttention => "NEEDS ATTENTION",
+        RoadmapSection::Waiting => "WAITING",
         RoadmapSection::Available => "AVAILABLE",
         RoadmapSection::Later => "LATER",
     }
@@ -2539,7 +2442,7 @@ fn print_roadmap(roadmap: &RoadmapSnapshot) {
                     owner: project.next_move.owner,
                     pr: None,
                     workspace: None,
-                    attention: None,
+                    condition: None,
                     reason: project.next_move.reason.clone(),
                 });
             }
@@ -2553,7 +2456,7 @@ fn print_roadmap(roadmap: &RoadmapSnapshot) {
         }
         for section in [
             RoadmapSection::Now,
-            RoadmapSection::NeedsAttention,
+            RoadmapSection::Waiting,
             RoadmapSection::Available,
             RoadmapSection::Later,
         ] {
@@ -2565,7 +2468,7 @@ fn print_roadmap(roadmap: &RoadmapSnapshot) {
             println!("  {}", section_label(section));
             for row in in_section {
                 println!(
-                    "    {id}  {rank:>4}  {owner:<8}  {age:>5}  {signal:<7}  {workspace:<20}  {pr:<24}  {title}",
+                    "    {id}  {rank:>4}  {owner:<8}  {age:>5}  {condition:<7}  {workspace:<20}  {pr:<24}  {title}",
                     id = task_identifier_label(
                         &row.id,
                         row.issue_url.as_deref(),
@@ -2581,9 +2484,9 @@ fn print_roadmap(roadmap: &RoadmapSnapshot) {
                         .age_secs
                         .map(format_age)
                         .unwrap_or_else(|| "-".to_string()),
-                    signal = row
-                        .attention
-                        .map(task_attention_label)
+                    condition = row
+                        .condition
+                        .map(task_condition_label)
                         .unwrap_or("-"),
                     workspace = truncate(row.workspace.as_deref().unwrap_or("-"), 20),
                     pr = truncate(row.pr.as_deref().unwrap_or("-"), 24),
@@ -2645,16 +2548,17 @@ mod tests {
     use time::OffsetDateTime;
 
     use super::{
-        derive_task_attention, historical_failure_line, metric_portfolio_text, next_move_for_task,
+        derive_task_condition, historical_failure_line, metric_portfolio_text, next_move_for_task,
         snapshot_project_runtime, truncate_start, LocalProgressEvidence,
-        LocalProgressEvidenceState, NextMove, NextMoveOwner, TaskAttentionEvidence,
-        TaskAttentionLevel, TaskRuntimeSnapshot,
+        LocalProgressEvidenceState, NextMove, NextMoveOwner, TaskConditionEvidence,
+        TaskConditionState, TaskRuntimeSnapshot,
     };
     use crate::controller::wave::metrics::{
         MetricEvidenceDto, MetricFreshnessDto, MetricIdentity, MetricPortfolioDto,
         MetricReadingDto, MetricStage, MetricTarget, MetricUnknownCauseDto,
     };
     use crate::durable::WorkStatus;
+    use crate::ops::task_actions::TaskActionEvidence;
     use crate::planning::{LinearProjectId, ProjectPlan};
     use crate::store::sqlite::SqliteStore;
     use crate::store::Store;
@@ -2821,7 +2725,7 @@ mod tests {
     }
 
     #[test]
-    fn only_a_durable_ask_marks_task_evidence_as_waiting_on_the_user() {
+    fn task_condition_distinguishes_clear_work_from_external_waits() {
         let runtime = TaskRuntimeSnapshot {
             work_id: "task-1".to_string(),
             project_id: "project-1".to_string(),
@@ -2835,7 +2739,7 @@ mod tests {
             owner: NextMoveOwner::Task,
             reason: "Task is ready".to_string(),
         };
-        let evidence = |user_ask| TaskAttentionEvidence {
+        let evidence = |human_session| TaskConditionEvidence {
             local_progress: LocalProgressEvidence {
                 state: LocalProgressEvidenceState::Observed,
                 unsettled: Some(false),
@@ -2844,19 +2748,17 @@ mod tests {
                 recovery_required: Some(false),
                 reason: None,
             },
-            user_ask,
+            human_session,
         };
 
-        let advisory = derive_task_attention(
-            false,
+        let advisory = derive_task_condition(
             Some(&runtime),
             &next_move,
             evidence(false),
             None,
             OffsetDateTime::now_utc(),
         );
-        let asked = derive_task_attention(
-            false,
+        let human = derive_task_condition(
             Some(&runtime),
             &next_move,
             evidence(true),
@@ -2864,9 +2766,75 @@ mod tests {
             OffsetDateTime::now_utc(),
         );
 
-        assert_eq!(advisory.level, TaskAttentionLevel::Black);
-        assert_eq!(asked.level, TaskAttentionLevel::Blue);
-        assert_eq!(asked.reason, "Waiting for your answer");
+        assert_eq!(advisory.state, TaskConditionState::Clear);
+        assert_eq!(human.state, TaskConditionState::Waiting);
+        assert_eq!(human.reason, "Waiting for your review");
+
+        let delegated = derive_task_condition(
+            Some(&runtime),
+            &NextMove {
+                owner: NextMoveOwner::Project,
+                reason: "Waiting for Project selection".to_string(),
+            },
+            evidence(false),
+            None,
+            OffsetDateTime::now_utc(),
+        );
+        assert_eq!(delegated.state, TaskConditionState::Waiting);
+        assert_eq!(delegated.reason, "Waiting for Project selection");
+
+        let user_handoff = derive_task_condition(
+            Some(&runtime),
+            &NextMove {
+                owner: NextMoveOwner::User,
+                reason: "Merge the pull request".to_string(),
+            },
+            evidence(false),
+            None,
+            OffsetDateTime::now_utc(),
+        );
+        assert_eq!(user_handoff.state, TaskConditionState::Waiting);
+    }
+
+    #[test]
+    fn active_pr_delivery_does_not_turn_a_manual_handoff_into_a_blocker() {
+        let local_progress = LocalProgressEvidence {
+            state: LocalProgressEvidenceState::Observed,
+            unsettled: Some(true),
+            dirty: Some(false),
+            authored_commits: Some(true),
+            recovery_required: Some(false),
+            reason: None,
+        };
+        let action_evidence = TaskActionEvidence {
+            status: WorkStatus::Ready,
+            latest_pr_phase: Some(PrPhase::Open),
+            latest_pr_after_merge: None,
+            latest_pr_merge_request: None,
+            latest_pr_presentation_current: Some(true),
+            completion_refusal: None,
+            resume_refusal: None,
+            ci: None,
+            predecessor_phase: None,
+            abandon_intent: false,
+            launch_refusal: None,
+        };
+        let condition = derive_task_condition(
+            None,
+            &NextMove {
+                owner: NextMoveOwner::User,
+                reason: "Merge the pull request".to_string(),
+            },
+            TaskConditionEvidence {
+                local_progress,
+                human_session: false,
+            },
+            Some(&action_evidence),
+            OffsetDateTime::now_utc(),
+        );
+
+        assert_eq!(condition.state, TaskConditionState::Waiting);
+        assert_eq!(condition.reason, "Merge the pull request");
     }
 
     #[test]

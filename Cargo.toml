@@ -21,6 +21,14 @@ incremental = false
 debug = 1
 incremental = false
 
+# Install selection authenticates copied binaries by digest. Keep that startup
+# check fast in local debug and test builds too.
+[profile.dev.package.sha2]
+opt-level = 3
+
+[profile.test.package.sha2]
+opt-level = 3
+
 [workspace.metadata.dist]
 cargo-dist-version = "0.27.0"
 ci = "github"

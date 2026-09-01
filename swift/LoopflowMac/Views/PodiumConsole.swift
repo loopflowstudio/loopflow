@@ -293,7 +293,7 @@ struct PodiumConsole<Content: View>: View {
                     ForEach(project.tasks) { task in
                         consoleRow(
                             title: task.task.name,
-                            subtitle: "\(task.task.identifier) · \(task.attention.reason)",
+                            subtitle: "\(task.task.identifier) · \(task.condition.reason)",
                             titleFont: Typography.body(12),
                             isCurrent: model.selection == .task(id: task.id),
                             currentShade: Color.white.opacity(0.14),
@@ -418,7 +418,7 @@ struct PodiumConsole<Content: View>: View {
 
     private func projectFader(_ project: RoadmapProject, wave entry: WaveEntry) -> FaderModel {
         let phase = ConsoleSignal.phase(
-            humanStop: project.tasks.contains { $0.attention.level == .red },
+            humanStop: project.tasks.contains { $0.condition.state == .blocked },
             agentRunning: false,
             signal: signal([])
         )
@@ -439,7 +439,7 @@ struct PodiumConsole<Content: View>: View {
         project: RoadmapProject
     ) -> FaderModel {
         let phase = ConsoleSignal.phase(
-            humanStop: task.attention.level == .red,
+            humanStop: task.condition.state == .blocked,
             agentRunning: false,
             signal: signal([])
         )
@@ -539,7 +539,7 @@ struct PodiumConsole<Content: View>: View {
             let nodes = providerNodes(wave: vm)
             let hasRedTask = (roadmap?.projects.items ?? [])
                 .flatMap(\.tasks)
-                .contains { $0.attention.level == .red }
+                .contains { $0.condition.state == .blocked }
             return WaveEntry(
                 vm: vm,
                 roadmap: roadmap,

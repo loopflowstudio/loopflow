@@ -1,6 +1,0 @@
-{
-  "ask_id": "ask_00000000000000000000000000000001",
-  "run_id": "run_00000000000000000000000000000002",
-  "home_route": "jack@local",
-  "attach_argv": ["tmux", "attach-session", "-t", "lf-ask-000000000000"]
-}

@@ -7,7 +7,7 @@ import Loopflow
 /// It bypasses the `lf` registry entirely so the populated Wave surface renders
 /// deterministically offline — the stable list's green/red/blue/black lenses and the
 /// selected Wave's full detail hierarchy (objective, Projects, KRs, Task rows
-/// with verbatim attention lenses). That makes the "selected" screenshot state
+/// with verbatim condition lenses). That makes the "selected" screenshot state
 /// real and, crucially, lets the AttributeGraph cycle capture drive the
 /// `WaveDetailPane` selection path (its `@ObservedObject` fix site) at cold
 /// launch on a machine whose registry can't serve W2-123 lens data.
@@ -219,18 +219,14 @@ enum MockWaveFixture {
                 "incorporated_summary": "Verification failures are now first."
               },
               "next_move": {"owner": "user", "reason": "merge pull request head 333333333333 on GitHub"},
-              "attention": {
-                "level": "red",
+              "condition": {
+                "state": "waiting",
                 "reason": "merge pull request head 333333333333 on GitHub",
                 "observed_at": "2026-07-13T21:00:00Z",
                 "evidence_age_secs": 7200,
-                "next_owner": "user",
-                "actions":{"recommended":"open_pr","reason":"merge head 333333333333 on GitHub"},
-                "pm_completed": false,
-                "work_status": "ready",
-                "local_progress": {"state": "observed", "unsettled": true, "dirty": false, "authored_commits": true, "recovery_required": false, "reason": null},
-                "active_pr_phase": "open"
+                "local_progress": {"state": "observed", "unsettled": true, "dirty": false, "authored_commits": true, "recovery_required": false, "reason": null}
               },
+              "actions":{"recommended":"open_pr","reason":"merge head 333333333333 on GitHub"},
               "prs": [{
                 "id": "pr_33333333333333333333333333333333",
                 "sequence": 1,
@@ -280,18 +276,14 @@ enum MockWaveFixture {
               "runtime": null,
               "directive": null,
               "next_move": {"owner": "project", "reason": "Task is ready to start"},
-              "attention": {
-                "level": "black",
+              "condition": {
+                "state": "clear",
                 "reason": "Task is ready to start",
                 "observed_at": "2026-07-13T21:00:00Z",
                 "evidence_age_secs": null,
-                "next_owner": "project",
-                "actions":{"recommended":null,"reason":"Task is ready to start"},
-                "pm_completed": false,
-                "work_status": null,
-                "local_progress": {"state": "not_applicable", "unsettled": false, "dirty": null, "authored_commits": null, "recovery_required": null, "reason": null},
-                "active_pr_phase": null
+                "local_progress": {"state": "not_applicable", "unsettled": false, "dirty": null, "authored_commits": null, "recovery_required": null, "reason": null}
               },
+              "actions":{"recommended":null,"reason":"Task is ready to start"},
               "prs": [],
               "active_pr": null
             }
@@ -395,21 +387,6 @@ enum MockWaveFixture {
             "harness": "codex",
             "model": "gpt-5",
             "surface": "headless"
-          }
-        ]
-      },
-      "attention": {
-        "state": "ok",
-        "truncated": false,
-        "items": [
-          {
-            "kind": "task",
-            "id": "ts_22222222222222222222222222222222",
-            "subject": "INF-123",
-            "owner": "user",
-            "reason": "merge pull request head 333333333333 on GitHub",
-            "since": "2026-07-13T19:00:00Z",
-            "age_secs": 7200
           }
         ]
       },

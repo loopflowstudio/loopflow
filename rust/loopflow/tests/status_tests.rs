@@ -648,12 +648,6 @@ fn orphaned_task_work_preserves_status_and_roadmap_evidence() {
     );
     assert_eq!(status["runs"]["state"], "ok");
     assert_eq!(status["runs"]["items"].as_array().expect("runs").len(), 0);
-    assert_eq!(status["attention"]["state"], "ok");
-    let attention = status["attention"]["items"]
-        .as_array()
-        .expect("attention items");
-    assert!(attention.is_empty());
-
     let unavailable = status["unavailable_projects"]
         .as_array()
         .expect("status unavailable Projects");

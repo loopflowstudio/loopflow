@@ -45,18 +45,15 @@ selection. Follow the repo style guide.
   not a completion quota.
 - Add or update tests for user-visible behavior.
 - Run the narrowest verification that covers the touched code.
-- When progress requires supervisor judgment, run `lf ask "<exact question>"`.
-  The command blocks without spending model tokens and returns the parent's
-  resolution to this Turn. Do not invent a provider-specific decision command or
-  start unrelated work while it is pending.
+- When progress requires another Work's perspective, launch an ordinary
+  `lf --as project:<id> : "<prompt>"` Run. When it requires human authority and
+  no human is present, run `lf ask "<exact request>"` and wait for the human to
+  complete that conversation. Do not invent a provider-specific decision command.
 - Use `lf pr publish` when the branch has a reviewable PR-shaped change; it
   pushes and creates or refreshes the PR without opening a browser. Reach for
   `lf pr open` only when a human explicitly asked to see the PR for review.
 - Do not land or complete the Task from this loop. The pinned final flow owns
   its gate, learning record, and landing disposition.
-- If a prior PR merged out of band and follow-up work remains, `lf pr next
-  [slug]` reconciles the merge and rotates to the next serial PR, carrying
-  committed and uncommitted follow-up forward — no manual git surgery.
 - File a concrete follow-up with `lf pm task create` when new work belongs later
   under a known project. Filing does not authorize launching it in this task.
 - Report consequential progress through the Task; its linked events

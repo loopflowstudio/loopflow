@@ -5,7 +5,7 @@ scope widened past the Mac app: product now owns the shared API and every surfac
 (CLI, Mac, iOS, agent turns, workers). Older notes below still say "Concerto" where
 they mean the Mac surface.
 
-## Work and continuity (settled 2026-07-19, `feedback-runtime`)
+## Work and continuity (settled 2026-07-19, Sessions revised 2026-08-30)
 
 - **Work is stable identity, not a process.** Wave, Project, and Task are the
   three Work kinds. A Run is one bounded period of execution authority; a
@@ -18,11 +18,13 @@ they mean the Mac surface.
 - **Steer is the one durable authored input.** Chat is its human Wave
   presentation, not a second mailbox or history truth. Radio, agent channels,
   machine bylines, and the database message bus are deleted.
-- **Ask is a targeted durable exchange, not a lifecycle checkpoint.** `lf ask`
-  blocks the child Turn until the immediate parent or authenticated User writes
-  the one first-writer-wins Answer. Project and Wave Runs service child Asks in
-  detached answer invocations beside their core loops. Feedback and Continue
-  are deleted; neither opening nor answering an Ask advances the playhead.
+- **Another Work perspective is an ordinary Run; human interaction is a
+  Session.** Launch `lf --as <work> : <question>` when another agent perspective
+  is useful. `lf ask` is reserved for a human boundary: it starts a provider
+  Run in the caller's checkout and blocks until that Session is explicitly
+  completed. A declared human Task node persists its exact playhead and advances
+  only through Approve or Iterate. There is no agent exchange row, answer lane,
+  or dedicated answer controller.
 - **Wave memory is file-only.** Applicable ancestor `MEMORY.md` files are read
   oldest-first. There is no live memory stream, and recent Wave Chat is not
   ambient Project/Task prompt context.
@@ -47,10 +49,9 @@ they mean the Mac surface.
   receipts contained no Turn ids and the residents immediately relaunched.
   Supervisors must distinguish a live containment from an owned provider
   process and an advancing Turn before recommending wait, interrupt, or retry.
-- `lf ask` now wakes a stopped parent idempotently, and a live Project or Wave
-  Run retains an answer lane while owned child Work can still ask. The broader
-  Home server design remains open for automatic backlog dispatch, remote
-  nudges, and Ready work that has no blocking child command to trigger a wake.
+- Cross-Work questions need no parent resident or answer lane. The broader Home
+  server design remains open for automatic backlog dispatch, remote nudges, and
+  Ready work that has no blocking child command to trigger a wake.
 - The server design must assign one owner each for dispatch, liveness, retry,
   streaming, and remote nudge before Wave, Project, and Task controls collapse
   onto one host path.
@@ -73,7 +74,7 @@ they mean the Mac surface.
   show delivered, queued, and working state instead of implying an immediate
   conversational reply.
 - App surfaces navigate, present, and Steer Work. A view, terminal, provider
-  process, or listener is never the source of Work or Ask/Answer truth.
+  process, or listener is never the source of Work or human-playhead truth.
 - A provider session is AgentInvocation continuity, not Work identity.
 - Runtime ownership remains deliberately unresolved until the Home/Work server
   topology can explain automatic Ready dispatch, remote nudge, and failure
@@ -182,9 +183,9 @@ they mean the Mac surface.
   the old `labels: [String]` was dropped for the explicit `project` slug.
 - **Vocabulary locked:** *Run* = one bounded period of execution authority plus
   its durable record; *AgentInvocation* = one provider/process attempt;
-  *session* names only concrete provider or attachable terminal continuity
-  (`TerminalSession`), never stable Work. *Exec* remains an implementation verb,
-  not product identity.
+  *Session* = a provider-native conversation or unresolved human boundary;
+  *Work* remains Wave, Project, or Task. *Exec* remains process evidence, not a
+  fourth Work kind or Session identity.
 - **Plan render works end to end now** — `PmShowResult` carries `projects` +
   `synced_at`, `RegistryQuery.plan`'s `PmShowSnapshot` decodes them, and
   `WaveDetailPane` shows each Project + KR proof. The old decode-throws blocker is
@@ -195,24 +196,14 @@ they mean the Mac surface.
 ## Swift data path — RegistryQuery is the single reader
 
 - **All data reads converge on `RegistryQuery`** (subprocess `lf … --json`,
-  daemon-less) — `waves()`, `status()`, `recentRuns()`, `allWaves()`. The
+  daemon-less) — including Waves, status, roadmap, Sessions, Activity, usage,
+  and recent Runs. The
   HTTP-to-lfd-as-API path is **deleted**: `LocalWaveService` (~1500 lines) and
   `WaveServiceProtocol` are gone; ~22 consumers rerouted onto RegistryQuery.
 - **`RunStatus` biases to `lf`** — align to `lf`'s lowercase tokens (`running`,
   `ok`, `waiting`, `failed`, `pending`), not the lfd int enum. No invented
   `cancelled`. An unknown status must be **loud** (surface it), never a silent
   `?? .pending`. When `lf` and lfd disagree, `lf` wins.
-- **Known debt (deferred, needs a human call):** `WaveService` remains a ~600-line
-  retired-lfd-HTTP facade whose ~25 action methods `throw unsupported(...)` — NOT
-  dead, RepoState/SessionState/AuthProviderStore still call them behind live UI
-  actions (stop/delete/land/next/addTrigger/combinePRs, session
-  create/attach/cancel). Collapsing it is a behavior change under the
-  mac-surface-ux bet, not a compress edit. Its
-  dict-based `parse*FromJSON` (~260 lines) is a SECOND wire mirror of the types
-  RegistryQuery decodes via Codable — the DTO drift hazard — but it backs the
-  `session.json` fixture test + ContractTests/WaveTests/AttentionStoreTests;
-  consolidating means migrating those onto RegistryQuery's Codable path first.
-
 ## Performance — reads never block on lfd
 
 - **Governing invariant: the repo/wave list paints from `lf` (daemon-less); a
@@ -229,34 +220,52 @@ they mean the Mac surface.
   snapshot + Set lookup (was `tmux has-session` per wave). See the Performance
   project for the ranked audit; budgets/instrumentation not yet built.
 
-## Patterns (verified 2026-05-19, embedded-terminal)
+## Sessions projection and native resume (settled 2026-08-30, PR #1250)
 
-- **lfd terminal provenance is `TerminalSession.source`; provider display is
-  `TerminalSession.agent`.** Rust `rust/loopflow/src/lfd/types/terminal_session.rs`,
-  Swift `swift/LoopflowCore/Models/TerminalSession.swift`. Don't add `interactive`
-  or `provider` synonyms.
-- **Source constants:** wave-run tmux is `"wave_step_tmux"` (`TMUX_TERMINAL_SOURCE`);
-  palette launches use `"palette"` (`PALETTE_TERMINAL_SOURCE`).
-  `is_tmux_backed()` treats both as attachable. Persistence has SQLite + Postgres
-  mirrors (`lfdb/sqlite.rs`, `lfdb/postgres.rs`, explicit column lists); new
-  columns need schema work, new `source` values don't.
-- **Attach contract is the shared path.** `POST /v0/terminal-sessions/{id}/attach`
-  returns `TerminalConnectionInfoDto {session_name,host,cwd,status}`. Swift panes
-  call `RepoState.attachTerminalSession(_:)` and attach Ghostty to the returned
-  tmux session; never recreate a parallel client-side tmux name. Attach by session
-  id even when the row is lfd-terminal — a succeeded palette row means the flow
-  exited into a shell, not that tmux is gone.
-- **Palette create path** (experiment): `POST /v0/terminal-sessions`
-  `{wave_id,flow,worktree,agent}` → `{session,connection}`; executor builds
-  `lf <flow> --no-direction … -w <wave> -m <agent>`, `source="palette"`.
-  Lifecycle completion is exit-file based (`.lf/tmp/terminal-sessions/<id>.exit`),
-  then keeps the pane alive via `exec "${SHELL:-/bin/zsh}"`; startup reconcile
-  re-arms watchers. `PaneConfig` is durable identity only (`terminalSessionId`);
-  `launchCommand`/config-normalization removed 2026-05-19.
-- **DTO fixtures cover terminal sessions** (`tests/fixtures/dto/terminal_session.json`,
-  `create_terminal_session_request.json`; Rust/Swift/Python).
-- **lfd readiness probe is `http://127.0.0.1:2486/health`** (unauthenticated root
-  route); most API lives under `/v0`, and `/status` is root + auth-protected.
+- **`lf session list --json` is the sole unresolved-human-work projection.** It
+  merges ordinary interactive TUI Runs, ad-hoc human Asks, and Task human
+  FlowSteps into required-field `SessionRecord` values. The Mac app renders that
+  projection and owns no second queue, title store, liveness model, or resolution
+  state.
+- **Provider history is the resume authority.** Opening a Session stops only the
+  exact Loopflow-owned client whose PID and birth evidence match its Run, then
+  resumes through Codex, Claude, or OpenCode's native command. Closing a pane or
+  provider exit resolves nothing. Complete applies only to interactive Sessions
+  and ready Asks; Approve and Iterate apply only to ready Task FlowSteps.
+- **tmux is only the first client's detached PTY cradle.** It lets a human-bound
+  TUI start before a desktop exists, but it is not Session identity, readiness,
+  presentation, liveness authority, or a resolution mechanism. A kernel advisory
+  lock protects initial publication until provider history and the exact owned
+  client are observable, so app open cannot race startup into a duplicate Run.
+- **The Mac multiplexer presents Sessions without owning them.** Selecting a row
+  replaces the focused Ghostty pane or focuses the pane already showing that
+  Session. Completing the selected Session removes its row and reconciles the
+  pane to the useful empty workspace. Repository selection uses canonical Git
+  common-directory identity so linked Task worktrees never appear as portfolio
+  roots.
+- **Work conditions remain non-actionable descriptions.** `lf status` and `lf
+  roadmap` expose one Task condition: `clear`, `waiting`, `blocked`, or `unknown`.
+  Sessions alone open or resolve human work. NOW groups the same conditions, and
+  `lf usage` accepts the Wave/Project/Task drill shared by `lf runs` rather than
+  inventing another hierarchy.
+- **Two configured-path proofs remain release evidence.** One promoted Ask must
+  survive open, provider-native continuation, Ready, Complete, pane clearing, and
+  blocked-caller release. The permissioned macOS UI gate must interact with a
+  Session and prove focus/action/pane reconciliation. A mocked `SessionRecord`,
+  launch-only screenshot, empty list, or live row without caller release is not
+  equivalent evidence.
+- **Keep the next projection reduction coherent.** Rust already owns Session
+  legality and exact Work identity, while Swift still reconstructs legal actions
+  from kind/state and joins the roadmap for display labels. If that surface grows,
+  project legal actions and display Work path in `SessionRecord`, then delete the
+  Swift action matrix, replacement-policy inference, Sessions-only roadmap join,
+  and unused narrower scopes together.
+- **PM reconciliation is queued after Linear reconnect.** The cached LOO-251
+  directive still describes an Ask-specific `lf ask list --user` and tmux-shaped
+  surface. Rename it to “Finish the native Sessions multiplexer and promoted Ask
+  handoff,” replace its contract with the model above, and keep the two configured-
+  path proofs as its closure criteria. File the projection reduction as a
+  separate Mac Surface UX Task after PR #1250 lands.
 
 ## Patterns (verified 2026-06-30, remote TLS connection)
 
@@ -342,13 +351,13 @@ here on top of PR #849's signed-test/release hardening.
   with white text** (`WaveSidebar.swift`), NOT a `NavigationSplitView` column (its
   gray vibrant material can't be overridden). Fields = `.textFieldStyle(.plain)` +
   `palette.surfaceMuted` (`CatchWaveView`), NOT `.roundedBorder` (renders black).
-- **`concerto-dev` builds from the worktree it's run in** (`REPO_ROOT`); run it
-  from the branch's worktree. Repo list is worktree-aware — collapse to main via
-  `git rev-parse --git-common-dir`, never present a worktree; default source `~/src`.
-- **Wave-agent (`/goal`) launch + attach already exists:** backend
-  `launch_wave_agent_session` starts the goal-loop agent in tmux; Concerto attaches
-  via `attachSession` → `GhosttyTerminalView` → `tmux attach-session`
-  (`TerminalWorkspaceView`). Reuse it; don't add new plumbing.
+- **`loopflow-dev.py` builds from the worktree it runs in.** Run it from the
+  branch checkout. Repository discovery collapses linked worktrees to the
+  canonical main checkout through the Git common directory; Task Work remains
+  the only surface that presents its worktree.
+- **Human-bound provider clients resume natively.** Reuse `SessionRecord` and
+  `lf session open`; do not restore lfd terminal attachment, a tmux presentation
+  path, or Ask-specific Swift plumbing.
 - The high-value review move was catching invented fields that duplicate existing
   ones (e.g. `RunStatus`), not re-litigating the approach.
 - `cargo test -p loopflow dto_fixtures` filters by test name; use

@@ -18,7 +18,7 @@ struct RoadmapViewTests {
 
         // An explicit User merge request advertises Open PR: the server
         // recommends the exact head, and the app does not re-derive it.
-        #expect(tasks[1].attention.actions.recommended == .openPr)
+        #expect(tasks[1].actions.recommended == .openPr)
         #expect(roadmapTaskAction(tasks[1]) == .openPr)
 
         // No Task Work yet, and a terminal Task offers nothing.
@@ -30,7 +30,7 @@ struct RoadmapViewTests {
     func recommendedActionCarriesItsReason() throws {
         let snapshot = try loadRoadmapFixture()
         let project = try #require(snapshot.waves.first?.projects.items.first)
-        let openingPR = project.tasks[1].attention.actions
+        let openingPR = project.tasks[1].actions
 
         #expect(openingPR.recommended == .openPr)
         #expect(openingPR.reason == "merge head abc1234 on GitHub")

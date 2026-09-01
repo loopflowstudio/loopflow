@@ -11,42 +11,6 @@ import Testing
 struct LocalWaveAgentLauncherTests {
     // MARK: - Command construction
 
-    @Test("canonical local and remote Homes route once")
-    func canonicalHomeRouting() {
-        #expect(!LaunchTargetLauncher.isRemoteHome("jack@local"))
-        #expect(LaunchTargetLauncher.isRemoteHome("ssh://jack@builder.example:22"))
-    }
-
-    @Test("Ask sessions attach through their generic Run route")
-    func askSessionCommands() {
-        let local = AskSessionRecord(
-            askId: "ask-1",
-            runId: "run-1",
-            homeRoute: "jack@local",
-            attachArgv: ["lf", "run", "attach", "run-1"]
-        )
-        #expect(LaunchTargetLauncher.command(for: local, localCwd: "/repo") == .init(
-            cwd: "/repo",
-            argv: ["lf", "run", "attach", "run-1"],
-            environment: [:]
-        ))
-
-        let remote = AskSessionRecord(
-            askId: "ask-2",
-            runId: "run-2",
-            homeRoute: "ssh://jack@builder.example:2200",
-            attachArgv: ["lf", "run", "attach", "run-2"]
-        )
-        #expect(LaunchTargetLauncher.command(for: remote, localCwd: "/repo") == .init(
-            cwd: "/",
-            argv: [
-                "ssh", "-p", "2200", "jack@builder.example",
-                "exec 'lf' 'run' 'attach' 'run-2'",
-            ],
-            environment: [:]
-        ))
-    }
-
     @Test("development launcher preserves the selected Home registry")
     func launchEnvironmentPreservesRegistry() {
         let environment = GUIProcessEnvironment.enriched([
@@ -128,7 +92,10 @@ struct LocalWaveAgentLauncherTests {
     @Test("a missing bundled helper never falls through to PATH")
     func missingBundledHelperFails() {
         #expect {
-            try LocalWaveAgentLauncher.bundledLfPath(bundled: nil)
+            try LocalWaveAgentLauncher.controlLfPath(
+                bundled: nil,
+                developmentConfig: nil
+            )
         } throws: { error in
             guard error is LocalLfError else { return false }
             return error.localizedDescription.contains("missing its executable bundled lf helper")
@@ -136,11 +103,28 @@ struct LocalWaveAgentLauncherTests {
         }
     }
 
+    @Test("a development app uses its explicit machine lf gate")
+    func developmentAppUsesMachineGate() throws {
+        let directory = FileManager.default.temporaryDirectory
+            .appending(path: UUID().uuidString, directoryHint: .isDirectory)
+        try FileManager.default.createDirectory(at: directory, withIntermediateDirectories: true)
+        defer { try? FileManager.default.removeItem(at: directory) }
+        let config = directory.appending(path: "LoopflowDevControl.json")
+        try Data(#"{"lf_path":"/bin/sh"}"#.utf8).write(to: config)
+
+        let path = try LocalWaveAgentLauncher.controlLfPath(
+            bundled: nil,
+            developmentConfig: config
+        )
+
+        #expect(path == "/bin/sh")
+    }
+
     #if !SWIFT_PACKAGE
     @Test("the hosted app executes and decodes its bundled process activity")
     func hostedBundleProcessActivityDecodes() async throws {
-        let helper = try #require(Bundle.main.url(forAuxiliaryExecutable: "lf"))
-        #expect(FileManager.default.isExecutableFile(atPath: helper.path))
+        let helper = try LocalWaveAgentLauncher.controlLfPath()
+        #expect(FileManager.default.isExecutableFile(atPath: helper))
         let query = RegistryQuery { args, cwd in
             #expect(args == ["ps", "--json"])
             #expect(cwd == nil)

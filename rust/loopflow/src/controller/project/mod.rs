@@ -1,7 +1,6 @@
 use std::io::BufRead;
 use std::ops::{Deref, DerefMut};
 use std::path::Path;
-use std::time::Duration;
 
 use anyhow::{anyhow, Result};
 use sha2::{Digest, Sha256};
@@ -12,7 +11,7 @@ use crate::child::ChildRef;
 use crate::controller::wave::playhead::{
     BodyProvenance, Playhead, PlayheadEvent, QueuedInvocation, StepKind, StepOutcome,
 };
-use crate::durable::{render_steers, Steer, SteerId, WorkStatus};
+use crate::durable::{Steer, WorkStatus};
 use crate::harness::{default_create_harness, drain_turn_failure_reason, ApprovalPolicy, Harness};
 use crate::store::SharedStore;
 use crate::work::project::{ChildEventPayload, Project, ProjectEventKind, ProjectId};
@@ -21,8 +20,6 @@ use crate::work::wave::Wave;
 mod state;
 
 pub(crate) use state::{automatic_restart_bar, State};
-
-const CONTROL_TICK_INTERVAL: Duration = Duration::from_secs(5);
 
 #[derive(Debug, Clone)]
 struct ControlledProject {
@@ -62,7 +59,6 @@ async fn controlled_project(
 #[derive(Debug)]
 struct PreparedProjectStep {
     turn: crate::lf::commands::run::PreparedHarnessTurn,
-    steers: Vec<SteerId>,
     planning: crate::ops::task_pm::ResolvedProject,
 }
 
@@ -82,283 +78,126 @@ async fn owning_wave(store: &SharedStore, project: &ControlledProject) -> Result
 }
 
 async fn run_project_inner(store: SharedStore, project_id: ProjectId) -> Result<()> {
-    'launch: loop {
-        let mut project = controlled_project(&store, &project_id).await?;
-        let wave = owning_wave(&store, &project).await?;
-        store.put_project_controller_state(&project.state).await?;
-        store
-            .append_project_event(&project.id, &ProjectEventKind::Started)
-            .await?;
-        let target = ChildRef::Project(project.id.clone());
-        let work = store.work_for_child(&target).await?;
-        let mut ask_lane = crate::ops::ask::AskLane::new(work.clone());
-        ask_lane.reconcile(&store).await?;
-        let observations = consume_task_observations(&store, &mut project).await?;
-        let (mut flow, _) =
-            Playhead::new(QueuedInvocation::load(Path::new(wave.repo()), "project")?);
-        let mut prepared =
-            prepare_project_flow_step(&store, &mut project, &wave, &flow, &observations).await?;
-        let mut active_planning = prepared.planning.clone();
-        let (harness_name, _) = crate::engine::config::parse_agent(&project.state.agent);
-        let capture = crate::run_record::CaptureHandle::begin_with_context(
-            crate::run_record::RunSpec {
-                harness: prepared.turn.harness.clone(),
-                model: prepared.turn.model.clone(),
-                surface: "headless".to_string(),
-                cwd: Path::new(wave.repo()).to_path_buf(),
-                repo: Some(Path::new(wave.repo()).to_path_buf()),
-                worktree: Some(Path::new(wave.repo()).to_path_buf()),
-                skill: flow.current().map(|step| step.step.clone()),
-                subjects: vec![
-                    crate::run_record::SubjectAttribution::declared(format!(
-                        "wave:{}",
-                        wave.name()
-                    )),
-                    crate::run_record::SubjectAttribution::declared(format!(
-                        "project:{}",
-                        project.plan.slug
-                    )),
-                ],
-            },
-            &prepared.turn.context,
-        )?;
-        capture.record_input("initial", &prepared.turn.input);
-        prepared.turn.config.env.extend(capture.environment());
-        capture.mark_spawn_requested();
-        let capture = Some(capture);
-        let (event_tx, mut event_rx) = mpsc::unbounded_channel();
-        let mut harness =
-            default_create_harness(&harness_name, ApprovalPolicy::AutoApprove, event_tx)
-                .inspect_err(|_| {
-                    finish_capture(capture.as_ref(), "failed");
-                })?;
-        harness.set_provider_session_id(project.state.provider_session_id.clone());
-        if let Err(error) = harness.start(&prepared.turn.config).await {
-            finish_capture(capture.as_ref(), "failed");
-            return Err(error);
-        }
-        project.state.provider = harness_name;
-        project.state.provider_session_id = harness.provider_session_id();
-        if let Err(error) = store.put_project_controller_state(&project.state).await {
-            let _ = harness.stop().await;
-            return Err(error.into());
-        }
-        if let Some(capture) = &capture {
-            capture.set_provider_session_id(project.state.provider_session_id.clone());
-        }
-        let mut active_steers = prepared.steers.clone();
-
-        start_project_flow_turn(
-            &store,
-            &mut project,
-            harness.as_mut(),
-            &mut flow,
-            None,
-            prepared,
-        )
+    let mut project = controlled_project(&store, &project_id).await?;
+    let wave = owning_wave(&store, &project).await?;
+    store.put_project_controller_state(&project.state).await?;
+    store
+        .append_project_event(&project.id, &ProjectEventKind::Started)
         .await?;
-        let mut flow_turn_active = true;
+    let observations = consume_task_observations(&store, &mut project).await?;
+    let (mut flow, _) = Playhead::new(QueuedInvocation::load(Path::new(wave.repo()), "project")?);
+    let mut prepared =
+        prepare_project_flow_step(&store, &mut project, &wave, &flow, &observations).await?;
+    let mut active_planning = prepared.planning.clone();
+    let (harness_name, _) = crate::engine::config::parse_agent(&project.state.agent);
+    let capture = crate::run_record::CaptureHandle::begin_with_context(
+        crate::run_record::RunSpec {
+            harness: prepared.turn.harness.clone(),
+            model: prepared.turn.model.clone(),
+            surface: "headless".to_string(),
+            cwd: Path::new(wave.repo()).to_path_buf(),
+            repo: Some(Path::new(wave.repo()).to_path_buf()),
+            worktree: Some(Path::new(wave.repo()).to_path_buf()),
+            skill: flow.current().map(|step| step.step.clone()),
+            subjects: vec![
+                crate::run_record::SubjectAttribution::declared(format!("wave:{}", wave.name())),
+                crate::run_record::SubjectAttribution::declared(format!(
+                    "project:{}",
+                    project.plan.slug
+                )),
+            ],
+        },
+        &prepared.turn.context,
+    )?;
+    capture.record_input("initial", &prepared.turn.input);
+    prepared.turn.config.env.extend(capture.environment());
+    capture.mark_spawn_requested();
+    let capture = Some(capture);
+    let (event_tx, mut event_rx) = mpsc::unbounded_channel();
+    let mut harness = default_create_harness(&harness_name, ApprovalPolicy::AutoApprove, event_tx)
+        .inspect_err(|_| {
+            finish_capture(capture.as_ref(), "failed");
+        })?;
+    harness.set_provider_session_id(project.state.provider_session_id.clone());
+    if let Err(error) = harness.start(&prepared.turn.config).await {
+        finish_capture(capture.as_ref(), "failed");
+        return Err(error);
+    }
+    project.state.provider = harness_name;
+    project.state.provider_session_id = harness.provider_session_id();
+    if let Err(error) = store.put_project_controller_state(&project.state).await {
+        let _ = harness.stop().await;
+        return Err(error.into());
+    }
+    if let Some(capture) = &capture {
+        capture.set_provider_session_id(project.state.provider_session_id.clone());
+    }
+    start_project_flow_turn(
+        &store,
+        &mut project,
+        harness.as_mut(),
+        &mut flow,
+        None,
+        prepared,
+    )
+    .await?;
+    let mut flow_turn_active = true;
 
-        let (attachment_tx, mut attachment_rx) = mpsc::unbounded_channel();
-        std::thread::spawn(move || {
-            for line in std::io::stdin().lock().lines() {
-                let Ok(line) = line else { break };
-                if attachment_tx.send(line).is_err() {
-                    break;
+    let (attachment_tx, mut attachment_rx) = mpsc::unbounded_channel();
+    std::thread::spawn(move || {
+        for line in std::io::stdin().lock().lines() {
+            let Ok(line) = line else { break };
+            if attachment_tx.send(line).is_err() {
+                break;
+            }
+        }
+    });
+    println!(
+        "project {}> attached; /status, /interrupt, /detach, or type an instruction",
+        project.plan.slug
+    );
+    let mut last_text = String::new();
+    loop {
+        tokio::select! {
+            line = attachment_rx.recv() => {
+                if let Some(line) = line {
+                    if line.trim() == "/interrupt" {
+                        harness.interrupt().await?;
+                    } else {
+                        handle_attachment(&store, &project, line).await?;
+                    }
                 }
             }
-        });
-        println!(
-            "project {}> attached; /status, /interrupt, /detach, or type an instruction",
-            project.plan.slug
-        );
-        let mut poll = tokio::time::interval(Duration::from_millis(200));
-        poll.set_missed_tick_behavior(tokio::time::MissedTickBehavior::Delay);
-        let mut control_tick = tokio::time::interval(CONTROL_TICK_INTERVAL);
-        control_tick.set_missed_tick_behavior(tokio::time::MissedTickBehavior::Delay);
-        spawn_ask_comment_publication(store.clone());
-        let mut last_text = String::new();
-        loop {
-            tokio::select! {
-                line = attachment_rx.recv() => {
-                    if let Some(line) = line {
-                        if line.trim() == "/interrupt" {
-                            harness.interrupt().await?;
-                        } else {
-                            handle_attachment(&store, &project, line).await?;
-                        }
-                    }
+            event = event_rx.recv() => {
+                let Some(event) = event else {
+                    return finish_failed(
+                        &store,
+                        &mut project,
+                        harness.as_mut(),
+                        "provider event stream closed",
+                        capture.as_ref(),
+                    )
+                    .await;
+                };
+                if let Some(capture) = &capture {
+                    capture.record_conversation(event.clone());
                 }
-                _ = poll.tick() => {
-                    ask_lane.reconcile(&store).await?;
+                let provider_session_id = harness.provider_session_id();
+                if provider_session_id != project.state.provider_session_id {
+                    project.state.provider_session_id = provider_session_id;
+                    store.put_project_controller_state(&project.state).await?;
                 }
-                _ = control_tick.tick() => spawn_ask_comment_publication(store.clone()),
-                event = event_rx.recv() => {
-                    let Some(event) = event else {
-                        return finish_failed(
-                            &store,
-                            &mut project,
-                            harness.as_mut(),
-                            "provider event stream closed",
-                            capture.as_ref(),
-                        )
-                        .await;
-                    };
-                    if let Some(capture) = &capture {
-                        capture.record_conversation(event.clone());
+                match event {
+                    ConversationEvent::TextDelta { content, .. } => last_text.push_str(&content),
+                    ConversationEvent::TurnStarted { .. } => {
                     }
-                    let provider_session_id = harness.provider_session_id();
-                    if provider_session_id != project.state.provider_session_id {
-                        project.state.provider_session_id = provider_session_id;
-                        store.put_project_controller_state(&project.state).await?;
-                    }
-                    match event {
-                        ConversationEvent::TextDelta { content, .. } => last_text.push_str(&content),
-                        ConversationEvent::TurnStarted { .. } => {
-                        }
-                        ConversationEvent::ItemCompleted { .. } => {}
-                        ConversationEvent::TurnCompleted { status, .. } => {
-                            if status == Lifecycle::Failed {
-                                let reason = drain_turn_failure_reason(
-                                    &mut event_rx,
-                                    "provider turn failed",
-                                );
-                                return finish_failed(
-                                    &store,
-                                    &mut project,
-                                    harness.as_mut(),
-                                    &reason,
-                                    capture.as_ref(),
-                                )
-                                .await;
-                            }
-                            if let Err(error) = verify_control_plane_checkout(Path::new(wave.repo())) {
-                                return finish_failed(
-                                    &store,
-                                    &mut project,
-                                    harness.as_mut(),
-                                    &error.to_string(),
-                                    capture.as_ref(),
-                                )
-                                .await;
-                            }
-                            let flow_iteration_completed = if flow_turn_active {
-                                finish_project_flow_turn(&mut flow, status)?
-                            } else {
-                                false
-                            };
-                            flow_turn_active = false;
-                            if status != Lifecycle::Interrupted {
-                                let observations =
-                                    consume_task_observations(&store, &mut project).await?;
-                                if !observations.is_empty() {
-                                    apply_input(
-                                        harness.as_mut(),
-                                        format!(
-                                            "New supervised Task observations arrived. Continue the same Project iteration:\n{}",
-                                            observations.join("\n")
-                                        ),
-                                    ).await?;
-                                    continue;
-                                }
-                            }
-                            if !flow_iteration_completed && status != Lifecycle::Interrupted {
-                                let prepared = prepare_project_flow_step(
-                                    &store,
-                                    &mut project,
-                                    &wave,
-                                    &flow,
-                                    &[],
-                                )
-                                .await?;
-                                active_planning = prepared.planning.clone();
-                                active_steers = prepared.steers.clone();
-                                start_project_flow_turn(
-                                    &store,
-                                    &mut project,
-                                    harness.as_mut(),
-                                    &mut flow,
-                                    capture.as_ref(),
-                                    prepared,
-                                )
-                                .await?;
-                                flow_turn_active = true;
-                                continue;
-                            }
-                            let summary = bounded_summary(&last_text);
-                            if flow_iteration_completed {
-                                project.state.iteration += 1;
-                                store.append_project_event(
-                                    &project.id,
-                                    &ProjectEventKind::IterationCompleted {
-                                        iteration: project.state.iteration,
-                                        summary: summary.clone(),
-                                    },
-                                ).await?;
-                            }
-                            let mut outcome = inspect_outcome(&store, &project, &active_planning).await?;
-                            if status == Lifecycle::Interrupted {
-                                outcome.disposition = ProjectDisposition::Wait;
-                            }
-                            if outcome.disposition == ProjectDisposition::Continue {
-                                project.state.last_state_fingerprint = Some(outcome.fingerprint);
-                                project.updated_at = time::OffsetDateTime::now_utc();
-                                store.put_project_controller_state(&project.state).await?;
-                                last_text.clear();
-                                let prepared = prepare_project_flow_step(
-                                    &store,
-                                    &mut project,
-                                    &wave,
-                                    &flow,
-                                    &[],
-                                )
-                                .await?;
-                                active_planning = prepared.planning.clone();
-                                active_steers = prepared.steers.clone();
-                                start_project_flow_turn(
-                                    &store,
-                                    &mut project,
-                                    harness.as_mut(),
-                                    &mut flow,
-                                    capture.as_ref(),
-                                    prepared,
-                                )
-                                .await?;
-                                flow_turn_active = true;
-                                continue;
-                            }
-                            project.state.last_state_fingerprint = Some(outcome.fingerprint);
-                            store.put_project_controller_state(&project.state).await?;
-                            let _ = harness.stop().await;
-                            finish_capture(capture.as_ref(), "completed");
-                            if project_run_must_remain_resident(
-                                &store,
-                                &mut ask_lane,
-                            ).await? {
-                                let restart = run_ask_only_supervisor(
-                                    &store,
-                                    &project,
-                                    &active_steers,
-                                    outcome.disposition,
-                                    summary,
-                                    &mut ask_lane,
-                                    &mut attachment_rx,
-                                ).await?;
-                                if restart {
-                                    continue 'launch;
-                                }
-                                return Ok(());
-                            }
-                            finish_project_outcome(
-                                &store,
-                                &project,
-                                outcome.disposition,
-                                summary,
-                            ).await?;
-                            return Ok(());
-                        }
-                        ConversationEvent::Error { code, message, .. } => {
-                            let reason = format!("{code}: {message}");
+                    ConversationEvent::ItemCompleted { .. } => {}
+                    ConversationEvent::TurnCompleted { status, .. } => {
+                        if status == Lifecycle::Failed {
+                            let reason = drain_turn_failure_reason(
+                                &mut event_rx,
+                                "provider turn failed",
+                            );
                             return finish_failed(
                                 &store,
                                 &mut project,
@@ -368,84 +207,131 @@ async fn run_project_inner(store: SharedStore, project_id: ProjectId) -> Result<
                             )
                             .await;
                         }
-                        ConversationEvent::ItemStarted { .. }
-                        | ConversationEvent::ItemUpdated { .. }
-                        | ConversationEvent::ReasoningDelta { .. }
-                        | ConversationEvent::DiffUpdated { .. }
-                        | ConversationEvent::UsageCheckpoint { .. }
-                        | ConversationEvent::SuggestedActions { .. }
-                        | ConversationEvent::StatusChanged { .. } => {}
+                        if let Err(error) = verify_control_plane_checkout(Path::new(wave.repo())) {
+                            return finish_failed(
+                                &store,
+                                &mut project,
+                                harness.as_mut(),
+                                &error.to_string(),
+                                capture.as_ref(),
+                            )
+                            .await;
+                        }
+                        let flow_iteration_completed = if flow_turn_active {
+                            finish_project_flow_turn(&mut flow, status)?
+                        } else {
+                            false
+                        };
+                        flow_turn_active = false;
+                        if status != Lifecycle::Interrupted {
+                            let observations =
+                                consume_task_observations(&store, &mut project).await?;
+                            if !observations.is_empty() {
+                                apply_input(
+                                    harness.as_mut(),
+                                    format!(
+                                        "New supervised Task observations arrived. Continue the same Project iteration:\n{}",
+                                        observations.join("\n")
+                                    ),
+                                ).await?;
+                                continue;
+                            }
+                        }
+                        if !flow_iteration_completed && status != Lifecycle::Interrupted {
+                            let prepared = prepare_project_flow_step(
+                                &store,
+                                &mut project,
+                                &wave,
+                                &flow,
+                                &[],
+                            )
+                            .await?;
+                            active_planning = prepared.planning.clone();
+                            start_project_flow_turn(
+                                &store,
+                                &mut project,
+                                harness.as_mut(),
+                                &mut flow,
+                                capture.as_ref(),
+                                prepared,
+                            )
+                            .await?;
+                            flow_turn_active = true;
+                            continue;
+                        }
+                        let summary = bounded_summary(&last_text);
+                        if flow_iteration_completed {
+                            project.state.iteration += 1;
+                            store.append_project_event(
+                                &project.id,
+                                &ProjectEventKind::IterationCompleted {
+                                    iteration: project.state.iteration,
+                                    summary: summary.clone(),
+                                },
+                            ).await?;
+                        }
+                        let mut outcome = inspect_outcome(&store, &project, &active_planning).await?;
+                        if status == Lifecycle::Interrupted {
+                            outcome.disposition = ProjectDisposition::Wait;
+                        }
+                        if outcome.disposition == ProjectDisposition::Continue {
+                            project.state.last_state_fingerprint = Some(outcome.fingerprint);
+                            project.updated_at = time::OffsetDateTime::now_utc();
+                            store.put_project_controller_state(&project.state).await?;
+                            last_text.clear();
+                            let prepared = prepare_project_flow_step(
+                                &store,
+                                &mut project,
+                                &wave,
+                                &flow,
+                                &[],
+                            )
+                            .await?;
+                            active_planning = prepared.planning.clone();
+                            start_project_flow_turn(
+                                &store,
+                                &mut project,
+                                harness.as_mut(),
+                                &mut flow,
+                                capture.as_ref(),
+                                prepared,
+                            )
+                            .await?;
+                            flow_turn_active = true;
+                            continue;
+                        }
+                        project.state.last_state_fingerprint = Some(outcome.fingerprint);
+                        store.put_project_controller_state(&project.state).await?;
+                        let _ = harness.stop().await;
+                        finish_capture(capture.as_ref(), "completed");
+                        finish_project_outcome(
+                            &store,
+                            &project,
+                            outcome.disposition,
+                            summary,
+                        ).await?;
+                        return Ok(());
                     }
-                }
-            }
-        }
-    }
-}
-
-fn spawn_ask_comment_publication(store: SharedStore) {
-    tokio::spawn(async move {
-        if let Err(error) = crate::ops::publish_pending_ask_comments(&store).await {
-            tracing::warn!(%error, "Ask comment outbox publication failed");
-        }
-    });
-}
-
-async fn project_run_must_remain_resident(
-    store: &SharedStore,
-    ask_lane: &mut crate::ops::ask::AskLane,
-) -> Result<bool> {
-    ask_lane.reconcile(store).await
-}
-
-async fn run_ask_only_supervisor(
-    store: &SharedStore,
-    project: &ControlledProject,
-    settled_steers: &[SteerId],
-    disposition: ProjectDisposition,
-    summary: String,
-    ask_lane: &mut crate::ops::ask::AskLane,
-    attachment_rx: &mut mpsc::UnboundedReceiver<String>,
-) -> Result<bool> {
-    let work = crate::durable::WorkRef::Project(project.id.clone());
-    let mut poll = tokio::time::interval(Duration::from_millis(200));
-    poll.set_missed_tick_behavior(tokio::time::MissedTickBehavior::Delay);
-    let mut control_tick = tokio::time::interval(CONTROL_TICK_INTERVAL);
-    control_tick.set_missed_tick_behavior(tokio::time::MissedTickBehavior::Delay);
-    spawn_ask_comment_publication(store.clone());
-    loop {
-        tokio::select! {
-            line = attachment_rx.recv() => {
-                if let Some(line) = line {
-                    if line.trim() == "/interrupt" {
-                        return Ok(false);
+                    ConversationEvent::Error { code, message, .. } => {
+                        let reason = format!("{code}: {message}");
+                        return finish_failed(
+                            &store,
+                            &mut project,
+                            harness.as_mut(),
+                            &reason,
+                            capture.as_ref(),
+                        )
+                        .await;
                     }
-                    handle_attachment(store, project, line).await?;
+                    ConversationEvent::ItemStarted { .. }
+                    | ConversationEvent::ItemUpdated { .. }
+                    | ConversationEvent::ReasoningDelta { .. }
+                    | ConversationEvent::DiffUpdated { .. }
+                    | ConversationEvent::UsageCheckpoint { .. }
+                    | ConversationEvent::SuggestedActions { .. }
+                    | ConversationEvent::StatusChanged { .. } => {}
                 }
             }
-            _ = poll.tick() => {
-                if ask_lane.reconcile(store).await? {
-                    continue;
-                }
-                let new_direction = store
-                    .work_steers(&work)
-                    .await?
-                    .iter()
-                    .map(|steer| steer.id.clone())
-                    .collect::<Vec<_>>()
-                    != settled_steers;
-                let new_observations = !store.pending_project_observations(&project.id).await?.is_empty();
-                if new_direction || new_observations {
-                    return Ok(true);
-                }
-                finish_project_outcome(
-                    store,
-                    project,
-                    disposition,
-                    summary,
-                ).await?;
-                return Ok(false);
-            }
-            _ = control_tick.tick() => spawn_ask_comment_publication(store.clone()),
         }
     }
 }
@@ -509,7 +395,6 @@ async fn prepare_project_flow_step(
     prepared.config.agent = Some(project.state.agent.clone());
     Ok(PreparedProjectStep {
         turn: prepared,
-        steers: steers.iter().map(|steer| steer.id.clone()).collect(),
         planning,
     })
 }
@@ -788,22 +673,16 @@ fn project_seed(
     observations: &[String],
     metric_context: &str,
 ) -> String {
-    let observations = if observations.is_empty() {
-        "none".to_string()
-    } else {
-        observations.join("\n")
-    };
-    let direction = render_steers(steers);
+    let context = crate::ops::render_project_context(
+        project,
+        Some(&project.state),
+        wave_name,
+        steers,
+        observations,
+        metric_context,
+    );
     format!(
-        "Advance Linear Project {name} ({project_id}) in wave/{wave}.\n\n{context}\n\n{metric_context}\n\nOnly metrics owned by this Project appear above. Cross-owned evidence appears only when the Wave routes it through durable direction. Metrics inform KR judgment; they never check a KR automatically.\n\n{direction}\n\nProject Work: {work_id}\nIteration: {iteration}\nPM snapshot synced at: {synced_at}\nSupervised Task observations:\n{observations}\n\nThe runner plays clarify, pursue, and mutate through this same provider session before it checks authoritative Project and Task state. Read and update only this Linear Project through `lf pm`. Create or select concrete Linear tasks, run file-writing work with `lf task run <issue-id>`, and supervise those Tasks. Do not edit repository files from the Wave home. Return concise phase evidence; the runner decides complete, wait, repeat, or block after the whole flow.",
-        name = project.plan.name,
-        project_id = project.plan.id.as_str(),
-        wave = wave_name,
-        context = project.plan.prompt_context,
-        metric_context = metric_context,
-        work_id = project.id,
-        iteration = project.state.iteration + 1,
-        synced_at = project.plan.pm_snapshot_synced_at,
+        "{context}\n\nRun clarify, pursue, and mutate through the same provider session. Read and update only this Linear Project. Start implementation through Task Work; do not edit repository files from Project Work."
     )
 }
 

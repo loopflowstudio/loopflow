@@ -631,7 +631,14 @@ fn run_bound_target_in_repo(
     match loopflow::lf::discovery::discover_target(repo_root, name)? {
         loopflow::lf::discovery::Target::Skill(_) => with_runtime(repo_root, command, || {
             with_skill_runtime(repo_root, name, || {
-                loopflow::lf::commands::run::run_bound(name, message, cli, binding)
+                loopflow::lf::commands::run::run_bound(Some(name), message, cli, binding)?;
+                let options = loopflow::ops::CommitOptions {
+                    add: true,
+                    message: Some(format!("lf commit: {name}")),
+                    ..loopflow::ops::CommitOptions::for_task(name)
+                };
+                loopflow::ops::commit_workflow(repo_root, &options, &loopflow::ops::NullProgress)?;
+                Ok(())
             })
         }),
         loopflow::lf::discovery::Target::Flow(_) => anyhow::bail!(
@@ -640,51 +647,73 @@ fn run_bound_target_in_repo(
     }
 }
 
-fn prepare_work_binding(
-    selection: loopflow::ops::WorkSelection<'_>,
-    subject: &str,
-    repo: &Path,
-) -> anyhow::Result<Option<loopflow::ops::WorkBinding>> {
-    let selected_count = [selection.task, selection.project, selection.wave]
-        .into_iter()
-        .flatten()
-        .count();
-    let runtime = match tokio::runtime::Runtime::new() {
-        Ok(runtime) => runtime,
-        Err(error) => {
-            if selected_count > 1 {
-                anyhow::bail!(
-                    "cannot validate the selected Work hierarchy without planning state: {error}"
-                );
-            }
-            warn!(%error, %subject, "cannot start planning enrichment; launching with the raw Work selector");
-            return Ok(None);
-        }
-    };
+fn prepare_work_binding(selector: &str, repo: &Path) -> anyhow::Result<loopflow::ops::WorkBinding> {
+    let runtime = tokio::runtime::Runtime::new()
+        .map_err(|error| anyhow::anyhow!("cannot resolve --as {selector}: {error}"))?;
     runtime.block_on(async {
-        let Some(store) = loopflow::store::open_existing_store().await else {
-            if selected_count > 1 {
-                anyhow::bail!(
-                    "cannot validate the selected Work hierarchy because the planning registry is unavailable"
-                );
-            }
-            warn!(%subject, "planning registry unavailable; launching with the raw Work selector");
-            return Ok(None);
-        };
-        let store = Arc::new(store);
-        let binding = loopflow::ops::resolve_work_selection(&store, repo, selection)
+        let store = loopflow::store::open_existing_store()
             .await
-            .map_err(|error| anyhow::anyhow!(error.to_string()))?;
-        Ok(Some(binding))
+            .ok_or_else(|| {
+                anyhow::anyhow!("cannot resolve --as {selector}: planning registry unavailable")
+            })?;
+        let store = Arc::new(store);
+        loopflow::ops::resolve_work_binding(&store, repo, selector)
+            .await
+            .map_err(anyhow::Error::from)
     })
 }
 
-fn require_bound_named_skill(command: &Option<Commands>, repo: &Path) -> anyhow::Result<()> {
+fn prepare_hierarchical_work_binding(
+    task: Option<&str>,
+    project: Option<&str>,
+    wave: Option<&str>,
+    repo: &Path,
+) -> anyhow::Result<loopflow::ops::WorkBinding> {
+    let runtime = tokio::runtime::Runtime::new()
+        .map_err(|error| anyhow::anyhow!("cannot resolve Work selection: {error}"))?;
+    runtime.block_on(async {
+        let store = loopflow::store::open_existing_store()
+            .await
+            .ok_or_else(|| {
+                anyhow::anyhow!("cannot resolve Work selection: planning registry unavailable")
+            })?;
+        let store = Arc::new(store);
+        loopflow::ops::resolve_work_selection(
+            &store,
+            repo,
+            loopflow::ops::WorkSelection {
+                task,
+                project,
+                wave,
+            },
+        )
+        .await
+        .map_err(anyhow::Error::from)
+    })
+}
+
+fn validate_work_selector(selector: &str) -> anyhow::Result<()> {
+    let (kind, value) = selector.split_once(':').ok_or_else(|| {
+        anyhow::anyhow!(
+            "invalid --as {selector:?}; use task:<selector>, project:<selector>, or wave:<selector>"
+        )
+    })?;
+    if !matches!(kind, "task" | "project" | "wave") {
+        anyhow::bail!("invalid --as kind {kind:?}; expected task, project, or wave");
+    }
+    if value.trim().is_empty() {
+        anyhow::bail!("{kind} selector cannot be empty");
+    }
+    Ok(())
+}
+
+fn require_bound_invocation(command: &Option<Commands>, repo: &Path) -> anyhow::Result<()> {
     let name = match command {
         Some(Commands::Skill { name, .. }) => name.clone(),
         Some(Commands::External(args)) => loopflow::lf::commands::run::split_skill_args(args)?.0,
+        Some(Commands::Inline { .. }) => return Ok(()),
         _ => {
-            anyhow::bail!("Work selectors start one named skill; use `lf --task LOO-123 implement`")
+            anyhow::bail!("`lf --as` starts one skill or inline prompt; use `lf --as task:LOO-123 implement` or `lf --as project:api : \"question\"`")
         }
     };
     match loopflow::lf::discovery::discover_target(repo, &name)? {
@@ -1486,7 +1515,8 @@ fn main() -> anyhow::Result<()> {
 
     let mut direct_binding = None;
     let mut _bound_cwd = None;
-    let selects_direct_work = cli.task.is_some()
+    let selects_direct_work = cli.as_work.is_some()
+        || cli.task.is_some()
         || cli.project.is_some()
         || (cli.wave.is_some()
             && matches!(
@@ -1495,23 +1525,38 @@ fn main() -> anyhow::Result<()> {
             ));
     if selects_direct_work {
         let repo = loopflow::lf::commands::util::find_repo_root()?;
-        let subject = cli
-            .work_subject_selector()
-            .expect("direct Work selection has a subject");
-        let selection = loopflow::ops::WorkSelection {
-            task: cli.task.as_deref(),
-            project: cli.project.as_deref(),
-            wave: cli.wave.as_deref(),
-        };
-        if let Some(binding) = prepare_work_binding(selection, &subject, &repo)? {
-            cli.wave = Some(binding.wave_name.clone());
-            let cwd = CwdGuard::enter(&binding.cwd)?;
-            require_bound_named_skill(&cli.command, &binding.cwd)?;
-            direct_binding = Some(binding);
-            _bound_cwd = Some(cwd);
+        let mut binding = if let Some(selector) = cli.as_work.as_deref() {
+            validate_work_selector(selector)?;
+            prepare_work_binding(selector, &repo)?
         } else {
-            require_bound_named_skill(&cli.command, &repo)?;
+            prepare_hierarchical_work_binding(
+                cli.task.as_deref(),
+                cli.project.as_deref(),
+                cli.wave.as_deref(),
+                &repo,
+            )?
+        };
+        if let Some(cwd) = cli.bound_cwd.clone() {
+            binding.cwd = cwd;
         }
+        if let Some(wave) = &explicit_wave {
+            if wave.id() != &binding.wave_id {
+                anyhow::bail!(
+                    "--wave {} does not own --as {}:{}",
+                    wave.name(),
+                    binding.work.kind(),
+                    binding.work.id(),
+                );
+            }
+        }
+        cli.wave = Some(binding.wave_name.clone());
+        if cli.model.is_none() {
+            cli.model = binding.agent.clone();
+        }
+        let cwd = CwdGuard::enter(&binding.cwd)?;
+        require_bound_invocation(&cli.command, &binding.cwd)?;
+        direct_binding = Some(binding);
+        _bound_cwd = Some(cwd);
     }
 
     let result = if cli.list {
@@ -1520,12 +1565,19 @@ fn main() -> anyhow::Result<()> {
         match &cli.command {
             Some(Commands::Inline { prompt }) => {
                 let text = prompt.join(" ");
-                in_repo_runtime(&args, |_| {
-                    loopflow::lf::commands::run::run(None, Some(&text), &cli)
+                in_repo_runtime(&args, |_| match direct_binding.as_ref() {
+                    Some(binding) => {
+                        loopflow::lf::commands::run::run_bound(None, Some(&text), &cli, binding)
+                    }
+                    None => loopflow::lf::commands::run::run(None, Some(&text), &cli),
                 })
             }
             Some(Commands::Desktop) => loopflow::lf::commands::desktop::run(),
+            Some(Commands::ProviderSession) => {
+                loopflow::lf::commands::runs::observe_provider_session()
+            }
             Some(Commands::Ask { ask }) => loopflow::lf::commands::ask::run(ask),
+            Some(Commands::Session { cmd }) => loopflow::lf::commands::session::run(cmd),
             Some(Commands::Pr { cmd }) => in_repo_runtime(&args, |_| {
                 loopflow::lf::commands::ops::run_pr(cmd.as_ref(), cli.model.as_deref())
             }),
@@ -1652,9 +1704,19 @@ fn main() -> anyhow::Result<()> {
             Some(Commands::Tokens { json, days }) => {
                 loopflow::lf::commands::tokens::run(*json, *days)
             }
-            Some(Commands::Usage { json, days }) => {
-                loopflow::lf::commands::usage::run(*json, *days)
-            }
+            Some(Commands::Usage {
+                json,
+                days,
+                wave,
+                project,
+                task,
+            }) => loopflow::lf::commands::usage::run(
+                *json,
+                *days,
+                wave.as_deref(),
+                project.as_deref(),
+                task.as_deref(),
+            ),
             Some(Commands::TelemetryScorecard { json }) => in_repo_runtime(&args, |repo| {
                 let item = loopflow::engine::flow::Op {
                     command: "__telemetry-scorecard".to_string(),
@@ -1707,6 +1769,7 @@ fn main() -> anyhow::Result<()> {
             Some(Commands::Runs {
                 run,
                 events,
+                resume,
                 task,
                 project,
                 wave,
@@ -1718,6 +1781,7 @@ fn main() -> anyhow::Result<()> {
                 task.as_deref(),
                 run.as_deref(),
                 *events,
+                *resume,
             ),
             Some(Commands::Replay { run }) => loopflow::lf::commands::replay::run(run),
             Some(Commands::Chat {
@@ -1828,7 +1892,8 @@ fn main() -> anyhow::Result<()> {
 #[cfg(test)]
 mod tests {
     use super::{
-        arg_tables, format_task_pr_line, normalize_ssh_args, reorder_args, CwdGuard, EnvGuard,
+        arg_tables, format_task_pr_line, normalize_ssh_args, reorder_args, validate_work_selector,
+        CwdGuard, EnvGuard,
     };
 
     use clap::Parser;
@@ -1836,7 +1901,7 @@ mod tests {
     use loopflow::work::task::{GithubPr, PrPublication, TaskId, TaskPr, TaskPrId};
 
     #[test]
-    fn raw_work_selector_does_not_require_a_readable_registry() {
+    fn bound_work_selector_requires_a_readable_registry() {
         let _lock = PROCESS_STATE_LOCK
             .lock()
             .unwrap_or_else(std::sync::PoisonError::into_inner);
@@ -1845,16 +1910,10 @@ mod tests {
         std::fs::create_dir(&registry_blocker).unwrap();
         let _db = EnvGuard::set("LF_DB_PATH", registry_blocker.display().to_string());
 
-        let selection = loopflow::ops::WorkSelection {
-            task: Some("LOO-265"),
-            project: None,
-            wave: None,
-        };
-        assert!(
-            super::prepare_work_binding(selection, "task:LOO-265", directory.path())
-                .unwrap()
-                .is_none()
-        );
+        validate_work_selector("task:LOO-265").unwrap();
+        let error = super::prepare_work_binding("task:LOO-265", directory.path())
+            .expect_err("--as must not degrade to raw attribution");
+        assert!(error.to_string().contains("planning registry unavailable"));
     }
 
     static PROCESS_STATE_LOCK: std::sync::Mutex<()> = std::sync::Mutex::new(());
@@ -2074,9 +2133,9 @@ mod tests {
         assert!(cli.command.is_none());
         let skill = loopflow::engine::builtins::get_builtin_skill("loopflow")
             .expect("builtin terminal control skill");
-        assert!(skill.contains("lf ask list --user --json"));
-        assert!(skill.contains("lf ask open <ask-id>"));
-        assert!(skill.contains("control conversation remains open"));
+        assert!(skill.contains("lf session list --json"));
+        assert!(skill.contains("lf session open <session-id> --json"));
+        assert!(skill.contains("Keep this conversation open"));
     }
 
     #[test]

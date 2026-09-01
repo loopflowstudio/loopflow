@@ -14,9 +14,8 @@ mod children;
 pub(crate) mod ci_incidents;
 mod durable;
 mod metrics;
-mod pr_landings;
-pub(crate) use durable::AskCommentWrite;
 pub mod migrations;
+mod pr_landings;
 pub mod provider_deliveries;
 pub mod rows;
 pub mod sqlite;
@@ -130,7 +129,7 @@ pub(crate) fn authority_home_dir() -> PathBuf {
         .or_else(|| std::env::var_os("LF_HOME"))
         .filter(|value| !value.is_empty())
         .map(PathBuf::from)
-        .unwrap_or_else(|| machine_home_dir().join(".lf"))
+        .unwrap_or_else(default_lf_home_dir)
 }
 
 pub(crate) fn observability_home_dir() -> PathBuf {
@@ -1895,6 +1894,15 @@ mod tests {
         assert_eq!(read.linear_attachment_id.as_deref(), Some("att-1"));
         assert_eq!(read.linear_comment_id.as_deref(), Some("comment-1"));
         assert_eq!(read.linear_link_error.as_deref(), Some("linear is down"));
+        assert_eq!(
+            store
+                .get_task_by_branch(&pr.branch)
+                .await
+                .unwrap()
+                .unwrap()
+                .id,
+            task.id
+        );
     }
 
     #[tokio::test]
@@ -1959,6 +1967,20 @@ mod tests {
         assert_eq!(
             store.active_task_pr(&task.id).await.unwrap().unwrap().id,
             second.id
+        );
+        assert!(store
+            .get_task_by_branch(&first.branch)
+            .await
+            .unwrap()
+            .is_none());
+        assert_eq!(
+            store
+                .get_task_by_branch(&second.branch)
+                .await
+                .unwrap()
+                .unwrap()
+                .id,
+            task.id
         );
 
         let mut abandoned = second.clone();
@@ -2129,13 +2151,13 @@ mod tests {
         assert_eq!(collapsed.parent_pr_id, None);
         assert_eq!(collapsed.base_commit, "main-after-200");
 
-        // The worktree lookup the rebase path relies on resolves the task.
-        let by_worktree = store
-            .get_task_by_worktree(&child.worktree.display().to_string())
+        // The tracked branch, not the worktree path, identifies the Task.
+        let by_branch = store
+            .get_task_by_branch(&child_pr.branch)
             .await
             .unwrap()
             .unwrap();
-        assert_eq!(by_worktree.id, child.id);
+        assert_eq!(by_branch.id, child.id);
     }
 
     #[tokio::test]

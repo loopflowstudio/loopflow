@@ -17,6 +17,7 @@ pub mod replay;
 pub mod run;
 pub mod runs;
 pub mod screenshot;
+pub mod session;
 pub mod ssh;
 pub mod thread;
 pub mod tokens;

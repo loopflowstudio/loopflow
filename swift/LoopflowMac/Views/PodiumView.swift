@@ -14,6 +14,7 @@ struct PodiumView: View {
     @Environment(\.palette) private var palette
     @State private var model: PodiumModel
     @State private var surface: PodiumSurface
+    private let query: RegistryQuery
 
     init(
         portfolioService: PortfolioService,
@@ -22,11 +23,13 @@ struct PodiumView: View {
     ) {
         self.portfolioService = portfolioService
         self.initialRepoPath = initialRepoPath
+        self.query = query
         let restoredRepoPath = initialRepoPath == nil && !AppTestMode.shouldBypassRegistry
             ? loadLoopflowState()?.selectedRepoPath
+                .flatMap(PortfolioDiscovery.resolveLaunchRepo)
             : nil
         let startingRepoPath = initialRepoPath
-            .map { PortfolioDiscovery.resolveLaunchRepo($0).path }
+            .flatMap(PortfolioDiscovery.resolveLaunchRepo)
             ?? restoredRepoPath
         let model = PodiumModel(query: query, repoPath: startingRepoPath)
         PodiumFixture.applyIfRequested(to: model)
@@ -48,8 +51,8 @@ struct PodiumView: View {
                 if surface == .sessions, let repoPath = model.repoPath {
                     SessionsView(
                         scope: .repo(repoPath),
-                        initialRecords: model.userAskAttention.value,
-                        onQueueChanged: { await model.refreshUserAskAttention() },
+                        query: query,
+                        initialRecords: model.sessions.value,
                         onShowWork: { surface = .work }
                     )
                     .id(repoPath.normalizedFilePath)
@@ -156,7 +159,7 @@ private struct PodiumBar: View {
 
             Spacer(minLength: Spacing.sm)
 
-            UserAskAttentionButton(model: model, onOpen: onOpenSessions)
+            SessionsButton(model: model, onOpen: onOpenSessions)
 
             ProcessActivityInstrument(reading: model.processActivity)
                 .accessibilityIdentifier("podium-process-activity")

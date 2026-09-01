@@ -184,40 +184,41 @@ public struct RegistryQuery: Sendable {
         return try Self.decode(TaskFileSnapshot.self, from: stdout)
     }
 
-    /// User-targeted Ask sessions from the same durable queue as bare `lf`.
-    public func userAskAttention(cwd: String? = nil) async throws -> [AskAttentionRecord] {
-        // Repo-scoped: the sessions surface shows the sessions for the repository
-        // the app is opened to, never a cross-repo aggregate. To see another
-        // repo's queue you open Loopflow to that repo (the direct-navigation
-        // route), not `--all`.
-        let stdout = try await run(["ask", "list", "--user", "--json"], cwd)
-        return try Self.decode([AskAttentionRecord].self, from: stdout)
+    /// Sessions in this repository.
+    public func sessions(cwd: String? = nil) async throws -> [SessionRecord] {
+        let stdout = try await run(["session", "list", "--json"], cwd)
+        return try Self.decode([SessionRecord].self, from: stdout)
     }
 
-    /// Claim or recover one Ask session and return its exact attach descriptor.
-    /// Presentation remains the app's responsibility until `confirmAskPresented`.
-    public func prepareAskOpen(
-        askId: String,
+    /// Open one Session and return its terminal command.
+    public func openSession(
+        id: String,
+        replacing: Bool = false,
         cwd: String? = nil
-    ) async throws -> AskSessionRecord {
-        let stdout = try await run(
-            ["ask", "open", askId, "--prepare", "--json"],
-            cwd
-        )
-        return try Self.decode(AskSessionRecord.self, from: stdout)
+    ) async throws -> SessionRecord {
+        var args = ["session", "open", id, "--json"]
+        if replacing { args.append("--replace") }
+        let stdout = try await run(args, cwd)
+        return try Self.decode(SessionRecord.self, from: stdout)
     }
 
-    /// Confirm presentation only for the exact generic Run returned by prepare.
-    public func confirmAskPresented(
-        askId: String,
-        runId: String,
+    /// Decide one Task FlowStep and release its controller.
+    public func resolveFlowSession(
+        id: String,
+        approving: Bool,
+        text: String,
         cwd: String? = nil
-    ) async throws -> AskRecord {
-        let stdout = try await run(
-            ["ask", "presented", askId, runId, "--json"],
-            cwd
-        )
-        return try Self.decode(AskRecord.self, from: stdout)
+    ) async throws {
+        let verb = approving ? "approve" : "iterate"
+        _ = try await run(["session", verb, id, text], cwd)
+    }
+
+    /// Complete one interactive or ad-hoc Ask session.
+    public func completeSession(
+        id: String,
+        cwd: String? = nil
+    ) async throws {
+        _ = try await run(["session", "complete", id], cwd)
     }
 
     /// A wave's measured bets from the local PM snapshot. Cache-only reads keep
@@ -246,10 +247,19 @@ public struct RegistryQuery: Sendable {
         )
     }
 
-    /// Direct provider-authored usage for recent Home-local Runs. Each row
-    /// keeps omitted counters, evidence gaps, and provider finality explicit.
-    public func usage(days: Int = 30) async throws -> [RunSnapshot] {
-        let stdout = try await run(["usage", "--days", String(days), "--json"], nil)
+    /// Direct provider-authored usage for recent Home-local Runs, optionally
+    /// drilled through the shared Wave → Project → Task attribution.
+    public func usage(
+        days: Int = 30,
+        wave: String? = nil,
+        project: String? = nil,
+        task: String? = nil
+    ) async throws -> [RunSnapshot] {
+        var arguments = ["usage", "--days", String(days), "--json"]
+        if let wave { arguments += ["--wave", wave] }
+        if let project { arguments += ["--project", project] }
+        if let task { arguments += ["--task", task] }
+        let stdout = try await run(arguments, nil)
         return try Self.decode([RunSnapshot].self, from: stdout)
     }
 
@@ -541,7 +551,6 @@ public struct WaveDetailSnapshot: Decodable, Sendable {
     public let metricPortfolio: MetricPortfolio
     public let unavailableProjects: [UnavailableProjectEvidence]
     public let runs: WorkEvidence<RunSnapshot>
-    public let attention: WorkEvidence<WaveAttentionItem>
     /// The focused Wave's Home probed for liveness and its one contextual action.
     public let homeRuntime: HomeRuntime
 
@@ -550,7 +559,7 @@ public struct WaveDetailSnapshot: Decodable, Sendable {
     }
 
     enum CodingKeys: String, CodingKey {
-        case wave, projects, runs, attention
+        case wave, projects, runs
         case metricPortfolio = "metric_portfolio"
         case homeRuntime = "home_runtime"
         case loopState = "loop_state"

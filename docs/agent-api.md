@@ -25,8 +25,8 @@ kind as the Mac app. It may inspect status and use `lf chat` when the person
 asks it to converse with or steer a Wave.
 
 A Loopflow-launched Wave, Project, or Task agent is an internal participant.
-It receives `LOOPFLOW.md`; typed Work observations and Ask carry
-coordination across the parent relationship.
+It receives `LOOPFLOW.md`; typed Work observations carry durable coordination,
+while `lf ask` parks the Run at a durable human session in its own checkout.
 
 A Wave directing a task is the internal case:
 
@@ -44,8 +44,9 @@ lf task wait INF-123 --until terminal                # block until it settles
 Tracked Work follows **Wave → Project → Task**. These are stable planning
 records, not a process hierarchy. A Wave coordinates and remembers; a Project
 pursues measurable KRs; only Task Work owns a worktree, and every file-writing
-change happens there, advancing through serial PRs to `main`. Work is `ready`,
-`done`, or `abandoned`; process liveness and attention are separate evidence.
+change happens there on its one active remote branch and PR to `main`. Work is `ready`,
+`done`, or `abandoned`; process liveness, Task condition, and Sessions are
+separate evidence.
 
 A **Run** is different: one append-only Home-local record of one harness launch.
 A Work may produce many Runs, and a Run may merely name Work as its subject.
@@ -98,8 +99,9 @@ the stable Work control surface directly:
 ```bash
 lf work status task task_... --json
 lf work steer task task_... "show the failing fixture" --json
-lf ask list --json                                    # pending parent requests
-lf ask open ask_...                                    # open one exact Ask session
+lf --as project:proj_... : "Which proof matters?"    # ordinary agent perspective
+lf ask "Review this proof with me"                    # durable human session
+lf session list --json                                # unresolved human Sessions
 ```
 
 A Steer receipt proves that the direction was stored, not that a provider read
@@ -112,7 +114,7 @@ for an operator who needs the provider's native controls.
 
 Work survives its provider process. `lf task resume INF-123 --model codex`
 selects another provider without losing durable direction, the worktree, or
-the PR chain. `lf task run` never reopens terminal Work: a person can use
+the Task PR. `lf task run` never reopens terminal Work: a person can use
 `lf task recover` to restart an abandoned Task on the same worktree, while a
 completed Task requires a new Linear task.
 
@@ -158,6 +160,7 @@ lf activity --task INF-123 --json
 lf runs --project parser --json
 lf runs --task INF-123 --json
 lf usage --days 30 --json   # direct RunSnapshot evidence, newest first
+lf usage --task INF-123 --json # the same evidence drilled to one Task
 lf ps --json                # one OS-live process frame
 ```
 
@@ -182,8 +185,9 @@ Every launched agent gets `LOOPFLOW.md` — the operating contract — in contex
 - Route git, worktrees, and PRs through `lf`; never raw `git worktree`.
 - Execute here first; delegation must make the problem smaller.
 - Checkpoint and proceed: don't ask permission for reversible work.
-- Answer humans in turn text; use typed Work observations and explicit
-  Ask exchanges for parent/child coordination.
+- Answer present humans in turn text; use typed Work observations for durable
+  coordination, ordinary `lf --as` Runs for another agent perspective, and
+  `lf ask` only for a new human session.
 - Write repo-specific learnings into `.lf/` and commit them with the work.
 
 Source: `rust/loopflow/src/engine/builtins/LOOPFLOW.md`.

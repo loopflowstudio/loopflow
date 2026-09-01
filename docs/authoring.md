@@ -59,12 +59,12 @@ flow — with commits between them:
 - gate
 ```
 
-Skills that need outside authority run `lf ask "<intervention>"`. The command
-creates a durable Ask session for the current Work, waits for its typed result,
-then returns the verified summary to the same skill process. The Ask owns its
-claim and settlement; the surrounding Run remains execution evidence.
+Skills that need another Work's perspective launch it directly with
+`lf --as <work> : "<prompt>"`. Skills that genuinely need human judgment use
+`lf ask "<request>"`; the Run blocks while a durable human session works in the
+same checkout, then resumes when the human completes that conversation.
 
-Put a mandatory absent-User gate on the exact authored occurrence. `id` is
+Put a mandatory human gate on the exact authored occurrence. `id` is
 stable within the expanded flow and required with `human: true`:
 
 ```yaml
@@ -75,7 +75,7 @@ stable within the expanded flow and required with `human: true`:
 ```
 
 A headless Task parks at that node; an attached TUI uses its present User.
-Decline returns to the nearest preceding autonomous occurrence. Flow policy
+Iterate returns to the nearest preceding autonomous occurrence. Flow policy
 does not create a separate review ledger; workflows that are already designed
 can select an existing gate-free first flow when they launch a Task.
 

@@ -77,12 +77,10 @@ lf pr land
 Inside a Task, choose the disposition explicitly:
 
 ```bash
-lf pr land --next released-upgrade-proof  # another serial PR follows
-lf pr land -c                             # this merge completes the Task
+lf pr land -c    # this merge completes the Task
 ```
 
-Do not combine `--next` and `--complete`. Task completion or rotation happens
-only after GitHub authoritatively reports the merge.
+Task completion happens only after GitHub authoritatively reports the merge.
 
 If you wrote title/body manually, include them:
 

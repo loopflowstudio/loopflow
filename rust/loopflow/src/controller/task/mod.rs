@@ -11,7 +11,7 @@ use crate::child::ChildRef;
 use crate::controller::wave::playhead::{
     BodyProvenance, Playhead, PlayheadEvent, QueuedInvocation, StepKind, StepOutcome,
 };
-use crate::durable::{render_steers, AskId, RunId, Steer, WorkRef};
+use crate::durable::{FlowPosition, Steer, WorkRef};
 use crate::harness::{drain_turn_failure_reason, ApprovalPolicy, Harness};
 use crate::planning::ProjectPlan;
 use crate::store::SharedStore;
@@ -32,13 +32,7 @@ struct PreparedTaskStep {
 
 #[derive(Debug)]
 struct StepPosition {
-    work: WorkRef,
-    flow: String,
-    step: String,
-    node_id: Option<String>,
     human: bool,
-    step_index: u32,
-    iteration: u32,
 }
 
 #[derive(Debug, Clone)]
@@ -132,7 +126,7 @@ async fn run_task_with(
         .await?;
     let mut flow = resume_task_phase(&task)?;
     let Some(mut prepared) =
-        prepare_task_flow_step(&store, &mut task, wave.name(), &mut flow, None).await?
+        prepare_task_flow_step(&store, &mut task, wave.name(), &mut flow).await?
     else {
         return Ok(());
     };
@@ -377,7 +371,6 @@ async fn run_task_with(
                                     &mut task,
                                     wave.name(),
                                     &mut flow,
-                                    capture.as_ref().map(crate::run_record::CaptureHandle::run_id),
                                 )
                                 .await?
                                 else {
@@ -428,9 +421,6 @@ async fn run_task_with(
                                         &mut task,
                                         wave.name(),
                                         &mut flow,
-                                        capture
-                                            .as_ref()
-                                            .map(crate::run_record::CaptureHandle::run_id),
                                     )
                                     .await?
                                     else {
@@ -581,13 +571,7 @@ async fn prepare_task_flow_step_once(
     );
     prepared.config.skip_permissions = true;
     let position = StepPosition {
-        work,
-        flow: task_controller_state(task).phase_plan().flow.clone(),
-        step: step.step.clone(),
-        node_id: step.policy.id.clone(),
         human: step.policy.human,
-        step_index: step.index,
-        iteration: step.iteration,
     };
     Ok(PreparedTaskStep {
         turn: prepared,
@@ -600,76 +584,62 @@ async fn prepare_task_flow_step(
     task: &mut ControlledTask,
     wave_name: &str,
     flow: &mut Playhead,
-    source_run_id: Option<RunId>,
 ) -> Result<Option<PreparedTaskStep>> {
-    loop {
-        let prepared = prepare_task_flow_step_once(store, task, wave_name, flow).await?;
-        if !prepared.position.human {
-            return Ok(Some(prepared));
-        }
-
-        let node_id = prepared
-            .position
-            .node_id
-            .clone()
-            .ok_or_else(|| anyhow!("human Task flow step has no stable node id"))?;
-        checkpoint_worktree_before_human(task, &node_id).await;
-        let placement = store.placement(&prepared.position.work).await?;
-        let ask = store
-            .create_ask(
-                crate::durable::AskOrigin {
-                    work: prepared.position.work.clone(),
-                    source_run_id: source_run_id.clone(),
-                    home_id: placement.home_id,
-                    cwd: task.worktree.clone(),
-                },
-                crate::durable::AskBody::FlowStep {
-                    flow: prepared.position.flow.clone(),
-                    node_id: node_id.clone(),
-                    skill: prepared.position.step.clone(),
-                    iteration: prepared.position.iteration,
-                },
-                crate::durable::AskTarget::User,
-            )
-            .await?;
-
-        match (ask.state, ask.result.as_ref()) {
-            (crate::durable::AskState::Queued | crate::durable::AskState::Claimed, None) => {
-                tracing::info!(task = %task.id, ask = %ask.id, node = %node_id, "Task is waiting at a human flow node");
-                return Ok(None);
-            }
-            (
-                crate::durable::AskState::Resolved,
-                Some(crate::durable::AskResult::Resolved { .. }),
-            ) => {
-                complete_human_task_step(store, task, flow).await?;
-            }
-            (
-                crate::durable::AskState::Declined,
-                Some(crate::durable::AskResult::Declined { reason }),
-            )
-            | (
-                crate::durable::AskState::Cancelled,
-                Some(crate::durable::AskResult::Cancelled { reason }),
-            ) => {
-                store
-                    .append_steer(
-                        &prepared.position.work,
-                        crate::durable::Author::User,
-                        &format!("Human flow node {node_id} did not accept the step: {reason}"),
-                    )
-                    .await?;
-                let resident = task_controller_state_mut(task);
-                resident.phase_cursor =
-                    preceding_autonomous_step(flow, prepared.position.step_index)?;
-                resident.phase_iteration += 1;
-                resident.updated_at = time::OffsetDateTime::now_utc();
-                store.put_task_controller_state(&task.state).await?;
-                *flow = resume_task_phase(task)?;
-            }
-            _ => anyhow::bail!("human Task Ask {} has an invalid terminal result", ask.id),
+    let step = flow
+        .current()
+        .ok_or_else(|| anyhow!("Task flow has no current step"))?;
+    if !step.policy.human {
+        return prepare_task_flow_step_once(store, task, wave_name, flow)
+            .await
+            .map(Some);
+    }
+    if step.kind != StepKind::Skill {
+        anyhow::bail!(
+            "Task flow step {} is {:?}; durable Task flows currently require skills",
+            step.step,
+            step.kind
+        );
+    }
+    let node_id = step
+        .policy
+        .id
+        .clone()
+        .ok_or_else(|| anyhow!("human Task flow step has no stable node id"))?;
+    let work = store
+        .work_for_child(&ChildRef::Task(task.id.clone()))
+        .await?;
+    store.put_task_controller_state(&task.state).await?;
+    let mut position = FlowPosition {
+        work,
+        flow: task_controller_state(task).phase_plan().flow.clone(),
+        step: step.step.clone(),
+        node_id: Some(node_id.clone()),
+        human: true,
+        session_run_id: None,
+        ready_summary: None,
+        step_index: step.index,
+        iteration: step.iteration,
+        updated_at: time::OffsetDateTime::now_utc(),
+    };
+    if let Some(previous) = store.flow_position(&position.work).await? {
+        if previous.flow == position.flow
+            && previous.step == position.step
+            && previous.node_id == position.node_id
+            && previous.iteration == position.iteration
+        {
+            position.session_run_id = previous.session_run_id;
+            position.ready_summary = previous.ready_summary;
         }
     }
+    checkpoint_worktree_before_human(task, &node_id).await;
+    store
+        .set_flow_position(&position.work, position.clone())
+        .await?;
+    if let Err(error) = crate::ops::human_session::prepare(store, task, &position).await {
+        tracing::warn!(task = %task.id, node = %node_id, %error, "human flow session did not start; the Task remains waiting");
+    }
+    tracing::info!(task = %task.id, node = %node_id, "Task is waiting at a human flow node");
+    Ok(None)
 }
 
 async fn complete_human_task_step(
@@ -687,6 +657,90 @@ async fn complete_human_task_step(
     }
     store.put_task_controller_state(&task.state).await?;
     Ok(())
+}
+
+pub(crate) async fn decide_human_flow_step(
+    store: &SharedStore,
+    token: &crate::ops::human_session::FlowSessionToken,
+    decision: crate::ops::human_session::FlowDecision,
+    text: &str,
+) -> Result<()> {
+    let text = text.trim();
+    if text.is_empty() {
+        anyhow::bail!("human flow settlement text cannot be empty");
+    }
+    if !crate::ops::human_session::token_is_current(store, token).await? {
+        anyhow::bail!("human flow session is stale");
+    }
+    let mut task = controlled_task(store, &token.task_id).await?;
+    let mut flow = resume_task_phase(&task)?;
+    let step = flow
+        .current()
+        .ok_or_else(|| anyhow!("Task {} has no current flow step", task.id))?;
+    if !step.policy.human
+        || step.policy.id.as_deref() != Some(token.node_id.as_str())
+        || step.step != token.skill
+        || step.iteration != token.iteration
+        || step.flow != token.flow
+    {
+        anyhow::bail!("human flow session no longer matches the Task playhead");
+    }
+
+    match decision {
+        crate::ops::human_session::FlowDecision::Approve => {
+            store
+                .append_task_event(
+                    &task.id,
+                    &TaskEventKind::Progress {
+                        summary: text.to_string(),
+                    },
+                )
+                .await?;
+            complete_human_task_step(store, &mut task, &mut flow).await?;
+        }
+        crate::ops::human_session::FlowDecision::Iterate => {
+            let work = WorkRef::Task(task.id.clone());
+            store
+                .append_steer(
+                    &work,
+                    crate::durable::Author::User,
+                    &format!(
+                        "Human requested another iteration on flow node {}: {text}",
+                        token.node_id
+                    ),
+                )
+                .await?;
+            let state = task_controller_state_mut(&mut task);
+            state.phase_cursor = preceding_autonomous_step(&flow, step.index)?;
+            state.phase_iteration += 1;
+            state.updated_at = time::OffsetDateTime::now_utc();
+            store.put_task_controller_state(&task.state).await?;
+            flow = resume_task_phase(&task)?;
+        }
+    }
+
+    let position = current_flow_position(&task, &flow)?;
+    let work = position.work.clone();
+    store.set_flow_position(&work, position).await?;
+    Ok(())
+}
+
+fn current_flow_position(task: &ControlledTask, flow: &Playhead) -> Result<FlowPosition> {
+    let step = flow
+        .current()
+        .ok_or_else(|| anyhow!("Task {} has no next flow step", task.id))?;
+    Ok(FlowPosition {
+        work: WorkRef::Task(task.id.clone()),
+        flow: task_controller_state(task).phase_plan().flow.clone(),
+        step: step.step,
+        node_id: step.policy.id,
+        human: step.policy.human,
+        session_run_id: None,
+        ready_summary: None,
+        step_index: step.index,
+        iteration: step.iteration,
+        updated_at: time::OffsetDateTime::now_utc(),
+    })
 }
 
 fn preceding_autonomous_step(flow: &Playhead, current: u32) -> Result<u32> {
@@ -749,15 +803,7 @@ async fn start_resumed_task_phase(
     capture: Option<&crate::run_record::CaptureHandle>,
 ) -> Result<Option<()>> {
     *flow = resume_task_phase(task)?;
-    let Some(prepared) = prepare_task_flow_step(
-        store,
-        task,
-        wave_name,
-        flow,
-        capture.map(crate::run_record::CaptureHandle::run_id),
-    )
-    .await?
-    else {
+    let Some(prepared) = prepare_task_flow_step(store, task, wave_name, flow).await? else {
         return Ok(None);
     };
     start_prepared_task_step(task, harness, flow, capture, prepared).await?;
@@ -839,7 +885,7 @@ fn finish_capture(capture: Option<&crate::run_record::CaptureHandle>, outcome: &
     }
 }
 
-/// A human Ask can outlive this machine's uptime; nothing the Task produced
+/// A human FlowStep can outlive this machine's uptime; nothing the Task produced
 /// may exist only in the local worktree while it waits. Failure to checkpoint
 /// (offline, no remote) must never block the park itself.
 async fn checkpoint_worktree_before_human(task: &ControlledTask, node_id: &str) {
@@ -1178,132 +1224,16 @@ fn task_seed(
     wave_name: &str,
     steers: &[Steer],
 ) -> String {
-    let placement = pr
-        .parent_pr_id
-        .as_ref()
-        .map(|parent| format!("Stack parent PR: {parent} (land the parent first)"))
-        .unwrap_or_else(|| "Stack parent PR: none (rooted on main)".to_string());
-    let gate_proposal = task
-        .state
-        .gate_proposal
-        .as_ref()
-        .map(|proposal| {
-            format!(
-                "Gate proposal: {} — {}",
-                if proposal.done { "done" } else { "continue" },
-                proposal.reason
-            )
-        })
-        .unwrap_or_else(|| "Gate proposal: none".to_string());
-    format!(
-        "Advance Linear task {identifier}: {title}\n\n{description}\n\nLinear Project: {project} ({project_id})\n{project_context}\n\n{direction}\n\nTask directive snapshot synced at: {task_snapshot_synced_at}\nProject definition snapshot synced at: {project_snapshot_synced_at}\nWave: {wave}\nTask: {task_id}\nController lifecycle phase: {lifecycle_phase} (iteration {phase_iteration}, gate cycle {gate_cycle})\n{gate_proposal}\nWorktree: {worktree}\nPR {pr_sequence}: {pr_branch}\nBase commit: {base_commit}\n{placement}\n\nThis PR owns one serial branch. The pinned finally flow owns landing and Task completion. `lf pr abandon` discards only this PR. If this PR already merged out of band and follow-up work remains, `lf pr next [slug]` rotates to the next serial PR, carrying committed and uncommitted follow-up forward. Watched landing owns automatic post-merge rotation.",
-        identifier = task.plan.identifier,
-        title = task.plan.title,
-        description = task.plan.description,
-        project = project.name,
-        project_id = project.id.as_str(),
-        project_context = project.prompt_context,
-        direction = render_steers(steers),
-        task_snapshot_synced_at = task.plan.pm_snapshot_synced_at,
-        project_snapshot_synced_at = project.pm_snapshot_synced_at,
-        wave = wave_name,
-        task_id = task.id,
-        lifecycle_phase = task_controller_state(task).lifecycle_phase.as_str(),
-        phase_iteration = task_controller_state(task).phase_iteration,
-        gate_cycle = task_controller_state(task).gate_cycle,
-        gate_proposal = gate_proposal,
-        worktree = task.worktree.display(),
-        pr_sequence = pr.sequence,
-        pr_branch = pr.branch,
-        base_commit = pr.base_commit,
-        placement = placement,
-    )
-}
-
-/// Prepare the skill's REAL harness turn for a human flow gate — the same turn
-/// `lf <skill>` builds (its system prompt, context, config), with only the
-/// settlement contract appended to the input. The Ask session then IS the skill
-/// run, not a generic agent handed the skill's task text (which self-approved).
-pub(crate) async fn flow_step_harness_turn(
-    store: &SharedStore,
-    ask: &crate::durable::Ask,
-) -> Result<crate::lf::commands::run::PreparedHarnessTurn> {
-    let crate::durable::AskBody::FlowStep {
-        flow,
-        node_id,
-        skill,
-        iteration,
-    } = &ask.request
-    else {
-        anyhow::bail!("Ask {} is not a flow-step request", ask.id);
-    };
-    let crate::durable::WorkRef::Task(task_id) = &ask.origin.work else {
-        anyhow::bail!("flow-step Ask {} does not belong to a Task", ask.id);
-    };
-    let work = store
-        .get_task(task_id)
-        .await?
-        .ok_or_else(|| anyhow!("Task {task_id} disappeared"))?;
-    let state = store
-        .task_controller_state(task_id)
-        .await?
-        .ok_or_else(|| anyhow!("Task {task_id} has no end-to-end controller state"))?;
-    let task = ControlledTask { work, state };
-    if task_controller_state(&task).phase_plan().flow != *flow {
-        anyhow::bail!(
-            "flow-step Ask {} names flow {:?}, but Task {} is at {:?}",
-            ask.id,
-            flow,
-            task.id,
-            task_controller_state(&task).phase_plan().flow
-        );
-    }
-    let definition = crate::engine::load_flow(flow, &task.worktree)?;
-    let items = crate::engine::expand_flow(&definition, &task.worktree)?;
-    let step = items
-        .get(task_controller_state(&task).phase_cursor as usize)
-        .and_then(|item| match item {
-            crate::engine::ConcreteStep::Skill(step) => Some(step),
-            _ => None,
-        })
-        .ok_or_else(|| anyhow!("Task {} is not at a skill node", task.id))?;
-    if !step.policy.human
-        || step.policy.id.as_deref() != Some(node_id)
-        || step.skill.name != *skill
-        || task_controller_state(&task).phase_iteration != *iteration
-    {
-        anyhow::bail!(
-            "flow-step Ask {} no longer matches the Task playhead",
-            ask.id
-        );
-    }
-    let steers = store.work_steers(&ask.origin.work).await?;
-    let pr = store
-        .active_task_pr(&task.id)
-        .await?
-        .ok_or_else(|| anyhow!("Task {} has no active PR", task.id))?;
-    let project = owning_project(store, &task).await?;
-    let wave = owning_wave(store, &task).await?;
-    let seed = format!(
-        "{}\n\n{}",
-        task_seed(&task, &project.plan, &pr, wave.name(), &steers),
-        crate::ops::task::task_workspace_context(&task, &pr)
-            .map_err(|error| anyhow!(error.to_string()))?
+    let context = crate::ops::render_task_context(
+        task,
+        Some(task_controller_state(task)),
+        project,
+        pr,
+        wave_name,
+        steers,
     );
-    let seed = human_flow_settlement(&seed, skill, node_id, &ask.id);
-    crate::lf::commands::run::prepare_interactive_harness_turn_at(
-        skill,
-        &seed,
-        wave.name(),
-        &task.worktree,
-    )
-}
-
-/// Append only the settlement contract to the skill's real input. The skill's
-/// own harness governs the review; the ask system owns just how the flow advances.
-fn human_flow_settlement(input: &str, skill: &str, node_id: &str, ask_id: &AskId) -> String {
     format!(
-        "{input}\n\n<lf:human-flow-node>\nThis `{skill}` run is the actual writable Task step at human node `{node_id}`, not an advisory review. Settle explicitly before leaving:\n- `lf ask resolve {ask_id} \"<concise verified summary>\"` accepts the step\n- `lf ask decline {ask_id} \"<reason>\"` returns to the preceding autonomous step\n- `lf ask release {ask_id} \"<reason>\"` leaves the node waiting\nA final response, clean exit, Ctrl-D, or window close never advances the flow.\n</lf:human-flow-node>"
+        "{context}\n\nAdvance this Task through its pinned lifecycle. This PR owns one serial branch. The pinned finally flow owns landing and Task completion. `lf pr abandon` discards only this PR. If this PR already merged out of band and follow-up work remains, `lf pr next [slug]` rotates to the next serial PR, carrying committed and uncommitted follow-up forward. Watched landing owns automatic post-merge rotation."
     )
 }
 
@@ -1319,44 +1249,15 @@ fn progress_summary(text: &str) -> String {
 }
 
 #[cfg(test)]
-struct TestLfBinGuard {
-    previous: Option<std::ffi::OsString>,
-    _lock: std::sync::MutexGuard<'static, ()>,
-}
-
-#[cfg(test)]
-impl TestLfBinGuard {
-    fn pin() -> Self {
-        let lock = crate::journal::test_env_lock();
-        let previous = std::env::var_os("LF_BIN");
-        std::env::set_var("LF_BIN", std::env::current_exe().unwrap());
-        Self {
-            previous,
-            _lock: lock,
-        }
-    }
-}
-
-#[cfg(test)]
-impl Drop for TestLfBinGuard {
-    fn drop(&mut self) {
-        match &self.previous {
-            Some(value) => std::env::set_var("LF_BIN", value),
-            None => std::env::remove_var("LF_BIN"),
-        }
-    }
-}
-
-#[cfg(test)]
 mod planning_tests {
     use super::{
-        completed_boundary_failure, execution_blocker_at_handoff, human_flow_settlement,
-        preceding_autonomous_step, sync_task_state, task_seed, unhandled_failure_receipt,
-        ControlledTask, State, TaskGateProposal, TaskLifecyclePhase, TaskLifecyclePlan,
+        completed_boundary_failure, execution_blocker_at_handoff, preceding_autonomous_step,
+        sync_task_state, task_seed, unhandled_failure_receipt, ControlledTask, State,
+        TaskGateProposal, TaskLifecyclePhase, TaskLifecyclePlan,
     };
     use crate::chat::types::Lifecycle;
     use crate::controller::wave::playhead::{Playhead, QueuedInvocation, StepKind, StepPlan};
-    use crate::durable::{AskBody, AskId, AskResult, AskTarget, RunId};
+    use crate::durable::{RunId, WorkRef};
     use crate::engine::agent::AgentConfig;
     use crate::engine::OccurrencePolicy;
     use crate::harness::{Harness, SendCurrentOutcome};
@@ -1385,9 +1286,9 @@ mod planning_tests {
     }
 
     #[test]
-    fn decline_skips_prior_human_nodes_when_returning_to_autonomous_work() {
+    fn iterate_skips_prior_human_nodes_when_returning_to_autonomous_work() {
         let (flow, _) = Playhead::new(QueuedInvocation {
-            id: "human-decline-proof".to_string(),
+            id: "human-iterate-proof".to_string(),
             flow: "proof".to_string(),
             steps: vec![
                 step("kickoff", None, false),
@@ -1554,23 +1455,6 @@ mod planning_tests {
         (store, task, flow)
     }
 
-    #[test]
-    fn human_flow_settlement_wraps_the_skill_input() {
-        let prompt = human_flow_settlement(
-            "the real review-design harness input",
-            "review-design",
-            "review_kickoff",
-            &AskId::parse("ask_00000000000000000000000000000001").unwrap(),
-        );
-
-        // The skill's own input is preserved verbatim; only settlement is appended.
-        assert!(prompt.starts_with("the real review-design harness input"));
-        assert!(prompt.contains("<lf:human-flow-node>"));
-        assert!(prompt.contains("lf ask resolve ask_00000000000000000000000000000001"));
-        assert!(prompt.contains("lf ask decline ask_00000000000000000000000000000001"));
-        assert!(prompt.contains("lf ask release ask_00000000000000000000000000000001"));
-    }
-
     #[tokio::test]
     async fn provider_failure_records_planning() {
         let (store, mut task, _) = human_task_fixture().await;
@@ -1598,7 +1482,7 @@ mod planning_tests {
     }
 
     #[test]
-    fn normal_task_completion_preserves_delivery_permission_and_ask_network_failures() {
+    fn normal_task_completion_preserves_delivery_permission_and_run_network_failures() {
         let commit = completed_boundary_failure(
             &["lf".into(), "commit".into(), "-m".into(), "ship".into(), "-p".into()],
             Lifecycle::Failed,
@@ -1608,19 +1492,20 @@ mod planning_tests {
             Some(128),
         )
         .unwrap();
-        let ask = completed_boundary_failure(
+        let run = completed_boundary_failure(
             &[
                 "lf".into(),
-                "ask".into(),
-                "--user".into(),
-                "Need authority".into(),
+                "--as".into(),
+                "project:proj_1".into(),
+                ":".into(),
+                "Review this".into(),
             ],
             Lifecycle::Failed,
             Some("network access is disabled by policy"),
             Some(1),
         )
         .unwrap();
-        let reason = execution_blocker_at_handoff(Lifecycle::Completed, &[commit, ask])
+        let reason = execution_blocker_at_handoff(Lifecycle::Completed, &[commit, run])
             .expect("normal task_complete with unresolved capability failures is blocked");
 
         assert!(reason.contains(".git/worktrees/task/index.lock"));
@@ -1670,226 +1555,108 @@ mod planning_tests {
         ));
     }
 
-    async fn settle_human_task(store: &SharedStore, result: AskResult) -> crate::durable::Ask {
-        let ask = store
-            .pending_asks(&AskTarget::User)
+    async fn park_human_task(
+        store: &SharedStore,
+        task: &mut ControlledTask,
+        flow: &mut Playhead,
+    ) -> crate::ops::human_session::FlowSessionToken {
+        assert!(
+            super::prepare_task_flow_step(store, task, "human-task-proof", flow)
+                .await
+                .unwrap()
+                .is_none()
+        );
+        let position = store
+            .flow_position(&WorkRef::Task(task.id.clone()))
             .await
             .unwrap()
-            .into_iter()
-            .next()
             .unwrap();
-        let claim = store.claim_ask(&ask.id).await.unwrap();
-        assert!(claim.needs_launch);
-        store
-            .mark_ask_presented(&ask.id, &claim.run_id)
-            .await
-            .unwrap();
-        let ask = store
-            .settle_ask(&ask.id, &claim.run_id, result)
-            .await
-            .unwrap();
-        ask
+        crate::ops::human_session::FlowSessionToken {
+            task_id: task.id.clone(),
+            flow: position.flow,
+            node_id: position.node_id.unwrap(),
+            skill: position.step,
+            iteration: position.iteration,
+        }
     }
 
     #[tokio::test]
-    #[allow(clippy::await_holding_lock)] // the guard serializes LF_BIN for the fixture
-    async fn released_human_task_attempt_keeps_the_same_node_parked() {
-        let _lf_bin = super::TestLfBinGuard::pin();
+    async fn restarting_a_human_node_reuses_the_same_task_position() {
         let (store, mut task, mut flow) = human_task_fixture().await;
-        let parent_run_id = RunId::new();
-        assert!(super::prepare_task_flow_step(
-            &store,
-            &mut task,
-            "human-task-proof",
-            &mut flow,
-            Some(parent_run_id.clone()),
-        )
-        .await
-        .unwrap()
-        .is_none());
-        let ask = store
-            .pending_asks(&AskTarget::User)
-            .await
-            .unwrap()
-            .remove(0);
-        assert_eq!(ask.origin.source_run_id, Some(parent_run_id));
-        let claim = store.claim_ask(&ask.id).await.unwrap();
-        assert!(claim.needs_launch);
-        store
-            .release_ask(&ask.id, &claim.run_id, Some("not finished"))
-            .await
-            .unwrap();
-
-        assert!(super::prepare_task_flow_step(
-            &store,
-            &mut task,
-            "human-task-proof",
-            &mut flow,
-            None
-        )
-        .await
-        .unwrap()
-        .is_none());
-        let queued = store.pending_asks(&AskTarget::User).await.unwrap();
-        assert_eq!(queued.len(), 1);
-        assert_eq!(queued[0].id, ask.id);
-        assert_eq!(task.state.phase_cursor, 1);
-    }
-
-    #[tokio::test]
-    #[allow(clippy::await_holding_lock)] // the guard serializes LF_BIN for the fixture
-    async fn restarted_human_task_reuses_the_queued_ask_without_sql_run_authority() {
-        let _lf_bin = super::TestLfBinGuard::pin();
-        let (store, mut task, mut flow) = human_task_fixture().await;
-        assert!(super::prepare_task_flow_step(
-            &store,
-            &mut task,
-            "human-task-proof",
-            &mut flow,
-            None
-        )
-        .await
-        .unwrap()
-        .is_none());
-        let original = store
-            .pending_asks(&AskTarget::User)
-            .await
-            .unwrap()
-            .remove(0);
+        let original = park_human_task(&store, &mut task, &mut flow).await;
+        let work = WorkRef::Task(task.id.clone());
+        let run_id = RunId::new();
+        let mut position = store.flow_position(&work).await.unwrap().unwrap();
+        position.session_run_id = Some(run_id.clone());
+        position.ready_summary = Some("ready".to_string());
+        store.set_flow_position(&work, position).await.unwrap();
         let mut restarted_flow = super::resume_task_phase(&task).unwrap();
+        let recovered = park_human_task(&store, &mut task, &mut restarted_flow).await;
 
-        assert!(super::prepare_task_flow_step(
-            &store,
-            &mut task,
-            "human-task-proof",
-            &mut restarted_flow,
-            None,
-        )
-        .await
-        .unwrap()
-        .is_none());
-        let recovered = store.pending_asks(&AskTarget::User).await.unwrap();
-        assert_eq!(recovered.len(), 1);
-        assert_eq!(recovered[0].id, original.id);
-        assert_eq!(recovered[0].origin, original.origin);
-        let claim = store.claim_ask(&recovered[0].id).await.unwrap();
-        assert!(claim.needs_launch);
+        assert_eq!(recovered, original);
+        assert_eq!(store.human_flow_positions().await.unwrap().len(), 1);
+        let recovered = store.flow_position(&work).await.unwrap().unwrap();
+        assert_eq!(recovered.session_run_id, Some(run_id));
+        assert_eq!(recovered.ready_summary.as_deref(), Some("ready"));
     }
 
     #[tokio::test]
-    #[allow(clippy::await_holding_lock)] // the guard serializes LF_BIN for the fixture
-    async fn human_task_node_queues_without_starting_a_provider_and_resolve_advances() {
-        let _lf_bin = super::TestLfBinGuard::pin();
+    async fn approving_a_human_node_advances_the_task_without_an_ask() {
         let (store, mut task, mut flow) = human_task_fixture().await;
-        let scratch = task.worktree.join("scratch");
-        std::fs::create_dir_all(&scratch).unwrap();
-        let design = scratch.join("human-task-proof.md");
-        std::fs::write(&design, "# Unreviewed design\nold authority\n").unwrap();
-        let prepared =
-            super::prepare_task_flow_step(&store, &mut task, "human-task-proof", &mut flow, None)
-                .await
-                .unwrap();
-        assert!(prepared.is_none());
-        let queued = store.pending_asks(&AskTarget::User).await.unwrap();
-        assert_eq!(queued.len(), 1);
-        assert!(matches!(
-            &queued[0].request,
-            AskBody::FlowStep { node_id, skill, .. }
-                if node_id == "review_kickoff" && skill == "review-design"
-        ));
-        let turn = super::flow_step_harness_turn(&store, &queued[0])
-            .await
-            .unwrap();
-        // The session runs the skill's real harness turn; only the settlement
-        // contract is appended — no generic-agent reviewer-mode injection.
-        assert!(turn.input.contains("<lf:human-flow-node>"));
-        assert!(turn.input.contains("lf ask resolve"));
-        assert!(turn.input.contains("scratch/human-task-proof.md"));
-        assert!(turn.input.contains("# Unreviewed design\nold authority"));
-        assert!(turn.input.contains("<lf:task-workspace>"));
-        assert!(turn.input.contains("\"committed\": true"));
-        assert_eq!(turn.context.task.text, turn.input);
-        assert!(turn.context.task.assets.iter().any(|asset| {
-            asset.kind == crate::trace::ContextAssetKind::Scratch
-                && asset.source_path.as_deref() == Some("scratch/human-task-proof.md")
-        }));
-        let reviewed_design =
-            "# Human-reviewed design\n\nExact bytes: replace the duplicate authority.\n";
-        std::fs::write(&design, reviewed_design).unwrap();
+        let token = park_human_task(&store, &mut task, &mut flow).await;
 
-        settle_human_task(
+        super::decide_human_flow_step(
             &store,
-            AskResult::Resolved {
-                summary: "design accepted".to_string(),
-            },
+            &token,
+            crate::ops::human_session::FlowDecision::Approve,
+            "design approved",
         )
-        .await;
-        let prepared =
-            super::prepare_task_flow_step(&store, &mut task, "human-task-proof", &mut flow, None)
-                .await
-                .unwrap()
-                .expect("resolved human node advances to autonomous work");
-        assert!(!prepared.position.human);
+        .await
+        .unwrap();
+
+        let task = super::controlled_task(&store, &task.id).await.unwrap();
         assert_eq!(task.state.lifecycle_phase, TaskLifecyclePhase::Loop);
-        assert!(prepared.turn.input.contains("scratch/human-task-proof.md"));
-        assert!(prepared.turn.input.contains(reviewed_design));
-        assert!(!prepared.turn.input.contains("old authority"));
-        assert_eq!(prepared.turn.context.task.text, prepared.turn.input);
+        assert!(!crate::ops::human_session::token_is_current(&store, &token)
+            .await
+            .unwrap());
+        assert!(store
+            .recent_task_events(&task.id, 10)
+            .await
+            .unwrap()
+            .iter()
+            .any(|event| matches!(
+                &event.kind,
+                TaskEventKind::Progress { summary } if summary == "design approved"
+            )));
     }
 
     #[tokio::test]
-    #[allow(clippy::await_holding_lock)] // the guard serializes LF_BIN for the fixture
-    async fn declined_human_task_node_returns_to_preceding_autonomous_step_with_reason() {
-        let _lf_bin = super::TestLfBinGuard::pin();
+    async fn iterating_a_human_node_returns_to_autonomous_work_with_a_steer() {
         let (store, mut task, mut flow) = human_task_fixture().await;
-        assert!(super::prepare_task_flow_step(
+        let token = park_human_task(&store, &mut task, &mut flow).await;
+
+        super::decide_human_flow_step(
             &store,
-            &mut task,
-            "human-task-proof",
-            &mut flow,
-            None
+            &token,
+            crate::ops::human_session::FlowDecision::Iterate,
+            "narrow the design",
         )
         .await
-        .unwrap()
-        .is_none());
-        let declined = settle_human_task(
-            &store,
-            AskResult::Declined {
-                reason: "narrow the design".to_string(),
-            },
-        )
-        .await;
+        .unwrap();
 
-        let prepared =
-            super::prepare_task_flow_step(&store, &mut task, "human-task-proof", &mut flow, None)
-                .await
-                .unwrap()
-                .expect("decline returns to autonomous kickoff");
-        assert_eq!(prepared.position.step, "kickoff");
+        let task = super::controlled_task(&store, &task.id).await.unwrap();
         assert_eq!(task.state.phase_cursor, 0);
         assert_eq!(task.state.phase_iteration, 1);
-        let steers = store.work_steers(&declined.origin.work).await.unwrap();
-        assert!(steers
+        let work = WorkRef::Task(task.id.clone());
+        let position = store.flow_position(&work).await.unwrap().unwrap();
+        assert_eq!(position.step, "kickoff");
+        assert!(!position.human);
+        assert!(store
+            .work_steers(&work)
+            .await
+            .unwrap()
             .iter()
             .any(|steer| steer.text.contains("narrow the design")));
-
-        super::open_task_flow_body(&mut flow, &task).unwrap();
-        assert!(!super::finish_task_flow_turn(&mut flow, Lifecycle::Completed).unwrap());
-        super::record_task_flow_position(&mut task, &flow).unwrap();
-        store.put_task_controller_state(&task.state).await.unwrap();
-        assert!(super::prepare_task_flow_step(
-            &store,
-            &mut task,
-            "human-task-proof",
-            &mut flow,
-            None
-        )
-        .await
-        .unwrap()
-        .is_none());
-        let queued = store.pending_asks(&AskTarget::User).await.unwrap();
-        assert_eq!(queued.len(), 1);
-        assert_ne!(queued[0].id, declined.id);
     }
 
     #[test]

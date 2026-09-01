@@ -152,13 +152,14 @@ Wave goals, and directions.
 ```bash
 lf pr publish   # push + create or update PR (no browser)
 lf pr open      # publish, then open the PR for review
-lf pr submit    # non-Task PR: prepare the exact head; you click merge
+lf pr submit    # prepare the exact head; you click merge
 lf pr arm       # arm exact-head auto-merge and return
 lf pr land      # watch, repair CI, and return after GitHub merges
 ```
 
-A managed Task ships only with `lf pr land` — its `finally` review is the single
-shipping decision, and `submit` (a human merge click) is refused inside a Task.
+Use the same delivery verbs for Task and non-Task branches. They act on the
+branch and Task PR record when present; they do not require end-to-end
+controller state.
 
 ---
 
@@ -192,7 +193,9 @@ tmux ls               # live agent sessions
 tmux attach -r -t <name> # inspect one; never mutate the session directly
 ```
 
-Use `lf ask list`, then `lf ask open <ask-id>`, for requested interventions that need an exact session.
+Use `lf session list`, then `lf session open <session-id>`, for every unresolved
+interactive Run, Ask, or Task FlowStep. Finish it with the kind-specific action
+shown in the [Sessions lifecycle](../README.md#sessions).
 
 Use `lf prompt: draft wave/shipper/GOAL.md` to author the loop contract. Use
 `lf design` to explore an uncertain operating context, or write it by hand.

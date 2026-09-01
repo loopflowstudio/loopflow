@@ -444,9 +444,8 @@ impl SwitchReceipt {
             .artifact_set
             .artifact(&ArtifactRole::Cli)
             .ok_or_else(|| anyhow!("install switch {} target set has no CLI", self.id))?;
-        let candidate_owned_bootstrap = self.prior.source == InstallSource::Published
-            && self.target.source == InstallSource::Development
-            && self.coordinator == *target_cli;
+        let candidate_owned_bootstrap =
+            self.target.source == InstallSource::Development && self.coordinator == *target_cli;
         if self.coordinator != *prior_cli && !candidate_owned_bootstrap {
             return Err(anyhow!(
                 "install switch {} coordinator matches neither the prior CLI nor its candidate-owned bootstrap",
@@ -977,13 +976,15 @@ fn authorize_for_switch(
             let actual = fs::canonicalize(executable).with_context(|| {
                 format!("resolve switch startup executable {}", executable.display())
             })?;
+            let actual_sha256 = file_sha256(&actual)?;
             let expected = receipt
                 .target
                 .artifact_set
                 .artifacts
                 .iter()
                 .find(|artifact| {
-                    artifact_matches_runtime_role(&artifact.role, role) && actual == artifact.path
+                    artifact_matches_runtime_role(&artifact.role, role)
+                        && actual_sha256 == artifact.sha256
                 })
                 .ok_or_else(|| {
                     anyhow!(
@@ -1000,13 +1001,14 @@ fn authorize_for_switch(
     };
     let actual = fs::canonicalize(executable)
         .with_context(|| format!("resolve running executable {}", executable.display()))?;
+    let actual_sha256 = file_sha256(&actual)?;
     let Some(expected) = active
         .selection
         .artifact_set
         .artifacts
         .iter()
         .find(|artifact| {
-            artifact_matches_runtime_role(&artifact.role, role) && actual == artifact.path
+            artifact_matches_runtime_role(&artifact.role, role) && actual_sha256 == artifact.sha256
         })
     else {
         if active
@@ -1015,7 +1017,8 @@ fn authorize_for_switch(
             .flat_map(|set| &set.artifacts)
             .chain(&active.published_fallback.artifacts)
             .any(|artifact| {
-                artifact_matches_runtime_role(&artifact.role, role) && actual == artifact.path
+                artifact_matches_runtime_role(&artifact.role, role)
+                    && actual_sha256 == artifact.sha256
             })
         {
             return Err(anyhow!(
@@ -1084,12 +1087,25 @@ pub fn selection_for_executable(
     };
     let actual = fs::canonicalize(executable)
         .with_context(|| format!("resolve running executable {}", executable.display()))?;
-    let Some(expected) = active
+    let actual_size = fs::metadata(&actual)
+        .with_context(|| format!("inspect running executable {}", actual.display()))?
+        .len();
+    let plausible_copies = active
         .selection
         .artifact_set
         .artifacts
         .iter()
-        .find(|artifact| artifact.path == actual)
+        .filter(|artifact| {
+            fs::metadata(&artifact.path).is_ok_and(|metadata| metadata.len() == actual_size)
+        })
+        .collect::<Vec<_>>();
+    if plausible_copies.is_empty() {
+        return Ok(None);
+    }
+    let actual_sha256 = file_sha256(&actual)?;
+    let Some(expected) = plausible_copies
+        .into_iter()
+        .find(|artifact| artifact.sha256 == actual_sha256)
     else {
         return Ok(None);
     };
@@ -1134,21 +1150,9 @@ fn app_bundle_for_executable(path: &Path) -> Result<&Path> {
 }
 
 fn update_tree_digest(root: &Path, path: &Path, digest: &mut Sha256) -> Result<()> {
-    update_tree_digest_excluding(root, path, &HashSet::new(), digest)
-}
-
-fn update_tree_digest_excluding(
-    root: &Path,
-    path: &Path,
-    excluded: &HashSet<&Path>,
-    digest: &mut Sha256,
-) -> Result<()> {
     let relative = path
         .strip_prefix(root)
         .with_context(|| format!("resolve bundle path {}", path.display()))?;
-    if excluded.contains(relative) {
-        return Ok(());
-    }
     let metadata = fs::symlink_metadata(path)
         .with_context(|| format!("inspect bundle path {}", path.display()))?;
     digest.update(relative.as_os_str().as_encoded_bytes());
@@ -1178,7 +1182,7 @@ fn update_tree_digest_excluding(
             .collect::<Result<Vec<_>, _>>()?;
         entries.sort();
         for entry in entries {
-            update_tree_digest_excluding(root, &entry, excluded, digest)?;
+            update_tree_digest(root, &entry, digest)?;
         }
     } else {
         return Err(anyhow!("unsupported app entry {}", path.display()));
@@ -1190,13 +1194,6 @@ fn update_tree_digest_excluding(
 pub(crate) fn tree_sha256(path: &Path) -> Result<String> {
     let mut digest = Sha256::new();
     update_tree_digest(path, path, &mut digest)?;
-    Ok(hex::encode(digest.finalize()))
-}
-
-pub(crate) fn tree_sha256_excluding(path: &Path, excluded: &[&Path]) -> Result<String> {
-    let mut digest = Sha256::new();
-    let excluded = excluded.iter().copied().collect::<HashSet<_>>();
-    update_tree_digest_excluding(path, path, &excluded, &mut digest)?;
     Ok(hex::encode(digest.finalize()))
 }
 
@@ -1432,6 +1429,58 @@ mod tests {
     }
 
     #[test]
+    fn copied_active_artifact_keeps_its_install_selection() {
+        let directory = tempfile::tempdir().unwrap();
+        let root = directory.path().join("authority");
+        let published = selection(directory.path(), "published", InstallSource::Published);
+        let development = selection(directory.path(), "development", InstallSource::Development);
+        let active = active(development.clone(), published.artifact_set.clone());
+        write_atomic_json(&root, &root.join(ACTIVE_FILE), &active).unwrap();
+
+        let installed_copy = directory.path().join("installed-app-helper-lf");
+        fs::copy(
+            &development
+                .artifact_set
+                .artifact(&ArtifactRole::Cli)
+                .unwrap()
+                .path,
+            &installed_copy,
+        )
+        .unwrap();
+
+        assert_eq!(
+            authorize(&root, &installed_copy, &ArtifactRole::Cli).unwrap(),
+            Some(development)
+        );
+    }
+
+    #[test]
+    fn copied_retained_artifact_cannot_claim_the_active_store() {
+        let directory = tempfile::tempdir().unwrap();
+        let root = directory.path().join("authority");
+        let published = selection(directory.path(), "published", InstallSource::Published);
+        let development = selection(directory.path(), "development", InstallSource::Development);
+        let active = active(development, published.artifact_set.clone());
+        write_atomic_json(&root, &root.join(ACTIVE_FILE), &active).unwrap();
+
+        let inactive_copy = directory.path().join("inactive-lf");
+        fs::copy(
+            &published
+                .artifact_set
+                .artifact(&ArtifactRole::Cli)
+                .unwrap()
+                .path,
+            &inactive_copy,
+        )
+        .unwrap();
+
+        assert!(authorize(&root, &inactive_copy, &ArtifactRole::Cli)
+            .unwrap_err()
+            .to_string()
+            .contains("inactive retained install artifact"));
+    }
+
+    #[test]
     fn artifact_set_detects_changed_app_resources() {
         let directory = tempfile::tempdir().unwrap();
         let directory = fs::canonicalize(directory.path()).unwrap();
@@ -1603,7 +1652,7 @@ mod tests {
     }
 
     #[test]
-    fn first_local_switch_may_be_coordinated_by_its_candidate() {
+    fn every_local_switch_may_be_coordinated_by_its_candidate() {
         let directory = tempfile::tempdir().unwrap();
         let published = selection(directory.path(), "published", InstallSource::Published);
         let development = selection(directory.path(), "development", InstallSource::Development);
@@ -1619,11 +1668,7 @@ mod tests {
         let next = selection(directory.path(), "next", InstallSource::Development);
         let mut replacement = switch(receipt.target, next, published.artifact_set);
         replacement.coordinator = replacement.candidate.clone();
-        assert!(replacement
-            .validate()
-            .unwrap_err()
-            .to_string()
-            .contains("matches neither the prior CLI"));
+        replacement.validate().unwrap();
     }
 
     #[test]

@@ -76,7 +76,7 @@ shell / automation / Loopflow.app
        resident
           |
           v
- Project / Task controller
+ Project controller / Task controller
           |
           v
     provider harness ------> Home-local Run record
@@ -84,11 +84,12 @@ shell / automation / Loopflow.app
 
 The process that directly spawns a child owns that child handle and may cancel
 it. The Wave listener owns the resident child it spawned. Deterministic tmux
-names make controller startup and inspection repeatable.
+names make resident startup and inspection repeatable; they do not reserve the
+Work against independent bound Runs.
 
 None of those local facts becomes generic cross-process Run control. A PID,
-tmux name, parent Run, Work identity, writer receipt, or telemetry row cannot
-prove that a later process may send a signal.
+tmux name, parent Run, Work identity, or telemetry row cannot prove that a
+later process may send a signal.
 
 ## Observe processes
 

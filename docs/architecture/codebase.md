@@ -18,9 +18,10 @@ complexity.
 | Territory | Main paths | Approx. LOC | Owns |
 | --- | --- | ---: | --- |
 | CLI and presentation | `rust/loopflow/src/lf/`, `src/bin/` | 31,700 | command grammar, dispatch, status/read models, terminal output |
-| Operational workflows | `rust/loopflow/src/ops/` | 25,800 | Task/Project operations, Ask, PR, Git, release, metrics, PM |
+| Operational workflows | `rust/loopflow/src/ops/` | 25,800 | Task/Project operations, human sessions, PR, Git, release, metrics, PM |
 | Prompt and process engine | `rust/loopflow/src/engine/`, `src/harness/` | 29,300 | Skill/Flow discovery, prompt assembly, provider subprocess streams |
-| Planning runtime | `wave/`, `flowloop/`, `project/`, `task/`, `pm/`, `chat/` | 32,500 | listeners, Work loops, planning/provider models |
+| Tracked Work | `work/`, `pm/` | — | Wave/Project/Task facts, Task PR identity, planning-provider models |
+| End-to-end controllers | `controller/` | — | Wave listener/runtime, Project pursuit, Task automation state and playheads |
 | Storage and command journal | `store/`, `journal/` | 19,700 | SQLite, migrations, durable domain rows, outer command receipts |
 | Provider authority | `provider_auth/`, `provider_account/` | 7,500 | login, encrypted tokens, account homes, routes, leases |
 | Home daemon | `lfd/` | 2,900 | Home HTTP API, webhooks, Wave and service reconciliation |
@@ -44,9 +45,11 @@ subprocess edge to one concept.
 | provider routing | [`provider_account.rs`](../../rust/loopflow/src/provider_account.rs) | selected account route and lease |
 | provider streams | [`harness/`](../../rust/loopflow/src/harness/) | normalized conversation and usage |
 | Run evidence | [`run_record.rs`](../../rust/loopflow/src/run_record.rs) | manifest, append events, terminal receipt |
-| shared Work types | [`durable.rs`](../../rust/loopflow/src/durable.rs) | `WorkRef`, status, inputs, placement, playhead |
-| Project loop | [`project/runner.rs`](../../rust/loopflow/src/project/runner.rs) | refreshed Project plan and transition |
-| Task loop | [`task/runner.rs`](../../rust/loopflow/src/task/runner.rs) | Flow boundary and delivery state |
+| shared Work types | [`durable.rs`](../../rust/loopflow/src/durable.rs) and [`work/`](../../rust/loopflow/src/work/) | `WorkRef`, status, inputs, placement, Wave/Project/Task facts |
+| Project loop | [`controller/project/`](../../rust/loopflow/src/controller/project/) | refreshed Project plan and transition |
+| Task loop | [`controller/task/`](../../rust/loopflow/src/controller/task/) | Flow boundary and delivery state |
+| Wave facts and authored context | [`work/wave/`](../../rust/loopflow/src/work/wave/) | identity, config, memory, repository scope |
+| Wave automation | [`controller/wave/`](../../rust/loopflow/src/controller/wave/) | listener, resident, placement policy, runtime |
 | store abstraction | [`store/`](../../rust/loopflow/src/store/) | domain rows and transactions |
 | Home daemon | [`lfd/mod.rs`](../../rust/loopflow/src/lfd/mod.rs) | Home HTTP and service reconciliation |
 | machine install | [`machine_install.rs`](../../rust/loopflow/src/machine_install.rs) | artifact set and switch receipt |
@@ -59,8 +62,9 @@ lf                         foreground command and Skill/Flow launches
 lf-prompt                  prompt-oriented executable surface
 lfd                        one Home's service keeper and webhook receiver
 lf __resident              Wave resident process
-lf __work                  Project/Task controller process
+lf __work                  Project or Task end-to-end controller
 lf __flow-step             one internal Flow boundary
+lf __provider-session      provider hook that binds native session identity to a Run
 lf __screenshot-supervisor bounded browser-capture owner
 Loopflow.app               pure client over CLI/HTTP DTOs
 ```
@@ -71,7 +75,8 @@ Flows may invoke the named internal operations that own their exact boundary.
 | Public family | Owns |
 | --- | --- |
 | `lf <skill>`, `lf flow` | direct execution and composition |
-| `lf wave`, `project`, `task`, `work`, `ask` | planning and communication |
+| `lf wave`, `project`, `task`, `work` | planning and Work coordination |
+| `lf ask`, `session` | durable human Sessions and resolution |
 | `lf wt`, `commit`, `rebase`, `pr`, `ci` | worktree and delivery operations |
 | `lf runs`, `usage`, `activity` | durable execution/history projections |
 | `lf ps`, `top`, `prune`, `doctor` | local OS and command-journal observation |
@@ -82,6 +87,30 @@ Flows may invoke the named internal operations that own their exact boundary.
 Argument-level behavior belongs in the [`lf` reference](../lf.md). Wire DTOs
 have required fields unless their type is explicitly optional. Rust and Swift
 round-trip the same fixtures under `tests/fixtures/dto/`.
+
+`lf task prepare` belongs to tracked Work and delivery: it creates no
+controller state. `lf task run`, `restart`, and `resume` compose that substrate
+with the built-in Task controller. `lf --task ... <skill>` goes directly
+through execution with Task attribution and never advances controller state.
+
+## Dependency direction
+
+```text
+controller -> execution
+controller -> work
+controller -> delivery
+delivery   -> work
+surface    -> controller, execution, work, delivery
+
+execution ⇏ work, controller
+work      ⇏ controller
+```
+
+Keep these directions literal. A convenience DTO may project Work and
+controller evidence together, but `work/` types and Work store reads never
+load controller state. Controller startup performs the join explicitly.
+Execution accepts preassembled Wave memory and opaque Work attribution; it does
+not resolve either from the planning store.
 
 ## HTTP boundaries
 
@@ -162,4 +191,3 @@ coherent, simplify the model or move the history to review notes.
 [Architecture →](../architecture.md) returns to the developer guide.
 [Architecture Reference →](../architecture-reference.md) opens the checked
 inventory.
-

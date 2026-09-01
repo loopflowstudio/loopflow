@@ -7,12 +7,12 @@ use std::sync::Arc;
 
 use loopflow::chat::turns::ChatRole;
 use loopflow::chat::types::{ConversationItem, Lifecycle};
-use loopflow::wave::journal::{fold_thread, journal_path, Journal, MessageOp};
-use loopflow::wave::playhead::BodyProvenance;
-use loopflow::wave::runtime::WaveRuntime;
-use loopflow::wave::server::{self, ResidentDoor};
-use loopflow::wave::state::LoopState;
-use loopflow::wave::wire::ResidentDelta;
+use loopflow::controller::wave::journal::{fold_thread, journal_path, Journal, MessageOp};
+use loopflow::controller::wave::playhead::BodyProvenance;
+use loopflow::controller::wave::runtime::WaveRuntime;
+use loopflow::controller::wave::server::{self, ResidentDoor};
+use loopflow::controller::wave::state::LoopState;
+use loopflow::controller::wave::wire::ResidentDelta;
 
 /// One complete resident turn, as the loop emits it after a pass: an
 /// item, the pass's reply text, then the finalized boundary.
@@ -144,7 +144,7 @@ async fn crashed_open_turn_is_finalized_failed_on_reboot() {
     // A server that dies mid-turn leaves started/item events with no finish.
     {
         let (mut journal, _) = Journal::open(&journal_path(tmp.path(), "ship")).expect("open");
-        use loopflow::wave::journal::EventKind;
+        use loopflow::controller::wave::journal::EventKind;
         journal.append(|seq| EventKind::TurnStarted {
             turn_id: format!("turn-{seq}"),
             answers: vec![],

@@ -6,6 +6,7 @@ import Foundation
 final class PortfolioService {
     private let defaults: UserDefaults
     private let key: String
+    private let scanner = RepoScanner()
 
     private(set) var repos: [PortfolioRepo] = []
 
@@ -18,15 +19,20 @@ final class PortfolioService {
         loadRepos()
     }
 
-    func addRepo(_ url: URL) {
-        let path = url.normalizedFilePath
+    @discardableResult
+    func addRepo(_ url: URL) -> URL? {
+        guard let main = scanner.mainRepository(url) else { return nil }
+        let path = main.normalizedFilePath
         repos.removeAll { $0.path == path }
         repos.insert(PortfolioRepo(path: path, lastOpened: Date()), at: 0)
         saveRepos()
+        return main
     }
 
     func removeRepo(_ url: URL) {
-        repos.removeAll { $0.path == url.normalizedFilePath }
+        let path = scanner.mainRepository(url)?.normalizedFilePath
+            ?? url.normalizedFilePath
+        repos.removeAll { $0.path == path }
         saveRepos()
     }
 
@@ -38,6 +44,7 @@ final class PortfolioService {
             return
         }
         repos = normalizedRepos(decoded)
+        if repos != decoded { saveRepos() }
     }
 
     private func saveRepos() {
@@ -50,15 +57,12 @@ final class PortfolioService {
         var normalized: [PortfolioRepo] = []
 
         for entry in entries.sorted(by: { $0.lastOpened > $1.lastOpened }) {
-            let path = entry.path.normalizedFilePath
-            guard FileManager.default.fileExists(atPath: path), !seen.contains(path) else {
-                continue
-            }
-            seen.insert(path)
+            guard let main = scanner.mainRepository(entry.url) else { continue }
+            let path = main.normalizedFilePath
+            guard seen.insert(path).inserted else { continue }
             normalized.append(PortfolioRepo(path: path, lastOpened: entry.lastOpened))
         }
 
         return normalized
     }
 }
-

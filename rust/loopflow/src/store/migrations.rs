@@ -571,6 +571,16 @@ const MIGRATIONS: &[Migration] = &[
         name: "release",
         sql: include_str!("migrations/0.12.14.001_release.sql"),
     },
+    Migration {
+        id: MigrationId {
+            major: 0,
+            minor: 12,
+            patch: Some(15),
+            ordinal: 1,
+        },
+        name: "release",
+        sql: include_str!("migrations/0.12.15.001_release.sql"),
+    },
 ];
 
 #[doc(hidden)]
@@ -1019,48 +1029,53 @@ fn apply_sqlite_transaction(
 }
 
 pub(crate) fn validate_persisted_json(conn: &rusqlite::Connection) -> StoreResult<()> {
-    let mut failures = validate_json_column::<crate::task::PmWritebackState>(
+    let mut failures = validate_json_column::<crate::work::task::PmWritebackState>(
         conn,
         "tasks",
         "id",
         "pm_writeback_json",
     )?;
-    failures.extend(validate_json_column::<crate::task::TaskGateProposal>(
+    let tables = user_tables(conn)?;
+    let (controller_table, controller_key) =
+        if tables.iter().any(|table| table == "task_controller_state") {
+            ("task_controller_state", "task_id")
+        } else {
+            ("tasks", "id")
+        };
+    failures.extend(validate_json_column::<
+        crate::controller::task::TaskGateProposal,
+    >(
         conn,
-        "tasks",
-        "id",
+        controller_table,
+        controller_key,
         "gate_proposal_json",
     )?);
-    failures.extend(validate_json_column::<crate::task::CiObservation>(
+    failures.extend(validate_json_column::<crate::work::task::CiObservation>(
         conn,
         "task_prs",
         "id",
         "ci_observation",
     )?);
-    failures.extend(validate_json_column::<crate::task::GithubObservation>(
-        conn,
-        "task_prs",
-        "id",
-        "github_observation",
-    )?);
-    failures.extend(validate_json_column::<crate::task::TaskEventKind>(
+    failures.extend(
+        validate_json_column::<crate::work::task::GithubObservation>(
+            conn,
+            "task_prs",
+            "id",
+            "github_observation",
+        )?,
+    );
+    failures.extend(validate_json_column::<crate::work::task::TaskEventKind>(
         conn,
         "task_events",
         "id",
         "kind_json",
     )?);
-    failures.extend(validate_json_column::<crate::project::ProjectEventKind>(
-        conn,
-        "project_events",
-        "id",
-        "kind_json",
-    )?);
-    failures.extend(validate_json_column::<crate::project::ChildEventPayload>(
-        conn,
-        "observation_outbox",
-        "id",
-        "payload_json",
-    )?);
+    failures.extend(validate_json_column::<
+        crate::work::project::ProjectEventKind,
+    >(conn, "project_events", "id", "kind_json")?);
+    failures.extend(validate_json_column::<
+        crate::work::project::ChildEventPayload,
+    >(conn, "observation_outbox", "id", "payload_json")?);
     failures.extend(validate_json_column::<Vec<String>>(
         conn,
         "ci_incidents",
@@ -1910,13 +1925,15 @@ mod tests {
         apply_sqlite, apply_sqlite_transaction, apply_sqlite_with_backup, backup_before_migration,
         latest_applied_version_sqlite, latest_known_version, latest_version_sqlite,
         migration_checksum, migration_sql_for_test, pending_migrations, product_schema,
-        validate_foreign_keys, validate_installed_development_sqlite, validate_persisted_json,
-        validate_set, validate_sqlite, Migration, MigrationId, DIVERGENT_MIGRATIONS, MIGRATIONS,
+        user_tables, validate_foreign_keys, validate_installed_development_sqlite,
+        validate_persisted_json, validate_set, validate_sqlite, Migration, MigrationId,
+        DIVERGENT_MIGRATIONS, MIGRATIONS,
     };
 
     const REOPEN_REPAIR_NAME: &str = "retire_obsolete_pm_reopen_writebacks";
     const GATE_PROPOSAL_REPAIR_NAME: &str = "repair_legacy_task_gate_proposals";
     const LEGACY_TASK_FLOW_REPAIR_NAME: &str = "repair_legacy_task_flow";
+    const COMPLETED_TASK_WORK_REPAIR_NAME: &str = "restore_completed_task_work";
     const TURN_USAGE_SAMPLES_NAME: &str = "add_turn_usage_samples";
     const REPOSITORY_OWNED_WAVES_NAME: &str = "repository_owned_waves";
     const REMOVE_TASK_LIFECYCLE_OUTCOME_NAME: &str = "remove_task_lifecycle_outcome";
@@ -2342,7 +2359,6 @@ mod tests {
             .unwrap();
         conn.pragma_update(None, "foreign_keys", "OFF").unwrap();
         for draft in [
-            "generic_ask_run_claim",
             "opaque_steer_run_provenance",
             "stable_work_state",
             "obsolete_sql_lifecycle",
@@ -2359,10 +2375,9 @@ mod tests {
         let conn = open();
         conn.execute_batch("PRAGMA foreign_keys = ON").unwrap();
         apply_before_current_draft(&conn, "stable_work_state");
-        if !columns(&conn, "ask_exchanges").contains(&"source_run_id".to_string()) {
-            for draft in ["generic_ask_run_claim", "opaque_steer_run_provenance"] {
-                conn.execute_batch(&current_draft_sql(draft)).unwrap();
-            }
+        if !columns(&conn, "tasks").contains(&"work_state".to_string()) {
+            conn.execute_batch(&current_draft_sql("opaque_steer_run_provenance"))
+                .unwrap();
         }
         conn.execute(
             "INSERT INTO waves (id, name, repo, created_at, parent_wave_id)
@@ -2382,7 +2397,12 @@ mod tests {
             )
             .unwrap();
         assert_eq!(state, ("ready".to_string(), None));
-        for table in ["waits", "work_truth", "epoch_revisions"] {
+        for table in [
+            "waits",
+            "work_truth",
+            "epoch_revisions",
+            "work_flow_positions",
+        ] {
             let exists: bool = conn
                 .query_row(
                     "SELECT EXISTS(
@@ -2394,12 +2414,7 @@ mod tests {
                 .unwrap();
             assert!(!exists, "{table} must be deleted");
         }
-        for table in [
-            "steers",
-            "tool_responses",
-            "work_flow_positions",
-            "ask_exchanges",
-        ] {
+        for table in ["steers", "tool_responses", "ask_exchanges"] {
             let rows: i64 = conn
                 .query_row(&format!("SELECT COUNT(*) FROM {table}"), [], |row| {
                     row.get(0)
@@ -2415,11 +2430,7 @@ mod tests {
         conn.execute_batch("PRAGMA foreign_keys = OFF").unwrap();
         apply_before_current_draft(&conn, "obsolete_sql_lifecycle");
         if !columns(&conn, "tasks").contains(&"work_state".to_string()) {
-            for draft in [
-                "generic_ask_run_claim",
-                "opaque_steer_run_provenance",
-                "stable_work_state",
-            ] {
+            for draft in ["opaque_steer_run_provenance", "stable_work_state"] {
                 conn.execute_batch(&current_draft_sql(draft)).unwrap();
             }
         }
@@ -3579,6 +3590,10 @@ mod tests {
         .unwrap();
 
         apply_sqlite(&conn).unwrap();
+        if !_draft_is_canonical(COMPLETED_TASK_WORK_REPAIR_NAME) {
+            conn.execute_batch(&migration_sql_for_test(COMPLETED_TASK_WORK_REPAIR_NAME))
+                .unwrap();
+        }
         apply_current_work_schema(&conn);
 
         let task: (String, String, String, String) = conn
@@ -3591,7 +3606,7 @@ mod tests {
             .unwrap();
         assert_eq!(task.1, "INF-123");
         assert_eq!(task.2, "inf-123");
-        assert_eq!(task.3, "ready");
+        assert_eq!(task.3, "done");
         let pr: (
             i64,
             String,
@@ -3771,25 +3786,48 @@ mod tests {
             conn.execute_batch(&migration_sql_for_test(GATE_PROPOSAL_REPAIR_NAME))
                 .unwrap();
         }
-        assert_eq!(
+        let controller_table_exists = user_tables(&conn)
+            .unwrap()
+            .iter()
+            .any(|table| table == "task_controller_state");
+        let current_gate = if controller_table_exists {
+            conn.query_row(
+                "SELECT controller.gate_proposal_json
+                 FROM task_controller_state controller
+                 JOIN tasks ON tasks.id = controller.task_id
+                 WHERE tasks.external_issue_id='issue-current'",
+                [],
+                |row| row.get::<_, String>(0),
+            )
+        } else {
             conn.query_row(
                 "SELECT gate_proposal_json FROM tasks WHERE external_issue_id='issue-current'",
                 [],
                 |row| row.get::<_, String>(0),
             )
-            .unwrap(),
+        }
+        .unwrap();
+        assert_eq!(
+            current_gate,
             "{\"done\":false,\"reason\":\"current\",\"future\":\"preserved\"}"
         );
-        assert_eq!(
+        let stale_gate_count = if controller_table_exists {
+            conn.query_row(
+                "SELECT COUNT(*) FROM task_controller_state
+                 WHERE json_type(gate_proposal_json, '$.status') IS NOT NULL",
+                [],
+                |row| row.get::<_, i64>(0),
+            )
+        } else {
             conn.query_row(
                 "SELECT COUNT(*) FROM tasks
                  WHERE json_type(gate_proposal_json, '$.status') IS NOT NULL",
                 [],
                 |row| row.get::<_, i64>(0),
             )
-            .unwrap(),
-            0
-        );
+        }
+        .unwrap();
+        assert_eq!(stale_gate_count, 0);
         validate_foreign_keys(&conn).unwrap();
         validate_persisted_json(&conn).unwrap();
         conn.pragma_update(None, "foreign_keys", "ON").unwrap();
@@ -3801,18 +3839,34 @@ mod tests {
                  WHERE external_issue_id='issue-reopen'",
                 [],
             )?;
-            conn.execute(
-                "UPDATE tasks
-                 SET gate_proposal_json='{\"reason\":\"missing done\"}'
-                 WHERE external_issue_id='issue-completed'",
-                [],
-            )?;
+            if controller_table_exists {
+                conn.execute(
+                    "UPDATE task_controller_state
+                     SET gate_proposal_json='{\"reason\":\"missing done\"}'
+                     WHERE task_id=(
+                         SELECT id FROM tasks WHERE external_issue_id='issue-completed'
+                     )",
+                    [],
+                )?;
+            } else {
+                conn.execute(
+                    "UPDATE tasks
+                     SET gate_proposal_json='{\"reason\":\"missing done\"}'
+                     WHERE external_issue_id='issue-completed'",
+                    [],
+                )?;
+            }
             Ok(())
         })
         .unwrap_err();
         let message = error.to_string();
         assert!(message.contains("tasks.pm_writeback_json"));
-        assert!(message.contains("tasks.gate_proposal_json"));
+        let gate_column = if controller_table_exists {
+            "task_controller_state.gate_proposal_json"
+        } else {
+            "tasks.gate_proposal_json"
+        };
+        assert!(message.contains(gate_column));
         assert_eq!(
             conn.query_row(
                 "SELECT pm_writeback_json FROM tasks WHERE external_issue_id='issue-reopen'",
@@ -3834,11 +3888,20 @@ mod tests {
             .unwrap();
         assert!(matches!(
             reopen.pm_writeback,
-            crate::task::PmWritebackState::Current
+            crate::work::task::PmWritebackState::Current
         ));
-        let mut decisions = tasks
-            .iter()
-            .map(|task| task.gate_proposal.as_ref().unwrap().done)
+        let conn = rusqlite::Connection::open(&path).unwrap();
+        let mut statement = conn
+            .prepare("SELECT gate_proposal_json FROM task_controller_state")
+            .unwrap();
+        let mut decisions = statement
+            .query_map([], |row| row.get::<_, String>(0))
+            .unwrap()
+            .map(|json| {
+                serde_json::from_str::<crate::controller::task::TaskGateProposal>(&json.unwrap())
+                    .unwrap()
+                    .done
+            })
             .collect::<Vec<_>>();
         decisions.sort_unstable();
         assert_eq!(decisions, vec![false, false, false, false, false, true]);
@@ -4473,10 +4536,10 @@ mod tests {
     }
 
     #[test]
-    fn stable_work_schema_keeps_plural_asks_without_execution_authority() {
+    fn native_human_session_schema_replaces_ask_with_human_flow_positions() {
         let conn = open();
-        apply_sqlite(&conn).unwrap();
-        apply_current_work_schema(&conn);
+        apply_installed_development_sqlite(&conn, crate::build_info::migration_draft_manifest())
+            .unwrap();
 
         assert!(!conn
             .query_row(
@@ -4493,54 +4556,32 @@ mod tests {
             assert!(!task_columns.contains(&deleted.to_string()));
         }
         let position_columns = columns(&conn, "work_flow_positions");
-        for present in ["work_kind", "work_id", "node_id", "human"] {
+        for present in [
+            "work_kind",
+            "work_id",
+            "node_id",
+            "human",
+            "session_run_id",
+            "ready_summary",
+        ] {
             assert!(position_columns.contains(&present.to_string()));
         }
         for deleted in ["epoch_id", "interactive"] {
             assert!(!position_columns.contains(&deleted.to_string()));
         }
 
-        let ask_columns = columns(&conn, "ask_exchanges");
-        assert!(ask_columns.contains(&"source_run_id".to_string()));
-        for deleted in [
-            "epoch_id",
-            "origin_run_id",
-            "origin_turn_id",
-            "origin_invocation_id",
-        ] {
-            assert!(!ask_columns.contains(&deleted.to_string()));
+        for table in ["ask_exchanges", "ask_linear_comment_outbox"] {
+            assert!(!conn
+                .query_row(
+                    "SELECT EXISTS(
+                        SELECT 1 FROM sqlite_master
+                        WHERE type='table' AND name=?1
+                    )",
+                    [table],
+                    |row| row.get::<_, bool>(0),
+                )
+                .unwrap());
         }
-
-        conn.execute_batch("PRAGMA foreign_keys=OFF").unwrap();
-        conn.execute_batch(
-            "INSERT INTO ask_exchanges (
-                id, origin_work_kind, origin_work_id, source_run_id,
-                origin_home_id, origin_cwd,
-                target_kind, target_work_kind, target_work_id,
-                request_kind, request_prompt, state, asked_at
-             ) VALUES
-             (
-                'ask_one', 'task', 'task_one', 'run_one', 'home_one', '/repo',
-                'parent', 'project', 'proj_parent',
-                'intervention', 'Which proof?', 'queued', 1
-             ),
-             (
-                'ask_two', 'task', 'task_one', 'run_one', 'home_one', '/repo',
-                'user', NULL, NULL,
-                'intervention', 'Another proof?', 'queued', 2
-             )",
-        )
-        .unwrap();
-        assert_eq!(
-            conn.query_row(
-                "SELECT COUNT(*) FROM ask_exchanges
-                 WHERE state='queued' AND source_run_id='run_one'",
-                [],
-                |row| row.get::<_, i64>(0),
-            )
-            .unwrap(),
-            2
-        );
     }
 
     #[test]
@@ -4748,91 +4789,6 @@ mod tests {
     }
 
     #[test]
-    fn generic_ask_run_claim_keeps_history_and_removes_invocation_authority() {
-        let conn = open();
-        apply_before_current_draft(&conn, "generic_ask_run_claim");
-        conn.execute_batch(
-            "INSERT INTO waves (id, name, repo, created_at)
-                 VALUES ('wave_ask', 'ask', '/repo', 1);
-             INSERT INTO projects (id, wave_id, external_project_id, created_at)
-                 VALUES ('project_ask', 'wave_ask', 'linear-ask', 1);
-             INSERT INTO epochs (
-                 id, number, wave_id, project_id, task_id, state, current_rev,
-                 created_at, terminal_at
-             ) VALUES ('epoch_ask', 1, NULL, 'project_ask', NULL, 'open', 0, 1, NULL);
-             INSERT INTO runs (
-                 id, epoch_id, home_id, state, trigger_json, retry_of,
-                 runtime_generation, source_kind, source_id, created_at,
-                 ended_at, stop_reason, containment_kind, containment_id, cwd,
-                 started_at
-             ) VALUES (
-                 'run_source_bytes', 'epoch_ask', (SELECT id FROM homes LIMIT 1),
-                 'ended', '{\"kind\":\"user\"}', NULL, NULL, 'project',
-                 'project_ask', 1, 2, NULL, NULL, NULL, NULL, NULL
-             );
-             INSERT INTO ask_exchanges (
-                 id, epoch_id, origin_work_kind, origin_work_id, origin_run_id,
-                 origin_turn_id, origin_invocation_id, origin_home_id, origin_cwd,
-                 target_kind, request_kind, request_prompt, state, asked_at
-             ) VALUES (
-                 'ask_generic', 'epoch_ask', 'project', 'project_ask',
-                 'run_source_bytes', NULL, NULL, (SELECT id FROM homes LIMIT 1),
-                 '/repo', 'user', 'intervention', 'Recover safely', 'queued', 2
-             );
-             INSERT INTO agent_invocations (
-                 id, run_id, process_id, started_at, repo, worktree, provider,
-                 surface, capture_status, outcome, artifact_dir,
-                 conversation_path, conversation_event_count, conversation_bytes,
-                 supervising_run_id, answer_ask_id, ask_ready_at, ask_presented_at
-             ) VALUES (
-                 'invocation_ask', 'trace_ask', 'process_ask', 3, '/repo', '/repo',
-                 'codex', 'ask_tui', 'prompt_only', 'running', '', '', 0, 0,
-                 'run_source_bytes', 'ask_generic', 4, 5
-             );
-             UPDATE ask_exchanges
-                SET state='claimed', active_invocation_id='invocation_ask'
-              WHERE id='ask_generic';",
-        )
-        .unwrap();
-
-        conn.execute_batch(&current_draft_sql("generic_ask_run_claim"))
-            .unwrap();
-
-        let ask_columns = columns(&conn, "ask_exchanges");
-        for removed in [
-            "origin_run_id",
-            "origin_turn_id",
-            "origin_invocation_id",
-            "active_invocation_id",
-        ] {
-            assert!(!ask_columns.contains(&removed.to_string()));
-        }
-        for added in ["source_run_id", "active_run_id", "ready_at", "presented_at"] {
-            assert!(ask_columns.contains(&added.to_string()));
-        }
-        assert_eq!(
-            conn.query_row(
-                "SELECT state || ':' || source_run_id || ':' ||
-                        COALESCE(active_run_id, 'none')
-                 FROM ask_exchanges WHERE id='ask_generic'",
-                [],
-                |row| row.get::<_, String>(0),
-            )
-            .unwrap(),
-            "queued:run_source_bytes:none"
-        );
-        assert!(conn
-            .query_row(
-                "SELECT answer_ask_id IS NULL AND ask_ready_at IS NULL
-                        AND ask_presented_at IS NULL
-                 FROM agent_invocations WHERE id='invocation_ask'",
-                [],
-                |row| row.get::<_, bool>(0),
-            )
-            .unwrap());
-    }
-
-    #[test]
     fn legacy_task_flow_repair_restores_existing_tasks_without_moving_their_work() {
         let conn = open();
         if _draft_is_canonical(LEGACY_TASK_FLOW_REPAIR_NAME) {
@@ -4972,7 +4928,7 @@ mod tests {
 
         let repo = std::path::Path::new(env!("CARGO_MANIFEST_DIR")).join("../..");
         for flow in ["slice", "slice", "ship-5whys"] {
-            let invocation = crate::wave::playhead::QueuedInvocation::load(&repo, flow)
+            let invocation = crate::controller::wave::playhead::QueuedInvocation::load(&repo, flow)
                 .expect("every repaired persisted loop flow resolves");
             assert_eq!(invocation.flow, flow);
         }

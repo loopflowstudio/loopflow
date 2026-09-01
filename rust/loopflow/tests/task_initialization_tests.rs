@@ -3,9 +3,9 @@ mod support;
 use std::process::Command;
 
 use loopflow::ops::task::{task_snapshot, task_status};
+use loopflow::ops::task_actions::TaskAction;
 use loopflow::store::PmSnapshotRow;
-use loopflow::task::actions::TaskAction;
-use loopflow::task::TaskEventKind;
+use loopflow::work::task::TaskEventKind;
 use loopflow_test_support::TestRepo;
 use support::{register_unrun_task, EnvGuard};
 
@@ -119,13 +119,10 @@ fn initializing_worktree_keeps_status_wait_and_roadmap_readable() {
     assert_eq!(wave["projects"]["state"], "ok", "roadmap wave: {wave:#}");
     let roadmap_task = &wave["projects"]["items"][0]["tasks"][0];
     assert_eq!(roadmap_task["task"]["identifier"], "INF-123");
-    assert_eq!(
-        roadmap_task["attention"]["actions"]["recommended"],
-        "no_action"
-    );
-    assert!(roadmap_task["attention"]["reason"]
+    assert_eq!(roadmap_task["actions"]["recommended"], "no_action");
+    assert!(roadmap_task["condition"]["reason"]
         .as_str()
-        .expect("roadmap attention reason")
+        .expect("roadmap condition reason")
         .contains("is initializing worktree"));
     let projected =
         task_snapshot(&task_status("INF-123").expect("read Task")).expect("project Task status");
@@ -160,10 +157,10 @@ fn initializing_worktree_keeps_status_wait_and_roadmap_readable() {
     );
     let stale_roadmap: serde_json::Value =
         serde_json::from_slice(&stale_roadmap.stdout).expect("stale roadmap JSON");
-    let stale_attention =
-        &stale_roadmap["waves"][0]["projects"]["items"][0]["tasks"][0]["attention"];
-    assert_eq!(stale_attention["level"], "red");
-    assert!(stale_attention["reason"]
+    let stale_condition =
+        &stale_roadmap["waves"][0]["projects"]["items"][0]["tasks"][0]["condition"];
+    assert_eq!(stale_condition["state"], "blocked");
+    assert!(stale_condition["reason"]
         .as_str()
         .expect("stale roadmap reason")
         .contains("initialization did not complete"));

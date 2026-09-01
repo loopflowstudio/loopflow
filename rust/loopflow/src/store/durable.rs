@@ -1,47 +1,10 @@
 use crate::child::ChildRef;
 use crate::durable::{
-    AbandonReceipt, Ask, AskBody, AskClaim, AskId, AskOrigin, AskResult, AskTarget, Author,
-    FlowPosition, Home, HomeId, Placement, RunId, Steer, SteerReceipt, ToolResponseReceipt,
-    ToolResponseWrite, WorkRef, WorkStatus,
+    AbandonReceipt, Author, FlowPosition, Home, HomeId, Placement, Steer, SteerReceipt,
+    ToolResponseReceipt, ToolResponseWrite, WorkRef, WorkStatus,
 };
 
 use super::{run_sqlite, Store, StoreResult};
-
-#[derive(Debug, Clone, Copy, PartialEq, Eq)]
-pub(crate) enum AskCommentTransition {
-    Requested,
-    Result,
-}
-
-impl AskCommentTransition {
-    // These are published outbox/marker values. Keep their bytes stable while
-    // the Rust vocabulary follows requested-session and typed-result state.
-    pub(crate) fn as_str(self) -> &'static str {
-        match self {
-            Self::Requested => "ask",
-            Self::Result => "answer",
-        }
-    }
-
-    pub(crate) fn marker(self, ask_id: &AskId) -> String {
-        format!("<!-- loopflow:{ask_id}:{} -->", self.as_str())
-    }
-}
-
-#[derive(Debug, Clone, PartialEq, Eq)]
-pub(crate) struct AskCommentWrite {
-    pub ask_id: AskId,
-    pub transition: AskCommentTransition,
-    pub issue_id: String,
-    pub body: String,
-    pub repo: String,
-    pub wave: String,
-    pub attempt_count: u32,
-    pub attempt_started_at: Option<i64>,
-    pub last_error: Option<String>,
-    pub linear_comment_id: Option<String>,
-    pub delivered_at: Option<i64>,
-}
 
 impl Store {
     pub(crate) async fn task_issue_identifier(
@@ -108,181 +71,13 @@ impl Store {
         .await
     }
 
-    pub async fn create_ask(
-        &self,
-        origin: AskOrigin,
-        request: AskBody,
-        target: AskTarget,
-    ) -> StoreResult<Ask> {
-        run_sqlite(&self.sqlite, move |store| {
-            store.create_ask(&origin, &request, &target)
-        })
-        .await
-    }
-
-    pub async fn ask_by_id(&self, ask_id: &AskId) -> StoreResult<Ask> {
-        let ask_id = ask_id.clone();
-        run_sqlite(&self.sqlite, move |store| store.ask_by_id(&ask_id)).await
-    }
-
-    pub async fn pending_asks(&self, target: &AskTarget) -> StoreResult<Vec<Ask>> {
-        let target = target.clone();
-        run_sqlite(&self.sqlite, move |store| store.pending_asks(&target)).await
-    }
-
-    pub(crate) async fn claim_ask(&self, ask_id: &AskId) -> StoreResult<AskClaim> {
-        let ask_id = ask_id.clone();
-        run_sqlite(&self.sqlite, move |store| store.claim_ask(&ask_id)).await
-    }
-
-    pub async fn mark_ask_presented(&self, ask_id: &AskId, run_id: &RunId) -> StoreResult<Ask> {
-        let ask_id = ask_id.clone();
-        let run_id = run_id.clone();
-        run_sqlite(&self.sqlite, move |store| {
-            store.mark_ask_presented(&ask_id, &run_id)
-        })
-        .await
-    }
-
-    pub(crate) fn interrupt_ask_on_interrupt(
-        &self,
-        ask_id: &AskId,
-        run_id: &RunId,
-    ) -> StoreResult<()> {
-        self.sqlite
-            .interrupt_ask_on_interrupt(ask_id, run_id)
-            .map(|_| ())
-    }
-
-    pub async fn settle_ask(
-        &self,
-        ask_id: &AskId,
-        run_id: &RunId,
-        result: AskResult,
-    ) -> StoreResult<Ask> {
-        let ask_id = ask_id.clone();
-        let run_id = run_id.clone();
-        run_sqlite(&self.sqlite, move |store| {
-            store.settle_ask(&ask_id, &run_id, &result)
-        })
-        .await
-    }
-
-    pub async fn release_ask(
-        &self,
-        ask_id: &AskId,
-        run_id: &RunId,
-        reason: Option<&str>,
-    ) -> StoreResult<Ask> {
-        let ask_id = ask_id.clone();
-        let run_id = run_id.clone();
-        let reason = reason.map(str::to_string);
-        run_sqlite(&self.sqlite, move |store| {
-            store.release_ask(&ask_id, &run_id, reason.as_deref())
-        })
-        .await
-    }
-
-    pub async fn escalate_ask(&self, ask_id: &AskId, run_id: &RunId) -> StoreResult<Ask> {
-        let ask_id = ask_id.clone();
-        let run_id = run_id.clone();
-        run_sqlite(&self.sqlite, move |store| {
-            store.escalate_ask(&ask_id, &run_id)
-        })
-        .await
-    }
-
-    pub async fn escalate_queued_ask(&self, ask_id: &AskId) -> StoreResult<Ask> {
-        let ask_id = ask_id.clone();
-        run_sqlite(&self.sqlite, move |store| {
-            store.escalate_queued_ask(&ask_id)
-        })
-        .await
-    }
-
-    pub async fn cancel_ask(&self, ask_id: &AskId, reason: &str) -> StoreResult<Ask> {
-        let ask_id = ask_id.clone();
-        let reason = reason.to_string();
-        run_sqlite(&self.sqlite, move |store| {
-            store.cancel_ask(&ask_id, &reason)
-        })
-        .await
-    }
-
-    pub(crate) async fn request_intervention(
-        &self,
-        origin: AskOrigin,
-        prompt: &str,
-        user: bool,
-    ) -> StoreResult<Ask> {
-        let prompt = prompt.to_string();
-        run_sqlite(&self.sqlite, move |store| {
-            store.request_intervention(&origin, &prompt, user)
-        })
-        .await
-    }
-
-    pub(crate) async fn asks_for_work(&self, work: &WorkRef) -> StoreResult<Vec<Ask>> {
+    pub async fn flow_position(&self, work: &WorkRef) -> StoreResult<Option<FlowPosition>> {
         let work = work.clone();
-        run_sqlite(&self.sqlite, move |store| store.asks_for_work(&work)).await
+        run_sqlite(&self.sqlite, move |store| store.flow_position(&work)).await
     }
 
-    pub(crate) async fn pending_ask_comment_writes(&self) -> StoreResult<Vec<AskCommentWrite>> {
-        run_sqlite(&self.sqlite, move |store| {
-            store.pending_ask_comment_writes()
-        })
-        .await
-    }
-
-    pub(crate) async fn claim_ask_comment_write(
-        &self,
-        ask_id: &AskId,
-        transition: AskCommentTransition,
-        attempted_at: i64,
-        stale_before: i64,
-    ) -> StoreResult<Option<AskCommentWrite>> {
-        let ask_id = ask_id.clone();
-        run_sqlite(&self.sqlite, move |store| {
-            store.claim_ask_comment_write(&ask_id, transition, attempted_at, stale_before)
-        })
-        .await
-    }
-
-    pub(crate) async fn complete_ask_comment_write(
-        &self,
-        ask_id: &AskId,
-        transition: AskCommentTransition,
-        comment_id: &str,
-        delivered_at: i64,
-    ) -> StoreResult<()> {
-        let ask_id = ask_id.clone();
-        let comment_id = comment_id.to_string();
-        run_sqlite(&self.sqlite, move |store| {
-            store.complete_ask_comment_write(&ask_id, transition, &comment_id, delivered_at)
-        })
-        .await
-    }
-
-    pub(crate) async fn fail_ask_comment_write(
-        &self,
-        ask_id: &AskId,
-        transition: AskCommentTransition,
-        error: &str,
-    ) -> StoreResult<()> {
-        let ask_id = ask_id.clone();
-        let error = error.to_string();
-        run_sqlite(&self.sqlite, move |store| {
-            store.fail_ask_comment_write(&ask_id, transition, &error)
-        })
-        .await
-    }
-
-    pub async fn has_pending_user_ask_for_work(&self, work: &WorkRef) -> StoreResult<bool> {
-        let work = work.clone();
-        run_sqlite(&self.sqlite, move |store| {
-            store.has_pending_user_ask_for_work(&work)
-        })
-        .await
+    pub async fn human_flow_positions(&self) -> StoreResult<Vec<FlowPosition>> {
+        run_sqlite(&self.sqlite, |store| store.human_flow_positions()).await
     }
 
     pub async fn abandon(&self, work: &WorkRef, reason: &str) -> StoreResult<AbandonReceipt> {
@@ -356,14 +151,10 @@ impl Store {
 
 #[cfg(test)]
 mod tests {
-    use time::OffsetDateTime;
-
-    use crate::durable::{AskBody, AskOrigin, AskResult, AskState, AskTarget, WorkRef};
+    use crate::durable::WorkRef;
     use crate::id::WaveId;
-    use crate::planning::{LinearProjectId, ProjectPlan};
-    use crate::project::{Project, ProjectId};
     use crate::store::{open_store, StorageConfig, StoreError};
-    use crate::wave::Wave;
+    use crate::work::wave::Wave;
 
     async fn wave_work() -> (super::Store, WorkRef) {
         let directory = tempfile::tempdir().unwrap().keep();
@@ -377,122 +168,6 @@ mod tests {
         );
         store.create_wave(&wave).await.unwrap();
         (store, WorkRef::Wave(wave.id().clone()))
-    }
-
-    fn project_for(wave: &Wave) -> Project {
-        let now = OffsetDateTime::now_utc();
-        Project {
-            id: ProjectId::new(),
-            plan: ProjectPlan {
-                id: LinearProjectId::new(format!("linear-{}", wave.id())).unwrap(),
-                slug: "runtime-project".to_string(),
-                name: "Runtime Project".to_string(),
-                prompt_context: "Answer child questions.".to_string(),
-                pm_snapshot_synced_at: now.unix_timestamp(),
-            },
-            wave_id: wave.id().clone(),
-            iteration: 0,
-            observation_cursor: 0,
-            last_state_fingerprint: None,
-            agent: "codex".to_string(),
-            provider: "codex".to_string(),
-            provider_session_id: None,
-            abandon_intent: None,
-            created_at: now,
-            updated_at: now,
-        }
-    }
-
-    async fn planning_ask_fixture() -> (super::Store, WorkRef, WorkRef, crate::durable::HomeId) {
-        let directory = tempfile::tempdir().unwrap().keep();
-        let store = open_store(&StorageConfig::sqlite(directory.join("registry.db")))
-            .await
-            .unwrap();
-        let wave = Wave::new(
-            WaveId::new(),
-            "runtime".to_string(),
-            directory.display().to_string(),
-        );
-        store.create_wave(&wave).await.unwrap();
-        let parent = WorkRef::Wave(wave.id().clone());
-        let project = project_for(&wave);
-        store.create_project(&project).await.unwrap();
-        let child = WorkRef::Project(project.id.clone());
-        let home_id = store.placement(&child).await.unwrap().home_id;
-        (store, parent, child, home_id)
-    }
-
-    #[tokio::test]
-    async fn ask_claim_uses_a_generic_run_identity() {
-        let (store, parent, child, home_id) = planning_ask_fixture().await;
-        let source_run_id = crate::durable::RunId::new();
-        let ask = store
-            .create_ask(
-                AskOrigin {
-                    work: child,
-                    source_run_id: Some(source_run_id.clone()),
-                    home_id,
-                    cwd: "/tmp/runtime".into(),
-                },
-                AskBody::Intervention {
-                    prompt: "Which proof matters?".to_string(),
-                },
-                AskTarget::Parent(parent),
-            )
-            .await
-            .unwrap();
-
-        let claim = store.claim_ask(&ask.id).await.unwrap();
-        assert!(claim.needs_launch);
-        let claimed = store.ask_by_id(&ask.id).await.unwrap();
-        assert_eq!(claimed.origin.source_run_id, Some(source_run_id));
-        assert_eq!(claimed.active_run_id, Some(claim.run_id.clone()));
-        assert!(claimed.ready_at.is_some());
-
-        store
-            .mark_ask_presented(&ask.id, &claim.run_id)
-            .await
-            .unwrap();
-        let result = AskResult::Resolved {
-            summary: "Use the observable boundary".to_string(),
-        };
-        let settled = store
-            .settle_ask(&ask.id, &claim.run_id, result.clone())
-            .await
-            .unwrap();
-        assert_eq!(settled.state, AskState::Resolved);
-        assert_eq!(settled.result, Some(result));
-        assert!(settled.active_run_id.is_none());
-        assert!(settled.ready_at.is_some());
-        assert!(settled.presented_at.is_some());
-    }
-
-    #[tokio::test]
-    async fn released_ask_claim_requeues_with_a_fresh_generic_run() {
-        let (store, parent, child, home_id) = planning_ask_fixture().await;
-        let ask = store
-            .create_ask(
-                AskOrigin {
-                    work: child,
-                    source_run_id: None,
-                    home_id,
-                    cwd: "/tmp/runtime".into(),
-                },
-                AskBody::Intervention {
-                    prompt: "Try again safely".to_string(),
-                },
-                AskTarget::Parent(parent),
-            )
-            .await
-            .unwrap();
-        let first = store.claim_ask(&ask.id).await.unwrap();
-        store
-            .release_ask(&ask.id, &first.run_id, Some("provider exited"))
-            .await
-            .unwrap();
-        let second = store.claim_ask(&ask.id).await.unwrap();
-        assert_ne!(first.run_id, second.run_id);
-        assert!(second.needs_launch);
     }
 
     #[tokio::test]

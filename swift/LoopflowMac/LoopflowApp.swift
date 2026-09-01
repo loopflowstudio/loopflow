@@ -54,11 +54,13 @@ struct LoopflowApp: App {
             systemScheme: systemScheme
         )
         let launchRepoURL = LaunchArguments.repoURL()
+        let registryQuery = SessionFixture.query ?? RegistryQueryLocal.shared
 
         WindowGroup {
             PodiumView(
                 portfolioService: portfolioService,
-                initialRepoPath: launchRepoURL?.path
+                initialRepoPath: launchRepoURL?.path,
+                query: registryQuery
             )
             .tint(.loopflowBurgundy)
             .preferredColorScheme(theme.preferredScheme)
@@ -186,11 +188,11 @@ struct LoopflowApp: App {
                 .queryItems?.first(where: { $0.name == "repo" })?.value
             else { return }
             let repoURL = URL(fileURLWithPath: repoPath)
-            portfolioService.addRepo(repoURL)
-            openWindow(id: "repo", value: repoURL)
+            guard let mainRepo = portfolioService.addRepo(repoURL) else { return }
+            openWindow(id: "repo", value: mainRepo)
         case "portfolio":
             openWindow(id: "portfolio")
-        case "asks":
+        case "sessions":
             NotificationCenter.default.post(name: .openSessions, object: nil)
         default:
             break
@@ -205,8 +207,11 @@ struct LoopflowApp: App {
         panel.allowsMultipleSelection = false
         panel.prompt = "Open Repo"
         guard panel.runModal() == .OK, let url = panel.url else { return }
-        portfolioService.addRepo(url)
-        openWindow(id: "repo", value: url)
+        guard let mainRepo = portfolioService.addRepo(url) else {
+            NSSound.beep()
+            return
+        }
+        openWindow(id: "repo", value: mainRepo)
     }
 }
 

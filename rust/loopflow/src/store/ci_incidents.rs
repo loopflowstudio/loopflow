@@ -3,7 +3,7 @@
 use time::OffsetDateTime;
 
 use crate::pr_landing::PrLandingId;
-use crate::task::CiIncident;
+use crate::work::task::CiIncident;
 
 use super::{run_sqlite, Store, StoreResult};
 

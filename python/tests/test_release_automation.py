@@ -10,16 +10,25 @@ ROOT = Path(__file__).resolve().parents[2]
 
 
 def test_nightly_packages_workflow_builds_and_smokes_without_deploying():
-    workflow = yaml.load(
+    nightly = yaml.load(
         (ROOT / ".github/workflows/nightly-packages.yml").read_text(), Loader=yaml.BaseLoader
     )
+    workflow = yaml.load(
+        (ROOT / ".github/workflows/package-build.yml").read_text(), Loader=yaml.BaseLoader
+    )
 
-    assert workflow["name"] == "Packages (nightly)"
-    assert workflow["on"]["schedule"] == [{"cron": "0 9 * * *"}]
-    assert "refs/tags/v" in workflow["env"]["LOOPFLOW_BUILD_PROVENANCE"]
+    assert nightly["name"] == "Packages (nightly)"
+    assert nightly["on"]["schedule"] == [{"cron": "0 9 * * *"}]
+    assert nightly["jobs"] == {
+        "packages": {"uses": "./.github/workflows/package-build.yml"}
+    }
+    assert workflow["name"] == "Package build"
+    assert set(workflow["on"]) == {"workflow_call"}
+    assert "inputs.release_tag" in workflow["env"]["LOOPFLOW_BUILD_PROVENANCE"]
     assert "development" in workflow["env"]["LOOPFLOW_BUILD_PROVENANCE"]
     assert "published" in workflow["env"]["LOOPFLOW_MIGRATION_AUTHORITY"]
     assert "validation_only" in workflow["env"]["LOOPFLOW_MIGRATION_AUTHORITY"]
+    assert workflow["env"]["LOOPFLOW_RELEASE_TAG"] == "${{ inputs.release_tag }}"
 
     native = workflow["jobs"]["native-packages"]
     assert "needs" not in native
@@ -37,6 +46,7 @@ def test_nightly_packages_workflow_builds_and_smokes_without_deploying():
     assert "package-smoke/lf --version" in commands
     assert "package-smoke/lf --help" in commands
     assert "package-smoke/lf --list" in commands
+    assert 'test "$(package-smoke/lf --version)" = "lf ${expected}"' in commands
 
     forbidden = [
         "gh release",
@@ -164,7 +174,14 @@ def test_release_build_workflow_is_credential_free():
         Loader=yaml.BaseLoader,
     )
 
-    assert release["jobs"] == {"packages": {"uses": "./.github/workflows/nightly-packages.yml"}}
+    assert release["jobs"] == {
+        "packages": {
+            "uses": "./.github/workflows/package-build.yml",
+            "with": {
+                "release_tag": "${{ inputs.tag }}",
+            },
+        }
+    }
     assert "schedule" not in release["on"]
 
     workflow_text = (ROOT / ".github/workflows/release.yml").read_text()
@@ -182,16 +199,16 @@ def test_release_build_workflow_is_credential_free():
     assert not (ROOT / ".github/workflows/website-deploy.yml").exists()
 
 
-def test_auto_tag_dispatch_matches_the_input_free_release_contract():
+def test_release_candidate_is_dispatched_explicitly_before_tagging():
     release = yaml.load(
         (ROOT / ".github/workflows/release.yml").read_text(),
         Loader=yaml.BaseLoader,
     )
-    assert not release["on"]["workflow_dispatch"]
-
-    auto_tag = (ROOT / ".github/workflows/auto-tag.yml").read_text()
-    assert 'gh workflow run release.yml --ref "$version"' in auto_tag
-    assert "-f tag=" not in auto_tag
+    inputs = release["on"]["workflow_dispatch"]["inputs"]
+    assert inputs["tag"]["required"] == "true"
+    assert set(inputs) == {"tag"}
+    assert "push" not in release["on"]
+    assert not (ROOT / ".github/workflows/auto-tag.yml").exists()
 
 
 def test_host_publisher_owns_credentialed_release_steps():

@@ -1,10 +1,12 @@
 //! Durable Project and Task compatibility rows and their observation outbox.
 
-use crate::child::{ChildBodyHandoffRequest, ObservationRecipient};
+use crate::child::ObservationRecipient;
 use crate::durable::Author;
 use crate::id::WaveId;
-use crate::project::{ObservationOutboxRow, Project, ProjectEvent, ProjectEventKind, ProjectId};
-use crate::task::{
+use crate::work::project::{
+    ObservationOutboxRow, Project, ProjectEvent, ProjectEventKind, ProjectId,
+};
+use crate::work::task::{
     LinearObservationApply, LinearObservationOutcome, Task, TaskEvent, TaskEventKind, TaskId,
     TaskLinearObservation, TaskPr, TaskPrId,
 };
@@ -82,19 +84,6 @@ impl Store {
         .await
     }
 
-    pub async fn handoff_task_body(
-        &self,
-        task_id: &TaskId,
-        request: &ChildBodyHandoffRequest,
-    ) -> StoreResult<Task> {
-        let task_id = task_id.clone();
-        let request = request.clone();
-        run_sqlite(&self.sqlite, move |store| {
-            store.handoff_task_body(&task_id, &request)
-        })
-        .await
-    }
-
     pub async fn get_task(&self, task_id: &TaskId) -> StoreResult<Option<Task>> {
         let task_id = task_id.clone();
         run_sqlite(&self.sqlite, move |store| store.task(&task_id)).await
@@ -105,9 +94,9 @@ impl Store {
         run_sqlite(&self.sqlite, move |store| store.task_by_issue(&issue)).await
     }
 
-    pub async fn get_task_by_worktree(&self, worktree: &str) -> StoreResult<Option<Task>> {
-        let worktree = worktree.to_string();
-        run_sqlite(&self.sqlite, move |store| store.task_by_worktree(&worktree)).await
+    pub async fn get_task_by_branch(&self, branch: &str) -> StoreResult<Option<Task>> {
+        let branch = branch.to_string();
+        run_sqlite(&self.sqlite, move |store| store.task_by_branch(&branch)).await
     }
 
     pub async fn list_tasks(&self, wave_id: Option<&WaveId>) -> StoreResult<Vec<Task>> {
@@ -126,7 +115,7 @@ impl Store {
     pub(crate) async fn record_task_pr_repair_incident(
         &self,
         pr_id: &TaskPrId,
-        kind: crate::task::TaskPrRepairKind,
+        kind: crate::work::task::TaskPrRepairKind,
         occurred_at: OffsetDateTime,
     ) -> StoreResult<bool> {
         let pr_id = pr_id.clone();
@@ -199,7 +188,7 @@ impl Store {
     pub async fn latest_project_failure(
         &self,
         project_id: &ProjectId,
-    ) -> StoreResult<Option<crate::project::HistoricalFailure>> {
+    ) -> StoreResult<Option<crate::work::project::HistoricalFailure>> {
         let project_id = project_id.clone();
         run_sqlite(&self.sqlite, move |store| {
             store.latest_project_failure(&project_id)
@@ -434,14 +423,6 @@ impl Store {
         run_sqlite(&self.sqlite, move |store| store.update_project(&project)).await
     }
 
-    pub(crate) async fn update_project_progress(&self, project: &Project) -> StoreResult<()> {
-        let project = project.clone();
-        run_sqlite(&self.sqlite, move |store| {
-            store.update_project_progress(&project)
-        })
-        .await
-    }
-
     pub(crate) async fn adopt_project_plan(
         &self,
         project_id: &ProjectId,
@@ -513,19 +494,6 @@ impl Store {
                 tracing::debug!(%error, %wave_id, %project_id, event_id, outcome, "Project terminal observation lookup failed; Wave observer will retry")
             }
         }
-    }
-
-    pub async fn handoff_project_body(
-        &self,
-        project_id: &ProjectId,
-        request: &ChildBodyHandoffRequest,
-    ) -> StoreResult<Project> {
-        let project_id = project_id.clone();
-        let request = request.clone();
-        run_sqlite(&self.sqlite, move |store| {
-            store.handoff_project_body(&project_id, &request)
-        })
-        .await
     }
 
     pub async fn get_project(&self, project_id: &ProjectId) -> StoreResult<Option<Project>> {

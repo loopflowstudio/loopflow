@@ -37,6 +37,12 @@ REQUIRED_SECRETS = (
     "R2_ACCOUNT_ID",
     "R2_SECRET_ACCESS_KEY",
 )
+CANDIDATE_STAGES = (
+    "artifacts_verified",
+    "installer_verified",
+    "dmg_notarized",
+    "website_candidate_verified",
+)
 
 
 @dataclass(frozen=True)
@@ -57,18 +63,28 @@ class PublishReceipt:
     completed_stages: tuple[str, ...]
 
 
+@dataclass(frozen=True)
+class CandidateReceipt:
+    tag: str
+    source_commit: str
+    workflow_run_id: str | None
+    artifact_sha256: dict[str, str]
+    completed_stages: tuple[str, ...]
+
+
 def _run(
     cmd: list[str],
     *,
     cwd: Path = ROOT,
     capture: bool = False,
     env: dict[str, str] | None = None,
+    check: bool = True,
 ) -> subprocess.CompletedProcess[str]:
     print(f"$ {shlex.join(cmd)}", flush=True)
     return subprocess.run(
         cmd,
         cwd=cwd,
-        check=True,
+        check=check,
         capture_output=capture,
         text=True,
         env=env,
@@ -148,6 +164,7 @@ def _validate_release_candidate(binary: Path, scratch: Path) -> None:
         [str(binary), "install", "preflight", "--json"],
         capture=True,
         env={**os.environ, "LF_CONTROL_DB_PATH": str(scratch / "uninitialized.db")},
+        check=False,
     )
     try:
         candidate = json.loads(result.stdout)["candidate"]
@@ -229,22 +246,78 @@ def _write_receipt(receipt: PublishReceipt) -> None:
     pending.replace(path)
 
 
-def publish_release(tag: str, artifact_dir: Path) -> PublishReceipt:
+def _candidate_receipt_path(artifact_dir: Path) -> Path:
+    return artifact_dir / "candidate.json"
+
+
+def _read_candidate_receipt(artifact_dir: Path) -> CandidateReceipt:
+    try:
+        value = json.loads(_candidate_receipt_path(artifact_dir).read_text())
+        return CandidateReceipt(
+            tag=value["tag"],
+            source_commit=value["source_commit"],
+            workflow_run_id=value["workflow_run_id"],
+            artifact_sha256=value["artifact_sha256"],
+            completed_stages=tuple(value["completed_stages"]),
+        )
+    except (KeyError, TypeError, json.JSONDecodeError, OSError) as exc:
+        raise RuntimeError("prepared release candidate receipt is invalid") from exc
+
+
+def _verify_candidate_receipt(
+    receipt: CandidateReceipt,
+    artifact_dir: Path,
+    tag: str,
+    source_commit: str,
+) -> None:
+    if receipt.tag != tag or receipt.source_commit != source_commit:
+        raise RuntimeError(
+            "prepared release candidate identity does not match "
+            f"{tag} at {source_commit}"
+        )
+    workflow_run_id = os.environ.get("LF_RELEASE_WORKFLOW_RUN_ID")
+    if workflow_run_id and receipt.workflow_run_id != workflow_run_id:
+        raise RuntimeError("prepared release candidate came from a different workflow run")
+    expected_artifacts = {
+        *(f"lf-{target}.tar.gz" for target in TARGETS),
+        "Loopflow.dmg",
+        "install.sh",
+        "SHA256SUMS",
+    }
+    if set(receipt.artifact_sha256) != expected_artifacts:
+        raise RuntimeError("prepared release candidate artifact set is incomplete")
+    if receipt.completed_stages != CANDIDATE_STAGES:
+        raise RuntimeError("prepared release candidate proof is incomplete")
+    for name, expected in receipt.artifact_sha256.items():
+        path = artifact_dir / name
+        if not path.is_file() or _sha256(path) != expected:
+            raise RuntimeError(f"prepared release artifact changed: {name}")
+
+
+def prepare_release(tag: str, artifact_dir: Path, output_dir: Path) -> CandidateReceipt:
     check_release_host()
-    if tag not in _run(["git", "tag", "--points-at", "HEAD"], capture=True).stdout.splitlines():
-        raise RuntimeError(f"publisher checkout is not tagged {tag}")
     source_commit = _run(["git", "rev-parse", "HEAD"], capture=True).stdout.strip()
+
+    if _candidate_receipt_path(output_dir).is_file():
+        try:
+            receipt = _read_candidate_receipt(output_dir)
+            _verify_candidate_receipt(receipt, output_dir, tag, source_commit)
+            return receipt
+        except RuntimeError as error:
+            print(f"Rebuilding invalid prepared candidate: {error}", flush=True)
 
     archives = _find_native_archives(artifact_dir)
     installer = ROOT / "release" / "install.sh"
     if not installer.is_file():
         raise RuntimeError(f"installer not found: {installer}")
 
-    stages: list[str] = ["artifacts_verified"]
+    stages: list[str] = [CANDIDATE_STAGES[0]]
     with tempfile.TemporaryDirectory() as temp:
         scratch = Path(temp)
         arm_binary, _arm_daemon = _extract_arm_binaries(archives, scratch)
         _validate_release_candidate(arm_binary, scratch)
+        _run(["sh", "-n", str(installer)])
+        stages.append(CANDIDATE_STAGES[1])
         env = {
             **os.environ,
             "LF_RELEASE_BINARY": str(arm_binary),
@@ -253,15 +326,61 @@ def publish_release(tag: str, artifact_dir: Path) -> PublishReceipt:
             "RELEASE_TAG": tag,
         }
         _run(["python3", "-u", "scripts/release-loopflow.py"], env=env)
+        stages.append(CANDIDATE_STAGES[2])
+        _run(["uv", "run", "python", "website/dev.py", "sync-docs", "--source", "docs"])
+        _run(["uv", "run", "python", "scripts/check_website_screens.py"])
+        stages.append(CANDIDATE_STAGES[3])
 
     dmg = ROOT / "swift" / "dist" / "Loopflow.dmg"
     if not dmg.is_file():
         raise RuntimeError(f"DMG builder did not produce {dmg}")
-    stages.append("dmg_notarized")
 
+    output_dir.parent.mkdir(parents=True, exist_ok=True)
+    with tempfile.TemporaryDirectory(dir=output_dir.parent) as temp:
+        prepared = Path(temp) / "candidate"
+        prepared.mkdir()
+        for archive in archives:
+            shutil.copy2(archive, prepared / archive.name)
+        shutil.copy2(dmg, prepared / dmg.name)
+        shutil.copy2(installer, prepared / installer.name)
+        paths = tuple(
+            sorted(
+                (path for path in prepared.iterdir() if path.is_file()),
+                key=lambda path: path.name,
+            )
+        )
+        checksums = prepared / "SHA256SUMS"
+        _write_checksums(paths, checksums)
+        paths = (*paths, checksums)
+        receipt = CandidateReceipt(
+            tag=tag,
+            source_commit=source_commit,
+            workflow_run_id=os.environ.get("LF_RELEASE_WORKFLOW_RUN_ID"),
+            artifact_sha256={path.name: _sha256(path) for path in paths},
+            completed_stages=tuple(stages),
+        )
+        _candidate_receipt_path(prepared).write_text(
+            json.dumps(asdict(receipt), indent=2, sort_keys=True) + "\n"
+        )
+        if output_dir.exists():
+            shutil.rmtree(output_dir)
+        prepared.replace(output_dir)
+    return receipt
+
+
+def publish_release(tag: str, artifact_dir: Path) -> PublishReceipt:
+    check_release_host()
+    if tag not in _run(["git", "tag", "--points-at", "HEAD"], capture=True).stdout.splitlines():
+        raise RuntimeError(f"publisher checkout is not tagged {tag}")
+    source_commit = _run(["git", "rev-parse", "HEAD"], capture=True).stdout.strip()
+    candidate = _read_candidate_receipt(artifact_dir)
+    _verify_candidate_receipt(candidate, artifact_dir, tag, source_commit)
+    archives = _find_native_archives(artifact_dir)
+    dmg = artifact_dir / "Loopflow.dmg"
+    installer = artifact_dir / "install.sh"
     checksums = artifact_dir / "SHA256SUMS"
-    _write_checksums((*archives, dmg, installer), checksums)
     artifacts = ReleaseArtifacts(tag, archives, dmg, installer, checksums)
+    stages = list(candidate.completed_stages)
     _stage_github_release(artifacts)
     stages.append("github_draft_staged")
 
@@ -306,6 +425,10 @@ def main() -> None:
     parser = argparse.ArgumentParser(description="Publish a Loopflow release from the cron host")
     subparsers = parser.add_subparsers(dest="command", required=True)
     subparsers.add_parser("check")
+    prepare = subparsers.add_parser("prepare")
+    prepare.add_argument("--tag", required=True)
+    prepare.add_argument("--artifacts", type=Path, required=True)
+    prepare.add_argument("--output", type=Path, required=True)
     publish = subparsers.add_parser("publish")
     publish.add_argument("--tag", required=True)
     publish.add_argument("--artifacts", type=Path, required=True)
@@ -323,7 +446,10 @@ def main() -> None:
             fcntl.flock(lock, fcntl.LOCK_EX | fcntl.LOCK_NB)
         except BlockingIOError as error:
             raise RuntimeError("another release publisher is already running") from error
-        receipt = publish_release(args.tag, args.artifacts)
+        if args.command == "prepare":
+            receipt = prepare_release(args.tag, args.artifacts, args.output)
+        else:
+            receipt = publish_release(args.tag, args.artifacts)
     print(json.dumps(asdict(receipt), sort_keys=True))
 
 

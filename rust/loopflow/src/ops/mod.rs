@@ -1,6 +1,4 @@
 mod abandon;
-pub(crate) mod ask;
-mod ask_comments;
 mod child;
 mod commit;
 pub mod cron;
@@ -8,6 +6,7 @@ mod error;
 mod flow;
 pub(crate) mod git_operation;
 pub mod home;
+pub(crate) mod human_session;
 mod land;
 pub mod linear_observe;
 pub(crate) mod metrics;
@@ -21,17 +20,16 @@ mod rebase;
 mod release;
 mod run;
 pub mod task;
+pub mod task_actions;
 pub(crate) mod task_pm;
 pub(crate) mod telemetry;
 pub mod trace;
 pub(crate) mod util;
 
 pub use abandon::{abandon_branch, AbandonOptions};
-pub(crate) use ask_comments::publish_pending_ask_comments;
 pub(crate) use child::ambient_author;
-pub(crate) use commit::checkpoint_task_worktree;
+pub(crate) use commit::{checkpoint_task_restart, checkpoint_task_worktree};
 pub use commit::{commit_workflow, commit_workflow_traced, CommitOptions};
-pub(crate) use cron::cron_receipt_ids;
 pub use cron::{
     add_cron, daily_time_of, default_launch_agents_dir, latest_cron_receipt, list_cron_receipts,
     list_crons, parse_schedule, parse_wait_duration, receipt_is_stale, receipt_root,
@@ -40,6 +38,7 @@ pub use cron::{
     CronReceipt, CronSchedule, CronSource, CronSpec, CronSyncResult, CronTargetKind, InstalledCron,
     SystemLaunchctl,
 };
+pub(crate) use cron::{cron_receipt_ids, list_cron_obligations, CronObligation};
 pub use error::{OpsError, OpsResult};
 pub use flow::execute_flow_ops;
 pub use land::{arm, mark_ready, submit, LandOptions};
@@ -60,7 +59,8 @@ pub use release::{
     ReleaseNotesStatus, ReleaseReceipt, ReleaseRunOutcome, ReleaseStatusResult,
 };
 pub(crate) use run::{launch_work, WorkLaunch, TASK_ACCOUNT_ID_ENV, TASK_RESUME_TOKEN_ENV};
+pub(crate) use run::{render_project_context, render_task_context, render_wave_context};
 #[doc(hidden)]
-pub use run::{resolve_work_binding, WorkBinding};
+pub use run::{resolve_work_binding, resolve_work_selection, WorkBinding, WorkSelection};
 pub use trace::{hash_prompt, trace_enabled, MockResponses, OpTrace, Tracer};
 pub use util::normalize_wave_name;

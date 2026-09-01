@@ -10,27 +10,23 @@ pub mod flow;
 pub mod git;
 pub mod identity;
 pub mod launch;
-pub(crate) mod machine;
 pub mod naming;
 pub mod platform;
 pub(crate) mod process;
 pub mod prompt;
-pub mod repo;
 pub mod skills;
 pub mod stream;
 pub mod structured_reply;
-pub mod wave_config;
-pub mod wave_context;
 pub mod wave_home;
 pub mod worktree;
 pub mod worktrees;
 
+pub use crate::repo::find_repo_root;
 pub use agent::{
-    build_agent_command, build_claude_command, build_codex_command, build_gemini_command,
-    build_model_command, build_opencode_command, check_cli_available, codex_permission_args,
-    launch_agent, workspace_add_dirs, AgentCapabilities, AgentCapture, AgentConfig,
-    AgentExecutionBoundary, AgentFailure, AgentWriteScope, ClaudeArgs, DefaultRunner, LaunchResult,
-    ProcessConfig, Runner,
+    build_agent_command, build_claude_command, build_codex_command, build_model_command,
+    build_opencode_command, check_cli_available, codex_permission_args, launch_agent,
+    workspace_add_dirs, AgentCapabilities, AgentCapture, AgentConfig, AgentExecutionBoundary,
+    AgentFailure, AgentWriteScope, ClaudeArgs, DefaultRunner, LaunchResult, ProcessConfig, Runner,
 };
 pub use command::{run_command, CommandError};
 pub use config::{
@@ -59,7 +55,6 @@ pub use prompt::{
     GatherContextOpts, GatherSpec, GatheredContext, PromptComponents, PromptFormatMode,
     RenderedPrompt, Surface,
 };
-pub use repo::find_repo_root;
 pub use skills::{sync_skills, SkillSyncOptions, SkillSyncReport};
 pub use stream::{
     format_event, render_event, ParseResult, ResultSubtype, StreamEvent, StreamFormat, StreamParser,

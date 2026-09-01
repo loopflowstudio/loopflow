@@ -10,8 +10,9 @@ independently; this is an autonomous loop step, not a Feedback boundary.
 ## Evidence first
 
 Read the Task directive, `scratch/<branch>.md`, and the complete diff. Extract
-the planned scope and every `Done when` claim before judging the implementation.
-Keep observed results separate from expectations.
+the current slice, complete target architecture, forbidden outcomes, and every
+`Done when` claim before judging the implementation. Keep observed results
+separate from expectations.
 
 Demonstrate the most obvious and important user-changing behavior through the
 real configured or production-like path available. Prefer a live environment,
@@ -29,6 +30,13 @@ Then inspect the source behind what was demonstrated. Review the implemented
 shape against the design rather than narrating the diff. Look for missing scope,
 behavior the design did not authorize, duplicate abstractions, unsafe operational
 edges, and tests that prove wiring instead of value.
+
+Require negative architectural proof where the design removes or consolidates
+an authority: search reachable launch paths, types, writers, tables, and
+fallback readers. Passing slice behavior is a failure when a forbidden
+Legacy/New adapter, duplicate store, dual write, or competing authority remains
+reachable. Record whether the slice advances the full design, merely passes
+locally, or creates a dead end for the next slice.
 
 ## Disposition
 

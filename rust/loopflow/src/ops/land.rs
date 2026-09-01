@@ -74,13 +74,15 @@ fn prepare_pr(
     let (repo_root, main_repo) = resolve_repos(repo, options.worktree.as_deref())?;
     crate::ops::pr::reject_control_plane_pr(&repo_root)?;
     if options.complete && (!options.strict || is_clean(&repo_root)?) {
-        if let Some(issue) = crate::ops::task::find_discardable_final_task(&repo_root)? {
-            // The final flow approved work that already landed, and rotation left
-            // one unpublished branch at its recorded base. Consume that approval
-            // instead of manufacturing either an empty GitHub PR or a new outcome.
-            // Pre-final Tasks continue through the ordinary range refusal.
+        if let Some(issue) = crate::ops::task::find_discardable_task_successor(&repo_root)? {
+            // Rotation left one unpublished branch at its recorded base after
+            // earlier Task work merged. The explicit `--complete` instruction
+            // settles the Task without manufacturing an empty GitHub PR.
             clear_scratch(&repo_root, progress)?;
-            crate::ops::task::task_complete_approved(&issue)?;
+            crate::ops::task::task_complete(
+                &issue,
+                "Completed over its merged pull request".to_string(),
+            )?;
             progress.status("Completed Task over its merged pull request.");
             return Ok(None);
         }
@@ -109,13 +111,13 @@ fn prepare_pr(
         let _mutation = crate::ops::task::lock_task_pr_mutation(&repo_root)?;
         if matches!(finalize, Finalize::AutoMerge) && matches!(integration, Integration::Required) {
             let after_merge = if options.complete {
-                crate::task::AfterMerge::CompleteTask
+                crate::work::task::AfterMerge::CompleteTask
             } else {
-                crate::task::AfterMerge::ContinueTask
+                crate::work::task::AfterMerge::ContinueTask
             };
             if let Some((number, head)) = crate::ops::task::matching_task_pr_merge_request(
                 &repo_root,
-                crate::task::PrMergeMode::Auto,
+                crate::work::task::PrMergeMode::Auto,
                 after_merge,
                 options.next_slug.as_deref(),
             )? {
@@ -161,15 +163,6 @@ fn prepare_pr(
     // Refuse an already-empty Task before scratch cleanup can manufacture a
     // bookkeeping-only `.gitkeep` commit or any GitHub command observes it.
     crate::ops::task::require_task_pr_range_nonempty(&repo_root)?;
-    // A managed Task ships on one judgment: its `finally` review, declared with
-    // `lf pr land`. `submit` (assign for a human merge click) would be a second
-    // gate. Refuse it now — after the shared authority/range proofs, so a
-    // contaminated or empty range still reports that deeper problem first, but
-    // before the first push, any `gh pr` mutation, or PR-copy generation. Non-
-    // Task PRs are an explicit no-op and keep `submit` unchanged.
-    if matches!(finalize, Finalize::UserMerge) {
-        crate::ops::task::reject_managed_task_submit(&repo_root)?;
-    }
     let pr_exists = if options.local {
         false
     } else {
@@ -260,14 +253,14 @@ fn prepare_pr(
     crate::ops::task::request_task_pr_merge(
         &repo_root,
         match finalize {
-            Finalize::AutoMerge => crate::task::PrMergeMode::Auto,
-            Finalize::UserMerge => crate::task::PrMergeMode::User,
+            Finalize::AutoMerge => crate::work::task::PrMergeMode::Auto,
+            Finalize::UserMerge => crate::work::task::PrMergeMode::User,
         },
         pr.as_ref().and_then(|pr| pr.head_sha.as_deref()),
         if options.complete {
-            crate::task::AfterMerge::CompleteTask
+            crate::work::task::AfterMerge::CompleteTask
         } else {
-            crate::task::AfterMerge::ContinueTask
+            crate::work::task::AfterMerge::ContinueTask
         },
         options.next_slug.as_deref(),
     )?;
@@ -600,7 +593,7 @@ fn resolve_repos(repo: &Path, worktree: Option<&str>) -> OpsResult<(PathBuf, Pat
 ///
 /// This step is what greens the `scratch-clear` required check, which is why
 /// that check is a *land-time precondition* and no repair turn can act on it —
-/// see [`crate::task::CiCheck::land_time_precondition`], which keeps the landing
+/// see [`crate::work::task::CiCheck::land_time_precondition`], which keeps the landing
 /// supervisor from launching `ci-fix` against work only this function can do.
 fn clear_scratch(repo: &Path, progress: &impl Progress) -> OpsResult<()> {
     let scratch = repo.join("scratch");

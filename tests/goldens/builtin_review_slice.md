@@ -4,7 +4,7 @@
 You are running inside loopflow. Loopflow owns git, worktrees, delegation, and
 release plumbing. Route those operations through `lf`, not around it. Doing them
 by hand breaks the machinery loopflow relies on: worktree placement, release
-state, and Run authority.
+state, and execution authority.
 
 ## Git, Worktrees, GitHub -> `lf`
 
@@ -40,20 +40,15 @@ four publish the PR headlessly and open no browser:
   Stops there: no auto-merge. Your merge click on GitHub is the one required
   gate — the button unlocks once checks pass. (GitHub blocks approving your own
   PR, so the gate is the merge click, not a review approval.) Use this as the
-  default finish for anything a person should land by hand. **A managed Task
-  rejects `submit`:** a Task already has exactly one shipping decision — its
-  `finally` review — so a GitHub merge click would be a competing second gate.
-  Ship a Task with `lf pr land` instead.
+  default finish for anything a person should land by hand, including tracked
+  Task work.
 - **`lf pr arm`** — prepare the exact head, request auto-merge, and return. Task
   disposition is recorded but is never applied before an authoritative merge.
 - **`lf pr land`** — run the same arm step, then join the one durable watcher for
   the PR. It observes GitHub, repairs failing required checks once per failed
   head, re-arms material repairs, and returns only after merge or an actionable
-  durable block. Inside a managed Task, `lf pr land` is the one shipping
-  declaration: its `finally` review is the sole human shipping decision, and
-  Loopflow arms the exact reviewed head after approval instead of adding a human
-  merge click. Bare `land` leaves the Task open; `-c` completes it after merge,
-  and `--next <slug>` rotates it after merge.
+  durable block. Bare `land` leaves a Task open; `-c` completes it after merge,
+  and `--next <slug>` rotates its serial PR chain after merge.
 
 **`lf pr open`** is the one command that *presents* — it publishes, then opens
 the PR for review (the GitHub page in the browser). It is a human-initiated
@@ -107,11 +102,12 @@ orchestration is unavailable, report the exact blocker once and continue inline
 whenever the seed remains computable.
 
 A one-shot operation is a direct skill or flow run. Durable delegated work
-starts from an existing Linear task with `lf task run <issue-id>`.
+starts from an existing Linear task with `lf task prepare <issue-id>`; use
+`lf task run <issue-id>` when the built-in controller should pursue it end to
+end.
 When dependent work must begin before another Task PR merges, start a separate
-Task with `--stack-on <parent-task>`. Do not rotate the parent Task onto a second
-simultaneously open PR; its multi-PR history remains serial. The child binds to
-the parent's active PR at launch and never follows later serial PRs implicitly.
+Task with `--stack-on <parent-task>`. Each Task owns one active remote branch. The child
+binds to the parent's active PR at launch.
 
 When work feels slow or stuck, run `lf top` before guessing. It continuously
 ranks OS-live Loopflow call trees by five-second normalized-output throughput and
@@ -135,7 +131,7 @@ of reconstructing it from processes, worktrees, or Linear:
 
 ```bash
 lf ls --json              # every durable Wave and its Home/runtime evidence
-lf status <wave> --json   # one Wave's Work hierarchy, Runs, and attention
+lf status <wave> --json   # one Wave's Work hierarchy, Runs, and Task conditions
 lf roadmap --json         # current plan across Waves joined to runtime truth
 ```
 
@@ -150,17 +146,16 @@ A Work names one stable Home authority, whose SSH route may change without
 moving the Work.
 
 ```bash
-lf --as task:DES-123 implement                  # one skill in the Task worktree
 lf home id                                      # this machine's HomeId
-lf work place wave <wave-id> <home-id>          # only while no Run is live
+lf work place wave <wave-id> <home-id>          # change durable placement
 lf start <wave>                                 # start it on this machine
 lf stop <wave>                                  # stop it on this machine
 lf ssh <home-id> status <wave> --json           # inspect it on that Home
 lf ssh <home-id> start <wave>                   # start it on that Home
 ```
 
-Use `--as task:...`, `--as project:...`, or `--as wave:...` only with one
-named skill. In a plain terminal it starts a supervised User Run at that
+Use `--as task:...`, `--as project:...`, or `--as wave:...` with one named
+Skill or `: "question"` for an inline prompt. In a plain terminal it starts a fresh Run at that
 Work's placement. Inside a Run it is an exact identity assertion; a mismatch
 fails. It never binds a multi-step flow.
 
@@ -170,12 +165,84 @@ target-local subscription accounts. Durable processes scrub forwarded provider,
 GitHub, PM, and secret authority before detaching and use credentials installed
 on their machine.
 
+## Work Directly On Behalf Of Existing Work
+
+Run one bounded skill with an existing Task, Project, or Wave as its subject:
+
+```bash
+lf task prepare LOO-267
+lf project prepare runtime-model
+lf --task LOO-267 research \
+  "Research the runtime model; write scratch/research-runtime-model.md"
+lf --task LOO-267 research \
+  "Research design handoff; write scratch/research-design-handoff.md"
+lf --project context project/clarify \
+  "Reconcile the KRs with the current evidence"
+```
+
+`lf task prepare` ensures tracked Task Work, its one worktree, and serial PR
+identity without installing or starting an end-to-end controller. `--task`,
+`--project`, and `--wave` start one supervised skill Run about the most specific
+selected Work. A Task implies its Project and Wave; a Project implies its Wave.
+Broader selectors may be supplied as qualifiers and must match. These commands
+never bind a flow, load or advance controller state, resume a provider session,
+or grant exclusive ownership. Task binding supplies the Task seed and uses its
+existing worktree as cwd. Project and Wave binding use the owning Wave
+repository; Projects do not own worktrees, so repository changes still belong
+in a Task. Zero, one, or many generic Runs may concern the same Work. Each has
+its own Run id; Work attribution is provenance, never a reservation or mutation
+lease.
+
+The worktree is shared durable context. Every Run assembled from a Task
+worktree receives the recursive UTF-8 Markdown tree under `scratch/` as a
+launch-time snapshot. Give parallel contributions distinct paths. A direct
+bound skill leaves its edits uncommitted and must never stage or claim unrelated
+dirty files merely because it finished first. After the bounded Runs finish,
+inspect the shared tree. When the complete set is one coherent checkpoint, use
+the ordinary `lf commit`/PR workflow to share it.
+
+Use Task, Project, or Wave controller commands when the built-in automation
+should choose and run subsequent work. Use `--task`, `--project`, or `--wave`
+with a skill when a human or parent already knows the one bounded contribution
+to make.
+
+A parent follows the same path without borrowing the Task's controller process:
+launch the exact `--task ...` contributions, wait for the artifacts it needs,
+inspect the shared tree, then invoke the explicit Task command. The generic Run
+ids remain provenance; they never become Task planning leases.
+
+When accumulated research or changed Task direction invalidates the current
+attempt, update the Task definition, wait for the exact contributions you need,
+then start its built-in controller over from a new kickoff:
+
+```bash
+lf task restart LOO-267 "Reconcile the new runtime evidence"
+```
+
+Restart force-refreshes the Task, checkpoints and pushes its complete current
+worktree, preserves its identity/worktree/PR history, clears provider
+continuation, and replaces controller state at its configured first flow in a
+fresh provider session. Existing scratch may be an older poor design;
+reconcile all of it as evidence instead of treating it as approved direction.
+If the stable controller session is live, restart interrupts and replaces that
+registered process. If it is absent, restart simply starts one. Generic Runs
+about the Task remain independent evidence and never block restart.
+
+Explicit flow selections are instructions, including when they differ from the
+default end-to-end Task script. Run them. The default feature flow carries the
+design review policy; commands do not reject an operator's off-script flow or
+try to prove that the “right” process requested it.
+
 ## Speak
 
 Answer a human message in your turn text. When a human is present, keep questions
-in that conversation. `lf ask` crosses to the immediate parent Work; headless
-`lf ask --user` requests genuine intervention from an absent User. An Ask is a
-durable Ask session, not a chat message or textual Answer.
+in that conversation. If a separate Work perspective would help, launch an
+ordinary Run explicitly with `lf --as <work> : "<prompt>"`. There is no separate
+agent-question protocol. In a headless Run, `lf ask "<request>"` opens a durable
+human session in the same checkout and blocks until the human completes it.
+Ask sessions remain visible after their agent marks them ready; Complete
+releases the caller with that summary. Declared Task FlowSteps use the same
+`lf session` surface but retain their explicit Approve/Iterate decision.
 
 When the active skill calls for a durable Wave learning, edit
 `wave/<name>/MEMORY.md` through the ordinary repository workflow. Keep it
@@ -217,14 +284,14 @@ the work so they stay transparent and reviewable.
 Run mode is headless. No human is present in this conversation. Do not ask a
 conversational question or wait for turn text — no one will answer here.
 
-Make safe executive decisions and keep moving. When progress truly requires
-outside authority, `lf ask "<exact intervention>"` requests an Ask session from the
-parent Work and blocks this shell call without consuming model turns. Use
-`lf ask --user "<exact intervention>"` only for genuine absent-User action the
-parent cannot provide. Root Work never escalates silently. Use `--noblock` only
-while genuinely independent work remains, then join with `lf ask wait <id>`.
+Make safe executive decisions and keep moving. When progress needs another
+Work's perspective, launch an ordinary Run explicitly with
+`lf --as <work> : "<prompt>"`. When progress genuinely requires human judgment,
+run `lf ask "<exact request>"`. It opens a durable human session in this Run's
+checkout and blocks until the human completes the conversation. The session
+agent marking itself ready does not complete or remove the session.
 
-If no outside authority is required, record a material assumption in
+If no human authority is required, record a material assumption in
 `scratch/questions.md` and proceed with the simpler safe choice. Do not stop.
 
 No rendering environment. Output is logged, not displayed.
@@ -239,8 +306,9 @@ independently; this is an autonomous loop step, not a Feedback boundary.
 ## Evidence first
 
 Read the Task directive, `scratch/<branch>.md`, and the complete diff. Extract
-the planned scope and every `Done when` claim before judging the implementation.
-Keep observed results separate from expectations.
+the current slice, complete target architecture, forbidden outcomes, and every
+`Done when` claim before judging the implementation. Keep observed results
+separate from expectations.
 
 Demonstrate the most obvious and important user-changing behavior through the
 real configured or production-like path available. Prefer a live environment,
@@ -258,6 +326,13 @@ Then inspect the source behind what was demonstrated. Review the implemented
 shape against the design rather than narrating the diff. Look for missing scope,
 behavior the design did not authorize, duplicate abstractions, unsafe operational
 edges, and tests that prove wiring instead of value.
+
+Require negative architectural proof where the design removes or consolidates
+an authority: search reachable launch paths, types, writers, tables, and
+fallback readers. Passing slice behavior is a failure when a forbidden
+Legacy/New adapter, duplicate store, dual write, or competing authority remains
+reachable. Record whether the slice advances the full design, merely passes
+locally, or creates a dead end for the next slice.
 
 ## Disposition
 

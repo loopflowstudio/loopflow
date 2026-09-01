@@ -5,7 +5,7 @@ use std::time::Duration;
 use crate::child::{ChildBodyHandoffRequest, ChildRef};
 use crate::durable::{AbandonReceipt, Author, RunId, SteerReceipt, WorkRef, RUN_ID_ENV};
 use crate::store::SharedStore;
-use crate::task::Task;
+use crate::work::task::Task;
 
 use super::{OpsError, OpsResult};
 
@@ -43,15 +43,26 @@ pub(crate) async fn resume_task(
     model: Option<String>,
     reason: Option<String>,
 ) -> OpsResult<WorkRef> {
+    let mut controller = store
+        .task_controller_state(&task.id)
+        .await
+        .map_err(child_error)?
+        .ok_or_else(|| {
+            child_error(format!(
+                "Task {} has no end-to-end controller; use `lf task run {}` to install one",
+                task.plan.identifier, task.plan.identifier
+            ))
+        })?;
     if let Some(model) = model {
         let request = handoff_request(&model, reason.as_deref())?;
-        if task.agent != request.agent {
-            task = store
-                .handoff_task_body(&task.id, &request)
+        if controller.agent != request.agent {
+            controller = store
+                .handoff_task_controller(&task.id, &request)
                 .await
                 .map_err(child_error)?;
         }
     }
+    let _ = controller;
     let label = format!("Task {}", task.plan.identifier);
     if let Some(intent) = &task.abandon_intent {
         return Err(child_error(format!(

@@ -15,13 +15,14 @@ Renamed from `systems` in the 2026-07-08 wave/project/task restructure. Steers L
 - **Native Linear hierarchy for PM** (jack-heart/infra) — Wave→Linear Initiative, Project→Linear Project, Task→Issue, replacing the wave-project-plus-`project:<slug>`-label model. `GOAL.md` frontmatter now carries `pm.linear_initiative`; `lf pm init` creates the Initiative, migrates legacy labeled issues into native Linear Projects, and rewrites `pm.linear_project`→`pm.linear_initiative`. Project definition/KRs round-trip through Linear Project `content`. The live Waves are migrated; Linear is the planning truth.
 - **Linear OAuth token pre-emption** — Linear PKCE access tokens expire in 24 h. Loopflow now persists the non-secret OAuth client ID beside the token (migration `060_provider_token_oauth_client_id`) and refreshes ~20 min before expiry, both on PM access and in the background `token_refresh` trigger. PKCE refresh needs no client secret. A rotated refresh token is persisted; an omitted one preserves the prior token. Proactive-refresh failure while the access token is still valid falls through to the current token and retries later; an expired legacy row with no OAuth config fails safe with a sanitized one-time reconnect command. Directly serves developer-efficiency's "credential expiries pre-empt" KR.
 - **`lf pm show` renders an aligned table** — one task per physical line under stable headers, columns measured from visible content (shares the `lf wt list` padding primitive), open tasks before done while preserving Linear rank within status, full task IDs kept, `--json` unchanged for machine consumers. Long titles can no longer collide with project/assignee/ID fields.
+- **Cron continuity follows durable obligations** (LOO-241) — installed fixed-daily jobs persist their activation time across unchanged syncs, and legacy jobs recover it from the earliest matching scheduled receipt. `lf doctor` judges only each job's latest due interval against an exact scheduled receipt; failed targets still prove the scheduler fired, manual receipts do not, and a miss names the cron, Home, interval, and history command. Raw ledger gap days remain visible history without keeping later telemetry red.
 
 ## Gotchas
 
 - **`scripts/test.py --all` cannot green the Loopflow UI suite headlessly** (filed). `xcodebuild` runs 304 app/unit tests to a pass, then `LoopflowUITests-Runner` hangs before establishing its connection and Xcode exits 65. Reproduced with a fresh `derivedDataPath`, so it is not a stale-cache artifact. Treat a `--all` UI failure as unproven, not as a regression, until the runner hang is fixed.
 - **Dotted-root vs dotted-ancestry collision — RESOLVED** by the WaveId decoupling: the dir is a flat `.`-chain, the remote branch carries `/`+author, and ancestry is read from the `Run` record, not the string. The old `branch_names.schema` grammar that caused it is gone.
 - **Run `cargo test` to completion before trusting a green-looking suite.** A failing lib target makes cargo skip every later target, so lib failures mask bin failures — two `bin/lf.rs` tests naming a deleted command had never run at all.
-- **Rust compilation does not validate SQLite column names.** Runtime SQL whose shape depends on a released schema must be shared with a behavior test that prepares and executes it against the materialized migration head. Epoch Work ownership is three exclusive foreign keys (`wave_id`, `project_id`, `task_id`); generic kind/id belongs to explicit routes such as parent Asks, not to Epochs.
+- **Rust compilation does not validate SQLite column names.** Runtime SQL whose shape depends on a released schema must be shared with a behavior test that prepares and executes it against the materialized migration head. Epoch Work ownership is three exclusive foreign keys (`wave_id`, `project_id`, `task_id`); generic kind/id belongs to explicit routes such as synchronous cross-Work questions, not to Epochs.
 - **Source history must reconstruct every applied release frontier** (learned 2026-07-20). One pre-schema-closure local promotion embedded a test-materialized `0.12.4` batch and advanced the shared store while git retained the ten source drafts and omitted the canonical file. Recovery preserved the database, extracted the canonical bytes from the retained immutable binary, matched their checksum to `schema_migrations`, registered the batch, and removed only byte-identical drafts. If a store is ahead by an unknown migration, retain state and old binary bytes; prove the checksum before ratifying history. Since #1123, draft-bearing candidates fail promotion even at an exact frontier, while a schema-complete exact-frontier CLI repair may safely activate with live Runs because it writes no migration.
 - **Tests must survive draft migration materialization** (learned 2026-07-21).
   Release-equivalent Rust tests delete ordinal-free drafts and compile the
@@ -41,6 +42,32 @@ Renamed from `systems` in the 2026-07-08 wave/project/task restructure. Steers L
   Linear moves an issue, historical Task Runs retain their evidence but lose
   automated PR and completion authority; fail closed before side effects and
   preserve the full Work, Run, Steer, and PR history for remediation.
+- **A live parent Run is not proof of child-control authority** (learned
+  2026-08-22). A relaunched Project can have a healthy provider process yet
+  lack the durable Turn Basis required to reserve its Task Run. Wave-level
+  Task control then correctly fails because only the immediate parent may act.
+  Preserve the existing Task, Work, and PR; do not retry into duplicate Runs
+  or publications. Wake pursuit only when a basis-bearing immediate-parent Run
+  exists. Cross-Work judgment now starts a fresh Work-bound Run and never
+  substitutes for missing immediate-parent control authority.
+- **Historical continuity currently short-circuits daily telemetry** (observed
+  2026-08-23). `telemetry-daily` stops in `doctor` on the same eight 2026-08-04
+  through 2026-08-11 gap days before its scorecard runs. LOO-241 owns making
+  continuity obligation-aware. Fresh receipts are new evidence for that Task,
+  not grounds for duplicate daily Tasks; retry its Work only from a Turn with
+  valid Run execution context.
+- **Release orchestration and product publication are separate evidence**
+  (observed 2026-08-23). A cron receipt proves only the scheduled target's
+  terminal state. `lf release status` remained at tag `v0.12.14` with a
+  successful hosted workflow and gate-safe notes but no GitHub Release after
+  both successful and failed `release-run` receipts. Judge the release KR by
+  the product state and keep same-tag recovery singular; LOO-261 owns the known
+  clean-host candidate-validation boundary.
+- **Incomplete release synchronization still consumes caller edits**
+  (reproduced 2026-08-23). The scheduled retry left `main` clean after removing
+  two pre-run Infrastructure memory edits. LOO-266 owns preserving the caller
+  branch, index, and working bytes across every release exit; do not file a
+  second repair Task for later instances of the same failure.
 
 ## Model (design settled)
 
@@ -76,6 +103,13 @@ Renamed from `systems` in the 2026-07-08 wave/project/task restructure. Steers L
   synthetic Run to reuse a Run-owned terminal transition. Prove this boundary
   with a zero-agent-boundary fixture and repeated reads that count Runs and
   completion events.
+- **Task resident state is an optional execution overlay** (revised
+  2026-08-27). Lifecycle playhead, gate proposal, provider choice, and
+  continuation live in `task_residents`, not Task identity. The supported
+  resident has one stable local session and restart stops that route before
+  resetting it. Generic Task-bound Runs remain legal and gain no resident or
+  worktree authority from attribution; there is no phase generation or stale
+  writer fence to turn one process into “the Task.”
 - **Phase-owned state needs the same freshness boundary in memory and storage**
   (learned 2026-07-20). Passive reconciliation may advance a durable Task to
   finally while its active Run still holds a pre-final snapshot. Refresh a gate
@@ -84,13 +118,12 @@ Renamed from `systems` in the 2026-07-08 wave/project/task restructure. Steers L
   Validation runs before SQL, so a persistence fence cannot repair a torn local
   refresh. Terminal Work remains authoritative over stale resumable failure
   observations.
-- **Durable Ask is the only blocking human-input primitive** (decided
-  2026-07-21). Interactive Task phases are advisory: the runner makes one launch
-  attempt and advances independently of launcher success, UI lifetime, or
-  Invocation handback. A launched surface is read-only while the next writable
-  phase owns the Task worktree; providers without enforceable read-only mode
-  fail closed. Launch failure ends the Invocation once, while a successful
-  launch stays live until optional handback records its evidence.
+- **A declared human Task FlowStep is the only blocking human-input primitive.**
+  The Task persists one exact flow/node/skill/iteration playhead, launches that
+  named Skill through ordinary `lf --as task:<id>`, and advances only through
+  typed accept/decline settlement. Closing the terminal leaves it waiting.
+   Agent-to-agent questions remain synchronous fresh Runs and own no planning
+   state.
 - **Persisted executable references are an installed-state invariant** (learned
   2026-07-21). Removing or renaming a builtin flow requires a forward migration
   for every surviving Task pin, plus catalog resolution before Run reservation.

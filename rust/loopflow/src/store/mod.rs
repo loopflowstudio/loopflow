@@ -9,14 +9,13 @@ use crate::profile::{
     AccessProfile, AccountAccessProfile, EmailAddress, ProfileId, ProviderRoute, RouteScope,
 };
 use crate::provider_auth::Provider;
-use crate::wave::{Wave, WaveLocator};
+use crate::work::wave::{Wave, WaveLocator};
 mod children;
 pub(crate) mod ci_incidents;
 mod durable;
 mod metrics;
-mod pr_landings;
-pub(crate) use durable::AskCommentWrite;
 pub mod migrations;
+mod pr_landings;
 pub mod provider_deliveries;
 pub mod rows;
 pub mod sqlite;
@@ -130,7 +129,7 @@ pub(crate) fn authority_home_dir() -> PathBuf {
         .or_else(|| std::env::var_os("LF_HOME"))
         .filter(|value| !value.is_empty())
         .map(PathBuf::from)
-        .unwrap_or_else(|| machine_home_dir().join(".lf"))
+        .unwrap_or_else(default_lf_home_dir)
 }
 
 pub(crate) fn observability_home_dir() -> PathBuf {
@@ -418,10 +417,10 @@ pub fn storage_config_from_env() -> Result<StorageConfig, std::io::Error> {
 
 #[derive(Debug)]
 pub struct Store {
-    sqlite: sqlite::SqliteStore,
+    pub(crate) sqlite: sqlite::SqliteStore,
 }
 
-async fn run_sqlite<T, F>(store: &sqlite::SqliteStore, func: F) -> StoreResult<T>
+pub(crate) async fn run_sqlite<T, F>(store: &sqlite::SqliteStore, func: F) -> StoreResult<T>
 where
     T: Send + 'static,
     F: FnOnce(sqlite::SqliteStore) -> StoreResult<T> + Send + 'static,
@@ -1107,16 +1106,17 @@ mod tests {
     };
     use crate::build_info::{BuildProvenance, MigrationAuthority};
     use crate::child::ChildRef;
+    use crate::controller::task::State as TaskControllerState;
     use crate::durable::{Author, WorkRef};
     use crate::id::WaveId;
     use crate::planning::{LinearIssueId, LinearProjectId, ProjectPlan, TaskPlan};
     use crate::profile::EmailAddress;
-    use crate::project::{Project, ProjectId};
-    use crate::task::{
+    use crate::work::project::{Project, ProjectId};
+    use crate::work::task::{
         GithubPr, PmWritebackState, PrPhase, PrPresentation, PrPublication, Task, TaskEventKind,
         TaskId, TaskPr, TaskPrId,
     };
-    use crate::wave::Wave;
+    use crate::work::wave::Wave;
     use std::env;
     use std::path::PathBuf;
     use time::OffsetDateTime;
@@ -1291,9 +1291,18 @@ mod tests {
             project_id: project.id.clone(),
             worktree: PathBuf::from("/repo.inf-123"),
             workspace_slug: format!("task-{}", &id.as_str()[3..11]),
-            lifecycle: crate::task::TaskLifecyclePlan::defaults(),
-            lifecycle_phase: crate::task::TaskLifecyclePhase::Loop,
-            phase_epoch: 1,
+            abandon_intent: None,
+            created_at: now,
+            updated_at: now,
+            observation: crate::work::task::Observation::NotRequired,
+        }
+    }
+
+    fn make_task_controller(task: &Task) -> TaskControllerState {
+        TaskControllerState {
+            task_id: task.id.clone(),
+            lifecycle: crate::controller::task::TaskLifecyclePlan::defaults(),
+            lifecycle_phase: crate::controller::task::TaskLifecyclePhase::Loop,
             phase_cursor: 0,
             phase_iteration: 0,
             gate_cycle: 0,
@@ -1301,10 +1310,7 @@ mod tests {
             agent: "codex".to_string(),
             provider: "codex".to_string(),
             provider_session_id: None,
-            abandon_intent: None,
-            created_at: now,
-            updated_at: now,
-            observation: crate::task::Observation::NotRequired,
+            updated_at: task.updated_at,
         }
     }
 
@@ -1343,12 +1349,6 @@ mod tests {
                 pm_snapshot_synced_at: now.unix_timestamp(),
             },
             wave_id: wave.id().clone(),
-            iteration: 1,
-            observation_cursor: 0,
-            last_state_fingerprint: None,
-            agent: "codex".to_string(),
-            provider: "codex".to_string(),
-            provider_session_id: Some("thread-project".to_string()),
             abandon_intent: None,
             created_at: now,
             updated_at: now,
@@ -1495,7 +1495,6 @@ mod tests {
 
         let source_run_id = crate::durable::RunId::new();
         let mut recovered = task.clone();
-        recovered.phase_epoch += 1;
         recovered.updated_at = time::OffsetDateTime::now_utc();
 
         assert_eq!(store.task_prs(&task.id).await.unwrap(), historical_prs);
@@ -1599,34 +1598,48 @@ mod tests {
         store.create_wave(&wave).await.unwrap();
         let project = make_project(&wave);
         store.create_project(&project).await.unwrap();
-        let mut task = make_task(&wave, &project);
-        task.lifecycle =
-            crate::task::TaskLifecyclePlan::standard("task-design", "code", "ship-demo");
-        task.phase_cursor = 2;
-        task.phase_iteration = 4;
+        let task = make_task(&wave, &project);
+        let mut controller = make_task_controller(&task);
+        controller.lifecycle = crate::controller::task::TaskLifecyclePlan::standard(
+            "task-design",
+            "code",
+            "ship-demo",
+        );
+        controller.phase_cursor = 2;
+        controller.phase_iteration = 4;
         store
             .create_task(&task, &make_task_pr(&task))
             .await
             .unwrap();
+        store.put_task_controller_state(&controller).await.unwrap();
 
-        let persisted = store.get_task(&task.id).await.unwrap().unwrap();
+        let persisted = store
+            .task_controller_state(&task.id)
+            .await
+            .unwrap()
+            .unwrap();
         assert_eq!(persisted.lifecycle.loop_.flow, "code");
         assert_eq!(persisted.lifecycle.first.flow, "task-design");
         assert_eq!(persisted.lifecycle.finally.flow, "ship-demo");
         assert_eq!(persisted.phase_cursor, 2);
         assert_eq!(persisted.phase_iteration, 4);
 
-        task.phase_cursor = 3;
-        task.phase_iteration = 5;
-        store.update_task(&task).await.unwrap();
-        let resumed = store.get_task(&task.id).await.unwrap().unwrap();
+        controller.phase_cursor = 3;
+        controller.phase_iteration = 5;
+        store.put_task_controller_state(&controller).await.unwrap();
+        let resumed = store
+            .task_controller_state(&task.id)
+            .await
+            .unwrap()
+            .unwrap();
         assert_eq!((resumed.phase_cursor, resumed.phase_iteration), (3, 5));
     }
 
     #[tokio::test]
-    async fn task_update_advances_epochs_and_rejects_stale_positions() {
+    async fn task_work_and_controller_state_are_independent() {
         let dir = tempfile::tempdir().unwrap();
-        let store = open_store(&StorageConfig::sqlite(dir.path().join("registry.db")))
+        let database = dir.path().join("registry.db");
+        let store = open_store(&StorageConfig::sqlite(database.clone()))
             .await
             .unwrap();
         let wave = make_wave("/repo");
@@ -1634,57 +1647,57 @@ mod tests {
         let project = make_project(&wave);
         store.create_project(&project).await.unwrap();
         let mut task = make_task(&wave, &project);
-        task.lifecycle_phase = crate::task::TaskLifecyclePhase::First;
-        task.phase_cursor = 1;
         store
             .create_task(&task, &make_task_pr(&task))
             .await
             .unwrap();
-        let mut stale = task.clone();
+        assert!(store
+            .task_controller_state(&task.id)
+            .await
+            .unwrap()
+            .is_none());
 
-        task.enter_loop().unwrap();
-        store.update_task(&task).await.unwrap();
-        let iterating = store.get_task(&task.id).await.unwrap().unwrap();
-        assert_eq!(
-            (
-                iterating.lifecycle_phase,
-                iterating.phase_epoch,
-                iterating.phase_cursor
-            ),
-            (crate::task::TaskLifecyclePhase::Loop, 2, 0)
-        );
+        let mut controller = make_task_controller(&task);
+        store.put_task_controller_state(&controller).await.unwrap();
 
-        stale.phase_cursor = 9;
-        stale.phase_iteration = 9;
-        store.update_task(&stale).await.unwrap();
-        let after_stale = store.get_task(&task.id).await.unwrap().unwrap();
+        let mut core_update = task.clone();
+        core_update.plan.title = "Refreshed without controller ownership".to_string();
+        store.update_task(&core_update).await.unwrap();
+        let persisted = store.get_task(&task.id).await.unwrap().unwrap();
+        assert_eq!(persisted.plan.title, core_update.plan.title);
         assert_eq!(
-            (
-                after_stale.lifecycle_phase,
-                after_stale.phase_epoch,
-                after_stale.phase_cursor,
-                after_stale.phase_iteration
-            ),
-            (crate::task::TaskLifecyclePhase::Loop, 2, 0, 0)
+            store.task_controller_state(&task.id).await.unwrap(),
+            Some(controller.clone())
         );
 
-        task.enter_finally(crate::task::TaskGateProposal {
-            done: true,
-            reason: "implementation complete".to_string(),
-        })
-        .unwrap();
-        store.update_task(&task).await.unwrap();
-        let gating = store.get_task(&task.id).await.unwrap().unwrap();
+        task.plan.title = "Stale controller-side title".to_string();
+        controller.phase_cursor = 4;
+        store.put_task_controller_state(&controller).await.unwrap();
+        let persisted = store.get_task(&task.id).await.unwrap().unwrap();
+        assert_eq!(persisted.plan.title, core_update.plan.title);
         assert_eq!(
-            gating.lifecycle_phase,
-            crate::task::TaskLifecyclePhase::Finally
+            store
+                .task_controller_state(&task.id)
+                .await
+                .unwrap()
+                .unwrap()
+                .phase_cursor,
+            4
         );
-        assert_eq!(gating.phase_epoch, 3);
-        assert_eq!(gating.gate_cycle, 1);
-        assert_eq!(
-            gating.gate_proposal.unwrap().reason,
-            "implementation complete"
-        );
+
+        let conn = rusqlite::Connection::open(database).unwrap();
+        let columns = |table: &str| {
+            conn.prepare(&format!("PRAGMA table_info({table})"))
+                .unwrap()
+                .query_map([], |row| row.get::<_, String>(1))
+                .unwrap()
+                .collect::<Result<Vec<_>, _>>()
+                .unwrap()
+        };
+        let task_columns = columns("tasks");
+        assert!(!task_columns.contains(&"phase_epoch".to_string()));
+        assert!(!task_columns.contains(&"lifecycle_phase".to_string()));
+        assert!(columns("task_controller_state").contains(&"lifecycle_phase".to_string()));
     }
 
     #[tokio::test]
@@ -1830,18 +1843,18 @@ mod tests {
             }),
             merge: None,
         });
-        pr.ci_observation = Some(crate::task::CiObservation {
+        pr.ci_observation = Some(crate::work::task::CiObservation {
             head_sha: "sha-abc".to_string(),
-            state: crate::task::CiState::Failing,
-            failing_checks: vec![crate::task::CiCheck {
+            state: crate::work::task::CiState::Failing,
+            failing_checks: vec![crate::work::task::CiCheck {
                 name: "build".to_string(),
                 url: Some("https://ci/build".to_string()),
             }],
             observed_at: OffsetDateTime::now_utc(),
         });
-        pr.github_observation = Some(crate::task::GithubObservation {
+        pr.github_observation = Some(crate::work::task::GithubObservation {
             checked_at: OffsetDateTime::now_utc(),
-            result: crate::task::GithubObservationResult::Degraded {
+            result: crate::work::task::GithubObservationResult::Degraded {
                 reason: "GitHub API rate limit exhausted".to_string(),
             },
         });
@@ -1852,7 +1865,7 @@ mod tests {
         assert_eq!(read.head_sha(), Some("sha-abc"));
         assert_eq!(read.presentation().unwrap().title, "Ship the proof");
         let ci = read.fresh_ci().expect("reading matches the current head");
-        assert_eq!(ci.state, crate::task::CiState::Failing);
+        assert_eq!(ci.state, crate::work::task::CiState::Failing);
         assert_eq!(ci.failing_checks[0].name, "build");
         assert_eq!(read.github_observation, pr.github_observation);
     }
@@ -1881,6 +1894,15 @@ mod tests {
         assert_eq!(read.linear_attachment_id.as_deref(), Some("att-1"));
         assert_eq!(read.linear_comment_id.as_deref(), Some("comment-1"));
         assert_eq!(read.linear_link_error.as_deref(), Some("linear is down"));
+        assert_eq!(
+            store
+                .get_task_by_branch(&pr.branch)
+                .await
+                .unwrap()
+                .unwrap()
+                .id,
+            task.id
+        );
     }
 
     #[tokio::test]
@@ -1945,6 +1967,20 @@ mod tests {
         assert_eq!(
             store.active_task_pr(&task.id).await.unwrap().unwrap().id,
             second.id
+        );
+        assert!(store
+            .get_task_by_branch(&first.branch)
+            .await
+            .unwrap()
+            .is_none());
+        assert_eq!(
+            store
+                .get_task_by_branch(&second.branch)
+                .await
+                .unwrap()
+                .unwrap()
+                .id,
+            task.id
         );
 
         let mut abandoned = second.clone();
@@ -2115,13 +2151,13 @@ mod tests {
         assert_eq!(collapsed.parent_pr_id, None);
         assert_eq!(collapsed.base_commit, "main-after-200");
 
-        // The worktree lookup the rebase path relies on resolves the task.
-        let by_worktree = store
-            .get_task_by_worktree(&child.worktree.display().to_string())
+        // The tracked branch, not the worktree path, identifies the Task.
+        let by_branch = store
+            .get_task_by_branch(&child_pr.branch)
             .await
             .unwrap()
             .unwrap();
-        assert_eq!(by_worktree.id, child.id);
+        assert_eq!(by_branch.id, child.id);
     }
 
     #[tokio::test]
@@ -2172,12 +2208,7 @@ mod tests {
         store.create_wave(&wave).await.unwrap();
         let project = make_project(&wave);
         store.create_project(&project).await.unwrap();
-        let mut task = make_task(&wave, &project);
-        task.enter_finally(crate::task::TaskGateProposal {
-            done: true,
-            reason: "empty Task is complete".to_string(),
-        })
-        .unwrap();
+        let task = make_task(&wave, &project);
         let pr = make_task_pr(&task);
         store.create_task(&task, &pr).await.unwrap();
 

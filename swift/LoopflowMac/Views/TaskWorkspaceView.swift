@@ -89,7 +89,6 @@ struct TaskWorkspaceView: View {
     let task: TaskPlanningSnapshot
     let reference: TaskReferenceSnapshot
     let runtime: TaskRuntimeSnapshot?
-    let attention: TaskAttentionSnapshot
     let repoPath: String
     @ObservedObject var terminalStore: TaskTerminalStore
 
@@ -107,7 +106,6 @@ struct TaskWorkspaceView: View {
         task: TaskPlanningSnapshot,
         reference: TaskReferenceSnapshot,
         runtime: TaskRuntimeSnapshot?,
-        attention: TaskAttentionSnapshot,
         repoPath: String,
         terminalStore: TaskTerminalStore,
         initialSection: TaskWorkspaceSection = .changes
@@ -115,7 +113,6 @@ struct TaskWorkspaceView: View {
         self.task = task
         self.reference = reference
         self.runtime = runtime
-        self.attention = attention
         self.repoPath = repoPath
         self.terminalStore = terminalStore
         _section = State(initialValue: initialSection)

@@ -429,7 +429,7 @@ fn with_runtime<T>(
     command: &[String],
     run: impl FnOnce() -> anyhow::Result<T>,
 ) -> anyhow::Result<T> {
-    let attribution = loopflow::engine::wave_context::run_attribution(Some(repo_root));
+    let attribution = loopflow::work::wave::context::run_attribution(Some(repo_root));
     if let Some(failure) = attribution.failure.as_deref() {
         warn!(
             error = failure,
@@ -599,9 +599,12 @@ fn run_target_in_repo(
         loopflow::lf::discovery::Target::Skill(_) => with_runtime(repo_root, command, || {
             with_skill_runtime(repo_root, name, || {
                 loopflow::lf::commands::run::run(Some(name), message, cli)?;
-                // Commit any uncommitted changes left by the skill.
-                // When running inside a flow, the flow executor handles this;
-                // for standalone skills we must do it here.
+                // Work-bound skills share their repository with other
+                // contributors and leave checkpoint composition to the caller.
+                if cli.work_subject_selector().is_some() {
+                    return Ok(());
+                }
+                // Unbound standalone skills retain their ordinary checkpoint.
                 let options = loopflow::ops::CommitOptions {
                     add: true,
                     message: Some(format!("lf commit: {name}")),
@@ -628,7 +631,7 @@ fn run_bound_target_in_repo(
     match loopflow::lf::discovery::discover_target(repo_root, name)? {
         loopflow::lf::discovery::Target::Skill(_) => with_runtime(repo_root, command, || {
             with_skill_runtime(repo_root, name, || {
-                loopflow::lf::commands::run::run_bound(name, message, cli, binding)?;
+                loopflow::lf::commands::run::run_bound(Some(name), message, cli, binding)?;
                 let options = loopflow::ops::CommitOptions {
                     add: true,
                     message: Some(format!("lf commit: {name}")),
@@ -639,33 +642,53 @@ fn run_bound_target_in_repo(
             })
         }),
         loopflow::lf::discovery::Target::Flow(_) => anyhow::bail!(
-            "`lf --as` supports one named skill invocation, not multi-step flow {name:?}"
+            "Work selectors support one named skill invocation, not multi-step flow {name:?}"
         ),
     }
 }
 
-fn prepare_work_binding(selector: &str, repo: &Path) -> Option<loopflow::ops::WorkBinding> {
-    let runtime = match tokio::runtime::Runtime::new() {
-        Ok(runtime) => runtime,
-        Err(error) => {
-            warn!(%error, %selector, "cannot start planning enrichment; launching with raw --as selector");
-            return None;
-        }
-    };
+fn prepare_work_binding(selector: &str, repo: &Path) -> anyhow::Result<loopflow::ops::WorkBinding> {
+    let runtime = tokio::runtime::Runtime::new()
+        .map_err(|error| anyhow::anyhow!("cannot resolve --as {selector}: {error}"))?;
     runtime.block_on(async {
-        let Some(store) = loopflow::store::open_existing_store().await else {
-            warn!(%selector, "planning registry unavailable; launching with raw --as selector");
-            return None;
-        };
+        let store = loopflow::store::open_existing_store()
+            .await
+            .ok_or_else(|| {
+                anyhow::anyhow!("cannot resolve --as {selector}: planning registry unavailable")
+            })?;
         let store = Arc::new(store);
-        let binding = match loopflow::ops::resolve_work_binding(&store, repo, selector).await {
-            Ok(binding) => binding,
-            Err(error) => {
-                warn!(%error, %selector, "planning enrichment unavailable; launching with raw --as selector");
-                return None;
-            }
-        };
-        Some(binding)
+        loopflow::ops::resolve_work_binding(&store, repo, selector)
+            .await
+            .map_err(anyhow::Error::from)
+    })
+}
+
+fn prepare_hierarchical_work_binding(
+    task: Option<&str>,
+    project: Option<&str>,
+    wave: Option<&str>,
+    repo: &Path,
+) -> anyhow::Result<loopflow::ops::WorkBinding> {
+    let runtime = tokio::runtime::Runtime::new()
+        .map_err(|error| anyhow::anyhow!("cannot resolve Work selection: {error}"))?;
+    runtime.block_on(async {
+        let store = loopflow::store::open_existing_store()
+            .await
+            .ok_or_else(|| {
+                anyhow::anyhow!("cannot resolve Work selection: planning registry unavailable")
+            })?;
+        let store = Arc::new(store);
+        loopflow::ops::resolve_work_selection(
+            &store,
+            repo,
+            loopflow::ops::WorkSelection {
+                task,
+                project,
+                wave,
+            },
+        )
+        .await
+        .map_err(anyhow::Error::from)
     })
 }
 
@@ -684,18 +707,19 @@ fn validate_work_selector(selector: &str) -> anyhow::Result<()> {
     Ok(())
 }
 
-fn require_bound_named_skill(command: &Option<Commands>, repo: &Path) -> anyhow::Result<()> {
+fn require_bound_invocation(command: &Option<Commands>, repo: &Path) -> anyhow::Result<()> {
     let name = match command {
         Some(Commands::Skill { name, .. }) => name.clone(),
         Some(Commands::External(args)) => loopflow::lf::commands::run::split_skill_args(args)?.0,
+        Some(Commands::Inline { .. }) => return Ok(()),
         _ => {
-            anyhow::bail!("`lf --as` starts one named skill; use `lf --as task:LOO-123 implement`")
+            anyhow::bail!("`lf --as` starts one skill or inline prompt; use `lf --as task:LOO-123 implement` or `lf --as project:api : \"question\"`")
         }
     };
     match loopflow::lf::discovery::discover_target(repo, &name)? {
         loopflow::lf::discovery::Target::Skill(_) => Ok(()),
         loopflow::lf::discovery::Target::Flow(_) => anyhow::bail!(
-            "`lf --as` supports one named skill invocation, not multi-step flow {name:?}"
+            "Work selectors support one named skill invocation, not multi-step flow {name:?}"
         ),
     }
 }
@@ -787,7 +811,7 @@ fn parse_duration(value: &str) -> anyhow::Result<std::time::Duration> {
 /// One PR's line in `lf task status`. A degraded Linear linkage is named here
 /// because this reading is where an operator already looks for writeback health —
 /// the Task's `PM writeback` line sits directly above. Silence means linked.
-fn format_task_pr_line(pr: &loopflow::task::TaskPr) -> String {
+fn format_task_pr_line(pr: &loopflow::work::task::TaskPr) -> String {
     let provider = pr
         .github()
         .map(|github| format!("GitHub #{}", github.number))
@@ -813,14 +837,14 @@ fn format_task_pr_line(pr: &loopflow::task::TaskPr) -> String {
     )
 }
 
-fn print_task(task: &loopflow::task::Task, json: bool) -> anyhow::Result<()> {
+fn print_task(task: &loopflow::work::task::Task, json: bool) -> anyhow::Result<()> {
     let snapshot = loopflow::ops::task::task_snapshot(task)?;
     if json {
         println!("{}", serde_json::to_string_pretty(&snapshot)?);
     } else {
         let pm_writeback = match &task.pm_writeback {
-            loopflow::task::PmWritebackState::Current => "current".to_string(),
-            loopflow::task::PmWritebackState::Pending { error, .. } => {
+            loopflow::work::task::PmWritebackState::Current => "current".to_string(),
+            loopflow::work::task::PmWritebackState::Pending { error, .. } => {
                 format!("pending: {error}")
             }
         };
@@ -830,17 +854,50 @@ fn print_task(task: &loopflow::task::Task, json: bool) -> anyhow::Result<()> {
             .and_then(|active| snapshot.prs.iter().find(|pr| &pr.id == active))
             .map(|pr| pr.branch.as_str())
             .unwrap_or("none");
-        let body = format!("agent {}, provider {}", task.agent, task.provider);
+        let (phase, cycle, flow, iteration, step, body) = match snapshot.controller.as_ref() {
+            Some(controller) => (
+                controller.lifecycle_phase.as_str().to_string(),
+                match controller.lifecycle_phase {
+                    loopflow::controller::task::TaskLifecyclePhase::First => "0".to_string(),
+                    loopflow::controller::task::TaskLifecyclePhase::Loop => {
+                        (controller.gate_cycle + 1).to_string()
+                    }
+                    loopflow::controller::task::TaskLifecyclePhase::Finally => {
+                        controller.gate_cycle.to_string()
+                    }
+                    _ => "unknown".to_string(),
+                },
+                controller
+                    .lifecycle
+                    .phase(controller.lifecycle_phase)
+                    .flow
+                    .clone(),
+                (controller.phase_iteration + 1).to_string(),
+                (controller.phase_cursor + 1).to_string(),
+                format!(
+                    "agent {}, provider {}",
+                    controller.agent, controller.provider
+                ),
+            ),
+            None => (
+                "none".to_string(),
+                "none".to_string(),
+                "none".to_string(),
+                "none".to_string(),
+                "none".to_string(),
+                "no end-to-end controller".to_string(),
+            ),
+        };
         println!(
             "{}  {}\n  task: {}\n  phase: {} cycle {}\n  flow: {} (iteration {}, step {})\n  body: {}\n  worktree: {}\n  branch: {}\n  PM writeback: {}\n  reason: {}",
             task.plan.identifier,
             snapshot.status,
             task.id,
-            task.lifecycle_phase.as_str(),
-            task.lifecycle_cycle(),
-            task.phase_plan().flow,
-            task.phase_iteration + 1,
-            task.phase_cursor + 1,
+            phase,
+            cycle,
+            flow,
+            iteration,
+            step,
             body,
             task.worktree.display(),
             branch,
@@ -852,10 +909,10 @@ fn print_task(task: &loopflow::task::Task, json: bool) -> anyhow::Result<()> {
             println!("{}", format_task_pr_line(pr));
         }
         match &snapshot.observation {
-            loopflow::task::Observation::Cached { observed_at } => {
+            loopflow::work::task::Observation::Cached { observed_at } => {
                 println!("  PR observation: cached from {observed_at}");
             }
-            loopflow::task::Observation::Degraded {
+            loopflow::work::task::Observation::Degraded {
                 reason,
                 cached_as_of,
                 retry_at,
@@ -864,8 +921,8 @@ fn print_task(task: &loopflow::task::Task, json: bool) -> anyhow::Result<()> {
                     "  PR observation: degraded — {reason} (cached from {cached_as_of}; retry after {retry_at})"
                 );
             }
-            loopflow::task::Observation::NotRequired
-            | loopflow::task::Observation::Fresh { .. } => {}
+            loopflow::work::task::Observation::NotRequired
+            | loopflow::work::task::Observation::Fresh { .. } => {}
         }
         let actions = &snapshot.actions;
         if let Some(recommended) = actions.recommended {
@@ -889,10 +946,10 @@ fn print_task_control(
             result.receipt.action(),
         );
         match &result.observation {
-            loopflow::task::Observation::Cached { observed_at } => {
+            loopflow::work::task::Observation::Cached { observed_at } => {
                 println!("PR observation: cached from {observed_at}");
             }
-            loopflow::task::Observation::Degraded {
+            loopflow::work::task::Observation::Degraded {
                 reason,
                 cached_as_of,
                 retry_at,
@@ -901,26 +958,31 @@ fn print_task_control(
                     "PR observation: degraded — {reason} (cached from {cached_as_of}; retry after {retry_at})"
                 );
             }
-            loopflow::task::Observation::NotRequired
-            | loopflow::task::Observation::Fresh { .. } => {}
+            loopflow::work::task::Observation::NotRequired
+            | loopflow::work::task::Observation::Fresh { .. } => {}
         }
     }
     Ok(())
 }
 
-fn print_project(project: &loopflow::project::Project, json: bool) -> anyhow::Result<()> {
+fn print_project(project: &loopflow::work::project::Project, json: bool) -> anyhow::Result<()> {
     let snapshot = loopflow::ops::project::project_snapshot(project)?;
     if json {
         println!("{}", serde_json::to_string_pretty(&snapshot)?);
     } else {
-        let body = format!("agent {}, provider {}", project.agent, project.provider);
+        let body = match (&snapshot.agent, &snapshot.provider) {
+            (Some(agent), Some(provider)) => format!("agent {agent}, provider {provider}"),
+            _ => "no end-to-end controller".to_string(),
+        };
         println!(
             "{}  {}\n  project: {}\n  body: {}\n  iteration: {}\n  reason: {}",
             project.plan.slug,
             snapshot.status,
             project.id,
             body,
-            project.iteration,
+            snapshot
+                .iteration
+                .map_or_else(|| "none".to_string(), |iteration| iteration.to_string()),
             snapshot.reason,
         );
         if let Some(failure) = &snapshot.last_failure {
@@ -950,6 +1012,15 @@ fn print_project_control(
 
 fn run_project_command(repo: &Path, command: &ProjectCommand) -> anyhow::Result<()> {
     match command {
+        ProjectCommand::Prepare {
+            project_id,
+            directive,
+            json,
+        } => {
+            let project =
+                loopflow::ops::project::project_prepare(repo, project_id, directive.clone())?;
+            print_project(&project, *json)
+        }
         ProjectCommand::Run {
             project_id,
             directive,
@@ -1043,6 +1114,24 @@ fn task_cycle(fix: bool, feature: bool) -> Option<loopflow::ops::task::TaskCycle
 
 fn run_task_command(repo: &Path, command: &TaskCommand) -> anyhow::Result<()> {
     match command {
+        TaskCommand::Prepare {
+            issue,
+            name,
+            stack_on,
+            directive,
+            json,
+        } => {
+            let task = loopflow::ops::task::task_prepare(
+                repo,
+                issue,
+                loopflow::ops::task::TaskPrepareOptions {
+                    name: name.clone(),
+                    stack_on: stack_on.clone(),
+                    directive: directive.clone(),
+                },
+            )?;
+            print_task(&task, *json)
+        }
         TaskCommand::Run {
             issue,
             name,
@@ -1204,6 +1293,14 @@ fn run_task_command(repo: &Path, command: &TaskCommand) -> anyhow::Result<()> {
             let result = loopflow::ops::task::task_resume(issue, model.clone(), reason.clone())?;
             print_task_control(&result, *json)
         }
+        TaskCommand::Restart {
+            issue,
+            advice,
+            json,
+        } => {
+            let task = loopflow::ops::task::task_restart(issue, advice.clone())?;
+            print_task(&task, *json)
+        }
         TaskCommand::Recover {
             issue,
             reason,
@@ -1296,7 +1393,7 @@ fn main() -> anyhow::Result<()> {
     let explicit_wave = cli
         .wave
         .as_deref()
-        .map(loopflow::engine::wave_context::resolve_explicit_wave)
+        .map(loopflow::work::wave::context::resolve_explicit_wave)
         .transpose()?;
     if let Some(wave) = &explicit_wave {
         cli.wave = Some(wave.name().to_string());
@@ -1305,7 +1402,7 @@ fn main() -> anyhow::Result<()> {
     // journaling, and every child process.
     let _explicit_wave_env = explicit_wave.as_ref().map(|wave| {
         EnvGuard::set(
-            loopflow::engine::wave_context::WAVE_ID_ENV,
+            loopflow::work::wave::context::WAVE_ID_ENV,
             wave.id().to_string(),
         )
     });
@@ -1418,28 +1515,48 @@ fn main() -> anyhow::Result<()> {
 
     let mut direct_binding = None;
     let mut _bound_cwd = None;
-    if let Some(selector) = cli.as_work.as_deref() {
+    let selects_direct_work = cli.as_work.is_some()
+        || cli.task.is_some()
+        || cli.project.is_some()
+        || (cli.wave.is_some()
+            && matches!(
+                &cli.command,
+                Some(Commands::Skill { .. }) | Some(Commands::External(_))
+            ));
+    if selects_direct_work {
         let repo = loopflow::lf::commands::util::find_repo_root()?;
-        validate_work_selector(selector)?;
-        if let Some(binding) = prepare_work_binding(selector, &repo) {
-            if let Some(wave) = &explicit_wave {
-                if wave.id() != &binding.wave_id {
-                    anyhow::bail!(
-                        "--wave {} does not own --as {}:{}",
-                        wave.name(),
-                        binding.work.kind(),
-                        binding.work.id(),
-                    );
-                }
-            }
-            cli.wave = Some(binding.wave_name.clone());
-            let cwd = CwdGuard::enter(&binding.cwd)?;
-            require_bound_named_skill(&cli.command, &binding.cwd)?;
-            direct_binding = Some(binding);
-            _bound_cwd = Some(cwd);
+        let mut binding = if let Some(selector) = cli.as_work.as_deref() {
+            validate_work_selector(selector)?;
+            prepare_work_binding(selector, &repo)?
         } else {
-            require_bound_named_skill(&cli.command, &repo)?;
+            prepare_hierarchical_work_binding(
+                cli.task.as_deref(),
+                cli.project.as_deref(),
+                cli.wave.as_deref(),
+                &repo,
+            )?
+        };
+        if let Some(cwd) = cli.bound_cwd.clone() {
+            binding.cwd = cwd;
         }
+        if let Some(wave) = &explicit_wave {
+            if wave.id() != &binding.wave_id {
+                anyhow::bail!(
+                    "--wave {} does not own --as {}:{}",
+                    wave.name(),
+                    binding.work.kind(),
+                    binding.work.id(),
+                );
+            }
+        }
+        cli.wave = Some(binding.wave_name.clone());
+        if cli.model.is_none() {
+            cli.model = binding.agent.clone();
+        }
+        let cwd = CwdGuard::enter(&binding.cwd)?;
+        require_bound_invocation(&cli.command, &binding.cwd)?;
+        direct_binding = Some(binding);
+        _bound_cwd = Some(cwd);
     }
 
     let result = if cli.list {
@@ -1448,12 +1565,19 @@ fn main() -> anyhow::Result<()> {
         match &cli.command {
             Some(Commands::Inline { prompt }) => {
                 let text = prompt.join(" ");
-                in_repo_runtime(&args, |_| {
-                    loopflow::lf::commands::run::run(None, Some(&text), &cli)
+                in_repo_runtime(&args, |_| match direct_binding.as_ref() {
+                    Some(binding) => {
+                        loopflow::lf::commands::run::run_bound(None, Some(&text), &cli, binding)
+                    }
+                    None => loopflow::lf::commands::run::run(None, Some(&text), &cli),
                 })
             }
             Some(Commands::Desktop) => loopflow::lf::commands::desktop::run(),
+            Some(Commands::ProviderSession) => {
+                loopflow::lf::commands::runs::observe_provider_session()
+            }
             Some(Commands::Ask { ask }) => loopflow::lf::commands::ask::run(ask),
+            Some(Commands::Session { cmd }) => loopflow::lf::commands::session::run(cmd),
             Some(Commands::Pr { cmd }) => in_repo_runtime(&args, |_| {
                 loopflow::lf::commands::ops::run_pr(cmd.as_ref(), cli.model.as_deref())
             }),
@@ -1514,7 +1638,7 @@ fn main() -> anyhow::Result<()> {
                 in_repo_runtime(&args, |_| loopflow::lf::commands::ops::cron_cmd(cmd))
             }
             Some(Commands::Wave { name, force }) => {
-                in_repo_runtime(&args, |_| loopflow::wave::run(name, *force))
+                in_repo_runtime(&args, |_| loopflow::controller::wave::run(name, *force))
             }
             Some(Commands::Start {
                 waves,
@@ -1533,7 +1657,7 @@ fn main() -> anyhow::Result<()> {
                 loopflow::lf::commands::wave_intent::run(name, false, *json, repo)
             }),
             Some(Commands::Resident { name }) => {
-                in_repo_runtime(&args, |_| loopflow::wave::resident::run(name))
+                in_repo_runtime(&args, |_| loopflow::controller::wave::resident::run(name))
             }
             Some(Commands::FlowStep { flow, index, seed }) => in_repo_runtime(&args, |repo| {
                 loopflow::lf::commands::flow::run_step(flow, *index, seed, &cli, repo)
@@ -1541,13 +1665,13 @@ fn main() -> anyhow::Result<()> {
             Some(Commands::Project {
                 cmd: ProjectCommand::Promote { slug, wave },
             }) => in_repo_runtime(&args, |repo| {
-                let parent = loopflow::engine::wave_context::resolve_managed_wave_sync(
+                let parent = loopflow::work::wave::context::resolve_managed_wave_sync(
                     Some(repo),
                     wave.as_deref(),
                 )
                 .map(|wave| wave.name().to_string())
                 .map_err(|err| match err {
-                    loopflow::engine::wave_context::WaveResolveError::NoContext => {
+                    loopflow::work::wave::context::WaveResolveError::NoContext => {
                         anyhow::anyhow!("cannot determine parent wave; pass --wave <name>")
                     }
                     other => anyhow::Error::from(other),
@@ -1574,15 +1698,25 @@ fn main() -> anyhow::Result<()> {
             }
             Some(Commands::WorkRunner { kind, work_id }) => {
                 run_work_runner_entrypoint(&args, kind, work_id, |work| {
-                    tokio::runtime::Runtime::new()?.block_on(loopflow::work_runner::run_work(work))
+                    tokio::runtime::Runtime::new()?.block_on(loopflow::controller::run_work(work))
                 })
             }
             Some(Commands::Tokens { json, days }) => {
                 loopflow::lf::commands::tokens::run(*json, *days)
             }
-            Some(Commands::Usage { json, days }) => {
-                loopflow::lf::commands::usage::run(*json, *days)
-            }
+            Some(Commands::Usage {
+                json,
+                days,
+                wave,
+                project,
+                task,
+            }) => loopflow::lf::commands::usage::run(
+                *json,
+                *days,
+                wave.as_deref(),
+                project.as_deref(),
+                task.as_deref(),
+            ),
             Some(Commands::TelemetryScorecard { json }) => in_repo_runtime(&args, |repo| {
                 let item = loopflow::engine::flow::Op {
                     command: "__telemetry-scorecard".to_string(),
@@ -1635,6 +1769,7 @@ fn main() -> anyhow::Result<()> {
             Some(Commands::Runs {
                 run,
                 events,
+                resume,
                 task,
                 project,
                 wave,
@@ -1646,6 +1781,7 @@ fn main() -> anyhow::Result<()> {
                 task.as_deref(),
                 run.as_deref(),
                 *events,
+                *resume,
             ),
             Some(Commands::Replay { run }) => loopflow::lf::commands::replay::run(run),
             Some(Commands::Chat {
@@ -1762,10 +1898,10 @@ mod tests {
 
     use clap::Parser;
     use loopflow::lf::{Cli, Commands, PmCommand, PmTaskCommand, PrCommand};
-    use loopflow::task::{GithubPr, PrPublication, TaskId, TaskPr, TaskPrId};
+    use loopflow::work::task::{GithubPr, PrPublication, TaskId, TaskPr, TaskPrId};
 
     #[test]
-    fn raw_work_selector_does_not_require_a_readable_registry() {
+    fn bound_work_selector_requires_a_readable_registry() {
         let _lock = PROCESS_STATE_LOCK
             .lock()
             .unwrap_or_else(std::sync::PoisonError::into_inner);
@@ -1775,7 +1911,9 @@ mod tests {
         let _db = EnvGuard::set("LF_DB_PATH", registry_blocker.display().to_string());
 
         validate_work_selector("task:LOO-265").unwrap();
-        assert!(super::prepare_work_binding("task:LOO-265", directory.path()).is_none());
+        let error = super::prepare_work_binding("task:LOO-265", directory.path())
+            .expect_err("--as must not degrade to raw attribution");
+        assert!(error.to_string().contains("planning registry unavailable"));
     }
 
     static PROCESS_STATE_LOCK: std::sync::Mutex<()> = std::sync::Mutex::new(());
@@ -1889,7 +2027,8 @@ mod tests {
             "-w",
             "-W",
             "--wave",
-            "--as",
+            "--project",
+            "--task",
         ] {
             assert!(tables.top_level.value.contains(flag), "value flag {flag}");
         }
@@ -1942,12 +2081,21 @@ mod tests {
         let args = vec![
             "lf".to_string(),
             "implement".to_string(),
-            "--as".to_string(),
-            "task:LOO-123".to_string(),
+            "--task".to_string(),
+            "LOO-123".to_string(),
+            "--project".to_string(),
+            "context".to_string(),
         ];
         assert_eq!(
             reorder_args(args),
-            vec!["lf", "--as", "task:LOO-123", "implement"]
+            vec![
+                "lf",
+                "--task",
+                "LOO-123",
+                "--project",
+                "context",
+                "implement"
+            ]
         );
     }
 
@@ -1985,9 +2133,9 @@ mod tests {
         assert!(cli.command.is_none());
         let skill = loopflow::engine::builtins::get_builtin_skill("loopflow")
             .expect("builtin terminal control skill");
-        assert!(skill.contains("lf ask list --user --json"));
-        assert!(skill.contains("lf ask open <ask-id>"));
-        assert!(skill.contains("control conversation remains open"));
+        assert!(skill.contains("lf session list --json"));
+        assert!(skill.contains("lf session open <session-id> --json"));
+        assert!(skill.contains("Keep this conversation open"));
     }
 
     #[test]

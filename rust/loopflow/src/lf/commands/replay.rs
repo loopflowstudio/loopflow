@@ -156,11 +156,12 @@ mod tests {
         let bin = home.path().join("bin");
         std::fs::create_dir(&bin).unwrap();
         let evidence = home.path().join("replay-evidence");
-        let provider = bin.join("gemini");
+        let provider = bin.join("opencode");
         std::fs::write(
             &provider,
-            r#"#!/bin/sh
-printf '%s\n' "$LF_RUN_ID|$LF_PARENT_RUN_ID|$(cat "$GEMINI_SYSTEM_MD")|$*" > "$LF_TEST_REPLAY_EVIDENCE"
+r#"#!/bin/sh
+context_file=$(printf '%s' "$OPENCODE_CONFIG_CONTENT" | sed -n 's/.*"instructions":\["\([^"]*\)"\].*/\1/p')
+printf '%s\n' "$LF_RUN_ID|$LF_PARENT_RUN_ID|$(cat "$context_file")|$*" > "$LF_TEST_REPLAY_EVIDENCE"
 printf '%s\n' '{"type":"result","subtype":"success","usage":{"input_tokens":5,"output_tokens":2}}'
 "#,
         )
@@ -199,7 +200,7 @@ printf '%s\n' '{"type":"result","subtype":"success","usage":{"input_tokens":5,"o
         let request = RunLaunchRequest {
             system_prompt: "recorded system".to_string(),
             task_prompt: "recorded task".to_string(),
-            agent: "gemini".to_string(),
+            agent: "opencode:opencode/glm-5.2".to_string(),
             account_id: None,
             max_turns: Some(3),
             write_scope: crate::engine::AgentWriteScope::Worktree,
@@ -209,8 +210,8 @@ printf '%s\n' '{"type":"result","subtype":"success","usage":{"input_tokens":5,"o
         };
         let source = CaptureHandle::begin_with_launch(
             RunSpec {
-                harness: "gemini".to_string(),
-                model: Some("2.5-pro".to_string()),
+                harness: "opencode".to_string(),
+                model: Some("opencode/glm-5.2".to_string()),
                 surface: "headless".to_string(),
                 cwd: home.path().to_path_buf(),
                 repo: Some(home.path().to_path_buf()),

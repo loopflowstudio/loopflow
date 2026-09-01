@@ -144,6 +144,21 @@ fn emit_build_provenance(manifest_dir: &Path, out_dir: &Path) {
             .is_ok_and(|output| output.status.success() && !output.stdout.is_empty())
     });
     let version_tag = format!("v{package_version}");
+    let release_candidate_tag = env::var("LOOPFLOW_RELEASE_TAG")
+        .ok()
+        .filter(|tag| !tag.is_empty());
+    let is_release_candidate = release_candidate_tag.as_deref().is_some_and(|tag| {
+        if provenance != "release" {
+            panic!("LOOPFLOW_RELEASE_TAG requires LOOPFLOW_BUILD_PROVENANCE=release");
+        }
+        if tag.rsplit('/').next() != Some(&version_tag) {
+            panic!("LOOPFLOW_RELEASE_TAG must match package version {version_tag}, got {tag}");
+        }
+        if dirty {
+            panic!("LOOPFLOW_RELEASE_TAG requires a clean source tree");
+        }
+        true
+    });
     let is_tagged_release = !dirty
         && git_root.is_some_and(|root| {
             Command::new("git")
@@ -157,7 +172,8 @@ fn emit_build_provenance(manifest_dir: &Path, out_dir: &Path) {
                             .any(|tag| tag == version_tag)
                 })
         });
-    let build_version = if is_tagged_release || source_revision == "unknown" {
+    let build_version = if is_release_candidate || is_tagged_release || source_revision == "unknown"
+    {
         package_version
     } else {
         let short_revision = source_revision.get(..9).unwrap_or(&source_revision);
@@ -175,6 +191,7 @@ fn emit_build_provenance(manifest_dir: &Path, out_dir: &Path) {
     println!("cargo:rustc-env=LOOPFLOW_BUILD_VERSION={build_version}");
     println!("cargo:rerun-if-env-changed=LOOPFLOW_BUILD_PROVENANCE");
     println!("cargo:rerun-if-env-changed=LOOPFLOW_MIGRATION_AUTHORITY");
+    println!("cargo:rerun-if-env-changed=LOOPFLOW_RELEASE_TAG");
     println!(
         "cargo:rerun-if-changed={}",
         manifest_dir.join("src").display()

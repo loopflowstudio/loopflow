@@ -65,16 +65,21 @@ The implementation follows the same order as the diagram:
 ## Add one capability at a time
 
 The Skill runner is useful by itself. The rest of Loopflow grows outward by
-adding one kind of capability at each layer.
+adding one kind of capability at each layer. Tracked Work and autonomous
+controllers are separate layers: Work remains fully operable when no
+controller is installed or running, while controllers consume the same Work,
+execution, and delivery operations available to any caller.
 
 ```text
 one Skill run
     |
     +-- Flow: compose Skills, mechanical operations, and human boundaries
     |
-    +-- Work: preserve purpose and input across provider processes
+    +-- Work: preserve purpose and input across independent processes
     |
-    +-- Task delivery: bind concrete Work to a worktree and serial PRs
+    +-- Task delivery: bind concrete Work to one active remote branch, worktree, and PR
+    |
+    +-- Controllers: pursue Work end to end using the layers above
     |
     +-- Home: place execution, credentials, services, files, and locks
     |
@@ -84,11 +89,49 @@ one Skill run
 | Area | What it adds | Start here |
 | --- | --- | --- |
 | Execution | Skill discovery, prompt assembly, provider routing, harnesses, Run records | [Execution](architecture/execution.md) |
-| Planning | Flow composition, Wave/Project/Task Work, Steer, Ask, resident loops | [Planning](architecture/planning.md) |
-| Delivery | Managed worktrees, commits, serial PRs, CI repair, merge | [Delivery](architecture/delivery.md) |
+| Planning | Flow composition, Wave/Project/Task Work, Steer, questions, human FlowSteps, resident loops | [Planning](architecture/planning.md) |
+| Delivery | Managed worktrees, commits, one active Task branch/PR, CI repair, merge | [Delivery](architecture/delivery.md) |
 | Homes | Placement, `lfd`, Wave listeners, SSH routing, machine install | [Homes and processes](architecture/homes.md) |
 | Data | Truth owners, SQLite, files, external systems, projections, consistency | [Data and persistence](architecture/data.md) |
 | Codebase | Source territories, public surfaces, processes, extension points | [Codebase map](architecture/codebase.md) |
+
+The source tree makes the planning boundary literal:
+
+```text
+work/                          controller/
+wave/{mod,config,context,      wave/{runner,resident,server,
+      memory}                       placement,...}
+project                       project/{mod,state}
+task                          task/{mod,state}
+                              runner + store
+
+execution kernel: engine/ + harness/ + Run records
+composition surfaces: lf/ + bin/
+```
+
+`work` never imports `controller`. The execution kernel works without either
+layer and never loads Work. CLI and controller callers resolve Work identity,
+Wave memory, and controller state, then pass ordinary launch inputs into the
+kernel.
+
+Release delivery also separates proof from authority:
+
+```text
+merged release commit
+        |
+        v
+candidate ref --> hosted matrix --> signed artifact receipt
+                                           |
+                                           v
+                                  immutable version tag
+                                           |
+                                           v
+                                      publication
+```
+
+The candidate ref and receipt are disposable recovery state. The version tag
+is created only after the exact commit and artifact hashes are proven; retries
+after that point publish the same bytes under the same tag.
 
 Each area page starts with a real command or artifact, follows its request or
 data flow, and ends with the contracts that neighboring areas may rely on.
@@ -105,15 +148,17 @@ human / agent --> lf CLI --------+----------+-----------+
           +---------+----------+
           |                    |
           v                    v
-  authored definitions   durable planning
+  authored definitions    tracked Work
   Skills / Flows /       Wave -> Project -> Task
   goals / memory                  |
-          |                       v
-          +-----------> planning controllers <------ Task delivery
-                              |
-                              | Skill boundary
-                              v
-                  shared execution components
+          |                       +---------> Task delivery
+          |                       |                ^
+          |                       v                |
+          +------------> end-to-end controllers --+
+          |                       |
+          +-----------------------+ Skill boundary
+                                  v
+                       shared execution components
               discovery / prompt / route / harness
                               |
                               v
@@ -137,7 +182,7 @@ ledger.
 Wave
   `-- Project
         `-- Task
-              `-- serial PRs
+              `-- one active remote branch and PR
 
 Flow = ordered Skill | Op | Xor | human boundaries
 Run  = evidence for one mediated harness launch
@@ -149,14 +194,14 @@ WorkStatus = Ready | Done | Abandoned
 | Model | Represents | Primary truth |
 | --- | --- | --- |
 | Skill | Reusable instructions plus declared context needs | Repository override, builtin, or installed Markdown |
-| Flow | Ordered Skill and mechanical nodes, Xor routing, human boundaries | Repository or builtin YAML plus the Work playhead |
+| Flow | Ordered Skill and mechanical nodes, Xor routing, human boundaries | Repository or builtin YAML plus a caller-owned playhead |
 | Run | Evidence from one mediated provider launch | One immutable Home-local record |
 | Wave | Durable operating context with goal, memory, cadence, chat, and project selection | Repository Wave files, local identity, Linear Initiative membership |
 | Project | One measured bet inside exactly one Wave | Linear Project plus bounded local Work state |
 | Task | One concrete change, investigation, or document | Linear Issue, local delivery state, Git, GitHub |
 | Work | Shared durable planning state for one Wave, Project, or Task | Rows keyed directly by stable Work identity |
 | Steer | Ordered authored correction to Work | Append-only Work input |
-| Ask | Durable blocking request with a typed, first-writer-wins result | Ask exchange and active answering-attempt fence |
+| Human session | Unresolved Ask or Task FlowStep bound to one ordinary provider Run | Boundary record, exact Run id, and provider-native history |
 | Home | Stable machine authority whose route may change | Home identity and observed SSH route |
 | Placement | Assignment of one Work to one Home | `(WorkRef, HomeId)` |
 
@@ -179,31 +224,42 @@ lf gate --diff-files
 These commands need the execution area only: discover, prompt, route, launch,
 record, return.
 
-### Durable delegated work
+### Tracked work without a controller
 
 ```bash
-lf task run INF-123
-lf task steer INF-123 "keep the parser public"
+lf task prepare INF-123
+lf --task INF-123 research "write scratch/runtime.md"
+lf --task INF-123 research "write scratch/prompts.md"
+lf commit -m "Reconcile Task research"
 lf pr publish
+lf pr submit
 lf task status INF-123 --json
 ```
 
-This crosses planning, execution, and delivery. Stable Task Work survives any
-one provider process; each provider launch leaves a separate Run record.
+`prepare` creates or reuses tracked Task Work, its one worktree, and the active
+serial PR identity. It installs no end-to-end controller. Each `--task` command
+is an independent Run in that worktree; several may overlap and write distinct
+scratch paths. Any caller may then use the ordinary Work and delivery commands.
+Those commands act on delivery facts, not on proof that a controller ran its
+expected Flow. `submit`, `arm`, and `land` therefore work the same whether the
+Task was pursued piecemeal, by the built-in controller, or by another system.
 
-### Resident planning
+### End-to-end controllers
 
 ```bash
 lf start product
+lf task run INF-123
 lf chat --steer "ship invoices first"
 lf status product
 ```
 
 The Home keeper starts the placed Wave listener. Its resident loop refreshes
 current planning evidence and chooses the next Project or Task boundary. Wave,
-Project, Task, and Ask retain distinct controllers; when one reaches a Skill
-boundary it reuses the ordinary discovery, prompt, provider, harness, and
-Run-evidence components before recording its domain transition.
+Project, and Task retain distinct controllers. Direct questions use ordinary
+fresh bound Runs. A Task human FlowStep starts the node's ordinary bound Skill
+command as a provider Run. A detached PTY cradle may keep the first client
+alive before a UI arrives; opening the Session replaces it with a native
+provider resume.
 
 ### Another machine
 
@@ -224,7 +280,7 @@ the behavior.
 | If you are changing… | Read |
 | --- | --- |
 | provider launch, retries, usage, or telemetry | [Execution](architecture/execution.md) |
-| Flow semantics, Work state, Steer, Ask, Project/Task loops | [Planning](architecture/planning.md) |
+| Flow semantics, Work state, Steer, questions, human FlowSteps, Project/Task loops | [Planning](architecture/planning.md) |
 | worktrees, commits, PR ranges, checks, or landing | [Delivery](architecture/delivery.md) |
 | daemons, remote execution, placement, process control, promotion | [Homes and processes](architecture/homes.md) |
 | schema, files, projections, DTOs, or consistency | [Data and persistence](architecture/data.md) |

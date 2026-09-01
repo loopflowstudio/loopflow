@@ -5,20 +5,36 @@ use std::path::Path;
 use anyhow::{anyhow, Result};
 use time::OffsetDateTime;
 
+use crate::controller::wave::journal::short_id;
+use crate::lf::commands::WorkFilter;
 use crate::lf::output::{format_cost, format_int, truncate, Colors};
 use crate::run_record::RunSnapshot;
-use crate::wave::journal::short_id;
 
 const REPO_WIDTH: usize = 18;
+const WORK_WIDTH: usize = 22;
 const RUN_WIDTH: usize = 22;
 const NUM_WIDTH: usize = 12;
 
 /// Print recent direct usage evidence. JSON is the same ordered Run projection
 /// used by `lf runs`; it does not invent interval completeness or provider
 /// finality.
-pub fn run(json: bool, days: u32) -> Result<()> {
+pub fn run(
+    json: bool,
+    days: u32,
+    wave: Option<&str>,
+    project: Option<&str>,
+    task: Option<&str>,
+) -> Result<()> {
     let since = since_days(days);
-    let runs = collect_since_at(&crate::store::observability_home_dir(), since)?;
+    let runs = collect_since_at(
+        &crate::store::observability_home_dir(),
+        since,
+        WorkFilter {
+            wave,
+            project,
+            task,
+        },
+    )?;
     if json {
         println!("{}", serde_json::to_string(&runs)?);
         return Ok(());
@@ -35,9 +51,20 @@ fn since_days(days: u32) -> i64 {
     }
 }
 
-fn collect_since_at(home: &Path, since: i64) -> Result<Vec<RunSnapshot>> {
+fn collect_since_at(home: &Path, since: i64, filter: WorkFilter<'_>) -> Result<Vec<RunSnapshot>> {
     crate::run_record::scan_runs_since(home, since)
         .map_err(|error| anyhow!("Run records unavailable: {error}"))
+        .map(|runs| {
+            runs.into_iter()
+                .filter(|run| {
+                    filter.matches(
+                        run.subject("wave"),
+                        run.subject("project"),
+                        run.subject("task"),
+                    )
+                })
+                .collect()
+        })
 }
 
 fn print_report(runs: &[RunSnapshot], days: u32) {
@@ -54,11 +81,12 @@ fn print_report(runs: &[RunSnapshot], days: u32) {
     let colors = Colors::default();
     println!("{}DIRECT RUN USAGE ({window}){}", colors.bold, colors.reset);
     println!(
-        "{bold}{time:<12}  {repo:<REPO_WIDTH$}  {run:<RUN_WIDTH$}  {input:>NUM_WIDTH$}  {output:>NUM_WIDTH$}  {cache:>NUM_WIDTH$}  {cost:>9}  {finality:>9}  {gaps:>5}  RUN{reset}",
+        "{bold}{time:<12}  {repo:<REPO_WIDTH$}  {work:<WORK_WIDTH$}  {run:<RUN_WIDTH$}  {input:>NUM_WIDTH$}  {output:>NUM_WIDTH$}  {cache:>NUM_WIDTH$}  {cost:>9}  {finality:>9}  {gaps:>5}  RUN{reset}",
         bold = colors.bold,
         reset = colors.reset,
         time = "TIME",
         repo = "REPO",
+        work = "WORK",
         run = "RUN",
         input = "INPUT",
         output = "OUTPUT",
@@ -69,9 +97,10 @@ fn print_report(runs: &[RunSnapshot], days: u32) {
     );
     for run in runs {
         println!(
-            "{time:<12}  {repo:<REPO_WIDTH$}  {run:<RUN_WIDTH$}  {input:>NUM_WIDTH$}  {output:>NUM_WIDTH$}  {cache:>NUM_WIDTH$}  {cost:>9}  {finality:>9}  {gaps:>5}  {id}",
+            "{time:<12}  {repo:<REPO_WIDTH$}  {work:<WORK_WIDTH$}  {run:<RUN_WIDTH$}  {input:>NUM_WIDTH$}  {output:>NUM_WIDTH$}  {cache:>NUM_WIDTH$}  {cost:>9}  {finality:>9}  {gaps:>5}  {id}",
             time = format_time(run.started),
             repo = truncate(&display_repo(run.repo.as_deref()), REPO_WIDTH),
+            work = truncate(&display_work(run), WORK_WIDTH),
             run = truncate(run.label(), RUN_WIDTH),
             input = format_optional(run.usage.input_tokens),
             output = format_optional(run.usage.output_tokens),
@@ -86,6 +115,15 @@ fn print_report(runs: &[RunSnapshot], days: u32) {
             id = short_id(&run.id),
         );
     }
+}
+
+fn display_work(run: &RunSnapshot) -> String {
+    for kind in ["task", "project", "wave"] {
+        if let Some(subject) = run.subject(kind) {
+            return format!("{kind}/{subject}");
+        }
+    }
+    "-".to_string()
 }
 
 fn format_optional(value: Option<i64>) -> String {
@@ -114,8 +152,9 @@ fn format_time(unix: i64) -> String {
 
 #[cfg(test)]
 mod tests {
-    use super::collect_since_at;
+    use super::{collect_since_at, display_work};
     use crate::engine::stream::StreamEvent;
+    use crate::lf::commands::WorkFilter;
     use crate::run_record::{CaptureHandle, RunSpec, SubjectAttribution};
 
     #[test]
@@ -142,12 +181,34 @@ mod tests {
         });
         capture.finish("completed").unwrap();
 
-        let runs = collect_since_at(home.path(), 0).unwrap();
+        let runs = collect_since_at(
+            home.path(),
+            0,
+            WorkFilter {
+                wave: None,
+                project: None,
+                task: Some("LOO-265"),
+            },
+        )
+        .unwrap();
         assert_eq!(runs.len(), 1);
+        assert_eq!(display_work(&runs[0]), "task/LOO-265");
         assert_eq!(runs[0].usage.input_tokens, Some(12));
         assert_eq!(runs[0].usage.output_tokens, None);
         assert_eq!(runs[0].usage.cache_read_tokens, Some(4));
         assert_eq!(runs[0].usage.final_streams, 0);
         assert_eq!(runs[0].usage.gaps, 0);
+
+        let excluded = collect_since_at(
+            home.path(),
+            0,
+            WorkFilter {
+                wave: None,
+                project: None,
+                task: Some("LOO-999"),
+            },
+        )
+        .unwrap();
+        assert!(excluded.is_empty());
     }
 }

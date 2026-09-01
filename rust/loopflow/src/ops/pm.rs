@@ -12,7 +12,6 @@ use std::path::Path;
 use futures_util::future::try_join_all;
 
 use crate::engine::config::load_repo_config;
-use crate::engine::wave_config::{read_wave_config, update_wave_goal_config, WavePmConfig};
 use crate::ops::error::{OpsError, OpsResult};
 use crate::ops::progress::Progress;
 use crate::ops::util::normalize_wave_name;
@@ -26,6 +25,7 @@ use crate::provider_auth::{
 };
 use crate::repository::RepoId;
 use crate::store::{open_existing_store, open_store, PmSnapshotRow, ProviderToken, Store};
+use crate::work::wave::config::{read_wave_config, update_wave_goal_config, WavePmConfig};
 
 // ── Options and results ─────────────────────────────────────────────
 
@@ -524,12 +524,6 @@ pub async fn linear_client(repo: &Path) -> OpsResult<LinearClient> {
     Ok(resolve_repository_context(repo).await?.client)
 }
 
-pub(crate) async fn linear_issue_client(repo: &Path, issue_id: &str) -> OpsResult<LinearClient> {
-    let context = resolve_repository_context(repo).await?;
-    resolve_owned_issue(repo, &context, issue_id).await?;
-    Ok(context.client)
-}
-
 async fn resolve_context(repo: &Path, wave: &str) -> OpsResult<PmContext> {
     let repository = resolve_repository_context(repo).await?;
     let provider = repository.provider;
@@ -685,7 +679,7 @@ pub(crate) fn format_age(secs: i64) -> String {
 
 async fn snapshot_row(repo: &Path, wave: &str) -> OpsResult<Option<PmSnapshotRow>> {
     let store = pm_store().await?;
-    let locator = crate::wave::WaveLocator::discover(repo, wave)
+    let locator = crate::work::wave::WaveLocator::discover(repo, wave)
         .map_err(|error| OpsError::Message(error.to_string()))?;
     let Some(wave) = store
         .get_wave_at(&locator)
@@ -875,7 +869,7 @@ async fn store_pm_snapshot_with_store(
             "failed to serialize PM snapshot for wave/{wave}: {err}"
         ))
     })?;
-    let registered = crate::wave::registry::ensure_wave_row(store, repo, wave)
+    let registered = crate::controller::wave::registry::ensure_wave_row(store, repo, wave)
         .await
         .map_err(|err| OpsError::Message(format!("failed to register PM Wave: {err}")))?;
     store
@@ -2022,7 +2016,7 @@ async fn pm_sync_async(
     let team_id = read_repository_team(repo, provider)?;
 
     if let Some(store) = open_existing_store().await {
-        let origin = crate::engine::wave_context::wave_origin(repo);
+        let origin = crate::work::wave::context::wave_origin(repo);
         for wave in store
             .list_waves(Some(&origin.display().to_string()))
             .await
@@ -2709,7 +2703,7 @@ fn default_team_key(repository: &str) -> String {
 }
 
 fn wave_summary(repo: &Path, wave: &str) -> OpsResult<String> {
-    Ok(crate::engine::wave_config::read_wave_summary(repo, wave)?)
+    Ok(crate::work::wave::config::read_wave_summary(repo, wave)?)
 }
 
 fn matching_wave_id(waves: &[PmWave], title: &str) -> OpsResult<Option<String>> {
@@ -2859,7 +2853,7 @@ async fn canonical_wave_title_path_with_store(
     wave: &str,
     store: &Store,
 ) -> OpsResult<String> {
-    let locator = crate::wave::WaveLocator::discover(repo, wave)
+    let locator = crate::work::wave::WaveLocator::discover(repo, wave)
         .map_err(|error| OpsError::Message(error.to_string()))?;
     let Some(mut current) = store
         .get_wave_at(&locator)
@@ -2930,7 +2924,7 @@ mod tests {
     use crate::id::WaveId;
     use crate::ops::NullProgress;
     use crate::pm::test_server::{self, json_response, QueuedResponse};
-    use crate::wave::Wave;
+    use crate::work::wave::Wave;
     use axum::http::StatusCode;
     use serde_json::{json, Value};
 

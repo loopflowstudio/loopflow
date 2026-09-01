@@ -20,7 +20,7 @@ enum PodiumFixture {
                     repos: [],
                     fixed: true
                 )
-            case .mockWaves:
+            case .mockWaves, .sessionFixtures:
                 let fixture = try loadRoadmap(sourceFile: sourceFile)
                 let reading: PodiumReading<RoadmapSnapshot>
                 let processActivity: PodiumReading<ActivitySnapshot>

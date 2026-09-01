@@ -9,9 +9,9 @@ use futures_util::future::join_all;
 use loopflow::child::ObservationRecipient;
 use loopflow::durable::WorkRef;
 use loopflow::planning::{LinearProjectId, ProjectPlan};
-use loopflow::project::{Project, ProjectEventKind, ProjectId};
 use loopflow::store::{open_store, StorageConfig};
-use loopflow::wave::WaveLocator;
+use loopflow::work::project::{Project, ProjectEventKind, ProjectId};
+use loopflow::work::wave::WaveLocator;
 use time::OffsetDateTime;
 
 const COMMAND_TIMEOUT: Duration = Duration::from_secs(10);
@@ -273,12 +273,6 @@ async fn supported_wave_starts_reach_bounded_live_or_rolled_back_states() {
             pm_snapshot_synced_at: now.unix_timestamp(),
         },
         wave_id: good.id().clone(),
-        iteration: 1,
-        observation_cursor: 0,
-        last_state_fingerprint: None,
-        agent: "codex".to_owned(),
-        provider: "codex".to_owned(),
-        provider_session_id: None,
         abandon_intent: None,
         created_at: now,
         updated_at: now,

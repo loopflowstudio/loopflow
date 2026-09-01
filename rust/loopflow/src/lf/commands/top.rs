@@ -139,7 +139,6 @@ enum ProcessKind {
     Lf,
     Codex,
     Claude,
-    Gemini,
     OpenCode,
 }
 
@@ -149,7 +148,6 @@ impl ProcessKind {
             Self::Lf => "lf",
             Self::Codex => "codex",
             Self::Claude => "claude",
-            Self::Gemini => "gemini",
             Self::OpenCode => "opencode",
         }
     }
@@ -401,7 +399,6 @@ fn process_kind(command: &str) -> Option<ProcessKind> {
         "lf" => Some(ProcessKind::Lf),
         "codex" => Some(ProcessKind::Codex),
         "claude" => Some(ProcessKind::Claude),
-        "gemini" => Some(ProcessKind::Gemini),
         "opencode" if words.iter().skip(1).any(|word| *word == "serve") => {
             Some(ProcessKind::OpenCode)
         }

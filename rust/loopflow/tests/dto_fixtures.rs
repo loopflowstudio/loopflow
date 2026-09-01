@@ -1,7 +1,7 @@
+use loopflow::controller::wave::metrics::MetricPortfolioDto;
 use loopflow::durable::WorkStatus;
 use loopflow::lf::commands::waves::{RoadmapSnapshot, WaveDetailSnapshot};
 use loopflow::ops::pm::PmShowResult;
-use loopflow::wave::metrics::MetricPortfolioDto;
 
 const PM_SHOW: &str = include_str!("../../../tests/fixtures/dto/pm_show.json");
 const WAVE_DETAIL: &str = include_str!("../../../tests/fixtures/dto/wave_detail.json");
@@ -100,7 +100,7 @@ fn status_and_roadmap_require_the_shared_metric_portfolio() {
     assert!(matches!(
         detail.metric_portfolio.metrics.as_slice(),
         [metric] if metric.identity.metric_id == "task-loop-trust"
-            && matches!(metric.evidence, loopflow::wave::metrics::MetricEvidenceDto::Met { .. })
+            && matches!(metric.evidence, loopflow::controller::wave::metrics::MetricEvidenceDto::Met { .. })
     ));
 
     let roadmap: RoadmapSnapshot = serde_json::from_str(ROADMAP).unwrap();

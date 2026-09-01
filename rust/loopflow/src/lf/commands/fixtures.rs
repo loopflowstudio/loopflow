@@ -6,11 +6,11 @@
 use std::path::Path;
 use std::sync::Arc;
 
+use crate::controller::wave::runtime::{InboxItem, WaveRuntime};
+use crate::controller::wave::server;
 use crate::id::WaveId;
 use crate::store::{open_store, SharedStore, StorageConfig};
-use crate::wave::runtime::{InboxItem, WaveRuntime};
-use crate::wave::server;
-use crate::wave::Wave;
+use crate::work::wave::Wave;
 
 pub(crate) async fn temp_store(dir: &Path) -> SharedStore {
     Arc::new(
@@ -47,7 +47,7 @@ pub(crate) async fn boot_server(
     let app = server::router_with_observer(
         runtime.clone(),
         server::ResidentDoor::new("test-token"),
-        Arc::new(crate::wave::registry::ObserverSlot::new(
+        Arc::new(crate::controller::wave::registry::ObserverSlot::new(
             runtime.clone(),
             None,
         )),

@@ -1064,13 +1064,6 @@ pub(crate) async fn provider_route_account_ids(
     Ok((!accounts.is_empty()).then_some(accounts))
 }
 
-pub(crate) fn resolve_provider_account_blocking(
-    provider: Provider,
-    provider_session_id: Option<String>,
-) -> Result<Option<ProviderAccountRoute>, ProviderAccountError> {
-    resolve_provider_account_exact_blocking(provider, provider_session_id, None)
-}
-
 pub(crate) fn resolve_provider_account_exact_blocking(
     provider: Provider,
     provider_session_id: Option<String>,

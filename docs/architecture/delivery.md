@@ -1,11 +1,14 @@
 # Delivery
 
-A Task binds durable planning to one managed worktree and one serial PR chain.
+A Task binds durable planning to one managed worktree and one active remote
+branch at a time. The current implementation retains settled PRs as a serial
+delivery history.
 Git owns commits and branches. GitHub owns PR heads, checks, and merge. Local
 state records enough evidence to resume the workflow safely.
 
 ```bash
-lf task run INF-123
+lf task prepare INF-123
+lf --task INF-123 implement
 lf commit -m "parser: accept nested groups"
 lf pr publish --title "Parser: accept nested groups"
 lf pr land -c
@@ -30,22 +33,24 @@ Task Work ----> managed worktree ----> commits
 | Object | Authority |
 | --- | --- |
 | Task directive and Project membership | Linear Issue |
-| managed worktree path and serial PR state | Task delivery records plus resolved Git repository |
+| managed worktree placement and serial PR state | Task delivery records plus resolved Git repository |
 | commits, branch ancestry, rebase state | Git |
 | PR head, required checks, merge | GitHub |
 | landing supervision and repair admission | exact recorded PR head plus landing generation |
 
-Task types live under [`task/`](../../rust/loopflow/src/task/). Operational Git,
+Task types live under [`work/task/`](../../rust/loopflow/src/work/task/). Operational Git,
 PR, CI, and landing workflows live under [`ops/`](../../rust/loopflow/src/ops/).
 The exact landing fence is modeled in
 [`pr_landing.rs`](../../rust/loopflow/src/pr_landing.rs).
 
 ## Create or reuse the worktree
 
-`lf task run` resolves one existing Linear Issue inside one Project, creates or
-reuses its managed worktree, and launches the Task's current Flow there. The
-repository identity—not the caller's current directory spelling—selects the
-Git directory and sibling worktree namespace.
+`lf task prepare` resolves one existing Linear Issue inside one Project and
+creates or reuses its managed worktree and first serial PR record. It installs
+no controller. `lf task run` uses the same substrate and additionally starts
+the built-in end-to-end Task flow. The repository identity—not the caller's
+current directory spelling—selects the Git directory and sibling worktree
+namespace.
 
 Only Task Work owns a delivery worktree. Project and Wave processes coordinate;
 they do not edit product files in substitute worktrees.
@@ -74,8 +79,9 @@ lf pr land                                     # prepared and auto-merged
 `land` integrate current main, clear merge-time scratch state, collapse
 checkpoint history into one authored commit, verify once, and push the exact
 head. `arm` requests GitHub auto-merge and returns. `land` watches through
-merge. Managed Task worktrees reject `submit`; that human-click path is for
-ordinary non-Task PRs.
+merge. `submit` performs the same preparation but leaves the exact-head merge
+to a human. These delivery commands inspect Task delivery state when present;
+they do not require a controller or certify that a particular Flow ran.
 
 `lf pr open` is the presenting verb; it opens the review surface after
 publishing. Headless Task flows use publish, arm, or land.
@@ -86,7 +92,6 @@ Loopflow uses advisory OS file locks beneath the repository's absolute Git
 directory:
 
 ```text
-<absolute-git-dir>/loopflow/writers/writer_<uuid>.json
 <absolute-git-dir>/loopflow/rebase-owner.json
 <absolute-git-dir>/lf-pr-mutation.lock
 ```
@@ -94,25 +99,23 @@ directory:
 The open file descriptor is authority. JSON is a readable receipt. Process
 death releases the kernel lock even if metadata remains.
 
-### Writer and rebase
+### Rebase operation
 
-An agent launch creates and locks its own writer receipt for the provider
-attempt. Independent agents use different receipts and may coexist. A rebase
-locks `rebase-owner.json` for the Git sequencer lifetime and refuses to begin
-while an independent writer is live. New writers refuse while the rebase lock
-is live.
+Provider launches receive no durable Git writer token. Independent agents may
+coexist in the shared worktree. A rebase locks `rebase-owner.json` for the Git
+sequencer lifetime; new agent launches refuse while that operation is live.
 
 | Concurrent work | Result |
 | --- | --- |
-| agent + independent agent | allowed |
+| agent + independent agent | allowed; use distinct output paths |
 | read/build/test + agent | allowed |
-| rebase + independent agent | blocked in either start order |
+| live rebase + new agent launch | blocked |
 | rebase + its exact recovery child | allowed |
-| stale receipt without a kernel lock | not a live owner |
+| stale rebase record without a kernel lock | adopted or removed through the rebase path |
 
-The writer lease does not serialize file edits, Run recording, tests, or
-planning writes. It exists so a broad integration operation cannot start
-beneath a live writer.
+The rebase owner authorizes only its exact sequencer and recovery child. It does
+not make a provider the worktree owner or serialize ordinary edits, Run
+recording, tests, or planning writes.
 
 ### PR mutation
 
@@ -165,7 +168,10 @@ serial chain to a new branch from fetched main.
 
 ## Boundary contracts
 
-- One Task owns one worktree and one serial PR chain.
+- One Task has one active remote branch. A checkout tracking it identifies the
+  Task; the stored worktree path is placement.
+- Settled PRs may remain as serial history until the one-branch Task model
+  replaces rotation.
 - Simultaneously open dependent work belongs to another stacked Task.
 - Git and GitHub remain authority for their own objects.
 - Locks serialize exact local races, not all activity.
@@ -174,6 +180,6 @@ serial chain to a new branch from fetched main.
 
 ## Next
 
-[Planning →](planning.md) owns the Task's objective and playhead.
+[Planning →](planning.md) separates the Task objective from controller playheads.
 [Homes and processes →](homes.md) owns the machine and process boundaries around
 delivery.

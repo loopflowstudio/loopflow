@@ -9,11 +9,11 @@
 use std::path::Path;
 use std::process::Command;
 
-use loopflow::engine::wave_context::{resolve_managed_wave, WaveResolveError};
 use loopflow::id::WaveId;
 use loopflow::store::sqlite::SqliteStore;
 use loopflow::store::{open_store, PmSnapshotRow, StorageConfig};
-use loopflow::wave::Wave;
+use loopflow::work::wave::context::{resolve_managed_wave, WaveResolveError};
+use loopflow::work::wave::Wave;
 
 /// The command matrix at the resolver itself: one durable Wave, driven from
 /// every ambient environment. Each cell resolves the SAME wave name or returns

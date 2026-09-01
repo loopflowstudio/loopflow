@@ -1,7 +1,5 @@
 //! Durable input and execution identity shared by Wave, Project, and Task Work.
 
-use std::path::PathBuf;
-
 use serde::{Deserialize, Serialize};
 use time::OffsetDateTime;
 
@@ -9,7 +7,6 @@ use crate::id::WaveId;
 
 /// The exact active Run named by an in-Run process.
 pub const RUN_ID_ENV: &str = "LF_RUN_ID";
-
 macro_rules! durable_id {
     ($name:ident, $prefix:literal) => {
         #[derive(Debug, Clone, PartialEq, Eq, Hash, Serialize, Deserialize)]
@@ -61,14 +58,11 @@ macro_rules! durable_id {
 pub enum DurableDataError {
     #[error("invalid durable id: {0}")]
     InvalidId(String),
-    #[error("invalid Ask state: {0}")]
-    InvalidAskState(String),
 }
 
 durable_id!(ProjectId, "proj_");
 durable_id!(TaskId, "task_");
 durable_id!(RunId, "run_");
-durable_id!(AskId, "ask_");
 durable_id!(HomeId, "home_");
 durable_id!(SteerId, "steer_");
 durable_id!(ToolResponseId, "response_");
@@ -132,154 +126,18 @@ pub struct Placement {
 }
 
 #[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
-#[serde(tag = "kind", content = "work", rename_all = "snake_case")]
-pub enum AskTarget {
-    User,
-    Parent(WorkRef),
-}
-
-impl std::fmt::Display for AskTarget {
-    fn fmt(&self, formatter: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
-        match self {
-            Self::User => formatter.write_str("user"),
-            Self::Parent(work) => {
-                write!(formatter, "parent:{}:{}", work.kind(), work.id())
-            }
-        }
-    }
-}
-
-#[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize)]
-#[serde(rename_all = "snake_case")]
-pub enum AskState {
-    Queued,
-    Claimed,
-    Resolved,
-    Declined,
-    Cancelled,
-}
-
-impl AskState {
-    pub fn is_terminal(self) -> bool {
-        matches!(self, Self::Resolved | Self::Declined | Self::Cancelled)
-    }
-
-    pub(crate) fn as_str(self) -> &'static str {
-        match self {
-            Self::Queued => "queued",
-            Self::Claimed => "claimed",
-            Self::Resolved => "resolved",
-            Self::Declined => "declined",
-            Self::Cancelled => "cancelled",
-        }
-    }
-
-    pub(crate) fn parse(value: &str) -> Result<Self, DurableDataError> {
-        match value {
-            "queued" => Ok(Self::Queued),
-            "claimed" => Ok(Self::Claimed),
-            "resolved" => Ok(Self::Resolved),
-            "declined" => Ok(Self::Declined),
-            "cancelled" => Ok(Self::Cancelled),
-            value => Err(DurableDataError::InvalidAskState(value.to_string())),
-        }
-    }
-}
-
-#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
-pub struct AskOrigin {
+pub struct FlowPosition {
     pub work: WorkRef,
-    pub source_run_id: Option<RunId>,
-    pub home_id: HomeId,
-    pub cwd: PathBuf,
-}
-
-#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
-#[serde(tag = "kind", rename_all = "snake_case")]
-pub enum AskBody {
-    Intervention {
-        prompt: String,
-    },
-    FlowStep {
-        flow: String,
-        node_id: String,
-        skill: String,
-        iteration: u32,
-    },
-}
-
-impl std::fmt::Display for AskBody {
-    fn fmt(&self, formatter: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
-        match self {
-            Self::Intervention { prompt } => formatter.write_str(prompt),
-            Self::FlowStep {
-                flow,
-                node_id,
-                skill,
-                ..
-            } => write!(formatter, "{flow}:{node_id} ({skill})"),
-        }
-    }
-}
-
-#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
-#[serde(tag = "kind", rename_all = "snake_case")]
-pub enum AskResult {
-    Resolved { summary: String },
-    Declined { reason: String },
-    Cancelled { reason: String },
-}
-
-impl AskResult {
-    pub(crate) fn state(&self) -> AskState {
-        match self {
-            Self::Resolved { .. } => AskState::Resolved,
-            Self::Declined { .. } => AskState::Declined,
-            Self::Cancelled { .. } => AskState::Cancelled,
-        }
-    }
-
-    pub fn text(&self) -> &str {
-        match self {
-            Self::Resolved { summary } => summary,
-            Self::Declined { reason } | Self::Cancelled { reason } => reason,
-        }
-    }
-}
-
-#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
-pub struct Ask {
-    pub id: AskId,
-    pub origin: AskOrigin,
-    pub target: AskTarget,
-    pub request: AskBody,
-    pub state: AskState,
-    pub active_run_id: Option<RunId>,
-    #[serde(with = "time::serde::rfc3339::option")]
-    pub ready_at: Option<OffsetDateTime>,
-    #[serde(with = "time::serde::rfc3339::option")]
-    pub presented_at: Option<OffsetDateTime>,
-    pub result: Option<AskResult>,
-    pub terminal_author: Option<Author>,
+    pub flow: String,
+    pub step: String,
+    pub node_id: Option<String>,
+    pub human: bool,
+    pub session_run_id: Option<RunId>,
+    pub ready_summary: Option<String>,
+    pub step_index: u32,
+    pub iteration: u32,
     #[serde(with = "time::serde::rfc3339")]
-    pub asked_at: OffsetDateTime,
-    #[serde(with = "time::serde::rfc3339::option")]
-    pub terminal_at: Option<OffsetDateTime>,
-}
-
-/// One target-authorized Ask claim.
-#[derive(Debug)]
-pub struct AskClaim {
-    pub run_id: RunId,
-    pub needs_launch: bool,
-}
-
-#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
-pub struct AskSession {
-    pub ask_id: AskId,
-    pub run_id: RunId,
-    pub home_route: String,
-    pub attach_argv: Vec<String>,
+    pub updated_at: OffsetDateTime,
 }
 
 #[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
@@ -361,19 +219,6 @@ impl std::fmt::Display for WorkStatus {
 }
 
 #[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
-pub struct FlowPosition {
-    pub work: WorkRef,
-    pub flow: String,
-    pub step: String,
-    pub node_id: Option<String>,
-    pub human: bool,
-    pub step_index: u32,
-    pub iteration: u32,
-    #[serde(with = "time::serde::rfc3339")]
-    pub updated_at: OffsetDateTime,
-}
-
-#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
 pub struct AbandonReceipt {
     pub work: WorkRef,
     pub reason: String,
@@ -383,7 +228,7 @@ pub struct AbandonReceipt {
 
 #[cfg(test)]
 mod tests {
-    use super::{render_steers, AskSession, Steer, WorkStatus};
+    use super::{render_steers, Steer, WorkStatus};
     use crate::durable::{Author, ProjectId, SteerId, WorkRef};
 
     #[test]
@@ -402,24 +247,6 @@ mod tests {
             render_steers(&steers),
             "<lf:steers>\n- first\n- second\n</lf:steers>"
         );
-    }
-
-    #[test]
-    fn ask_session_fixture_round_trips_generic_run_identity() {
-        let fixture = include_str!("../../../tests/fixtures/dto/ask_session.json");
-        let session: AskSession = serde_json::from_str(fixture).unwrap();
-        assert_eq!(
-            session.ask_id.as_str(),
-            "ask_00000000000000000000000000000001"
-        );
-        assert_eq!(
-            session.run_id.as_str(),
-            "run_00000000000000000000000000000002"
-        );
-
-        let encoded = serde_json::to_string(&session).unwrap();
-        let decoded: AskSession = serde_json::from_str(&encoded).unwrap();
-        assert_eq!(decoded, session);
     }
 
     #[test]

@@ -400,12 +400,14 @@ durable Task Work in its own stable sibling worktree:
 ```bash
 lf task start <linear-project-id> "add retry to token refresh"
 pbpaste | lf task start incident-management
+lf task prepare INF-123
+lf --task INF-123 research "write scratch/retry-analysis.md"
 lf task run INF-123
 lf task run INF-124 --stack-on INF-123     # dependent work before the parent merges
 lf task run INF-125 --first incident --loop ship-5whys --finally ship-demo
 ```
 
-Task Work advances through zero or more serial PRs to `main`. Its Project
+Task Work advances through one active remote branch and PR to `main`. Its Project
 configures `first`, `loop`, and `finally` flows; Task launch resolves all three
 and pins them for the lifetime of the Task. `--first`, `--loop`, and `--finally`
 override one Task at launch. The first flow runs once, the loop repeats, and the
@@ -413,14 +415,8 @@ finally flow gates, records learnings, and lands. After a merge or abandonment,
 Loopflow rotates the worktree onto the next branch. The Task inherits the wave's
 `GOAL.md` and `MEMORY.md` plus its Project definition and KRs.
 
-Loopflow expands the selected lifecycle before launch and refuses a composition
-without an autonomous loop or a terminal `pr land -c` operation. The
-[`lf` reference](lf.md#running-waves-projects-and-tasks) defines the lifecycle
-contract and recovery behavior.
-
 Each Task PR title starts with its Linear Task name, and its body links directly
-to the Linear issue. The anchors survive publication refreshes and serial PR
-rotation.
+to the Linear issue. The anchors survive publication refreshes.
 
 The wave stays steerable while several independent tasks run — task events
 enter its inbox as typed observations and wake it once. Steering, status,

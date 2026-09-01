@@ -24,13 +24,17 @@ The bar: could someone reading this code for the first time understand it faster
    If yes: this is the reduction opportunity. Don't just clean up around the edges—reshape toward the simpler design you now see.
 
 2. **Review the diff**
-   The diff against main is in your context. Identify what was added, what was changed.
+   The diff against main is in your context. Identify what was added, what was
+   changed, and whether the current slice still moves toward the complete
+   reviewed design.
 
 3. **Find reduction opportunities**
    For each file touched, ask:
    - What's unused now that this change landed?
    - What abstraction exists only because the old code needed it?
    - What duplication did this change create or reveal?
+   - Which old authority, type, writer, or path should now be unreachable?
+   - Did a locally convenient adapter leave two representations of one concept?
 
 4. **Reduce**
    Apply changes directly. Prefer reshaping over deleting—a better structure beats surgical removal.

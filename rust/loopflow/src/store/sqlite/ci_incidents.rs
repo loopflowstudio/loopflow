@@ -6,7 +6,7 @@ use time::OffsetDateTime;
 use crate::pr_landing::PrLandingId;
 use crate::store::ci_incidents::CiIncidentReportRow;
 use crate::store::{StoreError, StoreResult};
-use crate::task::{CiIncident, TaskId, TaskPrId};
+use crate::work::task::{CiIncident, TaskId, TaskPrId};
 
 fn timestamp(value: OffsetDateTime) -> i64 {
     value.unix_timestamp_nanos() as i64

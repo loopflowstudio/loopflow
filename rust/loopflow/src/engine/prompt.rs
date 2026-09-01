@@ -101,6 +101,8 @@ pub struct GatherContextOpts {
     pub files: Vec<String>,
     /// Wave name for wave/ scoping.
     pub wave: Option<String>,
+    /// Wave memory already resolved by the Work layer.
+    pub wave_memory: Option<String>,
     pub include_diff: bool,
     pub include_diff_files: bool,
     pub include_clipboard: bool,
@@ -407,7 +409,15 @@ pub fn gather_context(opts: &GatherContextOpts) -> Result<GatheredContext, CoreE
 
     let mut docs = Vec::new();
     let mut summaries = Vec::new();
-    let mut wave_memory = None;
+    let mut wave_memory = opts.wave_memory.as_ref().map(|content| Document {
+        path: opts
+            .wave
+            .as_ref()
+            .map(|wave| format!("wave/{wave}/MEMORY.md"))
+            .unwrap_or_else(|| "wave/MEMORY.md".to_string()),
+        content: content.clone(),
+        source: DocumentSource::WaveMemory,
+    });
     let mut diff_files = Vec::new();
     for doc in gathered_docs {
         match doc.source {
@@ -447,25 +457,6 @@ pub fn gather_context(opts: &GatherContextOpts) -> Result<GatheredContext, CoreE
         "read clipboard"
     );
 
-    // Wave memory follows durable ownership. Explicit --wave wins; otherwise
-    // LF_WAVE_ID resolves the Wave. Conversation is never included by recency.
-    let memory_start = Instant::now();
-    let ambient_wave = opts
-        .wave
-        .clone()
-        .or_else(crate::engine::wave_context::resolve_ambient_wave_name);
-    if wave_memory.is_none() {
-        if let Some(wave) = ambient_wave.as_deref() {
-            wave_memory = gather_wave_memory_doc(repo_root, Some(wave))?;
-        }
-    }
-    debug!(
-        elapsed_ms = memory_start.elapsed().as_millis(),
-        wave = ambient_wave.as_deref(),
-        has_memory = wave_memory.is_some(),
-        "gathered wave memory"
-    );
-
     debug!(elapsed_ms = start.elapsed().as_millis(), "gathered context");
     Ok(GatheredContext(PromptComponents {
         surface: opts.surface,
@@ -491,12 +482,9 @@ pub fn gather_context(opts: &GatherContextOpts) -> Result<GatheredContext, CoreE
 pub fn gather_documents(spec: &GatherSpec) -> Result<Vec<Document>, CoreError> {
     let mut docs = Vec::new();
 
-    // Preserve ambient ordering: scratch -> wave -> wave memory -> explicit docs.
+    // Preserve ambient ordering: scratch -> wave -> explicit docs.
     docs.extend(gather_scratch_docs(&spec.repo_root)?);
     docs.extend(gather_wave_docs(&spec.repo_root, spec.wave.as_deref())?);
-    if let Some(doc) = gather_wave_memory_doc(&spec.repo_root, spec.wave.as_deref())? {
-        docs.push(doc);
-    }
     if !spec.docs.is_empty() {
         let explicit_docs = gather_doc_targets(&spec.repo_root, &spec.docs, &spec.related_repos)?;
         if explicit_docs.len() > MAX_EXPLICIT_DOC_FILES {
@@ -580,26 +568,6 @@ fn gather_wave_docs(repo_root: &Path, wave: Option<&str>) -> Result<Vec<Document
     }
 
     Ok(docs)
-}
-
-fn gather_wave_memory_doc(
-    repo_root: &Path,
-    wave: Option<&str>,
-) -> Result<Option<Document>, CoreError> {
-    let Some(wave_name) = wave else {
-        return Ok(None);
-    };
-
-    let Some(content) = crate::engine::wave_context::gather_wave_memory(repo_root, wave_name)
-    else {
-        return Ok(None);
-    };
-
-    Ok(Some(Document {
-        path: format!("wave/{wave_name}/MEMORY.md"),
-        content,
-        source: DocumentSource::WaveMemory,
-    }))
 }
 
 enum ResolvedDocTarget<'a> {
@@ -973,17 +941,28 @@ fn gather_md_files(
         return Ok(());
     }
 
-    for entry in fs::read_dir(dir)? {
-        let entry = entry?;
+    gather_md_files_from(dir, dir, docs, source)
+}
+
+fn gather_md_files_from(
+    root: &Path,
+    dir: &Path,
+    docs: &mut Vec<Document>,
+    source: DocumentSource,
+) -> Result<(), CoreError> {
+    let mut entries = fs::read_dir(dir)?.collect::<Result<Vec<_>, _>>()?;
+    entries.sort_by_key(|entry| entry.path());
+
+    for entry in entries {
         let path = entry.path();
 
         if path.is_dir() {
-            gather_md_files(&path, docs, source)?;
+            gather_md_files_from(root, &path, docs, source)?;
         } else if path.extension().map(|e| e == "md").unwrap_or(false) {
             if let Ok(content) = fs::read_to_string(&path) {
                 docs.push(Document {
                     path: path
-                        .strip_prefix(dir.parent().unwrap_or(dir))
+                        .strip_prefix(root.parent().unwrap_or(root))
                         .unwrap_or(&path)
                         .to_string_lossy()
                         .to_string(),
@@ -1408,11 +1387,11 @@ fn glob_to_regex(pattern: &str) -> String {
 
 /// Files that coding agents load natively. All are skipped from lf docs to
 /// avoid duplication — whichever agent runs will pick up its own file.
-const AGENT_NATIVE_FILES: &[&str] = &["CLAUDE.md", "AGENTS.md", "GEMINI.md"];
+const AGENT_NATIVE_FILES: &[&str] = &["CLAUDE.md", "AGENTS.md"];
 
 /// Remove docs that duplicate any agent's natively-loaded instruction file.
 ///
-/// Skips all known native files (CLAUDE.md, AGENTS.md, GEMINI.md) and any
+/// Skips all known native files (CLAUDE.md and AGENTS.md) and any
 /// files they symlink to (e.g. CLAUDE.md -> STYLE.md also drops STYLE.md).
 pub fn drop_native_instruction_docs(
     components: &mut PromptComponents,
@@ -2091,7 +2070,7 @@ mod tests {
             let prompt = render_full_prompt(components);
             assert!(prompt.contains("A human is present"), "surface {surface:?}");
             assert!(
-                prompt.contains("never enqueue a User Ask"),
+                prompt.contains("never create a human session"),
                 "surface {surface:?}"
             );
         }
@@ -2495,8 +2474,9 @@ mod tests {
         let components = PromptComponents::default();
         let prompt = render_full_prompt(components);
         assert!(prompt.contains("Run mode is headless"));
-        assert!(prompt.contains("requests an Ask session from the\nparent Work"));
-        assert!(prompt.contains("only for genuine absent-User action"));
+        assert!(prompt.contains("launch an ordinary Run explicitly"));
+        assert!(prompt.contains("opens a durable human session"));
+        assert!(prompt.contains("If no human authority is required"));
     }
 
     #[test]
@@ -2827,6 +2807,40 @@ mod tests {
     }
 
     #[test]
+    fn gather_context_loads_every_nested_scratch_markdown_file_in_path_order() {
+        let temp = tempfile::tempdir().expect("create temp dir");
+        let repo = temp.path();
+        std::fs::create_dir_all(repo.join("scratch/nested")).expect("create nested scratch");
+        std::fs::write(repo.join("scratch/z.md"), "z research").expect("write z research");
+        std::fs::write(repo.join("scratch/a.md"), "a design").expect("write a design");
+        std::fs::write(repo.join("scratch/nested/b.md"), "b evidence")
+            .expect("write nested evidence");
+        std::fs::write(repo.join("scratch/raw.log"), "not implicit context")
+            .expect("write non-markdown evidence");
+
+        let components = gather_context(&GatherContextOpts {
+            repo_root: repo.to_path_buf(),
+            ..Default::default()
+        })
+        .expect("gather scratch context");
+        let scratch = components
+            .docs
+            .iter()
+            .filter(|document| document.source == DocumentSource::Scratch)
+            .map(|document| (document.path.as_str(), document.content.as_str()))
+            .collect::<Vec<_>>();
+
+        assert_eq!(
+            scratch,
+            [
+                ("scratch/a.md", "a design"),
+                ("scratch/nested/b.md", "b evidence"),
+                ("scratch/z.md", "z research"),
+            ]
+        );
+    }
+
+    #[test]
     fn gather_context_loads_explicit_docs_targets() {
         let repo = init_repo();
         write_file(repo.path(), "README.md", "# Project");
@@ -2939,18 +2953,14 @@ directions:
     }
 
     #[test]
-    fn gather_context_reads_wave_memory() {
+    fn gather_context_uses_preassembled_wave_memory() {
         let repo = init_repo();
         write_file(repo.path(), "wave/living/README.md", "# Living");
-        write_file(
-            repo.path(),
-            "wave/living/MEMORY.md",
-            "- always run rustfmt before commit",
-        );
 
         let opts = GatherContextOpts {
             repo_root: repo.path().to_path_buf(),
             wave: Some("living".to_string()),
+            wave_memory: Some("- always run rustfmt before commit".to_string()),
             ..Default::default()
         };
 

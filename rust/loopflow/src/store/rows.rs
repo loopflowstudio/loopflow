@@ -1,5 +1,5 @@
 use crate::store::StoreResult;
-use crate::wave::Wave;
+use crate::work::wave::Wave;
 
 pub fn unix_to_datetime(seconds: i64) -> time::OffsetDateTime {
     time::OffsetDateTime::from_unix_timestamp(seconds).unwrap_or(time::OffsetDateTime::UNIX_EPOCH)

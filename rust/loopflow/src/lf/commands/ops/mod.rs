@@ -234,7 +234,7 @@ pub fn run_rebase(
             continue_rebase_after_authorization(&repo_root, true, || {
                 crate::ops::task::record_task_pr_repair(
                     &repo_root,
-                    crate::task::TaskPrRepairKind::ManualGitRepair,
+                    crate::work::task::TaskPrRepairKind::ManualGitRepair,
                 )
                 .map(|_| ())
             })?;
@@ -249,7 +249,7 @@ pub fn run_rebase(
             abort_rebase_after_authorization(&repo_root, true, || {
                 crate::ops::task::record_task_pr_repair(
                     &repo_root,
-                    crate::task::TaskPrRepairKind::ManualGitRepair,
+                    crate::work::task::TaskPrRepairKind::ManualGitRepair,
                 )
                 .map(|_| ())
             })?;
@@ -385,7 +385,7 @@ fn resolve_rebase_conflict(
     if avoidable {
         crate::ops::task::record_task_pr_repair(
             repo_root,
-            crate::task::TaskPrRepairKind::AvoidableRebaseAgent,
+            crate::work::task::TaskPrRepairKind::AvoidableRebaseAgent,
         )?;
     }
     progress.status("Launching rebase agent to resolve conflicts...");
@@ -636,8 +636,8 @@ pub fn run_pm(cmd: &PmCommand) -> Result<()> {
     // `NoContext` stays `None` so a bare command keeps its "all waves" / "pass
     // --wave" behavior outside a managed process; a stale id is a loud error.
     let ambient_wave = |explicit: Option<&str>| -> Result<Option<String>> {
-        use crate::engine::wave_context::WaveResolveError;
-        match crate::engine::wave_context::resolve_managed_wave_sync(Some(&repo_root), explicit) {
+        use crate::work::wave::context::WaveResolveError;
+        match crate::work::wave::context::resolve_managed_wave_sync(Some(&repo_root), explicit) {
             Ok(wave) => Ok(Some(wave.name().to_string())),
             Err(WaveResolveError::NoContext) => Ok(None),
             Err(other) => Err(other.into()),
@@ -1205,13 +1205,13 @@ pub fn cron_cmd(cmd: &CronCommand) -> Result<()> {
             // `LF_WAVE_ID` (UUID or repository-scoped registered name). A
             // scheduled invocation needs a concrete wave, so `NoContext` is the
             // familiar "pass --wave" error.
-            let wave = crate::engine::wave_context::resolve_managed_wave_sync(
+            let wave = crate::work::wave::context::resolve_managed_wave_sync(
                 Some(&repo_root),
                 wave.as_deref(),
             )
             .map(|wave| wave.name().to_string())
             .map_err(|err| match err {
-                crate::engine::wave_context::WaveResolveError::NoContext => {
+                crate::work::wave::context::WaveResolveError::NoContext => {
                     anyhow!("cannot determine wave; pass --wave <name>")
                 }
                 other => other.into(),
@@ -1444,7 +1444,7 @@ fn cron_authority(wave_name: &str) -> Result<CronAuthority> {
         let store = crate::store::open_registry_for_authority()
             .await
             .map_err(cron_registry_error)?;
-        let wave = crate::engine::wave_context::resolve_managed_wave(
+        let wave = crate::work::wave::context::resolve_managed_wave(
             Some(&store),
             Some(&repo_root),
             Some(wave_name),
@@ -1520,7 +1520,7 @@ fn cron_target_kind(repo: &Path, name: &str) -> Result<CronTargetKind> {
 
 fn cron_specs(authority: &CronAuthority, wave: &str) -> Result<Vec<CronSpec>> {
     let lf_path = crate::ops::resolve_lf_path()?;
-    crate::engine::wave_config::try_read_wave_config(&authority.repo, wave)?
+    crate::work::wave::config::try_read_wave_config(&authority.repo, wave)?
         .ok_or_else(|| {
             anyhow!(
                 "Wave {wave} has no GOAL.md in {}; refusing to prune installed cron jobs",
@@ -2401,16 +2401,23 @@ fn launch_skill_agent(
         .cwd
         .clone()
         .unwrap_or_else(|| repo_root.to_path_buf());
-    let capture = crate::run_record::CaptureHandle::begin(crate::run_record::RunSpec {
-        harness: provider,
-        model,
-        surface: "headless".to_string(),
-        cwd,
-        repo: Some(repo_root.to_path_buf()),
-        worktree: Some(repo_root.to_path_buf()),
-        skill: Some(skill_name.to_string()),
-        subjects: Vec::new(),
-    })?;
+    let context = crate::trace::PreparedTurnContext::from_prompts(
+        &crate::engine::agent::system_prompt_with_structured_replies(&prepared.config),
+        &prepared.config.task_prompt,
+    );
+    let capture = crate::run_record::CaptureHandle::begin_with_context(
+        crate::run_record::RunSpec {
+            harness: provider,
+            model,
+            surface: "headless".to_string(),
+            cwd,
+            repo: Some(repo_root.to_path_buf()),
+            worktree: Some(repo_root.to_path_buf()),
+            skill: Some(skill_name.to_string()),
+            subjects: Vec::new(),
+        },
+        &context,
+    )?;
     capture.record_input("initial", &prepared.config.task_prompt);
 
     let mut launch = prepared.config;
@@ -2572,14 +2579,6 @@ const SYSTEM_DEPS: &[SystemDep] = &[
         macos_only: false,
         brew: None,
         fallback: "npm install -g @openai/codex",
-    },
-    SystemDep {
-        name: "gemini",
-        command: "gemini",
-        required: false,
-        macos_only: false,
-        brew: None,
-        fallback: "npm install -g @google/gemini-cli",
     },
     SystemDep {
         name: "warp",

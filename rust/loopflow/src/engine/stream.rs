@@ -1,6 +1,6 @@
 //! Stateful parser and formatter for agent stream-json events.
 //!
-//! Parses streaming JSON lines from Claude, Codex, Gemini, and OpenCode into
+//! Parses streaming JSON lines from Claude, Codex, and OpenCode into
 //! structured events and renders them as human-readable output (tool use
 //! summaries, cost/duration, text fragments). Protocol JSON with unrecognized
 //! types is suppressed; non-JSON lines pass through to the caller.
@@ -65,9 +65,9 @@ impl Default for StreamFormat {
 
 /// Stateful parser for stream-json lines.
 ///
-/// Handles Claude (`--output-format stream-json`), Codex (`--json`),
-/// Gemini (`--output-format stream-json`), and OpenCode (`--format json`)
-/// formats, normalizing all into the same `StreamEvent` types.
+/// Handles Claude (`--output-format stream-json`), Codex (`--json`), and
+/// OpenCode (`--format json`) formats, normalizing all into the same
+/// `StreamEvent` types.
 #[derive(Debug, Default)]
 pub struct StreamParser;
 
@@ -136,18 +136,6 @@ impl StreamParser {
             }]),
             "thread.started" | "turn.started" | "item.updated" => ParseResult::Skipped,
 
-            // ── Gemini ──────────────────────────────────────────────
-            // Gemini emits message/tool_use/tool_result/result events.
-            "message" => match parse_gemini_message(&v) {
-                Some(event) => ParseResult::Events(vec![event]),
-                None => ParseResult::Skipped,
-            },
-            "tool_use" => match parse_gemini_tool_use(&v) {
-                Some(event) => ParseResult::Events(vec![event]),
-                None => ParseResult::Skipped,
-            },
-            "init" | "tool_result" => ParseResult::Skipped,
-
             // ── OpenCode ─────────────────────────────────────────────
             // OpenCode emits text/skill_start/skill_finish with a "part" wrapper.
             // Guard "text" on sessionID to avoid conflicts with future agents.
@@ -159,10 +147,9 @@ impl StreamParser {
             "skill_finish" => ParseResult::Events(parse_opencode_finish(&v)),
 
             // ── Shared ──────────────────────────────────────────────
-            // Both Claude and Gemini emit "result" events (different schemas).
             "result" => ParseResult::Events(parse_result(&v)),
 
-            // Both Codex and Gemini emit "error" events.
+            // Codex emits separate error events before turn.failed.
             "error" => ParseResult::Skipped,
 
             // Unrecognized type — still protocol JSON, suppress it.
@@ -310,20 +297,6 @@ fn parse_codex_turn_completed(v: &serde_json::Value) -> Vec<StreamEvent> {
     events
 }
 
-// ── Gemini parsing ──────────────────────────────────────────────────────────
-
-fn parse_gemini_message(v: &serde_json::Value) -> Option<StreamEvent> {
-    let role = v.get("role").and_then(|r| r.as_str())?;
-    if role != "assistant" {
-        return None;
-    }
-    let content = v.get("content").and_then(|c| c.as_str())?;
-    if content.is_empty() {
-        return None;
-    }
-    Some(StreamEvent::Text(content.to_string()))
-}
-
 fn extract_codex_text(item: &serde_json::Value) -> Option<String> {
     if let Some(text) = item.get("text").and_then(|t| t.as_str()) {
         if !text.is_empty() {
@@ -372,44 +345,6 @@ fn extract_codex_turn_text(v: &serde_json::Value) -> Option<String> {
     }
 
     None
-}
-
-fn parse_gemini_tool_use(v: &serde_json::Value) -> Option<StreamEvent> {
-    let tool_name = v.get("tool_name").and_then(|n| n.as_str())?.to_string();
-    let params = v.get("parameters").cloned().unwrap_or_default();
-    let summary = summarize_gemini_tool(&tool_name, &params);
-    Some(StreamEvent::ToolUse {
-        name: tool_name,
-        summary,
-    })
-}
-
-fn summarize_gemini_tool(name: &str, params: &serde_json::Value) -> String {
-    match name {
-        "run_shell_command" => params
-            .get("description")
-            .or_else(|| params.get("command"))
-            .and_then(|v| v.as_str())
-            .map(|s| truncate(s, 60))
-            .unwrap_or_default(),
-        "read_file" | "write_file" | "edit" => params
-            .get("file_path")
-            .and_then(|v| v.as_str())
-            .unwrap_or("")
-            .to_string(),
-        "read_many_files" => "multiple files".to_string(),
-        "google_web_search" => params
-            .get("query")
-            .and_then(|v| v.as_str())
-            .unwrap_or("")
-            .to_string(),
-        "web_fetch" => params
-            .get("url")
-            .and_then(|v| v.as_str())
-            .unwrap_or("")
-            .to_string(),
-        _ => String::new(),
-    }
 }
 
 // ── OpenCode parsing ────────────────────────────────────────────────────────
@@ -478,14 +413,9 @@ fn parse_token_usage(usage: &serde_json::Value) -> Option<StreamEvent> {
     })
 }
 
-/// Parse a "result" event — works for both Claude and Gemini.
-/// Claude uses "subtype", Gemini uses "status". Claude also carries a `usage`
-/// object, which is emitted as a separate `Usage` event before the `Result`.
+/// Parse a Claude "result" event, including its separate usage event.
 fn parse_result(v: &serde_json::Value) -> Vec<StreamEvent> {
-    let subtype_str = v
-        .get("subtype")
-        .or_else(|| v.get("status"))
-        .and_then(|s| s.as_str());
+    let subtype_str = v.get("subtype").and_then(|s| s.as_str());
     let subtype = match subtype_str {
         Some("error") => ResultSubtype::Error,
         _ => ResultSubtype::Success,
@@ -495,21 +425,11 @@ fn parse_result(v: &serde_json::Value) -> Vec<StreamEvent> {
         .get("total_cost_usd")
         .or_else(|| v.get("cost_usd"))
         .and_then(|c| c.as_f64());
-    // Claude: duration_ms; Gemini: stats.duration_ms; fallback: duration_secs
-    let duration_secs = v
-        .get("duration_secs")
-        .and_then(|d| d.as_f64())
-        .or_else(|| {
-            v.get("duration_ms")
-                .and_then(|d| d.as_f64())
-                .map(|ms| ms / 1000.0)
-        })
-        .or_else(|| {
-            v.get("stats")
-                .and_then(|s| s.get("duration_ms"))
-                .and_then(|d| d.as_f64())
-                .map(|ms| ms / 1000.0)
-        });
+    let duration_secs = v.get("duration_secs").and_then(|d| d.as_f64()).or_else(|| {
+        v.get("duration_ms")
+            .and_then(|d| d.as_f64())
+            .map(|ms| ms / 1000.0)
+    });
     let mut events = Vec::new();
     if let Some(usage) = v.get("usage").and_then(parse_token_usage) {
         events.push(usage);
@@ -895,72 +815,6 @@ mod tests {
     fn codex_thread_started_skipped() {
         let mut parser = StreamParser::new();
         let line = r#"{"type":"thread.started","thread_id":"abc"}"#;
-        assert_eq!(parser.feed_line(line), ParseResult::Skipped);
-    }
-
-    // ── Gemini tests ────────────────────────────────────────────
-
-    #[test]
-    fn gemini_assistant_message() {
-        let mut parser = StreamParser::new();
-        let line = r#"{"type":"message","timestamp":"2025-01-01T00:00:00Z","role":"assistant","content":"hello","delta":true}"#;
-        assert_eq!(
-            parser.feed_line(line),
-            ParseResult::Events(vec![StreamEvent::Text("hello".to_string())])
-        );
-    }
-
-    #[test]
-    fn gemini_user_message_skipped() {
-        let mut parser = StreamParser::new();
-        let line = r#"{"type":"message","timestamp":"2025-01-01T00:00:00Z","role":"user","content":"do something"}"#;
-        assert_eq!(parser.feed_line(line), ParseResult::Skipped);
-    }
-
-    #[test]
-    fn gemini_tool_use() {
-        let mut parser = StreamParser::new();
-        let line = r#"{"type":"tool_use","timestamp":"2025-01-01T00:00:00Z","tool_name":"run_shell_command","tool_id":"c1","parameters":{"command":"ls","description":"List files"}}"#;
-        assert_eq!(
-            parser.feed_line(line),
-            ParseResult::Events(vec![StreamEvent::ToolUse {
-                name: "run_shell_command".to_string(),
-                summary: "List files".to_string(),
-            }])
-        );
-    }
-
-    #[test]
-    fn gemini_tool_use_read_file() {
-        let mut parser = StreamParser::new();
-        let line = r#"{"type":"tool_use","timestamp":"2025-01-01T00:00:00Z","tool_name":"read_file","tool_id":"c1","parameters":{"file_path":"/src/main.rs"}}"#;
-        assert_eq!(
-            parser.feed_line(line),
-            ParseResult::Events(vec![StreamEvent::ToolUse {
-                name: "read_file".to_string(),
-                summary: "/src/main.rs".to_string(),
-            }])
-        );
-    }
-
-    #[test]
-    fn gemini_result_with_stats() {
-        let mut parser = StreamParser::new();
-        let line = r#"{"type":"result","timestamp":"2025-01-01T00:00:00Z","status":"success","stats":{"duration_ms":5000,"total_tokens":250}}"#;
-        assert_eq!(
-            parser.feed_line(line),
-            ParseResult::Events(vec![StreamEvent::Result {
-                subtype: ResultSubtype::Success,
-                cost_usd: None,
-                duration_secs: Some(5.0),
-            }])
-        );
-    }
-
-    #[test]
-    fn gemini_init_skipped() {
-        let mut parser = StreamParser::new();
-        let line = r#"{"type":"init","timestamp":"2025-01-01T00:00:00Z","session_id":"s1","model":"gemini-2.0-flash"}"#;
         assert_eq!(parser.feed_line(line), ParseResult::Skipped);
     }
 

@@ -1,6 +1,7 @@
 use std::io::BufRead;
 use std::ops::{Deref, DerefMut};
 use std::path::Path;
+use std::time::Duration;
 
 use anyhow::{anyhow, Result};
 use sha2::{Digest, Sha256};
@@ -20,6 +21,10 @@ use crate::work::wave::Wave;
 mod state;
 
 pub(crate) use state::{automatic_restart_bar, State};
+
+/// Cadence for reading durable steer/interrupt requests into a live provider
+/// turn between provider events.
+const CONTROL_TICK_INTERVAL: Duration = Duration::from_secs(5);
 
 #[derive(Debug, Clone)]
 struct ControlledProject {
@@ -59,6 +64,8 @@ async fn controlled_project(
 #[derive(Debug)]
 struct PreparedProjectStep {
     turn: crate::lf::commands::run::PreparedHarnessTurn,
+    steers: Vec<i64>,
+    interrupt_id: i64,
     planning: crate::ops::task_pm::ResolvedProject,
 }
 
@@ -84,11 +91,15 @@ async fn run_project_inner(store: SharedStore, project_id: ProjectId) -> Result<
     store
         .append_project_event(&project.id, &ProjectEventKind::Started)
         .await?;
+    let target = ChildRef::Project(project.id.clone());
+    let work = store.work_for_child(&target).await?;
     let observations = consume_task_observations(&store, &mut project).await?;
     let (mut flow, _) = Playhead::new(QueuedInvocation::load(Path::new(wave.repo()), "project")?);
     let mut prepared =
         prepare_project_flow_step(&store, &mut project, &wave, &flow, &observations).await?;
     let mut active_planning = prepared.planning.clone();
+    let mut steer_cursor = prepared.steers.last().copied().unwrap_or(0);
+    let mut interrupt_cursor = prepared.interrupt_id;
     let (harness_name, _) = crate::engine::config::parse_agent(&project.state.agent);
     let capture = crate::run_record::CaptureHandle::begin_with_context(
         crate::run_record::RunSpec {
@@ -156,6 +167,8 @@ async fn run_project_inner(store: SharedStore, project_id: ProjectId) -> Result<
         "project {}> attached; /status, /interrupt, /detach, or type an instruction",
         project.plan.slug
     );
+    let mut control_tick = tokio::time::interval(CONTROL_TICK_INTERVAL);
+    control_tick.set_missed_tick_behavior(tokio::time::MissedTickBehavior::Delay);
     let mut last_text = String::new();
     loop {
         tokio::select! {
@@ -167,6 +180,14 @@ async fn run_project_inner(store: SharedStore, project_id: ProjectId) -> Result<
                         handle_attachment(&store, &project, line).await?;
                     }
                 }
+            }
+            _ = control_tick.tick() => {
+                crate::ops::child::inject_live_steers(
+                    &store, &work, harness.as_mut(), &mut steer_cursor,
+                ).await;
+                crate::ops::child::observe_interrupt(
+                    &store, &work, harness.as_mut(), &mut interrupt_cursor,
+                ).await;
             }
             event = event_rx.recv() => {
                 let Some(event) = event else {
@@ -189,8 +210,7 @@ async fn run_project_inner(store: SharedStore, project_id: ProjectId) -> Result<
                 }
                 match event {
                     ConversationEvent::TextDelta { content, .. } => last_text.push_str(&content),
-                    ConversationEvent::TurnStarted { .. } => {
-                    }
+                    ConversationEvent::TurnStarted { .. } => {}
                     ConversationEvent::ItemCompleted { .. } => {}
                     ConversationEvent::TurnCompleted { status, .. } => {
                         if status == Lifecycle::Failed {
@@ -223,21 +243,10 @@ async fn run_project_inner(store: SharedStore, project_id: ProjectId) -> Result<
                             false
                         };
                         flow_turn_active = false;
-                        if status != Lifecycle::Interrupted {
-                            let observations =
-                                consume_task_observations(&store, &mut project).await?;
-                            if !observations.is_empty() {
-                                apply_input(
-                                    harness.as_mut(),
-                                    format!(
-                                        "New supervised Task observations arrived. Continue the same Project iteration:\n{}",
-                                        observations.join("\n")
-                                    ),
-                                ).await?;
-                                continue;
-                            }
-                        }
-                        if !flow_iteration_completed && status != Lifecycle::Interrupted {
+                        if status == Lifecycle::Interrupted {
+                            // A Project interrupt forces this same step onto a
+                            // fresh, comment-complete seed instead of parking the
+                            // controller, mirroring Task control.
                             let prepared = prepare_project_flow_step(
                                 &store,
                                 &mut project,
@@ -247,6 +256,45 @@ async fn run_project_inner(store: SharedStore, project_id: ProjectId) -> Result<
                             )
                             .await?;
                             active_planning = prepared.planning.clone();
+                            steer_cursor = prepared.steers.last().copied().unwrap_or(0);
+                            interrupt_cursor = prepared.interrupt_id;
+                            start_project_flow_turn(
+                                &store,
+                                &mut project,
+                                harness.as_mut(),
+                                &mut flow,
+                                capture.as_ref(),
+                                prepared,
+                            )
+                            .await?;
+                            flow_turn_active = true;
+                            last_text.clear();
+                            continue;
+                        }
+                        let observations =
+                            consume_task_observations(&store, &mut project).await?;
+                        if !observations.is_empty() {
+                            apply_input(
+                                harness.as_mut(),
+                                format!(
+                                    "New supervised Task observations arrived. Continue the same Project iteration:\n{}",
+                                    observations.join("\n")
+                                ),
+                            ).await?;
+                            continue;
+                        }
+                        if !flow_iteration_completed {
+                            let prepared = prepare_project_flow_step(
+                                &store,
+                                &mut project,
+                                &wave,
+                                &flow,
+                                &[],
+                            )
+                            .await?;
+                            active_planning = prepared.planning.clone();
+                            steer_cursor = prepared.steers.last().copied().unwrap_or(0);
+                            interrupt_cursor = prepared.interrupt_id;
                             start_project_flow_turn(
                                 &store,
                                 &mut project,
@@ -270,10 +318,7 @@ async fn run_project_inner(store: SharedStore, project_id: ProjectId) -> Result<
                                 },
                             ).await?;
                         }
-                        let mut outcome = inspect_outcome(&store, &project, &active_planning).await?;
-                        if status == Lifecycle::Interrupted {
-                            outcome.disposition = ProjectDisposition::Wait;
-                        }
+                        let outcome = inspect_outcome(&store, &project, &active_planning).await?;
                         if outcome.disposition == ProjectDisposition::Continue {
                             project.state.last_state_fingerprint = Some(outcome.fingerprint);
                             project.updated_at = time::OffsetDateTime::now_utc();
@@ -288,6 +333,8 @@ async fn run_project_inner(store: SharedStore, project_id: ProjectId) -> Result<
                             )
                             .await?;
                             active_planning = prepared.planning.clone();
+                            steer_cursor = prepared.steers.last().copied().unwrap_or(0);
+                            interrupt_cursor = prepared.interrupt_id;
                             start_project_flow_turn(
                                 &store,
                                 &mut project,
@@ -368,6 +415,7 @@ async fn prepare_project_flow_step(
         .work_for_child(&ChildRef::Project(project.id.clone()))
         .await?;
     let steers = store.work_steers(&work).await?;
+    let interrupt_id = store.latest_interrupt_id(&work).await?;
     let step = flow
         .current()
         .ok_or_else(|| anyhow!("Project flow has no current step"))?;
@@ -395,6 +443,8 @@ async fn prepare_project_flow_step(
     prepared.config.agent = Some(project.state.agent.clone());
     Ok(PreparedProjectStep {
         turn: prepared,
+        steers: steers.iter().map(|steer| steer.id).collect(),
+        interrupt_id,
         planning,
     })
 }
@@ -513,10 +563,10 @@ async fn handle_attachment(
     }
     let target = ChildRef::Project(project.id.clone());
     let work = store.work_for_child(&target).await?;
-    let receipt = store
+    let steer = store
         .append_steer(&work, crate::durable::Author::User, line)
         .await?;
-    println!("queued {}", receipt.steer.id);
+    println!("queued {}", steer.id);
     Ok(())
 }
 
@@ -709,7 +759,7 @@ mod tests {
     use crate::id::WaveId;
     use crate::planning::{LinearProjectId, ProjectPlan};
     use crate::pm::{PmKr, PmProject, ProjectFlowPlan};
-    use crate::store::{open_store, SharedStore, StorageConfig};
+    use crate::store::{SharedStore, StorageConfig};
     use crate::work::project::{Project, ProjectEventKind, ProjectId};
     use crate::work::wave::Wave;
 
@@ -722,7 +772,7 @@ mod tests {
         let directory = tempfile::tempdir().unwrap();
         let database = directory.path().join("registry.db");
         let store = std::sync::Arc::new(
-            open_store(&StorageConfig::sqlite(database.clone()))
+            crate::store::open_ephemeral_store(&StorageConfig::sqlite(database.clone()))
                 .await
                 .unwrap(),
         );
@@ -850,9 +900,13 @@ mod tests {
             .unwrap();
         assert_eq!(controller.observation_cursor, 17);
         assert_eq!(store.work_steers(&work).await.unwrap(), prior_steers);
+        // Prior durable evidence survives the refresh. The steer is now a Project
+        // comment in the same event stream, so it rides alongside that evidence.
         let events = store.project_events_after(&adopted.id, 0).await.unwrap();
-        assert_eq!(events.len(), 1);
-        assert_eq!(events[0], prior_event);
+        assert!(events.contains(&prior_event));
+        assert!(events
+            .iter()
+            .any(|event| matches!(event.kind, ProjectEventKind::Steer { .. })));
 
         let adopted = super::ControlledProject {
             work: adopted,

@@ -203,29 +203,31 @@ foreground listener without `lfd`, inject the same secret for that process:
 doppler run -- lf wave product
 ```
 
-The bot needs only **View Channel**, **Read Message History**, and **Send
-Messages**, with Message Content enabled in the Discord developer portal. A
-backing change takes effect when the listener restarts and starts one durable
-conversation segment. Earlier local segments stay selectable and read-only;
-the API and `--epoch` flag retain their exact segment ids.
+The bot needs **View Channel**, **Read Message History**, **Send Messages**, and
+**Add Reactions**, with Message Content enabled in the Discord developer portal.
+A backing change takes effect when the listener restarts and starts one durable
+conversation segment. Earlier local segments stay selectable and read-only; the
+API and `--epoch` flag retain their exact segment ids.
 
-Discord is the transcript authority while its segment is active. Loopflow reads
-bounded history from Discord on demand and stores no duplicate presentation
-transcript. The Mac composer and `lf chat "text"` post through the bot, visibly
-prefix the message with the Wave name, and preserve message, steer, or interrupt
-intent when the provider echo reaches the resident. The Open in Discord action
-stays beside the native composer. A provider failure never falls through to a
-hidden local message. Human and agent speech appears only after Discord returns
-its provider message id. Every API message names its segment and exact local
-journal event or Discord message source.
+Discord is the transcript authority while its segment is active. The Gateway
+pushes new messages to Loopflow; every reconnect first catches up over REST from
+the journal's committed cursor. Each external message is journaled before the
+cursor advances. The Wave reads that durable channel tail, including its own
+replies, so restart recovery needs no consumed-message queue.
 
-Loopflow retains source-linked inputs until the resident consumes them,
-deterministic send intents, cursors, and direct provider receipts. Harness
-conversation and usage evidence belongs to Home-local Run records. `home_id`
-is the portable binding owner (`lf home id`) and must match the Wave's durable
-placement. Another Home fails before contacting Discord, while an OS-held
-lease prevents another checkout on the owner Home from consuming the same
-channel.
+The Mac composer and `lf chat "text"` post through the bot, visibly prefix the
+message with the Wave name, and preserve message, steer, or interrupt intent
+when the provider echo reaches the listener. The Open in Discord action stays
+beside the native composer. A provider failure never falls through to a hidden
+local message. Human and agent speech appears only after Discord returns its
+provider message id. Deterministic send intents, cursors, source links, and
+direct provider receipts remain durable; harness conversation and usage
+evidence belongs to Home-local Run records.
+
+`home_id` is the portable binding owner (`lf home id`) and must match the Wave's
+durable placement. Another Home fails before contacting Discord, while an
+OS-held lease prevents another checkout on the owner Home from observing the
+same channel.
 
 Read the current conversation segment or an earlier one explicitly:
 

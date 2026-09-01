@@ -2958,7 +2958,7 @@ mod tests {
     }
 
     async fn isolated_pm_store(repo: &Path) -> Store {
-        open_store(&crate::store::StorageConfig::sqlite(
+        crate::store::open_ephemeral_store(&crate::store::StorageConfig::sqlite(
             repo.join("registry.db"),
         ))
         .await
@@ -3168,9 +3168,11 @@ mod tests {
         );
 
         let database = repo.path().join("registry.db");
-        let store = open_store(&crate::store::StorageConfig::sqlite(database.clone()))
-            .await
-            .unwrap();
+        let store = crate::store::open_ephemeral_store(&crate::store::StorageConfig::sqlite(
+            database.clone(),
+        ))
+        .await
+        .unwrap();
         let survival = Wave::new(
             WaveId::new(),
             "survival".to_string(),
@@ -3342,9 +3344,11 @@ mod tests {
         );
 
         let database = repo.path().join("registry.db");
-        let store = open_store(&crate::store::StorageConfig::sqlite(database.clone()))
-            .await
-            .unwrap();
+        let store = crate::store::open_ephemeral_store(&crate::store::StorageConfig::sqlite(
+            database.clone(),
+        ))
+        .await
+        .unwrap();
         store
             .create_wave(&Wave::new(
                 WaveId::new(),
@@ -3913,7 +3917,7 @@ mod tests {
         let db_path =
             std::env::temp_dir().join(format!("lf-pm-refresh-{}.db", crate::id::WaveId::new()));
         let store = std::sync::Arc::new(
-            open_store(&crate::store::StorageConfig::sqlite(db_path))
+            crate::store::open_ephemeral_store(&crate::store::StorageConfig::sqlite(db_path))
                 .await
                 .expect("open token store"),
         );
@@ -3969,7 +3973,7 @@ mod tests {
         let db_path =
             std::env::temp_dir().join(format!("lf-pm-refresh-{}.db", crate::id::WaveId::new()));
         let store = std::sync::Arc::new(
-            open_store(&crate::store::StorageConfig::sqlite(db_path))
+            crate::store::open_ephemeral_store(&crate::store::StorageConfig::sqlite(db_path))
                 .await
                 .expect("open token store"),
         );

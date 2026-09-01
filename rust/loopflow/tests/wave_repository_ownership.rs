@@ -6,7 +6,7 @@ use loopflow::controller::wave::relocate::relocate_wave;
 use loopflow::durable::{HomeId, WorkRef, WorkStatus};
 use loopflow::id::WaveId;
 use loopflow::planning::{LinearIssueId, LinearProjectId, ProjectPlan, TaskPlan};
-use loopflow::store::{open_store, PmSnapshotRow, StorageConfig};
+use loopflow::store::{PmSnapshotRow, StorageConfig};
 use loopflow::work::project::{Project, ProjectId};
 use loopflow::work::task::{Observation, PmWritebackState, Task, TaskId, TaskPr, TaskPrId};
 use loopflow::work::wave::context::{resolve_managed_wave, WaveResolveError};
@@ -188,7 +188,7 @@ async fn repositories_own_same_named_waves_and_relocation_preserves_identity() {
 
     std::fs::create_dir_all(&home).unwrap();
     let database = home.join("loopflow.db");
-    let store = open_store(&StorageConfig::sqlite(database.clone()))
+    let store = loopflow::store::open_ephemeral_store(&StorageConfig::sqlite(database.clone()))
         .await
         .unwrap();
     apply_status_truth(&database);
@@ -561,7 +561,7 @@ async fn missing_repository_wave_can_be_disabled_and_relocated_from_its_target()
     author_wave(&target, "feedback", "feedback");
     std::fs::create_dir_all(&home).unwrap();
     let database = home.join("loopflow.db");
-    let store = open_store(&StorageConfig::sqlite(database.clone()))
+    let store = loopflow::store::open_ephemeral_store(&StorageConfig::sqlite(database.clone()))
         .await
         .unwrap();
     apply_status_truth(&database);
@@ -623,7 +623,7 @@ async fn relocation_retires_an_empty_destination_shadow_without_losing_identity(
     let home = tmp.path().join("home");
     std::fs::create_dir_all(&home).unwrap();
     let database = home.join("loopflow.db");
-    let store = open_store(&StorageConfig::sqlite(database.clone()))
+    let store = loopflow::store::open_ephemeral_store(&StorageConfig::sqlite(database.clone()))
         .await
         .unwrap();
     apply_status_truth(&database);
@@ -714,7 +714,9 @@ async fn relocation_retires_an_empty_destination_shadow_without_losing_identity(
     );
     assert_eq!(store.list_waves(None).await.unwrap().len(), 4);
 
-    let reopened = open_store(&StorageConfig::sqlite(database)).await.unwrap();
+    let reopened = loopflow::store::open_ephemeral_store(&StorageConfig::sqlite(database))
+        .await
+        .unwrap();
     assert_eq!(reopened.list_waves(None).await.unwrap().len(), 4);
     for (established, _) in &identities {
         assert_eq!(
@@ -738,7 +740,7 @@ async fn relocation_refuses_meaningful_destination_history() {
     repository(&target);
     author_wave(&source, "core", "core");
     let database = tmp.path().join("loopflow.db");
-    let store = open_store(&StorageConfig::sqlite(database.clone()))
+    let store = loopflow::store::open_ephemeral_store(&StorageConfig::sqlite(database.clone()))
         .await
         .unwrap();
     apply_status_truth(&database);

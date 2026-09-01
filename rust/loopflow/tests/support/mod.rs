@@ -5,9 +5,7 @@ use std::sync::{Mutex, OnceLock};
 
 use loopflow::id::WaveId;
 use loopflow::planning::{LinearIssueId, LinearProjectId, ProjectPlan, TaskPlan};
-use loopflow::store::{
-    open_store, PmSnapshotRow, StorageConfig, Store, CONTROL_DB_PATH_ENV, CONTROL_HOME_ENV,
-};
+use loopflow::store::{PmSnapshotRow, StorageConfig, Store, CONTROL_DB_PATH_ENV, CONTROL_HOME_ENV};
 use loopflow::work::project::{Project, ProjectId};
 use loopflow::work::task::{PmWritebackState, Task, TaskId, TaskPr, TaskPrId};
 use loopflow::work::wave::Wave;
@@ -270,7 +268,9 @@ fn register_task_fixture(
 ) -> RegisteredTask {
     let runtime = tokio::runtime::Runtime::new().expect("task test runtime");
     let store = runtime
-        .block_on(open_store(&StorageConfig::sqlite(home.join("loopflow.db"))))
+        .block_on(loopflow::store::open_ephemeral_store(
+            &StorageConfig::sqlite(home.join("loopflow.db")),
+        ))
         .expect("open task test store");
     let now = OffsetDateTime::now_utc();
     let wave = Wave::new(

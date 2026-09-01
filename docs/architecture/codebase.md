@@ -116,8 +116,8 @@ not resolve either from the planning store.
 
 The Home daemon exposes Home-scoped health, status, Wave start/stop/reconcile,
 webhook, and landing-claim routes. A Wave listener exposes only that Wave's
-conversation, events, playhead, messages, observations, stop, and resident
-attachment/context routes.
+channel, conversation, events, playhead, messages, observations, stop, and
+resident attachment/context routes.
 
 HTTP is a local supervision and presentation transport. It does not centralize
 Run records, provider credentials, or cross-Home process control. Remote access

@@ -1,9 +1,9 @@
 //! One Discord guild text channel as a presentation surface for Wave chat.
 //!
-//! Discord owns the company transcript. This adapter polls only messages after
-//! the journal's committed cursor and writes source-linked inputs plus outbound
-//! delivery receipts through [`WaveRuntime`]. It never owns an inbox or writes
-//! the journal directly.
+//! Discord owns the company transcript. This adapter receives new messages from
+//! the Gateway, catches up from the journal's committed cursor after reconnect,
+//! and writes source-linked inputs plus outbound delivery receipts through
+//! [`WaveRuntime`]. It never owns an inbox or writes the journal directly.
 
 use std::collections::{HashMap, HashSet};
 use std::fs::{File, OpenOptions};
@@ -12,6 +12,7 @@ use std::time::Duration;
 
 use anyhow::{anyhow, Context, Result};
 use fs2::FileExt;
+use futures_util::{SinkExt, StreamExt};
 use reqwest::header::{HeaderMap, HeaderValue, AUTHORIZATION, USER_AGENT};
 use reqwest::{Client, StatusCode};
 use secrecy::{ExposeSecret, SecretString};
@@ -19,6 +20,7 @@ use serde::de::DeserializeOwned;
 use serde::{Deserialize, Serialize};
 use sha2::{Digest, Sha256};
 use tokio::sync::watch;
+use tokio_tungstenite::tungstenite::Message as WsMessage;
 
 use crate::chat::turns::{ChatRole, ChatTurn};
 use crate::controller::wave::chat::{
@@ -26,13 +28,22 @@ use crate::controller::wave::chat::{
 };
 use crate::controller::wave::journal::{DiscordChatBinding, DiscordMessageSource, MessageOp};
 use crate::controller::wave::runtime::WaveRuntime;
-use crate::durable::HomeId;
 
 pub const TOKEN_ENV: &str = crate::engine::process::DISCORD_TOKEN_ENV;
 const API_BASE: &str = "https://discord.com/api/v10";
+const GATEWAY_URL: &str = "wss://gateway.discord.gg/?v=10&encoding=json";
 const REQUEST_TIMEOUT: Duration = Duration::from_secs(10);
-const POLL_CADENCE: Duration = Duration::from_secs(2);
+/// How often the gateway-driven loop flushes pending outbound sends. Inbound is
+/// push (gateway events); only outbound needs its own cadence.
+const OUTBOUND_TICK: Duration = Duration::from_secs(1);
 const ERROR_BACKOFF: Duration = Duration::from_secs(10);
+/// Discord asks apps to wait a short beat before re-IDENTIFYing after an
+/// INVALID_SESSION, so a repeated invalid session isn't a tight reconnect loop.
+const REIDENTIFY_BACKOFF: Duration = Duration::from_secs(2);
+/// Gateway close codes that will never succeed on retry (bad token, invalid or
+/// disallowed — including the privileged MESSAGE_CONTENT — intents, invalid
+/// shard/version). These surface as Blocked instead of looping forever.
+const FATAL_CLOSE_CODES: &[u16] = &[4004, 4010, 4011, 4012, 4013, 4014];
 const MESSAGE_LIMIT: usize = 2_000;
 const VIEW_CHANNEL: u64 = 1 << 10;
 const SEND_MESSAGES: u64 = 1 << 11;
@@ -40,6 +51,30 @@ const READ_MESSAGE_HISTORY: u64 = 1 << 16;
 const ADMINISTRATOR: u64 = 1 << 3;
 const MESSAGE_CONTENT: u64 = 1 << 18;
 const MESSAGE_CONTENT_LIMITED: u64 = 1 << 19;
+
+// Gateway intents: the bot receives guild message events plus their content.
+const INTENT_GUILD_MESSAGES: u64 = 1 << 9;
+const INTENT_MESSAGE_CONTENT: u64 = 1 << 15;
+
+// Gateway opcodes (https://discord.com/developers/docs/topics/gateway-events).
+const OP_DISPATCH: u64 = 0;
+const OP_HEARTBEAT: u64 = 1;
+const OP_IDENTIFY: u64 = 2;
+const OP_RESUME: u64 = 6;
+const OP_RECONNECT: u64 = 7;
+const OP_INVALID_SESSION: u64 = 9;
+const OP_HELLO: u64 = 10;
+const OP_HEARTBEAT_ACK: u64 = 11;
+
+// Instant-ack reactions (Devin/Cursor pattern): the channel feels responsive
+// because pickup is acknowledged in <1s, well before the reply is ready.
+const ACK_EMOJI: &str = "👀";
+const DONE_EMOJI: &str = "✅";
+
+/// Percent-encode an emoji for a Discord reaction path (every UTF-8 byte).
+fn percent_encode_emoji(emoji: &str) -> String {
+    emoji.bytes().map(|byte| format!("%{byte:02X}")).collect()
+}
 
 #[derive(Debug, thiserror::Error)]
 pub enum DiscordError {
@@ -59,71 +94,49 @@ pub enum DiscordError {
     InvalidPermission(String),
     #[error("Discord messages are limited to {limit} characters; this message has {actual}")]
     MessageTooLong { limit: usize, actual: usize },
-    #[error("Discord chat binding is owned by Home {owner}; current Home is {current}")]
-    WrongHome { owner: HomeId, current: HomeId },
-    #[error("Discord chat binding Home {configured} does not match Wave placement {placed}")]
-    PlacementMismatch { configured: HomeId, placed: HomeId },
-    #[error(
-        "Discord chat binding {guild_id}/{channel_id} already has a live listener on Home {home_id}"
-    )]
+    #[error("Discord chat binding {guild_id}/{channel_id} already has a live listener here")]
     AlreadyOwned {
         guild_id: String,
         channel_id: String,
-        home_id: HomeId,
     },
     #[error("failed to claim Discord chat binding: {0}")]
     Lease(#[from] std::io::Error),
+    #[error("Discord gateway connection failed: {0}")]
+    Gateway(String),
+    #[error("Discord gateway rejected the connection fatally: {0}")]
+    GatewayFatal(String),
 }
 
 impl DiscordError {
     fn retryable(&self) -> bool {
         matches!(self, Self::Transport(_))
             || matches!(self, Self::Api { status, .. } if status.is_server_error())
+            // A dropped or closed gateway is normal; reconnect and RESUME.
+            // `GatewayFatal` (bad token, disallowed intents) is deliberately not
+            // here — it must surface as Blocked, not loop forever.
+            || matches!(self, Self::Gateway(_))
     }
 }
 
-/// Process-held ownership for one Discord binding on its configured Home.
-///
-/// The authored Home stays portable when another store observes the repo. It
-/// must agree with Wave placement; the advisory lock then prevents a second
-/// checkout or store on that Home from competing. The file may outlive the
-/// process; only the held OS lock carries authority.
+/// Local single-owner authority for one Discord binding: an advisory OS lock on
+/// a file keyed by guild+channel. Only the held lock carries authority (the file
+/// may outlive the process). This is all the core needs — it prevents a second
+/// checkout or store *on this machine* from competing. Which machine runs a
+/// Discord-bound Wave at all is the general Wave-placement layer, not this lock.
 #[derive(Debug)]
 struct DiscordBindingLease {
     _file: File,
 }
 
 impl DiscordBindingLease {
-    fn acquire(
-        binding: &DiscordChatBinding,
-        configured_home_id: &HomeId,
-        placed_home_id: &HomeId,
-        local_home_id: &HomeId,
-    ) -> Result<Self, DiscordError> {
-        if configured_home_id != placed_home_id {
-            return Err(DiscordError::PlacementMismatch {
-                configured: configured_home_id.clone(),
-                placed: placed_home_id.clone(),
-            });
-        }
-        if configured_home_id != local_home_id {
-            return Err(DiscordError::WrongHome {
-                owner: configured_home_id.clone(),
-                current: local_home_id.clone(),
-            });
-        }
+    fn acquire(binding: &DiscordChatBinding) -> Result<Self, DiscordError> {
         Self::acquire_at(
             &crate::store::authority_home_dir().join("chat-bindings"),
             binding,
-            local_home_id,
         )
     }
 
-    fn acquire_at(
-        root: &Path,
-        binding: &DiscordChatBinding,
-        local_home_id: &HomeId,
-    ) -> Result<Self, DiscordError> {
+    fn acquire_at(root: &Path, binding: &DiscordChatBinding) -> Result<Self, DiscordError> {
         std::fs::create_dir_all(root)?;
         let mut digest = Sha256::new();
         digest.update(b"discord\0");
@@ -143,7 +156,6 @@ impl DiscordBindingLease {
                 Err(DiscordError::AlreadyOwned {
                     guild_id: binding.guild_id.clone(),
                     channel_id: binding.channel_id.clone(),
-                    home_id: local_home_id.clone(),
                 })
             }
             Err(error) => Err(DiscordError::Lease(error)),
@@ -155,6 +167,9 @@ impl DiscordBindingLease {
 struct DiscordClient {
     http: Client,
     base_url: String,
+    /// Retained so the gateway can authenticate its IDENTIFY. Never logged:
+    /// the `Debug` impl omits it and the header carrying it is marked sensitive.
+    token: SecretString,
 }
 
 impl std::fmt::Debug for DiscordClient {
@@ -198,6 +213,7 @@ impl DiscordClient {
         Ok(Self {
             http,
             base_url: base_url.trim_end_matches('/').to_string(),
+            token,
         })
     }
 
@@ -252,6 +268,49 @@ impl DiscordClient {
             return Ok(response.json().await?);
         }
     }
+
+    /// PUT/DELETE with no response body (Discord reaction endpoints answer 204).
+    /// Shares the rate-limit retry and error mapping; ignores the empty body.
+    async fn send_empty(&self, request: reqwest::RequestBuilder) -> Result<(), DiscordError> {
+        let request = request.build()?;
+        loop {
+            let response = self
+                .http
+                .execute(request.try_clone().ok_or_else(|| {
+                    DiscordError::Binding("Discord request body was not replayable".into())
+                })?)
+                .await?;
+            if response.status() == StatusCode::TOO_MANY_REQUESTS {
+                let retry = response
+                    .json::<RateLimit>()
+                    .await
+                    .map(|limit| limit.retry_after)
+                    .unwrap_or(1.0);
+                tokio::time::sleep(Duration::from_secs_f64(retry.max(0.05))).await;
+                continue;
+            }
+            if !response.status().is_success() {
+                let status = response.status();
+                let message = response
+                    .json::<ApiError>()
+                    .await
+                    .map(|error| error.message)
+                    .unwrap_or_else(|_| "request rejected".to_string());
+                return Err(DiscordError::Api { status, message });
+            }
+            return Ok(());
+        }
+    }
+
+    async fn put_empty(&self, path: &str) -> Result<(), DiscordError> {
+        self.send_empty(self.http.put(format!("{}{path}", self.base_url)))
+            .await
+    }
+
+    async fn delete(&self, path: &str) -> Result<(), DiscordError> {
+        self.send_empty(self.http.delete(format!("{}{path}", self.base_url)))
+            .await
+    }
 }
 
 /// A preflighted channel adapter. Construction performs every permanent
@@ -263,6 +322,9 @@ pub struct DiscordAdapter {
     bot_user_id: String,
     initial_head: Option<String>,
     health: watch::Sender<ChatBackingHealth>,
+    /// The gateway to dial for inbound events. Defaults to Discord's; tests
+    /// point it at a local websocket fixture.
+    gateway_url: String,
     _lease: Option<DiscordBindingLease>,
 }
 
@@ -278,17 +340,9 @@ pub(crate) struct DiscordProjection {
 impl DiscordAdapter {
     pub async fn preflight(
         binding: DiscordChatBinding,
-        configured_home_id: &HomeId,
-        placed_home_id: &HomeId,
-        local_home_id: &HomeId,
         token: Option<SecretString>,
     ) -> Result<Self, DiscordError> {
-        let lease = DiscordBindingLease::acquire(
-            &binding,
-            configured_home_id,
-            placed_home_id,
-            local_home_id,
-        )?;
+        let lease = DiscordBindingLease::acquire(&binding)?;
         let client = match token {
             Some(token) => DiscordClient::from_secret(Some(token), API_BASE)?,
             None => DiscordClient::from_env()?,
@@ -346,6 +400,7 @@ impl DiscordAdapter {
             bot_user_id: bot.id,
             initial_head: channel.last_message_id,
             health,
+            gateway_url: GATEWAY_URL.to_string(),
             _lease: None,
         })
     }
@@ -370,26 +425,33 @@ impl DiscordAdapter {
         Ok(())
     }
 
+    /// Ingest through the Discord gateway (a persistent websocket): messages
+    /// arrive as `MESSAGE_CREATE` pushes instead of a 2s poll. Each session
+    /// catches up over REST from the journal cursor on connect (the gateway does
+    /// not replay history), then streams live events; a dropped connection
+    /// reconnects and RESUMEs. Outbound sends still go over REST on a short tick.
     pub async fn run(self, runtime: std::sync::Arc<WaveRuntime>) {
+        // `resume` is threaded by `&mut` so a session's freshest identity/seq
+        // survives *any* exit — a clean RECONNECT, a zombie, or a transport drop
+        // — and the next connection RESUMEs instead of re-IDENTIFYing.
+        let mut resume: Option<ResumeState> = None;
         loop {
-            match self.sync_once(&runtime).await {
-                Ok(()) => {
-                    self.health.send_replace(ChatBackingHealth::Ready);
-                    tokio::time::sleep(POLL_CADENCE).await;
-                }
+            match self.run_gateway_session(&runtime, &mut resume).await {
+                Ok(Reconnect::Now) => {}
+                Ok(Reconnect::AfterBackoff) => tokio::time::sleep(REIDENTIFY_BACKOFF).await,
                 Err(error)
                     if error
                         .downcast_ref::<DiscordError>()
                         .is_some_and(DiscordError::retryable) =>
                 {
-                    tracing::warn!(%error, "Discord chat sync failed; retrying");
+                    tracing::warn!(%error, "Discord gateway dropped; reconnecting");
                     self.health.send_replace(ChatBackingHealth::Retrying {
                         detail: error.to_string(),
                     });
                     tokio::time::sleep(ERROR_BACKOFF).await;
                 }
                 Err(error) => {
-                    tracing::error!(%error, "Discord chat sync stopped; restart after correcting the binding or local journal");
+                    tracing::error!(%error, "Discord gateway stopped; correct the binding, token, or intents");
                     self.health.send_replace(ChatBackingHealth::Blocked {
                         detail: error.to_string(),
                     });
@@ -399,7 +461,150 @@ impl DiscordAdapter {
         }
     }
 
-    async fn sync_once(&self, runtime: &WaveRuntime) -> Result<()> {
+    /// One gateway connection, from handshake to disconnect. Updates `*resume`
+    /// live (READY establishes it; every sequenced frame advances it) so the
+    /// caller always holds the freshest resume state however the session ends.
+    async fn run_gateway_session(
+        &self,
+        runtime: &WaveRuntime,
+        resume: &mut Option<ResumeState>,
+    ) -> Result<Reconnect> {
+        let url = resume
+            .as_ref()
+            .map(|state| state.resume_url.clone())
+            .unwrap_or_else(|| self.gateway_url.clone());
+        let (stream, _) = tokio_tungstenite::connect_async(&url)
+            .await
+            .map_err(gateway_error)?;
+        let (mut write, mut read) = stream.split();
+
+        let hello = next_frame(&mut read).await?;
+        let GatewayEvent::Hello {
+            heartbeat_interval_ms,
+        } = classify_frame(&hello)?
+        else {
+            // A handshake that doesn't open with HELLO is a protocol violation,
+            // not a fatal config error: reconnect (retryable), don't Block.
+            return Err(DiscordError::Gateway("gateway did not open with HELLO".into()).into());
+        };
+
+        let resuming = resume.is_some();
+        if let Some(state) = resume.as_ref() {
+            // Health re-arms to Ready only once the RESUMED frame confirms the
+            // resume — sending the payload isn't proof it was accepted (Discord
+            // can answer with INVALID_SESSION), so we don't report Ready early.
+            send_json(
+                &mut write,
+                resume_payload(self.client.token.expose_secret(), state),
+            )
+            .await?;
+        } else {
+            send_json(
+                &mut write,
+                identify_payload(self.client.token.expose_secret()),
+            )
+            .await?;
+        }
+
+        let mut seq = resume.as_ref().map(|state| state.seq);
+        // A resumed session replays missed dispatches, but a REST catch-up from
+        // the cursor is idempotent and closes any gap either way; do it once.
+        let mut caught_up = resuming && {
+            self.catch_up_inbound(runtime).await?;
+            true
+        };
+        let mut awaiting_ack = false;
+
+        let mut heartbeat = tokio::time::interval(Duration::from_millis(heartbeat_interval_ms));
+        heartbeat.set_missed_tick_behavior(tokio::time::MissedTickBehavior::Delay);
+        heartbeat.tick().await; // consume the immediate first tick
+        let mut outbound = tokio::time::interval(OUTBOUND_TICK);
+
+        loop {
+            tokio::select! {
+                frame = next_frame(&mut read) => {
+                    let frame = frame?;
+                    if let Some(s) = frame.s {
+                        seq = Some(s);
+                        if let Some(state) = resume.as_mut() {
+                            state.seq = s;
+                        }
+                    }
+                    match classify_frame(&frame)? {
+                        GatewayEvent::Ready { session_id, resume_gateway_url } => {
+                            // Discord's resume_gateway_url is a bare host; carry
+                            // the same version/encoding query the initial connect used.
+                            *resume = Some(ResumeState {
+                                session_id,
+                                resume_url: format!("{resume_gateway_url}/?v=10&encoding=json"),
+                                seq: seq.unwrap_or(0),
+                            });
+                            if !caught_up {
+                                self.catch_up_inbound(runtime).await?;
+                                caught_up = true;
+                            }
+                            self.health.send_replace(ChatBackingHealth::Ready);
+                        }
+                        GatewayEvent::Resumed => {
+                            if !caught_up {
+                                self.catch_up_inbound(runtime).await?;
+                                caught_up = true;
+                            }
+                            self.health.send_replace(ChatBackingHealth::Ready);
+                        }
+                        GatewayEvent::MessageCreate(message) => {
+                            if !caught_up {
+                                self.catch_up_inbound(runtime).await?;
+                                caught_up = true;
+                            }
+                            if message.channel_id.as_deref() == Some(self.binding.channel_id.as_str()) {
+                                let id = message.id.clone();
+                                let human_input = self.accept_message(runtime, *message)?;
+                                runtime
+                                    .try_advance_discord_cursor(&self.binding, id.clone())
+                                    .context("journal Discord cursor")?;
+                                // Ack a live human message instantly (<1s), long
+                                // before the reply is ready — the responsiveness
+                                // the channel actually feels.
+                                if human_input {
+                                    self.react(&id, ACK_EMOJI).await;
+                                }
+                            }
+                        }
+                        GatewayEvent::HeartbeatRequest => {
+                            send_json(&mut write, heartbeat_payload(seq)).await?;
+                            awaiting_ack = true;
+                        }
+                        GatewayEvent::HeartbeatAck => awaiting_ack = false,
+                        // *resume already holds the freshest state; just reconnect.
+                        GatewayEvent::Reconnect => return Ok(Reconnect::Now),
+                        GatewayEvent::InvalidSession { resumable } => {
+                            if !resumable {
+                                *resume = None;
+                            }
+                            return Ok(Reconnect::AfterBackoff);
+                        }
+                        GatewayEvent::Hello { .. } | GatewayEvent::Ignored => {}
+                    }
+                }
+                _ = heartbeat.tick() => {
+                    if awaiting_ack {
+                        // A missed ACK means a zombie connection: drop and resume.
+                        return Ok(Reconnect::Now);
+                    }
+                    send_json(&mut write, heartbeat_payload(seq)).await?;
+                    awaiting_ack = true;
+                }
+                _ = outbound.tick() => {
+                    self.deliver_pending(runtime).await?;
+                }
+            }
+        }
+    }
+
+    /// REST catch-up from the journal cursor to the channel head. Shared by the
+    /// gateway's on-connect sync and by [`Self::sync_once`] (the tested path).
+    async fn catch_up_inbound(&self, runtime: &WaveRuntime) -> Result<()> {
         let attachment = runtime
             .discord_snapshot()
             .attachment
@@ -421,6 +626,15 @@ impl DiscordAdapter {
                     .context("journal Discord cursor")?;
             }
         }
+        Ok(())
+    }
+
+    /// The REST catch-up + outbound flush as one step. Production drives these
+    /// separately through the gateway loop; the tests exercise the shared REST
+    /// path through this helper.
+    #[cfg(test)]
+    async fn sync_once(&self, runtime: &WaveRuntime) -> Result<()> {
+        self.catch_up_inbound(runtime).await?;
         self.deliver_pending(runtime).await
     }
 
@@ -460,18 +674,45 @@ impl DiscordAdapter {
         Ok(messages)
     }
 
-    fn accept_message(&self, runtime: &WaveRuntime, message: Message) -> Result<()> {
+    /// Add a bot reaction to a message. Best-effort: an ack is cosmetic, so a
+    /// failure is logged and never breaks ingestion or delivery.
+    async fn react(&self, message_id: &str, emoji: &str) {
+        let path = format!(
+            "/channels/{}/messages/{message_id}/reactions/{}/@me",
+            self.binding.channel_id,
+            percent_encode_emoji(emoji)
+        );
+        if let Err(error) = self.client.put_empty(&path).await {
+            tracing::warn!(%error, "Discord reaction failed");
+        }
+    }
+
+    /// Remove a bot reaction. Best-effort (a 404 when it was never there is fine).
+    async fn remove_reaction(&self, message_id: &str, emoji: &str) {
+        let path = format!(
+            "/channels/{}/messages/{message_id}/reactions/{}/@me",
+            self.binding.channel_id,
+            percent_encode_emoji(emoji)
+        );
+        if let Err(error) = self.client.delete(&path).await {
+            tracing::debug!(%error, "Discord reaction removal failed");
+        }
+    }
+
+    /// Returns `true` when the message was a human chat input (delivered to the
+    /// runtime) — the caller acks live human input with a pickup reaction.
+    fn accept_message(&self, runtime: &WaveRuntime, message: Message) -> Result<bool> {
         if !message_in_epoch(&message, &runtime.active_conversation_epoch())
             .context("validate Discord input epoch")?
         {
-            return Ok(());
+            return Ok(false);
         }
         if message.author.id == self.bot_user_id {
             if self.reconcile_echo(runtime, &message)? {
-                return Ok(());
+                return Ok(false);
             }
             let Some((op, text)) = parse_authored_content(runtime.name(), &message.content) else {
-                return Ok(());
+                return Ok(false);
             };
             runtime
                 .try_deliver_discord_authored(
@@ -484,14 +725,14 @@ impl DiscordAdapter {
                     op,
                 )
                 .context("journal Discord app input")?;
-            return Ok(());
+            return Ok(false);
         }
         if message.author.bot == Some(true)
             || message.webhook_id.is_some()
             || !matches!(message.kind, 0 | 19)
             || message.content.trim().is_empty()
         {
-            return Ok(());
+            return Ok(false);
         }
         runtime
             .try_deliver_discord(
@@ -503,7 +744,7 @@ impl DiscordAdapter {
                 },
             )
             .context("journal Discord input")?;
-        Ok(())
+        Ok(true)
     }
 
     fn reconcile_echo(&self, runtime: &WaveRuntime, message: &Message) -> Result<bool> {
@@ -550,6 +791,8 @@ impl DiscordAdapter {
                 continue;
             }
             let reply_to = delivery.reply_to();
+            let ack_source = reply_to.map(|source| source.message_id.clone());
+            let mut posted_any = false;
             for part in &delivery.parts {
                 if delivery.confirmed.contains_key(&part.part_id) {
                     continue;
@@ -573,6 +816,15 @@ impl DiscordAdapter {
                 runtime
                     .try_confirm_discord_part(&delivery.delivery_id, &part.part_id, sent.id)
                     .context("journal Discord send receipt")?;
+                posted_any = true;
+            }
+            // Once the reply to a human message is delivered, flip its pickup
+            // reaction (👀) to done (✅). Best-effort; the send already landed.
+            if posted_any {
+                if let Some(source_id) = &ack_source {
+                    self.react(source_id, DONE_EMOJI).await;
+                    self.remove_reaction(source_id, ACK_EMOJI).await;
+                }
             }
         }
         Ok(())
@@ -904,6 +1156,184 @@ fn increment_snowflake(value: &str) -> Result<String> {
         .to_string())
 }
 
+// ---------------------------------------------------------------------------
+// Gateway (persistent websocket ingestion)
+// ---------------------------------------------------------------------------
+
+/// Enough to RESUME a dropped gateway session instead of re-IDENTIFYing.
+#[derive(Debug, Clone)]
+struct ResumeState {
+    session_id: String,
+    resume_url: String,
+    seq: u64,
+}
+
+/// How a finished gateway session asks the run loop to come back. The resume
+/// state itself lives in the caller's `&mut Option<ResumeState>`, updated live.
+#[derive(Debug, PartialEq, Eq)]
+enum Reconnect {
+    /// Reconnect immediately (RECONNECT opcode, zombie connection).
+    Now,
+    /// Wait a beat first (INVALID_SESSION — Discord asks for a short delay).
+    AfterBackoff,
+}
+
+/// One raw gateway frame. `s`/`t` are null on non-dispatch frames.
+#[derive(Debug, Deserialize)]
+struct GatewayFrame {
+    op: u64,
+    s: Option<u64>,
+    t: Option<String>,
+    #[serde(default)]
+    d: serde_json::Value,
+}
+
+/// A gateway frame classified into the events the listener acts on.
+#[derive(Debug)]
+enum GatewayEvent {
+    Hello {
+        heartbeat_interval_ms: u64,
+    },
+    Ready {
+        session_id: String,
+        resume_gateway_url: String,
+    },
+    Resumed,
+    MessageCreate(Box<Message>),
+    HeartbeatRequest,
+    HeartbeatAck,
+    Reconnect,
+    InvalidSession {
+        resumable: bool,
+    },
+    /// Any dispatch or control frame the listener does not act on.
+    Ignored,
+}
+
+fn classify_frame(frame: &GatewayFrame) -> Result<GatewayEvent> {
+    Ok(match frame.op {
+        OP_HELLO => GatewayEvent::Hello {
+            heartbeat_interval_ms: frame
+                .d
+                .get("heartbeat_interval")
+                .and_then(serde_json::Value::as_u64)
+                // Structural handshake miss → retryable (reconnect), not fatal.
+                .ok_or_else(|| DiscordError::Gateway("HELLO missing heartbeat_interval".into()))?,
+        },
+        OP_HEARTBEAT => GatewayEvent::HeartbeatRequest,
+        OP_HEARTBEAT_ACK => GatewayEvent::HeartbeatAck,
+        OP_RECONNECT => GatewayEvent::Reconnect,
+        OP_INVALID_SESSION => GatewayEvent::InvalidSession {
+            resumable: frame.d.as_bool().unwrap_or(false),
+        },
+        OP_DISPATCH => match frame.t.as_deref() {
+            Some("READY") => GatewayEvent::Ready {
+                session_id: frame
+                    .d
+                    .get("session_id")
+                    .and_then(serde_json::Value::as_str)
+                    .ok_or_else(|| DiscordError::Gateway("READY missing session_id".into()))?
+                    .to_string(),
+                resume_gateway_url: frame
+                    .d
+                    .get("resume_gateway_url")
+                    .and_then(serde_json::Value::as_str)
+                    .ok_or_else(|| {
+                        DiscordError::Gateway("READY missing resume_gateway_url".into())
+                    })?
+                    .to_string(),
+            },
+            Some("RESUMED") => GatewayEvent::Resumed,
+            // A malformed message is skipped, never fatal: one odd payload must
+            // not kill ingestion for the channel.
+            Some("MESSAGE_CREATE") => match serde_json::from_value(frame.d.clone()) {
+                Ok(message) => GatewayEvent::MessageCreate(Box::new(message)),
+                Err(error) => {
+                    tracing::warn!(%error, "skipping malformed Discord MESSAGE_CREATE");
+                    GatewayEvent::Ignored
+                }
+            },
+            _ => GatewayEvent::Ignored,
+        },
+        _ => GatewayEvent::Ignored,
+    })
+}
+
+fn identify_payload(token: &str) -> serde_json::Value {
+    serde_json::json!({
+        "op": OP_IDENTIFY,
+        "d": {
+            "token": token,
+            "intents": INTENT_GUILD_MESSAGES | INTENT_MESSAGE_CONTENT,
+            "properties": { "os": "linux", "browser": "loopflow", "device": "loopflow" },
+        },
+    })
+}
+
+fn resume_payload(token: &str, state: &ResumeState) -> serde_json::Value {
+    serde_json::json!({
+        "op": OP_RESUME,
+        "d": { "token": token, "session_id": state.session_id, "seq": state.seq },
+    })
+}
+
+fn heartbeat_payload(seq: Option<u64>) -> serde_json::Value {
+    serde_json::json!({ "op": OP_HEARTBEAT, "d": seq })
+}
+
+fn gateway_error(error: tokio_tungstenite::tungstenite::Error) -> DiscordError {
+    DiscordError::Gateway(error.to_string())
+}
+
+/// Read the next JSON frame, skipping websocket control frames. A close or a
+/// dropped connection is a retryable [`DiscordError::Gateway`] so the caller
+/// reconnects.
+async fn next_frame<S>(read: &mut S) -> Result<GatewayFrame>
+where
+    S: futures_util::Stream<Item = Result<WsMessage, tokio_tungstenite::tungstenite::Error>>
+        + Unpin,
+{
+    loop {
+        match read.next().await {
+            Some(Ok(WsMessage::Text(text))) => {
+                return serde_json::from_str(text.as_str())
+                    .map_err(|error| anyhow!("Discord gateway frame: {error}"));
+            }
+            // tungstenite queues an automatic Pong that flushes on our next send.
+            Some(Ok(WsMessage::Ping(_) | WsMessage::Pong(_) | WsMessage::Frame(_))) => continue,
+            Some(Ok(WsMessage::Binary(_))) => continue,
+            Some(Ok(WsMessage::Close(frame))) => {
+                return Err(close_error(frame.as_ref().map(|frame| u16::from(frame.code))).into());
+            }
+            None => return Err(DiscordError::Gateway("gateway connection closed".into()).into()),
+            Some(Err(error)) => return Err(gateway_error(error).into()),
+        }
+    }
+}
+
+/// Map a gateway close code to a retryable drop or a fatal (Blocked) rejection.
+/// Fatal codes (bad token, invalid/disallowed intents) never succeed on retry.
+fn close_error(code: Option<u16>) -> DiscordError {
+    match code {
+        Some(code) if FATAL_CLOSE_CODES.contains(&code) => {
+            DiscordError::GatewayFatal(format!("gateway closed with fatal code {code}"))
+        }
+        Some(code) => DiscordError::Gateway(format!("gateway closed (code {code})")),
+        None => DiscordError::Gateway("gateway connection closed".into()),
+    }
+}
+
+async fn send_json<S>(write: &mut S, value: serde_json::Value) -> Result<()>
+where
+    S: futures_util::Sink<WsMessage, Error = tokio_tungstenite::tungstenite::Error> + Unpin,
+{
+    write
+        .send(WsMessage::text(value.to_string()))
+        .await
+        .map_err(gateway_error)?;
+    Ok(())
+}
+
 #[derive(Debug, Deserialize)]
 struct RateLimit {
     retry_after: f64,
@@ -972,6 +1402,11 @@ struct Message {
     kind: u8,
     webhook_id: Option<String>,
     message_reference: Option<ReturnedMessageReference>,
+    /// Present on gateway MESSAGE_CREATE (events span every channel the bot
+    /// sees, so the listener filters on it). Absent on REST reads scoped to one
+    /// channel — `None` there means "already the bound channel".
+    #[serde(default)]
+    channel_id: Option<String>,
 }
 
 #[derive(Debug, Clone, Deserialize, Serialize)]
@@ -1026,6 +1461,8 @@ mod tests {
         posts: usize,
         lose_next_post_response: bool,
         channel_status: Option<u16>,
+        /// Recorded reaction ops as `"<METHOD> <message_id> <raw path emoji>"`.
+        reactions: Vec<String>,
     }
 
     impl Fixture {
@@ -1040,6 +1477,7 @@ mod tests {
                 kind: 0,
                 webhook_id: None,
                 message_reference: None,
+                channel_id: None,
             }
         }
     }
@@ -1172,6 +1610,7 @@ mod tests {
                             .as_str()
                             .map(str::to_string),
                     }),
+                    channel_id: Some("channel".into()),
                 };
                 fixture.messages.push(message.clone());
                 fixture.nonces.insert(nonce, message.clone());
@@ -1186,6 +1625,18 @@ mod tests {
                         serde_json::to_value(message).expect("message"),
                     )
                 }
+            }
+            (method @ ("PUT" | "DELETE"), path) if path.contains("/reactions/") => {
+                // .../messages/<id>/reactions/<emoji>/@me
+                let mut segments = path.split('/').skip_while(|s| *s != "messages").skip(1);
+                let message_id = segments.next().unwrap_or_default().to_string();
+                let emoji = segments.nth(1).unwrap_or_default().to_string();
+                fixture
+                    .lock()
+                    .expect("fixture")
+                    .reactions
+                    .push(format!("{method} {message_id} {emoji}"));
+                json_response(StatusCode::NO_CONTENT, json!(null))
             }
             _ => json_response(StatusCode::NOT_FOUND, json!({"message": "not found"})),
         }
@@ -1216,6 +1667,7 @@ mod tests {
             posts: 0,
             lose_next_post_response: false,
             channel_status: None,
+            reactions: Vec::new(),
         }))
     }
 
@@ -1237,44 +1689,120 @@ mod tests {
         assert!(!format!("{client:?}").contains("fixture-token"));
     }
 
+    fn frame(value: serde_json::Value) -> GatewayFrame {
+        serde_json::from_value(value).expect("gateway frame")
+    }
+
+    #[test]
+    fn gateway_frames_classify_into_actionable_events() {
+        assert!(matches!(
+            classify_frame(&frame(
+                json!({"op": 10, "d": {"heartbeat_interval": 41250}})
+            ))
+            .unwrap(),
+            GatewayEvent::Hello {
+                heartbeat_interval_ms: 41250
+            }
+        ));
+        assert!(matches!(
+            classify_frame(&frame(json!({"op": 11}))).unwrap(),
+            GatewayEvent::HeartbeatAck
+        ));
+        assert!(matches!(
+            classify_frame(&frame(json!({"op": 1}))).unwrap(),
+            GatewayEvent::HeartbeatRequest
+        ));
+        assert!(matches!(
+            classify_frame(&frame(json!({"op": 7}))).unwrap(),
+            GatewayEvent::Reconnect
+        ));
+        assert!(matches!(
+            classify_frame(&frame(json!({"op": 9, "d": true}))).unwrap(),
+            GatewayEvent::InvalidSession { resumable: true }
+        ));
+        assert!(matches!(
+            classify_frame(&frame(json!({"op": 9, "d": false}))).unwrap(),
+            GatewayEvent::InvalidSession { resumable: false }
+        ));
+
+        let ready = classify_frame(&frame(json!({
+            "op": 0, "s": 1, "t": "READY",
+            "d": {"session_id": "sess", "resume_gateway_url": "wss://resume.discord.gg"}
+        })))
+        .unwrap();
+        let GatewayEvent::Ready {
+            session_id,
+            resume_gateway_url,
+        } = ready
+        else {
+            panic!("expected READY");
+        };
+        assert_eq!(session_id, "sess");
+        assert_eq!(resume_gateway_url, "wss://resume.discord.gg");
+
+        let created = classify_frame(&frame(json!({
+            "op": 0, "s": 2, "t": "MESSAGE_CREATE",
+            "d": {"id": "42", "channel_id": "chan", "type": 0,
+                  "content": "hi", "author": {"id": "human"}}
+        })))
+        .unwrap();
+        let GatewayEvent::MessageCreate(message) = created else {
+            panic!("expected MESSAGE_CREATE");
+        };
+        assert_eq!(message.id, "42");
+        assert_eq!(message.channel_id.as_deref(), Some("chan"));
+
+        // A RESUMED dispatch re-arms health (see run loop); classified distinctly.
+        assert!(matches!(
+            classify_frame(&frame(json!({"op": 0, "s": 3, "t": "RESUMED", "d": {}}))).unwrap(),
+            GatewayEvent::Resumed
+        ));
+        // An unhandled dispatch (e.g. TYPING_START) is ignored, not an error.
+        assert!(matches!(
+            classify_frame(&frame(
+                json!({"op": 0, "s": 3, "t": "TYPING_START", "d": {}})
+            ))
+            .unwrap(),
+            GatewayEvent::Ignored
+        ));
+        // A malformed MESSAGE_CREATE is skipped, never fatal.
+        assert!(matches!(
+            classify_frame(&frame(
+                json!({"op": 0, "s": 4, "t": "MESSAGE_CREATE", "d": {"garbage": true}})
+            ))
+            .unwrap(),
+            GatewayEvent::Ignored
+        ));
+        // A structural HELLO miss is retryable (a DiscordError), not a fatal panic.
+        let hello_miss = classify_frame(&frame(json!({"op": 10, "d": {}}))).unwrap_err();
+        assert!(hello_miss
+            .downcast_ref::<DiscordError>()
+            .is_some_and(DiscordError::retryable));
+    }
+
+    #[test]
+    fn fatal_close_codes_block_while_transient_ones_retry() {
+        // Disallowed intents (4014) / bad token (4004) never succeed on retry.
+        assert!(!close_error(Some(4014)).retryable());
+        assert!(!close_error(Some(4004)).retryable());
+        // An ordinary drop reconnects.
+        assert!(close_error(Some(1006)).retryable());
+        assert!(close_error(None).retryable());
+    }
+
     #[test]
     fn discord_chat_binding_has_one_local_listener() {
         let temp = tempfile::tempdir().expect("tempdir");
-        let local = HomeId::new();
 
-        let first = DiscordBindingLease::acquire_at(temp.path(), &binding(), &local)
+        let first = DiscordBindingLease::acquire_at(temp.path(), &binding())
             .expect("first listener claims binding");
         assert!(matches!(
-            DiscordBindingLease::acquire_at(temp.path(), &binding(), &local),
+            DiscordBindingLease::acquire_at(temp.path(), &binding()),
             Err(DiscordError::AlreadyOwned { .. })
         ));
         drop(first);
-        DiscordBindingLease::acquire_at(temp.path(), &binding(), &local)
+        DiscordBindingLease::acquire_at(temp.path(), &binding())
             .expect("binding is released with its listener");
-    }
-
-    #[tokio::test]
-    async fn discord_chat_rejects_the_wrong_home_before_provider_access() {
-        let local = HomeId::new();
-        let owner = HomeId::new();
-
-        let error = DiscordAdapter::preflight(binding(), &owner, &owner, &local, None)
-            .await
-            .expect_err("another Home must not reach token or Discord preflight");
-
-        assert!(matches!(error, DiscordError::WrongHome { .. }));
-    }
-
-    #[tokio::test]
-    async fn discord_chat_rejects_binding_placement_drift_before_provider_access() {
-        let configured = HomeId::new();
-        let placed = HomeId::new();
-
-        let error = DiscordAdapter::preflight(binding(), &configured, &placed, &configured, None)
-            .await
-            .expect_err("binding ownership and Wave placement must agree");
-
-        assert!(matches!(error, DiscordError::PlacementMismatch { .. }));
     }
 
     #[tokio::test]
@@ -1299,7 +1827,7 @@ mod tests {
         adapter.attach(&runtime).expect("attach at head");
         adapter.sync_once(&runtime).await.expect("initial sync");
         assert!(
-            runtime.pending_messages().is_empty(),
+            runtime.read_channel(None).is_empty(),
             "history was not imported"
         );
 
@@ -1314,15 +1842,30 @@ mod tests {
             .messages
             .extend(catch_up_ids.into_iter().map(Fixture::human_message));
         adapter.sync_once(&runtime).await.expect("paged catch-up");
-        let pending = runtime.pending_messages();
-        assert_eq!(pending.len(), 105);
-        assert!(pending[0].text.ends_with(&format!("message {first_id}")));
-        assert!(pending[104].text.ends_with(&format!("message {newest_id}")));
+        let observed = runtime.read_channel(None);
+        assert_eq!(observed.len(), 105);
+        assert!(observed[0]
+            .content
+            .ends_with(&format!("message {first_id}")));
+        assert!(observed[104]
+            .content
+            .ends_with(&format!("message {newest_id}")));
         adapter.sync_once(&runtime).await.expect("duplicate fetch");
-        assert_eq!(runtime.pending_messages().len(), 105);
+        assert_eq!(runtime.read_channel(None).len(), 105);
+        let reply_to = runtime
+            .unanswered_chat_tail()
+            .into_iter()
+            .next()
+            .expect("newest chat trigger")
+            .id
+            .0;
 
-        let answers = pending.iter().map(|message| message.id.0.clone()).collect();
-        runtime.apply_resident_delta(ResidentDelta::TurnOpened { answers });
+        runtime.apply_resident_delta(ResidentDelta::TurnOpened {
+            answers: Vec::new(),
+        });
+        runtime.apply_resident_delta(ResidentDelta::TurnReplyTo {
+            message_id: reply_to,
+        });
         runtime.apply_resident_delta(ResidentDelta::TurnText {
             text: "x".repeat(2_001),
         });
@@ -1335,7 +1878,7 @@ mod tests {
                 .reply_to()
                 .map(|source| source.message_id.as_str()),
             Some(newest_id.as_str()),
-            "the ordered source list makes the newest claim the reply target"
+            "the explicit channel relation names the reply target"
         );
         fixture.lock().expect("fixture").lose_next_post_response = true;
         assert!(adapter.deliver_pending(&runtime).await.is_err());
@@ -1396,9 +1939,18 @@ mod tests {
                 },
             )
             .expect("deliver");
-        let answer = runtime.pending_messages()[0].id.0.clone();
         runtime.apply_resident_delta(ResidentDelta::TurnOpened {
-            answers: vec![answer],
+            answers: Vec::new(),
+        });
+        let reply_to = runtime
+            .unanswered_chat_tail()
+            .into_iter()
+            .next()
+            .expect("chat trigger")
+            .id
+            .0;
+        runtime.apply_resident_delta(ResidentDelta::TurnReplyTo {
+            message_id: reply_to,
         });
         runtime.apply_resident_delta(ResidentDelta::TurnText {
             text: "x".repeat(4_000),
@@ -1427,6 +1979,7 @@ mod tests {
             bot_user_id: "bot".into(),
             initial_head: None,
             health,
+            gateway_url: GATEWAY_URL.to_string(),
             _lease: None,
         };
         let echo = |id: &str| Message {
@@ -1441,6 +1994,7 @@ mod tests {
             message_reference: Some(ReturnedMessageReference {
                 message_id: Some("101".into()),
             }),
+            channel_id: Some("channel".into()),
         };
 
         adapter
@@ -1494,6 +2048,7 @@ mod tests {
                 kind: 0,
                 webhook_id: None,
                 message_reference: None,
+                channel_id: None,
             },
         ]);
 
@@ -1502,18 +2057,18 @@ mod tests {
             .await
             .expect("ingest provider head");
         assert_eq!(
-            runtime.pending_messages().len(),
+            runtime.read_channel(None).len(),
             2,
-            "normal and reply messages both reach the resident inbox"
+            "normal and reply messages both reach the channel"
         );
         adapter
             .sync_once(&runtime)
             .await
             .expect("repeat sync stays idempotent");
         assert_eq!(
-            runtime.pending_messages().len(),
+            runtime.read_channel(None).len(),
             2,
-            "provider messages reach the resident exactly once"
+            "provider messages reach the channel exactly once"
         );
         let journal_before = crate::controller::wave::journal::read_events(
             &crate::controller::wave::journal::journal_path(temp.path(), "ship"),
@@ -1538,12 +2093,9 @@ mod tests {
             .iter()
             .all(|message| matches!(message.source, ChatMessageSource::Discord { .. })));
 
-        let answers = runtime
-            .pending_messages()
-            .into_iter()
-            .map(|message| message.id.0)
-            .collect();
-        runtime.apply_resident_delta(ResidentDelta::TurnOpened { answers });
+        runtime.apply_resident_delta(ResidentDelta::TurnOpened {
+            answers: Vec::new(),
+        });
         runtime.apply_resident_delta(ResidentDelta::TurnText {
             text: "provider-committed answer".into(),
         });
@@ -1659,15 +2211,14 @@ mod tests {
         assert_eq!(fixture.lock().expect("fixture").posts, 3);
 
         adapter.sync_once(&runtime).await.expect("ingest bot echo");
-        let pending = runtime.pending_messages();
-        assert_eq!(pending.len(), 1);
-        assert_eq!(pending[0].op, MessageOp::Steer);
-        assert!(pending[0].text.ends_with("favor reliability"));
+        let observed = runtime.read_channel(None);
+        assert_eq!(observed.len(), 1);
+        assert!(observed[0].content.ends_with("favor reliability"));
         adapter
             .sync_once(&runtime)
             .await
             .expect("repeat sync stays idempotent");
-        assert_eq!(runtime.pending_messages().len(), 1);
+        assert_eq!(runtime.read_channel(None).len(), 1);
         let history = projection
             .history(&runtime, &runtime.active_conversation_epoch(), Some(12))
             .await
@@ -1710,8 +2261,8 @@ mod tests {
             .await
             .expect("advance past pre-epoch input");
         assert!(
-            runtime.pending_messages().is_empty(),
-            "a provider message before the durable epoch is not resident input"
+            runtime.read_channel(None).is_empty(),
+            "a provider message before the durable epoch is not channel input"
         );
         assert!(
             projection
@@ -1732,7 +2283,7 @@ mod tests {
             .sync_once(&runtime)
             .await
             .expect("ingest active-epoch input");
-        assert_eq!(runtime.pending_messages().len(), 1);
+        assert_eq!(runtime.read_channel(None).len(), 1);
         let messages = projection
             .history(&runtime, &runtime.active_conversation_epoch(), Some(12))
             .await
@@ -1740,6 +2291,105 @@ mod tests {
         assert_eq!(messages.len(), 1);
         assert_eq!(messages[0].turn.id, format!("discord-{inside_epoch}"));
         server.abort();
+    }
+
+    #[tokio::test]
+    async fn a_delivered_reply_flips_the_pickup_reaction_to_done() {
+        let fixture = fixture(Vec::new());
+        let (base_url, server) = fixture_server(fixture.clone()).await;
+        let client = DiscordClient::from_token(Some("fixture-token".into()), &base_url)
+            .expect("fixture client");
+        let adapter = DiscordAdapter::preflight_with_client(client, binding())
+            .await
+            .expect("preflight");
+        let temp = tempfile::tempdir().expect("tempdir");
+        let runtime = WaveRuntime::open_with_backing(
+            "ship".into(),
+            temp.path().to_path_buf(),
+            ChatBacking::discord(&binding()),
+        )
+        .expect("runtime");
+        adapter.attach(&runtime).expect("attach");
+
+        // The pickup ack the gateway arm posts on a live human message.
+        adapter.react("101", ACK_EMOJI).await;
+
+        // A human message is answered by the resident, then delivered.
+        runtime
+            .try_deliver_discord(
+                "question".into(),
+                DiscordMessageSource {
+                    binding: binding(),
+                    message_id: "101".into(),
+                    author_id: "human".into(),
+                },
+            )
+            .expect("deliver human message");
+        runtime.apply_resident_delta(ResidentDelta::TurnOpened {
+            answers: Vec::new(),
+        });
+        let reply_to = runtime
+            .unanswered_chat_tail()
+            .into_iter()
+            .next()
+            .expect("chat trigger")
+            .id
+            .0;
+        runtime.apply_resident_delta(ResidentDelta::TurnReplyTo {
+            message_id: reply_to,
+        });
+        runtime.apply_resident_delta(ResidentDelta::TurnText {
+            text: "here you go".into(),
+        });
+        runtime.apply_resident_delta(ResidentDelta::TurnFinished {
+            status: Lifecycle::Completed,
+            reason: None,
+        });
+        adapter
+            .deliver_pending(&runtime)
+            .await
+            .expect("deliver reply");
+
+        let reactions = fixture.lock().expect("fixture").reactions.clone();
+        let ack = percent_encode_emoji(ACK_EMOJI);
+        let done = percent_encode_emoji(DONE_EMOJI);
+        assert!(
+            reactions.contains(&format!("PUT 101 {ack}")),
+            "pickup ack on the human message: {reactions:?}"
+        );
+        assert!(
+            reactions.contains(&format!("PUT 101 {done}")),
+            "done ack once the reply is delivered: {reactions:?}"
+        );
+        assert!(
+            reactions.contains(&format!("DELETE 101 {ack}")),
+            "pickup ack cleared after done: {reactions:?}"
+        );
+        server.abort();
+    }
+
+    /// A local websocket gateway fixture that closes each connection with
+    /// `close_code`. `None` (or a transient code) is a retryable drop → Retrying;
+    /// a fatal code (e.g. 4014 disallowed intents) → Blocked.
+    async fn ws_gateway_fixture(close_code: Option<u16>) -> (String, tokio::task::JoinHandle<()>) {
+        use tokio_tungstenite::tungstenite::protocol::CloseFrame;
+        let listener = tokio::net::TcpListener::bind("127.0.0.1:0")
+            .await
+            .expect("bind ws fixture");
+        let address = listener.local_addr().expect("ws fixture address");
+        let task = tokio::spawn(async move {
+            while let Ok((stream, _)) = listener.accept().await {
+                let Ok(mut ws) = tokio_tungstenite::accept_async(stream).await else {
+                    continue;
+                };
+                let frame = close_code.map(|code| CloseFrame {
+                    code: code.into(),
+                    reason: "".into(),
+                });
+                let _ = ws.send(WsMessage::Close(frame)).await;
+            }
+        });
+        (format!("ws://{address}"), task)
     }
 
     #[tokio::test]
@@ -1757,13 +2407,15 @@ mod tests {
             panic!("Discord health did not reach the expected state");
         }
 
-        let retry_fixture = fixture(Vec::new());
-        let (base_url, retry_server) = fixture_server(retry_fixture.clone()).await;
+        // A gateway that drops the connection is retryable → Retrying.
+        let (retry_url, retry_server) = ws_gateway_fixture(None).await;
+        let (base_url, rest_server) = fixture_server(fixture(Vec::new())).await;
         let client = DiscordClient::from_token(Some("fixture-token".into()), &base_url)
             .expect("fixture client");
-        let adapter = DiscordAdapter::preflight_with_client(client, binding())
+        let mut adapter = DiscordAdapter::preflight_with_client(client, binding())
             .await
             .expect("preflight");
+        adapter.gateway_url = retry_url;
         let projection = adapter.projection();
         let retry_temp = tempfile::tempdir().expect("tempdir");
         let runtime = WaveRuntime::open_with_backing(
@@ -1773,7 +2425,6 @@ mod tests {
         )
         .expect("runtime");
         adapter.attach(&runtime).expect("attach");
-        retry_fixture.lock().expect("fixture").channel_status = Some(500);
         let retry_task = tokio::spawn(adapter.run(runtime));
         wait_for(&projection, |health| {
             matches!(health, ChatBackingHealth::Retrying { .. })
@@ -1781,14 +2432,18 @@ mod tests {
         .await;
         retry_task.abort();
         retry_server.abort();
+        rest_server.abort();
 
-        let blocked_fixture = fixture(Vec::new());
-        let (base_url, blocked_server) = fixture_server(blocked_fixture.clone()).await;
+        // A fatal close code (4014 disallowed intents) is not retryable → Blocked,
+        // and `run` returns instead of looping.
+        let (blocked_url, blocked_server) = ws_gateway_fixture(Some(4014)).await;
+        let (base_url, rest_server) = fixture_server(fixture(Vec::new())).await;
         let client = DiscordClient::from_token(Some("fixture-token".into()), &base_url)
             .expect("fixture client");
-        let adapter = DiscordAdapter::preflight_with_client(client, binding())
+        let mut adapter = DiscordAdapter::preflight_with_client(client, binding())
             .await
             .expect("preflight");
+        adapter.gateway_url = blocked_url;
         let projection = adapter.projection();
         let blocked_temp = tempfile::tempdir().expect("tempdir");
         let runtime = WaveRuntime::open_with_backing(
@@ -1798,17 +2453,13 @@ mod tests {
         )
         .expect("runtime");
         adapter.attach(&runtime).expect("attach");
-        blocked_fixture.lock().expect("fixture").channel_status = Some(403);
         adapter.run(runtime).await;
-        wait_for(&projection, |health| {
-            matches!(health, ChatBackingHealth::Blocked { .. })
-        })
-        .await;
         assert!(matches!(
             projection.health(),
             ChatBackingHealth::Blocked { .. }
         ));
         blocked_server.abort();
+        rest_server.abort();
     }
 
     #[tokio::test]

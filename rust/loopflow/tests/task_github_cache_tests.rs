@@ -177,8 +177,7 @@ fn rest_failure_opens_one_durable_circuit_while_local_controls_continue() {
 
     let steer =
         task_steer("INF-123", "work locally".to_string()).expect("Steer survives REST failure");
-    let interrupt = task_interrupt("INF-123").unwrap_err();
-    assert!(interrupt.to_string().contains("no exact process owner"));
+    task_interrupt("INF-123").expect("interrupt remains local and durable");
     match &steer.observation {
         Observation::Degraded {
             reason, retry_at, ..

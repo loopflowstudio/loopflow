@@ -286,6 +286,10 @@ fn task_activity_fields(event: &TaskEventKind) -> ActivityFields {
         TaskEventKind::Progress { summary } => {
             activity(ChildActivityKind::StateChanged, "Task progress", summary)
         }
+        TaskEventKind::Steer { text, .. } => {
+            activity(ChildActivityKind::StateChanged, "Task steer", text)
+        }
+        TaskEventKind::Interrupt => activity(ChildActivityKind::StateChanged, "Task interrupt", ""),
         TaskEventKind::PrStarted {
             sequence, branch, ..
         } => activity(
@@ -331,6 +335,12 @@ fn project_activity_fields(event: &ProjectEventKind) -> ActivityFields {
             "Project iteration completed",
             summary,
         ),
+        ProjectEventKind::Steer { text, .. } => {
+            activity(ChildActivityKind::StateChanged, "Project steer", text)
+        }
+        ProjectEventKind::Interrupt => {
+            activity(ChildActivityKind::StateChanged, "Project interrupt", "")
+        }
         ProjectEventKind::Completed { summary } => {
             activity(ChildActivityKind::Completed, "Project completed", summary)
         }

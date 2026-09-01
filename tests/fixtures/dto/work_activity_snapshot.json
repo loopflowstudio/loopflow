@@ -66,7 +66,7 @@
       }
     },
     {
-      "id": "steer:steer_00000000000000000000000000000001",
+      "id": "steer:wave:00000000-0000-4000-8000-000000000001:1",
       "recorded_at": 1784654500,
       "summary": "Steered: Make The Podium primary",
       "work": {
@@ -76,7 +76,7 @@
       "subject": "product",
       "fact": {
         "kind": "steer_issued",
-        "id": "steer_00000000000000000000000000000001",
+        "id": 1,
         "author": {
           "kind": "run",
           "id": "run_00000000000000000000000000000001"

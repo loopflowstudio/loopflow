@@ -36,6 +36,10 @@
       "text": "Dispatching one worker for the parser."
     },
     {
+      "kind": "turn_reply_to",
+      "message_id": "msg-5"
+    },
+    {
       "kind": "turn_item",
       "item": {
         "type": "tool",

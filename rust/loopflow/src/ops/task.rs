@@ -4575,7 +4575,7 @@ fn queue_task_steer(issue: &str, message: String) -> OpsResult<TaskControlResult
             .map_err(|error| task_error(format!("failed to resolve task: {error}")))?
             .ok_or_else(|| task_error(format!("no Task exists for {issue:?}")))?;
         reconcile_task_pr(&store, &mut task).await?;
-        let receipt =
+        let steer =
             super::child::append_steer(&store, ChildRef::Task(task.id.clone()), &message).await?;
         let has_controller = store
             .task_controller_state(&task.id)
@@ -4588,7 +4588,7 @@ fn queue_task_steer(issue: &str, message: String) -> OpsResult<TaskControlResult
         Ok(TaskControlResult {
             issue_id: task.plan.identifier.clone(),
             task_id: task.id.to_string(),
-            receipt: super::child::WorkControlReceipt::Steer { receipt },
+            receipt: super::child::WorkControlReceipt::Steer { steer },
             observation: task.observation.clone(),
         })
     })
@@ -4598,10 +4598,30 @@ pub fn task_steer(issue: &str, message: String) -> OpsResult<TaskControlResult> 
     queue_task_steer(issue, message)
 }
 
+/// Request that the Task end its current turn so the next re-reads its
+/// direction. The request is a durable comment on the Work; a live run observes
+/// it and interrupts. With no live run it is inert — there is no turn to end.
 pub fn task_interrupt(issue: &str) -> OpsResult<TaskControlResult> {
-    Err(task_error(format!(
-        "cannot interrupt Task {issue}: its controller has no exact process owner; attach to the live Task and use /interrupt"
-    )))
+    let issue = issue.to_string();
+    block_on_task(async move {
+        let store = task_store().await?;
+        let task = store
+            .get_task_by_issue(&issue)
+            .await
+            .map_err(|error| task_error(format!("failed to resolve task: {error}")))?
+            .ok_or_else(|| task_error(format!("no Task exists for {issue:?}")))?;
+        let work = crate::durable::WorkRef::Task(task.id.clone());
+        store
+            .append_interrupt(&work)
+            .await
+            .map_err(|error| task_error(error.to_string()))?;
+        Ok(TaskControlResult {
+            issue_id: task.plan.identifier.clone(),
+            task_id: task.id.to_string(),
+            receipt: super::child::WorkControlReceipt::Interrupt { work },
+            observation: task.observation.clone(),
+        })
+    })
 }
 
 /// Recover an abandoned Task as one linked successor that adopts its worktree
@@ -5014,7 +5034,7 @@ mod tests {
     use crate::engine::AgentExecutionBoundary;
     use crate::planning::{LinearIssueId, LinearProjectId, ProjectPlan, TaskPlan};
     use crate::pm::ProjectFlowPlan;
-    use crate::store::{open_store, SharedStore, StorageConfig};
+    use crate::store::{SharedStore, StorageConfig};
     use crate::work::project::{Project, ProjectId};
     use crate::work::task::{
         AfterMerge, GithubPr, Observation, PmWritebackState, PrMergeMode, PrMergeRequest,
@@ -5071,7 +5091,7 @@ mod tests {
         let database = tempfile::tempdir().unwrap();
         let database_path = database.path().join("registry.db");
         let store = std::sync::Arc::new(
-            open_store(&StorageConfig::sqlite(database_path.clone()))
+            crate::store::open_ephemeral_store(&StorageConfig::sqlite(database_path.clone()))
                 .await
                 .unwrap(),
         );

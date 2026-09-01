@@ -1611,7 +1611,7 @@ mod tests {
 
     async fn open_store(dir: &Path) -> Arc<Store> {
         Arc::new(
-            crate::store::open_store(&StorageConfig::sqlite(dir.join("registry.db")))
+            crate::store::open_ephemeral_store(&StorageConfig::sqlite(dir.join("registry.db")))
                 .await
                 .unwrap(),
         )
@@ -1636,7 +1636,7 @@ mod tests {
                 .unwrap();
         }
         Arc::new(
-            crate::store::open_store(&StorageConfig::sqlite(path))
+            crate::store::open_ephemeral_store(&StorageConfig::sqlite(path))
                 .await
                 .unwrap(),
         )

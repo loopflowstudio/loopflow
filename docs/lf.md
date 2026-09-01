@@ -43,7 +43,7 @@ lf task prepare DES-123           # tracked Work + worktree, no controller
 lf project prepare runtime-model  # tracked Project Work, no controller
 lf --task DES-123 research \
   "Map runtime behavior; write scratch/research-runtime.md"
-lf --project context project/clarify \
+lf --project context project/operate \
   "Reconcile the KRs with current evidence"
 lf task restart DES-123 "Reconcile the completed research"
 lf task run DES-123 --directive "fix the flaky test" # keep one Task through merge
@@ -88,7 +88,7 @@ Names resolve in this order:
 5. External skill namespaces — `npx/<owner>/<repo>` fetches live via `npx skills` and caches under `.agents/skills/`; cached or searchable skills can often be run as `npx/<name>`. The legacy `rams/rams` alias also resolves when `~/.claude/commands/rams.md` exists.
 
 Namespaced skills and flows use `/`, not `:`. Run `team/review`, not `team:review`.
-Ownership uses `/` (`wave/clarify`); words within one name use `-`
+Ownership uses `/` (`wave/operate`); words within one name use `-`
 (`review-slice`). Public catalog names never use `_`.
 
 ### Skill Arguments
@@ -134,7 +134,7 @@ Project skills — shape and pursue measured bets inside a Wave:
 
 | Skill | What it does |
 |------|--------------|
-| `project/clarify` / `project/pursue` / `project/mutate` | Clarify, advance, and judge a Project |
+| `project/operate` | Judge KR evidence and launch the next useful Task in one turn |
 | `project-promote` | Promote a Project into a resident child Wave |
 | `expand` / `reduce` / `polish` | Find higher leverage, simplifications, and finish quality |
 | `testing-audit` | Audit test value, rigor, cost, lifecycle ownership, and product proof |
@@ -148,7 +148,7 @@ Wave skills — maintain the durable operating context and its portfolio:
 | `wave-report` | Read health signals across all waves |
 | `mutate` | Compose and apply coordinated mutations across member waves |
 | `review` | Review mutations, amend or revert if needed |
-| `wave/clarify` / `wave/pursue` / `wave/mutate` | Clarify, direct, and evolve a Wave |
+| `wave/operate` | Read, decide, and take the one or two useful Wave moves in one turn |
 | `review-open-work` | Survey branches, PRs, worktrees, and waves for inbox-zero triage |
 | `update-wave` / `split-wave` | Maintain Wave structure and memory |
 | `s2-scan` / `s2-assess` | Coordination: backlogs, PR/path overlap, conflict risk and safe ordering |
@@ -321,6 +321,7 @@ lf session approve <flowstep-id> "Verified"           # approve a Task FlowStep
 lf session iterate <flowstep-id> "Narrow the design"
 lf task steer DES-123 "rename the flag"
 lf task steer DES-123 "take the smaller approach"
+lf task interrupt DES-123                             # end the active turn
 lf task wait DES-123
 lf task resume DES-123 --model codex --reason "Claude quota exhausted"
 lf task restart DES-123 "Reconcile the new runtime research"
@@ -501,11 +502,13 @@ lf chat -w infra "CI is red on the PR"      # target a wave by name
 lf chat --parent "blocked on schema change" # escalate to the parent wave
 lf chat --follow -w intelligence            # watch and speak from one terminal pane
 lf chat --history --json -w intelligence    # read the saved tail while stopped
+lf reply intelligence "Should this get an answer?"  # one reply decision, no listener
 ```
 
 | Command | What it does |
 |---------|--------------|
 | `lf chat [TEXT]` | Post into a wave's thread; `--follow` replays the latest 12 turns and continues live while typed lines post, `/status` reads health, and `/quit` leaves. `--history --json` reads the same bounded tail directly from the journal without a listener. Commands, tools, and loop bookkeeping stay out of chat; turn failures remain visible. Without `--follow`, omitted TEXT reads stdin. Outside any wave, one-shot chat prints a short drop note and exits 0 |
+| `lf reply WAVE [TEXT]` | Run the Wave's chat-reply capability once and print only a warranted reply. Reads stdin when TEXT is omitted; `--agent` selects a provider and `--max-turns` bounds it. It starts no listener, resident, or governance pass. |
 
 A Wave's durable memory is the ordinary repository file `wave/<name>/MEMORY.md`
 — read and edit it directly.

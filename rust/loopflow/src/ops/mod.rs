@@ -1,5 +1,5 @@
 mod abandon;
-mod child;
+pub(crate) mod child;
 mod commit;
 pub mod cron;
 mod error;

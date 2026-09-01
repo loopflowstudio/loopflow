@@ -4,7 +4,7 @@
 //! This runs inside the resident process (the internal half of
 //! `lf wave <name>`,
 //! see [`crate::controller::wave::resident`]) — never in the listener. A turn is one
-//! `wave` flow (clarify, pursue, then mutate) played through the live Harness
+//! `wave` flow (a single `operate` turn) played through the live Harness
 //! boundary. Phases reuse one provider session while the resident lives;
 //! GOAL.md, memory, and the chat journal preserve continuity across resident
 //! restarts.
@@ -90,6 +90,30 @@ pub const CRON_GRACE: chrono::Duration = chrono::Duration::hours(24);
 /// memory; the nudge only names the wake).
 const HEARTBEAT_PROMPT: &str = "Heartbeat: re-read your goal and memory, then take the next \
      orchestration skill. If nothing needs doing, say so in one line.";
+
+/// How many recent chat messages a chat observe pass reasons over.
+const RECENT_CHAT_LIMIT: usize = 12;
+
+/// Render the tail of the channel as the observe pass's context — labelled by
+/// speaker so the pass can see who said what and, crucially, its own prior
+/// replies ("you: …") to avoid answering twice.
+fn render_recent_channel(messages: &[crate::controller::wave::channel::Message]) -> String {
+    use crate::controller::wave::channel::Author;
+    let start = messages.len().saturating_sub(RECENT_CHAT_LIMIT);
+    messages[start..]
+        .iter()
+        .map(|message| {
+            let who = match &message.author {
+                Author::Bot => "you",
+                Author::Human { name } if !name.is_empty() => name.as_str(),
+                Author::Human { .. } => "user",
+                Author::Bridge { user, .. } => user.as_str(),
+            };
+            format!("{who}: {}", message.content)
+        })
+        .collect::<Vec<_>>()
+        .join("\n")
+}
 
 fn finish_capture(capture: Option<&crate::run_record::CaptureHandle>, outcome: &str) {
     let Some(capture) = capture else {
@@ -382,6 +406,17 @@ fn body_provenance(step: &StepRef, cwd: &Path) -> BodyProvenance {
     body
 }
 
+/// A pass bound for a live Discord channel speaks to a person reading there, so
+/// it runs on the chat surface — a plain, addressed reply instead of a headless
+/// governance transcript. Every other destination (Local passes, and the
+/// machine wakes — evidence, promotion, cron, heartbeat — that also carry
+/// `answers`) stays headless: the destination, not the presence of answers, is
+/// the "a human is reading" signal.
+fn chat_surface_for(destination: &MessageDestination) -> Option<crate::engine::prompt::Surface> {
+    matches!(destination, MessageDestination::Discord(_))
+        .then_some(crate::engine::prompt::Surface::Chat)
+}
+
 fn provider_session_id_for_harness(
     provider_session: Option<&ProviderSessionRef>,
     harness: &str,
@@ -433,7 +468,13 @@ type SpawnPass = Box<
 use crate::harness::CreateHarness as CreateBodyHarness;
 
 type PrepareBodyHarness = Box<
-    dyn Fn(&str, &str, &str, Option<u32>) -> Result<crate::lf::commands::run::PreparedHarnessTurn>
+    dyn Fn(
+            &str,
+            &str,
+            &str,
+            Option<u32>,
+            Option<crate::engine::prompt::Surface>,
+        ) -> Result<crate::lf::commands::run::PreparedHarnessTurn>
         + Send,
 >;
 
@@ -467,7 +508,7 @@ pub async fn run_loop(
     let prepare_origin = origin_repo.clone();
     let prepare_resident = resident_repo.clone();
     let backend = BodyBackend::Harness {
-        prepare: Box::new(move |skill, message, wave, max_turns| {
+        prepare: Box::new(move |skill, message, wave, max_turns, surface| {
             crate::lf::commands::run::prepare_wave_harness_turn(
                 skill,
                 message,
@@ -475,6 +516,7 @@ pub async fn run_loop(
                 max_turns,
                 &prepare_origin,
                 &prepare_resident,
+                surface,
             )
         }),
         create: Box::new(default_create_harness),
@@ -625,11 +667,11 @@ impl WaveLoop {
     async fn on_inbox(&mut self, item: InboxItem) {
         match item {
             InboxItem::Message(message) => {
-                // Idle: every op just queues — an interrupt has no pass to
-                // cancel, so it seeds the next one like any other message.
-                if self.seen.insert(message.id.clone()) {
-                    self.queue.push(message);
-                }
+                // Chat is a stream to observe, not a queue to drain: every chat
+                // message (Discord or local) runs one light observe pass that
+                // replies only if warranted. Governance is woken by cadence and
+                // observations, never by a chat message.
+                self.observe_chat(message).await;
             }
             InboxItem::Task(observation) => {
                 let message =
@@ -660,6 +702,80 @@ impl WaveLoop {
             }
             InboxItem::Interrupt | InboxItem::Skip => {}
         }
+    }
+
+    /// Observe a chat message through the shared chat-reply capability and post
+    /// only its deliberate reply. Not a governance pass: it never touches the
+    /// playhead or publishes provider/tool activity. Nothing is consumed — the
+    /// pass reads the channel incl. its own prior replies; a posted reply records
+    /// an explicit channel edge so restart replay does not re-observe that
+    /// message. The `seen` set dedupes the live/replay race within one process.
+    async fn observe_chat(&mut self, message: PendingMessage) {
+        if !self.seen.insert(message.id.clone()) {
+            return;
+        }
+        // Read the recent conversation INCLUDING our own prior replies, so the
+        // pass can tell whether it already answered — no consumption tracking.
+        let conversation = match self.client.read_channel(None).await {
+            Ok(messages) => render_recent_channel(&messages),
+            Err(err) => {
+                tracing::info!(
+                    error = %format!("{err:#}"),
+                    "listener unreachable; skipping chat observe"
+                );
+                return;
+            }
+        };
+        let prepared = match &self.backend {
+            BodyBackend::Harness { prepare, .. } => prepare(
+                "wave/chat",
+                &conversation,
+                &self.wave,
+                self.config.max_turns,
+                Some(crate::engine::prompt::Surface::Chat),
+            ),
+            #[cfg(test)]
+            BodyBackend::Process(_) => return,
+        };
+        let prepared = match prepared {
+            Ok(prepared) => prepared,
+            Err(err) => {
+                tracing::warn!(error = %format!("{err:#}"), "failed to prepare chat observe turn");
+                return;
+            }
+        };
+        let reply = match &self.backend {
+            BodyBackend::Harness { create, .. } => {
+                crate::controller::wave::chat_reply::reply_prepared(prepared, create).await
+            }
+            #[cfg(test)]
+            BodyBackend::Process(_) => return,
+        };
+        let reply = match reply {
+            Ok(reply) => reply,
+            Err(err) => {
+                tracing::warn!(error = %format!("{err:#}"), "chat observe failed");
+                return;
+            }
+        };
+        self.idle_since = Instant::now();
+        let Some(reply) = reply else {
+            return;
+        };
+        self.send(vec![
+            ResidentDelta::TurnOpened {
+                answers: Vec::new(),
+            },
+            ResidentDelta::TurnReplyTo {
+                message_id: message.id.0,
+            },
+            ResidentDelta::TurnText { text: reply },
+            ResidentDelta::TurnFinished {
+                status: Lifecycle::Completed,
+                reason: None,
+            },
+        ])
+        .await;
     }
 
     async fn on_heartbeat(&mut self, inbox_rx: &mut mpsc::UnboundedReceiver<InboxItem>) {
@@ -874,10 +990,21 @@ impl WaveLoop {
         inbox_rx: &mut mpsc::UnboundedReceiver<InboxItem>,
     ) {
         let mut body = body_provenance(&step, &self.resident_repo);
+        let surface = chat_surface_for(destination);
+        // Record what the pass actually ran on: a Discord-destined pass renders
+        // the chat surface, so the Run provenance must say so, not "headless".
+        let surface_label = match surface {
+            Some(crate::engine::prompt::Surface::Chat) => "chat",
+            _ => "headless",
+        };
         let prepared = match &self.backend {
-            BodyBackend::Harness { prepare, .. } => {
-                prepare(&step.step, &seed, &self.wave, self.config.max_turns)
-            }
+            BodyBackend::Harness { prepare, .. } => prepare(
+                &step.step,
+                &seed,
+                &self.wave,
+                self.config.max_turns,
+                surface,
+            ),
             #[cfg(test)]
             BodyBackend::Process(_) => unreachable!("live skill requires a harness backend"),
         };
@@ -900,7 +1027,7 @@ impl WaveLoop {
             crate::run_record::RunSpec {
                 harness: prepared.harness.clone(),
                 model: prepared.model.clone(),
-                surface: "headless".to_string(),
+                surface: surface_label.to_string(),
                 cwd: self.resident_repo.clone(),
                 repo: Some(self.origin_repo.clone()),
                 worktree: Some(self.resident_repo.clone()),
@@ -1637,6 +1764,19 @@ mod tests {
         }
     }
 
+    /// Wake the governance loop the way production does — a typed observation,
+    /// not a chat message (chat is observed, never a governance trigger). Each
+    /// call is a distinct wake so repeated wakes are not deduplicated.
+    fn wake_governance(runtime: &WaveRuntime, tag: &str) {
+        assert!(
+            runtime.deliver_promotion_wake(crate::work::wave::PromotionWake {
+                parent_wave_id: crate::id::WaveId::new(),
+                parent: tag.to_string(),
+            }),
+            "a fresh governance wake is scheduled"
+        );
+    }
+
     /// Boot with a far-away heartbeat; `script` is what every pass runs.
     fn boot(
         heartbeat: Duration,
@@ -1699,8 +1839,29 @@ mod tests {
         passes: mpsc::UnboundedReceiver<String>,
         planning: Option<WavePlanning>,
     ) -> TestLoop {
-        let runtime =
-            WaveRuntime::open("ship".into(), tmp.path().to_path_buf()).expect("open runtime");
+        boot_backend_backed(tmp, config, backend, seeds, passes, planning, None).await
+    }
+
+    async fn boot_backend_backed(
+        tmp: tempfile::TempDir,
+        config: LoopConfig,
+        backend: BodyBackend,
+        seeds: Arc<Mutex<Vec<String>>>,
+        passes: mpsc::UnboundedReceiver<String>,
+        planning: Option<WavePlanning>,
+        binding: Option<DiscordChatBinding>,
+    ) -> TestLoop {
+        let runtime = match binding {
+            Some(binding) => WaveRuntime::open_with_backing(
+                "ship".into(),
+                tmp.path().to_path_buf(),
+                crate::controller::wave::chat::ChatBacking::discord(&binding),
+            )
+            .expect("open discord-backed runtime"),
+            None => {
+                WaveRuntime::open("ship".into(), tmp.path().to_path_buf()).expect("open runtime")
+            }
+        };
         let door = ResidentDoor::new("test-token");
         let std_listener = std::net::TcpListener::bind("127.0.0.1:0").unwrap();
         std_listener.set_nonblocking(true).unwrap();
@@ -1765,6 +1926,138 @@ mod tests {
             }
             tokio::time::sleep(Duration::from_millis(5)).await;
         }
+    }
+
+    /// A Discord chat message is observed, not drained: it runs the light
+    /// `wave/chat` skill on the chat surface and posts the reply — it does not
+    /// seed the governance `wave/operate` loop.
+    #[tokio::test]
+    async fn a_discord_message_runs_a_chat_observe_pass_on_the_chat_surface() {
+        let tmp = tempfile::tempdir().expect("tempdir");
+        init_test_git_repo(tmp.path());
+        let prepare_skills = Arc::new(Mutex::new(Vec::new()));
+        let prepare_surfaces = Arc::new(Mutex::new(Vec::new()));
+        let prepare_seeds = Arc::new(Mutex::new(Vec::new()));
+        let recorded_skills = prepare_skills.clone();
+        let recorded_surfaces = prepare_surfaces.clone();
+        let recorded_seeds = prepare_seeds.clone();
+        let harness_inputs = Arc::new(Mutex::new(Vec::new()));
+        let backend = BodyBackend::Harness {
+            prepare: Box::new(move |skill, seed, _wave, max_turns, surface| {
+                recorded_skills
+                    .lock()
+                    .expect("skills")
+                    .push(skill.to_string());
+                recorded_surfaces.lock().expect("surfaces").push(surface);
+                recorded_seeds.lock().expect("seeds").push(seed.to_string());
+                Ok(crate::lf::commands::run::PreparedHarnessTurn {
+                    config: crate::engine::AgentConfig {
+                        agent: Some("fake".to_string()),
+                        max_turns,
+                        ..crate::engine::AgentConfig::default()
+                    },
+                    input: format!("{skill}\n{seed}"),
+                    context: crate::trace::PreparedTurnContext::from_prompts(
+                        "",
+                        &format!("{skill}\n{seed}"),
+                    ),
+                    harness: "fake".to_string(),
+                    model: None,
+                })
+            }),
+            create: Box::new(move |_name, _approval, events| {
+                Ok(Box::new(CompletingHarness {
+                    events,
+                    inputs: harness_inputs.clone(),
+                }))
+            }),
+        };
+        let loop_ = boot_backend_backed(
+            tmp,
+            test_config(Duration::from_secs(600)),
+            backend,
+            Arc::new(Mutex::new(Vec::new())),
+            mpsc::unbounded_channel().1,
+            None,
+            Some(discord_source("seed").binding),
+        )
+        .await;
+
+        // A prior reply the wave already posted — the observe pass must see it in
+        // its context (read includes our own messages) so it knows it answered.
+        loop_.runtime.append_finalized_turn(
+            ChatTurn {
+                id: String::new(),
+                role: ChatRole::Assistant,
+                text: "earlier I said LOO-1".to_string(),
+                status: Lifecycle::Completed,
+                items: Vec::new(),
+                created_at: String::new(),
+                body: None,
+                activity: None,
+            },
+            Vec::new(),
+        );
+
+        loop_
+            .runtime
+            .try_deliver_discord("hey bot, what's up?".into(), discord_source("m1"))
+            .expect("deliver a Discord chat message");
+
+        wait_for("the observe pass posts its reply", || {
+            loop_.runtime.thread_snapshot().iter().any(|turn| {
+                turn.role == ChatRole::Assistant
+                    && turn.status == Lifecycle::Completed
+                    && turn.text == "recovered"
+            })
+        })
+        .await;
+
+        let channel = loop_.runtime.read_channel(None);
+        let human = channel
+            .iter()
+            .find(|message| message.content == "hey bot, what's up?")
+            .expect("human channel message");
+        let reply = channel
+            .iter()
+            .find(|message| message.content == "recovered")
+            .expect("bot reply");
+        assert_eq!(reply.reply_to.as_deref(), Some(human.id.as_str()));
+        assert!(loop_.runtime.unanswered_chat_tail().is_empty());
+
+        // It ran the light chat skill on the chat surface — not governance.
+        assert!(
+            prepare_skills
+                .lock()
+                .expect("skills")
+                .iter()
+                .any(|skill| skill == "wave/chat"),
+            "a Discord message must run wave/chat, not wave/operate"
+        );
+        assert!(prepare_surfaces
+            .lock()
+            .expect("surfaces")
+            .contains(&Some(crate::engine::prompt::Surface::Chat)));
+        // The observe context is the channel read INCLUDING our own prior reply,
+        // labelled as ours ("you: …") — that is how the pass knows it answered.
+        assert!(
+            prepare_seeds
+                .lock()
+                .expect("seeds")
+                .iter()
+                .any(|seed| seed.contains("you: earlier I said LOO-1")),
+            "the observe pass must see its own prior reply in the read context"
+        );
+        // Observe is instantaneous: the governance playhead never advanced.
+        assert_eq!(
+            loop_
+                .runtime
+                .playhead()
+                .and_then(|playhead| playhead.now)
+                .map(|step| step.iteration),
+            Some(0),
+            "an observe pass must not advance the operate loop"
+        );
     }
 
     fn init_test_git_repo(path: &Path) {
@@ -1980,14 +2273,20 @@ mod tests {
 
         let attempts = Arc::new(Mutex::new(Vec::new()));
         let prepare_attempts = attempts.clone();
+        let surfaces = Arc::new(Mutex::new(Vec::new()));
+        let prepare_surfaces = surfaces.clone();
         let inputs = Arc::new(Mutex::new(Vec::new()));
         let harness_inputs = inputs.clone();
         let backend = BodyBackend::Harness {
-            prepare: Box::new(move |skill, seed, _wave, max_turns| {
+            prepare: Box::new(move |skill, seed, _wave, max_turns, surface| {
                 prepare_attempts
                     .lock()
                     .expect("attempts lock")
                     .push(skill.to_string());
+                prepare_surfaces
+                    .lock()
+                    .expect("surfaces lock")
+                    .push(surface);
                 Ok(crate::lf::commands::run::PreparedHarnessTurn {
                     config: crate::engine::AgentConfig {
                         agent: Some("fake".to_string()),
@@ -2019,10 +2318,7 @@ mod tests {
             None,
         )
         .await;
-        let user_turn = loop_
-            .runtime
-            .deliver(MessageOp::Message, "recover".into())
-            .expect("recovery wake");
+        wake_governance(&loop_.runtime, "recover");
 
         wait_for("fresh Wave iteration completed", || {
             loop_.runtime.thread_snapshot().iter().any(|turn| {
@@ -2038,15 +2334,21 @@ mod tests {
                     .runtime
                     .playhead()
                     .and_then(|playhead| playhead.now)
-                    .is_some_and(|step| step.step == "wave/clarify" && step.iteration == 1)
+                    .is_some_and(|step| step.step == "wave/operate" && step.iteration == 1)
         })
         .await;
 
         assert_eq!(
             *attempts.lock().expect("attempts lock"),
-            vec!["wave/clarify", "wave/pursue", "wave/mutate"]
+            vec!["wave/operate"]
         );
-        assert_eq!(inputs.lock().expect("inputs lock").len(), 3);
+        assert_eq!(
+            *surfaces.lock().expect("surfaces lock"),
+            vec![None],
+            "a Local pass stays headless even though it carries answers; only a \
+             Discord-destination pass gets the chat surface (see chat_surface_for)"
+        );
+        assert_eq!(inputs.lock().expect("inputs lock").len(), 1);
         let events = loop_.journal_events();
         assert_eq!(
             events
@@ -2072,8 +2374,8 @@ mod tests {
                     }
                 ))
                 .count(),
-            3,
-            "reset itself never opens a body; the fresh three-step flow does"
+            1,
+            "reset itself never opens a body; the fresh single-step flow does"
         );
         assert!(!events.iter().any(|event| matches!(
             event,
@@ -2085,10 +2387,6 @@ mod tests {
                 ..
             }
         )));
-        assert_eq!(
-            started_answers(&events),
-            vec![vec![message_id(&user_turn)], Vec::new(), Vec::new()]
-        );
         assert!(!loop_
             .runtime
             .thread_snapshot()
@@ -2104,7 +2402,7 @@ mod tests {
         let inputs = Arc::new(Mutex::new(Vec::new()));
         let harness_inputs = inputs.clone();
         let backend = BodyBackend::Harness {
-            prepare: Box::new(|skill, seed, _wave, max_turns| {
+            prepare: Box::new(|skill, seed, _wave, max_turns, _surface| {
                 Ok(crate::lf::commands::run::PreparedHarnessTurn {
                     config: crate::engine::AgentConfig {
                         agent: Some("fake".to_string()),
@@ -2141,9 +2439,7 @@ mod tests {
         .await;
         let runtime = loop_.runtime.clone();
 
-        runtime
-            .deliver(MessageOp::Message, "begin".into())
-            .expect("user turn");
+        wake_governance(&runtime, "begin");
         wait_for("initial live input", || inputs.lock().unwrap().len() == 1).await;
         let steer = runtime
             .deliver(MessageOp::Steer, "finish".into())
@@ -2172,7 +2468,7 @@ mod tests {
             EventKind::TurnSteered { answers, .. }
                 if answers == &[message_id(&steer)]
         )));
-        assert!(inputs.lock().unwrap()[0].contains("wave/clarify"));
+        assert!(inputs.lock().unwrap()[0].contains("wave/operate"));
     }
 
     #[tokio::test]
@@ -2183,7 +2479,7 @@ mod tests {
         let inputs = Arc::new(Mutex::new(Vec::new()));
         let harness_inputs = inputs.clone();
         let backend = BodyBackend::Harness {
-            prepare: Box::new(|skill, seed, _wave, max_turns| {
+            prepare: Box::new(|skill, seed, _wave, max_turns, _surface| {
                 Ok(crate::lf::commands::run::PreparedHarnessTurn {
                     config: crate::engine::AgentConfig {
                         agent: Some("fake".to_string()),
@@ -2220,9 +2516,7 @@ mod tests {
         .await;
         let runtime = loop_.runtime.clone();
 
-        runtime
-            .deliver(MessageOp::Message, "begin".into())
-            .expect("user turn");
+        wake_governance(&runtime, "begin");
         wait_for("initial live input", || inputs.lock().unwrap().len() == 1).await;
         runtime
             .deliver(MessageOp::Steer, "finish differently".into())
@@ -2236,7 +2530,7 @@ mod tests {
         .await;
 
         let inputs = inputs.lock().unwrap();
-        assert!(inputs[0].starts_with("wave/clarify\n"));
+        assert!(inputs[0].starts_with("wave/operate\n"));
         assert_eq!(
             inputs.len(),
             1,
@@ -2353,27 +2647,17 @@ mod tests {
     async fn one_wake_runs_one_full_wave_flow_then_idles() {
         let mut loop_ = boot(Duration::from_secs(600), "echo done").await;
 
-        loop_
-            .runtime
-            .deliver(MessageOp::Message, "first wake".into())
-            .expect("first wake");
-        for _ in 0..3 {
-            loop_.next_seed().await;
-        }
+        wake_governance(&loop_.runtime, "first wake");
+        loop_.next_seed().await;
         tokio::time::sleep(Duration::from_millis(100)).await;
         assert_eq!(
             loop_.pass_count(),
-            3,
+            1,
             "a completed Wave flow waits instead of starting another iteration"
         );
 
-        loop_
-            .runtime
-            .deliver(MessageOp::Message, "second wake".into())
-            .expect("second wake");
-        for _ in 0..3 {
-            loop_.next_seed().await;
-        }
+        wake_governance(&loop_.runtime, "second wake");
+        loop_.next_seed().await;
     }
 
     #[tokio::test]
@@ -2390,12 +2674,12 @@ mod tests {
             "a replayed promotion signal is deduplicated before scheduling"
         );
         assert_eq!(wake_of(&loop_.next_seed().await), wake.prompt());
-        wait_for("one promoted Wave flow", || loop_.pass_count() == 3).await;
+        wait_for("one promoted Wave flow", || loop_.pass_count() == 1).await;
         tokio::time::sleep(Duration::from_millis(100)).await;
         assert_eq!(
             loop_.pass_count(),
-            3,
-            "one promotion fact starts one three-step Wave flow"
+            1,
+            "one promotion fact starts one single-step Wave flow"
         );
 
         let events = loop_.journal_events();
@@ -2420,69 +2704,10 @@ mod tests {
 
     // -- Scheduling, over the full wire --
 
-    #[tokio::test]
-    async fn message_while_idle_starts_a_pass_answering_it() {
-        let mut loop_ = boot(Duration::from_secs(600), "echo hi!").await;
-        let user_turn = loop_
-            .runtime
-            .deliver(MessageOp::Message, "hello wave".into())
-            .expect("user turn");
-        // The message queued while idle starts the flow's first pass, and the
-        // wake it carries is the message.
-        assert_eq!(wake_of(&loop_.next_seed().await), "hello wave");
-        // The flow's second step spawns only once the first pass's output is
-        // committed, so its start is the edge that publishes the answer.
-        loop_.next_seed().await;
-
-        assert!(
-            loop_.runtime.thread_snapshot().iter().any(|t| {
-                t.role == ChatRole::Assistant
-                    && t.status == Lifecycle::Completed
-                    && t.text.contains("hi!")
-            }),
-            "the pass answers into a completed assistant turn"
-        );
-
-        let answers = started_answers(&loop_.journal_events());
-        assert_eq!(answers[0], vec![message_id(&user_turn)]);
-        assert!(answers.iter().skip(1).all(Vec::is_empty));
-    }
-
-    /// Messages landing mid-flow queue — never rejected, never injected —
-    /// and the next full Wave iteration drains the whole queue.
-    #[tokio::test]
-    async fn messages_during_a_pass_coalesce_into_one_boundary_pass() {
-        let mut loop_ = boot(Duration::from_secs(600), "sleep 0.4; echo done").await;
-        loop_
-            .runtime
-            .deliver(MessageOp::Message, "first".into())
-            .expect("user turn");
-        loop_.next_seed().await;
-
-        // Two messages land mid-pass: queued, never rejected. Give the SSE
-        // hop time to reach the loop before the pass exits (the biased
-        // select then guarantees they're queued before the boundary drains).
-        let m2 = loop_
-            .runtime
-            .deliver(MessageOp::Message, "second".into())
-            .expect("user turn");
-        let m3 = loop_
-            .runtime
-            .deliver(MessageOp::Message, "third".into())
-            .expect("user turn");
-
-        // Clarify, pursue, and mutate finish the current iteration before the
-        // queued human direction starts the next one.
-        loop_.next_seed().await;
-        loop_.next_seed().await;
-        let wake = wake_of(&loop_.next_seed().await);
-        assert!(wake.contains("second") && wake.contains("third"));
-
-        let answers = started_answers(&loop_.journal_events());
-        assert!(answers[1].is_empty());
-        assert!(answers[2].is_empty());
-        assert_eq!(answers[3], vec![message_id(&m2), message_id(&m3)]);
-    }
+    // Chat is a stream to observe, not a queue to drain: a chat message runs a
+    // wave/chat observe pass (see `a_discord_message_runs_a_chat_observe_pass_on_
+    // the_chat_surface`), never the governance operate loop. The old
+    // message-queues-into-operate and messages-coalesce behaviours are gone.
 
     // -- Cron: the third deadline --
 
@@ -2511,6 +2736,25 @@ mod tests {
 
         // Garbage never fires.
         assert!(next_cron_fire("not-a-cron", None, now).is_none());
+    }
+
+    #[test]
+    fn only_a_discord_destination_selects_the_chat_surface() {
+        use crate::controller::wave::journal::DiscordChatBinding;
+        use crate::engine::prompt::Surface;
+
+        // A person is reading a Discord channel → chat surface.
+        assert_eq!(
+            chat_surface_for(&MessageDestination::Discord(DiscordChatBinding {
+                guild_id: "g".into(),
+                channel_id: "c".into(),
+            })),
+            Some(Surface::Chat)
+        );
+        // Local passes and every machine wake (evidence, promotion, cron,
+        // heartbeat) route through Local → headless, even when they carry
+        // answers.
+        assert_eq!(chat_surface_for(&MessageDestination::Local), None);
     }
 
     #[test]
@@ -2584,17 +2828,11 @@ mod tests {
     #[tokio::test]
     async fn failure_cap_reports_failed_and_exits_the_resident() {
         let mut loop_ = boot(Duration::from_secs(600), "exit 1").await;
-        loop_
-            .runtime
-            .deliver(MessageOp::Message, "failure 1".into())
-            .expect("first failure wake");
+        wake_governance(&loop_.runtime, "failure 1");
         for attempt in 1..=MAX_CONSECUTIVE_PASS_FAILURES {
             loop_.next_seed().await;
             if attempt < MAX_CONSECUTIVE_PASS_FAILURES {
-                loop_
-                    .runtime
-                    .deliver(MessageOp::Message, format!("failure {}", attempt + 1))
-                    .expect("next failure wake");
+                wake_governance(&loop_.runtime, &format!("failure {}", attempt + 1));
             }
         }
 
@@ -2627,7 +2865,7 @@ mod tests {
         let prepare_attempts = attempts.clone();
         let (attempt_tx, mut attempt_rx) = mpsc::unbounded_channel();
         let backend = BodyBackend::Harness {
-            prepare: Box::new(move |_skill, _seed, _wave, _max_turns| {
+            prepare: Box::new(move |_skill, _seed, _wave, _max_turns, _surface| {
                 let mut attempts = prepare_attempts.lock().expect("attempts lock");
                 *attempts += 1;
                 attempt_tx.send(*attempts).expect("record prepare attempt");
@@ -2647,17 +2885,11 @@ mod tests {
         )
         .await;
 
-        loop_
-            .runtime
-            .deliver(MessageOp::Message, "failure 1".into())
-            .expect("first failure wake");
+        wake_governance(&loop_.runtime, "failure 1");
         for expected in 1..=MAX_CONSECUTIVE_PASS_FAILURES {
             assert_eq!(attempt_rx.recv().await.expect("prepare attempt"), expected);
             if expected < MAX_CONSECUTIVE_PASS_FAILURES {
-                loop_
-                    .runtime
-                    .deliver(MessageOp::Message, format!("failure {}", expected + 1))
-                    .expect("next failure wake");
+                wake_governance(&loop_.runtime, &format!("failure {}", expected + 1));
             }
         }
         wait_for("prepare failures exhaust the cap", || {
@@ -2689,10 +2921,7 @@ mod tests {
             max_turns: None,
         };
         let loop_ = boot_with(tmp, config, "sleep 30").await;
-        loop_
-            .runtime
-            .deliver(MessageOp::Message, "go".into())
-            .expect("user turn");
+        wake_governance(&loop_.runtime, "go");
         wait_for("pass spawned", || loop_.pass_count() == 1).await;
 
         wait_for("turn failed", || {
@@ -2714,10 +2943,7 @@ mod tests {
     #[tokio::test]
     async fn interrupt_kills_the_pass_and_finalizes_the_turn_interrupted() {
         let loop_ = boot(Duration::from_secs(600), "sleep 30").await;
-        loop_
-            .runtime
-            .deliver(MessageOp::Message, "start".into())
-            .expect("user turn");
+        wake_governance(&loop_.runtime, "start");
         wait_for("pass spawned", || loop_.pass_count() == 1).await;
         wait_for("turning", || loop_.runtime.loop_state().name() == "turning").await;
 

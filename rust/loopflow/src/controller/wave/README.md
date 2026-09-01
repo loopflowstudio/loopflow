@@ -3,6 +3,7 @@
 ```bash
 lf wave product
 lf chat --wave product "What needs attention?"
+lf reply product "Should the wave answer this?"
 lf stop product
 ```
 
@@ -17,10 +18,12 @@ lf wave <name>                     lf __resident <name>
 └──────────────────────┘ deltas   └──────────────────────┘
 ```
 
-The listener owns the durable thread, HTTP routes, local discovery, and typed
-Project and Task observations. The resident owns the pass
-scheduler and provider process. It reads the listener's inbox and returns
-ordered deltas; it never writes the journal directly.
+The listener owns the durable channel, HTTP routes, local discovery, and typed
+Project and Task observations. The resident owns two independent paths: a
+lightweight chat observer runs `wave/chat` over unread channel messages, while
+the governance scheduler runs `wave/operate` for cadence and Work observations.
+Both return ordered deltas; neither writes the journal directly. `lf reply`
+runs the same reply capability once without a listener or governance pass.
 
 The listener keeps the canonical checkout as its journal and control plane.
 The resident runs from the long-lived sibling `<repo>.wave-<name>` worktree.
@@ -56,18 +59,19 @@ unchanged. Before opening a body, the listener compares every journaled stack
 and queued plan with the current catalog. Any name, kind, order, policy, or
 shape change appends one reset snapshot and starts the current root at step
 zero. The reset drops cursors, iterations, nested invocations, and queued flow
-continuations; pending chat and inbox messages remain available to the fresh
-flow. An active body finishes against its pinned plan before this check runs.
+continuations; pending Work observations remain available to the fresh flow.
+An active body finishes against its pinned plan before this check runs.
 
 Wave Chat is local when `GOAL.md` has no `chat` block. A Discord channel binding
 replaces that backing on the next listener start. Each change appends one
 conversation epoch; reopening the same backing resumes its epoch. The listener
-preflights Discord before reserving a Run or opening the journal, then polls
-after the committed cursor, journals external inputs before advancing it, and
-journals deterministic send intents before posting. The resident receives only
-source-tagged authored input and never inherits `LF_DISCORD_TOKEN`. Binding
-ownership is explicit and must agree with the Wave's durable Home placement;
-an OS-held lease prevents concurrent listeners across its checkouts.
+preflights Discord before opening the journal, receives new messages through a
+persistent Gateway connection, and catches up over REST from the committed
+cursor after each connect. It journals external inputs before advancing that
+cursor and journals deterministic send intents before posting. The resident
+never inherits `LF_DISCORD_TOKEN`. Binding ownership is explicit and must agree
+with the Wave's durable Home placement; an OS-held lease prevents concurrent
+listeners across its checkouts.
 
 The shared `~/.lf/loopflow.db` stores the Wave UUID, its repository-scoped
 locator, and typed Project and Task observations. Human commands resolve the
@@ -115,6 +119,7 @@ do not require the resident token:
 | Method and path | What it does |
 | --- | --- |
 | `GET /health` | Reports listener/resident state plus the active chat epoch and backing health. |
+| `GET /channel` | Reads unified channel messages after an optional `?since=<journal-seq>` cursor, including the Wave's own replies. |
 | `GET /conversation` | Returns one source-bearing epoch; `?limit=N` tails it and `?epoch=<id>` selects history. |
 | `GET /events` | Emits epoch and backing health, replays source-bearing messages, then streams message, local-only message-delta, state, and playhead events. |
 | `POST /messages` | Sends locally, or returns `409` with Open in Discord when Discord is active. |

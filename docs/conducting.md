@@ -91,15 +91,20 @@ Reading is half; the system stays steerable while it runs.
 ```bash
 lf chat --steer "ship the parser fix first"   # reach the live wave body, else queue
 lf chat --follow                              # replay and tail the conversation
-lf task steer INF-123 "smaller PR"            # queue durable Task direction
+lf task steer INF-123 "smaller PR"            # store direction; inject live when possible
+lf task interrupt INF-123                     # end this turn and re-read direction
 lf session list --json                        # unresolved human Sessions
 lf session open <session-id> --json           # recover one exact conversation
+lf ask list --user --json                     # requested sessions needing attention
+lf ask open ask_...                            # open one Ask session
 ```
 
-Task and Project steering appends durable direction for the controller's next
-boundary and relaunches it if stopped. Wave Chat may also attempt a live send.
-Neither a stored Steer nor transport acceptance proves that an agent applied
-the direction — see [The Agent API](agent-api.md#steer).
+Task and Project steering appends durable Work comments and relaunches a stopped
+controller. A running controller offers new comments to its provider at turn
+boundaries; the next Skill seed is the fallback. Task interrupt ends the active
+turn so the next boundary reads immediately. Neither a stored Steer nor
+transport acceptance proves that an agent applied the direction — see
+[The Agent API](agent-api.md#steer).
 
 `lf ask` is a synchronous boundary with a human. It opens an ordinary TUI Run
 against the caller's exact checkout, enters the Sessions surface, and blocks

@@ -37,6 +37,59 @@ use uuid::Uuid;
 use crate::build_info::{self, MigrationAuthority};
 use crate::store::migrations;
 
+/// Bounds re-exec depth in the local-promotion delegation chain.
+///
+/// Local promotion hands the job between the candidate build and the machine's
+/// active install coordinator. When those two binaries are built from divergent
+/// revisions their routing rules can disagree — one sends the job to the
+/// coordinator, the other bounces it back to the candidate — and, absent a
+/// bound, they re-exec each other forever and fork-bomb the machine. This
+/// counter rides every promotion re-exec through the process environment (even
+/// across a non-cooperating older binary, which inherits and forwards it), so
+/// the chain fails closed with a legible diagnostic instead of running away.
+pub const INSTALL_PROMOTE_HOP_ENV: &str = "LF_INSTALL_PROMOTE_HOP";
+
+/// How many delegation re-execs to tolerate before declaring non-convergence.
+/// A healthy promotion converges in one hop; anything past a handful is two
+/// binaries disagreeing about who owns the switch.
+const MAX_PROMOTE_HOPS: u32 = 6;
+
+/// The current delegation depth, read from the inherited environment.
+fn current_promote_hop() -> u32 {
+    std::env::var(INSTALL_PROMOTE_HOP_ENV)
+        .ok()
+        .and_then(|value| value.trim().parse().ok())
+        .unwrap_or(0)
+}
+
+/// The pure convergence decision: reject once the chain has re-exec'd past the
+/// bound. Split from the environment read so it is testable without touching
+/// process-global state.
+fn check_promote_hop(hop: u32) -> Result<u32> {
+    if hop >= MAX_PROMOTE_HOPS {
+        return Err(anyhow!(
+            "local promotion did not converge after {hop} delegation hops; the machine's \
+             active install coordinator and this candidate disagree on routing (usually because \
+             the active dev install was built from a divergent branch). Reset to a published \
+             install with `python scripts/install.py refresh`, then promote again."
+        ));
+    }
+    Ok(hop)
+}
+
+/// Fail closed if the promotion delegation chain is not converging. Called at
+/// the top of every `promote` entry so a routing disagreement between divergent
+/// builds terminates instead of fork-bombing.
+fn guard_promote_hop() -> Result<u32> {
+    check_promote_hop(current_promote_hop())
+}
+
+/// Stamp the next hop count on a promotion re-exec so the depth accumulates
+/// across the delegation chain.
+fn stamp_next_promote_hop(command: &mut Command, hop: u32) {
+    command.env(INSTALL_PROMOTE_HOP_ENV, (hop + 1).to_string());
+}
+
 /// The candidate binary's identity. The process running `lf install` *is* the
 /// candidate, so every field comes from its own compiled-in build metadata.
 #[derive(Debug, Clone, PartialEq, Eq, Deserialize, Serialize)]
@@ -526,32 +579,52 @@ fn _executable_compatibility(connection: &rusqlite::Connection) -> ExecutableCom
         }
     };
     let mut failures = Vec::new();
+    let mut validated = 0usize;
+    let mut absent = 0usize;
     for (work_kind, work_id, flow, catalog_root) in &references {
         let catalog_path = Path::new(catalog_root);
-        let result = if !catalog_path.is_dir() {
-            Err(anyhow!("catalog root does not exist"))
-        } else {
-            crate::engine::load_flow(flow, catalog_path)
-                .map_err(anyhow::Error::from)
-                .and_then(|loaded| {
-                    crate::engine::expand_flow(&loaded, catalog_path)
-                        .map_err(anyhow::Error::from)
-                        .and_then(|steps| _validate_executable_steps(&steps, catalog_path))
-                })
-        };
-        if let Err(error) = result {
-            failures.push(ExecutableFailure {
+        // A placed ref whose catalog root is gone — the worktree or checkout was
+        // cleaned up, but the durable Work row was never retired — can never run
+        // its flow again under *any* binary. It therefore says nothing about
+        // whether this candidate is safe, so it is out of scope for candidate
+        // compatibility. Excluding it (rather than failing the whole promotion)
+        // is not a loosening of the safety intent: every ref whose catalog root
+        // still exists is validated exactly as before, so a build that dropped or
+        // renamed a flow is still caught by every live worktree. We only stop
+        // treating "the world moved on" as "the candidate is broken."
+        if !catalog_path.is_dir() {
+            absent += 1;
+            continue;
+        }
+        let result = crate::engine::load_flow(flow, catalog_path)
+            .map_err(anyhow::Error::from)
+            .and_then(|loaded| {
+                crate::engine::expand_flow(&loaded, catalog_path)
+                    .map_err(anyhow::Error::from)
+                    .and_then(|steps| _validate_executable_steps(&steps, catalog_path))
+            });
+        match result {
+            Ok(()) => validated += 1,
+            Err(error) => failures.push(ExecutableFailure {
                 work_kind: work_kind.clone(),
                 work_id: work_id.clone(),
                 flow: flow.clone(),
                 catalog_root: catalog_root.clone(),
                 reason: error.to_string(),
-            });
+            }),
         }
+    }
+    if absent > 0 {
+        // Never silent: a large count is a signal the registry has drifted from
+        // the filesystem and wants a `lf prune`/reconcile sweep.
+        eprintln!(
+            "note: skipped {absent} placed Work reference(s) whose catalog root is gone \
+             (dead worktrees); they cannot run and do not gate promotion"
+        );
     }
     if failures.is_empty() {
         ExecutableCompatibility::Compatible {
-            references: references.len(),
+            references: validated,
         }
     } else {
         ExecutableCompatibility::Incompatible { failures }
@@ -799,6 +872,47 @@ mod compatibility_tests {
         assert!(
             matches!(compatibility, ExecutableCompatibility::Compatible { .. }),
             "{compatibility:?}"
+        );
+    }
+
+    #[test]
+    fn a_placed_ref_whose_catalog_root_is_gone_does_not_block_promotion() {
+        let directory = tempfile::tempdir().unwrap();
+        let store = directory.path().join("loopflow.db");
+        crate::store::sqlite::SqliteStore::open_as_promotion_boundary(&store).unwrap();
+
+        // A placed, ready wave whose repo (its catalog root) was deleted: the
+        // durable row outlived the checkout. Before the fix this failed the whole
+        // promotion with "catalog root does not exist"; it must not, because the
+        // ref can never execute again regardless of which binary is installed.
+        let conn = rusqlite::Connection::open(&store).unwrap();
+        let home_id: String = conn
+            .query_row("SELECT id FROM homes WHERE route='local'", [], |row| {
+                row.get(0)
+            })
+            .unwrap();
+        let gone = directory.path().join("deleted-worktree");
+        conn.execute(
+            "INSERT INTO waves (id, name, repo, created_at, work_state)
+             VALUES ('w-gone', 'gone', ?1, 0, 'ready')",
+            [gone.to_str().unwrap()],
+        )
+        .unwrap();
+        conn.execute(
+            "INSERT INTO work_placements (wave_id, home_id, enabled, placed_at)
+             VALUES ('w-gone', ?1, 1, 0)",
+            [home_id],
+        )
+        .unwrap();
+        // Fold the write into the main db file so the backup-API copy sees it.
+        conn.pragma_update(None, "wal_checkpoint", "TRUNCATE")
+            .unwrap();
+        drop(conn);
+
+        let compatibility = _read_local_executable_compatibility(&store);
+        assert!(
+            matches!(compatibility, ExecutableCompatibility::Compatible { .. }),
+            "a dead-worktree ref must be skipped, not fail promotion: {compatibility:?}"
         );
     }
 }
@@ -2670,6 +2784,7 @@ fn delegate_local_promotion(
     if fresh {
         command.arg("--fresh");
     }
+    stamp_next_promote_hop(&mut command, current_promote_hop());
     let status = command
         .status()
         .with_context(|| format!("run local promotion candidate {}", build.display()))?;
@@ -2719,6 +2834,7 @@ fn delegate_to_active_coordinator(
     if fresh {
         command.arg("--fresh");
     }
+    stamp_next_promote_hop(&mut command, current_promote_hop());
     let status = command.status().with_context(|| {
         format!(
             "run receipt-pinned install coordinator {}",
@@ -3386,6 +3502,7 @@ pub fn promote(
             "--fresh requires --from-build during local promotion"
         ));
     }
+    guard_promote_hop()?;
     let root = crate::machine_install::root()?;
     let state = crate::machine_install::read_state(&root)?;
     if let crate::machine_install::MachineInstallState::Switching(receipt) = &state {
@@ -3607,6 +3724,24 @@ fn rollback_from_store(
         return Err(error);
     }
     Ok((candidate, daemon_candidate))
+}
+
+#[cfg(test)]
+mod hop_guard_tests {
+    use super::{check_promote_hop, MAX_PROMOTE_HOPS};
+
+    #[test]
+    fn a_converging_chain_is_allowed_and_a_runaway_fails_closed() {
+        // Every hop below the bound proceeds — a healthy promotion converges in one.
+        for hop in 0..MAX_PROMOTE_HOPS {
+            assert_eq!(check_promote_hop(hop).unwrap(), hop);
+        }
+        // At the bound the delegation is declared non-convergent and fails closed,
+        // so two divergent builds can never fork-bomb the machine.
+        let error = check_promote_hop(MAX_PROMOTE_HOPS).unwrap_err().to_string();
+        assert!(error.contains("did not converge"), "diagnostic: {error}");
+        assert!(check_promote_hop(MAX_PROMOTE_HOPS + 1).is_err());
+    }
 }
 
 #[cfg(test)]

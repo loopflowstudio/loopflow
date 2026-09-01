@@ -1,10 +1,8 @@
-use serde::{Deserialize, Deserializer, Serialize};
+use serde::{Deserialize, Serialize};
 use serde_yaml_ng::{Mapping, Value};
 use std::collections::HashMap;
 use std::path::Path;
 use tracing::warn;
-
-use crate::durable::HomeId;
 
 #[derive(Debug, thiserror::Error)]
 pub(crate) enum WaveConfigError {
@@ -51,19 +49,9 @@ pub struct WavePmConfig {
 pub enum WaveChatConfig {
     Local,
     Discord {
-        #[serde(deserialize_with = "deserialize_home_id")]
-        home_id: HomeId,
         guild_id: String,
         channel_id: String,
     },
-}
-
-fn deserialize_home_id<'de, D>(deserializer: D) -> Result<HomeId, D::Error>
-where
-    D: Deserializer<'de>,
-{
-    let value = String::deserialize(deserializer)?;
-    HomeId::parse(&value).map_err(serde::de::Error::custom)
 }
 
 /// Machine policy read from `wave/<name>/GOAL.md` frontmatter.
@@ -408,30 +396,39 @@ mod tests {
         fs::create_dir_all(&dir).expect("create dir");
         fs::write(
             dir.join("GOAL.md"),
-            "---\nchat:\n  provider: discord\n  home_id: home_11111111111111111111111111111111\n  guild_id: guild\n  channel_id: channel\n---\nDrive the work.\n",
+            "---\nchat:\n  provider: discord\n  guild_id: guild\n  channel_id: channel\n---\nDrive the work.\n",
         )
         .expect("write");
         let config = read_wave_config(temp.path(), "scan").expect("config should parse");
         assert!(matches!(
             config.chat,
-            Some(WaveChatConfig::Discord { home_id, guild_id, channel_id })
-                if home_id.as_str() == "home_11111111111111111111111111111111"
-                    && guild_id == "guild"
-                    && channel_id == "channel"
+            Some(WaveChatConfig::Discord { guild_id, channel_id })
+                if guild_id == "guild" && channel_id == "channel"
         ));
         assert!(matches!(
             try_read_wave_chat_config(temp.path(), "scan"),
-            Ok(Some(WaveChatConfig::Discord { home_id, guild_id, channel_id }))
-                if home_id.as_str() == "home_11111111111111111111111111111111"
-                    && guild_id == "guild"
-                    && channel_id == "channel"
+            Ok(Some(WaveChatConfig::Discord { guild_id, channel_id }))
+                if guild_id == "guild" && channel_id == "channel"
         ));
 
+        // The binding is local: `home_id` is no longer a Discord-config field.
+        // `deny_unknown_fields` rejects it, so a stale GOAL.md fails closed.
         fs::write(
             dir.join("GOAL.md"),
-            "---\nchat:\n  provider: discord\n  home_id: home_39860354aaca640c2ccb50bf6ca609d8\n  guild_id: guild\n---\nDrive the work.\n",
+            "---\nchat:\n  provider: discord\n  home_id: home_11111111111111111111111111111111\n  guild_id: guild\n  channel_id: channel\n---\nDrive the work.\n",
         )
-        .expect("write invalid");
+        .expect("write stale home_id");
+        assert!(matches!(
+            try_read_wave_chat_config(temp.path(), "scan"),
+            Err(WaveConfigError::Parse { .. })
+        ));
+
+        // A missing required field still fails closed.
+        fs::write(
+            dir.join("GOAL.md"),
+            "---\nchat:\n  provider: discord\n  guild_id: guild\n---\nDrive the work.\n",
+        )
+        .expect("write missing channel");
         assert!(matches!(
             try_read_wave_chat_config(temp.path(), "scan"),
             Err(WaveConfigError::Parse { .. })
@@ -447,16 +444,6 @@ mod tests {
                 .expect("local config")
                 .and_then(|config| config.chat),
             Some(WaveChatConfig::Local)
-        ));
-
-        fs::write(
-            dir.join("GOAL.md"),
-            "---\nchat:\n  provider: discord\n  home_id: not-a-home\n  guild_id: guild\n  channel_id: channel\n---\nDrive the work.\n",
-        )
-        .expect("write invalid HomeId");
-        assert!(matches!(
-            try_read_wave_chat_config(temp.path(), "scan"),
-            Err(WaveConfigError::Parse { .. })
         ));
 
         fs::write(

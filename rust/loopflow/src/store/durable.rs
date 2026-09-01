@@ -1,6 +1,6 @@
 use crate::child::ChildRef;
 use crate::durable::{
-    AbandonReceipt, Author, FlowPosition, Home, HomeId, Placement, Steer, SteerReceipt,
+    AbandonReceipt, Author, FlowPosition, Home, HomeId, Placement, Steer, SteerComment,
     ToolResponseReceipt, ToolResponseWrite, WorkRef, WorkStatus,
 };
 
@@ -101,6 +101,20 @@ impl Store {
         run_sqlite(&self.sqlite, move |store| store.work_steers(&work)).await
     }
 
+    pub async fn steers_since(&self, since: i64) -> StoreResult<Vec<SteerComment>> {
+        run_sqlite(&self.sqlite, move |store| store.steers_since(since)).await
+    }
+
+    pub async fn append_interrupt(&self, work: &WorkRef) -> StoreResult<i64> {
+        let work = work.clone();
+        run_sqlite(&self.sqlite, move |store| store.append_interrupt(&work)).await
+    }
+
+    pub async fn latest_interrupt_id(&self, work: &WorkRef) -> StoreResult<i64> {
+        let work = work.clone();
+        run_sqlite(&self.sqlite, move |store| store.latest_interrupt_id(&work)).await
+    }
+
     pub(crate) async fn work_steers_for_child(&self, target: &ChildRef) -> StoreResult<Vec<Steer>> {
         let target = target.clone();
         run_sqlite(&self.sqlite, move |store| {
@@ -114,7 +128,7 @@ impl Store {
         work: &WorkRef,
         author: Author,
         text: &str,
-    ) -> StoreResult<SteerReceipt> {
+    ) -> StoreResult<Steer> {
         let work = work.clone();
         let text = text.to_string();
         run_sqlite(&self.sqlite, move |store| {
@@ -153,14 +167,16 @@ impl Store {
 mod tests {
     use crate::durable::WorkRef;
     use crate::id::WaveId;
-    use crate::store::{open_store, StorageConfig, StoreError};
+    use crate::store::{StorageConfig, StoreError};
     use crate::work::wave::Wave;
 
     async fn wave_work() -> (super::Store, WorkRef) {
         let directory = tempfile::tempdir().unwrap().keep();
-        let store = open_store(&StorageConfig::sqlite(directory.join("registry.db")))
-            .await
-            .unwrap();
+        let store = crate::store::open_ephemeral_store(&StorageConfig::sqlite(
+            directory.join("registry.db"),
+        ))
+        .await
+        .unwrap();
         let wave = Wave::new(
             WaveId::new(),
             "runtime".to_string(),

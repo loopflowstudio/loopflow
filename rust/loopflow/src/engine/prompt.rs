@@ -139,6 +139,9 @@ pub enum Surface {
     Ide,
     Mac,
     Iphone,
+    /// A live chat channel (e.g. Discord) where a person is reading. The reply
+    /// is the message they see, so the resident speaks plainly and deliberately.
+    Chat,
     #[default]
     #[serde(other)]
     Headless,
@@ -150,6 +153,7 @@ impl Surface {
     pub fn instructions(self) -> &'static str {
         match self {
             Self::Headless => crate::engine::builtins::SURFACE_HEADLESS,
+            Self::Chat => crate::engine::builtins::SURFACE_CHAT,
             _ => crate::engine::builtins::SURFACE_HUMAN_PRESENT,
         }
     }
@@ -164,6 +168,7 @@ impl std::str::FromStr for Surface {
             "ide" => Self::Ide,
             "mac" => Self::Mac,
             "iphone" => Self::Iphone,
+            "chat" => Self::Chat,
             _ => Self::Headless,
         };
         Ok(surface)
@@ -2493,6 +2498,19 @@ mod tests {
             .parse::<Surface>()
             .expect("surface parsing is infallible");
         assert_eq!(parsed, Surface::Ide);
+    }
+
+    #[test]
+    fn chat_surface_speaks_plainly_and_is_distinct_from_headless() {
+        assert_eq!(
+            "chat".parse::<Surface>().expect("infallible"),
+            Surface::Chat
+        );
+        let chat = Surface::Chat.instructions();
+        assert!(chat.contains("live chat channel"));
+        assert!(chat.contains("Never narrate your internal machinery"));
+        assert_ne!(chat, Surface::Headless.instructions());
+        assert_ne!(chat, Surface::Cli.instructions());
     }
 
     // ==========================================================================

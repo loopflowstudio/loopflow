@@ -454,7 +454,7 @@ mod tests {
         let repo = crate::repo::find_repo_root().unwrap();
         let runtime = tokio::runtime::Runtime::new().unwrap();
         runtime.block_on(async {
-            let store = crate::store::open_store(&crate::store::StorageConfig::sqlite(
+            let store = crate::store::open_ephemeral_store(&crate::store::StorageConfig::sqlite(
                 ledger.home().join("loopflow.db"),
             ))
             .await
@@ -532,7 +532,7 @@ mod tests {
     #[tokio::test]
     async fn child_memory_walks_parent_scope() {
         let tmp = tempfile::tempdir().expect("tempdir");
-        let store = crate::store::open_store(&crate::store::StorageConfig::sqlite(
+        let store = crate::store::open_ephemeral_store(&crate::store::StorageConfig::sqlite(
             tmp.path().join("loopflow.db"),
         ))
         .await

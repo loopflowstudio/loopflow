@@ -1252,9 +1252,7 @@ mod tests {
     use crate::profile::{ProviderRoute, RouteScope};
     use crate::provider_account::{new_account, parse_account_id, RateLimitSignal};
     use crate::provider_auth::Provider;
-    use crate::store::{
-        open_store, CredentialState, ProviderAccount, ProviderAccountId, StorageConfig,
-    };
+    use crate::store::{CredentialState, ProviderAccount, ProviderAccountId, StorageConfig};
     use tempfile::tempdir;
     fn id(value: &str) -> ProviderAccountId {
         parse_account_id(value).unwrap()
@@ -1416,9 +1414,11 @@ mod tests {
         std::env::remove_var(ACCOUNT_LEASE_ENV);
 
         let store = Arc::new(
-            open_store(&StorageConfig::sqlite(temp.path().join("loopflow.db")))
-                .await
-                .unwrap(),
+            crate::store::open_ephemeral_store(&StorageConfig::sqlite(
+                temp.path().join("loopflow.db"),
+            ))
+            .await
+            .unwrap(),
         );
         let mut preferred = account(Provider::Claude, "preferred", "preferred@example.com");
         preferred.home = None;
@@ -1488,7 +1488,7 @@ mod tests {
         std::env::remove_var(ACCOUNT_LEASE_ENV);
         std::env::remove_var(ACCOUNT_SELECTION_ENV);
         let target_store = Arc::new(
-            open_store(&StorageConfig::sqlite(target_database))
+            crate::store::open_ephemeral_store(&StorageConfig::sqlite(target_database))
                 .await
                 .unwrap(),
         );
@@ -1523,9 +1523,11 @@ mod tests {
             .unwrap();
 
         let origin_store = Arc::new(
-            open_store(&StorageConfig::sqlite(temp.path().join("origin.db")))
-                .await
-                .unwrap(),
+            crate::store::open_ephemeral_store(&StorageConfig::sqlite(
+                temp.path().join("origin.db"),
+            ))
+            .await
+            .unwrap(),
         );
         let mut forwarded = account(Provider::Claude, "forwarded", "forwarded@example.com");
         forwarded.home = Some(temp.path().join("origin/accounts/claude/forwarded"));
@@ -1695,9 +1697,11 @@ mod tests {
         std::env::remove_var("LF_CONTROL_DB_PATH");
         std::env::remove_var(ACCOUNT_LEASE_ENV);
         let store = Arc::new(
-            open_store(&StorageConfig::sqlite(temp.path().join("lease.db")))
-                .await
-                .unwrap(),
+            crate::store::open_ephemeral_store(&StorageConfig::sqlite(
+                temp.path().join("lease.db"),
+            ))
+            .await
+            .unwrap(),
         );
         let grants = vec![
             ProviderGrant {

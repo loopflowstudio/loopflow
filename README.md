@@ -79,7 +79,8 @@ Delegate durable work — the same verbs whether the caller is you or the wave:
 lf task prepare INF-123                               # durable Task Work + worktree, no controller
 lf project prepare runtime-model                      # durable Project Work, no controller
 lf task run INF-123                                   # start end-to-end Task automation
-lf task steer INF-123 "take the smaller approach"     # queue direction; wake its controller if installed
+lf task steer INF-123 "take the smaller approach"     # store direction; inject live or wake its controller
+lf task interrupt INF-123                             # end this turn so fresh direction is read now
 lf --task INF-123 research "write scratch/runtime.md"    # one independent Task-bound Run
 lf task restart INF-123 "reconcile all scratch first" # checkpoint and begin a new kickoff
 lf task status INF-123 --json                         # inspect durable state

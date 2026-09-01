@@ -161,7 +161,7 @@ fn initialize_landing_store(path: &std::path::Path) {
     let runtime = tokio::runtime::Runtime::new().unwrap();
     drop(
         runtime
-            .block_on(loopflow::store::open_store(
+            .block_on(loopflow::store::open_ephemeral_store(
                 &loopflow::store::StorageConfig::sqlite(path.to_path_buf()),
             ))
             .unwrap(),

@@ -548,7 +548,7 @@ impl SqliteStore {
         comment_id: &str,
         text: &str,
         observed_at: OffsetDateTime,
-    ) -> StoreResult<Option<crate::durable::SteerId>> {
+    ) -> StoreResult<Option<i64>> {
         let observed_at = observed_at.unix_timestamp();
         let mut conn = self.conn.lock().expect("store mutex poisoned");
         let transaction = conn.transaction_with_behavior(TransactionBehavior::Immediate)?;
@@ -1370,15 +1370,15 @@ fn ingest_linear_comment(
     work: &crate::durable::WorkRef,
     text: &str,
     observed_at: i64,
-) -> StoreResult<Option<crate::durable::SteerId>> {
+) -> StoreResult<Option<i64>> {
     let inserted = conn.execute(
         "INSERT OR IGNORE INTO task_linear_ingested_comments
             (task_id, comment_id, ingested_at) VALUES (?1, ?2, ?3)",
         params![task_id, comment_id, observed_at],
     )?;
     if inserted == 1 {
-        let receipt = SqliteStore::append_steer_in(conn, work, &Author::User, text)?;
-        Ok(Some(receipt.steer.id))
+        let steer = SqliteStore::append_steer_in(conn, work, &Author::User, text)?;
+        Ok(Some(steer.id))
     } else {
         Ok(None)
     }
@@ -1926,7 +1926,7 @@ fn map_task_event_row(row: &rusqlite::Row<'_>) -> rusqlite::Result<TaskEvent> {
     })
 }
 
-fn task_events_after_in(
+pub(super) fn task_events_after_in(
     conn: &Connection,
     task_id: &TaskId,
     cursor: i64,
@@ -1936,6 +1936,20 @@ fn task_events_after_in(
          FROM task_events WHERE task_id=?1 AND id>?2 ORDER BY id",
     )?;
     let rows = statement.query_map(params![task_id.as_str(), cursor], map_task_event_row)?;
+    rows.collect::<Result<Vec<_>, _>>()
+        .map_err(StoreError::from)
+}
+
+pub(super) fn project_events_after_in(
+    conn: &Connection,
+    project_id: &ProjectId,
+    cursor: i64,
+) -> StoreResult<Vec<ProjectEvent>> {
+    let mut statement = conn.prepare(
+        "SELECT id, project_id, kind_json, created_at
+         FROM project_events WHERE project_id=?1 AND id>?2 ORDER BY id",
+    )?;
+    let rows = statement.query_map(params![project_id.as_str(), cursor], map_project_event_row)?;
     rows.collect::<Result<Vec<_>, _>>()
         .map_err(StoreError::from)
 }

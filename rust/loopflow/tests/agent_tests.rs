@@ -8,7 +8,7 @@ use loopflow::engine::error::CoreError;
 use loopflow::profile::{ProviderRoute, RouteScope};
 use loopflow::provider_auth::Provider;
 use loopflow::store::{
-    open_store, CredentialState, ProviderAccount, ProviderAccountId, RoutingState, StorageConfig,
+    CredentialState, ProviderAccount, ProviderAccountId, RoutingState, StorageConfig,
 };
 use support::EnvGuard;
 use tempfile::TempDir;
@@ -142,9 +142,9 @@ while read -r line; do :; done
     };
     let runtime = tokio::runtime::Runtime::new().expect("store runtime");
     let store = runtime
-        .block_on(open_store(&StorageConfig::sqlite(
-            home.path().join("loopflow.db"),
-        )))
+        .block_on(loopflow::store::open_ephemeral_store(
+            &StorageConfig::sqlite(home.path().join("loopflow.db")),
+        ))
         .expect("account store");
     runtime
         .block_on(store.upsert_provider_account(&account(revoked_id.clone(), revoked_home)))

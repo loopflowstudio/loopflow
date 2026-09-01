@@ -330,9 +330,13 @@ fn map_turn_usage(properties: &Value) -> Option<TurnUsage> {
 }
 
 fn parse_session_state(properties: &Value) -> SessionState {
-    let value = properties
-        .get("status")
+    // opencode reports `status` two ways across versions: an older bare string
+    // (`"status": "active"`) and a newer tagged object (`"status": {"type":
+    // "busy"}`). Accept both shapes so turn boundaries map on either.
+    let status = properties.get("status");
+    let value = status
         .and_then(Value::as_str)
+        .or_else(|| status.and_then(|s| s.get("type")).and_then(Value::as_str))
         .unwrap_or_default()
         .to_ascii_lowercase();
 
@@ -762,6 +766,53 @@ mod tests {
             &completed.events[1],
             ConversationEvent::TurnCompleted { turn_id, status }
                 if turn_id == &started_turn_id && *status == Lifecycle::Completed
+        ));
+    }
+
+    #[test]
+    fn tagged_object_status_maps_turn_boundaries() {
+        // opencode 1.18+ reports status as a tagged object (`{"type":"busy"}`)
+        // rather than a bare string. Turn boundaries must still map.
+        let mut state = ReaderState::new("session_1".to_string(), None, "opencode");
+
+        let started = map_event(
+            &json!({
+                "type": "session.status",
+                "properties": { "sessionID": "session_1", "status": { "type": "busy" } }
+            }),
+            &mut state,
+        );
+        assert_eq!(started.events.len(), 1);
+        assert!(matches!(
+            started.events[0],
+            ConversationEvent::TurnStarted { .. }
+        ));
+
+        let _ = map_event(
+            &json!({
+                "type": "message.part.updated",
+                "properties": {
+                    "sessionID": "session_1",
+                    "part": { "id": "p1", "type": "text", "text": "done" }
+                }
+            }),
+            &mut state,
+        );
+
+        let completed = map_event(
+            &json!({
+                "type": "session.status",
+                "properties": { "sessionID": "session_1", "status": { "type": "idle" } }
+            }),
+            &mut state,
+        );
+        assert_eq!(completed.events.len(), 1);
+        assert!(matches!(
+            completed.events[0],
+            ConversationEvent::TurnCompleted {
+                status: Lifecycle::Completed,
+                ..
+            }
         ));
     }
 

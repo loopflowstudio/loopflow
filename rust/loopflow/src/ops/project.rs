@@ -588,7 +588,7 @@ fn queue_project_steer(project: &str, message: String) -> OpsResult<ProjectContr
             .await
             .map_err(|error| project_error(error.to_string()))?
             .ok_or_else(|| project_error(format!("no Project exists for {project:?}")))?;
-        let receipt =
+        let steer =
             super::child::append_steer(&store, ChildRef::Project(project.id.clone()), &message)
                 .await?;
         let has_controller = store
@@ -602,7 +602,7 @@ fn queue_project_steer(project: &str, message: String) -> OpsResult<ProjectContr
         Ok(ProjectControlResult {
             id: project.id.to_string(),
             external_project_id: project.plan.id.as_str().to_string(),
-            receipt_id: receipt.steer.id.to_string(),
+            receipt_id: steer.id.to_string(),
             action: "steered".to_string(),
         })
     })
@@ -1004,7 +1004,7 @@ fn promotion_session_name(repo: &Path, wave: &str) -> String {
 mod tests {
     use super::*;
     use crate::lf::{Cli, Commands};
-    use crate::store::{open_store, StorageConfig};
+    use crate::store::StorageConfig;
     use clap::Parser;
     use std::process::Command;
 
@@ -1117,9 +1117,11 @@ mod tests {
             .unwrap()
             .success());
         let store: SharedStore = Arc::new(
-            open_store(&StorageConfig::sqlite(home.path().join("loopflow.db")))
-                .await
-                .unwrap(),
+            crate::store::open_ephemeral_store(&StorageConfig::sqlite(
+                home.path().join("loopflow.db"),
+            ))
+            .await
+            .unwrap(),
         );
         let now = time::OffsetDateTime::now_utc();
         let project = Project {
@@ -1173,7 +1175,7 @@ mod tests {
     async fn prepare_promotion_persists_ancestry_without_occurrence() {
         let tmp = tempfile::tempdir().unwrap();
         let database = tmp.path().join("loopflow.db");
-        let store = open_store(&StorageConfig::sqlite(database.clone()))
+        let store = crate::store::open_ephemeral_store(&StorageConfig::sqlite(database.clone()))
             .await
             .unwrap();
         let parent = Wave::new(
@@ -1216,7 +1218,7 @@ mod tests {
     async fn record_promotion_persists_occurrence_and_ancestry() {
         let tmp = tempfile::tempdir().unwrap();
         let database = tmp.path().join("loopflow.db");
-        let store = open_store(&StorageConfig::sqlite(database.clone()))
+        let store = crate::store::open_ephemeral_store(&StorageConfig::sqlite(database.clone()))
             .await
             .unwrap();
         let parent = Wave::new(

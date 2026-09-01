@@ -175,7 +175,7 @@ lf --task LOO-267 research \
   "Research the runtime model; write scratch/research-runtime-model.md"
 lf --task LOO-267 research \
   "Research design handoff; write scratch/research-design-handoff.md"
-lf --project context project/clarify \
+lf --project context project/operate \
   "Reconcile the KRs with the current evidence"
 ```
 
@@ -249,6 +249,21 @@ curated rather than appending a transcript. `update-wave` owns deliberate
 end-of-work memory curation; no live Wave is required.
 
 `lf chat` is the User surface. Work Steer is the live correction path.
+
+## Secrets And Auth
+
+Provider credentials and secrets resolve through Doppler — Loopflow reads a
+named secret from the environment first, else falls back to
+`doppler secrets get <NAME> --plain` in the repo. A command that needs one (a
+provider OAuth like `lf auth <provider>`, or any tool wanting an API key)
+therefore runs under `doppler run -- <cmd>` whenever the value is not already in
+the environment.
+
+So when you tell a User how to clear a missing-secret or auth error, give the
+Doppler-aware form, not the bare command: if `lf auth linear` reports its client
+id/secret are unset, the fix is `doppler run -- lf auth linear`. Discover names
+with `doppler secrets --only-names`; never print a secret value to a terminal,
+log, or chat.
 
 ## Where To Write
 

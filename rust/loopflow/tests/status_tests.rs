@@ -13,7 +13,7 @@ use loopflow::controller::wave::metrics::{
 use loopflow::id::WaveId;
 use loopflow::planning::{LinearIssueId, LinearProjectId, ProjectPlan, TaskPlan};
 use loopflow::store::sqlite::SqliteStore;
-use loopflow::store::{open_store, PmSnapshotRow, StorageConfig};
+use loopflow::store::{PmSnapshotRow, StorageConfig};
 use loopflow::work::project::{Project, ProjectEventKind, ProjectId};
 use loopflow::work::task::{
     Observation, PmWritebackState, PrMergeMode, Task, TaskId, TaskPr, TaskPrId,
@@ -529,9 +529,11 @@ Count dispatched Task loops that settle without rescue.
     *observation_id = id;
     let runtime = tokio::runtime::Runtime::new().expect("metric runtime");
     runtime.block_on(async {
-        let store = open_store(&StorageConfig::sqlite(home.path().join("loopflow.db")))
-            .await
-            .expect("open shared store");
+        let store = loopflow::store::open_ephemeral_store(&StorageConfig::sqlite(
+            home.path().join("loopflow.db"),
+        ))
+        .await
+        .expect("open shared store");
         store
             .register_metric_instrument(&contract.identity, &contract.instrument, now)
             .await

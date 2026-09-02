@@ -166,6 +166,9 @@ Home.
 | `uv run python scripts/loopflow-dev.py clean` | Remove the development app and reset permissions |
 
 Long-running development commands write logs under `~/.lf/logs/dev/`.
+The release command signs the app, hides SwiftPM's build-time resource bundles,
+and requires the packaged app to render before it creates the DMG. Build
+resources are restored on every verification exit.
 
 `project.yml` generates `LoopflowSwift.xcodeproj`:
 

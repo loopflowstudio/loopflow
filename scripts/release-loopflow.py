@@ -45,10 +45,18 @@ def run_capture(
     cmd: list[str],
     cwd: Path | None = None,
     timeout: int | None = None,
+    env: dict[str, str] | None = None,
 ) -> subprocess.CompletedProcess:
     print(f"$ {' '.join(cmd)}", flush=True)
     try:
-        return subprocess.run(cmd, cwd=cwd, capture_output=True, text=True, timeout=timeout)
+        return subprocess.run(
+            cmd,
+            cwd=cwd,
+            capture_output=True,
+            text=True,
+            timeout=timeout,
+            env=env,
+        )
     except subprocess.TimeoutExpired as exc:
         print(f"Timed out after {timeout}s: {' '.join(cmd)}", flush=True)
         raise RuntimeError(f"command timed out after {timeout}s") from exc
@@ -168,16 +176,75 @@ def _copy_bundled_tools(app_macos_dir: Path) -> None:
         shutil.copy(source, app_macos_dir / binary)
 
 
-def _copy_app_executable(build_dir: Path, info_plist: Path, app_macos_dir: Path) -> None:
+def _bundle_executable(info_plist: Path) -> str:
     with info_plist.open("rb") as file:
         executable = plistlib.load(file).get("CFBundleExecutable")
     if not isinstance(executable, str) or not executable:
         raise RuntimeError(f"Missing CFBundleExecutable in {info_plist}")
+    return executable
+
+
+def _copy_app_executable(build_dir: Path, info_plist: Path, app_macos_dir: Path) -> None:
+    executable = _bundle_executable(info_plist)
 
     source = build_dir / SWIFT_APP_PRODUCT
     if not source.is_file():
         raise RuntimeError(f"Missing built app executable: {source}")
     shutil.copy(source, app_macos_dir / executable)
+
+
+def _verify_app_resource_self_containment(app_path: Path, build_dir: Path) -> None:
+    info_plist = app_path / "Contents" / "Info.plist"
+    executable = app_path / "Contents" / "MacOS" / _bundle_executable(info_plist)
+    resource_bundles = tuple(sorted(build_dir.glob("*.bundle")))
+    if not resource_bundles:
+        raise RuntimeError(f"No SwiftPM resource bundles found in {build_dir}")
+
+    print(
+        "Verifying packaged app without SwiftPM build resources...",
+        flush=True,
+    )
+    with tempfile.TemporaryDirectory(
+        prefix="loopflow-app-resource-check-",
+        dir=build_dir.parent,
+    ) as temp:
+        holding_dir = Path(temp)
+        snapshot = holding_dir / "snapshot.png"
+        moved: list[tuple[Path, Path]] = []
+        try:
+            for bundle in resource_bundles:
+                held = holding_dir / bundle.name
+                bundle.rename(held)
+                moved.append((held, bundle))
+
+            result = run_capture(
+                [str(executable), "-ui-test-mode", "empty-workspaces"],
+                timeout=30,
+                env={
+                    **os.environ,
+                    "LOOPFLOW_UI_TEST_SNAPSHOT_PATH": str(snapshot),
+                    "LOOPFLOW_UI_TEST_DELAY": "0.2",
+                    "LOOPFLOW_UI_TEST_WIDTH": "900",
+                    "LOOPFLOW_UI_TEST_HEIGHT": "600",
+                },
+            )
+        finally:
+            for held, bundle in reversed(moved):
+                held.rename(bundle)
+
+        if result.returncode != 0:
+            diagnostic = (result.stderr.strip() or result.stdout.strip())[-2000:]
+            detail = f": {diagnostic}" if diagnostic else ""
+            raise RuntimeError(
+                "Packaged app failed without SwiftPM build resources "
+                f"(exit {result.returncode}){detail}"
+            )
+        if not snapshot.is_file() or snapshot.stat().st_size == 0:
+            raise RuntimeError("Packaged app produced no resource-check snapshot")
+    print(
+        "Verified packaged app renders without SwiftPM build resources",
+        flush=True,
+    )
 
 
 def release() -> int:
@@ -195,7 +262,8 @@ def release() -> int:
     app_name = "Loopflow"
     version = read_release_version(REPO_ROOT)
     dist_dir = SWIFT_DIR / "dist"
-    app_dir = dist_dir / f"{app_name}.app" / "Contents"
+    app_path = dist_dir / f"{app_name}.app"
+    app_dir = app_path / "Contents"
 
     if dist_dir.exists():
         shutil.rmtree(dist_dir)
@@ -222,7 +290,6 @@ def release() -> int:
     identity = _detect_signing_identity()
     if identity:
         entitlements = SWIFT_DIR / "LoopflowMac" / "Loopflow.entitlements"
-        app_path = dist_dir / f"{app_name}.app"
         rc = _codesign_app(app_path, identity, entitlements)
         if rc != 0:
             print("Codesigning failed")
@@ -234,6 +301,8 @@ def release() -> int:
             flush=True,
         )
         return 1
+
+    _verify_app_resource_self_containment(app_path, build_dir)
 
     # Create DMG
     dmg_path = dist_dir / f"{app_name}.dmg"

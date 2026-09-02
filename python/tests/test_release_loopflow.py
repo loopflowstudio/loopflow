@@ -2,6 +2,7 @@ from __future__ import annotations
 
 import importlib.util
 import plistlib
+import shlex
 import subprocess
 import sys
 from pathlib import Path
@@ -55,6 +56,62 @@ def test_release_bundle_carries_the_control_plane_pair(
 
     assert (app_macos_dir / "lf").read_bytes() == b"release-lf"
     assert (app_macos_dir / "lfd").read_bytes() == b"release-lfd"
+
+
+def _write_test_app(app_path: Path, script: str) -> None:
+    app_macos_dir = app_path / "Contents" / "MacOS"
+    app_macos_dir.mkdir(parents=True)
+    with (app_path / "Contents" / "Info.plist").open("wb") as file:
+        plistlib.dump({"CFBundleExecutable": "Loopflow"}, file)
+    executable = app_macos_dir / "Loopflow"
+    executable.write_text("#!/bin/sh\nset -eu\n" + script)
+    executable.chmod(0o755)
+
+
+def test_resource_check_hides_then_restores_build_resources(tmp_path: Path) -> None:
+    build_dir = tmp_path / "build"
+    build_bundle = build_dir / "LoopflowSwift_Loopflow.bundle"
+    build_bundle.mkdir(parents=True)
+    app_path = tmp_path / "Loopflow.app"
+    quoted_bundle = shlex.quote(str(build_bundle))
+    _write_test_app(
+        app_path,
+        f'test ! -e {quoted_bundle}\nprintf snapshot > "$LOOPFLOW_UI_TEST_SNAPSHOT_PATH"\n',
+    )
+
+    release_loopflow._verify_app_resource_self_containment(app_path, build_dir)
+
+    assert build_bundle.is_dir()
+
+
+def test_resource_check_rejects_a_build_dependent_app(tmp_path: Path) -> None:
+    build_dir = tmp_path / "build"
+    build_bundle = build_dir / "LoopflowSwift_Loopflow.bundle"
+    build_bundle.mkdir(parents=True)
+    app_path = tmp_path / "Loopflow.app"
+    quoted_bundle = shlex.quote(str(build_bundle))
+    _write_test_app(
+        app_path,
+        f'test -e {quoted_bundle}\nprintf snapshot > "$LOOPFLOW_UI_TEST_SNAPSHOT_PATH"\n',
+    )
+
+    with pytest.raises(RuntimeError, match="failed without SwiftPM build resources"):
+        release_loopflow._verify_app_resource_self_containment(app_path, build_dir)
+
+    assert build_bundle.is_dir()
+
+
+def test_resource_check_requires_a_rendered_snapshot(tmp_path: Path) -> None:
+    build_dir = tmp_path / "build"
+    build_bundle = build_dir / "LoopflowSwift_Loopflow.bundle"
+    build_bundle.mkdir(parents=True)
+    app_path = tmp_path / "Loopflow.app"
+    _write_test_app(app_path, "exit 0\n")
+
+    with pytest.raises(RuntimeError, match="produced no resource-check snapshot"):
+        release_loopflow._verify_app_resource_self_containment(app_path, build_dir)
+
+    assert build_bundle.is_dir()
 
 
 def test_release_command_reports_timeout(

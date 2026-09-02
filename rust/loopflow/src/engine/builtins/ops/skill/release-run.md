@@ -45,6 +45,26 @@ publication, deployment, and secret handling in the publisher.
 `lf release run` resumes an existing release PR or incomplete latest tag after
 interruptions.
 
+Process death does not make generated release state temporary. Re-entry owns:
+
+- provisional `release-candidate/<target>/<tag>/<commit>` refs
+- generated `prepare-<target>-<tag>-<commit>` and
+  `publish-<target>-<tag>` branch/worktree pairs
+- exact prepared artifacts at
+  `.lf/releases/<tag>/<commit>-<workflow-run-id>`
+
+Before creating, reusing, or removing one of these intermediates, the command
+must observe its target, tag, source commit, workflow run, generated path/ref,
+Git cleanliness and registration, and current stage lease. It then follows one
+restart rule: **observe → classify → converge or refuse**. Under the exact stage
+lease, reuse or replace only matching inactive state. Mismatched, dirty,
+differently registered, or live-owned state fails closed with the observed
+ownership evidence and no mutation.
+
+The one-shot caller must not manually remove a stale generated worktree, ref, or
+artifact directory as a workaround. A release stage is resumable only when each
+durable intermediate implements this restart rule.
+
 ## Guardrails
 
 - The version comes from the human or wave config. Don't decide it.

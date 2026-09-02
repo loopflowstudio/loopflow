@@ -769,12 +769,10 @@ pub fn dispatch_entry_gate(role: &ArtifactRole) -> Result<()> {
         {
             receipt.target
         }
-        MachineInstallState::Switching(receipt) => {
-            return Err(anyhow!(
-                "install switch {} is unsettled; ordinary startup is blocked",
-                receipt.id
-            ))
-        }
+        // A switch this process is not driving (typically one that failed or was
+        // abandoned mid-flight) must not brick ordinary startup: dispatch through
+        // the last good install instead of refusing.
+        MachineInstallState::Switching(receipt) => startup_selection_during_switch(&receipt),
         MachineInstallState::Settled(active) => active.selection,
     };
     let artifact = selection
@@ -836,6 +834,32 @@ pub fn read_state(root: &Path) -> Result<MachineInstallState> {
         return Ok(MachineInstallState::Settled(Box::new(active)));
     }
     Ok(MachineInstallState::Legacy)
+}
+
+/// The install selection ordinary startup should use while a switch receipt is
+/// present but this process is not the one driving that switch. A committed
+/// switch has already made its target the active install; anything earlier —
+/// including a switch that failed or was abandoned mid-flight — falls back to
+/// the prior settled selection. This keeps ordinary `lf` running the last good
+/// install instead of refusing every command until the switch is recovered: a
+/// failed promotion must never brick the CLI.
+fn startup_selection_during_switch(receipt: &SwitchReceipt) -> InstallSelection {
+    if receipt.active_selection_committed {
+        receipt.target.clone()
+    } else {
+        receipt.prior.clone()
+    }
+}
+
+/// The same fallback expressed as an `ActiveInstall`, for the authorization
+/// paths that resolve the running executable against a full install.
+fn startup_active_during_switch(receipt: &SwitchReceipt) -> ActiveInstall {
+    ActiveInstall {
+        schema_version: receipt.schema_version,
+        selection: startup_selection_during_switch(receipt),
+        published_fallback: receipt.published_fallback.clone(),
+        retained_published_sets: vec![receipt.published_fallback.clone()],
+    }
 }
 
 pub fn write_switch(root: &Path, receipt: &SwitchReceipt) -> Result<()> {
@@ -964,38 +988,37 @@ fn authorize_for_switch(
     let active = match read_state(root)? {
         MachineInstallState::Legacy => return Ok(None),
         MachineInstallState::Switching(receipt) => {
-            if switch_id != Some(receipt.id.as_str())
-                || receipt.phase.order() < SwitchPhase::Advancing.order()
-                || !receipt.target_store_advance_started
+            if switch_id == Some(receipt.id.as_str())
+                && receipt.phase.order() >= SwitchPhase::Advancing.order()
+                && receipt.target_store_advance_started
             {
-                return Err(anyhow!(
-                    "install switch {} is unsettled; ordinary startup is blocked",
-                    receipt.id
-                ));
-            }
-            let actual = fs::canonicalize(executable).with_context(|| {
-                format!("resolve switch startup executable {}", executable.display())
-            })?;
-            let actual_sha256 = file_sha256(&actual)?;
-            let expected = receipt
-                .target
-                .artifact_set
-                .artifacts
-                .iter()
-                .find(|artifact| {
-                    artifact_matches_runtime_role(&artifact.role, role)
-                        && actual_sha256 == artifact.sha256
-                })
-                .ok_or_else(|| {
-                    anyhow!(
-                        "install switch {} does not authorize {} as {:?}",
-                        receipt.id,
-                        actual.display(),
-                        role
-                    )
+                let actual = fs::canonicalize(executable).with_context(|| {
+                    format!("resolve switch startup executable {}", executable.display())
                 })?;
-            expected.verify()?;
-            return Ok(Some(receipt.target));
+                let actual_sha256 = file_sha256(&actual)?;
+                let expected = receipt
+                    .target
+                    .artifact_set
+                    .artifacts
+                    .iter()
+                    .find(|artifact| {
+                        artifact_matches_runtime_role(&artifact.role, role)
+                            && actual_sha256 == artifact.sha256
+                    })
+                    .ok_or_else(|| {
+                        anyhow!(
+                            "install switch {} does not authorize {} as {:?}",
+                            receipt.id,
+                            actual.display(),
+                            role
+                        )
+                    })?;
+                expected.verify()?;
+                return Ok(Some(receipt.target));
+            }
+            // Not the switch this process drives: authorize against the last good
+            // install so a failed or in-flight switch cannot brick ordinary startup.
+            startup_active_during_switch(&receipt)
         }
         MachineInstallState::Settled(active) => *active,
     };
@@ -1077,12 +1100,9 @@ pub fn selection_for_executable(
 ) -> Result<Option<InstallSelection>> {
     let active = match read_state(root)? {
         MachineInstallState::Legacy => return Ok(None),
-        MachineInstallState::Switching(receipt) => {
-            return Err(anyhow!(
-                "install switch {} is unsettled; ordinary startup is blocked",
-                receipt.id
-            ))
-        }
+        // A failed or in-flight switch resolves through the last good install so
+        // ordinary startup keeps working instead of refusing every command.
+        MachineInstallState::Switching(receipt) => startup_active_during_switch(&receipt),
         MachineInstallState::Settled(active) => *active,
     };
     let actual = fs::canonicalize(executable)
@@ -1518,33 +1538,45 @@ mod tests {
     }
 
     #[test]
-    fn unsettled_switch_takes_precedence_and_fences_startup() {
+    fn unsettled_switch_falls_back_to_the_prior_install_for_ordinary_startup() {
         let directory = tempfile::tempdir().unwrap();
         let root = directory.path().join("authority");
         let published = selection(directory.path(), "published", InstallSource::Published);
         let development = selection(directory.path(), "development", InstallSource::Development);
         let active = active(published.clone(), published.artifact_set.clone());
         write_atomic_json(&root, &root.join(ACTIVE_FILE), &active).unwrap();
-        let receipt = switch(published, development, active.published_fallback.clone());
+        let receipt = switch(
+            published.clone(),
+            development,
+            active.published_fallback.clone(),
+        );
         write_switch(&root, &receipt).unwrap();
 
+        // The switch is still surfaced so install operations can recover it...
         assert!(matches!(
             read_state(&root).unwrap(),
             MachineInstallState::Switching(found) if found.id == receipt.id
         ));
-        let error = authorize(&root, &receipt.coordinator.path, &ArtifactRole::Cli).unwrap_err();
-        assert!(error.to_string().contains("ordinary startup is blocked"));
+        // ...but a failed or in-flight switch must not brick the CLI: ordinary
+        // startup resolves through the prior (last good) install instead of
+        // refusing every command. `switch`'s coordinator is the prior CLI.
+        let resolved = authorize(&root, &receipt.coordinator.path, &ArtifactRole::Cli).unwrap();
+        assert_eq!(
+            resolved.map(|selection| selection.installation_id),
+            Some(published.installation_id)
+        );
     }
 
     #[test]
-    fn every_persisted_switch_phase_fences_ordinary_startup() {
+    fn every_unsettled_switch_phase_falls_back_to_the_prior_install() {
+        // No pre-commit switch phase may brick ordinary startup: each resolves
+        // through the prior (last good) install rather than refusing.
         for phase in [
             SwitchPhase::Planned,
             SwitchPhase::Quiesced,
             SwitchPhase::TargetPrepared,
             SwitchPhase::Advancing,
             SwitchPhase::Activated,
-            SwitchPhase::Settled,
         ] {
             let directory = tempfile::tempdir().unwrap();
             let root = directory.path().join("authority");
@@ -1557,26 +1589,23 @@ mod tests {
                 published.artifact_set.clone(),
             );
             receipt.phase = phase;
-            if matches!(
-                phase,
-                SwitchPhase::Advancing | SwitchPhase::Activated | SwitchPhase::Settled
-            ) {
+            if matches!(phase, SwitchPhase::Advancing | SwitchPhase::Activated) {
                 receipt.recovery_owner = RecoveryOwner::Candidate;
                 receipt.target_store_advance_started = true;
             }
-            if matches!(phase, SwitchPhase::Activated | SwitchPhase::Settled) {
+            if phase == SwitchPhase::Activated {
                 receipt.target_store_advanced = true;
-            }
-            if phase == SwitchPhase::Settled {
-                receipt.active_selection_committed = true;
             }
             write_switch(&root, &receipt).unwrap();
 
-            let error =
-                authorize(&root, &receipt.coordinator.path, &ArtifactRole::Cli).unwrap_err();
-            assert!(
-                error.to_string().contains("ordinary startup is blocked"),
-                "phase {phase:?}: {error}"
+            let resolved = authorize(&root, &receipt.coordinator.path, &ArtifactRole::Cli)
+                .unwrap_or_else(|error| {
+                    panic!("phase {phase:?} should not fence startup: {error}")
+                });
+            assert_eq!(
+                resolved.map(|selection| selection.installation_id),
+                Some(published.installation_id.clone()),
+                "phase {phase:?} should resolve to the prior install"
             );
         }
     }
@@ -1607,13 +1636,17 @@ mod tests {
         .unwrap()
         .unwrap();
         assert_eq!(selected, development);
+        // A different switch id no longer fences startup — it falls back to the
+        // prior install, where this candidate binary is not a member, so it is
+        // simply not authorized (None) rather than granted the target selection.
         assert!(authorize_for_switch(
             &root,
             &receipt.candidate.path,
             &ArtifactRole::Cli,
             Some("different-switch"),
         )
-        .is_err());
+        .unwrap()
+        .is_none());
     }
 
     #[test]

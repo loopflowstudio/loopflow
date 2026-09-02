@@ -302,7 +302,7 @@ fn check_machine_install(database_path: &Path) -> Vec<Check> {
         Ok(crate::machine_install::MachineInstallState::Switching(receipt)) => vec![Check::fail(
             "install-switch",
             format!(
-                "install switch {} is unsettled at {:?}; ordinary startup remains fenced",
+                "install switch {} is unsettled at {:?}; ordinary startup falls back to the prior install — recover or rerun the promotion to finish it",
                 receipt.id, receipt.phase
             ),
         )],

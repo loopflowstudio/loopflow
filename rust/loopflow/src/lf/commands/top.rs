@@ -337,7 +337,8 @@ fn observe_processes(now: i64, lf_home: &Path) -> Result<ProcessSnapshot> {
     if !output.status.success() {
         return Err(anyhow!("ps failed while collecting Loopflow activity"));
     }
-    let processes = parse_local_processes(&String::from_utf8_lossy(&output.stdout), now);
+    let processes = parse_local_processes(&String::from_utf8_lossy(&output.stdout), now)
+        .context("failed to parse local processes")?;
     let opencode_servers = match registered_opencode_servers_at(lf_home) {
         Ok(servers) => servers,
         Err(error) => {
@@ -1096,7 +1097,8 @@ mod tests {
         let processes = parse_local_processes(
             "10 1 10 S 01:00 opencode serve --port 3000\n11 1 11 S 02:00 opencode run yaml-language-server\n",
             10_000,
-        );
+        )
+        .unwrap();
 
         assert_eq!(
             process_kind(&processes[0].command),
@@ -1111,9 +1113,17 @@ mod tests {
         let processes = parse_local_processes(
             &format!("10 1 10 S 00:02 /Users/test/.lf/bin/lf-{digest} __work task task_123\n"),
             10_000,
-        );
+        )
+        .unwrap();
 
         assert_eq!(process_kind(&processes[0].command), Some(ProcessKind::Lf));
+    }
+
+    #[test]
+    fn process_parser_rejects_an_incomplete_os_snapshot() {
+        let error = parse_local_processes("not a process row\n", 10_000).unwrap_err();
+
+        assert!(error.to_string().contains("invalid PID"));
     }
 
     #[test]

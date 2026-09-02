@@ -311,12 +311,19 @@ pub(crate) fn read_work_startup_receipts_at(
         {
             continue;
         }
-        let Ok(bytes) = std::fs::read(entry.path()) else {
-            continue;
-        };
-        let Ok(receipt) = serde_json::from_slice::<WorkStartupReceipt>(&bytes) else {
-            continue;
-        };
+        let path = entry.path();
+        let bytes = std::fs::read(&path).map_err(|error| {
+            std::io::Error::new(
+                error.kind(),
+                format!("cannot read startup receipt {}: {error}", path.display()),
+            )
+        })?;
+        let receipt = serde_json::from_slice::<WorkStartupReceipt>(&bytes).map_err(|error| {
+            std::io::Error::new(
+                std::io::ErrorKind::InvalidData,
+                format!("invalid startup receipt {}: {error}", path.display()),
+            )
+        })?;
         receipts.push(receipt);
     }
     receipts.sort_by_key(|receipt| receipt.observed_at);

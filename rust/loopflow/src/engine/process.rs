@@ -106,31 +106,51 @@ pub(crate) async fn inspect_local_processes() -> Result<Vec<LocalProcess>> {
             String::from_utf8_lossy(&output.stderr).trim()
         ));
     }
-    Ok(parse_local_processes(
-        &String::from_utf8_lossy(&output.stdout),
-        now,
-    ))
+    parse_local_processes(&String::from_utf8_lossy(&output.stdout), now).map_err(|error| {
+        anyhow!("invalid ps output while inspecting controller ownership: {error}")
+    })
 }
 
-pub(crate) fn parse_local_processes(output: &str, now: i64) -> Vec<LocalProcess> {
+pub(crate) fn parse_local_processes(output: &str, now: i64) -> Result<Vec<LocalProcess>> {
     output
         .lines()
-        .filter_map(|line| {
+        .enumerate()
+        .filter(|(_, line)| !line.trim().is_empty())
+        .map(|(index, line)| {
             let mut fields = line.split_whitespace();
-            let pid = fields.next()?.parse::<u32>().ok()?;
-            let parent_pid = fields.next()?.parse::<u32>().ok()?;
-            let process_group = fields.next()?.parse::<u32>().ok()?;
-            let kernel_state = fields.next()?.to_string();
-            let elapsed = fields.next()?;
+            let pid = fields
+                .next()
+                .ok_or_else(|| anyhow!("line {} has no PID", index + 1))?
+                .parse::<u32>()
+                .map_err(|error| anyhow!("line {} has invalid PID: {error}", index + 1))?;
+            let parent_pid = fields
+                .next()
+                .ok_or_else(|| anyhow!("line {} has no parent PID", index + 1))?
+                .parse::<u32>()
+                .map_err(|error| anyhow!("line {} has invalid parent PID: {error}", index + 1))?;
+            let process_group = fields
+                .next()
+                .ok_or_else(|| anyhow!("line {} has no process group", index + 1))?
+                .parse::<u32>()
+                .map_err(|error| {
+                    anyhow!("line {} has invalid process group: {error}", index + 1)
+                })?;
+            let kernel_state = fields
+                .next()
+                .ok_or_else(|| anyhow!("line {} has no kernel state", index + 1))?
+                .to_string();
+            let elapsed = fields
+                .next()
+                .ok_or_else(|| anyhow!("line {} has no elapsed time", index + 1))?;
             let command = fields.collect::<Vec<_>>().join(" ");
             if command.is_empty() {
-                return None;
+                return Err(anyhow!("line {} has no command", index + 1));
             }
-            Some(LocalProcess {
+            Ok(LocalProcess {
                 pid,
                 parent_pid,
                 process_group,
-                started_at: now.saturating_sub(elapsed_seconds(elapsed) as i64),
+                started_at: now.saturating_sub(elapsed_seconds(elapsed)? as i64),
                 kernel_state,
                 command,
             })
@@ -138,25 +158,31 @@ pub(crate) fn parse_local_processes(output: &str, now: i64) -> Vec<LocalProcess>
         .collect()
 }
 
-fn elapsed_seconds(elapsed: &str) -> u64 {
-    let (days, clock) = elapsed
-        .split_once('-')
-        .map_or((0, elapsed), |(days, clock)| {
-            (days.parse::<u64>().unwrap_or(0), clock)
-        });
+fn elapsed_seconds(elapsed: &str) -> Result<u64> {
+    let (days, clock) = if let Some((days, clock)) = elapsed.split_once('-') {
+        let days = days
+            .parse::<u64>()
+            .map_err(|error| anyhow!("invalid elapsed days {days:?}: {error}"))?;
+        (days, clock)
+    } else {
+        (0, elapsed)
+    };
     let parts = clock
         .split(':')
-        .filter_map(|part| part.parse::<u64>().ok())
-        .collect::<Vec<_>>();
+        .map(|part| {
+            part.parse::<u64>()
+                .map_err(|error| anyhow!("invalid elapsed clock {elapsed:?}: {error}"))
+        })
+        .collect::<Result<Vec<_>>>()?;
     let clock_seconds = match parts.as_slice() {
         [minutes, seconds] => minutes.saturating_mul(60).saturating_add(*seconds),
         [hours, minutes, seconds] => hours
             .saturating_mul(3_600)
             .saturating_add(minutes.saturating_mul(60))
             .saturating_add(*seconds),
-        _ => 0,
+        _ => return Err(anyhow!("invalid elapsed time {elapsed:?}")),
     };
-    days.saturating_mul(86_400).saturating_add(clock_seconds)
+    Ok(days.saturating_mul(86_400).saturating_add(clock_seconds))
 }
 
 pub(crate) fn is_lf_executable_name(executable: &str) -> bool {

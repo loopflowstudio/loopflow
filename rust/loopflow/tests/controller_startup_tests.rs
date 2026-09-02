@@ -621,6 +621,10 @@ if [ -f "$LF_TEST_TMUX_STATE/fail-ps" ]; then
   echo "process inspection refused" >&2
   exit 8
 fi
+if [ -f "$LF_TEST_TMUX_STATE/malformed-ps" ]; then
+  echo "not a process row"
+  exit 0
+fi
 exec /bin/ps "$@"
 "#,
     );
@@ -970,6 +974,29 @@ exit 1
         .is_some_and(|reason| reason.contains("ps failed")));
     std::fs::remove_file(&fail_ps).expect("restore OS inspection");
 
+    let malformed_ps = tmux_state.join("malformed-ps");
+    std::fs::write(&malformed_ps, "malformed\n").expect("malform OS inspection");
+    let malformed_os_status = successful_json(
+        &public_lf(
+            &repo,
+            &home,
+            &bin,
+            Path::new(env!("CARGO_BIN_EXE_lf")),
+            &tmux_state,
+            &linear_base_url,
+            &["task", "status", &task.plan.identifier, "--json"],
+        ),
+        "Task status with malformed OS inspection",
+    );
+    assert_eq!(
+        malformed_os_status["controller_authority"]["state"],
+        "unverifiable"
+    );
+    assert!(malformed_os_status["controller_authority"]["reason"]
+        .as_str()
+        .is_some_and(|reason| reason.contains("invalid ps output")));
+    std::fs::remove_file(&malformed_ps).expect("restore OS inspection");
+
     stop_process_tree(first_pid);
     let inactive_status = successful_json(
         &public_lf(
@@ -985,6 +1012,46 @@ exit 1
     );
     assert_eq!(inactive_status["controller_authority"]["state"], "inactive");
     assert!(inactive_status["controller"]["provider_session_id"].is_string());
+
+    let malformed_startup = home.join("controller/startup/malformed.json");
+    std::fs::write(&malformed_startup, b"{").expect("malform startup evidence");
+    let malformed_startup_status = successful_json(
+        &public_lf(
+            &repo,
+            &home,
+            &bin,
+            Path::new(env!("CARGO_BIN_EXE_lf")),
+            &tmux_state,
+            &linear_base_url,
+            &["task", "status", &task.plan.identifier, "--json"],
+        ),
+        "Task status with malformed startup evidence",
+    );
+    assert_eq!(
+        malformed_startup_status["controller_authority"]["state"],
+        "unverifiable"
+    );
+    assert!(malformed_startup_status["controller_authority"]["reason"]
+        .as_str()
+        .is_some_and(|reason| reason.contains("invalid startup receipt")));
+    let malformed_startup_resume = public_lf(
+        &repo,
+        &home,
+        &bin,
+        Path::new(env!("CARGO_BIN_EXE_lf")),
+        &tmux_state,
+        &linear_base_url,
+        &["task", "resume", &task.plan.identifier, "--json"],
+    );
+    assert!(!malformed_startup_resume.status.success());
+    assert!(String::from_utf8_lossy(&malformed_startup_resume.stderr)
+        .contains("invalid startup receipt"));
+    assert_eq!(
+        running_receipts(&home, "task", task.id.as_str()).len(),
+        1,
+        "malformed ownership evidence must not authorize another launch"
+    );
+    std::fs::remove_file(&malformed_startup).expect("restore startup evidence");
 
     let mut unrelated = Command::new("sleep")
         .arg("30")
@@ -1075,6 +1142,28 @@ exit 1
     );
     assert!(!parked_resume.status.success());
     assert!(String::from_utf8_lossy(&parked_resume.stderr).contains("parked"));
+    let requests_before_parked_restart = linear_requests.load(Ordering::SeqCst);
+    let parked_restart = public_lf(
+        &repo,
+        &home,
+        &bin,
+        Path::new(env!("CARGO_BIN_EXE_lf")),
+        &tmux_state,
+        &linear_base_url,
+        &["task", "restart", &task.plan.identifier, "--json"],
+    );
+    assert!(!parked_restart.status.success());
+    assert!(String::from_utf8_lossy(&parked_restart.stderr).contains("parked"));
+    assert_eq!(
+        linear_requests.load(Ordering::SeqCst),
+        requests_before_parked_restart,
+        "parked restart must refuse before refreshing or mutating Task state"
+    );
+    assert_eq!(
+        running_receipts(&home, "task", task.id.as_str()).len(),
+        1,
+        "parked restart must not create another controller attempt"
+    );
     std::fs::remove_file(&parked_path).expect("remove parked Task receipt");
 
     let second_resume = public_lf(

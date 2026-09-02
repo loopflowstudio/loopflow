@@ -2569,7 +2569,32 @@ async fn stop_task_controller(store: &SharedStore, task: &Task) -> OpsResult<()>
                 .map_err(task_error)?;
             crate::engine::process::signal_process(owner.pid, "-KILL")
                 .map_err(|error| task_error(error.to_string()))?;
-            return Ok(());
+            break;
+        }
+        tokio::time::sleep(Duration::from_millis(50)).await;
+    }
+    let stopped_deadline = tokio::time::Instant::now() + Duration::from_secs(1);
+    loop {
+        match task_controller_authority(task).await {
+            ControllerAuthority::Inactive | ControllerAuthority::Parked { .. } => return Ok(()),
+            ControllerAuthority::Live { owner: current } if current == owner => {}
+            ControllerAuthority::Live { owner: current } => {
+                return Err(task_error(format!(
+                    "Task {} controller owner changed to attempt {} PID {} after forced stop",
+                    task.plan.identifier, current.attempt_id, current.pid
+                )))
+            }
+            ControllerAuthority::Unverifiable { reason } => {
+                if tokio::time::Instant::now() >= stopped_deadline {
+                    return Err(task_error(reason));
+                }
+            }
+        }
+        if tokio::time::Instant::now() >= stopped_deadline {
+            return Err(task_error(format!(
+                "Task {} controller PID {} remained live after forced stop",
+                task.plan.identifier, owner.pid
+            )));
         }
         tokio::time::sleep(Duration::from_millis(50)).await;
     }
@@ -4741,12 +4766,22 @@ async fn restart_task_async(issue: &str, advice: Option<String>) -> OpsResult<Ta
         }
         WorkStatus::Ready => {}
     }
-    if let ControllerAuthority::Unverifiable { reason } = task_controller_authority(&task).await {
-        return Err(task_error(format!(
-            "Task {} cannot restart: {reason}",
-            task.plan.identifier
-        )));
+    match task_controller_authority(&task).await {
+        ControllerAuthority::Live { .. } | ControllerAuthority::Inactive => {}
+        ControllerAuthority::Parked { attempt_id } => {
+            return Err(task_error(format!(
+                "Task {} cannot restart while its controller is parked at human boundary attempt {attempt_id}",
+                task.plan.identifier
+            )))
+        }
+        ControllerAuthority::Unverifiable { reason } => {
+            return Err(task_error(format!(
+                "Task {} cannot restart: {reason}",
+                task.plan.identifier
+            )))
+        }
     }
+    stop_task_controller(&store, &task).await?;
 
     let resolved = crate::ops::task_pm::resolve_task_async(
         &task.worktree,
@@ -4848,7 +4883,6 @@ async fn restart_task_async(issue: &str, advice: Option<String>) -> OpsResult<Ta
     validate_task_lifecycle(&task, controller)?;
 
     let direction = task_restart_direction(&task, advice.as_deref());
-    stop_task_controller(&store, &task).await?;
     store
         .update_task(&task)
         .await

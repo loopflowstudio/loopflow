@@ -15,11 +15,15 @@ use crate::engine::config::{
     load_config_or_default, Config, ReleaseCompletion, ReleaseTargetConfig,
 };
 use crate::engine::git::{
-    acquire_worktree_lease, delete_local_branch, fetch, get_default_branch, sync_main,
-    worktree_remove, worktree_remove_owned, WorktreeLease,
+    acquire_worktree_lease, current_branch, delete_local_branch, fetch, get_default_branch,
+    is_clean, ref_exists, rev_parse, sync_main, worktree_remove, worktree_remove_owned,
+    WorktreeLease,
 };
 use crate::engine::naming::{git_user, sanitize_for_branch};
-use crate::engine::worktrees::{create_named_worktree, main_repo_root, worktree_path};
+use crate::engine::worktrees::{
+    branch_exists, create_named_worktree, list_porcelain, main_repo_root, worktree_path,
+    CreateWorktreeResult,
+};
 use crate::ops::commit::{commit_workflow, CommitOptions};
 use crate::ops::error::{OpsError, OpsResult};
 use crate::ops::land::{finish_arm_after_rebase, LandOptions};
@@ -893,6 +897,169 @@ fn publish_worktree_name(target: &ReleaseTarget, tag: &str) -> String {
     format!("publish-{target_name}-{tag}")
 }
 
+fn materialize_exact_source_worktree(
+    repo: &Path,
+    worktree_name: &str,
+    revision: &str,
+    lease: &WorktreeLease,
+) -> OpsResult<CreateWorktreeResult> {
+    let path = worktree_path(repo, worktree_name);
+    let branch = release_branch_name(repo, worktree_name)?;
+    let expected_commit = rev_parse(repo, &format!("{revision}^{{commit}}"))?;
+    let registrations = list_porcelain(repo)?;
+    let registered_at_path = registrations
+        .iter()
+        .find(|(registered_path, _)| registered_path == &path)
+        .map(|(_, registered_branch)| registered_branch.clone());
+    let branch_registration = registrations
+        .iter()
+        .find(|(_, registered_branch)| registered_branch.as_deref() == Some(branch.as_str()))
+        .map(|(registered_path, _)| registered_path.clone());
+
+    if let Some(registered_path) = branch_registration.as_deref() {
+        if registered_path != path {
+            return Err(publisher_worktree_refused(
+                &path,
+                &branch,
+                &expected_commit,
+                &format!(
+                    "generated branch is registered at {}",
+                    registered_path.display()
+                ),
+            ));
+        }
+    }
+
+    if let Some(observed_branch) = registered_at_path.as_ref() {
+        if observed_branch.as_deref() != Some(branch.as_str()) {
+            let observed = observed_branch.as_deref().unwrap_or("detached HEAD");
+            return Err(publisher_worktree_refused(
+                &path,
+                &branch,
+                &expected_commit,
+                &format!("path is registered on {observed}"),
+            ));
+        }
+    }
+
+    let local_head = if branch_exists(repo, &branch)? {
+        Some(rev_parse(repo, &format!("refs/heads/{branch}^{{commit}}"))?)
+    } else {
+        None
+    };
+    if let Some(observed) = local_head.as_deref() {
+        if observed != expected_commit {
+            return Err(publisher_worktree_refused(
+                &path,
+                &branch,
+                &expected_commit,
+                &format!("local branch resolves to {observed}"),
+            ));
+        }
+    }
+
+    let remote_ref = format!("refs/remotes/origin/{branch}");
+    if ref_exists(repo, &remote_ref)? {
+        let remote_head = rev_parse(repo, &format!("{remote_ref}^{{commit}}"))?;
+        if remote_head != expected_commit {
+            return Err(publisher_worktree_refused(
+                &path,
+                &branch,
+                &expected_commit,
+                &format!("origin branch resolves to {remote_head}"),
+            ));
+        }
+    }
+
+    if registered_at_path.is_some() && path.exists() {
+        let observed_branch = current_branch(&path)?;
+        if observed_branch.as_deref() != Some(branch.as_str()) {
+            let observed = observed_branch.as_deref().unwrap_or("detached HEAD");
+            return Err(publisher_worktree_refused(
+                &path,
+                &branch,
+                &expected_commit,
+                &format!("worktree reports branch {observed}"),
+            ));
+        }
+        let observed_head = rev_parse(&path, "HEAD^{commit}")?;
+        if observed_head != expected_commit {
+            return Err(publisher_worktree_refused(
+                &path,
+                &branch,
+                &expected_commit,
+                &format!("worktree HEAD resolves to {observed_head}"),
+            ));
+        }
+        if !is_clean(&path)? {
+            let status = run_stdout(&path, "git", &["status", "--short"])?;
+            return Err(publisher_worktree_refused(
+                &path,
+                &branch,
+                &expected_commit,
+                &format!("worktree is dirty: {status}"),
+            ));
+        }
+        return Ok(CreateWorktreeResult {
+            path,
+            branch,
+            base_branch: None,
+            base_commit: Some(expected_commit),
+        });
+    }
+
+    if registered_at_path.is_none() && path.exists() && !publisher_path_is_empty(&path)? {
+        return Err(publisher_worktree_refused(
+            &path,
+            &branch,
+            &expected_commit,
+            "unregistered generated path is not an empty directory",
+        ));
+    }
+
+    if registered_at_path.is_some() {
+        worktree_remove_owned(repo, &path, lease)?;
+    }
+    if local_head.is_some() {
+        delete_local_branch(repo, &branch)?;
+    }
+    if path.exists() {
+        fs::remove_dir(&path)?;
+    }
+
+    let worktree = create_named_worktree(repo, worktree_name, Some(revision), false)?;
+    let observed_head = rev_parse(&worktree.path, "HEAD^{commit}")?;
+    if observed_head != expected_commit {
+        let _ = worktree_remove_owned(repo, &worktree.path, lease);
+        let _ = delete_local_branch(repo, &worktree.branch);
+        return Err(OpsError::Message(format!(
+            "publisher worktree {} materialized branch {branch} at {observed_head}, expected {expected_commit}; cleanup was attempted",
+            path.display()
+        )));
+    }
+    Ok(worktree)
+}
+
+fn publisher_path_is_empty(path: &Path) -> OpsResult<bool> {
+    let metadata = fs::symlink_metadata(path)?;
+    if !metadata.file_type().is_dir() {
+        return Ok(false);
+    }
+    Ok(fs::read_dir(path)?.next().is_none())
+}
+
+fn publisher_worktree_refused(
+    path: &Path,
+    branch: &str,
+    expected_commit: &str,
+    observed: &str,
+) -> OpsError {
+    OpsError::Message(format!(
+        "publisher worktree recovery refused for {}: expected branch {branch} at {expected_commit}; {observed}; no state was changed",
+        path.display()
+    ))
+}
+
 fn prepare_worktree_name(target: &ReleaseTarget, candidate: &ReleaseCandidate) -> String {
     let mut name =
         publish_worktree_name(target, &candidate.tag).replacen("publish-", "prepare-", 1);
@@ -987,7 +1154,7 @@ fn prepare_publisher(
         &format!("release candidate preparation for {}", candidate.tag),
     )?;
     progress.status(&format!("Preparing signed candidate {}...", candidate.tag));
-    let wt = create_named_worktree(repo, &wt_name, Some(&candidate.commit), false)?;
+    let wt = materialize_exact_source_worktree(repo, &wt_name, &candidate.commit, &lease)?;
     let prepare_result = {
         let mut cmd = Command::new(program);
         cmd.args(args)
@@ -1062,7 +1229,7 @@ fn run_publisher(
     progress.status(&format!(
         "Materializing tagged publisher worktree {wt_name}..."
     ));
-    let wt = create_named_worktree(repo, &wt_name, Some(tag), false)?;
+    let wt = materialize_exact_source_worktree(repo, &wt_name, tag, &lease)?;
     let publish_result = {
         let mut cmd = Command::new(program);
         cmd.args(args)

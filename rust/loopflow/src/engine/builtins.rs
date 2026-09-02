@@ -524,6 +524,25 @@ mod tests {
     }
 
     #[test]
+    fn release_run_names_its_durable_restart_contract() {
+        let skill = get_builtin_skill("release-run").expect("release-run skill");
+        let skill = skill.split_whitespace().collect::<Vec<_>>().join(" ");
+
+        for contract in [
+            "Process death does not make generated release state temporary",
+            "release-candidate/<target>/<tag>/<commit>",
+            "prepare-<target>-<tag>-<commit>",
+            "publish-<target>-<tag>",
+            ".lf/releases/<tag>/<commit>-<workflow-run-id>",
+            "observe → classify → converge or refuse",
+            "Mismatched, dirty, differently registered, or live-owned state fails closed",
+            "must not manually remove a stale generated worktree, ref, or artifact directory",
+        ] {
+            assert!(skill.contains(contract), "release-run omits {contract:?}");
+        }
+    }
+
+    #[test]
     fn generic_execution_skills_never_infer_a_wave_or_require_pm() {
         for name in ["implement", "gate", "qa", "research", "rebase-conflicts"] {
             let skill = get_builtin_skill(name).expect("generic skill");

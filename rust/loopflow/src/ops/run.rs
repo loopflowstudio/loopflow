@@ -438,29 +438,36 @@ pub(crate) struct WorkLaunch {
 }
 
 pub(crate) async fn launch_work(request: WorkLaunch) -> OpsResult<()> {
-    let environment = request.environment.clone();
-    start_work_session(&request, environment).await
-}
-
-async fn start_work_session(
-    request: &WorkLaunch,
-    mut environment: Vec<(String, String)>,
-) -> OpsResult<()> {
+    let WorkLaunch {
+        work,
+        wave_id,
+        cwd,
+        tmux_name,
+        mut environment,
+    } = request;
     let execution = current_home_execution_context()
         .map_err(|error| OpsError::Message(format!("cannot resolve current lf binary: {error}")))?;
+    let startup = crate::controller::startup::WorkStartupAttempt::new(&execution.lf_home).map_err(
+        |error| {
+            OpsError::Message(format!(
+                "cannot prepare {} controller startup: {error}",
+                work.kind()
+            ))
+        },
+    )?;
     let control_bin = pin_control_binary(&execution.lf_bin)
         .to_string_lossy()
         .to_string();
     let argv = vec![
         control_bin.clone(),
         "__work".to_string(),
-        request.work.kind().to_string(),
-        request.work.id().to_string(),
+        work.kind().to_string(),
+        work.id().to_string(),
     ];
     environment.extend([
         (
             crate::work::wave::context::WAVE_ID_ENV.to_string(),
-            request.wave_id.as_str().to_string(),
+            wave_id.as_str().to_string(),
         ),
         (crate::store::CONTROL_BIN_ENV.to_string(), control_bin),
         (
@@ -472,6 +479,7 @@ async fn start_work_session(
             execution.lf_home.to_string_lossy().to_string(),
         ),
     ]);
+    environment.extend(startup.environment());
     if let Some(switch_id) = std::env::var_os(crate::machine_install::INSTALL_SWITCH_ENV)
         .filter(|value| !value.is_empty())
     {
@@ -484,18 +492,27 @@ async fn start_work_session(
         .iter()
         .map(|(key, value)| (key.as_str(), value.as_str()))
         .collect::<Vec<_>>();
-    start_lf_session_with_env(&request.tmux_name, &request.cwd, &argv, &environment)
-        .await
-        .map_err(|error| {
+    if let Err(error) = start_lf_session_with_env(&tmux_name, &cwd, &argv, &environment).await {
+        let failure = format!("failed to launch {} body: {error}", work.kind());
+        let receipt = startup.settle_failed(&failure).map_err(|receipt_error| {
             OpsError::Message(format!(
-                "failed to launch {} body: {error}",
-                request.work.kind()
+                "{failure}; could not persist controller startup failure: {receipt_error}"
             ))
-        })
+        })?;
+        return Err(OpsError::Message(format!(
+            "{failure}; receipt: {}",
+            receipt.display()
+        )));
+    }
+    startup.wait(&work, &tmux_name).await.map_err(|error| {
+        OpsError::Message(format!("failed to start {} body: {error}", work.kind()))
+    })?;
+    Ok(())
 }
 
 #[cfg(test)]
 mod tests {
+    use std::ffi::OsString;
     use std::sync::Arc;
 
     use time::OffsetDateTime;
@@ -507,6 +524,30 @@ mod tests {
     use crate::work::project::Project;
     use crate::work::task::{Observation, PmWritebackState, Task, TaskPr, TaskPrId};
     use crate::work::wave::Wave;
+
+    struct EnvRestore(Vec<(String, Option<OsString>)>);
+
+    impl EnvRestore {
+        fn capture(names: &[&str]) -> Self {
+            Self(
+                names
+                    .iter()
+                    .map(|name| ((*name).to_string(), std::env::var_os(name)))
+                    .collect(),
+            )
+        }
+    }
+
+    impl Drop for EnvRestore {
+        fn drop(&mut self) {
+            for (name, value) in self.0.drain(..) {
+                match value {
+                    Some(value) => std::env::set_var(name, value),
+                    None => std::env::remove_var(name),
+                }
+            }
+        }
+    }
 
     async fn test_store() -> (tempfile::TempDir, SharedStore) {
         let directory = tempfile::tempdir().unwrap();
@@ -578,6 +619,98 @@ mod tests {
         };
         store.create_task(&task, &pr).await.unwrap();
         task
+    }
+
+    #[cfg(unix)]
+    #[tokio::test]
+    #[allow(clippy::await_holding_lock)] // the env lock serializes process-global launch routing
+    async fn project_and_task_launches_block_on_failed_controller_receipts() {
+        use std::os::unix::fs::PermissionsExt;
+
+        let _env_lock = crate::journal::test_env_lock();
+        let _restore = EnvRestore::capture(&[
+            "PATH",
+            "LF_BIN",
+            "LF_HOME",
+            "LF_DB_PATH",
+            "LF_CONTROL_BIN",
+            "LF_CONTROL_HOME",
+            "LF_CONTROL_DB_PATH",
+        ]);
+        let directory = tempfile::tempdir().unwrap();
+        let home = directory.path().join("home");
+        let cwd = directory.path().join("repo");
+        let bin = directory.path().join("bin");
+        std::fs::create_dir_all(&home).unwrap();
+        std::fs::create_dir_all(&cwd).unwrap();
+        std::fs::create_dir_all(&bin).unwrap();
+        let fake_lf = bin.join("lf");
+        std::fs::write(
+            &fake_lf,
+            r#"#!/bin/sh
+temporary="${LF_WORK_STARTUP_RECEIPT}.tmp"
+printf '{"attempt_id":"%s","observed_at":"2026-09-01T00:00:00Z","state":"failed","reason":"controller child failed before startup"}\n' "$LF_WORK_STARTUP_ATTEMPT" > "$temporary"
+mv "$temporary" "$LF_WORK_STARTUP_RECEIPT"
+exit 7
+"#,
+        )
+        .unwrap();
+        std::fs::set_permissions(&fake_lf, std::fs::Permissions::from_mode(0o755)).unwrap();
+        let fake_tmux = bin.join("tmux");
+        std::fs::write(
+            &fake_tmux,
+            r#"#!/bin/sh
+if [ "$1" = "new-session" ]; then
+  cwd="$6"
+  command="$9"
+  (
+    cd "$cwd" || exit 1
+    exec /bin/sh -lc "$command"
+  ) </dev/null >/dev/null 2>&1 &
+fi
+exit 0
+"#,
+        )
+        .unwrap();
+        std::fs::set_permissions(&fake_tmux, std::fs::Permissions::from_mode(0o755)).unwrap();
+
+        let path = std::env::var_os("PATH").unwrap_or_default();
+        std::env::set_var(
+            "PATH",
+            format!("{}:{}", bin.display(), path.to_string_lossy()),
+        );
+        std::env::set_var("LF_BIN", &fake_lf);
+        std::env::set_var("LF_HOME", &home);
+        std::env::set_var("LF_DB_PATH", home.join("loopflow.db"));
+        std::env::remove_var("LF_CONTROL_BIN");
+        std::env::remove_var("LF_CONTROL_HOME");
+        std::env::remove_var("LF_CONTROL_DB_PATH");
+
+        let work = [
+            WorkRef::Project(ProjectId::new()),
+            WorkRef::Task(TaskId::new()),
+        ];
+        for (index, work) in work.into_iter().enumerate() {
+            let error = launch_work(WorkLaunch {
+                wave_id: WaveId::new(),
+                cwd: cwd.clone(),
+                tmux_name: format!("failed-controller-{index}"),
+                environment: Vec::new(),
+                work,
+            })
+            .await
+            .expect_err("detached tmux acceptance is not controller startup");
+
+            assert!(error
+                .to_string()
+                .contains("controller child failed before startup"));
+        }
+        let receipts = std::fs::read_dir(home.join("controller/startup"))
+            .unwrap()
+            .filter_map(Result::ok)
+            .collect::<Vec<_>>();
+        assert_eq!(receipts.len(), 2);
+        assert!(receipts.iter().all(|entry| entry.path().is_file()));
     }
 
     #[tokio::test]

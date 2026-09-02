@@ -11,6 +11,7 @@ use anyhow::{anyhow, Context, Result};
 use serde::{Deserialize, Serialize};
 use time::OffsetDateTime;
 
+use crate::engine::process::{parse_local_processes, LocalProcess, LOCAL_PROCESS_COLUMNS};
 use crate::harness::opencode_runtime::{
     reap_selected_orphaned_opencode_servers_at, registered_opencode_servers_at, OpenCodeServerEntry,
 };
@@ -22,7 +23,6 @@ use crate::store::{sqlite::SqliteStore, RunEventRow};
 
 const SCHEMA_VERSION: u32 = 1;
 const REFRESH_INTERVAL: Duration = Duration::from_secs(2);
-const PROCESS_START_TOLERANCE_SECONDS: i64 = 3;
 const COMMAND_WIDTH: usize = 82;
 
 #[derive(Debug, Clone, Copy, Serialize, Deserialize, PartialEq, Eq)]
@@ -110,20 +110,9 @@ struct ActivityData {
     events: Vec<RunEventRow>,
 }
 
-#[derive(Debug, Clone, PartialEq, Eq)]
-struct OsProcess {
-    pid: u32,
-    ppid: u32,
-    process_group: u32,
-    started_at: i64,
-    kernel_state: String,
-    command: String,
-    kind: Option<ProcessKind>,
-}
-
 #[derive(Debug, Clone)]
 struct ProcessSnapshot {
-    processes: Vec<OsProcess>,
+    processes: Vec<LocalProcess>,
     receipts: Vec<ExecProcessReceipt>,
     opencode_servers: Vec<OpenCodeServerEntry>,
 }
@@ -131,7 +120,7 @@ struct ProcessSnapshot {
 #[derive(Debug, Clone)]
 struct OwnedProviderProcess {
     exec_id: String,
-    process: OsProcess,
+    process: LocalProcess,
 }
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
@@ -270,7 +259,9 @@ fn resolve_prune_targets(processes: &ProcessSnapshot) -> (Vec<u32>, Vec<u32>) {
         .filter(|entry| {
             process_by_pid
                 .get(&entry.opencode_pid)
-                .is_some_and(|process| process.kind == Some(ProcessKind::OpenCode))
+                .is_some_and(|process| {
+                    process_kind(&process.command) == Some(ProcessKind::OpenCode)
+                })
                 || processes.processes.iter().any(|process| {
                     process.process_group == entry.opencode_pid && process.pid != entry.opencode_pid
                 })
@@ -340,13 +331,13 @@ fn read_activity_data(path: &Path, live_execs: &[ExecProcessReceipt]) -> Result<
 
 fn observe_processes(now: i64, lf_home: &Path) -> Result<ProcessSnapshot> {
     let output = Command::new("ps")
-        .args(["-axo", "pid=,ppid=,pgid=,state=,etime=,command="])
+        .args(["-axo", LOCAL_PROCESS_COLUMNS])
         .output()
         .context("failed to inspect processes")?;
     if !output.status.success() {
         return Err(anyhow!("ps failed while collecting Loopflow activity"));
     }
-    let processes = parse_processes(&String::from_utf8_lossy(&output.stdout), now);
+    let processes = parse_local_processes(&String::from_utf8_lossy(&output.stdout), now);
     let opencode_servers = match registered_opencode_servers_at(lf_home) {
         Ok(servers) => servers,
         Err(error) => {
@@ -362,33 +353,6 @@ fn observe_processes(now: i64, lf_home: &Path) -> Result<ProcessSnapshot> {
     })
 }
 
-fn parse_processes(output: &str, now: i64) -> Vec<OsProcess> {
-    output
-        .lines()
-        .filter_map(|line| {
-            let mut fields = line.split_whitespace();
-            let pid = fields.next()?.parse::<u32>().ok()?;
-            let ppid = fields.next()?.parse::<u32>().ok()?;
-            let process_group = fields.next()?.parse::<u32>().ok()?;
-            let kernel_state = fields.next()?.to_string();
-            let elapsed = fields.next()?;
-            let command = fields.collect::<Vec<_>>().join(" ");
-            if command.is_empty() {
-                return None;
-            }
-            Some(OsProcess {
-                pid,
-                ppid,
-                process_group,
-                started_at: now.saturating_sub(elapsed_seconds(elapsed) as i64),
-                kernel_state,
-                kind: process_kind(&command),
-                command,
-            })
-        })
-        .collect()
-}
-
 fn process_kind(command: &str) -> Option<ProcessKind> {
     let words = command.split_whitespace().collect::<Vec<_>>();
     let executable = words
@@ -396,7 +360,9 @@ fn process_kind(command: &str) -> Option<ProcessKind> {
         .and_then(|word| Path::new(word).file_name())
         .and_then(|name| name.to_str())?;
     match executable {
-        "lf" => Some(ProcessKind::Lf),
+        executable if crate::engine::process::is_lf_executable_name(executable) => {
+            Some(ProcessKind::Lf)
+        }
         "codex" => Some(ProcessKind::Codex),
         "claude" => Some(ProcessKind::Claude),
         "opencode" if words.iter().skip(1).any(|word| *word == "serve") => {
@@ -404,27 +370,6 @@ fn process_kind(command: &str) -> Option<ProcessKind> {
         }
         _ => None,
     }
-}
-
-fn elapsed_seconds(elapsed: &str) -> u64 {
-    let (days, clock) = elapsed
-        .split_once('-')
-        .map_or((0, elapsed), |(days, clock)| {
-            (days.parse::<u64>().unwrap_or(0), clock)
-        });
-    let parts = clock
-        .split(':')
-        .filter_map(|part| part.parse::<u64>().ok())
-        .collect::<Vec<_>>();
-    let clock_seconds = match parts.as_slice() {
-        [minutes, seconds] => minutes.saturating_mul(60).saturating_add(*seconds),
-        [hours, minutes, seconds] => hours
-            .saturating_mul(3_600)
-            .saturating_add(minutes.saturating_mul(60))
-            .saturating_add(*seconds),
-        _ => 0,
-    };
-    days.saturating_mul(86_400).saturating_add(clock_seconds)
 }
 
 fn collect_activity(
@@ -517,8 +462,7 @@ fn collect_activity(
             .cloned()
             .unwrap_or((None, None));
         let process = owned.process;
-        let provider = process
-            .kind
+        let provider = process_kind(&process.command)
             .expect("owned provider process has a kind")
             .label();
         nodes.push(ActivityNode {
@@ -607,7 +551,7 @@ fn safe_command_word(value: &str) -> bool {
 fn receipt_evidence(
     exec: &ExecRecord,
     receipts: &[ExecProcessReceipt],
-    process_by_pid: &HashMap<u32, &OsProcess>,
+    process_by_pid: &HashMap<u32, &LocalProcess>,
 ) -> ReceiptEvidence {
     let Some(receipt) = receipts
         .iter()
@@ -624,17 +568,16 @@ fn receipt_evidence(
 
 fn receipt_matches_live_lf(
     receipt: &ExecProcessReceipt,
-    process_by_pid: &HashMap<u32, &OsProcess>,
+    process_by_pid: &HashMap<u32, &LocalProcess>,
 ) -> bool {
     process_by_pid.get(&receipt.pid).is_some_and(|process| {
-        process.kind == Some(ProcessKind::Lf)
-            && (process.started_at - receipt.started_at).abs() <= PROCESS_START_TOLERANCE_SECONDS
+        process.is_live_loopflow() && process.matches_birth(receipt.pid, receipt.started_at)
     })
 }
 
 fn claim_provider_processes(
     snapshot: &ProcessSnapshot,
-    process_by_pid: &HashMap<u32, &OsProcess>,
+    process_by_pid: &HashMap<u32, &LocalProcess>,
     owner_by_pid: &HashMap<u32, String>,
 ) -> (Vec<OwnedProviderProcess>, Vec<ProviderProcess>) {
     let registry = snapshot
@@ -645,7 +588,7 @@ fn claim_provider_processes(
     let mut owned = Vec::new();
     let mut unclaimed = Vec::new();
     for process in snapshot.processes.iter().filter(|process| {
-        process.kind.is_some_and(ProcessKind::is_provider)
+        process_kind(&process.command).is_some_and(ProcessKind::is_provider)
             && !has_provider_ancestor(process, process_by_pid)
     }) {
         let registered_owner = registry
@@ -657,7 +600,7 @@ fn claim_provider_processes(
         }
         let owner = registered_owner
             .and_then(|pid| owner_by_pid.get(&pid).cloned())
-            .or_else(|| nearest_exec_owner(process.ppid, process_by_pid, owner_by_pid));
+            .or_else(|| nearest_exec_owner(process.parent_pid, process_by_pid, owner_by_pid));
         let Some(owner) = owner else {
             unclaimed.push(provider_process(process, ProviderClaim::Unclaimed));
             continue;
@@ -672,24 +615,27 @@ fn claim_provider_processes(
     (owned, unclaimed)
 }
 
-fn has_provider_ancestor(process: &OsProcess, process_by_pid: &HashMap<u32, &OsProcess>) -> bool {
-    let mut pid = process.ppid;
+fn has_provider_ancestor(
+    process: &LocalProcess,
+    process_by_pid: &HashMap<u32, &LocalProcess>,
+) -> bool {
+    let mut pid = process.parent_pid;
     let mut seen = HashSet::new();
     while pid != 0 && seen.insert(pid) {
         let Some(parent) = process_by_pid.get(&pid) else {
             break;
         };
-        if parent.kind.is_some_and(ProcessKind::is_provider) {
+        if process_kind(&parent.command).is_some_and(ProcessKind::is_provider) {
             return true;
         }
-        pid = parent.ppid;
+        pid = parent.parent_pid;
     }
     false
 }
 
 fn nearest_exec_owner(
     mut pid: u32,
-    process_by_pid: &HashMap<u32, &OsProcess>,
+    process_by_pid: &HashMap<u32, &LocalProcess>,
     owner_by_pid: &HashMap<u32, String>,
 ) -> Option<String> {
     let mut seen = HashSet::new();
@@ -697,24 +643,21 @@ fn nearest_exec_owner(
         if let Some(owner) = owner_by_pid.get(&pid) {
             return Some(owner.clone());
         }
-        pid = process_by_pid.get(&pid)?.ppid;
+        pid = process_by_pid.get(&pid)?.parent_pid;
     }
     None
 }
 
-fn provider_process(process: &OsProcess, claim: ProviderClaim) -> ProviderProcess {
+fn provider_process(process: &LocalProcess, claim: ProviderClaim) -> ProviderProcess {
+    let kind = process_kind(&process.command).expect("provider process has a kind");
     ProviderProcess {
         pid: process.pid,
-        ppid: process.ppid,
+        ppid: process.parent_pid,
         process_group: process.process_group,
         started_at: process.started_at,
         kernel_state: process.kernel_state.clone(),
-        provider: process
-            .kind
-            .expect("provider process has a kind")
-            .label()
-            .to_string(),
-        command: match process.kind.expect("provider process has a kind") {
+        provider: kind.label().to_string(),
+        command: match kind {
             ProcessKind::OpenCode => "opencode serve".to_string(),
             kind => kind.label().to_string(),
         },
@@ -722,7 +665,7 @@ fn provider_process(process: &OsProcess, claim: ProviderClaim) -> ProviderProces
     }
 }
 
-fn os_activity_state(process: &OsProcess) -> ActivityState {
+fn os_activity_state(process: &LocalProcess) -> ActivityState {
     match process.kernel_state.chars().next() {
         Some('R') => ActivityState::Working,
         Some('T' | 'U' | 'D' | 'Z') => ActivityState::Stalled,
@@ -1025,15 +968,14 @@ mod tests {
         }
     }
 
-    fn process(pid: u32, ppid: u32, started_at: i64, command: &str) -> OsProcess {
-        OsProcess {
+    fn process(pid: u32, parent_pid: u32, started_at: i64, command: &str) -> LocalProcess {
+        LocalProcess {
             pid,
-            ppid,
+            parent_pid,
             process_group: pid,
             started_at,
             kernel_state: "S".to_string(),
             command: command.to_string(),
-            kind: process_kind(command),
         }
     }
 
@@ -1151,13 +1093,27 @@ mod tests {
 
     #[test]
     fn process_parser_rejects_opencode_helpers_that_are_not_servers() {
-        let processes = parse_processes(
+        let processes = parse_local_processes(
             "10 1 10 S 01:00 opencode serve --port 3000\n11 1 11 S 02:00 opencode run yaml-language-server\n",
             10_000,
         );
 
-        assert_eq!(processes[0].kind, Some(ProcessKind::OpenCode));
-        assert_eq!(processes[1].kind, None);
+        assert_eq!(
+            process_kind(&processes[0].command),
+            Some(ProcessKind::OpenCode)
+        );
+        assert_eq!(process_kind(&processes[1].command), None);
+    }
+
+    #[test]
+    fn process_parser_recognizes_content_addressed_lf_binaries() {
+        let digest = "a".repeat(64);
+        let processes = parse_local_processes(
+            &format!("10 1 10 S 00:02 /Users/test/.lf/bin/lf-{digest} __work task task_123\n"),
+            10_000,
+        );
+
+        assert_eq!(process_kind(&processes[0].command), Some(ProcessKind::Lf));
     }
 
     #[test]

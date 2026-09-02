@@ -499,16 +499,26 @@ fn run_work_runner_entrypoint<T>(
     command: &[String],
     kind: &str,
     work_id: &str,
-    run: impl FnOnce(loopflow::durable::WorkRef) -> anyhow::Result<T>,
+    run: impl FnOnce(
+        loopflow::durable::WorkRef,
+        Option<loopflow::controller::WorkStartupAttempt>,
+    ) -> anyhow::Result<T>,
 ) -> anyhow::Result<T> {
-    in_repo_runtime(command, |_| {
+    let startup = loopflow::controller::WorkStartupAttempt::take_from_env()?;
+    let result = in_repo_runtime(command, |_| {
         let work = match kind {
             "project" => loopflow::durable::WorkRef::Project(work_id.parse()?),
             "task" => loopflow::durable::WorkRef::Task(work_id.parse()?),
             _ => anyhow::bail!("unsupported hidden Work kind: {kind}"),
         };
-        run(work)
-    })
+        run(work, startup.clone())
+    });
+    if let (Err(error), Some(startup)) = (&result, startup) {
+        if let Err(report_error) = startup.report_failed(error) {
+            tracing::warn!(%report_error, "could not publish failed controller startup receipt");
+        }
+    }
+    result
 }
 
 fn with_skill_runtime<T>(
@@ -1697,8 +1707,9 @@ fn main() -> anyhow::Result<()> {
                 in_repo_runtime(&args, |repo| loopflow::lf::commands::work::run(cmd, repo))
             }
             Some(Commands::WorkRunner { kind, work_id }) => {
-                run_work_runner_entrypoint(&args, kind, work_id, |work| {
-                    tokio::runtime::Runtime::new()?.block_on(loopflow::controller::run_work(work))
+                run_work_runner_entrypoint(&args, kind, work_id, |work, startup| {
+                    tokio::runtime::Runtime::new()?
+                        .block_on(loopflow::controller::run_work(work, startup))
                 })
             }
             Some(Commands::Tokens { json, days }) => {

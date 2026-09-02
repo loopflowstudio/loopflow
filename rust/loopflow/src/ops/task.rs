@@ -6,6 +6,9 @@ use std::sync::Arc;
 use std::time::{Duration, Instant};
 
 use crate::child::ChildRef;
+use crate::controller::authority::{
+    controller_authority, matching_live_owner, ControllerAuthority,
+};
 use crate::controller::task::{
     State as TaskControllerState, TaskGateProposal, TaskLifecyclePhase, TaskLifecyclePlan,
 };
@@ -151,6 +154,7 @@ pub struct TaskSnapshot {
     pub wave: String,
     pub project_id: String,
     pub status: WorkStatus,
+    pub controller_authority: ControllerAuthority,
     pub worktree: String,
     pub workspace_slug: String,
     pub controller: Option<TaskControllerSnapshot>,
@@ -580,11 +584,8 @@ fn prepare_task(
         }
         return block_on_task(async move {
             let store = task_store().await?;
-            if task_session_live(&existing).await? {
-                return Ok(existing);
-            }
             launch_task_process(&store, &mut existing).await?;
-            wait_until_running(&store, &existing.id).await
+            Ok(existing)
         });
     }
     let main_repo = crate::ops::project::ensure_clean_main(repo, "Task start")
@@ -884,7 +885,7 @@ fn prepare_task(
 
         if controller.is_some() {
             launch_task_process(&store, &mut task).await?;
-            wait_until_running(&store, &task.id).await
+            Ok(task)
         } else {
             Ok(task)
         }
@@ -2495,43 +2496,96 @@ fn task_session_name(task: &Task) -> String {
     )
 }
 
-async fn task_session_live(task: &Task) -> OpsResult<bool> {
-    crate::engine::process::tmux_session_exists(&task_session_name(task))
-        .await
-        .map_err(|error| task_error(error.to_string()))
+async fn task_controller_authority(task: &Task) -> ControllerAuthority {
+    controller_authority(&WorkRef::Task(task.id.clone()), &task_session_name(task)).await
 }
 
-async fn stop_task_controller(task: &Task) -> OpsResult<()> {
-    if !task_session_live(task).await? {
-        return Ok(());
+fn task_authority_launch_refusal(task: &Task, authority: &ControllerAuthority) -> Option<String> {
+    match authority {
+        ControllerAuthority::Live { owner } => Some(format!(
+            "Task {} controller is live under attempt {} PID {}",
+            task.plan.identifier, owner.attempt_id, owner.pid
+        )),
+        ControllerAuthority::Inactive => None,
+        ControllerAuthority::Parked { attempt_id } => Some(format!(
+            "Task {} controller is parked at human boundary attempt {attempt_id}",
+            task.plan.identifier
+        )),
+        ControllerAuthority::Unverifiable { reason } => Some(reason.clone()),
     }
-    let session = task_session_name(task);
-    if let Err(error) = crate::engine::process::send_tmux_input(&session, "/interrupt").await {
-        if !task_session_live(task).await? {
-            return Ok(());
-        }
-        tracing::warn!(task = %task.id, %error, "controller interrupt failed; stopping its registered session");
-        crate::engine::process::stop_tmux_session(&session)
-            .await
-            .map_err(|stop_error| task_error(stop_error.to_string()))?;
-        return Ok(());
-    }
+}
+
+async fn stop_task_controller(store: &SharedStore, task: &Task) -> OpsResult<()> {
+    let owner = match task_controller_authority(task).await {
+        ControllerAuthority::Live { owner } => owner,
+        ControllerAuthority::Inactive | ControllerAuthority::Parked { .. } => return Ok(()),
+        ControllerAuthority::Unverifiable { reason } => return Err(task_error(reason)),
+    };
+    let work = WorkRef::Task(task.id.clone());
+    store
+        .append_interrupt(&work)
+        .await
+        .map_err(|error| task_error(error.to_string()))?;
     let deadline = tokio::time::Instant::now() + Duration::from_secs(3);
-    while task_session_live(task).await? {
+    loop {
+        match task_controller_authority(task).await {
+            ControllerAuthority::Inactive | ControllerAuthority::Parked { .. } => return Ok(()),
+            ControllerAuthority::Live { owner: current } if current == owner => {}
+            ControllerAuthority::Live { owner: current } => {
+                return Err(task_error(format!(
+                    "Task {} controller owner changed from attempt {} PID {} to attempt {} PID {}",
+                    task.plan.identifier,
+                    owner.attempt_id,
+                    owner.pid,
+                    current.attempt_id,
+                    current.pid
+                )))
+            }
+            ControllerAuthority::Unverifiable { reason } => return Err(task_error(reason)),
+        }
         if tokio::time::Instant::now() >= deadline {
-            crate::engine::process::stop_tmux_session(&session)
-                .await
-                .map_err(|error| task_error(error.to_string()))?;
             break;
         }
         tokio::time::sleep(Duration::from_millis(100)).await;
     }
-    Ok(())
+    matching_live_owner(task_controller_authority(task).await, &owner).map_err(task_error)?;
+    crate::engine::process::signal_process(owner.pid, "-TERM")
+        .map_err(|error| task_error(error.to_string()))?;
+    let force_deadline = tokio::time::Instant::now() + Duration::from_secs(1);
+    loop {
+        match task_controller_authority(task).await {
+            ControllerAuthority::Inactive | ControllerAuthority::Parked { .. } => return Ok(()),
+            ControllerAuthority::Unverifiable { reason } => return Err(task_error(reason)),
+            ControllerAuthority::Live { owner: current } if current == owner => {}
+            ControllerAuthority::Live { owner: current } => {
+                return Err(task_error(format!(
+                    "Task {} controller owner changed to attempt {} PID {} during restart",
+                    task.plan.identifier, current.attempt_id, current.pid
+                )))
+            }
+        }
+        if tokio::time::Instant::now() >= force_deadline {
+            matching_live_owner(task_controller_authority(task).await, &owner)
+                .map_err(task_error)?;
+            crate::engine::process::signal_process(owner.pid, "-KILL")
+                .map_err(|error| task_error(error.to_string()))?;
+            return Ok(());
+        }
+        tokio::time::sleep(Duration::from_millis(50)).await;
+    }
 }
 
 async fn launch_task_process(store: &SharedStore, task: &mut Task) -> OpsResult<()> {
-    if task_session_live(task).await? {
-        return Ok(());
+    match task_controller_authority(task).await {
+        ControllerAuthority::Live { .. } => return Ok(()),
+        ControllerAuthority::Inactive => {}
+        ControllerAuthority::Parked { attempt_id } => {
+            return Err(task_error(format!(
+                "Task {} controller is parked at human boundary attempt {attempt_id}",
+                task.plan.identifier
+            )))
+        }
+        ControllerAuthority::Unverifiable { reason } => return Err(task_error(reason)),
     }
     let controller = store
         .task_controller_state(&task.id)
@@ -2588,48 +2642,43 @@ async fn launch_task_process(store: &SharedStore, task: &mut Task) -> OpsResult<
             resume_token.clone(),
         ));
     }
-    crate::ops::launch_work(crate::ops::WorkLaunch {
+    let previous_event_id = store
+        .latest_task_event(&task.id)
+        .await
+        .map_err(|error| task_error(error.to_string()))?
+        .map(|event| event.id)
+        .unwrap_or_default();
+    let result = crate::ops::launch_work(crate::ops::WorkLaunch {
         work: WorkRef::Task(task.id.clone()),
         wave_id: task.wave_id.clone(),
         cwd: task.worktree.clone(),
         tmux_name: task_session_name(task),
         environment,
     })
-    .await
-    .map_err(|error| task_error(error.to_string()))
-}
-
-async fn wait_until_running(
-    store: &SharedStore,
-    task_id: &crate::work::task::TaskId,
-) -> OpsResult<Task> {
-    let deadline = tokio::time::Instant::now() + super::child::CHILD_STARTUP_GRACE;
-    loop {
-        let task = store
-            .get_task(task_id)
+    .await;
+    if let Err(error) = result {
+        let failure = format!("Task controller startup failed: {error}");
+        let child_recorded_failure = store
+            .task_events_after(&task.id, previous_event_id)
             .await
-            .map_err(|error| task_error(format!("failed to observe task startup: {error}")))?
-            .ok_or_else(|| task_error("task task disappeared during startup"))?;
-        if task_session_live(&task).await? {
-            return Ok(task);
+            .map_err(|store_error| task_error(store_error.to_string()))?
+            .into_iter()
+            .any(|event| matches!(event.kind, TaskEventKind::Failed { .. }));
+        if !child_recorded_failure {
+            store
+                .append_task_event(
+                    &task.id,
+                    &TaskEventKind::Failed {
+                        error: failure.clone(),
+                        resumable: true,
+                    },
+                )
+                .await
+                .map_err(|store_error| task_error(store_error.to_string()))?;
         }
-        if matches!(
-            task_work_status(store, &task).await?,
-            WorkStatus::Done | WorkStatus::Abandoned
-        ) {
-            return Err(task_error(format!(
-                "task {} ended during startup",
-                task.plan.identifier
-            )));
-        }
-        if tokio::time::Instant::now() >= deadline {
-            return Err(task_error(format!(
-                "task {} process did not report running within 10 seconds",
-                task.plan.identifier
-            )));
-        }
-        tokio::time::sleep(Duration::from_millis(100)).await;
+        return Err(task_error(failure));
     }
+    Ok(())
 }
 
 pub(crate) async fn reconcile_task_pr(
@@ -4225,11 +4274,15 @@ pub fn task_snapshot(task: &Task) -> OpsResult<TaskSnapshot> {
             .task_controller_state(&task.id)
             .await
             .map_err(|error| task_error(error.to_string()))?;
+        let controller_authority = task_controller_authority(&task).await;
         let launch_refusal = if worktree_blocker.is_some() {
             None
         } else {
-            task_configuration_refusal(&task, controller.as_ref())
-                .or_else(|| task_event_launch_refusal(latest_event.as_ref()).map(str::to_string))
+            task_authority_launch_refusal(&task, &controller_authority).or_else(|| {
+                task_configuration_refusal(&task, controller.as_ref()).or_else(|| {
+                    task_event_launch_refusal(latest_event.as_ref()).map(str::to_string)
+                })
+            })
         };
         let action_evidence = TaskActionEvidence {
             status: work_status.clone(),
@@ -4260,6 +4313,7 @@ pub fn task_snapshot(task: &Task) -> OpsResult<TaskSnapshot> {
             wave: wave.name().to_string(),
             project_id: task.project_id.to_string(),
             status: work_status,
+            controller_authority,
             worktree: task.worktree.display().to_string(),
             workspace_slug: task.workspace_slug,
             controller: controller.map(TaskControllerSnapshot::from),
@@ -4582,8 +4636,18 @@ fn queue_task_steer(issue: &str, message: String) -> OpsResult<TaskControlResult
             .await
             .map_err(|error| task_error(error.to_string()))?
             .is_some();
-        if has_controller && !task_session_live(&task).await? {
-            relaunch_inactive_process(&store, &mut task).await?;
+        if has_controller {
+            match task_controller_authority(&task).await {
+                ControllerAuthority::Live { .. } | ControllerAuthority::Parked { .. } => {}
+                ControllerAuthority::Inactive => {
+                    relaunch_inactive_process(&store, &mut task).await?
+                }
+                ControllerAuthority::Unverifiable { reason } => {
+                    return Err(task_error(format!(
+                        "Task steer was recorded, but its controller cannot be woken: {reason}"
+                    )))
+                }
+            }
         }
         Ok(TaskControlResult {
             issue_id: task.plan.identifier.clone(),
@@ -4615,6 +4679,12 @@ pub fn task_interrupt(issue: &str) -> OpsResult<TaskControlResult> {
             .append_interrupt(&work)
             .await
             .map_err(|error| task_error(error.to_string()))?;
+        if let ControllerAuthority::Unverifiable { reason } = task_controller_authority(&task).await
+        {
+            return Err(task_error(format!(
+                "Task interrupt was recorded, but delivery is blocked: {reason}"
+            )));
+        }
         Ok(TaskControlResult {
             issue_id: task.plan.identifier.clone(),
             task_id: task.id.to_string(),
@@ -4670,6 +4740,12 @@ async fn restart_task_async(issue: &str, advice: Option<String>) -> OpsResult<Ta
             )))
         }
         WorkStatus::Ready => {}
+    }
+    if let ControllerAuthority::Unverifiable { reason } = task_controller_authority(&task).await {
+        return Err(task_error(format!(
+            "Task {} cannot restart: {reason}",
+            task.plan.identifier
+        )));
     }
 
     let resolved = crate::ops::task_pm::resolve_task_async(
@@ -4772,7 +4848,7 @@ async fn restart_task_async(issue: &str, advice: Option<String>) -> OpsResult<Ta
     validate_task_lifecycle(&task, controller)?;
 
     let direction = task_restart_direction(&task, advice.as_deref());
-    stop_task_controller(&task).await?;
+    stop_task_controller(&store, &task).await?;
     store
         .update_task(&task)
         .await
@@ -4782,7 +4858,7 @@ async fn restart_task_async(issue: &str, advice: Option<String>) -> OpsResult<Ta
         .await
         .map_err(|error| task_error(format!("failed to restart Task controller: {error}")))?;
     launch_task_process(&store, &mut task).await?;
-    wait_until_running(&store, &task.id).await
+    Ok(task)
 }
 
 fn task_restart_direction(task: &Task, advice: Option<&str>) -> String {

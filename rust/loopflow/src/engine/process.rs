@@ -63,6 +63,108 @@ fn terminate_process_group(pid: u32) {
 }
 
 const TMUX_LIVENESS_TIMEOUT: std::time::Duration = std::time::Duration::from_secs(2);
+const PROCESS_START_TOLERANCE_SECONDS: i64 = 3;
+pub(crate) const LOCAL_PROCESS_COLUMNS: &str = "pid=,ppid=,pgid=,state=,etime=,command=";
+
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub(crate) struct LocalProcess {
+    pub pid: u32,
+    pub parent_pid: u32,
+    pub process_group: u32,
+    pub started_at: i64,
+    pub kernel_state: String,
+    pub command: String,
+}
+
+impl LocalProcess {
+    pub(crate) fn is_live_loopflow(&self) -> bool {
+        !self.kernel_state.starts_with('Z')
+            && self
+                .command
+                .split_whitespace()
+                .next()
+                .and_then(|word| Path::new(word).file_name())
+                .and_then(|name| name.to_str())
+                .is_some_and(is_lf_executable_name)
+    }
+
+    pub(crate) fn matches_birth(&self, pid: u32, started_at: i64) -> bool {
+        self.pid == pid && (self.started_at - started_at).abs() <= PROCESS_START_TOLERANCE_SECONDS
+    }
+}
+
+pub(crate) async fn inspect_local_processes() -> Result<Vec<LocalProcess>> {
+    let now = time::OffsetDateTime::now_utc().unix_timestamp();
+    let output = tokio::process::Command::new("ps")
+        .args(["-axo", LOCAL_PROCESS_COLUMNS])
+        .output()
+        .await
+        .map_err(|error| anyhow!("failed to inspect local processes: {error}"))?;
+    if !output.status.success() {
+        return Err(anyhow!(
+            "ps failed while inspecting controller ownership: {}",
+            String::from_utf8_lossy(&output.stderr).trim()
+        ));
+    }
+    Ok(parse_local_processes(
+        &String::from_utf8_lossy(&output.stdout),
+        now,
+    ))
+}
+
+pub(crate) fn parse_local_processes(output: &str, now: i64) -> Vec<LocalProcess> {
+    output
+        .lines()
+        .filter_map(|line| {
+            let mut fields = line.split_whitespace();
+            let pid = fields.next()?.parse::<u32>().ok()?;
+            let parent_pid = fields.next()?.parse::<u32>().ok()?;
+            let process_group = fields.next()?.parse::<u32>().ok()?;
+            let kernel_state = fields.next()?.to_string();
+            let elapsed = fields.next()?;
+            let command = fields.collect::<Vec<_>>().join(" ");
+            if command.is_empty() {
+                return None;
+            }
+            Some(LocalProcess {
+                pid,
+                parent_pid,
+                process_group,
+                started_at: now.saturating_sub(elapsed_seconds(elapsed) as i64),
+                kernel_state,
+                command,
+            })
+        })
+        .collect()
+}
+
+fn elapsed_seconds(elapsed: &str) -> u64 {
+    let (days, clock) = elapsed
+        .split_once('-')
+        .map_or((0, elapsed), |(days, clock)| {
+            (days.parse::<u64>().unwrap_or(0), clock)
+        });
+    let parts = clock
+        .split(':')
+        .filter_map(|part| part.parse::<u64>().ok())
+        .collect::<Vec<_>>();
+    let clock_seconds = match parts.as_slice() {
+        [minutes, seconds] => minutes.saturating_mul(60).saturating_add(*seconds),
+        [hours, minutes, seconds] => hours
+            .saturating_mul(3_600)
+            .saturating_add(minutes.saturating_mul(60))
+            .saturating_add(*seconds),
+        _ => 0,
+    };
+    days.saturating_mul(86_400).saturating_add(clock_seconds)
+}
+
+pub(crate) fn is_lf_executable_name(executable: &str) -> bool {
+    executable == "lf"
+        || executable.strip_prefix("lf-").is_some_and(|digest| {
+            digest.len() == 64 && digest.bytes().all(|byte| byte.is_ascii_hexdigit())
+        })
+}
 
 pub(crate) fn current_process_group_id() -> Option<u32> {
     // SAFETY: getpgrp has no preconditions and does not dereference memory.
@@ -356,42 +458,42 @@ pub(crate) async fn tmux_session_exists(session_name: &str) -> Result<bool> {
     tmux_session_exists_with_timeout(&mut command, TMUX_LIVENESS_TIMEOUT).await
 }
 
-pub(crate) async fn send_tmux_input(session_name: &str, input: &str) -> Result<()> {
+pub(crate) async fn tmux_pane_pid(session_name: &str) -> Result<Option<u32>> {
     let target = format!("={session_name}");
-    let status = tokio::process::Command::new("tmux")
-        .args(["send-keys", "-t", &target, "-l", "--", input])
-        .status()
+    let output = tokio::process::Command::new("tmux")
+        .args(["display-message", "-p", "-t", &target, "#{pane_pid}"])
+        .output()
         .await?;
-    if !status.success() {
-        return Err(anyhow!(
-            "failed to send input to tmux session {session_name}"
-        ));
+    if output.status.success() {
+        let pid = String::from_utf8_lossy(&output.stdout)
+            .trim()
+            .parse::<u32>()
+            .map_err(|error| {
+                anyhow!("tmux session {session_name} returned an invalid pane PID: {error}")
+            })?;
+        return Ok(Some(pid));
     }
-    let status = tokio::process::Command::new("tmux")
-        .args(["send-keys", "-t", &target, "Enter"])
-        .status()
-        .await?;
-    if !status.success() {
-        return Err(anyhow!(
-            "failed to submit input to tmux session {session_name}"
-        ));
+    let stderr = String::from_utf8_lossy(&output.stderr);
+    if tmux_session_is_absent(&stderr) {
+        Ok(None)
+    } else {
+        Err(anyhow!(
+            "tmux pane probe failed for session {session_name}: {}",
+            stderr.trim()
+        ))
     }
-    Ok(())
 }
 
-pub(crate) async fn stop_tmux_session(session_name: &str) -> Result<()> {
-    let target = format!("={session_name}");
-    let status = tokio::process::Command::new("tmux")
-        .args(["kill-session", "-t", &target])
+pub(crate) fn signal_process(pid: u32, signal: &str) -> Result<()> {
+    let status = std::process::Command::new("kill")
+        .args([signal, &pid.to_string()])
         .status()
-        .await?;
+        .map_err(|error| anyhow!("failed to signal process {pid}: {error}"))?;
     if status.success() {
-        return Ok(());
+        Ok(())
+    } else {
+        Err(anyhow!("failed to signal process {pid} with {signal}"))
     }
-    if !tmux_session_exists(session_name).await? {
-        return Ok(());
-    }
-    Err(anyhow!("failed to stop tmux session {session_name}"))
 }
 
 async fn tmux_session_exists_with_timeout(
@@ -410,15 +512,18 @@ async fn tmux_session_exists_with_timeout(
         return Ok(true);
     }
     let stderr = String::from_utf8_lossy(&output.stderr);
-    if stderr.contains("can't find session")
-        || stderr.contains("no server running")
-        || stderr.contains("no sessions")
-        || (stderr.contains("error connecting to") && stderr.contains("No such file or directory"))
-    {
+    if tmux_session_is_absent(&stderr) {
         Ok(false)
     } else {
         Err(anyhow!("tmux session probe failed: {}", stderr.trim()))
     }
+}
+
+fn tmux_session_is_absent(stderr: &str) -> bool {
+    stderr.contains("can't find session")
+        || stderr.contains("no server running")
+        || stderr.contains("no sessions")
+        || (stderr.contains("error connecting to") && stderr.contains("No such file or directory"))
 }
 
 pub(crate) async fn start_lf_session(session: &str, cwd: &Path, argv: &[String]) -> Result<()> {

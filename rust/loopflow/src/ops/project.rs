@@ -3,18 +3,17 @@ use std::sync::Arc;
 use std::time::{Duration, Instant};
 
 use crate::child::ChildRef;
+use crate::controller::authority::{controller_authority, ControllerAuthority};
 use crate::controller::project::State as ProjectControllerState;
 use crate::durable::{Author, WorkStatus};
 use crate::engine::config::{load_config_or_default, parse_agent};
 use crate::engine::git::{current_branch, get_default_branch, is_clean, worktree_root};
-use crate::engine::process::{
-    resolve_lf_binary, start_lf_session, tmux_session_exists, tmux_session_slug,
-};
+use crate::engine::process::{resolve_lf_binary, start_lf_session, tmux_session_slug};
 use crate::id::WaveId;
 use crate::ops::{OpsError, OpsResult};
 use crate::planning::{LinearProjectId, ProjectPlan};
 use crate::store::{open_existing_store, SharedStore, Store};
-use crate::work::project::{Project, ProjectId};
+use crate::work::project::{Project, ProjectEventKind, ProjectId};
 use crate::work::task::Task;
 use crate::work::wave::Wave;
 
@@ -33,6 +32,7 @@ pub struct ProjectSnapshot {
     pub agent: Option<String>,
     pub provider: Option<String>,
     pub provider_session_id: Option<String>,
+    pub controller_authority: ControllerAuthority,
     pub latest_event: Option<crate::work::project::ProjectEvent>,
     pub last_failure: Option<crate::work::project::HistoricalFailure>,
     pub created_at: time::OffsetDateTime,
@@ -116,10 +116,12 @@ fn project_session_name(project: &Project) -> String {
     )
 }
 
-async fn project_session_live(project: &Project) -> OpsResult<bool> {
-    tmux_session_exists(&project_session_name(project))
-        .await
-        .map_err(|error| project_error(error.to_string()))
+async fn project_controller_authority(project: &Project) -> ControllerAuthority {
+    controller_authority(
+        &crate::durable::WorkRef::Project(project.id.clone()),
+        &project_session_name(project),
+    )
+    .await
 }
 
 pub(crate) fn require_registered_wave(repo: &Path, wave: &str) -> OpsResult<Wave> {
@@ -176,17 +178,12 @@ pub fn project_run(repo: &Path, project_id: &str, directive: Option<String>) -> 
                 .await
                 .map_err(|error| project_error(error.to_string()))?;
         }
-        let live = project_session_live(&existing).await?;
-        Ok(Some((existing, live)))
+        Ok(Some(existing))
     })? {
-        let (existing, live) = existing;
-        if live {
-            return Ok(existing);
-        }
         return block_on_project(async move {
             let store = project_store().await?;
             launch_project_process(&store, &existing).await?;
-            wait_until_project_running(&store, &existing.id).await
+            Ok(existing)
         });
     }
 
@@ -197,11 +194,8 @@ pub fn project_run(repo: &Path, project_id: &str, directive: Option<String>) -> 
     let project = reserve_project(&repo, resolved, directive, true)?;
     block_on_project(async move {
         let store = project_store().await?;
-        if project_session_live(&project).await? {
-            return Ok(project);
-        }
         launch_project_process(&store, &project).await?;
-        wait_until_project_running(&store, &project.id).await
+        Ok(project)
     })
 }
 
@@ -469,51 +463,54 @@ pub(crate) async fn launch_project_process(
     // stopped Project long after its initial reservation.
     let wave = owning_wave(store, project).await?;
     ensure_clean_main(Path::new(wave.repo()), "Project turn")?;
-    if project_session_live(project).await? {
-        return Ok(());
+    match project_controller_authority(project).await {
+        ControllerAuthority::Live { .. } => return Ok(()),
+        ControllerAuthority::Inactive => {}
+        ControllerAuthority::Parked { attempt_id } => {
+            return Err(project_error(format!(
+                "Project {} controller is parked at human boundary attempt {attempt_id}",
+                project.plan.slug
+            )))
+        }
+        ControllerAuthority::Unverifiable { reason } => return Err(project_error(reason)),
     }
-    crate::ops::launch_work(crate::ops::WorkLaunch {
+    let previous_event_id = store
+        .latest_project_event(&project.id)
+        .await
+        .map_err(|error| project_error(error.to_string()))?
+        .map(|event| event.id)
+        .unwrap_or_default();
+    let result = crate::ops::launch_work(crate::ops::WorkLaunch {
         work: crate::durable::WorkRef::Project(project.id.clone()),
         wave_id: project.wave_id.clone(),
         cwd: Path::new(wave.repo()).to_path_buf(),
         tmux_name: project_session_name(project),
         environment: Vec::new(),
     })
-    .await
-    .map_err(|error| project_error(error.to_string()))
-}
-
-async fn wait_until_project_running(
-    store: &SharedStore,
-    project_id: &ProjectId,
-) -> OpsResult<Project> {
-    let deadline = tokio::time::Instant::now() + super::child::CHILD_STARTUP_GRACE;
-    loop {
-        let project = store
-            .get_project(project_id)
+    .await;
+    if let Err(error) = result {
+        let failure = format!("Project controller startup failed: {error}");
+        let child_recorded_failure = store
+            .project_events_after(&project.id, previous_event_id)
             .await
-            .map_err(|error| project_error(error.to_string()))?
-            .ok_or_else(|| project_error("Project disappeared during startup"))?;
-        if project_session_live(&project).await? {
-            return Ok(project);
+            .map_err(|store_error| project_error(store_error.to_string()))?
+            .into_iter()
+            .any(|event| matches!(event.kind, ProjectEventKind::Failed { .. }));
+        if !child_recorded_failure {
+            store
+                .append_project_event(
+                    &project.id,
+                    &ProjectEventKind::Failed {
+                        error: failure.clone(),
+                        resumable: true,
+                    },
+                )
+                .await
+                .map_err(|store_error| project_error(store_error.to_string()))?;
         }
-        match project_work_status(store, &project).await? {
-            WorkStatus::Done | WorkStatus::Abandoned => {
-                return Err(project_error(format!(
-                    "Project {} ended during startup",
-                    project.plan.slug
-                )))
-            }
-            WorkStatus::Ready => {}
-        }
-        if tokio::time::Instant::now() >= deadline {
-            return Err(project_error(format!(
-                "Project {} did not become running within 10s",
-                project.plan.slug
-            )));
-        }
-        tokio::time::sleep(Duration::from_millis(100)).await;
+        return Err(project_error(failure));
     }
+    Ok(())
 }
 
 pub fn project_status(project: &str) -> OpsResult<Project> {
@@ -555,6 +552,7 @@ pub fn project_snapshot(project: &Project) -> OpsResult<ProjectSnapshot> {
             .project_controller_state(&project.id)
             .await
             .map_err(|error| project_error(error.to_string()))?;
+        let controller_authority = project_controller_authority(&project).await;
         Ok(ProjectSnapshot {
             id: project.id.to_string(),
             external_project_id: project.plan.id.as_str().to_string(),
@@ -569,6 +567,7 @@ pub fn project_snapshot(project: &Project) -> OpsResult<ProjectSnapshot> {
             agent: controller.as_ref().map(|state| state.agent.clone()),
             provider: controller.as_ref().map(|state| state.provider.clone()),
             provider_session_id: controller.and_then(|state| state.provider_session_id),
+            controller_authority,
             latest_event,
             last_failure: store
                 .latest_project_failure(&project.id)
@@ -596,8 +595,16 @@ fn queue_project_steer(project: &str, message: String) -> OpsResult<ProjectContr
             .await
             .map_err(|error| project_error(error.to_string()))?
             .is_some();
-        if has_controller && !project_session_live(&project).await? {
-            launch_project_process(&store, &project).await?;
+        if has_controller {
+            match project_controller_authority(&project).await {
+                ControllerAuthority::Live { .. } | ControllerAuthority::Parked { .. } => {}
+                ControllerAuthority::Inactive => launch_project_process(&store, &project).await?,
+                ControllerAuthority::Unverifiable { reason } => {
+                    return Err(project_error(format!(
+                        "Project steer was recorded, but its controller cannot be woken: {reason}"
+                    )))
+                }
+            }
         }
         Ok(ProjectControlResult {
             id: project.id.to_string(),
@@ -613,9 +620,32 @@ pub fn project_steer(project: &str, message: String) -> OpsResult<ProjectControl
 }
 
 pub fn project_interrupt(project: &str) -> OpsResult<ProjectControlResult> {
-    Err(project_error(format!(
-        "cannot interrupt Project {project}: its controller has no exact process owner; attach to the live Project and use /interrupt"
-    )))
+    block_on_project(async move {
+        let store = project_store().await?;
+        let project = store
+            .get_project_by_project(project)
+            .await
+            .map_err(|error| project_error(error.to_string()))?
+            .ok_or_else(|| project_error(format!("no Project exists for {project:?}")))?;
+        let work = crate::durable::WorkRef::Project(project.id.clone());
+        store
+            .append_interrupt(&work)
+            .await
+            .map_err(|error| project_error(error.to_string()))?;
+        if let ControllerAuthority::Unverifiable { reason } =
+            project_controller_authority(&project).await
+        {
+            return Err(project_error(format!(
+                "Project interrupt was recorded, but delivery is blocked: {reason}"
+            )));
+        }
+        Ok(ProjectControlResult {
+            id: project.id.to_string(),
+            external_project_id: project.plan.id.as_str().to_string(),
+            receipt_id: work.id().to_string(),
+            action: "interrupted".to_string(),
+        })
+    })
 }
 
 pub fn project_resume(
@@ -713,15 +743,19 @@ pub fn project_wait(
     let start = Instant::now();
     loop {
         let project = project_status(project)?;
-        let (status, live) = block_on_project(async {
+        let (status, authority) = block_on_project(async {
             let store = project_store().await?;
             Ok((
                 project_work_status(&store, &project).await?,
-                project_session_live(&project).await?,
+                project_controller_authority(&project).await,
             ))
         })?;
         let done = match until {
-            ProjectWaitUntil::Waiting => !live,
+            ProjectWaitUntil::Waiting => match authority {
+                ControllerAuthority::Live { .. } => false,
+                ControllerAuthority::Inactive | ControllerAuthority::Parked { .. } => true,
+                ControllerAuthority::Unverifiable { reason } => return Err(project_error(reason)),
+            },
             ProjectWaitUntil::Terminal => {
                 matches!(status, WorkStatus::Done | WorkStatus::Abandoned)
             }
@@ -738,14 +772,42 @@ pub fn project_wait(
 
 pub fn project_attach(project: &str) -> OpsResult<()> {
     let project = project_status(project)?;
-    if !block_on_project(project_session_live(&project))? {
+    let name = project_session_name(&project);
+    let owner = match block_on_project(async { Ok(project_controller_authority(&project).await) })?
+    {
+        ControllerAuthority::Live { owner } => owner,
+        ControllerAuthority::Inactive => {
+            return Err(project_error(format!(
+                "Project {} is inactive; run `lf project resume {}` first",
+                project.plan.slug,
+                project.plan.id.as_str()
+            )))
+        }
+        ControllerAuthority::Parked { attempt_id } => {
+            return Err(project_error(format!(
+                "Project {} is parked at human boundary attempt {attempt_id}",
+                project.plan.slug
+            )))
+        }
+        ControllerAuthority::Unverifiable { reason } => return Err(project_error(reason)),
+    };
+    let pane_pid = block_on_project(async {
+        crate::engine::process::tmux_pane_pid(&name)
+            .await
+            .map_err(|error| project_error(error.to_string()))
+    })?
+    .ok_or_else(|| {
+        project_error(format!(
+            "Project {} has no tmux transport",
+            project.plan.slug
+        ))
+    })?;
+    if pane_pid != owner.pid {
         return Err(project_error(format!(
-            "Project {} is not running; run `lf project resume {}` first",
-            project.plan.slug,
-            project.plan.id.as_str()
+            "Project {} tmux transport belongs to PID {pane_pid}, not controller owner PID {}",
+            project.plan.slug, owner.pid
         )));
     }
-    let name = project_session_name(&project);
     let status = std::process::Command::new("tmux")
         .args(["attach-session", "-t", &name])
         .status()
@@ -778,8 +840,10 @@ pub(crate) async fn wake_project(project_id: &ProjectId) -> OpsResult<()> {
         tracing::info!(project = %project_id, "not waking Project: {bar}");
         return Ok(());
     }
-    if !project_session_live(&project).await? {
-        launch_project_process(&store, &project).await?;
+    match project_controller_authority(&project).await {
+        ControllerAuthority::Live { .. } | ControllerAuthority::Parked { .. } => {}
+        ControllerAuthority::Inactive => launch_project_process(&store, &project).await?,
+        ControllerAuthority::Unverifiable { reason } => return Err(project_error(reason)),
     }
     Ok(())
 }

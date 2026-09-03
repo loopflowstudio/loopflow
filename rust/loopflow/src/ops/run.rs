@@ -438,6 +438,48 @@ pub(crate) struct WorkLaunch {
 }
 
 pub(crate) async fn launch_work(request: WorkLaunch) -> OpsResult<()> {
+    let switch_handoff =
+        std::env::var_os(crate::machine_install::INSTALL_SWITCH_CONTROLLER_HANDOFF_ENV)
+            .is_some_and(|value| !value.is_empty());
+    let _promotion_lock = if switch_handoff {
+        if std::env::var_os(crate::machine_install::INSTALL_SWITCH_ENV)
+            .is_none_or(|value| value.is_empty())
+        {
+            return Err(OpsError::Message(
+                "release controller handoff has no install switch identity".to_string(),
+            ));
+        }
+        crate::promotion_lock::require_exclusive_holder().map_err(|error| {
+            OpsError::Message(format!(
+                "release controller handoff has no exclusive promotion owner: {error}"
+            ))
+        })?;
+        None
+    } else {
+        let lock = crate::promotion_lock::acquire_shared().map_err(|error| {
+            OpsError::Message(format!(
+                "cannot serialize controller launch with release promotion: {error}"
+            ))
+        })?;
+        let root = crate::machine_install::root().map_err(|error| {
+            OpsError::Message(format!(
+                "cannot inspect release promotion before controller launch: {error}"
+            ))
+        })?;
+        if let crate::machine_install::MachineInstallState::Switching(receipt) =
+            crate::machine_install::read_state(&root).map_err(|error| {
+                OpsError::Message(format!(
+                    "cannot inspect release promotion before controller launch: {error}"
+                ))
+            })?
+        {
+            return Err(OpsError::Message(format!(
+                "install switch {} is unsettled; recover it before launching a controller",
+                receipt.id
+            )));
+        }
+        Some(lock)
+    };
     let WorkLaunch {
         work,
         wave_id,

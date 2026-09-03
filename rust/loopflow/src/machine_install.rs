@@ -25,11 +25,14 @@ use serde::{Deserialize, Serialize};
 use sha2::{Digest, Sha256};
 use uuid::Uuid;
 
+use crate::durable::WorkRef;
+
 const SCHEMA_VERSION: u32 = 1;
 const ACTIVE_FILE: &str = "active.json";
 const SWITCH_FILE: &str = "switch.json";
 const GATE_DIRECTORY: &str = "gates/1";
 pub const INSTALL_SWITCH_ENV: &str = "LF_INSTALL_SWITCH";
+pub const INSTALL_SWITCH_CONTROLLER_HANDOFF_ENV: &str = "LF_INSTALL_SWITCH_CONTROLLER_HANDOFF";
 static AUTHORIZED_CURRENT: OnceLock<Option<InstallSelection>> = OnceLock::new();
 
 #[derive(Debug, Clone, PartialEq, Eq, Hash, Deserialize, Serialize)]
@@ -339,6 +342,44 @@ pub struct ActivationTargets {
     pub legacy_app: Option<PathBuf>,
 }
 
+#[derive(Debug, Clone, PartialEq, Eq, Deserialize, Serialize)]
+#[serde(tag = "state", rename_all = "snake_case")]
+#[non_exhaustive]
+pub enum ControllerHandoffState {
+    Captured,
+    Quiesced,
+    Parked { parked_attempt_id: String },
+    Restarted { target_attempt_id: String },
+}
+
+impl ControllerHandoffState {
+    fn validate_transition_from(&self, prior: &Self) -> bool {
+        matches!(
+            (prior, self),
+            (Self::Captured, Self::Captured)
+                | (Self::Captured, Self::Quiesced)
+                | (Self::Captured, Self::Parked { .. })
+                | (Self::Quiesced, Self::Quiesced)
+                | (Self::Quiesced, Self::Parked { .. })
+                | (Self::Quiesced, Self::Restarted { .. })
+                | (Self::Parked { .. }, Self::Parked { .. })
+                | (Self::Restarted { .. }, Self::Restarted { .. })
+        )
+    }
+
+    pub(crate) fn is_settled(&self) -> bool {
+        matches!(self, Self::Parked { .. } | Self::Restarted { .. })
+    }
+}
+
+#[derive(Debug, Clone, PartialEq, Eq, Deserialize, Serialize)]
+pub struct ControllerHandoff {
+    pub work: WorkRef,
+    pub tmux_name: String,
+    pub prior_attempt_id: String,
+    pub state: ControllerHandoffState,
+}
+
 impl ActivationTargets {
     fn validate(&self) -> Result<()> {
         for path in [&self.cli, &self.daemon] {
@@ -387,6 +428,7 @@ pub struct SwitchReceipt {
     pub activation: ActivationTargets,
     pub app_was_running: bool,
     pub disposable_store_owned: bool,
+    pub controller_handoffs: Option<Vec<ControllerHandoff>>,
 }
 
 impl SwitchReceipt {
@@ -467,6 +509,51 @@ impl SwitchReceipt {
                 "install switch {} claims a disposable store it did not create",
                 self.id
             ));
+        }
+        let mut works = HashSet::new();
+        let mut transports = HashSet::new();
+        for handoff in self.controller_handoffs.iter().flatten() {
+            if matches!(handoff.work, WorkRef::Wave(_)) {
+                return Err(anyhow!(
+                    "install switch {} controller handoff cannot target Wave Work",
+                    self.id
+                ));
+            }
+            if handoff.tmux_name.is_empty() {
+                return Err(anyhow!(
+                    "install switch {} controller handoff has no transport name",
+                    self.id
+                ));
+            }
+            if !works.insert(handoff.work.clone()) {
+                return Err(anyhow!(
+                    "install switch {} repeats controller Work {} {}",
+                    self.id,
+                    handoff.work.kind(),
+                    handoff.work.id()
+                ));
+            }
+            if !transports.insert(handoff.tmux_name.as_str()) {
+                return Err(anyhow!(
+                    "install switch {} repeats controller transport {}",
+                    self.id,
+                    handoff.tmux_name
+                ));
+            }
+            if handoff.prior_attempt_id.is_empty() {
+                return Err(anyhow!(
+                    "install switch {} controller handoff has no prior attempt",
+                    self.id
+                ));
+            }
+            if let ControllerHandoffState::Restarted { target_attempt_id } = &handoff.state {
+                if target_attempt_id.is_empty() || target_attempt_id == &handoff.prior_attempt_id {
+                    return Err(anyhow!(
+                        "install switch {} controller handoff has no distinct target attempt",
+                        self.id
+                    ));
+                }
+            }
         }
         if self.target_store_advanced && !self.target_store_advance_started {
             return Err(anyhow!(
@@ -550,6 +637,32 @@ impl SwitchReceipt {
                 self.id
             ));
         }
+        if let Some(previous_handoffs) = &prior.controller_handoffs {
+            let handoffs = self.controller_handoffs.as_ref().ok_or_else(|| {
+                anyhow!(
+                    "install switch {} cannot forget captured controllers",
+                    self.id
+                )
+            })?;
+            if handoffs.len() != previous_handoffs.len() {
+                return Err(anyhow!(
+                    "install switch {} cannot change its captured controller set",
+                    self.id
+                ));
+            }
+            for (handoff, previous) in handoffs.iter().zip(previous_handoffs) {
+                if handoff.work != previous.work
+                    || handoff.tmux_name != previous.tmux_name
+                    || handoff.prior_attempt_id != previous.prior_attempt_id
+                    || !handoff.state.validate_transition_from(&previous.state)
+                {
+                    return Err(anyhow!(
+                        "install switch {} cannot change captured controller identity or regress its handoff",
+                        self.id
+                    ));
+                }
+            }
+        }
         if self.published_fallback != prior.published_fallback
             && !(self.phase == SwitchPhase::Settled
                 && self.target.source == InstallSource::Published
@@ -618,6 +731,10 @@ pub fn root_for_home(home: &Path) -> PathBuf {
 
 #[cfg(unix)]
 pub fn account_home() -> Result<PathBuf> {
+    #[cfg(debug_assertions)]
+    if let Some(home) = std::env::var_os("LF_TEST_ACCOUNT_HOME").filter(|home| !home.is_empty()) {
+        return Ok(PathBuf::from(home));
+    }
     // `HOME` is process configuration. Install authority belongs to the OS
     // account and must not move when a child changes its inherited environment.
     // SAFETY: `geteuid` has no preconditions and returns the calling process uid.
@@ -662,6 +779,10 @@ pub fn account_home() -> Result<PathBuf> {
 
 #[cfg(not(unix))]
 pub fn account_home() -> Result<PathBuf> {
+    #[cfg(debug_assertions)]
+    if let Some(home) = std::env::var_os("LF_TEST_ACCOUNT_HOME").filter(|home| !home.is_empty()) {
+        return Ok(PathBuf::from(home));
+    }
     dirs::home_dir().ok_or_else(|| anyhow!("resolve OS account home directory"))
 }
 
@@ -1420,6 +1541,7 @@ mod tests {
             },
             app_was_running: false,
             disposable_store_owned: false,
+            controller_handoffs: None,
         }
     }
 

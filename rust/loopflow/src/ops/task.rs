@@ -7,7 +7,7 @@ use std::time::{Duration, Instant};
 
 use crate::child::ChildRef;
 use crate::controller::authority::{
-    controller_authority, matching_live_owner, ControllerAuthority,
+    controller_authority, stop_controller_owner, ControllerAuthority,
 };
 use crate::controller::task::{
     State as TaskControllerState, TaskGateProposal, TaskLifecyclePhase, TaskLifecyclePlan,
@@ -2488,7 +2488,7 @@ pub(crate) async fn resume_inactive_process(store: &SharedStore, task: &mut Task
     launch_task_process(store, task).await
 }
 
-fn task_session_name(task: &Task) -> String {
+pub(crate) fn task_session_name(task: &Task) -> String {
     format!(
         "lf-task-{}-{}",
         tmux_session_slug(&task.plan.identifier),
@@ -2522,82 +2522,16 @@ async fn stop_task_controller(store: &SharedStore, task: &Task) -> OpsResult<()>
         ControllerAuthority::Unverifiable { reason } => return Err(task_error(reason)),
     };
     let work = WorkRef::Task(task.id.clone());
-    store
-        .append_interrupt(&work)
+    let lf_home = crate::store::authority_home_dir();
+    stop_controller_owner(store, &lf_home, &work, &task_session_name(task), &owner)
         .await
-        .map_err(|error| task_error(error.to_string()))?;
-    let deadline = tokio::time::Instant::now() + Duration::from_secs(3);
-    loop {
-        match task_controller_authority(task).await {
-            ControllerAuthority::Inactive | ControllerAuthority::Parked { .. } => return Ok(()),
-            ControllerAuthority::Live { owner: current } if current == owner => {}
-            ControllerAuthority::Live { owner: current } => {
-                return Err(task_error(format!(
-                    "Task {} controller owner changed from attempt {} PID {} to attempt {} PID {}",
-                    task.plan.identifier,
-                    owner.attempt_id,
-                    owner.pid,
-                    current.attempt_id,
-                    current.pid
-                )))
-            }
-            ControllerAuthority::Unverifiable { reason } => return Err(task_error(reason)),
-        }
-        if tokio::time::Instant::now() >= deadline {
-            break;
-        }
-        tokio::time::sleep(Duration::from_millis(100)).await;
-    }
-    matching_live_owner(task_controller_authority(task).await, &owner).map_err(task_error)?;
-    crate::engine::process::signal_process(owner.pid, "-TERM")
-        .map_err(|error| task_error(error.to_string()))?;
-    let force_deadline = tokio::time::Instant::now() + Duration::from_secs(1);
-    loop {
-        match task_controller_authority(task).await {
-            ControllerAuthority::Inactive | ControllerAuthority::Parked { .. } => return Ok(()),
-            ControllerAuthority::Unverifiable { reason } => return Err(task_error(reason)),
-            ControllerAuthority::Live { owner: current } if current == owner => {}
-            ControllerAuthority::Live { owner: current } => {
-                return Err(task_error(format!(
-                    "Task {} controller owner changed to attempt {} PID {} during restart",
-                    task.plan.identifier, current.attempt_id, current.pid
-                )))
-            }
-        }
-        if tokio::time::Instant::now() >= force_deadline {
-            matching_live_owner(task_controller_authority(task).await, &owner)
-                .map_err(task_error)?;
-            crate::engine::process::signal_process(owner.pid, "-KILL")
-                .map_err(|error| task_error(error.to_string()))?;
-            break;
-        }
-        tokio::time::sleep(Duration::from_millis(50)).await;
-    }
-    let stopped_deadline = tokio::time::Instant::now() + Duration::from_secs(1);
-    loop {
-        match task_controller_authority(task).await {
-            ControllerAuthority::Inactive | ControllerAuthority::Parked { .. } => return Ok(()),
-            ControllerAuthority::Live { owner: current } if current == owner => {}
-            ControllerAuthority::Live { owner: current } => {
-                return Err(task_error(format!(
-                    "Task {} controller owner changed to attempt {} PID {} after forced stop",
-                    task.plan.identifier, current.attempt_id, current.pid
-                )))
-            }
-            ControllerAuthority::Unverifiable { reason } => {
-                if tokio::time::Instant::now() >= stopped_deadline {
-                    return Err(task_error(reason));
-                }
-            }
-        }
-        if tokio::time::Instant::now() >= stopped_deadline {
-            return Err(task_error(format!(
-                "Task {} controller PID {} remained live after forced stop",
-                task.plan.identifier, owner.pid
-            )));
-        }
-        tokio::time::sleep(Duration::from_millis(50)).await;
-    }
+        .map_err(|error| {
+            task_error(format!(
+                "Task {} controller could not stop: {error}",
+                task.plan.identifier
+            ))
+        })?;
+    Ok(())
 }
 
 async fn launch_task_process(store: &SharedStore, task: &mut Task) -> OpsResult<()> {

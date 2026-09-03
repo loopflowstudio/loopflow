@@ -11,9 +11,14 @@ use axum::extract::State;
 use axum::routing::post;
 use axum::{Json, Router};
 use serde_json::{json, Value};
+use sha2::{Digest, Sha256};
 
-use loopflow::durable::{ProjectId, TaskId};
+use loopflow::durable::{ProjectId, TaskId, WorkRef};
 use loopflow::id::WaveId;
+use loopflow::machine_install::{
+    ActiveInstall, ArtifactIdentity, ArtifactRole, ArtifactSet, ControllerHandoffState,
+    InstallSelection, InstallSource, MachineInstallState,
+};
 use loopflow::planning::{LinearIssueId, LinearProjectId, ProjectPlan, TaskPlan};
 use loopflow::profile::{ProviderRoute, RouteScope};
 use loopflow::provider_auth::Provider;
@@ -112,6 +117,19 @@ fn write_executable(path: &Path, contents: &str) {
     }
 }
 
+fn file_sha256(path: &Path) -> String {
+    hex::encode(Sha256::digest(
+        std::fs::read(path).expect("read artifact for digest"),
+    ))
+}
+
+fn artifact_set_sha256(cli: &Path, daemon: &Path) -> String {
+    let mut digest = Sha256::new();
+    digest.update(file_sha256(cli).as_bytes());
+    digest.update(file_sha256(daemon).as_bytes());
+    hex::encode(digest.finalize())
+}
+
 fn public_lf(
     repo: &Path,
     home: &Path,
@@ -122,7 +140,8 @@ fn public_lf(
     args: &[&str],
 ) -> Output {
     let path = std::env::var_os("PATH").unwrap_or_default();
-    Command::new(env!("CARGO_BIN_EXE_lf"))
+    let mut command = Command::new(env!("CARGO_BIN_EXE_lf"));
+    command
         .args(args)
         .current_dir(repo)
         .env(
@@ -146,8 +165,28 @@ fn public_lf(
         .env_remove("LF_PROCESS_ID")
         .env_remove("LF_WAVE_ID")
         .env_remove("LF_ACCOUNT_LEASE")
-        .output()
-        .expect("run public lf command")
+        .env_remove("LF_TEST_ACCOUNT_HOME")
+        .env_remove("LF_TEST_INTERRUPT_SWITCH_AFTER_QUIESCE")
+        .env_remove("LF_TEST_INTERRUPT_SWITCH_AFTER_CONTROLLER_RESTORE");
+    let account_home = home
+        .parent()
+        .expect("fixture Home has an account directory")
+        .join("machine-account");
+    if account_home.is_dir() {
+        let account_home = std::fs::canonicalize(account_home)
+            .expect("canonical fixture machine account directory");
+        command.env("LF_TEST_ACCOUNT_HOME", account_home);
+    }
+    if tmux_state.join("interrupt-switch-after-quiesce").is_file() {
+        command.env("LF_TEST_INTERRUPT_SWITCH_AFTER_QUIESCE", "1");
+    }
+    if tmux_state
+        .join("interrupt-switch-after-controller-restore")
+        .is_file()
+    {
+        command.env("LF_TEST_INTERRUPT_SWITCH_AFTER_CONTROLLER_RESTORE", "1");
+    }
+    command.output().expect("run public lf command")
 }
 
 fn running_receipts(home: &Path, kind: &str, id: &str) -> Vec<serde_json::Value> {
@@ -387,6 +426,7 @@ async fn public_project_and_task_controllers_prove_startup_and_resume() {
     let directory = tempfile::tempdir().expect("temporary controller fixture");
     let repo = directory.path().join("repo");
     let task_worktree = directory.path().join("repo.controller-startup");
+    let promotion_worktree = directory.path().join("repo.controller-promotion");
     let home = directory.path().join("home");
     let bin = directory.path().join("bin");
     let tmux_state = directory.path().join("tmux");
@@ -432,6 +472,19 @@ async fn public_project_and_task_controllers_prove_startup_and_resume() {
             "-q",
             task_worktree.to_str().expect("UTF-8 Task worktree"),
             "jack/controller-startup",
+        ],
+    );
+    git(&repo, &["branch", "jack/controller-promotion"]);
+    git(
+        &repo,
+        &[
+            "worktree",
+            "add",
+            "-q",
+            promotion_worktree
+                .to_str()
+                .expect("UTF-8 promotion Task worktree"),
+            "jack/controller-promotion",
         ],
     );
     let base_commit = String::from_utf8(
@@ -505,6 +558,19 @@ async fn public_project_and_task_controllers_prove_startup_and_resume() {
         created_at: now,
         updated_at: now,
     };
+    let mut promotion_task = task.clone();
+    promotion_task.id = TaskId::new();
+    promotion_task.plan.id =
+        LinearIssueId::new("controller-promotion-issue").expect("promotion issue id");
+    promotion_task.plan.identifier = "LOO-PROMOTION".to_string();
+    promotion_task.plan.title = "Prove controller promotion".to_string();
+    promotion_task.worktree = promotion_worktree;
+    promotion_task.workspace_slug = "controller-promotion".to_string();
+    let mut promotion_pr = pr.clone();
+    promotion_pr.id = TaskPrId::new();
+    promotion_pr.task_id = promotion_task.id.clone();
+    promotion_pr.slug = promotion_task.workspace_slug.clone();
+    promotion_pr.branch = "jack/controller-promotion".to_string();
     store.create_wave(&wave).await.expect("create Wave fixture");
     store
         .upsert_provider_token(&ProviderToken {
@@ -527,6 +593,10 @@ async fn public_project_and_task_controllers_prove_startup_and_resume() {
         .create_task(&task, &pr)
         .await
         .expect("create Task fixture");
+    store
+        .create_task(&promotion_task, &promotion_pr)
+        .await
+        .expect("create promotion Task fixture");
     let project = Project {
         id: ProjectId::new(),
         plan: ProjectPlan {
@@ -651,6 +721,15 @@ case "$1" in
     echo "can't find session" >&2
     exit 1
     ;;
+  kill-session)
+    session="${3#=}"
+    marker="$LF_TEST_TMUX_STATE/$session"
+    if [ -f "$marker" ]; then
+      kill -TERM "$(sed -n '1p' "$marker")" 2>/dev/null || true
+      rm -f "$marker"
+    fi
+    exit 0
+    ;;
   new-session)
     if [ -f "$LF_TEST_TMUX_STATE/fail-new-session" ]; then
       echo "tmux launch refused" >&2
@@ -658,14 +737,29 @@ case "$1" in
     fi
     session="$4"
     marker="$LF_TEST_TMUX_STATE/$session"
+    ready="$marker.ready"
     (
       cd "$6" || exit 1
       sleep 0.02
-      exec /bin/sh -lc "$9"
+      (
+        exec /bin/sh -lc "$9"
+      ) &
+      child="$!"
+      printf '%s\n' "$child" > "$marker"
+      : > "$ready"
+      wait "$child"
       rm -f "$marker"
     ) </dev/null >/dev/null 2>&1 &
-    printf '%s\n' "$!" > "$marker"
-    exit 0
+    attempts=0
+    while [ ! -f "$ready" ] && [ "$attempts" -lt 100 ]; do
+      attempts=$((attempts + 1))
+      sleep 0.01
+    done
+    if [ -f "$ready" ]; then
+      rm -f "$ready"
+      exit 0
+    fi
+    exit 1
     ;;
   set-option)
     exit 0
@@ -1442,4 +1536,327 @@ exit 1
     {
         stop_process_tree(second_project_pid);
     }
+
+    std::fs::remove_file(&provider_release).expect("reset provider for promotion handoff");
+    let promotion_resume = public_lf(
+        &repo,
+        &home,
+        &bin,
+        Path::new(env!("CARGO_BIN_EXE_lf")),
+        &tmux_state,
+        &linear_base_url,
+        &["task", "resume", &promotion_task.plan.identifier, "--json"],
+    );
+    assert!(
+        promotion_resume.status.success(),
+        "Task did not start for promotion: {}",
+        String::from_utf8_lossy(&promotion_resume.stderr)
+    );
+    let promotion_prior = running_receipts(&home, "task", promotion_task.id.as_str())
+        .into_iter()
+        .find(|receipt| receipt["pid"].as_u64().is_some_and(process_is_live))
+        .expect("live Task controller before promotion");
+    assert_exact_live_owner(&home, &promotion_prior);
+    let prior_attempt_id = promotion_prior["attempt_id"]
+        .as_str()
+        .expect("prior attempt id")
+        .to_string();
+    let prior_pid = promotion_prior["pid"].as_u64().expect("prior PID");
+    let prior_tmux_marker = tmux_marker_for_pid(&tmux_state, prior_pid);
+
+    let cli = Path::new(env!("CARGO_BIN_EXE_lf"));
+    let daemon = Path::new(env!("CARGO_BIN_EXE_lfd"));
+    let cli_target = bin.join("installed-lf");
+    let daemon_target = bin.join("installed-lfd");
+    std::fs::copy(cli, &cli_target).expect("seed installed CLI target");
+    std::fs::copy(daemon, &daemon_target).expect("seed installed daemon target");
+    let prior_set = ArtifactSet {
+        id: "published-controller-fixture".to_string(),
+        source: InstallSource::Published,
+        source_revision: "controller-fixture-prior".to_string(),
+        source_identity: "controller-fixture-prior".to_string(),
+        content_sha256: artifact_set_sha256(cli, daemon),
+        artifacts: vec![
+            ArtifactIdentity::capture(ArtifactRole::Cli, cli).expect("capture prior CLI"),
+            ArtifactIdentity::capture(ArtifactRole::Daemon, daemon).expect("capture prior daemon"),
+        ],
+    };
+    let prior_selection = InstallSelection {
+        installation_id: "published-controller-fixture".to_string(),
+        source: InstallSource::Published,
+        artifact_set: prior_set.clone(),
+        store: std::fs::canonicalize(&home)
+            .expect("canonical fixture Home")
+            .join("loopflow.db"),
+    };
+    let machine_account = directory.path().join("machine-account");
+    let production_home = machine_account.join(".lf");
+    std::fs::create_dir_all(&production_home).expect("create fixture production Home");
+    let production_store = production_home.join("loopflow.db");
+    rusqlite::Connection::open(home.join("loopflow.db"))
+        .expect("open fixture store for production snapshot")
+        .execute(
+            "VACUUM INTO ?1",
+            [production_store.to_str().expect("UTF-8 production store")],
+        )
+        .expect("snapshot fixture production store");
+    let machine_root = loopflow::machine_install::root_for_home(
+        &std::fs::canonicalize(machine_account).expect("canonical fixture machine account"),
+    );
+    loopflow::machine_install::write_active(
+        &machine_root,
+        &ActiveInstall {
+            schema_version: 1,
+            selection: prior_selection,
+            published_fallback: prior_set.clone(),
+            retained_published_sets: vec![prior_set],
+        },
+    )
+    .expect("seed machine install selection");
+
+    let cli_text = cli.to_str().expect("UTF-8 CLI path");
+    let daemon_text = daemon.to_str().expect("UTF-8 daemon path");
+    let cli_target_text = cli_target.to_str().expect("UTF-8 CLI target");
+    let daemon_target_text = daemon_target.to_str().expect("UTF-8 daemon target");
+    let promote = || {
+        public_lf(
+            &repo,
+            &home,
+            &bin,
+            cli,
+            &tmux_state,
+            &linear_base_url,
+            &[
+                "install",
+                "promote",
+                "--from-build",
+                cli_text,
+                "--fresh",
+                "--cli-target",
+                cli_target_text,
+                "--daemon-source",
+                daemon_text,
+                "--daemon-target",
+                daemon_target_text,
+            ],
+        )
+    };
+
+    let prior_exec = home.join(format!("runtime/exec-processes/{prior_pid}.json"));
+    let prior_exec_bytes = std::fs::read(&prior_exec).expect("read prior Exec receipt");
+    std::fs::remove_file(&prior_exec).expect("remove prior Exec receipt");
+    let missing_exec_promotion = promote();
+    assert!(!missing_exec_promotion.status.success());
+    let missing_exec_error = String::from_utf8_lossy(&missing_exec_promotion.stderr);
+    assert!(
+        missing_exec_error.contains("no matching Exec receipt"),
+        "unexpected missing-Exec promotion error: {missing_exec_error}"
+    );
+    assert!(process_is_live(prior_pid));
+    assert!(matches!(
+        loopflow::machine_install::read_state(&machine_root).expect("read machine install"),
+        MachineInstallState::Settled(_)
+    ));
+    std::fs::write(&prior_exec, prior_exec_bytes).expect("restore prior Exec receipt");
+
+    let mut unrelated_promotion = Command::new("sleep")
+        .arg("30")
+        .spawn()
+        .expect("start unrelated promotion transport occupant");
+    std::fs::write(
+        &prior_tmux_marker,
+        format!("{}\n", unrelated_promotion.id()),
+    )
+    .expect("replace promotion transport owner");
+    let unowned_transport_promotion = promote();
+    assert!(!unowned_transport_promotion.status.success());
+    let unowned_transport_error = String::from_utf8_lossy(&unowned_transport_promotion.stderr);
+    assert!(
+        unowned_transport_error.contains("unverifiable"),
+        "unexpected unowned-transport promotion error: {unowned_transport_error}"
+    );
+    assert!(process_is_live(prior_pid));
+    assert!(process_is_live(u64::from(unrelated_promotion.id())));
+    unrelated_promotion
+        .kill()
+        .expect("stop unrelated promotion transport occupant");
+    unrelated_promotion
+        .wait()
+        .expect("reap unrelated promotion transport occupant");
+    std::fs::write(&prior_tmux_marker, format!("{prior_pid}\n"))
+        .expect("restore promotion transport owner");
+
+    let interrupt_switch = tmux_state.join("interrupt-switch-after-quiesce");
+    std::fs::write(&interrupt_switch, "interrupt\n")
+        .expect("interrupt promotion after controller quiescence");
+    let interrupted_promotion = promote();
+    assert!(!interrupted_promotion.status.success());
+    assert!(String::from_utf8_lossy(&interrupted_promotion.stderr)
+        .contains("test interruption after switch"));
+    assert!(!process_is_live(prior_pid));
+    let interrupted = match loopflow::machine_install::read_state(&machine_root)
+        .expect("read interrupted machine install")
+    {
+        MachineInstallState::Switching(receipt) => receipt,
+        state => panic!("interrupted promotion lost its receipt: {state:?}"),
+    };
+    assert!(!interrupted.target_store_advance_started);
+    let interrupted_handoffs = interrupted
+        .controller_handoffs
+        .as_ref()
+        .expect("interrupted switch captured controllers");
+    assert_eq!(interrupted_handoffs.len(), 1);
+    assert_eq!(interrupted_handoffs[0].prior_attempt_id, prior_attempt_id);
+    assert_eq!(
+        interrupted_handoffs[0].state,
+        ControllerHandoffState::Quiesced
+    );
+    let blocked_resume = public_lf(
+        &repo,
+        &home,
+        &bin,
+        cli,
+        &tmux_state,
+        &linear_base_url,
+        &["task", "resume", &promotion_task.plan.identifier, "--json"],
+    );
+    assert!(!blocked_resume.status.success());
+    assert!(String::from_utf8_lossy(&blocked_resume.stderr).contains("is unsettled"));
+    assert_eq!(
+        running_receipts(&home, "task", promotion_task.id.as_str()).len(),
+        1,
+        "an ordinary resume must not create an owner while switch recovery is pending"
+    );
+    std::fs::remove_file(&interrupt_switch).expect("permit switch recovery");
+
+    let interrupt_restore = tmux_state.join("interrupt-switch-after-controller-restore");
+    std::fs::write(&interrupt_restore, "interrupt\n")
+        .expect("interrupt recovery after restoring the prior controller");
+    let interrupted_restore = promote();
+    assert!(!interrupted_restore.status.success());
+    assert!(
+        String::from_utf8_lossy(&interrupted_restore.stderr).contains("restored its controllers")
+    );
+    let restored_prior = running_receipts(&home, "task", promotion_task.id.as_str())
+        .into_iter()
+        .find(|receipt| receipt["pid"].as_u64().is_some_and(process_is_live))
+        .expect("interrupted recovery restored the captured Task");
+    let restored_prior_attempt_id = restored_prior["attempt_id"]
+        .as_str()
+        .expect("restored prior attempt id")
+        .to_string();
+    assert_ne!(restored_prior_attempt_id, prior_attempt_id);
+    assert_exact_live_owner(&home, &restored_prior);
+    assert!(matches!(
+        loopflow::machine_install::read_state(&machine_root)
+            .expect("read interrupted controller restoration"),
+        MachineInstallState::Switching(_)
+    ));
+    std::fs::remove_file(&interrupt_restore).expect("permit restored switch recovery");
+
+    let recovered_promotion = promote();
+    assert!(
+        recovered_promotion.status.success(),
+        "promotion recovery failed: {}",
+        String::from_utf8_lossy(&recovered_promotion.stderr)
+    );
+    assert!(matches!(
+        loopflow::machine_install::read_state(&machine_root)
+            .expect("read recovered machine install"),
+        MachineInstallState::Settled(_)
+    ));
+    let recovered_prior = running_receipts(&home, "task", promotion_task.id.as_str())
+        .into_iter()
+        .find(|receipt| receipt["pid"].as_u64().is_some_and(process_is_live))
+        .expect("recovery restarted the captured Task");
+    let successful_prior_attempt_id = recovered_prior["attempt_id"]
+        .as_str()
+        .expect("recovered prior attempt id")
+        .to_string();
+    let successful_prior_pid = recovered_prior["pid"]
+        .as_u64()
+        .expect("recovered prior PID");
+    assert_eq!(successful_prior_attempt_id, restored_prior_attempt_id);
+    assert_exact_live_owner(&home, &recovered_prior);
+    let continuity_steer = public_lf(
+        &repo,
+        &home,
+        &bin,
+        cli,
+        &tmux_state,
+        &linear_base_url,
+        &[
+            "task",
+            "steer",
+            &promotion_task.plan.identifier,
+            "selected store continuity",
+            "--json",
+        ],
+    );
+    assert!(
+        continuity_steer.status.success(),
+        "could not seed selected-store evidence: {}",
+        String::from_utf8_lossy(&continuity_steer.stderr)
+    );
+
+    let successful_promotion = promote();
+    assert!(
+        successful_promotion.status.success(),
+        "local promotion failed: {}",
+        String::from_utf8_lossy(&successful_promotion.stderr)
+    );
+    assert!(!process_is_live(successful_prior_pid));
+    let active = match loopflow::machine_install::read_state(&machine_root)
+        .expect("read promoted machine install")
+    {
+        MachineInstallState::Settled(active) => active,
+        state => panic!("promotion did not settle: {state:?}"),
+    };
+    assert_eq!(active.selection.source, InstallSource::Development);
+    let target_home = active
+        .selection
+        .store
+        .parent()
+        .expect("target store has a Home");
+    let target_receipts = running_receipts(target_home, "task", promotion_task.id.as_str());
+    assert_eq!(target_receipts.len(), 1);
+    let target = &target_receipts[0];
+    assert_exact_live_owner(target_home, target);
+    assert_ne!(target["attempt_id"], successful_prior_attempt_id);
+    let target_store = loopflow::store::open_store(&loopflow::store::StorageConfig::sqlite(
+        active.selection.store.clone(),
+    ))
+    .await
+    .expect("open promoted target store");
+    assert!(target_store
+        .work_steers(&WorkRef::Task(promotion_task.id.clone()))
+        .await
+        .expect("read promoted Task steers")
+        .iter()
+        .any(|steer| steer.text == "selected store continuity"));
+
+    let settled_receipt = std::fs::read_dir(machine_root.join("receipts"))
+        .expect("read settled switch receipts")
+        .filter_map(Result::ok)
+        .find_map(|entry| {
+            std::fs::read(entry.path()).ok().and_then(|bytes| {
+                serde_json::from_slice::<loopflow::machine_install::SwitchReceipt>(&bytes).ok()
+            })
+        })
+        .expect("settled switch receipt");
+    let settled_handoffs = settled_receipt
+        .controller_handoffs
+        .as_ref()
+        .expect("settled switch captured controllers");
+    assert_eq!(settled_handoffs.len(), 1);
+    let handoff = &settled_handoffs[0];
+    assert_eq!(handoff.work.id(), promotion_task.id.as_str());
+    match &handoff.state {
+        ControllerHandoffState::Restarted { target_attempt_id } => {
+            assert_eq!(handoff.prior_attempt_id, successful_prior_attempt_id);
+            assert_eq!(target_attempt_id, target["attempt_id"].as_str().unwrap());
+        }
+        state => panic!("controller handoff did not restart: {state:?}"),
+    }
+    stop_process_tree(target["pid"].as_u64().expect("target controller PID"));
 }

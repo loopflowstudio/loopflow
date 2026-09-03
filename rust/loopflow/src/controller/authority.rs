@@ -1,10 +1,12 @@
 use std::collections::HashMap;
+use std::path::Path;
 
 use serde::Serialize;
 
 use crate::controller::startup::{read_work_startup_receipts_at, WorkStartupState};
 use crate::durable::{RunId, WorkRef};
 use crate::engine::process::{inspect_local_processes, tmux_pane_pid};
+use crate::store::Store;
 
 #[derive(Debug, Clone, PartialEq, Eq, Serialize)]
 pub struct ControllerOwner {
@@ -28,7 +30,15 @@ pub enum ControllerAuthority {
 
 pub(crate) async fn controller_authority(work: &WorkRef, tmux_name: &str) -> ControllerAuthority {
     let lf_home = crate::store::authority_home_dir();
-    let receipts = match read_work_startup_receipts_at(&lf_home) {
+    controller_authority_at(&lf_home, work, tmux_name).await
+}
+
+pub(crate) async fn controller_authority_at(
+    lf_home: &Path,
+    work: &WorkRef,
+    tmux_name: &str,
+) -> ControllerAuthority {
+    let receipts = match read_work_startup_receipts_at(lf_home) {
         Ok(receipts) => receipts,
         Err(error) => {
             return unverifiable(work, format!("cannot read startup receipts: {error}"));
@@ -45,7 +55,7 @@ pub(crate) async fn controller_authority(work: &WorkRef, tmux_name: &str) -> Con
     let latest_parked = matching.last().and_then(|receipt| {
         matches!(receipt.state, WorkStartupState::Parked { .. }).then(|| receipt.attempt_id.clone())
     });
-    let exec_receipts = match crate::journal::read_exec_process_receipts_at(&lf_home) {
+    let exec_receipts = match crate::journal::read_exec_process_receipts_at(lf_home) {
         Ok(receipts) => receipts,
         Err(error) => {
             return unverifiable(work, format!("cannot read Exec receipts: {error}"));
@@ -182,6 +192,113 @@ pub(crate) fn matching_live_owner(
             Err(format!("controller parked during attempt {attempt_id}"))
         }
         ControllerAuthority::Unverifiable { reason } => Err(reason),
+    }
+}
+
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub(crate) enum ControllerStop {
+    Inactive,
+    Parked { attempt_id: String },
+}
+
+pub(crate) async fn stop_controller_owner(
+    store: &Store,
+    lf_home: &Path,
+    work: &WorkRef,
+    tmux_name: &str,
+    expected: &ControllerOwner,
+) -> Result<ControllerStop, String> {
+    matching_live_owner(
+        controller_authority_at(lf_home, work, tmux_name).await,
+        expected,
+    )?;
+    store
+        .append_interrupt(work)
+        .await
+        .map_err(|error| error.to_string())?;
+    let graceful_deadline = tokio::time::Instant::now() + std::time::Duration::from_secs(3);
+    loop {
+        match controller_authority_at(lf_home, work, tmux_name).await {
+            ControllerAuthority::Inactive => return Ok(ControllerStop::Inactive),
+            ControllerAuthority::Parked { attempt_id } => {
+                return Ok(ControllerStop::Parked { attempt_id });
+            }
+            ControllerAuthority::Live { owner } if owner == *expected => {}
+            ControllerAuthority::Live { owner } => {
+                return Err(format!(
+                    "controller owner changed from attempt {} PID {} to attempt {} PID {}",
+                    expected.attempt_id, expected.pid, owner.attempt_id, owner.pid
+                ));
+            }
+            ControllerAuthority::Unverifiable { reason } => return Err(reason),
+        }
+        if tokio::time::Instant::now() >= graceful_deadline {
+            break;
+        }
+        tokio::time::sleep(std::time::Duration::from_millis(100)).await;
+    }
+
+    matching_live_owner(
+        controller_authority_at(lf_home, work, tmux_name).await,
+        expected,
+    )?;
+    crate::engine::process::signal_process(expected.pid, "-TERM")
+        .map_err(|error| error.to_string())?;
+    let force_deadline = tokio::time::Instant::now() + std::time::Duration::from_secs(1);
+    loop {
+        match controller_authority_at(lf_home, work, tmux_name).await {
+            ControllerAuthority::Inactive => return Ok(ControllerStop::Inactive),
+            ControllerAuthority::Parked { attempt_id } => {
+                return Ok(ControllerStop::Parked { attempt_id });
+            }
+            ControllerAuthority::Live { owner } if owner == *expected => {}
+            ControllerAuthority::Live { owner } => {
+                return Err(format!(
+                    "controller owner changed to attempt {} PID {} during stop",
+                    owner.attempt_id, owner.pid
+                ));
+            }
+            ControllerAuthority::Unverifiable { reason } => return Err(reason),
+        }
+        if tokio::time::Instant::now() >= force_deadline {
+            matching_live_owner(
+                controller_authority_at(lf_home, work, tmux_name).await,
+                expected,
+            )?;
+            crate::engine::process::signal_process(expected.pid, "-KILL")
+                .map_err(|error| error.to_string())?;
+            break;
+        }
+        tokio::time::sleep(std::time::Duration::from_millis(50)).await;
+    }
+
+    let stopped_deadline = tokio::time::Instant::now() + std::time::Duration::from_secs(1);
+    loop {
+        match controller_authority_at(lf_home, work, tmux_name).await {
+            ControllerAuthority::Inactive => return Ok(ControllerStop::Inactive),
+            ControllerAuthority::Parked { attempt_id } => {
+                return Ok(ControllerStop::Parked { attempt_id });
+            }
+            ControllerAuthority::Live { owner } if owner == *expected => {}
+            ControllerAuthority::Live { owner } => {
+                return Err(format!(
+                    "controller owner changed to attempt {} PID {} after forced stop",
+                    owner.attempt_id, owner.pid
+                ));
+            }
+            ControllerAuthority::Unverifiable { reason } => {
+                if tokio::time::Instant::now() >= stopped_deadline {
+                    return Err(reason);
+                }
+            }
+        }
+        if tokio::time::Instant::now() >= stopped_deadline {
+            return Err(format!(
+                "controller PID {} remained live after forced stop",
+                expected.pid
+            ));
+        }
+        tokio::time::sleep(std::time::Duration::from_millis(50)).await;
     }
 }
 

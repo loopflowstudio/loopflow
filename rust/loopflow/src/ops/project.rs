@@ -108,7 +108,7 @@ fn default_project_controller_state(
     }
 }
 
-fn project_session_name(project: &Project) -> String {
+pub(crate) fn project_session_name(project: &Project) -> String {
     format!(
         "lf-project-{}-{}",
         tmux_session_slug(&project.plan.slug),

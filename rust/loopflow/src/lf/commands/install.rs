@@ -2075,7 +2075,7 @@ async fn resume_controller_handoff(
         .env(crate::machine_install::INSTALL_SWITCH_ENV, switch_id)
         .env(
             crate::machine_install::INSTALL_SWITCH_CONTROLLER_HANDOFF_ENV,
-            switch_id,
+            "1",
         )
         .env("LF_BIN", &artifact.path)
         .env("LF_HOME", &lf_home)

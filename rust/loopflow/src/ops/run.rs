@@ -438,11 +438,10 @@ pub(crate) struct WorkLaunch {
 }
 
 pub(crate) async fn launch_work(request: WorkLaunch) -> OpsResult<()> {
-    let switch_handoff_id =
-        std::env::var(crate::machine_install::INSTALL_SWITCH_CONTROLLER_HANDOFF_ENV)
-            .ok()
-            .filter(|value| !value.is_empty());
-    let _promotion_lock = if let Some(switch_handoff_id) = switch_handoff_id {
+    let switch_handoff =
+        std::env::var_os(crate::machine_install::INSTALL_SWITCH_CONTROLLER_HANDOFF_ENV)
+            .is_some_and(|value| !value.is_empty());
+    let _promotion_lock = if switch_handoff {
         let switch_id = std::env::var(crate::machine_install::INSTALL_SWITCH_ENV)
             .ok()
             .filter(|value| !value.is_empty())
@@ -451,11 +450,6 @@ pub(crate) async fn launch_work(request: WorkLaunch) -> OpsResult<()> {
                     "release controller handoff has no install switch identity".to_string(),
                 )
             })?;
-        if switch_handoff_id != switch_id {
-            return Err(OpsError::Message(format!(
-                "release controller handoff names switch {switch_handoff_id}, not {switch_id}"
-            )));
-        }
         crate::promotion_lock::require_exclusive_holder().map_err(|error| {
             OpsError::Message(format!(
                 "release controller handoff has no exclusive promotion owner: {error}"

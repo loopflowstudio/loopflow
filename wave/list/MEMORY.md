@@ -30,5 +30,6 @@
   production store; otherwise a live controller can restart against stale or
   missing Work after a development-to-development promotion.
 - A release handoff lock proves serialization, not transition identity. The
-  restart capability must also name the active switch receipt, and terminal
-  parked or restarted attempt ids must remain immutable in that receipt.
+  switch capability must also match the active receipt, while the separate
+  handoff marker names the operation. Terminal parked or restarted attempt ids
+  must remain immutable in that receipt.

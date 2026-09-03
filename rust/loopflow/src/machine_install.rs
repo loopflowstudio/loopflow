@@ -354,17 +354,15 @@ pub enum ControllerHandoffState {
 
 impl ControllerHandoffState {
     fn validate_transition_from(&self, prior: &Self) -> bool {
-        matches!(
-            (prior, self),
-            (Self::Captured, Self::Captured)
-                | (Self::Captured, Self::Quiesced)
-                | (Self::Captured, Self::Parked { .. })
-                | (Self::Quiesced, Self::Quiesced)
-                | (Self::Quiesced, Self::Parked { .. })
-                | (Self::Quiesced, Self::Restarted { .. })
-                | (Self::Parked { .. }, Self::Parked { .. })
-                | (Self::Restarted { .. }, Self::Restarted { .. })
-        )
+        match (prior, self) {
+            (Self::Captured, Self::Captured | Self::Quiesced | Self::Parked { .. })
+            | (Self::Quiesced, Self::Quiesced | Self::Parked { .. } | Self::Restarted { .. }) => {
+                true
+            }
+            (Self::Parked { .. }, Self::Parked { .. })
+            | (Self::Restarted { .. }, Self::Restarted { .. }) => self == prior,
+            _ => false,
+        }
     }
 
     pub(crate) fn is_settled(&self) -> bool {
@@ -546,13 +544,25 @@ impl SwitchReceipt {
                     self.id
                 ));
             }
-            if let ControllerHandoffState::Restarted { target_attempt_id } = &handoff.state {
-                if target_attempt_id.is_empty() || target_attempt_id == &handoff.prior_attempt_id {
+            match &handoff.state {
+                ControllerHandoffState::Parked { parked_attempt_id }
+                    if parked_attempt_id.is_empty() =>
+                {
+                    return Err(anyhow!(
+                        "install switch {} controller handoff has no parked attempt",
+                        self.id
+                    ));
+                }
+                ControllerHandoffState::Restarted { target_attempt_id }
+                    if target_attempt_id.is_empty()
+                        || target_attempt_id == &handoff.prior_attempt_id =>
+                {
                     return Err(anyhow!(
                         "install switch {} controller handoff has no distinct target attempt",
                         self.id
                     ));
                 }
+                _ => {}
             }
         }
         if self.target_store_advanced && !self.target_store_advance_started {
@@ -1907,6 +1917,73 @@ mod tests {
             .unwrap_err()
             .to_string()
             .contains("without candidate recovery ownership"));
+    }
+
+    #[test]
+    fn controller_handoff_terminal_attempt_cannot_change() {
+        let directory = tempfile::tempdir().unwrap();
+        let root = directory.path().join("authority");
+        let published = selection(directory.path(), "published", InstallSource::Published);
+        let development = selection(directory.path(), "development", InstallSource::Development);
+        let mut receipt = switch(
+            published.clone(),
+            development,
+            published.artifact_set.clone(),
+        );
+        receipt.controller_handoffs = Some(vec![ControllerHandoff {
+            work: WorkRef::Task(crate::durable::TaskId::new()),
+            tmux_name: "lf-task-controller".to_string(),
+            prior_attempt_id: "attempt-prior".to_string(),
+            state: ControllerHandoffState::Captured,
+        }]);
+        write_switch(&root, &receipt).unwrap();
+
+        let handoff = &mut receipt
+            .controller_handoffs
+            .as_mut()
+            .expect("controller handoff exists")[0];
+        handoff.state = ControllerHandoffState::Quiesced;
+        write_switch(&root, &receipt).unwrap();
+        receipt.controller_handoffs.as_mut().unwrap()[0].state =
+            ControllerHandoffState::Restarted {
+                target_attempt_id: "attempt-target".to_string(),
+            };
+        write_switch(&root, &receipt).unwrap();
+
+        receipt.controller_handoffs.as_mut().unwrap()[0].state =
+            ControllerHandoffState::Restarted {
+                target_attempt_id: "attempt-replacement".to_string(),
+            };
+        assert!(write_switch(&root, &receipt)
+            .unwrap_err()
+            .to_string()
+            .contains("cannot change captured controller identity"));
+    }
+
+    #[test]
+    fn controller_handoff_requires_a_parked_attempt() {
+        let directory = tempfile::tempdir().unwrap();
+        let published = selection(directory.path(), "published", InstallSource::Published);
+        let development = selection(directory.path(), "development", InstallSource::Development);
+        let mut receipt = switch(
+            published.clone(),
+            development,
+            published.artifact_set.clone(),
+        );
+        receipt.controller_handoffs = Some(vec![ControllerHandoff {
+            work: WorkRef::Project(crate::durable::ProjectId::new()),
+            tmux_name: "lf-project-controller".to_string(),
+            prior_attempt_id: "attempt-prior".to_string(),
+            state: ControllerHandoffState::Parked {
+                parked_attempt_id: String::new(),
+            },
+        }]);
+
+        assert!(receipt
+            .validate()
+            .unwrap_err()
+            .to_string()
+            .contains("has no parked attempt"));
     }
 
     #[test]

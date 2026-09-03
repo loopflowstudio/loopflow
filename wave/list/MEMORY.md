@@ -29,3 +29,6 @@
 - A fresh release target must clone the prior selected store, not a fixed
   production store; otherwise a live controller can restart against stale or
   missing Work after a development-to-development promotion.
+- A release handoff lock proves serialization, not transition identity. The
+  restart capability must also name the active switch receipt, and terminal
+  parked or restarted attempt ids must remain immutable in that receipt.

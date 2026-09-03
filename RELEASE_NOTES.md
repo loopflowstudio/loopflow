@@ -1,48 +1,38 @@
-# v0.12.16
+# v0.12.17
 
 <!-- loopflow:release-notes=narrative;gate=safe -->
 
-v0.12.16 makes human interaction a durable part of Loopflow's execution model. Sessions preserve the exact conversation and resolution boundary when a provider, terminal, app, or machine-control process exits, while Wave chat acknowledges messages promptly and delivers one deliberate response instead of a controller transcript. Operators can now resume human work or steer a running Task without confusing process liveness with approval.
+v0.12.17 hardens both sides of an upgrade: the installation users run and the release pipeline that produces it. A failed promotion now leaves the previous `lf` available, interrupted same-tag publication can resume from matching durable state, and the Mac release gate proves the packaged app can render without local build resources. The result is a release path that recovers when evidence is clear and stops safely when it is not.
 
-## Resume human work without advancing it by accident
+## Keep using `lf` when an install fails
 
-Readiness, process exit, and human approval are now separate facts represented by one Session projection. Interactive Runs, ad-hoc human Asks, and Task human FlowSteps remain available across restarts until a person performs the resolution action valid for that kind of Session.
+An interrupted or failed install switch no longer bricks ordinary CLI startup. Loopflow resolves pre-commit switch phases to the recorded last-good installation while preserving the unsettled receipt for diagnosis and a later recovery attempt.
 
-- `lf session` lists and opens resumable Sessions and exposes readiness, completion, approval, and iteration as distinct actions.
-- Provider exit or terminal pane closure leaves the Session resumable with its provider-native history; it no longer settles the human boundary.
-- Interactive and Ask Sessions finish through Complete, while Task FlowSteps advance only through Approve or Iterate.
-- Task controllers persist their Flow position and use semantic conditions around a single active Task branch and PR, so automation cannot advance merely because its process disappeared.
-- The macOS Sessions surface consumes the same Session DTO, attaches native terminals, and presents only the actions valid for each Session kind.
-- Desktop control follows the machine-selected Home, copied runtime binaries are authenticated by digest, and Work-scoped usage can be filtered against the same durable identity.
+- Ordinary commands fall back to the switch receipt's `prior` install during every unsettled pre-commit phase.
+- A committed switch continues to select its intended target.
+- `lf doctor` reports the unsettled switch and the active fallback instead of describing startup as blocked.
+- Install operations retain the receipt, so they can recover or rerun the promotion without hiding what failed.
 
-## Use Wave chat as an operator surface
+## Resume interrupted releases from durable evidence
 
-Discord-backed Waves now treat conversation as durable channel history rather than a queue to consume. The Wave sees authorship, reply relationships, and its own previous posts, allowing it to decide whether a response is warranted and preventing listener restarts from producing duplicate replies.
+Same-tag release publication now treats generated worktrees, refs, and artifact directories as process-durable state. Candidate preparation and tagged publication share one exact-source recovery path, allowing an interrupted release to continue without manual cleanup when the existing state can be attributed unambiguously.
 
-- Incoming messages receive an immediate pickup reaction, followed by one completed response and a success reaction.
-- A resumable Discord Gateway connection, REST cursor catch-up, and delivery reconciliation preserve continuity across listener restarts.
-- The shared `wave/chat` contract and `lf reply` keep only the finished reply on the channel; intermediate work remains inside the Run.
-- Wave and Project governance use focused `operate` turns, keeping chat responses deliberate instead of streaming controller activity.
+- Complete, clean worktrees at the exact tag commit are reused.
+- Attributable partial states—including empty paths, branch-only worktrees, and missing release bodies—are reconstructed under the existing stage lease.
+- Recovery preserves the exact-tag, exact-commit, verified-artifact, and single-publisher gates.
+- Dirty, divergent, differently registered, or live-owned worktrees are left untouched and fail with expected-versus-observed evidence.
 
-## Steer long-running work while it is live
+## Prove the Mac app stands alone before shipping
 
-Direction now travels through durable Task and Project event streams and can also reach the active provider session at its next turn boundary. This keeps a correction useful whether the process consumes it immediately or resumes later.
+The Mac release now tests the assembled application without access to SwiftPM's local build resource bundles. DMG creation proceeds only when the signed packaged app launches in UI-test mode and produces a non-empty snapshot, catching builds that work on the release machine but would fail after installation elsewhere.
 
-- `lf task steer <task> "take the smaller approach"` sends durable direction to running work.
-- `lf task interrupt <task>` ends the current turn so execution can restart with that direction.
-- Codex, Claude, and OpenCode harnesses share live current-session delivery support.
-- The standalone steers table and transient consumption model are gone; interruption state and direction live with the Work they affect.
+- Packaged apps prefer the embedded `LoopflowSwift_Loopflow.bundle`; development and framework resource lookup remain supported.
+- Release verification temporarily hides build-time bundles, waits up to 30 seconds for a rendered snapshot, and includes launch diagnostics on failure.
+- Hidden resources are restored on every success and failure path.
 
 ## Operational notes
 
-- Discord bindings now require **Add Reactions** and **Message Content** permissions.
-- The legacy Ask tables, Ask commands, attention DTOs, and standalone steers table were removed rather than kept behind compatibility shims. Consumers must move to Sessions and Work event streams.
-- Provider-native Claude and OpenCode steering checks remain opt-in; deterministic coverage exercises the shared controller contract.
-- A dedicated responder process and Discord thread-to-Task mapping are not included in this release. Wave replies still run through the existing resident.
-- Settled Task PRs remain as serial delivery history even though each Task now has only one active branch and PR.
-
-## Small changes
-
-- Temporary SQLite stores are hermetic, preventing migration tests from racing ambient machine state.
-- Installation promotion avoids version-skew re-exec loops and ignores stale placements whose catalog roots no longer exist.
-- Linked worktrees resolve to their main checkout during repository discovery.
+- A failed install promotion may still require repair, but ordinary `lf` commands remain available through the recorded prior installation and `lf doctor` exposes the unsettled state.
+- Corrupt or ambiguous Git metadata intentionally prevents automatic release recovery. The existing evidence is preserved for operator inspection.
+- Mutable release-PR worktrees are not covered by the immutable-source recovery policy.
+- Mac release builds now require the packaged app to render successfully in the build environment before DMG creation; the gate verifies startup and initial rendering, not broader interaction.

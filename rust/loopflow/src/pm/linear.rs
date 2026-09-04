@@ -403,7 +403,7 @@ impl LinearClient {
             client: reqwest::Client::new(),
             token,
             team_id,
-            base_url: LINEAR_BASE_URL.to_string(),
+            base_url: linear_base_url(),
         }
     }
 
@@ -1183,6 +1183,14 @@ impl LinearClient {
                 .collect(),
         })
     }
+}
+
+fn linear_base_url() -> String {
+    #[cfg(debug_assertions)]
+    if let Ok(base_url) = std::env::var("LF_TEST_LINEAR_BASE_URL") {
+        return base_url;
+    }
+    LINEAR_BASE_URL.to_string()
 }
 
 #[derive(Serialize)]

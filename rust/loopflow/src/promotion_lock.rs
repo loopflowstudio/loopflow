@@ -12,7 +12,11 @@ pub(crate) struct PromotionLock {
 }
 
 pub(crate) fn acquire_exclusive() -> io::Result<PromotionLock> {
-    _acquire(&lock_path())
+    _acquire(&lock_path(), true)
+}
+
+pub(crate) fn acquire_shared() -> io::Result<PromotionLock> {
+    _acquire(&lock_path(), false)
 }
 
 fn lock_path() -> PathBuf {
@@ -41,7 +45,7 @@ pub(crate) fn require_exclusive_holder() -> io::Result<()> {
     }
 }
 
-fn _acquire(path: &Path) -> io::Result<PromotionLock> {
+fn _acquire(path: &Path, exclusive: bool) -> io::Result<PromotionLock> {
     if let Some(parent) = path.parent() {
         fs::create_dir_all(parent)?;
     }
@@ -51,6 +55,10 @@ fn _acquire(path: &Path) -> io::Result<PromotionLock> {
         .read(true)
         .write(true)
         .open(path)?;
-    FileExt::lock_exclusive(&file)?;
+    if exclusive {
+        FileExt::lock_exclusive(&file)?;
+    } else {
+        FileExt::lock_shared(&file)?;
+    }
     Ok(PromotionLock { _file: file })
 }

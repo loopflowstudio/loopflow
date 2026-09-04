@@ -675,6 +675,33 @@ pub(crate) fn read_exec_process_receipts_at(
     Ok(receipts)
 }
 
+pub(crate) fn current_exec_process_receipt() -> Result<ExecProcessReceipt, std::io::Error> {
+    let pid = std::process::id();
+    let path = crate::store::lf_home_dir()
+        .join(EXEC_PROCESS_ROOT)
+        .join(format!("{pid}.json"));
+    let receipt: ExecProcessReceipt =
+        serde_json::from_slice(&fs::read(&path)?).map_err(std::io::Error::other)?;
+    let trace_id = std::env::var(LF_TRACE_ID_ENV)
+        .map_err(|error| std::io::Error::new(std::io::ErrorKind::NotFound, error))?;
+    let exec_id = std::env::var(LF_PROCESS_ID_ENV)
+        .map_err(|error| std::io::Error::new(std::io::ErrorKind::NotFound, error))?;
+    if receipt.schema_version != 1
+        || receipt.pid != pid
+        || receipt.trace_id != trace_id
+        || receipt.exec_id != exec_id
+    {
+        return Err(std::io::Error::new(
+            std::io::ErrorKind::InvalidData,
+            format!(
+                "live Exec receipt {} does not match this process",
+                path.display()
+            ),
+        ));
+    }
+    Ok(receipt)
+}
+
 pub(crate) fn remove_exec_process_receipt_at(
     lf_home: &Path,
     pid: u32,
@@ -1429,6 +1456,10 @@ mod tests {
         assert_eq!(
             receipts[0].exec_id,
             std::env::var(super::LF_PROCESS_ID_ENV).expect("current Exec id")
+        );
+        assert_eq!(
+            super::current_exec_process_receipt().expect("read current live receipt"),
+            receipts[0]
         );
 
         emit(

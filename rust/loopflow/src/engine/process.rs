@@ -63,6 +63,134 @@ fn terminate_process_group(pid: u32) {
 }
 
 const TMUX_LIVENESS_TIMEOUT: std::time::Duration = std::time::Duration::from_secs(2);
+const PROCESS_START_TOLERANCE_SECONDS: i64 = 3;
+pub(crate) const LOCAL_PROCESS_COLUMNS: &str = "pid=,ppid=,pgid=,state=,etime=,command=";
+
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub(crate) struct LocalProcess {
+    pub pid: u32,
+    pub parent_pid: u32,
+    pub process_group: u32,
+    pub started_at: i64,
+    pub kernel_state: String,
+    pub command: String,
+}
+
+impl LocalProcess {
+    pub(crate) fn is_live_loopflow(&self) -> bool {
+        !self.kernel_state.starts_with('Z')
+            && self
+                .command
+                .split_whitespace()
+                .next()
+                .and_then(|word| Path::new(word).file_name())
+                .and_then(|name| name.to_str())
+                .is_some_and(is_lf_executable_name)
+    }
+
+    pub(crate) fn matches_birth(&self, pid: u32, started_at: i64) -> bool {
+        self.pid == pid && (self.started_at - started_at).abs() <= PROCESS_START_TOLERANCE_SECONDS
+    }
+}
+
+pub(crate) async fn inspect_local_processes() -> Result<Vec<LocalProcess>> {
+    let now = time::OffsetDateTime::now_utc().unix_timestamp();
+    let output = tokio::process::Command::new("ps")
+        .args(["-axo", LOCAL_PROCESS_COLUMNS])
+        .output()
+        .await
+        .map_err(|error| anyhow!("failed to inspect local processes: {error}"))?;
+    if !output.status.success() {
+        return Err(anyhow!(
+            "ps failed while inspecting controller ownership: {}",
+            String::from_utf8_lossy(&output.stderr).trim()
+        ));
+    }
+    parse_local_processes(&String::from_utf8_lossy(&output.stdout), now).map_err(|error| {
+        anyhow!("invalid ps output while inspecting controller ownership: {error}")
+    })
+}
+
+pub(crate) fn parse_local_processes(output: &str, now: i64) -> Result<Vec<LocalProcess>> {
+    output
+        .lines()
+        .enumerate()
+        .filter(|(_, line)| !line.trim().is_empty())
+        .map(|(index, line)| {
+            let mut fields = line.split_whitespace();
+            let pid = fields
+                .next()
+                .ok_or_else(|| anyhow!("line {} has no PID", index + 1))?
+                .parse::<u32>()
+                .map_err(|error| anyhow!("line {} has invalid PID: {error}", index + 1))?;
+            let parent_pid = fields
+                .next()
+                .ok_or_else(|| anyhow!("line {} has no parent PID", index + 1))?
+                .parse::<u32>()
+                .map_err(|error| anyhow!("line {} has invalid parent PID: {error}", index + 1))?;
+            let process_group = fields
+                .next()
+                .ok_or_else(|| anyhow!("line {} has no process group", index + 1))?
+                .parse::<u32>()
+                .map_err(|error| {
+                    anyhow!("line {} has invalid process group: {error}", index + 1)
+                })?;
+            let kernel_state = fields
+                .next()
+                .ok_or_else(|| anyhow!("line {} has no kernel state", index + 1))?
+                .to_string();
+            let elapsed = fields
+                .next()
+                .ok_or_else(|| anyhow!("line {} has no elapsed time", index + 1))?;
+            let command = fields.collect::<Vec<_>>().join(" ");
+            if command.is_empty() {
+                return Err(anyhow!("line {} has no command", index + 1));
+            }
+            Ok(LocalProcess {
+                pid,
+                parent_pid,
+                process_group,
+                started_at: now.saturating_sub(elapsed_seconds(elapsed)? as i64),
+                kernel_state,
+                command,
+            })
+        })
+        .collect()
+}
+
+fn elapsed_seconds(elapsed: &str) -> Result<u64> {
+    let (days, clock) = if let Some((days, clock)) = elapsed.split_once('-') {
+        let days = days
+            .parse::<u64>()
+            .map_err(|error| anyhow!("invalid elapsed days {days:?}: {error}"))?;
+        (days, clock)
+    } else {
+        (0, elapsed)
+    };
+    let parts = clock
+        .split(':')
+        .map(|part| {
+            part.parse::<u64>()
+                .map_err(|error| anyhow!("invalid elapsed clock {elapsed:?}: {error}"))
+        })
+        .collect::<Result<Vec<_>>>()?;
+    let clock_seconds = match parts.as_slice() {
+        [minutes, seconds] => minutes.saturating_mul(60).saturating_add(*seconds),
+        [hours, minutes, seconds] => hours
+            .saturating_mul(3_600)
+            .saturating_add(minutes.saturating_mul(60))
+            .saturating_add(*seconds),
+        _ => return Err(anyhow!("invalid elapsed time {elapsed:?}")),
+    };
+    Ok(days.saturating_mul(86_400).saturating_add(clock_seconds))
+}
+
+pub(crate) fn is_lf_executable_name(executable: &str) -> bool {
+    executable == "lf"
+        || executable.strip_prefix("lf-").is_some_and(|digest| {
+            digest.len() == 64 && digest.bytes().all(|byte| byte.is_ascii_hexdigit())
+        })
+}
 
 pub(crate) fn current_process_group_id() -> Option<u32> {
     // SAFETY: getpgrp has no preconditions and does not dereference memory.
@@ -356,42 +484,42 @@ pub(crate) async fn tmux_session_exists(session_name: &str) -> Result<bool> {
     tmux_session_exists_with_timeout(&mut command, TMUX_LIVENESS_TIMEOUT).await
 }
 
-pub(crate) async fn send_tmux_input(session_name: &str, input: &str) -> Result<()> {
+pub(crate) async fn tmux_pane_pid(session_name: &str) -> Result<Option<u32>> {
     let target = format!("={session_name}");
-    let status = tokio::process::Command::new("tmux")
-        .args(["send-keys", "-t", &target, "-l", "--", input])
-        .status()
+    let output = tokio::process::Command::new("tmux")
+        .args(["display-message", "-p", "-t", &target, "#{pane_pid}"])
+        .output()
         .await?;
-    if !status.success() {
-        return Err(anyhow!(
-            "failed to send input to tmux session {session_name}"
-        ));
+    if output.status.success() {
+        let pid = String::from_utf8_lossy(&output.stdout)
+            .trim()
+            .parse::<u32>()
+            .map_err(|error| {
+                anyhow!("tmux session {session_name} returned an invalid pane PID: {error}")
+            })?;
+        return Ok(Some(pid));
     }
-    let status = tokio::process::Command::new("tmux")
-        .args(["send-keys", "-t", &target, "Enter"])
-        .status()
-        .await?;
-    if !status.success() {
-        return Err(anyhow!(
-            "failed to submit input to tmux session {session_name}"
-        ));
+    let stderr = String::from_utf8_lossy(&output.stderr);
+    if tmux_session_is_absent(&stderr) {
+        Ok(None)
+    } else {
+        Err(anyhow!(
+            "tmux pane probe failed for session {session_name}: {}",
+            stderr.trim()
+        ))
     }
-    Ok(())
 }
 
-pub(crate) async fn stop_tmux_session(session_name: &str) -> Result<()> {
-    let target = format!("={session_name}");
-    let status = tokio::process::Command::new("tmux")
-        .args(["kill-session", "-t", &target])
+pub(crate) fn signal_process(pid: u32, signal: &str) -> Result<()> {
+    let status = std::process::Command::new("kill")
+        .args([signal, &pid.to_string()])
         .status()
-        .await?;
+        .map_err(|error| anyhow!("failed to signal process {pid}: {error}"))?;
     if status.success() {
-        return Ok(());
+        Ok(())
+    } else {
+        Err(anyhow!("failed to signal process {pid} with {signal}"))
     }
-    if !tmux_session_exists(session_name).await? {
-        return Ok(());
-    }
-    Err(anyhow!("failed to stop tmux session {session_name}"))
 }
 
 async fn tmux_session_exists_with_timeout(
@@ -410,15 +538,18 @@ async fn tmux_session_exists_with_timeout(
         return Ok(true);
     }
     let stderr = String::from_utf8_lossy(&output.stderr);
-    if stderr.contains("can't find session")
-        || stderr.contains("no server running")
-        || stderr.contains("no sessions")
-        || (stderr.contains("error connecting to") && stderr.contains("No such file or directory"))
-    {
+    if tmux_session_is_absent(&stderr) {
         Ok(false)
     } else {
         Err(anyhow!("tmux session probe failed: {}", stderr.trim()))
     }
+}
+
+fn tmux_session_is_absent(stderr: &str) -> bool {
+    stderr.contains("can't find session")
+        || stderr.contains("no server running")
+        || stderr.contains("no sessions")
+        || (stderr.contains("error connecting to") && stderr.contains("No such file or directory"))
 }
 
 pub(crate) async fn start_lf_session(session: &str, cwd: &Path, argv: &[String]) -> Result<()> {
@@ -568,7 +699,7 @@ pub(crate) fn lf_session_shell_command(argv: &[String], env: &[(&str, &str)]) ->
         .map(|(key, value)| format!("{}={}", shell_escape(key), shell_escape(value)))
         .collect::<Vec<_>>()
         .join(" ");
-    let clear_context = "if [ -n \"${LF_FORWARDED_SECRET_NAMES:-}\" ]; then unset $LF_FORWARDED_SECRET_NAMES; fi; unset LF_TRACE_ID LF_PROCESS_ID LF_WAVE_ID LF_RUN_ID LF_INSTALL_SWITCH LF_BIN LF_HOME LF_DB_PATH LF_CONTROL_BIN LF_CONTROL_HOME LF_CONTROL_DB_PATH LF_ACCOUNT_LEASE LF_ACCOUNT_SELECTION LF_FORWARDED_PM_TOKEN LF_FORWARDED_PM_PROVIDER LF_FORWARDED_SECRET_NAMES LF_SSH_TARGET LF_LINEAR_WEBHOOK_SECRET LF_LINEAR_VIEWER_ID LF_GITHUB_WEBHOOK_SECRET LF_GITHUB_WEBHOOK_URL LF_LFD_ALLOW_NON_LOOPBACK LF_DISCORD_TOKEN GH_TOKEN OPENCODE_API_KEY CLAUDE_CODE_OAUTH_TOKEN ANTHROPIC_API_KEY CODEX_ACCESS_TOKEN OPENAI_API_KEY";
+    let clear_context = "if [ -n \"${LF_FORWARDED_SECRET_NAMES:-}\" ]; then unset $LF_FORWARDED_SECRET_NAMES; fi; unset LF_TRACE_ID LF_PROCESS_ID LF_WAVE_ID LF_RUN_ID LF_INSTALL_SWITCH LF_INSTALL_SWITCH_CONTROLLER_HANDOFF LF_BIN LF_HOME LF_DB_PATH LF_CONTROL_BIN LF_CONTROL_HOME LF_CONTROL_DB_PATH LF_ACCOUNT_LEASE LF_ACCOUNT_SELECTION LF_FORWARDED_PM_TOKEN LF_FORWARDED_PM_PROVIDER LF_FORWARDED_SECRET_NAMES LF_SSH_TARGET LF_LINEAR_WEBHOOK_SECRET LF_LINEAR_VIEWER_ID LF_GITHUB_WEBHOOK_SECRET LF_GITHUB_WEBHOOK_URL LF_LFD_ALLOW_NON_LOOPBACK LF_DISCORD_TOKEN GH_TOKEN OPENCODE_API_KEY CLAUDE_CODE_OAUTH_TOKEN ANTHROPIC_API_KEY CODEX_ACCESS_TOKEN OPENAI_API_KEY";
     if env.is_empty() {
         format!("{clear_context}; exec {command}")
     } else {
@@ -824,7 +955,7 @@ mod tests {
             "if [ -n \"${LF_FORWARDED_SECRET_NAMES:-}\" ]; then unset $LF_FORWARDED_SECRET_NAMES; fi; unset "
         ));
         assert!(command.contains("LF_WAVE_ID LF_RUN_ID LF_INSTALL_SWITCH"));
-        assert!(command.contains("LF_INSTALL_SWITCH LF_BIN"));
+        assert!(command.contains("LF_INSTALL_SWITCH LF_INSTALL_SWITCH_CONTROLLER_HANDOFF LF_BIN"));
         assert!(command.contains("LF_ACCOUNT_LEASE LF_ACCOUNT_SELECTION"));
         assert!(command.contains("LF_DISCORD_TOKEN"));
         assert!(command.contains("GH_TOKEN OPENCODE_API_KEY"));

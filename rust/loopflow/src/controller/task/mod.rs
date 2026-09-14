@@ -98,11 +98,16 @@ async fn controlled_task(store: &SharedStore, task_id: &TaskId) -> Result<Contro
     Ok(ControlledTask { work, state })
 }
 
-pub(crate) async fn run(store: SharedStore, task_id: TaskId) -> Result<()> {
+pub(crate) async fn run(
+    store: SharedStore,
+    task_id: TaskId,
+    startup: Option<crate::controller::WorkStartupAttempt>,
+) -> Result<()> {
     let result = run_task_with(
         store.clone(),
         task_id.clone(),
         Box::new(crate::harness::default_create_harness),
+        startup,
     )
     .await;
     if let Err(error) = &result {
@@ -140,6 +145,7 @@ async fn run_task_with(
     store: SharedStore,
     task_id: TaskId,
     create_harness: crate::harness::CreateHarness,
+    startup: Option<crate::controller::WorkStartupAttempt>,
 ) -> Result<()> {
     let mut task = controlled_task(&store, &task_id).await?;
     let wave = owning_wave(&store, &task).await?;
@@ -151,6 +157,9 @@ async fn run_task_with(
     let Some(mut prepared) =
         prepare_task_flow_step(&store, &mut task, wave.name(), &mut flow).await?
     else {
+        if let Some(startup) = &startup {
+            startup.report_parked(WorkRef::Task(task.id.clone()))?;
+        }
         return Ok(());
     };
     let (harness_name, _) = crate::engine::config::parse_agent(&task_controller_state(&task).agent);
@@ -177,6 +186,7 @@ async fn run_task_with(
         },
         &prepared.turn.context,
     )?;
+    let startup_run_id = capture.run_id();
     capture.record_input("initial", &prepared.turn.input);
     prepared.turn.config.env.extend(capture.environment());
     capture.mark_spawn_requested();
@@ -223,6 +233,9 @@ async fn run_task_with(
     }
     let mut control_cursors = ControlCursors::from_prepared(&prepared);
     start_prepared_task_step(&mut task, harness.as_mut(), &mut flow, None, prepared).await?;
+    if let Some(startup) = &startup {
+        startup.report_running(WorkRef::Task(task.id.clone()), startup_run_id)?;
+    }
 
     let (attachment_tx, mut attachment_rx) = mpsc::unbounded_channel();
     std::thread::spawn(move || {

@@ -69,8 +69,12 @@ struct PreparedProjectStep {
     planning: crate::ops::task_pm::ResolvedProject,
 }
 
-pub(crate) async fn run(store: SharedStore, project_id: ProjectId) -> Result<()> {
-    let result = run_project_inner(store.clone(), project_id.clone()).await;
+pub(crate) async fn run(
+    store: SharedStore,
+    project_id: ProjectId,
+    startup: Option<crate::controller::WorkStartupAttempt>,
+) -> Result<()> {
+    let result = run_project_inner(store.clone(), project_id.clone(), startup).await;
     if let Err(error) = &result {
         record_unhandled_failure(&store, &project_id, error).await;
     }
@@ -84,7 +88,11 @@ async fn owning_wave(store: &SharedStore, project: &ControlledProject) -> Result
         .ok_or_else(|| anyhow!("owning Wave {} is not registered", project.wave_id))
 }
 
-async fn run_project_inner(store: SharedStore, project_id: ProjectId) -> Result<()> {
+async fn run_project_inner(
+    store: SharedStore,
+    project_id: ProjectId,
+    startup: Option<crate::controller::WorkStartupAttempt>,
+) -> Result<()> {
     let mut project = controlled_project(&store, &project_id).await?;
     let wave = owning_wave(&store, &project).await?;
     store.put_project_controller_state(&project.state).await?;
@@ -120,6 +128,7 @@ async fn run_project_inner(store: SharedStore, project_id: ProjectId) -> Result<
         },
         &prepared.turn.context,
     )?;
+    let startup_run_id = capture.run_id();
     capture.record_input("initial", &prepared.turn.input);
     prepared.turn.config.env.extend(capture.environment());
     capture.mark_spawn_requested();
@@ -152,6 +161,12 @@ async fn run_project_inner(store: SharedStore, project_id: ProjectId) -> Result<
         prepared,
     )
     .await?;
+    if let Some(startup) = &startup {
+        startup.report_running(
+            crate::durable::WorkRef::Project(project.id.clone()),
+            startup_run_id,
+        )?;
+    }
     let mut flow_turn_active = true;
 
     let (attachment_tx, mut attachment_rx) = mpsc::unbounded_channel();

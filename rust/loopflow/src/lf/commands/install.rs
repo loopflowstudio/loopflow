@@ -24,6 +24,7 @@ use std::os::unix::fs::PermissionsExt;
 use std::os::unix::process::CommandExt;
 use std::path::{Path, PathBuf};
 use std::process::Command;
+use std::sync::Arc;
 use std::time::Duration;
 #[cfg(target_os = "macos")]
 use std::time::Instant;
@@ -1829,6 +1830,452 @@ fn resume_switch_app(_receipt: &crate::machine_install::SwitchReceipt) -> Result
     Ok(())
 }
 
+fn selection_home(selection: &crate::machine_install::InstallSelection) -> Result<PathBuf> {
+    selection
+        .store
+        .parent()
+        .map(Path::to_path_buf)
+        .ok_or_else(|| anyhow!("install selection store has no Home directory"))
+}
+
+async fn open_selection_store(
+    selection: &crate::machine_install::InstallSelection,
+) -> Result<crate::store::SharedStore> {
+    crate::store::open_store(&crate::store::StorageConfig::sqlite(
+        selection.store.clone(),
+    ))
+    .await
+    .map(Arc::new)
+    .map_err(|error| {
+        anyhow!(
+            "open install selection store {}: {error}",
+            selection.store.display()
+        )
+    })
+}
+
+async fn discover_controller_handoffs(
+    selection: &crate::machine_install::InstallSelection,
+) -> Result<Vec<crate::machine_install::ControllerHandoff>> {
+    let store = open_selection_store(selection).await?;
+    let lf_home = selection_home(selection)?;
+    let mut controllers = store
+        .list_projects(None)
+        .await?
+        .into_iter()
+        .map(|project| {
+            (
+                crate::durable::WorkRef::Project(project.id.clone()),
+                crate::ops::project::project_session_name(&project),
+            )
+        })
+        .collect::<Vec<_>>();
+    controllers.extend(store.list_tasks(None).await?.into_iter().map(|task| {
+        (
+            crate::durable::WorkRef::Task(task.id.clone()),
+            crate::ops::task::task_session_name(&task),
+        )
+    }));
+
+    let mut handoffs = Vec::new();
+    for (work, tmux_name) in controllers {
+        match crate::controller::authority::controller_authority_at(&lf_home, &work, &tmux_name)
+            .await
+        {
+            crate::controller::authority::ControllerAuthority::Live { owner } => {
+                handoffs.push(crate::machine_install::ControllerHandoff {
+                    work,
+                    tmux_name,
+                    prior_attempt_id: owner.attempt_id,
+                    state: crate::machine_install::ControllerHandoffState::Captured,
+                });
+            }
+            crate::controller::authority::ControllerAuthority::Inactive
+            | crate::controller::authority::ControllerAuthority::Parked { .. } => {}
+            crate::controller::authority::ControllerAuthority::Unverifiable { reason } => {
+                return Err(anyhow!(reason));
+            }
+        }
+    }
+    handoffs.sort_by(|left, right| {
+        (left.work.kind(), left.work.id()).cmp(&(right.work.kind(), right.work.id()))
+    });
+    Ok(handoffs)
+}
+
+fn controller_handoff_runtime() -> Result<tokio::runtime::Runtime> {
+    tokio::runtime::Runtime::new().context("create release controller handoff runtime")
+}
+
+fn capture_switch_controllers(
+    root: &Path,
+    receipt: &mut crate::machine_install::SwitchReceipt,
+) -> Result<()> {
+    if receipt.controller_handoffs.is_some() {
+        return Ok(());
+    }
+    if receipt.target_store_advance_started {
+        return Err(anyhow!(
+            "install switch {} advanced without capturing live controllers; refusing ambiguous recovery",
+            receipt.id
+        ));
+    }
+    receipt.controller_handoffs =
+        Some(controller_handoff_runtime()?.block_on(discover_controller_handoffs(&receipt.prior))?);
+    crate::machine_install::write_switch(root, receipt)
+}
+
+async fn quiesce_controller_handoff(
+    store: &crate::store::Store,
+    lf_home: &Path,
+    handoff: &crate::machine_install::ControllerHandoff,
+) -> Result<crate::machine_install::ControllerHandoffState> {
+    let prior_attempt_id = handoff.prior_attempt_id.clone();
+    let authority = crate::controller::authority::controller_authority_at(
+        lf_home,
+        &handoff.work,
+        &handoff.tmux_name,
+    )
+    .await;
+    match authority {
+        crate::controller::authority::ControllerAuthority::Inactive => {
+            Ok(crate::machine_install::ControllerHandoffState::Quiesced)
+        }
+        crate::controller::authority::ControllerAuthority::Parked { attempt_id } => {
+            Ok(crate::machine_install::ControllerHandoffState::Parked {
+                parked_attempt_id: attempt_id,
+            })
+        }
+        crate::controller::authority::ControllerAuthority::Unverifiable { reason } => {
+            Err(anyhow!(reason))
+        }
+        crate::controller::authority::ControllerAuthority::Live { owner } => {
+            if owner.attempt_id != prior_attempt_id {
+                return Err(anyhow!(
+                    "{} {} controller changed from captured attempt {} to live attempt {} during release quiescence",
+                    handoff.work.kind(),
+                    handoff.work.id(),
+                    prior_attempt_id,
+                    owner.attempt_id
+                ));
+            }
+            match crate::controller::authority::stop_controller_owner(
+                store,
+                lf_home,
+                &handoff.work,
+                &handoff.tmux_name,
+                &owner,
+            )
+            .await
+            .map_err(anyhow::Error::msg)?
+            {
+                crate::controller::authority::ControllerStop::Inactive => {
+                    Ok(crate::machine_install::ControllerHandoffState::Quiesced)
+                }
+                crate::controller::authority::ControllerStop::Parked { attempt_id } => {
+                    Ok(crate::machine_install::ControllerHandoffState::Parked {
+                        parked_attempt_id: attempt_id,
+                    })
+                }
+            }
+        }
+    }
+}
+
+fn quiesce_switch_controllers(
+    root: &Path,
+    receipt: &mut crate::machine_install::SwitchReceipt,
+) -> Result<()> {
+    let handoff_count = receipt
+        .controller_handoffs
+        .as_ref()
+        .ok_or_else(|| {
+            anyhow!(
+                "install switch {} cannot quiesce controllers before capture",
+                receipt.id
+            )
+        })?
+        .len();
+    let runtime = controller_handoff_runtime()?;
+    let store = runtime.block_on(open_selection_store(&receipt.prior))?;
+    let lf_home = selection_home(&receipt.prior)?;
+    for index in 0..handoff_count {
+        if !matches!(
+            receipt
+                .controller_handoffs
+                .as_ref()
+                .expect("controller capture was validated")[index]
+                .state,
+            crate::machine_install::ControllerHandoffState::Captured
+        ) {
+            continue;
+        }
+        let handoff = receipt
+            .controller_handoffs
+            .as_ref()
+            .expect("controller capture was validated")[index]
+            .clone();
+        receipt
+            .controller_handoffs
+            .as_mut()
+            .expect("controller capture was validated")[index]
+            .state = runtime.block_on(quiesce_controller_handoff(&store, &lf_home, &handoff))?;
+        crate::machine_install::write_switch(root, receipt)?;
+    }
+    Ok(())
+}
+
+async fn controller_resume_args(
+    store: &crate::store::Store,
+    work: &crate::durable::WorkRef,
+) -> Result<Vec<String>> {
+    match work {
+        crate::durable::WorkRef::Project(project_id) => {
+            let project = store
+                .get_project(project_id)
+                .await?
+                .ok_or_else(|| anyhow!("captured Project {project_id} is missing"))?;
+            Ok(vec![
+                "project".to_string(),
+                "resume".to_string(),
+                project.plan.id.as_str().to_string(),
+                "--json".to_string(),
+            ])
+        }
+        crate::durable::WorkRef::Task(task_id) => {
+            let task = store
+                .get_task(task_id)
+                .await?
+                .ok_or_else(|| anyhow!("captured Task {task_id} is missing"))?;
+            Ok(vec![
+                "task".to_string(),
+                "resume".to_string(),
+                task.plan.identifier,
+                "--json".to_string(),
+            ])
+        }
+        crate::durable::WorkRef::Wave(_) => {
+            Err(anyhow!("Wave Work has no release controller handoff"))
+        }
+    }
+}
+
+async fn resume_controller_handoff(
+    selection: &crate::machine_install::InstallSelection,
+    artifact: &crate::machine_install::ArtifactIdentity,
+    switch_id: &str,
+    store: &crate::store::Store,
+    work: &crate::durable::WorkRef,
+) -> Result<()> {
+    artifact.verify()?;
+    let args = controller_resume_args(store, work).await?;
+    let lf_home = selection_home(selection)?;
+    let output = Command::new(&artifact.path)
+        .args(&args)
+        .env(crate::machine_install::INSTALL_SWITCH_ENV, switch_id)
+        .env(
+            crate::machine_install::INSTALL_SWITCH_CONTROLLER_HANDOFF_ENV,
+            "1",
+        )
+        .env("LF_BIN", &artifact.path)
+        .env("LF_HOME", &lf_home)
+        .env("LF_DB_PATH", &selection.store)
+        .env(crate::store::CONTROL_BIN_ENV, &artifact.path)
+        .env(crate::store::CONTROL_HOME_ENV, &lf_home)
+        .env(crate::store::CONTROL_DB_PATH_ENV, &selection.store)
+        .output()
+        .with_context(|| {
+            format!(
+                "resume {} {} through release target {}",
+                work.kind(),
+                work.id(),
+                artifact.path.display()
+            )
+        })?;
+    if output.status.success() {
+        return Ok(());
+    }
+    Err(anyhow!(
+        "release target could not resume {} {}: {}",
+        work.kind(),
+        work.id(),
+        String::from_utf8_lossy(&output.stderr).trim()
+    ))
+}
+
+async fn converge_controller_handoff(
+    selection: &crate::machine_install::InstallSelection,
+    artifact: &crate::machine_install::ArtifactIdentity,
+    switch_id: &str,
+    store: &crate::store::Store,
+    handoff: &crate::machine_install::ControllerHandoff,
+) -> Result<crate::machine_install::ControllerHandoffState> {
+    let prior_attempt_id = handoff.prior_attempt_id.clone();
+    let lf_home = selection_home(selection)?;
+    let mut authority = crate::controller::authority::controller_authority_at(
+        &lf_home,
+        &handoff.work,
+        &handoff.tmux_name,
+    )
+    .await;
+    if matches!(
+        authority,
+        crate::controller::authority::ControllerAuthority::Inactive
+    ) {
+        resume_controller_handoff(selection, artifact, switch_id, store, &handoff.work).await?;
+        authority = crate::controller::authority::controller_authority_at(
+            &lf_home,
+            &handoff.work,
+            &handoff.tmux_name,
+        )
+        .await;
+    }
+    match authority {
+        crate::controller::authority::ControllerAuthority::Live { owner } => {
+            if owner.attempt_id == prior_attempt_id {
+                return Err(anyhow!(
+                    "{} {} prior controller attempt {} remained live across release",
+                    handoff.work.kind(),
+                    handoff.work.id(),
+                    prior_attempt_id
+                ));
+            }
+            Ok(crate::machine_install::ControllerHandoffState::Restarted {
+                target_attempt_id: owner.attempt_id,
+            })
+        }
+        crate::controller::authority::ControllerAuthority::Parked { attempt_id } => {
+            Ok(crate::machine_install::ControllerHandoffState::Parked {
+                parked_attempt_id: attempt_id,
+            })
+        }
+        crate::controller::authority::ControllerAuthority::Inactive => Err(anyhow!(
+            "release target returned without starting {} {} controller",
+            handoff.work.kind(),
+            handoff.work.id()
+        )),
+        crate::controller::authority::ControllerAuthority::Unverifiable { reason } => {
+            Err(anyhow!(reason))
+        }
+    }
+}
+
+fn restart_switch_controllers(
+    root: &Path,
+    receipt: &mut crate::machine_install::SwitchReceipt,
+) -> Result<()> {
+    let handoff_count = receipt
+        .controller_handoffs
+        .as_ref()
+        .ok_or_else(|| {
+            anyhow!(
+                "install switch {} advanced without a controller handoff; refusing ambiguous recovery",
+                receipt.id
+            )
+        })?
+        .len();
+    let runtime = controller_handoff_runtime()?;
+    let store = runtime.block_on(open_selection_store(&receipt.target))?;
+    for index in 0..handoff_count {
+        if !matches!(
+            receipt
+                .controller_handoffs
+                .as_ref()
+                .expect("controller capture was validated")[index]
+                .state,
+            crate::machine_install::ControllerHandoffState::Quiesced
+        ) {
+            continue;
+        }
+        let handoff = receipt
+            .controller_handoffs
+            .as_ref()
+            .expect("controller capture was validated")[index]
+            .clone();
+        receipt
+            .controller_handoffs
+            .as_mut()
+            .expect("controller capture was validated")[index]
+            .state = runtime.block_on(converge_controller_handoff(
+            &receipt.target,
+            &receipt.candidate,
+            &receipt.id,
+            &store,
+            &handoff,
+        ))?;
+        crate::machine_install::write_switch(root, receipt)?;
+    }
+    if receipt
+        .controller_handoffs
+        .iter()
+        .flatten()
+        .any(|handoff| !handoff.state.is_settled())
+    {
+        return Err(anyhow!(
+            "install switch {} has an incomplete controller handoff",
+            receipt.id
+        ));
+    }
+    Ok(())
+}
+
+fn restore_switch_controllers(receipt: &crate::machine_install::SwitchReceipt) -> Result<()> {
+    let Some(handoffs) = &receipt.controller_handoffs else {
+        return Ok(());
+    };
+    let runtime = controller_handoff_runtime()?;
+    let store = runtime.block_on(open_selection_store(&receipt.prior))?;
+    let lf_home = selection_home(&receipt.prior)?;
+    for handoff in handoffs {
+        if matches!(
+            handoff.state,
+            crate::machine_install::ControllerHandoffState::Parked { .. }
+        ) {
+            continue;
+        }
+        let prior_attempt_id = &handoff.prior_attempt_id;
+        match runtime.block_on(crate::controller::authority::controller_authority_at(
+            &lf_home,
+            &handoff.work,
+            &handoff.tmux_name,
+        )) {
+            crate::controller::authority::ControllerAuthority::Live { owner }
+                if owner.attempt_id == *prior_attempt_id
+                    || matches!(
+                        handoff.state,
+                        crate::machine_install::ControllerHandoffState::Quiesced
+                    ) => {}
+            crate::controller::authority::ControllerAuthority::Live { owner } => {
+                return Err(anyhow!(
+                    "{} {} controller changed from captured attempt {} to live attempt {} during rollback",
+                    handoff.work.kind(),
+                    handoff.work.id(),
+                    prior_attempt_id,
+                    owner.attempt_id
+                ));
+            }
+            crate::controller::authority::ControllerAuthority::Inactive => {
+                runtime.block_on(resume_controller_handoff(
+                    &receipt.prior,
+                    receipt
+                        .prior
+                        .artifact_set
+                        .artifact(&crate::machine_install::ArtifactRole::Cli)
+                        .expect("validated prior selection has a CLI"),
+                    &receipt.id,
+                    &store,
+                    &handoff.work,
+                ))?;
+            }
+            crate::controller::authority::ControllerAuthority::Parked { .. } => {}
+            crate::controller::authority::ControllerAuthority::Unverifiable { reason } => {
+                return Err(anyhow!(reason));
+            }
+        }
+    }
+    Ok(())
+}
+
 fn pause_home(store_path: &Path) -> Result<PausedHome> {
     let (home_id, repo) = read_home_context(store_path)?;
     let runtime = tokio::runtime::Runtime::new().context("create Home quiesce runtime")?;
@@ -2400,19 +2847,24 @@ fn restore_before_local_advance(
     error: anyhow::Error,
 ) -> anyhow::Error {
     let cleanup = discard_unadvanced_disposable_store(receipt);
-    let clear = if cleanup.is_ok() {
+    let controllers = restore_switch_controllers(receipt);
+    let clear = if cleanup.is_ok() && controllers.is_ok() {
         crate::machine_install::clear_switch(root, &receipt.id)
     } else {
-        Err(anyhow!("disposable target cleanup failed"))
+        Err(anyhow!("prior install restoration is incomplete"))
     };
     drop(lock);
     let resume = resume_home_for_install_selection(paused, &receipt.prior);
     let app = resume_switch_app(receipt);
-    match (cleanup, clear, resume, app) {
-        (Ok(()), Ok(()), Ok(()), Ok(())) => error,
-        (cleanup, clear, resume, app) => anyhow!(
-            "{error}; restoring the prior install also failed (target: {}, receipt: {}, keeper: {}, app: {})",
+    match (cleanup, controllers, clear, resume, app) {
+        (Ok(()), Ok(()), Ok(()), Ok(()), Ok(())) => error,
+        (cleanup, controllers, clear, resume, app) => anyhow!(
+            "{error}; restoring the prior install also failed (target: {}, controllers: {}, receipt: {}, keeper: {}, app: {})",
             cleanup
+                .err()
+                .map(|error| error.to_string())
+                .unwrap_or_else(|| "ok".to_string()),
+            controllers
                 .err()
                 .map(|error| error.to_string())
                 .unwrap_or_else(|| "ok".to_string()),
@@ -2581,6 +3033,7 @@ fn promote_local_candidate(
         },
         app_was_running: false,
         disposable_store_owned: false,
+        controller_handoffs: None,
     };
     crate::machine_install::write_switch(&root, &switch)?;
 
@@ -2591,6 +3044,16 @@ fn promote_local_candidate(
             return Err(error);
         }
     };
+    if let Err(error) = capture_switch_controllers(&root, &mut switch) {
+        return Err(restore_before_local_advance(
+            &root, &switch, &paused, lock, error,
+        ));
+    }
+    if let Err(error) = quiesce_switch_controllers(&root, &mut switch) {
+        return Err(restore_before_local_advance(
+            &root, &switch, &paused, lock, error,
+        ));
+    }
     if let Err(error) = quiesce_switch_app(&root, &mut switch) {
         return Err(restore_before_local_advance(
             &root, &switch, &paused, lock, error,
@@ -2679,9 +3142,7 @@ fn promote_local_candidate(
                 &root, &switch, &paused, lock, error,
             ));
         }
-        if let Err(error) =
-            _copy_store_for_candidate(&crate::store::production_database_path(), &target_store)
-        {
+        if let Err(error) = _copy_store_for_candidate(&prior.selection.store, &target_store) {
             return Err(restore_before_local_advance(
                 &root, &switch, &paused, lock, error,
             ));
@@ -3075,6 +3536,26 @@ fn advance_switch_store(
     mut receipt: crate::machine_install::SwitchReceipt,
     verdict: &Verdict,
 ) -> Result<crate::machine_install::SwitchReceipt> {
+    if receipt.controller_handoffs.as_ref().is_none_or(|handoffs| {
+        handoffs.iter().any(|handoff| {
+            matches!(
+                handoff.state,
+                crate::machine_install::ControllerHandoffState::Captured
+            )
+        })
+    }) {
+        return Err(anyhow!(
+            "install switch {} cannot advance before every live controller is durably quiesced or parked",
+            receipt.id
+        ));
+    }
+    #[cfg(debug_assertions)]
+    if std::env::var_os("LF_TEST_INTERRUPT_SWITCH_AFTER_QUIESCE").is_some() {
+        return Err(anyhow!(
+            "test interruption after switch {} quiesced its controllers",
+            receipt.id
+        ));
+    }
     receipt.recovery_owner = crate::machine_install::RecoveryOwner::Candidate;
     receipt.target_store_advance_started = true;
     receipt.target_store_advanced = store_is_exact(verdict);
@@ -3146,6 +3627,7 @@ fn settle_switch(
     receipt: &mut crate::machine_install::SwitchReceipt,
     active: &crate::machine_install::ActiveInstall,
 ) -> Result<()> {
+    restart_switch_controllers(root, receipt)?;
     receipt.published_fallback = active.published_fallback.clone();
     receipt.phase = crate::machine_install::SwitchPhase::Settled;
     receipt.active_selection_committed = true;
@@ -3202,11 +3684,26 @@ pub fn recover_switch(switch_id: &str) -> Result<()> {
 
     if !receipt.target_store_advance_started {
         discard_unadvanced_disposable_store(&receipt)?;
+        restore_switch_controllers(&receipt)?;
+        #[cfg(debug_assertions)]
+        if std::env::var_os("LF_TEST_INTERRUPT_SWITCH_AFTER_CONTROLLER_RESTORE").is_some() {
+            return Err(anyhow!(
+                "test interruption after switch {} restored its controllers",
+                receipt.id
+            ));
+        }
         crate::machine_install::clear_switch(&root, &receipt.id)?;
         drop(lock);
         resume_store_home(&receipt.prior, None)?;
         resume_switch_app(&receipt)?;
         return Ok(());
+    }
+
+    if receipt.controller_handoffs.is_none() {
+        return Err(anyhow!(
+            "install switch {} advanced without durable controller handoff evidence; refusing ambiguous recovery",
+            receipt.id
+        ));
     }
 
     if !receipt.target_store_advanced {
@@ -3406,6 +3903,7 @@ fn promote_published_from_machine_install(
         },
         app_was_running: false,
         disposable_store_owned: false,
+        controller_handoffs: None,
     };
     crate::machine_install::write_switch(&root, &switch)?;
     let paused = match pause_home(&prior.selection.store) {
@@ -3415,6 +3913,16 @@ fn promote_published_from_machine_install(
             return Err(error);
         }
     };
+    if let Err(error) = capture_switch_controllers(&root, &mut switch) {
+        return Err(restore_before_local_advance(
+            &root, &switch, &paused, lock, error,
+        ));
+    }
+    if let Err(error) = quiesce_switch_controllers(&root, &mut switch) {
+        return Err(restore_before_local_advance(
+            &root, &switch, &paused, lock, error,
+        ));
+    }
     if let Err(error) = quiesce_switch_app(&root, &mut switch) {
         return Err(restore_before_local_advance(
             &root, &switch, &paused, lock, error,

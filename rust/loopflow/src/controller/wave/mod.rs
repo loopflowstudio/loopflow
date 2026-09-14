@@ -683,6 +683,18 @@ mod tests {
         panic!("condition not met in time");
     }
 
+    async fn wait_for_live_endpoint(repo: &Path, wave: &str) -> String {
+        let endpoint = server::endpoint_path(repo, wave);
+        wait_for(|| endpoint.exists()).await;
+        for _ in 0..5 {
+            if let Some(endpoint) = server::live_endpoint(repo, wave).await {
+                return endpoint;
+            }
+            tokio::time::sleep(Duration::from_millis(10)).await;
+        }
+        panic!("wave {wave} did not publish a live endpoint");
+    }
+
     #[tokio::test]
     async fn finalized_turn_appears_in_conversation() {
         let (base, runtime, _tmp) = boot().await;
@@ -1637,7 +1649,7 @@ mod tests {
         });
 
         let endpoint = server::endpoint_path(&repo, "ship");
-        wait_for(|| endpoint.exists()).await;
+        wait_for_live_endpoint(&repo, "ship").await;
         assert!(request_stop(&repo, "ship").await.expect("request stop"));
         handle.await.unwrap().unwrap();
         assert!(!endpoint.exists(), "stop removes the endpoint");
@@ -1666,12 +1678,10 @@ mod tests {
             .await
         });
 
-        let endpoint = server::endpoint_path(&repo, "ship");
-        wait_for(|| endpoint.exists()).await;
-        let addr = std::fs::read_to_string(&endpoint).unwrap();
+        let addr = wait_for_live_endpoint(&repo, "ship").await;
         let client = reqwest::Client::new();
         let events = client
-            .get(format!("http://{}/events?inbox=true", addr.trim()))
+            .get(format!("http://{addr}/events?inbox=true"))
             .send()
             .await
             .expect("subscribe");
@@ -1750,8 +1760,7 @@ mod tests {
             .await
         });
         let endpoint = server::endpoint_path(&repo, "ship");
-        wait_for(|| endpoint.exists()).await;
-        let first_addr = std::fs::read_to_string(&endpoint).unwrap();
+        let first_addr = wait_for_live_endpoint(&repo, "ship").await;
 
         // Second server: probed live, refused, pointer untouched.
         let (_shutdown_tx2, shutdown_rx2) = tokio::sync::oneshot::channel::<()>();
@@ -1798,8 +1807,7 @@ mod tests {
             .await
         });
         let endpoint = server::endpoint_path(&repo, "ship");
-        wait_for(|| endpoint.exists()).await;
-        let first_address = std::fs::read_to_string(&endpoint).unwrap();
+        let first_address = wait_for_live_endpoint(&repo, "ship").await;
 
         let (second_stop_tx, second_stop_rx) = tokio::sync::oneshot::channel::<()>();
         let second_repo = repo.clone();

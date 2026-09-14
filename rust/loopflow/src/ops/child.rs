@@ -1,15 +1,11 @@
 //! Shared recovery and execution helpers for Project and Task Work.
 
-use std::time::Duration;
-
 use crate::child::{ChildBodyHandoffRequest, ChildRef};
 use crate::durable::{AbandonReceipt, Author, RunId, Steer, WorkRef, RUN_ID_ENV};
 use crate::store::SharedStore;
 use crate::work::task::Task;
 
 use super::{OpsError, OpsResult};
-
-pub(crate) const CHILD_STARTUP_GRACE: Duration = Duration::from_secs(10);
 
 #[derive(Debug, Clone, PartialEq, Eq, serde::Serialize)]
 #[serde(tag = "kind", rename_all = "snake_case")]

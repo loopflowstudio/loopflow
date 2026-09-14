@@ -146,27 +146,28 @@ lf install promote --from-build <path>
 Promotion changes the executable selected by future top-level processes:
 
 1. Verify and stage immutable artifacts.
-2. Copy the selected planning store.
-3. Apply the candidate schema to that isolated copy and prove it can be read.
-4. Acquire the machine promotion lock.
-5. Atomically select the new artifact.
-6. Replace only the known Home services and app surfaces owned by promotion.
-7. persist a switch receipt for recovery or rollback.
+2. Acquire the machine promotion lock and capture every live Project and Task
+   controller by its birth-validated Exec owner.
+3. Stop each captured owner and record the quiesced handoff in the switch
+   receipt.
+4. Copy the selected planning store, apply the candidate schema to that
+   isolated copy, and prove it can be read.
+5. Atomically select the new artifact and replace the known Home services and
+   app surfaces owned by promotion.
+6. Restart each captured Work through the target selection and settle only
+   after every handoff is running under a distinct attempt or durably parked.
 
-The promotion lock lives at the OS account's `$HOME/.lf/promotion.lock` and is held only for the
-switch transaction. Ordinary harnesses do not check or hold it. Promotion does
-not discover, drain, stop, or settle Runs.
+The promotion lock lives at the OS account's `$HOME/.lf/promotion.lock`.
+Promotion and recovery hold it exclusively. Project and Task controller
+launches hold its shared side through startup and refuse to launch while an
+unsettled switch receipt exists. The receipt therefore remains the only path
+that can restart a quiesced controller after a coordinator exits.
 
-An already-running old process continues with the executable and store path it
-selected. On the first published-to-development promotion, it may keep writing
-successfully to the prior production store; those writes are then invisible to
-commands reading the newly selected clone. A later development promotion may
-reuse and migrate the selected development store in place, in which case an
-old writer may instead fail against the changed schema. Promotion pauses known
-Home services but does not discover arbitrary shells or providers. Retry the
-operation with a current process after checking which store received the old
-write. The isolated clone proves candidate readability, not old-writer
-continuity across the selection switch.
+Managed Project and Task controllers do not coexist across releases. Promotion
+stops their exact prior owners before store advance and starts distinct target
+attempts from the selected store snapshot. Arbitrary shells, providers, and
+other unowned processes continue with the executable and store path they
+selected; they are not promoted into controller authority.
 
 Artifact switching lives in
 [`machine_install.rs`](../../rust/loopflow/src/machine_install.rs) and the
@@ -180,8 +181,9 @@ install command implementation under [`lf/commands/`](../../rust/loopflow/src/lf
 - Placement selects where Work belongs, not whether it is currently running.
 - Detached processes use credentials installed on their Home.
 - Direct child handles are local capability; inferred process ownership is not.
-- Promotion owns artifact selection and known service replacement, not Run
-  lifecycle.
+- Promotion owns artifact selection, known service replacement, and exact
+  Project/Task controller handoff. Run and provider records remain telemetry;
+  they never authorize the handoff.
 - A schema clone protects preview and recovery; it can also leave old writers
   authoring the prior, now-unselected store.
 

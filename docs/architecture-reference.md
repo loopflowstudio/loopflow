@@ -671,29 +671,31 @@ the separate `lf pm reteam` operation.
 ## Promotion and long-running old processes
 
 1. Verify and install immutable versioned artifacts.
-2. Copy the selected planning store, apply the candidate schema to that
+2. Capture each live Project and Task controller in the switch receipt by its
+   birth-validated Exec owner, then stop that exact owner.
+3. Copy the selected planning store, apply the candidate schema to that
    isolated copy, and prove the candidate can read it.
-3. Atomically repoint the launcher used by future top-level processes.
-4. Let already-running processes continue with their selected executable.
-5. Restart only the Home services and app surfaces actually being replaced.
-6. Recover or roll back from the persisted artifact-selection receipt.
-7. Garbage-collect old artifacts separately from activation.
+4. Atomically repoint the launcher used by future top-level processes.
+5. Restart the captured Work through the target selection and replace the Home
+   services and app surfaces owned by promotion.
+6. Settle only after every controller handoff is running under a distinct
+   target attempt or durably parked.
+7. Recover or roll back from the persisted switch receipt and garbage-collect
+   old artifacts separately from activation.
 
-The machine-wide promotion lock serializes artifact selection and service
-replacement. It does not discover, drain, stop, or settle Runs and it is not
-held by ordinary harnesses. Store cloning remains useful because preview can
+The machine-wide promotion lock serializes artifact selection, controller
+handoff, and service replacement. Promotion and recovery hold it exclusively;
+ordinary Project and Task controller launches hold it shared through startup
+and are fenced while a switch receipt is unsettled. Store cloning lets preview
 prove a candidate schema without mutating the selected store.
 
-A long-running old `lf` process is isolated from new Run recording because each
-launch writes its own Run record. It retains both its executable and selected store
-path. On the first published-to-development switch, the process may keep
-writing successfully to the prior production store after new commands select
-the cloned development store; those writes become invisible to the new
-selection. A later development-to-development promotion may reuse and migrate
-the selected store, so an old writer may instead fail against changed schema.
-Promotion pauses and replaces the known services it owns but does not discover
-every shell or provider process. The clone proves candidate readability; it
-does not provide cross-store write continuity or old-schema compatibility.
+Managed Project and Task controllers never coexist across releases: the switch
+receipt proves the prior owner absent before store advance and records the
+distinct target attempt before settlement. Provider and Run evidence remain
+advisory. Other long-running `lf` processes retain their executable and
+selected store path because promotion has no ownership proof for them; the
+controller handoff does not turn arbitrary shells or providers into managed
+processes.
 
 ## Truth and projections
 

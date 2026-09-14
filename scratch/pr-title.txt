@@ -1,1 +1,0 @@
-Restore safe Project and Task controller execution

@@ -65,11 +65,12 @@ recover from the receipt and restart exactly the captured Work.
 
 ## Review
 
-Reviewed on 2026-09-02 against the complete Task diff, the public Project and
+Reviewed on 2026-09-13 against the complete Task diff, the public Project and
 Task controller path, and both machine-managed promotion paths. The behavioral
-proof is an isolated production-shaped local promotion with real public `lf`
-commands, SQLite stores, startup/Exec receipts, OS processes, and switch
-receipts. It does not mutate the configured machine installation.
+proof is an isolated production-shaped local promotion with compiled public
+`lf` commands, SQLite stores, startup/Exec receipts, OS processes, and switch
+receipts. Tmux, provider, and Linear behavior are local doubles. It does not
+mutate the configured machine installation.
 
 | Claim | Planned behavior | Implemented behavior | Proof | Result |
 |-------|------------------|----------------------|-------|--------|
@@ -77,13 +78,14 @@ receipts. It does not mutate the configured machine installation.
 | Missing ownership fails closed | Missing Exec identity or an unowned controller tmux transport rejects before advance and signals no process | Capture accepts only `Live`, ignores positive absence/parking, and returns every `Unverifiable` result without mutation | Public promotion probes remove the Exec receipt and substitute an unrelated pane PID; both owners remain live | Pass |
 | Recovery is receipt-driven | An interruption after quiescence restores exactly the captured Work and remains idempotent if recovery exits after the fresh prior attempt starts | Normal launches are fenced while a switch receipt exists; receipt-scoped recovery alone bypasses the shared lock and accepts its already-restored exact owner | Two forced public-command interruptions followed by recovery; only one restored attempt remains live | Pass |
 | Receipt evidence is monotonic | A terminal parked or restarted outcome must keep naming the attempt that established it | Receipt validation rejects an empty parked attempt and any rewrite of a terminal handoff attempt | `machine_install::tests::controller_handoff_*` | Pass |
-| Lock bypass is receipt-scoped | Only the active switch recovery may launch a replacement while promotion holds the exclusive lock | The handoff marker selects the operation; the separate switch capability must name the active receipt and prove exclusive ownership | Source inspection plus the public target-restart path | Pass |
+| Lock bypass is receipt-scoped | Only active switch recovery may launch a replacement while promotion holds the exclusive lock | The handoff marker must name the active receipt while the exclusive coordinator lock is observably held | Source inspection plus the public target-restart path | Pass |
 | Store ownership follows the handoff | A fresh target restarts from the store the prior owner was using | Fresh promotion clones `prior.selection.store`, the same store used for capture and quiescence | A post-snapshot Task steer survives in the target store and the target controller starts from it | Pass |
 | Project and Task execution still advances | Existing controller startup, disagreement, stop, resume, and phase behavior remains intact | Promotion reuses the shared authority and startup contracts without adding a second owner model | `cargo test -p loopflow --test controller_startup_tests public_project_and_task_controllers_prove_startup_and_resume -- --test-threads=1` | Pass |
+| Transport failure stays bounded | A wedged tmux transport must fail closed without hanging status, recovery, or promotion | Session and pane probes share the same two-second timeout and kill-on-drop boundary | `cargo test -p loopflow engine::process::tests::hanging_tmux_probe_is_bounded --lib`; source inspection of both callers | Pass |
 
 Negative source search found two production `launch_work` callers, one startup
 receipt writer, one controller-authority query, and one switch handoff
 collection. No Project or Task liveness reader, input fallback, deterministic
 controller tmux kill, or promotion-side provider/Run authority remains. The
-only remaining tmux-presence liveness check is the pre-outcome startup watchdog;
-Home keeper replacement retains its separate service contract.
+only remaining tmux-presence liveness check is the bounded pre-outcome startup
+watchdog; Home keeper replacement retains its separate service contract.

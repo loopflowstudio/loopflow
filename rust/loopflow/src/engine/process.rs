@@ -486,10 +486,10 @@ pub(crate) async fn tmux_session_exists(session_name: &str) -> Result<bool> {
 
 pub(crate) async fn tmux_pane_pid(session_name: &str) -> Result<Option<u32>> {
     let target = format!("={session_name}");
-    let output = tokio::process::Command::new("tmux")
-        .args(["display-message", "-p", "-t", &target, "#{pane_pid}"])
-        .output()
-        .await?;
+    let mut command = tokio::process::Command::new("tmux");
+    command.args(["display-message", "-p", "-t", &target, "#{pane_pid}"]);
+    let output =
+        tmux_output_with_timeout(&mut command, TMUX_LIVENESS_TIMEOUT, "tmux pane probe").await?;
     if output.status.success() {
         let pid = String::from_utf8_lossy(&output.stdout)
             .trim()
@@ -526,14 +526,8 @@ async fn tmux_session_exists_with_timeout(
     command: &mut tokio::process::Command,
     timeout: std::time::Duration,
 ) -> Result<bool> {
-    command
-        .stdout(std::process::Stdio::null())
-        .kill_on_drop(true);
-    let output = match tokio::time::timeout(timeout, command.output()).await {
-        Ok(Ok(output)) => output,
-        Ok(Err(error)) => return Err(error.into()),
-        Err(_) => return Err(anyhow!("tmux session probe timed out")),
-    };
+    command.stdout(std::process::Stdio::null());
+    let output = tmux_output_with_timeout(command, timeout, "tmux session probe").await?;
     if output.status.success() {
         return Ok(true);
     }
@@ -542,6 +536,19 @@ async fn tmux_session_exists_with_timeout(
         Ok(false)
     } else {
         Err(anyhow!("tmux session probe failed: {}", stderr.trim()))
+    }
+}
+
+async fn tmux_output_with_timeout(
+    command: &mut tokio::process::Command,
+    timeout: std::time::Duration,
+    context: &str,
+) -> Result<std::process::Output> {
+    command.kill_on_drop(true);
+    match tokio::time::timeout(timeout, command.output()).await {
+        Ok(Ok(output)) => Ok(output),
+        Ok(Err(error)) => Err(error.into()),
+        Err(_) => Err(anyhow!("{context} timed out")),
     }
 }
 

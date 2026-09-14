@@ -37,6 +37,8 @@ restarted` or `parked` handoffs in `SwitchReceipt`.
 
 - Process inspection and birth validation are deliberately fail-closed. Missing
   or contradictory receipts can prevent recovery until the evidence is repaired.
+- Tmux session and pane probes are bounded at two seconds; a wedged transport
+  reports unverifiable ownership instead of hanging the control path.
 - Startup waits up to ten seconds for the child receipt; immediate failures are
   durable and actionable, but a wedged child consumes that timeout.
 - The local changed-aware gate could not start affected suites on 2026-09-02:
@@ -57,13 +59,21 @@ restarted` or `parked` handoffs in `SwitchReceipt`.
 
 ## Validation
 
-The production-shaped public Project/Task proof passed at the exact published
-tree. It exercised real `lf` commands, SQLite stores, tmux controllers,
+The production-shaped public Project/Task proof passed at the reviewed tree. It
+exercised compiled `lf` commands, real OS processes and SQLite stores,
 startup/Exec receipts, process ownership disagreement, stop/resume, phase
-advancement, promotion, and interrupted-switch recovery.
+advancement, promotion, and interrupted-switch recovery. Tmux, provider, and
+Linear behavior are local doubles; the test does not mutate the configured
+machine installation.
+
+One intermediate review run timed out waiting for the isolated Home keeper's
+startup receipt. Its temporary log was removed during panic cleanup, so the
+cause was not recoverable; the exact proof passed on rerun. Hosted CI remains
+the stability signal for that boundary.
 
 - `cargo test -p loopflow --test controller_startup_tests public_project_and_task_controllers_prove_startup_and_resume -- --test-threads=1` — passed
 - `cargo test -p loopflow machine_install::tests::controller_handoff --lib` — passed
+- `cargo test -p loopflow engine::process::tests::hanging_tmux_probe_is_bounded --lib` — passed
 - `cargo clippy -p loopflow --all-targets -- -D warnings` — passed
 - `cargo fmt --all -- --check` — passed
 - `git diff --check` — passed

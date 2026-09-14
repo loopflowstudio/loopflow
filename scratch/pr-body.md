@@ -5,14 +5,17 @@ Run:
 ```bash
 cargo test -p loopflow --test controller_startup_tests public_project_and_task_controllers_prove_startup_and_resume -- --test-threads=1
 cargo test -p loopflow machine_install::tests::controller_handoff --lib
+cargo test -p loopflow engine::process::tests::hanging_tmux_probe_is_bounded --lib
 ```
 
-The first proof drives public Project and Task commands through startup,
-intentional stop/resume, phase advancement, process/provider disagreement, live
-release promotion, and interrupted-switch recovery. It observes one captured
-prior attempt, positive absence before store advance, and one distinct live
-target attempt. The second proof rejects mutable or incomplete terminal handoff
-evidence. Both pass.
+The first proof drives compiled public Project and Task commands through
+startup, intentional stop/resume, phase advancement, process/provider
+disagreement, an isolated local release promotion, and interrupted-switch
+recovery. It uses real OS processes and SQLite stores with local tmux, provider,
+and Linear doubles. It observes one captured prior attempt, positive absence
+before store advance, and one distinct live target attempt. The other proofs
+reject mutable or incomplete terminal handoff evidence and keep tmux ownership
+probes bounded. All pass.
 
 ## Why it matters
 
@@ -28,6 +31,8 @@ signalable.
   Project and Task launch paths.
 - Made a Work-linked, birth-validated OS Exec owner the sole authority for
   liveness and signaling; provider and Run state remain advisory.
+- Bounded both tmux session and pane ownership probes at two seconds so a
+  wedged transport fails closed instead of hanging control commands.
 - Persisted monotonic controller handoffs in the machine switch receipt and
   serialized ordinary launches against promotion.
 - Quiesced exact prior owners before store advance, restarted captured Work

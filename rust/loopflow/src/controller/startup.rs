@@ -7,7 +7,7 @@ use anyhow::{anyhow, Context, Result};
 use serde::{Deserialize, Serialize};
 use time::OffsetDateTime;
 
-use crate::durable::{RunId, WorkRef};
+use crate::durable::{FlowPosition, RunId, WorkRef};
 
 pub(crate) const WORK_STARTUP_ATTEMPT_ENV: &str = "LF_WORK_STARTUP_ATTEMPT";
 pub(crate) const WORK_STARTUP_RECEIPT_ENV: &str = "LF_WORK_STARTUP_RECEIPT";
@@ -27,10 +27,50 @@ pub(crate) enum WorkStartupState {
     },
     Parked {
         work: WorkRef,
+        boundary: HumanBoundary,
     },
     Failed {
         reason: String,
     },
+}
+
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
+pub(crate) struct HumanBoundary {
+    flow: String,
+    step: String,
+    node_id: String,
+    step_index: u32,
+    iteration: u32,
+}
+
+impl HumanBoundary {
+    fn from_position(position: &FlowPosition) -> Result<Self> {
+        if !position.human {
+            return Err(anyhow!(
+                "controller cannot park at an autonomous flow position"
+            ));
+        }
+        let node_id = position
+            .node_id
+            .clone()
+            .ok_or_else(|| anyhow!("human flow position has no stable node id"))?;
+        Ok(Self {
+            flow: position.flow.clone(),
+            step: position.step.clone(),
+            node_id,
+            step_index: position.step_index,
+            iteration: position.iteration,
+        })
+    }
+
+    pub(crate) fn matches(&self, position: &FlowPosition) -> bool {
+        position.human
+            && position.flow == self.flow
+            && position.step == self.step
+            && position.node_id.as_deref() == Some(self.node_id.as_str())
+            && position.step_index == self.step_index
+            && position.iteration == self.iteration
+    }
 }
 
 #[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
@@ -203,8 +243,11 @@ impl WorkStartupAttempt {
         })
     }
 
-    pub(crate) fn report_parked(&self, work: WorkRef) -> Result<()> {
-        self.report_success(WorkStartupState::Parked { work })
+    pub(crate) fn report_parked(&self, position: &FlowPosition) -> Result<()> {
+        self.report_success(WorkStartupState::Parked {
+            work: position.work.clone(),
+            boundary: HumanBoundary::from_position(position)?,
+        })
     }
 
     #[doc(hidden)]
@@ -271,8 +314,8 @@ fn validate_receipt(
             expected.kind(),
             expected.id()
         )),
-        WorkStartupState::Parked { work } if work == expected => Ok(receipt),
-        WorkStartupState::Parked { work } => Err(anyhow!(
+        WorkStartupState::Parked { work, .. } if work == expected => Ok(receipt),
+        WorkStartupState::Parked { work, .. } => Err(anyhow!(
             "controller startup receipt {} belongs to {} {}, not {} {}",
             attempt.receipt_path.display(),
             work.kind(),
@@ -361,6 +404,21 @@ mod tests {
     use super::*;
     use crate::durable::{ProjectId, TaskId};
 
+    fn human_position(work: WorkRef) -> FlowPosition {
+        FlowPosition {
+            work,
+            flow: "task-design".to_string(),
+            step: "review-design".to_string(),
+            node_id: Some("review-design".to_string()),
+            human: true,
+            session_run_id: None,
+            ready_summary: None,
+            step_index: 1,
+            iteration: 2,
+            updated_at: OffsetDateTime::now_utc(),
+        }
+    }
+
     #[tokio::test]
     async fn failed_child_receipt_preserves_the_actionable_reason() {
         let home = tempfile::tempdir().unwrap();
@@ -390,7 +448,7 @@ mod tests {
         let work = WorkRef::Task(TaskId::new());
 
         signal.report_failed("startup timed out").unwrap();
-        let error = signal.report_parked(work).unwrap_err();
+        let error = signal.report_parked(&human_position(work)).unwrap_err();
 
         assert!(error.to_string().contains("already settled as Failed"));
         let persisted = read_receipt(&signal.receipt_path).unwrap();
@@ -510,13 +568,18 @@ mod tests {
         let attempt = WorkStartupAttempt::new(home.path()).unwrap();
         let signal = attempt.clone();
         let expected = WorkRef::Task(TaskId::new());
+        let position = human_position(expected.clone());
 
-        signal.report_parked(expected.clone()).unwrap();
+        signal.report_parked(&position).unwrap();
         let receipt = attempt
             .wait_with_timeout(&expected, None, STARTUP_TIMEOUT)
             .await
             .unwrap();
 
-        assert!(matches!(receipt.state, WorkStartupState::Parked { work } if work == expected));
+        assert!(matches!(
+            receipt.state,
+            WorkStartupState::Parked { work, boundary }
+                if work == expected && boundary.matches(&position)
+        ));
     }
 }

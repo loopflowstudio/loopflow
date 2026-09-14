@@ -22,7 +22,8 @@ attempt. The receipt records monotonic outcomes for that handoff:
 - `captured`: the prior owner was live when the switch began.
 - `quiesced`: that exact owner is positively absent.
 - `parked`: the controller reached an intentional human boundary and must not
-  be relaunched automatically.
+  be relaunched automatically while that exact durable Flow position remains
+  current.
 - `restarted`: the target release established a distinct running attempt.
 
 The owner tuple remains in the immutable startup and Exec receipts; the switch
@@ -77,7 +78,8 @@ mutate the configured machine installation.
 | Live controller handoff | Capture one exact prior attempt, prove it absent before advance, and settle only after a distinct target attempt is live | The switch receipt advances `captured -> quiesced -> restarted`; each transition is persisted around the same authority query | Public Project/Task controller integration test; settled switch and startup/Exec receipts | Pass |
 | Missing ownership fails closed | Missing Exec identity or an unowned controller tmux transport rejects before advance and signals no process | Capture accepts only `Live`, ignores positive absence/parking, and returns every `Unverifiable` result without mutation | Public promotion probes remove the Exec receipt and substitute an unrelated pane PID; both owners remain live | Pass |
 | Recovery is receipt-driven | An interruption after quiescence restores exactly the captured Work and remains idempotent if recovery exits after the fresh prior attempt starts | Normal launches are fenced while a switch receipt exists; receipt-scoped recovery alone bypasses the shared lock and accepts its already-restored exact owner | Two forced public-command interruptions followed by recovery; only one restored attempt remains live | Pass |
-| Receipt evidence is monotonic | A terminal parked or restarted outcome must keep naming the attempt that established it | Receipt validation rejects an empty parked attempt and any rewrite of a terminal handoff attempt | `machine_install::tests::controller_handoff_*` | Pass |
+| Receipt evidence is monotonic | A terminal parked or restarted outcome must keep naming the attempt that established it, and phase advancement must not outrun handoff evidence | Receipt validation rejects empty or rewritten terminal attempts, non-captured initial states, quiesced phases with captured owners, and settlement with incomplete handoffs | `machine_install::tests::controller_handoff_*`, `switch_phase_requires_complete_controller_handoff_evidence`, `first_controller_handoff_receipt_must_capture_the_prior_owner` | Pass |
+| Parked Tasks remain resumable | A historical parked receipt must not strand Work after the human playhead advances | Parked authority records the exact human flow/node/iteration and becomes inactive when the current `FlowPosition` no longer matches | Public Task status and resume path in the controller integration test | Pass |
 | Lock bypass is receipt-scoped | Only active switch recovery may launch a replacement while promotion holds the exclusive lock | The handoff marker must name the active receipt while the exclusive coordinator lock is observably held | Source inspection plus the public target-restart path | Pass |
 | Store ownership follows the handoff | A fresh target restarts from the store the prior owner was using | Fresh promotion clones `prior.selection.store`, the same store used for capture and quiescence | A post-snapshot Task steer survives in the target store and the target controller starts from it | Pass |
 | Project and Task execution still advances | Existing controller startup, disagreement, stop, resume, and phase behavior remains intact | Promotion reuses the shared authority and startup contracts without adding a second owner model | `cargo test -p loopflow --test controller_startup_tests public_project_and_task_controllers_prove_startup_and_resume -- --test-threads=1` | Pass |

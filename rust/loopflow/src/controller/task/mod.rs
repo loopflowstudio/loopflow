@@ -158,7 +158,12 @@ async fn run_task_with(
         prepare_task_flow_step(&store, &mut task, wave.name(), &mut flow).await?
     else {
         if let Some(startup) = &startup {
-            startup.report_parked(WorkRef::Task(task.id.clone()))?;
+            let work = WorkRef::Task(task.id.clone());
+            let position = store
+                .flow_position(&work)
+                .await?
+                .ok_or_else(|| anyhow!("parked Task has no durable flow position"))?;
+            startup.report_parked(&position)?;
         }
         return Ok(());
     };

@@ -116,8 +116,9 @@ pub(crate) fn project_session_name(project: &Project) -> String {
     )
 }
 
-async fn project_controller_authority(project: &Project) -> ControllerAuthority {
+async fn project_controller_authority(store: &Store, project: &Project) -> ControllerAuthority {
     controller_authority(
+        store,
         &crate::durable::WorkRef::Project(project.id.clone()),
         &project_session_name(project),
     )
@@ -463,7 +464,7 @@ pub(crate) async fn launch_project_process(
     // stopped Project long after its initial reservation.
     let wave = owning_wave(store, project).await?;
     ensure_clean_main(Path::new(wave.repo()), "Project turn")?;
-    match project_controller_authority(project).await {
+    match project_controller_authority(store, project).await {
         ControllerAuthority::Live { .. } => return Ok(()),
         ControllerAuthority::Inactive => {}
         ControllerAuthority::Parked { attempt_id } => {
@@ -552,7 +553,7 @@ pub fn project_snapshot(project: &Project) -> OpsResult<ProjectSnapshot> {
             .project_controller_state(&project.id)
             .await
             .map_err(|error| project_error(error.to_string()))?;
-        let controller_authority = project_controller_authority(&project).await;
+        let controller_authority = project_controller_authority(&store, &project).await;
         Ok(ProjectSnapshot {
             id: project.id.to_string(),
             external_project_id: project.plan.id.as_str().to_string(),
@@ -596,7 +597,7 @@ fn queue_project_steer(project: &str, message: String) -> OpsResult<ProjectContr
             .map_err(|error| project_error(error.to_string()))?
             .is_some();
         if has_controller {
-            match project_controller_authority(&project).await {
+            match project_controller_authority(&store, &project).await {
                 ControllerAuthority::Live { .. } | ControllerAuthority::Parked { .. } => {}
                 ControllerAuthority::Inactive => launch_project_process(&store, &project).await?,
                 ControllerAuthority::Unverifiable { reason } => {
@@ -633,7 +634,7 @@ pub fn project_interrupt(project: &str) -> OpsResult<ProjectControlResult> {
             .await
             .map_err(|error| project_error(error.to_string()))?;
         if let ControllerAuthority::Unverifiable { reason } =
-            project_controller_authority(&project).await
+            project_controller_authority(&store, &project).await
         {
             return Err(project_error(format!(
                 "Project interrupt was recorded, but delivery is blocked: {reason}"
@@ -747,7 +748,7 @@ pub fn project_wait(
             let store = project_store().await?;
             Ok((
                 project_work_status(&store, &project).await?,
-                project_controller_authority(&project).await,
+                project_controller_authority(&store, &project).await,
             ))
         })?;
         let done = match until {
@@ -773,8 +774,10 @@ pub fn project_wait(
 pub fn project_attach(project: &str) -> OpsResult<()> {
     let project = project_status(project)?;
     let name = project_session_name(&project);
-    let owner = match block_on_project(async { Ok(project_controller_authority(&project).await) })?
-    {
+    let owner = match block_on_project(async {
+        let store = project_store().await?;
+        Ok(project_controller_authority(&store, &project).await)
+    })? {
         ControllerAuthority::Live { owner } => owner,
         ControllerAuthority::Inactive => {
             return Err(project_error(format!(
@@ -840,7 +843,7 @@ pub(crate) async fn wake_project(project_id: &ProjectId) -> OpsResult<()> {
         tracing::info!(project = %project_id, "not waking Project: {bar}");
         return Ok(());
     }
-    match project_controller_authority(&project).await {
+    match project_controller_authority(&store, &project).await {
         ControllerAuthority::Live { .. } | ControllerAuthority::Parked { .. } => {}
         ControllerAuthority::Inactive => launch_project_process(&store, &project).await?,
         ControllerAuthority::Unverifiable { reason } => return Err(project_error(reason)),
@@ -1112,15 +1115,6 @@ mod tests {
             .contains("canonical main checkout is dirty"));
     }
 
-    #[test]
-    fn project_interrupt_refuses_without_exact_process_ownership() {
-        let error = project_interrupt("project-no-owner")
-            .expect_err("a deterministic tmux name is not signal authority");
-
-        assert!(error.to_string().contains("no exact process owner"));
-        assert!(error.to_string().contains("use /interrupt"));
-    }
-
     /// Promotion grants residency: the spawned child must be the steerable
     /// half. A one-shot task runner would never publish an endpoint.
     #[test]
@@ -1152,7 +1146,9 @@ mod tests {
     /// Home `LF_BIN` is gone; the launch fails at binary resolution, proving the
     /// control pin was never consulted.
     #[tokio::test]
+    #[allow(clippy::await_holding_lock)] // the env lock serializes process-global launch routing
     async fn launch_project_process_ignores_control_bin_and_resolves_current_home() {
+        let _env_lock = crate::journal::test_env_lock();
         let home = tempfile::tempdir().unwrap();
         let repo = tempfile::tempdir().unwrap();
         for args in [

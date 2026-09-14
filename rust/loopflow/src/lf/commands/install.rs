@@ -1879,8 +1879,10 @@ async fn discover_controller_handoffs(
 
     let mut handoffs = Vec::new();
     for (work, tmux_name) in controllers {
-        match crate::controller::authority::controller_authority_at(&lf_home, &work, &tmux_name)
-            .await
+        match crate::controller::authority::controller_authority_at(
+            &store, &lf_home, &work, &tmux_name,
+        )
+        .await
         {
             crate::controller::authority::ControllerAuthority::Live { owner } => {
                 handoffs.push(crate::machine_install::ControllerHandoff {
@@ -1932,6 +1934,7 @@ async fn quiesce_controller_handoff(
 ) -> Result<crate::machine_install::ControllerHandoffState> {
     let prior_attempt_id = handoff.prior_attempt_id.clone();
     let authority = crate::controller::authority::controller_authority_at(
+        store,
         lf_home,
         &handoff.work,
         &handoff.tmux_name,
@@ -2113,6 +2116,7 @@ async fn converge_controller_handoff(
     let prior_attempt_id = handoff.prior_attempt_id.clone();
     let lf_home = selection_home(selection)?;
     let mut authority = crate::controller::authority::controller_authority_at(
+        store,
         &lf_home,
         &handoff.work,
         &handoff.tmux_name,
@@ -2124,6 +2128,7 @@ async fn converge_controller_handoff(
     ) {
         resume_controller_handoff(selection, artifact, switch_id, store, &handoff.work).await?;
         authority = crate::controller::authority::controller_authority_at(
+            store,
             &lf_home,
             &handoff.work,
             &handoff.tmux_name,
@@ -2235,6 +2240,7 @@ fn restore_switch_controllers(receipt: &crate::machine_install::SwitchReceipt) -
         }
         let prior_attempt_id = &handoff.prior_attempt_id;
         match runtime.block_on(crate::controller::authority::controller_authority_at(
+            &store,
             &lf_home,
             &handoff.work,
             &handoff.tmux_name,

@@ -33,3 +33,7 @@
   switch capability must also match the active receipt, while the separate
   handoff marker names the operation. Terminal parked or restarted attempt ids
   must remain immutable in that receipt.
+- On 2026-09-13, parked controller authority was bound to the exact durable
+  human Flow position. A parked startup receipt prevents duplicate launch only
+  while its flow, node, and iteration remain current; after a human decision
+  advances the playhead, that receipt is historical.

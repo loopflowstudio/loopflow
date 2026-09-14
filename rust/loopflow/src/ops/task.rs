@@ -2496,8 +2496,13 @@ pub(crate) fn task_session_name(task: &Task) -> String {
     )
 }
 
-async fn task_controller_authority(task: &Task) -> ControllerAuthority {
-    controller_authority(&WorkRef::Task(task.id.clone()), &task_session_name(task)).await
+async fn task_controller_authority(store: &Store, task: &Task) -> ControllerAuthority {
+    controller_authority(
+        store,
+        &WorkRef::Task(task.id.clone()),
+        &task_session_name(task),
+    )
+    .await
 }
 
 fn task_authority_launch_refusal(task: &Task, authority: &ControllerAuthority) -> Option<String> {
@@ -2516,7 +2521,7 @@ fn task_authority_launch_refusal(task: &Task, authority: &ControllerAuthority) -
 }
 
 async fn stop_task_controller(store: &SharedStore, task: &Task) -> OpsResult<()> {
-    let owner = match task_controller_authority(task).await {
+    let owner = match task_controller_authority(store, task).await {
         ControllerAuthority::Live { owner } => owner,
         ControllerAuthority::Inactive | ControllerAuthority::Parked { .. } => return Ok(()),
         ControllerAuthority::Unverifiable { reason } => return Err(task_error(reason)),
@@ -2535,7 +2540,7 @@ async fn stop_task_controller(store: &SharedStore, task: &Task) -> OpsResult<()>
 }
 
 async fn launch_task_process(store: &SharedStore, task: &mut Task) -> OpsResult<()> {
-    match task_controller_authority(task).await {
+    match task_controller_authority(store, task).await {
         ControllerAuthority::Live { .. } => return Ok(()),
         ControllerAuthority::Inactive => {}
         ControllerAuthority::Parked { attempt_id } => {
@@ -4233,7 +4238,7 @@ pub fn task_snapshot(task: &Task) -> OpsResult<TaskSnapshot> {
             .task_controller_state(&task.id)
             .await
             .map_err(|error| task_error(error.to_string()))?;
-        let controller_authority = task_controller_authority(&task).await;
+        let controller_authority = task_controller_authority(&store, &task).await;
         let launch_refusal = if worktree_blocker.is_some() {
             None
         } else {
@@ -4596,7 +4601,7 @@ fn queue_task_steer(issue: &str, message: String) -> OpsResult<TaskControlResult
             .map_err(|error| task_error(error.to_string()))?
             .is_some();
         if has_controller {
-            match task_controller_authority(&task).await {
+            match task_controller_authority(&store, &task).await {
                 ControllerAuthority::Live { .. } | ControllerAuthority::Parked { .. } => {}
                 ControllerAuthority::Inactive => {
                     relaunch_inactive_process(&store, &mut task).await?
@@ -4638,7 +4643,8 @@ pub fn task_interrupt(issue: &str) -> OpsResult<TaskControlResult> {
             .append_interrupt(&work)
             .await
             .map_err(|error| task_error(error.to_string()))?;
-        if let ControllerAuthority::Unverifiable { reason } = task_controller_authority(&task).await
+        if let ControllerAuthority::Unverifiable { reason } =
+            task_controller_authority(&store, &task).await
         {
             return Err(task_error(format!(
                 "Task interrupt was recorded, but delivery is blocked: {reason}"
@@ -4700,7 +4706,7 @@ async fn restart_task_async(issue: &str, advice: Option<String>) -> OpsResult<Ta
         }
         WorkStatus::Ready => {}
     }
-    match task_controller_authority(&task).await {
+    match task_controller_authority(&store, &task).await {
         ControllerAuthority::Live { .. } | ControllerAuthority::Inactive => {}
         ControllerAuthority::Parked { attempt_id } => {
             return Err(task_error(format!(

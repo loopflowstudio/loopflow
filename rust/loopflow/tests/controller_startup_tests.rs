@@ -13,7 +13,7 @@ use axum::{Json, Router};
 use serde_json::{json, Value};
 use sha2::{Digest, Sha256};
 
-use loopflow::durable::{ProjectId, TaskId, WorkRef};
+use loopflow::durable::{FlowPosition, ProjectId, TaskId, WorkRef};
 use loopflow::id::WaveId;
 use loopflow::machine_install::{
     ActiveInstall, ArtifactIdentity, ArtifactRole, ArtifactSet, ControllerHandoffState,
@@ -1197,6 +1197,22 @@ exit 1
     unrelated.wait().expect("reap unrelated tmux occupant");
     std::fs::remove_file(&task_tmux_marker).expect("remove unowned tmux transport");
 
+    let parked_position = FlowPosition {
+        work: WorkRef::Task(task.id.clone()),
+        flow: "task-design".to_string(),
+        step: "review-design".to_string(),
+        node_id: Some("review-design".to_string()),
+        human: true,
+        session_run_id: None,
+        ready_summary: None,
+        step_index: 1,
+        iteration: 0,
+        updated_at: time::OffsetDateTime::now_utc(),
+    };
+    store
+        .set_flow_position(&parked_position.work, parked_position.clone())
+        .await
+        .expect("record parked human boundary");
     let parked_path = home.join("controller/startup/parked-task.json");
     let parked_observed_at = time::OffsetDateTime::now_utc()
         .format(&time::format_description::well_known::Rfc3339)
@@ -1207,7 +1223,14 @@ exit 1
             "attempt_id": "parked-task",
             "observed_at": parked_observed_at,
             "state": "parked",
-            "work": { "kind": "task", "id": task.id.as_str() }
+            "work": { "kind": "task", "id": task.id.as_str() },
+            "boundary": {
+                "flow": parked_position.flow.clone(),
+                "step": parked_position.step.clone(),
+                "node_id": parked_position.node_id.clone(),
+                "step_index": parked_position.step_index,
+                "iteration": parked_position.iteration
+            }
         }))
         .expect("serialize parked Task receipt"),
     )
@@ -1258,7 +1281,30 @@ exit 1
         1,
         "parked restart must not create another controller attempt"
     );
-    std::fs::remove_file(&parked_path).expect("remove parked Task receipt");
+    let mut resumed_position = parked_position;
+    resumed_position.step = "implement".to_string();
+    resumed_position.node_id = None;
+    resumed_position.human = false;
+    resumed_position.step_index = 2;
+    resumed_position.updated_at = time::OffsetDateTime::now_utc();
+    let resumed_work = resumed_position.work.clone();
+    store
+        .set_flow_position(&resumed_work, resumed_position)
+        .await
+        .expect("advance beyond parked human boundary");
+    let unparked_status = successful_json(
+        &public_lf(
+            &repo,
+            &home,
+            &bin,
+            Path::new(env!("CARGO_BIN_EXE_lf")),
+            &tmux_state,
+            &linear_base_url,
+            &["task", "status", &task.plan.identifier, "--json"],
+        ),
+        "Task status after human boundary advanced",
+    );
+    assert_eq!(unparked_status["controller_authority"]["state"], "inactive");
 
     let second_resume = public_lf(
         &repo,

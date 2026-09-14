@@ -416,6 +416,12 @@ A Wave listener owns the resident process it directly spawned. These are local
 placement/supervision facts, not durable cross-process Run ownership, and they
 are never published as `owner.json`.
 
+A Task controller that reaches a human FlowStep publishes a parked startup
+receipt naming that exact flow, node, and iteration. The receipt blocks an
+automatic duplicate launch only while it still matches the current durable
+`FlowPosition`; once a human decision advances the position, the receipt is
+historical and a fresh controller may launch.
+
 When a provider or Task body disappears, the controller records resumable
 planning failure and returns judgment to the Project. A later controller
 decision can launch a fresh Run from current planning state.
@@ -692,7 +698,8 @@ prove a candidate schema without mutating the selected store.
 Managed Project and Task controllers never coexist across releases: the switch
 receipt proves the prior owner absent before store advance and records the
 distinct target attempt before settlement. Provider and Run evidence remain
-advisory. Other long-running `lf` processes retain their executable and
+advisory. A parked outcome is terminal only while its exact human Flow position
+remains current. Other long-running `lf` processes retain their executable and
 selected store path because promotion has no ownership proof for them; the
 controller handoff does not turn arbitrary shells or providers into managed
 processes.

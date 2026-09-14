@@ -29,7 +29,13 @@ fn publish_task(task: &mut RegisteredTask) {
 }
 
 fn tmux_script() -> &'static str {
-    "#!/bin/sh\nexit 0\n"
+    r#"#!/bin/sh
+if [ "$1" = "has-session" ] || [ "$1" = "display-message" ]; then
+  echo "can't find session" >&2
+  exit 1
+fi
+exit 0
+"#
 }
 
 fn point_origin_at_github(repo: &TestRepo) {

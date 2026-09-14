@@ -565,6 +565,30 @@ impl SwitchReceipt {
                 _ => {}
             }
         }
+        if self.phase.order() >= SwitchPhase::Quiesced.order()
+            && self.controller_handoffs.as_ref().is_none_or(|handoffs| {
+                handoffs
+                    .iter()
+                    .any(|handoff| matches!(handoff.state, ControllerHandoffState::Captured))
+            })
+        {
+            return Err(anyhow!(
+                "install switch {} reached {:?} before every captured controller was quiesced or parked",
+                self.id,
+                self.phase
+            ));
+        }
+        if self.phase == SwitchPhase::Settled
+            && self
+                .controller_handoffs
+                .as_ref()
+                .is_none_or(|handoffs| handoffs.iter().any(|handoff| !handoff.state.is_settled()))
+        {
+            return Err(anyhow!(
+                "install switch {} settled with an incomplete controller handoff",
+                self.id
+            ));
+        }
         if self.target_store_advanced && !self.target_store_advance_started {
             return Err(anyhow!(
                 "install switch {} records a committed advance that never started",
@@ -672,6 +696,16 @@ impl SwitchReceipt {
                     ));
                 }
             }
+        } else if self
+            .controller_handoffs
+            .iter()
+            .flatten()
+            .any(|handoff| !matches!(handoff.state, ControllerHandoffState::Captured))
+        {
+            return Err(anyhow!(
+                "install switch {} must capture every controller before recording a later handoff state",
+                self.id
+            ));
         }
         if self.published_fallback != prior.published_fallback
             && !(self.phase == SwitchPhase::Settled
@@ -1551,7 +1585,7 @@ mod tests {
             },
             app_was_running: false,
             disposable_store_owned: false,
-            controller_handoffs: None,
+            controller_handoffs: Some(Vec::new()),
         }
     }
 
@@ -1984,6 +2018,69 @@ mod tests {
             .unwrap_err()
             .to_string()
             .contains("has no parked attempt"));
+    }
+
+    #[test]
+    fn switch_phase_requires_complete_controller_handoff_evidence() {
+        let directory = tempfile::tempdir().unwrap();
+        let published = selection(directory.path(), "published", InstallSource::Published);
+        let development = selection(directory.path(), "development", InstallSource::Development);
+        let mut receipt = switch(
+            published.clone(),
+            development,
+            published.artifact_set.clone(),
+        );
+        receipt.controller_handoffs = Some(vec![ControllerHandoff {
+            work: WorkRef::Task(crate::durable::TaskId::new()),
+            tmux_name: "lf-task-controller".to_string(),
+            prior_attempt_id: "attempt-prior".to_string(),
+            state: ControllerHandoffState::Captured,
+        }]);
+        receipt.phase = SwitchPhase::Quiesced;
+
+        assert!(receipt
+            .validate()
+            .unwrap_err()
+            .to_string()
+            .contains("before every captured controller was quiesced or parked"));
+
+        receipt.controller_handoffs.as_mut().unwrap()[0].state = ControllerHandoffState::Quiesced;
+        receipt.phase = SwitchPhase::Settled;
+        receipt.recovery_owner = RecoveryOwner::Candidate;
+        receipt.target_store_advance_started = true;
+        receipt.target_store_advanced = true;
+        receipt.active_selection_committed = true;
+        assert!(receipt
+            .validate()
+            .unwrap_err()
+            .to_string()
+            .contains("settled with an incomplete controller handoff"));
+    }
+
+    #[test]
+    fn first_controller_handoff_receipt_must_capture_the_prior_owner() {
+        let directory = tempfile::tempdir().unwrap();
+        let root = directory.path().join("authority");
+        let published = selection(directory.path(), "published", InstallSource::Published);
+        let development = selection(directory.path(), "development", InstallSource::Development);
+        let mut receipt = switch(
+            published.clone(),
+            development,
+            published.artifact_set.clone(),
+        );
+        receipt.controller_handoffs = None;
+        write_switch(&root, &receipt).unwrap();
+        receipt.controller_handoffs = Some(vec![ControllerHandoff {
+            work: WorkRef::Task(crate::durable::TaskId::new()),
+            tmux_name: "lf-task-controller".to_string(),
+            prior_attempt_id: "attempt-prior".to_string(),
+            state: ControllerHandoffState::Quiesced,
+        }]);
+
+        assert!(write_switch(&root, &receipt)
+            .unwrap_err()
+            .to_string()
+            .contains("must capture every controller"));
     }
 
     #[test]

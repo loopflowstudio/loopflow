@@ -169,6 +169,11 @@ attempts from the selected store snapshot. Arbitrary shells, providers, and
 other unowned processes continue with the executable and store path they
 selected; they are not promoted into controller authority.
 
+A parked Task attempt names its exact human flow, node, and iteration. It stays
+authoritative only while that boundary is the current durable `FlowPosition`;
+advancing the human decision makes the old parked receipt historical instead of
+stranding the Task.
+
 Artifact switching lives in
 [`machine_install.rs`](../../rust/loopflow/src/machine_install.rs) and the
 install command implementation under [`lf/commands/`](../../rust/loopflow/src/lf/commands/).

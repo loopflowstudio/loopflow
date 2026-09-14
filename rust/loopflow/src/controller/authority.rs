@@ -21,6 +21,7 @@ pub struct ControllerOwner {
 
 #[derive(Debug, Clone, PartialEq, Eq, Serialize)]
 #[serde(tag = "state", rename_all = "snake_case")]
+#[non_exhaustive]
 pub enum ControllerAuthority {
     Live { owner: ControllerOwner },
     Inactive,
@@ -28,12 +29,17 @@ pub enum ControllerAuthority {
     Unverifiable { reason: String },
 }
 
-pub(crate) async fn controller_authority(work: &WorkRef, tmux_name: &str) -> ControllerAuthority {
+pub(crate) async fn controller_authority(
+    store: &Store,
+    work: &WorkRef,
+    tmux_name: &str,
+) -> ControllerAuthority {
     let lf_home = crate::store::authority_home_dir();
-    controller_authority_at(&lf_home, work, tmux_name).await
+    controller_authority_at(store, &lf_home, work, tmux_name).await
 }
 
 pub(crate) async fn controller_authority_at(
+    store: &Store,
     lf_home: &Path,
     work: &WorkRef,
     tmux_name: &str,
@@ -48,12 +54,15 @@ pub(crate) async fn controller_authority_at(
         .iter()
         .filter(|receipt| match &receipt.state {
             WorkStartupState::Running { work: owner, .. }
-            | WorkStartupState::Parked { work: owner } => owner == work,
+            | WorkStartupState::Parked { work: owner, .. } => owner == work,
             WorkStartupState::Failed { .. } => false,
         })
         .collect::<Vec<_>>();
-    let latest_parked = matching.last().and_then(|receipt| {
-        matches!(receipt.state, WorkStartupState::Parked { .. }).then(|| receipt.attempt_id.clone())
+    let latest_parked = matching.last().and_then(|receipt| match &receipt.state {
+        WorkStartupState::Parked { boundary, .. } => {
+            Some((receipt.attempt_id.clone(), boundary.clone()))
+        }
+        _ => None,
     });
     let exec_receipts = match crate::journal::read_exec_process_receipts_at(lf_home) {
         Ok(receipts) => receipts,
@@ -162,9 +171,16 @@ pub(crate) async fn controller_authority_at(
             format!("tmux transport {tmux_name} has unowned pane PID {pid}"),
         );
     }
-    latest_parked.map_or(ControllerAuthority::Inactive, |attempt_id| {
-        ControllerAuthority::Parked { attempt_id }
-    })
+    let Some((attempt_id, boundary)) = latest_parked else {
+        return ControllerAuthority::Inactive;
+    };
+    match store.flow_position(work).await {
+        Ok(Some(position)) if boundary.matches(&position) => {
+            ControllerAuthority::Parked { attempt_id }
+        }
+        Ok(_) => ControllerAuthority::Inactive,
+        Err(error) => unverifiable(work, format!("cannot read current flow position: {error}")),
+    }
 }
 
 fn unverifiable(work: &WorkRef, reason: impl std::fmt::Display) -> ControllerAuthority {
@@ -209,7 +225,7 @@ pub(crate) async fn stop_controller_owner(
     expected: &ControllerOwner,
 ) -> Result<ControllerStop, String> {
     matching_live_owner(
-        controller_authority_at(lf_home, work, tmux_name).await,
+        controller_authority_at(store, lf_home, work, tmux_name).await,
         expected,
     )?;
     store
@@ -218,7 +234,7 @@ pub(crate) async fn stop_controller_owner(
         .map_err(|error| error.to_string())?;
     let graceful_deadline = tokio::time::Instant::now() + std::time::Duration::from_secs(3);
     loop {
-        match controller_authority_at(lf_home, work, tmux_name).await {
+        match controller_authority_at(store, lf_home, work, tmux_name).await {
             ControllerAuthority::Inactive => return Ok(ControllerStop::Inactive),
             ControllerAuthority::Parked { attempt_id } => {
                 return Ok(ControllerStop::Parked { attempt_id });
@@ -239,14 +255,14 @@ pub(crate) async fn stop_controller_owner(
     }
 
     matching_live_owner(
-        controller_authority_at(lf_home, work, tmux_name).await,
+        controller_authority_at(store, lf_home, work, tmux_name).await,
         expected,
     )?;
     crate::engine::process::signal_process(expected.pid, "-TERM")
         .map_err(|error| error.to_string())?;
     let force_deadline = tokio::time::Instant::now() + std::time::Duration::from_secs(1);
     loop {
-        match controller_authority_at(lf_home, work, tmux_name).await {
+        match controller_authority_at(store, lf_home, work, tmux_name).await {
             ControllerAuthority::Inactive => return Ok(ControllerStop::Inactive),
             ControllerAuthority::Parked { attempt_id } => {
                 return Ok(ControllerStop::Parked { attempt_id });
@@ -262,7 +278,7 @@ pub(crate) async fn stop_controller_owner(
         }
         if tokio::time::Instant::now() >= force_deadline {
             matching_live_owner(
-                controller_authority_at(lf_home, work, tmux_name).await,
+                controller_authority_at(store, lf_home, work, tmux_name).await,
                 expected,
             )?;
             crate::engine::process::signal_process(expected.pid, "-KILL")
@@ -274,7 +290,7 @@ pub(crate) async fn stop_controller_owner(
 
     let stopped_deadline = tokio::time::Instant::now() + std::time::Duration::from_secs(1);
     loop {
-        match controller_authority_at(lf_home, work, tmux_name).await {
+        match controller_authority_at(store, lf_home, work, tmux_name).await {
             ControllerAuthority::Inactive => return Ok(ControllerStop::Inactive),
             ControllerAuthority::Parked { attempt_id } => {
                 return Ok(ControllerStop::Parked { attempt_id });

@@ -491,12 +491,18 @@ pub(crate) async fn tmux_pane_pid(session_name: &str) -> Result<Option<u32>> {
     let output =
         tmux_output_with_timeout(&mut command, TMUX_LIVENESS_TIMEOUT, "tmux pane probe").await?;
     if output.status.success() {
-        let pid = String::from_utf8_lossy(&output.stdout)
-            .trim()
-            .parse::<u32>()
-            .map_err(|error| {
-                anyhow!("tmux session {session_name} returned an invalid pane PID: {error}")
-            })?;
+        let pane_pid = String::from_utf8_lossy(&output.stdout);
+        let pane_pid = pane_pid.trim();
+        if pane_pid.is_empty() {
+            return if tmux_session_exists(session_name).await? {
+                Err(anyhow!("tmux session {session_name} returned no pane PID"))
+            } else {
+                Ok(None)
+            };
+        }
+        let pid = pane_pid.parse::<u32>().map_err(|error| {
+            anyhow!("tmux session {session_name} returned an invalid pane PID: {error}")
+        })?;
         return Ok(Some(pid));
     }
     let stderr = String::from_utf8_lossy(&output.stderr);

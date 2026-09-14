@@ -33,6 +33,16 @@ fn noop_script() -> &'static str {
     "#!/bin/sh\nexit 0\n"
 }
 
+fn absent_tmux_script() -> &'static str {
+    r#"#!/bin/sh
+if [ "$1" = "has-session" ] || [ "$1" = "display-message" ]; then
+  echo "can't find session" >&2
+  exit 1
+fi
+exit 0
+"#
+}
+
 fn codex_auth_refresh_script() -> &'static str {
     r#"#!/bin/sh
 read -r initialize
@@ -991,7 +1001,7 @@ fn task_resume_revokes_auto_merge_before_restarting_authored_work() {
     let _env = EnvGuard::with_lf_home(
         &[
             ("gh", script.as_str()),
-            ("tmux", noop_script()),
+            ("tmux", absent_tmux_script()),
             ("codex", codex_auth_refresh_script()),
         ],
         home.path(),
@@ -1062,7 +1072,11 @@ fn task_resume_revokes_auto_merge_before_restarting_authored_work() {
         .block_on(task.store.update_task_pr(&pr))
         .expect("store auto merge request");
 
-    task_resume("INF-123", None, None).expect("resume Task authored work");
+    let error = task_resume("INF-123", None, None)
+        .expect_err("the fake controller cannot acknowledge startup");
+    assert!(error
+        .to_string()
+        .contains("controller process exited before acknowledging startup"));
 
     let persisted = runtime
         .block_on(task.store.active_task_pr(&task.task.id))

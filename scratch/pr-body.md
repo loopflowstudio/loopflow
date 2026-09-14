@@ -24,6 +24,8 @@ Final results: 1,913 Rust tests passed with 6 skipped; 78 website tests passed w
 
 A local release switch previously replaced the installed binary and store selection without owning active Project and Task controllers. An old controller could be stranded on the prior store or overlap a newly launched generation. Promotion now makes that execution transition durable, exclusive, and recoverable.
 
+The durable invariant is that release selection cannot advance independently of live controller ownership. The production-shaped Project and Task fixture proves capture, positive prior-owner absence, one distinct target attempt, and receipt-driven recovery; `SwitchReceipt` validation and the shared controller-authority promotion path enforce the same ordering in production.
+
 ## What changed
 
 - Added one controller authority contract backed by startup receipts, Exec receipts, OS birth validation, and bounded tmux transport probes.

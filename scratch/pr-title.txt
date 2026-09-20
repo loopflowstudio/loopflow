@@ -1,1 +1,0 @@
-Restore live controllers across release promotion

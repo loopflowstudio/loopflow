@@ -132,6 +132,8 @@ lf session iterate <flowstep-id> "Narrow the design"
 
 Ready, provider exit, and pane close resolve nothing. Complete resolves an
 interactive Run or Ask. Approve and Iterate act only on Task FlowSteps.
+In Loopflow.app, switching Sessions or closing a pane keeps its terminal live.
+**Move here** explicitly takes over a Session active in another terminal.
 
 ## The model
 

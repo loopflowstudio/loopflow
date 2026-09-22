@@ -9,6 +9,7 @@ Commands:
     build           Build the app
     install         Build and install without launching
     test            Build and run tests
+    ghostty-build   Build the pinned patched GhosttyKit
     run             Build and launch the app
     run-debug       Build and run with stdout visible
     release         Build release .app and .dmg (delegates to release-loopflow.py)
@@ -32,8 +33,10 @@ import os
 import shutil
 import subprocess
 import sys
+import tarfile
 import tempfile
 import time
+import urllib.request
 from pathlib import Path
 
 REPO_ROOT = Path(__file__).parent.parent
@@ -53,6 +56,8 @@ LOOPFLOW_STREAM_LOG = DEV_LOG_DIR / f"{REPO_ROOT.name}.loopflow-run-debug.log"
 MACHINE_INSTALL_STATE = Path.home() / ".lf-machine" / "install" / "active.json"
 MACHINE_LF_GATE = Path.home() / ".lf-machine" / "install" / "gates" / "1" / "lf"
 DEV_CONTROL_CONFIG = "LoopflowDevControl.json"
+GHOSTTY_REVISION = "4c838723173da757a16a2f3afd4c94f16732ef6a"
+GHOSTTY_ARTIFACT = "GhosttyKit-4c83872-lf1.xcframework.zip"
 
 
 def _app_environment(repo: Path) -> dict[str, str]:
@@ -183,6 +188,77 @@ def cmd_test() -> int:
     if result.returncode != 0:
         return result.returncode
     return run(["swift", "test"], cwd=SWIFT_DIR, check=False).returncode
+
+
+def cmd_ghostty_build() -> int:
+    """Build the pinned GhosttyKit with Loopflow's small embedder patch."""
+    build_root = SWIFT_DIR / ".build" / "ghostty-kit"
+    source = build_root / f"ghostty-{GHOSTTY_REVISION}"
+    archive = build_root / "source.tar.gz"
+    local_framework = SWIFT_DIR / ".build" / "local" / "GhosttyKit.xcframework"
+    artifact = SWIFT_DIR / ".build" / "artifacts" / GHOSTTY_ARTIFACT
+
+    if build_root.exists():
+        shutil.rmtree(build_root)
+    build_root.mkdir(parents=True)
+
+    url = f"https://github.com/ghostty-org/ghostty/archive/{GHOSTTY_REVISION}.tar.gz"
+    print(f"Downloading Ghostty {GHOSTTY_REVISION}...")
+    with urllib.request.urlopen(url) as response, archive.open("wb") as output:
+        shutil.copyfileobj(response, output)
+    with tarfile.open(archive) as source_archive:
+        source_archive.extractall(build_root, filter="data")
+
+    for patch in sorted((SWIFT_DIR / "GhosttyKitPatches").glob("*.patch")):
+        print(f"Applying {patch.name}...")
+        with patch.open("rb") as patch_input:
+            result = subprocess.run(
+                ["patch", "-p1"],
+                cwd=source,
+                stdin=patch_input,
+                check=False,
+            )
+        if result.returncode != 0:
+            return result.returncode
+
+    result = run(["zig", "build", "-Doptimize=ReleaseFast"], cwd=source, check=False)
+    if result.returncode != 0:
+        return result.returncode
+
+    if local_framework.exists():
+        shutil.rmtree(local_framework)
+    local_framework.parent.mkdir(parents=True, exist_ok=True)
+    result = run(
+        ["ditto", str(source / "macos" / "GhosttyKit.xcframework"), str(local_framework)],
+        check=False,
+    )
+    if result.returncode != 0:
+        return result.returncode
+
+    artifact.parent.mkdir(parents=True, exist_ok=True)
+    artifact.unlink(missing_ok=True)
+    result = run(
+        [
+            "ditto",
+            "-c",
+            "-k",
+            "--sequesterRsrc",
+            "--keepParent",
+            str(local_framework),
+            str(artifact),
+        ],
+        check=False,
+    )
+    if result.returncode != 0:
+        return result.returncode
+
+    checksum = run_capture(["swift", "package", "compute-checksum", str(artifact)])
+    if checksum.returncode != 0:
+        print(checksum.stderr, file=sys.stderr)
+        return checksum.returncode
+    print(f"Artifact: {artifact}")
+    print(f"SwiftPM checksum: {checksum.stdout.strip()}")
+    return 0
 
 
 def cmd_run() -> int:
@@ -568,6 +644,7 @@ COMMANDS = {
     "build": (cmd_build, "Build the app"),
     "install": (cmd_install, "Build and install without launching"),
     "test": (cmd_test, "Build and run tests"),
+    "ghostty-build": (cmd_ghostty_build, "Build the pinned patched GhosttyKit"),
     "run": (cmd_run, "Build and launch the app"),
     "run-debug": (cmd_run_debug, "Build and run with stdout visible"),
     "release": (cmd_release, "Build release .app and .dmg"),

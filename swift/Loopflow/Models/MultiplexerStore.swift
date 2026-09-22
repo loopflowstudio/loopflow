@@ -75,8 +75,12 @@ public final class MultiplexerStore {
 
     @discardableResult
     public func split(_ paneId: String, axis: SplitAxis) -> PaneState? {
+        _split(paneId, axis: axis, content: .empty)
+    }
+
+    private func _split(_ paneId: String, axis: SplitAxis, content: PaneContent) -> PaneState? {
         guard layout.pane(for: paneId) != nil else { return nil }
-        let pane = PaneState(content: .shell)
+        let pane = PaneState(content: content)
         layout = layout.splitting(paneId, axis: axis, newPane: pane)
         focusedPaneId = pane.id
         zoomedPaneId = nil
@@ -132,6 +136,11 @@ public final class MultiplexerStore {
             return
         }
 
+        if focusedPane.content == .shell {
+            _ = _split(focusedPaneId, axis: .vertical, content: .session(id: sessionId))
+            return
+        }
+
         layout = layout.replacingContent(
             of: focusedPaneId,
             with: .session(id: sessionId)
@@ -144,7 +153,7 @@ public final class MultiplexerStore {
         if focusedPane.content == .empty {
             layout = layout.replacingContent(of: focusedPaneId, with: .shell)
         } else {
-            _ = split(focusedPaneId, axis: .vertical)
+            _ = _split(focusedPaneId, axis: .vertical, content: .shell)
             return
         }
         closedState = nil

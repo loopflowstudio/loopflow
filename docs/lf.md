@@ -437,10 +437,12 @@ lf session iterate <session-id> "Narrow the design"
 
 The FlowStep session runs `lf --tui --as task:<id> <skill>`. Closing, provider
 exit, or agent readiness never means approval; the persisted Task playhead
-remains waiting. Loopflow.app lists the same sessions, stops the exact
-background client, resumes provider-native history in the selected pane, and
-exposes the FlowStep decision controls. It does not mirror a second Session
-collection or lifecycle.
+remains waiting. Loopflow.app lists the same sessions and exposes the FlowStep
+decision controls. Selecting a Session already open in the app returns to its
+live terminal. If its client is active elsewhere, **Move here** explicitly
+stops that client and resumes provider-native history in the selected pane.
+Closing a pane keeps the live terminal available in the Sessions list; Complete
+ends the Session.
 
 Human sessions may use a detached PTY cradle to let the first provider client
 start before the desktop is present. That cradle is not Session identity,
@@ -546,6 +548,7 @@ lf session list                  # interactive, Ask, and FlowStep sessions
 lf session open run_ab12         # continue a closed native provider session
 lf session open run_ab12 --try   # let the provider arbitrate an active session
 lf session open run_ab12 --replace # stop Loopflow's client, then continue here
+lf session open run_ab12 --json --replace # prepare a takeover command without stopping it yet
 lf session complete run_ab12     # finish it; provider history remains resumable
 lf replay run_ab12               # launch that request as a child Run
 lf usage --days 30              # direct provider-authored usage per Run

@@ -1,0 +1,259 @@
+--- a/src/terminal/Screen.zig
++++ b/src/terminal/Screen.zig
+@@ -2912,7 +2912,42 @@
+ 
+     return .init(hl.start, hl.end, false);
+ }
++
++/// Select a completed shell command and its output as one unit. The prompt is
++/// excluded from the text selection, but callers can use the prompt-to-prompt
++/// row extent to draw a full-width block around the selection.
++///
++/// An active command is not a block yet: a following prompt is the proof that
++/// the shell completed it. This keeps clicks in the live composer available to
++/// the shell.
++pub fn selectCommandBlock(self: *Screen, pin: Pin) ?Selection {
++    if (!self.semantic_prompt.seen) return null;
++
++    var prior_prompts = pin.promptIterator(.left_up, null);
++    const prompt_pin = prior_prompts.next() orelse return null;
+ 
++    // A following prompt closes this command. Without it, the command is
++    // either still running or is the live input row.
++    var following_prompts = prompt_pin.promptIterator(.right_down, null);
++    _ = following_prompts.next() orelse return null;
++    _ = following_prompts.next() orelse return null;
++
++    const input = self.pages.highlightSemanticContent(
++        prompt_pin,
++        .input,
++    ) orelse return null;
++    const output = self.pages.highlightSemanticContent(
++        prompt_pin,
++        .output,
++    );
++
++    return .init(
++        input.start,
++        if (output) |value| value.end else input.end,
++        false,
++    );
++}
++
+ pub const LineIterator = struct {
+     screen: *const Screen,
+     current: ?Pin = null,
+@@ -8704,8 +8739,55 @@
+             .y = 8,
+         } }).?) == null);
+     }
++}
++
++test "Screen: selectCommandBlock selects input and output after completion" {
++    const testing = std.testing;
++    const alloc = testing.allocator;
++
++    var s = try init(alloc, .{ .cols = 20, .rows = 10, .max_scrollback = 0 });
++    defer s.deinit();
++
++    s.cursorSetSemanticContent(.{ .prompt = .initial });
++    try s.testWriteString("$ ");
++    s.cursorSetSemanticContent(.{ .input = .clear_explicit });
++    try s.testWriteString("printf alpha\n");
++    s.cursorSetSemanticContent(.output);
++    try s.testWriteString("alpha\nbeta\n");
++    s.cursorSetSemanticContent(.{ .prompt = .initial });
++    try s.testWriteString("$ ");
++
++    var sel = s.selectCommandBlock(s.pages.pin(.{ .active = .{
++        .x = 0,
++        .y = 2,
++    } }).?).?;
++    defer sel.deinit(&s);
++    const contents = try s.selectionString(alloc, .{
++        .sel = sel,
++        .trim = false,
++    });
++    defer alloc.free(contents);
++    try testing.expectEqualStrings("printf alpha\nalpha\nbeta", contents);
+ }
+ 
++test "Screen: selectCommandBlock leaves the active prompt interactive" {
++    const testing = std.testing;
++    const alloc = testing.allocator;
++
++    var s = try init(alloc, .{ .cols = 20, .rows = 5, .max_scrollback = 0 });
++    defer s.deinit();
++
++    s.cursorSetSemanticContent(.{ .prompt = .initial });
++    try s.testWriteString("$ ");
++    s.cursorSetSemanticContent(.{ .input = .clear_explicit });
++    try s.testWriteString("unfinished");
++
++    try testing.expect(s.selectCommandBlock(s.pages.pin(.{ .active = .{
++        .x = 4,
++        .y = 0,
++    } }).?) == null);
++}
++
+ test "Screen: selectionString basic" {
+     const testing = std.testing;
+     const alloc = testing.allocator;
+--- a/src/apprt/embedded.zig
++++ b/src/apprt/embedded.zig
+@@ -1372,6 +1372,13 @@
+                 .rectangle = self.rectangle,
+             };
+         }
++    };
++
++    // ghostty_command_block_s
++    const CommandBlock = extern struct {
++        id: u64,
++        start_row: u16,
++        end_row: u16,
+     };
+ 
+     // Reference the conditional exports based on target platform
+@@ -1591,7 +1598,113 @@
+     export fn ghostty_surface_has_selection(surface: *Surface) bool {
+         return surface.core_surface.hasSelection();
++    }
++
++    /// Return the completed semantic command blocks intersecting the visible
++    /// viewport. Rows are inclusive and relative to the viewport.
++    export fn ghostty_surface_command_blocks(
++        surface: *Surface,
++        blocks: [*]CommandBlock,
++        capacity: usize,
++    ) usize {
++        if (capacity == 0) return 0;
++
++        const core_surface = &surface.core_surface;
++        core_surface.renderer_state.mutex.lock();
++        defer core_surface.renderer_state.mutex.unlock();
++
++        const screen = core_surface.renderer_state.terminal.screens.active;
++        var count: usize = 0;
++        var active_selection: ?terminal.Selection = null;
++        var active_start: u16 = 0;
++
++        for (0..screen.pages.rows) |row| {
++            const pin = screen.pages.pin(.{ .viewport = .{
++                .x = 0,
++                .y = @intCast(row),
++            } }) orelse continue;
++            const selection = screen.selectCommandBlock(pin);
++
++            if (selection) |value| {
++                if (active_selection) |active| {
++                    if (active.eql(value)) continue;
++                    writeCommandBlock(
++                        blocks,
++                        capacity,
++                        &count,
++                        active,
++                        active_start,
++                        @intCast(row - 1),
++                    );
++                }
++                active_selection = value;
++                active_start = @intCast(row);
++            } else if (active_selection != null) {
++                writeCommandBlock(
++                    blocks,
++                    capacity,
++                    &count,
++                    active_selection.?,
++                    active_start,
++                    @intCast(row - 1),
++                );
++                active_selection = null;
++            }
++        }
++
++        if (active_selection != null) {
++            writeCommandBlock(
++                blocks,
++                capacity,
++                &count,
++                active_selection.?,
++                active_start,
++                @intCast(screen.pages.rows - 1),
++            );
++        }
++
++        return count;
+     }
+ 
++    fn writeCommandBlock(
++        blocks: [*]CommandBlock,
++        capacity: usize,
++        count: *usize,
++        selection: terminal.Selection,
++        start_row: u16,
++        end_row: u16,
++    ) void {
++        if (count.* >= capacity) return;
++        const start = selection.start();
++        blocks[count.*] = .{
++            .id = @intFromPtr(start.node) ^
++                (@as(u64, start.y) << 32) ^
++                @as(u64, start.x),
++            .start_row = start_row,
++            .end_row = end_row,
++        };
++        count.* += 1;
++    }
++
++    /// Read a completed semantic command block at a viewport row without
++    /// changing the terminal's ordinary text selection.
++    export fn ghostty_surface_read_command_block(
++        surface: *Surface,
++        viewport_row: u16,
++        result: *Text,
++    ) bool {
++        const core_surface = &surface.core_surface;
++        core_surface.renderer_state.mutex.lock();
++        defer core_surface.renderer_state.mutex.unlock();
++
++        const screen = core_surface.renderer_state.terminal.screens.active;
++        const pin = screen.pages.pin(.{ .viewport = .{
++            .x = 0,
++            .y = viewport_row,
++        } }) orelse return false;
++        const selection = screen.selectCommandBlock(pin) orelse return false;
++        return readTextLocked(surface, selection, result);
++    }
++
+     /// Same as ghostty_surface_read_text but reads from the user selection,
+     /// if any.
+     export fn ghostty_surface_read_selection(
+--- a/include/ghostty.h
++++ b/include/ghostty.h
+@@ -460,6 +460,12 @@
+   uint32_t cell_width_px;
+   uint32_t cell_height_px;
+ } ghostty_surface_size_s;
++
++typedef struct {
++  uint64_t id;
++  uint16_t start_row;
++  uint16_t end_row;
++} ghostty_command_block_s;
+ 
+ // Config types
+ 
+@@ -1118,6 +1124,12 @@
+                                                 void*,
+                                                 bool);
+ bool ghostty_surface_has_selection(ghostty_surface_t);
++size_t ghostty_surface_command_blocks(ghostty_surface_t,
++                                      ghostty_command_block_s*,
++                                      size_t);
++bool ghostty_surface_read_command_block(ghostty_surface_t,
++                                        uint16_t,
++                                        ghostty_text_s*);
+ bool ghostty_surface_read_selection(ghostty_surface_t, ghostty_text_s*);
+ bool ghostty_surface_read_text(ghostty_surface_t,
+                                ghostty_selection_s,

@@ -516,14 +516,16 @@ pub(crate) async fn open(
                         manifest.harness
                     );
                 }
-                OpenMode::Replace => crate::lf::commands::util::replace_provider_clients(
+                OpenMode::Replace if resume => crate::lf::commands::util::replace_provider_clients(
                     dir,
                     &manifest.harness,
                     &active_clients,
+                    crate::run_record::ProviderClientStopReason::Moved,
                 )?,
+                OpenMode::Replace => {}
                 OpenMode::Refuse | OpenMode::Try => {}
             }
-            let session = interactive_surface(dir, manifest)?;
+            let mut session = interactive_surface(dir, manifest)?;
             if resume {
                 crate::lf::commands::util::resume_session(
                     &manifest.harness,
@@ -533,6 +535,12 @@ pub(crate) async fn open(
                     dir,
                     provider_session,
                 )?;
+            } else {
+                match mode {
+                    OpenMode::Replace => session.open_argv.push("--replace".to_string()),
+                    OpenMode::Try => session.open_argv.push("--try".to_string()),
+                    OpenMode::Refuse => {}
+                }
             }
             Ok(session)
         }
@@ -562,6 +570,7 @@ pub(crate) async fn complete(store: &SharedStore, session_id: &str) -> Result<Se
                 dir,
                 &manifest.harness,
                 &active_clients,
+                crate::run_record::ProviderClientStopReason::Completed,
             )?;
             crate::run_record::resolve_provider_session(dir)
                 .map_err(|error| anyhow!("cannot complete Session {}: {error}", manifest.run_id))?;
@@ -850,7 +859,12 @@ fn resume_native_run(run_id: &RunId, token: &HumanSessionToken) -> Result<bool> 
         Err(error) => return Err(error).context("resolve human Session Run"),
     };
     let clients = crate::lf::commands::util::active_provider_clients(&dir, &manifest.harness)?;
-    crate::lf::commands::util::replace_provider_clients(&dir, &manifest.harness, &clients)?;
+    crate::lf::commands::util::replace_provider_clients(
+        &dir,
+        &manifest.harness,
+        &clients,
+        crate::run_record::ProviderClientStopReason::Moved,
+    )?;
     let Some(provider_session) = crate::run_record::read_provider_session(&dir)? else {
         return Ok(false);
     };
@@ -876,7 +890,12 @@ fn stop_native_run(run_id: &RunId) -> Result<()> {
         Err(error) => return Err(error).context("resolve human Session Run"),
     };
     let clients = crate::lf::commands::util::active_provider_clients(&dir, &manifest.harness)?;
-    crate::lf::commands::util::replace_provider_clients(&dir, &manifest.harness, &clients)?;
+    crate::lf::commands::util::replace_provider_clients(
+        &dir,
+        &manifest.harness,
+        &clients,
+        crate::run_record::ProviderClientStopReason::Completed,
+    )?;
     if crate::run_record::read_provider_session(&dir)?.is_some() {
         crate::run_record::resolve_provider_session(&dir)?;
     }

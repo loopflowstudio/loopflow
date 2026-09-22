@@ -220,29 +220,34 @@ they mean the Mac surface.
   snapshot + Set lookup (was `tmux has-session` per wave). See the Performance
   project for the ranked audit; budgets/instrumentation not yet built.
 
-## Sessions projection and native resume (settled 2026-08-30, PR #1250)
+## Sessions projection and native resume (2026-08-30, revised 2026-09-22)
 
 - **`lf session list --json` is the sole unresolved-human-work projection.** It
   merges ordinary interactive TUI Runs, ad-hoc human Asks, and Task human
   FlowSteps into required-field `SessionRecord` values. The Mac app renders that
   projection and owns no second queue, title store, liveness model, or resolution
   state.
-- **Provider history is the resume authority.** Opening a Session stops only the
-  exact Loopflow-owned client whose PID and birth evidence match its Run, then
-  resumes through Codex, Claude, or OpenCode's native command. Closing a pane or
-  provider exit resolves nothing. Complete applies only to interactive Sessions
-  and ready Asks; Approve and Iterate apply only to ready Task FlowSteps.
+- **Provider history is the resume authority; interactive takeover is explicit.**
+  A row click focuses or reveals its retained terminal. An interactive client
+  active elsewhere opens an explanation; only **Move here** requests replacement
+  of the exact Loopflow-owned client whose PID and birth evidence match its Run.
+  Native resume preserves conversation history, not unsent input in the old TUI.
+  `session open --json --replace` prepares the replacement argv without stopping
+  that client. Closing a pane or provider exit resolves nothing. Complete applies
+  only to interactive Sessions and ready Asks; Approve and Iterate apply only to
+  ready Task FlowSteps.
 - **tmux is only the first client's detached PTY cradle.** It lets a human-bound
   TUI start before a desktop exists, but it is not Session identity, readiness,
   presentation, liveness authority, or a resolution mechanism. A kernel advisory
   lock protects initial publication until provider history and the exact owned
   client are observable, so app open cannot race startup into a duplicate Run.
-- **The Mac multiplexer presents Sessions without owning them.** Selecting a row
-  replaces the focused Ghostty pane or focuses the pane already showing that
-  Session. Completing the selected Session removes its row and reconciles the
-  pane to the useful empty workspace. Repository selection uses canonical Git
-  common-directory identity so linked Task worktrees never appear as portfolio
-  roots.
+- **The Mac multiplexer presents Sessions without owning them.** The sidebar is
+  the Session switcher; splits are explicit. Selecting another row changes the
+  focused viewing slot and retains the previous terminal. **Close view** hides a
+  Session and Undo restores it live; Complete removes its row and reconciles its
+  pane. VIEWING, RUNNING, ELSEWHERE, OPENING, and RETRY describe distinct states.
+  Repository selection uses canonical Git common-directory identity so linked
+  Task worktrees never appear as portfolio roots.
 - **Work conditions remain non-actionable descriptions.** `lf status` and `lf
   roadmap` expose one Task condition: `clear`, `waiting`, `blocked`, or `unknown`.
   Sessions alone open or resolve human work. NOW groups the same conditions, and
@@ -260,12 +265,129 @@ they mean the Mac surface.
   project legal actions and display Work path in `SessionRecord`, then delete the
   Swift action matrix, replacement-policy inference, Sessions-only roadmap join,
   and unused narrower scopes together.
-- **PM reconciliation is queued after Linear reconnect.** The cached LOO-251
-  directive still describes an Ask-specific `lf ask list --user` and tmux-shaped
-  surface. Rename it to “Finish the native Sessions multiplexer and promoted Ask
-  handoff,” replace its contract with the model above, and keep the two configured-
-  path proofs as its closure criteria. File the projection reduction as a
-  separate Mac Surface UX Task after PR #1250 lands.
+- **LOO-251 was reconciled in Linear on 2026-09-22.** Its native Sessions
+  multiplexer and promoted Ask handoff contract replaces the obsolete Ask-only,
+  global-manager design. Keep it open for caller-release/UI proof and corrected
+  split-paste confirmation. The projection reduction is filed as
+  [LOO-284](https://linear.app/loopflow/issue/LOO-284).
+
+### Terminal ownership and input (branch evidence, 2026-09-22)
+
+- Each window owns a repository workspace registry, which retains its pane
+  layout and terminal view pool across Sessions↔Work and repository switches.
+  Each view owns its Ghostty surface. A global Session-ID surface registry caused
+  one window's release to destroy another's terminal; it is deleted. Do not
+  share an NSView between windows or evict a hidden Session to save memory:
+  freeing a surface ends its PTY. Window close/app quit still end embedded
+  clients; history resumes, unfinished drafts do not survive.
+- Session identity, provider process, local opening/error state, terminal view,
+  and pane placement have different lifetimes. Keep them separate. In particular,
+  `.prepared` bridges async opening and surface creation, and an open failure
+  stays visible until retried or superseded. Shell panes also survive navigation,
+  but explicit close/process exit closes their shell; there is no sidebar entry
+  through which to recover an invisible shell. Task tmux tabs retain their own
+  kill-on-close/quit policy.
+- `TerminalIdentity` carries Session, shell, or Task-terminal purpose through
+  views, pools, and bell/title/close notifications. Input policy follows the
+  enum case, never string prefixes. Resolve callback identity from surface
+  userdata while its handle is valid; deferred notifications carry values.
+  Late callbacks must not discard replacement views. A dead/released view must
+  never relaunch a retained `--replace` command and steal a client back.
+- The displaced launcher needs **stop intent after liveness ends**. Record
+  moved/completed before signaling; consume it to print a clean handoff message.
+  An unmarked SIGTERM remains an error. Clear stale intent when publishing a new
+  client so PID reuse cannot inherit it. This record is not duplicate liveness.
+- AppKit offers key equivalents to sibling views. Only the first responder may
+  consume terminal Command-V; a focus border alone proves nothing. The regression
+  dispatches through a parent and reads both real PTY buffers. Copy reads actual
+  Ghostty selection; core clipboard requests must receive a completion callback.
+- Session clipboard images use the provider's Ctrl-V image shortcut. Copied file
+  URLs win over image bytes and insert escaped paths; raw dropped image data is
+  saved as readable PNG before insertion. Retain temporary data through provider
+  consumption. A path appearing is not proof of an image attachment: inspect
+  the composer. Shell paste uses paths, not provider shortcuts.
+- The 2026-09-22 human demo confirmed retained Session switching, copy/image
+  input, and explicit Warp handoff. A later demo exposed split paste misrouting;
+  the automated real-PTY correction passes but its final human confirmation is
+  still pending. Latest identity pass recorded 45 tests in four suites, then 24
+  affected tests after review. These are prior-run receipts, not fresh update-wave
+  validation or an all-provider matrix. Hosted UI initialization was canceled by
+  LocalAuthentication; it supplied no behavioral result. JSON prepare-without-kill
+  has source/Swift contract coverage but no focused Rust behavioral proof yet.
+
+### Shell command blocks and build fidelity (2026-09-22)
+
+- Human acceptance is **visible grouping before interaction plus one ordinary
+  click anywhere in a completed command/output region selecting both**. Invisible
+  OSC 133 metadata, triple-click gestures, or tooltips do not meet it. Warp is the
+  benchmark: full-width groups, persistent separation, restrained tint and left
+  accent, whole-surface hover/selection, and a distinct fresh prompt. Preserve
+  Loopflow's palette; context/timing and richer actions are options, not mandatory
+  copies of Warp. Provider Session panes remain outside shell-block semantics.
+- The checked-in Ghostty patch exposes visible block geometry and a separate
+  read-block API. Block Copy deliberately avoids native character highlighting:
+  the first demo showed two competing highlights. Keep geometry and hover separate
+  from one selected `(id, text)` snapshot. Page/pin IDs are not durable across
+  reflow/recycling; selection clears when its block leaves the visible list.
+- SwiftPM pins the published, checksum-verified patched artifact, not a local
+  build path. `swift/GhosttyKitPatches/` plus `loopflow-dev.py ghostty-build`
+  carry the reproducible source patch. Use a new artifact version on patch changes;
+  publication is a separate authorized action. The upstream surface API did not
+  expose semantic geometry; a newer standalone VT API is not automatically an
+  embedded-surface replacement. Avoid synthetic multi-click API workarounds.
+- Real marked-output PTY tests prove parser→click→pasteboard block copy, clearing
+  at the live prompt, window-local release, and title delivery. Wait for parsed
+  completed blocks, not incidental prompt text. They do not prove automatic shell
+  hook injection or final appearance. `shellIntegrationEmitsSemanticMarks`
+  manually invokes zsh hooks; custom prompts and other bundled shells remain
+  unproven. Upstream excludes macOS `/bin/bash` from auto-injection. Provider
+  `TERM` stays `xterm-256color`; changing it needs separate fidelity evidence.
+- **Build parity remains broken.** `project.yml` copies resources but still builds
+  Ghostty-disabled stubs, unlike SwiftPM. The later fresh Xcode build-for-testing
+  failure supersedes earlier compile-success notes. Binary/resource revision facts
+  also remain duplicated, the build recipe does not regenerate the shell payload,
+  and missing resources disable all terminals. Give both builds one dependency
+  and generated provenance, degrade missing shell resources to blockless terminals,
+  and contain resource-environment mutation. Copying payload alone is no proof.
+- Remaining block risks are hypotheses to measure: centered-grid math is shared
+  by geometry helpers and tests rather than checked against rendered padding;
+  per-row prompt scans at 10 Hz hold the renderer mutex and may repeatedly walk
+  long history. Patch Zig tests lack a recorded run. Final block appearance and
+  corrected split paste need configured-app confirmation. Keep separate command,
+  output, and last-command actions, multi-selection, bookmarks, and sharing
+  deferred until the core interaction is proven. Upstream API contribution may
+  reduce patch maintenance later (research reference: ghostty-org/ghostty#11747).
+
+### Shared viewing boundary
+
+Native launch plus explicit Move here remains the main path. The human wants
+optional simultaneous Warp/Loopflow viewing: second attachment view-only, then
+explicit **Take control**. Earlier research recommending default tmux presentation
+is superseded. `4d5e96383` shared raw resume argv, not a live PTY; `90c871805` and
+`7889d65bc` established native presentation. The human separately reported tmux
+color distortion and terminal bugs; those were not stated in the commit messages.
+
+Compare an opt-in tmux configuration with a transparent PTY relay before changing
+that contract. Prove truecolor, keyboard/image input, independent sizes, late
+attachment, one provider PID/draft, clean takeover, and view-only enforcement at
+the owner. Client-local scroll/selection is separate from durable process state.
+Native concurrent resume cannot prove shared PTY continuity. The prior research
+reported clipboard-image failures inside tmux (anthropics/claude-code#25672);
+retest the exact stack. Control-mode integration requires its own protocol/render
+client; a broker also owns replay, flow control, resize, and failure recovery.
+App-quit survival and remote Home attachment remain separate scope decisions.
+Client provenance is absent today; keep ELSEWHERE generic until the shared API
+can name the recorded terminal/location.
+
+The 2026-09-22 reconciliation filed these remaining concrete gaps under Mac
+Surface UX: [LOO-280](https://linear.app/loopflow/issue/LOO-280) for build/resource
+parity, [LOO-281](https://linear.app/loopflow/issue/LOO-281) for real-shell blocks,
+geometry, long-output measurements, and visual proof,
+[LOO-282](https://linear.app/loopflow/issue/LOO-282) for client provenance, and
+[LOO-283](https://linear.app/loopflow/issue/LOO-283) for the bounded shared-viewing
+comparison. This branch does not establish any Project's week/month evidence
+window; definitions and KRs remain unchanged. No open Task had enough evidence
+to close during this reconciliation.
 
 ## Patterns (verified 2026-06-30, remote TLS connection)
 

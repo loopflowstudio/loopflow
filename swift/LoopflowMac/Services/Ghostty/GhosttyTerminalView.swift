@@ -3,6 +3,7 @@
 
 import SwiftUI
 import AppKit
+import QuartzCore
 import Loopflow
 
 #if GHOSTTY_ENABLED
@@ -12,7 +13,8 @@ struct GhosttyTerminalView: View {
     let workingDirectory: String
     let argv: [String]
     let env: [String: String]
-    let sessionId: String?
+    let terminal: TerminalIdentity
+    let surfacePool: GhosttySurfacePool?
     let isFocused: Bool
     let onSurfaceCreated: () -> Void
     let onFocus: () -> Void
@@ -22,7 +24,8 @@ struct GhosttyTerminalView: View {
         workingDirectory: String,
         argv: [String] = [],
         env: [String: String] = [:],
-        sessionId: String? = nil,
+        terminal: TerminalIdentity,
+        surfacePool: GhosttySurfacePool? = nil,
         isFocused: Bool = false,
         onSurfaceCreated: @escaping () -> Void = {},
         onFocus: @escaping () -> Void = {},
@@ -31,7 +34,8 @@ struct GhosttyTerminalView: View {
         self.workingDirectory = workingDirectory
         self.argv = argv
         self.env = env
-        self.sessionId = sessionId
+        self.terminal = terminal
+        self.surfacePool = surfacePool
         self.isFocused = isFocused
         self.onSurfaceCreated = onSurfaceCreated
         self.onFocus = onFocus
@@ -43,7 +47,8 @@ struct GhosttyTerminalView: View {
             GhosttyTerminalRepresentable(
                 workingDirectory: workingDirectory,
                 command: shellCommand,
-                sessionId: sessionId,
+                terminal: terminal,
+                surfacePool: surfacePool,
                 isFocused: isFocused,
                 onSurfaceCreated: onSurfaceCreated,
                 onFocus: onFocus,
@@ -61,7 +66,8 @@ struct GhosttyTerminalView: View {
 struct GhosttyTerminalRepresentable: NSViewRepresentable {
     let workingDirectory: String
     let command: String?
-    let sessionId: String?
+    let terminal: TerminalIdentity
+    let surfacePool: GhosttySurfacePool?
     let isFocused: Bool
     let onSurfaceCreated: () -> Void
     let onFocus: () -> Void
@@ -69,10 +75,14 @@ struct GhosttyTerminalRepresentable: NSViewRepresentable {
     @ObservedObject var manager: GhosttyManager
 
     func makeNSView(context: Context) -> GhosttyMetalView {
-        let view = GhosttyMetalView()
+        let view: GhosttyMetalView
+        if let surfacePool {
+            view = surfacePool.view(for: terminal)
+        } else {
+            view = GhosttyMetalView(terminal: terminal)
+        }
         view.workingDirectory = workingDirectory
         view.command = command
-        view.sessionId = sessionId
         view.onSurfaceCreated = onSurfaceCreated
         view.onFocus = onFocus
 
@@ -87,7 +97,8 @@ struct GhosttyTerminalRepresentable: NSViewRepresentable {
         nsView.onFocus = onFocus
         nsView.sizeDidChange(size)
 
-        if case .ready = manager.state, nsView.surface == nil, size.width > 0, size.height > 0 {
+        if case .ready = manager.state, nsView.surface == nil, !nsView.childExited,
+           size.width > 0, size.height > 0 {
             nsView.createSurface(manager: manager)
         }
         if isFocused, nsView.window?.firstResponder !== nsView {
@@ -96,15 +107,109 @@ struct GhosttyTerminalRepresentable: NSViewRepresentable {
     }
 }
 
+/// Retains live terminal views for one window's Sessions workspace so pane
+/// churn and Sessions↔Work navigation never free a surface. Each window owns
+/// its own pool: an NSView can only live in one view hierarchy, so sharing a
+/// pool across windows would silently steal terminals between them.
+@MainActor
+final class GhosttySurfacePool {
+    private var views: [TerminalIdentity: GhosttyMetalView] = [:]
+
+    func view(for id: TerminalIdentity) -> GhosttyMetalView {
+        if let existing = views[id] { return existing }
+        let view = GhosttyMetalView(terminal: id)
+        view.pool = self
+        views[id] = view
+        return view
+    }
+
+    /// True only while the surface's child is still running. A provider killed
+    /// from another client (Move here in Warp or a second window) leaves the
+    /// surface displaying an exit banner; that must not read as live, and the
+    /// dead surface is freed so an explicit reopen relaunches.
+    func hasSurface(_ id: TerminalIdentity) -> Bool {
+        guard let view = views[id], let surface = view.surface else { return false }
+        if ghostty_surface_process_exited(surface) {
+            Task { @MainActor in view.handleSurfaceClose() }
+            return false
+        }
+        return true
+    }
+
+    /// Drops a view whose child exited so a later reopen mints a fresh view
+    /// instead of reviving a dead one.
+    func discard(_ view: GhosttyMetalView) {
+        guard views[view.terminal] === view else { return }
+        views.removeValue(forKey: view.terminal)
+    }
+
+    func release(_ id: TerminalIdentity) {
+        views.removeValue(forKey: id)?.destroySurface()
+    }
+}
+
 // MARK: - GhosttyMetalView
 
+struct GhosttyCommandBlockLayout: Equatable {
+    let id: UInt64
+    let startRow: Int
+    let endRow: Int
+
+    func contains(_ row: Int) -> Bool {
+        startRow...endRow ~= row
+    }
+}
+
+func ghosttyCommandBlock(
+    atViewportRow row: Int,
+    in blocks: [GhosttyCommandBlockLayout]
+) -> GhosttyCommandBlockLayout? {
+    blocks.first { $0.contains(row) }
+}
+
+func ghosttyViewportRow(
+    at point: CGPoint,
+    bounds: CGRect,
+    rows: Int,
+    cellHeight: CGFloat
+) -> Int? {
+    guard rows > 0, cellHeight > 0 else { return nil }
+    let contentHeight = CGFloat(rows) * cellHeight
+    let topInset = max(0, (bounds.height - contentHeight) / 2)
+    let distanceFromTop = bounds.height - point.y - topInset
+    guard distanceFromTop >= 0, distanceFromTop < contentHeight else { return nil }
+    return Int(distanceFromTop / cellHeight)
+}
+
+func ghosttyCommandBlockFrame(
+    _ block: GhosttyCommandBlockLayout,
+    bounds: CGRect,
+    rows: Int,
+    cellHeight: CGFloat
+) -> CGRect {
+    let contentHeight = CGFloat(rows) * cellHeight
+    let topInset = max(0, (bounds.height - contentHeight) / 2)
+    let top = bounds.height - topInset - CGFloat(block.startRow) * cellHeight
+    let bottom = bounds.height - topInset - CGFloat(block.endRow + 1) * cellHeight
+    return CGRect(
+        x: 4,
+        y: bottom + 1,
+        width: max(0, bounds.width - 8),
+        height: max(0, top - bottom - 2)
+    )
+}
+
 @MainActor
-final class GhosttyMetalView: NSView, GhosttySessionSurfaceOwner, @preconcurrency NSTextInputClient {
+final class GhosttyMetalView: NSView, @preconcurrency NSTextInputClient {
     var workingDirectory: String = ""
     var command: String?
-    var sessionId: String?
+    let terminal: TerminalIdentity
     var onSurfaceCreated: () -> Void = {}
     var onFocus: () -> Void = {}
+    weak var pool: GhosttySurfacePool?
+    /// Set when the surface's child ended; blocks implicit relaunch — reopening
+    /// a Session or shell is an explicit action that mints a fresh view.
+    private(set) var childExited = false
     nonisolated(unsafe) var surface: ghostty_surface_t?
 
     private nonisolated(unsafe) var displayLink: CADisplayLink?
@@ -114,15 +219,23 @@ final class GhosttyMetalView: NSView, GhosttySessionSurfaceOwner, @preconcurrenc
     private var _selectedRange = NSRange(location: 0, length: 0)
     private var _didInsertText = false
     private var _currentKeyEventModifiers: NSEvent.ModifierFlags = []
+    private var dropHighlight: NSView?
+    private let commandBlockOverlay = CALayer()
+    private var commandBlocks: [GhosttyCommandBlockLayout] = []
+    private var hoveredCommandBlock: GhosttyCommandBlockLayout?
+    private var selectedCommandBlock: (id: UInt64, text: String)?
+    private var commandBlockMouseDown = false
+    private var lastCommandBlockRefresh: CFTimeInterval = 0
 
-    override init(frame frameRect: NSRect) {
+    init(terminal: TerminalIdentity, frame frameRect: NSRect = .zero) {
+        self.terminal = terminal
         super.init(frame: frameRect)
         setupView()
     }
 
     required init?(coder: NSCoder) {
-        super.init(coder: coder)
-        setupView()
+        // Terminal identity comes from its application owner, never a nib.
+        return nil
     }
 
     private func setupView() {
@@ -130,6 +243,7 @@ final class GhosttyMetalView: NSView, GhosttySessionSurfaceOwner, @preconcurrenc
         layer?.backgroundColor = NSColor.loopflowDarkBackground.cgColor
         layerContentsRedrawPolicy = .onSetNeedsDisplay
         autoresizingMask = [.width, .height]
+        registerForDraggedTypes(ghosttyDropTypes)
     }
 
     func createSurface(manager: GhosttyManager) {
@@ -141,15 +255,11 @@ final class GhosttyMetalView: NSView, GhosttySessionSurfaceOwner, @preconcurrenc
             view: self
         )
 
-        if let surface {
-            // Register surface as active session for lifecycle callbacks
-            if let sessionId {
-                manager.registerSurface(surface, sessionId: sessionId, owner: self)
-            }
-
+        if surface != nil {
             updateContentScale()
             updateSurfaceSize()
-            setupDisplayLink()
+            installCommandBlockOverlay()
+            if window != nil { setupDisplayLink() }
             setupTrackingArea()
             onSurfaceCreated()
         }
@@ -161,9 +271,29 @@ final class GhosttyMetalView: NSView, GhosttySessionSurfaceOwner, @preconcurrenc
         displayLink = link
     }
 
-    private func teardownSurface(freeSurface: Bool) {
+    override func viewDidMoveToWindow() {
+        super.viewDidMoveToWindow()
+        if window == nil {
+            displayLink?.invalidate()
+            displayLink = nil
+        } else if surface != nil, displayLink == nil {
+            setupDisplayLink()
+            updateContentScale()
+            updateSurfaceSize()
+        }
+    }
+
+    func destroySurface() {
+        // A released view may still be mounted until SwiftUI reconciles it.
+        // Only an explicit reopen with a fresh view may launch another child.
+        childExited = true
         displayLink?.invalidate()
         displayLink = nil
+        commandBlockOverlay.removeFromSuperlayer()
+        commandBlocks = []
+        hoveredCommandBlock = nil
+        selectedCommandBlock = nil
+        commandBlockMouseDown = false
 
         if let trackingArea {
             removeTrackingArea(trackingArea)
@@ -172,25 +302,155 @@ final class GhosttyMetalView: NSView, GhosttySessionSurfaceOwner, @preconcurrenc
 
         guard let surface else { return }
         self.surface = nil
-        if freeSurface {
-            ghostty_surface_free(surface)
-        }
+        ghostty_surface_free(surface)
     }
 
-    func destroyManagedSurface(_ managedSurface: ghostty_surface_t) {
-        guard surface == managedSurface else {
-            ghostty_surface_free(managedSurface)
-            return
-        }
-        teardownSurface(freeSurface: true)
+    /// The surface's child process ended — a provider exit, a shell exit, or an
+    /// external `--replace` takeover. Frees the dead surface so pool and
+    /// Session state stop reporting it live, and announces the closure so the
+    /// UI can reclassify immediately instead of waiting for the next poll.
+    func handleSurfaceClose() {
+        guard surface != nil else { return }
+        destroySurface()
+        pool?.discard(self)
+        NotificationCenter.default.post(name: .ghosttySurfaceClosed, object: terminal)
     }
 
     @objc private func displayLinkFired(_ link: CADisplayLink) {
         guard let surface,
+              window != nil,
               !isHiddenOrHasHiddenAncestor,
               window?.occlusionState.contains(.visible) != false
         else { return }
         ghostty_surface_draw(surface)
+        let now = CACurrentMediaTime()
+        if isShellPane, now - lastCommandBlockRefresh >= 0.1 {
+            lastCommandBlockRefresh = now
+            refreshCommandBlocks()
+        }
+    }
+
+    private var isShellPane: Bool {
+        if case .shell = terminal { return true }
+        return false
+    }
+
+    private func installCommandBlockOverlay() {
+        guard isShellPane, let rootLayer = layer else { return }
+        commandBlockOverlay.removeFromSuperlayer()
+        commandBlockOverlay.frame = bounds
+        commandBlockOverlay.autoresizingMask = [.layerWidthSizable, .layerHeightSizable]
+        commandBlockOverlay.masksToBounds = true
+        commandBlockOverlay.zPosition = 20
+        commandBlockOverlay.contentsScale = window?.backingScaleFactor ?? 2
+        rootLayer.addSublayer(commandBlockOverlay)
+        refreshCommandBlocks()
+    }
+
+    private func refreshCommandBlocks() {
+        guard isShellPane, let surface else { return }
+        let size = ghostty_surface_size(surface)
+        let capacity = max(Int(size.rows), 1)
+        var rawBlocks = Array(repeating: ghostty_command_block_s(), count: capacity)
+        let count = rawBlocks.withUnsafeMutableBufferPointer { buffer in
+            ghostty_surface_command_blocks(surface, buffer.baseAddress, buffer.count)
+        }
+        let nextBlocks = rawBlocks.prefix(min(count, rawBlocks.count)).map {
+            GhosttyCommandBlockLayout(
+                id: $0.id,
+                startRow: Int($0.start_row),
+                endRow: Int($0.end_row)
+            )
+        }
+        guard nextBlocks != commandBlocks || commandBlockOverlay.frame != bounds else { return }
+        commandBlocks = nextBlocks
+        if let selectedCommandBlock,
+           !commandBlocks.contains(where: { $0.id == selectedCommandBlock.id }) {
+            self.selectedCommandBlock = nil
+        }
+        if let hoveredCommandBlock,
+           !commandBlocks.contains(where: {
+               $0.startRow == hoveredCommandBlock.startRow
+                   && $0.endRow == hoveredCommandBlock.endRow
+           }) {
+            self.hoveredCommandBlock = nil
+        }
+        renderCommandBlocks(size: size)
+    }
+
+    private func renderCommandBlocks(size: ghostty_surface_size_s? = nil) {
+        guard isShellPane, let surface else { return }
+        let surfaceSize = size ?? ghostty_surface_size(surface)
+        let scale = window?.backingScaleFactor ?? NSScreen.main?.backingScaleFactor ?? 2
+        let cellHeight = CGFloat(surfaceSize.cell_height_px) / scale
+        let rowCount = Int(surfaceSize.rows)
+
+        CATransaction.begin()
+        CATransaction.setDisableActions(true)
+        commandBlockOverlay.frame = bounds
+        commandBlockOverlay.sublayers = commandBlocks.map { block in
+            let frame = ghosttyCommandBlockFrame(
+                block,
+                bounds: bounds,
+                rows: rowCount,
+                cellHeight: cellHeight
+            )
+            let hovered = hoveredCommandBlock.map {
+                $0.startRow == block.startRow && $0.endRow == block.endRow
+            } ?? false
+            let selected = selectedCommandBlock?.id == block.id
+
+            let surfaceLayer = CALayer()
+            surfaceLayer.frame = frame
+            surfaceLayer.cornerRadius = 3
+            surfaceLayer.backgroundColor = commandBlockColor(
+                selected: selected,
+                hovered: hovered
+            ).cgColor
+
+            let accentLayer = CALayer()
+            accentLayer.frame = CGRect(x: 0, y: 0, width: 3, height: frame.height)
+            accentLayer.cornerRadius = 1.5
+            accentLayer.backgroundColor = commandBlockAccentColor(
+                selected: selected,
+                hovered: hovered
+            ).cgColor
+            surfaceLayer.addSublayer(accentLayer)
+            return surfaceLayer
+        }
+        CATransaction.commit()
+    }
+
+    private func commandBlockColor(selected: Bool, hovered: Bool) -> NSColor {
+        if selected {
+            return NSColor(red: 0x72 / 255, green: 0x2F / 255, blue: 0x37 / 255, alpha: 0.28)
+        }
+        if hovered {
+            return NSColor(red: 0x72 / 255, green: 0x2F / 255, blue: 0x37 / 255, alpha: 0.16)
+        }
+        return NSColor.white.withAlphaComponent(0.045)
+    }
+
+    private func commandBlockAccentColor(selected: Bool, hovered: Bool) -> NSColor {
+        if selected {
+            return NSColor(red: 0xB8 / 255, green: 0x62 / 255, blue: 0x6C / 255, alpha: 0.95)
+        }
+        if hovered {
+            return NSColor(red: 0x8B / 255, green: 0x3D / 255, blue: 0x47 / 255, alpha: 0.8)
+        }
+        return NSColor.white.withAlphaComponent(0.16)
+    }
+
+    private func viewportRow(at point: CGPoint) -> Int? {
+        guard let surface else { return nil }
+        let size = ghostty_surface_size(surface)
+        let scale = window?.backingScaleFactor ?? NSScreen.main?.backingScaleFactor ?? 2
+        return ghosttyViewportRow(
+            at: point,
+            bounds: bounds,
+            rows: Int(size.rows),
+            cellHeight: CGFloat(size.cell_height_px) / scale
+        )
     }
 
     private func setupTrackingArea() {
@@ -215,11 +475,11 @@ final class GhosttyMetalView: NSView, GhosttySessionSurfaceOwner, @preconcurrenc
     override var acceptsFirstResponder: Bool { true }
 
     override func becomeFirstResponder() -> Bool {
-        if let surface {
+        let accepted = super.becomeFirstResponder()
+        if accepted, let surface {
             ghostty_surface_set_focus(surface, true)
         }
-        onFocus()
-        return super.becomeFirstResponder()
+        return accepted
     }
 
     override func resignFirstResponder() -> Bool {
@@ -237,6 +497,7 @@ final class GhosttyMetalView: NSView, GhosttySessionSurfaceOwner, @preconcurrenc
     override func setFrameSize(_ newSize: NSSize) {
         super.setFrameSize(newSize)
         updateSurfaceSize()
+        if isShellPane { refreshCommandBlocks() }
     }
 
     private func updateContentScale() {
@@ -261,6 +522,9 @@ final class GhosttyMetalView: NSView, GhosttySessionSurfaceOwner, @preconcurrenc
     // MARK: - Keyboard Input
 
     override func performKeyEquivalent(with event: NSEvent) -> Bool {
+        // AppKit visits sibling views for key equivalents; only the keyboard
+        // responder may consume a terminal shortcut or send it to its PTY.
+        guard window?.firstResponder === self else { return false }
         guard let surface else { return super.performKeyEquivalent(with: event) }
 
         let mods = event.modifierFlags
@@ -447,8 +711,21 @@ final class GhosttyMetalView: NSView, GhosttySessionSurfaceOwner, @preconcurrenc
     // MARK: - Mouse Input
 
     override func mouseDown(with event: NSEvent) {
-        window?.makeFirstResponder(self)
+        focusForPointerInput()
         guard let surface else { return }
+        let point = convert(event.locationInWindow, from: nil)
+        let selectionModifiers: NSEvent.ModifierFlags = [.command, .control, .option, .shift]
+        if isShellPane,
+           event.modifierFlags.intersection(selectionModifiers).isEmpty,
+           let row = viewportRow(at: point),
+           let block = ghosttyCommandBlock(atViewportRow: row, in: commandBlocks),
+           let text = readCommandBlock(surface: surface, viewportRow: row) {
+            commandBlockMouseDown = true
+            selectedCommandBlock = (id: block.id, text: text)
+            renderCommandBlocks()
+            return
+        }
+        clearCommandBlockSelection()
         _ = ghostty_surface_mouse_button(
             surface,
             GHOSTTY_MOUSE_PRESS,
@@ -458,6 +735,10 @@ final class GhosttyMetalView: NSView, GhosttySessionSurfaceOwner, @preconcurrenc
     }
 
     override func mouseUp(with event: NSEvent) {
+        if commandBlockMouseDown {
+            commandBlockMouseDown = false
+            return
+        }
         guard let surface else { return }
         _ = ghostty_surface_mouse_button(
             surface,
@@ -468,6 +749,7 @@ final class GhosttyMetalView: NSView, GhosttySessionSurfaceOwner, @preconcurrenc
     }
 
     override func rightMouseDown(with event: NSEvent) {
+        focusForPointerInput()
         guard let surface else { return }
 
         // Send to terminal first
@@ -497,15 +779,29 @@ final class GhosttyMetalView: NSView, GhosttySessionSurfaceOwner, @preconcurrenc
     override func mouseMoved(with event: NSEvent) {
         guard let surface else { return }
         let point = convert(event.locationInWindow, from: nil)
+        if isShellPane {
+            let nextHover = viewportRow(at: point).flatMap {
+                ghosttyCommandBlock(atViewportRow: $0, in: commandBlocks)
+            }
+            if nextHover != hoveredCommandBlock {
+                hoveredCommandBlock = nextHover
+                renderCommandBlocks()
+            }
+        }
         let y = bounds.height - point.y
         ghostty_surface_mouse_pos(surface, point.x, y, translateMods(event.modifierFlags))
     }
 
     override func mouseDragged(with event: NSEvent) {
+        if commandBlockMouseDown { return }
         mouseMoved(with: event)
     }
 
     override func mouseExited(with event: NSEvent) {
+        if hoveredCommandBlock != nil {
+            hoveredCommandBlock = nil
+            renderCommandBlocks()
+        }
         guard let surface else { return }
         // Send -1, -1 to indicate mouse left the view
         ghostty_surface_mouse_pos(surface, -1, -1, translateMods(event.modifierFlags))
@@ -570,20 +866,114 @@ final class GhosttyMetalView: NSView, GhosttySessionSurfaceOwner, @preconcurrenc
     // MARK: - Copy/Paste
 
     private func copySelection() -> Bool {
-        // The selection is handled by Ghostty's write_clipboard_cb callback
-        // For now, return false to let the system handle it
-        return false
+        if let selectedCommandBlock {
+            let pasteboard = NSPasteboard.general
+            pasteboard.clearContents()
+            return pasteboard.setString(selectedCommandBlock.text, forType: .string)
+        }
+        guard let surface else { return false }
+        var text = ghostty_text_s()
+        guard ghostty_surface_read_selection(surface, &text) else { return false }
+        defer { ghostty_surface_free_text(surface, &text) }
+        guard let bytes = text.text, text.text_len > 0 else { return false }
+
+        let pasteboard = NSPasteboard.general
+        pasteboard.clearContents()
+        let selection = String(decoding: Data(bytes: bytes, count: Int(text.text_len)), as: UTF8.self)
+        return pasteboard.setString(selection, forType: .string)
+    }
+
+    private func focusForPointerInput() {
+        onFocus()
+        window?.makeFirstResponder(self)
+    }
+
+    private func clearCommandBlockSelection() {
+        guard selectedCommandBlock != nil else { return }
+        selectedCommandBlock = nil
+        renderCommandBlocks()
+    }
+
+    private func readCommandBlock(surface: ghostty_surface_t, viewportRow: Int) -> String? {
+        var text = ghostty_text_s()
+        guard ghostty_surface_read_command_block(surface, UInt16(viewportRow), &text) else {
+            return nil
+        }
+        defer { ghostty_surface_free_text(surface, &text) }
+        guard let bytes = text.text, text.text_len > 0 else { return nil }
+        return String(decoding: Data(bytes: bytes, count: Int(text.text_len)), as: UTF8.self)
     }
 
     private func pasteFromClipboard() -> Bool {
-        guard let surface else { return false }
-
-        guard let string = NSPasteboard.general.string(forType: .string) else {
-            return false
+        if case .session = terminal,
+           ghosttyPrefersImageShortcut(NSPasteboard.general) {
+            return sendImagePasteShortcut()
         }
+        guard let text = terminalPasteText(from: NSPasteboard.general) else { return false }
+        return insertTerminalText(text)
+    }
 
-        string.withCString { ptr in
-            ghostty_surface_text(surface, ptr, UInt(string.utf8.count))
+    private func sendImagePasteShortcut() -> Bool {
+        guard let surface else { return false }
+        var key = ghostty_input_key_s()
+        key.action = GHOSTTY_ACTION_PRESS
+        key.mods = GHOSTTY_MODS_CTRL
+        key.consumed_mods = GHOSTTY_MODS_NONE
+        key.keycode = 0x09 // macOS V key
+        key.unshifted_codepoint = 118 // v
+        _ = ghostty_surface_key(surface, key)
+        key.action = GHOSTTY_ACTION_RELEASE
+        _ = ghostty_surface_key(surface, key)
+        return true
+    }
+
+    override func draggingEntered(_ sender: any NSDraggingInfo) -> NSDragOperation {
+        guard surface != nil,
+              ghosttyAcceptsDrop(sender.draggingPasteboard.types)
+        else { return [] }
+        showDropHighlight()
+        return .copy
+    }
+
+    override func draggingExited(_ sender: (any NSDraggingInfo)?) {
+        hideDropHighlight()
+    }
+
+    override func draggingEnded(_ sender: any NSDraggingInfo) {
+        hideDropHighlight()
+    }
+
+    override func performDragOperation(_ sender: any NSDraggingInfo) -> Bool {
+        hideDropHighlight()
+        guard let text = terminalPasteText(from: sender.draggingPasteboard) else { return false }
+        return insertTerminalText(text)
+    }
+
+    private func showDropHighlight() {
+        if dropHighlight == nil {
+            let highlight = NSView()
+            highlight.wantsLayer = true
+            highlight.layer?.borderWidth = 2
+            highlight.layer?.cornerRadius = 6
+            highlight.layer?.borderColor = NSColor.controlAccentColor.cgColor
+            highlight.layer?.backgroundColor =
+                NSColor.controlAccentColor.withAlphaComponent(0.08).cgColor
+            highlight.autoresizingMask = [.width, .height]
+            addSubview(highlight)
+            dropHighlight = highlight
+        }
+        dropHighlight?.frame = bounds
+        dropHighlight?.isHidden = false
+    }
+
+    private func hideDropHighlight() {
+        dropHighlight?.isHidden = true
+    }
+
+    private func insertTerminalText(_ text: String) -> Bool {
+        guard let surface else { return false }
+        text.withCString { ptr in
+            ghostty_surface_text(surface, ptr, UInt(text.utf8.count))
         }
         return true
     }
@@ -644,22 +1034,57 @@ final class GhosttyMetalView: NSView, GhosttySessionSurfaceOwner, @preconcurrenc
 
     deinit {
         MainActor.assumeIsolated {
-            if let sessionId, let surface {
-                GhosttyManager.shared.unregisterSurface(sessionId, surface: surface)
-            }
-            teardownSurface(freeSurface: true)
+            destroySurface()
         }
     }
+}
+
+/// Raw image bytes go to the provider's Ctrl+V clipboard-image shortcut; a
+/// copied file — even an image file — pastes as its path, matching drops.
+func ghosttyPrefersImageShortcut(_ pasteboard: NSPasteboard) -> Bool {
+    if let urls = pasteboard.readObjects(forClasses: [NSURL.self]) as? [URL],
+       urls.contains(where: \.isFileURL) {
+        return false
+    }
+    return NSImage(pasteboard: pasteboard) != nil
+}
+
+func terminalPasteText(from pasteboard: NSPasteboard) -> String? {
+    if let urls = pasteboard.readObjects(forClasses: [NSURL.self]) as? [URL],
+       let first = urls.first(where: \.isFileURL) {
+        return shellEscape(first.path)
+    }
+
+    if let image = NSImage(pasteboard: pasteboard),
+       let tiff = image.tiffRepresentation,
+       let bitmap = NSBitmapImageRep(data: tiff),
+       let png = bitmap.representation(using: .png, properties: [:]) {
+        let path = FileManager.default.temporaryDirectory
+            .appendingPathComponent("loopflow-image-\(UUID().uuidString.lowercased()).png")
+        guard (try? png.write(to: path, options: .atomic)) != nil else { return nil }
+        return shellEscape(path.path)
+    }
+
+    if let text = pasteboard.string(forType: .string) { return text }
+    if let url = pasteboard.string(forType: .URL) { return shellEscape(url) }
+    return nil
 }
 
 #else
 
 // Stub view when GhosttyKit is not available
+@MainActor
+final class GhosttySurfacePool {
+    func hasSurface(_ id: TerminalIdentity) -> Bool { false }
+    func release(_ id: TerminalIdentity) {}
+}
+
 struct GhosttyTerminalView: View {
     let workingDirectory: String
     let argv: [String]
     let env: [String: String]
-    let sessionId: String?
+    let terminal: TerminalIdentity
+    let surfacePool: GhosttySurfacePool?
     let isFocused: Bool
     let onSurfaceCreated: () -> Void
     let onFocus: () -> Void
@@ -669,7 +1094,8 @@ struct GhosttyTerminalView: View {
         workingDirectory: String,
         argv: [String] = [],
         env: [String: String] = [:],
-        sessionId: String? = nil,
+        terminal: TerminalIdentity,
+        surfacePool: GhosttySurfacePool? = nil,
         isFocused: Bool = false,
         onSurfaceCreated: @escaping () -> Void = {},
         onFocus: @escaping () -> Void = {},
@@ -678,7 +1104,8 @@ struct GhosttyTerminalView: View {
         self.workingDirectory = workingDirectory
         self.argv = argv
         self.env = env
-        self.sessionId = sessionId
+        self.terminal = terminal
+        self.surfacePool = surfacePool
         self.isFocused = isFocused
         self.onSurfaceCreated = onSurfaceCreated
         self.onFocus = onFocus
@@ -702,6 +1129,15 @@ struct GhosttyTerminalView: View {
 }
 
 #endif
+
+let ghosttyDropTypes: [NSPasteboard.PasteboardType] = [
+    .fileURL, .URL, .tiff, .png, .string,
+]
+
+func ghosttyAcceptsDrop(_ types: [NSPasteboard.PasteboardType]?) -> Bool {
+    guard let types else { return false }
+    return !Set(types).isDisjoint(with: ghosttyDropTypes)
+}
 
 func buildGhosttyShellCommand(argv: [String], env: [String: String]) -> String? {
     let command = argv.map(shellEscape).joined(separator: " ")

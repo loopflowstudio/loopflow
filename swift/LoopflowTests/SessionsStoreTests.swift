@@ -65,8 +65,8 @@ struct SessionsStoreTests {
         #expect(item(store, "second")?.surface?.openArgv.suffix(3) == ["session", "open", "second"])
     }
 
-    @Test("Selecting an interactive Session replaces its active provider client")
-    func interactiveSelectionUsesReplace() async throws {
+    @Test("Selecting an active Session leaves its other terminal running until Move here")
+    func interactiveSelectionRequiresExplicitMove() async throws {
         let store = SessionsStore(
             scope: .repo("/tmp/repo"),
             query: RegistryQuery { args, _ in
@@ -79,18 +79,73 @@ struct SessionsStoreTests {
         ]))
 
         let opened = await store.select("native")
+        #expect(opened == nil)
+        #expect(item(store, "native")?.state == .elsewhere)
 
-        #expect(opened?.id == "native")
+        let moved = await store.moveHere("native")
+
+        #expect(moved?.id == "native")
         #expect(item(store, "native")?.surface != nil)
     }
 
-    @Test("Polling preserves an open interactive Session terminal")
-    func reconcilePreservesInteractiveSurface() async throws {
+    @Test("Polling preserves the prepared interactive launch command", arguments: [false, true])
+    func reconcilePreservesPreparedLaunch(replacing: Bool) async throws {
+        let store = SessionsStore(
+            scope: .repo("/tmp/repo"),
+            query: RegistryQuery { _, _ in
+                session(id: "native", state: "closed", kind: "interactive", replacing: replacing)
+            }
+        )
+        store.reconcile(try records([
+            session(id: "native", state: replacing ? "active" : "closed", kind: "interactive"),
+        ]))
+
+        let prepared = if replacing {
+            await store.moveHere("native")
+        } else {
+            await store.select("native")
+        }
+        #expect(prepared?.openArgv.contains("--replace") == replacing)
+        store.reconcile(try records([
+            session(id: "native", state: "active", kind: "interactive"),
+        ]))
+
+        #expect(item(store, "native")?.state == .prepared)
+        #expect(item(store, "native")?.surface?.openArgv == prepared?.openArgv)
+    }
+
+    @Test("An externally killed terminal reclassifies as active elsewhere")
+    func externalKillReclassifies() async throws {
+        let store = SessionsStore(
+            scope: .repo("/tmp/repo"),
+            query: RegistryQuery { _, _ in
+                session(id: "native", state: "active", kind: "interactive")
+            }
+        )
+        store.reconcile(try records([
+            session(id: "native", state: "active", kind: "interactive"),
+        ]))
+        _ = await store.moveHere("native")
+        store.recordPaneLive("native")
+        #expect(item(store, "native")?.state == .live)
+
+        store.noteSurfaceClosed(.shell("native"))
+        store.noteSurfaceClosed(.taskTerminal("native"))
+        #expect(item(store, "native")?.state == .live)
+
+        store.noteSurfaceClosed(.session("native"))
+
+        #expect(item(store, "native")?.state == .elsewhere)
+        #expect(item(store, "native")?.surface == nil)
+    }
+
+    @Test("A failed open stays visible across polling until superseded")
+    func failedOpenSurvivesPolling() async throws {
         let store = SessionsStore(
             scope: .repo("/tmp/repo"),
             query: RegistryQuery { args, _ in
-                #expect(args == ["session", "open", "native", "--json", "--replace"])
-                return session(id: "native", state: "closed", kind: "interactive")
+                #expect(args.contains("open"))
+                return "not json"
             }
         )
         store.reconcile(try records([
@@ -98,11 +153,17 @@ struct SessionsStoreTests {
         ]))
 
         _ = await store.select("native")
+        #expect(item(store, "native")?.error != nil)
+
+        store.reconcile(try records([
+            session(id: "native", state: "closed", kind: "interactive"),
+        ]))
+        #expect(item(store, "native")?.error != nil)
+
         store.reconcile(try records([
             session(id: "native", state: "active", kind: "interactive"),
         ]))
-
-        #expect(item(store, "native")?.surface?.state == .active)
+        #expect(item(store, "native")?.state == .elsewhere)
     }
 
     @Test("Completing an interactive Session removes it from Sessions")
@@ -244,7 +305,7 @@ private func records(_ entries: [String]) throws -> [SessionRecord] {
     )
 }
 
-private func session(id: String, state: String, kind: String = "flow") -> String {
+private func session(id: String, state: String, kind: String = "flow", replacing: Bool = false) -> String {
     """
     {
       "id": "\(id)",
@@ -255,7 +316,7 @@ private func session(id: String, state: String, kind: String = "flow") -> String
       "cwd": "/tmp/repo.\(id)",
       "state": "\(state)",
       "ready_summary": \(state == "ready" ? "\"Ready for review\"" : "null"),
-      "open_argv": ["lf", "session", "open", "\(id)"]
+      "open_argv": ["lf", "session", "open", "\(id)"\(replacing ? ", \"--replace\"" : "")]
     }
     """
 }

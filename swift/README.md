@@ -21,32 +21,54 @@ only through the Task Work that owns them.
 ⌘W / ⌘Z     close / restore a pane
 ```
 
+Shell panes with Ghostty shell integration group each completed command and its
+output into a full-width block. Click anywhere in a block to select the whole
+unit, then use Command-C or the terminal's context menu to copy the command and
+all of its output.
+Command-Up/Down navigates between prompts. The live prompt remains ungrouped;
+Session/provider panes keep their native TUI behavior and do not expose shell
+command blocks.
+Automatic integration depends on the configured shell; macOS `/bin/bash` is
+excluded by the pinned Ghostty build.
+
 Opening Loopflow to a repository leads with its Sessions queue. Select a session
 to resume its provider-native terminal in the focused Ghostty pane; selecting it again
 jumps back to that pane. Each pane owns one native libghostty surface. Sessions
 include native interactive provider Runs, Task human FlowSteps, and `lf ask`
 calls made by ordinary Runs. Rows use the real prompt or Task title plus the
-actual provider, Skill, or Run detail.
+actual provider, Skill, or Run detail. The row badge names the terminal's real
+state: **VIEWING** (in a pane here), **RUNNING** (live, view closed),
+**ELSEWHERE** (another client — Warp, another window, SSH — holds it).
+
+Selecting an ELSEWHERE row opens a pane that explains the situation; nothing is
+stopped until its explicit **Move here**, which stops the other client and
+resumes the Session in that pane. Unsent text typed in the other client is
+lost, and the pane says so before you commit.
 
 The green **Complete** action stops an interactive provider client and removes
-its Session from the queue while retaining provider-native history. Closing its
-pane stops only the current client; the Session stays resumable. An Ask agent
+its Session from the queue while retaining provider-native history. Closing a
+pane only hides the view: the terminal and its provider client keep running
+(the row shows RUNNING) and reopen exactly as left. An Ask agent
 can mark itself ready, but the row and terminal remain until the human completes
 the conversation. Task FlowSteps instead expose Approve and Iterate. Closing
 or detaching either human boundary never resolves it.
 
 Task FlowSteps run ordinary `lf --tui --as task:<id> <skill>` provider Runs.
 Ad-hoc Asks run in the originating Run's exact checkout so the session can edit
-files before the caller resumes. A thin detached PTY cradle keeps only the
-initial client alive; selecting a Session stops that client and resumes its
-provider-native history. The app lists, opens, and acts on the shared Rust
-`SessionRecord` projection; it owns no parallel queue.
-Selecting another session replaces the focused pane. Use the split controls
-first when both sessions should remain visible; closing the final pane clears it
-without ending the durable session.
+files before the caller resumes. The app lists, opens, and acts on the shared
+Rust `SessionRecord` projection; it owns no parallel queue.
+Selecting another session replaces the focused pane's view. Use the split
+controls first when both sessions should remain visible; closing the final pane
+clears it without ending the durable session.
 Completing the selected Session returns the main pane to its empty workspace.
 Use **New shell** there or in the sidebar for a bare terminal, and **Waves &
-roadmap** to return to Work.
+roadmap** to return to Work. A shell pane closes when its process exits;
+closing a shell pane ends its shell. A Session whose provider client is
+stopped elsewhere reclassifies to ELSEWHERE instead of showing a dead
+terminal as live. Terminals survive Sessions ↔ Work navigation and
+repository switches within a window. Each window owns its panes and surfaces;
+the same Session shown from another window is simply another client and reads
+ELSEWHERE there.
 Session reads and preparation run in the opened repository rather than a
 machine-wide aggregate.
 
@@ -160,6 +182,7 @@ Home.
 | `uv run python scripts/loopflow-dev.py install` | Build and install without launching |
 | `uv run python scripts/loopflow-dev.py run-debug` | Build and run with stdout |
 | `uv run python scripts/loopflow-dev.py build` | Build only |
+| `uv run python scripts/loopflow-dev.py ghostty-build` | Rebuild the pinned patched GhosttyKit and emit its SwiftPM artifact/checksum |
 | `uv run python scripts/loopflow-dev.py test` | Run unit tests |
 | `uv run python scripts/loopflow-dev.py xcode` | Generate and open the Xcode project |
 | `uv run python scripts/loopflow-dev.py release` | Build the release app and DMG |

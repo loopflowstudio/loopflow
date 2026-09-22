@@ -19,6 +19,7 @@ struct MultiplexerStoreTests {
         let pane = try #require(store.split(first, axis: .vertical))
         #expect(store.layout.allPanes.count == 2)
         #expect(store.focusedPaneId == pane.id)
+        #expect(pane.content == .empty)
         #expect(store.color(for: pane.id) != store.color(for: first))
     }
 
@@ -74,6 +75,19 @@ struct MultiplexerStoreTests {
         store.newShell()
         #expect(store.focusedPane.content == .shell)
         #expect(store.layout.allPanes.count == 2)
+    }
+
+    @Test("opening a Session keeps the shell pane alive")
+    func loadingSessionPreservesShell() {
+        let store = MultiplexerStore()
+        store.newShell()
+
+        store.load(sessionId: "session-1")
+
+        #expect(store.layout.allPanes.map(\.content) == [
+            .shell,
+            .session(id: "session-1"),
+        ])
     }
 
     @Test("close collapses the split and undo restores it")

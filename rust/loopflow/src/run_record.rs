@@ -163,6 +163,19 @@ pub(crate) struct ProviderClientRef {
     pub(crate) started_at: OffsetDateTime,
 }
 
+#[derive(Debug, Clone, Copy, Serialize, Deserialize, PartialEq, Eq)]
+#[serde(rename_all = "snake_case")]
+pub(crate) enum ProviderClientStopReason {
+    Moved,
+    Completed,
+}
+
+#[derive(Debug, Clone, Serialize, Deserialize, PartialEq, Eq)]
+struct ProviderClientStop {
+    schema_version: u32,
+    reason: ProviderClientStopReason,
+}
+
 #[derive(Debug, Clone, Serialize, Deserialize, PartialEq, Eq)]
 struct SessionResolution {
     schema_version: u32,
@@ -732,6 +745,7 @@ pub(crate) fn write_provider_client(dir: &Path, pid: u32) -> std::io::Result<()>
         ));
     }
     read_manifest(dir)?;
+    remove_provider_client_stop(dir, pid)?;
     let root = dir.join("provider-clients");
     fs::create_dir_all(&root)?;
     let path = root.join(format!("{pid}.json"));
@@ -747,6 +761,66 @@ pub(crate) fn write_provider_client(dir: &Path, pid: u32) -> std::io::Result<()>
     )?;
     fs::rename(staging, path)?;
     sync_dir(&root)
+}
+
+pub(crate) fn read_provider_client_stop(
+    dir: &Path,
+    pid: u32,
+) -> std::io::Result<Option<ProviderClientStopReason>> {
+    let path = dir
+        .join("provider-client-stops")
+        .join(format!("{pid}.json"));
+    let bytes = match fs::read(path) {
+        Ok(bytes) => bytes,
+        Err(error) if error.kind() == std::io::ErrorKind::NotFound => return Ok(None),
+        Err(error) => return Err(error),
+    };
+    let stop: ProviderClientStop = serde_json::from_slice(&bytes).map_err(std::io::Error::other)?;
+    if stop.schema_version != SCHEMA_VERSION {
+        return Err(std::io::Error::new(
+            std::io::ErrorKind::InvalidData,
+            "invalid provider client stop",
+        ));
+    }
+    Ok(Some(stop.reason))
+}
+
+pub(crate) fn write_provider_client_stop(
+    dir: &Path,
+    pid: u32,
+    reason: ProviderClientStopReason,
+) -> std::io::Result<()> {
+    if pid <= 1 {
+        return Err(std::io::Error::new(
+            std::io::ErrorKind::InvalidInput,
+            "provider client pid must identify a child process",
+        ));
+    }
+    read_manifest(dir)?;
+    let root = dir.join("provider-client-stops");
+    fs::create_dir_all(&root)?;
+    let path = root.join(format!("{pid}.json"));
+    let staging = root.join(format!(".{pid}-{}.staging", Uuid::new_v4()));
+    write_private_exclusive(
+        &staging,
+        &serde_json::to_vec_pretty(&ProviderClientStop {
+            schema_version: SCHEMA_VERSION,
+            reason,
+        })
+        .map_err(std::io::Error::other)?,
+    )?;
+    fs::rename(staging, path)?;
+    sync_dir(&root)
+}
+
+pub(crate) fn remove_provider_client_stop(dir: &Path, pid: u32) -> std::io::Result<()> {
+    let root = dir.join("provider-client-stops");
+    let path = root.join(format!("{pid}.json"));
+    match fs::remove_file(path) {
+        Ok(()) => sync_dir(&root),
+        Err(error) if error.kind() == std::io::ErrorKind::NotFound => Ok(()),
+        Err(error) => Err(error),
+    }
 }
 
 pub(crate) fn remove_provider_client(dir: &Path, pid: u32) -> std::io::Result<()> {

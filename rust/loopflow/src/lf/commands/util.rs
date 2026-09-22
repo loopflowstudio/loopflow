@@ -7,7 +7,7 @@ use time::{format_description::well_known::Rfc3339, Duration, OffsetDateTime};
 
 use crate::engine::{check_cli_available, codex_permission_args, workspace_add_dirs, LaunchTarget};
 use crate::provider_auth::Provider;
-use crate::run_record::ProviderClientRef;
+use crate::run_record::{ProviderClientRef, ProviderClientStopReason};
 
 pub fn find_repo_root() -> Result<PathBuf> {
     crate::repo::find_repo_root()
@@ -286,9 +286,15 @@ pub(crate) fn replace_provider_clients(
     dir: &Path,
     harness: &str,
     clients: &[ProviderClientRef],
+    reason: ProviderClientStopReason,
 ) -> Result<()> {
     for client in clients {
-        signal_provider_client(client.pid, libc::SIGTERM)?;
+        crate::run_record::write_provider_client_stop(dir, client.pid, reason)
+            .context("record why the provider client is stopping")?;
+        if let Err(error) = signal_provider_client(client.pid, libc::SIGTERM) {
+            let _ = crate::run_record::remove_provider_client_stop(dir, client.pid);
+            return Err(error);
+        }
     }
     for _ in 0..20 {
         if clients
@@ -459,22 +465,42 @@ fn spawn_session_command_with_env(
     provider_session_id: Option<&str>,
     exact_account_id: Option<&crate::store::ProviderAccountId>,
 ) -> Result<()> {
-    let status = session_command_status_with_env(
+    let outcome = session_command_status_with_env(
         command,
         environment,
         provider_session_id,
         exact_account_id,
     )?;
-    if status.success() {
+    if let Some(reason) = outcome.stop_reason {
+        eprintln!("{}", provider_client_stop_message(reason));
+        Ok(())
+    } else if outcome.status.success() {
         Ok(())
     } else if provider_session_id.is_some() {
         Err(anyhow!(
-            "{} could not open this session (status {status}). If another client still owns it, close that client or use `lf session open --replace` for a Loopflow-owned client.",
-            command.program
+            "{} could not open this session (status {}). If another client still owns it, close that client or use `lf session open --replace` for a Loopflow-owned client.",
+            command.program,
+            outcome.status,
         ))
     } else {
-        Err(anyhow!("session launcher exited with status {status}"))
+        Err(anyhow!(
+            "session launcher exited with status {}",
+            outcome.status
+        ))
     }
+}
+
+fn provider_client_stop_message(reason: ProviderClientStopReason) -> &'static str {
+    match reason {
+        ProviderClientStopReason::Moved => "Session moved to another terminal.",
+        ProviderClientStopReason::Completed => "Session completed elsewhere.",
+    }
+}
+
+#[derive(Debug)]
+struct SessionCommandOutcome {
+    status: std::process::ExitStatus,
+    stop_reason: Option<ProviderClientStopReason>,
 }
 
 fn session_command_status_with_env(
@@ -482,7 +508,7 @@ fn session_command_status_with_env(
     environment: &BTreeMap<String, String>,
     provider_session_id: Option<&str>,
     exact_account_id: Option<&crate::store::ProviderAccountId>,
-) -> Result<std::process::ExitStatus> {
+) -> Result<SessionCommandOutcome> {
     if !check_cli_available(&command.program) {
         return Err(anyhow!(
             "'{}' CLI not found. Install it and rerun `lf init`.",
@@ -562,7 +588,7 @@ fn session_command_status_with_env(
         return run_opencode_with_session_observer(process, environment);
     }
     let mut child = process.spawn()?;
-    let _client = match ProviderClientGuard::publish(environment, child.id()) {
+    let client = match ProviderClientGuard::publish(environment, child.id()) {
         Ok(client) => client,
         Err(error) => {
             let _ = child.kill();
@@ -570,7 +596,16 @@ fn session_command_status_with_env(
             return Err(error);
         }
     };
-    child.wait().map_err(Into::into)
+    let status = child.wait()?;
+    let stop_reason = client
+        .as_ref()
+        .map(ProviderClientGuard::take_stop_reason)
+        .transpose()?
+        .flatten();
+    Ok(SessionCommandOutcome {
+        status,
+        stop_reason,
+    })
 }
 
 #[derive(Debug)]
@@ -589,12 +624,24 @@ impl ProviderClientGuard {
             .map_err(|error| anyhow!("cannot record active provider client: {error}"))?;
         Ok(Some(Self { run_dir, pid }))
     }
+
+    fn take_stop_reason(&self) -> Result<Option<ProviderClientStopReason>> {
+        let reason = crate::run_record::read_provider_client_stop(&self.run_dir, self.pid)?;
+        if reason.is_some() {
+            crate::run_record::remove_provider_client_stop(&self.run_dir, self.pid)?;
+        }
+        Ok(reason)
+    }
 }
 
 impl Drop for ProviderClientGuard {
     fn drop(&mut self) {
         if let Err(error) = crate::run_record::remove_provider_client(&self.run_dir, self.pid) {
             tracing::warn!(pid = self.pid, %error, "failed to clear provider client receipt");
+        }
+        if let Err(error) = crate::run_record::remove_provider_client_stop(&self.run_dir, self.pid)
+        {
+            tracing::warn!(pid = self.pid, %error, "failed to clear provider client stop");
         }
     }
 }
@@ -619,7 +666,7 @@ fn codex_session_start_hook_for(executable: &Path) -> String {
 fn run_opencode_with_session_observer(
     mut process: Command,
     environment: &BTreeMap<String, String>,
-) -> Result<std::process::ExitStatus> {
+) -> Result<SessionCommandOutcome> {
     let run_dir = PathBuf::from(
         environment
             .get(crate::run_record::RUN_DIR_ENV)
@@ -627,7 +674,7 @@ fn run_opencode_with_session_observer(
     );
     process.stderr(Stdio::piped());
     let mut child = process.spawn()?;
-    let _client = match ProviderClientGuard::publish(environment, child.id()) {
+    let client = match ProviderClientGuard::publish(environment, child.id()) {
         Ok(client) => client,
         Err(error) => {
             let _ = child.kill();
@@ -673,7 +720,15 @@ fn run_opencode_with_session_observer(
     observer
         .join()
         .map_err(|_| anyhow!("OpenCode session observer panicked"))??;
-    Ok(status)
+    let stop_reason = client
+        .as_ref()
+        .map(ProviderClientGuard::take_stop_reason)
+        .transpose()?
+        .flatten();
+    Ok(SessionCommandOutcome {
+        status,
+        stop_reason,
+    })
 }
 
 fn parse_opencode_session_id(line: &str) -> Option<&str> {
@@ -798,6 +853,22 @@ mod tests {
         );
     }
 
+    #[cfg(unix)]
+    fn fake_provider(temp: &tempfile::TempDir, body: &str) -> PathBuf {
+        use std::os::unix::fs::PermissionsExt;
+
+        let provider = temp.path().join("fake-provider");
+        std::fs::write(
+            &provider,
+            format!("#!/bin/sh\nif [ \"$1\" = \"--version\" ]; then exit 0; fi\n{body}\n"),
+        )
+        .unwrap();
+        let mut permissions = std::fs::metadata(&provider).unwrap().permissions();
+        permissions.set_mode(0o755);
+        std::fs::set_permissions(&provider, permissions).unwrap();
+        provider
+    }
+
     #[test]
     fn message_text_prefers_args_then_stdin_then_errors() {
         let text = message_text(&["hello".into(), "world".into()], std::io::empty()).unwrap();
@@ -808,6 +879,109 @@ mod tests {
 
         let err = message_text(&[], std::io::empty()).unwrap_err();
         assert!(err.to_string().contains("no message text"));
+    }
+
+    #[cfg(unix)]
+    #[test]
+    fn intentional_session_move_exits_cleanly() {
+        let temp = tempfile::tempdir().unwrap();
+        let provider = fake_provider(&temp, "trap 'exit 143' TERM\nwhile :; do sleep 0.05; done");
+        let capture = crate::run_record::CaptureHandle::begin_at(
+            temp.path(),
+            crate::run_record::RunSpec {
+                harness: "fake-provider".to_string(),
+                model: None,
+                surface: "tui".to_string(),
+                cwd: temp.path().to_path_buf(),
+                repo: None,
+                worktree: None,
+                skill: None,
+                subjects: Vec::new(),
+            },
+        )
+        .unwrap();
+        let run_dir = capture.artifact_dir();
+        let stop_dir = run_dir.clone();
+        let stop = std::thread::spawn(move || {
+            let deadline = std::time::Instant::now() + std::time::Duration::from_secs(5);
+            loop {
+                let clients = crate::run_record::read_provider_clients(&stop_dir).unwrap();
+                if !clients.is_empty() {
+                    let pid = clients[0].pid;
+                    replace_provider_clients(
+                        &stop_dir,
+                        "fake-provider",
+                        &clients,
+                        ProviderClientStopReason::Moved,
+                    )
+                    .unwrap();
+                    return pid;
+                }
+                assert!(
+                    std::time::Instant::now() < deadline,
+                    "provider client was not published"
+                );
+                std::thread::sleep(std::time::Duration::from_millis(10));
+            }
+        });
+        let command = SessionCommand {
+            program: provider.display().to_string(),
+            args: Vec::new(),
+            cwd: temp.path().to_path_buf(),
+        };
+
+        let result = spawn_session_command_with_env(&command, &capture.environment(), None, None);
+        let pid = stop.join().unwrap();
+
+        assert!(result.is_ok());
+        assert_eq!(
+            provider_client_stop_message(ProviderClientStopReason::Moved),
+            "Session moved to another terminal."
+        );
+        assert_eq!(
+            provider_client_stop_message(ProviderClientStopReason::Completed),
+            "Session completed elsewhere."
+        );
+        assert_eq!(
+            crate::run_record::read_provider_client_stop(&run_dir, pid).unwrap(),
+            None
+        );
+    }
+
+    #[cfg(unix)]
+    #[test]
+    fn provider_sigterm_without_stop_intent_remains_an_error() {
+        let temp = tempfile::tempdir().unwrap();
+        let provider = fake_provider(&temp, "kill -TERM $$");
+        let capture = crate::run_record::CaptureHandle::begin_at(
+            temp.path(),
+            crate::run_record::RunSpec {
+                harness: "fake-provider".to_string(),
+                model: None,
+                surface: "tui".to_string(),
+                cwd: temp.path().to_path_buf(),
+                repo: None,
+                worktree: None,
+                skill: None,
+                subjects: Vec::new(),
+            },
+        )
+        .unwrap();
+        let command = SessionCommand {
+            program: provider.display().to_string(),
+            args: Vec::new(),
+            cwd: temp.path().to_path_buf(),
+        };
+
+        let error = spawn_session_command_with_env(&command, &capture.environment(), None, None)
+            .expect_err("unexplained SIGTERM must remain an error");
+
+        assert!(error.to_string().contains("signal: 15"));
+        assert!(
+            crate::run_record::read_provider_clients(&capture.artifact_dir())
+                .unwrap()
+                .is_empty()
+        );
     }
 
     #[test]
@@ -1053,10 +1227,10 @@ mod tests {
             cwd: temp.path().to_path_buf(),
         };
 
-        let status =
+        let outcome =
             session_command_status_with_env(&command, &capture.environment(), None, None).unwrap();
 
-        assert!(status.success());
+        assert!(outcome.status.success());
         assert_eq!(
             crate::run_record::read_provider_session(&capture.artifact_dir())
                 .unwrap()

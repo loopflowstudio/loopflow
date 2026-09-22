@@ -62,7 +62,6 @@ final class TaskTerminalStore: ObservableObject {
     }
 
     func close(_ tab: TaskTerminal, taskId: String) {
-        GhosttyManager.shared.destroySession(tab.id)
         TmuxSessionRegistry.shared.killSession(named: tab.tmuxName)
         tabsByTask[taskId]?.removeAll { $0.id == tab.id }
         if selectedTabByTask[taskId] == tab.id {
@@ -412,7 +411,7 @@ private struct TaskTerminalWorkspaceView: View {
                 GhosttyTerminalView(
                     workingDirectory: worktree,
                     argv: ["tmux", "attach-session", "-t", selected.tmuxName],
-                    sessionId: selected.id
+                    terminal: .taskTerminal(selected.id)
                 )
                 .id(selected.id)
                 .background(LoopflowPalette.dark.background)

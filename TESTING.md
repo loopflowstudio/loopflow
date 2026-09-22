@@ -149,6 +149,13 @@ swift test --package-path swift --filter CatalogTests  # Catalog DTO / used-by c
 swift test --package-path swift --filter SomeTestClass  # Filtered
 ```
 
+SwiftPM links GhosttyKit; the Xcode project builds the terminal fallback.
+Keep tests that reference Ghostty-only types or helpers inside
+`#if canImport(GhosttyKit)`. When changing terminal code or its tests, gate both
+configurations: run the focused SwiftPM tests and
+`uv run python scripts/test.py --loopflow`. A SwiftPM pass alone does not prove
+the Xcode test target compiles.
+
 ## Loopflow UI Tests
 
 Two levels, split on purpose:

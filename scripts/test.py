@@ -82,6 +82,7 @@ def _run_artifact_root() -> Path:
 # hangs; they are not performance targets. An unlisted label falls back to
 # DEFAULT_BUDGET_S.
 PHASE_BUDGETS: dict[str, int] = {
+    "architecture": 120,
     "rustfmt": 120,
     "clippy": 900,
     "rust": 1200,
@@ -211,6 +212,16 @@ class Suite:
     # machine as it found it; a returned string fails a passing suite and is
     # appended to an already-failing one.
     postcheck: Optional[Callable[[], Optional[str]]] = None
+
+
+def _architecture_commands(_changed: list[str]) -> list[Command]:
+    return [
+        Command(
+            ["uv", "run", "python", "scripts/check_architecture.py"],
+            REPO_ROOT,
+            "architecture",
+        )
+    ]
 
 
 def _rust_commands(_changed: list[str]) -> list[Command]:
@@ -559,6 +570,13 @@ def _ui_host_postcheck() -> Optional[str]:
 
 # Ordered fast -> slow. Slow suites are gated behind --all / their own flag.
 SUITES: list[Suite] = [
+    Suite(
+        name="architecture",
+        slow=False,
+        trigger_desc="changed paths",
+        match=bool,
+        build=_architecture_commands,
+    ),
     Suite(
         name="python",
         slow=False,

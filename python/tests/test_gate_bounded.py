@@ -497,6 +497,22 @@ def test_python_verifier_change_runs_the_full_python_suite():
     assert plan.commands[0].argv == ["uv", "run", "pytest", "python/tests/"]
 
 
+def test_changed_gate_always_runs_architecture_check():
+    plan = next(
+        item
+        for item in gate.build_plan(changed=["docs/waves.md"], run_all=False, forced=set())
+        if item.suite.name == "architecture"
+    )
+
+    assert plan.run is True
+    assert plan.commands[0].argv == [
+        "uv",
+        "run",
+        "python",
+        "scripts/check_architecture.py",
+    ]
+
+
 def test_all_never_runs_the_required_host_gate():
     plans = gate.build_plan(changed=[], run_all=True, forced=set())
     ui = next(p for p in plans if p.suite.name == "ui-host")

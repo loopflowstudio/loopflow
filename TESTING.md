@@ -110,6 +110,7 @@ Path → suite mapping:
 
 | Changed | Suite | Runs |
 |---------|-------|------|
+| any changed path | architecture | `uv run python scripts/check_architecture.py` |
 | `rust/`, `Cargo.toml/lock` | rust | `cargo fmt`, `cargo clippy --all-targets`, then draft materialization in a disposable exact-tree worktree and `cargo nextest run --all` (falls back to `cargo test --all`) |
 | `python/`, `scripts/*.py`, top-level `*.py`, `pyproject.toml` | python | `uv run pytest python/tests/` (scoped to changed `test_*.py` when no source moved) |
 | `website/`, `docs/` | website | `cd website && uv run python dev.py test` |

@@ -562,6 +562,32 @@ mod tests {
     }
 
     #[test]
+    fn chapter_skills_are_registered() {
+        for name in [
+            "start-chapter",
+            "review-chapter",
+            "wave/start-chapter",
+            "wave/review-chapter",
+            "project/start-chapter",
+            "project/review-chapter",
+        ] {
+            assert!(get_builtin_skill(name).is_some(), "{name}");
+            assert!(
+                !builtin_skill_description(name).is_empty(),
+                "{name} needs a catalog description"
+            );
+        }
+        assert_eq!(
+            resolve_builtin_skill("start-chapter"),
+            Some("start-chapter")
+        );
+        assert_eq!(
+            resolve_builtin_skill("review-chapter"),
+            Some("review-chapter")
+        );
+    }
+
+    #[test]
     fn retired_export_memory_skill_is_not_registered() {
         assert!(get_builtin_skill("export-memory").is_none());
     }

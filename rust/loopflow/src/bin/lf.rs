@@ -599,9 +599,11 @@ fn run_target_in_repo(
         loopflow::lf::discovery::Target::Skill(_) => with_runtime(repo_root, command, || {
             with_skill_runtime(repo_root, name, || {
                 loopflow::lf::commands::run::run(Some(name), message, cli)?;
-                // Work-bound skills share their repository with other
+                // Bound or nested skills share their repository with other
                 // contributors and leave checkpoint composition to the caller.
-                if cli.work_subject_selector().is_some() {
+                if cli.work_subject_selector().is_some()
+                    || std::env::var_os(loopflow::durable::RUN_ID_ENV).is_some()
+                {
                     return Ok(());
                 }
                 // Unbound standalone skills retain their ordinary checkpoint.
@@ -632,12 +634,6 @@ fn run_bound_target_in_repo(
         loopflow::lf::discovery::Target::Skill(_) => with_runtime(repo_root, command, || {
             with_skill_runtime(repo_root, name, || {
                 loopflow::lf::commands::run::run_bound(Some(name), message, cli, binding)?;
-                let options = loopflow::ops::CommitOptions {
-                    add: true,
-                    message: Some(format!("lf commit: {name}")),
-                    ..loopflow::ops::CommitOptions::for_task(name)
-                };
-                loopflow::ops::commit_workflow(repo_root, &options, &loopflow::ops::NullProgress)?;
                 Ok(())
             })
         }),

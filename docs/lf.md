@@ -135,6 +135,7 @@ Project skills — shape and pursue measured bets inside a Wave:
 | Skill | What it does |
 |------|--------------|
 | `project/operate` | Judge KR evidence and launch the next useful Task in one turn |
+| `project/start-chapter` / `project/review-chapter` | One bet's chapter: propose definition, KRs, and Task dispositions / verdict every KR on dated evidence |
 | `project-promote` | Promote a Project into a resident child Wave |
 | `expand` / `reduce` / `polish` | Find higher leverage, simplifications, and finish quality |
 | `testing-audit` | Audit test value, rigor, cost, lifecycle ownership, and product proof |
@@ -151,6 +152,7 @@ Wave skills — maintain the durable operating context and its portfolio:
 | `wave/operate` | Read, decide, and take the one or two useful Wave moves in one turn |
 | `review-open-work` | Survey branches, PRs, worktrees, and waves for inbox-zero triage |
 | `update-wave` / `split-wave` | Maintain Wave structure and memory |
+| `wave/start-chapter` / `wave/review-chapter` | One Wave's chapter: propose its Project portfolio / report every KR verdict |
 | `s2-scan` / `s2-assess` | Coordination: backlogs, PR/path overlap, conflict risk and safe ordering |
 | `s3-scan` / `s3-assess` | Control: live health, velocity, CI, retries, worker-pool size |
 | `s4-scan` / `s4-assess` | Intelligence: dependencies, advisories, upstream APIs, what they imply |
@@ -161,6 +163,7 @@ Ops skills — raw prompt logic around mechanical git, PR, and release commands:
 | Skill | What it does |
 |------|--------------|
 | `init` | Connect the repo to Homes, accounts, Waves, and task execution |
+| `start-chapter` / `review-chapter` | Open a new planning chapter with the human / close the old chapter's evidence record |
 | `loopflow-validate` | Validate flows, skills, and directions |
 | `commit-message` | Generate a commit message without committing |
 | `rebase-conflicts` | Resolve conflicts after the mechanical rebase stops |

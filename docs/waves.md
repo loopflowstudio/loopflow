@@ -478,6 +478,34 @@ Schedules use 6/7-field cron syntax (seconds first). A schedule that comes due
 mid-turn fires at the next turn boundary; occurrences older than 24 hours are
 missed, not replayed.
 
+## Chapters
+
+A chapter is a dated planning interval. Reviews close its evidence record;
+starts let the plan expire while keeping shipped code:
+
+```bash
+lf -b --task LOO-123 review-chapter             # review every Wave and Project KR
+lf -i --task LOO-123 start-chapter              # shape the next Wave portfolio
+lf -b --wave product wave/review-chapter        # inspect one Wave
+lf -i --wave product wave/start-chapter         # shape one Wave's portfolio
+```
+
+Use a Task worktree for repository chapter work. The repository Run collects
+scoped reports and keeps the tracked evidence record under
+`.lf/chapters/<chapter-id>/` — start ledger, per-Wave and per-Project reports —
+so a cold checkout can reconstruct what the chapter claimed after the Task PR
+lands. A standalone scoped review returns its report without writing to the
+Wave's main checkout. Review gives each ledger KR one verdict
+— holds, does not hold, or unknown — from dated evidence; missing evidence is
+an honest unknown, never a pass or fail, and incomplete enumeration says so.
+
+Start has two human gates: direction is accepted before any scoped session
+launches, and the reconciled plan is accepted before any planning mutation.
+Scoped Wave and Project Runs are proposal-only and can challenge the
+brief. Every old Project and open Task gets an explicit carry, rewrite,
+complete, or retire disposition. Product code and Git history remain; active
+Task work changes only through an accepted disposition.
+
 ## Drafting wave content
 
 Draft with `lf design` or write the files by hand — see

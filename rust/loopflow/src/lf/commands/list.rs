@@ -7,6 +7,7 @@ use crate::lf::output::Colors;
 use anyhow::Result;
 use std::collections::{BTreeMap, BTreeSet, HashMap, HashSet};
 use std::fmt::Write as _;
+use std::io::{self, IsTerminal};
 use std::path::Path;
 
 const NAME_WIDTH: usize = 26;
@@ -21,8 +22,20 @@ struct CatalogEntry {
 
 pub fn show_all() -> Result<()> {
     let repo_root = find_repo_root().ok();
-    print!("{}", render_all(repo_root.as_deref(), Colors::default()));
+    let stdout = io::stdout();
+    let is_terminal = stdout.is_terminal();
+    let catalog = render_all(repo_root.as_deref(), Colors::default());
+    write_catalog(stdout.lock(), &catalog, is_terminal)?;
     Ok(())
+}
+
+fn write_catalog(mut output: impl io::Write, catalog: &str, is_terminal: bool) -> io::Result<()> {
+    if is_terminal {
+        // Raw terminals may advance on LF without returning to column zero.
+        output.write_all(catalog.replace('\n', "\r\n").as_bytes())
+    } else {
+        output.write_all(catalog.as_bytes())
+    }
 }
 
 fn render_all(repo_root: Option<&Path>, colors: Colors) -> String {
@@ -287,5 +300,18 @@ mod tests {
         assert!(rendered.contains("wave/operate"));
         assert!(!rendered.contains("wave_operate"));
         assert!(rendered.lines().all(|line| line.trim_end() == line));
+    }
+
+    #[test]
+    fn catalog_returns_to_column_zero_on_terminals() {
+        let catalog = "CATALOG\n\nTask\n  build flow\n";
+        let mut terminal = Vec::new();
+        let mut redirected = Vec::new();
+
+        write_catalog(&mut terminal, catalog, true).expect("terminal output");
+        write_catalog(&mut redirected, catalog, false).expect("redirected output");
+
+        assert_eq!(terminal, b"CATALOG\r\n\r\nTask\r\n  build flow\r\n");
+        assert_eq!(redirected, catalog.as_bytes());
     }
 }

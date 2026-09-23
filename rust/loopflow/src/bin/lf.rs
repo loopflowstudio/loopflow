@@ -1351,10 +1351,12 @@ fn main() -> anyhow::Result<()> {
     let bypasses_machine_startup_gate = matches!(
         &cli.command,
         Some(Commands::Install {
-            cmd: InstallCommand::RecoverSwitch { .. }
-                | InstallCommand::AdvanceSwitch { .. }
-                | InstallCommand::LocalPreflight { .. }
-                | InstallCommand::Promote { .. }
+            cmd: Some(
+                InstallCommand::RecoverSwitch { .. }
+                    | InstallCommand::AdvanceSwitch { .. }
+                    | InstallCommand::LocalPreflight { .. }
+                    | InstallCommand::Promote { .. }
+            )
         })
     );
     if !bypasses_machine_startup_gate {
@@ -1442,18 +1444,22 @@ fn main() -> anyhow::Result<()> {
     // trace/store capture. `lf install` opens the store only read-only, inside
     // its own preflight.
     if let Some(Commands::Install { cmd }) = &cli.command {
-        return match cmd {
-            InstallCommand::RecoverSwitch { switch } => {
+        return match cmd.as_ref() {
+            None => loopflow::lf::commands::refresh::run(),
+            Some(InstallCommand::Schedule) => loopflow::lf::commands::refresh::schedule(),
+            Some(InstallCommand::RecoverSwitch { switch }) => {
                 loopflow::lf::commands::install::recover_switch(switch)
             }
-            InstallCommand::Preflight { json } => loopflow::lf::commands::install::preflight(*json),
-            InstallCommand::LocalPreflight { store, json } => {
+            Some(InstallCommand::Preflight { json }) => {
+                loopflow::lf::commands::install::preflight(*json)
+            }
+            Some(InstallCommand::LocalPreflight { store, json }) => {
                 loopflow::lf::commands::install::local_preflight(store, *json)
             }
-            InstallCommand::AdvanceSwitch { switch } => {
+            Some(InstallCommand::AdvanceSwitch { switch }) => {
                 loopflow::lf::commands::install::advance_switch(switch)
             }
-            InstallCommand::Promote {
+            Some(InstallCommand::Promote {
                 from_build,
                 coordinated_build,
                 fresh,
@@ -1465,7 +1471,7 @@ fn main() -> anyhow::Result<()> {
                 legacy_app_target,
                 sync_skills,
                 preview,
-            } => loopflow::lf::commands::install::promote(
+            }) => loopflow::lf::commands::install::promote(
                 loopflow::lf::commands::install::PromotionArtifacts {
                     cli_target,
                     daemon_source,
@@ -1480,12 +1486,12 @@ fn main() -> anyhow::Result<()> {
                 coordinated_build.as_deref(),
                 *fresh,
             ),
-            InstallCommand::Rollback {
+            Some(InstallCommand::Rollback {
                 cli_target,
                 candidate,
                 daemon_target,
                 daemon_candidate,
-            } => loopflow::lf::commands::install::rollback(
+            }) => loopflow::lf::commands::install::rollback(
                 cli_target,
                 candidate,
                 daemon_target,

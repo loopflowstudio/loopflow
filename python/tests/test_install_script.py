@@ -192,10 +192,28 @@ def test_source_builds_are_always_development_validation_only(
     assert env["LOOPFLOW_MIGRATION_AUTHORITY"] == "validation_only"
 
 
+@pytest.mark.parametrize("installed", ["cli_only", "development_pair", "unknown_pair"])
 def test_published_refresh_pins_and_verifies_the_external_installer(
-    monkeypatch: pytest.MonkeyPatch, tmp_path: Path
+    monkeypatch: pytest.MonkeyPatch, tmp_path: Path, installed: str
 ) -> None:
     installer_payload = b"#!/bin/sh\nexit 0\n"
+    # Version equality alone cannot establish a complete published control pair.
+    (tmp_path / "bin").mkdir()
+    binary = tmp_path / "bin/lf"
+    identity = (
+        '{"candidate":{"authority":"validation_only"}}'
+        if installed == "development_pair"
+        else "unknown"
+    )
+    binary.write_text(
+        '#!/bin/sh\nif [ "$1" = "--version" ]; then echo "lf 9.9.9"; '
+        f"else echo '{identity}'; fi\n"
+    )
+    binary.chmod(0o755)
+    if installed != "cli_only":
+        daemon = tmp_path / "bin/lfd"
+        daemon.write_text('#!/bin/sh\necho "lfd 9.9.9"\n')
+        daemon.chmod(0o755)
     digest = install.hashlib.sha256(installer_payload).hexdigest()
     downloads: list[str] = []
     runs: list[tuple[list[str], dict[str, str]]] = []
@@ -366,3 +384,124 @@ def test_local_promotion_uses_only_the_control_pair_off_macos(
 
     assert skipped == [{"swift"}]
     assert promoted == [(spec.app_path, tmp_path / "installed", True)]
+
+
+def _write_published_binaries(directory: Path) -> None:
+    directory.mkdir(parents=True, exist_ok=True)
+    for name in ["lf", "lfd"]:
+        binary = directory / name
+        binary.write_text(
+            f'#!/bin/sh\nif [ "$1" = "--version" ]; then echo "{name} 9.9.9"; '
+            'else echo \'{"candidate":{"authority":"published"}}\'; fi\n'
+        )
+        binary.chmod(0o755)
+
+
+def _write_release_app(applications: Path, version: str) -> Path:
+    contents = applications / "Loopflow.app/Contents"
+    binaries = contents / "MacOS"
+    _write_published_binaries(binaries)
+    _write_fake_macho(binaries / "Loopflow")
+    (contents / "Info.plist").write_bytes(
+        plistlib.dumps({"CFBundleShortVersionString": version, "CFBundleVersion": version})
+    )
+    return contents
+
+
+@pytest.mark.parametrize("system", ["Linux", "Darwin"])
+def test_published_refresh_skips_assets_only_for_current_release(
+    monkeypatch: pytest.MonkeyPatch, tmp_path: Path, system: str
+) -> None:
+    _write_published_binaries(tmp_path)
+    applications = tmp_path / "Applications"
+    monkeypatch.setenv("LF_APPLICATIONS_DIR", str(applications))
+    monkeypatch.setattr(install.platform, "system", lambda: system)
+    if system == "Darwin":
+        _write_release_app(applications, "9.9.9")
+    monkeypatch.setattr(install, "_latest_release_tag", lambda: "v9.9.9")
+    monkeypatch.setattr(
+        install,
+        "_download_release_asset",
+        lambda *_args: pytest.fail("current release downloaded assets"),
+    )
+    assert install._install_published_release(tmp_path) == "v9.9.9"
+
+
+@pytest.mark.parametrize("app_state", ["missing", "stale", "invalid", "incomplete"])
+def test_published_refresh_repairs_the_mac_app(
+    monkeypatch: pytest.MonkeyPatch, tmp_path: Path, app_state: str
+) -> None:
+    _write_published_binaries(tmp_path)
+    applications = tmp_path / "Applications"
+    monkeypatch.setenv("LF_APPLICATIONS_DIR", str(applications))
+    monkeypatch.setattr(install.platform, "system", lambda: "Darwin")
+    if app_state != "missing":
+        contents = _write_release_app(applications, "9.9.8" if app_state == "stale" else "9.9.9")
+        if app_state == "invalid":
+            (contents / "Info.plist").write_text("invalid plist")
+        elif app_state == "incomplete":
+            (contents / "MacOS/Loopflow").unlink()
+    # The downloaded installer stands in for network and app promotion. Its
+    # observable marker proves refresh took the repair path despite current CLIs.
+    payload = b'#!/bin/sh\ntouch "$LF_INSTALL_DIR/app-repaired"\n'
+    digest = install.hashlib.sha256(payload).hexdigest()
+
+    def download(_url: str, destination: Path) -> str:
+        if destination.name == "SHA256SUMS":
+            destination.write_text(f"{digest}  install.sh\n")
+        else:
+            destination.write_bytes(payload)
+        return _url
+
+    monkeypatch.setattr(install, "_latest_release_tag", lambda: "v9.9.9")
+    monkeypatch.setattr(install, "_download_release_asset", download)
+    assert install._install_published_release(tmp_path) == "v9.9.9"
+    assert (tmp_path / "app-repaired").exists()
+
+
+def test_latest_release_lookup_failure_does_not_claim_current(
+    monkeypatch: pytest.MonkeyPatch, tmp_path: Path
+) -> None:
+    binary = tmp_path / "lf"
+    binary.write_text('#!/bin/sh\necho "lf 9.9.9"\n')
+    binary.chmod(0o755)
+
+    def unavailable() -> str:
+        raise install.StageError("latest release lookup failed: offline")
+
+    monkeypatch.setattr(install, "_latest_release_tag", unavailable)
+    with pytest.raises(install.StageError, match="offline"):
+        install._install_published_release(tmp_path)
+
+
+def test_schedule_is_loaded_and_unchanged_configuration_is_reused(
+    monkeypatch: pytest.MonkeyPatch, tmp_path: Path
+) -> None:
+    monkeypatch.setattr(install.platform, "system", lambda: "Darwin")
+    monkeypatch.setattr(install.Path, "home", lambda: tmp_path)
+    monkeypatch.setattr(install, "ROOT", tmp_path / "repo")
+    monkeypatch.setattr(install, "_resolve_install_dir", lambda: tmp_path / "bin")
+    loaded = False
+
+    def launchctl(command: list[str], **_kwargs: object) -> subprocess.CompletedProcess:
+        return subprocess.CompletedProcess(command, 0 if loaded else 1)
+
+    def apply(command: list[str], _label: str) -> None:
+        nonlocal loaded
+        loaded = command[1] == "bootstrap"
+
+    monkeypatch.setattr(install.subprocess, "run", launchctl)
+    monkeypatch.setattr(install, "_run_or_raise", apply)
+    install.schedule()
+    plist = tmp_path / "Library/LaunchAgents/com.loopflow.refresh.plist"
+    content = plistlib.loads(plist.read_bytes())
+    assert loaded
+    assert content["ProgramArguments"] == [str(tmp_path / "bin/lf"), "install"]
+    assert content["RunAtLoad"] and content["StartCalendarInterval"] == {"Minute": 0}
+    before = plist.stat().st_mtime_ns
+    install.schedule()
+    assert plist.stat().st_mtime_ns == before
+    # A persisted plist whose job was unloaded must load again on retry.
+    loaded = False
+    install.schedule()
+    assert loaded

@@ -897,6 +897,15 @@ lf rebase --plan   # show the strategy without changing git
 lf rebase origin/main          # explicit target
 ```
 
+Every invocation fetches current upstream and updates the local default branch,
+including when called from a sibling worktree. Main fast-forwards when possible;
+divergent unpublished commits are retained through a merge. Main is never pushed.
+The caller then integrates that updated local main (or its explicit/stacked
+target). An already-current main does not skip a behind caller's rebase.
+Staged, unstaged and untracked edits are saved and restored. If restoration
+conflicts, the error names the retained stash. `--plan` stays read-only and
+describes locally known refs without fetching.
+
 Classifies the branch before mutating git: disposable branches can reset to
 their base, authored work uses a normal rebase path. Clean updates stay
 mechanical. A conflict keeps the first sequencer in place for one authorized
@@ -928,6 +937,29 @@ lf rebase --abort --adopt
 
 Plain `lf rebase` never adopts or aborts an existing Git operation.
 
+## lf install
+
+```bash
+lf install             # update main, required tools, Python environment and published lf
+lf install schedule    # install a macOS login/hourly refresh job
+```
+
+Runs from any worktree and shares main's preserving update with `lf rebase`.
+Homebrew installs/upgrades the required tools in the doctor inventory; `uv sync
+--locked` converges the canonical checkout's environment. Published release
+installation uses the existing verified promotion path. An already-installed
+release skips asset downloads when the control binaries and, on macOS, the
+application are current and complete; missing or stale app bundles are repaired
+through the published installer. No source build runs. `lf rebase` only updates
+checkouts and does not install packages or binaries.
+
+The laptop job invokes `lf install` through the installed command, with stable
+tool paths and logs at `~/Library/Logs/Loopflow/refresh.log`. It runs at login
+and on the hour; launchd coalesces sleeping calendar intervals into one run at
+wake. Failed network/package requests retry on a later run or an explicit
+`lf install`; failures remain nonzero. Linux
+checks required tools and reports missing-tool installation instructions.
+
 ## lf wt
 
 Inspect, switch, and clean worktrees. Normal roadmap work starts with
@@ -936,12 +968,20 @@ dependent roadmap work through `lf task run CHILD --stack-on PARENT`, not
 `lf wt`.
 
 ```bash
+lf wt create next             # refresh main, then create a sibling from it
+lf wt create next --plan      # preview placement without fetching or writing
 lf wt switch bugs             # by directory name, identity leaf, or full branch
 lf wt list                    # worktrees as a tree; --format json
+lf wt list --sync             # refresh main before listing
 lf wt ci                      # CI status for the current branch
 lf wt prune --dry-run         # show terminal or week-stale worktrees
 lf wt prune                   # remove them and their local branches
 ```
+
+`create`, `list --sync`, and `prune` fetch and integrate current upstream into
+main, preserving unpublished commits and local edits. Refresh failures stop
+the command. `create --plan` and `prune --dry-run` preview without fetching or
+updating main; they do not establish upstream freshness.
 
 `prune` never removes a worktree with uncommitted files. It removes clean
 worktrees immediately when the remote branch is gone, the work landed, or the

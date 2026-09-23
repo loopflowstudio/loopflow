@@ -38,6 +38,7 @@ pub enum RebaseClass {
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub enum RebaseStrategy {
     Noop,
+    MergeMain,
     ResetToBase,
     DirectRebase,
 }
@@ -113,7 +114,14 @@ pub fn plan_rebase(
         .any(|path| !path.starts_with(Path::new("scratch")));
 
     let (class, strategy) = if branch == default_branch {
-        (RebaseClass::Protected, RebaseStrategy::Noop)
+        let strategy = if crate::engine::git::is_ancestor(repo, &base_ref, "HEAD")? {
+            RebaseStrategy::Noop
+        } else if base_ref == format!("origin/{default_branch}") {
+            RebaseStrategy::MergeMain
+        } else {
+            RebaseStrategy::DirectRebase
+        };
+        (RebaseClass::Protected, strategy)
     } else if protected {
         (RebaseClass::Protected, RebaseStrategy::DirectRebase)
     } else if unique_commits == 0 && scratch_only {
@@ -148,6 +156,19 @@ pub fn rebase_with_recovery(
     options: &RebaseOptions,
     progress: &impl Progress,
 ) -> OpsResult<RebaseVerification> {
+    let default = get_default_branch(repo)?;
+    if current_branch(repo)?.as_deref() == Some(&default)
+        && options.onto == format!("origin/{default}")
+    {
+        crate::ops::checkout::refresh_main(repo, progress)?;
+        let target_sha = rev_parse(repo, &options.onto)?;
+        return Ok(RebaseVerification {
+            branch: default,
+            head: rev_parse(repo, "HEAD")?,
+            unique_commits: count_unique_commits(repo, &target_sha)?,
+            target_sha,
+        });
+    }
     start_owned_rebase(repo, options, false, progress)
 }
 
@@ -173,7 +194,7 @@ pub fn start_rebase_for_resolution(
         push: false,
         fork_base: options.fork_base.clone(),
     };
-    start_owned_rebase(repo, &local, false, progress)
+    rebase_with_recovery(repo, &local, progress)
 }
 
 /// Continue a local rebase after its conflict paths have been resolved.
@@ -833,6 +854,7 @@ pub fn rebase_class_name(class: &RebaseClass) -> &'static str {
 pub fn rebase_strategy_name(strategy: &RebaseStrategy) -> &'static str {
     match strategy {
         RebaseStrategy::Noop => "noop",
+        RebaseStrategy::MergeMain => "merge_main",
         RebaseStrategy::ResetToBase => "reset_to_base",
         RebaseStrategy::DirectRebase => "direct_rebase",
     }

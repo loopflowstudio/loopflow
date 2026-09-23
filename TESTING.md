@@ -219,6 +219,19 @@ Keep `workflow_run.workflows: ["CI"]` in sync with `.github/workflows/ci.yml`. R
 
 ## Rust Tests
 
+For worktree creation or checkout-refresh changes, build the current CLI before
+running its Python behavior tests:
+
+```bash
+cargo build -p loopflow --bin lf
+LOOPFLOW_TEST_LF="$PWD/target/debug/lf" uv run pytest python/tests/test_checkout_refresh.py
+```
+
+The background-push regression holds Git until the CLI exits, then verifies
+upstream tracking and a subsequent rebase. Immediate local pushes can hide
+broken pipes that interrupt Git after the remote ref moves; background children
+must use stdio that survives their parent's exit.
+
 Prompt parity and golden prompt tests live in Rust.
 
 ```bash

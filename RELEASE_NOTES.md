@@ -1,19 +1,31 @@
-# v0.12.18
+# v0.12.19
 
-<!-- loopflow:release-notes=narrative;gate=safe -->
+v0.12.19 keeps ongoing terminal work intact as you navigate the Mac app. Session panes retain their running clients and contents, moving a Session from another terminal requires an explicit action, and completed shell commands can be copied together with their output. The through-line is continuity: preserve the work already running and make terminal actions follow your focus.
 
-v0.12.18 makes chapter changes easier to assess and safer to reset. New chapter workflows review KR evidence across repository, project, and Wave scopes, while interactive starts preserve human direction through scoped Runs and apply only the accepted plan. Terminal skill catalogs also stay aligned without changing redirected output.
+## Keep Sessions running as you move around
 
-## Review and reset plans as chapters
+Closing a Session pane or switching views should not interrupt its client. The app now retains pane layouts and live terminal surfaces per repository within each window, so returning to a Session restores the ongoing work.
 
-Chapter work now has built-in start and review paths at repository, project, and Wave scope. Reviews can judge KR progress autonomously; starts capture human direction before scoped Runs, reconcile the resulting challenges, and carry the accepted plan forward.
+- Close and reopen Session panes, navigate between Sessions and Work, or switch repositories without losing the running client or terminal contents.
+- Selecting a Session active elsewhere leaves its client running until you choose **Move here**. The previous terminal then reports that the Session moved.
+- VIEWING, RUNNING, and ELSEWHERE states clarify terminal status, with recovery from provider exits.
+- Opening a Session beside a focused shell preserves that shell.
 
-- Six built-in chapter skills cover starting and reviewing work at all three scopes.
-- Repository chapter starts record human Wave direction before launching scoped Runs.
-- Interactive starts reconcile the Runs' challenges and apply only the plan the human accepts.
-- Bound and nested Runs leave their edits uncommitted for the owning Task to inspect and checkpoint.
+## Copy a command and its output together
+
+Shell panes now support selectable command blocks through the bundled Ghostty build. Completed commands and their output can be highlighted and copied as one block while the live prompt remains editable.
+
+- Click a completed command block and press Command-C to copy the command and output.
+- Terminal shortcuts follow the focused pane, including paste routing through split panes into live terminals.
+- Clipboard, image, and file-drop handling broaden terminal input support.
+
+## Operational notes
+
+- Terminal retention lasts for the window's lifetime. Closing a shell pane still ends its shell.
+- **Move here** discards unsent text in the previous client; the UI explains this before takeover.
+- Command blocks apply only to shell panes with supported shell integration. The pinned build excludes automatic integration for macOS `/bin/bash`.
+- The Ghostty framework is pinned with a checksum and bundled with matching shell integration and terminfo. A rebuild command is available for contributors maintaining the patched framework.
 
 ## Small changes
 
-- `lf list` now returns to column zero on each terminal newline, preventing skill catalog output from drifting right in raw terminals.
-- Redirected and captured `lf list` output keeps its original LF bytes.
+- Intentional provider termination for a Session move or completion exits cleanly; unexplained termination remains an error.

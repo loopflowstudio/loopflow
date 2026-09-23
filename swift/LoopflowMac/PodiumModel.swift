@@ -167,7 +167,10 @@ final class PodiumModel {
         await sessionRefresh
         roadmap = reading(from: await roadmapResult, lastGood: previousRoadmap)
         selectRequestedWaveIfNeeded()
-        if visibleRoadmaps.allSatisfy({ $0.projects.unavailableReason == nil && $0.unavailableProjects.isEmpty }) {
+        if visibleRoadmaps.allSatisfy({ wave in
+            guard case .available(_, false) = wave.projects else { return false }
+            return wave.unavailableProjects.isEmpty
+        }) {
             clearSelectionIfOutsideScope()
         }
         await refreshWorkActivity()
@@ -212,8 +215,9 @@ final class PodiumModel {
             workActivityGeneration &+= 1
             if !usesFixedFixture { workActivity = .loading }
         }
+        // Navigation is already scoped to this repository. A partial planning
+        // read cannot invalidate its saved selection merely because we return.
         repoPath = path
-        clearSelectionIfOutsideScope()
     }
 
     func setWavePaused(waveId: String, paused: Bool) async throws {

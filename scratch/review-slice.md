@@ -1,95 +1,122 @@
-# Slice review — Wave chapters
+# Unified navigation slice review — 2026-09-23
 
-2026-09-24. Disposition: advances the full design, but does not yet satisfy the
-clarified ownership contract. Do not approve or publish as complete. Keep the
-remaining work in this PR, as specified by `projects.md`.
+## Disposition
 
-## Findings
+Advances the accepted design; **not yet approved for publication**. The compact
+navigator and shared identity join have focused behavioral evidence. Configured
+native navigation, focus, draft and scroll retention still lack proof. No PR
+publication, landing, Task completion, PM mutation or external-product trial was
+performed by this review.
 
-1. **P1 — metric targets still belong to the Wave.**
-   `controller/wave/metrics.rs` stores `target` on `MetricContractDefinition`
-   and `MetricContract`, includes it in the revision hash, and evaluates from
-   that contract. `ops/metrics.rs::wave_metric_portfolio` reads Wave contracts
-   without resolving chapter targets. `pm/mod.rs::ProjectContent` has only
-   definition, flows, and KRs. Rotation therefore cannot author a new target,
-   unset an omitted target, or preserve chapter-specific target/verdict history.
-   Existing metric tests prove the superseded ownership, not the new contract.
-
-2. **P1 — chapter authoring still introduces an independent objective.**
-   `engine/builtins/wave/skill/wave_start-chapter.md` asks for fresh objectives
-   and emits a Project `definition`; `WaveDetailPane.swift::WaveChapterView`
-   displays it as chapter objectives. Native fixture captures visibly show
-   both Wave goal and chapter definition. The human assigned the objective to
-   the Wave. The authoring instructions, content model, and both UI projections
-   must agree on that single authority.
-
-3. **Fixed — redundant public Project creation writer.**
-   Removed unused `ops/pm.rs::pm_create_project`, its async implementation and
-   `LocalProject`, plus unused `pm_resolve_project`/`PmResolvedProject`. The
-   creation path bypassed the durable chapter identity and current binding.
-   Searches found no callers. Provider/local creation primitives remain for
-   the chapter writer; historical storage remains for provenance.
-
-4. **Fixed — historical Project inspection was rejected by CLI grammar.**
-   Restored `lf work status project <id>` while leaving Project enable,
-   disable, interrupt, and abandon unavailable. The existing read path already
-   supports Project provenance. A focused parser test proves this distinction.
+Scope is the first navigation slice from `main-view-task.md`, not the full
+LOO-291 directive. Bounded conversations, Task-directive editing, LOO-284 shared
+actions/display path, lf-new's nested workspaces, external trials and measured
+budgets remain explicitly outstanding. No new kickoff or alternative design is
+needed.
 
 ## Evidence matrix
 
+Pass describes the stated proof level; model fixtures do not establish native
+interaction.
+
 | Claim | Planned behavior | Implemented behavior | Proof | Result |
 |---|---|---|---|---|
-| Ownership | Wave objective/instruments; chapter Tasks/KRs/targets | Tasks/KRs correct; targets and objective authoring remain wrong | Findings 1–2; inspected native captures | Gap |
-| Target reset/history | Change target without changing instrument; omission unsets; old dated verdict survives | No chapter target representation or evaluation snapshot | `ProjectContent`, metric composition, chapter receipt source | Gap |
-| Provisioning and one current chapter | One binding; fixed successor identity; no duplicate on retry | Durable binding and pending receipt; provider UUID reconciled | Fresh chapter suite, including SQLite cutover and local HTTP lifecycle | Pass locally |
-| Deterministic preview/apply | Read-only preview, refresh evidence on apply, resumable lost responses | Shared classifier and transition; retries reuse identity | HTTP simulation covers lost create/move/cancel replies and repeated application | Pass locally; real CLI rotations not demonstrated |
-| Task dispositions | Started unfinished carry; untouched cancel; terminal remain historical; ambiguity never auto-closes | Structured state and durable execution evidence drive classification | Classifier and HTTP simulation, including a start after preview | Pass locally |
-| Task continuity | Preserve claim, Flow, worktree, PR and identity; stale saves cannot undo transfer | Dedicated parent transfer; ordinary updates omit parent | Fresh store transfer test | Pass locally |
-| First-start race | Retirement cannot discard a Task that already began | Durable first-start evidence and claim boundary | Fresh retirement/first-claim test; source inspection | Pass locally |
-| Historical task evidence | A moved Task remains in old chapter without later completion credit | Boundary receipt freezes content/membership/evidence | HTTP lifecycle completes moved Task later and rereads history | Pass locally |
-| Chapter skills | One Wave proposal/review; deterministic API owns dispositions | Project delegation removed; preview/apply/history commands taught | Builtin registration check and source inspection | Structural pass; ownership text wrong; authored skill runs not demonstrated |
-| Wave-only ordinary UI | Both workspaces show Wave → Task and full backlog | Flat task navigation, chapter KRs, history and metrics on Wave | Fresh native fixture captures in `evidence/review-slice/` | Rendering pass; live interactions not demonstrated |
-| Secondary UI continuity | Selection, Sessions, Activity, references and cache survive chapter change | Shared projections and source-reference routing | Prior recorded Swift checks; reviewed source | Prior evidence only; no new live rotation proof |
-| Historical diagnostics | Read old Project Work without reopening planning | Status grammar restored; mutation selectors remain Wave/Task | Fresh `historical_projects_are_inspectable_but_not_controllable` test | Pass |
-| Removed planning authority | No independent Project operator, launch tier or ordinary creator | Deleted skills/commands/writers; chapter creation remains | Negative source searches; bounded deletion above | Pass for inspected paths |
-| Future Wave hierarchy | Preserve ancestry; no hierarchy expansion now | Existing `parent_wave_id`, ancestry resolution and history retained | Wave model and PM ancestry source; prior historical checks | Preserved; future behavior not claimed |
+| Unified inventory | Incomplete autonomous, upcoming and human Tasks share compact Wave/Project groups | Derived planning rows, stable planning IDs, ranked Tasks, no Session prerequisite | WorkspaceNavigationTests.workDoesNotRequireSessions; navigator source | pass, model; configured appearance gap |
+| Exact Session association | Typed durable Work edge; never name/cwd/planning-ID guesses | Joins runtime.workId by kind; retains multiple and unmatched Sessions | everyHumanBoundaryRemainsReachable; current Rust/Swift SessionRecord comparison | pass, fixtures |
+| Completed and top-level work | Completed-with-Session, repo/Wave/Project and missing planning remain reachable | Completed rows retained when associated; unmatched records remain in Other open Sessions | everyHumanBoundaryRemainsReachable; live read has two unbound Sessions | pass, model; live continuation gap |
+| Details and no-Session | Directive, condition/reason, Project definition/KRs, Activity, PR/worktree and explicit absence | Existing inspectors/actions reused; zero only after a readable association | inspectorShowsPlanning, unavailableAssociationIsNotNoSessions; WorkSurfaceView/subjectSessions source | pass, model/view |
+| A/D presentation | Toggle list without recreating workspace or launching provider | Same retained workspace and mounted multiplexer; presentation state separate | navigationRetainsWorkspace; SessionsView source | pass, model; native/scroll gap |
+| Repository and search retention | Restore selection/expansion/search/splits/focus across navigation | Existing registry and per-repository navigation, expansion preserved during search | navigationRetainsWorkspace; new unavailable/truncated regression | pass, model; native focus gap |
+| Unavailable evidence | Failure is never healthy empty; keep useful context | Last-good readings/errors; unknown badge; partial planning warning; selected Work retained | unavailableIsNotEmpty, lastGoodSessionsSurviveRepositorySwitch, new regression | pass, model/view |
+| Responsive Session access | Planning cannot gate Session publication/opening | Session read publishes independently; pane selection precedes asynchronous preparation | sessionsArriveBeforePlanning; openSession source | pass, model; measured latency gap |
+| Human lifecycle | Exact open/Move here; resolution does not complete Task | Existing shared operations; callback removes resolved Session from reading | Existing SessionsStore focused receipt; resolutionKeepsTask | pass, fixtures; configured resolution gap |
+| Native lifetime and input | Same surfaces/processes/drafts/splits; hidden terminals relinquish input | Retained pool, disabled hidden multiplexer, transition-based focus | Native proof and unchanged isolation proof both previously failed at surface creation | gap |
+| One authority | Remove root switch/cascade, duplicate Session polling and labels lookup | Podium reads; projection derives; one window registry retains surfaces | Negative searches and complete Swift diff review below | pass, source |
+| Source freshness | Distinguish read timestamp from provider sync freshness | Toolbar labels snapshot generation and explains unavailable sync timestamp | SessionsView toolbar, README | pass, honest limitation; full freshness integration remains |
+| External trials/budgets | Human-selected workflow, authorized edit, measured long-lived-registry trials | Not implemented/proven in this slice | No workflow selected; no timings collected | gap, remaining Task scope |
 
-## Proof and limits
+## Bounded corrections made
 
-- `cargo test -p loopflow --lib chapter`: 9 passed. Exercises production
-  operations against a local HTTP provider and SQLite. It is not a live Linear
-  or real CLI end-to-end demonstration.
-- `cargo test -p loopflow --lib historical_projects_are_inspectable`: 1 passed.
-- `cargo fmt --check` and `cargo clippy --all-targets -- -D warnings`: passed.
-  The first lint pass caught imports left behind by deleting the unused writer;
-  moved the test-only imports into the test module and reran successfully.
-  Fresh test/lint logs are saved alongside the native captures.
-- Inspected fresh native captures `wave-900.png` and `portfolio-900.png` in
-  `scratch/evidence/review-slice/`. Both expose Tasks directly under Waves.
-  The unbundled executable reports its missing installed `lf` helper; captures
-  prove fixture rendering, not live controls, click-through or rotation.
-- Earlier Rust/Swift/DTO evidence is preserved in `review-wave-chapters.md`.
-  Those checks were not rerun merely because a review phase began.
-- Exact Git patch coverage remains unproven: this generic worktree has no
-  Task binding (`lf task diff projects --json` reports no Task). Reviewed a
-  filesystem comparison with `/Users/jack/src/loopflow` plus focused source
-  reads. That comparison can include sibling drift and is not an authoritative
-  branch diff. No raw Git was used to bypass Loopflow.
-- No live PM changes, push, or PR publication occurred.
+The existing per-repository selection was cleared on return after a successful
+roadmap response containing unavailable planning. `setRepoPath` called
+`clearSelectionIfOutsideScope`, which treated an unresolvable saved Task as
+absent. The new test reproduced `model.selection == nil` after switching away
+and back. Switching now restores its existing navigation state without that
+redundant clearing. Complete planning refreshes still reconcile removed Work.
 
-## Next coherent slice
+The refresh check also accepted truncated planning as complete. It now requires
+available, untruncated Projects and no unavailable Project entries before
+clearing a missing selection. The same regression covers unavailable and
+truncated responses, retaining the selected Task and its unmatched Session.
+This changes no lifecycle or ownership boundary.
 
-Move target authorship into Project content and carry it through plan parsing,
-preview/apply/update, history, Rust/Swift wire fixtures, and both Wave views.
-Evaluate the persistent Wave instrument against the selected chapter target;
-freeze dated historical targets/verdicts and remove the Wave-target fallback.
-Keep observation identity/history independent of target changes. Make chapter
-skills author KRs and targets against the one Wave objective; remove the second
-objective from the model and UI rather than merely relabeling it.
+## Commands and observations
 
-Focused proof: rotate twice with different targets for the same instrument,
-then omit the target. Confirm unchanged Wave objective/instrument, the new
-target or explicit absence, preserved old target/verdict, and continuous Task
-identity. Follow with installed CLI/native interaction evidence for the
-remaining demo claims. Wave hierarchy remains a later design, not another
-implementation requirement for this slice.
+- Read the complete Task patch through `lf task diff LOO-291 --json` (reported
+  `truncated: false`), including committed implementation and compression edits.
+  Local receipt: `/tmp/main-view-task-review-diff.json`; extracted Swift diff:
+  `/tmp/main-view-task-review-code.diff`.
+- Live read-only `lf roadmap --json` and `lf session list --json` succeeded.
+  Roadmap generated at `2026-09-23T23:42:34.733612Z` contains Product, two
+  Projects and nine incomplete Tasks. Sessions contains two unbound records and
+  no Work-bound Session. These are configured CLI observations, not proof of a
+  live Task-to-Session UI trial. Raw observations remain in
+  `/tmp/main-view-task-review-{roadmap,sessions}.json`; no identities or outcomes
+  were fabricated to fill the missing population.
+- Pre-fix regression: one test failed at the saved-selection assertion.
+  `/tmp/main-view-task-review-regression.log`.
+- After repository restoration fix:
+  `swift test --package-path swift -Xswiftc -gnone --jobs 4 --filter
+  'WorkspaceNavigationTests|PodiumModelTests'` passed 25 tests, exit 0.
+  `/tmp/main-view-task-review-proof.log`.
+- Final partial-plan correction:
+  `swift test --package-path swift -Xswiftc -gnone --jobs 4 --filter
+  WorkspaceNavigationTests/unavailablePlanningPreservesRepositorySelection`
+  passed one parameterized test with both unavailable/truncated cases, exit 0.
+  `/tmp/main-view-task-review-partial-proof.log`.
+- Reused the prior 35-test compression receipt for unchanged Session actions;
+  did not run the broad gate. Final source includes the subsequent two bounded
+  selection corrections with the focused receipts above.
+- Re-read native failure receipts: the new draft test has a nil terminal surface;
+  unchanged GhosttyTerminalInputTests.releaseSurfaceIsWindowLocal likewise fails
+  before behavior assertions. Logs: `/tmp/loo291-native-focus-proof.log` and
+  `/tmp/loo291-existing-native-proof.log`. This headless run has no rendering
+  environment. The precise initialization cause remains unknown; repeating the
+  same native check would add no discriminating evidence. Hosted UI test sources
+  were inspected but not executed.
+
+## Negative architectural proof
+
+Searches under the reachable Mac root and tests find no SessionScope,
+SessionContext, SessionGroup, SessionRowItem, PodiumConsole, PodiumSurface or
+_loadHierarchy. `query.sessions` and `query.roadmap` in the desktop path each
+have one owner, PodiumModel. SessionsStore performs existing Session actions
+and maintains local prepared/opening/error state; it no longer polls or resolves
+labels. The root constructs one window-local SessionsWorkspaceRegistry.
+WorkspaceProjection has no persistence/writer/launch operations. No schema,
+backend DTO, migration, compatibility adapter, planning write or new Session
+legality matrix was added. Existing Task controls remain in inspectors; removed
+console fleet switches were not restored.
+
+The SessionRecord files in this checkout, canonical main and lf-new are
+byte-identical (SHA-256
+`e020dd7922d735ce2406dbbd38485b372ec8340b57891ec6bc7da05fb005485d`).
+The Rust mirror still has the same fields, with no projected legal actions or
+display path. This slice preserves the existing native action path; consuming
+LOO-284 remains a real integration requirement. Sibling checkouts were read
+only. The existing repository workspace is retained, not advertised as lf-new's
+unimplemented per-worktree layout.
+
+## Next proof, without redesign
+
+Use the configured native app on a rendering-capable, permissioned host. In one
+repository show autonomous/upcoming/human Tasks; open the exact existing Session;
+retain an unfinished draft in a split beside a running shell. Inspect Task and
+Project details, toggle A/D, search and collapse groups, switch repositories and
+return. Verify the same surface/process identities, draft, layout, focus and
+scroll positions. Confirm search input remains in the field during polling and
+resize, hidden terminals receive no input, and explicit Continue restores focus.
+Complete a disposable authorized Session and prove pane reconciliation without
+Task completion. Do not transfer or resolve the human's current Sessions merely
+to manufacture evidence. Retain the native regression alongside that configured
+trial. Until this succeeds, the skill's publication condition is unmet.

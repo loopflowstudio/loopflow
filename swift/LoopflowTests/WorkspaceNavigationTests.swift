@@ -127,6 +127,29 @@ struct WorkspaceNavigationTests {
         #expect(model.sessions.errorMessage == "offline")
     }
 
+    @Test("Incomplete planning preserves the repository's selected Task", arguments: [false, true])
+    func unavailablePlanningPreservesRepositorySelection(truncated: Bool) async throws {
+        let source = try ReadingSource(roadmap: roadmapJSON(), sessions: sessionsJSON())
+        let model = PodiumModel(query: RegistryQuery { args, _ in try await source.read(args) }, repoPath: "/src/loopflow")
+        await model.refresh()
+        model.select(.task(id: "issue-review"))
+        var snapshot = try #require(JSONSerialization.jsonObject(with: Data(roadmapJSON().utf8)) as? [String: Any])
+        var waves = try #require(snapshot["waves"] as? [[String: Any]])
+        waves[0]["projects"] = truncated
+            ? ["state": "ok", "items": [], "truncated": true]
+            : ["state": "unavailable", "reason": "planning offline"]
+        waves[0]["unavailable_projects"] = []
+        snapshot["waves"] = waves
+        await source.replaceRoadmap(String(decoding: try JSONSerialization.data(withJSONObject: snapshot), as: UTF8.self))
+        await model.refresh()
+        #expect(model.selection == .task(id: "issue-review"))
+        model.setRepoPath("/src/context")
+        model.setRepoPath("/src/loopflow")
+        #expect(model.selection == .task(id: "issue-review"))
+        #expect(model.navigation.content == .details)
+        #expect(model.workspace.unmatchedSessions.map(\.id) == ["human"])
+    }
+
     @Test("Completing a Session removes its link without completing its Task")
     func resolutionKeepsTask() async throws {
         let model = try model()
@@ -236,11 +259,12 @@ private actor PlanningGate {
 }
 
 private actor ReadingSource {
-    let roadmap: String
+    var roadmap: String
     let sessions: String
     var failed = false
     init(roadmap: String, sessions: String) { self.roadmap = roadmap; self.sessions = sessions }
     func fail() { failed = true }
+    func replaceRoadmap(_ value: String) { roadmap = value }
     func read(_ args: [String]) throws -> String {
         if failed { throw RegistryQueryError("offline") }
         switch args.first {

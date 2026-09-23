@@ -1,59 +1,71 @@
 ---
 requires: watched PR landing with failing CI checks (or CI failure message context)
-produces: branch with CI failures fixed
+produces: verified CI repair published with auto-merge enabled
 diff_files: false
 action_style: procedural
 ---
-Fix failing CI checks for the watched PR landing.
+Fix failing CI checks and leave the repaired PR published with auto-merge enabled.
 
 ## Goal
 
-Use the watched PR context, identify the failing checks on its exact head, fix
-them, and leave the branch ready for the landing supervisor to publish.
+Start from an up-to-date branch, repair the watched head's failures, verify the
+repair, and publish it with auto-merge enabled. The landing supervisor watches
+GitHub and completes the Task only after an authoritative merge.
 
 ## Workflow
 
-1. **Resolve the watched PR**
-   - If the prompt message already includes check metadata (PR number, branch, commit SHA, logs URL), use it directly.
-   - Otherwise, resolve the PR for the current branch with the GitHub CLI:
+1. **Rebase first**
+   - Preserve existing work with `lf commit` when needed, then run `lf rebase`.
+   - Resolve conflicts and continue the rebase before investigating CI. Keep
+     the watched failed SHA as evidence even when the local head changes.
+
+2. **Resolve the watched PR and failures**
+   - Use supplied PR/check metadata, or resolve the current branch:
      ```bash
      gh pr view --json number,headRefName,headRefOid,url
      ```
-   - If there is no PR, stop and explain what is missing.
-
-2. **Fetch latest check-run failures**
-   - Query checks for the PR head SHA (from `headRefOid`):
+   - If no PR exists, stop and name what is missing.
+   - Read checks for the exact published head:
      ```bash
      repo=$(gh repo view --json nameWithOwner -q .nameWithOwner)
      sha=$(gh pr view <pr> --json headRefOid -q .headRefOid)
      gh api "repos/$repo/commits/$sha/check-runs"
      ```
-   - Focus on failed checks from the most recent completed runs.
-   - Use the check `html_url`/logs link for repro details.
+   - Focus on the most recent completed failed checks and their logs. Compare
+     the failures with the rebased code; an old failure may already be fixed.
 
-3. **Fix one failing check at a time**
-   - Reproduce the failure locally from the current branch.
-   - Apply the smallest correct fix.
-   - Run only the relevant local checks first, then broader checks if needed.
-   - Repeat until failing checks for the head SHA are addressed or a real blocker remains.
+3. **Repair and verify**
+   - Reproduce each failure locally and apply the smallest correct fix.
+   - Run focused checks first; broaden only when needed. Do not ignore tests
+     or publish an empty commit to manufacture a rerun.
+   - Address the cause in gate guidance or repository conventions when a
+     missing local check let the failure reach CI.
 
-4. **Verify and report**
-   - Summarize what failed, what was changed, and what commands were run.
-   - If no failing checks remain, say so clearly.
-   - If blocked (missing secrets, flaky upstream, infra outage), give exact
-     blocker details and the next manual action. Name the failing capability
-     (provider, github-observation, secrets); the landing supervisor records
-     that durable blocker.
+4. **Publish and enable auto-merge**
+   - Inspect the complete diff and keep unrelated work out of the repair.
+   - Commit with `lf commit -m "ci-fix: <what failed and why>"`, then run
+     `lf pr arm`. Arm prepares the exact head, pushes it, enables auto-merge,
+     and returns without waiting for CI or merge.
+   - Use the supervisor's supplied arm command verbatim: `lf pr arm -c`
+     preserves Task completion, and `lf pr arm --next <slug>` preserves rotation.
+     Outside a watched landing, use bare `lf pr arm` unless the user requested
+     a Task disposition.
+   - Verify the published `headRefOid` matches local `HEAD` and GitHub shows
+     auto-merge enabled (or already merged). Local edits or a local commit
+     alone do not complete the repair.
+
+5. **Report the handoff**
+   - Give the published SHA, PR URL, auto-merge state, and local checks run.
+     Distinguish local passes from CI still pending on the new head.
+   - If blocked, name the capability (provider, github-observation, secrets,
+     publication) and exact next action. Do not claim an unpublished or unarmed
+     repair is complete.
 
 ## Guardrails
 
-- Stay scoped to CI failures on this PR.
-- Prefer targeted fixes over broad refactors.
-- Do not ignore failing tests to get green.
-- Do not push, land, or merge. If you cannot repair the head, say so and stop. A
-  material tree change is the only signal that lets the landing supervisor
-  publish, re-arm a new head, and continue watching.
-
-## Adaptation
-
-After fixing the immediate failure, ask: why did this get to CI? Could gate have caught it? If the answer points to a missing check in gate, a missing convention in repo docs, or a recurring ci-fix pattern — make that update. The fix addresses the symptom; the step or doc update prevents recurrence.
+- Invoking this skill authorizes rebase, commit, push, and auto-merge for the
+  watched PR. Route mutations through `lf`.
+- Stay scoped to the CI failures and their prevention; prefer targeted fixes.
+- Do not call `lf pr land`, spawn another watcher, or wait for merge. Return
+  after the repaired head is published and armed; the existing watcher resumes.
+- If the repair cannot be verified or published, report the blocker and stop.

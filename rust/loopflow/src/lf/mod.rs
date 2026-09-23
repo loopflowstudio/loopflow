@@ -339,6 +339,9 @@ pub enum Commands {
         /// Take over even if another live Wave is registered
         #[arg(long)]
         force: bool,
+        /// Replace a historical Flow definition with a newly compiled invocation
+        #[arg(long)]
+        restart_flow: bool,
     },
     /// Start one or more Waves on this machine.
     Start {
@@ -385,12 +388,12 @@ pub enum Commands {
         index: usize,
         seed: String,
     },
-    /// Project lifecycle operations
+    /// Linear-backed Project facts and finite operations
     Project {
         #[command(subcommand)]
         cmd: ProjectCommand,
     },
-    /// Linear-backed Task lifecycle
+    /// Linear-backed Task work and bounded workers
     Task {
         #[command(subcommand)]
         cmd: TaskCommand,
@@ -399,13 +402,6 @@ pub enum Commands {
     Work {
         #[command(subcommand)]
         cmd: WorkCommand,
-    },
-    /// Internal: run a Project or Task body under the ambient Run context
-    #[command(name = "__work", hide = true)]
-    WorkRunner {
-        #[arg(value_parser = ["project", "task"])]
-        kind: String,
-        work_id: String,
     },
     /// Measure this codebase: lines and tokens per directory (tracked files only)
     Tokens {
@@ -762,6 +758,7 @@ pub enum SessionCommand {
     #[command(name = "serve-flow", hide = true)]
     ServeFlow {
         task_id: crate::work::task::TaskId,
+        invocation_id: String,
         flow: String,
         node_id: String,
         skill: String,
@@ -889,7 +886,7 @@ pub struct WaveTargetArgs {
 
 #[derive(Subcommand, Debug)]
 pub enum ProjectCommand {
-    /// Ensure tracked Project Work without starting a controller
+    /// Ensure tracked Project Work without running an operation
     Prepare {
         /// Linear Project UUID or unique slug
         project_id: String,
@@ -898,7 +895,7 @@ pub enum ProjectCommand {
         #[arg(long)]
         json: bool,
     },
-    /// Create a Linear Project first, then start its durable Project
+    /// Create a Linear Project, then run one finite operation
     Start {
         title: String,
         #[arg(short = 'w', long = "wave")]
@@ -908,7 +905,7 @@ pub enum ProjectCommand {
         #[arg(long)]
         json: bool,
     },
-    /// Start or resume the current Work for an existing Linear Project
+    /// Run one finite operation for an existing Linear Project
     Run {
         /// Linear Project UUID or unique slug
         project_id: String,
@@ -917,48 +914,20 @@ pub enum ProjectCommand {
         #[arg(long)]
         json: bool,
     },
-    /// Show durable Project state and Home-owned liveness evidence
+    /// Show durable Project facts and the most recent operation outcome
     Status {
         /// Linear Project UUID, unique slug, or historical Project id
         project_id: String,
         #[arg(long)]
         json: bool,
     },
-    /// Redirect Project Work now, relaunching its provider when needed
+    /// Store Project direction and launch one finite operation
     Steer {
         project_id: String,
         message: String,
         #[arg(long)]
         json: bool,
     },
-    /// Interrupt the active Project turn
-    Interrupt {
-        project_id: String,
-        #[arg(long)]
-        json: bool,
-    },
-    /// Wait without polling an LM
-    Wait {
-        project_id: String,
-        #[arg(long, default_value = "terminal", value_parser = ["waiting", "terminal"])]
-        until: String,
-        #[arg(long)]
-        timeout: Option<String>,
-        #[arg(long)]
-        json: bool,
-    },
-    /// Resume the same Project, optionally handing its next body to another agent
-    Resume {
-        project_id: String,
-        #[arg(long)]
-        model: Option<String>,
-        #[arg(long, requires = "model")]
-        reason: Option<String>,
-        #[arg(long)]
-        json: bool,
-    },
-    /// Attach to the writable Project control terminal
-    Attach { project_id: String },
     /// End Project pursuit without deleting its durable history
     Abandon {
         project_id: String,
@@ -979,7 +948,10 @@ pub enum ProjectCommand {
 
 #[derive(Subcommand, Debug)]
 pub enum TaskCommand {
-    /// Ensure tracked Task Work and its worktree without starting a controller
+    /// Internal: run one claimed Task Flow boundary
+    #[command(name = "__worker", hide = true)]
+    Worker { task_id: crate::work::task::TaskId },
+    /// Ensure tracked Task Work and its worktree without starting a worker
     Prepare {
         issue: String,
         #[arg(long)]
@@ -992,26 +964,14 @@ pub enum TaskCommand {
         #[arg(long)]
         json: bool,
     },
-    /// Ensure its Project, then start or return the existing Linear task
+    /// Ensure its Project, then start a Task worker for an existing Linear task
     Run {
         issue: String,
         #[arg(long)]
         name: Option<String>,
-        /// Fix cycle: first incident, finally ship-demo (human gates at the demo)
-        #[arg(long, conflicts_with = "feature")]
-        fix: bool,
-        /// Feature cycle: design review first, configured-path demo before settlement
-        #[arg(long, alias = "feat", conflicts_with = "fix")]
-        feature: bool,
-        /// Override the Project's first flow for a new Task
+        /// Select a Flow for this Task worker; defaults to the Project recommendation
         #[arg(long, value_name = "FLOW")]
-        first: Option<String>,
-        /// Override the Project's loop flow for a new Task
-        #[arg(long = "loop", value_name = "FLOW")]
-        loop_: Option<String>,
-        /// Override the Project's finally flow for a new Task
-        #[arg(long, value_name = "FLOW")]
-        finally: Option<String>,
+        flow: Option<String>,
         /// Fork this Task's worktree from another Task's active PR
         #[arg(long = "stack-on", value_name = "PARENT_TASK")]
         stack_on: Option<String>,
@@ -1020,7 +980,7 @@ pub enum TaskCommand {
         #[arg(long)]
         json: bool,
     },
-    /// Create a Linear task, ensure its Project, then start its Task
+    /// Create a Linear task, ensure its Project, then start a Task worker
     Start {
         /// Required Linear Project id or slug
         project_id: String,
@@ -1028,21 +988,9 @@ pub enum TaskCommand {
         title: Option<String>,
         #[arg(long)]
         name: Option<String>,
-        /// Fix cycle: first incident, finally ship-demo (human gates at the demo)
-        #[arg(long, conflicts_with = "feature")]
-        fix: bool,
-        /// Feature cycle: design review first, configured-path demo before settlement
-        #[arg(long, alias = "feat", conflicts_with = "fix")]
-        feature: bool,
-        /// Override the Project's first flow
+        /// Select a Flow for this Task worker; defaults to the Project recommendation
         #[arg(long, value_name = "FLOW")]
-        first: Option<String>,
-        /// Override the Project's loop flow
-        #[arg(long = "loop", value_name = "FLOW")]
-        loop_: Option<String>,
-        /// Override the Project's finally flow
-        #[arg(long, value_name = "FLOW")]
-        finally: Option<String>,
+        flow: Option<String>,
         /// Fork this Task's worktree from another Task's active PR
         #[arg(long = "stack-on", value_name = "PARENT_TASK")]
         stack_on: Option<String>,
@@ -1051,7 +999,7 @@ pub enum TaskCommand {
         #[arg(long)]
         json: bool,
     },
-    /// Show durable state and Home-owned liveness evidence
+    /// Show durable Task facts and current worker evidence
     Status {
         issue: String,
         #[arg(long)]
@@ -1108,17 +1056,16 @@ pub enum TaskCommand {
         #[arg(long)]
         json: bool,
     },
-    /// Resume the same Task, optionally handing its next body to another agent
+    /// Resume Task advancement from its durable Flow position
     Resume {
         issue: String,
+        /// Explain what changed after a durable execution blocker
         #[arg(long)]
-        model: Option<String>,
-        #[arg(long, requires = "model")]
         reason: Option<String>,
         #[arg(long)]
         json: bool,
     },
-    /// Begin a new Task kickoff in a fresh provider session
+    /// Begin the Project's currently recommended Flow in a fresh Task worker
     Restart {
         issue: String,
         advice: Option<String>,
@@ -1541,15 +1488,9 @@ pub enum PmProjectCommand {
         /// Key result; repeat for each KR. Prefix with `[x] ` when it holds.
         #[arg(long = "kr", required = true)]
         krs: Vec<String>,
-        /// Flow run once when each Task starts
+        /// Flow recommended to each Task worker
         #[arg(long)]
-        first: Option<String>,
-        /// Flow repeated while each Task makes progress
-        #[arg(long = "loop")]
-        loop_: Option<String>,
-        /// Flow run to gate, learn from, and land each Task
-        #[arg(long)]
-        finally: Option<String>,
+        recommended: Option<String>,
     },
     /// Update a Linear Project's content or Task flows
     Update {
@@ -1564,15 +1505,9 @@ pub enum PmProjectCommand {
         /// Replace KRs; repeat for each KR. Prefix with `[x] ` when it holds.
         #[arg(long = "kr")]
         krs: Vec<String>,
-        /// Flow run once when each Task starts
+        /// Flow recommended to each Task worker
         #[arg(long)]
-        first: Option<String>,
-        /// Flow repeated while each Task makes progress
-        #[arg(long = "loop")]
-        loop_: Option<String>,
-        /// Flow run to gate, learn from, and land each Task
-        #[arg(long)]
-        finally: Option<String>,
+        recommended: Option<String>,
     },
     /// Archive a Linear Project and refresh the wave snapshot
     Archive {
@@ -2541,7 +2476,7 @@ mod tests {
     }
 
     #[test]
-    fn task_prepare_accepts_worktree_options_without_controller_flows() {
+    fn task_prepare_accepts_worktree_options_without_starting_a_worker() {
         let cli = Cli::try_parse_from([
             "lf",
             "task",
@@ -2605,35 +2540,40 @@ mod tests {
     }
 
     #[test]
-    fn task_run_accepts_lifecycle_flow_overrides() {
+    fn project_run_is_a_finite_cli_operation() {
         let cli = Cli::try_parse_from([
             "lf",
-            "task",
+            "project",
             "run",
-            "INF-123",
-            "--first",
-            "incident",
-            "--loop",
-            "ship-5whys",
-            "--finally",
-            "ship",
+            "runtime-model",
+            "--directive",
+            "reconcile current evidence",
+            "--json",
         ])
-        .expect("parse task lifecycle overrides");
-        let Some(Commands::Task {
-            cmd:
-                TaskCommand::Run {
-                    first,
-                    loop_,
-                    finally,
-                    ..
+        .expect("parse finite Project operation");
+        assert!(matches!(
+            cli.command,
+            Some(Commands::Project {
+                cmd: ProjectCommand::Run {
+                    project_id,
+                    directive: Some(directive),
+                    json: true,
                 },
+            }) if project_id == "runtime-model" && directive == "reconcile current evidence"
+        ));
+    }
+
+    #[test]
+    fn task_run_accepts_flow_selection() {
+        let cli = Cli::try_parse_from(["lf", "task", "run", "INF-123", "--flow", "incident"])
+            .expect("parse task lifecycle overrides");
+        let Some(Commands::Task {
+            cmd: TaskCommand::Run { flow, .. },
         }) = cli.command
         else {
             panic!("expected task run command");
         };
-        assert_eq!(first.as_deref(), Some("incident"));
-        assert_eq!(loop_.as_deref(), Some("ship-5whys"));
-        assert_eq!(finally.as_deref(), Some("ship"));
+        assert_eq!(flow.as_deref(), Some("incident"));
     }
 
     #[test]
@@ -2900,62 +2840,32 @@ mod tests {
     }
 
     #[test]
-    fn task_and_project_resume_accept_audited_model_handoffs() {
+    fn task_resume_advances_without_provider_handoff() {
         let task = Cli::try_parse_from([
             "lf",
             "task",
             "resume",
             "W2-135",
-            "--model",
-            "codex",
             "--reason",
-            "Claude quota exhausted",
+            "credential repaired",
             "--json",
         ])
-        .expect("parse Task body handoff");
+        .expect("parse Task advancement retry");
         assert!(matches!(
             task.command,
             Some(Commands::Task {
                 cmd: TaskCommand::Resume {
                     issue,
-                    model: Some(model),
                     reason: Some(reason),
                     json: true,
                     ..
                 }
-            }) if issue == "W2-135" && model == "codex" && reason == "Claude quota exhausted"
+            }) if issue == "W2-135" && reason == "credential repaired"
         ));
 
-        let project = Cli::try_parse_from([
-            "lf",
-            "project",
-            "resume",
-            "loopflow-api",
-            "--model",
-            "claude:opus",
-        ])
-        .expect("parse Project body handoff");
-        assert!(matches!(
-            project.command,
-            Some(Commands::Project {
-                cmd: ProjectCommand::Resume {
-                    project_id,
-                    model: Some(model),
-                    reason: None,
-                    ..
-                }
-            }) if project_id == "loopflow-api" && model == "claude:opus"
-        ));
-
-        assert!(Cli::try_parse_from([
-            "lf",
-            "task",
-            "resume",
-            "W2-135",
-            "--reason",
-            "quota exhausted",
-        ])
-        .is_err());
+        assert!(
+            Cli::try_parse_from(["lf", "task", "resume", "W2-135", "--model", "codex",]).is_err()
+        );
     }
 
     #[test]
@@ -3030,6 +2940,23 @@ mod tests {
 
         assert!(Cli::try_parse_from(["lf", "work", "continue", "task", "task_1"]).is_err());
         assert!(Cli::try_parse_from(["lf", "work", "escalate", "task", "task_1"]).is_err());
+
+        assert!(Cli::try_parse_from([
+            "lf",
+            "work",
+            "advance",
+            "task",
+            "task_00000000000000000000000000000001",
+        ])
+        .is_err());
+        assert!(Cli::try_parse_from([
+            "lf",
+            "work",
+            "execute",
+            "task",
+            "task_00000000000000000000000000000001",
+        ])
+        .is_err());
 
         let place = Cli::try_parse_from([
             "lf",

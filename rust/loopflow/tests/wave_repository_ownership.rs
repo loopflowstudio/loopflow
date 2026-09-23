@@ -91,6 +91,7 @@ fn project(wave: &Wave) -> Project {
             pm_snapshot_synced_at: now.unix_timestamp(),
         },
         wave_id: wave.id().clone(),
+        iteration: 0,
         abandon_intent: None,
         created_at: now,
         updated_at: now,

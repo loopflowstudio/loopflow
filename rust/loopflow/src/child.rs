@@ -74,15 +74,6 @@ pub enum ObservationRecipient {
     Project { project_id: ProjectId },
 }
 
-/// Requested replacement of the agent/provider body acting for a durable
-/// Project or Task.
-#[derive(Debug, Clone, PartialEq, Eq)]
-pub struct ChildBodyHandoffRequest {
-    pub agent: String,
-    pub provider: String,
-    pub reason: String,
-}
-
 /// Typed audit record for a body handoff. Work and Run identity are intentionally
 /// absent: they do not change during this transition.
 #[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]

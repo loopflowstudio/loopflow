@@ -155,7 +155,7 @@ enum MockWaveFixture {
             "name": "Release feedback",
             "summary": "Failures become focused work.",
             "definition": "Close the release feedback loop.",
-            "flows": {"first": "incident", "loop": "ship-5whys", "finally": "ship"},
+            "flows": {"recommended": "incident"},
             "krs": [
               {"text": "Every failed run has an owner", "holds": false}
             ]

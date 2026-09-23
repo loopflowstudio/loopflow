@@ -12,9 +12,7 @@
       "summary": "Keep mail flowing.",
       "definition": "Keep mail flowing.",
       "flows": {
-        "first": null,
-        "loop": "task/pursue",
-        "finally": null
+        "recommended": null
       },
       "krs": [
         {

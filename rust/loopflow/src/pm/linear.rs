@@ -2147,9 +2147,7 @@ mod tests {
                 &ProjectContent {
                     definition: "Conversation stays in flow.".to_string(),
                     flows: crate::pm::ProjectFlowPlan {
-                        first: Some("incident".to_string()),
-                        loop_: Some("ship-5whys".to_string()),
-                        finally: Some("ship".to_string()),
+                        recommended: Some("task-design".to_string()),
                     },
                     krs: vec![PmKr {
                         text: "Replies survive every restart boundary".to_string(),
@@ -2170,7 +2168,7 @@ mod tests {
         assert!(update["variables"]["content"]
             .as_str()
             .expect("content")
-            .contains("loop: ship-5whys"));
+            .contains("recommended: task-design"));
     }
 
     #[tokio::test]

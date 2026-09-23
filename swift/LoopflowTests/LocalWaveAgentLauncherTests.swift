@@ -33,7 +33,7 @@ struct LocalWaveAgentLauncherTests {
         ])
     }
 
-    @Test("Task controls use the existing lifecycle verbs")
+    @Test("Task controls use the bounded worker commands")
     func taskControlCommandShapes() {
         let lf = "/Applications/Loopflow.app/Contents/MacOS/lf"
 

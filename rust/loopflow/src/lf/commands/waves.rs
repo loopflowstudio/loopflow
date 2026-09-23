@@ -958,12 +958,13 @@ pub(crate) async fn snapshot_wave(store: &SharedStore, wave: &Wave) -> Result<Wa
 }
 
 async fn snapshot_task_runtime(
-    store: &SharedStore,
+    _store: &SharedStore,
     task: &Task,
     status: WorkStatus,
 ) -> Result<TaskRuntimeSnapshot> {
     let routing_project_id = Some(task.project_id.to_string());
-    let controller = store.task_controller_state(&task.id).await?;
+    let config = crate::engine::config::load_config_or_default(Some(&task.worktree));
+    let (provider, _) = crate::engine::config::parse_agent(config.agent());
     Ok(TaskRuntimeSnapshot {
         work_id: task.id.to_string(),
         project_id: task.project_id.to_string(),
@@ -971,7 +972,7 @@ async fn snapshot_task_runtime(
         reason: status.reason().to_string(),
         status,
         updated_at: format_time(task.updated_at).unwrap_or_default(),
-        provider: controller.map(|state| state.provider).unwrap_or_default(),
+        provider,
     })
 }
 
@@ -995,15 +996,20 @@ async fn snapshot_project_runtime(
             .map_err(|err| anyhow!("failed to read Project observation outbox: {err}"))?
             .len() as u32
     };
-    let controller = store.project_controller_state(&project.id).await?;
+    let wave = store
+        .get_wave(&project.wave_id)
+        .await?
+        .ok_or_else(|| anyhow!("owning Wave {} is not registered", project.wave_id))?;
+    let config = crate::engine::config::load_config_or_default(Some(Path::new(wave.repo())));
+    let (provider, _) = crate::engine::config::parse_agent(config.agent());
     Ok(ProjectRuntimeSnapshot {
         work_id: project.id.to_string(),
         reason: status.reason().to_string(),
         status,
         updated_at: format_time(project.updated_at).unwrap_or_default(),
-        iteration: controller.as_ref().map_or(0, |state| state.iteration),
+        iteration: project.iteration,
         pending_observations,
-        provider: controller.map_or_else(String::new, |state| state.provider),
+        provider,
         last_failure: store
             .latest_project_failure(&project.id)
             .await
@@ -1340,9 +1346,9 @@ async fn snapshot_task_detail(
                 .work_for_child(&ChildRef::Task(task.id.clone()))
                 .await?;
             let human_session = store
-                .flow_position(&work)
+                .flow_position(&task.id)
                 .await?
-                .is_some_and(|position| position.human);
+                .is_some_and(|position| position.is_human());
             let work_status = store.work_status(&work).await?;
             (
                 Some(TaskActionEvidence {
@@ -2594,6 +2600,7 @@ mod tests {
                 pm_snapshot_synced_at: now.unix_timestamp(),
             },
             wave_id: wave.id().clone(),
+            iteration: 0,
             abandon_intent: None,
             created_at: now,
             updated_at: now,

@@ -39,8 +39,8 @@ lf team/review                    # run .lf/skills/team/review.md
 lf npx/vercel-labs/deep-research  # fetch a skill from the npx skills catalog
 lf : "fix the typo"               # inline prompt
 lf debug -c                       # paste clipboard, fix the bug
-lf task prepare DES-123           # tracked Work + worktree, no controller
-lf project prepare runtime-model  # tracked Project Work, no controller
+lf task prepare DES-123           # tracked Work + worktree, no execution
+lf project prepare runtime-model  # tracked Project Work, no execution
 lf --task DES-123 research \
   "Map runtime behavior; write scratch/research-runtime.md"
 lf --project context project/operate \
@@ -51,7 +51,7 @@ lf task run DES-124 --stack-on DES-123                # dependent Task, separate
 ```
 
 `--task`, `--project`, and `--wave` run one named skill about existing Work
-without loading or advancing a controller. The most specific selector is the
+without advancing its Flow position. The most specific selector is the
 Run subject: Task implies Project and Wave; Project implies Wave. Broader
 selectors may qualify it and must match. Task binding supplies the Task seed,
 uses its existing worktree, and preloads the complete recursive scratch
@@ -61,8 +61,7 @@ concurrently; each keeps a distinct Run id and none reserves the Work. Bound
 direct skills leave edits uncommitted; give parallel contributions distinct
 paths, reconcile the shared tree, then checkpoint one coherent result with `lf
 commit` or aggregate it deliberately with `lf task restart`. Parent Runs use
-this same path without borrowing the Task's controller process or any planning
-lease.
+this same path without becoming the Task worker or taking its claim.
 
 ## Browser Captures
 
@@ -307,13 +306,13 @@ lf pause designer                                  # keep listening; queue new t
 lf resume designer                                 # enable queued and future turns
 lf stop designer                                   # stop it; leave the Home keeper running
 lf project run <linear-project-id>                  # durable Project Work
-lf project prepare <linear-project-id>              # Project Work, no controller
-lf task prepare DES-123                             # Task Work + worktree, no controller
+lf project prepare <linear-project-id>              # Project Work, no execution
+lf task prepare DES-123                             # Task Work + worktree, no execution
 lf task start <linear-project-id> "fix the flaky chord-timeout test"
 pbpaste | lf task start incident-management
 lf task run DES-123 --directive "fix the parser before the docs"
 lf task run DES-124 --stack-on DES-123
-lf task run DES-125 --first incident --loop ship-5whys --finally ship-demo
+lf task run DES-125 --flow incident
 lf task status DES-123
 lf --as project:proj_... : "Which KR owns this?"      # ordinary agent perspective
 lf ask "Review this proof with me"                    # block on a human session
@@ -326,9 +325,8 @@ lf task steer DES-123 "rename the flag"
 lf task steer DES-123 "take the smaller approach"
 lf task interrupt DES-123                             # end the active turn
 lf task wait DES-123
-lf task resume DES-123 --model codex --reason "Claude quota exhausted"
+lf task resume DES-123 --reason "provider credentials repaired"
 lf task restart DES-123 "Reconcile the new runtime research"
-lf project resume <linear-project-id> --model codex
 lf work status task task_... --json                  # stable Work projection
 lf work interrupt task task_...                      # refuses without exact process ownership
 lf work place wave wave_... home_...                 # move idle Wave Work to a Home
@@ -346,42 +344,38 @@ Bare `lf start` is the automatic form: it starts only repo Waves whose optional
 `owner` and `home` fields in `GOAL.md` match this machine and whose recorded
 placement is local and enabled. The named form is the explicit override.
 `lf wave <name>` runs that Wave listener and resident in the foreground for
-development. Project Work pursues one Linear Project's KRs without a worktree.
-Each Project phase refreshes Linear before it starts. Definition, Task-flow, and
-KR edits take effect together on the next phase without replacing the Project
-Work or its direction; an unavailable or invalid plan stops before another
-provider turn and status prints the restart reason.
+development. `lf project run` launches one finite `project/operate` Run without
+a Project worktree or resident process. Each operation refreshes Linear before
+it starts, so definition, recommended Task Flow, and KR edits take effect on
+the next invocation without replacing Project Work or its direction.
 Project and Task Work have stable identities and small state:
 `ready`, `done`, or `abandoned`. Process liveness, Task condition, Sessions,
-PR state, controller state, and Run evidence stay separate. `task prepare` ensures the
+PR state, Flow position, and Run evidence stay separate. `task prepare` ensures the
 Project and Task Work records, one stable Task worktree, and its first serial PR
-identity without installing end-to-end automation. `task run` uses that same
-substrate, then installs or starts the built-in Task controller.
-Its provider process and transcript are replaceable execution state: plain
-`resume` keeps compatible history; `resume --model <agent>` preserves the same
-Work, durable Steers, worktree, branch, and PR while selecting another provider.
-The Task remains resumable through review and explicit
-completion.
+identity without starting execution. `task run` uses that same substrate,
+selects a Flow when none is active, and ensures the exact next boundary has one
+Task worker. Each autonomous boundary starts a fresh provider Run from durable
+Task facts; no provider transcript or resident Task process is required.
+`resume` preserves the Work, selected Flow, Steers, worktree, branch, and PR
+while starting a fresh worker.
+`steer` records direction even before a Flow is selected; `task run` selects
+the Flow when execution should begin.
 Wave names are repository-scoped. Relocation requires the UUID because the
 repository and name may both change; it preserves authored Wave files, journal,
 PM binding, Work state, and Home placement. Home-local Run records remain on
 the Home that recorded them and are never rewritten as control state.
-Relocation refuses live Wave, Project, or Task processes and never keeps an
+Relocation refuses a live Wave or claimed Task worker and never keeps an
 old-name alias. UUID-addressed `lf work` reads and mutations also verify that
 the selected Work belongs to the invoking repository; a UUID from another
 repository is not a capability.
 
-The built-in Task controller runs `first → loop N → finally`. Its Project
-supplies those three flows and `--first`, `--loop`, and `--finally` select an
-explicit Task-specific plan. The default feature cycle asks a human to review
-the design before implementation, then reviews the configured-path demo before
-settlement. The fix cycle keeps only the demo review.
-
-Those defaults are automation policy, not Task or delivery authority. Explicit
-flow selections are instructions: Loopflow does not reject them because they
-omit an autonomous loop, a review step, or `pr land -c`. A flow that does not
-settle the Task simply leaves ready Work for a later controller boundary or
-explicit command.
+A Linear Project may recommend one Task Flow. `lf task run --flow <name>`
+overrides that recommendation when it selects the next worker's Flow. The
+selected Flow definition is persisted immutably for that invocation, so edits
+to repository Flow YAML cannot change a Task already in progress. When the
+Flow completes, Loopflow deletes its position and leaves the Task ready. The
+next worker chooses afresh; PR delivery and Task completion remain explicit
+commands rather than an implied next lifecycle phase.
 
 Every Task-owned PR keeps the Linear Task name at the start of its title and a
 direct `Linear Task: [KEY](URL)` link in its body. Loopflow restores those
@@ -452,7 +446,7 @@ record owns resolution; the ordinary Run owns provider identity and history.
 `--stack-on` places a new Task worktree on another Task's published PR. Its PR
 targets that parent branch automatically, then collapses onto `main` after the
 parent merges. The two Tasks keep separate identities, worktrees, and workers.
-For managed controllers, tmux remains process containment, not product identity.
+Tmux remains process containment, not product identity or advancement authority.
 
 ## Placing Work and Reaching Homes
 
@@ -803,8 +797,8 @@ lf pr submit
 ```
 
 Inside a managed Task worktree, `submit` records a user-owned exact-head merge
-request in the Task PR state. It does not install, advance, or consult a Task
-controller. Use `-c` to complete the Task after merge or `--next <slug>` to
+request in the Task PR state. It does not advance or consult the Task's Flow
+position. Use `-c` to complete the Task after merge or `--next <slug>` to
 rotate its serial PR chain.
 
 ### lf pr arm
@@ -823,8 +817,10 @@ rotation wait for a later authoritative merged observation.
 ### lf pr land
 
 Prepare and arm the PR, then watch GitHub until merged or actionably blocked.
-Failing required checks launch one bounded repair for the exact failed head;
-material repairs are published and re-armed before watching resumes.
+Failing required checks launch one bounded `ci-fix` agent for the exact failed
+head. That agent rebases first, repairs and verifies, then pushes and enables
+auto-merge with the original Task disposition. The watcher observes the new
+head and completes after merge; it does not publish or re-arm repairs.
 
 ```bash
 lf pr land                    # land one PR; the Task stays open
@@ -856,14 +852,14 @@ LOO-249: Make Task PR copy explain intent and lifecycle
 ```
 
 The exact identifier, name, provider link, PR sequence, and merge disposition
-come from durable Task delivery state. Controller phase is intentionally absent.
+come from durable Task delivery state. Task lifecycle phase is intentionally absent.
 Generated or gate-authored prose adds the evaluation path, importance, and
 implementation-specific scope without repeating that context. Ordinary
 non-Task PR copy keeps its authored title and body unchanged.
 
 If a Task's work already merged and rotation left a provably empty unpublished
 successor, `lf pr land -c` completes over the merged PR without creating
-another one. This is a delivery-state decision and needs no controller row.
+another one. This is a delivery-state decision and needs no Flow-position claim.
 
 Submit, arm, and land clear `scratch/`, preserve a recovery ref, collapse the
 authored range to one tree-identical commit, replay that commit onto the pinned

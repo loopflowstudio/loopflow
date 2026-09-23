@@ -408,16 +408,16 @@ lf task prepare INF-123
 lf --task INF-123 research "write scratch/retry-analysis.md"
 lf task run INF-123
 lf task run INF-124 --stack-on INF-123     # dependent work before the parent merges
-lf task run INF-125 --first incident --loop ship-5whys --finally ship-demo
+lf task run INF-125 --flow incident
 ```
 
 Task Work advances through one active remote branch and PR to `main`. Its Project
-configures `first`, `loop`, and `finally` flows; Task launch resolves all three
-and pins them for the lifetime of the Task. `--first`, `--loop`, and `--finally`
-override one Task at launch. The first flow runs once, the loop repeats, and the
-finally flow gates, records learnings, and lands. After a merge or abandonment,
-Loopflow rotates the worktree onto the next branch. The Task inherits the wave's
-`GOAL.md` and `MEMORY.md` plus its Project definition and KRs.
+may recommend one Flow; `--flow` overrides it for this Task worker. Launch pins
+the complete Flow definition and exact position until it completes or parks at
+a human boundary. Completion clears that Flow state and leaves the Task open
+for a later worker or explicit delivery command. After a merge or abandonment,
+Loopflow rotates the worktree onto the next branch. The Task inherits the
+wave's `GOAL.md` and `MEMORY.md` plus its Project definition and KRs.
 
 Each Task PR title starts with its Linear Task name, and its body links directly
 to the Linear issue. The anchors survive publication refreshes.

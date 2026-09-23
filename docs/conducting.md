@@ -107,9 +107,10 @@ lf ask list --user --json                     # requested sessions needing atten
 lf ask open ask_...                            # open one Ask session
 ```
 
-Task and Project steering appends durable Work comments and relaunches a stopped
-controller. A running controller offers new comments to its provider at turn
-boundaries; the next Skill seed is the fallback. Task interrupt ends the active
+Task and Project steering appends durable Work comments. Task Steer requests a
+bounded worker; Project Steer launches a finite operation. A running Task
+worker accepts new comments when possible; the next Skill seed always reads
+them. Task interrupt ends the active
 turn so the next boundary reads immediately. Neither a stored Steer nor
 transport acceptance proves that an agent applied the direction — see
 [The Agent API](agent-api.md#steer).

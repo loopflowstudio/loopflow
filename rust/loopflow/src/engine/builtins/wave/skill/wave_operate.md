@@ -31,15 +31,14 @@ message at all.**
 
 Wave → Project → Task is a graph of intent and purpose: it makes work visible,
 gives intent a shareable shape, and ties code to the work it serves. It is **not
-ownership and not permissions.** It gates nothing. An unhealthy Project or Task
-agent never blocks you — adding a Task is just adding a node to the graph.
+ownership and not permissions.** Project and Task motion comes from durable
+intent and explicit operations, not resident ancestor processes. Only Tasks
+persist a selected Flow position.
 
-- **Always launch work.** If work should start, start it. Do not wait for a
-  Project agent, a placement check, or a valid ancestry. If a reader or the Task
-  controller is down, do the computable thing directly.
-- **Step in when a delegated layer fails.** Project agent can't create the Task?
-  Create and run it directly. A Task run crashed mid-work? Inspect it with `lf
-  runs` and finish the work in that Task's worktree (concurrent writers are fine).
+- **Always launch work.** If work should start, start it with `lf task run`; the
+  exact Task Flow-position claim collapses concurrent nudges.
+- **Recover through Work.** A crashed boundary Run is replaced from durable
+  state. Helper Runs may assist in the Task worktree, but never drive its Flow.
 - **Capture stays.** Work is still captured as Task nodes with Project placement;
   only the requirement that the ancestry be *healthy first* is gone.
 
@@ -52,8 +51,7 @@ not the objective. Trust worker summaries; do not reread transcripts.
 
 - Answer a waiting human first, plainly and with the useful thing.
 - Select from filed Tasks and open KRs, or file the Task the moment work should
-  start. Start it with `lf task run <issue-id> --directive "<brief>"`; if the
-  controller is down, create and run the node directly.
+  start. Start it with `lf task run <issue-id> --directive "<brief>"`.
 - Supervise with `lf task status/steer/interrupt/wait/resume`. Independent Tasks
   run in parallel; never a second session for one issue.
 - Keep coordination and small read-only decisions in the Wave.
@@ -71,13 +69,13 @@ snapshot evidence is explicitly absent; keep the Task and its status/next owner.
 ## Uncertainty selects the flow, it never blocks
 
 Do not stop to ask permission before launching. If uncertain, launch the work
-with a flow whose lifecycle already contains a human review gate (`task-design` →
-`task-gate`, or a `finally` review) rather than blocking the channel. Confident
-work runs a straight-through ship flow. Your only judgment is *which flow*.
+with a Flow that contains the needed human review gate, such as `task-design`,
+rather than blocking the channel. Confident work may use a straight-through
+Flow. Your launch judgment is *which Flow this Task worker should run*.
 
 Correct `GOAL.md` only when the objective, bounds, or cadence no longer ask the
 honest question; correct Project definitions or KRs through `lf pm project
 update`. Promote a durable operating context into a Wave, never a child Project.
 
-Keep the turn to the one or two useful moves. The Wave runner advances the flow;
-write no loop bit.
+Keep the turn to the one or two useful moves. Each invocation acts once; write
+no loop bit.

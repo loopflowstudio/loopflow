@@ -40,16 +40,15 @@ lf session iterate <flowstep-id> "Narrow the design"
 lf task steer INF-123 "address the latest feedback"
 lf task interrupt INF-123
 lf task resume INF-123
-lf task resume INF-123 --model codex --reason "Claude quota exhausted"
+lf task resume INF-123 --reason "provider credentials repaired"
 ```
 
-Plain `resume` continues the same provider transcript. `--model` keeps the Task
-Work, Steers, worktree, and active PR, but gives the next attempt to the selected
-agent. It refuses while another executor is still writing. A Task Steer is a
-durable Work comment. A live controller offers new comments to the provider at
-turn boundaries; the next Skill seed remains the fallback. `task interrupt`
-ends the active turn so that boundary arrives immediately. Neither command's
-receipt proves that the provider applied the direction.
+`resume` starts a fresh boundary from the Task Work, Steers, worktree, and
+active PR. It refuses while another exact Task worker is live. A Task Steer
+is a durable Work comment; the active Task worker receives new comments when
+possible and the next Skill seed always reads them. `task interrupt` ends the
+active boundary so the next one re-reads direction. Neither command's receipt
+proves that the provider applied the direction.
 
 During new-Task placement, status reports the declared worktree as initializing.
 If creation does not finish, status keeps the Task identity and names the exact
@@ -68,12 +67,15 @@ the account unavailable until its reported reset and immediately tries the next
 account in the grant. `--account` retains the normal route as fallback;
 `--only-account` stays inside the accounts it names.
 
-If the retries exhaust for a managed Task, resume it on another provider:
+After repairing provider access, retry the Task or Project operation:
 
 ```bash
-lf task resume INF-123 --model codex --reason "Claude quota exhausted"
-lf project resume project-slug --model codex --reason "Claude quota exhausted"
+lf task resume INF-123 --reason "provider credentials repaired"
+lf project run project-slug
 ```
+
+Project operations are finite Runs, so recovery is a fresh `project run`, not a
+resume of Project process state.
 
 Other options:
 

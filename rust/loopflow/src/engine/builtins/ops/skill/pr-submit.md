@@ -12,7 +12,7 @@ the button unlocks once checks pass.)
 
 Tracked Tasks use the same command. Delivery state records the user-owned
 exact-head merge request, but `pr-submit` does not install, advance, or inspect
-an end-to-end controller.
+the Task's Flow position.
 
 ## Orientation
 

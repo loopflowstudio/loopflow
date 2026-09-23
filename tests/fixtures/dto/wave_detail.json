@@ -33,9 +33,7 @@
         "summary": "Failures become focused work.",
         "definition": "Close the release feedback loop.",
         "flows": {
-          "first": "task-design",
-          "loop": "slice",
-          "finally": "ship"
+          "recommended": "task-design"
         },
         "krs": [
           {

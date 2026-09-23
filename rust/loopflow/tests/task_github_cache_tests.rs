@@ -3,7 +3,7 @@ mod support;
 use std::fs;
 use std::process::Command;
 
-use loopflow::durable::WorkStatus;
+use loopflow::durable::{WorkRef, WorkStatus};
 use loopflow::ops::task::{task_interrupt, task_status, task_steer};
 use loopflow::work::task::{GithubPr, Observation, PrPublication};
 use loopflow_test_support::TestRepo;
@@ -129,6 +129,16 @@ fn graph_ql_exhaustion_never_blocks_task_control_or_forces_pr_enumeration() {
     assert!(matches!(steer.observation, Observation::Cached { .. }));
     task_steer("INF-123", "prioritize the cache proof".to_string())
         .expect("steer remains local and durable");
+    let runtime = tokio::runtime::Runtime::new().unwrap();
+    let steers = runtime
+        .block_on(task.store.work_steers(&WorkRef::Task(task.task.id.clone())))
+        .unwrap();
+    assert_eq!(steers.len(), 2);
+    assert_eq!(steers[1].text, "prioritize the cache proof");
+    assert!(runtime
+        .block_on(task.store.flow_position(&task.task.id))
+        .unwrap()
+        .is_none());
     let cached = task_status("INF-123").expect("cached status succeeds");
     assert!(matches!(cached.observation, Observation::Cached { .. }));
 

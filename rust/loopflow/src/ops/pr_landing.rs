@@ -18,9 +18,9 @@ use crate::store::{open_store, storage_config_from_env, SharedStore};
 use crate::work::task::{CiCheck, CiIncident, CiObservation, CiState};
 
 use super::error::{OpsError, OpsResult};
-use super::land::{arm, LandOptions};
+use super::land::LandOptions;
 use super::pr::{merge_gate_state, observe_pr_by_number, PrInfo, PrObservation, PrReadFreshness};
-use super::progress::{NullProgress, Progress};
+use super::progress::Progress;
 
 const LANDING_POLL_INTERVAL: Duration = Duration::from_secs(30);
 const LANDING_DEGRADED_INTERVAL: Duration = Duration::from_secs(60);
@@ -71,7 +71,6 @@ impl LandingObservation {
 pub(crate) trait LandingDriver: Send + Sync {
     fn observe(&self, landing: &PrLanding) -> OpsResult<LandingObservation>;
     fn repair(&self, landing: &PrLanding, incident: &CiIncident) -> OpsResult<()>;
-    fn rearm(&self, landing: &PrLanding) -> OpsResult<PrInfo>;
 }
 
 #[derive(Debug, Clone)]
@@ -117,27 +116,6 @@ impl LandingDriver for GithubLandingDriver {
 
     fn repair(&self, landing: &PrLanding, incident: &CiIncident) -> OpsResult<()> {
         launch_ci_fix(landing, incident)
-    }
-
-    fn rearm(&self, landing: &PrLanding) -> OpsResult<PrInfo> {
-        let options = LandOptions {
-            strict: false,
-            local: false,
-            create_pr: true,
-            complete: landing.after_merge == Some(crate::work::task::AfterMerge::CompleteTask),
-            next_slug: landing.next_slug.clone(),
-            worktree: Some(landing.worktree.display().to_string()),
-            commit_message: Some("ci-fix: repair required checks".to_string()),
-            pr_title: None,
-            pr_body: None,
-            agent: None,
-        };
-        arm(&landing.worktree, &options, &NullProgress)?.ok_or_else(|| {
-            OpsError::Message(format!(
-                "pull request #{} disappeared while re-arming repaired head",
-                landing.pr_number
-            ))
-        })
     }
 }
 
@@ -211,8 +189,9 @@ fn launch_ci_fix(landing: &PrLanding, incident: &CiIncident) -> OpsResult<()> {
         .as_ref()
         .map(|task_id| format!("\nTask context: {task_id}"))
         .unwrap_or_default();
+    let arm_command = repair_arm_command(landing);
     let prompt = format!(
-        "{skill}\n\nRepair the exact watched landing incident below. Do not land or merge it; leave a material fix in the worktree for the landing supervisor to publish.\n\nRepository: {}\nPull request: #{}\nBranch: {}\nFailed head: {}\nFailing checks:\n{}{}",
+        "{skill}\n\nRepair the exact watched landing incident below. Start with `lf rebase`. Repair and verify, then run `{arm_command}` to publish and enable auto-merge with the requested Task disposition. Do not invoke `lf pr land` or wait for merge; the landing supervisor only observes the result and completes after merge.\n\nRepository: {}\nPull request: #{}\nBranch: {}\nFailed head: {}\nFailing checks:\n{}{}",
         incident.repo,
         incident.pr_number,
         landing.branch,
@@ -250,6 +229,19 @@ fn launch_ci_fix(landing: &PrLanding, incident: &CiIncident) -> OpsResult<()> {
         )));
     }
     Ok(())
+}
+
+fn repair_arm_command(landing: &PrLanding) -> String {
+    if landing.after_merge == Some(crate::work::task::AfterMerge::CompleteTask) {
+        "lf pr arm -c".to_string()
+    } else if let Some(slug) = &landing.next_slug {
+        format!(
+            "lf pr arm --next {}",
+            crate::engine::process::shell_escape(slug)
+        )
+    } else {
+        "lf pr arm".to_string()
+    }
 }
 
 fn ci_incident(landing: &PrLanding, checks: &[CiCheck], now: OffsetDateTime) -> CiIncident {
@@ -455,44 +447,16 @@ pub(crate) async fn supervise_pr_landing(
         };
 
         if let Some(head) = observed.head_sha() {
-            if head != landing.observed_head_sha
-                && !matches!(observed, LandingObservation::Merged { .. })
-            {
-                landing.observed_head_sha = head.to_string();
-                refresh_joined_request(&store, &mut landing).await?;
-                let armed = run_driver_operation(&store, &landing, "re-arm", {
-                    let driver = Arc::clone(&driver);
-                    let landing = landing.clone();
-                    move || driver.rearm(&landing)
-                })
-                .await;
-                let armed = match armed {
-                    Ok(armed) => armed,
-                    Err(error) => {
-                        let reason = format!(
-                            "pull request #{} changed heads but re-arm failed: {error}",
-                            landing.pr_number
-                        );
-                        return block_landing(&store, &mut landing, reason).await;
-                    }
-                };
-                let Some(armed_head) = armed.head_sha else {
-                    let reason = format!(
-                        "GitHub omitted the head after re-arming pull request #{}",
-                        landing.pr_number
-                    );
-                    return block_landing(&store, &mut landing, reason).await;
-                };
+            if head != landing.observed_head_sha {
                 persist_landing_state(
                     &store,
                     &mut landing,
                     PrLandingState::Watching,
-                    armed_head,
+                    head.to_string(),
                     None,
                     None,
                 )
                 .await?;
-                continue;
             }
         }
 
@@ -550,39 +514,11 @@ pub(crate) async fn supervise_pr_landing(
                 wait_interval(poll_interval).await;
             }
             LandingObservation::Unarmed { .. } => {
-                refresh_joined_request(&store, &mut landing).await?;
-                let armed = run_driver_operation(&store, &landing, "re-arm", {
-                    let driver = Arc::clone(&driver);
-                    let landing = landing.clone();
-                    move || driver.rearm(&landing)
-                })
-                .await;
-                let armed = match armed {
-                    Ok(armed) => armed,
-                    Err(error) => {
-                        let reason = format!(
-                            "pull request #{} lost its merge request and re-arm failed: {error}",
-                            landing.pr_number
-                        );
-                        return block_landing(&store, &mut landing, reason).await;
-                    }
-                };
-                let Some(armed_head) = armed.head_sha else {
-                    let reason = format!(
-                        "GitHub omitted the head after re-arming pull request #{}",
-                        landing.pr_number
-                    );
-                    return block_landing(&store, &mut landing, reason).await;
-                };
-                persist_landing_state(
-                    &store,
-                    &mut landing,
-                    PrLandingState::Watching,
-                    armed_head,
-                    None,
-                    None,
-                )
-                .await?;
+                let reason = format!(
+                    "pull request #{} has no auto-merge request; run lf pr arm to resume landing",
+                    landing.pr_number
+                );
+                return block_landing(&store, &mut landing, reason).await;
             }
             LandingObservation::Pending { .. } => wait_interval(poll_interval).await,
             LandingObservation::Degraded { reason } if degraded_is_actionable(&reason) => {
@@ -697,28 +633,24 @@ pub(crate) async fn supervise_pr_landing(
                     }
                 }
                 refresh_joined_request(&store, &mut landing).await?;
-                let armed = run_driver_operation(&store, &landing, "re-arm", {
+                let repaired = run_driver_operation(&store, &landing, "repair observation", {
                     let driver = Arc::clone(&driver);
                     let landing = landing.clone();
-                    move || driver.rearm(&landing)
+                    move || driver.observe(&landing)
                 })
                 .await;
-                let armed = match armed {
-                    Ok(armed) => armed,
-                    Err(error) => {
+                let repaired_head = match repaired {
+                    Ok(LandingObservation::Pending { head_sha })
+                    | Ok(LandingObservation::Passing { head_sha })
+                    | Ok(LandingObservation::Failing { head_sha, .. })
+                    | Ok(LandingObservation::Merged { head_sha, .. }) => head_sha,
+                    other => {
                         let reason = format!(
-                            "pull request #{} repair could not be re-armed: {error}",
+                            "ci-fix did not leave pull request #{} published and armed: {other:?}",
                             landing.pr_number
                         );
                         return block_landing(&store, &mut landing, reason).await;
                     }
-                };
-                let Some(repaired_head) = armed.head_sha else {
-                    let reason = format!(
-                        "GitHub omitted the repaired head for pull request #{}",
-                        landing.pr_number
-                    );
-                    return block_landing(&store, &mut landing, reason).await;
                 };
                 if repaired_head == incident.failed_head_sha {
                     let reason = format!(
@@ -965,15 +897,27 @@ mod tests {
     use std::collections::VecDeque;
     use std::sync::Mutex;
 
-    use super::*;
+    use super::{
+        ci_incident, repair_arm_command, supervise_pr_landing, LandingDriver, LandingObservation,
+    };
+    use std::path::PathBuf;
+    use std::sync::Arc;
+    use std::time::Duration;
+    use time::OffsetDateTime;
+
+    use crate::ops::error::{OpsError, OpsResult};
+    use crate::pr_landing::{
+        LandingClaim, LandingPlacement, NewPrLanding, PrLanding, PrLandingState,
+        SUPERVISOR_STALE_AFTER,
+    };
     use crate::store::migrations::migration_sql_for_test;
+    use crate::store::SharedStore;
     use crate::store::StorageConfig;
+    use crate::work::task::{AfterMerge, CiCheck, CiIncident};
 
     struct FakeDriver {
         observations: Mutex<VecDeque<LandingObservation>>,
-        repaired_head: String,
         repairs: Mutex<u32>,
-        rearms: Mutex<u32>,
     }
 
     impl LandingDriver for FakeDriver {
@@ -988,22 +932,6 @@ mod tests {
         fn repair(&self, _landing: &PrLanding, _incident: &CiIncident) -> OpsResult<()> {
             *self.repairs.lock().unwrap() += 1;
             Ok(())
-        }
-
-        fn rearm(&self, landing: &PrLanding) -> OpsResult<PrInfo> {
-            *self.rearms.lock().unwrap() += 1;
-            Ok(PrInfo {
-                url: format!(
-                    "https://github.com/{}/pull/{}",
-                    landing.repo, landing.pr_number
-                ),
-                number: u64::from(landing.pr_number),
-                state: "open".to_string(),
-                branch: landing.branch.clone(),
-                merge_commit: None,
-                merged_at: None,
-                head_sha: Some(self.repaired_head.clone()),
-            })
         }
     }
 
@@ -1067,7 +995,7 @@ mod tests {
     }
 
     #[tokio::test]
-    async fn pr_landing_runs_ci_fix_rearms_and_finishes_only_after_merge() {
+    async fn pr_landing_observes_ci_fix_publication_and_finishes_only_after_merge() {
         let (_directory, store) = store().await;
         let landing = claimed(&store).await;
         let driver = Arc::new(FakeDriver {
@@ -1094,9 +1022,7 @@ mod tests {
                     merge_commit: "merge-head".to_string(),
                 },
             ])),
-            repaired_head: "repaired-head".to_string(),
             repairs: Mutex::new(0),
-            rearms: Mutex::new(0),
         });
         let landed = supervise_pr_landing(store, landing, driver.clone(), Duration::ZERO)
             .await
@@ -1104,6 +1030,54 @@ mod tests {
         assert_eq!(landed.state, PrLandingState::Merged);
         assert_eq!(landed.repair_count, 1);
         assert_eq!(*driver.repairs.lock().unwrap(), 1);
+    }
+
+    #[tokio::test]
+    async fn ci_fix_must_publish_a_new_head_and_enable_auto_merge() {
+        for result in [
+            LandingObservation::Pending {
+                head_sha: "failed-head".to_string(),
+            },
+            LandingObservation::Unarmed {
+                head_sha: "repaired-head".to_string(),
+            },
+        ] {
+            let (_directory, store) = store().await;
+            let landing = claimed(&store).await;
+            let failure = LandingObservation::Failing {
+                head_sha: "failed-head".to_string(),
+                failing_checks: vec![CiCheck {
+                    name: "rust".to_string(),
+                    url: None,
+                }],
+            };
+            let driver = Arc::new(FakeDriver {
+                observations: Mutex::new(VecDeque::from([failure.clone(), failure, result])),
+                repairs: Mutex::new(0),
+            });
+            supervise_pr_landing(store.clone(), landing.clone(), driver, Duration::ZERO)
+                .await
+                .unwrap_err();
+            let blocked = store.get_pr_landing(&landing.id).await.unwrap().unwrap();
+            assert_eq!(blocked.state, PrLandingState::Blocked);
+            assert_eq!(blocked.repair_count, 1);
+            assert!(blocked.blocked_reason.unwrap().contains("ci-fix did not"));
+        }
+    }
+
+    #[tokio::test]
+    async fn ci_fix_arm_preserves_task_completion_and_rotation() {
+        let (_directory, store) = store().await;
+        let mut landing = claimed(&store).await;
+        assert_eq!(repair_arm_command(&landing), "lf pr arm");
+        landing.after_merge = Some(AfterMerge::CompleteTask);
+        assert_eq!(repair_arm_command(&landing), "lf pr arm -c");
+        landing.after_merge = Some(AfterMerge::ContinueTask);
+        landing.next_slug = Some("parser-proof".to_string());
+        assert_eq!(
+            repair_arm_command(&landing),
+            "lf pr arm --next 'parser-proof'"
+        );
     }
 
     #[tokio::test]
@@ -1120,9 +1094,7 @@ mod tests {
                     merge_commit: "merge-head".to_string(),
                 },
             ])),
-            repaired_head: "unused".to_string(),
             repairs: Mutex::new(0),
-            rearms: Mutex::new(0),
         });
         supervise_pr_landing(store, landing, driver.clone(), Duration::ZERO)
             .await
@@ -1131,28 +1103,22 @@ mod tests {
     }
 
     #[tokio::test]
-    async fn missing_merge_request_is_rearmed_without_a_repair() {
+    async fn missing_merge_request_blocks_without_mutating_the_pr() {
         let (_directory, store) = store().await;
         let landing = claimed(&store).await;
         let driver = Arc::new(FakeDriver {
-            observations: Mutex::new(VecDeque::from([
-                LandingObservation::Unarmed {
-                    head_sha: "failed-head".to_string(),
-                },
-                LandingObservation::Merged {
-                    head_sha: "failed-head".to_string(),
-                    merge_commit: "merge-head".to_string(),
-                },
-            ])),
-            repaired_head: "failed-head".to_string(),
+            observations: Mutex::new(VecDeque::from([LandingObservation::Unarmed {
+                head_sha: "failed-head".to_string(),
+            }])),
             repairs: Mutex::new(0),
-            rearms: Mutex::new(0),
         });
-        supervise_pr_landing(store, landing, driver.clone(), Duration::ZERO)
+        let error = supervise_pr_landing(store.clone(), landing.clone(), driver, Duration::ZERO)
             .await
-            .unwrap();
-        assert_eq!(*driver.repairs.lock().unwrap(), 0);
-        assert_eq!(*driver.rearms.lock().unwrap(), 1);
+            .unwrap_err();
+        assert!(error.to_string().contains("no auto-merge request"));
+        let blocked = store.get_pr_landing(&landing.id).await.unwrap().unwrap();
+        assert_eq!(blocked.state, PrLandingState::Blocked);
+        assert_eq!(blocked.repair_count, 0);
     }
 
     #[tokio::test]
@@ -1173,9 +1139,7 @@ mod tests {
                     merge_commit: "merge-head".to_string(),
                 },
             ])),
-            repaired_head: "unused".to_string(),
             repairs: Mutex::new(0),
-            rearms: Mutex::new(0),
         });
         supervise_pr_landing(store, landing, driver.clone(), Duration::ZERO)
             .await
@@ -1211,9 +1175,7 @@ mod tests {
                     merge_commit: "merge-head".to_string(),
                 },
             ])),
-            repaired_head: "next-head".to_string(),
             repairs: Mutex::new(0),
-            rearms: Mutex::new(0),
         });
         supervise_pr_landing(store, landing, driver.clone(), Duration::ZERO)
             .await

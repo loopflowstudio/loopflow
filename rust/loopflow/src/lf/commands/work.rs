@@ -1,6 +1,7 @@
 use anyhow::{anyhow, Context};
 use serde::Serialize;
 use std::path::Path;
+use std::sync::Arc;
 
 use crate::durable::{AbandonReceipt, Placement, ProjectId, Steer, TaskId, WorkRef, WorkStatus};
 use crate::id::WaveId;
@@ -123,10 +124,11 @@ async fn run_async(command: &WorkCommand, repo: &Path) -> anyhow::Result<()> {
     Ok(())
 }
 
-async fn open_shared_store() -> anyhow::Result<Store> {
+async fn open_shared_store() -> anyhow::Result<Arc<Store>> {
     let config = storage_config_from_env().context("resolve the shared Loopflow store")?;
     open_store(&config)
         .await
+        .map(Arc::new)
         .context("open the shared Loopflow store")
 }
 

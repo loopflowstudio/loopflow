@@ -150,7 +150,7 @@ pub struct GoalRenderContext {
     pub memory: String,
 }
 
-#[derive(Debug, Clone, PartialEq, Eq)]
+#[derive(Debug, Clone, Serialize, Deserialize, PartialEq, Eq)]
 pub struct ConcreteSkill {
     pub skill: Skill,
     pub policy: OccurrencePolicy,
@@ -165,20 +165,20 @@ impl ConcreteSkill {
     }
 }
 
-#[derive(Debug, Clone, PartialEq, Eq)]
+#[derive(Debug, Clone, Serialize, Deserialize, PartialEq, Eq)]
 pub struct ConcreteXor {
     pub router: Option<String>,
     pub paths: HashMap<String, XorPath>,
     pub flow_parents: Vec<String>,
 }
 
-#[derive(Debug, Clone, PartialEq, Eq)]
+#[derive(Debug, Clone, Serialize, Deserialize, PartialEq, Eq)]
 pub struct ConcreteOp {
     pub item: Op,
     pub flow_parents: Vec<String>,
 }
 
-#[derive(Debug, Clone, PartialEq, Eq)]
+#[derive(Debug, Clone, Serialize, Deserialize, PartialEq, Eq)]
 pub enum ConcreteStep {
     Skill(ConcreteSkill),
     Op(ConcreteOp),

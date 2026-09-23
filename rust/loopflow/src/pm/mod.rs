@@ -64,19 +64,12 @@ pub struct PmKr {
 
 #[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
 pub struct ProjectFlowPlan {
-    pub first: Option<String>,
-    #[serde(rename = "loop")]
-    pub loop_: Option<String>,
-    pub finally: Option<String>,
+    pub recommended: Option<String>,
 }
 
 impl ProjectFlowPlan {
     pub fn empty() -> Self {
-        Self {
-            first: None,
-            loop_: None,
-            finally: None,
-        }
+        Self { recommended: None }
     }
 }
 
@@ -372,7 +365,6 @@ pub fn parse_project_content(content: &str) -> ProjectContent {
     let mut section = Section::None;
     let mut definition = Vec::new();
     let mut flows = ProjectFlowPlan::empty();
-    let mut cycle = None;
     let mut krs = Vec::new();
     let mut current_kr: Option<PmKr> = None;
     for line in content.lines() {
@@ -420,16 +412,8 @@ pub fn parse_project_content(content: &str) -> ProjectContent {
                     "" => None,
                     value => Some(value.to_string()),
                 };
-                match name.trim() {
-                    "first" => flows.first = value,
-                    "loop" => flows.loop_ = value,
-                    "finally" => flows.finally = value,
-                    "cycle" => {
-                        cycle = value
-                            .as_deref()
-                            .and_then(crate::ops::task::TaskCycle::parse)
-                    }
-                    _ => {}
+                if name.trim() == "recommended" {
+                    flows.recommended = value;
                 }
             }
             Section::Krs => {
@@ -467,14 +451,6 @@ pub fn parse_project_content(content: &str) -> ProjectContent {
         krs.push(kr);
     }
 
-    // `cycle:` is sugar for the preset's flows; explicit keys win, and
-    // writeback normalizes the sugar into explicit first/finally lines.
-    if let Some(cycle) = cycle {
-        let (first, finally) = cycle.flows();
-        flows.first = flows.first.or_else(|| Some(first.to_string()));
-        flows.finally = flows.finally.or_else(|| Some(finally.to_string()));
-    }
-
     ProjectContent {
         definition: definition.join("\n").trim().to_string(),
         flows,
@@ -486,14 +462,8 @@ pub fn render_project_content(project: &ProjectContent) -> String {
     let mut content = format!("## Definition\n\n{}", project.definition.trim());
     if project.flows != ProjectFlowPlan::empty() {
         content.push_str("\n\n## Flows\n");
-        if let Some(flow) = &project.flows.first {
-            content.push_str(&format!("\nfirst: {}", flow.trim()));
-        }
-        if let Some(flow) = &project.flows.loop_ {
-            content.push_str(&format!("\nloop: {}", flow.trim()));
-        }
-        if let Some(flow) = &project.flows.finally {
-            content.push_str(&format!("\nfinally: {}", flow.trim()));
+        if let Some(flow) = &project.flows.recommended {
+            content.push_str(&format!("\nrecommended: {}", flow.trim()));
         }
     }
     content.push_str("\n\n## KRs");
@@ -685,22 +655,6 @@ mod tests {
     }
 
     #[test]
-    fn project_cycle_is_sugar_for_preset_flows() {
-        let content = parse_project_content(
-            "## Definition\n\nFix things.\n\n## Flows\n\ncycle: fix\n\n## KRs\n\n- [ ] holds\n",
-        );
-        assert_eq!(content.flows.first.as_deref(), Some("incident"));
-        assert_eq!(content.flows.loop_, None);
-        assert_eq!(content.flows.finally.as_deref(), Some("ship-demo"));
-
-        let explicit = parse_project_content(
-            "## Definition\n\nFix things.\n\n## Flows\n\ncycle: fix\nfirst: task-design\n",
-        );
-        assert_eq!(explicit.flows.first.as_deref(), Some("task-design"));
-        assert_eq!(explicit.flows.finally.as_deref(), Some("ship-demo"));
-    }
-
-    #[test]
     fn project_content_round_trips_linear_markdown() {
         let krs = vec![
             PmKr {
@@ -715,9 +669,7 @@ mod tests {
         let project = ProjectContent {
             definition: "A measured bet.".to_string(),
             flows: ProjectFlowPlan {
-                first: Some("incident".to_string()),
-                loop_: Some("ship-5whys".to_string()),
-                finally: Some("ship".to_string()),
+                recommended: Some("task-design".to_string()),
             },
             krs: krs.clone(),
         };

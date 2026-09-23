@@ -106,6 +106,11 @@ core model and public contract in one screen?
    test breaks because it encodes the old model, update or delete the test. If a
    behavior breaks, the reduction went too far.
 
+   In this repository, installed development builds also record draft migration
+   checksums. Remove persisted fossils with a forward draft after their owning
+   migration; do not rewrite an applied draft. Keep historical fixtures intact
+   and prove that the upgrade preserves the object's remaining facts.
+
 ## What To Reduce
 
 **Duplicated concepts.** If two names describe the same product object, pick one

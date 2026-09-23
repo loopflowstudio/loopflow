@@ -394,51 +394,6 @@ fn _read_executable_references(
          WHERE placement.enabled=1
            AND w.work_state='ready'
            AND w.retired_at IS NULL
-         UNION
-         SELECT 'project', p.id, 'project', w.repo
-         FROM work_placements placement
-         JOIN projects p ON p.id=placement.project_id
-         JOIN waves w ON w.id=p.wave_id
-         WHERE placement.enabled=1
-           AND p.work_state='ready'
-           AND w.work_state='ready'
-           AND w.retired_at IS NULL
-         UNION
-         SELECT 'task', t.id, r.kickoff_flow, w.repo
-         FROM work_placements placement
-         JOIN tasks t ON t.id=placement.task_id
-         JOIN task_controller_state r ON r.task_id=t.id
-         JOIN projects p ON p.id=t.project_id
-         JOIN waves w ON w.id=p.wave_id
-         WHERE placement.enabled=1
-           AND t.work_state='ready'
-           AND p.work_state='ready'
-           AND w.work_state='ready'
-           AND w.retired_at IS NULL
-         UNION
-         SELECT 'task', t.id, r.iterate_flow, w.repo
-         FROM work_placements placement
-         JOIN tasks t ON t.id=placement.task_id
-         JOIN task_controller_state r ON r.task_id=t.id
-         JOIN projects p ON p.id=t.project_id
-         JOIN waves w ON w.id=p.wave_id
-         WHERE placement.enabled=1
-           AND t.work_state='ready'
-           AND p.work_state='ready'
-           AND w.work_state='ready'
-           AND w.retired_at IS NULL
-         UNION
-         SELECT 'task', t.id, r.gate_flow, w.repo
-         FROM work_placements placement
-         JOIN tasks t ON t.id=placement.task_id
-         JOIN task_controller_state r ON r.task_id=t.id
-         JOIN projects p ON p.id=t.project_id
-         JOIN waves w ON w.id=p.wave_id
-         WHERE placement.enabled=1
-           AND t.work_state='ready'
-           AND p.work_state='ready'
-           AND w.work_state='ready'
-           AND w.retired_at IS NULL
          ORDER BY 1, 2, 3, 4",
     )?;
     let references = statement

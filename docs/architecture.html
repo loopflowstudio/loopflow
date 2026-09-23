@@ -2013,10 +2013,9 @@ provider result.</p>
 <p><a href="https://loopflow.studio/architecture/execution">Follow the complete execution path →</a></p>
 <h2 id="add-one-capability-at-a-time">Add one capability at a time<a class="anchor-link" href="#add-one-capability-at-a-time" title="Link to this section">#</a></h2>
 <p>The Skill runner is useful by itself. The rest of Loopflow grows outward by
-adding one kind of capability at each layer. Tracked Work and autonomous
-controllers are separate layers: Work remains fully operable when no
-controller is installed or running, while controllers consume the same Work,
-execution, and delivery operations available to any caller.</p>
+adding one kind of capability at each layer. Tracked Work owns autonomous
+progression; transient boundary Runs consume the same execution and delivery
+operations available to helpers without becoming resident Work identities.</p>
 <pre tabindex="0"><code class="language-text">one Skill run
     |
     +-- Flow: compose Skills, mechanical operations, and human boundaries
@@ -2076,17 +2075,18 @@ execution, and delivery operations available to any caller.</p>
 <pre tabindex="0"><code class="language-text">work/                          controller/
 wave/{mod,config,context,      wave/{runner,resident,server,
       memory}                       placement,...}
-project                       project/{mod,state}
-task                          task/{mod,state}
-                              runner + store
+project                       task/mod
+task                          Task worker
+
+ops/project.rs                finite Project operations
 
 execution kernel: engine/ + harness/ + Run records
 composition surfaces: lf/ + bin/
 </code></pre>
 <p><code>work</code> never imports <code>controller</code>. The execution kernel works without either
-layer and never loads Work. CLI and controller callers resolve Work identity,
-Wave memory, and controller state, then pass ordinary launch inputs into the
-kernel.</p>
+layer and never loads Work. CLI and boundary callers resolve Work identity,
+Wave memory, and the exact Flow position, then pass ordinary launch inputs into
+the kernel.</p>
 <p>Release delivery also separates proof from authority:</p>
 <pre tabindex="0"><code class="language-text">merged release commit
         |
@@ -2120,7 +2120,7 @@ human / agent --&gt; lf CLI --------+----------+-----------+
           |                       +---------&gt; Task delivery
           |                       |                ^
           |                       v                |
-          +------------&gt; end-to-end controllers --+
+          +------------&gt; Task advancement --------+
           |                       |
           +-----------------------+ Skill boundary
                                   v
@@ -2230,7 +2230,7 @@ lf gate --diff-files
 </code></pre>
 <p>These commands need the execution area only: discover, prompt, route, launch,
 record, return.</p>
-<h3 id="tracked-work-without-a-controller">Tracked work without a controller<a class="anchor-link" href="#tracked-work-without-a-controller" title="Link to this section">#</a></h3>
+<h3 id="direct-task-work">Direct Task work<a class="anchor-link" href="#direct-task-work" title="Link to this section">#</a></h3>
 <pre tabindex="0"><code class="language-bash">lf task prepare INF-123
 lf --task INF-123 research &quot;write scratch/runtime.md&quot;
 lf --task INF-123 research &quot;write scratch/prompts.md&quot;
@@ -2240,25 +2240,26 @@ lf pr submit
 lf task status INF-123 --json
 </code></pre>
 <p><code>prepare</code> creates or reuses tracked Task Work, its one worktree, and the active
-serial PR identity. It installs no end-to-end controller. Each <code>--task</code> command
+serial PR identity. It starts no Task execution. Each <code>--task</code> command
 is an independent Run in that worktree; several may overlap and write distinct
 scratch paths. Any caller may then use the ordinary Work and delivery commands.
-Those commands act on delivery facts, not on proof that a controller ran its
-expected Flow. <code>submit</code>, <code>arm</code>, and <code>land</code> therefore work the same whether the
-Task was pursued piecemeal, by the built-in controller, or by another system.</p>
-<h3 id="end-to-end-controllers">End-to-end controllers<a class="anchor-link" href="#end-to-end-controllers" title="Link to this section">#</a></h3>
+Those commands act on delivery facts, not on Flow-driving authority. <code>submit</code>,
+<code>arm</code>, and <code>land</code> therefore work the same whether the Task was pursued by its
+Task worker, piecemeal helper Runs, or another system.</p>
+<h3 id="bounded-task-advancement">Bounded Task advancement<a class="anchor-link" href="#bounded-task-advancement" title="Link to this section">#</a></h3>
 <pre tabindex="0"><code class="language-bash">lf start product
 lf task run INF-123
+lf project run billing
 lf chat --steer &quot;ship invoices first&quot;
 lf status product
 </code></pre>
-<p>The Home keeper starts the placed Wave listener. Its resident loop refreshes
-current planning evidence and chooses the next Project or Task boundary. Wave,
-Project, and Task retain distinct controllers. Direct questions use ordinary
-fresh bound Runs. A Task human FlowStep starts the node's ordinary bound Skill
-command as a provider Run. A detached PTY cradle may keep the first client
-alive before a UI arrives; opening the Session replaces it with a native
-provider resume.</p>
+<p>The Home keeper may start the placed Wave listener and resident. Project and
+Task motion does not depend on either: Project commands launch finite attributed
+operations, while Task commands claim an exact Flow boundary for one worker.
+Direct questions and helper work use ordinary fresh attributed Runs without
+gaining Task Flow authority.
+A Task human FlowStep starts the persisted Skill as a provider Run and remains
+parked until its exact decision arrives. Daemon and app triggers are later work.</p>
 <h3 id="another-machine">Another machine<a class="anchor-link" href="#another-machine" title="Link to this section">#</a></h3>
 <pre tabindex="0"><code class="language-bash">lf ssh build-home runs --json
 lf ssh build-home start product

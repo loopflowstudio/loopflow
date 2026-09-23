@@ -57,7 +57,7 @@ struct RegistryQueryTests {
           "wave":{"id":"goals","name":"goals","status":"ready","goal":"g","repo":"/tmp/repo-a","active_tasks":1,"active_projects":1,"live":false,"paused":false,"enabled":true,"endpoint":null,"created_at":null,"parent_wave_id":null,"home":{"id":"home_00000000000000000000000000000001","route":"local","created_at":"1970-01-01T00:00:00Z","observed_at":"1970-01-01T00:00:00Z"}},
           "loop_state":"turning",
           "projects":[{
-            "project":{"id":"project-1","slug":"developer-efficiency","name":"Developer efficiency","summary":"Keep flow.","definition":"Remove friction.","flows":{"first":"task-design","loop":"slice","finally":"ship"},"krs":[{"text":"Fast loops","holds":false}]},
+            "project":{"id":"project-1","slug":"developer-efficiency","name":"Developer efficiency","summary":"Keep flow.","definition":"Remove friction.","flows":{"recommended": "task-design"},"krs":[{"text":"Fast loops","holds":false}]},
             "runtime":{"work_id":"project-1","status":"ready","reason":"ready","updated_at":"2026-07-06T00:00:00Z","iteration":2,"pending_observations":0,"provider":"codex","last_failure":null},
             "directive":null,
             "next_move":{"owner":"project","reason":"supervised Tasks are active"},
@@ -91,6 +91,7 @@ struct RegistryQueryTests {
         #expect(result.homeRuntime.action == .start(homeId: "home_00000000000000000000000000000001"))
         #expect(result.loopState == "turning")
         #expect(result.workMap.projects[0].project.slug == "developer-efficiency")
+        #expect(result.workMap.projects[0].project.flows.recommended == "task-design")
         #expect(result.workMap.projects[0].runtime?.status == .ready)
         #expect(result.workMap.projects[0].tasks[0].task.identifier == "INF-123")
         #expect(result.workMap.projects[0].tasks[0].runtime?.projectId == "project-1")
@@ -460,7 +461,7 @@ struct RegistryQueryTests {
     func planDecodesProjects() async throws {
         let json = """
         {"wave":"goals","provider":"linear","initiative":"init-1","project":null,"synced_at":1,"projects":[
-          {"id":"project-1","slug":"runtime","name":"Runtime","summary":"Run reliably.","definition":"Run reliably.","flows":{"first":null,"loop":null,"finally":null},"krs":[{"text":"Survives restart","holds":true}],"initiative_ids":["init-1"],"team_ids":["team-loo"]}
+          {"id":"project-1","slug":"runtime","name":"Runtime","summary":"Run reliably.","definition":"Run reliably.","flows":{"recommended": null},"krs":[{"text":"Survives restart","holds":true}],"initiative_ids":["init-1"],"team_ids":["team-loo"]}
         ],"items":[{"id":"issue-1","identifier":"LOO-1","url":null,"name":"Wire runtime","description":"","rank":1,"completed":false,"project_id":"project-1","project":"runtime","team_id":"team-loo","assignee":null}]}
         """
         let query = RegistryQuery { args, cwd in

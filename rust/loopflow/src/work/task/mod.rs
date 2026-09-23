@@ -1,7 +1,7 @@
-//! Durable tracking and delivery identity for one Linear Task.
+//! Durable state for one Linear Task.
 //!
-//! A Task owns one durable worktree and serial PR chain. End-to-end execution
-//! state belongs to the controller layer; one-shot Runs need only this record.
+//! A Task owns one durable worktree, serial PR chain, and Flow progression.
+//! Runs are transient executors of that state.
 
 use std::path::PathBuf;
 use std::str::FromStr;

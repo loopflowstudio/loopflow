@@ -12,10 +12,8 @@ use std::path::PathBuf;
 use rusqlite::{params, Connection, OptionalExtension, ToSql, TransactionBehavior};
 use time::OffsetDateTime;
 
-use crate::child::{
-    AbandonIntent, ChildBodyHandoff, ChildBodyHandoffRequest, ChildRef, ObservationRecipient,
-};
-use crate::durable::Author;
+use crate::child::{AbandonIntent, ChildRef, ObservationRecipient};
+use crate::durable::{Author, FlowPosition, TaskFlowBlocker, TaskWorkerClaim, WorkRef};
 use crate::id::WaveId;
 use crate::planning::{LinearIssueId, LinearProjectId, ProjectPlan, TaskPlan};
 use crate::store::rows::now_unix;
@@ -115,7 +113,7 @@ impl SqliteStore {
         let mut conn = self.conn.lock().expect("store mutex poisoned");
         let transaction = conn.transaction_with_behavior(TransactionBehavior::Immediate)?;
         validate_task_project(&transaction, task)?;
-        let parameters = task_control_params(task);
+        let parameters = task_params(task);
         let changed = transaction.execute(
             TASK_UPDATE,
             rusqlite::params_from_iter(parameters.iter().map(|value| value.as_ref())),
@@ -123,6 +121,300 @@ impl SqliteStore {
         if changed == 0 {
             return Err(StoreError::NotFound);
         }
+        transaction.commit()?;
+        Ok(())
+    }
+
+    pub fn settle_task_worker(
+        &self,
+        task: &Task,
+        expected: &TaskWorkerClaim,
+        next: &FlowPosition,
+        progress: Option<&str>,
+    ) -> StoreResult<FlowPosition> {
+        validate_task(task)?;
+        let mut conn = self.conn.lock().expect("store mutex poisoned");
+        let transaction = conn.transaction_with_behavior(TransactionBehavior::Immediate)?;
+        validate_task_project(&transaction, task)?;
+        update_task_timestamp_in(&transaction, task)?;
+        let position =
+            super::durable::settle_task_worker_in(&transaction, &task.id, expected, next)?;
+        if let Some(summary) = progress.filter(|summary| !summary.is_empty()) {
+            insert_task_event_in(
+                &transaction,
+                task,
+                &TaskEventKind::Progress {
+                    summary: summary.to_string(),
+                },
+            )?;
+        }
+        transaction.commit()?;
+        Ok(position)
+    }
+
+    pub fn finish_task_flow(
+        &self,
+        task: &Task,
+        expected: &TaskWorkerClaim,
+        progress: Option<&str>,
+    ) -> StoreResult<()> {
+        validate_task(task)?;
+        let mut conn = self.conn.lock().expect("store mutex poisoned");
+        let transaction = conn.transaction_with_behavior(TransactionBehavior::Immediate)?;
+        validate_task_project(&transaction, task)?;
+        update_task_timestamp_in(&transaction, task)?;
+        super::durable::finish_task_flow_in(&transaction, &task.id, expected)?;
+        if let Some(summary) = progress.filter(|summary| !summary.is_empty()) {
+            insert_task_event_in(
+                &transaction,
+                task,
+                &TaskEventKind::Progress {
+                    summary: summary.to_string(),
+                },
+            )?;
+        }
+        transaction.commit()?;
+        Ok(())
+    }
+
+    pub fn block_task_flow(
+        &self,
+        task_id: &TaskId,
+        expected: &TaskWorkerClaim,
+        failure: &TaskFlowBlocker,
+    ) -> StoreResult<FlowPosition> {
+        let mut conn = self.conn.lock().expect("store mutex poisoned");
+        let transaction = conn.transaction_with_behavior(TransactionBehavior::Immediate)?;
+        let current = matching_claim_in(&transaction, task_id, expected)?;
+        let position =
+            super::durable::block_task_flow_in(&transaction, task_id, &current, failure)?;
+        let task = transaction.query_row(TASK_SELECT, params![task_id.as_str()], map_task_row)?;
+        insert_task_event_in(
+            &transaction,
+            &task,
+            &TaskEventKind::Failed {
+                error: failure.reason.clone(),
+                resumable: !failure.restart_required,
+            },
+        )?;
+        transaction.commit()?;
+        Ok(position)
+    }
+
+    pub fn release_task_worker(
+        &self,
+        task_id: &TaskId,
+        expected: &TaskWorkerClaim,
+    ) -> StoreResult<FlowPosition> {
+        let mut conn = self.conn.lock().expect("store mutex poisoned");
+        let transaction = conn.transaction_with_behavior(TransactionBehavior::Immediate)?;
+        let current = matching_claim_in(&transaction, task_id, expected)?;
+        let position = super::durable::release_task_worker_in(&transaction, task_id, &current)?;
+        transaction.commit()?;
+        Ok(position)
+    }
+
+    pub fn approve_human_task_boundary(
+        &self,
+        task: &Task,
+        expected: &FlowPosition,
+        next: &FlowPosition,
+        summary: &str,
+    ) -> StoreResult<FlowPosition> {
+        self.settle_human_task_boundary(task, expected, next, Some(summary), None)
+    }
+
+    pub fn finish_human_task_boundary(
+        &self,
+        task: &Task,
+        expected: &FlowPosition,
+        summary: &str,
+    ) -> StoreResult<()> {
+        validate_task(task)?;
+        if expected.task_id != task.id
+            || !expected.is_human()
+            || expected.claim.is_some()
+            || expected.failure.is_some()
+        {
+            return Err(StoreError::InvalidAuthority(
+                "human Task completion requires its exact unclaimed position".to_string(),
+            ));
+        }
+        let mut conn = self.conn.lock().expect("store mutex poisoned");
+        let transaction = conn.transaction_with_behavior(TransactionBehavior::Immediate)?;
+        let current = super::durable::flow_position_in(&transaction, &task.id)?
+            .ok_or(StoreError::NotFound)?;
+        if current != *expected {
+            return Err(StoreError::InvalidAuthority(
+                "human Task position changed before completion".to_string(),
+            ));
+        }
+        validate_task_project(&transaction, task)?;
+        if transaction.execute(
+            "DELETE FROM task_flow_positions WHERE task_id=?1 AND position_version=?2",
+            params![
+                task.id.as_str(),
+                i64::try_from(expected.version)
+                    .map_err(|error| StoreError::InvalidData(error.to_string()))?
+            ],
+        )? != 1
+        {
+            return Err(StoreError::InvalidAuthority(
+                "human Task position changed before completion".to_string(),
+            ));
+        }
+        insert_task_event_in(
+            &transaction,
+            task,
+            &TaskEventKind::Progress {
+                summary: summary.to_string(),
+            },
+        )?;
+        transaction.commit()?;
+        Ok(())
+    }
+
+    pub fn iterate_human_task_boundary(
+        &self,
+        task: &Task,
+        expected: &FlowPosition,
+        next: &FlowPosition,
+        author: &Author,
+        direction: &str,
+    ) -> StoreResult<FlowPosition> {
+        self.settle_human_task_boundary(task, expected, next, None, Some((author, direction)))
+    }
+
+    pub fn retry_task_flow(
+        &self,
+        task_id: &TaskId,
+        expected: &FlowPosition,
+        author: &Author,
+        reason: &str,
+    ) -> StoreResult<FlowPosition> {
+        let work = WorkRef::Task(task_id.clone());
+        if expected.task_id != *task_id || expected.claim.is_some() || expected.failure.is_none() {
+            return Err(StoreError::InvalidAuthority(
+                "Task retry requires its exact failed Flow position".to_string(),
+            ));
+        }
+        if expected
+            .failure
+            .as_ref()
+            .is_some_and(|failure| failure.restart_required)
+        {
+            return Err(StoreError::InvalidAuthority(
+                "Task failure requires an explicit Flow restart".to_string(),
+            ));
+        }
+        let mut next = expected.clone();
+        next.failure = None;
+        next.updated_at = OffsetDateTime::now_utc();
+        let mut conn = self.conn.lock().expect("store mutex poisoned");
+        let transaction = conn.transaction_with_behavior(TransactionBehavior::Immediate)?;
+        let current =
+            super::durable::flow_position_in(&transaction, task_id)?.ok_or(StoreError::NotFound)?;
+        if current != *expected {
+            return Err(StoreError::InvalidAuthority(
+                "Task failure changed before retry".to_string(),
+            ));
+        }
+        let position = super::durable::set_flow_position_in(&transaction, task_id, &next)?;
+        Self::append_steer_in(&transaction, &work, author, reason)?;
+        transaction.commit()?;
+        Ok(position)
+    }
+
+    fn settle_human_task_boundary(
+        &self,
+        task: &Task,
+        expected: &FlowPosition,
+        next: &FlowPosition,
+        progress: Option<&str>,
+        steer: Option<(&Author, &str)>,
+    ) -> StoreResult<FlowPosition> {
+        validate_task(task)?;
+        let work = WorkRef::Task(task.id.clone());
+        if expected.task_id != task.id
+            || !expected.is_human()
+            || expected.claim.is_some()
+            || expected.failure.is_some()
+        {
+            return Err(StoreError::InvalidAuthority(
+                "human Task settlement requires its exact unclaimed position".to_string(),
+            ));
+        }
+        if next.version != expected.version {
+            return Err(StoreError::InvalidAuthority(
+                "human Task settlement has a stale position version".to_string(),
+            ));
+        }
+        let mut conn = self.conn.lock().expect("store mutex poisoned");
+        let transaction = conn.transaction_with_behavior(TransactionBehavior::Immediate)?;
+        let current = super::durable::flow_position_in(&transaction, &task.id)?
+            .ok_or(StoreError::NotFound)?;
+        if current != *expected {
+            return Err(StoreError::InvalidAuthority(
+                "human Task position changed before settlement".to_string(),
+            ));
+        }
+        validate_task_project(&transaction, task)?;
+        update_task_timestamp_in(&transaction, task)?;
+        let position = super::durable::set_flow_position_in(&transaction, &task.id, next)?;
+        if let Some(summary) = progress {
+            insert_task_event_in(
+                &transaction,
+                task,
+                &TaskEventKind::Progress {
+                    summary: summary.to_string(),
+                },
+            )?;
+        }
+        if let Some((author, direction)) = steer {
+            Self::append_steer_in(&transaction, &work, author, direction)?;
+        }
+        transaction.commit()?;
+        Ok(position)
+    }
+
+    pub(crate) fn restart_task_flow(
+        &self,
+        task: &Task,
+        author: &Author,
+        direction: &str,
+        checkpoint_head: &str,
+    ) -> StoreResult<()> {
+        validate_task(task)?;
+        if direction.trim().is_empty() || checkpoint_head.trim().is_empty() {
+            return Err(StoreError::InvalidData(
+                "Task restart requires direction and a checkpoint head".to_string(),
+            ));
+        }
+        let mut conn = self.conn.lock().expect("store mutex poisoned");
+        let transaction = conn.transaction_with_behavior(TransactionBehavior::Immediate)?;
+        validate_task_project(&transaction, task)?;
+        let task_work = transaction
+            .query_row(TASK_SELECT, params![task.id.as_str()], map_task_row)
+            .optional()?
+            .ok_or(StoreError::NotFound)?;
+        let work = work_for_child_in(&transaction, &ChildRef::Task(task.id.clone()))?;
+        transaction.execute(
+            "DELETE FROM task_flow_positions WHERE task_id=?1",
+            [task.id.as_str()],
+        )?;
+        let parameters = task_params(task);
+        transaction.execute(
+            TASK_UPDATE,
+            rusqlite::params_from_iter(parameters.iter().map(|value| value.as_ref())),
+        )?;
+        Self::append_steer_in(&transaction, &work, author, direction)?;
+        insert_task_event_in(
+            &transaction,
+            &task_work,
+            &TaskEventKind::Progress {
+                summary: format!("Task restarted from checkpoint {checkpoint_head}"),
+            },
+        )?;
         transaction.commit()?;
         Ok(())
     }
@@ -195,7 +487,7 @@ impl SqliteStore {
                 return Err(StoreError::NotFound);
             }
         }
-        let parameters = task_control_params(task);
+        let parameters = task_params(task);
         if transaction.execute(
             TASK_UPDATE,
             rusqlite::params_from_iter(parameters.iter().map(|value| value.as_ref())),
@@ -391,7 +683,7 @@ impl SqliteStore {
         let transaction = conn.transaction_with_behavior(TransactionBehavior::Immediate)?;
         validate_task_project(&transaction, task)?;
         settle_task_pr_on(&transaction, pr)?;
-        let parameters = task_control_params(task);
+        let parameters = task_params(task);
         if transaction.execute(
             TASK_UPDATE,
             rusqlite::params_from_iter(parameters.iter().map(|value| value.as_ref())),
@@ -665,7 +957,6 @@ impl SqliteStore {
     // process/receipt shape as Tasks but deliberately own no worktree.
 
     pub fn insert_project(&self, project: &Project) -> StoreResult<()> {
-        validate_project(project)?;
         let mut conn = self.conn.lock().expect("store mutex poisoned");
         let transaction = conn.transaction_with_behavior(TransactionBehavior::Immediate)?;
         transaction.execute(
@@ -683,7 +974,6 @@ impl SqliteStore {
         author: &Author,
         text: &str,
     ) -> StoreResult<()> {
-        validate_project(project)?;
         let mut conn = self.conn.lock().expect("store mutex poisoned");
         let transaction = conn.transaction_with_behavior(TransactionBehavior::Immediate)?;
         let parameters = project_params(project);
@@ -704,7 +994,6 @@ impl SqliteStore {
         author: &Author,
         text: &str,
     ) -> StoreResult<()> {
-        validate_project(project)?;
         let mut conn = self.conn.lock().expect("store mutex poisoned");
         let transaction = conn.transaction_with_behavior(TransactionBehavior::Immediate)?;
         let parameters = project_params(project);
@@ -720,12 +1009,11 @@ impl SqliteStore {
     }
 
     pub fn update_project(&self, project: &Project) -> StoreResult<()> {
-        validate_project(project)?;
         let mut conn = self.conn.lock().expect("store mutex poisoned");
         let transaction = conn.transaction_with_behavior(TransactionBehavior::Immediate)?;
-        let parameters = project_control_params(project);
+        let parameters = project_fact_params(project);
         let changed = transaction.execute(
-            PROJECT_UPDATE,
+            PROJECT_FACT_UPDATE,
             rusqlite::params_from_iter(parameters.iter().map(|value| value.as_ref())),
         )?;
         if changed == 0 {
@@ -735,124 +1023,58 @@ impl SqliteStore {
         Ok(())
     }
 
-    pub(crate) fn adopt_project_plan(
+    pub fn complete_project_operation(
         &self,
         project_id: &ProjectId,
-        plan: &ProjectPlan,
-    ) -> StoreResult<(Project, bool)> {
+        observations: &[ObservationOutboxRow],
+    ) -> StoreResult<Project> {
         let mut conn = self.conn.lock().expect("store mutex poisoned");
         let transaction = conn.transaction_with_behavior(TransactionBehavior::Immediate)?;
-        let mut project = transaction.query_row(
-            PROJECT_SELECT,
-            params![project_id.as_str()],
-            map_project_row,
+        let mut project = transaction
+            .query_row(
+                PROJECT_SELECT,
+                params![project_id.as_str()],
+                map_project_row,
+            )
+            .optional()?
+            .ok_or(StoreError::NotFound)?;
+        project.iteration += 1;
+        project.updated_at = OffsetDateTime::now_utc();
+        update_project_progression_in(&transaction, &project)?;
+        consume_project_observations_in(&transaction, &project, observations)?;
+        insert_project_event_in(
+            &transaction,
+            &project,
+            &ProjectEventKind::IterationCompleted {
+                iteration: project.iteration,
+                summary: "project/operate completed".to_string(),
+            },
         )?;
-        if plan.id != project.plan.id {
-            return Err(StoreError::InvalidData(format!(
-                "Project {} cannot adopt planning for Linear Project {}",
-                project.id,
-                plan.id.as_str()
-            )));
-        }
-        if plan.pm_snapshot_synced_at < project.plan.pm_snapshot_synced_at {
-            return Err(StoreError::InvalidData(format!(
-                "Project {} cannot move its PM snapshot backward from {} to {}",
-                project.id, project.plan.pm_snapshot_synced_at, plan.pm_snapshot_synced_at
-            )));
-        }
-        let changed = !project.plan.has_same_content(plan);
-        if project.plan == *plan {
-            transaction.commit()?;
-            return Ok((project, false));
-        }
-        project.plan = plan.clone();
-        if changed {
-            project.updated_at = OffsetDateTime::now_utc();
-        }
-        validate_project(&project)?;
-        let parameters = project_params(&project);
-        if transaction.execute(
-            PROJECT_UPDATE,
-            rusqlite::params_from_iter(parameters.iter().map(|value| value.as_ref())),
-        )? == 0
-        {
-            return Err(StoreError::NotFound);
-        }
         transaction.commit()?;
-        Ok((project, changed))
+        Ok(project)
     }
 
-    pub(crate) fn fail_project(&self, project: &Project, error: &str) -> StoreResult<ProjectEvent> {
-        validate_project(project)?;
+    pub fn fail_project_operation(&self, project_id: &ProjectId, error: &str) -> StoreResult<()> {
         let mut conn = self.conn.lock().expect("store mutex poisoned");
         let transaction = conn.transaction_with_behavior(TransactionBehavior::Immediate)?;
-        let parameters = project_params(project);
-        if transaction.execute(
-            PROJECT_UPDATE,
-            rusqlite::params_from_iter(parameters.iter().map(|value| value.as_ref())),
-        )? == 0
-        {
-            return Err(StoreError::NotFound);
-        }
-        let event = insert_project_event_in(
+        let project = transaction
+            .query_row(
+                PROJECT_SELECT,
+                params![project_id.as_str()],
+                map_project_row,
+            )
+            .optional()?
+            .ok_or(StoreError::NotFound)?;
+        insert_project_event_in(
             &transaction,
-            project,
+            &project,
             &ProjectEventKind::Failed {
                 error: error.to_string(),
                 resumable: true,
             },
         )?;
         transaction.commit()?;
-        Ok(event)
-    }
-
-    pub(crate) fn complete_project(
-        &self,
-        project: &Project,
-        summary: &str,
-    ) -> StoreResult<ProjectEvent> {
-        validate_project(project)?;
-        let mut conn = self.conn.lock().expect("store mutex poisoned");
-        let transaction = conn.transaction_with_behavior(TransactionBehavior::Immediate)?;
-        let work = crate::durable::WorkRef::Project(project.id.clone());
-        super::durable::work_status_in(&transaction, &work).and_then(|status| {
-            if status == crate::durable::WorkStatus::Ready {
-                Ok(())
-            } else {
-                Err(StoreError::InvalidAuthority(format!(
-                    "Project {} Work is {status}",
-                    project.id
-                )))
-            }
-        })?;
-        let parameters = project_params(project);
-        if transaction.execute(
-            PROJECT_UPDATE,
-            rusqlite::params_from_iter(parameters.iter().map(|value| value.as_ref())),
-        )? == 0
-        {
-            return Err(StoreError::NotFound);
-        }
-        let event = insert_project_event_in(
-            &transaction,
-            project,
-            &ProjectEventKind::Completed {
-                summary: summary.to_string(),
-            },
-        )?;
-        if transaction.execute(
-            "UPDATE projects SET work_state='done', work_terminal_at=?2
-             WHERE id=?1 AND work_state='ready'",
-            params![project.id.as_str(), now_unix()],
-        )? != 1
-        {
-            return Err(StoreError::InvalidData(format!(
-                "Project {} Work changed while completion was being recorded",
-                project.id
-            )));
-        }
-        transaction.commit()?;
-        Ok(event)
+        Ok(())
     }
 
     pub fn project(&self, project_id: &ProjectId) -> StoreResult<Option<Project>> {
@@ -1044,80 +1266,111 @@ impl SqliteStore {
         )?;
         Ok(())
     }
+}
 
-    pub fn consume_task_observation_for_project(
-        &self,
-        project_id: &ProjectId,
-        observation: &ObservationOutboxRow,
-    ) -> StoreResult<bool> {
-        let (
-            ObservationRecipient::Project {
-                project_id: recipient_id,
-            },
-            ChildRef::Task(task_id),
-            ChildEventPayload::Task { event },
-        ) = (
-            &observation.recipient,
-            &observation.source,
-            &observation.payload,
-        )
-        else {
-            return Err(StoreError::InvalidData(
-                "Project can consume only supervised Task observations".to_string(),
-            ));
-        };
-        let mut conn = self.conn.lock().expect("store mutex poisoned");
-        let transaction = conn.transaction_with_behavior(TransactionBehavior::Immediate)?;
-        if recipient_id != project_id {
-            return Err(StoreError::InvalidData(format!(
-                "observation {} belongs to Project {recipient_id}, not {project_id}",
-                observation.id
-            )));
-        }
-        let exists: bool = transaction.query_row(
-            "SELECT EXISTS(
-                SELECT 1 FROM project_events
-                WHERE project_id=?1
-                  AND json_extract(kind_json, '$.kind')='task_observed'
-                  AND json_extract(kind_json, '$.task_id')=?2
-                  AND json_extract(kind_json, '$.task_event_id')=?3
-             )",
-            params![project_id.as_str(), task_id.as_str(), observation.event_id,],
-            |row| row.get(0),
-        )?;
-        if !exists {
-            let kind = ProjectEventKind::TaskObserved {
+fn consume_project_observations_in(
+    conn: &Connection,
+    project: &Project,
+    observations: &[ObservationOutboxRow],
+) -> StoreResult<()> {
+    for observation in observations {
+        consume_task_observation_for_project_in(conn, project, observation)?;
+    }
+    Ok(())
+}
+
+fn consume_task_observation_for_project_in(
+    conn: &Connection,
+    project: &Project,
+    observation: &ObservationOutboxRow,
+) -> StoreResult<bool> {
+    let (
+        ObservationRecipient::Project {
+            project_id: recipient_id,
+        },
+        ChildRef::Task(task_id),
+        ChildEventPayload::Task { event },
+    ) = (
+        &observation.recipient,
+        &observation.source,
+        &observation.payload,
+    )
+    else {
+        return Err(StoreError::InvalidData(
+            "Project can consume only supervised Task observations".to_string(),
+        ));
+    };
+    if recipient_id != &project.id {
+        return Err(StoreError::InvalidData(format!(
+            "observation {} belongs to Project {recipient_id}, not {}",
+            observation.id, project.id
+        )));
+    }
+    let exists: bool = conn.query_row(
+        "SELECT EXISTS(
+            SELECT 1 FROM project_events
+            WHERE project_id=?1
+              AND json_extract(kind_json, '$.kind')='task_observed'
+              AND json_extract(kind_json, '$.task_id')=?2
+              AND json_extract(kind_json, '$.task_event_id')=?3
+         )",
+        params![project.id.as_str(), task_id.as_str(), observation.event_id],
+        |row| row.get(0),
+    )?;
+    if !exists {
+        insert_project_event_in(
+            conn,
+            project,
+            &ProjectEventKind::TaskObserved {
                 task_id: task_id.clone(),
                 task_event_id: observation.event_id,
                 event: Box::new(event.clone()),
-            };
-            let project = transaction.query_row(
-                PROJECT_SELECT,
-                params![project_id.as_str()],
-                map_project_row,
-            )?;
-            insert_project_event_in(&transaction, &project, &kind)?;
-        }
-        let now = now_unix();
-        transaction.execute(
-            "UPDATE observation_outbox SET delivered_at=?1
-             WHERE id=?2 AND delivered_at IS NULL",
-            params![now, observation.id],
+            },
         )?;
-        transaction.execute(
-            "UPDATE project_controller_state
-             SET observation_cursor=MAX(observation_cursor, ?1), updated_at=?2
-             WHERE project_id=?3",
-            params![observation.id, now, project_id.as_str()],
-        )?;
-        transaction.commit()?;
-        Ok(!exists)
     }
+    conn.execute(
+        "UPDATE observation_outbox SET delivered_at=?1
+         WHERE id=?2 AND delivered_at IS NULL",
+        params![now_unix(), observation.id],
+    )?;
+    Ok(!exists)
 }
 
 fn validate_task(task: &Task) -> StoreResult<()> {
     task.validate()
         .map_err(|error| StoreError::InvalidData(error.to_string()))
+}
+
+fn update_task_timestamp_in(conn: &Connection, task: &Task) -> StoreResult<()> {
+    if conn.execute(
+        "UPDATE tasks SET updated_at=?2 WHERE id=?1",
+        params![task.id.as_str(), task.updated_at.unix_timestamp()],
+    )? != 1
+    {
+        return Err(StoreError::NotFound);
+    }
+    Ok(())
+}
+
+fn matching_claim_in(
+    conn: &Connection,
+    task_id: &TaskId,
+    expected: &TaskWorkerClaim,
+) -> StoreResult<TaskWorkerClaim> {
+    let current = super::durable::flow_position_in(conn, task_id)?
+        .and_then(|position| position.claim)
+        .ok_or_else(|| {
+            StoreError::InvalidAuthority(format!("Task {task_id} has no active worker"))
+        })?;
+    if current.invocation_id != expected.invocation_id
+        || current.position_version != expected.position_version
+        || current.generation != expected.generation
+    {
+        return Err(StoreError::InvalidAuthority(format!(
+            "Task {task_id} worker changed"
+        )));
+    }
+    Ok(current)
 }
 
 fn complete_task_work_in(conn: &Connection, task: &Task) -> StoreResult<()> {
@@ -1170,64 +1423,6 @@ fn resolve_current_task(key: &str, mut tasks: Vec<Task>) -> StoreResult<Option<T
         )));
     }
     Ok(tasks.pop())
-}
-
-pub(super) fn validate_handoff_request(request: &ChildBodyHandoffRequest) -> StoreResult<()> {
-    if request.agent.trim().is_empty() || request.provider.trim().is_empty() {
-        return Err(StoreError::InvalidData(
-            "body handoff requires an agent and provider".to_string(),
-        ));
-    }
-    if request.reason.trim().is_empty() {
-        return Err(StoreError::InvalidData(
-            "body handoff requires an audit reason".to_string(),
-        ));
-    }
-    Ok(())
-}
-
-pub(super) fn validate_handoff_state(
-    kind: &str,
-    label: &str,
-    status: &crate::durable::WorkStatus,
-    abandon_intent: Option<&AbandonIntent>,
-) -> StoreResult<()> {
-    if matches!(
-        status,
-        crate::durable::WorkStatus::Done | crate::durable::WorkStatus::Abandoned
-    ) {
-        return Err(StoreError::InvalidData(format!(
-            "{kind} {label} is terminal; Work cannot hand off bodies"
-        )));
-    }
-    if let Some(intent) = abandon_intent {
-        return Err(StoreError::InvalidData(format!(
-            "{kind} {label} is being abandoned: {}",
-            intent.reason
-        )));
-    }
-    Ok(())
-}
-
-pub(super) fn apply_handoff(
-    agent: &mut String,
-    provider: &mut String,
-    provider_session_id: &mut Option<String>,
-    request: &ChildBodyHandoffRequest,
-) -> ChildBodyHandoff {
-    let handoff = ChildBodyHandoff {
-        from_agent: agent.clone(),
-        to_agent: request.agent.clone(),
-        from_provider: provider.clone(),
-        to_provider: request.provider.clone(),
-        reason: request.reason.clone(),
-    };
-    if *provider != request.provider {
-        *provider_session_id = None;
-    }
-    *agent = request.agent.clone();
-    *provider = request.provider.clone();
-    handoff
 }
 
 fn validate_task_pr(pr: &TaskPr) -> StoreResult<()> {
@@ -1308,10 +1503,16 @@ fn validate_task_project(conn: &Connection, task: &Task) -> StoreResult<()> {
     Ok(())
 }
 
-fn validate_project(project: &Project) -> StoreResult<()> {
-    project
-        .validate()
-        .map_err(|error| StoreError::InvalidData(error.to_string()))
+fn update_project_progression_in(conn: &Connection, project: &Project) -> StoreResult<()> {
+    let parameters = project_progression_params(project);
+    if conn.execute(
+        PROJECT_PROGRESSION_UPDATE,
+        rusqlite::params_from_iter(parameters.iter().map(|value| value.as_ref())),
+    )? != 1
+    {
+        return Err(StoreError::NotFound);
+    }
+    Ok(())
 }
 
 const TASK_INSERT: &str = "INSERT INTO tasks (
@@ -1412,10 +1613,6 @@ fn task_params(task: &Task) -> Vec<Box<dyn ToSql>> {
         Box::new(task.created_at.unix_timestamp()),
         Box::new(task.updated_at.unix_timestamp()),
     ]
-}
-
-fn task_control_params(task: &Task) -> Vec<Box<dyn ToSql>> {
-    task_params(task)
 }
 
 fn insert_task_pr(conn: &Connection, pr: &TaskPr) -> StoreResult<()> {
@@ -1958,27 +2155,35 @@ const PROJECT_INSERT: &str = "INSERT INTO projects (
     id, wave_id, external_project_id, project_slug, project_name,
     project_prompt_context, pm_snapshot_synced_at,
     abandon_requested_at, abandon_reason,
-    created_at, updated_at
+    created_at, updated_at, iteration
 ) VALUES (
-    ?1, ?2, ?3, ?4, ?5, ?6, ?7, ?8, ?9, ?10, ?11
+    ?1, ?2, ?3, ?4, ?5, ?6, ?7, ?8, ?9, ?10, ?11, ?12
 )";
 const PROJECT_COLUMNS: &str = "SELECT
     id, external_project_id, project_slug, project_name, project_prompt_context,
     wave_id, pm_snapshot_synced_at, abandon_requested_at, abandon_reason,
-    created_at, updated_at
+    created_at, updated_at, iteration
     FROM projects";
 pub(super) const PROJECT_SELECT: &str = "SELECT
     id, external_project_id, project_slug, project_name, project_prompt_context,
     wave_id, pm_snapshot_synced_at, abandon_requested_at, abandon_reason,
-    created_at, updated_at
+    created_at, updated_at, iteration
     FROM projects WHERE id=?1";
-const PROJECT_UPDATE: &str = "UPDATE projects SET
+const PROJECT_REOPEN_UPDATE: &str = "UPDATE projects SET
+    wave_id=?2, external_project_id=?3, project_slug=?4, project_name=?5,
+    project_prompt_context=?6, pm_snapshot_synced_at=?7,
+    abandon_requested_at=?8, abandon_reason=?9,
+    created_at=?10, updated_at=?11, iteration=?12
+    WHERE id=?1";
+const PROJECT_FACT_UPDATE: &str = "UPDATE projects SET
     wave_id=?2, external_project_id=?3, project_slug=?4, project_name=?5,
     project_prompt_context=?6, pm_snapshot_synced_at=?7,
     abandon_requested_at=?8, abandon_reason=?9,
     created_at=?10, updated_at=?11
     WHERE id=?1";
-const PROJECT_REOPEN_UPDATE: &str = PROJECT_UPDATE;
+const PROJECT_PROGRESSION_UPDATE: &str = "UPDATE projects SET
+    updated_at=?2, iteration=?3
+    WHERE id=?1";
 fn project_params(project: &Project) -> Vec<Box<dyn ToSql>> {
     vec![
         Box::new(project.id.as_str().to_string()),
@@ -2002,11 +2207,20 @@ fn project_params(project: &Project) -> Vec<Box<dyn ToSql>> {
         ),
         Box::new(project.created_at.unix_timestamp()),
         Box::new(project.updated_at.unix_timestamp()),
+        Box::new(project.iteration),
     ]
 }
 
-fn project_control_params(project: &Project) -> Vec<Box<dyn ToSql>> {
-    project_params(project)
+fn project_fact_params(project: &Project) -> Vec<Box<dyn ToSql>> {
+    project_params(project).into_iter().take(11).collect()
+}
+
+fn project_progression_params(project: &Project) -> Vec<Box<dyn ToSql>> {
+    vec![
+        Box::new(project.id.as_str().to_string()),
+        Box::new(project.updated_at.unix_timestamp()),
+        Box::new(project.iteration),
+    ]
 }
 
 pub(super) fn map_project_row(row: &rusqlite::Row<'_>) -> rusqlite::Result<Project> {
@@ -2030,6 +2244,7 @@ pub(super) fn map_project_row(row: &rusqlite::Row<'_>) -> rusqlite::Result<Proje
             pm_snapshot_synced_at: row.get(6)?,
         },
         wave_id: row.get(5)?,
+        iteration: row.get::<_, i64>(11)? as u32,
         abandon_intent,
         created_at: crate::store::rows::unix_to_datetime(row.get(9)?),
         updated_at: crate::store::rows::unix_to_datetime(row.get(10)?),

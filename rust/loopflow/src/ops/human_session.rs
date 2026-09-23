@@ -12,6 +12,7 @@ use serde::{Deserialize, Serialize};
 use sha2::{Digest, Sha256};
 
 use crate::durable::{FlowPosition, ProjectId, RunId, WorkRef, WorkStatus};
+use crate::engine::Skill;
 use crate::id::WaveId;
 use crate::run_record::{ProviderSessionRef, RunManifest, RUN_DIR_ENV};
 use crate::store::SharedStore;
@@ -26,16 +27,17 @@ const SESSION_START_TIMEOUT: Duration = Duration::from_secs(30);
 #[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
 pub(crate) struct FlowSessionToken {
     pub(crate) task_id: TaskId,
+    pub(crate) invocation_id: String,
     pub(crate) flow: String,
     pub(crate) node_id: String,
-    pub(crate) skill: String,
+    pub(crate) skill: Skill,
     pub(crate) iteration: u32,
 }
 
 #[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
 #[serde(tag = "kind", rename_all = "snake_case")]
 enum HumanSessionToken {
-    Flow { token: FlowSessionToken },
+    Flow { token: Box<FlowSessionToken> },
     Ask { id: String },
 }
 
@@ -110,12 +112,12 @@ struct AskSessionRecord {
 enum SessionTarget {
     Interactive {
         dir: PathBuf,
-        manifest: RunManifest,
+        manifest: Box<RunManifest>,
         provider_session: ProviderSessionRef,
     },
     Ask(AskSessionRecord),
     Flow {
-        task: Task,
+        task: Box<Task>,
         position: FlowPosition,
     },
 }
@@ -177,7 +179,7 @@ pub(crate) async fn prepare(
     if position.session_run_id.is_some() {
         return Ok(surface);
     }
-    let placement = store.placement(&position.work).await?;
+    let placement = store.placement(&position.work()).await?;
     let home = store
         .home_by_id(&placement.home_id)
         .await?
@@ -214,7 +216,7 @@ async fn find_session(store: &SharedStore, session_id: &str) -> Result<Option<Se
                 })?;
             return Ok(Some(SessionTarget::Interactive {
                 dir,
-                manifest,
+                manifest: Box::new(manifest),
                 provider_session,
             }));
         }
@@ -231,7 +233,10 @@ async fn find_session(store: &SharedStore, session_id: &str) -> Result<Option<Se
     let Some((task, position)) = find_flow_session_optional(store, session_id).await? else {
         return Ok(None);
     };
-    Ok(Some(SessionTarget::Flow { task, position }))
+    Ok(Some(SessionTarget::Flow {
+        task: Box::new(task),
+        position,
+    }))
 }
 
 async fn session_surface(store: &SharedStore, target: &SessionTarget) -> Result<SessionRecord> {
@@ -251,9 +256,8 @@ pub(crate) async fn mark_ready(store: &SharedStore, summary: &str) -> Result<()>
     let token = active_session_token()?;
     match token {
         HumanSessionToken::Flow { token } => {
-            let work = WorkRef::Task(token.task_id.clone());
             let mut position = store
-                .flow_position(&work)
+                .flow_position(&token.task_id)
                 .await?
                 .ok_or_else(|| anyhow!("human flow session is no longer waiting"))?;
             if !token_matches(&token, &position)
@@ -263,7 +267,7 @@ pub(crate) async fn mark_ready(store: &SharedStore, summary: &str) -> Result<()>
             }
             position.ready_summary = Some(summary.to_string());
             position.updated_at = time::OffsetDateTime::now_utc();
-            store.set_flow_position(&work, position).await?;
+            store.set_flow_position(&token.task_id, position).await?;
         }
         HumanSessionToken::Ask { id } => {
             let mut record = read_ask_record(&id)?
@@ -312,12 +316,25 @@ pub(crate) async fn decide(
         .map_err(|error| anyhow!(error.to_string()))
 }
 
+pub(crate) async fn decision_worktree(store: &SharedStore, session_id: &str) -> Result<PathBuf> {
+    match find_session(store, session_id)
+        .await?
+        .ok_or_else(|| session_not_found(session_id))?
+    {
+        SessionTarget::Flow { task, .. } => Ok(task.worktree.clone()),
+        SessionTarget::Interactive { .. } => {
+            bail!("Interactive Sessions use `lf session complete`")
+        }
+        SessionTarget::Ask(_) => bail!("Ad-hoc Ask Sessions use `lf session complete`"),
+    }
+}
+
 async fn stop_flow_run(store: &SharedStore, task: &Task, position: &FlowPosition) {
     let Some(run_id) = position.session_run_id.clone() else {
         return;
     };
     let result = async {
-        let placement = store.placement(&position.work).await?;
+        let placement = store.placement(&position.work()).await?;
         let home = store
             .home_by_id(&placement.home_id)
             .await?
@@ -370,18 +387,29 @@ async fn complete_ask(session_id: &str) -> Result<()> {
 pub(crate) async fn serve_flow(
     store: SharedStore,
     task_id: TaskId,
+    invocation_id: String,
     flow: String,
     node_id: String,
     skill: String,
     iteration: u32,
 ) -> Result<()> {
-    let token = FlowSessionToken {
-        task_id,
-        flow,
-        node_id,
-        skill,
-        iteration,
-    };
+    let task = store
+        .get_task(&task_id)
+        .await?
+        .ok_or_else(|| anyhow!("Task {task_id} disappeared"))?;
+    let position = store
+        .flow_position(&task_id)
+        .await?
+        .ok_or_else(|| anyhow!("human flow session is no longer waiting"))?;
+    let token = flow_token(&task, &position)?;
+    if token.invocation_id != invocation_id
+        || token.flow != flow
+        || token.node_id != node_id
+        || token.skill.name != skill
+        || token.iteration != iteration
+    {
+        bail!("human flow session is stale");
+    }
     let launch_lock = lock_session_launch(&flow_token_id(&token))?;
     serve_flow_locked(store, token, launch_lock).await
 }
@@ -396,21 +424,27 @@ async fn serve_flow_locked(
         .await?
         .ok_or_else(|| anyhow!("Task {} disappeared", token.task_id))?;
     validate_token(&store, &token).await?;
+    let position = store
+        .flow_position(&token.task_id)
+        .await?
+        .ok_or_else(|| anyhow!("human flow session is no longer waiting"))?;
+    if let Some(failure) = &position.failure {
+        bail!("human flow session cannot start: {}", failure.reason);
+    }
     let message = flow_message(&task, &token);
     let lf = crate::engine::process::resolve_current_home_lf_binary_checked()?;
     let selector = format!("task:{}", token.task_id);
     let serialized = serde_json::to_string(&HumanSessionToken::Flow {
-        token: token.clone(),
+        token: Box::new(token.clone()),
     })?;
     let mut command = tokio::process::Command::new(lf);
     command
-        .args(["--tui", "--as", &selector, &token.skill, &message])
+        .args(["--tui", "--as", &selector, &token.skill.name, &message])
         .current_dir(&task.worktree)
         .env(HUMAN_SESSION_ENV, serialized);
     let (mut child, run_id) = spawn_session_run(&mut command).await?;
-    let work = WorkRef::Task(token.task_id.clone());
     let mut position = store
-        .flow_position(&work)
+        .flow_position(&token.task_id)
         .await?
         .ok_or_else(|| anyhow!("human flow session is no longer waiting"))?;
     if !token_matches(&token, &position) {
@@ -420,7 +454,7 @@ async fn serve_flow_locked(
     position.session_run_id = Some(run_id);
     position.ready_summary = None;
     position.updated_at = time::OffsetDateTime::now_utc();
-    store.set_flow_position(&work, position).await?;
+    store.set_flow_position(&token.task_id, position).await?;
     drop(launch_lock);
     let status = child.wait().await.context("wait for human flow skill")?;
     if status.success() {
@@ -630,7 +664,7 @@ async fn open_boundary(store: &SharedStore, session_id: &str) -> Result<()> {
         if resume_native_run(
             run_id,
             &HumanSessionToken::Flow {
-                token: token.clone(),
+                token: Box::new(token.clone()),
             },
         )? {
             return Ok(());
@@ -638,8 +672,8 @@ async fn open_boundary(store: &SharedStore, session_id: &str) -> Result<()> {
         position.session_run_id = None;
         position.ready_summary = None;
         position.updated_at = time::OffsetDateTime::now_utc();
-        let work = position.work.clone();
-        store.set_flow_position(&work, position).await?;
+        let task_id = position.task_id.clone();
+        store.set_flow_position(&task_id, position).await?;
     }
     let launch_lock = lock_session_launch(session_id)?;
     let (_, current) = find_flow_session(store, session_id).await?;
@@ -647,7 +681,7 @@ async fn open_boundary(store: &SharedStore, session_id: &str) -> Result<()> {
         if resume_native_run(
             run_id,
             &HumanSessionToken::Flow {
-                token: token.clone(),
+                token: Box::new(token.clone()),
             },
         )? {
             return Ok(());
@@ -662,7 +696,7 @@ pub(crate) fn stop_run(run_id: &RunId) -> Result<()> {
 
 async fn boundary_run_ids(store: &SharedStore) -> Result<HashSet<RunId>> {
     let mut run_ids = store
-        .human_flow_positions()
+        .human_task_flow_positions()
         .await?
         .into_iter()
         .filter_map(|position| position.session_run_id)
@@ -934,9 +968,8 @@ pub(crate) async fn token_is_current(
     store: &SharedStore,
     token: &FlowSessionToken,
 ) -> Result<bool> {
-    let work = WorkRef::Task(token.task_id.clone());
     Ok(store
-        .flow_position(&work)
+        .flow_position(&token.task_id)
         .await?
         .as_ref()
         .is_some_and(|position| token_matches(token, position)))
@@ -944,14 +977,11 @@ pub(crate) async fn token_is_current(
 
 async fn list_flow_sessions(store: &SharedStore) -> Result<Vec<SessionRecord>> {
     let mut sessions = Vec::new();
-    for position in store.human_flow_positions().await? {
-        let WorkRef::Task(task_id) = &position.work else {
+    for position in store.human_task_flow_positions().await? {
+        let Some(task) = store.get_task(&position.task_id).await? else {
             continue;
         };
-        let Some(task) = store.get_task(task_id).await? else {
-            continue;
-        };
-        if store.work_status(&position.work).await? != WorkStatus::Ready {
+        if store.work_status(&position.work()).await? != WorkStatus::Ready {
             continue;
         }
         sessions.push(flow_surface(store, &task, &position).await?);
@@ -996,17 +1026,14 @@ async fn find_flow_session_optional(
     store: &SharedStore,
     session_id: &str,
 ) -> Result<Option<(Task, FlowPosition)>> {
-    for position in store.human_flow_positions().await? {
+    for position in store.human_task_flow_positions().await? {
         if flow_id(&position)? != session_id {
             continue;
         }
-        let WorkRef::Task(task_id) = &position.work else {
-            break;
-        };
         let task = store
-            .get_task(task_id)
+            .get_task(&position.task_id)
             .await?
-            .ok_or_else(|| anyhow!("Task {task_id} disappeared"))?;
+            .ok_or_else(|| anyhow!("Task {} disappeared", position.task_id))?;
         return Ok(Some((task, position)));
     }
     Ok(None)
@@ -1018,7 +1045,8 @@ async fn flow_surface(
     position: &FlowPosition,
 ) -> Result<SessionRecord> {
     validate_task_position(task, position)?;
-    let placement = store.placement(&position.work).await?;
+    let step = position.current();
+    let placement = store.placement(&position.work()).await?;
     let home = store
         .home_by_id(&placement.home_id)
         .await?
@@ -1044,9 +1072,9 @@ async fn flow_surface(
     Ok(SessionRecord {
         id,
         kind: SessionKind::Flow,
-        work: Some(position.work.clone()),
+        work: Some(position.work()),
         title: task.plan.title.clone(),
-        detail: position.step.clone(),
+        detail: step.step,
         cwd: task.worktree.display().to_string(),
         state: runtime,
         ready_summary: position.ready_summary.clone(),
@@ -1096,11 +1124,13 @@ fn human_open_argv(
 }
 
 fn validate_task_position(task: &Task, position: &FlowPosition) -> Result<()> {
-    if position.work != WorkRef::Task(task.id.clone()) || !position.human {
+    if position.task_id != task.id || !position.is_human() {
         return Err(anyhow!("human session does not belong to Task {}", task.id));
     }
-    let node_id = position
-        .node_id
+    let step = position.current();
+    let node_id = step
+        .policy
+        .id
         .as_deref()
         .ok_or_else(|| anyhow!("human flow position has no node id"))?;
     if node_id.trim().is_empty() {
@@ -1119,31 +1149,38 @@ async fn validate_token(store: &SharedStore, token: &FlowSessionToken) -> Result
 
 fn flow_token(task: &Task, position: &FlowPosition) -> Result<FlowSessionToken> {
     validate_task_position(task, position)?;
+    let step = position.current();
+    let crate::engine::ConcreteStep::Skill(planned) = position.current_plan() else {
+        bail!("human flow position does not select a Skill");
+    };
     Ok(FlowSessionToken {
         task_id: task.id.clone(),
-        flow: position.flow.clone(),
-        node_id: position
-            .node_id
-            .clone()
+        invocation_id: position.invocation.id.clone(),
+        flow: step.flow,
+        node_id: step
+            .policy
+            .id
             .expect("validated human position has a node id"),
-        skill: position.step.clone(),
+        skill: planned.skill.clone(),
         iteration: position.iteration,
     })
 }
 
 fn token_matches(token: &FlowSessionToken, position: &FlowPosition) -> bool {
-    position.work == WorkRef::Task(token.task_id.clone())
-        && position.human
-        && position.flow == token.flow
-        && position.node_id.as_deref() == Some(token.node_id.as_str())
-        && position.step == token.skill
+    let step = position.current();
+    position.task_id == token.task_id
+        && position.invocation.id == token.invocation_id
+        && step.policy.human
+        && step.flow == token.flow
+        && step.policy.id.as_deref() == Some(token.node_id.as_str())
+        && step.step == token.skill.name
         && position.iteration == token.iteration
 }
 
 fn flow_message(task: &Task, token: &FlowSessionToken) -> String {
     format!(
         "<lf:human-session>\nThis `{skill}` Run is the writable human session for Task {identifier} at `{node}`. Work with the human in this terminal. When your work is ready for their decision, run `lf session ready \"<concise summary>\"`. Ready does not approve, iterate, close, or advance the Task; only the human can approve or iterate on the session.\n</lf:human-session>",
-        skill = token.skill,
+        skill = token.skill.name,
         identifier = task.plan.identifier,
         node = token.node_id,
     )
@@ -1157,8 +1194,10 @@ fn ask_message(record: &AskSessionRecord) -> String {
 }
 
 async fn launch_flow(task: &Task, position: &FlowPosition) -> Result<()> {
-    let node_id = position
-        .node_id
+    let step = position.current();
+    let node_id = step
+        .policy
+        .id
         .as_deref()
         .ok_or_else(|| anyhow!("human flow position has no node id"))?;
     let lf = crate::engine::process::resolve_current_home_lf_binary();
@@ -1167,9 +1206,10 @@ async fn launch_flow(task: &Task, position: &FlowPosition) -> Result<()> {
         "session".to_string(),
         "serve-flow".to_string(),
         task.id.to_string(),
-        position.flow.clone(),
+        position.invocation.id.clone(),
+        step.flow,
         node_id.to_string(),
-        position.step.clone(),
+        step.step,
         position.iteration.to_string(),
     ];
     start_durable_session(&flow_background_name(position)?, &task.worktree, &argv, &[]).await
@@ -1218,23 +1258,22 @@ async fn start_durable_session(
 }
 
 fn flow_id(position: &FlowPosition) -> Result<String> {
-    let node_id = position
-        .node_id
+    let step = position.current();
+    let node_id = step
+        .policy
+        .id
         .as_deref()
         .ok_or_else(|| anyhow!("human flow position has no node id"))?;
     Ok(format!(
-        "{}:{}:{}:{}",
-        position.work.id(),
-        position.flow,
-        node_id,
-        position.iteration
+        "{}:{}:{}:{}:{}",
+        position.task_id, position.invocation.id, step.flow, node_id, position.iteration
     ))
 }
 
 fn flow_token_id(token: &FlowSessionToken) -> String {
     format!(
-        "{}:{}:{}:{}",
-        token.task_id, token.flow, token.node_id, token.iteration
+        "{}:{}:{}:{}:{}",
+        token.task_id, token.invocation_id, token.flow, token.node_id, token.iteration
     )
 }
 
@@ -1255,17 +1294,19 @@ fn lock_session_launch(id: &str) -> Result<File> {
 }
 
 fn flow_background_name(position: &FlowPosition) -> Result<String> {
+    let step = position.current();
     Ok(flow_token_background_name(&FlowSessionToken {
-        task_id: match &position.work {
-            WorkRef::Task(task_id) => task_id.clone(),
-            _ => return Err(anyhow!("human flow position is not Task Work")),
-        },
-        flow: position.flow.clone(),
-        node_id: position
-            .node_id
-            .clone()
+        task_id: position.task_id.clone(),
+        invocation_id: position.invocation.id.clone(),
+        flow: step.flow,
+        node_id: step
+            .policy
+            .id
             .ok_or_else(|| anyhow!("human flow position has no node id"))?,
-        skill: position.step.clone(),
+        skill: match position.current_plan() {
+            crate::engine::ConcreteStep::Skill(planned) => planned.skill.clone(),
+            _ => bail!("human flow position does not select a Skill"),
+        },
         iteration: position.iteration,
     }))
 }
@@ -1282,7 +1323,8 @@ fn flow_token_background_name(token: &FlowSessionToken) -> String {
         .chars()
         .take(24)
         .collect::<String>();
-    format!("lf-human-{task}-{node}-{}", token.iteration)
+    let invocation = token.invocation_id.chars().take(8).collect::<String>();
+    format!("lf-human-{task}-{node}-{invocation}-{}", token.iteration)
 }
 
 fn ask_background_name(id: &str) -> String {
@@ -1412,6 +1454,24 @@ fn active_session_token() -> Result<HumanSessionToken> {
     serde_json::from_str(&raw).context("active human session token is invalid")
 }
 
+pub(crate) fn active_flow_skill(requested: &str) -> Result<Option<Skill>> {
+    let Some(raw) = std::env::var_os(HUMAN_SESSION_ENV) else {
+        return Ok(None);
+    };
+    let raw = raw
+        .into_string()
+        .map_err(|_| anyhow!("active human session token is not valid UTF-8"))?;
+    let token: HumanSessionToken =
+        serde_json::from_str(&raw).context("active human session token is invalid")?;
+    let HumanSessionToken::Flow { token } = token else {
+        return Ok(None);
+    };
+    if token.skill.name != requested {
+        bail!("human flow session Skill does not match the requested Skill");
+    }
+    Ok(Some(token.skill))
+}
+
 fn active_run_id() -> Result<RunId> {
     let value = std::env::var(crate::durable::RUN_ID_ENV)
         .context("this command requires an active Loopflow Run")?;
@@ -1421,25 +1481,32 @@ fn active_run_id() -> Result<RunId> {
 #[cfg(test)]
 mod tests {
     use super::{
-        concise_title, flow_background_name, flow_id, flow_token_id, human_open_argv,
-        preferred_work_selector, question_title, session_run_is_resumable, token_matches,
-        FlowSessionToken,
+        active_flow_skill, concise_title, flow_background_name, flow_id, flow_token_id,
+        human_open_argv, preferred_work_selector, question_title, session_run_is_resumable,
+        token_matches, FlowSessionToken, HumanSessionToken, HUMAN_SESSION_ENV,
     };
-    use crate::durable::{FlowPosition, WorkRef};
+    use crate::durable::FlowPosition;
     use crate::run_record::{AttributionSource, RunManifest, SubjectAttribution};
     use crate::work::task::TaskId;
 
     fn position() -> FlowPosition {
         FlowPosition {
-            work: WorkRef::Task(TaskId::new()),
-            flow: "review".to_string(),
-            step: "review-design".to_string(),
-            node_id: Some("review_kickoff".to_string()),
-            human: true,
+            task_id: TaskId::new(),
+            invocation: crate::durable::test_flow_invocation(
+                "review",
+                1,
+                "review-design",
+                Some("review_kickoff"),
+                true,
+            ),
             session_run_id: None,
             ready_summary: None,
             step_index: 1,
             iteration: 3,
+            version: 0,
+            worker_generation: 0,
+            claim: None,
+            failure: None,
             updated_at: time::OffsetDateTime::now_utc(),
         }
     }
@@ -1447,14 +1514,16 @@ mod tests {
     #[test]
     fn session_identity_is_the_exact_human_flow_position() {
         let position = position();
+        let step = position.current();
         let token = FlowSessionToken {
-            task_id: match &position.work {
-                WorkRef::Task(task_id) => task_id.clone(),
-                _ => unreachable!(),
+            task_id: position.task_id.clone(),
+            invocation_id: position.invocation.id.clone(),
+            flow: step.flow,
+            node_id: step.policy.id.unwrap(),
+            skill: match position.current_plan() {
+                crate::engine::ConcreteStep::Skill(planned) => planned.skill.clone(),
+                _ => panic!("human position must select a Skill"),
             },
-            flow: position.flow.clone(),
-            node_id: position.node_id.clone().unwrap(),
-            skill: position.step.clone(),
             iteration: position.iteration,
         };
 
@@ -1464,6 +1533,44 @@ mod tests {
         assert!(flow_background_name(&position)
             .unwrap()
             .starts_with("lf-human-"));
+    }
+
+    #[test]
+    fn human_session_carries_the_started_skill_definition() {
+        let _lock = crate::journal::test_env_lock();
+        let mut position = position();
+        let crate::engine::ConcreteStep::Skill(planned) =
+            &mut position.invocation.steps[position.step_index as usize]
+        else {
+            panic!("human position must select a Skill")
+        };
+        planned.skill.content = Some("started instructions".to_string());
+        let planned_skill = planned.skill.clone();
+        let step = position.current();
+        let token = FlowSessionToken {
+            task_id: position.task_id.clone(),
+            invocation_id: position.invocation.id.clone(),
+            flow: step.flow,
+            node_id: step.policy.id.unwrap(),
+            skill: planned_skill,
+            iteration: position.iteration,
+        };
+        let previous = std::env::var_os(HUMAN_SESSION_ENV);
+        std::env::set_var(
+            HUMAN_SESSION_ENV,
+            serde_json::to_string(&HumanSessionToken::Flow {
+                token: Box::new(token),
+            })
+            .unwrap(),
+        );
+
+        let skill = active_flow_skill("review-design").unwrap().unwrap();
+
+        match previous {
+            Some(value) => std::env::set_var(HUMAN_SESSION_ENV, value),
+            None => std::env::remove_var(HUMAN_SESSION_ENV),
+        }
+        assert_eq!(skill.content.as_deref(), Some("started instructions"));
     }
 
     #[test]

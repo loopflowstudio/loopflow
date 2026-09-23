@@ -1,29 +1,20 @@
 use std::io::BufRead;
-use std::ops::{Deref, DerefMut};
 use std::path::Path;
 use std::time::Duration;
 
 use anyhow::{anyhow, Result};
-use sha2::{Digest, Sha256};
 use tokio::sync::mpsc;
 
 use crate::chat::types::{ConversationEvent, ConversationItem, Lifecycle};
 use crate::child::ChildRef;
-use crate::controller::wave::playhead::{
-    BodyProvenance, Playhead, PlayheadEvent, QueuedInvocation, StepKind, StepOutcome,
-};
-use crate::durable::{FlowPosition, Steer, WorkRef};
+use crate::controller::wave::playhead::{QueuedInvocation, StepKind};
+use crate::durable::{FlowPosition, Steer, TaskWorkerClaim, WorkRef};
 use crate::harness::{drain_turn_failure_reason, ApprovalPolicy, Harness};
 use crate::planning::ProjectPlan;
 use crate::store::SharedStore;
 use crate::work::project::Project;
-use crate::work::task::{PrPhase, Task, TaskEventKind, TaskId};
+use crate::work::task::{Task, TaskId};
 use crate::work::wave::Wave;
-
-mod state;
-
-pub(crate) use state::State;
-pub use state::{TaskGateProposal, TaskLifecyclePhase, TaskLifecyclePlan, TaskPhasePlan};
 
 /// How often a live Task run checks its comment stream for new steers to inject
 /// into the in-flight turn. A skill can run for hours; this is the latency floor
@@ -33,82 +24,45 @@ const STEER_POLL_INTERVAL: Duration = Duration::from_secs(5);
 #[derive(Debug)]
 struct PreparedTaskStep {
     turn: crate::lf::commands::run::PreparedHarnessTurn,
-    position: StepPosition,
     seeded_steer_id: i64,
     interrupt_id: i64,
 }
 
-#[derive(Debug, Clone, Copy)]
-struct ControlCursors {
-    steer: i64,
-    interrupt: i64,
-}
-
-impl ControlCursors {
-    fn from_prepared(prepared: &PreparedTaskStep) -> Self {
-        Self {
-            steer: prepared.seeded_steer_id,
-            interrupt: prepared.interrupt_id,
-        }
-    }
-}
-
-#[derive(Debug)]
-struct StepPosition {
-    human: bool,
-}
-
-#[derive(Debug, Clone)]
-struct ControlledTask {
-    work: Task,
-    state: State,
-}
-
-impl Deref for ControlledTask {
-    type Target = Task;
-
-    fn deref(&self) -> &Self::Target {
-        &self.work
-    }
-}
-
-impl DerefMut for ControlledTask {
-    fn deref_mut(&mut self) -> &mut Self::Target {
-        &mut self.work
-    }
-}
-
-fn task_controller_state(task: &ControlledTask) -> &State {
-    &task.state
-}
-
-fn task_controller_state_mut(task: &mut ControlledTask) -> &mut State {
-    &mut task.state
-}
-
-async fn controlled_task(store: &SharedStore, task_id: &TaskId) -> Result<ControlledTask> {
-    let work = store
+async fn load_task(store: &SharedStore, task_id: &TaskId) -> Result<Task> {
+    store
         .get_task(task_id)
         .await?
-        .ok_or_else(|| anyhow!("Task {task_id} not found"))?;
-    let state = store
-        .task_controller_state(task_id)
-        .await?
-        .ok_or_else(|| anyhow!("Task {task_id} has no end-to-end controller state"))?;
-    Ok(ControlledTask { work, state })
+        .ok_or_else(|| anyhow!("Task {task_id} not found"))
 }
 
 pub(crate) async fn run(store: SharedStore, task_id: TaskId) -> Result<()> {
+    let launch_claim =
+        take_task_launch_env(crate::durable::TASK_WORKER_CLAIM_ENV, "Task worker claim")?
+            .map(|value| serde_json::from_str::<TaskWorkerClaim>(&value))
+            .transpose()
+            .map_err(|error| anyhow!("invalid Task worker claim: {error}"))?
+            .ok_or_else(|| anyhow!("Task boundary launch is missing its worker claim"))?;
+    let failure_claim = launch_claim.clone();
     let result = run_task_with(
         store.clone(),
         task_id.clone(),
         Box::new(crate::harness::default_create_harness),
+        launch_claim,
     )
     .await;
     if let Err(error) = &result {
-        record_unhandled_failure(&store, &task_id, error).await;
+        record_claimed_failure(&store, &task_id, &failure_claim, error).await;
     }
     result
+}
+
+pub async fn run_worker(task_id: TaskId) -> Result<()> {
+    let store = std::sync::Arc::new(
+        crate::store::open_existing_store()
+            .await
+            .ok_or_else(|| anyhow!("no Loopflow registry on this machine"))?,
+    );
+    run(store, task_id).await
 }
 
 fn take_task_launch_env(key: &'static str, label: &str) -> Result<Option<String>> {
@@ -122,65 +76,106 @@ fn take_task_launch_env(key: &'static str, label: &str) -> Result<Option<String>
         .map_err(|_| anyhow!("{label} is not valid UTF-8"))
 }
 
-async fn owning_wave(store: &SharedStore, task: &ControlledTask) -> Result<Wave> {
+async fn owning_wave(store: &SharedStore, task: &Task) -> Result<Wave> {
     store
         .get_wave(&task.wave_id)
         .await?
         .ok_or_else(|| anyhow!("owning Wave {} is not registered", task.wave_id))
 }
 
-async fn owning_project(store: &SharedStore, task: &ControlledTask) -> Result<Project> {
+async fn owning_project(store: &SharedStore, task: &Task) -> Result<Project> {
     store
         .get_project(&task.project_id)
         .await?
         .ok_or_else(|| anyhow!("owning Project {} is not registered", task.project_id))
 }
 
+fn task_run_spec(
+    task: &Task,
+    wave: &Wave,
+    project: &Project,
+    harness: String,
+    model: Option<String>,
+    surface: &str,
+    skill: Option<String>,
+) -> crate::run_record::RunSpec {
+    crate::run_record::RunSpec {
+        harness,
+        model,
+        surface: surface.to_string(),
+        cwd: task.worktree.clone(),
+        repo: Some(Path::new(wave.repo()).to_path_buf()),
+        worktree: Some(task.worktree.clone()),
+        skill,
+        subjects: vec![
+            crate::run_record::SubjectAttribution::declared(format!("wave:{}", wave.name())),
+            crate::run_record::SubjectAttribution::declared(format!(
+                "project:{}",
+                project.plan.slug
+            )),
+            crate::run_record::SubjectAttribution::declared(format!(
+                "task:{}",
+                task.plan.identifier
+            )),
+        ],
+    }
+}
+
 async fn run_task_with(
     store: SharedStore,
     task_id: TaskId,
     create_harness: crate::harness::CreateHarness,
+    launch_claim: TaskWorkerClaim,
 ) -> Result<()> {
-    let mut task = controlled_task(&store, &task_id).await?;
+    let mut task = load_task(&store, &task_id).await?;
     let wave = owning_wave(&store, &task).await?;
     let project = owning_project(&store, &task).await?;
-    store
-        .append_task_event(&task.id, &TaskEventKind::Started)
-        .await?;
-    let mut flow = resume_task_phase(&task)?;
-    let Some(mut prepared) =
-        prepare_task_flow_step(&store, &mut task, wave.name(), &mut flow).await?
-    else {
-        return Ok(());
-    };
-    let (harness_name, _) = crate::engine::config::parse_agent(&task_controller_state(&task).agent);
+    let mut flow = store
+        .flow_position(&task.id)
+        .await?
+        .ok_or_else(|| anyhow!("Task {} has no Flow position", task.id))?;
+    if flow.claim.as_ref() != Some(&launch_claim) {
+        anyhow::bail!("Task boundary launch claim is stale");
+    }
+    if flow.current().kind == StepKind::Op {
+        return run_task_op_boundary(store, task, wave, project, flow, launch_claim).await;
+    }
+    let mut prepared = prepare_task_flow_step(&store, &task, wave.name(), &flow).await?;
+    let (harness_name, _) = crate::engine::config::parse_agent(
+        prepared
+            .turn
+            .config
+            .agent
+            .as_deref()
+            .expect("Task launch prepared its agent"),
+    );
     let capture = crate::run_record::CaptureHandle::begin_with_context(
-        crate::run_record::RunSpec {
-            harness: prepared.turn.harness.clone(),
-            model: prepared.turn.model.clone(),
-            surface: "headless".to_string(),
-            cwd: Path::new(&task.worktree).to_path_buf(),
-            repo: Some(Path::new(wave.repo()).to_path_buf()),
-            worktree: Some(Path::new(&task.worktree).to_path_buf()),
-            skill: flow.current().map(|step| step.step.clone()),
-            subjects: vec![
-                crate::run_record::SubjectAttribution::declared(format!("wave:{}", wave.name())),
-                crate::run_record::SubjectAttribution::declared(format!(
-                    "project:{}",
-                    project.plan.slug
-                )),
-                crate::run_record::SubjectAttribution::declared(format!(
-                    "task:{}",
-                    task.plan.identifier
-                )),
-            ],
-        },
+        task_run_spec(
+            &task,
+            &wave,
+            &project,
+            prepared.turn.harness.clone(),
+            prepared.turn.model.clone(),
+            "headless",
+            Some(flow.current().step),
+        ),
         &prepared.turn.context,
     )?;
     capture.record_input("initial", &prepared.turn.input);
     prepared.turn.config.env.extend(capture.environment());
     capture.mark_spawn_requested();
     let capture = Some(capture);
+    let owner = crate::journal::current_process_identity()
+        .ok_or_else(|| anyhow!("Task boundary requires a registered Loopflow process identity"))?;
+    let bound_claim = store
+        .bind_task_worker_run(
+            &task.id,
+            &launch_claim,
+            &capture.as_ref().expect("capture was created").run_id(),
+            &owner,
+        )
+        .await
+        .inspect_err(|_| finish_capture(capture.as_ref(), "failed"))?;
     let (event_tx, mut event_rx) = mpsc::unbounded_channel();
     let mut harness = create_harness(&harness_name, ApprovalPolicy::AutoApprove, event_tx)
         .inspect_err(|_| {
@@ -192,37 +187,19 @@ async fn run_task_with(
             .transpose()
             .map_err(|reason| anyhow!("invalid Task provider account route: {reason}"))?;
     harness.set_provider_account_id(requested_account);
-    harness.set_provider_session_id(
-        take_task_launch_env(crate::ops::TASK_RESUME_TOKEN_ENV, "Task resume token")?
-            .or_else(|| task_controller_state(&task).provider_session_id.clone()),
-    );
+    harness.set_provider_session_id(None);
     if let Err(error) = harness.start(&prepared.turn.config).await {
         finish_capture(capture.as_ref(), "failed");
+        fail_claimed_boundary(&store, &task, &bound_claim, &error.to_string(), true).await?;
         return Err(error);
     }
-    {
-        let resident = task_controller_state_mut(&mut task);
-        resident.provider = harness_name;
-        resident.provider_session_id = harness.provider_session_id();
-        resident.updated_at = time::OffsetDateTime::now_utc();
-    }
-    if let Err(error) = store.put_task_controller_state(&task.state).await {
-        let _ = harness.stop().await;
-        return Err(error.into());
-    }
-    let mut state_fingerprint = task_state_fingerprint(&task)?;
-    let mut gate_fingerprint =
-        if task_controller_state(&task).lifecycle_phase == TaskLifecyclePhase::Finally {
-            Some(task_gate_fingerprint(&task)?)
-        } else {
-            None
-        };
-
     if let Some(capture) = &capture {
-        capture.set_provider_session_id(task_controller_state(&task).provider_session_id.clone());
+        capture.set_provider_session_id(harness.provider_session_id());
     }
-    let mut control_cursors = ControlCursors::from_prepared(&prepared);
-    start_prepared_task_step(&mut task, harness.as_mut(), &mut flow, None, prepared).await?;
+    let mut steer_cursor = prepared.seeded_steer_id;
+    let mut interrupt_cursor = prepared.interrupt_id;
+    harness.send_input(&prepared.turn.input).await?;
+    drop(prepared);
 
     let (attachment_tx, mut attachment_rx) = mpsc::unbounded_channel();
     std::thread::spawn(move || {
@@ -246,14 +223,14 @@ async fn run_task_with(
     let work = WorkRef::Task(task.id.clone());
     let mut steer_tick = tokio::time::interval(STEER_POLL_INTERVAL);
     steer_tick.set_missed_tick_behavior(tokio::time::MissedTickBehavior::Delay);
-    'runner: loop {
+    loop {
         tokio::select! {
             _ = steer_tick.tick() => {
                 crate::ops::child::inject_live_steers(
-                    &store, &work, harness.as_mut(), &mut control_cursors.steer,
+                    &store, &work, harness.as_mut(), &mut steer_cursor,
                 ).await;
                 crate::ops::child::observe_interrupt(
-                    &store, &work, harness.as_mut(), &mut control_cursors.interrupt,
+                    &store, &work, harness.as_mut(), &mut interrupt_cursor,
                 ).await;
             }
             line = attachment_rx.recv() => {
@@ -268,23 +245,18 @@ async fn run_task_with(
             }
             event = event_rx.recv() => {
                 let Some(event) = event else {
-                    return finish_failed(
+                    return finish_claimed_failure(
                         &store,
-                        &mut task,
+                        &task,
+                        &bound_claim,
                         harness.as_mut(),
                         "provider event stream closed",
+                        true,
                         capture.as_ref(),
                     ).await;
                 };
                 if let Some(capture) = &capture {
                     capture.record_conversation(event.clone());
-                }
-                let provider_session_id = harness.provider_session_id();
-                if provider_session_id != task_controller_state(&task).provider_session_id {
-                    let resident = task_controller_state_mut(&mut task);
-                    resident.provider_session_id = provider_session_id;
-                    resident.updated_at = time::OffsetDateTime::now_utc();
-                    store.put_task_controller_state(&task.state).await?;
                 }
                 match event {
                     ConversationEvent::TextDelta { content, .. } => last_text.push_str(&content),
@@ -318,252 +290,64 @@ async fn run_task_with(
                                 &mut event_rx,
                                 "provider turn failed",
                             );
-                            return finish_body_failure(
+                            let (reason, retryable) = match provider_credential_blocker(&reason) {
+                                Some(blocker) => (blocker, false),
+                                None => (reason, true),
+                            };
+                            return finish_claimed_failure(
                                 &store,
-                                &mut task,
+                                &task,
+                                &bound_claim,
                                 harness.as_mut(),
                                 &reason,
+                                retryable,
                                 capture.as_ref(),
                             )
                             .await;
                         }
-                        if execution_blocker_at_handoff(status, &command_failures).is_some() {
-                            return finish_execution_blocked(
-                                &store,
-                                &mut task,
-                                harness.as_mut(),
-                                &command_failures,
-                                capture.as_ref(),
-                            )
-                            .await;
-                        }
-                        let mut flow_iteration_completed =
-                            finish_task_flow_turn(&mut flow, status)?;
-                        let mut finally_ops_ran = false;
-                        if !flow_iteration_completed
-                            && flow.current().is_some_and(|step| step.kind == StepKind::Op)
+                        if let Some(reason) =
+                            execution_blocker_at_handoff(status, &command_failures)
                         {
-                            let current_fingerprint = task_gate_fingerprint(&task)?;
-                            if gate_fingerprint.as_ref() == Some(&current_fingerprint) {
-                                flow_iteration_completed =
-                                    run_task_flow_ops(&task, &mut flow).await?;
-                                finally_ops_ran = true;
-                            } else {
-                                // Mechanical finish is the side-effect boundary. A final-flow
-                                // skill that changed material work must return through Loop and
-                                // be reviewed before any op may publish or land it.
-                                flow_iteration_completed = true;
-                            }
-                        }
-                        let latest = controlled_task(&store, &task.id).await?;
-                        sync_task_state(&mut task, &latest);
-                        record_task_flow_position(&mut task, &flow)?;
-                        store.put_task_controller_state(&task.state).await?;
-                        if status == Lifecycle::Interrupted {
-                            // Interrupt is the immediacy lever: force a fresh
-                            // boundary for this same step, whose seed re-reads
-                            // every durable comment, instead of parking until a
-                            // separate resume command arrives.
-                            let Some(prepared) = prepare_task_flow_step(
+                            return finish_claimed_failure(
                                 &store,
-                                &mut task,
-                                wave.name(),
-                                &mut flow,
-                            )
-                            .await?
-                            else {
-                                return park_task_at_human(
-                                    Some(harness.as_mut()),
-                                    capture.as_ref(),
-                                )
-                                .await;
-                            };
-                            control_cursors = ControlCursors::from_prepared(&prepared);
-                            start_prepared_task_step(
-                                &mut task,
+                                &task,
+                                &bound_claim,
                                 harness.as_mut(),
-                                &mut flow,
+                                &reason,
+                                false,
                                 capture.as_ref(),
-                                prepared,
                             )
-                            .await?;
-                            last_text.clear();
-                            continue 'runner;
+                            .await;
                         }
-                        if flow_iteration_completed
-                                && task_controller_state(&task).lifecycle_phase == TaskLifecyclePhase::First
-                            {
-                                task_controller_state_mut(&mut task).enter_loop()?;
-                                store.put_task_controller_state(&task.state).await?;
-                                flow = resume_task_phase(&task)?;
-                                flow_iteration_completed = false;
-                                state_fingerprint = task_state_fingerprint(&task)?;
-                                gate_fingerprint = None;
-                                last_text.clear();
-                            }
-                            let approved_gate = if flow_iteration_completed
-                                && task_controller_state(&task).lifecycle_phase == TaskLifecyclePhase::Finally
-                            {
-                                let next_gate_fingerprint = task_gate_fingerprint(&task)?;
-                                if !finally_ops_ran
-                                    && gate_fingerprint.as_ref() != Some(&next_gate_fingerprint)
-                                {
-                                    state_fingerprint = task_state_fingerprint(&task)?;
-                                    gate_fingerprint = None;
-                                    task_controller_state_mut(&mut task).enter_loop()?;
-                                    store.put_task_controller_state(&task.state).await?;
-                                    let Some(()) = start_resumed_task_phase(
-                                        &store,
-                                        &mut task,
-                                        harness.as_mut(),
-                                        &mut flow,
-                                        wave.name(),
-                                        capture.as_ref(),
-                                        &mut control_cursors,
-                                    )
-                                    .await?
-                                    else {
-                                        return park_task_at_human(
-                                            Some(harness.as_mut()),
-                                            capture.as_ref(),
-                                        )
-                                        .await;
-                                    };
-                                    last_text.clear();
-                                    continue 'runner;
-                                }
-                                Some(task_controller_state(&task).approved_gate_proposal()?)
-                            } else {
-                                None
-                            };
-                            if !flow_iteration_completed {
-                                let Some(prepared) = prepare_task_flow_step(
-                                    &store,
-                                    &mut task,
-                                    wave.name(),
-                                    &mut flow,
-                                )
-                                .await?
-                                else {
-                                    return park_task_at_human(
-                                        Some(harness.as_mut()),
-                                        capture.as_ref(),
-                                    )
-                                    .await;
-                                };
-                                control_cursors = ControlCursors::from_prepared(&prepared);
-                                start_prepared_task_step(
-                                    &mut task,
-                                    harness.as_mut(),
-                                    &mut flow,
-                                    capture.as_ref(),
-                                    prepared,
-                                )
-                                .await?;
-                                continue 'runner;
-                            }
-                            let summary = progress_summary(&last_text);
-                            let latest = controlled_task(&store, &task.id).await?;
-                            sync_task_state(&mut task, &latest);
-                            let observed_pr = crate::ops::task::reconcile_task_pr(
-                                &store,
-                                &mut task,
-                            )
-                            .await
-                            .map_err(|error| anyhow!(error.to_string()))?;
-                            let (stopped_done, stopped_reason) = if let Some(proposal) = approved_gate {
-                                (proposal.done, proposal.reason)
-                            } else if let Some(pr) = observed_pr
-                                .as_ref()
-                                .filter(|pr| pr.phase() == PrPhase::Open)
-                            {
-                                (false, crate::ops::task::open_pr_wait_reason(pr))
-                            } else {
-                                let next_fingerprint = task_state_fingerprint(&task)?;
-                                if next_fingerprint != state_fingerprint {
-                                    state_fingerprint = next_fingerprint;
-                                    store.put_task_controller_state(&task.state).await?;
-                                    let Some(prepared) = prepare_task_flow_step(
-                                        &store,
-                                        &mut task,
-                                        wave.name(),
-                                        &mut flow,
-                                    )
-                                    .await?
-                                    else {
-                                        return park_task_at_human(
-                                            Some(harness.as_mut()),
-                                            capture.as_ref(),
-                                        )
-                                        .await;
-                                    };
-                                    control_cursors = ControlCursors::from_prepared(&prepared);
-                                    start_prepared_task_step(
-                                        &mut task,
-                                        harness.as_mut(),
-                                        &mut flow,
-                                        capture.as_ref(),
-                                        prepared,
-                                    )
-                                    .await?;
-                                    last_text.clear();
-                                    continue 'runner;
-                                }
-                                (
-                                    false,
-                                    "Task flow completed without a PR or any worktree change; another automatic iteration would spin".to_string(),
-                                )
-                            };
-                            if task_controller_state(&task).lifecycle_phase == TaskLifecyclePhase::Loop {
-                                task_controller_state_mut(&mut task).enter_finally(TaskGateProposal {
-                                    done: stopped_done,
-                                    reason: stopped_reason,
-                                })?;
-                                gate_fingerprint = Some(task_gate_fingerprint(&task)?);
-                                store.put_task_controller_state(&task.state).await?;
-                                let Some(()) = start_resumed_task_phase(
-                                    &store,
-                                    &mut task,
-                                    harness.as_mut(),
-                                    &mut flow,
-                                    wave.name(),
-                                    capture.as_ref(),
-                                    &mut control_cursors,
-                                )
-                                .await?
-                                else {
-                                    return park_task_at_human(
-                                        Some(harness.as_mut()),
-                                        capture.as_ref(),
-                                    )
-                                    .await;
-                                };
-                                last_text.clear();
-                                continue 'runner;
-                            }
-                            store.put_task_controller_state(&task.state).await?;
-                            let _ = harness.stop().await;
-                            finish_capture(capture.as_ref(), "completed");
-                            if !summary.is_empty() {
-                                store.append_task_event(
-                                    &task.id,
-                                    &TaskEventKind::Progress {
-                                        summary: summary.clone(),
-                                    },
-                                ).await?;
-                            }
-                            if stopped_done {
-                                store.complete_task(&task, None).await?;
-                            }
-                        return Ok(());
+                        let flow_completed = finish_task_flow_turn(&mut flow, status)?;
+                        let latest = load_task(&store, &task.id).await?;
+                        task.pm_writeback = latest.pm_writeback;
+                        let _ = harness.stop().await;
+                        finish_capture(capture.as_ref(), "completed");
+                        return finish_claimed_task_boundary(
+                            &store,
+                            &mut task,
+                            &mut flow,
+                            &bound_claim,
+                            status,
+                            flow_completed,
+                            &last_text,
+                        )
+                        .await;
                     }
                     ConversationEvent::Error { code, message, .. } => {
                         let reason = format!("{code}: {message}");
-                        return finish_body_failure(
+                        let (reason, retryable) = match provider_credential_blocker(&reason) {
+                            Some(blocker) => (blocker, false),
+                            None => (reason, true),
+                        };
+                        return finish_claimed_failure(
                             &store,
-                            &mut task,
+                            &task,
+                            &bound_claim,
                             harness.as_mut(),
                             &reason,
+                            retryable,
                             capture.as_ref(),
                         )
                         .await;
@@ -581,11 +365,143 @@ async fn run_task_with(
     }
 }
 
-async fn prepare_task_flow_step_once(
+async fn run_task_op_boundary(
+    store: SharedStore,
+    mut task: Task,
+    wave: Wave,
+    project: Project,
+    mut flow: FlowPosition,
+    launch_claim: TaskWorkerClaim,
+) -> Result<()> {
+    let step = flow.current();
+    let context = crate::trace::PreparedTurnContext::from_prompts(
+        "Loopflow mechanical Task boundary",
+        &step.step,
+    );
+    let capture = crate::run_record::CaptureHandle::begin_with_context(
+        task_run_spec(
+            &task,
+            &wave,
+            &project,
+            "loopflow".to_string(),
+            None,
+            "operation",
+            None,
+        ),
+        &context,
+    )?;
+    capture.record_input("operation", &step.step);
+    let owner = crate::journal::current_process_identity()
+        .ok_or_else(|| anyhow!("Task operation requires a registered Loopflow process identity"))?;
+    let bound_claim = store
+        .bind_task_worker_run(&task.id, &launch_claim, &capture.run_id(), &owner)
+        .await?;
+    let flow_completed = match run_task_flow_op(&task, &mut flow).await {
+        Ok(completed) => completed,
+        Err(error) => {
+            finish_capture(Some(&capture), "failed");
+            fail_claimed_boundary(&store, &task, &bound_claim, &error.to_string(), true).await?;
+            return Err(error);
+        }
+    };
+    let result = finish_claimed_task_boundary(
+        &store,
+        &mut task,
+        &mut flow,
+        &bound_claim,
+        Lifecycle::Completed,
+        flow_completed,
+        "",
+    )
+    .await;
+    finish_capture(
+        Some(&capture),
+        if result.is_ok() {
+            "completed"
+        } else {
+            "failed"
+        },
+    );
+    result
+}
+
+async fn finish_claimed_task_boundary(
     store: &SharedStore,
-    task: &mut ControlledTask,
+    task: &mut Task,
+    flow: &mut FlowPosition,
+    claim: &TaskWorkerClaim,
+    status: Lifecycle,
+    flow_completed: bool,
+    text: &str,
+) -> Result<()> {
+    let work = WorkRef::Task(task.id.clone());
+    if store.work_status(&work).await? != crate::durable::WorkStatus::Ready {
+        return Ok(());
+    }
+    task.updated_at = time::OffsetDateTime::now_utc();
+
+    if status == Lifecycle::Interrupted || !flow_completed {
+        return settle_claimed_task_position(store, task, flow, claim, text).await;
+    }
+
+    let summary = progress_summary(text);
+    store
+        .finish_task_flow(
+            task,
+            claim,
+            (!summary.is_empty()).then_some(summary.as_str()),
+        )
+        .await?;
+    Ok(())
+}
+
+async fn settle_claimed_task_position(
+    store: &SharedStore,
+    task: &mut Task,
+    flow: &FlowPosition,
+    claim: &TaskWorkerClaim,
+    text: &str,
+) -> Result<()> {
+    let mut next = flow.clone();
+    next.claim = None;
+    next.failure = None;
+    next.session_run_id = None;
+    next.ready_summary = None;
+    next.updated_at = time::OffsetDateTime::now_utc();
+    let summary = progress_summary(text);
+    let next = store
+        .settle_task_worker(
+            task,
+            claim,
+            &next,
+            (!summary.is_empty()).then_some(summary.as_str()),
+        )
+        .await?;
+    if next.is_human() {
+        let node_id = next
+            .current()
+            .policy
+            .id
+            .ok_or_else(|| anyhow!("human Task flow step has no stable node id"))?;
+        checkpoint_worktree_before_human(task, &node_id).await;
+        crate::ops::human_session::prepare(store, task, &next).await?;
+        return Ok(());
+    }
+    let mut next_task = store
+        .get_task(&task.id)
+        .await?
+        .ok_or_else(|| anyhow!("Task {} disappeared after boundary settlement", task.id))?;
+    crate::ops::task::launch_task_process(store, &mut next_task, None)
+        .await
+        .map_err(|error| anyhow!(error.to_string()))?;
+    Ok(())
+}
+
+async fn prepare_task_flow_step(
+    store: &SharedStore,
+    task: &Task,
     wave_name: &str,
-    flow: &Playhead,
+    flow: &FlowPosition,
 ) -> Result<PreparedTaskStep> {
     let work = store
         .work_for_child(&ChildRef::Task(task.id.clone()))
@@ -593,17 +509,9 @@ async fn prepare_task_flow_step_once(
     let steers = store.work_steers(&work).await?;
     let seeded_steer_id = steers.last().map_or(0, |steer| steer.id);
     let interrupt_id = store.latest_interrupt_id(&work).await?;
-    let step = flow
-        .current()
-        .ok_or_else(|| anyhow!("Task flow has no current step"))?;
-    if step.kind != StepKind::Skill {
-        anyhow::bail!(
-            "Task flow step {} is {:?}; durable Task flows currently require skills",
-            step.step,
-            step.kind
-        );
-    }
-    store.put_task_controller_state(&task.state).await?;
+    let crate::engine::ConcreteStep::Skill(skill) = flow.current_plan() else {
+        anyhow::bail!("Task flow step {} is not a skill", flow.current().step);
+    };
     let pr = store
         .active_task_pr(&task.id)
         .await?
@@ -615,112 +523,27 @@ async fn prepare_task_flow_step_once(
         crate::ops::task::task_workspace_context(task, &pr)
             .map_err(|error| anyhow!(error.to_string()))?
     );
-    let mut prepared = crate::lf::commands::run::prepare_harness_turn_at(
-        &step.step,
+    let mut prepared = crate::lf::commands::run::prepare_harness_turn_from_skill_at(
+        &skill.skill,
         &seed,
         wave_name,
         None,
         &task.worktree,
     )?;
-    prepared.config.agent = Some(task_controller_state(task).agent.clone());
+    let config = crate::engine::config::load_config_or_default(Some(&task.worktree));
+    let agent = config.agent();
+    prepared.config.agent = Some(agent.to_string());
     prepared.config.write_scope = crate::engine::agent::AgentWriteScope::Worktree;
     prepared.config.execution_boundary = Some(
-        crate::ops::task::task_execution_boundary(
-            &task.worktree,
-            &task_controller_state(task).agent,
-        )
-        .map_err(|error| anyhow!(error.to_string()))?,
+        crate::ops::task::task_execution_boundary(&task.worktree, agent)
+            .map_err(|error| anyhow!(error.to_string()))?,
     );
     prepared.config.skip_permissions = true;
-    let position = StepPosition {
-        human: step.policy.human,
-    };
     Ok(PreparedTaskStep {
         turn: prepared,
-        position,
         seeded_steer_id,
         interrupt_id,
     })
-}
-
-async fn prepare_task_flow_step(
-    store: &SharedStore,
-    task: &mut ControlledTask,
-    wave_name: &str,
-    flow: &mut Playhead,
-) -> Result<Option<PreparedTaskStep>> {
-    let step = flow
-        .current()
-        .ok_or_else(|| anyhow!("Task flow has no current step"))?;
-    if !step.policy.human {
-        return prepare_task_flow_step_once(store, task, wave_name, flow)
-            .await
-            .map(Some);
-    }
-    if step.kind != StepKind::Skill {
-        anyhow::bail!(
-            "Task flow step {} is {:?}; durable Task flows currently require skills",
-            step.step,
-            step.kind
-        );
-    }
-    let node_id = step
-        .policy
-        .id
-        .clone()
-        .ok_or_else(|| anyhow!("human Task flow step has no stable node id"))?;
-    let work = store
-        .work_for_child(&ChildRef::Task(task.id.clone()))
-        .await?;
-    store.put_task_controller_state(&task.state).await?;
-    let mut position = FlowPosition {
-        work,
-        flow: task_controller_state(task).phase_plan().flow.clone(),
-        step: step.step.clone(),
-        node_id: Some(node_id.clone()),
-        human: true,
-        session_run_id: None,
-        ready_summary: None,
-        step_index: step.index,
-        iteration: step.iteration,
-        updated_at: time::OffsetDateTime::now_utc(),
-    };
-    if let Some(previous) = store.flow_position(&position.work).await? {
-        if previous.flow == position.flow
-            && previous.step == position.step
-            && previous.node_id == position.node_id
-            && previous.iteration == position.iteration
-        {
-            position.session_run_id = previous.session_run_id;
-            position.ready_summary = previous.ready_summary;
-        }
-    }
-    checkpoint_worktree_before_human(task, &node_id).await;
-    store
-        .set_flow_position(&position.work, position.clone())
-        .await?;
-    if let Err(error) = crate::ops::human_session::prepare(store, task, &position).await {
-        tracing::warn!(task = %task.id, node = %node_id, %error, "human flow session did not start; the Task remains waiting");
-    }
-    tracing::info!(task = %task.id, node = %node_id, "Task is waiting at a human flow node");
-    Ok(None)
-}
-
-async fn complete_human_task_step(
-    store: &SharedStore,
-    task: &mut ControlledTask,
-    flow: &mut Playhead,
-) -> Result<()> {
-    open_task_flow_body(flow, task)?;
-    let completed = finish_task_flow_turn(flow, Lifecycle::Completed)?;
-    if completed && task_controller_state(task).lifecycle_phase == TaskLifecyclePhase::First {
-        task_controller_state_mut(task).enter_loop()?;
-        *flow = resume_task_phase(task)?;
-    } else {
-        record_task_flow_position(task, flow)?;
-    }
-    store.put_task_controller_state(&task.state).await?;
-    Ok(())
 }
 
 pub(crate) async fn decide_human_flow_step(
@@ -736,209 +559,148 @@ pub(crate) async fn decide_human_flow_step(
     if !crate::ops::human_session::token_is_current(store, token).await? {
         anyhow::bail!("human flow session is stale");
     }
-    let mut task = controlled_task(store, &token.task_id).await?;
-    let mut flow = resume_task_phase(&task)?;
-    let step = flow
-        .current()
-        .ok_or_else(|| anyhow!("Task {} has no current flow step", task.id))?;
+    let expected = store
+        .flow_position(&token.task_id)
+        .await?
+        .ok_or_else(|| anyhow!("human flow session is no longer waiting"))?;
+    let mut task = load_task(store, &token.task_id).await?;
+    let mut position = expected.clone();
+    let step = position.current();
     if !step.policy.human
+        || step.invocation_id != token.invocation_id
         || step.policy.id.as_deref() != Some(token.node_id.as_str())
-        || step.step != token.skill
+        || step.step != token.skill.name
         || step.iteration != token.iteration
         || step.flow != token.flow
     {
-        anyhow::bail!("human flow session no longer matches the Task playhead");
+        anyhow::bail!("human flow session no longer matches the Task Flow position");
     }
 
-    match decision {
+    let (iterate_direction, flow_completed) = match decision {
         crate::ops::human_session::FlowDecision::Approve => {
-            store
-                .append_task_event(
-                    &task.id,
-                    &TaskEventKind::Progress {
-                        summary: text.to_string(),
-                    },
-                )
-                .await?;
-            complete_human_task_step(store, &mut task, &mut flow).await?;
+            let completed = finish_task_flow_turn(&mut position, Lifecycle::Completed)?;
+            (None, completed)
         }
         crate::ops::human_session::FlowDecision::Iterate => {
-            let work = WorkRef::Task(task.id.clone());
+            let cursor = preceding_autonomous_step(&position.invocation, step.index)?;
+            let iteration = step.iteration + 1;
+            task.updated_at = time::OffsetDateTime::now_utc();
+            position.step_index = cursor;
+            position.iteration = iteration;
+            (
+                Some(format!(
+                    "Human requested another iteration on flow node {}: {text}",
+                    token.node_id
+                )),
+                false,
+            )
+        }
+    };
+
+    if flow_completed {
+        store
+            .finish_human_task_boundary(&task, &expected, text)
+            .await?;
+        return Ok(());
+    }
+    position.session_run_id = None;
+    position.ready_summary = None;
+    position.updated_at = time::OffsetDateTime::now_utc();
+    match iterate_direction {
+        Some(direction) => {
             store
-                .append_steer(
-                    &work,
-                    crate::durable::Author::User,
-                    &format!(
-                        "Human requested another iteration on flow node {}: {text}",
-                        token.node_id
-                    ),
+                .iterate_human_task_boundary(
+                    &task,
+                    &expected,
+                    &position,
+                    &crate::durable::Author::User,
+                    &direction,
                 )
                 .await?;
-            let state = task_controller_state_mut(&mut task);
-            state.phase_cursor = preceding_autonomous_step(&flow, step.index)?;
-            state.phase_iteration += 1;
-            state.updated_at = time::OffsetDateTime::now_utc();
-            store.put_task_controller_state(&task.state).await?;
-            flow = resume_task_phase(&task)?;
+        }
+        None => {
+            store
+                .approve_human_task_boundary(&task, &expected, &position, text)
+                .await?;
         }
     }
-
-    let position = current_flow_position(&task, &flow)?;
-    let work = position.work.clone();
-    store.set_flow_position(&work, position).await?;
     Ok(())
 }
 
-fn current_flow_position(task: &ControlledTask, flow: &Playhead) -> Result<FlowPosition> {
-    let step = flow
-        .current()
-        .ok_or_else(|| anyhow!("Task {} has no next flow step", task.id))?;
-    Ok(FlowPosition {
-        work: WorkRef::Task(task.id.clone()),
-        flow: task_controller_state(task).phase_plan().flow.clone(),
-        step: step.step,
-        node_id: step.policy.id,
-        human: step.policy.human,
-        session_run_id: None,
-        ready_summary: None,
-        step_index: step.index,
-        iteration: step.iteration,
-        updated_at: time::OffsetDateTime::now_utc(),
-    })
+pub(crate) async fn ensure_flow_position(
+    store: &SharedStore,
+    task_id: &TaskId,
+    selected_flow: Option<&str>,
+) -> Result<FlowPosition> {
+    let task = load_task(store, task_id).await?;
+    if let Some(current) = store.flow_position(&task.id).await? {
+        return Ok(current);
+    }
+    let selected_flow = selected_flow.ok_or_else(|| {
+        anyhow!(
+            "Task {} has no active Flow; run `lf task run {} [--flow FLOW]` to select one",
+            task.plan.identifier,
+            task.plan.identifier
+        )
+    })?;
+    let candidate = start_task_flow(&task, selected_flow)?;
+    let candidate = store.set_flow_position(&task.id, candidate).await?;
+    if candidate.is_human() {
+        let node_id = candidate
+            .current()
+            .policy
+            .id
+            .ok_or_else(|| anyhow!("human Task flow step has no stable node id"))?;
+        checkpoint_worktree_before_human(&task, &node_id).await;
+        crate::ops::human_session::prepare(store, &task, &candidate).await?;
+    }
+    Ok(candidate)
 }
 
-fn preceding_autonomous_step(flow: &Playhead, current: u32) -> Result<u32> {
-    let root = flow
-        .stack
-        .first()
-        .ok_or_else(|| anyhow!("Task flow has no root invocation"))?;
-    root.steps
+fn preceding_autonomous_step(invocation: &QueuedInvocation, current: u32) -> Result<u32> {
+    invocation.steps
         .iter()
         .enumerate()
         .take(current as usize)
         .rev()
-        .find(|(_, step)| step.kind == StepKind::Skill && !step.policy.human)
+        .find(|(_, step)| {
+            matches!(step, crate::engine::ConcreteStep::Skill(skill) if !skill.policy.human)
+        })
         .map(|(index, _)| index as u32)
         .ok_or_else(|| anyhow!("human Task flow node has no preceding autonomous skill"))
 }
 
-fn open_task_flow_body(flow: &mut Playhead, task: &ControlledTask) -> Result<()> {
-    let step = flow
-        .current()
-        .ok_or_else(|| anyhow!("Task flow has no current step"))?;
-    if step.kind != StepKind::Skill {
-        anyhow::bail!("Task flow step {} is not a skill", step.step);
-    }
-    flow.start_body(BodyProvenance::for_step(&step, &task.worktree))?;
-    Ok(())
-}
-
-async fn start_task_flow_turn(
-    task: &mut ControlledTask,
-    harness: &mut dyn Harness,
-    flow: &mut Playhead,
-    prepared: crate::lf::commands::run::PreparedHarnessTurn,
-) -> Result<()> {
-    open_task_flow_body(flow, task)?;
-    harness.send_input(&prepared.input).await?;
-    Ok(())
-}
-
-async fn start_prepared_task_step(
-    task: &mut ControlledTask,
-    harness: &mut dyn Harness,
-    flow: &mut Playhead,
-    capture: Option<&crate::run_record::CaptureHandle>,
-    prepared: PreparedTaskStep,
-) -> Result<()> {
-    debug_assert!(!prepared.position.human);
-    if let Some(capture) = capture {
-        capture.record_input("queued", &prepared.turn.input);
-    }
-    start_task_flow_turn(task, harness, flow, prepared.turn).await
-}
-
-async fn start_resumed_task_phase(
-    store: &SharedStore,
-    task: &mut ControlledTask,
-    harness: &mut dyn Harness,
-    flow: &mut Playhead,
-    wave_name: &str,
-    capture: Option<&crate::run_record::CaptureHandle>,
-    control_cursors: &mut ControlCursors,
-) -> Result<Option<()>> {
-    *flow = resume_task_phase(task)?;
-    let Some(prepared) = prepare_task_flow_step(store, task, wave_name, flow).await? else {
-        return Ok(None);
-    };
-    *control_cursors = ControlCursors::from_prepared(&prepared);
-    start_prepared_task_step(task, harness, flow, capture, prepared).await?;
-    Ok(Some(()))
-}
-
-fn finish_task_flow_turn(flow: &mut Playhead, status: Lifecycle) -> Result<bool> {
-    let body_id = flow
-        .active
-        .as_ref()
-        .map(|body| body.body_id.clone())
-        .ok_or_else(|| anyhow!("Task flow turn completed without an active body"))?;
-    let outcome = match status {
-        Lifecycle::Completed => StepOutcome::Completed,
-        Lifecycle::Interrupted => StepOutcome::Interrupted,
-        _ => anyhow::bail!("Task flow turn ended with unexpected status {status:?}"),
-    };
-    let events = flow.finish_body(&body_id, outcome, status.name())?;
-    Ok(events
-        .iter()
-        .any(|event| matches!(event, PlayheadEvent::InvocationCompleted { .. })))
-}
-
-async fn run_task_flow_ops(task: &ControlledTask, flow: &mut Playhead) -> Result<bool> {
-    if task_controller_state(task).lifecycle_phase != TaskLifecyclePhase::Finally {
-        anyhow::bail!(
-            "Task {} {} flow reached an op; only finally flows may run mechanical ops",
-            task.id,
-            task_controller_state(task).lifecycle_phase.as_str()
-        );
-    }
-    while let Some(step) = flow.current() {
-        if step.kind != StepKind::Op {
-            return Ok(false);
-        }
-        let definition = crate::engine::load_flow(&step.flow, &task.worktree)?;
-        let items = crate::engine::expand_flow(&definition, &task.worktree)?;
-        let op = match items.get(step.index as usize) {
-            Some(crate::engine::ConcreteStep::Op(op)) => op.clone(),
-            Some(item) => {
-                anyhow::bail!(
-                    "Task flow step {} was planned as an op but expanded to {item:?}",
-                    step.step
-                )
+fn finish_task_flow_turn(position: &mut FlowPosition, status: Lifecycle) -> Result<bool> {
+    match status {
+        Lifecycle::Interrupted => Ok(false),
+        Lifecycle::Completed => {
+            // A completed Task Flow has no next position. Keep the last valid
+            // cursor until the claimed transaction removes the invocation.
+            if position.step_index as usize + 1 == position.invocation.steps.len() {
+                return Ok(true);
             }
-            None => anyhow::bail!("Task flow op {} is outside its expanded flow", step.step),
-        };
-        let body = BodyProvenance::for_step(&step, &task.worktree);
-        let body_id = body.body_id.clone();
-        flow.start_body(body)?;
-        let worktree = task.worktree.clone();
-        let result = tokio::task::spawn_blocking(move || {
-            crate::ops::execute_flow_ops(&worktree, &op.item, &crate::ops::NullProgress)
-        })
-        .await
-        .map_err(|error| anyhow!("Task flow op worker failed: {error}"))?;
-        if let Err(error) = result {
-            flow.finish_body(&body_id, StepOutcome::Failed, &error.to_string())?;
-            return Err(anyhow!(error.to_string()));
+            position.step_index += 1;
+            Ok(false)
         }
-        let events = flow.finish_body(&body_id, StepOutcome::Completed, "completed")?;
-        if events
-            .iter()
-            .any(|event| matches!(event, PlayheadEvent::InvocationCompleted { .. }))
-        {
-            return Ok(true);
-        }
+        _ => anyhow::bail!("Task flow turn ended with unexpected status {status:?}"),
     }
-    Ok(true)
+}
+
+async fn run_task_flow_op(task: &Task, position: &mut FlowPosition) -> Result<bool> {
+    let crate::engine::ConcreteStep::Op(op) = position.current_plan() else {
+        anyhow::bail!(
+            "Task flow step {} is not an operation",
+            position.current().step
+        );
+    };
+    let op = op.clone();
+    let worktree = task.worktree.clone();
+    tokio::task::spawn_blocking(move || {
+        crate::ops::execute_flow_ops(&worktree, &op.item, &crate::ops::NullProgress)
+    })
+    .await
+    .map_err(|error| anyhow!("Task flow op worker failed: {error}"))??;
+    finish_task_flow_turn(position, Lifecycle::Completed)
 }
 
 /// End a parked body while Work stays open. The caller supplies
@@ -954,7 +716,7 @@ fn finish_capture(capture: Option<&crate::run_record::CaptureHandle>, outcome: &
 /// A human FlowStep can outlive this machine's uptime; nothing the Task produced
 /// may exist only in the local worktree while it waits. Failure to checkpoint
 /// (offline, no remote) must never block the park itself.
-async fn checkpoint_worktree_before_human(task: &ControlledTask, node_id: &str) {
+async fn checkpoint_worktree_before_human(task: &Task, node_id: &str) {
     if let Err(error) = crate::ops::checkpoint_task_worktree(
         task.worktree.clone(),
         task.plan.identifier.clone(),
@@ -966,75 +728,25 @@ async fn checkpoint_worktree_before_human(task: &ControlledTask, node_id: &str) 
     }
 }
 
-async fn park_task_at_human(
-    harness: Option<&mut dyn Harness>,
-    capture: Option<&crate::run_record::CaptureHandle>,
-) -> Result<()> {
-    finish_capture(capture, "completed");
-    if let Some(harness) = harness {
-        let _ = harness.stop().await;
-    }
-    Ok(())
-}
-
-fn record_task_flow_position(task: &mut ControlledTask, flow: &Playhead) -> Result<()> {
-    let root = flow
-        .stack
-        .first()
-        .ok_or_else(|| anyhow!("Task flow has no root invocation"))?;
-    if root.flow != task_controller_state(task).phase_plan().flow {
-        anyhow::bail!(
-            "Task {} {} flow is {:?}, but its playhead is {:?}",
-            task.id,
-            task_controller_state(task).lifecycle_phase.as_str(),
-            task_controller_state(task).phase_plan().flow,
-            root.flow
-        );
-    }
-    let resident = task_controller_state_mut(task);
-    resident.phase_cursor = root.cursor;
-    resident.phase_iteration = root.iteration;
-    resident.updated_at = time::OffsetDateTime::now_utc();
-    Ok(())
-}
-
-fn resume_task_phase(task: &ControlledTask) -> Result<Playhead> {
-    let (flow, _) = Playhead::resume_root(
-        QueuedInvocation::load(
-            &task.worktree,
-            &task_controller_state(task).phase_plan().flow,
-        )?,
-        task_controller_state(task).phase_cursor,
-        task_controller_state(task).phase_iteration,
-    )?;
-    Ok(flow)
-}
-
-fn sync_task_state(task: &mut ControlledTask, latest: &ControlledTask) {
-    task.pm_writeback = latest.pm_writeback.clone();
-    if task_controller_state(task).lifecycle_phase == TaskLifecyclePhase::Finally
-        && task_controller_state(latest).lifecycle_phase == TaskLifecyclePhase::Finally
-    {
-        task_controller_state_mut(task).gate_proposal =
-            task_controller_state(latest).gate_proposal.clone();
-    } else if task_controller_state(task).lifecycle_phase != TaskLifecyclePhase::Finally {
-        task_controller_state_mut(task).gate_proposal = None;
-    }
-}
-
-fn task_state_fingerprint(task: &ControlledTask) -> Result<String> {
-    let state = crate::engine::git::worktree_state(Path::new(&task.worktree))?;
-    Ok(hex::encode(Sha256::digest(state.as_bytes())))
-}
-
-fn task_gate_fingerprint(task: &ControlledTask) -> Result<String> {
-    let state = crate::engine::git::material_worktree_state(Path::new(&task.worktree))?;
-    Ok(hex::encode(Sha256::digest(state.as_bytes())))
+fn start_task_flow(task: &Task, selected_flow: &str) -> Result<FlowPosition> {
+    Ok(FlowPosition {
+        task_id: task.id.clone(),
+        invocation: QueuedInvocation::load(&task.worktree, selected_flow)?,
+        session_run_id: None,
+        ready_summary: None,
+        step_index: 0,
+        iteration: 0,
+        version: 0,
+        worker_generation: 0,
+        claim: None,
+        failure: None,
+        updated_at: time::OffsetDateTime::now_utc(),
+    })
 }
 
 async fn handle_attachment(
     store: &SharedStore,
-    task: &ControlledTask,
+    task: &Task,
     harness: &mut dyn Harness,
     line: String,
 ) -> Result<()> {
@@ -1074,37 +786,71 @@ async fn handle_attachment(
     Ok(())
 }
 
-async fn record_unhandled_failure(store: &SharedStore, task_id: &TaskId, error: &anyhow::Error) {
+async fn record_claimed_failure(
+    store: &SharedStore,
+    task_id: &TaskId,
+    claim: &TaskWorkerClaim,
+    error: &anyhow::Error,
+) {
     let detail = error.to_string();
     let (message, resumable) = unhandled_failure_receipt(&detail);
-    if store
-        .latest_task_event(task_id)
-        .await
-        .ok()
-        .flatten()
-        .is_some_and(|event| {
-            matches!(
-                event.kind,
-                TaskEventKind::Failed {
-                    error,
-                    resumable: recorded_resumable,
-                } if (error == detail || error == message) && recorded_resumable == resumable
-            )
-        })
-    {
+    if resumable {
+        if let Err(persist_error) = store.release_task_worker(task_id, claim).await {
+            tracing::debug!(
+                task = %task_id,
+                error = %persist_error,
+                "Task failure arrived after its worker claim changed"
+            );
+        }
         return;
     }
-    let event = TaskEventKind::Failed {
-        error: message,
-        resumable,
+    let failure = crate::durable::TaskFlowBlocker {
+        reason: message,
+        restart_required: false,
+        observed_at: time::OffsetDateTime::now_utc(),
     };
-    if let Err(persist_error) = store.append_task_event(task_id, &event).await {
-        tracing::error!(
+    if let Err(persist_error) = store.block_task_flow(task_id, claim, &failure).await {
+        tracing::debug!(
             task = %task_id,
             error = %persist_error,
-            "Task failure receipt did not persist"
+            "Task failure arrived after its worker claim changed"
         );
     }
+}
+
+async fn fail_claimed_boundary(
+    store: &SharedStore,
+    task: &Task,
+    claim: &TaskWorkerClaim,
+    reason: &str,
+    safe_to_retry: bool,
+) -> Result<()> {
+    if safe_to_retry {
+        store.release_task_worker(&task.id, claim).await?;
+        return Ok(());
+    }
+    let failure = crate::durable::TaskFlowBlocker {
+        reason: reason.to_string(),
+        restart_required: false,
+        observed_at: time::OffsetDateTime::now_utc(),
+    };
+    store.block_task_flow(&task.id, claim, &failure).await?;
+    Ok(())
+}
+
+async fn finish_claimed_failure(
+    store: &SharedStore,
+    task: &Task,
+    claim: &TaskWorkerClaim,
+    harness: &mut dyn Harness,
+    reason: &str,
+    safe_to_retry: bool,
+    capture: Option<&crate::run_record::CaptureHandle>,
+) -> Result<()> {
+    finish_capture(capture, "failed");
+    let _ = harness.stop().await;
+    fail_claimed_boundary(store, task, claim, reason, safe_to_retry).await?;
+    anyhow::bail!(reason.to_string())
 }
 
 fn unhandled_failure_receipt(detail: &str) -> (String, bool) {
@@ -1120,28 +866,6 @@ fn provider_credential_blocker(detail: &str) -> Option<String> {
             "Task provider credential capability is blocked: {detail}. Reconnect the named managed account before starting a new Run"
         )
     })
-}
-
-async fn finish_failed(
-    store: &SharedStore,
-    task: &mut ControlledTask,
-    harness: &mut dyn Harness,
-    error: &str,
-    capture: Option<&crate::run_record::CaptureHandle>,
-) -> Result<()> {
-    finish_capture(capture, "failed");
-    let _ = harness.stop().await;
-    store.put_task_controller_state(&task.state).await?;
-    store
-        .append_task_event(
-            &task.id,
-            &TaskEventKind::Failed {
-                error: error.to_string(),
-                resumable: true,
-            },
-        )
-        .await?;
-    anyhow::bail!(error.to_string())
 }
 
 fn completed_boundary_failure(
@@ -1181,39 +905,6 @@ fn completed_boundary_failure(
     Some(format!("`{command}` failed{exit}: {detail}"))
 }
 
-async fn finish_execution_blocked(
-    store: &SharedStore,
-    task: &mut ControlledTask,
-    harness: &mut dyn Harness,
-    failures: &[String],
-    capture: Option<&crate::run_record::CaptureHandle>,
-) -> Result<()> {
-    let reason = execution_blocked_reason(failures);
-    finish_nonresumable(store, task, harness, &reason, capture).await
-}
-
-async fn finish_nonresumable(
-    store: &SharedStore,
-    task: &mut ControlledTask,
-    harness: &mut dyn Harness,
-    reason: &str,
-    capture: Option<&crate::run_record::CaptureHandle>,
-) -> Result<()> {
-    finish_capture(capture, "failed");
-    let _ = harness.stop().await;
-    store.put_task_controller_state(&task.state).await?;
-    store
-        .append_task_event(
-            &task.id,
-            &TaskEventKind::Failed {
-                error: reason.to_string(),
-                resumable: false,
-            },
-        )
-        .await?;
-    Ok(())
-}
-
 fn execution_blocked_reason(failures: &[String]) -> String {
     format!(
         "Task execution boundary is blocked:\n- {}\nCorrect the named filesystem, control-plane, or network capability before starting a new Run.",
@@ -1226,80 +917,16 @@ fn execution_blocker_at_handoff(status: Lifecycle, failures: &[String]) -> Optio
         .then(|| execution_blocked_reason(failures))
 }
 
-/// Name the infrastructure capability that blocked a Task body while keeping
-/// any attached PR visible for a later resume.
-fn infra_blocked_reason(capability: &str, detail: &str, pr_number: Option<u32>) -> String {
-    let pr_note = pr_number
-        .map(|n| format!(" Pull request #{n} stays attached."))
-        .unwrap_or_default();
-    format!("Task execution blocked by {capability}: {detail}.{pr_note}")
-}
-
-/// Stop the body and record an infrastructure failure (provider outage, GitHub
-/// observation failure), keeping the active PR attached so a resume after the
-/// capability recovers picks up the same PR. Returns `Ok(())` after the atomic
-/// Task failure receipt settles the Run, so the outer boundary does not record
-/// the same failure twice.
-async fn finish_infra_blocked(
-    store: &SharedStore,
-    task: &mut ControlledTask,
-    harness: &mut dyn Harness,
-    capability: &str,
-    detail: &str,
-) -> Result<()> {
-    let _ = harness.stop().await;
-    let pr_number = store
-        .active_task_pr(&task.id)
-        .await?
-        .and_then(|pr| pr.github().map(|g| g.number));
-    let reason = infra_blocked_reason(capability, detail, pr_number);
-    store.put_task_controller_state(&task.state).await?;
-    store
-        .append_task_event(
-            &task.id,
-            &TaskEventKind::Failed {
-                error: reason,
-                resumable: true,
-            },
-        )
-        .await?;
-    Ok(())
-}
-
-async fn finish_body_failure(
-    store: &SharedStore,
-    task: &mut ControlledTask,
-    harness: &mut dyn Harness,
-    reason: &str,
-    capture: Option<&crate::run_record::CaptureHandle>,
-) -> Result<()> {
-    if let Some(blocker) = provider_credential_blocker(reason) {
-        return finish_nonresumable(store, task, harness, &blocker, capture).await;
-    }
-    if store.active_task_pr(&task.id).await?.is_some() {
-        finish_capture(capture, "failed");
-        return finish_infra_blocked(store, task, harness, "provider", reason).await;
-    }
-    finish_failed(store, task, harness, reason, capture).await
-}
-
 fn task_seed(
-    task: &ControlledTask,
+    task: &Task,
     project: &ProjectPlan,
     pr: &crate::work::task::TaskPr,
     wave_name: &str,
     steers: &[Steer],
 ) -> String {
-    let context = crate::ops::render_task_context(
-        task,
-        Some(task_controller_state(task)),
-        project,
-        pr,
-        wave_name,
-        steers,
-    );
+    let context = crate::ops::render_task_context(task, project, pr, wave_name, steers);
     format!(
-        "{context}\n\nAdvance this Task through its pinned lifecycle. This PR owns one serial branch. The pinned finally flow owns landing and Task completion. `lf pr abandon` discards only this PR. If this PR already merged out of band and follow-up work remains, `lf pr next [slug]` rotates to the next serial PR, carrying committed and uncommitted follow-up forward. Watched landing owns automatic post-merge rotation."
+        "{context}\n\nYou are the current Task worker. Run the selected immutable Flow from its persisted boundary. This Flow does not choose what a later worker will run. Typed PR and Task operations own publication, landing, rotation, and completion. `lf pr abandon` discards only this PR. If this PR already merged out of band and follow-up work remains, `lf pr next [slug]` rotates to the next serial PR, carrying committed and uncommitted follow-up forward."
     )
 }
 
@@ -1347,15 +974,17 @@ impl Drop for TestLfBinGuard {
 mod planning_tests {
     use super::{
         completed_boundary_failure, execution_blocker_at_handoff, preceding_autonomous_step,
-        sync_task_state, task_seed, unhandled_failure_receipt, ControlledTask, State,
-        TaskGateProposal, TaskLifecyclePhase, TaskLifecyclePlan,
+        task_seed, unhandled_failure_receipt,
     };
     use crate::chat::types::Lifecycle;
-    use crate::controller::wave::playhead::{Playhead, QueuedInvocation, StepKind, StepPlan};
-    use crate::durable::{Author, RunId, WorkRef};
+    use crate::controller::wave::playhead::{QueuedInvocation, StepKind};
+    use crate::durable::{
+        Author, FlowPosition, RunId, TaskWorkerClaimOutcome, TaskWorkerOwner, WorkRef,
+    };
     use crate::engine::agent::AgentConfig;
     use crate::engine::OccurrencePolicy;
     use crate::harness::{Harness, SendCurrentOutcome};
+    use crate::id::{ExecId, TraceId};
     use crate::planning::{LinearIssueId, LinearProjectId, ProjectPlan, TaskPlan};
     use crate::store::{SharedStore, StorageConfig};
     use crate::work::project::{Project, ProjectId};
@@ -1375,20 +1004,20 @@ mod planning_tests {
         interrupts: usize,
     }
 
-    fn step(name: &str, id: Option<&str>, human: bool) -> StepPlan {
-        StepPlan {
-            name: name.to_string(),
-            kind: StepKind::Skill,
+    fn step(name: &str, id: Option<&str>, human: bool) -> crate::engine::ConcreteStep {
+        crate::engine::ConcreteStep::Skill(crate::engine::ConcreteSkill {
+            skill: crate::engine::Skill::named(name),
             policy: OccurrencePolicy {
                 id: id.map(str::to_string),
                 human,
             },
-        }
+            flow_parents: Vec::new(),
+        })
     }
 
     #[test]
     fn iterate_skips_prior_human_nodes_when_returning_to_autonomous_work() {
-        let (flow, _) = Playhead::new(QueuedInvocation {
+        let invocation = QueuedInvocation {
             id: "human-iterate-proof".to_string(),
             flow: "proof".to_string(),
             steps: vec![
@@ -1396,9 +1025,9 @@ mod planning_tests {
                 step("first-review", Some("first_review"), true),
                 step("second-review", Some("second_review"), true),
             ],
-        });
+        };
 
-        assert_eq!(preceding_autonomous_step(&flow, 2).unwrap(), 0);
+        assert_eq!(preceding_autonomous_step(&invocation, 2).unwrap(), 0);
     }
 
     #[async_trait::async_trait]
@@ -1460,7 +1089,7 @@ mod planning_tests {
         }
     }
 
-    async fn human_task_fixture() -> (SharedStore, ControlledTask, Playhead) {
+    async fn human_task_fixture() -> (SharedStore, Task, FlowPosition) {
         let repository =
             std::fs::canonicalize(std::path::Path::new(env!("CARGO_MANIFEST_DIR")).join("../.."))
                 .unwrap();
@@ -1523,6 +1152,7 @@ mod planning_tests {
                 pm_snapshot_synced_at: now.unix_timestamp(),
             },
             wave_id: wave.id().clone(),
+            iteration: 0,
             abandon_intent: None,
             created_at: now,
             updated_at: now,
@@ -1546,19 +1176,6 @@ mod planning_tests {
             updated_at: now,
             observation: Observation::NotRequired,
         };
-        let state = State {
-            task_id: task.id.clone(),
-            lifecycle: TaskLifecyclePlan::defaults(),
-            lifecycle_phase: TaskLifecyclePhase::First,
-            phase_cursor: 1,
-            phase_iteration: 0,
-            gate_cycle: 0,
-            gate_proposal: None,
-            agent: "codex".to_string(),
-            provider: "codex".to_string(),
-            provider_session_id: None,
-            updated_at: now,
-        };
         let pr = TaskPr {
             id: TaskPrId::new(),
             task_id: task.id.clone(),
@@ -1581,36 +1198,66 @@ mod planning_tests {
         store.create_wave(&wave).await.unwrap();
         store.create_project(&project).await.unwrap();
         store.create_task(&task, &pr).await.unwrap();
-        store.put_task_controller_state(&state).await.unwrap();
-        let task = ControlledTask { work: task, state };
-        let flow = super::resume_task_phase(&task).unwrap();
+        let mut flow = super::start_task_flow(&task, "task-design").unwrap();
+        flow.step_index = 1;
         (store, task, flow)
     }
 
     #[tokio::test]
-    async fn provider_failure_records_planning() {
-        let (store, mut task, _) = human_task_fixture().await;
+    async fn provider_failure_releases_the_exact_worker_claim() {
+        let (store, task, _) = human_task_fixture().await;
+        let flow = super::start_task_flow(&task, "task-design").unwrap();
+        let initial = store
+            .set_flow_position(&task.id, flow.clone())
+            .await
+            .unwrap();
+        let owner = TaskWorkerOwner {
+            trace_id: TraceId::new(),
+            exec_id: ExecId::new(),
+            pid: 301,
+            started_at: 1_700_000_000,
+        };
+        let claim = match store
+            .claim_task_worker(
+                &task.id,
+                initial.version,
+                &owner,
+                time::OffsetDateTime::now_utc(),
+            )
+            .await
+            .unwrap()
+        {
+            TaskWorkerClaimOutcome::Claimed(claim) => claim,
+            outcome => panic!("unexpected claim outcome: {outcome:?}"),
+        };
+        let claim = store
+            .bind_task_worker_run(&task.id, &claim, &RunId::new(), &owner)
+            .await
+            .unwrap();
         let mut harness = UnusedHarness::default();
 
-        super::finish_body_failure(
+        let error = super::finish_claimed_failure(
             &store,
-            &mut task,
+            &task,
+            &claim,
             &mut harness,
             "opencode_disconnected: provider stream ended",
+            true,
             None,
         )
         .await
-        .unwrap();
+        .unwrap_err();
 
-        let events = store.task_events_after(&task.id, 0).await.unwrap();
-        assert!(matches!(
-            &events.last().unwrap().kind,
-            TaskEventKind::Failed {
-                error,
-                resumable: true,
-            } if error.contains("provider stream ended")
-        ));
+        assert!(error.to_string().contains("provider stream ended"));
+        assert!(store
+            .task_events_after(&task.id, 0)
+            .await
+            .unwrap()
+            .is_empty());
         assert!(harness.stopped);
+        let position = store.flow_position(&task.id).await.unwrap().unwrap();
+        assert!(position.claim.is_none());
+        assert!(position.failure.is_none());
     }
 
     #[test]
@@ -1669,38 +1316,139 @@ mod planning_tests {
     }
 
     #[tokio::test]
-    async fn unhandled_task_failure_is_a_planning_receipt() {
-        let (store, task, _) = human_task_fixture().await;
+    async fn prebind_task_failure_releases_its_claim_without_shared_failure_state() {
+        let (store, task, mut flow) = human_task_fixture().await;
+        flow.step_index = 0;
+        let position = store.set_flow_position(&task.id, flow).await.unwrap();
+        let owner = TaskWorkerOwner {
+            trace_id: TraceId::new(),
+            exec_id: ExecId::new(),
+            pid: 302,
+            started_at: 1_700_000_000,
+        };
+        let claim = match store
+            .claim_task_worker(
+                &task.id,
+                position.version,
+                &owner,
+                time::OffsetDateTime::now_utc(),
+            )
+            .await
+            .unwrap()
+        {
+            TaskWorkerClaimOutcome::Claimed(claim) => claim,
+            outcome => panic!("unexpected claim outcome: {outcome:?}"),
+        };
 
-        super::record_unhandled_failure(
+        super::record_claimed_failure(
             &store,
             &task.id,
+            &claim,
             &anyhow::anyhow!("provider stream closed"),
         )
         .await;
 
-        let events = store.recent_task_events(&task.id, 10).await.unwrap();
-        assert!(matches!(
-            &events[0].kind,
-            TaskEventKind::Failed { error, resumable: true }
-                if error == "task process failed: provider stream closed"
-        ));
+        assert!(store
+            .recent_task_events(&task.id, 10)
+            .await
+            .unwrap()
+            .is_empty());
+        let position = store.flow_position(&task.id).await.unwrap().unwrap();
+        assert!(position.claim.is_none());
+        assert!(position.failure.is_none());
+    }
+
+    #[tokio::test]
+    async fn stale_task_child_cannot_rewrite_a_replacement_human_boundary() {
+        let (store, task, human_flow) = human_task_fixture().await;
+        let autonomous = super::start_task_flow(&task, "task-design").unwrap();
+        let first = store
+            .set_flow_position(&task.id, autonomous.clone())
+            .await
+            .unwrap();
+        let owner = TaskWorkerOwner {
+            trace_id: TraceId::new(),
+            exec_id: ExecId::new(),
+            pid: 303,
+            started_at: 1_700_000_000,
+        };
+        let stale_claim = match store
+            .claim_task_worker(
+                &task.id,
+                first.version,
+                &owner,
+                time::OffsetDateTime::now_utc(),
+            )
+            .await
+            .unwrap()
+        {
+            TaskWorkerClaimOutcome::Claimed(claim) => claim,
+            outcome => panic!("unexpected claim outcome: {outcome:?}"),
+        };
+
+        store
+            .restart_task_flow(&task, &Author::User, "replace invocation", "deadbeef")
+            .await
+            .unwrap();
+        let replacement = store
+            .set_flow_position(&task.id, human_flow.clone())
+            .await
+            .unwrap();
+
+        let error = super::run_task_with(
+            store.clone(),
+            task.id.clone(),
+            Box::new(|_, _, _| panic!("stale child must fail before creating a harness")),
+            stale_claim,
+        )
+        .await
+        .unwrap_err();
+
+        assert!(error.to_string().contains("launch claim is stale"));
+        assert_eq!(
+            store.flow_position(&task.id).await.unwrap(),
+            Some(replacement)
+        );
+    }
+
+    #[tokio::test]
+    async fn restart_only_failure_cannot_be_cleared_as_a_retry() {
+        let (store, task, _) = human_task_fixture().await;
+        let mut blocked = super::start_task_flow(&task, "task-design").unwrap();
+        blocked.failure = Some(crate::durable::TaskFlowBlocker {
+            reason: "old Flow definition is unavailable".to_string(),
+            restart_required: true,
+            observed_at: time::OffsetDateTime::now_utc(),
+        });
+        let blocked = store.set_flow_position(&task.id, blocked).await.unwrap();
+
+        let error = store
+            .retry_task_flow(
+                &task.id,
+                &blocked,
+                &Author::User,
+                "pretend this was repaired",
+            )
+            .await
+            .unwrap_err();
+
+        assert!(error.to_string().contains("explicit Flow restart"));
+        assert_eq!(store.flow_position(&task.id).await.unwrap(), Some(blocked));
     }
 
     #[tokio::test]
     #[allow(clippy::await_holding_lock)] // the guard serializes LF_BIN for the fixture
     async fn control_events_after_seed_preparation_remain_live() {
         let _lf_bin = super::TestLfBinGuard::pin();
-        let (store, mut task, flow) = human_task_fixture().await;
+        let (store, task, flow) = human_task_fixture().await;
         let work = WorkRef::Task(task.id.clone());
         let seeded = store
             .append_steer(&work, Author::User, "seeded direction")
             .await
             .unwrap();
-        let prepared =
-            super::prepare_task_flow_step_once(&store, &mut task, "human-task-proof", &flow)
-                .await
-                .unwrap();
+        let prepared = super::prepare_task_flow_step(&store, &task, "human-task-proof", &flow)
+            .await
+            .unwrap();
         assert_eq!(prepared.seeded_steer_id, seeded.id);
         assert!(prepared.turn.input.contains("seeded direction"));
 
@@ -1727,9 +1475,8 @@ mod planning_tests {
     #[allow(clippy::await_holding_lock)] // the guard serializes LF_BIN for the fixture
     async fn interrupted_step_restarts_in_place_with_fresh_direction() {
         let _lf_bin = super::TestLfBinGuard::pin();
-        let (store, mut task, mut flow) = human_task_fixture().await;
-        let interrupted_step = flow.current().unwrap().step.clone();
-        super::open_task_flow_body(&mut flow, &task).unwrap();
+        let (store, task, mut flow) = human_task_fixture().await;
+        let interrupted_step = flow.current().step.clone();
 
         assert!(!super::finish_task_flow_turn(&mut flow, Lifecycle::Interrupted).unwrap());
         store
@@ -1741,64 +1488,298 @@ mod planning_tests {
             .await
             .unwrap();
 
-        let prepared =
-            super::prepare_task_flow_step_once(&store, &mut task, "human-task-proof", &flow)
-                .await
-                .unwrap();
+        let prepared = super::prepare_task_flow_step(&store, &task, "human-task-proof", &flow)
+            .await
+            .unwrap();
 
-        assert_eq!(flow.current().unwrap().step, interrupted_step);
+        assert_eq!(flow.current().step, interrupted_step);
         assert!(prepared.turn.input.contains("direction after interrupt"));
+    }
+
+    #[tokio::test]
+    async fn one_mechanical_op_advances_one_persisted_boundary_without_a_provider() {
+        let (_store, task, _) = human_task_fixture().await;
+        let flow_dir = task.worktree.join(".lf/flows");
+        std::fs::create_dir_all(&flow_dir).unwrap();
+        std::fs::write(
+            flow_dir.join("two-ops.yaml"),
+            "- op: rebase --plan\n- op: rebase --plan\n",
+        )
+        .unwrap();
+        let mut flow = super::start_task_flow(&task, "two-ops").unwrap();
+        assert_eq!(flow.current().kind, StepKind::Op);
+        assert!(!super::run_task_flow_op(&task, &mut flow).await.unwrap());
+        assert_eq!(flow.current().index, 1);
+        assert_eq!(flow.current().kind, StepKind::Op);
+        assert!(super::run_task_flow_op(&task, &mut flow).await.unwrap());
+        assert_eq!(flow.step_index, 1);
+        assert_eq!(flow.iteration, 0);
+    }
+
+    #[tokio::test]
+    async fn active_task_invocation_ignores_later_flow_and_skill_edits() {
+        let (store, task, _) = human_task_fixture().await;
+        let flow_dir = task.worktree.join(".lf/flows");
+        let skill_dir = task.worktree.join(".lf/skills");
+        std::fs::create_dir_all(&flow_dir).unwrap();
+        std::fs::create_dir_all(&skill_dir).unwrap();
+        std::fs::write(
+            flow_dir.join("persisted-proof.yaml"),
+            "- original-proof\n- op: rebase --plan\n",
+        )
+        .unwrap();
+        std::fs::write(
+            skill_dir.join("original-proof.md"),
+            "# Original\n\nExecute the definition captured at Flow start.\n",
+        )
+        .unwrap();
+        let flow = super::start_task_flow(&task, "persisted-proof").unwrap();
+        store
+            .set_flow_position(&task.id, flow.clone())
+            .await
+            .unwrap();
+
+        std::fs::write(
+            flow_dir.join("persisted-proof.yaml"),
+            "- replacement-proof\n- op: doctor\n",
+        )
+        .unwrap();
+        std::fs::write(
+            skill_dir.join("original-proof.md"),
+            "# Mutated\n\nThis must not affect the active invocation.\n",
+        )
+        .unwrap();
+        std::fs::write(
+            skill_dir.join("replacement-proof.md"),
+            "# Replacement\n\nA future invocation may use this.\n",
+        )
+        .unwrap();
+
+        let persisted = store.flow_position(&task.id).await.unwrap().unwrap();
+        let crate::engine::ConcreteStep::Skill(active_skill) = persisted.current_plan() else {
+            panic!("active first step is a skill")
+        };
+        assert_eq!(active_skill.skill.name, "original-proof");
+        assert!(active_skill
+            .skill
+            .content
+            .as_deref()
+            .unwrap()
+            .contains("captured at Flow start"));
+        let crate::engine::ConcreteStep::Op(active_op) = &persisted.invocation.steps[1] else {
+            panic!("active second step is an op")
+        };
+        assert_eq!(active_op.item.command, "rebase");
+        assert_eq!(active_op.item.args, ["--plan"]);
+
+        let future = super::start_task_flow(&task, "persisted-proof").unwrap();
+        let crate::engine::ConcreteStep::Skill(future_skill) = future.current_plan() else {
+            panic!("future first step is a skill")
+        };
+        assert_eq!(future_skill.skill.name, "replacement-proof");
+        let crate::engine::ConcreteStep::Op(future_op) = &future.invocation.steps[1] else {
+            panic!("future second step is an op")
+        };
+        assert_eq!(future_op.item.command, "doctor");
     }
 
     async fn park_human_task(
         store: &SharedStore,
-        task: &mut ControlledTask,
-        flow: &mut Playhead,
+        task: &Task,
+        flow: &FlowPosition,
     ) -> crate::ops::human_session::FlowSessionToken {
-        assert!(
-            super::prepare_task_flow_step(store, task, "human-task-proof", flow)
+        if store.flow_position(&task.id).await.unwrap().is_none() {
+            store
+                .set_flow_position(&task.id, flow.clone())
                 .await
-                .unwrap()
-                .is_none()
-        );
-        let position = store
-            .flow_position(&WorkRef::Task(task.id.clone()))
-            .await
-            .unwrap()
-            .unwrap();
+                .unwrap();
+        }
+        let position = store.flow_position(&task.id).await.unwrap().unwrap();
+        let step = position.current();
+        let crate::engine::ConcreteStep::Skill(planned) = position.current_plan() else {
+            panic!("human position must select a Skill")
+        };
         crate::ops::human_session::FlowSessionToken {
             task_id: task.id.clone(),
-            flow: position.flow,
-            node_id: position.node_id.unwrap(),
-            skill: position.step,
+            invocation_id: position.invocation.id.clone(),
+            flow: step.flow,
+            node_id: step.policy.id.unwrap(),
+            skill: planned.skill.clone(),
             iteration: position.iteration,
         }
     }
 
     #[tokio::test]
     async fn restarting_a_human_node_reuses_the_same_task_position() {
-        let (store, mut task, mut flow) = human_task_fixture().await;
-        let original = park_human_task(&store, &mut task, &mut flow).await;
-        let work = WorkRef::Task(task.id.clone());
+        let (store, task, flow) = human_task_fixture().await;
+        let original = park_human_task(&store, &task, &flow).await;
         let run_id = RunId::new();
-        let mut position = store.flow_position(&work).await.unwrap().unwrap();
+        let mut position = store.flow_position(&task.id).await.unwrap().unwrap();
         position.session_run_id = Some(run_id.clone());
         position.ready_summary = Some("ready".to_string());
-        store.set_flow_position(&work, position).await.unwrap();
-        let mut restarted_flow = super::resume_task_phase(&task).unwrap();
-        let recovered = park_human_task(&store, &mut task, &mut restarted_flow).await;
+        store.set_flow_position(&task.id, position).await.unwrap();
+        let persisted = store.flow_position(&task.id).await.unwrap().unwrap();
+        let restarted_flow = super::ensure_flow_position(&store, &task.id, None)
+            .await
+            .unwrap();
+        assert_eq!(restarted_flow, persisted);
+        let recovered = park_human_task(&store, &task, &restarted_flow).await;
 
         assert_eq!(recovered, original);
-        assert_eq!(store.human_flow_positions().await.unwrap().len(), 1);
-        let recovered = store.flow_position(&work).await.unwrap().unwrap();
+        assert_eq!(store.human_task_flow_positions().await.unwrap().len(), 1);
+        let recovered = store.flow_position(&task.id).await.unwrap().unwrap();
         assert_eq!(recovered.session_run_id, Some(run_id));
         assert_eq!(recovered.ready_summary.as_deref(), Some("ready"));
     }
 
     #[tokio::test]
+    async fn stale_human_decisions_cannot_target_a_replacement_invocation() {
+        let (store, task, flow) = human_task_fixture().await;
+        let stale = park_human_task(&store, &task, &flow).await;
+        let mut replacement = store.flow_position(&task.id).await.unwrap().unwrap();
+        let step = replacement.current();
+        replacement.invocation = crate::durable::test_flow_invocation(
+            &step.flow,
+            replacement.step_index,
+            &step.step,
+            step.policy.id.as_deref(),
+            true,
+        );
+        let replacement = store
+            .set_flow_position(&task.id, replacement)
+            .await
+            .unwrap();
+
+        for decision in [
+            crate::ops::human_session::FlowDecision::Approve,
+            crate::ops::human_session::FlowDecision::Iterate,
+        ] {
+            assert!(
+                super::decide_human_flow_step(&store, &stale, decision, "obsolete decision")
+                    .await
+                    .is_err()
+            );
+        }
+        let current = store.flow_position(&task.id).await.unwrap().unwrap();
+        assert_eq!(current.invocation.id, replacement.invocation.id);
+        assert_eq!(current.version, replacement.version);
+    }
+
+    #[tokio::test]
+    #[allow(clippy::await_holding_lock)] // the guard serializes LF_BIN for the fixture
+    async fn claimed_autonomous_boundary_settles_once_at_the_human_node() {
+        let _lf_bin = super::TestLfBinGuard::pin();
+        let (store, mut task, _) = human_task_fixture().await;
+        let mut flow = super::start_task_flow(&task, "task-design").unwrap();
+        let initial = store
+            .set_flow_position(&task.id, flow.clone())
+            .await
+            .unwrap();
+        let owner = TaskWorkerOwner {
+            trace_id: TraceId::new(),
+            exec_id: ExecId::new(),
+            pid: 101,
+            started_at: 1_700_000_000,
+        };
+        let claim = match store
+            .claim_task_worker(
+                &task.id,
+                initial.version,
+                &owner,
+                time::OffsetDateTime::now_utc(),
+            )
+            .await
+            .unwrap()
+        {
+            TaskWorkerClaimOutcome::Claimed(claim) => claim,
+            outcome => panic!("unexpected claim outcome: {outcome:?}"),
+        };
+        let claim = store
+            .bind_task_worker_run(&task.id, &claim, &RunId::new(), &owner)
+            .await
+            .unwrap();
+        flow = store.flow_position(&task.id).await.unwrap().unwrap();
+        let completed = super::finish_task_flow_turn(&mut flow, Lifecycle::Completed).unwrap();
+        assert!(!completed);
+        super::finish_claimed_task_boundary(
+            &store,
+            &mut task,
+            &mut flow,
+            &claim,
+            Lifecycle::Completed,
+            completed,
+            "design ready",
+        )
+        .await
+        .unwrap();
+
+        let settled = store.flow_position(&task.id).await.unwrap().unwrap();
+        assert!(settled.is_human());
+        assert!(settled.claim.is_none());
+        assert_eq!(settled.version, initial.version + 1);
+        assert_eq!(store.human_task_flow_positions().await.unwrap().len(), 1);
+    }
+
+    #[tokio::test]
+    async fn final_skill_completion_removes_the_flow_without_restarting_it() {
+        let (store, mut task, _) = human_task_fixture().await;
+        let mut position = super::start_task_flow(&task, "task-design").unwrap();
+        position.invocation.steps.truncate(1);
+        position.iteration = 3;
+        let position = store.set_flow_position(&task.id, position).await.unwrap();
+        let owner = TaskWorkerOwner {
+            trace_id: TraceId::new(),
+            exec_id: ExecId::new(),
+            pid: 101,
+            started_at: 1_700_000_000,
+        };
+        let claim = match store
+            .claim_task_worker(
+                &task.id,
+                position.version,
+                &owner,
+                time::OffsetDateTime::now_utc(),
+            )
+            .await
+            .unwrap()
+        {
+            TaskWorkerClaimOutcome::Claimed(claim) => claim,
+            outcome => panic!("unexpected claim outcome: {outcome:?}"),
+        };
+        let claim = store
+            .bind_task_worker_run(&task.id, &claim, &RunId::new(), &owner)
+            .await
+            .unwrap();
+        let mut position = store.flow_position(&task.id).await.unwrap().unwrap();
+        let completed = super::finish_task_flow_turn(&mut position, Lifecycle::Completed).unwrap();
+        assert!(completed);
+        assert_eq!(position.iteration, 3);
+        super::finish_claimed_task_boundary(
+            &store,
+            &mut task,
+            &mut position,
+            &claim,
+            Lifecycle::Completed,
+            completed,
+            "done",
+        )
+        .await
+        .unwrap();
+
+        assert!(store.flow_position(&task.id).await.unwrap().is_none());
+        assert_eq!(
+            store
+                .work_status(&WorkRef::Task(task.id.clone()))
+                .await
+                .unwrap(),
+            crate::durable::WorkStatus::Ready
+        );
+    }
+
+    #[tokio::test]
     async fn approving_a_human_node_advances_the_task_without_an_ask() {
-        let (store, mut task, mut flow) = human_task_fixture().await;
-        let token = park_human_task(&store, &mut task, &mut flow).await;
+        let (store, task, flow) = human_task_fixture().await;
+        let token = park_human_task(&store, &task, &flow).await;
 
         super::decide_human_flow_step(
             &store,
@@ -1809,8 +1790,7 @@ mod planning_tests {
         .await
         .unwrap();
 
-        let task = super::controlled_task(&store, &task.id).await.unwrap();
-        assert_eq!(task.state.lifecycle_phase, TaskLifecyclePhase::Loop);
+        assert!(store.flow_position(&task.id).await.unwrap().is_none());
         assert!(!crate::ops::human_session::token_is_current(&store, &token)
             .await
             .unwrap());
@@ -1827,8 +1807,8 @@ mod planning_tests {
 
     #[tokio::test]
     async fn iterating_a_human_node_returns_to_autonomous_work_with_a_steer() {
-        let (store, mut task, mut flow) = human_task_fixture().await;
-        let token = park_human_task(&store, &mut task, &mut flow).await;
+        let (store, task, flow) = human_task_fixture().await;
+        let token = park_human_task(&store, &task, &flow).await;
 
         super::decide_human_flow_step(
             &store,
@@ -1839,13 +1819,11 @@ mod planning_tests {
         .await
         .unwrap();
 
-        let task = super::controlled_task(&store, &task.id).await.unwrap();
-        assert_eq!(task.state.phase_cursor, 0);
-        assert_eq!(task.state.phase_iteration, 1);
         let work = WorkRef::Task(task.id.clone());
-        let position = store.flow_position(&work).await.unwrap().unwrap();
-        assert_eq!(position.step, "kickoff");
-        assert!(!position.human);
+        let position = store.flow_position(&task.id).await.unwrap().unwrap();
+        assert_eq!(position.current().step, "kickoff");
+        assert_eq!(position.iteration, 1);
+        assert!(!position.is_human());
         assert!(store
             .work_steers(&work)
             .await
@@ -1854,79 +1832,40 @@ mod planning_tests {
             .any(|steer| steer.text.contains("narrow the design")));
     }
 
-    #[test]
-    fn task_state_sync_keeps_gate_proposals_scoped_to_finally() {
-        let now = time::OffsetDateTime::now_utc();
-        let first_work = Task {
-            id: TaskId::new(),
-            plan: TaskPlan {
-                id: LinearIssueId::new("incident-issue").unwrap(),
-                identifier: "ENG-125".to_string(),
-                title: "Incident".to_string(),
-                description: String::new(),
-                pm_snapshot_synced_at: 1,
-            },
-            pm_writeback: PmWritebackState::Current,
-            wave_id: crate::id::WaveId::new(),
-            project_id: ProjectId::new(),
-            worktree: "/tmp/incident".into(),
-            workspace_slug: "incident".to_string(),
-            abandon_intent: None,
-            created_at: now,
-            updated_at: now,
-            observation: Observation::NotRequired,
-        };
-        let first = ControlledTask {
-            state: State {
-                task_id: first_work.id.clone(),
-                lifecycle: TaskLifecyclePlan::standard("incident", "ship-5whys", "ship"),
-                lifecycle_phase: TaskLifecyclePhase::First,
-                phase_cursor: 0,
-                phase_iteration: 0,
-                gate_cycle: 0,
-                gate_proposal: None,
-                agent: "codex".to_string(),
-                provider: "codex".to_string(),
-                provider_session_id: None,
-                updated_at: now,
-            },
-            work: first_work,
-        };
-        let mut finally = first.clone();
-        finally.state.enter_loop().unwrap();
-        finally
-            .state
-            .enter_finally(TaskGateProposal {
-                done: true,
-                reason: "pull request merged".to_string(),
-            })
-            .unwrap();
+    #[tokio::test]
+    async fn concurrent_human_decisions_settle_once() {
+        let (store, task, flow) = human_task_fixture().await;
+        let token = park_human_task(&store, &task, &flow).await;
+        let approve_store = store.clone();
+        let approve_token = token.clone();
+        let iterate_store = store.clone();
+        let iterate_token = token.clone();
 
-        let mut first_body = first.clone();
-        sync_task_state(&mut first_body, &finally);
-        assert!(first_body.state.gate_proposal.is_none());
-        first_body.validate().unwrap();
+        let (approve, iterate) = tokio::join!(
+            super::decide_human_flow_step(
+                &approve_store,
+                &approve_token,
+                crate::ops::human_session::FlowDecision::Approve,
+                "approve",
+            ),
+            super::decide_human_flow_step(
+                &iterate_store,
+                &iterate_token,
+                crate::ops::human_session::FlowDecision::Iterate,
+                "iterate",
+            ),
+        );
 
-        let mut loop_body = first;
-        loop_body.state.enter_loop().unwrap();
-        sync_task_state(&mut loop_body, &finally);
-        assert!(loop_body.state.gate_proposal.is_none());
-        loop_body.validate().unwrap();
-
-        let mut finally_body = finally.clone();
-        finally.state.gate_proposal = Some(TaskGateProposal {
-            done: false,
-            reason: "another prevention remains".to_string(),
-        });
-        sync_task_state(&mut finally_body, &finally);
-        assert_eq!(finally_body.state, finally.state);
-        finally_body.validate().unwrap();
+        assert_ne!(approve.is_ok(), iterate.is_ok());
+        assert!(!crate::ops::human_session::token_is_current(&store, &token)
+            .await
+            .unwrap());
     }
 
     #[test]
     fn task_seed_uses_the_current_parent_project_definition() {
         let now = time::OffsetDateTime::UNIX_EPOCH;
-        let task_work = Task {
+        let task = Task {
             id: TaskId::new(),
             plan: TaskPlan {
                 id: LinearIssueId::new("issue-1").unwrap(),
@@ -1944,22 +1883,6 @@ mod planning_tests {
             created_at: now,
             updated_at: now,
             observation: Observation::NotRequired,
-        };
-        let task = ControlledTask {
-            state: State {
-                task_id: task_work.id.clone(),
-                lifecycle: TaskLifecyclePlan::standard("task-design", "task", "ship"),
-                lifecycle_phase: TaskLifecyclePhase::Loop,
-                phase_cursor: 0,
-                phase_iteration: 0,
-                gate_cycle: 0,
-                gate_proposal: None,
-                agent: "codex".to_string(),
-                provider: "codex".to_string(),
-                provider_session_id: None,
-                updated_at: now,
-            },
-            work: task_work,
         };
         let pr = TaskPr {
             id: TaskPrId::new(),

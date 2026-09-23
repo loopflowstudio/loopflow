@@ -31,7 +31,7 @@ kernel locks                  live local exclusion authority
 | --- | --- |
 | What is this Wave trying to do? | `wave/<name>/GOAL.md` and `MEMORY.md` |
 | What Projects and Tasks exist? | Linear, through the bounded PM projection |
-| What controller boundary should resume? | controller state joined explicitly to current Work evidence |
+| What boundary should resume? | Work domain state joined to its exact `task_flow_positions` row |
 | What did one provider launch emit? | the Run record on the Home that launched it |
 | Is a local process moving now? | the OS process table joined to local command receipts |
 | Did a PR merge? | GitHub |
@@ -52,9 +52,9 @@ The current application tables group by owner:
 | Owner | Tables | Purpose |
 | --- | --- | --- |
 | Tracked Work | `waves`, `projects`, `project_events`, `tasks`, `task_events` | stable identity, status, progress, comments, interrupts, history |
-| Controller automation | `project_controller_state`, `task_controller_state` | end-to-end playheads, provider continuation, controller observations |
+| Project and Task progression | `projects`, `tasks`, `task_flow_positions` | Project operation evidence; Task-only selected Flow, exact boundary, claim, and unsafe blocker |
 | Task delivery | `task_prs`, `task_pr_repair_incidents`, `task_linear_observations`, `task_linear_ingested_comments` | serial PRs and provider observations |
-| Work adjuncts | `tool_responses`, `work_flow_positions`, `work_placements` | tool answers, human/flow playheads, and Home placement; Project/Task correction events live in their Work event streams |
+| Work adjuncts | `tool_responses`, `work_placements` | tool answers and Home placement; Project/Task correction events live in their Work event streams |
 | Ask | `ask_exchanges`, `ask_linear_comment_outbox` | blocking requests, answering fence, results, publication |
 | PM projection | `pm_snapshots`, `observation_outbox` | bounded Linear reads and deferred publication |
 | Metrics | `metric_instruments`, `metric_observations` | registered producers and accepted evidence |
@@ -68,10 +68,14 @@ Released migration bytes are immutable. Draft migrations form a dependency-
 ordered development frontier and become released only through the release
 workflow.
 
-Controller rows use Work ids as foreign keys, but Work reads never join them.
-Project and Task controller code loads Work and controller state separately.
-There is no phase epoch, active controller slot, Task writer token, or Work
-ownership lease in the schema.
+Project and Task progression lives on the Work records and exact
+`task_flow_positions`; there is no controller table, provider continuation,
+phase epoch, active controller slot, Task writer token, or generic Work lease.
+The short advancement claim fences one Flow-position version and uses the
+existing process ledger for liveness evidence.
+Claimed Task settlement, completion, and blocking commit the Flow change and
+its Task evidence in one transaction. Ordinary Task updates write facts, while
+Flow settlement only touches the Task timestamp.
 
 Store open uses a short OS migration lock around backup plus schema
 application. A current schema does not take the database write lock merely to

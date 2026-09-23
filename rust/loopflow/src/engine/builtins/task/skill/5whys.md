@@ -89,4 +89,4 @@ Problem → Cause 1 → Cause 2 → Cause 3 → Root Cause
 - [ ] <specific change 2>
 ```
 
-The Task's loop flow implements these changes one coherent prevention at a time.
+The Task worker implements these changes one coherent prevention at a time.

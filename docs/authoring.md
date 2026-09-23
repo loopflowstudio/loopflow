@@ -77,7 +77,7 @@ stable within the expanded flow and required with `human: true`:
 A headless Task parks at that node; an attached TUI uses its present User.
 Iterate returns to the nearest preceding autonomous occurrence. Flow policy
 does not create a separate review ledger; workflows that are already designed
-can select an existing gate-free first flow when they launch a Task.
+can select an existing gate-free Flow when they launch a Task worker.
 
 Mechanical git/PR operations ride along as `op:` steps:
 

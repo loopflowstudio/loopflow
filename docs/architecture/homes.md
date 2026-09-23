@@ -66,26 +66,20 @@ shell / automation / Loopflow.app
       local store + repository/Git
                |
                v
-              lfd
-               |
-               v
-         Wave listener
-          |         |
-          |         `-- HTTP, conversation, journal
-          v
-       resident
+              lfd -------- Wave listener / resident
+
+ Task or Project CLI
           |
           v
- Project controller / Task controller
-          |
-          v
-    provider harness ------> Home-local Run record
+ Work Flow position -- exact claim --> boundary Run
+                                      |
+                                      `--> Home-local Run record
 ```
 
 The process that directly spawns a child owns that child handle and may cancel
-it. The Wave listener owns the resident child it spawned. Deterministic tmux
-names make resident startup and inspection repeatable; they do not reserve the
-Work against independent bound Runs.
+it. Project and Task execution authority comes from the exact Flow-position
+claim, not from a resident ancestor or deterministic tmux name. The current
+Wave listener still owns its resident governance child separately.
 
 None of those local facts becomes generic cross-process Run control. A PID,
 tmux name, parent Run, Work identity, or telemetry row cannot prove that a

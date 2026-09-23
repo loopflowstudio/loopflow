@@ -45,7 +45,8 @@ four publish the PR headlessly and open no browser:
   disposition is recorded but is never applied before an authoritative merge.
 - **`lf pr land`** — run the same arm step, then join the one durable watcher for
   the PR. It observes GitHub, repairs failing required checks once per failed
-  head, re-arms material repairs, and returns only after merge or an actionable
+  head through ci-fix (which rebases, repairs, pushes, and enables auto-merge),
+  and returns only after merge or an actionable
   durable block. Bare `land` leaves a Task open; `-c` completes it after merge,
   and `--next <slug>` rotates its serial PR chain after merge.
 
@@ -102,7 +103,7 @@ whenever the seed remains computable.
 
 A one-shot operation is a direct skill or flow run. Durable delegated work
 starts from an existing Linear task with `lf task prepare <issue-id>`; use
-`lf task run <issue-id>` when the built-in controller should pursue it end to
+`lf task run <issue-id>` when Loopflow should pursue its declared Flow end to
 end.
 When dependent work must begin before another Task PR merges, start a separate
 Task with `--stack-on <parent-task>`. Each Task owns one active remote branch. The child
@@ -180,11 +181,11 @@ lf --project context project/operate \
 ```
 
 `lf task prepare` ensures tracked Task Work, its one worktree, and serial PR
-identity without installing or starting an end-to-end controller. `--task`,
+identity without starting Task execution. `--task`,
 `--project`, and `--wave` start one supervised skill Run about the most specific
 selected Work. A Task implies its Project and Wave; a Project implies its Wave.
 Broader selectors may be supplied as qualifiers and must match. These commands
-never bind a flow, load or advance controller state, resume a provider session,
+never bind or advance the Work's Flow, resume a provider session,
 or grant exclusive ownership. Task binding supplies the Task seed and uses its
 existing worktree as cwd. Project and Wave binding use the owning Wave
 repository; Projects do not own worktrees, so repository changes still belong
@@ -200,31 +201,30 @@ dirty files merely because it finished first. After the bounded Runs finish,
 inspect the shared tree. When the complete set is one coherent checkpoint, use
 the ordinary `lf commit`/PR workflow to share it.
 
-Use Task, Project, or Wave controller commands when the built-in automation
-should choose and run subsequent work. Use `--task`, `--project`, or `--wave`
+Use Task, Project, or Wave pursuit commands when Loopflow should choose and run
+subsequent work. Use `--task`, `--project`, or `--wave`
 with a skill when a human or parent already knows the one bounded contribution
 to make.
 
-A parent follows the same path without borrowing the Task's controller process:
+A parent follows the same path without becoming the Task worker:
 launch the exact `--task ...` contributions, wait for the artifacts it needs,
 inspect the shared tree, then invoke the explicit Task command. The generic Run
 ids remain provenance; they never become Task planning leases.
 
 When accumulated research or changed Task direction invalidates the current
 attempt, update the Task definition, wait for the exact contributions you need,
-then start its built-in controller over from a new kickoff:
+then start the Project's currently recommended Flow in a fresh Task worker:
 
 ```bash
 lf task restart LOO-267 "Reconcile the new runtime evidence"
 ```
 
 Restart force-refreshes the Task, checkpoints and pushes its complete current
-worktree, preserves its identity/worktree/PR history, clears provider
-continuation, and replaces controller state at its configured first flow in a
-fresh provider session. Existing scratch may be an older poor design;
+worktree, preserves its identity/worktree/PR history, clears any active Flow,
+and selects the Project's current recommendation in a fresh provider Run. Existing scratch may be an older poor design;
 reconcile all of it as evidence instead of treating it as approved direction.
-If the stable controller session is live, restart interrupts and replaces that
-registered process. If it is absent, restart simply starts one. Generic Runs
+If an exact Task worker is live, restart interrupts it before starting the new
+Flow. If it is absent, restart launches one. Generic Runs
 about the Task remain independent evidence and never block restart.
 
 Explicit flow selections are instructions, including when they differ from the

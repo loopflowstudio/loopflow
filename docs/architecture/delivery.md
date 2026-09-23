@@ -46,9 +46,9 @@ The exact landing fence is modeled in
 ## Create or reuse the worktree
 
 `lf task prepare` resolves one existing Linear Issue inside one Project and
-creates or reuses its managed worktree and first serial PR record. It installs
-no controller. `lf task run` uses the same substrate and additionally starts
-the built-in end-to-end Task flow. The repository identity—not the caller's
+creates or reuses its managed worktree and first serial PR record. It starts no
+execution. `lf task run` uses the same substrate and additionally advances the
+declared Task flow. The repository identity—not the caller's
 current directory spelling—selects the Git directory and sibling worktree
 namespace.
 
@@ -81,7 +81,7 @@ checkpoint history into one authored commit, verify once, and push the exact
 head. `arm` requests GitHub auto-merge and returns. `land` watches through
 merge. `submit` performs the same preparation but leaves the exact-head merge
 to a human. These delivery commands inspect Task delivery state when present;
-they do not require a controller or certify that a particular Flow ran.
+they do not require a live Task worker or certify that a particular Flow ran.
 
 `lf pr open` is the presenting verb; it opens the review surface after
 publishing. Headless Task flows use publish, arm, or land.
@@ -180,6 +180,6 @@ serial chain to a new branch from fetched main.
 
 ## Next
 
-[Planning →](planning.md) separates the Task objective from controller playheads.
+[Planning →](planning.md) separates the Task objective from exact Flow positions.
 [Homes and processes →](homes.md) owns the machine and process boundaries around
 delivery.

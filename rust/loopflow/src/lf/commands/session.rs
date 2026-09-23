@@ -9,7 +9,20 @@ use crate::ops::human_session::{FlowDecision, OpenMode, SessionKind, SessionReco
 use crate::store::{open_store, storage_config_from_env, Store};
 
 pub fn run(command: &SessionCommand) -> anyhow::Result<()> {
-    tokio::runtime::Runtime::new()?.block_on(run_async(command))
+    let runtime = tokio::runtime::Runtime::new()?;
+    let session_id = match command {
+        SessionCommand::Approve { id, .. } | SessionCommand::Iterate { id, .. } => Some(id),
+        _ => None,
+    };
+    let Some(session_id) = session_id else {
+        return runtime.block_on(run_async(command));
+    };
+    let store = runtime.block_on(open_shared_store())?;
+    let worktree = runtime.block_on(crate::ops::human_session::decision_worktree(
+        &store, session_id,
+    ))?;
+    let argv = std::env::args().collect::<Vec<_>>();
+    crate::journal::with_runtime(&worktree, &argv, || runtime.block_on(run_async(command)))
 }
 
 async fn run_async(command: &SessionCommand) -> anyhow::Result<()> {
@@ -49,6 +62,7 @@ async fn run_async(command: &SessionCommand) -> anyhow::Result<()> {
         }
         SessionCommand::ServeFlow {
             task_id,
+            invocation_id,
             flow,
             node_id,
             skill,
@@ -58,6 +72,7 @@ async fn run_async(command: &SessionCommand) -> anyhow::Result<()> {
             crate::ops::human_session::serve_flow(
                 store,
                 task_id.clone(),
+                invocation_id.clone(),
                 flow.clone(),
                 node_id.clone(),
                 skill.clone(),

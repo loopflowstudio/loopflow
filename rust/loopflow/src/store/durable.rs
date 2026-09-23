@@ -1,7 +1,10 @@
+use time::OffsetDateTime;
+
 use crate::child::ChildRef;
 use crate::durable::{
-    AbandonReceipt, Author, FlowPosition, Home, HomeId, Placement, Steer, SteerComment,
-    ToolResponseReceipt, ToolResponseWrite, WorkRef, WorkStatus,
+    AbandonReceipt, Author, FlowPosition, Home, HomeId, Placement, RunId, Steer, SteerComment,
+    TaskId, TaskWorkerClaim, TaskWorkerClaimOutcome, TaskWorkerOwner, ToolResponseReceipt,
+    ToolResponseWrite, WorkRef, WorkStatus,
 };
 
 use super::{run_sqlite, Store, StoreResult};
@@ -61,23 +64,71 @@ impl Store {
 
     pub async fn set_flow_position(
         &self,
-        work: &WorkRef,
+        task_id: &TaskId,
         position: FlowPosition,
     ) -> StoreResult<FlowPosition> {
-        let work = work.clone();
+        let task_id = task_id.clone();
         run_sqlite(&self.sqlite, move |store| {
-            store.set_flow_position(&work, &position)
+            store.set_flow_position(&task_id, &position)
         })
         .await
     }
 
-    pub async fn flow_position(&self, work: &WorkRef) -> StoreResult<Option<FlowPosition>> {
-        let work = work.clone();
-        run_sqlite(&self.sqlite, move |store| store.flow_position(&work)).await
+    pub async fn flow_position(&self, task_id: &TaskId) -> StoreResult<Option<FlowPosition>> {
+        let task_id = task_id.clone();
+        run_sqlite(&self.sqlite, move |store| store.flow_position(&task_id)).await
     }
 
-    pub async fn human_flow_positions(&self) -> StoreResult<Vec<FlowPosition>> {
-        run_sqlite(&self.sqlite, |store| store.human_flow_positions()).await
+    pub async fn claim_task_worker(
+        &self,
+        task_id: &TaskId,
+        expected_version: u64,
+        owner: &TaskWorkerOwner,
+        claimed_at: OffsetDateTime,
+    ) -> StoreResult<TaskWorkerClaimOutcome> {
+        let task_id = task_id.clone();
+        let owner = owner.clone();
+        run_sqlite(&self.sqlite, move |store| {
+            store.claim_task_worker(&task_id, expected_version, &owner, claimed_at)
+        })
+        .await
+    }
+
+    pub async fn reclaim_task_worker(
+        &self,
+        task_id: &TaskId,
+        expected: &TaskWorkerClaim,
+        owner: &TaskWorkerOwner,
+        claimed_at: OffsetDateTime,
+    ) -> StoreResult<TaskWorkerClaim> {
+        let task_id = task_id.clone();
+        let expected = expected.clone();
+        let owner = owner.clone();
+        run_sqlite(&self.sqlite, move |store| {
+            store.reclaim_task_worker(&task_id, &expected, &owner, claimed_at)
+        })
+        .await
+    }
+
+    pub async fn bind_task_worker_run(
+        &self,
+        task_id: &TaskId,
+        expected: &TaskWorkerClaim,
+        worker_run_id: &RunId,
+        owner: &TaskWorkerOwner,
+    ) -> StoreResult<TaskWorkerClaim> {
+        let task_id = task_id.clone();
+        let expected = expected.clone();
+        let worker_run_id = worker_run_id.clone();
+        let owner = owner.clone();
+        run_sqlite(&self.sqlite, move |store| {
+            store.bind_task_worker_run(&task_id, &expected, &worker_run_id, &owner)
+        })
+        .await
+    }
+
+    pub async fn human_task_flow_positions(&self) -> StoreResult<Vec<FlowPosition>> {
+        run_sqlite(&self.sqlite, |store| store.human_task_flow_positions()).await
     }
 
     pub async fn abandon(&self, work: &WorkRef, reason: &str) -> StoreResult<AbandonReceipt> {

@@ -1045,21 +1045,6 @@ pub(crate) fn validate_persisted_json(conn: &rusqlite::Connection) -> StoreResul
         "id",
         "pm_writeback_json",
     )?;
-    let tables = user_tables(conn)?;
-    let (controller_table, controller_key) =
-        if tables.iter().any(|table| table == "task_controller_state") {
-            ("task_controller_state", "task_id")
-        } else {
-            ("tasks", "id")
-        };
-    failures.extend(validate_json_column::<
-        crate::controller::task::TaskGateProposal,
-    >(
-        conn,
-        controller_table,
-        controller_key,
-        "gate_proposal_json",
-    )?);
     failures.extend(validate_json_column::<crate::work::task::CiObservation>(
         conn,
         "task_prs",
@@ -1935,9 +1920,8 @@ mod tests {
         apply_sqlite, apply_sqlite_transaction, apply_sqlite_with_backup, backup_before_migration,
         latest_applied_version_sqlite, latest_known_version, latest_version_sqlite,
         migration_checksum, migration_sql_for_test, pending_migrations, product_schema,
-        user_tables, validate_foreign_keys, validate_installed_development_sqlite,
-        validate_persisted_json, validate_set, validate_sqlite, Migration, MigrationId,
-        DIVERGENT_MIGRATIONS, MIGRATIONS,
+        validate_foreign_keys, validate_installed_development_sqlite, validate_persisted_json,
+        validate_set, validate_sqlite, Migration, MigrationId, DIVERGENT_MIGRATIONS, MIGRATIONS,
     };
 
     const REOPEN_REPAIR_NAME: &str = "retire_obsolete_pm_reopen_writebacks";
@@ -3809,67 +3793,33 @@ mod tests {
         )
         .unwrap();
 
-        conn.execute_batch("BEGIN EXCLUSIVE").unwrap();
-        apply_set(&conn, MIGRATIONS).unwrap();
-        conn.execute_batch("COMMIT").unwrap();
-        let stale: String = conn
+        // Prove the historical JSON repair before later releases retire its storage.
+        let (repair_index, _, _) = draft_location(GATE_PROPOSAL_REPAIR_NAME);
+        apply_set(&conn, &MIGRATIONS[..=repair_index]).unwrap();
+        let current_gate: String = conn
             .query_row(
-                "SELECT pm_writeback_json FROM tasks WHERE external_issue_id='issue-reopen'",
+                "SELECT gate_proposal_json FROM tasks WHERE external_issue_id='issue-current'",
                 [],
                 |row| row.get(0),
             )
             .unwrap();
-        if !_draft_is_canonical(REOPEN_REPAIR_NAME) {
-            assert!(stale.contains("reopen_task"));
-            conn.execute_batch(&migration_sql_for_test(REOPEN_REPAIR_NAME))
-                .unwrap();
-        }
-        if !_draft_is_canonical(GATE_PROPOSAL_REPAIR_NAME) {
-            conn.execute_batch(&migration_sql_for_test(GATE_PROPOSAL_REPAIR_NAME))
-                .unwrap();
-        }
-        let controller_table_exists = user_tables(&conn)
-            .unwrap()
-            .iter()
-            .any(|table| table == "task_controller_state");
-        let current_gate = if controller_table_exists {
-            conn.query_row(
-                "SELECT controller.gate_proposal_json
-                 FROM task_controller_state controller
-                 JOIN tasks ON tasks.id = controller.task_id
-                 WHERE tasks.external_issue_id='issue-current'",
-                [],
-                |row| row.get::<_, String>(0),
-            )
-        } else {
-            conn.query_row(
-                "SELECT gate_proposal_json FROM tasks WHERE external_issue_id='issue-current'",
-                [],
-                |row| row.get::<_, String>(0),
-            )
-        }
-        .unwrap();
         assert_eq!(
             current_gate,
             "{\"done\":false,\"reason\":\"current\",\"future\":\"preserved\"}"
         );
-        let stale_gate_count = if controller_table_exists {
-            conn.query_row(
-                "SELECT COUNT(*) FROM task_controller_state
-                 WHERE json_type(gate_proposal_json, '$.status') IS NOT NULL",
-                [],
-                |row| row.get::<_, i64>(0),
-            )
-        } else {
-            conn.query_row(
+        let stale_gate_count: i64 = conn
+            .query_row(
                 "SELECT COUNT(*) FROM tasks
                  WHERE json_type(gate_proposal_json, '$.status') IS NOT NULL",
                 [],
-                |row| row.get::<_, i64>(0),
+                |row| row.get(0),
             )
-        }
-        .unwrap();
+            .unwrap();
         assert_eq!(stale_gate_count, 0);
+
+        conn.execute_batch("BEGIN EXCLUSIVE").unwrap();
+        apply_set(&conn, MIGRATIONS).unwrap();
+        conn.execute_batch("COMMIT").unwrap();
         validate_foreign_keys(&conn).unwrap();
         validate_persisted_json(&conn).unwrap();
         conn.pragma_update(None, "foreign_keys", "ON").unwrap();
@@ -3881,34 +3831,11 @@ mod tests {
                  WHERE external_issue_id='issue-reopen'",
                 [],
             )?;
-            if controller_table_exists {
-                conn.execute(
-                    "UPDATE task_controller_state
-                     SET gate_proposal_json='{\"reason\":\"missing done\"}'
-                     WHERE task_id=(
-                         SELECT id FROM tasks WHERE external_issue_id='issue-completed'
-                     )",
-                    [],
-                )?;
-            } else {
-                conn.execute(
-                    "UPDATE tasks
-                     SET gate_proposal_json='{\"reason\":\"missing done\"}'
-                     WHERE external_issue_id='issue-completed'",
-                    [],
-                )?;
-            }
             Ok(())
         })
         .unwrap_err();
         let message = error.to_string();
         assert!(message.contains("tasks.pm_writeback_json"));
-        let gate_column = if controller_table_exists {
-            "task_controller_state.gate_proposal_json"
-        } else {
-            "tasks.gate_proposal_json"
-        };
-        assert!(message.contains(gate_column));
         assert_eq!(
             conn.query_row(
                 "SELECT pm_writeback_json FROM tasks WHERE external_issue_id='issue-reopen'",
@@ -3932,21 +3859,6 @@ mod tests {
             reopen.pm_writeback,
             crate::work::task::PmWritebackState::Current
         ));
-        let conn = rusqlite::Connection::open(&path).unwrap();
-        let mut statement = conn
-            .prepare("SELECT gate_proposal_json FROM task_controller_state")
-            .unwrap();
-        let mut decisions = statement
-            .query_map([], |row| row.get::<_, String>(0))
-            .unwrap()
-            .map(|json| {
-                serde_json::from_str::<crate::controller::task::TaskGateProposal>(&json.unwrap())
-                    .unwrap()
-                    .done
-            })
-            .collect::<Vec<_>>();
-        decisions.sort_unstable();
-        assert_eq!(decisions, vec![false, false, false, false, false, true]);
     }
 
     #[test]
@@ -4578,7 +4490,60 @@ mod tests {
     }
 
     #[test]
-    fn native_human_session_schema_replaces_ask_with_human_flow_positions() {
+    fn dropping_project_fingerprint_preserves_planning_and_progress() {
+        let conn = open();
+        apply_before_current_draft(&conn, "drop_project_fingerprint");
+        if !_draft_is_canonical("drop_project_fingerprint") {
+            conn.execute_batch(&current_draft_sql("work_domain_state"))
+                .unwrap();
+        }
+        conn.execute_batch(
+            "INSERT INTO waves (id, name, repo, created_at)
+             VALUES ('wave_project', 'project', '/repo', 100);
+             INSERT INTO projects (
+                 id, wave_id, external_project_id, created_at, updated_at,
+                 project_prompt_context, iteration, last_state_fingerprint
+             ) VALUES (
+                 'proj_progress', 'wave_project', 'linear-project', 100, 200,
+                 'Current definition and KRs', 7, 'retired-controller-evidence'
+             );",
+        )
+        .unwrap();
+
+        conn.execute_batch(&current_draft_sql("drop_project_fingerprint"))
+            .unwrap();
+
+        assert!(!columns(&conn, "projects").contains(&"last_state_fingerprint".to_string()));
+        let retained: (String, String, i64, i64, i64) = conn
+            .query_row(
+                "SELECT wave_id, project_prompt_context, iteration, created_at, updated_at
+                 FROM projects WHERE id='proj_progress' AND external_project_id='linear-project'",
+                [],
+                |row| {
+                    Ok((
+                        row.get(0)?,
+                        row.get(1)?,
+                        row.get(2)?,
+                        row.get(3)?,
+                        row.get(4)?,
+                    ))
+                },
+            )
+            .unwrap();
+        assert_eq!(
+            retained,
+            (
+                "wave_project".into(),
+                "Current definition and KRs".into(),
+                7,
+                100,
+                200
+            )
+        );
+    }
+
+    #[test]
+    fn native_human_session_schema_uses_task_flow_positions() {
         let conn = open();
         apply_installed_development_sqlite(&conn, crate::build_info::migration_draft_manifest())
             .unwrap();
@@ -4597,10 +4562,9 @@ mod tests {
         for deleted in ["kickoff_reviewer", "iterate_reviewer", "gate_reviewer"] {
             assert!(!task_columns.contains(&deleted.to_string()));
         }
-        let position_columns = columns(&conn, "work_flow_positions");
+        let position_columns = columns(&conn, "task_flow_positions");
         for present in [
-            "work_kind",
-            "work_id",
+            "task_id",
             "node_id",
             "human",
             "session_run_id",
@@ -4609,6 +4573,9 @@ mod tests {
             assert!(position_columns.contains(&present.to_string()));
         }
         for deleted in ["epoch_id", "interactive"] {
+            assert!(!position_columns.contains(&deleted.to_string()));
+        }
+        for deleted in ["work_kind", "work_id"] {
             assert!(!position_columns.contains(&deleted.to_string()));
         }
 
@@ -4624,6 +4591,160 @@ mod tests {
                 )
                 .unwrap());
         }
+    }
+
+    #[test]
+    fn task_worker_claim_preserves_old_positions_as_explicit_restart_boundaries() {
+        let conn = open();
+        apply_before_current_draft(&conn, "task_worker_claim");
+        conn.execute_batch(
+            "INSERT INTO waves (id, name, repo, created_at)
+             VALUES ('wave_claim', 'claim', '/repo', 100);
+             INSERT INTO work_flow_positions (
+                 work_kind, work_id, flow, step, node_id, human,
+                 session_run_id, ready_summary, step_index, iteration, updated_at
+             ) VALUES
+             (
+                 'task', 'task_human', 'task-design', 'review-design', 'review', 1,
+                 'run_human', 'ready to approve', 2, 3, 100
+             ),
+             (
+                 'task', 'task_finally', 'ship-demo', 'pr land -c', NULL, 0,
+                 NULL, NULL, 4, 2, 101
+             ),
+             (
+                 'task', 'task_stale', 'task-design', 'review-design', 'review', 1,
+                 'run_stale', 'old approval evidence', 1, 1, 99
+             ),
+             (
+                 'project', 'project_legacy', 'project-operate', 'project/operate', NULL, 0,
+                 NULL, NULL, 0, 0, 98
+             );
+             PRAGMA foreign_keys=OFF;
+             INSERT INTO task_controller_state (
+                 task_id, kickoff_flow, iterate_flow, gate_flow, lifecycle_phase,
+                 phase_cursor, phase_iteration, gate_cycle, gate_proposal_json,
+                 agent, provider, provider_session_id, updated_at
+             ) VALUES (
+                 'task_controller_only', 'task-design', 'slice', 'ship-demo', 'gate',
+                 6, 4, 2, '{\"done\":false,\"reason\":\"waiting\"}',
+                 'codex', 'codex', 'provider-old', 102
+             ),
+             (
+                 'task_stale', 'task-design', 'slice', 'ship-demo', 'gate',
+                 4, 2, 3, '{\"done\":true,\"reason\":\"ready\"}',
+                 'codex', 'codex', 'provider-newer', 103
+             );",
+        )
+        .unwrap();
+
+        conn.execute_batch(&current_draft_sql("task_worker_claim"))
+            .unwrap();
+
+        let rows: i64 = conn
+            .query_row("SELECT COUNT(*) FROM task_flow_positions", [], |row| {
+                row.get(0)
+            })
+            .unwrap();
+        assert_eq!(rows, 3);
+        assert!(!conn
+            .query_row(
+                "SELECT EXISTS(
+                    SELECT 1 FROM sqlite_master
+                    WHERE type='table' AND name='work_flow_positions'
+                )",
+                [],
+                |row| row.get::<_, bool>(0),
+            )
+            .unwrap());
+        let position_columns = columns(&conn, "task_flow_positions");
+        assert!(position_columns.contains(&"invocation_json".to_string()));
+        let (invocation_json, session_run_id, ready_summary, step_index, iteration, failure_json): (
+            String,
+            Option<String>,
+            Option<String>,
+            i64,
+            i64,
+            String,
+        ) = conn
+            .query_row(
+                "SELECT invocation_json, session_run_id, ready_summary, step_index, iteration,
+                        failure_json
+                 FROM task_flow_positions WHERE task_id='task_human'",
+                [],
+                |row| {
+                    Ok((
+                        row.get(0)?,
+                        row.get(1)?,
+                        row.get(2)?,
+                        row.get(3)?,
+                        row.get(4)?,
+                        row.get(5)?,
+                    ))
+                },
+            )
+            .unwrap();
+        let invocation: crate::controller::wave::playhead::QueuedInvocation =
+            serde_json::from_str(&invocation_json).unwrap();
+        let step = invocation.step_at(0, iteration as u32).unwrap();
+        assert_eq!(step.step, "review-design");
+        assert!(step.policy.human);
+        assert_eq!(session_run_id.as_deref(), Some("run_human"));
+        assert_eq!(ready_summary.as_deref(), Some("ready to approve"));
+        assert_eq!(step_index, 0);
+        let failure: crate::durable::TaskFlowBlocker = serde_json::from_str(&failure_json).unwrap();
+        assert!(failure.restart_required);
+        assert!(failure.reason.contains("previous step 3"));
+
+        let (step, failure): (String, String) = conn
+            .query_row(
+                "SELECT step, failure_json FROM task_flow_positions
+                 WHERE task_id='task_finally'",
+                [],
+                |row| Ok((row.get(0)?, row.get(1)?)),
+            )
+            .unwrap();
+        assert_eq!(step, "pr land -c");
+        assert!(failure.contains("previous step 5"));
+
+        assert!(!conn
+            .query_row(
+                "SELECT EXISTS(SELECT 1 FROM task_flow_positions
+                 WHERE task_id='task_controller_only')",
+                [],
+                |row| row.get::<_, bool>(0),
+            )
+            .unwrap());
+
+        let (step, flow, iteration, session_run_id, failure_json): (
+            String,
+            String,
+            i64,
+            Option<String>,
+            String,
+        ) = conn
+            .query_row(
+                "SELECT step, flow, iteration, session_run_id, failure_json
+                 FROM task_flow_positions WHERE task_id='task_stale'",
+                [],
+                |row| {
+                    Ok((
+                        row.get(0)?,
+                        row.get(1)?,
+                        row.get(2)?,
+                        row.get(3)?,
+                        row.get(4)?,
+                    ))
+                },
+            )
+            .unwrap();
+        assert_eq!(step, "review-design");
+        assert_eq!(flow, "task-design");
+        assert_eq!(iteration, 1);
+        assert_eq!(session_run_id.as_deref(), Some("run_stale"));
+        let failure: crate::durable::TaskFlowBlocker = serde_json::from_str(&failure_json).unwrap();
+        assert!(failure.restart_required);
+        assert!(failure.reason.contains("previous step 2"));
     }
 
     #[test]

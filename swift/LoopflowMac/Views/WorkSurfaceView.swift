@@ -9,13 +9,8 @@ struct WorkSurfaceView: View {
     @Bindable var model: PodiumModel
 
     @Environment(\.palette) private var palette
-    // Externally-owned singleton: observe it, don't @StateObject-own it (see
-    // WaveDetailPane) — the create-and-own lifecycle fires the publisher during
-    // the first body pass and logs an AttributeGraph cycle at cold launch.
-    @ObservedObject private var terminalStore = TaskTerminalStore.shared
     @State private var controlError: String?
     @State private var activeControlId: String?
-    @State private var workspaceSelection: WorkTaskSelection?
 
     private var snapshot: RoadmapSnapshot? { model.roadmap.value }
     private var queryError: String? { model.roadmap.errorMessage }
@@ -37,16 +32,7 @@ struct WorkSurfaceView: View {
             content
         }
         .background(palette.background)
-        .sheet(item: $workspaceSelection) { selection in
-            TaskWorkspaceView(
-                task: selection.task.task,
-                reference: selection.task.reference,
-                runtime: selection.task.runtime,
-                repoPath: selection.wave.repo,
-                terminalStore: terminalStore,
-                initialSection: .changes
-            )
-        }
+
     }
 
     // MARK: - Content routing
@@ -371,11 +357,9 @@ struct WorkSurfaceView: View {
 
     // MARK: - Controls
 
-    private struct WorkTaskSelection: Identifiable {
+    private struct WorkTaskSelection {
         let wave: WaveSnapshot
         let task: RoadmapTask
-
-        var id: String { "\(wave.id):\(task.id)" }
     }
 
     private enum TaskControl {

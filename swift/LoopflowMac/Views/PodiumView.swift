@@ -47,7 +47,7 @@ struct PodiumView: View {
             Group {
                 if let repoPath = model.repoPath {
                     SessionsView(
-                        model: model, scope: .repo(repoPath),
+                        model: model, repoPath: repoPath,
                         workspaces: sessionWorkspaces, query: query
                     )
                     .id(repoPath.normalizedFilePath)

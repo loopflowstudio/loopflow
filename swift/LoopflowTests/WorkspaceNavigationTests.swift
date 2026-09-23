@@ -62,6 +62,7 @@ struct WorkspaceNavigationTests {
         let focused = workspace.multiplexer.focusedPaneId
         model.select(.task(id: "issue-review"))
         let navigation = model.navigation
+        #expect(navigation.selection == .task(id: "issue-review"))
         let group = model.workspace.waves[0].id
         navigation.toggle(group)
         navigation.search = "upcoming"
@@ -179,10 +180,10 @@ struct WorkspaceNavigationTests {
     func unavailableAssociationIsNotNoSessions() async throws {
         let model = try model()
         await model.refresh()
-        model.selection = .task(id: "absent-from-planning")
+        model.navigation.selection = .task(id: "absent-from-planning")
         model.navigation.content = .details
         let view = SessionsView(
-            model: model, scope: .repo("/src/loopflow"),
+            model: model, repoPath: "/src/loopflow",
             workspaces: SessionsWorkspaceRegistry()
         )
         #expect(throws: Never.self) {

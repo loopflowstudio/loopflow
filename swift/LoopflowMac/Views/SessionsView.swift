@@ -18,9 +18,9 @@ final class SessionsWorkspace {
     private var surfaceClosed: AnyCancellable?
     private var retainedStore: SessionsStore?
 
-    func sessionStore(scope: SessionScope, query: RegistryQuery) -> SessionsStore {
+    func sessionStore(repoPath: String, query: RegistryQuery) -> SessionsStore {
         if let retainedStore { return retainedStore }
-        let store = SessionsStore(scope: scope, query: query, surfaces: surfaces)
+        let store = SessionsStore(repoPath: repoPath, query: query, surfaces: surfaces)
         retainedStore = store
         return store
     }
@@ -58,56 +58,6 @@ final class SessionsWorkspaceRegistry {
     }
 }
 
-enum SessionScope: Hashable, Sendable {
-    case repo(String)
-    case wave(repo: String, id: String)
-    case project(repo: String, id: String)
-    case task(repo: String, id: String)
-
-    var repoPath: String {
-        switch self {
-        case .repo(let path): path
-        case .wave(let path, _), .project(let path, _), .task(let path, _): path
-        }
-    }
-
-    var label: String {
-        switch self {
-        case .repo(let path): URL(fileURLWithPath: path).lastPathComponent
-        case .wave(_, let id): id
-        case .project(_, let id): id
-        case .task(_, let id): id
-        }
-    }
-
-    func resolvingRepository() -> SessionScope {
-        let path = WaveOrigin.resolve(repoPath)
-        return switch self {
-        case .repo:
-            .repo(path)
-        case .wave(_, let id):
-            .wave(repo: path, id: id)
-        case .project(_, let id):
-            .project(repo: path, id: id)
-        case .task(_, let id):
-            .task(repo: path, id: id)
-        }
-    }
-
-    func includes(_ record: SessionRecord) -> Bool {
-        switch self {
-        case .repo:
-            true
-        case .wave(_, let id):
-            record.work?.kind == .wave && record.work?.id == id
-        case .project(_, let id):
-            record.work?.kind == .project && record.work?.id == id
-        case .task(_, let id):
-            record.work?.kind == .task && record.work?.id == id
-        }
-    }
-}
-
 struct SessionItem: Identifiable, Equatable {
     enum State: Equatable {
         case pending
@@ -122,8 +72,6 @@ struct SessionItem: Identifiable, Equatable {
     var state: State
 
     var id: String { record.id }
-    var label: String { record.title }
-    var work: WorkReference? { record.work }
 
     var statusLabel: String {
         switch record.state {
@@ -133,8 +81,6 @@ struct SessionItem: Identifiable, Equatable {
         case .closed: "CLOSED"
         }
     }
-
-    var step: String { record.detail }
 
     var surface: SessionRecord? {
         switch state {
@@ -156,22 +102,21 @@ final class SessionsStore: ObservableObject {
 
     let surfaces: GhosttySurfacePool
 
-    private let scope: SessionScope
+    let repoPath: String
     private let query: RegistryQuery
     private let metrics: SessionsLatencyMetrics
     private var hasRecordedSessionsLoad = false
     private var requestedSessionId: String?
 
     init(
-        scope: SessionScope,
+        repoPath: String,
         query: RegistryQuery = RegistryQueryLocal.shared,
         surfaces: GhosttySurfacePool = GhosttySurfacePool()
     ) {
-        let scope = scope.resolvingRepository()
-        self.scope = scope
+        self.repoPath = WaveOrigin.resolve(repoPath)
         self.query = query
         self.surfaces = surfaces
-        metrics = SessionsLatencyMetrics(scope: scope.label)
+        metrics = SessionsLatencyMetrics(scope: URL(fileURLWithPath: self.repoPath).lastPathComponent)
     }
 
     func reconcile(_ records: [SessionRecord]) {
@@ -179,11 +124,10 @@ final class SessionsStore: ObservableObject {
             metrics.recordSessionsLoaded(count: records.count)
             hasRecordedSessionsLoad = true
         }
-        let filtered = records.filter(scope.includes)
-        let incoming = Set(filtered.map(\.id))
+        let incoming = Set(records.map(\.id))
         sessions.removeAll { !incoming.contains($0.id) }
 
-        for record in filtered {
+        for record in records {
             let interactiveState: SessionItem.State = surfaces.hasSurface(
                 .session(record.id)
             ) ? .live : record.state == .active ? .elsewhere : .pending
@@ -240,7 +184,7 @@ final class SessionsStore: ObservableObject {
             let surface = try await query.openSession(
                 id: id,
                 replacing: replacing,
-                cwd: scope.repoPath
+                cwd: repoPath
             )
             guard let latest = _index(id) else { return nil }
             if case .opening = sessions[latest].state {
@@ -309,7 +253,7 @@ final class SessionsStore: ObservableObject {
                 id: id,
                 approving: approving,
                 text: text,
-                cwd: scope.repoPath
+                cwd: repoPath
             )
             sessions.removeAll { $0.id == id }
             onResolved?(id)
@@ -324,7 +268,7 @@ final class SessionsStore: ObservableObject {
     func complete(_ id: String) async -> Bool {
         guard _index(id) != nil else { return false }
         do {
-            try await query.completeSession(id: id, cwd: scope.repoPath)
+            try await query.completeSession(id: id, cwd: repoPath)
             sessions.removeAll { $0.id == id }
             onResolved?(id)
             return true
@@ -403,7 +347,6 @@ private final class SessionsLatencyMetrics {
 /// Unified Work navigation around the existing retained native workspace.
 struct SessionsView: View {
     @Bindable var model: PodiumModel
-    private let scope: SessionScope
     private let multiplexer: MultiplexerStore
     @ObservedObject private var store: SessionsStore
     @State private var layoutSnapshot: LayoutNode
@@ -411,14 +354,13 @@ struct SessionsView: View {
     @State private var zoomedPaneId: String?
     @Environment(\.palette) private var palette
 
-    init(model: PodiumModel, scope: SessionScope, workspaces: SessionsWorkspaceRegistry,
+    init(model: PodiumModel, repoPath: String, workspaces: SessionsWorkspaceRegistry,
          query: RegistryQuery = RegistryQueryLocal.shared) {
         self.model = model
-        self.scope = scope
-        let workspace = workspaces.workspace(for: scope.repoPath)
+        let workspace = workspaces.workspace(for: repoPath)
         multiplexer = workspace.multiplexer
-        let store = workspace.sessionStore(scope: scope, query: query)
-        store.onResolved = { [weak model] id in model?.sessionResolved(id, repo: scope.repoPath) }
+        let store = workspace.sessionStore(repoPath: repoPath, query: query)
+        store.onResolved = { [weak model] id in model?.sessionResolved(id, repo: repoPath) }
         _store = ObservedObject(wrappedValue: store)
         _layoutSnapshot = State(initialValue: multiplexer.layout)
         _focusedPaneId = State(initialValue: multiplexer.focusedPaneId)
@@ -455,7 +397,7 @@ struct SessionsView: View {
                 ZStack {
                     MultiplexerView(
                         layout: layoutSnapshot, focusedPaneId: focusedPaneId,
-                        zoomedPaneId: zoomedPaneId, scope: scope, sessions: store, store: multiplexer
+                        zoomedPaneId: zoomedPaneId, sessions: store, store: multiplexer
                     )
                     .opacity(terminalsVisible ? 1 : 0)
                     .disabled(!terminalsVisible)
@@ -635,7 +577,6 @@ private struct MultiplexerView: View {
     let layout: LayoutNode
     let focusedPaneId: String
     let zoomedPaneId: String?
-    let scope: SessionScope
     @ObservedObject var sessions: SessionsStore
     let store: MultiplexerStore
 
@@ -645,7 +586,6 @@ private struct MultiplexerView: View {
                 SessionPaneView(
                     pane: pane,
                     isFocused: true,
-                    scope: scope,
                     sessions: sessions,
                     store: store
                 )
@@ -653,7 +593,6 @@ private struct MultiplexerView: View {
                 MultiplexerNodeView(
                     node: layout,
                     focusedPaneId: focusedPaneId,
-                    scope: scope,
                     sessions: sessions,
                     store: store
                 )
@@ -668,7 +607,6 @@ private struct MultiplexerView: View {
 private struct MultiplexerNodeView: View {
     let node: LayoutNode
     let focusedPaneId: String
-    let scope: SessionScope
     @ObservedObject var sessions: SessionsStore
     let store: MultiplexerStore
 
@@ -681,7 +619,6 @@ private struct MultiplexerNodeView: View {
                 SessionPaneView(
                     pane: pane,
                     isFocused: pane.id == focusedPaneId,
-                    scope: scope,
                     sessions: sessions,
                     store: store
                 )
@@ -728,7 +665,6 @@ private struct MultiplexerNodeView: View {
         MultiplexerNodeView(
             node: child,
             focusedPaneId: focusedPaneId,
-            scope: scope,
             sessions: sessions,
             store: store
         )
@@ -788,7 +724,6 @@ private enum FlowResolutionAction {
 private struct SessionPaneView: View {
     let pane: PaneState
     let isFocused: Bool
-    let scope: SessionScope
     @ObservedObject var sessions: SessionsStore
     let store: MultiplexerStore
     @State private var bellRinging = false
@@ -1070,7 +1005,7 @@ private struct SessionPaneView: View {
             }
         case .shell:
             GhosttyTerminalView(
-                workingDirectory: scope.repoPath,
+                workingDirectory: sessions.repoPath,
                 terminal: .shell(pane.id),
                 surfacePool: sessions.surfaces,
                 isFocused: isFocused,
@@ -1178,7 +1113,7 @@ private struct SessionPaneView: View {
     @ViewBuilder
     private func _terminal(item: SessionItem, surface: SessionRecord) -> some View {
         GhosttyTerminalView(
-            workingDirectory: scope.repoPath,
+            workingDirectory: sessions.repoPath,
             argv: surface.openArgv,
             terminal: .session(surface.id),
             surfacePool: sessions.surfaces,

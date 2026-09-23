@@ -9,7 +9,7 @@ import Testing
 struct SessionsStoreTests {
     @Test("reconcile adopts liveness and removes Tasks that advanced")
     func reconcileTracksTheTaskPlayhead() throws {
-        let store = SessionsStore(scope: .repo("/tmp/repo"))
+        let store = SessionsStore(repoPath: "/tmp/repo")
         store.reconcile(try records([
             session(id: "a", state: "waiting"),
             session(id: "b", state: "active"),
@@ -27,7 +27,7 @@ struct SessionsStoreTests {
     @Test("selecting one waiting Task recovers only that terminal")
     func opensOnlyTheSelectedSession() async throws {
         let store = SessionsStore(
-            scope: .repo("/tmp/repo"),
+            repoPath: "/tmp/repo",
             query: RegistryQuery { args, _ in
                 #expect(args.first == "session")
                 #expect(args.dropFirst().first == "open")
@@ -49,7 +49,7 @@ struct SessionsStoreTests {
     @Test("Selecting an active Session leaves its other terminal running until Move here")
     func interactiveSelectionRequiresExplicitMove() async throws {
         let store = SessionsStore(
-            scope: .repo("/tmp/repo"),
+            repoPath: "/tmp/repo",
             query: RegistryQuery { args, _ in
                 #expect(args == ["session", "open", "native", "--json", "--replace"])
                 return session(id: "native", state: "closed", kind: "interactive")
@@ -72,7 +72,7 @@ struct SessionsStoreTests {
     @Test("Polling preserves the prepared interactive launch command", arguments: [false, true])
     func reconcilePreservesPreparedLaunch(replacing: Bool) async throws {
         let store = SessionsStore(
-            scope: .repo("/tmp/repo"),
+            repoPath: "/tmp/repo",
             query: RegistryQuery { _, _ in
                 session(id: "native", state: "closed", kind: "interactive", replacing: replacing)
             }
@@ -98,7 +98,7 @@ struct SessionsStoreTests {
     @Test("An externally killed terminal reclassifies as active elsewhere")
     func externalKillReclassifies() async throws {
         let store = SessionsStore(
-            scope: .repo("/tmp/repo"),
+            repoPath: "/tmp/repo",
             query: RegistryQuery { _, _ in
                 session(id: "native", state: "active", kind: "interactive")
             }
@@ -123,7 +123,7 @@ struct SessionsStoreTests {
     @Test("A failed open stays visible across polling until superseded")
     func failedOpenSurvivesPolling() async throws {
         let store = SessionsStore(
-            scope: .repo("/tmp/repo"),
+            repoPath: "/tmp/repo",
             query: RegistryQuery { args, _ in
                 #expect(args.contains("open"))
                 return "not json"
@@ -151,7 +151,7 @@ struct SessionsStoreTests {
     func completionRemovesInteractiveSession() async throws {
         let calls = SessionCalls()
         let store = SessionsStore(
-            scope: .repo("/tmp/repo"),
+            repoPath: "/tmp/repo",
             query: RegistryQuery { args, cwd in
                 await calls.append(args)
                 #expect(cwd == "/tmp/repo")
@@ -179,7 +179,7 @@ struct SessionsStoreTests {
     func completionRemovesAskSession() async throws {
         let calls = SessionCalls()
         let store = SessionsStore(
-            scope: .repo("/tmp/repo"),
+            repoPath: "/tmp/repo",
             query: RegistryQuery { args, cwd in
                 await calls.append(args)
                 #expect(cwd == "/tmp/repo")
@@ -205,7 +205,7 @@ struct SessionsStoreTests {
 
     @Test("A ready FlowStep stays visible until its decision")
     func readyDoesNotDisappear() throws {
-        let store = SessionsStore(scope: .repo("/tmp/repo"))
+        let store = SessionsStore(repoPath: "/tmp/repo")
         store.reconcile(try records([session(id: "review", state: "ready")]))
 
         #expect(store.sessions.map(\.id) == ["review"])
@@ -217,7 +217,7 @@ struct SessionsStoreTests {
     func resolutionNamesTheSession() async throws {
         let calls = SessionCalls()
         let store = SessionsStore(
-            scope: .repo("/tmp/repo"),
+            repoPath: "/tmp/repo",
             query: RegistryQuery { args, cwd in
                 await calls.append(args)
                 #expect(cwd == "/tmp/repo")
@@ -243,8 +243,8 @@ struct SessionsStoreTests {
         ])
     }
 
-    @Test("Session scope collapses a linked worktree to its main repository")
-    func sessionScopeUsesMainRepository() throws {
+    @Test("Session actions use the main repository for a linked worktree")
+    func sessionStoreUsesMainRepository() throws {
         let root = FileManager.default.temporaryDirectory
             .appendingPathComponent("session-scope-\(UUID().uuidString)", isDirectory: true)
         let main = root.appendingPathComponent("loopflow", isDirectory: true)
@@ -261,13 +261,12 @@ struct SessionsStoreTests {
         )
         try runGit(["worktree", "add", "-q", worktree.path], at: main)
 
-        let scope = SessionScope.repo(worktree.path).resolvingRepository()
+        let store = SessionsStore(repoPath: worktree.path)
 
         #expect(
-            URL(fileURLWithPath: scope.repoPath).resolvingSymlinksInPath().path
+            URL(fileURLWithPath: store.repoPath).resolvingSymlinksInPath().path
                 == main.resolvingSymlinksInPath().path
         )
-        #expect(scope.label == "loopflow")
     }
 }
 

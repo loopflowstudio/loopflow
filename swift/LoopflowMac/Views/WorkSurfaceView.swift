@@ -9,10 +9,8 @@ struct WorkSurfaceView: View {
     @Bindable var model: PodiumModel
 
     @Environment(\.palette) private var palette
-    @StateObject private var terminalStore = TaskTerminalStore()
     @State private var controlError: String?
     @State private var activeControlId: String?
-    @State private var workspaceSelection: WorkTaskSelection?
 
     private var snapshot: RoadmapSnapshot? { model.roadmap.value }
     private var queryError: String? { model.roadmap.errorMessage }
@@ -34,16 +32,7 @@ struct WorkSurfaceView: View {
             content
         }
         .background(palette.background)
-        .sheet(item: $workspaceSelection) { selection in
-            TaskWorkspaceView(
-                task: selection.task.task,
-                reference: selection.task.reference,
-                runtime: selection.task.runtime,
-                repoPath: selection.wave.repo,
-                terminalStore: terminalStore,
-                initialSection: .changes
-            )
-        }
+
     }
 
     // MARK: - Content routing
@@ -363,11 +352,9 @@ struct WorkSurfaceView: View {
 
     // MARK: - Controls
 
-    private struct WorkTaskSelection: Identifiable {
+    private struct WorkTaskSelection {
         let wave: WaveSnapshot
         let task: RoadmapTask
-
-        var id: String { "\(wave.id):\(task.id)" }
     }
 
     private enum TaskControl {

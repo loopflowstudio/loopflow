@@ -43,7 +43,7 @@ struct WaveSummary: Equatable {
 @Observable
 final class PodiumModel {
     var repoPath: String?
-    var selection: WorkReference?
+    var selection: WorkReference? { navigation.selection }
     @ObservationIgnored private var navigationByRepo: [String: WorkspaceNavigation] = [:]
 
     var navigation: WorkspaceNavigation {
@@ -209,10 +209,10 @@ final class PodiumModel {
         let path = path.map(WaveOrigin.resolve)
         if repoPath?.normalizedFilePath != path?.normalizedFilePath {
             sessionsGeneration &+= 1
+            workActivityGeneration &+= 1
+            if !usesFixedFixture { workActivity = .loading }
         }
-        navigation.selection = selection
         repoPath = path
-        setSelection(navigation.selection)
         clearSelectionIfOutsideScope()
     }
 
@@ -438,7 +438,7 @@ final class PodiumModel {
     private func setSelection(_ selection: WorkReference?) {
         guard self.selection != selection else { return }
         workActivityGeneration &+= 1
-        self.selection = selection
+        navigation.selection = selection
         if !usesFixedFixture { workActivity = .loading }
     }
 

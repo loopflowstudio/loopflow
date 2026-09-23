@@ -44,10 +44,27 @@ struct WaveSummary: Equatable {
 final class PodiumModel {
     var repoPath: String?
     var selection: WorkReference?
+    @ObservationIgnored private var navigationByRepo: [String: WorkspaceNavigation] = [:]
+
+    var navigation: WorkspaceNavigation {
+        let key = repoPath ?? ""
+        if let existing = navigationByRepo[key] { return existing }
+        let state = WorkspaceNavigation()
+        navigationByRepo[key] = state
+        return state
+    }
+
+    var workspace: WorkspaceProjection {
+        WorkspaceProjection(roadmaps: visibleRoadmaps, sessions: sessions.value ?? [])
+    }
     private(set) var roadmap: PodiumReading<RoadmapSnapshot> = .loading
     private(set) var waves: PodiumReading<[Wave]> = .loading
     private(set) var processActivity: PodiumReading<ActivitySnapshot> = .loading
-    private(set) var sessions: PodiumReading<[SessionRecord]> = .loading
+    private var sessionReadings: [String: PodiumReading<[SessionRecord]>] = [:]
+    private(set) var sessions: PodiumReading<[SessionRecord]> {
+        get { sessionReadings[repoPath ?? ""] ?? .loading }
+        set { sessionReadings[repoPath ?? ""] = newValue }
+    }
     private(set) var workActivity: PodiumReading<WorkActivitySnapshot> = .loading
     private(set) var workActivityScope = WorkActivityScope(
         wave: nil,
@@ -140,29 +157,19 @@ final class PodiumModel {
 
         let previousRoadmap = roadmap.value
         let previousWaves = waves.value
-        let previousSessions = sessions.value
-        let requestedSessionsGeneration = sessionsGeneration
-        let sessionsRepoPath = repoPath
         if previousRoadmap == nil { roadmap = .loading }
         if previousWaves == nil { waves = .loading }
-        if previousSessions == nil { sessions = .loading }
 
         async let roadmapResult = readRoadmap()
         async let wavesResult = readWaves()
-        async let sessionsResult = readSessions(
-            repoPath: sessionsRepoPath
-        )
+        async let sessionRefresh: Void = refreshSessions()
         waves = reading(from: await wavesResult, lastGood: previousWaves)
-        let nextSessions = await sessionsResult
-        if sessionsGeneration == requestedSessionsGeneration {
-            sessions = reading(
-                from: nextSessions,
-                lastGood: previousSessions
-            )
-        }
+        await sessionRefresh
         roadmap = reading(from: await roadmapResult, lastGood: previousRoadmap)
         selectRequestedWaveIfNeeded()
-        clearSelectionIfOutsideScope()
+        if visibleRoadmaps.allSatisfy({ $0.projects.unavailableReason == nil && $0.unavailableProjects.isEmpty }) {
+            clearSelectionIfOutsideScope()
+        }
         await refreshWorkActivity()
     }
 
@@ -202,9 +209,10 @@ final class PodiumModel {
         let path = path.map(WaveOrigin.resolve)
         if repoPath?.normalizedFilePath != path?.normalizedFilePath {
             sessionsGeneration &+= 1
-            sessions = .loading
         }
+        navigation.selection = selection
         repoPath = path
+        setSelection(navigation.selection)
         clearSelectionIfOutsideScope()
     }
 
@@ -228,6 +236,7 @@ final class PodiumModel {
     }
 
     func select(_ selection: WorkReference?) {
+        navigation.content = selection == nil ? .overview : .details
         setSelection(selection)
         clearSelectionIfOutsideScope()
     }
@@ -256,13 +265,28 @@ final class PodiumModel {
     }
 
     func refreshSessions() async {
-        guard !usesFixedFixture else { return }
+        guard !usesFixedFixture || AppTestMode.current() == .sessionFixtures else { return }
+        sessionsGeneration &+= 1
         let generation = sessionsGeneration
         let repoPath = repoPath
         let previous = sessions.value
         let result = await readSessions(repoPath: repoPath)
         guard sessionsGeneration == generation else { return }
         sessions = reading(from: result, lastGood: previous)
+    }
+
+    func sessionResolved(_ id: String, repo: String) {
+        // A pre-resolution read must not resurrect the completed human boundary.
+        // Resolution may finish after the human has switched repositories.
+        sessionsGeneration &+= 1
+        switch sessionReadings[repo] {
+        case .available(let records):
+            sessionReadings[repo] = .available(records.filter { $0.id != id })
+        case .unavailable(let records, let reason):
+            sessionReadings[repo] = .unavailable(lastGood: records?.filter { $0.id != id }, reason: reason)
+        case .loading, nil:
+            break
+        }
     }
 
     func wave(id: String) -> WaveRoadmap? {
@@ -274,7 +298,7 @@ final class PodiumModel {
     }
 
     func project(id: String) -> (wave: WaveRoadmap, project: RoadmapProject)? {
-        for wave in roadmap.value?.waves ?? [] {
+        for wave in visibleRoadmaps {
             if let project = wave.projects.items.first(where: { $0.id == id }) {
                 return (wave, project)
             }
@@ -287,7 +311,7 @@ final class PodiumModel {
         project: RoadmapProject,
         task: RoadmapTask
     )? {
-        for wave in roadmap.value?.waves ?? [] {
+        for wave in visibleRoadmaps {
             for project in wave.projects.items {
                 if let task = project.tasks.first(where: { $0.id == id }) {
                     return (wave, project, task)
@@ -339,6 +363,7 @@ final class PodiumModel {
         fixed: Bool = false
     ) {
         self.roadmap = roadmap
+        if fixed && AppTestMode.current() != .sessionFixtures { self.sessions = .available([]) }
         self.waves = waves
         self.processActivity = processActivity
         self.workActivity = workActivity

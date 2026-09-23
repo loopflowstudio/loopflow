@@ -31,14 +31,27 @@ command blocks.
 Automatic integration depends on the configured shell; macOS `/bin/bash` is
 excluded by the pinned Ghostty build.
 
-Opening Loopflow to a repository leads with its Sessions queue. Select a session
-to resume its provider-native terminal in the focused Ghostty pane; selecting it again
-jumps back to that pane. Each pane owns one native libghostty surface. Sessions
-include native interactive provider Runs, Task human FlowSteps, and `lf ask`
-calls made by ordinary Runs. Rows use the real prompt or Task title plus the
-actual provider, Skill, or Run detail. The row badge names the terminal's real
-state: **VIEWING** (in a pane here), **RUNNING** (live, view closed),
-**ELSEWHERE** (another client — Warp, another window, SSH — holds it).
+Open a repository to see one compact Work list, grouped by collapsible Wave
+and Project headings. Incomplete Tasks remain visible whether they are upcoming,
+running autonomously, or have human Sessions. Select a Task to inspect its
+directive, recorded condition, Project definition and KR proof, Activity, PR,
+and worktree references. A Task with no open Sessions says so explicitly.
+
+Open a Session from its subject's terminal button. Sessions absent from the
+planning read remain reachable under **Other open Sessions**; existing multiple
+conversations and required human decisions stay available. Task joins use the
+shared durable Work relationship, never titles or checkout guesses.
+
+Work opens full-width. **Show work list** adds the compact navigator alongside
+it; **Hide work list** restores full width. **All work** returns to the overview,
+and **Return to terminals** restores the retained pane layout. List visibility,
+search, group expansion, and Work selection survive repository switches for
+this window. Searching temporarily reveals matching groups without changing
+saved expansion. Navigation never starts a provider or resolves a Session.
+
+Each pane owns one native libghostty surface. Session badges distinguish
+**VIEWING**, **RUNNING**, **ELSEWHERE**, **OPENING**, and **RETRY**. Sessions
+include interactive provider Runs, Task human FlowSteps, and ad-hoc Asks.
 
 Selecting an ELSEWHERE row opens a pane that explains the situation; nothing is
 stopped until its explicit **Move here**, which stops the other client and
@@ -61,8 +74,7 @@ Selecting another session replaces the focused pane's view. Use the split
 controls first when both sessions should remain visible; closing the final pane
 clears it without ending the durable session.
 Completing the selected Session returns the main pane to its empty workspace.
-Use **New shell** there or in the sidebar for a bare terminal, and **Waves &
-roadmap** to return to Work. A shell pane closes when its process exits;
+Use **New shell** for a bare terminal and **All work** to inspect the plan. A shell pane closes when its process exits;
 closing a shell pane ends its shell. A Session whose provider client is
 stopped elsewhere reclassifies to ELSEWHERE instead of showing a dead
 terminal as live. Terminals survive Sessions ↔ Work navigation and
@@ -72,24 +84,20 @@ ELSEWHERE there.
 Session reads and preparation run in the opened repository rather than a
 machine-wide aggregate.
 
-The Podium keeps a closable Wave hierarchy above the Sessions and Work surfaces.
-Its Work surface shows machine-wide Now/Roadmap Work beside durable Activity. Selecting a
-Wave, Project, or Task preserves the live view and scopes `lf activity --json`
-at the source. Disclose each branch from Wave → Project → Task → live Exec.
-Exec remains process evidence rather than a fourth Work kind. PR facts open
-GitHub proof.
+Planning and Sessions share the Podium readings; there is no separate
+Sessions-only roadmap query. The displayed planning timestamp is snapshot
+generation time, not evidence of a fresh provider sync. A failed read keeps its
+last useful evidence and exposes the error. Unknown Session counts show **?**.
 
 The compact Podium bar reads live process evidence from `lf ps --json`. Its
 lamp reflects OS-live state: black is off, green is working, blue is stalled,
 and amber is waiting or unknown. Wave count, active Runs, and
 Run-without-listener warnings come from `lf ls --json`.
-Its Sessions badge reads repo-scoped `lf session list --json` and returns to
-the Sessions screen.
+Its Sessions badge uses the same repo-scoped `lf session list --json` reading
+and reveals the work list.
 Repository scope filters the Work and Wave snapshots locally; live process
 evidence remains machine-wide.
-Each provider node retains its existing repository and Work attribution, so the
-hierarchy rolls one process reading up to Task, Project, and Wave without another
-telemetry store. Authored Waves count even before they have an active Run.
+Provider activity remains separate from Task condition and human Session presence.
 
 Loading, empty, stale-last-good, and unavailable reads stay distinct. Wave and
 agent readings fail independently. A failed refresh keeps the last useful

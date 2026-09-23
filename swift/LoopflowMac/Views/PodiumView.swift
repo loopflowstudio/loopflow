@@ -2,18 +2,12 @@ import Foundation
 import Loopflow
 import SwiftUI
 
-private enum PodiumSurface {
-    case sessions
-    case work
-}
-
 struct PodiumView: View {
     let portfolioService: PortfolioService
     let initialRepoPath: String?
 
     @Environment(\.palette) private var palette
     @State private var model: PodiumModel
-    @State private var surface: PodiumSurface
     /// Per-window terminal workspaces: this window's panes and surfaces are
     /// never shared with another window showing the same repository.
     @State private var sessionWorkspaces = SessionsWorkspaceRegistry()
@@ -37,7 +31,6 @@ struct PodiumView: View {
         let model = PodiumModel(query: query, repoPath: startingRepoPath)
         PodiumFixture.applyIfRequested(to: model)
         _model = State(initialValue: model)
-        _surface = State(initialValue: model.repoPath == nil ? .work : .sessions)
     }
 
     var body: some View {
@@ -46,42 +39,20 @@ struct PodiumView: View {
             PodiumBar(
                 model: model,
                 onOpenSessions: {
-                    if model.repoPath != nil { surface = .sessions }
+                    model.navigation.showsList = true
+                    model.navigation.content = .overview
                 }
             )
             Divider()
-            PodiumConsole(model: model) {
-                if surface == .sessions, let repoPath = model.repoPath {
+            Group {
+                if let repoPath = model.repoPath {
                     SessionsView(
-                        scope: .repo(repoPath),
-                        workspaces: sessionWorkspaces,
-                        query: query,
-                        initialRecords: model.sessions.value,
-                        onShowWork: { surface = .work }
+                        model: model, scope: .repo(repoPath),
+                        workspaces: sessionWorkspaces, query: query
                     )
                     .id(repoPath.normalizedFilePath)
                 } else {
-                    HSplitView {
-                        WorkSurfaceView(model: model)
-                        .frame(
-                            minWidth: 350,
-                            idealWidth: 660,
-                            maxWidth: .infinity,
-                            maxHeight: .infinity,
-                            alignment: .top
-                        )
-                        .accessibilityIdentifier("podium-work")
-
-                        WorkActivityView(model: model)
-                            .frame(
-                                minWidth: 265,
-                                idealWidth: 390,
-                                maxWidth: 520,
-                                maxHeight: .infinity,
-                                alignment: .top
-                            )
-                    }
-                    .frame(maxWidth: .infinity, maxHeight: .infinity, alignment: .top)
+                    WorkspaceNavigator(model: model, onOpenSession: { _ in })
                 }
             }
             .frame(maxWidth: .infinity, maxHeight: .infinity, alignment: .topLeading)
@@ -126,11 +97,12 @@ struct PodiumView: View {
                 )
             }
         }
-        .onChange(of: model.repoPath) { _, repoPath in
-            surface = repoPath == nil ? .work : .sessions
-        }
-        .onReceive(NotificationCenter.default.publisher(for: .openSessions)) { _ in
-            if model.repoPath != nil { surface = .sessions }
+        .task(id: model.repoPath) {
+            while !Task.isCancelled {
+                await model.refreshSessions()
+                do { try await Task.sleep(for: .seconds(2)) }
+                catch { return }
+            }
         }
     }
 }

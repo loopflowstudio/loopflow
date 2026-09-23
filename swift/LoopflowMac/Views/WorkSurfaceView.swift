@@ -1,7 +1,4 @@
-// The Podium's work surface: everything below the console belongs to the
-// selected node. No selection shows the flat, cross-wave NOW triage; selecting
-// a Wave or Task swaps in that node's own detail. The tree itself is
-// never drawn here — the console's drawer columns own the hierarchy.
+// Work inspectors consume the same planning reading as the compact navigator.
 
 #if os(macOS)
 import AppKit
@@ -37,9 +34,6 @@ struct WorkSurfaceView: View {
             content
         }
         .background(palette.background)
-        .sheet(item: $model.historyWave) { wave in
-            ChapterHistoryView(wave: wave.name, repo: wave.repo, sourceReference: model.historyReference)
-        }
         .sheet(item: $workspaceSelection) { selection in
             TaskWorkspaceView(
                 task: selection.task.task,
@@ -77,11 +71,11 @@ struct WorkSurfaceView: View {
         } else {
             switch model.selection?.kind {
             case nil:
-                overview
+                ContentUnavailableView("Choose Work", systemImage: "list.bullet")
             case .wave:
                 waveDetail
             case .project:
-                waveDetail
+                projectDetail
             case .task:
                 taskDetail
             }
@@ -101,36 +95,6 @@ struct WorkSurfaceView: View {
             .frame(maxWidth: .infinity, alignment: .center)
         }
         .accessibilityIdentifier(identifier)
-    }
-
-    // MARK: - Overview (no selection): the flat NOW triage
-
-    @ViewBuilder
-    private var overview: some View {
-        let sections = nowSections(from: visibleWaves)
-        if sections.isEmpty {
-            ContentUnavailableView(
-                "Nothing needs action",
-                systemImage: "checkmark.circle",
-                description: Text("No live or stopped work across these Waves. Open the console to walk the plan.")
-            )
-        } else {
-            scrollingDetail(identifier: "work-now") {
-                surfaceHeader("Work", subtitle: "Everything that can move right now")
-                ForEach(sections) { section in
-                    NowSectionView(
-                        section: section,
-                        selection: model.selection,
-                        activeControlId: activeControlId,
-                        onSelect: { row in model.select(.task(id: row.task.id)) },
-                        onTaskAction: { row, action in
-                            perform(action, on: WorkTaskSelection(wave: row.wave, task: row.task))
-                        },
-                        onOpenWorktree: openWorktree
-                    )
-                }
-            }
-        }
     }
 
     // MARK: - Wave detail
@@ -184,19 +148,64 @@ struct WorkSurfaceView: View {
                         )
                     }
                 }
-                WaveMetricPortfolioView(portfolio: roadmap.metricPortfolio)
-                ForEach(roadmap.unavailableTasks, id: \.taskId) { task in
-                    Text("\(task.taskIdentifier): \(task.reason) · \(task.recovery)")
-                        .foregroundStyle(Color.statusWarning)
-                }
             }
         } else if let selection = model.selection, let roster = model.rosterWave(id: selection.id) {
             // Authored but never served: there is no roadmap to show yet.
             scrollingDetail(identifier: "podium-detail-wave") {
                 surfaceHeader(roster.displayName, subtitle: "Authored — not yet served")
-                Text("Press the Wave's fader in the console to start `lf start \(roster.api.name)`.")
+                Text("Planning evidence is not available for this authored Wave.")
                     .font(Typography.body(12))
                     .foregroundStyle(palette.textSecondary)
+            }
+        } else {
+            missingSelection
+        }
+    }
+
+    // MARK: - Project detail
+
+    @ViewBuilder
+    private var projectDetail: some View {
+        if let selection = model.selection, let found = model.project(id: selection.id) {
+            scrollingDetail(identifier: "podium-detail-project") {
+                VStack(alignment: .leading, spacing: Spacing.xxs) {
+                    HStack(alignment: .firstTextBaseline, spacing: Spacing.sm) {
+                        surfaceHeader(
+                            found.project.project.name,
+                            subtitle: "\(found.wave.wave.name) · \(found.project.nextMove.owner.rawValue)"
+                        )
+                        sectionBadge(found.project.section)
+                    }
+                    if !found.project.project.definition.isEmpty {
+                        Text(found.project.project.definition)
+                            .font(Typography.body(13))
+                            .foregroundStyle(palette.textSecondary)
+                    }
+                    Text(found.project.nextMove.reason)
+                        .font(Typography.caption(11))
+                        .foregroundStyle(palette.textSecondary)
+                }
+
+                projectProof(found.project.project)
+
+                if found.project.tasks.isEmpty {
+                    Text("No Tasks filed under this Project yet.")
+                        .font(Typography.caption(11))
+                        .foregroundStyle(palette.textSecondary)
+                } else {
+                    ForEach(found.project.tasks) { task in
+                        RoadmapTaskRow(
+                            task: task,
+                            isSelected: false,
+                            activeControlId: activeControlId,
+                            onSelect: { model.select(.task(id: task.id)) },
+                            onAction: { action in
+                                perform(action, on: WorkTaskSelection(wave: found.wave.wave, task: task))
+                            },
+                            onOpenWorktree: openWorktree
+                        )
+                    }
+                }
             }
         } else {
             missingSelection
@@ -211,7 +220,7 @@ struct WorkSurfaceView: View {
             let task = found.task
             scrollingDetail(identifier: "podium-detail-task") {
                 VStack(alignment: .leading, spacing: Spacing.sm) {
-                    Text(found.wave.wave.name)
+                    Text("\(found.wave.wave.name) · \(found.project.project.name)")
                         .font(Typography.caption(10).weight(.semibold))
                         .tracking(0.8)
                         .textCase(.uppercase)
@@ -255,6 +264,19 @@ struct WorkSurfaceView: View {
                     RoundedRectangle(cornerRadius: CornerRadius.lg)
                         .stroke(palette.border, lineWidth: 1)
                 }
+                Text("Task directive").font(Typography.sectionTitle(16))
+                Text(task.task.description.isEmpty ? "No directive recorded." : task.task.description)
+                    .font(Typography.body(13))
+                    .textSelection(.enabled)
+                    .accessibilityIdentifier("workspace-task-directive")
+                if let workspace = task.reference.workspace {
+                    Text(workspace.worktree)
+                        .font(Typography.code(11)).textSelection(.enabled)
+                }
+                Text(found.project.project.name).font(Typography.sectionTitle(16))
+                Text(found.project.project.definition)
+                    .font(Typography.body(13)).textSelection(.enabled)
+                projectProof(found.project.project)
             }
         } else {
             missingSelection
@@ -263,11 +285,27 @@ struct WorkSurfaceView: View {
 
     // MARK: - Shared pieces
 
+    private func projectProof(_ project: ProjectPlanningSnapshot) -> some View {
+        VStack(alignment: .leading, spacing: Spacing.sm) {
+            Text("Key results").font(Typography.sectionTitle(16))
+            if project.krs.isEmpty {
+                Text("No key results recorded.")
+            }
+            ForEach(project.krs) { kr in
+                Label(kr.text, systemImage: kr.holds ? "checkmark.circle.fill" : "circle")
+                    .textSelection(.enabled)
+                    .accessibilityLabel("\(kr.holds ? "Holds" : "Not established"): \(kr.text)")
+            }
+        }
+        .font(Typography.body(12))
+        .accessibilityIdentifier("workspace-project-proof")
+    }
+
     private var missingSelection: some View {
         ContentUnavailableView(
-            "Selection is gone",
+            "Selected Work is unavailable",
             systemImage: "questionmark.circle",
-            description: Text("The selected work is absent from the latest roadmap.")
+            description: Text("This planning read cannot resolve the selection. Its Sessions remain accessible in the work list.")
         )
     }
 

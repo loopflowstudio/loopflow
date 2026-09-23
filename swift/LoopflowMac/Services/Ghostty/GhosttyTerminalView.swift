@@ -64,6 +64,7 @@ struct GhosttyTerminalView: View {
 }
 
 struct GhosttyTerminalRepresentable: NSViewRepresentable {
+    @Environment(\.isEnabled) private var isEnabled
     let workingDirectory: String
     let command: String?
     let terminal: TerminalIdentity
@@ -73,6 +74,12 @@ struct GhosttyTerminalRepresentable: NSViewRepresentable {
     let onFocus: () -> Void
     let size: CGSize
     @ObservedObject var manager: GhosttyManager
+
+    final class Coordinator {
+        var requestedFocus = false
+    }
+
+    func makeCoordinator() -> Coordinator { Coordinator() }
 
     func makeNSView(context: Context) -> GhosttyMetalView {
         let view: GhosttyMetalView
@@ -101,8 +108,17 @@ struct GhosttyTerminalRepresentable: NSViewRepresentable {
            size.width > 0, size.height > 0 {
             nsView.createSurface(manager: manager)
         }
-        if isFocused, nsView.window?.firstResponder !== nsView {
-            nsView.window?.makeFirstResponder(nsView)
+        let requestsFocus = isEnabled && isFocused
+        if !requestsFocus {
+            let relinquishesFocus = !isEnabled || context.coordinator.requestedFocus
+            context.coordinator.requestedFocus = false
+            if relinquishesFocus, nsView.window?.firstResponder === nsView {
+                nsView.window?.makeFirstResponder(nil)
+            }
+        } else if !context.coordinator.requestedFocus, let window = nsView.window {
+            // Polling and resizing must not steal input from the Work search
+            // field. Only a focus/visibility transition requests native focus.
+            context.coordinator.requestedFocus = window.makeFirstResponder(nsView)
         }
     }
 }
@@ -145,6 +161,11 @@ final class GhosttySurfacePool {
 
     func release(_ id: TerminalIdentity) {
         views.removeValue(forKey: id)?.destroySurface()
+    }
+
+    func focus(_ id: TerminalIdentity) {
+        guard let view = views[id] else { return }
+        view.window?.makeFirstResponder(view)
     }
 }
 
@@ -1077,6 +1098,7 @@ func terminalPasteText(from pasteboard: NSPasteboard) -> String? {
 final class GhosttySurfacePool {
     func hasSurface(_ id: TerminalIdentity) -> Bool { false }
     func release(_ id: TerminalIdentity) {}
+    func focus(_ id: TerminalIdentity) {}
 }
 
 struct GhosttyTerminalView: View {

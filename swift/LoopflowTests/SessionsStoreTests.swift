@@ -7,25 +7,6 @@ import Testing
 @Suite("Sessions store")
 @MainActor
 struct SessionsStoreTests {
-    @Test("refresh reads Task flow sessions in the opened repository")
-    func refreshUsesRepoScope() async {
-        let store = SessionsStore(
-            scope: .repo("/tmp/scoped-repo"),
-            query: RegistryQuery { args, cwd in
-                #expect(args == ["session", "list", "--json"])
-                #expect(cwd == "/tmp/scoped-repo")
-                return "[\(session(id: "review", state: "active"))]"
-            }
-        )
-
-        await store.refresh()
-
-        #expect(store.hasLoaded)
-        #expect(store.sessions.map(\.id) == ["review"])
-        #expect(store.sessions.first?.label == "Design the control surface")
-        #expect(store.sessions.first?.step == "review-design")
-    }
-
     @Test("reconcile adopts liveness and removes Tasks that advanced")
     func reconcileTracksTheTaskPlayhead() throws {
         let store = SessionsStore(scope: .repo("/tmp/repo"))
@@ -191,7 +172,6 @@ struct SessionsStoreTests {
         #expect(store.sessions.isEmpty)
         #expect(await calls.values == [
             ["session", "complete", "native"],
-            ["session", "list", "--json"],
         ])
     }
 
@@ -220,7 +200,6 @@ struct SessionsStoreTests {
         #expect(store.sessions.isEmpty)
         #expect(await calls.values == [
             ["session", "complete", "ask"],
-            ["session", "list", "--json"],
         ])
     }
 
@@ -257,7 +236,6 @@ struct SessionsStoreTests {
         #expect(store.sessions.isEmpty)
         #expect(await calls.values == [
             ["session", "complete", "review"],
-            ["session", "list", "--json"],
         ])
     }
 

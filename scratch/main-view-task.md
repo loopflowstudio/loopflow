@@ -155,3 +155,30 @@ No separate authorities for Work/Sessions inventories, oversized parent cards, c
 - 2026-09-23: the human clarified conversations are optional and fresh starts should be encouraged. One-current-at-a-time is a cardinality constraint, not a permanent conversation per subject. Start/Continue/Finish/Start fresh above are proposed controls for that intent.
 - 2026-09-23: the human requested advancing the Task, then clarified that the pre-identified Task should receive this design. Reuse LOO-291 rather than create a duplicate. Earlier queue timing does not block this explicit advance; external-work proof remains unselected and must not be fabricated.
 - Open: per-subject Session lifecycle, checkout choice/taskification, first-open presentation, repository breadth, external proving workflow, and the directive-editing follow-up.
+
+## Slice ledger — navigation implementation, 2026-09-23
+
+The first slice replaces the root Work/Sessions switch and cascading console
+with the compact shared Work list. It retains the existing per-window terminal
+workspace, joins exact typed durable identities to stable planning rows, and
+keeps unmatched/multiple/pending human Sessions accessible. Task inspectors now
+include the directive and Project definition/KRs alongside existing actions and
+Activity. A/D presentation is window/repository state, initially full-width.
+
+Current main's Session DTO and native view match the prepared base. Shared legal
+actions/display path (LOO-284), conversation cardinality, and lf-new's nested
+worktree layout are not present and have not been invented in Swift. No wire API
+changed. The implementation removes the labels-only roadmap read and Session
+poller; Podium owns the shared readings, SessionsStore retains presentation and
+opening state, and SessionsWorkspaceRegistry still owns layouts/surfaces.
+
+Before declaring the slice fully proven, complete configured-app navigation
+with live Sessions on a host where Ghostty can create surfaces. The local
+fixture proofs and exact outstanding failures are recorded in
+`navigation-proof.md`; they are not the ten external-work trials.
+
+Remaining LOO-291 scope: shared LOO-284 action/display contract integration;
+optional bounded per-subject conversations and required lf-new workspace
+integration; Task-directive editing; human-selected external-product trials;
+and published measured paint/interaction budgets with long-lived-registry
+trials. No Task completion or publication is claimed by this implementation.

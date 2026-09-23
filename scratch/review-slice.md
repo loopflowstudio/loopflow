@@ -80,10 +80,12 @@ This changes no lifecycle or ownership boundary.
 - Re-read native failure receipts: the new draft test has a nil terminal surface;
   unchanged GhosttyTerminalInputTests.releaseSurfaceIsWindowLocal likewise fails
   before behavior assertions. Logs: `/tmp/loo291-native-focus-proof.log` and
-  `/tmp/loo291-existing-native-proof.log`. This headless run has no rendering
-  environment. The precise initialization cause remains unknown; repeating the
-  same native check would add no discriminating evidence. Hosted UI test sources
-  were inspected but not executed.
+  `/tmp/loo291-existing-native-proof.log`. The subsequent diagnostic in
+  `native-surface-diagnostic.md` supersedes the hypothesis that this process has
+  no rendering environment: it sees a screen and Metal device. Ghostty reports
+  `error.OutOfMemory`, also reproduced by a minimal AppKit host without user
+  configuration or navigation code. The allocation failure's cause remains
+  unknown. Hosted UI test sources were inspected but not executed.
 
 ## Negative architectural proof
 

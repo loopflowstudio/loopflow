@@ -189,3 +189,11 @@ Work was removed. The focused regression reproduces the former loss and passes
 both missing-evidence cases after correction. `review-slice.md` contains the
 claim matrix and precise configured-native proof still needed. Slice publication
 is not approved by this review; remaining LOO-291 scope is unchanged.
+
+Native-proof investigation, 2026-09-23: Ghostty reports `error.OutOfMemory` before
+navigation assertions. A minimal AppKit C-API host using the same artifact also
+fails with user config omitted, both before and after window attachment. The
+process sees a screen and Metal device; the earlier no-rendering explanation
+is not established. `native-surface-diagnostic.md` and its probe preserve the
+reproduction. Restore that boundary before the configured navigation trial;
+no production change or publication is justified by this diagnostic alone.

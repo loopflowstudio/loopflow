@@ -1,0 +1,249 @@
+Repository start-chapter proposal Run for chapter 20260923T000959Z-502f011b; parent Run run_502f011b9d1f4596ba62eff0e54a8b0e, Task LOO-278. UTC start 2026-09-23T00:09:59.226362+00:00; proposed review 2026-10-21T00:09:59.226362+00:00 for every scope.
+
+IMPORTANT HUMAN INSTRUCTION OVERRIDING THE SKILL INTERVIEW: Gate 1 is explicitly accepted in the live parent conversation. Do NOT open lf ask or any human session. Do not wait for human text. Return material questions/challenges to this parent in your final report. Pass this instruction verbatim to EVERY Project child. Proposal-only: no PM/Work/charter edits, no implementation, no commits/push, no files in your checkout. The parent alone writes archives. Do not rerun the completed manual review.
+
+Loopflow exists to keep Cube, Etude, Kata, and Hootro moving. In each week at least three have durable Work that accurately states the human's desired next focus and observable forward momentum on at least one Task. The human selects priorities. Product dogfooding is external: those four projects are the proving ground. Desktop joins current Project/KR/Task planning to excellent open-Session organization. Account juggling and prompting evidence support that loop, not disconnected bets.
+
+Portfolio parallelism is desirable; intra-project parallelism stays low. Small = 1–2 active Tasks (Cube, Etude, Hootro), Medium = 2–4 (Kata), Big = 2–8 (Loopflow across Projects). These are company-specific review heuristics, not new Work kinds or execution constraints.
+
+Keep Product, Infrastructure, and Intelligence. Infrastructure owns Loopflow-on-Loopflow reliability: releases, auth, execution continuity, flow-driven Work advancement, and repository-wide architecture reduction/minimalism. Intelligence owns non-authoritative evidence that makes real Runs explainable and useful for diagnosing portfolio execution and improving prompting. Product owns external dogfood and the shared user contract, including Desktop planning plus open Sessions. List and engbot are stale structures to disposition, not next-chapter Waves. Favor excellent completion, fewer concurrent Loopflow commitments, and capacity for the external projects.
+
+Routing: loopflow.wave-agents belongs in Infrastructure / Architecture Minimalism. Loopflow self-hosting failures belong in Infrastructure Reliability or Intelligence evidence. Sessions design is validated enough to build on, not restart. Small/Medium/Big never enforce runtime behavior.
+
+Your accepted scoped brief:
+Own Reliability (releases, auth, self-hosting execution continuity) and repository-wide Architecture Minimalism. Shape a small portfolio around the accepted external outcomes. Consider rewriting Stability & Security to Reliability and Technical Architecture to Architecture Minimalism (do not claim complete because one KR held); retire Performance & Efficiency's broad unsupported promises with explicit parked triggers. Route LOO-257 and untracked loopflow.wave-agents here, with the latter under Architecture Minimalism. Examine List's Task-first control-plane ledger as retirement input and preserve exact authority/safe signaling as invariants. Distinguish runtime owner from Intelligence's evidence owner. Minimum release and documentation/reduction KRs come from the baseline direction. Do not turn every technical remainder into a Project or opening Task.
+
+Inspect actual code/current work read-only and the supplied exact starting ledger. Use cache-only lf pm show --no-sync if needed; preserve any divergence instead of refreshing or repairing auth. Read these local parent artifacts (paths are accessible read-only):
+- /Users/jack/src/loopflow.chapter-planning/.lf/chapters/20260922-manual-baseline/chapter-review.html (complete baseline, current evidence and Project verdicts)
+- /Users/jack/src/loopflow.chapter-planning/.lf/chapters/20260922-manual-baseline/review-ledger.json (exact 39 reviewed claims/evidence/gaps and prior Project review Run ids)
+- /Users/jack/src/loopflow.chapter-planning/.lf/chapters/20260923T000959Z-502f011b/accepted-direction.md
+- /Users/jack/src/loopflow.chapter-planning/.lf/chapters/20260923T000959Z-502f011b/sources/infrastructure-status.json
+- /Users/jack/src/loopflow.chapter-planning/.lf/chapters/20260923T000959Z-502f011b/frozen-ledger.json
+The old direction draft is historical discussion; do not treat its older Project map as settled.
+
+EXACT FROZEN STARTING WAVE / PROJECT / KR / OPEN TASK LEDGER:
+{
+  "wave": {
+    "id": "6155f18a-1b7f-418c-9af3-8d6fa5ce4989",
+    "name": "infrastructure",
+    "status": "ready",
+    "goal": "Loopflow's infrastructure makes ordinary work fast, safe, and boring. It keeps the system legible, converts failures into prevention, and turns repeated operational friction into durable capability.",
+    "repo": "/Users/jack/src/loopflow",
+    "active_tasks": 82,
+    "active_projects": 5,
+    "live": true,
+    "paused": false,
+    "enabled": true,
+    "endpoint": "127.0.0.1:57745",
+    "created_at": "2026-07-14T18:36:09Z",
+    "parent_wave_id": null,
+    "retired_at": null,
+    "superseded_by_wave_id": null,
+    "retirement_reason": null,
+    "home": {
+      "id": "home_39860354aaca640c2ccb50bf6ca609d8",
+      "route": "local",
+      "created_at": "2026-07-19T14:56:05Z",
+      "observed_at": "2026-07-19T14:56:05Z"
+    }
+  },
+  "charter": "sources/wave/infrastructure/GOAL.md",
+  "pm_snapshot": "sources/infrastructure-pm.json",
+  "pm_synced_at": 1790116742,
+  "projects": [
+    {
+      "id": "03c59a52-dbd4-4e11-a6ac-f6d6359c8e08",
+      "slug": "stability-security",
+      "name": "Stability & Security",
+      "summary": "Loopflow control and delivery paths preserve state, authority, isolation, and recoverability across processes, machines, credentials, CI, and releases. Failures stop safely, surface actionably, and require no hidden manual repair.",
+      "definition": "Loopflow control and delivery paths preserve state, authority, isolation, and recoverability across processes, machines, credentials, CI, and releases. Failures stop safely, surface actionably, and require no hidden manual repair.",
+      "flows": {
+        "first": null,
+        "loop": null,
+        "finally": null
+      },
+      "krs": [
+        {
+          "text": "Seven consecutive days of real Task, Project, and Wave runs produce zero strands after owner, process, or provider failure; zero lost or duplicated durable commands; and zero terminal-truth regressions.",
+          "holds": false
+        },
+        {
+          "text": "Across 30 days, one writer owns each assigned worktree and zero implementation writes occur outside it.",
+          "holds": false
+        },
+        {
+          "text": "Across 30 days, credentials and forwarded authority preflight or fail closed: zero runs are blocked by expiry and zero child receives secrets it does not need.",
+          "holds": false
+        },
+        {
+          "text": "Four consecutive weekly releases and fourteen nightly verifications complete with zero manual repair; every red produces actionable work within one day.",
+          "holds": false
+        },
+        {
+          "text": "Across 30 days, host, daemon, migration, and registry drift surfaces before a human and recovery preserves state and history.",
+          "holds": false
+        }
+      ],
+      "initiative_ids": [
+        "218967b6-a760-4b7c-9a46-11d9d61a42c2"
+      ],
+      "team_ids": [
+        "3871bed0-8c95-4077-ab72-728327d615b3"
+      ]
+    },
+    {
+      "id": "62b73cde-5057-4959-8ad8-fca96b9e80b5",
+      "slug": "technical-architecture",
+      "name": "Technical Architecture",
+      "summary": "Loopflow architecture is legible from the top down: key data structures, authorities, process boundaries, and public APIs explain the system; implementation follows that map; obsolete concepts do not linger as alternate designs.",
+      "definition": "Loopflow architecture is legible from the top down: key data structures, authorities, process boundaries, and public APIs explain the system; implementation follows that map; obsolete concepts do not linger as alternate designs.",
+      "flows": {
+        "first": null,
+        "loop": null,
+        "finally": null
+      },
+      "krs": [
+        {
+          "text": "A top-down architecture map names every durable control owner, truth source, process boundary, and public API; four consecutive weekly drift checks find zero unnamed owner, mirror, or shim.",
+          "holds": false
+        },
+        {
+          "text": "For 30 consecutive days, every landed PR maps cleanly to documented architecture concepts or updates the map in the same PR.",
+          "holds": false
+        },
+        {
+          "text": "Stale pre-Run, pre-Home, and pre-native-PM language reaches zero outside migrations and historical release material and stays zero for 30 days.",
+          "holds": false
+        }
+      ],
+      "initiative_ids": [
+        "218967b6-a760-4b7c-9a46-11d9d61a42c2"
+      ],
+      "team_ids": [
+        "3871bed0-8c95-4077-ab72-728327d615b3"
+      ]
+    },
+    {
+      "id": "3778bc54-6fcb-4f38-b262-8eb68bcaa602",
+      "slug": "performance-efficiency",
+      "name": "Performance & Efficiency",
+      "summary": "Ordinary Loopflow work is fast and economical for humans, agents, and machines. Setup, builds, verification, navigation, worktrees, landing, and resource use stay within explicit budgets and require no avoidable manual work.",
+      "definition": "Ordinary Loopflow work is fast and economical for humans, agents, and machines. Setup, builds, verification, navigation, worktrees, landing, and resource use stay within explicit budgets and require no avoidable manual work.",
+      "flows": {
+        "first": null,
+        "loop": null,
+        "finally": null
+      },
+      "krs": [
+        {
+          "text": "Task launch-to-first-progress, pre-land verification, and land-to-merge each have named p50 and p95 budgets and stay within them for 30 days.",
+          "holds": false
+        },
+        {
+          "text": "Thirty consecutive landings report every local pre-land verification stage against its budget.",
+          "holds": false
+        },
+        {
+          "text": "Seven consecutive days of normal development require zero avoidable setup or repair steps and zero manual Git surgery.",
+          "holds": false
+        },
+        {
+          "text": "Build artifacts, disk use, CPU, and agent spend remain within named budgets for 30 days without disrupting work.",
+          "holds": false
+        }
+      ],
+      "initiative_ids": [
+        "218967b6-a760-4b7c-9a46-11d9d61a42c2"
+      ],
+      "team_ids": [
+        "3871bed0-8c95-4077-ab72-728327d615b3"
+      ]
+    }
+  ],
+  "open_tasks": [
+    {
+      "id": "15172e70-1ec8-4cb0-a15c-f84d49361381",
+      "identifier": "LOO-279",
+      "url": "https://linear.app/loopflow/issue/LOO-279/make-linear-oauth-recovery-survive-unattended-project-runs",
+      "name": "Make Linear OAuth recovery survive unattended Project runs",
+      "description": "Observed 2026-09-22: Technical Architecture, Performance & Efficiency, and Stability & Security Project runs all stopped before plan refresh because the stored Linear access token expired and automatic refresh was rejected. Restore unattended refresh so headless Project planning continues across token expiry; persist rotated refresh credentials atomically; prove the installed path across expiry and a rejected refresh response; keep reconnect guidance Doppler-aware when user action is genuinely required.",
+      "rank": 0,
+      "completed": false,
+      "project_id": "03c59a52-dbd4-4e11-a6ac-f6d6359c8e08",
+      "project": "stability-security",
+      "team_id": "3871bed0-8c95-4077-ab72-728327d615b3",
+      "assignee": null
+    }
+  ],
+  "gap": null
+}
+
+Additional exact stale List ledger to propose disposition (no separate Wave start):
+{
+  "wave": {
+    "id": "9861d5b6-e53d-493d-a59b-cc8960ff88ed",
+    "name": "list",
+    "status": "ready",
+    "goal": "Loopflow's Task control plane keeps work safe, recoverable, and available while process ownership, provider sessions, telemetry, and releases change independently.",
+    "repo": "/Users/jack/src/loopflow",
+    "active_tasks": 0,
+    "active_projects": 1,
+    "live": false,
+    "paused": false,
+    "enabled": false,
+    "endpoint": null,
+    "created_at": "2026-07-16T06:41:55Z",
+    "parent_wave_id": null,
+    "retired_at": null,
+    "superseded_by_wave_id": null,
+    "retirement_reason": null,
+    "home": {
+      "id": "home_39860354aaca640c2ccb50bf6ca609d8",
+      "route": "local",
+      "created_at": "2026-07-19T14:56:05Z",
+      "observed_at": "2026-07-19T14:56:05Z"
+    }
+  },
+  "charter": "sources/wave/list/GOAL.md",
+  "pm_snapshot": "sources/list-pm.json",
+  "pm_synced_at": 1790116750,
+  "projects": [
+    {
+      "id": "b211197b-4c71-4ea9-bef1-37f826ba5b5b",
+      "slug": "task-first-control-plane",
+      "name": "Task-first control plane",
+      "summary": "Task execution has one explicit control authority and one explicit release-transition model, so every Task can be attached, recovered, signaled, and promoted safely when OS process identity, provider Invocation state, and telemetry disagree or are incompl",
+      "definition": "Task execution has one explicit control authority and one explicit release-transition model, so every Task can be attached, recovered, signaled, and promoted safely when OS process identity, provider Invocation state, and telemetry disagree or are incomplete.",
+      "flows": {
+        "first": "task-design",
+        "loop": "slice",
+        "finally": "ship-demo"
+      },
+      "krs": [
+        {
+          "text": "For 30 consecutive days of local Task operation, every liveness, signal, recovery, and promotion decision is attributable to one documented authority and matches OS/provider disagreement probes; no Task is stranded by contradictory control records.",
+          "holds": false
+        },
+        {
+          "text": "Across 30 consecutive days and at least three promotions with live or recoverable Tasks, each Task has exactly one authoritative process tree before and after promotion, with no duplicate progress, lost handoff, or ambiguous release ownership.",
+          "holds": false
+        },
+        {
+          "text": "Forced missing or stale ProcessOwner, provider Invocation, trace, and Exec evidence produces the designed attach, restart, recovery, or fail-closed outcome in tests and dogfood, and never signals a process whose exact ownership cannot be proven.",
+          "holds": false
+        }
+      ],
+      "initiative_ids": [
+        "f6d2c0bd-c9bd-490a-a18e-8ed03216e6d4"
+      ],
+      "team_ids": [
+        "3871bed0-8c95-4077-ab72-728327d615b3"
+      ]
+    }
+  ],
+  "open_tasks": [],
+  "gap": null
+}
+Launch bounded project/start-chapter Runs sequentially for Project definitions/KRs needing real shaping using lf -b --wave NAME --project EXISTING_ID project/start-chapter "brief + exact ledger"; proposed new bets use --wave without --project. Do not use provider-native subagents or controllers. Keep at most one Project child at a time. For trivial retirement propose directly. Carry the full accepted scope, exact relevant ledger, and no-human-session/proposal-only instruction to each child. Capture every child Run id and full final proposal. Do not write files in the Wave checkout; temporary capture under /tmp is fine.
+
+Return one complete final Markdown report with: agree/challenge verdict and evidence; proposed Wave purpose/boundary; EXACT proposed Project names, stable reuse/new identities, definitions and KR texts; one explicit disposition for every prior Project, numbered KR, open Task, relevant historical Work; small opening frontier plus parked triggers; dependencies; unresolved questions for parent; proposed review date; all Project child Run ids and their complete final reports (not summaries alone). Failed/unanswered children stay explicit and block affected scope. Do not claim human acceptance or apply anything.

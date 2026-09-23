@@ -573,7 +573,13 @@ pub fn status(wave: Option<&str>, json: bool) -> Result<()> {
         let home_runtime =
             crate::ops::home::probe_home(wave.name(), &snapshot.home, Path::new(wave.repo())).await;
         let status = WaveDetailSnapshot {
-            runs: Evidence::from_result(crate::lf::commands::runs::wave_runs(wave.name())),
+            runs: Evidence::from_result(crate::lf::commands::runs::collect_runs(
+                crate::lf::commands::WorkFilter {
+                    wave: Some(wave.name()),
+                    project: None,
+                    task: None,
+                },
+            )),
             wave: snapshot,
             loop_state,
             projects: project_snapshots.projects,

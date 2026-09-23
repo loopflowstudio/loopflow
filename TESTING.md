@@ -239,6 +239,10 @@ cargo test -p loopflow store
 cargo test -p loopflow harness::conformance_tests
 ```
 
+When changing harness event mapping, run the recorded-trace conformance tests
+alongside the provider's unit tests. Keep trace expectations aligned with the
+event contract, including durable final-answer receipts and usage checkpoints.
+
 After Run-record or schema changes, run `lf runs --json`, `lf usage --json`, and
 `lf doctor --json` against a fresh local Home.
 

@@ -1,0 +1,16 @@
+{
+  "work": {
+    "kind": "project",
+    "id": "proj_d8813eb7de644d18bfa11d7271033c05"
+  },
+  "placement": {
+    "work": {
+      "kind": "project",
+      "id": "proj_d8813eb7de644d18bfa11d7271033c05"
+    },
+    "home_id": "home_39860354aaca640c2ccb50bf6ca609d8",
+    "enabled": true,
+    "placed_at": "2026-09-02T04:05:26Z"
+  },
+  "status": "abandoned"
+}

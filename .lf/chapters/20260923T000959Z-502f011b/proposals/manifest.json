@@ -1,0 +1,11 @@
+{
+  "proposals/architecture-minimalism.md": "f9113fbdac2b88cc488d84ac9fde8ee6e56a6973af7c65737b5de70850507cd3",
+  "proposals/company-dogfood.md": "7e467b1297269910ba2dfc17c505ee13d21bb0324b0c5c3270f91e5cd4d386c3",
+  "proposals/desktop.md": "a5084af35f54cdf2eb5c138af7902ab2f105b4b9041ab38192268d645b7b8bfc",
+  "proposals/infrastructure.md": "f7d39bfbfc0644d3fd16f54cef67edd46882c082979c50251ad24c4ec6fceb6c",
+  "proposals/intelligence.md": "ead257a8574cb099177923ee350379cb07c766ca5abcd288c0bed4c3f942f492",
+  "proposals/product-historical-dispositions.json": "c6bd4064c02ef0d3cbc9c78d1f4f0d80970e45cbad63c6ebb3fb978f3c0f7679",
+  "proposals/product.md": "846d6f3d54eb83ffaf8acd95ead73c38435302070dba3fa918f36dc8b55e6497",
+  "proposals/reliability.md": "bde4828e74ad0be3b537de6d21f6f069536686d2da333d918fb9d754abe84c83",
+  "proposals/trace-context.md": "52e4111e1fe282061709a92734d2ce1ce77de0b13deb69b4d7d5ac5cdd076a25"
+}

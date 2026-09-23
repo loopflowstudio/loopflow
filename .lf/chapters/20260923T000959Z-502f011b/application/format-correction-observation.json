@@ -1,0 +1,14 @@
+{
+  "observed": "2026-09-23",
+  "first_validation": "failed; not sealed",
+  "failed_checks": [
+    "twelve_existing_tasks_exact",
+    "seven_new_tasks_exact"
+  ],
+  "differences": {
+    "LOO-185": "Provider collapsed one extra blank line before Proof heading.",
+    "LOO-285": "Copied subsection prefix had unmatched bold delimiters; provider escaped the asterisks and collapsed blank lines.",
+    "LOO-286": "Provider normalized hyphen bullets to asterisks and collapsed blank lines."
+  },
+  "decision": "Repair copied heading; resubmit canonical Markdown; require exact equality again. No scope or proof criterion changes."
+}

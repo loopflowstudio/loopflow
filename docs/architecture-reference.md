@@ -769,7 +769,8 @@ model.
 
 Canonical migrations, migration fixtures, and release notes retain historical
 names because changing shipped evidence would rewrite history. Operational docs
-and current runtime source do not.
+and current runtime source do not. Chapter archives under `.lf/chapters/` are
+dated evidence, excluded from live vocabulary and compatibility-seam discovery.
 
 ## Authority and failure invariants
 

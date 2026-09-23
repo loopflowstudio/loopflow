@@ -1,0 +1,52 @@
+[
+  {
+    "wave_id": "4dbc0638-a441-489a-b095-f9e407ea01bf",
+    "name": "engbot",
+    "disposition": "retire",
+    "reason": "Empty registered structure, no charter or cached PM snapshot; preserve registration/history and confirm current provider state before retirement.",
+    "operation_status": "applied_verified",
+    "preserve_active_work": true,
+    "application_status": "applied_verified",
+    "verified_at": "2026-09-23T16:13:45.110901+00:00"
+  },
+  {
+    "wave_id": "6155f18a-1b7f-418c-9af3-8d6fa5ce4989",
+    "name": "infrastructure",
+    "disposition": "carry",
+    "reason": "Retained boundary explicitly accepted at Gate 1; revised Project portfolio remains pending Gate 2.",
+    "operation_status": "applied_verified",
+    "preserve_active_work": true,
+    "application_status": "applied_verified",
+    "verified_at": "2026-09-23T16:13:45.110901+00:00"
+  },
+  {
+    "wave_id": "cb366067-4821-4071-9393-82ff4b6d61d2",
+    "name": "intelligence",
+    "disposition": "carry",
+    "reason": "Retained boundary explicitly accepted at Gate 1; revised Project portfolio remains pending Gate 2.",
+    "operation_status": "applied_verified",
+    "preserve_active_work": true,
+    "application_status": "applied_verified",
+    "verified_at": "2026-09-23T16:13:45.110901+00:00"
+  },
+  {
+    "wave_id": "9861d5b6-e53d-493d-a59b-cc8960ff88ed",
+    "name": "list",
+    "disposition": "retire",
+    "reason": "Stale control-plane planning structure; exact authority and safe signaling survive under Infrastructure.",
+    "operation_status": "applied_verified",
+    "preserve_active_work": true,
+    "application_status": "applied_verified",
+    "verified_at": "2026-09-23T16:13:45.110901+00:00"
+  },
+  {
+    "wave_id": "5081a624-c095-4218-9a54-6d1a6711f282",
+    "name": "product",
+    "disposition": "carry",
+    "reason": "Retained boundary explicitly accepted at Gate 1; revised Project portfolio remains pending Gate 2.",
+    "operation_status": "applied_verified",
+    "preserve_active_work": true,
+    "application_status": "applied_verified",
+    "verified_at": "2026-09-23T16:13:45.110901+00:00"
+  }
+]

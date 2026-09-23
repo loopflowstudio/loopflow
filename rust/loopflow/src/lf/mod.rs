@@ -545,13 +545,31 @@ pub enum Commands {
     /// Show recent agent-backed skill runs with context and token evidence
     Runs {
         /// Inspect one Run by full id or unambiguous displayed prefix
-        #[arg(conflicts_with_all = ["task", "project", "wave"])]
+        #[arg(conflicts_with_all = ["parent", "task", "project", "wave"])]
         run: Option<String>,
+        /// List every direct child of one Run, without the recent-history cap
+        #[arg(long, conflicts_with_all = ["run", "task", "project", "wave"])]
+        parent: Option<String>,
         /// Print the Run's append-only event stream verbatim
-        #[arg(long, requires = "run", conflicts_with_all = ["json", "resume"])]
+        #[arg(
+            long,
+            requires = "run",
+            conflicts_with_all = ["final_answer", "json", "resume"]
+        )]
         events: bool,
+        /// Print the Run's last durable provider conclusion
+        #[arg(
+            long = "final",
+            requires = "run",
+            conflicts_with_all = ["events", "json", "resume"]
+        )]
+        final_answer: bool,
         /// Resume the Run's provider-native interactive session
-        #[arg(long, requires = "run", conflicts_with_all = ["events", "json"])]
+        #[arg(
+            long,
+            requires = "run",
+            conflicts_with_all = ["events", "final_answer", "json"]
+        )]
         resume: bool,
         /// Drill to one roadmap Task by its Linear issue identifier (e.g. W2-122)
         #[arg(long)]
@@ -2097,14 +2115,42 @@ mod tests {
             cli.command,
             Some(Commands::Runs {
                 run: Some(run),
+                parent: None,
                 resume: true,
                 events: false,
+                final_answer: false,
                 json: false,
                 ..
             }) if run == "abc123"
         ));
         assert!(Cli::try_parse_from(["lf", "runs", "--resume"]).is_err());
         assert!(Cli::try_parse_from(["lf", "runs", "abc123", "--resume", "--events"]).is_err());
+    }
+
+    #[test]
+    fn runs_exposes_direct_children_and_final_answers() {
+        let children = Cli::try_parse_from(["lf", "runs", "--parent", "abc123", "--json"])
+            .expect("parse direct child query");
+        assert!(matches!(
+            children.command,
+            Some(Commands::Runs {
+                run: None,
+                parent: Some(parent),
+                json: true,
+                ..
+            }) if parent == "abc123"
+        ));
+
+        let final_answer = Cli::try_parse_from(["lf", "runs", "abc123", "--final"])
+            .expect("parse final answer read");
+        assert!(matches!(
+            final_answer.command,
+            Some(Commands::Runs {
+                run: Some(run),
+                final_answer: true,
+                ..
+            }) if run == "abc123"
+        ));
     }
 
     #[test]

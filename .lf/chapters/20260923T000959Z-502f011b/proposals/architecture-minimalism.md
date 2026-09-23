@@ -1,0 +1,130 @@
+**Agree with the Infrastructure boundary.** Rename Technical Architecture to **Architecture Minimalism**, preserve its identity, and keep it open as a repository-wide frontier. Reliability owns operational continuity, auth, and releases; this Project owns coherent concepts, authority simplification, deletion, and documentation consistency. Intelligence owns observational evidence. No separate Work Execution Project is needed.
+
+This is a proposal for chapter `20260923T000959Z-502f011b`, pending Gate 2. Gate 1’s supplied acceptance replaces the interview. I made no files, state changes, implementation changes, or new reviews, and launched no sessions or child Runs.
+
+**Identity and definition**
+
+| Field | Proposed value |
+|---|---|
+| Linear Project | `62b73cde-5057-4959-8ad8-fca96b9e80b5` — unchanged |
+| Project Work | `proj_b98a997ce55a45d1981ad9537d21da3b` — unchanged |
+| Name | Architecture Minimalism |
+| Derived slug | `architecture-minimalism`, replacing `technical-architecture` |
+| Wave | Infrastructure |
+| Linear Initiative | `218967b6-a760-4b7c-9a46-11d9d61a42c2` — unchanged |
+| Next review | `2026-10-21T00:09:59.226362+00:00` |
+
+Proposed definition:
+
+> Loopflow’s repository-wide architecture expresses intentional product concepts through clear data structures, public APIs, and explicit authorities. Every public, cross-module, durable, wire, and process concept has an accountable owner and truth source. Implementation, CLI, documentation, and the architecture map agree; obsolete paths, duplicate truth, and unexplained compatibility seams are removed. Execution remains recoverable without giving helpers, observations, or process ancestry implicit control authority.
+
+The rename changes the command-facing slug. The parent should preserve UUID-based history and reconcile active references during application; it must not create a replacement Project.
+
+**Evidence and scope challenges**
+
+The completed [manual review ledger](/Users/jack/src/loopflow.chapter-planning/.lf/chapters/20260922-manual-baseline/review-ledger.json) gives three distinct results:
+
+- Old KR1 was **unknown**: reconstructed weekly checks passed, but actual scheduled-run receipts were unavailable.
+- Old KR2 **held**: all 19 first-parent landings from August 23 through September 22 passed their commit’s architecture checker.
+- Old KR3 **failed**: the normal checkout exposed 43 vocabulary hits in ignored runtime history, revealing disagreement between local and hosted source boundaries.
+
+These judgments remain the baseline. KR2’s success does not complete the broader bet.
+
+Current source supports keeping the unfinished commitments. [The checker](/Users/jack/src/loopflow/scripts/check_architecture.py:1) explicitly covers finite categories; it does not establish that every public or cross-module concept is justified. Its source traversal still includes configured filesystem trees without a general reviewed-source boundary. [Task placement](/Users/jack/src/loopflow/rust/loopflow/src/ops/task.rs:1942) still refuses canonical main ahead of origin, and placement calls that refusal.
+
+The sibling branch requires a separate distinction. Its [current design](/Users/jack/src/loopflow.wave-agents/scratch/flow-driven-work-reconciliation.md) now proposes Task workers and Task-owned execution, with finite Wave/Project operations. The [retained review](/Users/jack/src/loopflow.wave-agents/scratch/review-flow-driven-work-current.md) evaluated an earlier generic Work advancement design. Current source includes an early stale-claim comparison, but I did not rerun its proof. None of the retained failures is declared repaired here.
+
+**Exact proposed KR ledger**
+
+All five begin **unproven**. Historical success remains attached to its original window.
+
+1. **At chapter review, every public, cross-module, durable, wire, and process concept and authority in the reviewed repository is accounted for in a finite, revision-bound inventory: each maps to an intentional product concept, owner, authoritative source, and supported surface. Every retained projection or compatibility seam has an explicit necessity; no unexplained owner, duplicate authority, obsolete active path, or unaccounted concept remains.**
+
+2. **The reviewed repository contains fewer competing execution authorities and obsolete production paths than the chapter baseline: Task execution has one current advancement owner, Wave and Project operations require no parallel execution controller, and generic helper Runs gain no advancement or process-signaling authority from attribution. Necessary historical readers preserve shipped evidence without becoming alternate live writers.**
+
+3. **At the same reviewed revision, implementation, CLI, user documentation, architecture map, and checker describe the same supported behavior. A normal local checkout and clean hosted checkout judge the same reviewed source consistently, including tracked configuration and excluding generated runtime history by a principled boundary. Four actual weekly checks retain revision, scope, findings, and coverage limits; reconstructed runs do not substitute for missing receipts.**
+
+4. **The supported execution and upgrade paths preserve exact ownership, immutable active Flow definitions, human decisions, terminal Work, and historical progress across concurrent requests, worker death, stale results, and migration. Recorded counterexamples yield one valid transition or an explicit preserved stop, never lost progress, silent replay, duplicate advancement, or signaling of an unproven process.**
+
+5. **New Task worktrees use the exact current canonical-main commit, including unpublished commits, record that base truthfully, and remain idempotent on reuse. Placement requires no publication or reset, leaves uncommitted bytes and origin unchanged, and subsequent integration preserves the minimal Task PR range through ordinary delivery mechanics.**
+
+KR1 requires human semantic examination across a declared repository inventory, including Rust module/API boundaries, Swift wire mirrors, Python tooling, builtins, and supported process surfaces. A passing bounded checker supplies evidence for its categories only. Mechanical omissions and semantic omissions remain distinguishable.
+
+KR3 replaces the unsupported universal 30-day claim with four actual weekly observations during this chapter. A missing receipt remains unknown. The review must report unfinished coverage rather than infer completeness from green output. Reduction evidence should name deleted authorities and paths; line counts may corroborate it but cannot justify deleting migration safety.
+
+**Old KR dispositions**
+
+| Old KR | Disposition |
+|---|---|
+| Complete map plus four clean weekly checks | **Rewrite** into KR1 and KR3. Preserve the old unknown verdict and receipt gap. |
+| Thirty days of architecture-consistent landings | **Complete the historical KR** for its reviewed window; carry the ongoing consistency obligation into KR3. Keep the Project open. |
+| Thirty days without stale vocabulary | **Rewrite** into KR1 and KR3. Preserve the failed verdict; neither deleting runtime archives nor expanding vocabulary exceptions proves source consistency. |
+
+**One opening Task**
+
+Propose one tracked Task here for the existing `loopflow.wave-agents` work:
+
+> **Finish Task-owned Flow execution with one authority and lossless cutover.**
+
+Reuse an existing exact Task association if the parent has one; otherwise create one Task after Gate 2. No stable Task ID was supplied, so none is invented. Preserve the existing branch, worktree, research, and reviews. This proposal does not authorize a second writer or automatic restart.
+
+The outcome is a bounded Task worker owning immutable current execution; generic helper Runs remain available, and Wave/Project judgments remain finite attributed operations. Typed delivery and planning operations retain their own authority. Helpers may perform independently authorized edits and delivery operations; Task attribution itself does not authorize cursor movement, terminal transitions, or process signals.
+
+The Task must reconcile the revised design with every retained counterexample:
+
+- A stale child cannot rewrite replacement human state or perform preparation side effects before establishing its authority.
+- Migration preserves controller-only autonomous progress and reconciles stale position rows before removing their old owner.
+- Missing executable definitions remain explicitly non-executable; ordinary retry or old human approval cannot erase an explicit-restart requirement.
+- Wave startup cannot silently replace historical execution or discard queued work.
+- An exact human decision has a functioning public continuation path, with settlement and launch outcomes reported separately.
+- Policy changes cannot overwrite concurrent intent or silently replace an active invocation. Historical Project execution has an explicit preservation and disposition path when live Project execution is removed.
+
+Completion also requires the previously absent real provider death/replacement proof, helper-versus-worker authority proof, and configured CLI/Home/app path evidence. A killed `sleep`, passing store CAS, account-preflight failure, or app-shaped fixture is narrower evidence and must be labeled accordingly. App closure and optional service shutdown must not corrupt execution or become prerequisites for Task operation.
+
+Keep these as one coherent authority change with internal slices, following the branch’s current design. The retained review’s deferred generic advancement receipts are not automatically requirements for the revised Task-only model; their intended observable guarantees must survive.
+
+**Incoming Task and sequenced followers**
+
+**LOO-257**, UUID `2ada2b81-ffe1-40cb-9544-8c7bcb613c66`: **carry and route** from Loopflow API to Architecture Minimalism, preserving identity. Sequence it after the opening authority Task unless the parent identifies placement as its immediate blocker.
+
+Rewrite only stale proof context: LOO-256 is historically complete, so do not reopen it to demonstrate placement. Use a fresh disposable Task fixture and, when available, a newly authorized configured Task. Preserve the exact-local-HEAD, unchanged-origin, idempotence, ownership, and minimal-PR-range requirements. LOO-175’s fixed fetched-origin placement precondition is superseded; its minimal-range outcome remains required.
+
+After those Tasks, the next selectable follower is **repository-wide reduction and documentation agreement**, covering KR1/KR3 and the unresolved local/hosted discrepancy. Keep this as one scoped frontier, not a Task per vocabulary hit, module, or historical seed. Changes already required by the opening Task belong in that Task. Unresolved remainder still counts against the chapter KRs if capacity expires.
+
+**Every historical Task and Work disposition**
+
+The frozen Project has **zero current open Tasks**. Its historical ledger remains explicit:
+
+| Task | Disposition |
+|---|---|
+| LOO-270 | Preserve PM completion. Its claimed checker-consistency outcome remains contradicted by retained evidence; carry the gap into the sequenced follower, without silently reopening it. |
+| LOO-253 | Preserve Done Work `task_2c822e334dc7498e92734ed21d736764` and merged PR #1230. Missing checkout requires no resurrection. |
+| LOO-254 | Preserve completion and absorption into LOO-253. No separate commitment. |
+| LOO-73 | Preserve Done Work `task_316fe0299ce9402ebce76f1c021b0e77`, PR #1184. Preserve safe adoption of planning changes as an invariant. |
+| LOO-208 | Preserve Done Work `task_4995e07e047b4898870cebaaa2bd1c8f`, PR #1159. Extend its map through current work; do not restart its historical Task. |
+| LOO-127 | Preserve Done Work `task_2e1035726a794330a182d564b908327e`, PR #1169, and repository/placement ownership invariants. |
+| W2-127 | Preserve Abandoned Work `task_40fbeeaadfbca5367aa7391432ae84ff` and merged PR #876 evidence. Migration safety survives; abandonment is not reversed. |
+| W2-142 | Preserve Done Work `task_3aac4445a92f175b017497d4948bd60e`, PR #888. Future release outcomes belong to Reliability. |
+| W2-147 | Preserve Done Work `task_f23f219d1f80103281bda979fffebcd6`, PR #890. Release re-entry remains Reliability’s concern. |
+| W2-148 | Preserve Abandoned Work `task_17debabdf4bc9fa4c63003749bb2d80a`; no PR is recorded. Do not infer completion or reopen it. |
+| W2-149 | Preserve Done Work `task_7a402b71ac05eea22e505b67d25de51f`, PR #892. Vocabulary consistency continues under KR3. |
+| W2-88 | Preserve Abandoned Work `task_e80fdd16457caf15b86340ee9c0c5b10` and merged PR #895 evidence. Retain explicit Home routing; do not revive the Task. |
+
+The W2 records retain historical Project Work ownership `proj_e972b70272fbb5e91c096ebe657f9f9b`; current PM grouping does not authorize rewriting that history. Missing-worktree diagnostics on terminal Work are historical evidence, not a recovery queue.
+
+The current Architecture Project Work remains open. Its cached authentication failure belongs to Reliability; renaming the Project does not imply repairing auth or restarting its controller. The unavailable `release-stability` Work `proj_ecb630ef20d156f77c63461acd007741` belongs to the Wave/Reliability disposition, not this Project.
+
+**List retirement and dependencies**
+
+Agree with parent-owned retirement of List and its Task-first control-plane Project `b211197b-4c71-4ea9-bef1-37f826ba5b5b`. It has no open Tasks to move. Retire all three old KR texts without claiming their endurance windows were met.
+
+Absorb their architectural invariants into KR2/KR4: one attributable execution owner, exact safe signaling, explicit recovery under missing or conflicting evidence, preserved human boundaries, and no reopening terminal Work through retry or hierarchy changes. Reliability retains promotion and sustained operational outcomes. Intelligence may explain disagreements but cannot supply execution authority.
+
+Park broad cleanup expansion until the opening Task and LOO-257 settle. Escalate a specific omission earlier only when it blocks those proofs or exposes another active competing authority. Product’s Sessions work consumes the shared contract; this proposal does not restart its design.
+
+Two material questions return to the parent for Gate 2:
+
+- Accept the branch’s revised **Task-only execution, finite Wave/Project operations** target, explicitly superseding generic Work advancement where incompatible?
+- Confirm the exact existing Task association for `loopflow.wave-agents`, if any, before creating its single tracking Task?
+
+No additional interview is required.

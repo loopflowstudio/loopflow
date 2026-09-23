@@ -5,12 +5,57 @@ scope widened past the Mac app: product now owns the shared API and every surfac
 (CLI, Mac, iOS, agent turns, workers). Older notes below still say "Concerto" where
 they mean the Mac surface.
 
-## Work and continuity (settled 2026-07-19, Sessions revised 2026-08-30)
+## Chapter decisions and review lessons (2026-09-23)
+
+- **Accepted direction lives in the sealed chapter**, not the provisional
+  summer drafts: [.lf/chapters/20260923T000959Z-502f011b/start.md](../../.lf/chapters/20260923T000959Z-502f011b/start.md).
+  The interval is 23 September–21 October, starting at 00:09:59 UTC. Gate 2
+  accepted the plan; it did not authorize publication. The summer review judged
+  39 KRs (2 hold, 16 do not, 21 unknown); the start freeze contains 42 because
+  List adds three previously unreviewed claims. Those are different populations.
+- **Product value is external progress chosen by the human.** Current Work
+  direction plus material Task progress in any three of Cube, Etude, Kata, and
+  Hootro makes a successful week. An open Session, refreshed plan, settled Run,
+  or Loopflow self-hosting repair is insufficient. Small/Medium/Big are company
+  review heuristics, never runtime limits. Preserve capacity outside Loopflow.
+- **The summer reset clarified ownership through real use.** Product dogfood
+  built much of the execution foundation; that was useful discovery, not simply
+  work in the wrong Wave. Infrastructure now owns execution and self-hosting
+  repair, Intelligence owns evidence, and Product owns the external experience.
+  The validated Sessions design is a foundation to finish, not restart.
+- **Review rows before telling the story.** Freeze the exact Project/KR union,
+  including retired or rewritten claims; keep each report's Run id and recompute
+  totals from rows. A definition verdict is not another KR. A complete current
+  roster cannot establish complete historical lineage. Missing duration proof is
+  unknown unless a dated in-scope counterexample disproves the claim.
+- **Keep evidence and user consequences together.** Each Project report needs
+  both exact observations and a concise account of who benefited, what changed,
+  and why the KRs prove it. Carry, learned, not actually prioritized, and misplaced
+  work are separate judgments; review proposes, accepted start applies.
+- **Repository review launches Project reviews directly.** A Wave aggregation
+  Run added no evidence in the first trial. Recover exact children with
+  `lf runs --parent`, conclusions with `lf runs <id> --final`; accept a child
+  only with completed settlement and its report. Unknown liveness remains
+  unknown. Archive authority follows the Run's Task binding, never a Task-like
+  directory name. Standalone Wave review remains useful.
+- **The baseline cannot recover missing KR history.** PM retains current text
+  and `holds` with one overwritten snapshot timestamp. The new start ledger
+  establishes a forward boundary; retain later wording changes as dated evidence.
+  Append-only PM revisions or provider KR identities remain an instrumentation
+  option when a real review needs lineage the archive cannot supply.
+- **LOO-278 delivery is consolidated, Task placement is not** (observed
+  2026-09-23). The combined code and sealed archive are in
+  `loopflow.review-chapter`; the Task still records `loopflow.chapter-planning`
+  and its original serial PR branch. Preserve that checkout and history until
+  supported reassignment exists. Do not infer a binding from copied files,
+  rewrite the registry, or start a second writer. No publication is established.
+
+## Work and continuity (reconciled 2026-09-23)
 
 - **Work is stable identity, not a process.** Wave, Project, and Task are the
-  three Work kinds. A Run is one bounded period of execution authority; a
-  AgentInvocation is one provider/process attempt inside it; a Turn is one
-  observed provider boundary.
+  three Work kinds. A Run records one Home-local provider launch; attribution
+  does not grant Work mutation or process-control authority. Provider attempts and observed
+  Turns remain execution evidence, and the provider owns Session continuity.
 - **Domain structure carries continuity.** A Wave owns `GOAL.md`, `MEMORY.md`,
   cadence, Chat, and its Project portfolio. A Project owns definition, KRs, and
   Tasks. A Task owns its directive, worktree, and serial PR chain. Project and
@@ -29,12 +74,13 @@ they mean the Mac surface.
   oldest-first. There is no live memory stream, and recent Wave Chat is not
   ambient Project/Task prompt context.
 - **Environment configures a process; it never decides what the process is.**
-  Work identity and Run authority come from durable state, not inherited
-  endpoint variables or a surviving terminal.
+  Work identity comes from durable state; execution and signal authority must
+  be established at their owning boundary, never inferred from a Run id,
+  inherited endpoint variables, or a surviving terminal.
 - **Backlogs are allowed.** Linear Tasks may exist without a Run; open Runs are
   not the Wave's roadmap.
 
-### Runtime boundary still open
+### Earlier runtime findings (July–August evidence)
 
 - **Missing lifecycle flows must settle, not retry** (dogfood 2026-07-21).
   LOO-167, LOO-193, and LOO-195 repeatedly alternated between `ready` and a
@@ -76,9 +122,10 @@ they mean the Mac surface.
 - App surfaces navigate, present, and Steer Work. A view, terminal, provider
   process, or listener is never the source of Work or human-playhead truth.
 - A provider session is AgentInvocation continuity, not Work identity.
-- Runtime ownership remains deliberately unresolved until the Home/Work server
-  topology can explain automatic Ready dispatch, remote nudge, and failure
-  recovery in one diagram.
+- Home-local execution, Work continuity, provider history, and direct process
+  control have separate owners. The current boundary is documented in
+  `docs/architecture/{execution,planning,homes}.md`; earlier open topology
+  questions below are historical context, not an alternate authority model.
 
 ### Charter model (restarted 2026-07-07, resettled 2026-07-08, Linear-owned 2026-07-10)
 
@@ -144,7 +191,7 @@ they mean the Mac surface.
   attention-navigation, wave-conducting, remote-connection, palette) was folded
   into the product portfolio and deleted, not tombstoned.
 
-### The `lf` / Home spine (server topology not yet settled)
+### The `lf` / Home spine
 
 - **`lf` is the single command implementation.** Local reads query the durable
   registry directly; CLI and app actions call the same Work operations.
@@ -160,9 +207,9 @@ they mean the Mac surface.
   not persist a second transcript. This listener is not generalized into
   Project/Task communication and Discord history does not become ambient prompt
   context.
-- **Home ownership is the next design.** Decide how Ready scanning, remote
-  nudges, live deltas, and replaceable executors fit together before moving
-  remaining lfd/Wave-listener behavior.
+- **Remote execution runs the target Home's `lf`.** SSH is transport; `lfd`
+  keeps Home services and receives webhooks. Neither a remote presenter nor a
+  telemetry row acquires execution authority from observing the target.
 - Resident crons evaluate in **UTC**, so the product `wave` flow at `0 0 8 …`
   fires 08:00 UTC regardless of host timezone.
 
@@ -181,8 +228,8 @@ they mean the Mac surface.
 - **`BacklogItem` (this branch)** decodes `id, name, description, rank, completed,
   project, assignee` — matching the item shape `lf pm show --json` actually emits;
   the old `labels: [String]` was dropped for the explicit `project` slug.
-- **Vocabulary locked:** *Run* = one bounded period of execution authority plus
-  its durable record; *AgentInvocation* = one provider/process attempt;
+- **Vocabulary:** *Run* = one Home-local launch record;
+  *AgentInvocation* = one provider/process attempt;
   *Session* = a provider-native conversation or unresolved human boundary;
   *Work* remains Wave, Project, or Task. *Exec* remains process evidence, not a
   fourth Work kind or Session identity.
@@ -265,11 +312,11 @@ they mean the Mac surface.
   project legal actions and display Work path in `SessionRecord`, then delete the
   Swift action matrix, replacement-policy inference, Sessions-only roadmap join,
   and unused narrower scopes together.
-- **LOO-251 was reconciled in Linear on 2026-09-22.** Its native Sessions
-  multiplexer and promoted Ask handoff contract replaces the obsolete Ask-only,
-  global-manager design. Keep it open for caller-release/UI proof and corrected
-  split-paste confirmation. The projection reduction is filed as
-  [LOO-284](https://linear.app/loopflow/issue/LOO-284).
+- **PM reconciliation applied 2026-09-23.** LOO-251 now carries the native
+  Sessions and real caller-release proof; LOO-284 carries shared actions and
+  labels; LOO-291 carries scoped planning integration. Their current directives
+  and activation conditions live in Linear. The older Ask-only directive is
+  superseded; do not file duplicate follow-ups.
 
 ### Terminal ownership and input (branch evidence, 2026-09-22)
 
@@ -389,32 +436,13 @@ comparison. This branch does not establish any Project's week/month evidence
 window; definitions and KRs remain unchanged. No open Task had enough evidence
 to close during this reconciliation.
 
-## Patterns (verified 2026-06-30, remote TLS connection)
+## Historical remote client
 
-- **Concerto reaches remote `lfd` over HTTPS via Tailscale, not TLS in `lfd`.**
-  `deploy/tailscale-lfd-host.sh` keeps native lfd on `127.0.0.1` and runs
-  `tailscale serve` as HTTPS ingress with a real `*.ts.net` cert;
-  `deploy/native-lfd-host.sh` owns launchd. Keep TLS termination outside lfd.
-- **Remote bearer token read fresh from `~/.lf/concerto.yaml` per request.**
-  `RemoteConnectionConfig` (`swift/LoopflowCore/Config/ConcertoConfig.swift`)
-  carries optional `token`; `ConnectionStore.token(for:)` prefers it over
-  static/Keychain, but only when config host+port match the active connection
-  (no cross-profile leak). Rotation is immediate. `configLoader` is `@escaping`,
-  held on the store so the read stays live.
-- **CA-trusted certs (incl. `*.ts.net`) use system trust, not pinning.**
-  `CertificatePinningDelegate` skips pinning for CA-trusted chains.
-- **Dev builds use bundle id `com.loopflow.concerto.dev`** — `scripts/concerto-dev.py`
-  rewrites the assembled `Concerto Dev.app` Info.plist so worktree runs don't
-  clobber installed-app remote settings.
-- **macOS UI-test mode skips bundled daemons + remote subscriptions** (guard in
-  `WavesView`/`ConnectionStore`); UI tests must not touch a live remote host.
-
-## Not yet built
-
-- Remote connection: no multi-profile config (schema is one remote `connection` +
-  optional container settings — speculative with a single Mac mini host); no
-  live-tailnet CI round-trip (coverage is script syntax + Config/ConnectionStore
-  tests); no bundled TLS inside lfd (rejected alternative, not a gap).
+The June HTTP-to-lfd, bearer-token, and Concerto build recipes are superseded by
+shared `lf` projections and explicit Home transport. Their dated observations are
+preserved in the [pre-chapter memory](../../.lf/chapters/20260923T000959Z-502f011b/sources/wave/product/MEMORY.md)
+and the [execution synthesis](../../.lf/chapters/20260922-manual-baseline/execution-architecture-synthesis.md).
+They explain the topology change; they are not current setup instructions.
 
 ## Wave controls & truthful failures (built this branch, `wave-controls`)
 

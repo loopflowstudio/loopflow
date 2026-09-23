@@ -199,6 +199,7 @@ impl ChatTurn {
                     return;
                 }
                 Some("commentary") => {}
+                Some("final_answer") if self.text.ends_with(text) => return,
                 _ => {
                     self.push_text(text);
                     return;
@@ -495,5 +496,23 @@ mod tests {
         }
 
         assert_eq!(turn.text, "hello world");
+    }
+
+    #[test]
+    fn absorb_item_does_not_repeat_a_streamed_final_answer_receipt() {
+        let mut turn = ChatTurn::user("turn-5".into(), String::new());
+        turn.role = ChatRole::Assistant;
+        turn.absorb_item(ConversationItem::Message {
+            id: "stream-1".into(),
+            text: "working\nfinal report".into(),
+            phase: Some("stream".into()),
+        });
+        turn.absorb_item(ConversationItem::Message {
+            id: "answer-1".into(),
+            text: "final report".into(),
+            phase: Some("final_answer".into()),
+        });
+
+        assert_eq!(turn.text, "working\nfinal report");
     }
 }

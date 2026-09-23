@@ -367,10 +367,12 @@ lf pm project create --wave infra --title "Technical Architecture" \
   --kr "Top-down architecture documentation is complete and published."
 ```
 
-KRs should read as **proof under duration**: observable end states
-demonstrated on real work over a stated window, not capability checkboxes
-that pass once on a demo. [Authoring → Writing KRs](authoring.md#writing-krs)
-carries the craft and examples.
+Start the Project definition with who benefits and what improves in their real
+use of Loopflow. KRs should then read as **proof under duration**: observable
+end states causally connected to that improvement and demonstrated on real
+work over a stated window, not capability checkboxes that pass once on a demo.
+[Authoring → Writing KRs](authoring.md#writing-krs) carries the craft and
+examples.
 
 ## Linear
 

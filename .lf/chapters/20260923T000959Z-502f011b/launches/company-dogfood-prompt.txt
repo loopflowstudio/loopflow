@@ -1,0 +1,178 @@
+IMPORTANT HUMAN INSTRUCTION OVERRIDING THE SKILL INTERVIEW: Gate 1 is explicitly accepted in the live parent conversation. Do NOT open lf ask or any human session. Do not wait for human text. Return material questions/challenges to this parent in your final report. Pass this instruction verbatim to EVERY Project child. Proposal-only: no PM/Work/charter edits, no implementation, no commits/push, no files in your checkout. The parent alone writes archives. Do not rerun the completed manual review.
+
+Chapter 20260923T000959Z-502f011b, root Run run_502f011b9d1f4596ba62eff0e54a8b0e, Task LOO-278. Proposed review 2026-10-21T00:09:59.226362+00:00. Read-only code/current work inspection; use cache-only PM if needed; preserve divergences, no auth repair. No children or controllers needed for this bounded Project proposal. Save your COMPLETE ORIGINAL final Markdown report under the exact /tmp path specified below, and also return it in final. /tmp writes are permitted; no checkout files. Capture your own Run id from LF_RUN_ID and include it in report. Exact definitions, proposed numbered KR texts, explicit dispositions of every prior numbered KR and supplied Task, small opening frontier/park triggers, dependencies, and agree/challenge verdict required. Do not claim human acceptance. Unknown proof stays unknown. Human chooses external priorities; Run success or honest failure is not portfolio momentum. Small/Medium/Big are review heuristics only, no runtime enforcement.
+
+Full accepted scope:
+# Gate 1 — accepted repository direction
+
+Loopflow exists to keep Cube, Etude, Kata, and Hootro moving. In each week at least three have durable Work that accurately states the human's desired next focus and observable forward momentum on at least one Task. The human selects priorities. Product dogfooding is external: those four projects are the proving ground. Desktop joins current Project/KR/Task planning to excellent open-Session organization. Account juggling and prompting evidence support that loop, not disconnected bets.
+
+Portfolio parallelism is desirable; intra-project parallelism stays low. Small = 1–2 active Tasks (Cube, Etude, Hootro), Medium = 2–4 (Kata), Big = 2–8 (Loopflow across Projects). These are company-specific review heuristics, not new Work kinds or execution constraints.
+
+Keep Product, Infrastructure, and Intelligence. Infrastructure owns Loopflow-on-Loopflow reliability: releases, auth, execution continuity, flow-driven Work advancement, and repository-wide architecture reduction/minimalism. Intelligence owns non-authoritative evidence that makes real Runs explainable and useful for diagnosing portfolio execution and improving prompting. Product owns external dogfood and the shared user contract, including Desktop planning plus open Sessions. List and engbot are stale structures to disposition, not next-chapter Waves. Favor excellent completion, fewer concurrent Loopflow commitments, and capacity for the external projects.
+
+Routing: loopflow.wave-agents belongs in Infrastructure / Architecture Minimalism. Loopflow self-hosting failures belong in Infrastructure Reliability or Intelligence evidence. Sessions design is validated enough to build on, not restart. Small/Medium/Big never enforce runtime behavior.
+
+Acceptance source: explicit instruction from the live parent conversation supplied to Run `run_502f011b9d1f4596ba62eff0e54a8b0e`. No new interview or human Session is required. New questions and challenges return to that parent. Gate 2 is not accepted.
+
+Product scoped brief: Own external portfolio progress and Desktop planning plus open Sessions. Shape Company Dogfood around Cube, Etude, Kata, Hootro (not Loopflow self-hosting), with weekly >=3/4 current human-selected Work focus plus Task momentum. Desktop builds on validated native Sessions and integrates current Project/KR/Task intent. LOO-278 and LOO-185 are candidate Company Dogfood Tasks; LOO-251 seeds Desktop. LOO-257 and loopflow.wave-agents route to Infrastructure / Architecture Minimalism. Explicitly disposition all supplied open Tasks, including new LOO-280–284; desired Session polish and shared-view experiments must not silently expand the active frontier. LOO-274 was rejected in the baseline direction. LOO-148 needs an exact owner and park trigger if not selected, not an orphan. Consider rewriting Mac Surface UX to Desktop, Loopflow API to Company Dogfood, retiring Auditability while assigning its evidence/UI obligations. Prior iOS/general fleet/broad performance promises need not survive. Account juggling and prompting evidence are supporting dependencies.
+Infrastructure proposes Reliability + Architecture Minimalism and initially one active Task each (LOO-279; existing loopflow.wave-agents). Latest flow branch target is Task-only execution with finite Wave/Project Runs; this MATERIAL CHANGE is OPEN for parent Gate 2, not accepted by routing it to Infrastructure. Intelligence proposes Trace & Context: 20 real settled Runs and a fourteen-day attempted-operation population, preserving pre-Run failures/corrupt omissions, missing required context never success. Do not add an evidence/control authority in Desktop. Auditability retirement routes raw trace/context/provenance to Intelligence; shared semantics/repair to Infrastructure; user presentation to Desktop; weekly external momentum judgement to Company Dogfood.
+Source artifacts (read-only):
+/Users/jack/src/loopflow.chapter-planning/.lf/chapters/20260922-manual-baseline/chapter-review.html
+/Users/jack/src/loopflow.chapter-planning/.lf/chapters/20260922-manual-baseline/review-ledger.json
+/Users/jack/src/loopflow.chapter-planning/.lf/chapters/20260923T000959Z-502f011b/sources/product-status.json
+/Users/jack/src/loopflow.chapter-planning/.lf/chapters/20260923T000959Z-502f011b/frozen-ledger.json
+
+Your bounded slice: Propose reuse of Loopflow API stable Project UUID as Company Dogfood. Restrict evidence to external Cube/Etude/Kata/Hootro human-selected focus plus concrete Task momentum. Retire obsolete five-wave/Cadenza/iOS/spawn-chain commitments. LOO-257 transfers Architecture Minimalism. Keep initial Product frontier small: LOO-278 is already in flight; LOO-185 conditional, not mandatory Discord onboarding. No new external priority choices. Need exact weekly denominator, material-progress definition, handling missing human focus and failures. Chapter review/reset supports human-selected next focus; it is not itself external momentum.
+Complete original final report path: /tmp/product-company-dogfood-original.md
+EXACT STARTING LEDGER:
+{
+  "wave": {
+    "id": "5081a624-c095-4218-9a54-6d1a6711f282",
+    "name": "product",
+    "status": "ready",
+    "goal": "Loopflow is the product for conducting goal-authored work across humans, agents, devices, and machines. The product is not one interface; it is the shared API and surfaces that make waves understandable and steerable wherever they run: CLI, Mac, iOS, agent turns, local workers, and remote compute.",
+    "repo": "/Users/jack/src/loopflow",
+    "active_tasks": 37,
+    "active_projects": 5,
+    "live": false,
+    "paused": false,
+    "enabled": false,
+    "endpoint": null,
+    "created_at": "2026-07-14T19:04:43Z",
+    "parent_wave_id": null,
+    "retired_at": null,
+    "superseded_by_wave_id": null,
+    "retirement_reason": null,
+    "home": {
+      "id": "home_39860354aaca640c2ccb50bf6ca609d8",
+      "route": "local",
+      "created_at": "2026-07-19T14:56:05Z",
+      "observed_at": "2026-07-19T14:56:05Z"
+    }
+  },
+  "project": {
+    "id": "d19956b2-9955-437d-aea6-d91766231c77",
+    "slug": "loopflow-api",
+    "name": "Loopflow API",
+    "summary": "The loopflow API is the product contract for goal-authored computation. Waves, projects, tasks, agents, runs, chat, delegation, termination, recovery, and evidence all share one coherent model across CLI, Mac, iOS, prompts, and worker processes.",
+    "definition": "The loopflow API is the product contract for goal-authored computation. Waves,\nprojects, tasks, agents, runs, chat, delegation, termination, recovery, and\nevidence all share one coherent model across CLI, Mac, iOS, prompts, and worker\nprocesses.",
+    "flows": {
+      "first": null,
+      "loop": null,
+      "finally": null
+    },
+    "krs": [
+      {
+        "text": "The thesis holds under load: >= 5 waves run consistently for 1 week straight across loopflow and Cadenza, at least 2 per codebase driven from GOAL.md with zero repo-authored skills added for the work.",
+        "holds": false
+      },
+      {
+        "text": "Task loops earn trust by streak: over one week of real work, every dispatched task loop either lands its PR unattended or stops with an actionable non-convergence record \u2014 zero silent stalls, zero human rescues inside the window.",
+        "holds": false
+      },
+      {
+        "text": "The spawn chain survives a week: wave loops spawn project loops spawn task loops with caps enforced throughout, and no run escapes its budget.",
+        "holds": false
+      },
+      {
+        "text": "One model everywhere, continuously: for a month of landings, CLI, Mac, iOS, and agent prompts expose the same wave/project/task model \u2014 a parallel concept appearing anywhere is a failure event.",
+        "holds": false
+      },
+      {
+        "text": "A new wave can be created, steered, delegated, inspected, and closed through the shared API contract, repeated cold 3/3 times.",
+        "holds": false
+      }
+    ],
+    "initiative_ids": [
+      "33e774b0-ec3b-4bd6-a4f8-07676f9e897b"
+    ],
+    "team_ids": [
+      "3871bed0-8c95-4077-ab72-728327d615b3"
+    ]
+  },
+  "open_tasks": [
+    {
+      "id": "eef88fa6-ddcf-4570-a779-8110c7a161c6",
+      "identifier": "LOO-278",
+      "url": "https://linear.app/loopflow/issue/LOO-278/add-chapter-reviews-and-interactive-plan-resets",
+      "name": "Add chapter reviews and interactive plan resets",
+      "description": "Create a built-in chapter skill family. Autonomous review-chapter evaluates every Project KR across the chapter and writes an evidence-backed chapter report. Interactive start-chapter begins with substantial human direction, decides the Wave portfolio, then launches scoped Wave and Project chapter sessions whose findings can revise parent boundaries. Preserve shipped code and history; expired plans lose planning authority. Prepare a design in the Task worktree, implement the coherent first slice, and stop at a working demo/review for the human.",
+      "rank": 0,
+      "completed": false,
+      "project_id": "d19956b2-9955-437d-aea6-d91766231c77",
+      "project": "loopflow-api",
+      "team_id": "3871bed0-8c95-4077-ab72-728327d615b3",
+      "assignee": null
+    },
+    {
+      "id": "2ada2b81-ffe1-40cb-9544-8c7bcb613c66",
+      "identifier": "LOO-257",
+      "url": "https://linear.app/loopflow/issue/LOO-257/base-new-task-worktrees-on-current-canonical-main",
+      "name": "Base new Task worktrees on current canonical main",
+      "description": "## Outcome\n\n`lf task run` creates a new Task worktree from the exact current canonical-main commit even when that commit is ahead of or otherwise unpublished to origin. Placement records that commit as the Task/PR base and leaves publication/rebase to the normal Task lifecycle.\n\n## Observed configured failure \u2014 2026-08-21\n\nThe Product Wave committed durable memory on canonical main. Starting LOO-256 then failed before Task creation because main was ahead of origin/main. The refusal made the Wave\u2019s own durable learning prevent all subsequent Task work.\n\n## Proof\n\n* In a temporary repository whose clean canonical main is one or more commits ahead of origin/main, `lf task run` creates the sibling Task worktree and bases it at the exact local canonical-main HEAD.\n* No push, reset, force-push, origin equality check, allowlist, or manual reconciliation is required.\n* Existing Task/worktree reuse remains idempotent.\n* Landing still rebases/integrates through normal Loopflow PR mechanics.\n* The configured Product path can create LOO-256 without first publishing Wave commits.\n\n## Boundaries\n\nThis intentionally supersedes LOO-175\u2019s fixed fetched-origin placement precondition while preserving its minimal-PR-range outcome. Remove the fixed-context precondition rather than extend it. Do not silently include uncommitted filesystem changes, mutate origin, or weaken Task/worktree ownership.",
+      "rank": 3,
+      "completed": false,
+      "project_id": "d19956b2-9955-437d-aea6-d91766231c77",
+      "project": "loopflow-api",
+      "team_id": "3871bed0-8c95-4077-ab72-728327d615b3",
+      "assignee": null
+    },
+    {
+      "id": "2c3d04d1-91b9-45ab-9ee5-2488f97d8aad",
+      "identifier": "LOO-185",
+      "url": "https://linear.app/loopflow/issue/LOO-185/provision-loopflows-company-discord-channels",
+      "name": "Provision Loopflow's company Discord channels",
+      "description": "## Outcome\n\nA company installs Loopflow in one Discord and idempotently receives one shared Loopflow room plus one channel per Wave, usable by humans and Waves across repositories, users, and Homes.\n\n> \"basically it is a set of channels that are loopflow-managed inside of a company discord\"\n\n## Contract\n\n* Guild and channel IDs are identity; names are presentation and may be renamed.\n* Provision only the category/channels, permissions, and webhook/byline resources the product uses.\n* Reconciliation adopts existing managed resources, repairs safe drift, and refuses ambiguous or foreign resources.\n* Every Wave has a stable visible byline. A Wave ignores its own echo without hiding another Wave's message.\n* Task and incident depth uses Discord threads rather than permanent Task channels.\n* Setup explains required Message Content access and least-privilege bot permissions.\n* Never store the bot token or webhook tokens in git or non-secret configuration.\n\n## Demo and done when\n\nProvision two repositories on two Homes into one company Discord. Both Wave sets appear once. Rename a Wave channel, reconcile, and prove its binding and history survive. Re-run provisioning with no changes and observe a no-op. Tests cover partial setup, duplicate names, missing permissions, a deleted managed channel, foreign channels, and restart after a partially completed reconciliation.",
+      "rank": 44,
+      "completed": false,
+      "project_id": "d19956b2-9955-437d-aea6-d91766231c77",
+      "project": "loopflow-api",
+      "team_id": "3871bed0-8c95-4077-ab72-728327d615b3",
+      "assignee": null
+    }
+  ]
+}
+COMPLETED BASELINE REVIEW (do not rerun):
+[
+  {
+    "wave": "Product",
+    "project": "Loopflow API",
+    "verdict": "unknown",
+    "promise": "The thesis holds under load: >= 5 waves run consistently for 1 week straight across loopflow and Cadenza, at least 2 per codebase driven from GOAL.md with zero repo-authored skills added for the work.",
+    "evidence": "Five Waves were registered locally, all in Loopflow; only Infrastructure was live. No Cadenza or seven-day fleet history was available.",
+    "gap": "Seven continuous days across both codebases and Homes, including skill provenance."
+  },
+  {
+    "wave": "Product",
+    "project": "Loopflow API",
+    "verdict": "unknown",
+    "promise": "Task loops earn trust by streak: over one week of real work, every dispatched task loop either lands its PR unattended or stops with an actionable non-convergence record \u2014 zero silent stalls, zero human rescues inside the window.",
+    "evidence": "The task-loop-trust metric exists but is uninstrumented, freshness never.",
+    "gap": "Classify every settled Task over seven days by unattended landing, non-convergence, rescue, and repair."
+  },
+  {
+    "wave": "Product",
+    "project": "Loopflow API",
+    "verdict": "unknown",
+    "promise": "The spawn chain survives a week: wave loops spawn project loops spawn task loops with caps enforced throughout, and no run escapes its budget.",
+    "evidence": "Recent records do not expose a complete Wave \u2192 Project \u2192 Task lineage or declared-cap comparison.",
+    "gap": "A seven-day lineage and cap-violation ledger."
+  },
+  {
+    "wave": "Product",
+    "project": "Loopflow API",
+    "verdict": "fail",
+    "promise": "One model everywhere, continuously: for a month of landings, CLI, Mac, iOS, and agent prompts expose the same wave/project/task model \u2014 a parallel concept appearing anywhere is a failure event.",
+    "evidence": "CLI, Mac, and prompts share the model, but the repository explicitly has no iOS application target. Git and Task state also disagreed for LOO-278 on 22 September.",
+    "gap": "An actual iOS path and a month-long compatibility/reconciliation ledger."
+  },
+  {
+    "wave": "Product",
+    "project": "Loopflow API",
+    "verdict": "unknown",
+    "promise": "A new wave can be created, steered, delegated, inspected, and closed through the shared API contract, repeated cold 3/3 times.",
+    "evidence": "The commands exist; no dated configured-path record exercises the full lifecycle three times.",
+    "gap": "Three timestamped cold create \u2192 steer \u2192 delegate \u2192 inspect \u2192 close runs."
+  }
+]

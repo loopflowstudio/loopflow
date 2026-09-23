@@ -1,0 +1,26 @@
+[
+  {
+    "command": [
+      "lf",
+      "project",
+      "status",
+      "architecture-minimalism",
+      "--json"
+    ],
+    "exit_code": 1,
+    "stdout": "",
+    "stderr": "Error: no Project exists for \"architecture-minimalism\"\n"
+  },
+  {
+    "command": [
+      "lf",
+      "project",
+      "status",
+      "62b73cde-5057-4959-8ad8-fca96b9e80b5",
+      "--json"
+    ],
+    "exit_code": 0,
+    "stdout": "{\n  \"id\": \"proj_b98a997ce55a45d1981ad9537d21da3b\",\n  \"external_project_id\": \"62b73cde-5057-4959-8ad8-fca96b9e80b5\",\n  \"project_slug\": \"technical-architecture\",\n  \"project_name\": \"Technical Architecture\",\n  \"wave\": \"infrastructure\",\n  \"status\": \"ready\",\n  \"reason\": \"ready\",\n  \"iteration\": 119,\n  \"observation_cursor\": 83588,\n  \"pending_observations\": 0,\n  \"agent\": \"codex\",\n  \"provider\": \"codex\",\n  \"provider_session_id\": \"019f85fc-f19e-7243-ab25-15f504e46e6c\",\n  \"latest_event\": {\n    \"id\": 30263,\n    \"project_id\": \"proj_b98a997ce55a45d1981ad9537d21da3b\",\n    \"kind\": {\n      \"kind\": \"failed\",\n      \"error\": \"project runner failed: Project plan refresh blocked before the next phase: could not refresh wave/infrastructure from Linear: Stored linear token expired and automatic refresh failed: linear OAuth refresh failed: the token endpoint rejected or could not complete the request. Run `lf auth linear` once to reconnect.. Reconnect or run `lf pm sync --wave infrastructure`.. Project Work proj_b98a997ce55a45d1981ad9537d21da3b did not continue on its stale plan; repair Linear planning, then restart it with `lf project run 62b73cde-5057-4959-8ad8-fca96b9e80b5`\",\n      \"resumable\": true\n    },\n    \"created_at\": [\n      2026,\n      240,\n      22,\n      1,\n      4,\n      0,\n      0,\n      0,\n      0\n    ]\n  },\n  \"last_failure\": {\n    \"message\": \"project runner failed: Project plan refresh blocked before the next phase: could not refresh wave/infrastructure from Linear: Stored linear token expired and automatic refresh failed: linear OAuth refresh failed: the token endpoint rejected or could not complete the request. Run `lf auth linear` once to reconnect.. Reconnect or run `lf pm sync --wave infrastructure`.. Project Work proj_b98a997ce55a45d1981ad9537d21da3b did not continue on its stale plan; repair Linear planning, then restart it with `lf project run 62b73cde-5057-4959-8ad8-fca96b9e80b5`\",\n    \"occurred_at\": \"2026-08-28T22:01:04Z\"\n  },\n  \"created_at\": [\n    2026,\n    202,\n    18,\n    42,\n    53,\n    0,\n    0,\n    0,\n    0\n  ],\n  \"updated_at\": [\n    2026,\n    234,\n    1,\n    16,\n    11,\n    0,\n    0,\n    0,\n    0\n  ]\n}\n",
+    "stderr": ""
+  }
+]

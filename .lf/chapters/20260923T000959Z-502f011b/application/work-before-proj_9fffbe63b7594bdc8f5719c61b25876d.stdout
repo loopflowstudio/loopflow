@@ -1,0 +1,16 @@
+{
+  "work": {
+    "kind": "project",
+    "id": "proj_9fffbe63b7594bdc8f5719c61b25876d"
+  },
+  "placement": {
+    "work": {
+      "kind": "project",
+      "id": "proj_9fffbe63b7594bdc8f5719c61b25876d"
+    },
+    "home_id": "home_39860354aaca640c2ccb50bf6ca609d8",
+    "enabled": true,
+    "placed_at": "2026-08-20T09:43:36Z"
+  },
+  "status": "ready"
+}

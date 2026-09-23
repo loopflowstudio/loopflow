@@ -1,0 +1,31 @@
+{
+  "checked_at": "2026-09-23T16:13:45.110901+00:00",
+  "result": "passed",
+  "checks": {
+    "five_projects_exact_ids": true,
+    "definitions_and_seven_unproven_krs_exact": true,
+    "twelve_existing_tasks_exact": true,
+    "seven_new_tasks_exact": true,
+    "eighteen_open_tasks_no_extra": true,
+    "all_nine_project_dispositions": true,
+    "42_prior_claims_unchanged_and_dispositioned": true,
+    "174_work_dispositions_verified": true,
+    "119_stale_tasks_seven_projects_retired": true,
+    "terminal_history_and_active_tasks_carried": true,
+    "no_pre_application_historical_mismatch": true,
+    "retired_waves_abandoned_disabled": true,
+    "final_wave_states_and_identity": true,
+    "both_active_task_artifacts_unchanged": true,
+    "three_active_charters": true,
+    "obsolete_metric_preserved_outside_active_contracts": true,
+    "frozen_sources_unchanged": true,
+    "every_owner_command_succeeded": true,
+    "no_publication_or_execution_launch": true,
+    "desktop_order_and_discord_parked": true
+  },
+  "limitations": [
+    "Historical Project lifecycle selectors retain last-execution labels; stable Project/Work IDs are used. Current PM/shared planning reads expose accepted names.",
+    "Wave charter/roster/metric changes are local to this Task checkout pending human-authorized publication.",
+    "No implementation, external momentum, Desktop UI/budget, or endurance KR success is claimed."
+  ]
+}

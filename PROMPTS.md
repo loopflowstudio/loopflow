@@ -237,14 +237,19 @@ either split it into sibling projects, promote the operating context into a
 wave, or demote the pieces into tasks.
 
 Good projects are either completable behavioral improvements or standing quality
-frontiers. "Wave Chat can steer and interrupt work from CLI and Mac" is a
-project. "Technical Architecture stays legible and minimally simple" is a
-project. "Delete an obsolete API" is individual debt: file it as a task under
-a project.
+frontiers. Begin with the beneficiary and the experienced change, then name
+the system boundary. "Operators can steer and interrupt Wave work from CLI
+and Mac without switching mental models" is a project. "Maintainers can
+change Loopflow without rediscovering its architecture" is a project.
+"Delete an obsolete API" is individual debt: file it as a task under a
+project.
 
 Write project KRs as proof, not backlog. A KR states an observable end state:
 what would let a maintainer say the bet now holds. Do not mix task lists,
-implementation receipts, issue ids, or status into the KR line.
+implementation receipts, issue ids, or status into the KR line. The Project
+definition carries the user promise; each KR needs a credible causal link to
+that promise. Instrumentation that is easy to count but does not establish a
+better user, operator, maintainer, or agent experience is not a strong KR.
 
 ```markdown
 # Weak: task bundle pretending to be a project
@@ -259,9 +264,10 @@ implementation receipts, issue ids, or status into the KR line.
 # Strong: project frontier with proof-shaped KRs
 # Technical Architecture
 
-Loopflow's architecture is legible from the top down: the key data structures
-and APIs explain the system, the implementation follows that map, and obsolete
-pre-loop concepts do not linger as alternate design.
+Maintainers can change Loopflow without first reverse-engineering competing
+models. The key data structures and APIs explain the system, the implementation
+follows that map, and obsolete pre-loop concepts do not linger as alternate
+design.
 
 ## KRs
 

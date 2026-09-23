@@ -1764,21 +1764,27 @@ fn main() -> anyhow::Result<()> {
             ),
             Some(Commands::Runs {
                 run,
+                parent,
                 events,
+                final_answer,
                 resume,
                 task,
                 project,
                 wave,
                 json,
-            }) => loopflow::lf::commands::runs::list(
-                *json,
-                wave.as_deref(),
-                project.as_deref(),
-                task.as_deref(),
-                run.as_deref(),
-                *events,
-                *resume,
-            ),
+            }) => match run {
+                Some(run) if *resume => loopflow::lf::commands::runs::resume_run(run),
+                Some(run) => {
+                    loopflow::lf::commands::runs::inspect(run, *events, *final_answer, *json)
+                }
+                None => loopflow::lf::commands::runs::list(
+                    *json,
+                    wave.as_deref(),
+                    project.as_deref(),
+                    task.as_deref(),
+                    parent.as_deref(),
+                ),
+            },
             Some(Commands::Replay { run }) => loopflow::lf::commands::replay::run(run),
             Some(Commands::Reply {
                 wave,

@@ -1,0 +1,16 @@
+{
+  "work": {
+    "kind": "task",
+    "id": "task_add16f9632ee4253840773d2401abe28"
+  },
+  "placement": {
+    "work": {
+      "kind": "task",
+      "id": "task_add16f9632ee4253840773d2401abe28"
+    },
+    "home_id": "home_39860354aaca640c2ccb50bf6ca609d8",
+    "enabled": false,
+    "placed_at": "2026-08-22T14:26:56Z"
+  },
+  "status": "done"
+}

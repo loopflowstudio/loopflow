@@ -1,0 +1,16 @@
+{
+  "work": {
+    "kind": "wave",
+    "id": "9861d5b6-e53d-493d-a59b-cc8960ff88ed"
+  },
+  "placement": {
+    "work": {
+      "kind": "wave",
+      "id": "9861d5b6-e53d-493d-a59b-cc8960ff88ed"
+    },
+    "home_id": "home_39860354aaca640c2ccb50bf6ca609d8",
+    "enabled": false,
+    "placed_at": "2026-07-16T06:41:55Z"
+  },
+  "status": "abandoned"
+}

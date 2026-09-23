@@ -1,0 +1,5 @@
+{
+  "mismatches": [],
+  "residual_local_progress": [],
+  "policy": "Only exact accepted stale Work is abandoned; no process signals, no artifact deletion, no restart. Missing checkouts remain missing."
+}

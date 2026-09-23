@@ -11,7 +11,7 @@ This is the governing document of the loopflow codebase. Humans and LLMs alike a
 - Projects own KRs and closure criteria; they do not own memory or cadence
 - Tasks own implementation, investigation, docs, or shipped changes
 - Individual technical-debt cleanup is a task; a standing debt frontier can be a project
-- KRs should read as proof: observable end states, not backlog bullets or implementation receipts
+- Project definitions name the beneficiary and experienced improvement; KRs prove that bet rather than merely measuring its mechanism
 
 **Python:**
 - Use `uv run` or activate `.venv` before any Python command
@@ -186,9 +186,9 @@ Use three planning nouns, and keep them distinct by kind rather than size:
 
 Do not make recursive project trees. If a project wants subprojects, either split it into sibling projects under the same wave, promote the durable operating context into a wave, or demote the pieces into tasks. For now, do not create orphan or ephemeral projects; every project has one parent wave.
 
-Good projects are either completable behavioral improvements or standing quality frontiers. "Wave Chat works from CLI and Mac" can be a project. "Technical Architecture stays legible and minimally simple" can be a project. "Delete an obsolete API" is a task under a project, not a project by itself.
+Good projects are either completable behavioral improvements or standing quality frontiers. Start with who benefits and what becomes easier, safer, faster, clearer, or newly possible in their real work. "Operators can steer Wave Chat from CLI and Mac without switching mental models" can be a project. "Maintainers can change Loopflow without rediscovering its architecture" can be a project. "Delete an obsolete API" is a task under a project, not a project by itself.
 
-Write project KRs as proof. A KR should state an observable condition that would let a maintainer say "this bet now holds." Avoid mixing the KR with task lists, implementation receipts, or Linear issue ids. Put those in tasks and PR notes.
+Write project KRs as proof. A KR should state an observable condition that would let a maintainer say "this bet now holds." Be able to explain why that condition is credible evidence of the intended user, operator, maintainer, or agent improvement. A metric that is easy to count but weakly connected to the bet is instrumentation, not a KR. Avoid mixing the KR with task lists, implementation receipts, or Linear issue ids. Put those in tasks and PR notes.
 
 # Development Environment
 

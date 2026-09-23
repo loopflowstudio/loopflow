@@ -182,3 +182,10 @@ optional bounded per-subject conversations and required lf-new workspace
 integration; Task-directive editing; human-selected external-product trials;
 and published measured paint/interaction budgets with long-lived-registry
 trials. No Task completion or publication is claimed by this implementation.
+
+Review-slice correction, 2026-09-23: saved Work selection now survives returning
+through unavailable planning; truncated snapshots cannot establish that selected
+Work was removed. The focused regression reproduces the former loss and passes
+both missing-evidence cases after correction. `review-slice.md` contains the
+claim matrix and precise configured-native proof still needed. Slice publication
+is not approved by this review; remaining LOO-291 scope is unchanged.

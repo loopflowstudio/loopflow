@@ -27,9 +27,13 @@ its final output.
 
 Gather scoped human direction before settling anything: which bets feel done,
 which expired, what pressure the code itself is applying, what the parent
-brief missed. On a headless surface, open a durable `lf ask "<exact request>"`
-session for the material choices; provider exit, silence, or a ready session
-does not count as acceptance.
+brief missed. When an orchestrating parent supplies direction accepted in its
+live human conversation, use that record and return any new material question
+or challenge to the parent; do not open a second human session merely to reach
+the same person. On a standalone headless surface with no accepted parent
+direction, open a durable `lf ask "<exact request>"` session for the material
+choices; provider exit, silence, or a ready session does not count as
+acceptance.
 
 Where this Wave's evidence contradicts the parent brief — wrong boundary,
 stale purpose, a tension the brief papered over — challenge it. The return
@@ -40,11 +44,14 @@ the parent to reconcile. Do not silently comply and do not silently diverge.
 ## Propose the portfolio
 
 Choose the Project portfolio for the new chapter. Good Projects are
-completable behavioral improvements or standing quality frontiers, each with
-KRs that read as proof — observable end states, not backlog bullets or
-implementation receipts. Every old Project and open Task receives an explicit
-carry, rewrite, complete, or retire disposition; none inherits priority
-merely by existing.
+completable behavioral improvements or standing quality frontiers. Each names
+its beneficiary and the real experience it will improve before naming the
+mechanism, then carries KRs that credibly prove that improvement — observable
+end states, not backlog bullets or implementation receipts. Internal Projects
+may serve maintainers or agents, but a mechanism with no explicit downstream
+experience is not yet a shaped bet. Every old Project and open Task receives
+an explicit carry, rewrite, complete, or retire disposition; none inherits
+priority merely by existing.
 
 For each existing Project whose definition or KRs need real shaping, launch
 `lf -b --wave <name> --project <project-id> project/start-chapter

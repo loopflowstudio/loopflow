@@ -204,11 +204,20 @@ the goal or another repository file.
 
 ### Writing KRs
 
-Project KRs live in Linear, but writing them is goal craft. A KR should read
+Project KRs live in Linear, but writing them begins one level above the
+measurement. State who the Project serves and what becomes easier, safer,
+faster, clearer, or newly possible in their real work. For internal Projects,
+the beneficiary may be an operator, maintainer, or agent; still name the
+downstream experience instead of treating the mechanism as self-justifying.
+
+Then choose evidence. A KR should read
 as **proof under duration**: an observable end state demonstrated on real
 work over a stated window, not a capability checkbox that passes once on a
 demo.
 
+- **Connected to the bet.** Be able to finish the sentence: “If this holds,
+  the intended user improvement is credible because …” A convenient metric
+  with no causal link is telemetry, not a KR.
 - **Endurance over capability.** Not "the loop can fix a failing build" but
   "over one week, every dispatched loop lands or stops with an actionable
   record — zero silent stalls."
@@ -224,7 +233,8 @@ demo.
 - The agent can fix a failing build.
 - Reports are visible in the app.
 
-# Strong: proof under duration
+# Strong: user promise with proof under duration
+# Project: Operators can dispatch work without babysitting the loop.
 - Over one week of real work, every dispatched loop lands its PR unattended
   or stops with an actionable record — zero silent stalls, zero rescues.
 - Four consecutive weekly releases complete with no manual repair.

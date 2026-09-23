@@ -251,6 +251,20 @@ def test_generated_website_docs_do_not_duplicate_the_authoritative_scan(repo: Pa
     assert architecture.check_repository(repo).ok
 
 
+def test_chapter_evidence_does_not_define_current_architecture(repo: Path) -> None:
+    _write(
+        repo,
+        ".lf/chapters/baseline/review.md",
+        "Project Session\n# architecture-shim: retired-bridge\n",
+    )
+
+    assert architecture.check_repository(repo).ok
+
+    _write(repo, ".lf/skills/review.md", "Project Session\n")
+
+    assert "stale vocabulary 'Project Session' at .lf/skills/review.md:1" in _errors(repo)
+
+
 def test_named_historical_sql_scope_accepts_retired_language(repo: Path) -> None:
     architecture_doc = repo / "docs/architecture-reference.md"
     architecture_doc.write_text(

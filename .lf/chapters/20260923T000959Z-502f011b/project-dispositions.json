@@ -1,0 +1,110 @@
+[
+  {
+    "project_id": "03c59a52-dbd4-4e11-a6ac-f6d6359c8e08",
+    "starting_name": "Stability & Security",
+    "starting_slug": "stability-security",
+    "disposition": "rewrite",
+    "proposed_name": "Reliability",
+    "proposed_wave": "infrastructure",
+    "status": "applied_verified",
+    "preserve": "Stable IDs, historical ownership, code, Task and Run evidence. Renames require reference reconciliation; retirement is not achievement.",
+    "application_status": "applied_verified",
+    "verified_at": "2026-09-23T16:13:45.110901+00:00"
+  },
+  {
+    "project_id": "62b73cde-5057-4959-8ad8-fca96b9e80b5",
+    "starting_name": "Technical Architecture",
+    "starting_slug": "technical-architecture",
+    "disposition": "rewrite",
+    "proposed_name": "Architecture Minimalism",
+    "proposed_wave": "infrastructure",
+    "status": "applied_verified",
+    "preserve": "Stable IDs, historical ownership, code, Task and Run evidence. Renames require reference reconciliation; retirement is not achievement.",
+    "application_status": "applied_verified",
+    "verified_at": "2026-09-23T16:13:45.110901+00:00"
+  },
+  {
+    "project_id": "3778bc54-6fcb-4f38-b262-8eb68bcaa602",
+    "starting_name": "Performance & Efficiency",
+    "starting_slug": "performance-efficiency",
+    "disposition": "retire",
+    "proposed_name": null,
+    "proposed_wave": null,
+    "status": "applied_verified",
+    "preserve": "Stable IDs, historical ownership, code, Task and Run evidence. Renames require reference reconciliation; retirement is not achievement.",
+    "application_status": "applied_verified",
+    "verified_at": "2026-09-23T16:13:45.110901+00:00"
+  },
+  {
+    "project_id": "2f8390f7-6614-426c-84a8-fa5291358691",
+    "starting_name": "Trace",
+    "starting_slug": "trace",
+    "disposition": "rewrite",
+    "proposed_name": "Trace & Context",
+    "proposed_wave": "intelligence",
+    "status": "applied_verified",
+    "preserve": "Stable IDs, historical ownership, code, Task and Run evidence. Renames require reference reconciliation; retirement is not achievement.",
+    "application_status": "applied_verified",
+    "verified_at": "2026-09-23T16:13:45.110901+00:00"
+  },
+  {
+    "project_id": "0f37b71f-3c7c-43f4-b809-ca2c346ca5fa",
+    "starting_name": "Context",
+    "starting_slug": "context",
+    "disposition": "retire",
+    "proposed_name": null,
+    "proposed_wave": null,
+    "status": "applied_verified",
+    "preserve": "Stable IDs, historical ownership, code, Task and Run evidence. Renames require reference reconciliation; retirement is not achievement.",
+    "application_status": "applied_verified",
+    "verified_at": "2026-09-23T16:13:45.110901+00:00"
+  },
+  {
+    "project_id": "b211197b-4c71-4ea9-bef1-37f826ba5b5b",
+    "starting_name": "Task-first control plane",
+    "starting_slug": "task-first-control-plane",
+    "disposition": "retire",
+    "proposed_name": null,
+    "proposed_wave": null,
+    "status": "applied_verified",
+    "preserve": "Stable IDs, historical ownership, code, Task and Run evidence. Renames require reference reconciliation; retirement is not achievement.",
+    "application_status": "applied_verified",
+    "verified_at": "2026-09-23T16:13:45.110901+00:00"
+  },
+  {
+    "project_id": "d19956b2-9955-437d-aea6-d91766231c77",
+    "starting_name": "Loopflow API",
+    "starting_slug": "loopflow-api",
+    "disposition": "rewrite",
+    "proposed_name": "Company Dogfood",
+    "proposed_wave": "product",
+    "status": "applied_verified",
+    "preserve": "Stable IDs and historical attribution. Auditability evidence/presentation/semantics obligations transfer explicitly to Trace & Context, Desktop, Infrastructure and Company Dogfood.",
+    "application_status": "applied_verified",
+    "verified_at": "2026-09-23T16:13:45.110901+00:00"
+  },
+  {
+    "project_id": "57fee17f-7231-46f3-afd8-031d866a1779",
+    "starting_name": "Mac Surface UX",
+    "starting_slug": "mac-surface-ux",
+    "disposition": "rewrite",
+    "proposed_name": "Desktop",
+    "proposed_wave": "product",
+    "status": "applied_verified",
+    "preserve": "Stable IDs and historical attribution. Auditability evidence/presentation/semantics obligations transfer explicitly to Trace & Context, Desktop, Infrastructure and Company Dogfood.",
+    "application_status": "applied_verified",
+    "verified_at": "2026-09-23T16:13:45.110901+00:00"
+  },
+  {
+    "project_id": "95159066-9098-4d0b-8903-01459dc7ec14",
+    "starting_name": "Auditability",
+    "starting_slug": "auditability",
+    "disposition": "retire",
+    "proposed_name": null,
+    "proposed_wave": null,
+    "status": "applied_verified",
+    "preserve": "Stable IDs and historical attribution. Auditability evidence/presentation/semantics obligations transfer explicitly to Trace & Context, Desktop, Infrastructure and Company Dogfood.",
+    "application_status": "applied_verified",
+    "verified_at": "2026-09-23T16:13:45.110901+00:00"
+  }
+]

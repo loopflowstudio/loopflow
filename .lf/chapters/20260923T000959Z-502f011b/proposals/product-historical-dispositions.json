@@ -1,0 +1,749 @@
+[
+  {
+    "project": "mac-surface-ux",
+    "identifier": "LOO-221",
+    "pm_id": "a80fc7e3-4da0-4b4e-9423-a81c2bddbd07",
+    "work_id": "task_95d4aa9a0e8d4166b3032215cf52ebb7",
+    "runtime_status": "ready",
+    "disposition": "retire residual active planning authority; preserve PM completion and history",
+    "reconciliation_owner": "Infrastructure / Reliability"
+  },
+  {
+    "project": "mac-surface-ux",
+    "identifier": "LOO-149",
+    "pm_id": "73f0dbcf-9bd1-48ee-947d-5ec370f0312d",
+    "work_id": "task_7ad56f01347e91c74dd3273747af17b8",
+    "runtime_status": "ready",
+    "disposition": "retire residual active planning authority; preserve PM completion and history",
+    "reconciliation_owner": "Infrastructure / Reliability"
+  },
+  {
+    "project": "mac-surface-ux",
+    "identifier": "LOO-150",
+    "pm_id": "4baaafc6-4905-4477-ae22-36f974b50f00",
+    "work_id": "task_fea3a9b60d2012bc558592d65dcab4a0",
+    "runtime_status": "ready",
+    "disposition": "retire residual active planning authority; preserve PM completion and history",
+    "reconciliation_owner": "Infrastructure / Reliability"
+  },
+  {
+    "project": "mac-surface-ux",
+    "identifier": "LOO-151",
+    "pm_id": "b5690fb1-3ee4-4d44-998e-08faa46d57d3",
+    "work_id": "task_0aabdbaea6fb475cdf0b64e5e7e7bd89",
+    "runtime_status": "ready",
+    "disposition": "retire residual active planning authority; preserve PM completion and history",
+    "reconciliation_owner": "Infrastructure / Reliability"
+  },
+  {
+    "project": "mac-surface-ux",
+    "identifier": "LOO-152",
+    "pm_id": "c957123f-7cd9-4e7b-acc4-4921b8a02af6",
+    "work_id": "task_50418b03bae612866b92c0101346fc3d",
+    "runtime_status": "ready",
+    "disposition": "retire residual active planning authority; preserve PM completion and history",
+    "reconciliation_owner": "Infrastructure / Reliability"
+  },
+  {
+    "project": "mac-surface-ux",
+    "identifier": "LOO-153",
+    "pm_id": "b429bab9-9313-44c0-a4fd-4ccb889be96c",
+    "work_id": "task_b88e0b61e1645fcc7185ddaa0402fa91",
+    "runtime_status": "ready",
+    "disposition": "retire residual active planning authority; preserve PM completion and history",
+    "reconciliation_owner": "Infrastructure / Reliability"
+  },
+  {
+    "project": "mac-surface-ux",
+    "identifier": "LOO-154",
+    "pm_id": "f63ca30f-0311-4145-a517-dfea9e28debf",
+    "work_id": "task_9d7fe58867b15b69e9123cad881d65ef",
+    "runtime_status": "ready",
+    "disposition": "retire residual active planning authority; preserve PM completion and history",
+    "reconciliation_owner": "Infrastructure / Reliability"
+  },
+  {
+    "project": "mac-surface-ux",
+    "identifier": "LOO-155",
+    "pm_id": "0f57c2d5-5967-4db5-86c2-f1fc09aa0ffd",
+    "work_id": null,
+    "runtime_status": null,
+    "disposition": "carry historical completion or abandonment; no new execution",
+    "reconciliation_owner": null
+  },
+  {
+    "project": "mac-surface-ux",
+    "identifier": "LOO-156",
+    "pm_id": "d01abde6-bf28-496d-8753-83f15ebaf00b",
+    "work_id": null,
+    "runtime_status": null,
+    "disposition": "carry historical completion or abandonment; no new execution",
+    "reconciliation_owner": null
+  },
+  {
+    "project": "mac-surface-ux",
+    "identifier": "LOO-157",
+    "pm_id": "65b606aa-b6a1-4d2d-a91a-255f94b39360",
+    "work_id": null,
+    "runtime_status": null,
+    "disposition": "carry historical completion or abandonment; no new execution",
+    "reconciliation_owner": null
+  },
+  {
+    "project": "mac-surface-ux",
+    "identifier": "LOO-158",
+    "pm_id": "5d580b7c-a8ad-4ca0-9249-646ddc75101a",
+    "work_id": null,
+    "runtime_status": null,
+    "disposition": "carry historical completion or abandonment; no new execution",
+    "reconciliation_owner": null
+  },
+  {
+    "project": "mac-surface-ux",
+    "identifier": "LOO-159",
+    "pm_id": "1e1da818-54b0-4ce5-a4d8-abcf3a9f38a4",
+    "work_id": null,
+    "runtime_status": null,
+    "disposition": "carry historical completion or abandonment; no new execution",
+    "reconciliation_owner": null
+  },
+  {
+    "project": "mac-surface-ux",
+    "identifier": "LOO-160",
+    "pm_id": "45a4d4fe-b233-4fc6-94d1-54b7caabf99f",
+    "work_id": null,
+    "runtime_status": null,
+    "disposition": "carry historical completion or abandonment; no new execution",
+    "reconciliation_owner": null
+  },
+  {
+    "project": "mac-surface-ux",
+    "identifier": "LOO-161",
+    "pm_id": "ed244473-7f2b-47e7-8f8e-61b77f3a81e6",
+    "work_id": null,
+    "runtime_status": null,
+    "disposition": "carry historical completion or abandonment; no new execution",
+    "reconciliation_owner": null
+  },
+  {
+    "project": "mac-surface-ux",
+    "identifier": "W2-86",
+    "pm_id": "e17ceffb-eb49-42aa-8f73-16d9cc1d7c23",
+    "work_id": "task_ba2baf1be1a2f90c75d464a2940a6cd4",
+    "runtime_status": "abandoned",
+    "disposition": "carry historical completion or abandonment; no new execution",
+    "reconciliation_owner": null
+  },
+  {
+    "project": "loopflow-api",
+    "identifier": "LOO-269",
+    "pm_id": "9478fcdf-3771-4a39-9aeb-cf9c2f3f97b8",
+    "work_id": null,
+    "runtime_status": null,
+    "disposition": "carry historical completion or abandonment; no new execution",
+    "reconciliation_owner": null
+  },
+  {
+    "project": "loopflow-api",
+    "identifier": "LOO-260",
+    "pm_id": "c484b752-05d5-4fea-af77-42ef66ce2569",
+    "work_id": null,
+    "runtime_status": null,
+    "disposition": "carry historical completion or abandonment; no new execution",
+    "reconciliation_owner": null
+  },
+  {
+    "project": "loopflow-api",
+    "identifier": "LOO-256",
+    "pm_id": "ca54414e-7181-400c-98b3-89cc1c826805",
+    "work_id": null,
+    "runtime_status": null,
+    "disposition": "carry historical completion or abandonment; no new execution",
+    "reconciliation_owner": null
+  },
+  {
+    "project": "loopflow-api",
+    "identifier": "LOO-252",
+    "pm_id": "2862d909-fb20-4a15-a7d1-54b5b242ec58",
+    "work_id": "task_4b178d2d59fd421a9f15c07f532f6311",
+    "runtime_status": "ready",
+    "disposition": "retire residual active planning authority; preserve PM completion and history",
+    "reconciliation_owner": "Infrastructure / Reliability"
+  },
+  {
+    "project": "loopflow-api",
+    "identifier": "LOO-250",
+    "pm_id": "fdb61a1a-1fe8-49d0-ac7f-27889ae22dda",
+    "work_id": "task_692dabda6231427283db5bd73732d1e4",
+    "runtime_status": "done",
+    "disposition": "carry historical completion or abandonment; no new execution",
+    "reconciliation_owner": null
+  },
+  {
+    "project": "loopflow-api",
+    "identifier": "LOO-249",
+    "pm_id": "477ab9fb-9de9-4604-bda8-5a1aca854bc0",
+    "work_id": "task_61ac3c1d62e14bc3b5e4d0eed844c6fd",
+    "runtime_status": "ready",
+    "disposition": "retire residual active planning authority; preserve PM completion and history",
+    "reconciliation_owner": "Infrastructure / Reliability"
+  },
+  {
+    "project": "loopflow-api",
+    "identifier": "LOO-248",
+    "pm_id": "1700ca4d-7fbd-4e9f-bb76-895ccd9dcdd6",
+    "work_id": "task_c203d49b9468408db8998900367506e2",
+    "runtime_status": "done",
+    "disposition": "carry historical completion or abandonment; no new execution",
+    "reconciliation_owner": null
+  },
+  {
+    "project": "loopflow-api",
+    "identifier": "LOO-247",
+    "pm_id": "3a1d0c34-911a-42e7-8328-9683b62fa357",
+    "work_id": "task_c15c85ecd2834344bd88f26f78a25e02",
+    "runtime_status": "abandoned",
+    "disposition": "carry historical completion or abandonment; no new execution",
+    "reconciliation_owner": null
+  },
+  {
+    "project": "loopflow-api",
+    "identifier": "LOO-244",
+    "pm_id": "8161e183-5109-4a76-b35e-520fa0e2158e",
+    "work_id": null,
+    "runtime_status": null,
+    "disposition": "carry historical completion or abandonment; no new execution",
+    "reconciliation_owner": null
+  },
+  {
+    "project": "loopflow-api",
+    "identifier": "LOO-235",
+    "pm_id": "692952c0-a99f-4e0e-a7e2-23adf9f962ed",
+    "work_id": "task_8840cd0674e240a09ae30991bbf68dfa",
+    "runtime_status": "done",
+    "disposition": "carry historical completion or abandonment; no new execution",
+    "reconciliation_owner": null
+  },
+  {
+    "project": "loopflow-api",
+    "identifier": "LOO-238",
+    "pm_id": "3f20e6ce-a9a8-4f8f-8b40-6e83a292774b",
+    "work_id": "task_a445483e8b5447318ae91b36e24b4923",
+    "runtime_status": "done",
+    "disposition": "carry historical completion or abandonment; no new execution",
+    "reconciliation_owner": null
+  },
+  {
+    "project": "loopflow-api",
+    "identifier": "LOO-236",
+    "pm_id": "342cf819-23a9-44e4-939d-cbe8f432d786",
+    "work_id": null,
+    "runtime_status": null,
+    "disposition": "carry historical completion or abandonment; no new execution",
+    "reconciliation_owner": null
+  },
+  {
+    "project": "loopflow-api",
+    "identifier": "LOO-237",
+    "pm_id": "dc74191c-4f87-4364-8d79-5fa5227c7cf9",
+    "work_id": "task_21b193b0ee3b4c70afd1dcb025dc6589",
+    "runtime_status": "done",
+    "disposition": "carry historical completion or abandonment; no new execution",
+    "reconciliation_owner": null
+  },
+  {
+    "project": "loopflow-api",
+    "identifier": "LOO-230",
+    "pm_id": "61abef00-43fc-41bc-a4b3-3e91a7fcbbd3",
+    "work_id": "task_7fdfb94cfe654fafbcf6777a2e162213",
+    "runtime_status": "ready",
+    "disposition": "retire residual active planning authority; preserve PM completion and history",
+    "reconciliation_owner": "Infrastructure / Reliability"
+  },
+  {
+    "project": "loopflow-api",
+    "identifier": "LOO-223",
+    "pm_id": "06f8790a-33a1-48d3-8d7e-684693c79b36",
+    "work_id": "task_d0fa47e3ccb24002adf1892dab352a32",
+    "runtime_status": "ready",
+    "disposition": "retire residual active planning authority; preserve PM completion and history",
+    "reconciliation_owner": "Infrastructure / Reliability"
+  },
+  {
+    "project": "loopflow-api",
+    "identifier": "LOO-222",
+    "pm_id": "90a0f387-7ba4-4b96-a50f-b7724218e170",
+    "work_id": "task_13eedfbbb59a489685c5f41737ec6f14",
+    "runtime_status": "ready",
+    "disposition": "retire residual active planning authority; preserve PM completion and history",
+    "reconciliation_owner": "Infrastructure / Reliability"
+  },
+  {
+    "project": "loopflow-api",
+    "identifier": "LOO-225",
+    "pm_id": "c2c91762-3d29-4018-b962-e2eb709daeb6",
+    "work_id": "task_b198050f6d7e443c8e02c5e51d0c1c2f",
+    "runtime_status": "done",
+    "disposition": "carry historical completion or abandonment; no new execution",
+    "reconciliation_owner": null
+  },
+  {
+    "project": "loopflow-api",
+    "identifier": "LOO-220",
+    "pm_id": "ae8c7122-991a-4c1f-920e-5225b9f03055",
+    "work_id": "task_b76dc013c62145d785dc6c0366e709f2",
+    "runtime_status": "ready",
+    "disposition": "retire residual active planning authority; preserve PM completion and history",
+    "reconciliation_owner": "Infrastructure / Reliability"
+  },
+  {
+    "project": "loopflow-api",
+    "identifier": "LOO-162",
+    "pm_id": "ec89bd9f-aac9-4305-9e9b-a1aec0c0612d",
+    "work_id": "task_f0f81a9582fe12bce91ceba5f0f15c57",
+    "runtime_status": "ready",
+    "disposition": "retire residual active planning authority; preserve PM completion and history",
+    "reconciliation_owner": "Infrastructure / Reliability"
+  },
+  {
+    "project": "loopflow-api",
+    "identifier": "LOO-163",
+    "pm_id": "e59a1581-699c-4d55-a1bd-6fe5d6ca5372",
+    "work_id": "task_e5fe011eaf216a3a3960a6380699a9e7",
+    "runtime_status": "ready",
+    "disposition": "retire residual active planning authority; preserve PM completion and history",
+    "reconciliation_owner": "Infrastructure / Reliability"
+  },
+  {
+    "project": "loopflow-api",
+    "identifier": "LOO-207",
+    "pm_id": "5e6a2e23-fb95-43fb-9b9e-7ef964f3684d",
+    "work_id": "task_f607ae8aec8d45bcb634e58b81ae5a34",
+    "runtime_status": "abandoned",
+    "disposition": "carry historical completion or abandonment; no new execution",
+    "reconciliation_owner": null
+  },
+  {
+    "project": "loopflow-api",
+    "identifier": "LOO-164",
+    "pm_id": "69d0fc85-a698-4d8d-a9c8-12c540dc5a71",
+    "work_id": "task_bd7f8b96641e71b53cbac3915805134b",
+    "runtime_status": "ready",
+    "disposition": "retire residual active planning authority; preserve PM completion and history",
+    "reconciliation_owner": "Infrastructure / Reliability"
+  },
+  {
+    "project": "loopflow-api",
+    "identifier": "LOO-165",
+    "pm_id": "abde656d-06c9-4572-a2df-499c009c8749",
+    "work_id": "task_8eb408976ab97e15c11eda2d42add0f7",
+    "runtime_status": "ready",
+    "disposition": "retire residual active planning authority; preserve PM completion and history",
+    "reconciliation_owner": "Infrastructure / Reliability"
+  },
+  {
+    "project": "loopflow-api",
+    "identifier": "LOO-166",
+    "pm_id": "4194aa8d-29f7-43dd-85f4-62c2e7ce0753",
+    "work_id": "task_94182c109eee3665545112c2f984a4be",
+    "runtime_status": "ready",
+    "disposition": "retire residual active planning authority; preserve PM completion and history",
+    "reconciliation_owner": "Infrastructure / Reliability"
+  },
+  {
+    "project": "loopflow-api",
+    "identifier": "LOO-167",
+    "pm_id": "cd90421b-c587-4492-b55f-8e6a90ae111c",
+    "work_id": "task_113a3a20a1168da783afc89467c367c8",
+    "runtime_status": "ready",
+    "disposition": "retire residual active planning authority; preserve PM completion and history",
+    "reconciliation_owner": "Infrastructure / Reliability"
+  },
+  {
+    "project": "loopflow-api",
+    "identifier": "LOO-168",
+    "pm_id": "fa4b5b80-49b7-48af-ae40-e253c5a75fef",
+    "work_id": "task_1a33fa263171ae88436b4b86bb5c6098",
+    "runtime_status": "ready",
+    "disposition": "retire residual active planning authority; preserve PM completion and history",
+    "reconciliation_owner": "Infrastructure / Reliability"
+  },
+  {
+    "project": "loopflow-api",
+    "identifier": "LOO-169",
+    "pm_id": "ee037012-eaf5-4c1e-8663-4ac89c498f8c",
+    "work_id": null,
+    "runtime_status": null,
+    "disposition": "carry historical completion or abandonment; no new execution",
+    "reconciliation_owner": null
+  },
+  {
+    "project": "loopflow-api",
+    "identifier": "LOO-170",
+    "pm_id": "83fcc4fc-428e-4942-8290-f0129d85621a",
+    "work_id": "task_55eafafe0b5d7803336a02602c15b7af",
+    "runtime_status": "ready",
+    "disposition": "retire residual active planning authority; preserve PM completion and history",
+    "reconciliation_owner": "Infrastructure / Reliability"
+  },
+  {
+    "project": "loopflow-api",
+    "identifier": "LOO-171",
+    "pm_id": "69a78b36-9d2c-4b72-96ad-8b09985e0b58",
+    "work_id": "task_bd9342391df884d82d63dbc4f5f5f69d",
+    "runtime_status": "ready",
+    "disposition": "retire residual active planning authority; preserve PM completion and history",
+    "reconciliation_owner": "Infrastructure / Reliability"
+  },
+  {
+    "project": "loopflow-api",
+    "identifier": "LOO-172",
+    "pm_id": "d2ae21dc-3394-48df-8762-276431dc8c20",
+    "work_id": "task_50195641afaaedc123327ee74171e1e3",
+    "runtime_status": "ready",
+    "disposition": "retire residual active planning authority; preserve PM completion and history",
+    "reconciliation_owner": "Infrastructure / Reliability"
+  },
+  {
+    "project": "loopflow-api",
+    "identifier": "LOO-173",
+    "pm_id": "be89f28d-a6be-4431-99c6-d8e61de25f26",
+    "work_id": null,
+    "runtime_status": null,
+    "disposition": "carry historical completion or abandonment; no new execution",
+    "reconciliation_owner": null
+  },
+  {
+    "project": "loopflow-api",
+    "identifier": "LOO-174",
+    "pm_id": "7cd11fa8-a825-4b6f-a68c-448c00bdea29",
+    "work_id": null,
+    "runtime_status": null,
+    "disposition": "carry historical completion or abandonment; no new execution",
+    "reconciliation_owner": null
+  },
+  {
+    "project": "loopflow-api",
+    "identifier": "LOO-175",
+    "pm_id": "6f362006-6b35-4bbf-abee-7cc868490161",
+    "work_id": "task_73c78de1ba8914670c438aa8ac5203d1",
+    "runtime_status": "ready",
+    "disposition": "retire residual active planning authority; preserve PM completion and history",
+    "reconciliation_owner": "Infrastructure / Reliability"
+  },
+  {
+    "project": "loopflow-api",
+    "identifier": "LOO-176",
+    "pm_id": "d4a4eb7c-bfd1-4bd5-a124-d64e92661bec",
+    "work_id": null,
+    "runtime_status": null,
+    "disposition": "carry historical completion or abandonment; no new execution",
+    "reconciliation_owner": null
+  },
+  {
+    "project": "loopflow-api",
+    "identifier": "LOO-177",
+    "pm_id": "ffeac343-6815-4ae9-9ae9-ff44d88ea59f",
+    "work_id": null,
+    "runtime_status": null,
+    "disposition": "carry historical completion or abandonment; no new execution",
+    "reconciliation_owner": null
+  },
+  {
+    "project": "loopflow-api",
+    "identifier": "LOO-178",
+    "pm_id": "295a9330-558c-49f6-8402-4de577551097",
+    "work_id": "task_4069580b6426fe8ef6f8ce90d0670e55",
+    "runtime_status": "ready",
+    "disposition": "retire residual active planning authority; preserve PM completion and history",
+    "reconciliation_owner": "Infrastructure / Reliability"
+  },
+  {
+    "project": "loopflow-api",
+    "identifier": "LOO-179",
+    "pm_id": "243bfd4a-7c60-40fe-8e72-ab57dd66d18b",
+    "work_id": "task_2851571016b4d8fb88d289f8e6fde0f3",
+    "runtime_status": "done",
+    "disposition": "carry historical completion or abandonment; no new execution",
+    "reconciliation_owner": null
+  },
+  {
+    "project": "loopflow-api",
+    "identifier": "LOO-180",
+    "pm_id": "8e77a60f-71e7-4e73-8471-2a1d9c2deb58",
+    "work_id": null,
+    "runtime_status": null,
+    "disposition": "carry historical completion or abandonment; no new execution",
+    "reconciliation_owner": null
+  },
+  {
+    "project": "loopflow-api",
+    "identifier": "LOO-181",
+    "pm_id": "5bb2acde-4682-48d6-a868-ce85bf3c847b",
+    "work_id": null,
+    "runtime_status": null,
+    "disposition": "carry historical completion or abandonment; no new execution",
+    "reconciliation_owner": null
+  },
+  {
+    "project": "loopflow-api",
+    "identifier": "LOO-182",
+    "pm_id": "b1ef4c76-8bbf-4a11-b210-d89132be8564",
+    "work_id": null,
+    "runtime_status": null,
+    "disposition": "carry historical completion or abandonment; no new execution",
+    "reconciliation_owner": null
+  },
+  {
+    "project": "loopflow-api",
+    "identifier": "LOO-183",
+    "pm_id": "cc84a449-3b12-486c-bf6d-ab9ccde93230",
+    "work_id": null,
+    "runtime_status": null,
+    "disposition": "carry historical completion or abandonment; no new execution",
+    "reconciliation_owner": null
+  },
+  {
+    "project": "loopflow-api",
+    "identifier": "LOO-184",
+    "pm_id": "e229f364-09a6-4a16-a241-7f901cfca14f",
+    "work_id": "task_123381b4bc954de9a3e0c0d4ed32fa01",
+    "runtime_status": "done",
+    "disposition": "carry historical completion or abandonment; no new execution",
+    "reconciliation_owner": null
+  },
+  {
+    "project": "loopflow-api",
+    "identifier": "LOO-186",
+    "pm_id": "923cdfdb-aecd-4752-98bc-77091455f880",
+    "work_id": null,
+    "runtime_status": null,
+    "disposition": "carry historical completion or abandonment; no new execution",
+    "reconciliation_owner": null
+  },
+  {
+    "project": "loopflow-api",
+    "identifier": "LOO-187",
+    "pm_id": "63b06501-60e3-45ec-b594-1586a9f5c1de",
+    "work_id": null,
+    "runtime_status": null,
+    "disposition": "carry historical completion or abandonment; no new execution",
+    "reconciliation_owner": null
+  },
+  {
+    "project": "loopflow-api",
+    "identifier": "LOO-188",
+    "pm_id": "48c08025-959d-4983-898b-a402888611d4",
+    "work_id": null,
+    "runtime_status": null,
+    "disposition": "carry historical completion or abandonment; no new execution",
+    "reconciliation_owner": null
+  },
+  {
+    "project": "loopflow-api",
+    "identifier": "LOO-189",
+    "pm_id": "f31fbcb6-2e4f-47a0-a093-9887b12efc10",
+    "work_id": null,
+    "runtime_status": null,
+    "disposition": "carry historical completion or abandonment; no new execution",
+    "reconciliation_owner": null
+  },
+  {
+    "project": "loopflow-api",
+    "identifier": "LOO-190",
+    "pm_id": "3c42d477-ac56-4f6e-8aa3-953766566b8b",
+    "work_id": "task_9ef67f38cebc44bebc98b75204c179cd",
+    "runtime_status": "ready",
+    "disposition": "retire residual active planning authority; preserve PM completion and history",
+    "reconciliation_owner": "Infrastructure / Reliability"
+  },
+  {
+    "project": "loopflow-api",
+    "identifier": "LOO-191",
+    "pm_id": "9ca0428d-bb19-446f-b7ef-ff3f7d7c5336",
+    "work_id": null,
+    "runtime_status": null,
+    "disposition": "carry historical completion or abandonment; no new execution",
+    "reconciliation_owner": null
+  },
+  {
+    "project": "loopflow-api",
+    "identifier": "LOO-192",
+    "pm_id": "c2295698-9083-4b92-8f93-5a7b9c7fe612",
+    "work_id": "task_8ad790387a4049c088754e0bd49c25d0",
+    "runtime_status": "ready",
+    "disposition": "retire residual active planning authority; preserve PM completion and history",
+    "reconciliation_owner": "Infrastructure / Reliability"
+  },
+  {
+    "project": "loopflow-api",
+    "identifier": "LOO-193",
+    "pm_id": "0cc9440c-5d15-4d10-8ec1-f9b3577248b1",
+    "work_id": "task_c1a44ebdda399351bb625d127dcaed3a",
+    "runtime_status": "ready",
+    "disposition": "retire residual active planning authority; preserve PM completion and history",
+    "reconciliation_owner": "Infrastructure / Reliability"
+  },
+  {
+    "project": "loopflow-api",
+    "identifier": "LOO-194",
+    "pm_id": "921fafdf-25a2-433f-adc0-9b1ca3aaa9ff",
+    "work_id": "task_8e08e49c2f013a4fa0f686362c859836",
+    "runtime_status": "ready",
+    "disposition": "retire residual active planning authority; preserve PM completion and history",
+    "reconciliation_owner": "Infrastructure / Reliability"
+  },
+  {
+    "project": "loopflow-api",
+    "identifier": "LOO-195",
+    "pm_id": "caa6efc5-d7ca-4912-9e67-89918f4e82fe",
+    "work_id": "task_4774e5ff5a824fb2438ca5b5b16df593",
+    "runtime_status": "ready",
+    "disposition": "retire residual active planning authority; preserve PM completion and history",
+    "reconciliation_owner": "Infrastructure / Reliability"
+  },
+  {
+    "project": "loopflow-api",
+    "identifier": "LOO-196",
+    "pm_id": "22d37a5a-5900-4a14-b520-68b909e2d6ab",
+    "work_id": "task_9903f3b326db0b04cf40c024bceefd19",
+    "runtime_status": "ready",
+    "disposition": "retire residual active planning authority; preserve PM completion and history",
+    "reconciliation_owner": "Infrastructure / Reliability"
+  },
+  {
+    "project": "auditability",
+    "identifier": "LOO-258",
+    "pm_id": "8a912fc4-e1bd-4450-8b3b-8a9877ceab36",
+    "work_id": null,
+    "runtime_status": null,
+    "disposition": "carry historical completion or abandonment; no new execution",
+    "reconciliation_owner": null
+  },
+  {
+    "project": "auditability",
+    "identifier": "LOO-242",
+    "pm_id": "a166a298-608d-4349-a291-09a5133b516b",
+    "work_id": null,
+    "runtime_status": null,
+    "disposition": "carry historical completion or abandonment; no new execution",
+    "reconciliation_owner": null
+  },
+  {
+    "project": "auditability",
+    "identifier": "LOO-233",
+    "pm_id": "5162744e-6a18-40f8-8ba2-4181ec74acec",
+    "work_id": null,
+    "runtime_status": null,
+    "disposition": "carry historical completion or abandonment; no new execution",
+    "reconciliation_owner": null
+  },
+  {
+    "project": "auditability",
+    "identifier": "LOO-234",
+    "pm_id": "afeb573b-4257-4241-a007-74d8ae728a45",
+    "work_id": "task_cb43389e7130484b9b132c7a9e8662fb",
+    "runtime_status": "ready",
+    "disposition": "retire residual active planning authority; preserve PM completion and history",
+    "reconciliation_owner": "Infrastructure / Reliability"
+  },
+  {
+    "project": "auditability",
+    "identifier": "LOO-231",
+    "pm_id": "2d58f64b-21d1-47e4-8649-c868f08c8d53",
+    "work_id": null,
+    "runtime_status": null,
+    "disposition": "carry historical completion or abandonment; no new execution",
+    "reconciliation_owner": null
+  },
+  {
+    "project": "auditability",
+    "identifier": "LOO-232",
+    "pm_id": "c0f1fff2-5642-47d0-9c9f-ea5932270a3b",
+    "work_id": null,
+    "runtime_status": null,
+    "disposition": "carry historical completion or abandonment; no new execution",
+    "reconciliation_owner": null
+  },
+  {
+    "project": "auditability",
+    "identifier": "LOO-197",
+    "pm_id": "e30f9e73-ebe8-407d-9897-de49803d5439",
+    "work_id": "task_37dee180d4efc53c9a58a96c6bb9ce3f",
+    "runtime_status": "ready",
+    "disposition": "retire residual active planning authority; preserve PM completion and history",
+    "reconciliation_owner": "Infrastructure / Reliability"
+  },
+  {
+    "project": "auditability",
+    "identifier": "LOO-198",
+    "pm_id": "9c0032b4-585c-4b7c-b31f-4937effa3d6d",
+    "work_id": "task_71618cc6a377da4e296e45456dad4936",
+    "runtime_status": "ready",
+    "disposition": "retire residual active planning authority; preserve PM completion and history",
+    "reconciliation_owner": "Infrastructure / Reliability"
+  },
+  {
+    "project": "auditability",
+    "identifier": "LOO-199",
+    "pm_id": "5558ab82-d43f-44d3-b2eb-cbc7499c0957",
+    "work_id": "task_fdde1193a34c783f153d7f2925b2e563",
+    "runtime_status": "ready",
+    "disposition": "retire residual active planning authority; preserve PM completion and history",
+    "reconciliation_owner": "Infrastructure / Reliability"
+  },
+  {
+    "project": "auditability",
+    "identifier": "LOO-200",
+    "pm_id": "c47f3d9c-09bc-4b26-a157-2e7bab54e5df",
+    "work_id": "task_94a71ff19df6a4c49cdfceee19022ec3",
+    "runtime_status": "ready",
+    "disposition": "retire residual active planning authority; preserve PM completion and history",
+    "reconciliation_owner": "Infrastructure / Reliability"
+  },
+  {
+    "project": "auditability",
+    "identifier": "LOO-201",
+    "pm_id": "1c848784-7a9d-43fe-9767-8546b1881ad0",
+    "work_id": null,
+    "runtime_status": null,
+    "disposition": "carry historical completion or abandonment; no new execution",
+    "reconciliation_owner": null
+  },
+  {
+    "project": "auditability",
+    "identifier": "LOO-203",
+    "pm_id": "3660357b-a225-43c2-8219-e1aa1ab59240",
+    "work_id": null,
+    "runtime_status": null,
+    "disposition": "carry historical completion or abandonment; no new execution",
+    "reconciliation_owner": null
+  },
+  {
+    "project": "auditability",
+    "identifier": "LOO-202",
+    "pm_id": "b2c63ac1-287c-4dd2-9ee1-5a4a7d858bd3",
+    "work_id": "task_0a94c1f5a0384344a45192378e2fb301",
+    "runtime_status": "done",
+    "disposition": "carry historical completion or abandonment; no new execution",
+    "reconciliation_owner": null
+  },
+  {
+    "project": "auditability",
+    "identifier": "LOO-204",
+    "pm_id": "bf891855-e7d1-454c-96c2-865ecf221a87",
+    "work_id": null,
+    "runtime_status": null,
+    "disposition": "carry historical completion or abandonment; no new execution",
+    "reconciliation_owner": null
+  },
+  {
+    "project": "auditability",
+    "identifier": "LOO-205",
+    "pm_id": "fe8f0caa-dfd6-4bd6-9a28-90bd125dcb89",
+    "work_id": null,
+    "runtime_status": null,
+    "disposition": "carry historical completion or abandonment; no new execution",
+    "reconciliation_owner": null
+  }
+]

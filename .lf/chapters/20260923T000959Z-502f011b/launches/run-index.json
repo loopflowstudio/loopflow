@@ -1,0 +1,274 @@
+[
+  {
+    "id": "run_787dbbe691c44d5d91ea7cf94575cde2",
+    "parent_run_id": "run_ea98cc7ad3ac40908b01ca0e8455f724",
+    "repo": "/Users/jack/src/loopflow",
+    "worktree": "/Users/jack/src/loopflow",
+    "subjects": [
+      {
+        "selector": "project:proj_86f8af8b1e71ee288b167663c5f9e41b",
+        "source": "declared"
+      }
+    ],
+    "skill": "project/start-chapter",
+    "outcome": "completed",
+    "started": 1790127661,
+    "ended": 1790128047,
+    "usage": {
+      "streams": 1,
+      "final_streams": 1,
+      "gaps": 0,
+      "input_tokens": 70995,
+      "output_tokens": 12257,
+      "total_input_tokens": 491859,
+      "peak_input_tokens": 81966,
+      "context_window_tokens": 258400,
+      "reasoning_tokens": 587,
+      "cache_read_tokens": 420864,
+      "cache_write_tokens": null,
+      "cost_usd": null
+    },
+    "evidence_gaps": 0,
+    "harness": "codex",
+    "model": null,
+    "surface": "headless"
+  },
+  {
+    "id": "run_dfe0cc8351914375b3769a953cad3cfe",
+    "parent_run_id": "run_ea98cc7ad3ac40908b01ca0e8455f724",
+    "repo": "/Users/jack/src/loopflow",
+    "worktree": "/Users/jack/src/loopflow",
+    "subjects": [
+      {
+        "selector": "project:proj_9f1fc19a84211aed8b8136e55c8ab1f3",
+        "source": "declared"
+      }
+    ],
+    "skill": "project/start-chapter",
+    "outcome": "completed",
+    "started": 1790127317,
+    "ended": 1790127641,
+    "usage": {
+      "streams": 1,
+      "final_streams": 1,
+      "gaps": 0,
+      "input_tokens": 58088,
+      "output_tokens": 10022,
+      "total_input_tokens": 445800,
+      "peak_input_tokens": 68975,
+      "context_window_tokens": 258400,
+      "reasoning_tokens": 459,
+      "cache_read_tokens": 387712,
+      "cache_write_tokens": null,
+      "cost_usd": null
+    },
+    "evidence_gaps": 0,
+    "harness": "codex",
+    "model": null,
+    "surface": "headless"
+  },
+  {
+    "id": "run_ea98cc7ad3ac40908b01ca0e8455f724",
+    "parent_run_id": "run_502f011b9d1f4596ba62eff0e54a8b0e",
+    "repo": "/Users/jack/src/loopflow",
+    "worktree": "/Users/jack/src/loopflow",
+    "subjects": [
+      {
+        "selector": "wave:5081a624-c095-4218-9a54-6d1a6711f282",
+        "source": "declared"
+      }
+    ],
+    "skill": "wave/start-chapter",
+    "outcome": "completed",
+    "started": 1790127226,
+    "ended": 1790128206,
+    "usage": {
+      "streams": 1,
+      "final_streams": 1,
+      "gaps": 0,
+      "input_tokens": 108745,
+      "output_tokens": 14884,
+      "total_input_tokens": 4171337,
+      "peak_input_tokens": 113082,
+      "context_window_tokens": 258400,
+      "reasoning_tokens": 2642,
+      "cache_read_tokens": 4062592,
+      "cache_write_tokens": null,
+      "cost_usd": null
+    },
+    "evidence_gaps": 0,
+    "harness": "codex",
+    "model": null,
+    "surface": "headless"
+  },
+  {
+    "id": "run_3a453ab92c124ced8f5f6f380a2349fb",
+    "parent_run_id": "run_5debbd828ff945eb86cc915cc626736e",
+    "repo": "/Users/jack/src/loopflow",
+    "worktree": "/Users/jack/src/loopflow",
+    "subjects": [
+      {
+        "selector": "project:proj_9fffbe63b7594bdc8f5719c61b25876d",
+        "source": "declared"
+      }
+    ],
+    "skill": "project/start-chapter",
+    "outcome": "completed",
+    "started": 1790123284,
+    "ended": 1790127049,
+    "usage": {
+      "streams": 1,
+      "final_streams": 1,
+      "gaps": 0,
+      "input_tokens": 59798,
+      "output_tokens": 5305,
+      "total_input_tokens": 351254,
+      "peak_input_tokens": 77570,
+      "context_window_tokens": 258400,
+      "reasoning_tokens": 81,
+      "cache_read_tokens": 291456,
+      "cache_write_tokens": null,
+      "cost_usd": null
+    },
+    "evidence_gaps": 0,
+    "harness": "codex",
+    "model": null,
+    "surface": "headless"
+  },
+  {
+    "id": "run_5debbd828ff945eb86cc915cc626736e",
+    "parent_run_id": "run_502f011b9d1f4596ba62eff0e54a8b0e",
+    "repo": "/Users/jack/src/loopflow",
+    "worktree": "/Users/jack/src/loopflow",
+    "subjects": [
+      {
+        "selector": "wave:cb366067-4821-4071-9393-82ff4b6d61d2",
+        "source": "declared"
+      }
+    ],
+    "skill": "wave/start-chapter",
+    "outcome": "completed",
+    "started": 1790123189,
+    "ended": 1790127183,
+    "usage": {
+      "streams": 1,
+      "final_streams": 1,
+      "gaps": 0,
+      "input_tokens": 97749,
+      "output_tokens": 9663,
+      "total_input_tokens": 2278229,
+      "peak_input_tokens": 106929,
+      "context_window_tokens": 258400,
+      "reasoning_tokens": 872,
+      "cache_read_tokens": 2180480,
+      "cache_write_tokens": null,
+      "cost_usd": null
+    },
+    "evidence_gaps": 0,
+    "harness": "codex",
+    "model": null,
+    "surface": "headless"
+  },
+  {
+    "id": "run_84eafc507dd94ea9b382e293738adb58",
+    "parent_run_id": "run_fb04e36d5fe742c19463ba94385590cf",
+    "repo": "/Users/jack/src/loopflow",
+    "worktree": "/Users/jack/src/loopflow",
+    "subjects": [
+      {
+        "selector": "project:proj_b98a997ce55a45d1981ad9537d21da3b",
+        "source": "declared"
+      }
+    ],
+    "skill": "project/start-chapter",
+    "outcome": "completed",
+    "started": 1790122651,
+    "ended": 1790122833,
+    "usage": {
+      "streams": 1,
+      "final_streams": 1,
+      "gaps": 0,
+      "input_tokens": 62783,
+      "output_tokens": 5155,
+      "total_input_tokens": 394303,
+      "peak_input_tokens": 73945,
+      "context_window_tokens": 258400,
+      "reasoning_tokens": 423,
+      "cache_read_tokens": 331520,
+      "cache_write_tokens": null,
+      "cost_usd": null
+    },
+    "evidence_gaps": 0,
+    "harness": "codex",
+    "model": null,
+    "surface": "headless"
+  },
+  {
+    "id": "run_d9299390668b41d582405e990ee7e788",
+    "parent_run_id": "run_fb04e36d5fe742c19463ba94385590cf",
+    "repo": "/Users/jack/src/loopflow",
+    "worktree": "/Users/jack/src/loopflow",
+    "subjects": [
+      {
+        "selector": "project:proj_33676884d672454780209ce4e5b624fa",
+        "source": "declared"
+      }
+    ],
+    "skill": "project/start-chapter",
+    "outcome": "completed",
+    "started": 1790122434,
+    "ended": 1790122636,
+    "usage": {
+      "streams": 1,
+      "final_streams": 1,
+      "gaps": 0,
+      "input_tokens": 71889,
+      "output_tokens": 5969,
+      "total_input_tokens": 494033,
+      "peak_input_tokens": 82696,
+      "context_window_tokens": 258400,
+      "reasoning_tokens": 444,
+      "cache_read_tokens": 422144,
+      "cache_write_tokens": null,
+      "cost_usd": null
+    },
+    "evidence_gaps": 0,
+    "harness": "codex",
+    "model": null,
+    "surface": "headless"
+  },
+  {
+    "id": "run_fb04e36d5fe742c19463ba94385590cf",
+    "parent_run_id": "run_502f011b9d1f4596ba62eff0e54a8b0e",
+    "repo": "/Users/jack/src/loopflow",
+    "worktree": "/Users/jack/src/loopflow",
+    "subjects": [
+      {
+        "selector": "wave:6155f18a-1b7f-418c-9af3-8d6fa5ce4989",
+        "source": "declared"
+      }
+    ],
+    "skill": "wave/start-chapter",
+    "outcome": "completed",
+    "started": 1790122357,
+    "ended": 1790123153,
+    "usage": {
+      "streams": 1,
+      "final_streams": 1,
+      "gaps": 0,
+      "input_tokens": 126611,
+      "output_tokens": 19712,
+      "total_input_tokens": 3134611,
+      "peak_input_tokens": 133319,
+      "context_window_tokens": 258400,
+      "reasoning_tokens": 3175,
+      "cache_read_tokens": 3008000,
+      "cache_write_tokens": null,
+      "cost_usd": null
+    },
+    "evidence_gaps": 0,
+    "harness": "codex",
+    "model": null,
+    "surface": "headless"
+  }
+]

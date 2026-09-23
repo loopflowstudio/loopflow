@@ -1,0 +1,16 @@
+{
+  "work": {
+    "kind": "wave",
+    "id": "4dbc0638-a441-489a-b095-f9e407ea01bf"
+  },
+  "placement": {
+    "work": {
+      "kind": "wave",
+      "id": "4dbc0638-a441-489a-b095-f9e407ea01bf"
+    },
+    "home_id": "home_39860354aaca640c2ccb50bf6ca609d8",
+    "enabled": false,
+    "placed_at": "2026-07-17T03:37:51Z"
+  },
+  "status": "ready"
+}

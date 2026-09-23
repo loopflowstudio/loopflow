@@ -104,6 +104,8 @@ lf roadmap --all       # every repository on this machine
 lf status designer     # one wave's live Project → Task hierarchy
 lf activity            # durable Work changes with exact Run, PR, and Steer proof
 lf runs                # recent Home-local Run records
+lf runs --parent run_ab12 --json # every direct child Run, uncapped
+lf runs run_ab12 --final  # print the durable provider conclusion
 lf runs run_ab12 --events # inspect one Run's append-only evidence
 lf replay run_ab12     # repeat its recorded provider request as a child Run
 lf usage --days 30     # direct provider-authored usage for those Runs

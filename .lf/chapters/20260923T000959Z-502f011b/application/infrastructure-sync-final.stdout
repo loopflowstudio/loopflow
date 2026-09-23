@@ -1,0 +1,16 @@
+checking linear repository Initiatives, Projects, and Tasks
+action: refresh wave/infrastructure PM snapshot from Linear Initiative 218967b6-a760-4b7c-9a46-11d9d61a42c2
+diagnostic: Linear Initiative `Hootro Product` (b29a8494-f9a0-46e8-9d21-b7a591839977) is not linked by any local wave
+diagnostic: Linear Initiative `Hootro Infrastructure` (fcb2e536-1b58-4e0b-9471-836ec2d37217) is not linked by any local wave
+diagnostic: Linear Initiative `Survival` (23682692-99e4-4aa2-b715-285358de9a52) is not linked by any local wave
+diagnostic: Linear Initiative `Dj` (d2299fb2-ca81-47c4-9597-2535b49dcd99) is not linked by any local wave
+diagnostic: Linear Initiative `Intelligence` (427144c1-6896-40e1-a23e-6e7fe9bc9fc4) is not linked by any local wave
+diagnostic: Linear Initiative `Study` (1f18f754-dbad-44c0-a90a-4a51941aed88) is not linked by any local wave
+diagnostic: Linear Initiative `Game` (21966203-a6bb-4e2c-a902-f43cbe813053) is not linked by any local wave
+diagnostic: Linear Initiative `Rules` (2b6f3d99-9176-4b77-af42-710f0f30fde9) is not linked by any local wave
+diagnostic: Linear Initiative `Scores` (bc7a801d-7e3a-4d4e-abc1-765af1c9c19a) is not linked by any local wave
+diagnostic: Linear Initiative `Teacher` (3a12d63b-e690-4b7a-8b08-ba3e56eb9bdb) is not linked by any local wave
+diagnostic: Linear Initiative `Release` (4542bafd-b1cf-4c74-be3a-d9219e721e45) is not linked by any local wave
+diagnostic: Linear Initiative `Theory` (438abcb0-7a23-4d84-ab81-3a5cf92433a6) is not linked by any local wave
+diagnostic: Linear Initiative `Ear` (5c489394-07ec-46d9-a409-3de50705c5e9) is not linked by any local wave
+diagnostic: Linear Initiative `Core` (0cd38c27-ec49-4a3a-b158-f7f411b87ed4) is not linked by any local wave

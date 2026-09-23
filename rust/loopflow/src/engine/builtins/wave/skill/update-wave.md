@@ -78,9 +78,11 @@ fold it. If it only describes what was already built, let it go.
    where there's a clear match; add sections for new durable context. Keep it
    tight — memory is a working store, not an archive.
 6. **Update Linear Projects when measured bets moved.**
-   Project KRs should read as proof: observable end states, not backlog bullets,
-   issue ids, status, or implementation receipts. Individual technical-debt
-   cleanup is a task; a standing debt frontier can be a project.
+   Project definitions name who benefits and what improves in their real use
+   of Loopflow. KRs should read as credible proof of that change: observable
+   end states, not convenient mechanism metrics, backlog bullets, issue ids,
+   status, or implementation receipts. Individual technical-debt cleanup is a
+   task; a standing debt frontier can be a project.
 7. **Update `GOAL.md` only if the wave's identity moved.** Changed objective,
    bounds, cadence, or routing judgment count. If the branch didn't change what
    the wave *is*, leave `GOAL.md` alone. Official metric meaning belongs in

@@ -1,0 +1,310 @@
+{
+  "schema_version": 1,
+  "observed_at": 1790171681,
+  "nodes": [
+    {
+      "id": "exec:70ee78a0-df48-4a39-987d-824e11ec0567",
+      "parent_id": null,
+      "kind": "exec",
+      "label": "lf",
+      "repo": "/Users/jack/src/loopflow",
+      "wave": null,
+      "pid": 49477,
+      "started_at": 1787349378,
+      "state": "waiting"
+    },
+    {
+      "id": "provider:49707",
+      "parent_id": "exec:70ee78a0-df48-4a39-987d-824e11ec0567",
+      "kind": "provider_process",
+      "label": "codex 49707",
+      "repo": "/Users/jack/src/loopflow",
+      "wave": null,
+      "pid": 49707,
+      "started_at": 1787349379,
+      "state": "waiting"
+    }
+  ],
+  "provider_processes": [
+    {
+      "pid": 4548,
+      "ppid": 4483,
+      "process_group": 64539,
+      "started_at": 1787935793,
+      "kernel_state": "S+",
+      "provider": "codex",
+      "command": "codex",
+      "claim": "unclaimed"
+    },
+    {
+      "pid": 5834,
+      "ppid": 3485,
+      "process_group": 3485,
+      "started_at": 1790039814,
+      "kernel_state": "S+",
+      "provider": "codex",
+      "command": "codex",
+      "claim": "unclaimed"
+    },
+    {
+      "pid": 15151,
+      "ppid": 15136,
+      "process_group": 15151,
+      "started_at": 1787965124,
+      "kernel_state": "SNs",
+      "provider": "claude",
+      "command": "claude",
+      "claim": "unclaimed"
+    },
+    {
+      "pid": 15152,
+      "ppid": 15136,
+      "process_group": 15152,
+      "started_at": 1787965124,
+      "kernel_state": "SNs",
+      "provider": "claude",
+      "command": "claude",
+      "claim": "unclaimed"
+    },
+    {
+      "pid": 16760,
+      "ppid": 16759,
+      "process_group": 16679,
+      "started_at": 1788381072,
+      "kernel_state": "S+",
+      "provider": "codex",
+      "command": "codex",
+      "claim": "unclaimed"
+    },
+    {
+      "pid": 17424,
+      "ppid": 17423,
+      "process_group": 60200,
+      "started_at": 1787874808,
+      "kernel_state": "S+",
+      "provider": "codex",
+      "command": "codex",
+      "claim": "unclaimed"
+    },
+    {
+      "pid": 27514,
+      "ppid": 27502,
+      "process_group": 91822,
+      "started_at": 1787935840,
+      "kernel_state": "S+",
+      "provider": "codex",
+      "command": "codex",
+      "claim": "unclaimed"
+    },
+    {
+      "pid": 41205,
+      "ppid": 41194,
+      "process_group": 63478,
+      "started_at": 1787331922,
+      "kernel_state": "S+",
+      "provider": "codex",
+      "command": "codex",
+      "claim": "unclaimed"
+    },
+    {
+      "pid": 41371,
+      "ppid": 41314,
+      "process_group": 63034,
+      "started_at": 1787331922,
+      "kernel_state": "S+",
+      "provider": "codex",
+      "command": "codex",
+      "claim": "unclaimed"
+    },
+    {
+      "pid": 47485,
+      "ppid": 47484,
+      "process_group": 63677,
+      "started_at": 1787332116,
+      "kernel_state": "S+",
+      "provider": "codex",
+      "command": "codex",
+      "claim": "unclaimed"
+    },
+    {
+      "pid": 48167,
+      "ppid": 48166,
+      "process_group": 48067,
+      "started_at": 1788204477,
+      "kernel_state": "S+",
+      "provider": "codex",
+      "command": "codex",
+      "claim": "unclaimed"
+    },
+    {
+      "pid": 49012,
+      "ppid": 48997,
+      "process_group": 48349,
+      "started_at": 1788413689,
+      "kernel_state": "S+",
+      "provider": "codex",
+      "command": "codex",
+      "claim": "unclaimed"
+    },
+    {
+      "pid": 49104,
+      "ppid": 49103,
+      "process_group": 47637,
+      "started_at": 1787261406,
+      "kernel_state": "S+",
+      "provider": "codex",
+      "command": "codex",
+      "claim": "unclaimed"
+    },
+    {
+      "pid": 58463,
+      "ppid": 58455,
+      "process_group": 58455,
+      "started_at": 1786913973,
+      "kernel_state": "S+",
+      "provider": "codex",
+      "command": "codex",
+      "claim": "unclaimed"
+    },
+    {
+      "pid": 58761,
+      "ppid": 58619,
+      "process_group": 58619,
+      "started_at": 1786913973,
+      "kernel_state": "S+",
+      "provider": "codex",
+      "command": "codex",
+      "claim": "unclaimed"
+    },
+    {
+      "pid": 65799,
+      "ppid": 77015,
+      "process_group": 65799,
+      "started_at": 1790111959,
+      "kernel_state": "S+",
+      "provider": "codex",
+      "command": "codex",
+      "claim": "unclaimed"
+    },
+    {
+      "pid": 74913,
+      "ppid": 74514,
+      "process_group": 74514,
+      "started_at": 1790111343,
+      "kernel_state": "S+",
+      "provider": "codex",
+      "command": "codex",
+      "claim": "unclaimed"
+    },
+    {
+      "pid": 75084,
+      "ppid": 75075,
+      "process_group": 74439,
+      "started_at": 1787187313,
+      "kernel_state": "S+",
+      "provider": "codex",
+      "command": "codex",
+      "claim": "unclaimed"
+    },
+    {
+      "pid": 79407,
+      "ppid": 79399,
+      "process_group": 79399,
+      "started_at": 1786914233,
+      "kernel_state": "S+",
+      "provider": "codex",
+      "command": "codex",
+      "claim": "unclaimed"
+    },
+    {
+      "pid": 80019,
+      "ppid": 80018,
+      "process_group": 36622,
+      "started_at": 1787331995,
+      "kernel_state": "S+",
+      "provider": "codex",
+      "command": "codex",
+      "claim": "unclaimed"
+    },
+    {
+      "pid": 81709,
+      "ppid": 81703,
+      "process_group": 80306,
+      "started_at": 1789320765,
+      "kernel_state": "S+",
+      "provider": "codex",
+      "command": "codex",
+      "claim": "unclaimed"
+    },
+    {
+      "pid": 82973,
+      "ppid": 82956,
+      "process_group": 81109,
+      "started_at": 1789320766,
+      "kernel_state": "S+",
+      "provider": "codex",
+      "command": "codex",
+      "claim": "unclaimed"
+    },
+    {
+      "pid": 83069,
+      "ppid": 80261,
+      "process_group": 80261,
+      "started_at": 1790102479,
+      "kernel_state": "S+",
+      "provider": "codex",
+      "command": "codex",
+      "claim": "unclaimed"
+    },
+    {
+      "pid": 84364,
+      "ppid": 84273,
+      "process_group": 84364,
+      "started_at": 1789494305,
+      "kernel_state": "SNs",
+      "provider": "claude",
+      "command": "claude",
+      "claim": "unclaimed"
+    },
+    {
+      "pid": 84365,
+      "ppid": 84273,
+      "process_group": 84365,
+      "started_at": 1789494305,
+      "kernel_state": "SNs",
+      "provider": "claude",
+      "command": "claude",
+      "claim": "unclaimed"
+    },
+    {
+      "pid": 87863,
+      "ppid": 87527,
+      "process_group": 87527,
+      "started_at": 1790097943,
+      "kernel_state": "S+",
+      "provider": "codex",
+      "command": "codex",
+      "claim": "unclaimed"
+    },
+    {
+      "pid": 97008,
+      "ppid": 97007,
+      "process_group": 73764,
+      "started_at": 1787891855,
+      "kernel_state": "S+",
+      "provider": "codex",
+      "command": "codex",
+      "claim": "unclaimed"
+    },
+    {
+      "pid": 98620,
+      "ppid": 98619,
+      "process_group": 63635,
+      "started_at": 1787332028,
+      "kernel_state": "S+",
+      "provider": "codex",
+      "command": "codex",
+      "claim": "unclaimed"
+    }
+  ]
+}

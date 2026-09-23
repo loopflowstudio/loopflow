@@ -68,7 +68,8 @@ SCAN_ROOTS = (
     Path(".lf"),
 )
 IGNORED_PARTS = {".git", ".venv", "node_modules", "target", "DerivedData", "__pycache__"}
-IGNORED_PREFIXES = (Path("website/docs"),)
+# Generated docs and chapter evidence copy other sources, not live architecture.
+IGNORED_PREFIXES = (Path("website/docs"), Path(".lf/chapters"))
 
 
 @dataclass(frozen=True)

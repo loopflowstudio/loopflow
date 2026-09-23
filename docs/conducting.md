@@ -47,6 +47,8 @@ It is history, not another live process model: `lf ps` owns current motion.
 lf runs --wave infra          # recent Home-local Run records for one Wave
 lf runs --project parser      # one Project, filtered before the result cap
 lf runs --task INF-123 --json # direct bundle evidence for one Task
+lf runs --parent run_ab12 --json # every direct child, without the recent cap
+lf runs run_ab12 --final      # the last durable provider conclusion
 lf runs run_ab12 --events     # raw append-only evidence for one Run
 lf replay run_ab12            # repeat the recorded request as a child Run
 ```
@@ -56,6 +58,12 @@ append-only evidence streams, and at most one exclusive terminal receipt. The
 scan does not depend on the planning store. `lf usage` reduces provider-authored
 counters from those same bundles; missing telemetry stays missing instead of
 blocking the launch or becoming a synthetic zero.
+
+`--parent` resolves one exact Run and returns all of its direct children rather
+than sampling the recent global list. `--final` reads the provider-neutral
+final-answer receipt. Runs without those receipts are labeled and return
+streamed prose from their last completed provider turn so recovery remains
+possible. It fails explicitly when neither form exists.
 
 Replay reads the source manifest and launches its recorded prompt, agent/model,
 turn limit, permission mode, capability flags, and provider account ID through

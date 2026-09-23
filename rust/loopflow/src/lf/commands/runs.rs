@@ -1,8 +1,9 @@
 //! `lf runs` — read Home-local Run records.
 
-#[cfg(test)]
-use std::path::Path;
-use std::{io::Read, path::PathBuf};
+use std::{
+    io::Read,
+    path::{Path, PathBuf},
+};
 
 use anyhow::{anyhow, Result};
 
@@ -24,23 +25,23 @@ pub(crate) fn collect_runs(filter: WorkFilter) -> Result<(Vec<RunSnapshot>, bool
     Ok((runs, truncated))
 }
 
-fn collect_runs_started_since(filter: WorkFilter, since: i64) -> Result<Vec<RunSnapshot>> {
-    crate::run_record::scan_runs_since(&crate::store::observability_home_dir(), since)
-        .map_err(|err| anyhow!("Run records unavailable: {err}"))
+fn collect_child_runs_at(lf_home: &Path, parent: &str) -> Result<Vec<RunSnapshot>> {
+    let (_, manifest) = crate::run_record::resolve_manifest(lf_home, parent)
+        .map_err(|error| anyhow!("Run record unavailable: {error}"))?;
+    let parent_id = manifest.run_id.to_string();
+    crate::run_record::scan_runs_since(lf_home, 0)
+        .map_err(|error| anyhow!("Run records unavailable: {error}"))
         .map(|runs| {
             runs.into_iter()
-                .filter(|run| {
-                    filter.matches(
-                        run.subject("wave"),
-                        run.subject("project"),
-                        run.subject("task"),
-                    )
-                })
+                .filter(|run| run.parent_run_id.as_deref() == Some(parent_id.as_str()))
                 .collect()
         })
 }
 
-#[cfg(test)]
+fn collect_runs_started_since(filter: WorkFilter, since: i64) -> Result<Vec<RunSnapshot>> {
+    collect_runs_started_since_at(&crate::store::observability_home_dir(), filter, since)
+}
+
 fn collect_runs_started_since_at(
     lf_home: &Path,
     filter: WorkFilter,
@@ -68,20 +69,9 @@ pub(crate) fn collect_run_activity_since(
     filter: WorkFilter,
     since: i64,
 ) -> Result<Vec<RunSnapshot>> {
-    crate::run_record::scan_runs_since(&crate::store::observability_home_dir(), 0)
-        .map_err(|err| anyhow!("Run records unavailable: {err}"))
-        .map(|runs| {
-            runs.into_iter()
-                .filter(|run| run.started >= since || run.ended.is_some_and(|end| end >= since))
-                .filter(|run| {
-                    filter.matches(
-                        run.subject("wave"),
-                        run.subject("project"),
-                        run.subject("task"),
-                    )
-                })
-                .collect()
-        })
+    let mut runs = collect_runs_started_since(filter, 0)?;
+    runs.retain(|run| run.started >= since || run.ended.is_some_and(|end| end >= since));
+    Ok(runs)
 }
 
 /// `lf runs [--wave <name>] [--project <slug>] [--task <id>]`: recent harness
@@ -91,21 +81,19 @@ pub fn list(
     wave: Option<&str>,
     project: Option<&str>,
     task: Option<&str>,
-    run: Option<&str>,
-    events: bool,
-    resume: bool,
+    parent: Option<&str>,
 ) -> Result<()> {
-    if let Some(run) = run {
-        if resume {
-            return resume_run(run);
+    let runs = match parent {
+        Some(parent) => collect_child_runs_at(&crate::store::observability_home_dir(), parent)?,
+        None => {
+            let (runs, _truncated) = collect_runs(WorkFilter {
+                wave,
+                project,
+                task,
+            })?;
+            runs
         }
-        return inspect(run, events, json);
-    }
-    let (runs, _truncated) = collect_runs(WorkFilter {
-        wave,
-        project,
-        task,
-    })?;
+    };
 
     if json {
         println!("{}", serde_json::to_string(&runs)?);
@@ -113,17 +101,18 @@ pub fn list(
     }
 
     if runs.is_empty() {
-        match (wave, project, task) {
-            (_, _, Some(task)) => {
+        match (parent, wave, project, task) {
+            (Some(parent), _, _, _) => println!("No child Runs recorded for {parent}."),
+            (None, _, _, Some(task)) => {
                 println!("No Runs recorded for {task} in the last {WINDOW_DAYS} days.")
             }
-            (_, Some(project), None) => {
+            (None, _, Some(project), None) => {
                 println!("No Runs recorded for project/{project} in the last {WINDOW_DAYS} days.")
             }
-            (Some(wave), None, None) => {
+            (None, Some(wave), None, None) => {
                 println!("No Runs recorded for wave/{wave} in the last {WINDOW_DAYS} days.")
             }
-            (None, None, None) => {
+            (None, None, None, None) => {
                 println!("No Runs recorded in the last {WINDOW_DAYS} days.")
             }
         }
@@ -168,7 +157,7 @@ pub fn list(
     Ok(())
 }
 
-fn resume_run(selector: &str) -> Result<()> {
+pub fn resume_run(selector: &str) -> Result<()> {
     let home = crate::store::observability_home_dir();
     let (dir, manifest) = crate::run_record::resolve_manifest(&home, selector)
         .map_err(|error| anyhow!("Run record unavailable: {error}"))?;
@@ -207,7 +196,7 @@ pub fn observe_provider_session() -> Result<()> {
         .map_err(|error| anyhow!("cannot preserve provider session: {error}"))
 }
 
-fn inspect(selector: &str, events: bool, json: bool) -> Result<()> {
+pub fn inspect(selector: &str, events: bool, final_answer: bool, json: bool) -> Result<()> {
     let home = crate::store::observability_home_dir();
     let (dir, manifest) = crate::run_record::resolve_manifest(&home, selector)
         .map_err(|error| anyhow!("Run record unavailable: {error}"))?;
@@ -221,6 +210,30 @@ fn inspect(selector: &str, events: bool, json: bool) -> Result<()> {
     }
     let snapshot = crate::run_record::read_run_snapshot(&dir)
         .map_err(|error| anyhow!("Run record unavailable: {error}"))?;
+    if final_answer {
+        let answer = crate::run_record::read_final_answer(&dir)
+            .map_err(|error| anyhow!("Run final answer unavailable: {error}"))?;
+        return match answer {
+            Some(answer) => {
+                if !answer.exact {
+                    eprintln!(
+                        "warning: this Run has no final-answer receipt; showing all streamed prose from its last completed provider turn"
+                    );
+                }
+                println!("{}", answer.text);
+                Ok(())
+            }
+            None if snapshot.outcome.is_none() => Err(anyhow!(
+                "Run {} is not settled and has no final answer",
+                snapshot.id
+            )),
+            None => Err(anyhow!(
+                "Run {} settled as {} without a final answer",
+                snapshot.id,
+                snapshot.outcome.as_deref().unwrap_or("unknown")
+            )),
+        };
+    }
     if json {
         println!("{}", serde_json::to_string(&snapshot)?);
         return Ok(());
@@ -244,21 +257,6 @@ fn inspect(selector: &str, events: bool, json: bool) -> Result<()> {
     );
     println!("Evidence gaps: {}", snapshot.evidence_gaps);
     Ok(())
-}
-
-/// The Runs attributed to one Wave, newest first.
-pub(crate) fn wave_runs(wave: &str) -> Result<(Vec<RunSnapshot>, bool)> {
-    let since = chrono::Utc::now().timestamp() - WINDOW_DAYS * 24 * 3600;
-    let mut runs = collect_runs_started_since(
-        WorkFilter {
-            wave: Some(wave),
-            project: None,
-            task: None,
-        },
-        since,
-    )?;
-    let truncated = cap_runs(&mut runs);
-    Ok((runs, truncated))
 }
 
 fn cap_runs(runs: &mut Vec<RunSnapshot>) -> bool {
@@ -322,9 +320,11 @@ pub(crate) fn format_tokens(value: i64) -> String {
 
 #[cfg(test)]
 mod tests {
-    use super::{collect_runs_started_since_at, format_tokens};
+    use super::{collect_child_runs_at, collect_runs_started_since_at, format_tokens};
     use crate::lf::commands::WorkFilter;
-    use crate::run_record::{CaptureHandle, RunSpec, SubjectAttribution};
+    use crate::run_record::{
+        CaptureHandle, RunLaunchRequest, RunManifest, RunSpec, SubjectAttribution,
+    };
 
     #[test]
     fn work_drill_reads_record_subjects_without_a_sql_ledger() {
@@ -360,6 +360,68 @@ mod tests {
 
         assert_eq!(runs.len(), 1);
         assert_eq!(runs[0].subject("task"), Some("LOO-265"));
+    }
+
+    #[test]
+    fn child_drill_reads_the_exact_parent_without_time_or_count_caps() {
+        let home = tempfile::tempdir().unwrap();
+        let parent = CaptureHandle::begin_at(
+            home.path(),
+            RunSpec {
+                harness: "codex".to_string(),
+                model: None,
+                surface: "headless".to_string(),
+                cwd: home.path().to_path_buf(),
+                repo: Some(home.path().to_path_buf()),
+                worktree: Some(home.path().to_path_buf()),
+                skill: Some("review-chapter".to_string()),
+                subjects: Vec::new(),
+            },
+        )
+        .unwrap();
+        let parent_id = parent.run_id();
+        let mut expected = Vec::new();
+        for _ in 0..=super::MAX_RUNS {
+            let child = CaptureHandle::begin_replay_at(
+                home.path(),
+                RunSpec {
+                    harness: "codex".to_string(),
+                    model: None,
+                    surface: "headless".to_string(),
+                    cwd: home.path().to_path_buf(),
+                    repo: Some(home.path().to_path_buf()),
+                    worktree: Some(home.path().to_path_buf()),
+                    skill: Some("project/review-chapter".to_string()),
+                    subjects: Vec::new(),
+                },
+                RunLaunchRequest {
+                    system_prompt: "system".to_string(),
+                    task_prompt: "task".to_string(),
+                    agent: "codex".to_string(),
+                    account_id: None,
+                    max_turns: None,
+                    write_scope: crate::engine::AgentWriteScope::Configured,
+                    execution_boundary: None,
+                    skip_permissions: false,
+                    chrome: false,
+                },
+                parent_id.clone(),
+            )
+            .unwrap();
+            let manifest_path = child.artifact_dir().join("manifest.json");
+            let mut manifest: RunManifest =
+                serde_json::from_slice(&std::fs::read(&manifest_path).unwrap()).unwrap();
+            manifest.created_at -= time::Duration::days(super::WINDOW_DAYS + 1);
+            std::fs::write(&manifest_path, serde_json::to_vec(&manifest).unwrap()).unwrap();
+            expected.push(child.run_id().to_string());
+        }
+
+        let children = collect_child_runs_at(home.path(), parent_id.as_str()).unwrap();
+
+        let mut actual: Vec<_> = children.into_iter().map(|child| child.id).collect();
+        actual.sort();
+        expected.sort();
+        assert_eq!(actual, expected);
     }
 
     #[test]

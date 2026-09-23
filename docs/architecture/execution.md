@@ -166,15 +166,27 @@ that a process is still alive.
 
 ```bash
 lf runs --task LOO-265 --json
+lf runs --parent run_ab12 --json
+lf runs run_ab12 --final
 lf runs run_ab12 --events
 lf replay run_ab12
 lf usage --task LOO-265 --days 30 --json
 ```
 
+`--final` prefers the exact provider-neutral final-answer receipt. Runs
+without that receipt are labeled and return normalized streamed prose from
+their last completed provider turn, including commentary, so callers can
+recover evidence without a false claim of exact extraction.
+
 `scan_runs_since` reduces record files into `RunSnapshot`. `lf runs` and `lf
 usage` apply the same Wave/Project/Task attribution drill over that projection;
 Work activity, status views, and the Mac app consume it too. There is no
 authoritative Run index to repair.
+
+Direct-child reads resolve the parent manifest first and scan the Home-local
+records without the recent-history cap. Final-answer reads project normalized
+`ConversationEvent::ItemCompleted` messages, preferring the explicit
+`final_answer` phase and retaining untagged conclusions for older harnesses.
 
 Replay resolves one full Run ID or unambiguous prefix, verifies that its
 manifest contains a headless launch request and that the named provider account

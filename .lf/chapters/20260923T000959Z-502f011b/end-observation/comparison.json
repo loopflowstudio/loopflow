@@ -1,0 +1,34 @@
+[
+  {
+    "wave": "infrastructure",
+    "observed_at": "2026-09-23T01:51:07.745684+00:00",
+    "frozen_synced_at": 1790116742,
+    "current_synced_at": 1790116742,
+    "same_projects": true,
+    "same_items": true
+  },
+  {
+    "wave": "intelligence",
+    "observed_at": "2026-09-23T01:51:07.746256+00:00",
+    "frozen_synced_at": 1790116739,
+    "current_synced_at": 1790116739,
+    "same_projects": true,
+    "same_items": true
+  },
+  {
+    "wave": "product",
+    "observed_at": "2026-09-23T01:51:07.747218+00:00",
+    "frozen_synced_at": 1790116739,
+    "current_synced_at": 1790116739,
+    "same_projects": true,
+    "same_items": true
+  },
+  {
+    "wave": "list",
+    "observed_at": "2026-09-23T01:51:07.747333+00:00",
+    "frozen_synced_at": 1790116750,
+    "current_synced_at": 1790116750,
+    "same_projects": true,
+    "same_items": true
+  }
+]

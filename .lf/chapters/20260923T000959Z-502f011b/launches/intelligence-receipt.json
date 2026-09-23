@@ -1,0 +1,19 @@
+{
+  "wave": "intelligence",
+  "started_at": "2026-09-23T00:26:27.489472+00:00",
+  "command": [
+    "lf",
+    "-b",
+    "--wave",
+    "intelligence",
+    "wave/start-chapter"
+  ],
+  "status": "returned",
+  "exit_code": 0,
+  "finished_at": "2026-09-23T01:33:03.914338+00:00",
+  "run_id": "run_5debbd828ff945eb86cc915cc626736e",
+  "project_runs": {
+    "trace-context": "run_3a453ab92c124ced8f5f6f380a2349fb"
+  },
+  "provider_reconnects": "Recovered; full final report and completed receipt observed. Partial emissions retained only in raw log."
+}

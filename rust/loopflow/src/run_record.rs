@@ -1,6 +1,6 @@
 //! Authoritative, Home-local evidence for one Loopflow harness launch.
 
-use std::collections::BTreeMap;
+use std::collections::{BTreeMap, HashMap};
 use std::fs::{self, File, OpenOptions};
 use std::io::{BufRead, BufReader, Write};
 #[cfg(unix)]
@@ -14,7 +14,7 @@ use sha2::{Digest, Sha256};
 use time::OffsetDateTime;
 use uuid::Uuid;
 
-use crate::chat::types::{ConversationEvent, TurnUsage};
+use crate::chat::types::{ConversationEvent, ConversationItem, Lifecycle, TurnUsage};
 use crate::durable::{RunId, RUN_ID_ENV};
 use crate::engine::stream::{ResultSubtype, StreamEvent};
 use crate::store::{StoreError, StoreResult};
@@ -681,6 +681,82 @@ pub(crate) fn read_provider_session(dir: &Path) -> std::io::Result<Option<Provid
         }
     }
     Ok(provider_session)
+}
+
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub(crate) struct FinalAnswer {
+    pub text: String,
+    pub exact: bool,
+}
+
+#[derive(Default)]
+struct TurnProse {
+    tagged: Option<String>,
+    untagged: Option<String>,
+    streamed: String,
+}
+
+impl TurnProse {
+    fn answer(self) -> Option<FinalAnswer> {
+        self.tagged
+            .map(|text| FinalAnswer { text, exact: true })
+            .or_else(|| self.untagged.map(|text| FinalAnswer { text, exact: true }))
+            .or_else(|| {
+                (!self.streamed.is_empty()).then_some(FinalAnswer {
+                    text: self.streamed,
+                    exact: false,
+                })
+            })
+    }
+}
+
+/// Read the last completed provider conclusion without exposing raw event shape.
+pub(crate) fn read_final_answer(dir: &Path) -> std::io::Result<Option<FinalAnswer>> {
+    let file = match File::open(dir.join("events.jsonl")) {
+        Ok(file) => file,
+        Err(error) if error.kind() == std::io::ErrorKind::NotFound => return Ok(None),
+        Err(error) => return Err(error),
+    };
+    let mut turns = HashMap::<String, TurnProse>::new();
+    let mut answer = None;
+    for line in BufReader::new(file).lines() {
+        let envelope: EventEnvelope =
+            serde_json::from_str(&line?).map_err(std::io::Error::other)?;
+        if envelope.schema_version != SCHEMA_VERSION {
+            return Err(std::io::Error::new(
+                std::io::ErrorKind::InvalidData,
+                "unsupported Run event schema",
+            ));
+        }
+        let RunEvent::Conversation { event } = envelope.event else {
+            continue;
+        };
+        match *event {
+            ConversationEvent::TextDelta { turn_id, content } => {
+                turns
+                    .entry(turn_id)
+                    .or_default()
+                    .streamed
+                    .push_str(&content);
+            }
+            ConversationEvent::ItemCompleted {
+                turn_id,
+                item: ConversationItem::Message { text, phase, .. },
+            } => match phase.as_deref() {
+                Some("final_answer") => turns.entry(turn_id).or_default().tagged = Some(text),
+                None => turns.entry(turn_id).or_default().untagged = Some(text),
+                Some(_) => {}
+            },
+            ConversationEvent::TurnCompleted { turn_id, status } => {
+                let prose = turns.remove(&turn_id).unwrap_or_default();
+                if status == Lifecycle::Completed {
+                    answer = prose.answer().or(answer);
+                }
+            }
+            _ => {}
+        }
+    }
+    Ok(answer)
 }
 
 pub(crate) fn write_provider_session(
@@ -1922,13 +1998,13 @@ mod tests {
     use std::io::Write;
 
     use super::{
-        observed_run_ids_at, provider_session_is_resolved, read_provider_clients,
-        read_provider_session, read_run_snapshot, remove_provider_client, resolve_provider_session,
-        scan_runs_since, scan_unresolved_provider_runs, write_provider_client,
-        write_provider_session, CaptureHandle, RunLaunchRequest, RunManifest, RunSpec,
-        SubjectAttribution, TerminalReceipt,
+        observed_run_ids_at, provider_session_is_resolved, read_final_answer,
+        read_provider_clients, read_provider_session, read_run_snapshot, remove_provider_client,
+        resolve_provider_session, scan_runs_since, scan_unresolved_provider_runs,
+        write_provider_client, write_provider_session, CaptureHandle, RunLaunchRequest,
+        RunManifest, RunSpec, SubjectAttribution, TerminalReceipt,
     };
-    use crate::chat::types::{ConversationEvent, TurnUsage};
+    use crate::chat::types::{ConversationEvent, ConversationItem, TurnUsage};
     use crate::engine::stream::{ResultSubtype, StreamEvent};
     use crate::engine::{AgentCapabilities, AgentConfig};
 
@@ -2082,6 +2158,71 @@ mod tests {
         let unchanged: TerminalReceipt =
             serde_json::from_slice(&fs::read(dir.join("terminal.json")).unwrap()).unwrap();
         assert_eq!(unchanged.outcome, "completed");
+    }
+
+    #[test]
+    fn final_answer_reader_returns_the_conclusion_without_commentary() {
+        let home = tempfile::tempdir().unwrap();
+        let capture = CaptureHandle::begin_at(home.path(), spec(home.path())).unwrap();
+        capture.record_conversation(ConversationEvent::ItemCompleted {
+            turn_id: "turn-1".to_string(),
+            item: ConversationItem::Message {
+                id: "commentary".to_string(),
+                text: "still working".to_string(),
+                phase: Some("commentary".to_string()),
+            },
+        });
+        capture.record_conversation(ConversationEvent::ItemCompleted {
+            turn_id: "turn-1".to_string(),
+            item: ConversationItem::Message {
+                id: "answer".to_string(),
+                text: "final report".to_string(),
+                phase: Some("final_answer".to_string()),
+            },
+        });
+        capture.record_conversation(ConversationEvent::TurnCompleted {
+            turn_id: "turn-1".to_string(),
+            status: crate::chat::types::Lifecycle::Completed,
+        });
+        capture.finish("completed").unwrap();
+
+        assert_eq!(
+            read_final_answer(&capture.artifact_dir()).unwrap(),
+            Some(super::FinalAnswer {
+                text: "final report".to_string(),
+                exact: true,
+            })
+        );
+    }
+
+    #[test]
+    fn final_answer_reader_recovers_legacy_streamed_prose_honestly() {
+        let home = tempfile::tempdir().unwrap();
+        let capture = CaptureHandle::begin_at(home.path(), spec(home.path())).unwrap();
+        capture.record_conversation(ConversationEvent::TurnStarted {
+            turn_id: "turn-1".to_string(),
+        });
+        capture.record_conversation(ConversationEvent::TextDelta {
+            turn_id: "turn-1".to_string(),
+            content: "working\n".to_string(),
+        });
+        capture.record_conversation(ConversationEvent::TextDelta {
+            turn_id: "turn-1".to_string(),
+            content: "final report".to_string(),
+        });
+        capture.record_conversation(ConversationEvent::TurnCompleted {
+            turn_id: "turn-1".to_string(),
+            status: crate::chat::types::Lifecycle::Completed,
+        });
+        capture.finish("completed").unwrap();
+
+        assert_eq!(
+            read_final_answer(&capture.artifact_dir()).unwrap(),
+            Some(super::FinalAnswer {
+                text: "working\nfinal report".to_string(),
+                exact: false,
+            })
+        );
     }
 
     #[test]

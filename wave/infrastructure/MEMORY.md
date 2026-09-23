@@ -1,6 +1,54 @@
 # infrastructure wave memory
 
-Renamed from `systems` in the 2026-07-08 wave/project/task restructure. Steers Loopflow toward boring releases: nightly verification that never deploys, weekly publishing gated on that same verification, and repo-owned `lf cron` jobs — with Cadenza mirroring the cadence.
+Renamed from `systems` in the 2026-07-08 wave/project/task restructure. Owns dependable self-hosting, verified releases, and architecture minimalism. The configured release schedule and accepted proof obligations govern current work; older nightly/weekly notes below are historical.
+
+## Chapter boundaries and preservation (2026-09-23)
+
+The [accepted chapter](../../.lf/chapters/20260923T000959Z-502f011b/start.md)
+keeps Infrastructure responsible for execution mechanics, auth, placement,
+recovery, releases, and repository-wide simplification. Product judges external
+usefulness; Intelligence owns the non-authoritative evidence. A green scheduling
+receipt does not prove publication, and a passing architecture inventory proves
+only its declared coverage. Earlier release cadence and backlog notes below do
+not override the accepted chapter or current Linear directives.
+
+- **Separate authority from observation.** The summer moved from a remote
+  daemon API to complete `lf` execution on each owning Home. Stable Work,
+  provider-native continuity, direct child control, and current OS liveness have
+  different owners. Run parentage explains causality; it cannot manufacture
+  signal authority. The historical reconstruction is a synthesis, not proof of
+  one simultaneous fleet deployment.
+- **Reduce readers without losing evidence.** CLI and Wave status now share the
+  same Work-filtered reader, including its tests. Recent history is bounded;
+  exact child discovery is uncapped; activity includes Runs completing inside
+  the window even when they started earlier. These answer different questions.
+- **Historical archives are outside live architecture discovery.** The checker
+  excludes `.lf/chapters/`, as it excludes generated website docs. Fourteen
+  retired-term quotations initially failed the check. Preserve those exact
+  observations rather than sanitizing history or adding word-specific exceptions.
+  The regression still rejects retired vocabulary in active `.lf/skills/` files.
+- **PM renames preserve identity but not every historical label.** Chapter
+  application found new slugs failing in `lf project status` while stable UUIDs
+  resolved the same Work and captured old plan. Use the archived
+  `application/project-references.json` identities. Current PM and historical
+  execution plans are different facts; never restart a controller or directly
+  rewrite storage just to repaint history.
+- **Read back shared PM writes from the provider.** During memory curation,
+  concurrent branch updates replaced LOO-287's description after a successful
+  write. Refresh, merge both evidence sections, and verify the resulting text;
+  a successful command or stale local snapshot cannot prove the retained notes.
+- **Consolidation does not rebind Task ownership.** LOO-278's files were integrated
+  with `lf rebase --manual` into review-chapter, but its registered checkout and
+  PR chain still name chapter-planning. Installed `lf task` has no supported
+  reassignment; `prepare --name` rejects a different existing workspace and
+  `lf work relocate` supports Waves only. Preserve the original tree and exact
+  history; a supported adoption path must prove preservation before a new writer
+  starts. This is an observed placement gap, not authority to edit the registry.
+- **Current PM and historical Work counts differ.** Deduplicate by stable Work
+  id before dispositions: the chapter observed 175 rows but 174 unique Works.
+  Applied retirement preserved artifacts and history; a PM-complete retired
+  issue does not establish shipment or a won KR. Replaying the archive verifier
+  proves retained receipts, not fresh PM state or publication.
 
 ## Shipped
 
@@ -32,7 +80,9 @@ Renamed from `systems` in the 2026-07-08 wave/project/task restructure. Steers L
   time.
 - **Ordinary-PR integration tests inherit Task authority inside a worker.** Scrub `LF_RUN_CONTEXT` (plus its lease/invocation companions) when a fixture deliberately represents a non-Task repository. A missing registry while Run context is present is the intended fail-closed behavior, not a commit/push regression.
 - **Concurrent editing corrupts a file; concurrent rebasing corrupts history.** Two drivers sharing one worktree shared its `rebase-merge` state dir: conflicts resolved themselves between one command and the next, and `done` advanced 6→22 with no `--continue` from the losing session. Nothing was lost that time. Check for a live agent before working — or rebasing — a wave worktree; the driver that owns the worktree owns its `.git` sequencer.
-- **Linear Project names are identity-bearing under the native hierarchy.** The CLI slug derives deterministically from the Project name, and the slug is the cache filename (`projects/<slug>.md`) and the `--project` argument to task commands. Renaming a Linear Project changes its slug, so it moves the cache file and changes every task command's input — a rename is a migration, not a cosmetic edit.
+- **Linear Project UUIDs survive renames; derived slugs do not.** Project content
+  lives in Linear and the local SQLite snapshot, with no `projects/*.md` cache.
+  Use stable IDs when reconciling current names with captured historical plans.
 - **Environment configures a process; it must never decide what the process is.** An earlier runtime chose between booting a listener and being a resident from inherited environment, so a promoted wave could attach to its parent's listener with the parent's token. The current `lf wave` surface keeps that role explicit.
 - **Current PM truth and durable Work history have different lifetimes** (learned 2026-07-21). A terminal Project omitted from the current PM snapshot can still own non-terminal historical Task Work. Wave reads must render the current PM hierarchy and classify the stranded Project/Task separately as Wave-owned degraded evidence; they must not fail the whole join, delete history, or synthesize a PM Project. Recovery must use the stable Work id (`lf work abandon task <work-id>`) because higher-level Task commands may inspect a historical worktree that no longer exists.
 - **Terminal Task state and current PM routing are authorization boundaries**
@@ -155,7 +205,7 @@ Renamed from `systems` in the 2026-07-08 wave/project/task restructure. Steers L
 - **`sync --plan` diagnoses; it never guesses.** It reports renamed/stranded Linear projects, unassigned tasks, and labels naming no local project. Ambiguous task moves stay in the plan output for a human.
 - **Open question:** `lf pm doctor` and `lf pm sync --plan` are byte-for-byte identical (both call `pm_sync` with `plan: true`). `doctor` earns its keep only as a memorable read-only verb. Collapsing it is a product-surface call, deliberately left to Jack.
 
-## Next
+## Earlier follow-ups (reselect through the accepted chapter)
 
 - **Reduction leftovers from the `minds` review** (triaged; the `TurnFinished`+`BodyFinished` collapse, the `LoopRun` reuse in `bin/lf.rs`, and the stale `playhead.rs` error hint are applied): factor the shared inbox-interrupt arms and lift the lease-renewal block; merge `interrupt_child`/`interrupt_harness` behind one `begin_interrupt`; finish the endpoint-resolver consolidation; inline `require_loop_flow`. `heartbeat_idle` stays — a real scheduler input, and deleting it to satisfy a lint instinct is reshaping production code around tests in reverse.
 - **Live Work/Launches per worktree in `lf status`** — the store already holds

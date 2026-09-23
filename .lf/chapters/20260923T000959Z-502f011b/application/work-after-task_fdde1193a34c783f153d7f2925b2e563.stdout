@@ -1,0 +1,16 @@
+{
+  "work": {
+    "kind": "task",
+    "id": "task_fdde1193a34c783f153d7f2925b2e563"
+  },
+  "placement": {
+    "work": {
+      "kind": "task",
+      "id": "task_fdde1193a34c783f153d7f2925b2e563"
+    },
+    "home_id": "home_39860354aaca640c2ccb50bf6ca609d8",
+    "enabled": false,
+    "placed_at": "2026-07-15T21:12:17Z"
+  },
+  "status": "abandoned"
+}

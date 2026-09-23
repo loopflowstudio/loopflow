@@ -19,7 +19,12 @@ bound to the same Task first and use its report. Read every
 (`lf pm show --wave <name> --json`), and live state
 (`lf ls`, `lf status <wave>`). Build a concise briefing: what held, what is
 unknown, what shipped, which work remains active, and where reality has
-moved.
+moved. Start with what became better or worse for users, operators,
+maintainers, and agents. Keep the exact KR evidence available underneath;
+do not make the human reconstruct product meaning from the ledger.
+Carry forward the review's proposed next-chapter implications as questions,
+not inherited decisions: likely carry goals, changed assumptions, goals not
+supported by actual priority, and misplaced or unowned work.
 
 The tracked chapter archive and any Wave charter edits belong in a Task
 worktree. If this Run is not in one, complete the human briefing and return
@@ -28,11 +33,25 @@ new Task worktree before dispatching children or changing live planning.
 
 ## Gate 1 — accept direction before delegation
 
-Bring the briefing, then explore with the human what feels complete,
-obsolete, urgent, valuable, and constrained. Propose a provisional Wave map
-and discuss keep, split, merge, retire, and new boundaries until the human
-explicitly says the direction captures their intent. No Wave or Project
-start Run may launch before this record exists.
+Bring the briefing, then begin with the human's experience rather than a
+portfolio proposal. Ask a small number of open questions at a time and listen
+before synthesizing:
+
+- How did the last chapter feel? What created momentum, frustration, or
+  surprise?
+- What are they excited to make possible for users now?
+- Which user pain or opportunity matters most, independent of the existing
+  backlog?
+- What feels complete, obsolete, urgent, valuable, or constrained?
+
+These are direction questions, not requests to approve an agent-authored map.
+Reflect the answers back in the human's language, name tensions that remain
+open, and only then propose a provisional Wave map that names who each Wave
+serves and what should improve in their real use of Loopflow. Discuss keep,
+split, merge, retire, and new boundaries until the human explicitly says the
+direction captures their intent. A list of old Projects or Tasks is not a
+substitute for this conversation. No Wave or Project start Run may launch
+before this record exists.
 
 On a headless surface, open a durable `lf ask "<exact request>"` session for
 this conversation and block on it. Provider exit, silence, or a ready
@@ -45,6 +64,16 @@ this Run's id, the accepted repository direction and Wave boundaries with their 
 open tensions, source timestamps and explicit evidence gaps, and the frozen
 ledger — every starting Wave, Project stable id, exact definition, exact KR
 claim, and open Task.
+
+## Dogfood the chapter process
+
+When this live chapter exposes a defect in `start-chapter` instructions or
+tooling, preserve the observation separately from the plan. Fix a reversible,
+in-scope process defect in the current Task worktree, run its smallest useful
+validation, and resume from the same gate. Process repair never counts as human
+acceptance and never grants permission to mutate Wave, Project, Task, or Work
+state early. Record larger defects as explicit follow-up work without making
+the chapter wait for unrelated infrastructure.
 
 ## Delegate and reconcile
 
@@ -88,6 +117,24 @@ an operation look successful. Seal the interval by renaming `draft.md` to
 `start.md` only after every accepted operation succeeds. A failed or
 interrupted draft never displaces the last valid chapter. Corrections append
 a dated correction section rather than replacing an observed decision.
+
+## Publish the chapter boundary
+
+The chapter is not durable merely because live planning changed or a local
+`start.md` exists. After application succeeds, create one repository checkpoint
+containing the preceding chapter's `review.md`, every scoped review and start
+report, the accepted `start.md`, and any accepted Wave charter edits. Use `lf
+commit` so the archive has one identifiable Git boundary. Do not include
+scratch presentations or transient planning notes.
+
+Obtain explicit human authority before pushing. Then publish the checkpoint
+through the ordinary PR workflow the human selected; default to `lf pr submit`
+when a person should land it. Future chapter reviews open their interval from
+the newest merged `.lf/chapters/<chapter-id>/start.md`, using the record's UTC
+start time rather than commit age. Until that commit merges, report that live PM
+state is ahead of the repository archive and do not claim the new chapter is
+fully published. A later correction appends evidence in a new commit; it never
+rewrites the observed start decision.
 
 ## Preservation
 

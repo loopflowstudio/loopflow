@@ -67,6 +67,10 @@ jobs:
       - uses: taiki-e/install-action@nextest
       - name: Run Rust tests
         run: cargo nextest run --all
+      - name: Prove checkout refresh through the CLI
+        run: |
+          cargo build -p loopflow --bin lf
+          LOOPFLOW_TEST_LF="$PWD/target/debug/lf" uv run pytest python/tests/test_checkout_refresh.py
 
   # Needs the full history: the check compares every migration against the last
   # release tag, which is how an edited shipped migration is caught before publish.

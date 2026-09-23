@@ -176,6 +176,9 @@ each `.md` URL, use the curated
 ## Developing loopflow
 
 ```bash
+lf install                                   # refresh main, required packages, and the published release
+lf install schedule                          # keep this laptop current at login and hourly (macOS)
+lf rebase                                    # refresh main and integrate it into this worktree
 uv run python scripts/install.py local --use  # build and pin this checkout against a disposable Home
 uv run python scripts/install.py refresh      # return to the latest published release and reliable Home
 uv run python scripts/install.py local        # build only under local-bin/

@@ -1,6 +1,6 @@
 use crate::engine::agent::{launch_agent, AgentCapabilities, ProcessConfig};
-use crate::engine::config::load_config_or_default;
-use crate::engine::git::{current_branch, delete_local_branch, get_default_branch, sync_main};
+use crate::engine::config::{load_config_or_default, Config};
+use crate::engine::git::{current_branch, delete_local_branch, get_default_branch};
 use crate::engine::identity::WorktreeName;
 use crate::engine::naming::git_user;
 use crate::engine::worktrees::{
@@ -183,7 +183,8 @@ pub fn run_release(cmd: &ReleaseCommand) -> Result<()> {
     }
 }
 
-struct CliProgress;
+#[derive(Debug)]
+pub(crate) struct CliProgress;
 
 impl Progress for CliProgress {
     fn status(&self, msg: &str) {
@@ -260,9 +261,23 @@ pub fn run_rebase(
         return Ok(());
     }
     let started = Instant::now();
+    let default = get_default_branch(&repo_root)?;
+    let upstream = format!("origin/{default}");
+    let on_main = current_branch(&repo_root)?.as_deref() == Some(&default);
+    if !plan_only {
+        crate::ops::checkout::refresh_main(&repo_root, progress)?;
+        if on_main && onto.is_none_or(|target| target == upstream) {
+            progress.status("Main is current; unpublished commits and edits remain local.");
+            return Ok(());
+        }
+    }
     // A Task stack owns its rebase target: the live parent branch until merge,
     // then the default branch. An explicit override could silently drop work.
-    let stacked = crate::ops::task::task_stack(&repo_root)?;
+    let stacked = if on_main {
+        None
+    } else {
+        crate::ops::task::task_stack(&repo_root)?
+    };
     if stacked.is_some() && onto.is_some() {
         return Err(anyhow!(
             "stacked Task rebases choose their parent automatically; omit --onto"
@@ -273,9 +288,10 @@ pub fn run_rebase(
         .and_then(|stacked| stacked.parent_branch.as_ref())
         .map(|branch| format!("origin/{branch}"));
     let fork_base = stacked.as_ref().map(|stacked| stacked.fork_base.clone());
+    let default_target = if on_main { upstream } else { default.clone() };
     let plan = plan_rebase(
         &repo_root,
-        stacked_onto.as_deref().or(onto),
+        stacked_onto.as_deref().or(onto).or(Some(&default_target)),
         fork_base.clone(),
     )?;
     let onto_ref = plan.base_ref.clone();
@@ -296,33 +312,39 @@ pub fn run_rebase(
         .map(|_| ())
         .map_err(Into::into);
     }
-    let (verification, agent_launched) = match rebase_with_recovery(
-        &repo_root,
-        &RebaseOptions {
-            onto: onto_ref.clone(),
-            push: true,
-            fork_base,
-        },
-        progress,
-    ) {
-        Ok(verification) => (verification, false),
-        Err(OpsError::RebaseConflict {
-            onto,
-            detail,
-            recovery,
-        }) => (
-            resolve_rebase_conflict(
+    let recovery_config = load_config_or_default(Some(&repo_root));
+    let (verification, agent_launched) =
+        crate::ops::checkout::with_preserved_edits(&repo_root, || {
+            match rebase_with_recovery(
                 &repo_root,
-                &onto,
-                &detail,
-                recovery,
-                is_avoidable_rebase_class(&plan.class),
+                &RebaseOptions {
+                    onto: onto_ref.clone(),
+                    push: !on_main,
+                    fork_base,
+                },
                 progress,
-            )?,
-            true,
-        ),
-        Err(err) => return Err(err.into()),
-    };
+            ) {
+                Ok(verification) => Ok((verification, false)),
+                Err(OpsError::RebaseConflict {
+                    onto,
+                    detail,
+                    recovery,
+                }) => Ok((
+                    resolve_rebase_conflict(
+                        &repo_root,
+                        &onto,
+                        &detail,
+                        recovery,
+                        is_avoidable_rebase_class(&plan.class),
+                        progress,
+                        &recovery_config,
+                    )
+                    .map_err(|error| OpsError::Message(error.to_string()))?,
+                    true,
+                )),
+                Err(err) => Err(err),
+            }
+        })?;
     if let Some(stacked) = stacked.as_ref() {
         crate::ops::task::record_stack_rebase(
             stacked,
@@ -376,6 +398,7 @@ fn resolve_rebase_conflict(
     recovery: Option<Box<crate::ops::RebaseRecovery>>,
     avoidable: bool,
     progress: &impl Progress,
+    config: &Config,
 ) -> Result<crate::ops::RebaseVerification> {
     let recovery =
         recovery.ok_or_else(|| anyhow!("rebase conflict has no owned recovery operation"))?;
@@ -390,8 +413,14 @@ fn resolve_rebase_conflict(
     }
     progress.status("Launching rebase agent to resolve conflicts...");
     Ok(recover_rebase(*recovery, |env| {
-        launch_skill_agent(repo_root, "rebase-conflicts", Some(&context), Some(env))
-            .map_err(|error| OpsError::Message(error.to_string()))
+        launch_skill_agent(
+            repo_root,
+            "rebase-conflicts",
+            Some(&context),
+            Some(env),
+            config,
+        )
+        .map_err(|error| OpsError::Message(error.to_string()))
     })?)
 }
 
@@ -434,7 +463,15 @@ fn with_rebase_retry<T>(
             detail,
             recovery,
         }) => {
-            resolve_rebase_conflict(repo_root, &onto, &detail, recovery, false, progress)?;
+            resolve_rebase_conflict(
+                repo_root,
+                &onto,
+                &detail,
+                recovery,
+                false,
+                progress,
+                &load_config_or_default(Some(repo_root)),
+            )?;
             progress.status(&format!("Retrying {label} after rebase..."));
             op(repo_root, true).map_err(Into::into)
         }
@@ -1741,8 +1778,9 @@ fn wt_create(name: &str, dry_run: bool) -> Result<()> {
     let main_repo = main_repo_root(&repo_root)?;
     let segment = WorktreeSegment::parse(name)?;
 
-    let default_branch = get_default_branch(&main_repo)?;
-    let _ = sync_main(&main_repo, &default_branch);
+    if !dry_run {
+        crate::ops::checkout::refresh_main(&main_repo, &CliProgress)?;
+    }
 
     let placement = plan_placement(&main_repo, segment)?;
 
@@ -1859,11 +1897,11 @@ fn wt_list(format: Option<&str>, sync: bool) -> Result<()> {
     let default_branch = get_default_branch(&main_repo)?;
     // `wt list` is an inspection surface and stays side-effect free by default:
     // merge/fresh flags reflect the last-synced main. `--sync` is the explicit,
-    // self-owned mutation that fetches origin and fast-forwards main first — a
+    // self-owned mutation that fetches origin and integrates main first — a
     // read never fetches, resets, or stashes the canonical checkout behind the
     // user's back.
     if sync {
-        let _ = sync_main(&main_repo, &default_branch);
+        crate::ops::checkout::refresh_main(&main_repo, &crate::ops::NullProgress)?;
     }
     let worktrees = list_worktrees(&main_repo)?;
 
@@ -2092,8 +2130,9 @@ fn parse_shortstat(raw: &str) -> String {
 fn wt_prune(dry_run: bool) -> Result<()> {
     let repo_root = find_repo_root()?;
     let main_repo = main_repo_root(&repo_root)?;
-    let default_branch = get_default_branch(&main_repo)?;
-    let _ = sync_main(&main_repo, &default_branch);
+    if !dry_run {
+        crate::ops::checkout::refresh_main(&main_repo, &CliProgress)?;
+    }
     let protected_paths = protected_worktree_paths()?;
     let report = prune_worktrees(
         &main_repo,
@@ -2365,13 +2404,13 @@ fn launch_skill_agent(
     skill_name: &str,
     context: Option<&str>,
     env: Option<&std::collections::BTreeMap<String, String>>,
+    config: &Config,
 ) -> Result<()> {
     let skill = discover_skill(repo_root, skill_name)?;
-    let config = load_config_or_default(Some(repo_root));
 
     let message = context.map(|value| value.to_string());
     let prepared = prepare_launch_prompt(
-        &config,
+        config,
         LaunchPromptInput {
             repo_root: repo_root.to_path_buf(),
             skill: Some(skill_name.to_string()),
@@ -2456,7 +2495,7 @@ fn launch_skill_agent(
 /// How a dependency is installed via Homebrew (macOS).
 #[derive(Debug, Clone, Copy, PartialEq)]
 enum Brew {
-    /// `brew install <name>` — plain formula (or tap-qualified, e.g. dopplerhq/cli/doppler).
+    /// `brew install <name>` — plain formula (or tap-qualified, e.g. doppler).
     Formula(&'static str),
     /// `brew install --cask <name>` — GUI app.
     Cask(&'static str),
@@ -2552,7 +2591,7 @@ const SYSTEM_DEPS: &[SystemDep] = &[
         command: "doppler",
         required: true,
         macos_only: false,
-        brew: Some(Brew::Formula("dopplerhq/cli/doppler")),
+        brew: Some(Brew::Formula("doppler")),
         fallback: "https://docs.doppler.com/docs/install-cli",
     },
     // Optional: agent CLIs and editors.
@@ -2597,6 +2636,39 @@ const SYSTEM_DEPS: &[SystemDep] = &[
         fallback: "",
     },
 ];
+
+/// Converge required tools using the same inventory as doctor and Brewfile.
+pub(crate) fn refresh_required_packages() -> Result<()> {
+    if cfg!(target_os = "macos") {
+        let mut child = Command::new("brew")
+            .args(["bundle", "install", "--file=-"])
+            .stdin(std::process::Stdio::piped())
+            .spawn()
+            .map_err(|error| {
+                anyhow!("required package refresh needs Homebrew (https://brew.sh): {error}")
+            })?;
+        let mut input = child.stdin.take().expect("piped Homebrew input");
+        for dep in SYSTEM_DEPS.iter().filter(|dep| dep.required) {
+            if let Some(Brew::Formula(formula)) = dep.brew {
+                writeln!(input, "brew {formula:?}")?;
+            }
+        }
+        drop(input);
+        if !child.wait()?.success() {
+            return Err(anyhow!("required package refresh failed; fix the Homebrew error above and rerun `lf install`"));
+        }
+    }
+    for dep in SYSTEM_DEPS.iter().filter(|dep| dep.required) {
+        if !dep.is_present() {
+            return Err(anyhow!(
+                "required tool {} is missing: {}; then rerun `lf install`",
+                dep.name,
+                dep.install_hint(cfg!(target_os = "macos"))
+            ));
+        }
+    }
+    Ok(())
+}
 
 /// Render the repo-root Brewfile from the declared dependency list.
 fn brewfile_contents() -> String {

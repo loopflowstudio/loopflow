@@ -98,7 +98,7 @@ require_homebrew
 
 MISSING_TOOLS=""
 ensure_brew_formula "gh" "gh" MISSING_TOOLS
-ensure_brew_formula "doppler" "dopplerhq/cli/doppler" MISSING_TOOLS
+ensure_brew_formula "doppler" "doppler" MISSING_TOOLS
 ensure_brew_formula "cloudflared" "cloudflared" MISSING_TOOLS
 
 if [[ "$MODE" == "check" && -n "$MISSING_TOOLS" ]]; then

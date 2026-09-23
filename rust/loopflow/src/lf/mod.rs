@@ -240,11 +240,10 @@ pub enum Commands {
         #[command(subcommand)]
         cmd: SessionCommand,
     },
-    /// Internal installer transaction entry point.
-    #[command(hide = true)]
+    /// Refresh main, required packages, and the installed published release
     Install {
         #[command(subcommand)]
-        cmd: InstallCommand,
+        cmd: Option<InstallCommand>,
     },
     /// Pull request lifecycle
     Pr {
@@ -1146,6 +1145,8 @@ pub enum TaskCommand {
 
 #[derive(Subcommand, Debug)]
 pub enum InstallCommand {
+    /// Install an hourly laptop refresh job (macOS launchd)
+    Schedule,
     /// Continue one interrupted machine install switch from its pinned candidate.
     #[command(hide = true)]
     RecoverSwitch {
@@ -1981,9 +1982,21 @@ mod tests {
     }
 
     #[test]
-    fn installer_transport_is_hidden_and_has_no_status_surface() {
-        let help = Cli::command().render_long_help().to_string();
-        assert!(!help.contains("install"));
+    fn install_exposes_refresh_and_schedule_but_hides_transaction_commands() {
+        let mut command = Cli::command();
+        assert!(command.render_long_help().to_string().contains("install"));
+        let help = command
+            .find_subcommand_mut("install")
+            .unwrap()
+            .render_long_help()
+            .to_string();
+        assert!(help.contains("schedule"));
+        assert!(!help.contains("preflight"));
+        assert!(matches!(
+            Cli::try_parse_from(["lf", "install"]).unwrap().command,
+            Some(Commands::Install { cmd: None })
+        ));
+        assert!(Cli::try_parse_from(["lf", "install", "schedule"]).is_ok());
         assert!(Cli::try_parse_from(["lf", "install", "status"]).is_err());
         assert!(Cli::try_parse_from(["lf", "install", "preflight"]).is_ok());
     }
@@ -3190,11 +3203,11 @@ mod tests {
         assert!(matches!(
             cli.command,
             Some(Commands::Install {
-                cmd: InstallCommand::Promote {
+                cmd: Some(InstallCommand::Promote {
                     from_build: Some(_),
                     fresh: true,
                     ..
-                }
+                })
             })
         ));
         assert!(Cli::try_parse_from([

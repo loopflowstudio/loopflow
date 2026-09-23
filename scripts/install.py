@@ -13,8 +13,10 @@ Remote releases happen via `lf release patch` -> merge -> auto-tag -> CI.
 from __future__ import annotations
 
 import hashlib
+import json
 import os
 import platform
+import plistlib
 import shutil
 import subprocess
 import tempfile
@@ -314,9 +316,16 @@ def _verify_release_asset(path: Path, expected: str) -> None:
 
 
 def _install_published_release(install_dir: Path) -> str:
+    tag = _latest_release_tag()
+    if (
+        all(_has_release_version(install_dir / name, tag) for name in ("lf", "lfd"))
+        and _is_published_cli(install_dir / "lf")
+        and (platform.system() != "Darwin" or _has_release_app(tag))
+    ):
+        typer.echo(f"Published release {tag} is already installed.")
+        return tag
     with tempfile.TemporaryDirectory(prefix="loopflow-release-") as temp:
         directory = Path(temp)
-        tag = _latest_release_tag()
         pinned_base = f"{RELEASE_DOWNLOAD_BASE}/{tag}"
         manifest = directory / "SHA256SUMS"
         _download_release_asset(f"{pinned_base}/SHA256SUMS", manifest)
@@ -330,6 +339,54 @@ def _install_published_release(install_dir: Path) -> str:
             env=env,
         )
         return tag
+
+
+def _has_release_version(binary: Path, tag: str) -> bool:
+    try:
+        version = subprocess.run(
+            [str(binary), "--version"], capture_output=True, text=True, timeout=30
+        )
+    except (OSError, subprocess.TimeoutExpired):
+        return False
+    return version.returncode == 0 and version.stdout.strip() == (
+        f"{binary.name} {tag.removeprefix('v')}"
+    )
+
+
+def _has_release_app(tag: str) -> bool:
+    applications = Path(os.environ.get("LF_APPLICATIONS_DIR", "/Applications"))
+    contents = applications / f"{APP_NAME}.app" / "Contents"
+    try:
+        info = plistlib.loads((contents / "Info.plist").read_bytes())
+    except (OSError, ValueError):
+        return False
+    version = tag.removeprefix("v")
+    return (
+        isinstance(info, dict)
+        and info.get("CFBundleShortVersionString") == version
+        and info.get("CFBundleVersion") == version
+        and all(
+            (contents / "MacOS" / name).is_file() and os.access(contents / "MacOS" / name, os.X_OK)
+            for name in (APP_NAME, "lf", "lfd")
+        )
+    )
+
+
+def _is_published_cli(binary: Path) -> bool:
+    # A clean development build at a release tag has the same version string.
+    # Reuse the installer's read-only identity instead of inventing a receipt.
+    try:
+        result = subprocess.run(
+            [str(binary), "install", "preflight", "--json"],
+            capture_output=True,
+            text=True,
+            timeout=30,
+        )
+        preview = json.loads(result.stdout)
+    except (OSError, subprocess.TimeoutExpired, ValueError):
+        return False
+    candidate = preview.get("candidate") if isinstance(preview, dict) else None
+    return isinstance(candidate, dict) and candidate.get("authority") == "published"
 
 
 # --- Loopflow bundle ---
@@ -471,6 +528,57 @@ app = typer.Typer(help="Build and install loopflow locally.", add_completion=Fal
 @app.callback()
 def _root() -> None:
     """Build and install loopflow locally."""
+
+
+@app.command()
+def schedule() -> None:
+    """Run the full laptop refresh at login and hourly, retrying missed runs."""
+    if platform.system() != "Darwin":
+        raise typer.BadParameter("automatic laptop refresh currently uses macOS launchd")
+    binary = _resolve_install_dir() / "lf"
+    label = "com.loopflow.refresh"
+    logs = Path.home() / "Library" / "Logs" / "Loopflow"
+    logs.mkdir(parents=True, exist_ok=True)
+    path = Path.home() / "Library" / "LaunchAgents" / f"{label}.plist"
+    path.parent.mkdir(parents=True, exist_ok=True)
+    # Stable tool locations only: provider-session PATHs expire after the run.
+    search_path = ":".join(
+        [
+            str(binary.parent),
+            str(Path.home() / ".cargo/bin"),
+            "/opt/homebrew/bin",
+            "/usr/local/bin",
+            "/usr/bin",
+            "/bin",
+            "/usr/sbin",
+            "/sbin",
+        ]
+    )
+    payload = plistlib.dumps(
+        {
+            "Label": label,
+            "ProgramArguments": [str(binary), "install"],
+            "WorkingDirectory": str(ROOT.resolve()),
+            "EnvironmentVariables": {"PATH": search_path},
+            "RunAtLoad": True,
+            "StartCalendarInterval": {"Minute": 0},
+            "StandardOutPath": str(logs / "refresh.log"),
+            "StandardErrorPath": str(logs / "refresh.log"),
+        }
+    )
+    domain = f"gui/{os.getuid()}"
+    loaded = (
+        subprocess.run(["launchctl", "print", f"{domain}/{label}"], capture_output=True).returncode
+        == 0
+    )
+    if path.exists() and path.read_bytes() == payload and loaded:
+        typer.echo(f"Refresh already scheduled: {path}")
+        return
+    if loaded:
+        _run_or_raise(["launchctl", "bootout", f"{domain}/{label}"], "unschedule refresh")
+    path.write_bytes(payload)
+    _run_or_raise(["launchctl", "bootstrap", domain, str(path)], "schedule refresh")
+    typer.echo(f"Refresh scheduled at login and hourly: {path}; logs: {logs / 'refresh.log'}")
 
 
 @app.command()

@@ -1,7 +1,7 @@
 use crate::engine::{
     check_cli_available, launch_agent, load_config_or_default, parse_agent, prepare_launch_prompt,
     write_prompt_log, AgentCapabilities, AgentConfig, Config, ContextSourceOverrides,
-    LaunchPromptInput, LaunchTarget, ProcessConfig, PromptComponents, SkillSyncOptions,
+    LaunchPromptInput, LaunchTarget, ProcessConfig, PromptComponents, Skill, SkillSyncOptions,
     StreamFormat, Surface,
 };
 use crate::lf::commands::util::{find_repo_root, launch_session_with_env};
@@ -52,7 +52,11 @@ pub fn run_bound(
             binding.context,
         ),
     };
-    let mut built = build_bound_prompt_at(skill, &message, cli, &binding.cwd)?;
+    let resolved_skill = skill
+        .map(crate::ops::human_session::active_flow_skill)
+        .transpose()?
+        .flatten();
+    let mut built = build_bound_prompt_at(skill, &message, cli, &binding.cwd, resolved_skill)?;
     built.agent_config.cwd = Some(binding.cwd.clone());
     built.agent_config.env.insert(
         crate::work::wave::context::WAVE_ID_ENV.to_string(),
@@ -90,23 +94,8 @@ pub(crate) struct PreparedHarnessTurn {
     pub model: Option<String>,
 }
 
-pub(crate) fn prepare_harness_turn(
-    skill: &str,
-    message: &str,
-    wave: &str,
-    max_turns: Option<u32>,
-) -> Result<PreparedHarnessTurn> {
-    let cli = Cli {
-        batch: true,
-        wave: Some(wave.to_string()),
-        max_turns,
-        ..Cli::default()
-    };
-    prepare_runner_turn(skill, message, &cli)
-}
-
-pub(crate) fn prepare_harness_turn_at(
-    skill: &str,
+pub(crate) fn prepare_harness_turn_from_skill_at(
+    skill: &Skill,
     message: &str,
     wave: &str,
     max_turns: Option<u32>,
@@ -118,11 +107,19 @@ pub(crate) fn prepare_harness_turn_at(
         max_turns,
         ..Cli::default()
     };
-    prepare_runner_turn_at(skill, message, &cli, repo_root.to_path_buf(), true, None)
+    prepare_runner_turn_at(
+        &skill.name,
+        message,
+        &cli,
+        repo_root.to_path_buf(),
+        true,
+        None,
+        Some(skill.clone()),
+    )
 }
 
 pub(crate) fn prepare_wave_harness_turn(
-    skill: &str,
+    skill: &Skill,
     message: &str,
     wave: &str,
     max_turns: Option<u32>,
@@ -137,20 +134,16 @@ pub(crate) fn prepare_wave_harness_turn(
         ..Cli::default()
     };
     let mut prepared = prepare_runner_turn_at(
-        skill,
+        &skill.name,
         message,
         &cli,
         origin_repo.to_path_buf(),
         true,
         surface_override,
+        Some(skill.clone()),
     )?;
     prepared.config.cwd = Some(resident_repo.to_path_buf());
     Ok(prepared)
-}
-
-fn prepare_runner_turn(skill: &str, message: &str, cli: &Cli) -> Result<PreparedHarnessTurn> {
-    let repo_root = find_repo_root()?;
-    prepare_runner_turn_at(skill, message, cli, repo_root, true, None)
 }
 
 fn prepare_runner_turn_at(
@@ -160,6 +153,7 @@ fn prepare_runner_turn_at(
     repo_root: PathBuf,
     use_native_skill_launch: bool,
     surface_override: Option<Surface>,
+    resolved_skill: Option<Skill>,
 ) -> Result<PreparedHarnessTurn> {
     let mut built = build_prompt_at(
         Some(skill),
@@ -171,7 +165,7 @@ fn prepare_runner_turn_at(
             crate::trace::ContextAssetKind::Goal,
             crate::trace::ContextScope::Step,
         )),
-        surface_override,
+        (surface_override, resolved_skill),
     )?;
     let input = std::mem::take(&mut built.agent_config.task_prompt);
     Ok(PreparedHarnessTurn {
@@ -187,7 +181,7 @@ fn build_prompt(skill: Option<&str>, message: Option<&str>, cli: &Cli) -> Result
     let start = Instant::now();
     let repo_root = find_repo_root()?;
     debug!(elapsed_ms = start.elapsed().as_millis(), "found repo root");
-    build_prompt_at(skill, message, cli, repo_root, true, None, None)
+    build_prompt_at(skill, message, cli, repo_root, true, None, (None, None))
 }
 
 fn build_bound_prompt_at(
@@ -195,6 +189,7 @@ fn build_bound_prompt_at(
     message: &str,
     cli: &Cli,
     repo_root: &Path,
+    resolved_skill: Option<Skill>,
 ) -> Result<PromptBuild> {
     // A Work-bound launch carries context that cannot be reconstructed by a
     // vendor skill sigil: the selected Work seed and the Task worktree's exact
@@ -209,7 +204,7 @@ fn build_bound_prompt_at(
             crate::trace::ContextAssetKind::Goal,
             crate::trace::ContextScope::Task,
         )),
-        None,
+        (None, resolved_skill),
     )
 }
 
@@ -220,8 +215,9 @@ fn build_prompt_at(
     repo_root: PathBuf,
     use_native_skill_launch: bool,
     message_context: Option<(crate::trace::ContextAssetKind, crate::trace::ContextScope)>,
-    surface_override: Option<Surface>,
+    launch_override: (Option<Surface>, Option<Skill>),
 ) -> Result<PromptBuild> {
+    let (surface_override, resolved_skill) = launch_override;
     let config_start = Instant::now();
     let config = load_config_or_default(Some(&repo_root));
     debug!(
@@ -235,12 +231,12 @@ fn build_prompt_at(
     );
 
     let discover_start = Instant::now();
-    let discovered_skill = if let Some(skill_name) = skill {
-        Some(crate::lf::discovery::discover_skill(
+    let discovered_skill = match (resolved_skill, skill) {
+        (Some(skill), _) => Some(skill),
+        (None, Some(skill_name)) => Some(crate::lf::discovery::discover_skill(
             &repo_root, skill_name,
-        )?)
-    } else {
-        None
+        )?),
+        (None, None) => None,
     };
     debug!(
         elapsed_ms = discover_start.elapsed().as_millis(),
@@ -1022,13 +1018,13 @@ mod tests {
     use super::{
         attributed_context, begin_run_capture, build_bound_prompt_at, build_prompt_at,
         is_interactive_run, is_interactive_run_with_tty, launch_headless_prompt, launch_prompt,
-        prepare_wave_harness_turn, should_launch_via_skill, skill_launch_seed, split_skill_args,
-        PromptBuild,
+        prepare_harness_turn_from_skill_at, prepare_wave_harness_turn, should_launch_via_skill,
+        skill_launch_seed, split_skill_args, PromptBuild,
     };
     use crate::durable::RunId;
     use crate::engine::agent::{launch_agent, AgentCapabilities, AgentConfig, ProcessConfig};
     use crate::engine::prompt::{Document, DocumentSource, PromptComponents};
-    use crate::engine::{Config, Surface};
+    use crate::engine::{Config, Skill, Surface};
     use crate::lf::Cli;
     use crate::trace::{ContextAssetKind, ContextScope};
     use clap::Parser;
@@ -1368,7 +1364,8 @@ printf '%s\n' '{"type":"result","subtype":"success","usage":{"input_tokens":7,"o
             2
         );
 
-        let built = build_bound_prompt_at(Some("proof"), "reconcile", &cli, repo.path()).unwrap();
+        let built =
+            build_bound_prompt_at(Some("proof"), "reconcile", &cli, repo.path(), None).unwrap();
         assert!(built
             .agent_config
             .task_prompt
@@ -1380,7 +1377,7 @@ printf '%s\n' '{"type":"result","subtype":"success","usage":{"input_tokens":7,"o
     }
 
     #[test]
-    fn wave_harness_loads_canonical_skill_and_executes_in_resident_worktree() {
+    fn wave_harness_uses_started_skill_and_executes_in_resident_worktree() {
         let origin = loopflow_test_support::TestRepo::new();
         origin.create_file(".lf/skills/proof.md", "canonical skill instructions");
         origin.stage_all();
@@ -1390,8 +1387,10 @@ printf '%s\n' '{"type":"result","subtype":"success","usage":{"input_tokens":7,"o
         resident.stage_all();
         resident.commit("stale resident skill");
 
+        let skill = crate::engine::load_skill("proof", origin.path()).unwrap();
+        origin.create_file(".lf/skills/proof.md", "later instructions");
         let prepared = prepare_wave_harness_turn(
-            "proof",
+            &skill,
             "continue",
             "ship",
             Some(4),
@@ -1404,6 +1403,7 @@ printf '%s\n' '{"type":"result","subtype":"success","usage":{"input_tokens":7,"o
         assert_eq!(prepared.config.cwd.as_deref(), Some(resident.path()));
         assert!(prepared.input.contains("canonical skill instructions"));
         assert!(!prepared.input.contains("stale resident skill instructions"));
+        assert!(!prepared.input.contains("later instructions"));
     }
 
     #[test]
@@ -1420,7 +1420,8 @@ printf '%s\n' '{"type":"result","subtype":"success","usage":{"input_tokens":7,"o
             wave: Some("ship".to_string()),
             ..Cli::default()
         };
-        let built = build_bound_prompt_at(Some("proof"), "continue", &cli, repo.path()).unwrap();
+        let built =
+            build_bound_prompt_at(Some("proof"), "continue", &cli, repo.path(), None).unwrap();
 
         let committed = built
             .agent_config
@@ -1460,6 +1461,7 @@ printf '%s\n' '{"type":"result","subtype":"success","usage":{"input_tokens":7,"o
             "<lf:work kind=\"task\" id=\"task_test\">Task seed</lf:work>",
             &cli,
             repo.path(),
+            None,
         )
         .unwrap();
         repo.create_file(
@@ -1532,7 +1534,7 @@ printf '%s\n' '{"type":"result","subtype":"success","usage":{"input_tokens":7,"o
             repo.path().to_path_buf(),
             true,
             None,
-            None,
+            (None, None),
         )
         .unwrap();
 
@@ -1542,6 +1544,32 @@ printf '%s\n' '{"type":"result","subtype":"success","usage":{"input_tokens":7,"o
         assert!(built.prompt.contains("verify the result"));
         assert!(!built.prompt.starts_with("/proof"));
         assert!(!built.prompt.starts_with("$proof"));
+    }
+
+    #[test]
+    fn persisted_skill_spec_is_the_prompt_authority() {
+        let repo = loopflow_test_support::TestRepo::new();
+        repo.create_file(
+            ".lf/skills/proof.md",
+            "# Mutated\n\nThis source was edited after the Flow started.",
+        );
+        let skill = Skill {
+            name: "proof".to_string(),
+            agent: None,
+            default_agent: None,
+            directions: Vec::new(),
+            action_style: None,
+            content: Some(
+                "# Persisted\n\nThese are the instructions captured at Flow start.".to_string(),
+            ),
+        };
+
+        let prepared =
+            prepare_harness_turn_from_skill_at(&skill, "prove it", "proof-wave", None, repo.path())
+                .unwrap();
+
+        assert!(prepared.input.contains("captured at Flow start"));
+        assert!(!prepared.input.contains("edited after the Flow started"));
     }
 
     #[test]

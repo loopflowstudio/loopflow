@@ -31,7 +31,7 @@ while `lf ask` parks the Run at a durable human session in its own checkout.
 A Wave directing a task is the internal case:
 
 ```bash
-lf task prepare INF-123                              # tracked Work, no controller
+lf task prepare INF-123                              # tracked Work, no execution
 lf --task INF-123 research "write scratch/api.md"    # independent bounded Run
 lf task run INF-123                                  # start built-in Task automation
 lf task steer INF-123 "take the smaller approach"    # queue durable direction
@@ -54,10 +54,11 @@ Run identity does not reserve Work, authorize a worktree mutation, or prove a
 process signal-safe. Tasks are Linear issues, so durable delegated work starts
 from an existing issue and the roadmap remains the queue.
 
-Built-in Wave, Project, and Task controllers form a layer above these records.
-An agent may instead compose `lf task prepare`, a `--task`/`--project`/`--wave`
-skill Run, Work input, and delivery commands itself; it need not install a
-controller to act for Work.
+Only Task Work persists a selected Flow and advances it one exact boundary at a
+time. Project operation is a finite `project/operate` Run over current facts.
+An agent may also compose `lf task prepare`, a `--task`/`--project`/`--wave`
+skill Run, Work input, and delivery commands itself. Attribution grants context,
+not permission to move a Task's Flow position.
 
 ## Delegate
 
@@ -67,7 +68,7 @@ lf task run INF-123                          # run an existing Linear issue
 lf task start <project-id> "add passkeys"    # create the issue, then run it
 pbpaste | lf task start <project-id>         # report from stdin; first line is the title
 lf task run INF-124 --stack-on INF-123       # dependent work before the parent PR merges
-lf project run <project-id>                  # start the supervising Project Work
+lf project run <project-id>                  # run one finite Project operation
 ```
 
 The contract every agent runs under: **delegation must make the problem
@@ -83,11 +84,9 @@ merge, then replays only child-authored commits onto `main`.
 ## Steer
 
 Task and Project Steer appends a durable comment event to the selected Work
-before doing anything else. If the Work has a controller, a stopped controller
-is relaunched. A running controller polls for new comments and asks its provider
-harness to apply them at the next turn boundary; if live insertion is unavailable,
-the next Skill seed reads the complete comment stream. Controller-free Work
-retains the direction for the next bounded Run or future controller:
+before doing anything else. Task Steer ensures the selected Task Flow has one
+worker; Project Steer launches a new finite operation. The next Skill seed reads
+the complete comment stream:
 
 ```bash
 lf task steer INF-123 "support passkeys too"       # durable direction
@@ -107,17 +106,16 @@ lf session list --json                                # unresolved human Session
 
 A Steer receipt proves that the direction was stored, not that a provider read
 or applied it. `lf task interrupt INF-123` appends a durable interrupt comment;
-the active Task controller observes it and ends the current provider turn so
-the next boundary re-reads direction. With no live controller it is inert.
-Generic `lf work interrupt` and `lf project interrupt` still refuse because
-those surfaces do not publish an exact process owner. Loopflow never guesses
-signal authority from a Run id, Work id, PID, or tmux name. Project Work has
-`lf project attach <id>` for an operator who needs the provider's native
-controls.
+the active Task worker observes it and ends the current provider turn so the
+next boundary re-reads direction. With no live worker it remains durable input.
+Generic `lf work interrupt` refuses because it does not publish an exact process
+owner. Loopflow never guesses signal authority from a Run id, Work id, PID, or
+tmux name. Project operations are ordinary finite Runs; they have no resident
+process to interrupt, resume, wait for, or attach to.
 
-Work survives its provider process. `lf task resume INF-123 --model codex`
-selects another provider without losing durable direction, the worktree, or
-the Task PR. `lf task run` never reopens terminal Work: a person can use
+Work survives its provider process. `lf task resume INF-123` starts a fresh
+boundary without losing durable direction, the worktree, or the Task PR. `lf
+task run` never reopens terminal Work: a person can use
 `lf task recover` to restart an abandoned Task on the same worktree, while a
 completed Task requires a new Linear task.
 
@@ -127,8 +125,8 @@ fails closed before a commit, push, publication, merge request, rotation, or
 completion; a person retains explicit authority to inspect and remediate the
 preserved Work.
 
-`lf project` carries the same durable `steer`, `wait`, `resume`, and `attach`
-controls one level up.
+`lf project run` and `lf project steer` launch fresh operations from current
+Project facts and durable input.
 
 ## Memory
 

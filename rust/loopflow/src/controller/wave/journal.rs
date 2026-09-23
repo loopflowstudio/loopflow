@@ -653,7 +653,7 @@ impl Narrator {
                     info(format!("playhead completed · {flow}"))
                 }
                 PlayheadEvent::DefinitionReset => {
-                    info("playhead reset · definition changed".to_string())
+                    info("playhead replaced a historical definition".to_string())
                 }
                 PlayheadEvent::StepStarted { step, .. } => {
                     info(format!("playhead now · {} / {}", step.flow, step.step))
@@ -837,6 +837,14 @@ impl Journal {
                     );
                 }
                 Err(err) => {
+                    if line.ends_with('\n') {
+                        anyhow::bail!(
+                            "journal {} has an unreadable complete record at byte {}: {}",
+                            path.display(),
+                            start,
+                            err,
+                        );
+                    }
                     tracing::warn!(
                         path = %path.display(),
                         byte_offset = start,
@@ -1594,6 +1602,37 @@ mod tests {
         let (_, events) = Journal::open(&path).expect("reopen again");
         assert_eq!(events.len(), 2);
         assert_eq!(events[1].seq, 2);
+    }
+
+    #[test]
+    fn shipped_step_plan_journal_replays_without_truncation() {
+        let (_tmp, path) = open_tmp();
+        std::fs::create_dir_all(path.parent().unwrap()).unwrap();
+        let playhead = r#"{"v":1,"seq":1,"at":"2026-09-22T00:00:00Z","kind":{"type":"playhead_changed","event":{"kind":"definition_reset"},"playhead":{"stack":[{"id":"old-wave","flow":"wave","steps":[{"name":"wave/operate","kind":"skill","human":false}],"cursor":0,"iteration":0,"queue":[]}],"active":null}}}"#;
+        let message = r#"{"v":1,"seq":2,"at":"2026-09-22T00:01:00Z","kind":{"type":"user_message","id":"msg-2","op":"message","text":"Keep this durable conversation"}}"#;
+        let raw = format!("{playhead}\n{message}\n");
+        std::fs::write(&path, &raw).unwrap();
+
+        let (journal, events) = Journal::open(&path).unwrap();
+
+        assert_eq!(events.len(), 2);
+        assert_eq!(journal.next_seq(), 3);
+        assert_eq!(std::fs::read_to_string(path).unwrap(), raw);
+        let EventKind::PlayheadChanged { playhead, .. } = &events[0].kind else {
+            panic!("first event must retain the historical playhead")
+        };
+        assert!(!playhead.has_executable_definition());
+    }
+
+    #[test]
+    fn unreadable_complete_record_is_not_destroyed_as_a_torn_tail() {
+        let (_tmp, path) = open_tmp();
+        std::fs::create_dir_all(path.parent().unwrap()).unwrap();
+        let raw = "{\"complete\":\"but unknown\"}\n";
+        std::fs::write(&path, raw).unwrap();
+
+        assert!(Journal::open(&path).is_err());
+        assert_eq!(std::fs::read_to_string(path).unwrap(), raw);
     }
 
     #[test]

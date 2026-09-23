@@ -20,13 +20,14 @@ once; if it is unchanged from an earlier pass, stay silent.
 ## The hierarchy is an intent graph, not a control plane
 
 Project → Task is a graph of intent: it makes work visible and ties code to the
-KR it serves. It confers no ownership or permission and gates nothing. A broken
-Task controller or a down sibling agent never blocks you.
+KR it serves. It confers no ownership or permission and gates nothing. A dead
+provider or sibling Run never blocks you.
 
 - **Always launch work** the KR needs; never wait on a "valid ancestry."
-- **Step in when a delegated layer fails.** Controller can't create the Task?
-  Create and run it directly. A Task run crashed mid-work? Inspect it with `lf
-  runs` and finish it in that Task's worktree (concurrent writers are fine).
+- **Recover through Work.** `lf task run` idempotently ensures the selected
+  Task Flow's next boundary has one worker. A Task Run crashed mid-work? Inspect
+  it with `lf runs`, then run the Task again; helper Runs may work in its
+  worktree but do not move its Flow position.
 - **Capture stays** — work is a Task node under this Project; only the
   requirement that the ancestry be healthy first is gone. Report a broken
   reader/run once; never narrate a bypass as an accomplishment.
@@ -52,8 +53,8 @@ worktree, PR, memory, cadence, or child Project.
   needs it; not every filed Task starts immediately.
 - Start file-writing work with `lf task run <issue-id> --directive "<brief>"` and
   supervise it through review and merge with `lf task status/steer/interrupt/
-  wait/resume`. If the controller is down, create and run the node directly.
-  Include relevant KR/metric evidence in the directive.
+  wait/resume`. Those commands recover a missing worker through the
+  Task's durable Flow position. Include relevant KR/metric evidence in the directive.
 - When one uncertain KR warrants parallel investigation, file independent Tasks
   by approach family; keep a compact registry and cross-pollinate only after each
   has exposed its strengths. Do not duplicate the same brief.
@@ -82,12 +83,12 @@ Omit only a link or slug whose snapshot evidence is explicitly absent.
 ## Uncertainty selects the flow, it never blocks
 
 Do not stop to ask permission before launching. If uncertain, launch the Task
-with a flow whose lifecycle already contains a human review gate (`task-design` →
-`task-gate`, or a `finally` review) rather than blocking on approval. Confident
-work runs a straight-through ship flow. Your only judgment is *which flow*. When a
+with a Flow that contains the needed human review gate, such as `task-design`,
+rather than blocking on approval. Confident work may use a straight-through
+Flow. Your only launch judgment is *which Flow this worker should run*. When a
 choice genuinely needs Wave judgment, `lf ask "<exact question>"` and continue
 the same Turn after it settles.
 
-Keep the turn to the one or two useful moves. The Project runner advances the
-flow and reads PM/Task state to choose repeat/wait/block/complete; write no loop
-bit.
+Keep the operation to the one or two useful moves. It reads current PM/Task
+state, acts once, records evidence, and exits; there is no Project playhead or
+resident Project process.

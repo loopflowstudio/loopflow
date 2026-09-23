@@ -1,6 +1,6 @@
 use loopflow::controller::wave::metrics::MetricPortfolioDto;
 use loopflow::durable::WorkStatus;
-use loopflow::lf::commands::waves::{RoadmapSnapshot, WaveDetailSnapshot};
+use loopflow::lf::commands::waves::{Evidence, RoadmapSnapshot, WaveDetailSnapshot};
 use loopflow::ops::pm::PmShowResult;
 
 const PM_SHOW: &str = include_str!("../../../tests/fixtures/dto/pm_show.json");
@@ -18,6 +18,10 @@ fn pm_show_preserves_repository_team_and_project_ownership() {
         ["initiative-infrastructure"]
     );
     assert_eq!(snapshot.projects[0].name, "Gmail");
+    assert_eq!(
+        snapshot.projects[0].flows.as_ref().unwrap().recommended,
+        None
+    );
     assert_eq!(snapshot.projects[0].team_ids, ["team-loo"]);
     assert_eq!(snapshot.items[0].identifier, "LOO-2");
     assert_eq!(snapshot.items[0].project_id, "project-gmail");
@@ -45,6 +49,10 @@ fn pm_show_rejects_a_legacy_item_without_stable_ownership() {
 #[test]
 fn wave_detail_requires_machine_and_turn_controls() {
     let snapshot: WaveDetailSnapshot = serde_json::from_str(WAVE_DETAIL).unwrap();
+    assert_eq!(
+        snapshot.projects[0].project.flows.recommended.as_deref(),
+        Some("task-design")
+    );
     assert!(!snapshot.wave.paused);
     assert!(snapshot.wave.enabled);
 
@@ -52,6 +60,10 @@ fn wave_detail_requires_machine_and_turn_controls() {
     let decoded: WaveDetailSnapshot = serde_json::from_str(&encoded).unwrap();
     assert!(!decoded.wave.paused);
     assert!(decoded.wave.enabled);
+    assert_eq!(
+        decoded.projects[0].project.flows,
+        snapshot.projects[0].project.flows
+    );
 
     let mut legacy: serde_json::Value = serde_json::from_str(WAVE_DETAIL).unwrap();
     legacy["wave"].as_object_mut().unwrap().remove("paused");
@@ -104,6 +116,10 @@ fn status_and_roadmap_require_the_shared_metric_portfolio() {
     ));
 
     let roadmap: RoadmapSnapshot = serde_json::from_str(ROADMAP).unwrap();
+    let Evidence::Ok { items, .. } = &roadmap.waves[0].projects else {
+        panic!("fixture has current Project evidence")
+    };
+    assert_eq!(items[0].project.flows.recommended, None);
     assert_eq!(
         roadmap.waves[0].metric_portfolio.metrics[0]
             .identity

@@ -1118,9 +1118,11 @@ mod tests {
     };
     use crate::build_info::{BuildProvenance, MigrationAuthority};
     use crate::child::ChildRef;
-    use crate::controller::task::State as TaskControllerState;
-    use crate::durable::{Author, WorkRef};
-    use crate::id::WaveId;
+    use crate::durable::{
+        Author, FlowPosition, RunId, TaskFlowBlocker, TaskWorkerClaimOutcome, TaskWorkerOwner,
+        WorkRef,
+    };
+    use crate::id::{ExecId, TraceId, WaveId};
     use crate::planning::{LinearIssueId, LinearProjectId, ProjectPlan, TaskPlan};
     use crate::profile::EmailAddress;
     use crate::work::project::{Project, ProjectId};
@@ -1310,22 +1312,6 @@ mod tests {
         }
     }
 
-    fn make_task_controller(task: &Task) -> TaskControllerState {
-        TaskControllerState {
-            task_id: task.id.clone(),
-            lifecycle: crate::controller::task::TaskLifecyclePlan::defaults(),
-            lifecycle_phase: crate::controller::task::TaskLifecyclePhase::Loop,
-            phase_cursor: 0,
-            phase_iteration: 0,
-            gate_cycle: 0,
-            gate_proposal: None,
-            agent: "codex".to_string(),
-            provider: "codex".to_string(),
-            provider_session_id: None,
-            updated_at: task.updated_at,
-        }
-    }
-
     fn make_task_pr(task: &Task) -> TaskPr {
         TaskPr {
             id: TaskPrId::new(),
@@ -1361,6 +1347,7 @@ mod tests {
                 pm_snapshot_synced_at: now.unix_timestamp(),
             },
             wave_id: wave.id().clone(),
+            iteration: 0,
             abandon_intent: None,
             created_at: now,
             updated_at: now,
@@ -1506,7 +1493,7 @@ mod tests {
     }
 
     /// Records the text of every `send_current` it accepts; `steerable=false`
-    /// stands in for a driver (or a between-turns gap) that can't take live
+    /// stands in for a worker (or a between-turns gap) that can't take live
     /// input, so the caller must defer to the next boundary.
     #[derive(Default)]
     struct RecordingHarness {
@@ -1851,10 +1838,32 @@ mod tests {
             .await
             .unwrap();
         assert_eq!(observations.len(), 1);
-        assert!(store
-            .consume_task_observation_for_project(&project.id, &observations[0])
+        store
+            .append_task_event(
+                &sibling.id,
+                &TaskEventKind::Failed {
+                    error: "arrived during the Project pass".to_string(),
+                    resumable: true,
+                },
+            )
             .await
-            .unwrap());
+            .unwrap();
+        let completed = store
+            .complete_project_operation(&project.id, &observations)
+            .await
+            .unwrap();
+        assert_eq!(completed.iteration, 1);
+        let pending = store
+            .pending_project_observations(&project.id)
+            .await
+            .unwrap();
+        assert_eq!(pending.len(), 1);
+        assert!(matches!(
+            &pending[0].payload,
+            crate::work::project::ChildEventPayload::Task {
+                event: TaskEventKind::Failed { error, resumable: true }
+            } if error == "arrived during the Project pass"
+        ));
 
         assert_eq!(
             store.work_status(&target_work).await.unwrap(),
@@ -1865,7 +1874,101 @@ mod tests {
     }
 
     #[tokio::test]
-    async fn task_lifecycle_plan_and_progress_round_trip() {
+    async fn task_worker_settlement_rejects_stale_claims_atomically() {
+        let dir = tempfile::tempdir().unwrap();
+        let store = crate::store::open_ephemeral_store(&StorageConfig::sqlite(
+            dir.path().join("registry.db"),
+        ))
+        .await
+        .unwrap();
+        let wave = make_wave("/repo");
+        store.create_wave(&wave).await.unwrap();
+        let project = make_project(&wave);
+        store.create_project(&project).await.unwrap();
+        let mut task = make_task(&wave, &project);
+        store
+            .create_task(&task, &make_task_pr(&task))
+            .await
+            .unwrap();
+
+        let initial = store
+            .set_flow_position(
+                &task.id,
+                FlowPosition {
+                    task_id: task.id.clone(),
+                    invocation: crate::durable::test_flow_invocation(
+                        "code", 3, "review", None, false,
+                    ),
+                    session_run_id: None,
+                    ready_summary: None,
+                    step_index: 2,
+                    iteration: 4,
+                    version: 0,
+                    worker_generation: 0,
+                    claim: None,
+                    failure: None,
+                    updated_at: OffsetDateTime::now_utc(),
+                },
+            )
+            .await
+            .unwrap();
+        let owner = TaskWorkerOwner {
+            trace_id: TraceId::new(),
+            exec_id: ExecId::new(),
+            pid: 502,
+            started_at: 1_700_000_000,
+        };
+        let claim = match store
+            .claim_task_worker(&task.id, initial.version, &owner, OffsetDateTime::now_utc())
+            .await
+            .unwrap()
+        {
+            TaskWorkerClaimOutcome::Claimed(claim) => claim,
+            outcome => panic!("unexpected claim outcome: {outcome:?}"),
+        };
+        let claim = store
+            .bind_task_worker_run(&task.id, &claim, &RunId::new(), &owner)
+            .await
+            .unwrap();
+        let mut next = initial.clone();
+        next.step_index = 3;
+        next.iteration = 5;
+        next.version = claim.position_version;
+        let mut refreshed = task.clone();
+        refreshed.plan.title = "Updated while the worker ran".to_string();
+        store.update_task(&refreshed).await.unwrap();
+        let saved_task = store.get_task(&task.id).await.unwrap().unwrap();
+        let saved_position = store.flow_position(&task.id).await.unwrap().unwrap();
+        task.updated_at = saved_task.updated_at + time::Duration::seconds(60);
+        let mut stale = claim.clone();
+        stale.generation += 1;
+        assert!(store
+            .settle_task_worker(&task, &stale, &next, Some("must roll back"))
+            .await
+            .is_err());
+        let unchanged = store.flow_position(&task.id).await.unwrap().unwrap();
+        assert_eq!(unchanged, saved_position);
+        assert_eq!(store.get_task(&task.id).await.unwrap().unwrap(), saved_task);
+        assert!(store
+            .task_events_after(&task.id, 0)
+            .await
+            .unwrap()
+            .is_empty());
+
+        store
+            .settle_task_worker(&task, &claim, &next, Some("advanced atomically"))
+            .await
+            .unwrap();
+        let settled = store.flow_position(&task.id).await.unwrap().unwrap();
+        assert_eq!(settled.step_index, 3);
+        assert_eq!(settled.invocation, initial.invocation);
+        let updated_task = store.get_task(&task.id).await.unwrap().unwrap();
+        assert_eq!(updated_task.updated_at, task.updated_at);
+        assert_eq!(updated_task.plan.title, refreshed.plan.title);
+    }
+
+    #[tokio::test]
+    async fn task_restart_fences_a_late_failure_from_the_prior_invocation() {
         let dir = tempfile::tempdir().unwrap();
         let store = crate::store::open_ephemeral_store(&StorageConfig::sqlite(
             dir.path().join("registry.db"),
@@ -1877,44 +1980,124 @@ mod tests {
         let project = make_project(&wave);
         store.create_project(&project).await.unwrap();
         let task = make_task(&wave, &project);
-        let mut controller = make_task_controller(&task);
-        controller.lifecycle = crate::controller::task::TaskLifecyclePlan::standard(
-            "task-design",
-            "code",
-            "ship-demo",
-        );
-        controller.phase_cursor = 2;
-        controller.phase_iteration = 4;
         store
             .create_task(&task, &make_task_pr(&task))
             .await
             .unwrap();
-        store.put_task_controller_state(&controller).await.unwrap();
-
-        let persisted = store
-            .task_controller_state(&task.id)
+        let first = store
+            .set_flow_position(
+                &task.id,
+                FlowPosition {
+                    task_id: task.id.clone(),
+                    invocation: crate::durable::test_flow_invocation(
+                        "task-design",
+                        0,
+                        "design",
+                        None,
+                        false,
+                    ),
+                    session_run_id: None,
+                    ready_summary: None,
+                    step_index: 0,
+                    iteration: 0,
+                    version: 0,
+                    worker_generation: 0,
+                    claim: None,
+                    failure: None,
+                    updated_at: OffsetDateTime::now_utc(),
+                },
+            )
+            .await
+            .unwrap();
+        let old_owner = TaskWorkerOwner {
+            trace_id: TraceId::new(),
+            exec_id: ExecId::new(),
+            pid: 601,
+            started_at: 1_700_000_000,
+        };
+        let old_claim = match store
+            .claim_task_worker(
+                &task.id,
+                first.version,
+                &old_owner,
+                OffsetDateTime::now_utc(),
+            )
             .await
             .unwrap()
-            .unwrap();
-        assert_eq!(persisted.lifecycle.loop_.flow, "code");
-        assert_eq!(persisted.lifecycle.first.flow, "task-design");
-        assert_eq!(persisted.lifecycle.finally.flow, "ship-demo");
-        assert_eq!(persisted.phase_cursor, 2);
-        assert_eq!(persisted.phase_iteration, 4);
+        {
+            TaskWorkerClaimOutcome::Claimed(claim) => claim,
+            outcome => panic!("unexpected claim outcome: {outcome:?}"),
+        };
 
-        controller.phase_cursor = 3;
-        controller.phase_iteration = 5;
-        store.put_task_controller_state(&controller).await.unwrap();
-        let resumed = store
-            .task_controller_state(&task.id)
+        store
+            .restart_task_flow(&task, &Author::User, "restart", "deadbeef")
+            .await
+            .unwrap();
+        let replacement = store
+            .set_flow_position(
+                &task.id,
+                FlowPosition {
+                    task_id: task.id.clone(),
+                    invocation: crate::durable::test_flow_invocation(
+                        "task-design",
+                        0,
+                        "design",
+                        None,
+                        false,
+                    ),
+                    session_run_id: None,
+                    ready_summary: None,
+                    step_index: 0,
+                    iteration: 0,
+                    version: 0,
+                    worker_generation: 0,
+                    claim: None,
+                    failure: None,
+                    updated_at: OffsetDateTime::now_utc(),
+                },
+            )
+            .await
+            .unwrap();
+        let new_owner = TaskWorkerOwner {
+            trace_id: TraceId::new(),
+            exec_id: ExecId::new(),
+            pid: 602,
+            started_at: 1_700_000_001,
+        };
+        let new_claim = match store
+            .claim_task_worker(
+                &task.id,
+                replacement.version,
+                &new_owner,
+                OffsetDateTime::now_utc(),
+            )
             .await
             .unwrap()
+        {
+            TaskWorkerClaimOutcome::Claimed(claim) => claim,
+            outcome => panic!("unexpected claim outcome: {outcome:?}"),
+        };
+        let new_claim = store
+            .bind_task_worker_run(&task.id, &new_claim, &RunId::new(), &new_owner)
+            .await
             .unwrap();
-        assert_eq!((resumed.phase_cursor, resumed.phase_iteration), (3, 5));
+        let failure = TaskFlowBlocker {
+            reason: "late old failure".to_string(),
+            restart_required: false,
+            observed_at: OffsetDateTime::now_utc(),
+        };
+
+        assert!(store
+            .block_task_flow(&task.id, &old_claim, &failure)
+            .await
+            .is_err());
+        let current = store.flow_position(&task.id).await.unwrap().unwrap();
+        assert_eq!(current.claim.as_ref(), Some(&new_claim));
+        assert!(current.failure.is_none());
     }
 
     #[tokio::test]
-    async fn task_work_and_controller_state_are_independent() {
+    async fn task_facts_update_without_rewriting_work_progression() {
         let dir = tempfile::tempdir().unwrap();
         let database = dir.path().join("registry.db");
         let store = crate::store::open_ephemeral_store(&StorageConfig::sqlite(database.clone()))
@@ -1929,39 +2112,10 @@ mod tests {
             .create_task(&task, &make_task_pr(&task))
             .await
             .unwrap();
-        assert!(store
-            .task_controller_state(&task.id)
-            .await
-            .unwrap()
-            .is_none());
-
-        let mut controller = make_task_controller(&task);
-        store.put_task_controller_state(&controller).await.unwrap();
-
-        let mut core_update = task.clone();
-        core_update.plan.title = "Refreshed without controller ownership".to_string();
-        store.update_task(&core_update).await.unwrap();
+        task.plan.title = "Refreshed Task".to_string();
+        store.update_task(&task).await.unwrap();
         let persisted = store.get_task(&task.id).await.unwrap().unwrap();
-        assert_eq!(persisted.plan.title, core_update.plan.title);
-        assert_eq!(
-            store.task_controller_state(&task.id).await.unwrap(),
-            Some(controller.clone())
-        );
-
-        task.plan.title = "Stale controller-side title".to_string();
-        controller.phase_cursor = 4;
-        store.put_task_controller_state(&controller).await.unwrap();
-        let persisted = store.get_task(&task.id).await.unwrap().unwrap();
-        assert_eq!(persisted.plan.title, core_update.plan.title);
-        assert_eq!(
-            store
-                .task_controller_state(&task.id)
-                .await
-                .unwrap()
-                .unwrap()
-                .phase_cursor,
-            4
-        );
+        assert_eq!(persisted.plan.title, "Refreshed Task");
 
         let conn = rusqlite::Connection::open(database).unwrap();
         let columns = |table: &str| {
@@ -1975,7 +2129,7 @@ mod tests {
         let task_columns = columns("tasks");
         assert!(!task_columns.contains(&"phase_epoch".to_string()));
         assert!(!task_columns.contains(&"lifecycle_phase".to_string()));
-        assert!(columns("task_controller_state").contains(&"lifecycle_phase".to_string()));
+        assert!(!columns("task_controller_state").contains(&"lifecycle_phase".to_string()));
     }
 
     #[tokio::test]
@@ -2028,11 +2182,13 @@ mod tests {
 
         project.plan.prompt_context = "Definition:\nCurrent proof".to_string();
         project.plan.pm_snapshot_synced_at += 1;
+        project.iteration = 9;
         store.update_project(&project).await.unwrap();
 
         let stored_project = store.get_project(&project.id).await.unwrap().unwrap();
         let stored_task = store.get_task(&task.id).await.unwrap().unwrap();
         assert_eq!(stored_project.plan, project.plan);
+        assert_eq!(stored_project.iteration, 0);
         assert_eq!(stored_task.plan, task.plan);
         assert_eq!(stored_task.project_id, stored_project.id);
     }

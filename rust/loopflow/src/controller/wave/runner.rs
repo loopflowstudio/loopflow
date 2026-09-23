@@ -469,7 +469,7 @@ use crate::harness::CreateHarness as CreateBodyHarness;
 
 type PrepareBodyHarness = Box<
     dyn Fn(
-            &str,
+            &crate::engine::Skill,
             &str,
             &str,
             Option<u32>,
@@ -727,13 +727,25 @@ impl WaveLoop {
             }
         };
         let prepared = match &self.backend {
-            BodyBackend::Harness { prepare, .. } => prepare(
-                "wave/chat",
-                &conversation,
-                &self.wave,
-                self.config.max_turns,
-                Some(crate::engine::prompt::Surface::Chat),
-            ),
+            BodyBackend::Harness { prepare, .. } => {
+                let skill = match crate::engine::load_skill("wave/chat", &self.origin_repo) {
+                    Ok(skill) => skill,
+                    Err(err) => {
+                        tracing::warn!(
+                            error = %format!("{err:#}"),
+                            "failed to load chat observe skill"
+                        );
+                        return;
+                    }
+                };
+                prepare(
+                    &skill,
+                    &conversation,
+                    &self.wave,
+                    self.config.max_turns,
+                    Some(crate::engine::prompt::Surface::Chat),
+                )
+            }
             #[cfg(test)]
             BodyBackend::Process(_) => return,
         };
@@ -858,6 +870,15 @@ impl WaveLoop {
                 self.fail("playhead has no current step").await;
                 return;
             };
+            let planned_skill = context
+                .playhead
+                .stack
+                .last()
+                .and_then(|invocation| invocation.steps.get(invocation.cursor as usize))
+                .and_then(|planned| match planned {
+                    crate::engine::ConcreteStep::Skill(skill) => Some(skill.skill.clone()),
+                    _ => None,
+                });
             let key = (step.invocation_id.clone(), step.iteration);
             if invocation.as_ref().is_some_and(|expected| expected != &key) {
                 return;
@@ -876,7 +897,12 @@ impl WaveLoop {
             let live_skill = step.kind == StepKind::Skill
                 && matches!(&self.backend, BodyBackend::Harness { .. });
             if live_skill {
-                self.run_harness_pass(step, seed, answers, &destination, inbox_rx)
+                let Some(skill) = planned_skill else {
+                    self.fail("playhead Skill has no persisted Skill definition")
+                        .await;
+                    return;
+                };
+                self.run_harness_pass(step, skill, seed, answers, &destination, inbox_rx)
                     .await;
             } else {
                 self.run_process_pass(step, seed, answers, inbox_rx).await;
@@ -984,6 +1010,7 @@ impl WaveLoop {
     async fn run_harness_pass(
         &mut self,
         step: StepRef,
+        skill: crate::engine::Skill,
         seed: String,
         answers: Vec<String>,
         destination: &MessageDestination,
@@ -998,13 +1025,9 @@ impl WaveLoop {
             _ => "headless",
         };
         let prepared = match &self.backend {
-            BodyBackend::Harness { prepare, .. } => prepare(
-                &step.step,
-                &seed,
-                &self.wave,
-                self.config.max_turns,
-                surface,
-            ),
+            BodyBackend::Harness { prepare, .. } => {
+                prepare(&skill, &seed, &self.wave, self.config.max_turns, surface)
+            }
             #[cfg(test)]
             BodyBackend::Process(_) => unreachable!("live skill requires a harness backend"),
         };
@@ -1609,11 +1632,9 @@ mod tests {
     use crate::controller::wave::journal::{
         journal_path, DiscordChatBinding, DiscordMessageSource, EventKind, Journal,
     };
-    use crate::controller::wave::playhead::{Playhead, PlayheadEvent, QueuedInvocation, StepPlan};
     use crate::controller::wave::runtime::WaveRuntime;
     use crate::controller::wave::server::{self, ResidentDoor};
     use crate::controller::wave::state::LoopState;
-    use crate::engine::OccurrencePolicy;
     use async_trait::async_trait;
 
     fn queued_message(id: &str, source: Option<DiscordMessageSource>) -> PendingMessage {
@@ -1947,7 +1968,7 @@ mod tests {
                 recorded_skills
                     .lock()
                     .expect("skills")
-                    .push(skill.to_string());
+                    .push(skill.name.clone());
                 recorded_surfaces.lock().expect("surfaces").push(surface);
                 recorded_seeds.lock().expect("seeds").push(seed.to_string());
                 Ok(crate::lf::commands::run::PreparedHarnessTurn {
@@ -1956,10 +1977,10 @@ mod tests {
                         max_turns,
                         ..crate::engine::AgentConfig::default()
                     },
-                    input: format!("{skill}\n{seed}"),
+                    input: format!("{}\n{seed}", skill.name),
                     context: crate::trace::PreparedTurnContext::from_prompts(
                         "",
-                        &format!("{skill}\n{seed}"),
+                        &format!("{}\n{seed}", skill.name),
                     ),
                     harness: "fake".to_string(),
                     model: None,
@@ -2246,155 +2267,6 @@ mod tests {
     }
 
     #[tokio::test]
-    async fn stale_wave_definition_resets_before_running_the_fresh_flow() {
-        let tmp = tempfile::tempdir().expect("tempdir");
-        init_test_git_repo(tmp.path());
-
-        let (mut journal, _) =
-            Journal::open(&journal_path(tmp.path(), "ship")).expect("open journal");
-        let root = QueuedInvocation {
-            id: "wave-root".to_string(),
-            flow: "wave".to_string(),
-            steps: ["wave_clarify", "wave_pursue", "wave_mutate"]
-                .into_iter()
-                .map(|name| StepPlan {
-                    name: name.to_string(),
-                    kind: StepKind::Skill,
-                    policy: OccurrencePolicy::default(),
-                })
-                .collect(),
-        };
-        let (playhead, event) = Playhead::resume_root(root, 2, 7).expect("legacy playhead");
-        journal.append(|_| EventKind::PlayheadChanged {
-            event,
-            playhead: Box::new(playhead),
-        });
-        drop(journal);
-
-        let attempts = Arc::new(Mutex::new(Vec::new()));
-        let prepare_attempts = attempts.clone();
-        let surfaces = Arc::new(Mutex::new(Vec::new()));
-        let prepare_surfaces = surfaces.clone();
-        let inputs = Arc::new(Mutex::new(Vec::new()));
-        let harness_inputs = inputs.clone();
-        let backend = BodyBackend::Harness {
-            prepare: Box::new(move |skill, seed, _wave, max_turns, surface| {
-                prepare_attempts
-                    .lock()
-                    .expect("attempts lock")
-                    .push(skill.to_string());
-                prepare_surfaces
-                    .lock()
-                    .expect("surfaces lock")
-                    .push(surface);
-                Ok(crate::lf::commands::run::PreparedHarnessTurn {
-                    config: crate::engine::AgentConfig {
-                        agent: Some("fake".to_string()),
-                        max_turns,
-                        ..crate::engine::AgentConfig::default()
-                    },
-                    input: format!("{skill}\n{seed}"),
-                    context: crate::trace::PreparedTurnContext::from_prompts(
-                        "",
-                        &format!("{skill}\n{seed}"),
-                    ),
-                    harness: "fake".to_string(),
-                    model: None,
-                })
-            }),
-            create: Box::new(move |_name, _approval, events| {
-                Ok(Box::new(CompletingHarness {
-                    events,
-                    inputs: harness_inputs.clone(),
-                }))
-            }),
-        };
-        let loop_ = boot_backend(
-            tmp,
-            test_config(Duration::from_secs(600)),
-            backend,
-            Arc::new(Mutex::new(Vec::new())),
-            mpsc::unbounded_channel().1,
-            None,
-        )
-        .await;
-        wake_governance(&loop_.runtime, "recover");
-
-        wait_for("fresh Wave iteration completed", || {
-            loop_.runtime.thread_snapshot().iter().any(|turn| {
-                turn.role == ChatRole::Assistant
-                    && turn.status == Lifecycle::Completed
-                    && turn.text == "recovered"
-            })
-        })
-        .await;
-        wait_for("next Wave iteration is idle", || {
-            loop_.runtime.loop_state() == LoopState::Idle
-                && loop_
-                    .runtime
-                    .playhead()
-                    .and_then(|playhead| playhead.now)
-                    .is_some_and(|step| step.step == "wave/operate" && step.iteration == 1)
-        })
-        .await;
-
-        assert_eq!(
-            *attempts.lock().expect("attempts lock"),
-            vec!["wave/operate"]
-        );
-        assert_eq!(
-            *surfaces.lock().expect("surfaces lock"),
-            vec![None],
-            "a Local pass stays headless even though it carries answers; only a \
-             Discord-destination pass gets the chat surface (see chat_surface_for)"
-        );
-        assert_eq!(inputs.lock().expect("inputs lock").len(), 1);
-        let events = loop_.journal_events();
-        assert_eq!(
-            events
-                .iter()
-                .filter(|event| matches!(
-                    event,
-                    EventKind::PlayheadChanged {
-                        event: PlayheadEvent::DefinitionReset,
-                        ..
-                    }
-                ))
-                .count(),
-            1
-        );
-        assert_eq!(
-            events
-                .iter()
-                .filter(|event| matches!(
-                    event,
-                    EventKind::PlayheadChanged {
-                        event: PlayheadEvent::StepStarted { .. },
-                        ..
-                    }
-                ))
-                .count(),
-            1,
-            "reset itself never opens a body; the fresh single-step flow does"
-        );
-        assert!(!events.iter().any(|event| matches!(
-            event,
-            EventKind::PlayheadChanged {
-                event: PlayheadEvent::StepFinished {
-                    outcome: StepOutcome::Failed,
-                    ..
-                },
-                ..
-            }
-        )));
-        assert!(!loop_
-            .runtime
-            .thread_snapshot()
-            .iter()
-            .any(|turn| turn.role == ChatRole::Assistant && turn.status == Lifecycle::Failed));
-    }
-
-    #[tokio::test]
     async fn steer_reaches_the_live_body_and_streams_into_one_turn() {
         let tmp = tempfile::tempdir().expect("tempdir");
         init_test_git_repo(tmp.path());
@@ -2410,10 +2282,10 @@ mod tests {
                         max_turns,
                         ..crate::engine::AgentConfig::default()
                     },
-                    input: format!("{skill}\n{seed}"),
+                    input: format!("{}\n{seed}", skill.name),
                     context: crate::trace::PreparedTurnContext::from_prompts(
                         "",
-                        &format!("{skill}\n{seed}"),
+                        &format!("{}\n{seed}", skill.name),
                     ),
                     harness: "fake".to_string(),
                     model: None,
@@ -2487,10 +2359,10 @@ mod tests {
                         max_turns,
                         ..crate::engine::AgentConfig::default()
                     },
-                    input: format!("{skill}\n{seed}"),
+                    input: format!("{}\n{seed}", skill.name),
                     context: crate::trace::PreparedTurnContext::from_prompts(
                         "",
-                        &format!("{skill}\n{seed}"),
+                        &format!("{}\n{seed}", skill.name),
                     ),
                     harness: "fake".to_string(),
                     model: None,

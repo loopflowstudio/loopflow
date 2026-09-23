@@ -139,6 +139,19 @@ cd website && uv run python dev.py test -a     # Accessibility tests only
 cd website && uv run python dev.py sync-docs   # Refresh generated docs copy
 ```
 
+After changing `docs/architecture.md` or its website rendering, regenerate the
+portable HTML before gate and include it in the same change:
+
+```bash
+cd website
+uv run python dev.py sync-docs
+uv run python ../scripts/render_architecture_html.py
+uv run python ../scripts/render_architecture_html.py --check
+```
+
+The website suite checks that `docs/architecture.html` matches the rendered
+source. A Markdown-only edit can fail that check.
+
 ## Swift Tests
 
 Tests for the Swift package (models, protocols, shared logic).
@@ -219,6 +232,10 @@ Keep `workflow_run.workflows: ["CI"]` in sync with `.github/workflows/ci.yml`. R
 
 ## Rust Tests
 
+Session-command fixtures must work without an installed `lf`. Follow
+[the isolated executable guidance](.lf/directions/testing.md) when testing
+binary resolution or repairing an executable-dependent CI failure.
+
 For worktree creation or checkout-refresh changes, build the current CLI before
 running its Python behavior tests:
 
@@ -239,9 +256,14 @@ cargo test -p loopflow golden_prompt
 uv run python tests/goldens/update_goldens.py   # refresh prompt goldens after prompt changes
 ```
 
-Fresh-store coverage exercises the live SQLite schema. Existing incompatible
-databases are rejected with a direct delete-and-recreate instruction; there is
-no historical upgrade chain.
+Changes to builtin `LOOPFLOW.md` affect every prompt golden. Regenerate and
+review them before gate. For migration regressions, use the materialized Rust
+test path above: inspect historical fields at their migration boundary, then
+finish the upgrade and verify the current schema.
+
+Fresh-store coverage exercises the live SQLite schema. Populated historical
+fixtures exercise the migration chain and verify retained facts. A fresh-store
+pass alone does not prove that an existing Home can upgrade without losing work.
 
 Run records have focused storage, harness, reducer, and reader checks:
 

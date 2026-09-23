@@ -14,7 +14,6 @@ use crate::work::wave::Wave;
 use super::{OpsError, OpsResult};
 
 pub(crate) const TASK_ACCOUNT_ID_ENV: &str = "LF_TASK_ACCOUNT_ID";
-pub(crate) const TASK_RESUME_TOKEN_ENV: &str = "LF_TASK_RESUME_TOKEN";
 
 #[derive(Debug, Clone)]
 pub struct WorkBinding {
@@ -24,11 +23,11 @@ pub struct WorkBinding {
     pub cwd: PathBuf,
     pub context: String,
     pub agent: Option<String>,
+    pub project_observations: Vec<crate::work::project::ObservationOutboxRow>,
 }
 
 pub(crate) fn render_task_context(
     task: &Task,
-    state: Option<&crate::controller::task::State>,
     project: &ProjectPlan,
     pr: &TaskPr,
     wave_name: &str,
@@ -39,30 +38,8 @@ pub(crate) fn render_task_context(
         .as_ref()
         .map(|parent| format!("Stack parent PR: {parent} (land the parent first)"))
         .unwrap_or_else(|| "Stack parent PR: none (rooted on main)".to_string());
-    let controller = state.map_or_else(
-        || "Task controller: not started".to_string(),
-        |state| {
-            let gate_proposal = state
-                .gate_proposal
-                .as_ref()
-                .map(|proposal| {
-                    format!(
-                        "Gate proposal: {} — {}",
-                        if proposal.done { "done" } else { "continue" },
-                        proposal.reason
-                    )
-                })
-                .unwrap_or_else(|| "Gate proposal: none".to_string());
-            format!(
-                "Lifecycle phase: {} (iteration {}, gate cycle {})\n{gate_proposal}",
-                state.lifecycle_phase.as_str(),
-                state.phase_iteration,
-                state.gate_cycle,
-            )
-        },
-    );
     format!(
-        "Linear Task {identifier}: {title}\n\n{description}\n\nLinear Project: {project} ({project_id})\n{project_context}\n\n{direction}\n\nTask directive snapshot synced at: {task_snapshot_synced_at}\nProject definition snapshot synced at: {project_snapshot_synced_at}\nWave: {wave}\nTask Work: {task_id}\n{controller}\nWorktree: {worktree}\nPR {pr_sequence}: {pr_branch}\nBase commit: {base_commit}\n{placement}",
+        "Linear Task {identifier}: {title}\n\n{description}\n\nLinear Project: {project} ({project_id})\n{project_context}\n\n{direction}\n\nTask directive snapshot synced at: {task_snapshot_synced_at}\nProject definition snapshot synced at: {project_snapshot_synced_at}\nWave: {wave}\nTask Work: {task_id}\nWorktree: {worktree}\nPR {pr_sequence}: {pr_branch}\nBase commit: {base_commit}\n{placement}",
         identifier = task.plan.identifier,
         title = task.plan.title,
         description = task.plan.description,
@@ -84,7 +61,6 @@ pub(crate) fn render_task_context(
 
 pub(crate) fn render_project_context(
     project: &Project,
-    state: Option<&crate::controller::project::State>,
     wave_name: &str,
     steers: &[Steer],
     observations: &[String],
@@ -95,12 +71,9 @@ pub(crate) fn render_project_context(
     } else {
         observations.join("\n")
     };
-    let controller = state.map_or_else(
-        || "Project controller: not started".to_string(),
-        |state| format!("Project controller iteration: {}", state.iteration + 1),
-    );
+    let progress = format!("Project Flow iteration: {}", project.iteration + 1);
     format!(
-        "Linear Project {name} ({project_id}) in wave/{wave}.\n\n{context}\n\n{metric_context}\n\nOnly metrics owned by this Project appear above. Cross-owned evidence appears only when the Wave routes it through durable direction. Metrics inform KR judgment; they never check a KR automatically.\n\n{direction}\n\nProject Work: {work_id}\n{controller}\nPM snapshot synced at: {synced_at}\nSupervised Task observations:\n{observations}",
+        "Linear Project {name} ({project_id}) in wave/{wave}.\n\n{context}\n\n{metric_context}\n\nOnly metrics owned by this Project appear above. Cross-owned evidence appears only when the Wave routes it through durable direction. Metrics inform KR judgment; they never check a KR automatically.\n\n{direction}\n\nProject Work: {work_id}\n{progress}\nPM snapshot synced at: {synced_at}\nSupervised Task observations:\n{observations}",
         name = project.plan.name,
         project_id = project.plan.id.as_str(),
         wave = wave_name,
@@ -242,18 +215,7 @@ pub async fn resolve_work_selection(
             .await
             .map_err(run_error)?
             .ok_or_else(|| run_error(format!("Task {} has no active PR", task.id)))?;
-        let state = store
-            .task_controller_state(&task.id)
-            .await
-            .map_err(run_error)?;
-        let context = render_task_context(
-            &task,
-            state.as_ref(),
-            &project.plan,
-            &pr,
-            wave.name(),
-            &steers,
-        );
+        let context = render_task_context(&task, &project.plan, &pr, wave.name(), &steers);
         let cwd = if crate::engine::git::origin_branch(repo)
             .ok()
             .flatten()
@@ -270,7 +232,12 @@ pub async fn resolve_work_selection(
             wave_name: wave.name().to_string(),
             cwd,
             context,
-            agent: state.map(|state| state.agent),
+            agent: Some(
+                crate::engine::config::load_config_or_default(Some(&task.worktree))
+                    .agent()
+                    .to_string(),
+            ),
+            project_observations: Vec::new(),
         });
     }
 
@@ -301,23 +268,19 @@ pub async fn resolve_work_selection(
         );
         let work = WorkRef::Project(project.id.clone());
         let steers = store.work_steers(&work).await.map_err(run_error)?;
-        let observations = store
+        let project_observations = store
             .pending_project_observations(&project.id)
             .await
-            .map_err(run_error)?
-            .into_iter()
+            .map_err(run_error)?;
+        let observations = project_observations
+            .iter()
             .filter_map(|observation| match observation.payload {
-                ChildEventPayload::Task { event } => serde_json::to_string(&event).ok(),
+                ChildEventPayload::Task { ref event } => serde_json::to_string(event).ok(),
                 ChildEventPayload::Project { .. } => None,
             })
             .collect::<Vec<_>>();
-        let state = store
-            .project_controller_state(&project.id)
-            .await
-            .map_err(run_error)?;
         let context = render_project_context(
             &project,
-            state.as_ref(),
             wave.name(),
             &steers,
             &observations,
@@ -329,7 +292,12 @@ pub async fn resolve_work_selection(
             wave_name: wave.name().to_string(),
             cwd: PathBuf::from(wave.repo()),
             context,
-            agent: state.map(|state| state.agent),
+            agent: Some(
+                crate::engine::config::load_config_or_default(Some(Path::new(wave.repo())))
+                    .agent()
+                    .to_string(),
+            ),
+            project_observations,
         });
     }
 
@@ -352,6 +320,7 @@ pub async fn resolve_work_selection(
             cwd,
             context,
             agent: None,
+            project_observations: Vec::new(),
         });
     }
 
@@ -429,21 +398,21 @@ fn run_error(error: impl std::fmt::Display) -> OpsError {
 }
 
 #[derive(Debug)]
-pub(crate) struct WorkLaunch {
-    pub work: WorkRef,
+pub(crate) struct TaskWorkerLaunch {
+    pub task_id: TaskId,
     pub wave_id: WaveId,
     pub cwd: PathBuf,
     pub tmux_name: String,
     pub environment: Vec<(String, String)>,
 }
 
-pub(crate) async fn launch_work(request: WorkLaunch) -> OpsResult<()> {
+pub(crate) async fn launch_task_worker(request: TaskWorkerLaunch) -> OpsResult<()> {
     let environment = request.environment.clone();
     start_work_session(&request, environment).await
 }
 
 async fn start_work_session(
-    request: &WorkLaunch,
+    request: &TaskWorkerLaunch,
     mut environment: Vec<(String, String)>,
 ) -> OpsResult<()> {
     let execution = current_home_execution_context()
@@ -453,9 +422,9 @@ async fn start_work_session(
         .to_string();
     let argv = vec![
         control_bin.clone(),
-        "__work".to_string(),
-        request.work.kind().to_string(),
-        request.work.id().to_string(),
+        "task".to_string(),
+        "__worker".to_string(),
+        request.task_id.to_string(),
     ];
     environment.extend([
         (
@@ -486,12 +455,7 @@ async fn start_work_session(
         .collect::<Vec<_>>();
     start_lf_session_with_env(&request.tmux_name, &request.cwd, &argv, &environment)
         .await
-        .map_err(|error| {
-            OpsError::Message(format!(
-                "failed to launch {} body: {error}",
-                request.work.kind()
-            ))
-        })
+        .map_err(|error| OpsError::Message(format!("failed to launch Task worker: {error}")))
 }
 
 #[cfg(test)]
@@ -530,6 +494,7 @@ mod tests {
                 pm_snapshot_synced_at: now.unix_timestamp(),
             },
             wave_id: wave.id().clone(),
+            iteration: 0,
             abandon_intent: None,
             created_at: now,
             updated_at: now,
@@ -628,11 +593,6 @@ mod tests {
 
         assert_eq!(runtime.unwrap().cwd, worktree);
         assert_eq!(prompts.unwrap().work, WorkRef::Task(task.id.clone()));
-        assert!(store
-            .task_controller_state(&task.id)
-            .await
-            .unwrap()
-            .is_none());
     }
 
     #[tokio::test]

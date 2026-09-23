@@ -2,7 +2,7 @@
 
 use std::time::Duration;
 
-use crate::child::{ChildBodyHandoffRequest, ChildRef};
+use crate::child::ChildRef;
 use crate::durable::{AbandonReceipt, Author, RunId, Steer, WorkRef, RUN_ID_ENV};
 use crate::store::SharedStore;
 use crate::work::task::Task;
@@ -40,32 +40,7 @@ impl WorkControlReceipt {
     }
 }
 
-pub(crate) async fn resume_task(
-    store: &SharedStore,
-    mut task: Task,
-    model: Option<String>,
-    reason: Option<String>,
-) -> OpsResult<WorkRef> {
-    let mut controller = store
-        .task_controller_state(&task.id)
-        .await
-        .map_err(child_error)?
-        .ok_or_else(|| {
-            child_error(format!(
-                "Task {} has no end-to-end controller; use `lf task run {}` to install one",
-                task.plan.identifier, task.plan.identifier
-            ))
-        })?;
-    if let Some(model) = model {
-        let request = handoff_request(&model, reason.as_deref())?;
-        if controller.agent != request.agent {
-            controller = store
-                .handoff_task_controller(&task.id, &request)
-                .await
-                .map_err(child_error)?;
-        }
-    }
-    let _ = controller;
+pub(crate) async fn resume_task(store: &SharedStore, mut task: Task) -> OpsResult<WorkRef> {
     let label = format!("Task {}", task.plan.identifier);
     if let Some(intent) = &task.abandon_intent {
         return Err(child_error(format!(
@@ -164,41 +139,6 @@ pub(crate) fn ambient_author() -> OpsResult<Author> {
         })
         .transpose()?
         .unwrap_or(Author::User))
-}
-
-pub(crate) fn handoff_request(
-    model: &str,
-    reason: Option<&str>,
-) -> OpsResult<ChildBodyHandoffRequest> {
-    let agent = model.trim();
-    if agent.is_empty() {
-        return Err(child_error("handoff model cannot be empty"));
-    }
-    let (provider, model_name) = agent
-        .split_once(':')
-        .map_or((agent, None), |(provider, model_name)| {
-            (provider, Some(model_name))
-        });
-    let provider = crate::harness::canonical_harness(provider)
-        .ok_or_else(|| child_error(format!("unsupported provider harness: {provider}")))?;
-    let agent = match model_name {
-        Some(model_name) if model_name.trim().is_empty() => {
-            return Err(child_error("handoff model name cannot be empty"));
-        }
-        Some(model_name) => format!("{provider}:{}", model_name.trim()),
-        None => provider.to_string(),
-    };
-    let reason = reason
-        .unwrap_or("operator requested provider handoff")
-        .trim();
-    if reason.is_empty() {
-        return Err(child_error("handoff reason cannot be empty"));
-    }
-    Ok(ChildBodyHandoffRequest {
-        agent,
-        provider: provider.to_string(),
-        reason: reason.to_string(),
-    })
 }
 
 fn child_error(error: impl std::fmt::Display) -> OpsError {

@@ -115,21 +115,22 @@ impl<F> ListenerSignals<F> {
 /// whether the resident endpoint/token were present in env, which meant any
 /// process holding a parent's env — a tmux child, a promoted Wave — booted
 /// the wrong half by accident.
-pub fn run(name: &str, force: bool) -> Result<()> {
+pub fn run(name: &str, force: bool, restart_flow: bool) -> Result<()> {
     let repo_root = find_repo_root()?;
     let main_repo = main_repo_root(&repo_root).unwrap_or_else(|_| repo_root.clone());
     let wave = normalize_wave_name(name).ok_or_else(|| anyhow!("invalid wave name: '{name}'"))?;
     let rt = tokio::runtime::Runtime::new()?;
     rt.block_on(async {
         let registry_config = resolve_registry(&main_repo, &wave).await;
-        run_listener(
+        run_listener_with_startup(
             main_repo,
             wave,
             registry_config,
             force,
             true,
             None,
-            shutdown_signal(),
+            restart_flow,
+            ListenerSignals::new(None, shutdown_signal()),
         )
         .await
     })
@@ -281,6 +282,7 @@ fn resident_command(
 /// server without a registry store; `force` rides separately because the
 /// endpoint-file floor must honor it even when there is no registry config at
 /// all.
+#[cfg(test)]
 pub(crate) async fn run_listener(
     repo_root: PathBuf,
     wave: String,
@@ -297,6 +299,7 @@ pub(crate) async fn run_listener(
         force,
         spawn_resident,
         discord_token,
+        false,
         ListenerSignals::new(None, shutdown),
     )
     .await
@@ -305,6 +308,7 @@ pub(crate) async fn run_listener(
 /// Run a listener and publish the exact point at which its endpoint becomes
 /// attachable. The Home host uses this instead of polling the discovery file;
 /// direct `lf wave` callers need no startup receiver.
+#[allow(clippy::too_many_arguments)]
 pub(crate) async fn run_listener_with_startup<F>(
     repo_root: PathBuf,
     wave: String,
@@ -312,6 +316,7 @@ pub(crate) async fn run_listener_with_startup<F>(
     force: bool,
     spawn_resident: bool,
     discord_token: Option<SecretString>,
+    restart_legacy_flow: bool,
     signals: ListenerSignals<F>,
 ) -> Result<()>
 where
@@ -430,6 +435,9 @@ where
     // Refusals are behind us: NOW open the journal for writing and mark the
     // boot. The store-polling observer starts once the runtime exists.
     let runtime = WaveRuntime::open_with_backing(wave.clone(), repo_root.clone(), chat_backing)?;
+    if restart_legacy_flow {
+        runtime.restart_legacy_playhead()?;
+    }
     if let Some(adapter) = discord_adapter.as_ref() {
         adapter.attach(&runtime)?;
     }

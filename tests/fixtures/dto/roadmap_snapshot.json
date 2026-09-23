@@ -74,9 +74,7 @@
               "summary": "One coherent model everywhere.",
               "definition": "The product contract for goal-authored computation.",
               "flows": {
-                "first": null,
-                "loop": null,
-                "finally": null
+                "recommended": null
               },
               "krs": [
                 {

@@ -4,15 +4,13 @@ use std::fs;
 use std::os::unix::fs::PermissionsExt;
 use std::process::Command;
 
-use loopflow::durable::WorkStatus;
+use loopflow::controller::wave::playhead::QueuedInvocation;
+use loopflow::durable::{FlowPosition, WorkStatus};
 use loopflow::ops::task::{pr_next, task_complete, task_resume, task_snapshot, task_status};
 use loopflow::ops::{
     arm as land, commit_workflow, create_or_update_pr, current_pr, present_pr_review,
     CommitOptions, LandOptions, NullProgress, OpsError, PrOptions,
 };
-use loopflow::profile::{ProviderRoute, RouteScope};
-use loopflow::provider_auth::Provider;
-use loopflow::store::{CredentialState, ProviderAccount, ProviderAccountId, RoutingState};
 use loopflow::work::task::{
     AfterMerge, GithubPr, PrMergeMode, PrMergeRequest, PrPhase, PrPresentation, PrPublication,
 };
@@ -31,16 +29,6 @@ fn write_gh_script(pr_list: &str, pr_diff: Option<&str>) -> String {
 
 fn noop_script() -> &'static str {
     "#!/bin/sh\nexit 0\n"
-}
-
-fn codex_auth_refresh_script() -> &'static str {
-    r#"#!/bin/sh
-read -r initialize
-echo '{"id":1,"result":{}}'
-read -r initialized
-read -r account_read
-echo '{"id":2,"result":{"account":{}}}'
-"#
 }
 
 fn reviewer_copy(head_sha: &str) -> PrPresentation {
@@ -984,18 +972,11 @@ fn changed_head_revokes_auto_merge_and_clears_the_stale_request() {
 }
 
 #[test]
-fn task_resume_revokes_auto_merge_before_restarting_authored_work() {
+fn task_resume_revokes_auto_merge_before_returning_to_human_review() {
     let home = tempfile::TempDir::new().expect("temp home");
     let log_path = home.path().join("gh.log");
     let script = gh_open_auto_script(log_path.to_string_lossy().as_ref());
-    let _env = EnvGuard::with_lf_home(
-        &[
-            ("gh", script.as_str()),
-            ("tmux", noop_script()),
-            ("codex", codex_auth_refresh_script()),
-        ],
-        home.path(),
-    );
+    let _env = EnvGuard::with_lf_home(&[("gh", script.as_str())], home.path());
     let repo = TestRepo::new();
     let base = repo.head_sha();
     let branch = "jack/task-resume-proof";
@@ -1022,47 +1003,35 @@ fn task_resume_revokes_auto_merge_before_restarting_authored_work() {
         }),
     });
     let runtime = tokio::runtime::Runtime::new().expect("task runtime");
-    let account_home = home.path().join("accounts/codex/ready");
-    std::fs::create_dir_all(&account_home).expect("create managed Codex home");
-    std::fs::write(
-        account_home.join("auth.json"),
-        r#"{"access_token":"test-oauth-token"}"#,
-    )
-    .expect("seed managed Codex login");
-    let account_id = ProviderAccountId::parse("ready").expect("account id");
-    let account_now = time::OffsetDateTime::now_utc().unix_timestamp();
-    runtime
-        .block_on(task.store.upsert_provider_account(&ProviderAccount {
-            provider: "codex".to_string(),
-            account_id: account_id.clone(),
-            home: Some(account_home),
-            login_email: None,
-            credential_state: CredentialState::Connected,
-            routing_state: RoutingState::Automatic,
-            plan: None,
-            paid_through: None,
-            utilization_percent: None,
-            cooldown_until: None,
-            cooldown_reason: None,
-            last_selected_at: None,
-            created_at: account_now,
-            updated_at: account_now,
-        }))
-        .expect("seed managed Codex account");
-    runtime
-        .block_on(task.store.set_provider_route(&ProviderRoute {
-            scope: RouteScope::Default,
-            provider: Provider::Codex,
-            accounts: vec![account_id],
-            created_at: account_now,
-            updated_at: account_now,
-        }))
-        .expect("seed default Codex route");
+    let position = FlowPosition {
+        task_id: task.task.id.clone(),
+        invocation: QueuedInvocation::load(repo.path(), "task-design").expect("Task design Flow"),
+        session_run_id: None,
+        ready_summary: None,
+        step_index: 1,
+        iteration: 0,
+        version: 0,
+        worker_generation: 0,
+        claim: None,
+        failure: None,
+        updated_at: now,
+    };
+    assert!(position.is_human());
+    let position = runtime
+        .block_on(task.store.set_flow_position(&task.task.id, position))
+        .expect("persist human review boundary");
     runtime
         .block_on(task.store.update_task_pr(&pr))
         .expect("store auto merge request");
 
-    task_resume("INF-123", None, None).expect("resume Task authored work");
+    task_resume("INF-123", None).expect("resume Task authored work");
+    assert_eq!(
+        runtime
+            .block_on(task.store.flow_position(&task.task.id))
+            .unwrap(),
+        Some(position),
+        "resume preserves the exact human review boundary"
+    );
 
     let persisted = runtime
         .block_on(task.store.active_task_pr(&task.task.id))

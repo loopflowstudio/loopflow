@@ -884,24 +884,20 @@ pub fn run_pm(cmd: &PmCommand) -> Result<()> {
             }
         },
         PmCommand::Project { cmd } => {
-            let (wave, project, title, definition, krs, first, loop_, finally) = match cmd {
+            let (wave, project, title, definition, krs, recommended) = match cmd {
                 PmProjectCommand::Create {
                     wave,
                     title,
                     definition,
                     krs,
-                    first,
-                    loop_,
-                    finally,
+                    recommended,
                 } => (
                     wave.clone(),
                     None,
                     Some(title.clone()),
                     Some(definition.clone()),
                     krs.clone(),
-                    first.clone(),
-                    loop_.clone(),
-                    finally.clone(),
+                    recommended.clone(),
                 ),
                 PmProjectCommand::Update {
                     wave,
@@ -909,18 +905,14 @@ pub fn run_pm(cmd: &PmCommand) -> Result<()> {
                     title,
                     definition,
                     krs,
-                    first,
-                    loop_,
-                    finally,
+                    recommended,
                 } => (
                     wave.clone(),
                     Some(project.clone()),
                     title.clone(),
                     definition.clone(),
                     krs.clone(),
-                    first.clone(),
-                    loop_.clone(),
-                    finally.clone(),
+                    recommended.clone(),
                 ),
                 PmProjectCommand::Archive { wave, project } => {
                     let result = crate::ops::pm::pm_project_archive(
@@ -946,9 +938,7 @@ pub fn run_pm(cmd: &PmCommand) -> Result<()> {
                     title,
                     definition,
                     krs,
-                    first,
-                    loop_,
-                    finally,
+                    recommended,
                 },
                 progress,
             )?;

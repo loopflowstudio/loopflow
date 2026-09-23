@@ -1,15 +1,11 @@
 use std::path::Path;
 use std::sync::Arc;
-use std::time::{Duration, Instant};
+use std::time::Duration;
 
 use crate::child::ChildRef;
-use crate::controller::project::State as ProjectControllerState;
-use crate::durable::{Author, WorkStatus};
-use crate::engine::config::{load_config_or_default, parse_agent};
+use crate::durable::{Author, RunId, WorkRef, WorkStatus};
 use crate::engine::git::{current_branch, get_default_branch, is_clean, worktree_root};
-use crate::engine::process::{
-    resolve_lf_binary, start_lf_session, tmux_session_exists, tmux_session_slug,
-};
+use crate::engine::process::{resolve_lf_binary, start_lf_session, tmux_session_slug};
 use crate::id::WaveId;
 use crate::ops::{OpsError, OpsResult};
 use crate::planning::{LinearProjectId, ProjectPlan};
@@ -27,12 +23,10 @@ pub struct ProjectSnapshot {
     pub wave: String,
     pub status: WorkStatus,
     pub reason: String,
-    pub iteration: Option<u32>,
-    pub observation_cursor: Option<i64>,
+    pub iteration: u32,
     pub pending_observations: u32,
-    pub agent: Option<String>,
-    pub provider: Option<String>,
-    pub provider_session_id: Option<String>,
+    pub agent: String,
+    pub provider: String,
     pub latest_event: Option<crate::work::project::ProjectEvent>,
     pub last_failure: Option<crate::work::project::HistoricalFailure>,
     pub created_at: time::OffsetDateTime,
@@ -45,12 +39,6 @@ pub struct ProjectControlResult {
     pub external_project_id: String,
     pub receipt_id: String,
     pub action: String,
-}
-
-#[derive(Debug, Clone, Copy, PartialEq, Eq)]
-pub enum ProjectWaitUntil {
-    Waiting,
-    Terminal,
 }
 
 fn project_error(message: impl Into<String>) -> OpsError {
@@ -88,40 +76,6 @@ async fn project_work_status(store: &Store, project: &Project) -> OpsResult<Work
         .map_err(|error| project_error(error.to_string()))
 }
 
-fn default_project_controller_state(
-    project: &Project,
-    repo: &Path,
-    now: time::OffsetDateTime,
-) -> ProjectControllerState {
-    let config = load_config_or_default(Some(repo));
-    let agent = config.agent().to_string();
-    let (provider, _) = parse_agent(&agent);
-    ProjectControllerState {
-        project_id: project.id.clone(),
-        iteration: 0,
-        observation_cursor: 0,
-        last_state_fingerprint: None,
-        agent,
-        provider,
-        provider_session_id: None,
-        updated_at: now,
-    }
-}
-
-fn project_session_name(project: &Project) -> String {
-    format!(
-        "lf-project-{}-{}",
-        tmux_session_slug(&project.plan.slug),
-        &project.id.as_str()[3..11]
-    )
-}
-
-async fn project_session_live(project: &Project) -> OpsResult<bool> {
-    tmux_session_exists(&project_session_name(project))
-        .await
-        .map_err(|error| project_error(error.to_string()))
-}
-
 pub(crate) fn require_registered_wave(repo: &Path, wave: &str) -> OpsResult<Wave> {
     let locator = crate::work::wave::WaveLocator::discover(repo, wave)
         .map_err(|error| project_error(error.to_string()))?;
@@ -141,67 +95,11 @@ pub(crate) fn require_registered_wave(repo: &Path, wave: &str) -> OpsResult<Wave
 }
 
 pub fn project_run(repo: &Path, project_id: &str, directive: Option<String>) -> OpsResult<Project> {
-    let directive = normalize_directive(directive)?;
-    if let Some(existing) = block_on_project(async {
-        let store = project_store().await?;
-        let Some(existing) = store
-            .get_project_by_project(project_id)
-            .await
-            .map_err(|error| project_error(format!("failed to read Project: {error}")))?
-        else {
-            return Ok(None);
-        };
-        let status = project_work_status(&store, &existing).await?;
-        if matches!(status, WorkStatus::Done | WorkStatus::Abandoned) {
-            return Ok(None);
-        }
-        if directive.is_some() {
-            return Err(project_error(format!(
-                "Project {} already exists; use `lf project steer {} <new-direction>`",
-                existing.plan.slug, existing.plan.slug,
-            )));
-        }
-        if store
-            .project_controller_state(&existing.id)
-            .await
-            .map_err(|error| project_error(error.to_string()))?
-            .is_none()
-        {
-            store
-                .put_project_controller_state(&default_project_controller_state(
-                    &existing,
-                    repo,
-                    time::OffsetDateTime::now_utc(),
-                ))
-                .await
-                .map_err(|error| project_error(error.to_string()))?;
-        }
-        let live = project_session_live(&existing).await?;
-        Ok(Some((existing, live)))
-    })? {
-        let (existing, live) = existing;
-        if live {
-            return Ok(existing);
-        }
-        return block_on_project(async move {
-            let store = project_store().await?;
-            launch_project_process(&store, &existing).await?;
-            wait_until_project_running(&store, &existing.id).await
-        });
-    }
-
-    let repo = ensure_clean_main(repo, "Project")?;
-
-    let resolved =
-        crate::ops::task_pm::resolve_project(&repo, project_id, crate::ops::pm::PmRefresh::Auto)?;
-    let project = reserve_project(&repo, resolved, directive, true)?;
+    let project = project_prepare(repo, project_id, directive)?;
     block_on_project(async move {
         let store = project_store().await?;
-        if project_session_live(&project).await? {
-            return Ok(project);
-        }
-        launch_project_process(&store, &project).await?;
-        wait_until_project_running(&store, &project.id).await
+        launch_project_operation(&store, &project).await?;
+        Ok(project)
     })
 }
 
@@ -240,23 +138,16 @@ pub fn project_prepare(
     let repo = ensure_clean_main(repo, "Project prepare")?;
     let resolved =
         crate::ops::task_pm::resolve_project(&repo, project_id, crate::ops::pm::PmRefresh::Auto)?;
-    reserve_project(&repo, resolved, directive, false)
+    reserve_project(&repo, resolved, directive)
 }
 
 pub(crate) fn reserve_project(
     repo: &Path,
     resolved: crate::ops::task_pm::ResolvedProject,
     directive: Option<String>,
-    install_controller: bool,
 ) -> OpsResult<Project> {
     let locator = crate::work::wave::WaveLocator::discover(repo, &resolved.snapshot.wave)
         .map_err(|error| project_error(error.to_string()))?;
-    let controller_route = install_controller.then(|| {
-        let config = load_config_or_default(Some(repo));
-        let agent = config.agent().to_string();
-        let (provider, _) = parse_agent(&agent);
-        (agent, provider)
-    });
     let directive = directive.unwrap_or_else(|| {
         format!(
             "Pursue {}.\n\n{}",
@@ -274,28 +165,6 @@ pub(crate) fn reserve_project(
                 project_work_status(&store, existing).await?,
                 WorkStatus::Done | WorkStatus::Abandoned
             ) {
-                if let Some((agent, provider)) = controller_route.as_ref() {
-                    if store
-                        .project_controller_state(&existing.id)
-                        .await
-                        .map_err(|error| project_error(error.to_string()))?
-                        .is_none()
-                    {
-                        store
-                            .put_project_controller_state(&ProjectControllerState {
-                                project_id: existing.id.clone(),
-                                iteration: 0,
-                                observation_cursor: 0,
-                                last_state_fingerprint: None,
-                                agent: agent.clone(),
-                                provider: provider.clone(),
-                                provider_session_id: None,
-                                updated_at: time::OffsetDateTime::now_utc(),
-                            })
-                            .await
-                            .map_err(|error| project_error(error.to_string()))?;
-                    }
-                }
                 return Ok(existing.clone());
             }
         }
@@ -318,6 +187,7 @@ pub(crate) fn reserve_project(
                 .unwrap_or_else(ProjectId::new),
             plan,
             wave_id: wave.id().clone(),
+            iteration: predecessor.as_ref().map_or(0, |project| project.iteration),
             abandon_intent: None,
             created_at: predecessor
                 .as_ref()
@@ -348,23 +218,6 @@ pub(crate) fn reserve_project(
             }
             return Err(project_error(format!("failed to reserve Project: {error}")));
         }
-        if let Some((agent, provider)) = controller_route {
-            store
-                .put_project_controller_state(&ProjectControllerState {
-                    project_id: project.id.clone(),
-                    iteration: 0,
-                    observation_cursor: 0,
-                    last_state_fingerprint: None,
-                    agent,
-                    provider,
-                    provider_session_id: None,
-                    updated_at: now,
-                })
-                .await
-                .map_err(|error| {
-                    project_error(format!("failed to install Project controller: {error}"))
-                })?;
-        }
         Ok(project)
     })
 }
@@ -387,7 +240,7 @@ pub(crate) fn ensure_project_for_task(
     repo: &Path,
     resolved: crate::ops::task_pm::ResolvedProject,
 ) -> OpsResult<Project> {
-    let project = reserve_project(repo, resolved, None, false)?;
+    let project = reserve_project(repo, resolved, None)?;
     Ok(project)
 }
 
@@ -461,59 +314,37 @@ pub fn project_start(
     project_run(&main, &project.project.id, directive)
 }
 
-pub(crate) async fn launch_project_process(
+pub(crate) async fn launch_project_operation(
     store: &SharedStore,
     project: &Project,
 ) -> OpsResult<()> {
-    // Re-check at the launch boundary: commands and observations can wake a
-    // stopped Project long after its initial reservation.
     let wave = owning_wave(store, project).await?;
     ensure_clean_main(Path::new(wave.repo()), "Project turn")?;
-    if project_session_live(project).await? {
-        return Ok(());
+    if matches!(
+        project_work_status(store, project).await?,
+        WorkStatus::Done | WorkStatus::Abandoned
+    ) {
+        return Err(project_error(format!(
+            "Project {} is terminal and cannot run another operation",
+            project.plan.slug
+        )));
     }
-    crate::ops::launch_work(crate::ops::WorkLaunch {
-        work: crate::durable::WorkRef::Project(project.id.clone()),
-        wave_id: project.wave_id.clone(),
-        cwd: Path::new(wave.repo()).to_path_buf(),
-        tmux_name: project_session_name(project),
-        environment: Vec::new(),
-    })
-    .await
-    .map_err(|error| project_error(error.to_string()))
-}
-
-async fn wait_until_project_running(
-    store: &SharedStore,
-    project_id: &ProjectId,
-) -> OpsResult<Project> {
-    let deadline = tokio::time::Instant::now() + super::child::CHILD_STARTUP_GRACE;
-    loop {
-        let project = store
-            .get_project(project_id)
-            .await
-            .map_err(|error| project_error(error.to_string()))?
-            .ok_or_else(|| project_error("Project disappeared during startup"))?;
-        if project_session_live(&project).await? {
-            return Ok(project);
-        }
-        match project_work_status(store, &project).await? {
-            WorkStatus::Done | WorkStatus::Abandoned => {
-                return Err(project_error(format!(
-                    "Project {} ended during startup",
-                    project.plan.slug
-                )))
-            }
-            WorkStatus::Ready => {}
-        }
-        if tokio::time::Instant::now() >= deadline {
-            return Err(project_error(format!(
-                "Project {} did not become running within 10s",
-                project.plan.slug
-            )));
-        }
-        tokio::time::sleep(Duration::from_millis(100)).await;
-    }
+    let operation_id = RunId::new();
+    let session = format!(
+        "lf-project-{}-{}",
+        tmux_session_slug(&project.plan.slug),
+        &operation_id.to_string()[4..12],
+    );
+    let argv = vec![
+        resolve_lf_binary().display().to_string(),
+        "--project".to_string(),
+        project.id.to_string(),
+        "--batch".to_string(),
+        "project/operate".to_string(),
+    ];
+    start_lf_session(&session, Path::new(wave.repo()), &argv)
+        .await
+        .map_err(|error| project_error(format!("failed to start Project operation: {error}")))
 }
 
 pub fn project_status(project: &str) -> OpsResult<Project> {
@@ -525,6 +356,31 @@ pub fn project_status(project: &str) -> OpsResult<Project> {
             .map_err(|error| project_error(error.to_string()))?
             .ok_or_else(|| project_error(format!("no Project exists for {project:?}")))?;
         Ok(project)
+    })
+}
+
+pub fn record_project_operation(
+    binding: &crate::ops::WorkBinding,
+    error: Option<&anyhow::Error>,
+) -> OpsResult<()> {
+    let WorkRef::Project(project_id) = &binding.work else {
+        return Err(project_error(
+            "project/operate requires an exact Project Work binding",
+        ));
+    };
+    block_on_project(async {
+        let store = project_store().await?;
+        match error {
+            Some(error) => store
+                .fail_project_operation(project_id, &error.to_string())
+                .await
+                .map_err(|store_error| project_error(store_error.to_string())),
+            None => store
+                .complete_project_operation(project_id, &binding.project_observations)
+                .await
+                .map(|_| ())
+                .map_err(|store_error| project_error(store_error.to_string())),
+        }
     })
 }
 
@@ -551,10 +407,9 @@ pub fn project_snapshot(project: &Project) -> OpsResult<ProjectSnapshot> {
             .await
             .map_err(|error| project_error(error.to_string()))?;
         let reason = status.reason().to_string();
-        let controller = store
-            .project_controller_state(&project.id)
-            .await
-            .map_err(|error| project_error(error.to_string()))?;
+        let config = crate::engine::config::load_config_or_default(Some(Path::new(wave.repo())));
+        let agent = config.agent().to_string();
+        let (provider, _) = crate::engine::config::parse_agent(&agent);
         Ok(ProjectSnapshot {
             id: project.id.to_string(),
             external_project_id: project.plan.id.as_str().to_string(),
@@ -563,12 +418,10 @@ pub fn project_snapshot(project: &Project) -> OpsResult<ProjectSnapshot> {
             wave: wave.name().to_string(),
             status,
             reason,
-            iteration: controller.as_ref().map(|state| state.iteration),
-            observation_cursor: controller.as_ref().map(|state| state.observation_cursor),
+            iteration: project.iteration,
             pending_observations,
-            agent: controller.as_ref().map(|state| state.agent.clone()),
-            provider: controller.as_ref().map(|state| state.provider.clone()),
-            provider_session_id: controller.and_then(|state| state.provider_session_id),
+            agent,
+            provider,
             latest_event,
             last_failure: store
                 .latest_project_failure(&project.id)
@@ -591,14 +444,7 @@ fn queue_project_steer(project: &str, message: String) -> OpsResult<ProjectContr
         let steer =
             super::child::append_steer(&store, ChildRef::Project(project.id.clone()), &message)
                 .await?;
-        let has_controller = store
-            .project_controller_state(&project.id)
-            .await
-            .map_err(|error| project_error(error.to_string()))?
-            .is_some();
-        if has_controller && !project_session_live(&project).await? {
-            launch_project_process(&store, &project).await?;
-        }
+        launch_project_operation(&store, &project).await?;
         Ok(ProjectControlResult {
             id: project.id.to_string(),
             external_project_id: project.plan.id.as_str().to_string(),
@@ -610,74 +456,6 @@ fn queue_project_steer(project: &str, message: String) -> OpsResult<ProjectContr
 
 pub fn project_steer(project: &str, message: String) -> OpsResult<ProjectControlResult> {
     queue_project_steer(project, message)
-}
-
-pub fn project_interrupt(project: &str) -> OpsResult<ProjectControlResult> {
-    Err(project_error(format!(
-        "cannot interrupt Project {project}: its controller has no exact process owner; attach to the live Project and use /interrupt"
-    )))
-}
-
-pub fn project_resume(
-    project: &str,
-    model: Option<String>,
-    reason: Option<String>,
-) -> OpsResult<ProjectControlResult> {
-    block_on_project(async move {
-        let store = project_store().await?;
-        let project = store
-            .get_project_by_project(project)
-            .await
-            .map_err(|error| project_error(error.to_string()))?
-            .ok_or_else(|| project_error(format!("no Project exists for {project:?}")))?;
-        if store
-            .project_controller_state(&project.id)
-            .await
-            .map_err(|error| project_error(error.to_string()))?
-            .is_none()
-        {
-            let wave = owning_wave(&store, &project).await?;
-            store
-                .put_project_controller_state(&default_project_controller_state(
-                    &project,
-                    Path::new(wave.repo()),
-                    time::OffsetDateTime::now_utc(),
-                ))
-                .await
-                .map_err(|error| {
-                    project_error(format!("failed to install Project controller: {error}"))
-                })?;
-        }
-        if let Some(model) = model {
-            let request = super::child::handoff_request(&model, reason.as_deref())?;
-            let controller = store
-                .project_controller_state(&project.id)
-                .await
-                .map_err(|error| project_error(error.to_string()))?
-                .ok_or_else(|| {
-                    project_error(format!(
-                        "Project {} has no end-to-end controller state",
-                        project.plan.slug
-                    ))
-                })?;
-            if controller.agent != request.agent {
-                store
-                    .handoff_project_controller(&project.id, &request)
-                    .await
-                    .map_err(|error| project_error(error.to_string()))?;
-            }
-        }
-        let external_project_id = project.plan.id.as_str().to_string();
-        let id = project.id.to_string();
-        launch_project_process(&store, &project).await?;
-        let session = project_session_name(&project);
-        Ok(ProjectControlResult {
-            id,
-            external_project_id,
-            receipt_id: session,
-            action: "resumed".to_string(),
-        })
-    })
 }
 
 pub fn project_abandon(project: &str, reason: String) -> OpsResult<ProjectControlResult> {
@@ -705,57 +483,6 @@ pub fn project_abandon(project: &str, reason: String) -> OpsResult<ProjectContro
     })
 }
 
-pub fn project_wait(
-    project: &str,
-    until: ProjectWaitUntil,
-    timeout: Option<Duration>,
-) -> OpsResult<Project> {
-    let start = Instant::now();
-    loop {
-        let project = project_status(project)?;
-        let (status, live) = block_on_project(async {
-            let store = project_store().await?;
-            Ok((
-                project_work_status(&store, &project).await?,
-                project_session_live(&project).await?,
-            ))
-        })?;
-        let done = match until {
-            ProjectWaitUntil::Waiting => !live,
-            ProjectWaitUntil::Terminal => {
-                matches!(status, WorkStatus::Done | WorkStatus::Abandoned)
-            }
-        };
-        if done {
-            return Ok(project);
-        }
-        if timeout.is_some_and(|timeout| start.elapsed() >= timeout) {
-            return Ok(project);
-        }
-        std::thread::sleep(Duration::from_millis(200));
-    }
-}
-
-pub fn project_attach(project: &str) -> OpsResult<()> {
-    let project = project_status(project)?;
-    if !block_on_project(project_session_live(&project))? {
-        return Err(project_error(format!(
-            "Project {} is not running; run `lf project resume {}` first",
-            project.plan.slug,
-            project.plan.id.as_str()
-        )));
-    }
-    let name = project_session_name(&project);
-    let status = std::process::Command::new("tmux")
-        .args(["attach-session", "-t", &name])
-        .status()
-        .map_err(|error| project_error(format!("failed to attach Project: {error}")))?;
-    if !status.success() {
-        return Err(project_error("tmux attach failed"));
-    }
-    Ok(())
-}
-
 pub(crate) async fn wake_project(project_id: &ProjectId) -> OpsResult<()> {
     let store = project_store().await?;
     let project = store
@@ -763,25 +490,13 @@ pub(crate) async fn wake_project(project_id: &ProjectId) -> OpsResult<()> {
         .await
         .map_err(|error| project_error(error.to_string()))?
         .ok_or_else(|| project_error(format!("Project {project_id} not found")))?;
-    if store
-        .project_controller_state(&project.id)
-        .await
-        .map_err(|error| project_error(error.to_string()))?
-        .is_none()
-    {
+    if matches!(
+        project_work_status(&store, &project).await?,
+        WorkStatus::Done | WorkStatus::Abandoned
+    ) {
         return Ok(());
     }
-    // A wake is a supervisor restart: a Task observation arrived and the Project
-    // may want to judge it. That is never a reason to revive a Project whose end
-    // was already decided.
-    if let Some(bar) = crate::controller::project::automatic_restart_bar(&project) {
-        tracing::info!(project = %project_id, "not waking Project: {bar}");
-        return Ok(());
-    }
-    if !project_session_live(&project).await? {
-        launch_project_process(&store, &project).await?;
-    }
-    Ok(())
+    launch_project_operation(&store, &project).await
 }
 
 pub(crate) async fn wake_task_project_route(_store: &Store, task: &Task) -> OpsResult<()> {
@@ -1048,15 +763,6 @@ mod tests {
             .contains("canonical main checkout is dirty"));
     }
 
-    #[test]
-    fn project_interrupt_refuses_without_exact_process_ownership() {
-        let error = project_interrupt("project-no-owner")
-            .expect_err("a deterministic tmux name is not signal authority");
-
-        assert!(error.to_string().contains("no exact process owner"));
-        assert!(error.to_string().contains("use /interrupt"));
-    }
-
     /// Promotion grants residency: the spawned child must be the steerable
     /// half. A one-shot task runner would never publish an endpoint.
     #[test]
@@ -1068,7 +774,11 @@ mod tests {
         assert!(
             matches!(
                 Cli::try_parse_from(full).expect("promotion argv parses").command,
-                Some(Commands::Wave { name, force: false }) if name == "release-stability"
+                Some(Commands::Wave {
+                    name,
+                    force: false,
+                    restart_flow: false,
+                }) if name == "release-stability"
             ),
             "what promotion spawns must parse as the Wave entrypoint"
         );
@@ -1081,94 +791,6 @@ mod tests {
         drop(listener);
 
         wake_child_observer(&endpoint, "platform", "ship").await;
-    }
-
-    /// The launch resolver for Projects ignores `LF_CONTROL_BIN`. It
-    /// names a real, existing binary (the historical pin) while the current
-    /// Home `LF_BIN` is gone; the launch fails at binary resolution, proving the
-    /// control pin was never consulted.
-    #[tokio::test]
-    async fn launch_project_process_ignores_control_bin_and_resolves_current_home() {
-        let home = tempfile::tempdir().unwrap();
-        let repo = tempfile::tempdir().unwrap();
-        for args in [
-            vec!["init", "-b", "main"],
-            vec!["config", "user.email", "test@example.com"],
-            vec!["config", "user.name", "Test"],
-        ] {
-            assert!(Command::new("git")
-                .args(args)
-                .current_dir(repo.path())
-                .status()
-                .unwrap()
-                .success());
-        }
-        std::fs::write(repo.path().join("README.md"), "test\n").unwrap();
-        assert!(Command::new("git")
-            .args(["add", "."])
-            .current_dir(repo.path())
-            .status()
-            .unwrap()
-            .success());
-        assert!(Command::new("git")
-            .args(["commit", "-m", "initial"])
-            .current_dir(repo.path())
-            .status()
-            .unwrap()
-            .success());
-        let store: SharedStore = Arc::new(
-            crate::store::open_ephemeral_store(&StorageConfig::sqlite(
-                home.path().join("loopflow.db"),
-            ))
-            .await
-            .unwrap(),
-        );
-        let now = time::OffsetDateTime::now_utc();
-        let project = Project {
-            id: ProjectId::new(),
-            plan: ProjectPlan {
-                id: LinearProjectId::new("project-no-pin").unwrap(),
-                slug: "no-pin".to_string(),
-                name: "No pin".to_string(),
-                prompt_context: String::new(),
-                pm_snapshot_synced_at: now.unix_timestamp(),
-            },
-            wave_id: WaveId::new(),
-            abandon_intent: None,
-            created_at: now,
-            updated_at: now,
-        };
-        store
-            .create_wave(&Wave::new(
-                project.wave_id.clone(),
-                "no-pin".to_string(),
-                repo.path().display().to_string(),
-            ))
-            .await
-            .unwrap();
-        store.create_project(&project).await.unwrap();
-
-        let previous_control_bin = std::env::var_os("LF_CONTROL_BIN");
-        let previous_lf_bin = std::env::var_os("LF_BIN");
-        std::env::set_var("LF_CONTROL_BIN", "/bin/sh");
-        std::env::set_var("LF_BIN", "/loopflow-test/does-not-exist/lf");
-        let result = super::launch_project_process(&store, &project).await;
-        match previous_lf_bin {
-            Some(value) => std::env::set_var("LF_BIN", value),
-            None => std::env::remove_var("LF_BIN"),
-        }
-        match previous_control_bin {
-            Some(value) => std::env::set_var("LF_CONTROL_BIN", value),
-            None => std::env::remove_var("LF_CONTROL_BIN"),
-        }
-
-        let error = result.expect_err("launch must fail when the current Home lf is missing");
-        assert!(
-            error
-                .to_string()
-                .contains("cannot resolve current lf binary"),
-            "launch must resolve the current Home lf, not the LF_CONTROL_BIN pin: {error}"
-        );
     }
 
     #[tokio::test]

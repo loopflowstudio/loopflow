@@ -4,8 +4,8 @@ use time::OffsetDateTime;
 use crate::child::ChildRef;
 use crate::durable::{
     AbandonReceipt, Author, FlowPosition, Home, HomeId, Placement, ProjectId, RunId, Steer,
-    SteerComment, TaskId, ToolResponseId, ToolResponseReceipt, ToolResponseWrite, WorkRef,
-    WorkStatus,
+    SteerComment, TaskFlowBlocker, TaskId, TaskWorkerClaim, TaskWorkerClaimOutcome,
+    TaskWorkerOwner, ToolResponseId, ToolResponseReceipt, ToolResponseWrite, WorkRef, WorkStatus,
 };
 use crate::id::WaveId;
 use crate::store::rows::now_unix;
@@ -132,89 +132,178 @@ impl SqliteStore {
 
     pub fn set_flow_position(
         &self,
-        work: &WorkRef,
+        task_id: &TaskId,
         position: &FlowPosition,
     ) -> StoreResult<FlowPosition> {
         let mut conn = self.conn.lock().expect("store mutex poisoned");
         let tx = conn.transaction_with_behavior(TransactionBehavior::Immediate)?;
-        require_ready_work(&tx, work)?;
-        if &position.work != work {
+        let stored = set_flow_position_in(&tx, task_id, position)?;
+        tx.commit()?;
+        Ok(stored)
+    }
+
+    pub fn flow_position(&self, task_id: &TaskId) -> StoreResult<Option<FlowPosition>> {
+        let conn = self.conn.lock().expect("store mutex poisoned");
+        flow_position_in(&conn, task_id)
+    }
+
+    pub fn claim_task_worker(
+        &self,
+        task_id: &TaskId,
+        expected_version: u64,
+        owner: &TaskWorkerOwner,
+        claimed_at: OffsetDateTime,
+    ) -> StoreResult<TaskWorkerClaimOutcome> {
+        let mut conn = self.conn.lock().expect("store mutex poisoned");
+        let tx = conn.transaction_with_behavior(TransactionBehavior::Immediate)?;
+        let work = WorkRef::Task(task_id.clone());
+        require_task_worker_eligible(&tx, &work)?;
+        let position = flow_position_in(&tx, task_id)?.ok_or(StoreError::NotFound)?;
+        if position.is_human() {
             return Err(StoreError::InvalidAuthority(
-                "flow position does not belong to this Work".to_string(),
+                "human Flow positions require an exact decision".to_string(),
             ));
         }
-        if position.flow.trim().is_empty() || position.step.trim().is_empty() {
-            return Err(StoreError::InvalidData(
-                "flow and step cannot be empty".to_string(),
-            ));
+        if position.version != expected_version {
+            return Ok(TaskWorkerClaimOutcome::Stale {
+                actual_version: position.version,
+            });
         }
-        if position.human && position.node_id.is_none() {
-            return Err(StoreError::InvalidData(
-                "human flow positions require a stable node id".to_string(),
-            ));
+        if let Some(claim) = position.claim {
+            return Ok(TaskWorkerClaimOutcome::Busy(claim));
         }
-        tx.execute(
-            "INSERT INTO work_flow_positions (
-                work_kind, work_id, flow, step, node_id, human, session_run_id,
-                ready_summary, step_index, iteration, updated_at
-             ) VALUES (?1, ?2, ?3, ?4, ?5, ?6, ?7, ?8, ?9, ?10, ?11)
-             ON CONFLICT(work_kind, work_id) DO UPDATE SET
-                flow=excluded.flow, step=excluded.step, node_id=excluded.node_id,
-                human=excluded.human, session_run_id=excluded.session_run_id,
-                ready_summary=excluded.ready_summary,
-                step_index=excluded.step_index, iteration=excluded.iteration,
-                updated_at=excluded.updated_at",
+        let generation = position.worker_generation.checked_add(1).ok_or_else(|| {
+            StoreError::InvalidData("Task worker generation overflow".to_string())
+        })?;
+        let claim = TaskWorkerClaim {
+            invocation_id: position.invocation.id.clone(),
+            generation,
+            position_version: position.version,
+            owner: owner.clone(),
+            worker_run_id: None,
+            claimed_at,
+        };
+        let claim_json = serde_json::to_string(&claim)?;
+        let changed = tx.execute(
+            "UPDATE task_flow_positions
+             SET worker_generation=?2, claim_json=?3, failure_json=NULL, updated_at=?4
+             WHERE task_id=?1 AND position_version=?5 AND claim_json IS NULL",
             params![
-                work.kind(),
-                work.id(),
-                position.flow,
-                position.step,
-                position.node_id,
-                position.human,
-                position.session_run_id.as_ref().map(RunId::as_str),
-                position.ready_summary,
-                i64::from(position.step_index),
-                i64::from(position.iteration),
-                position.updated_at.unix_timestamp()
+                task_id.as_str(),
+                i64::try_from(generation).map_err(invalid_durable)?,
+                claim_json,
+                claimed_at.unix_timestamp(),
+                i64::try_from(expected_version).map_err(invalid_durable)?
             ],
         )?;
-        tx.commit()?;
-        Ok(position.clone())
-    }
-
-    pub fn flow_position(&self, work: &WorkRef) -> StoreResult<Option<FlowPosition>> {
-        let conn = self.conn.lock().expect("store mutex poisoned");
-        let row = conn
-            .query_row(
-                "SELECT flow, step, node_id, human, session_run_id, ready_summary,
-                        step_index, iteration, updated_at
-                 FROM work_flow_positions WHERE work_kind=?1 AND work_id=?2",
-                params![work.kind(), work.id()],
-                |row| {
-                    Ok((
-                        row.get::<_, String>(0)?,
-                        row.get::<_, String>(1)?,
-                        row.get::<_, Option<String>>(2)?,
-                        row.get::<_, bool>(3)?,
-                        row.get::<_, Option<String>>(4)?,
-                        row.get::<_, Option<String>>(5)?,
-                        row.get::<_, i64>(6)?,
-                        row.get::<_, i64>(7)?,
-                        row.get::<_, i64>(8)?,
-                    ))
+        if changed != 1 {
+            let current = flow_position_in(&tx, task_id)?.ok_or(StoreError::NotFound)?;
+            return Ok(match current.claim {
+                Some(claim) => TaskWorkerClaimOutcome::Busy(claim),
+                None => TaskWorkerClaimOutcome::Stale {
+                    actual_version: current.version,
                 },
-            )
-            .optional()?;
-        row.map(|row| decode_flow_position(work.clone(), row))
-            .transpose()
+            });
+        }
+        tx.commit()?;
+        Ok(TaskWorkerClaimOutcome::Claimed(claim))
     }
 
-    pub fn human_flow_positions(&self) -> StoreResult<Vec<FlowPosition>> {
+    pub fn reclaim_task_worker(
+        &self,
+        task_id: &TaskId,
+        expected: &TaskWorkerClaim,
+        owner: &TaskWorkerOwner,
+        claimed_at: OffsetDateTime,
+    ) -> StoreResult<TaskWorkerClaim> {
+        let mut conn = self.conn.lock().expect("store mutex poisoned");
+        let tx = conn.transaction_with_behavior(TransactionBehavior::Immediate)?;
+        let work = WorkRef::Task(task_id.clone());
+        require_task_worker_eligible(&tx, &work)?;
+        let position = flow_position_in(&tx, task_id)?.ok_or(StoreError::NotFound)?;
+        if position.version != expected.position_version
+            || position.claim.as_ref() != Some(expected)
+        {
+            return Err(stale_task_worker(task_id));
+        }
+        let generation = position.worker_generation.checked_add(1).ok_or_else(|| {
+            StoreError::InvalidData("Task worker generation overflow".to_string())
+        })?;
+        let replacement = TaskWorkerClaim {
+            invocation_id: position.invocation.id.clone(),
+            generation,
+            position_version: position.version,
+            owner: owner.clone(),
+            worker_run_id: None,
+            claimed_at,
+        };
+        let expected_json = serde_json::to_string(expected)?;
+        let replacement_json = serde_json::to_string(&replacement)?;
+        if tx.execute(
+            "UPDATE task_flow_positions
+             SET worker_generation=?2, claim_json=?3, failure_json=NULL, updated_at=?4
+             WHERE task_id=?1 AND position_version=?5 AND claim_json=?6",
+            params![
+                task_id.as_str(),
+                i64::try_from(generation).map_err(invalid_durable)?,
+                replacement_json,
+                claimed_at.unix_timestamp(),
+                i64::try_from(position.version).map_err(invalid_durable)?,
+                expected_json
+            ],
+        )? != 1
+        {
+            return Err(stale_task_worker(task_id));
+        }
+        tx.commit()?;
+        Ok(replacement)
+    }
+
+    pub fn bind_task_worker_run(
+        &self,
+        task_id: &TaskId,
+        expected: &TaskWorkerClaim,
+        worker_run_id: &RunId,
+        owner: &TaskWorkerOwner,
+    ) -> StoreResult<TaskWorkerClaim> {
+        let mut conn = self.conn.lock().expect("store mutex poisoned");
+        let tx = conn.transaction_with_behavior(TransactionBehavior::Immediate)?;
+        require_ready_work(&tx, &WorkRef::Task(task_id.clone()))?;
+        let bound = TaskWorkerClaim {
+            invocation_id: expected.invocation_id.clone(),
+            generation: expected.generation,
+            position_version: expected.position_version,
+            owner: owner.clone(),
+            worker_run_id: Some(worker_run_id.clone()),
+            claimed_at: expected.claimed_at,
+        };
+        let expected_json = serde_json::to_string(expected)?;
+        let bound_json = serde_json::to_string(&bound)?;
+        if tx.execute(
+            "UPDATE task_flow_positions SET claim_json=?2
+             WHERE task_id=?1 AND position_version=?3 AND claim_json=?4",
+            params![
+                task_id.as_str(),
+                bound_json,
+                i64::try_from(expected.position_version).map_err(invalid_durable)?,
+                expected_json
+            ],
+        )? != 1
+        {
+            return Err(stale_task_worker(task_id));
+        }
+        tx.commit()?;
+        Ok(bound)
+    }
+
+    pub fn human_task_flow_positions(&self) -> StoreResult<Vec<FlowPosition>> {
         let conn = self.conn.lock().expect("store mutex poisoned");
         let mut statement = conn.prepare(
-            "SELECT work_kind, work_id, flow, step, node_id, human,
-                    session_run_id, ready_summary, step_index, iteration, updated_at
-             FROM work_flow_positions WHERE human=1 ORDER BY updated_at, work_kind, work_id",
+            "SELECT task_id, invocation_json, flow, step, node_id, human,
+                    session_run_id, ready_summary, step_index, iteration,
+                    position_version, worker_generation, claim_json, failure_json,
+                    updated_at
+             FROM task_flow_positions WHERE human=1 ORDER BY updated_at, task_id",
         )?;
         let rows = statement.query_map([], |row| {
             Ok((
@@ -229,13 +318,17 @@ impl SqliteStore {
                 row.get::<_, i64>(8)?,
                 row.get::<_, i64>(9)?,
                 row.get::<_, i64>(10)?,
+                row.get::<_, i64>(11)?,
+                row.get::<_, Option<String>>(12)?,
+                row.get::<_, Option<String>>(13)?,
+                row.get::<_, i64>(14)?,
             ))
         })?;
         let mut positions = Vec::new();
         for row in rows {
             let (
-                kind,
-                id,
+                task_id,
+                invocation_json,
                 flow,
                 step,
                 node_id,
@@ -244,12 +337,16 @@ impl SqliteStore {
                 ready_summary,
                 step_index,
                 iteration,
+                position_version,
+                worker_generation,
+                claim_json,
+                failure_json,
                 updated_at,
             ) = row?;
-            let work = parse_work_ref(&kind, &id)?;
             positions.push(decode_flow_position(
-                work,
+                TaskId::parse(&task_id).map_err(invalid_durable)?,
                 (
+                    invocation_json,
                     flow,
                     step,
                     node_id,
@@ -258,6 +355,10 @@ impl SqliteStore {
                     ready_summary,
                     step_index,
                     iteration,
+                    position_version,
+                    worker_generation,
+                    claim_json,
+                    failure_json,
                     updated_at,
                 ),
             )?);
@@ -753,11 +854,25 @@ fn require_ready_work(conn: &Connection, work: &WorkRef) -> StoreResult<()> {
     }
 }
 
+fn require_task_worker_eligible(conn: &Connection, work: &WorkRef) -> StoreResult<()> {
+    require_ready_work(conn, work)?;
+    if !placement_in(conn, work)?.enabled {
+        return Err(StoreError::InvalidAuthority(format!(
+            "{} {} is paused",
+            work.kind(),
+            work.id()
+        )));
+    }
+    Ok(())
+}
+
 pub(crate) fn reopen_work_in(conn: &Connection, work: &WorkRef) -> StoreResult<()> {
-    conn.execute(
-        "DELETE FROM work_flow_positions WHERE work_kind=?1 AND work_id=?2",
-        params![work.kind(), work.id()],
-    )?;
+    if let WorkRef::Task(task_id) = work {
+        conn.execute(
+            "DELETE FROM task_flow_positions WHERE task_id=?1",
+            [task_id.as_str()],
+        )?;
+    }
     let (table, id) = work_table(work);
     if conn.execute(
         &format!(
@@ -784,24 +899,8 @@ fn work_table(work: &WorkRef) -> (&'static str, &str) {
     }
 }
 
-fn parse_work_ref(kind: &str, id: &str) -> StoreResult<WorkRef> {
-    match kind {
-        "wave" => WaveId::parse(id)
-            .map(WorkRef::Wave)
-            .map_err(invalid_durable),
-        "project" => ProjectId::parse(id)
-            .map(WorkRef::Project)
-            .map_err(invalid_durable),
-        "task" => TaskId::parse(id)
-            .map(WorkRef::Task)
-            .map_err(invalid_durable),
-        value => Err(StoreError::InvalidData(format!(
-            "invalid Work kind: {value}"
-        ))),
-    }
-}
-
 type StoredFlowPosition = (
+    String,
     String,
     String,
     Option<String>,
@@ -811,11 +910,254 @@ type StoredFlowPosition = (
     i64,
     i64,
     i64,
+    i64,
+    Option<String>,
+    Option<String>,
+    i64,
 );
 
+pub(super) fn flow_position_in(
+    conn: &Connection,
+    task_id: &TaskId,
+) -> StoreResult<Option<FlowPosition>> {
+    let row = conn
+        .query_row(
+            "SELECT invocation_json, flow, step, node_id, human, session_run_id, ready_summary,
+                    step_index, iteration, position_version, worker_generation,
+                    claim_json, failure_json, updated_at
+             FROM task_flow_positions WHERE task_id=?1",
+            [task_id.as_str()],
+            |row| {
+                Ok((
+                    row.get::<_, String>(0)?,
+                    row.get::<_, String>(1)?,
+                    row.get::<_, String>(2)?,
+                    row.get::<_, Option<String>>(3)?,
+                    row.get::<_, bool>(4)?,
+                    row.get::<_, Option<String>>(5)?,
+                    row.get::<_, Option<String>>(6)?,
+                    row.get::<_, i64>(7)?,
+                    row.get::<_, i64>(8)?,
+                    row.get::<_, i64>(9)?,
+                    row.get::<_, i64>(10)?,
+                    row.get::<_, Option<String>>(11)?,
+                    row.get::<_, Option<String>>(12)?,
+                    row.get::<_, i64>(13)?,
+                ))
+            },
+        )
+        .optional()?;
+    row.map(|row| decode_flow_position(task_id.clone(), row))
+        .transpose()
+}
+
+pub(super) fn set_flow_position_in(
+    conn: &Connection,
+    task_id: &TaskId,
+    position: &FlowPosition,
+) -> StoreResult<FlowPosition> {
+    require_ready_work(conn, &WorkRef::Task(task_id.clone()))?;
+    validate_flow_position(task_id, position)?;
+    if position.claim.is_some() {
+        return Err(StoreError::InvalidAuthority(
+            "set_flow_position cannot write an advancement claim".to_string(),
+        ));
+    }
+    let failure_json = position
+        .failure
+        .as_ref()
+        .map(serde_json::to_string)
+        .transpose()?;
+    let step = position.current();
+    let changed = if position.version == 0 {
+        conn.execute(
+            "INSERT INTO task_flow_positions (
+                task_id, invocation_json, flow, step, node_id, human, session_run_id,
+                ready_summary, step_index, iteration, position_version,
+                worker_generation, claim_json, failure_json, updated_at
+             ) VALUES (
+                ?1, ?2, ?3, ?4, ?5, ?6, ?7, ?8, ?9, ?10, 1, 0, NULL, ?11, ?12
+             )
+             ON CONFLICT(task_id) DO NOTHING",
+            params![
+                task_id.as_str(),
+                serde_json::to_string(&position.invocation)?,
+                step.flow,
+                step.step,
+                step.policy.id,
+                step.policy.human,
+                position.session_run_id.as_ref().map(RunId::as_str),
+                position.ready_summary,
+                i64::from(position.step_index),
+                i64::from(position.iteration),
+                failure_json,
+                position.updated_at.unix_timestamp()
+            ],
+        )?
+    } else {
+        conn.execute(
+            "UPDATE task_flow_positions
+             SET invocation_json=?2, flow=?3, step=?4, node_id=?5, human=?6, session_run_id=?7,
+                 ready_summary=?8, step_index=?9, iteration=?10,
+                 position_version=position_version + 1,
+                 worker_generation=0, claim_json=NULL, failure_json=?11,
+                 updated_at=?12
+             WHERE task_id=?1 AND position_version=?13 AND claim_json IS NULL",
+            params![
+                task_id.as_str(),
+                serde_json::to_string(&position.invocation)?,
+                step.flow,
+                step.step,
+                step.policy.id,
+                step.policy.human,
+                position.session_run_id.as_ref().map(RunId::as_str),
+                position.ready_summary,
+                i64::from(position.step_index),
+                i64::from(position.iteration),
+                failure_json,
+                position.updated_at.unix_timestamp(),
+                i64::try_from(position.version).map_err(invalid_durable)?
+            ],
+        )?
+    };
+    if changed != 1 {
+        return Err(StoreError::InvalidAuthority(format!(
+            "Flow position for Task {task_id} changed or is actively claimed"
+        )));
+    }
+    flow_position_in(conn, task_id)?.ok_or(StoreError::NotFound)
+}
+
+pub(super) fn block_task_flow_in(
+    conn: &Connection,
+    task_id: &TaskId,
+    expected: &TaskWorkerClaim,
+    failure: &TaskFlowBlocker,
+) -> StoreResult<FlowPosition> {
+    require_ready_work(conn, &WorkRef::Task(task_id.clone()))?;
+    let expected_json = serde_json::to_string(expected)?;
+    let failure_json = serde_json::to_string(failure)?;
+    if conn.execute(
+        "UPDATE task_flow_positions
+         SET claim_json=NULL, failure_json=?2, updated_at=?3
+         WHERE task_id=?1 AND position_version=?4 AND claim_json=?5",
+        params![
+            task_id.as_str(),
+            failure_json,
+            failure.observed_at.unix_timestamp(),
+            i64::try_from(expected.position_version).map_err(invalid_durable)?,
+            expected_json
+        ],
+    )? != 1
+    {
+        return Err(stale_task_worker(task_id));
+    }
+    flow_position_in(conn, task_id)?.ok_or(StoreError::NotFound)
+}
+
+pub(super) fn release_task_worker_in(
+    conn: &Connection,
+    task_id: &TaskId,
+    expected: &TaskWorkerClaim,
+) -> StoreResult<FlowPosition> {
+    require_ready_work(conn, &WorkRef::Task(task_id.clone()))?;
+    let expected_json = serde_json::to_string(expected)?;
+    if conn.execute(
+        "UPDATE task_flow_positions
+         SET claim_json=NULL, failure_json=NULL, updated_at=?2
+         WHERE task_id=?1 AND position_version=?3 AND claim_json=?4",
+        params![
+            task_id.as_str(),
+            OffsetDateTime::now_utc().unix_timestamp(),
+            i64::try_from(expected.position_version).map_err(invalid_durable)?,
+            expected_json
+        ],
+    )? != 1
+    {
+        return Err(stale_task_worker(task_id));
+    }
+    flow_position_in(conn, task_id)?.ok_or(StoreError::NotFound)
+}
+
+pub(super) fn settle_task_worker_in(
+    conn: &Connection,
+    task_id: &TaskId,
+    expected: &TaskWorkerClaim,
+    next: &FlowPosition,
+) -> StoreResult<FlowPosition> {
+    validate_flow_position(task_id, next)?;
+    if expected.worker_run_id.is_none() {
+        return Err(StoreError::InvalidAuthority(
+            "only a bound Task worker Run may settle a Task Flow".to_string(),
+        ));
+    }
+    if next.version != expected.position_version || next.claim.is_some() || next.failure.is_some() {
+        return Err(stale_task_worker(task_id));
+    }
+    require_ready_work(conn, &WorkRef::Task(task_id.clone()))?;
+    let expected_json = serde_json::to_string(expected)?;
+    let step = next.current();
+    if conn.execute(
+        "UPDATE task_flow_positions
+         SET invocation_json=?2, flow=?3, step=?4, node_id=?5, human=?6, session_run_id=?7,
+             ready_summary=?8, step_index=?9, iteration=?10,
+             position_version=position_version + 1,
+             worker_generation=0, claim_json=NULL, failure_json=NULL,
+             updated_at=?11
+         WHERE task_id=?1 AND position_version=?12 AND claim_json=?13",
+        params![
+            task_id.as_str(),
+            serde_json::to_string(&next.invocation)?,
+            step.flow,
+            step.step,
+            step.policy.id,
+            step.policy.human,
+            next.session_run_id.as_ref().map(RunId::as_str),
+            next.ready_summary,
+            i64::from(next.step_index),
+            i64::from(next.iteration),
+            next.updated_at.unix_timestamp(),
+            i64::try_from(expected.position_version).map_err(invalid_durable)?,
+            expected_json
+        ],
+    )? != 1
+    {
+        return Err(stale_task_worker(task_id));
+    }
+    flow_position_in(conn, task_id)?.ok_or(StoreError::NotFound)
+}
+
+pub(super) fn finish_task_flow_in(
+    conn: &Connection,
+    task_id: &TaskId,
+    expected: &TaskWorkerClaim,
+) -> StoreResult<()> {
+    if expected.worker_run_id.is_none() {
+        return Err(StoreError::InvalidAuthority(
+            "only a bound Task worker Run may finish a Task Flow".to_string(),
+        ));
+    }
+    require_ready_work(conn, &WorkRef::Task(task_id.clone()))?;
+    let expected_json = serde_json::to_string(expected)?;
+    if conn.execute(
+        "DELETE FROM task_flow_positions
+         WHERE task_id=?1 AND position_version=?2 AND claim_json=?3",
+        params![
+            task_id.as_str(),
+            i64::try_from(expected.position_version).map_err(invalid_durable)?,
+            expected_json
+        ],
+    )? != 1
+    {
+        return Err(stale_task_worker(task_id));
+    }
+    Ok(())
+}
+
 fn decode_flow_position(
-    work: WorkRef,
+    task_id: TaskId,
     (
+        invocation_json,
         flow,
         step,
         node_id,
@@ -824,23 +1166,83 @@ fn decode_flow_position(
         ready_summary,
         step_index,
         iteration,
+        position_version,
+        worker_generation,
+        claim_json,
+        failure_json,
         updated_at,
     ): StoredFlowPosition,
 ) -> StoreResult<FlowPosition> {
-    Ok(FlowPosition {
-        work,
-        flow,
-        step,
-        node_id,
-        human,
+    let position = FlowPosition {
+        task_id,
+        invocation: serde_json::from_str(&invocation_json)?,
         session_run_id: session_run_id
             .map(|run_id| RunId::parse(&run_id).map_err(invalid_durable))
             .transpose()?,
         ready_summary,
         step_index: u32::try_from(step_index).map_err(invalid_durable)?,
         iteration: u32::try_from(iteration).map_err(invalid_durable)?,
+        version: u64::try_from(position_version).map_err(invalid_durable)?,
+        worker_generation: u64::try_from(worker_generation).map_err(invalid_durable)?,
+        claim: claim_json
+            .map(|claim| serde_json::from_str::<TaskWorkerClaim>(&claim))
+            .transpose()?,
+        failure: failure_json
+            .map(|failure| serde_json::from_str::<TaskFlowBlocker>(&failure))
+            .transpose()?,
         updated_at: OffsetDateTime::from_unix_timestamp(updated_at).map_err(invalid_durable)?,
-    })
+    };
+    validate_flow_position(&position.task_id, &position)?;
+    let current = position
+        .invocation
+        .step_at(position.step_index, position.iteration)
+        .ok_or_else(|| StoreError::InvalidData("Flow position has no current step".to_string()))?;
+    if current.flow != flow
+        || current.step != step
+        || current.policy.id != node_id
+        || current.policy.human != human
+    {
+        return Err(StoreError::InvalidData(
+            "stored Flow position projection does not match its invocation".to_string(),
+        ));
+    }
+    Ok(position)
+}
+
+fn validate_flow_position(task_id: &TaskId, position: &FlowPosition) -> StoreResult<()> {
+    if &position.task_id != task_id {
+        return Err(StoreError::InvalidAuthority(
+            "Flow position does not belong to this Task".to_string(),
+        ));
+    }
+    let step = position
+        .invocation
+        .step_at(position.step_index, position.iteration)
+        .ok_or_else(|| StoreError::InvalidData("Flow position has no current step".to_string()))?;
+    if step.flow.trim().is_empty() || step.step.trim().is_empty() {
+        return Err(StoreError::InvalidData(
+            "flow and step cannot be empty".to_string(),
+        ));
+    }
+    if step.policy.human && step.policy.id.is_none() {
+        return Err(StoreError::InvalidData(
+            "human flow positions require a stable node id".to_string(),
+        ));
+    }
+    if position.claim.as_ref().is_some_and(|claim| {
+        claim.invocation_id != position.invocation.id
+            || claim.position_version != position.version
+            || claim.generation != position.worker_generation
+    }) {
+        return Err(StoreError::InvalidData(
+            "Task worker claim does not belong to its Flow position".to_string(),
+        ));
+    }
+    Ok(())
+}
+
+fn stale_task_worker(task_id: &TaskId) -> StoreError {
+    StoreError::InvalidAuthority(format!("Task worker for {task_id} is stale"))
 }
 
 fn invalid_durable(error: impl std::fmt::Display) -> StoreError {
@@ -1003,16 +1405,28 @@ fn tool_response_in(
 
 #[cfg(test)]
 mod durable_store_tests {
-    use crate::durable::{FlowPosition, RunId, WorkRef};
-    use crate::id::WaveId;
-    use crate::store::sqlite::SqliteStore;
+    use std::path::PathBuf;
+    use std::sync::{Arc, Barrier};
+    use std::thread;
 
-    /// A registered Wave is the cheapest real Work and needs no PM binding.
-    fn _store_with_wave() -> (tempfile::TempDir, SqliteStore, WorkRef) {
+    use crate::durable::{
+        FlowPosition, ProjectId, RunId, TaskFlowBlocker, TaskId, TaskWorkerClaimOutcome,
+        TaskWorkerOwner,
+    };
+    use crate::id::{ExecId, TraceId, WaveId};
+    use crate::planning::{LinearIssueId, LinearProjectId, ProjectPlan, TaskPlan};
+    use crate::store::sqlite::SqliteStore;
+    use crate::work::project::Project;
+    use crate::work::task::{PmWritebackState, Task, TaskEventKind, TaskPr, TaskPrId};
+
+    fn store_with_task() -> (tempfile::TempDir, SqliteStore, TaskId) {
         let dir = tempfile::tempdir().unwrap();
         let path = dir.path().join("loopflow.db");
         let store = SqliteStore::new(&path).expect("open a fresh store");
         let wave_id = WaveId::new();
+        let project_id = ProjectId::new();
+        let task_id = TaskId::new();
+        let now = time::OffsetDateTime::now_utc();
         let conn = rusqlite::Connection::open(&path).unwrap();
         conn.execute(
             "INSERT INTO waves (id, name, repo, created_at, parent_wave_id)
@@ -1028,28 +1442,116 @@ mod durable_store_tests {
             super::create_wave_work(&tx, &wave_id, 1_700_000_000).unwrap();
             tx.commit().unwrap();
         }
-        let work = WorkRef::Wave(wave_id);
-        (dir, store, work)
+        let project = Project {
+            id: project_id.clone(),
+            plan: ProjectPlan {
+                id: LinearProjectId::new("project-uuid").unwrap(),
+                slug: "probe".to_string(),
+                name: "Probe".to_string(),
+                prompt_context: "Probe Task execution".to_string(),
+                pm_snapshot_synced_at: now.unix_timestamp(),
+            },
+            wave_id: wave_id.clone(),
+            iteration: 0,
+            abandon_intent: None,
+            created_at: now,
+            updated_at: now,
+        };
+        store.insert_project(&project).unwrap();
+        let task = Task {
+            id: task_id.clone(),
+            plan: TaskPlan {
+                id: LinearIssueId::new("task-uuid").unwrap(),
+                identifier: "PROBE-1".to_string(),
+                title: "Probe Task execution".to_string(),
+                description: "Exercise the Task Flow store".to_string(),
+                pm_snapshot_synced_at: now.unix_timestamp(),
+            },
+            pm_writeback: PmWritebackState::Current,
+            wave_id,
+            project_id,
+            worktree: PathBuf::from("/repo.probe"),
+            workspace_slug: "probe".to_string(),
+            abandon_intent: None,
+            created_at: now,
+            updated_at: now,
+            observation: crate::work::task::Observation::NotRequired,
+        };
+        let pr = TaskPr {
+            id: TaskPrId::new(),
+            task_id: task_id.clone(),
+            sequence: 1,
+            slug: "probe".to_string(),
+            branch: "probe".to_string(),
+            base_commit: "deadbeef".to_string(),
+            parent_pr_id: None,
+            publication: None,
+            merge_commit: None,
+            abandoned_at: None,
+            ci_observation: None,
+            github_observation: None,
+            linear_attachment_id: None,
+            linear_comment_id: None,
+            linear_link_error: None,
+            created_at: now,
+            updated_at: now,
+        };
+        store.insert_task(&task, &pr).unwrap();
+        (dir, store, task_id)
     }
 
-    fn store_with_wave() -> (tempfile::TempDir, SqliteStore, WorkRef) {
-        _store_with_wave()
+    fn autonomous_position(task_id: &TaskId) -> FlowPosition {
+        FlowPosition {
+            task_id: task_id.clone(),
+            invocation: crate::durable::test_flow_invocation(
+                "task",
+                0,
+                "implement",
+                Some("implement"),
+                false,
+            ),
+            session_run_id: None,
+            ready_summary: None,
+            step_index: 0,
+            iteration: 0,
+            version: 0,
+            worker_generation: 0,
+            claim: None,
+            failure: None,
+            updated_at: time::OffsetDateTime::now_utc(),
+        }
+    }
+
+    fn owner(pid: u32) -> TaskWorkerOwner {
+        TaskWorkerOwner {
+            trace_id: TraceId::new(),
+            exec_id: ExecId::new(),
+            pid,
+            started_at: 1_700_000_000,
+        }
     }
 
     #[test]
     fn human_session_runtime_survives_a_store_round_trip() {
-        let (_dir, store, work) = store_with_wave();
+        let (_dir, store, work) = store_with_task();
         let run_id = RunId::new();
         let position = FlowPosition {
-            work: work.clone(),
-            flow: "review".to_string(),
-            step: "review-design".to_string(),
-            node_id: Some("human_review".to_string()),
-            human: true,
+            task_id: work.clone(),
+            invocation: crate::durable::test_flow_invocation(
+                "review",
+                1,
+                "review-design",
+                Some("human_review"),
+                true,
+            ),
             session_run_id: Some(run_id.clone()),
             ready_summary: Some("Ready for review".to_string()),
             step_index: 1,
             iteration: 2,
+            version: 0,
+            worker_generation: 0,
+            claim: None,
+            failure: None,
             updated_at: time::OffsetDateTime::now_utc(),
         };
 
@@ -1058,5 +1560,213 @@ mod durable_store_tests {
         let stored = store.flow_position(&work).unwrap().unwrap();
         assert_eq!(stored.session_run_id, Some(run_id));
         assert_eq!(stored.ready_summary.as_deref(), Some("Ready for review"));
+    }
+
+    #[test]
+    fn concurrent_task_worker_claims_choose_one_worker() {
+        let (dir, store, work) = store_with_task();
+        let position = store
+            .set_flow_position(&work, &autonomous_position(&work))
+            .unwrap();
+        let barrier = Arc::new(Barrier::new(20));
+        let stores = (0..20)
+            .map(|_| SqliteStore::new(&dir.path().join("loopflow.db")).unwrap())
+            .collect::<Vec<_>>();
+        let handles = stores
+            .into_iter()
+            .enumerate()
+            .map(|(index, store)| {
+                let work = work.clone();
+                let barrier = barrier.clone();
+                thread::spawn(move || {
+                    barrier.wait();
+                    store
+                        .claim_task_worker(
+                            &work,
+                            position.version,
+                            &owner(1_000 + u32::try_from(index).unwrap()),
+                            time::OffsetDateTime::from_unix_timestamp(1_700_000_100).unwrap(),
+                        )
+                        .unwrap()
+                })
+            })
+            .collect::<Vec<_>>();
+        let outcomes = handles
+            .into_iter()
+            .map(|handle| handle.join().unwrap())
+            .collect::<Vec<_>>();
+        let claimed = outcomes
+            .iter()
+            .filter_map(|outcome| match outcome {
+                TaskWorkerClaimOutcome::Claimed(claim) => Some(claim),
+                _ => None,
+            })
+            .collect::<Vec<_>>();
+
+        assert_eq!(claimed.len(), 1);
+        assert_eq!(claimed[0].generation, 1);
+        assert!(outcomes.iter().all(|outcome| match outcome {
+            TaskWorkerClaimOutcome::Claimed(claim) | TaskWorkerClaimOutcome::Busy(claim) =>
+                claim == claimed[0],
+            TaskWorkerClaimOutcome::Stale { .. } => false,
+        }));
+    }
+
+    #[test]
+    fn only_the_bound_worker_can_settle_a_position() {
+        let (_dir, store, work) = store_with_task();
+        let task = store.task(&work).unwrap().unwrap();
+        let mut initial = autonomous_position(&work);
+        initial.invocation = crate::durable::test_flow_invocation("task", 1, "review", None, false);
+        let position = store.set_flow_position(&work, &initial).unwrap();
+        let claim = match store
+            .claim_task_worker(
+                &work,
+                position.version,
+                &owner(101),
+                time::OffsetDateTime::now_utc(),
+            )
+            .unwrap()
+        {
+            TaskWorkerClaimOutcome::Claimed(claim) => claim,
+            outcome => panic!("unexpected claim outcome: {outcome:?}"),
+        };
+        let worker_run_id = RunId::new();
+        let bound = store
+            .bind_task_worker_run(&work, &claim, &worker_run_id, &owner(102))
+            .unwrap();
+        let mut next = store.flow_position(&work).unwrap().unwrap();
+        next.step_index = 1;
+        next.claim = None;
+        next.updated_at = time::OffsetDateTime::now_utc();
+
+        assert!(store
+            .settle_task_worker(&task, &claim, &next, Some("advanced"))
+            .is_err());
+        let settled = store
+            .settle_task_worker(&task, &bound, &next, Some("advanced"))
+            .unwrap();
+        assert_eq!(settled.version, position.version + 1);
+        assert_eq!(settled.current().step, "review");
+        assert_eq!(settled.invocation, position.invocation);
+        assert_eq!(settled.worker_generation, 0);
+        assert!(settled.claim.is_none());
+        assert!(store
+            .settle_task_worker(&task, &bound, &next, Some("advanced"))
+            .is_err());
+        let events = store.task_events_after(&work, 0).unwrap();
+        assert_eq!(events.len(), 1);
+        assert!(matches!(
+            &events[0].kind,
+            TaskEventKind::Progress { summary } if summary == "advanced"
+        ));
+    }
+
+    #[test]
+    fn only_the_bound_worker_can_finish_a_position_without_a_successor() {
+        let (_dir, store, work) = store_with_task();
+        let task = store.task(&work).unwrap().unwrap();
+        let position = store
+            .set_flow_position(&work, &autonomous_position(&work))
+            .unwrap();
+        let claim = match store
+            .claim_task_worker(
+                &work,
+                position.version,
+                &owner(111),
+                time::OffsetDateTime::now_utc(),
+            )
+            .unwrap()
+        {
+            TaskWorkerClaimOutcome::Claimed(claim) => claim,
+            outcome => panic!("unexpected claim outcome: {outcome:?}"),
+        };
+        let bound = store
+            .bind_task_worker_run(&work, &claim, &RunId::new(), &owner(112))
+            .unwrap();
+
+        assert!(store
+            .finish_task_flow(&task, &claim, Some("finished"))
+            .is_err());
+        store
+            .finish_task_flow(&task, &bound, Some("finished"))
+            .unwrap();
+        assert!(store.flow_position(&work).unwrap().is_none());
+        assert!(store
+            .finish_task_flow(&task, &bound, Some("finished"))
+            .is_err());
+        let events = store.task_events_after(&work, 0).unwrap();
+        assert_eq!(events.len(), 1);
+        assert!(matches!(
+            &events[0].kind,
+            TaskEventKind::Progress { summary } if summary == "finished"
+        ));
+    }
+
+    #[test]
+    fn reclaim_fences_the_old_worker_and_increments_generation() {
+        let (_dir, store, work) = store_with_task();
+        let position = store
+            .set_flow_position(&work, &autonomous_position(&work))
+            .unwrap();
+        let first = match store
+            .claim_task_worker(
+                &work,
+                position.version,
+                &owner(201),
+                time::OffsetDateTime::now_utc(),
+            )
+            .unwrap()
+        {
+            TaskWorkerClaimOutcome::Claimed(claim) => claim,
+            outcome => panic!("unexpected claim outcome: {outcome:?}"),
+        };
+        let replacement = store
+            .reclaim_task_worker(&work, &first, &owner(202), time::OffsetDateTime::now_utc())
+            .unwrap();
+
+        assert_eq!(replacement.generation, 2);
+        assert!(store
+            .bind_task_worker_run(&work, &first, &RunId::new(), &owner(203))
+            .is_err());
+
+        let bound = store
+            .bind_task_worker_run(&work, &replacement, &RunId::new(), &owner(204))
+            .unwrap();
+        let failure = TaskFlowBlocker {
+            reason: "provider exited".to_string(),
+            restart_required: false,
+            observed_at: time::OffsetDateTime::now_utc(),
+        };
+        let failed = store.block_task_flow(&work, &bound, &failure).unwrap();
+        assert!(failed.claim.is_none());
+        assert_eq!(failed.failure.as_ref(), Some(&failure));
+        assert!(store.block_task_flow(&work, &first, &failure).is_err());
+        let events = store.task_events_after(&work, 0).unwrap();
+        assert_eq!(events.len(), 1);
+        assert!(matches!(
+            &events[0].kind,
+            TaskEventKind::Failed { error, resumable: true } if error == &failure.reason
+        ));
+
+        let retried = match store
+            .claim_task_worker(
+                &work,
+                position.version,
+                &owner(205),
+                time::OffsetDateTime::now_utc(),
+            )
+            .unwrap()
+        {
+            TaskWorkerClaimOutcome::Claimed(claim) => claim,
+            outcome => panic!("unexpected claim outcome: {outcome:?}"),
+        };
+        assert_eq!(retried.generation, 3);
+        assert!(store
+            .flow_position(&work)
+            .unwrap()
+            .unwrap()
+            .failure
+            .is_none());
     }
 }

@@ -274,6 +274,7 @@ async fn supported_wave_starts_reach_bounded_live_or_rolled_back_states() {
             pm_snapshot_synced_at: now.unix_timestamp(),
         },
         wave_id: good.id().clone(),
+        iteration: 0,
         abandon_intent: None,
         created_at: now,
         updated_at: now,

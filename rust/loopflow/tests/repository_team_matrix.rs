@@ -56,7 +56,7 @@ fn snapshot(
             "name": project_name,
             "summary": "Fixture project",
             "definition": "A measured bet.",
-            "flows": { "first": null, "loop": null, "finally": null },
+            "flows": { "recommended": null },
             "krs": [{ "text": "Ownership is deterministic", "holds": true }],
             "initiative_ids": [initiative],
             "team_ids": ["team-loo"]
@@ -382,7 +382,8 @@ fn repository_team_matrix() {
         let error = String::from_utf8_lossy(&output.stderr);
         assert!(!output.status.success());
         assert!(
-            error.contains("cannot resolve current lf binary"),
+            error.contains("failed to start Project operation")
+                && error.contains("missing-lf does not exist"),
             "{error}"
         );
         let control_store = SqliteStore::new(&control_home.join("loopflow.db")).unwrap();

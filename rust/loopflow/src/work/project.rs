@@ -12,14 +12,6 @@ use crate::id::WaveId;
 use crate::planning::ProjectPlan;
 use crate::work::task::{TaskEventKind, TaskId};
 
-#[derive(Debug, Clone, PartialEq, Eq, thiserror::Error)]
-pub enum ProjectDataError {
-    #[error("invalid Project id: {0}")]
-    InvalidId(String),
-    #[error("invalid Project: {0}")]
-    InvalidInvariant(String),
-}
-
 #[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
 pub struct Project {
     pub id: ProjectId,
@@ -27,17 +19,14 @@ pub struct Project {
     pub plan: ProjectPlan,
     /// Current ownership. Wave name and checkout are resolved from this id.
     pub wave_id: WaveId,
+    /// Completed Project judgment passes. This is durable domain progress, not
+    /// the lifetime of a Project process.
+    pub iteration: u32,
     /// Set when abandonment is *requested*, not when it is applied. No launch
     /// path may start a Run for Project Work carrying this.
     pub abandon_intent: Option<AbandonIntent>,
     pub created_at: OffsetDateTime,
     pub updated_at: OffsetDateTime,
-}
-
-impl Project {
-    pub fn validate(&self) -> Result<(), ProjectDataError> {
-        Ok(())
-    }
 }
 
 #[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]

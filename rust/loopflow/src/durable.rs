@@ -3,10 +3,12 @@
 use serde::{Deserialize, Serialize};
 use time::OffsetDateTime;
 
-use crate::id::WaveId;
+use crate::controller::wave::playhead::QueuedInvocation;
+use crate::id::{ExecId, TraceId, WaveId};
 
 /// The exact active Run named by an in-Run process.
 pub const RUN_ID_ENV: &str = "LF_RUN_ID";
+pub const TASK_WORKER_CLAIM_ENV: &str = "LF_WORK_ADVANCE_CLAIM";
 macro_rules! durable_id {
     ($name:ident, $prefix:literal) => {
         #[derive(Debug, Clone, PartialEq, Eq, Hash, Serialize, Deserialize)]
@@ -126,17 +128,105 @@ pub struct Placement {
 
 #[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
 pub struct FlowPosition {
-    pub work: WorkRef,
-    pub flow: String,
-    pub step: String,
-    pub node_id: Option<String>,
-    pub human: bool,
+    pub task_id: TaskId,
+    pub invocation: QueuedInvocation,
     pub session_run_id: Option<RunId>,
     pub ready_summary: Option<String>,
     pub step_index: u32,
     pub iteration: u32,
+    pub version: u64,
+    pub worker_generation: u64,
+    pub claim: Option<TaskWorkerClaim>,
+    pub failure: Option<TaskFlowBlocker>,
     #[serde(with = "time::serde::rfc3339")]
     pub updated_at: OffsetDateTime,
+}
+
+impl FlowPosition {
+    pub fn work(&self) -> WorkRef {
+        WorkRef::Task(self.task_id.clone())
+    }
+
+    pub fn current_plan(&self) -> &crate::engine::ConcreteStep {
+        self.invocation
+            .steps
+            .get(self.step_index as usize)
+            .expect("a persisted Flow position always selects a validated step")
+    }
+
+    pub fn current(&self) -> crate::controller::wave::playhead::StepRef {
+        self.invocation
+            .step_at(self.step_index, self.iteration)
+            .expect("a persisted Flow position always selects a validated step")
+    }
+
+    pub fn is_human(&self) -> bool {
+        self.current().policy.human
+    }
+}
+
+#[cfg(test)]
+pub(crate) fn test_flow_invocation(
+    flow: &str,
+    step_index: u32,
+    step: &str,
+    node_id: Option<&str>,
+    human: bool,
+) -> QueuedInvocation {
+    let steps = (0..=step_index)
+        .map(|index| {
+            let target = index == step_index;
+            let name = if target {
+                step.to_string()
+            } else {
+                format!("before-{index}")
+            };
+            crate::engine::ConcreteStep::Skill(crate::engine::ConcreteSkill {
+                skill: crate::engine::Skill::named(&name),
+                policy: crate::engine::OccurrencePolicy {
+                    id: target.then(|| node_id.map(str::to_string)).flatten(),
+                    human: target && human,
+                },
+                flow_parents: Vec::new(),
+            })
+        })
+        .collect();
+    QueuedInvocation::new(flow, steps).expect("test Flow invocation has a step")
+}
+
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
+pub struct TaskWorkerOwner {
+    pub trace_id: TraceId,
+    pub exec_id: ExecId,
+    pub pid: u32,
+    pub started_at: i64,
+}
+
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
+pub struct TaskWorkerClaim {
+    pub invocation_id: String,
+    pub generation: u64,
+    pub position_version: u64,
+    pub owner: TaskWorkerOwner,
+    pub worker_run_id: Option<RunId>,
+    #[serde(with = "time::serde::rfc3339")]
+    pub claimed_at: OffsetDateTime,
+}
+
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
+pub struct TaskFlowBlocker {
+    pub reason: String,
+    pub restart_required: bool,
+    #[serde(with = "time::serde::rfc3339")]
+    pub observed_at: OffsetDateTime,
+}
+
+#[derive(Debug, Clone, PartialEq, Eq)]
+#[non_exhaustive]
+pub enum TaskWorkerClaimOutcome {
+    Claimed(TaskWorkerClaim),
+    Busy(TaskWorkerClaim),
+    Stale { actual_version: u64 },
 }
 
 #[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]

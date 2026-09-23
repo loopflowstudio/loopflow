@@ -49,7 +49,7 @@ fn initializing_worktree_keeps_status_wait_and_roadmap_readable() {
             "name": project.plan.name,
             "summary": project.plan.prompt_context,
             "definition": project.plan.prompt_context,
-            "flows": {"first": null, "loop": null, "finally": null},
+            "flows": {"recommended": null},
             "krs": [],
             "initiative_ids": ["initialization-initiative"],
             "team_ids": ["initialization-team"]

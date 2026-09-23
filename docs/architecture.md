@@ -65,10 +65,9 @@ The implementation follows the same order as the diagram:
 ## Add one capability at a time
 
 The Skill runner is useful by itself. The rest of Loopflow grows outward by
-adding one kind of capability at each layer. Tracked Work and autonomous
-controllers are separate layers: Work remains fully operable when no
-controller is installed or running, while controllers consume the same Work,
-execution, and delivery operations available to any caller.
+adding one kind of capability at each layer. Tracked Work owns autonomous
+progression; transient boundary Runs consume the same execution and delivery
+operations available to helpers without becoming resident Work identities.
 
 ```text
 one Skill run
@@ -101,18 +100,19 @@ The source tree makes the planning boundary literal:
 work/                          controller/
 wave/{mod,config,context,      wave/{runner,resident,server,
       memory}                       placement,...}
-project                       project/{mod,state}
-task                          task/{mod,state}
-                              runner + store
+project                       task/mod
+task                          Task worker
+
+ops/project.rs                finite Project operations
 
 execution kernel: engine/ + harness/ + Run records
 composition surfaces: lf/ + bin/
 ```
 
 `work` never imports `controller`. The execution kernel works without either
-layer and never loads Work. CLI and controller callers resolve Work identity,
-Wave memory, and controller state, then pass ordinary launch inputs into the
-kernel.
+layer and never loads Work. CLI and boundary callers resolve Work identity,
+Wave memory, and the exact Flow position, then pass ordinary launch inputs into
+the kernel.
 
 Release delivery also separates proof from authority:
 
@@ -154,7 +154,7 @@ human / agent --> lf CLI --------+----------+-----------+
           |                       +---------> Task delivery
           |                       |                ^
           |                       v                |
-          +------------> end-to-end controllers --+
+          +------------> Task advancement --------+
           |                       |
           +-----------------------+ Skill boundary
                                   v
@@ -224,7 +224,7 @@ lf gate --diff-files
 These commands need the execution area only: discover, prompt, route, launch,
 record, return.
 
-### Tracked work without a controller
+### Direct Task work
 
 ```bash
 lf task prepare INF-123
@@ -237,29 +237,30 @@ lf task status INF-123 --json
 ```
 
 `prepare` creates or reuses tracked Task Work, its one worktree, and the active
-serial PR identity. It installs no end-to-end controller. Each `--task` command
+serial PR identity. It starts no Task execution. Each `--task` command
 is an independent Run in that worktree; several may overlap and write distinct
 scratch paths. Any caller may then use the ordinary Work and delivery commands.
-Those commands act on delivery facts, not on proof that a controller ran its
-expected Flow. `submit`, `arm`, and `land` therefore work the same whether the
-Task was pursued piecemeal, by the built-in controller, or by another system.
+Those commands act on delivery facts, not on Flow-driving authority. `submit`,
+`arm`, and `land` therefore work the same whether the Task was pursued by its
+Task worker, piecemeal helper Runs, or another system.
 
-### End-to-end controllers
+### Bounded Task advancement
 
 ```bash
 lf start product
 lf task run INF-123
+lf project run billing
 lf chat --steer "ship invoices first"
 lf status product
 ```
 
-The Home keeper starts the placed Wave listener. Its resident loop refreshes
-current planning evidence and chooses the next Project or Task boundary. Wave,
-Project, and Task retain distinct controllers. Direct questions use ordinary
-fresh bound Runs. A Task human FlowStep starts the node's ordinary bound Skill
-command as a provider Run. A detached PTY cradle may keep the first client
-alive before a UI arrives; opening the Session replaces it with a native
-provider resume.
+The Home keeper may start the placed Wave listener and resident. Project and
+Task motion does not depend on either: Project commands launch finite attributed
+operations, while Task commands claim an exact Flow boundary for one worker.
+Direct questions and helper work use ordinary fresh attributed Runs without
+gaining Task Flow authority.
+A Task human FlowStep starts the persisted Skill as a provider Run and remains
+parked until its exact decision arrives. Daemon and app triggers are later work.
 
 ### Another machine
 

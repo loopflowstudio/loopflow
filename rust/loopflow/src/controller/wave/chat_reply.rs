@@ -18,8 +18,8 @@ use anyhow::{anyhow, Result};
 use tokio::sync::mpsc;
 
 use crate::chat::types::{ConversationEvent, Lifecycle};
-use crate::engine::parse_agent;
 use crate::engine::prompt::Surface;
+use crate::engine::{load_skill, parse_agent};
 use crate::harness::{default_create_harness, CreateHarness};
 use crate::lf::commands::run::{prepare_wave_harness_turn, PreparedHarnessTurn};
 
@@ -39,8 +39,9 @@ pub async fn reply(
     agent: Option<String>,
     max_turns: Option<u32>,
 ) -> Result<Option<String>> {
+    let skill = load_skill("wave/chat", origin_repo)?;
     let mut prepared = prepare_wave_harness_turn(
-        "wave/chat",
+        &skill,
         conversation,
         wave,
         max_turns,

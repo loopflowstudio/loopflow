@@ -1,7 +1,7 @@
 use std::path::Path;
 
 use anyhow::{anyhow, Result};
-use serde::{Deserialize, Serialize};
+use serde::{Deserialize, Deserializer, Serialize};
 use uuid::Uuid;
 
 use crate::engine::{expand_flow, load_flow, ConcreteStep, OccurrencePolicy};
@@ -20,57 +20,34 @@ pub enum StepKind {
 }
 
 #[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
-pub struct StepPlan {
-    pub name: String,
-    pub kind: StepKind,
-    #[serde(flatten)]
-    pub policy: OccurrencePolicy,
-}
-
-impl StepPlan {
-    fn from_concrete(step: &ConcreteStep) -> Self {
-        let (name, kind, policy) = match step {
-            ConcreteStep::Skill(skill) => (
-                skill.skill.name.clone(),
-                StepKind::Skill,
-                skill.policy.clone(),
-            ),
-            ConcreteStep::Op(op) => (op.item.display_name(), StepKind::Op, Default::default()),
-            ConcreteStep::Xor(branch) => (
-                branch
-                    .router
-                    .clone()
-                    .unwrap_or_else(|| "xor-route".to_string()),
-                StepKind::Xor,
-                Default::default(),
-            ),
-        };
-        Self { name, kind, policy }
-    }
-}
-
-#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
 pub struct QueuedInvocation {
     pub id: String,
     pub flow: String,
-    pub steps: Vec<StepPlan>,
+    #[serde(deserialize_with = "deserialize_steps")]
+    pub steps: Vec<ConcreteStep>,
 }
 
 impl QueuedInvocation {
-    pub fn load(repo: &Path, flow: &str) -> Result<Self> {
-        let definition = load_flow(flow, repo)?;
-        let steps = expand_flow(&definition, repo)?
-            .iter()
-            .map(StepPlan::from_concrete)
-            .collect::<Vec<_>>();
+    pub fn new(flow: impl Into<String>, steps: Vec<ConcreteStep>) -> Result<Self> {
+        let flow = flow.into();
         if steps.is_empty() {
             return Err(anyhow!("flow '{flow}' has no steps"));
         }
         Ok(Self {
             id: Uuid::new_v4().to_string(),
-            flow: definition.name,
+            flow,
             steps,
         })
+    }
+
+    pub fn load(repo: &Path, flow: &str) -> Result<Self> {
+        let definition = load_flow(flow, repo)?;
+        let steps = expand_flow(&definition, repo)?;
+        Self::new(definition.name, steps)
+    }
+
+    pub fn step_at(&self, index: u32, iteration: u32) -> Option<StepRef> {
+        step_ref_at(&self.id, &self.flow, &self.steps, index, iteration)
     }
 
     fn start(self) -> InvocationState {
@@ -83,17 +60,14 @@ impl QueuedInvocation {
             queue: Vec::new(),
         }
     }
-
-    fn matches_definition(&self, flow: &str, steps: &[StepPlan]) -> bool {
-        self.flow == flow && self.steps == steps
-    }
 }
 
 #[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
 pub struct InvocationState {
     pub id: String,
     pub flow: String,
-    pub steps: Vec<StepPlan>,
+    #[serde(deserialize_with = "deserialize_steps")]
+    pub steps: Vec<ConcreteStep>,
     pub cursor: u32,
     pub iteration: u32,
     pub queue: Vec<QueuedInvocation>,
@@ -219,6 +193,8 @@ pub enum PlayheadEvent {
         invocation_id: String,
         flow: String,
     },
+    // Reader-only compatibility for v1 Wave journals. New playheads never
+    // reset an active invocation from mutable source.
     DefinitionReset,
     StepStarted {
         step: StepRef,
@@ -251,61 +227,29 @@ impl Playhead {
         )
     }
 
-    pub fn resume_root(
-        root: QueuedInvocation,
-        cursor: u32,
-        iteration: u32,
-    ) -> Result<(Self, PlayheadEvent)> {
-        if cursor as usize >= root.steps.len() {
-            return Err(anyhow!(
-                "flow '{}' cannot resume at step {} of {}",
-                root.flow,
-                cursor + 1,
-                root.steps.len()
-            ));
-        }
-        let (mut playhead, event) = Self::new(root);
-        let frame = playhead
-            .stack
-            .first_mut()
-            .expect("a new playhead always has its root invocation");
-        frame.cursor = cursor;
-        frame.iteration = iteration;
-        Ok((playhead, event))
-    }
-
-    pub fn reset(root: QueuedInvocation) -> (Self, PlayheadEvent) {
-        (
-            Self {
-                stack: vec![root.start()],
-                active: None,
-            },
-            PlayheadEvent::DefinitionReset,
-        )
-    }
-
-    pub fn definitions_match(&self, repo: &Path, root: &QueuedInvocation) -> bool {
-        let Some(root_frame) = self.stack.first() else {
-            return false;
-        };
-        if !root.matches_definition(&root_frame.flow, &root_frame.steps) {
-            return false;
-        }
-        self.stack.iter().skip(1).all(|frame| {
-            QueuedInvocation::load(repo, &frame.flow)
-                .is_ok_and(|current| current.matches_definition(&frame.flow, &frame.steps))
-        }) && self
-            .stack
-            .iter()
-            .flat_map(|frame| &frame.queue)
-            .all(|queued| {
-                QueuedInvocation::load(repo, &queued.flow)
-                    .is_ok_and(|current| current.matches_definition(&queued.flow, &queued.steps))
-            })
-    }
-
     pub fn current(&self) -> Option<StepRef> {
         step_ref(self.stack.last()?)
+    }
+
+    pub fn current_plan(&self) -> Option<&ConcreteStep> {
+        let invocation = self.stack.last()?;
+        invocation.steps.get(invocation.cursor as usize)
+    }
+
+    pub fn has_executable_definition(&self) -> bool {
+        self.stack.iter().all(invocation_is_executable)
+    }
+
+    pub fn legacy_flow_intents(&self) -> Vec<String> {
+        let mut flows = Vec::new();
+        for invocation in self.stack.iter().skip(1).rev() {
+            flows.push(invocation.flow.clone());
+            flows.extend(invocation.queue.iter().map(|queued| queued.flow.clone()));
+        }
+        if let Some(root) = self.stack.first() {
+            flows.extend(root.queue.iter().map(|queued| queued.flow.clone()));
+        }
+        flows
     }
 
     pub fn view(&self) -> PlayheadView {
@@ -486,25 +430,139 @@ impl Playhead {
     }
 }
 
+const LEGACY_STEP_PLAN: &str = "__legacy_step_plan__";
+
+#[derive(Deserialize)]
+struct LegacyStepPlan {
+    name: String,
+    kind: StepKind,
+    #[serde(flatten)]
+    policy: OccurrencePolicy,
+}
+
+#[derive(Deserialize)]
+#[serde(untagged)]
+enum StoredStep {
+    Current(ConcreteStep),
+    Legacy(LegacyStepPlan),
+}
+
+fn deserialize_steps<'de, D>(deserializer: D) -> Result<Vec<ConcreteStep>, D::Error>
+where
+    D: Deserializer<'de>,
+{
+    Vec::<StoredStep>::deserialize(deserializer).map(|steps| {
+        steps
+            .into_iter()
+            .map(|step| match step {
+                StoredStep::Current(step) => step,
+                StoredStep::Legacy(step) => legacy_step(step),
+            })
+            .collect()
+    })
+}
+
+fn legacy_step(step: LegacyStepPlan) -> ConcreteStep {
+    let flow_parents = vec![LEGACY_STEP_PLAN.to_string()];
+    match step.kind {
+        StepKind::Skill => ConcreteStep::Skill(crate::engine::ConcreteSkill {
+            skill: crate::engine::Skill::named(&step.name),
+            policy: step.policy,
+            flow_parents,
+        }),
+        StepKind::Op => ConcreteStep::Op(crate::engine::ConcreteOp {
+            item: crate::engine::Op {
+                command: step.name,
+                args: Vec::new(),
+            },
+            flow_parents,
+        }),
+        StepKind::Xor | StepKind::And | StepKind::Or | StepKind::Loop => {
+            ConcreteStep::Xor(crate::engine::ConcreteXor {
+                router: Some(step.name),
+                paths: Default::default(),
+                flow_parents,
+            })
+        }
+    }
+}
+
+fn invocation_is_executable(invocation: &InvocationState) -> bool {
+    invocation.steps.iter().all(|step| {
+        let parents = match step {
+            ConcreteStep::Skill(step) => &step.flow_parents,
+            ConcreteStep::Op(step) => &step.flow_parents,
+            ConcreteStep::Xor(step) => &step.flow_parents,
+        };
+        !parents.iter().any(|parent| parent == LEGACY_STEP_PLAN)
+    }) && invocation.queue.iter().all(|queued| {
+        queued.steps.iter().all(|step| {
+            let parents = match step {
+                ConcreteStep::Skill(step) => &step.flow_parents,
+                ConcreteStep::Op(step) => &step.flow_parents,
+                ConcreteStep::Xor(step) => &step.flow_parents,
+            };
+            !parents.iter().any(|parent| parent == LEGACY_STEP_PLAN)
+        })
+    })
+}
+
 /// The step an invocation's cursor selects, `None` once the cursor has run off
 /// the end (an invocation about to complete).
 fn step_ref(invocation: &InvocationState) -> Option<StepRef> {
-    let step = invocation.steps.get(invocation.cursor as usize)?;
+    step_ref_at(
+        &invocation.id,
+        &invocation.flow,
+        &invocation.steps,
+        invocation.cursor,
+        invocation.iteration,
+    )
+}
+
+fn step_ref_at(
+    invocation_id: &str,
+    flow: &str,
+    steps: &[ConcreteStep],
+    index: u32,
+    iteration: u32,
+) -> Option<StepRef> {
+    let step = steps.get(index as usize)?;
+    let (name, kind, policy) = match step {
+        ConcreteStep::Skill(skill) => (
+            skill.skill.name.clone(),
+            StepKind::Skill,
+            skill.policy.clone(),
+        ),
+        ConcreteStep::Op(op) => (
+            op.item.display_name(),
+            StepKind::Op,
+            OccurrencePolicy::default(),
+        ),
+        ConcreteStep::Xor(branch) => (
+            branch
+                .router
+                .clone()
+                .unwrap_or_else(|| "xor-route".to_string()),
+            StepKind::Xor,
+            OccurrencePolicy::default(),
+        ),
+    };
     Some(StepRef {
-        invocation_id: invocation.id.clone(),
-        flow: invocation.flow.clone(),
-        step: step.name.clone(),
-        kind: step.kind,
-        policy: step.policy.clone(),
-        index: invocation.cursor,
-        total: invocation.steps.len() as u32,
-        iteration: invocation.iteration,
+        invocation_id: invocation_id.to_string(),
+        flow: flow.to_string(),
+        step: name,
+        kind,
+        policy,
+        index,
+        total: steps.len() as u32,
+        iteration,
     })
 }
 
 #[cfg(test)]
 mod tests {
     use super::*;
+    use crate::engine::ConcreteSkill;
 
     fn invocation(flow: &str, steps: &[&str]) -> QueuedInvocation {
         QueuedInvocation {
@@ -512,10 +570,12 @@ mod tests {
             flow: flow.to_string(),
             steps: steps
                 .iter()
-                .map(|name| StepPlan {
-                    name: (*name).to_string(),
-                    kind: StepKind::Skill,
-                    policy: OccurrencePolicy::default(),
+                .map(|name| {
+                    ConcreteStep::Skill(ConcreteSkill {
+                        skill: crate::engine::Skill::named(name),
+                        policy: OccurrencePolicy::default(),
+                        flow_parents: Vec::new(),
+                    })
                 })
                 .collect(),
         }
@@ -560,84 +620,24 @@ mod tests {
     }
 
     #[test]
-    fn root_resumes_at_the_persisted_position() {
-        let (playhead, _) =
-            Playhead::resume_root(invocation("task", &["clarify", "pursue"]), 1, 3).unwrap();
-        let current = playhead.current().unwrap();
-        assert_eq!(current.step, "pursue");
-        assert_eq!(current.iteration, 3);
-    }
-
-    #[test]
     fn playhead_preserves_human_node_identity() {
         let queued = QueuedInvocation {
             id: "task-first".to_string(),
             flow: "task-design".to_string(),
-            steps: vec![StepPlan {
-                name: "review-design".to_string(),
-                kind: StepKind::Skill,
+            steps: vec![ConcreteStep::Skill(ConcreteSkill {
+                skill: crate::engine::Skill::named("review-design"),
                 policy: OccurrencePolicy {
                     id: Some("review_kickoff".to_string()),
                     human: true,
                 },
-            }],
+                flow_parents: Vec::new(),
+            })],
         };
         let (playhead, _) = Playhead::new(queued);
 
         let step = playhead.current().unwrap();
         assert_eq!(step.policy.id.as_deref(), Some("review_kickoff"));
         assert!(step.policy.human);
-    }
-
-    #[test]
-    fn root_rejects_a_cursor_past_its_current_definition() {
-        let error = Playhead::resume_root(invocation("task", &["clarify"]), 1, 0).unwrap_err();
-        assert!(error.to_string().contains("cannot resume at step 2 of 1"));
-    }
-
-    #[test]
-    fn playhead_definition_comparison_covers_root_and_queued_shape() {
-        let tmp = tempfile::tempdir().unwrap();
-        let flows = tmp.path().join(".lf/flows");
-        std::fs::create_dir_all(&flows).unwrap();
-        std::fs::write(flows.join("wave.yaml"), "- current\n- next\n").unwrap();
-        std::fs::write(flows.join("queued.yaml"), "- queued-current\n").unwrap();
-
-        let root = QueuedInvocation::load(tmp.path(), "wave").unwrap();
-        let (mut playhead, _) = Playhead::new(root.clone());
-        assert!(playhead.definitions_match(tmp.path(), &root));
-
-        let mut renamed = playhead.clone();
-        renamed.stack[0].steps[0].name = "old-name".to_string();
-        assert!(!renamed.definitions_match(tmp.path(), &root));
-
-        let mut changed_kind = playhead.clone();
-        changed_kind.stack[0].steps[0].kind = StepKind::Op;
-        assert!(!changed_kind.definitions_match(tmp.path(), &root));
-
-        let mut changed_policy = playhead.clone();
-        changed_policy.stack[0].steps[0].policy.id = Some("old-policy".to_string());
-        assert!(!changed_policy.definitions_match(tmp.path(), &root));
-
-        let mut reordered = playhead.clone();
-        reordered.stack[0].steps.reverse();
-        assert!(!reordered.definitions_match(tmp.path(), &root));
-
-        let mut shortened = playhead.clone();
-        shortened.stack[0].steps.pop();
-        assert!(!shortened.definitions_match(tmp.path(), &root));
-
-        playhead.stack[0]
-            .queue
-            .push(invocation("queued", &["queued-old"]));
-        assert!(!playhead.definitions_match(tmp.path(), &root));
-
-        let (reset, event) = Playhead::reset(root);
-        assert_eq!(event, PlayheadEvent::DefinitionReset);
-        assert_eq!(reset.stack.len(), 1);
-        assert_eq!(reset.stack[0].cursor, 0);
-        assert_eq!(reset.stack[0].iteration, 0);
-        assert!(reset.stack[0].queue.is_empty());
     }
 
     #[test]

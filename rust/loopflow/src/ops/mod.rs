@@ -59,8 +59,8 @@ pub use release::{
     release_run, release_status, release_tag, MergedPr, ReleaseNotesDegradation,
     ReleaseNotesStatus, ReleaseReceipt, ReleaseRunOutcome, ReleaseStatusResult,
 };
-pub(crate) use run::{launch_work, WorkLaunch, TASK_ACCOUNT_ID_ENV, TASK_RESUME_TOKEN_ENV};
-pub(crate) use run::{render_project_context, render_task_context, render_wave_context};
+pub(crate) use run::{launch_task_worker, TaskWorkerLaunch, TASK_ACCOUNT_ID_ENV};
+pub(crate) use run::{render_task_context, render_wave_context};
 #[doc(hidden)]
 pub use run::{resolve_work_binding, resolve_work_selection, WorkBinding, WorkSelection};
 pub use trace::{hash_prompt, trace_enabled, MockResponses, OpTrace, Tracer};

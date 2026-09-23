@@ -21,7 +21,7 @@ complexity.
 | Operational workflows | `rust/loopflow/src/ops/` | 25,800 | Task/Project operations, human sessions, PR, Git, release, metrics, PM |
 | Prompt and process engine | `rust/loopflow/src/engine/`, `src/harness/` | 29,300 | Skill/Flow discovery, prompt assembly, provider subprocess streams |
 | Tracked Work | `work/`, `pm/` | — | Wave/Project/Task facts, Task PR identity, planning-provider models |
-| End-to-end controllers | `controller/` | — | Wave listener/runtime, Project pursuit, Task automation state and playheads |
+| Boundary execution | `controller/` | — | optional Wave service and claimed Task Flow boundaries |
 | Storage and command journal | `store/`, `journal/` | 19,700 | SQLite, migrations, durable domain rows, outer command receipts |
 | Provider authority | `provider_auth/`, `provider_account/` | 7,500 | login, encrypted tokens, account homes, routes, leases |
 | Home daemon | `lfd/` | 2,900 | Home HTTP API, webhooks, Wave and service reconciliation |
@@ -46,8 +46,8 @@ subprocess edge to one concept.
 | provider streams | [`harness/`](../../rust/loopflow/src/harness/) | normalized conversation and usage |
 | Run evidence | [`run_record.rs`](../../rust/loopflow/src/run_record.rs) | manifest, append events, terminal receipt |
 | shared Work types | [`durable.rs`](../../rust/loopflow/src/durable.rs) and [`work/`](../../rust/loopflow/src/work/) | `WorkRef`, status, inputs, placement, Wave/Project/Task facts |
-| Project loop | [`controller/project/`](../../rust/loopflow/src/controller/project/) | refreshed Project plan and transition |
-| Task loop | [`controller/task/`](../../rust/loopflow/src/controller/task/) | Flow boundary and delivery state |
+| Project operation | [`ops/project.rs`](../../rust/loopflow/src/ops/project.rs) | finite attributed `project/operate` Run |
+| Task boundary executor | [`controller/task/`](../../rust/loopflow/src/controller/task/) | one claimed Flow boundary |
 | Wave facts and authored context | [`work/wave/`](../../rust/loopflow/src/work/wave/) | identity, config, memory, repository scope |
 | Wave automation | [`controller/wave/`](../../rust/loopflow/src/controller/wave/) | listener, resident, placement policy, runtime |
 | store abstraction | [`store/`](../../rust/loopflow/src/store/) | domain rows and transactions |
@@ -62,7 +62,7 @@ lf                         foreground command and Skill/Flow launches
 lf-prompt                  prompt-oriented executable surface
 lfd                        one Home's service keeper and webhook receiver
 lf __resident              Wave resident process
-lf __work                  Project or Task end-to-end controller
+lf task __worker           one already-claimed Task boundary
 lf __flow-step             one internal Flow boundary
 lf __provider-session      provider hook that binds native session identity to a Run
 lf __screenshot-supervisor bounded browser-capture owner
@@ -88,27 +88,26 @@ Argument-level behavior belongs in the [`lf` reference](../lf.md). Wire DTOs
 have required fields unless their type is explicitly optional. Rust and Swift
 round-trip the same fixtures under `tests/fixtures/dto/`.
 
-`lf task prepare` belongs to tracked Work and delivery: it creates no
-controller state. `lf task run`, `restart`, and `resume` compose that substrate
-with the built-in Task controller. `lf --task ... <skill>` goes directly
-through execution with Task attribution and never advances controller state.
+`lf task prepare` belongs to tracked Work and delivery: it starts no execution.
+`lf task run`, `restart`, and `resume` compose that substrate with a bounded
+Task worker. `lf --task ... <skill>` goes directly through execution with Task
+attribution and never advances the Task's Flow position.
 
 ## Dependency direction
 
 ```text
-controller -> execution
-controller -> work
-controller -> delivery
+task worker -> execution
+task worker -> work
+task worker -> delivery
 delivery   -> work
 surface    -> controller, execution, work, delivery
 
-execution ⇏ work, controller
-work      ⇏ controller
+execution ⇏ work, task worker
+work      ⇏ task worker
 ```
 
-Keep these directions literal. A convenience DTO may project Work and
-controller evidence together, but `work/` types and Work store reads never
-load controller state. Controller startup performs the join explicitly.
+Keep these directions literal. Work types own Project/Task domain progression;
+the Task worker joins them with the exact `FlowPosition` claim.
 Execution accepts preassembled Wave memory and opaque Work attribution; it does
 not resolve either from the planning store.
 

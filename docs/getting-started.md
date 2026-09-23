@@ -158,8 +158,7 @@ lf pr land      # watch, repair CI, and return after GitHub merges
 ```
 
 Use the same delivery verbs for Task and non-Task branches. They act on the
-branch and Task PR record when present; they do not require end-to-end
-controller state.
+branch and Task PR record when present; they do not require a live Task worker.
 
 ---
 
@@ -168,9 +167,9 @@ controller state.
 Ready to automate? Waves remain available continuously and choose another
 bounded pass when chat, child observations, crons, or a heartbeat wake them.
 
-`lf` skills are manual building blocks. A Wave is a named agent that reads its
-Linear Projects and tasks, starts durable Tasks, and supervises their
-results.
+`lf` skills are manual building blocks. A Wave is a durable operating context
+whose optional resident handles chat and recurring selection. Project
+operations and Task workers run independently of that resident.
 
 Author `wave/shipper/GOAL.md` (the body is the goal prompt; optional
 frontmatter sets machine config such as `owner:`, `home:`, `crons:`, and `pm:`), then open it in

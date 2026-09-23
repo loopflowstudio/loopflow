@@ -50,6 +50,149 @@ not override the accepted chapter or current Linear directives.
   issue does not establish shipment or a won KR. Replaying the archive verifier
   proves retained receipts, not fresh PM state or publication.
 
+## Task execution authority (branch evidence, 2026-09-23)
+
+**Owner:** LOO-286, Architecture Minimalism, tracks `jack-heart/wave-agents` in
+its existing checkout. The refreshed Linear snapshot explicitly names that
+branch; this resolves the scratch design's previously unknown placement. Keep
+its Work/PR association with the existing owner; a tracking issue is no reason
+to prepare another checkout or launch another writer. LOO-287 owns later
+repository-wide reduction. Neither Task is complete from this memory update.
+
+**Chosen contract:** Wave, Project, and Task remain durable Work. Wave and
+Project judgments are finite attributed Runs. Task owns implementation pursuit,
+its worktree, serial PRs, delivery facts, and current immutable Flow. Helper
+attribution grants no cursor or process-control capability; independently
+permitted Git/PR/PM operations retain their own authority. Optional Wave chat/API
+hosting must not become a prerequisite for Task or Project progress.
+
+At checkpoint `11fa65881`, Project execution and Task first/loop/finally policy
+are removed. `task_flow_positions` holds the saved invocation, cursor, worker
+claim, human Session evidence, and unsafe blocker. The executor advances that
+position directly; Task's synthetic Wave Playhead/body/event adapter is gone.
+A worker currently settles one boundary and launches another worker for the
+next autonomous boundary. This is narrower than the design's one worker running
+to a semantic stop and is not proof of the proposed `TaskExecutionState` API.
+Finishing the invocation deletes its row without selecting a successor Flow.
+A later launch selects explicit Flow, else the current Project recommendation,
+else `task-design`. The Task-level location of the recommendation and automatic
+post-completion trigger policy remain unresolved.
+
+### Preserve these boundaries
+
+- Compile expanded definitions at invocation creation. Resume autonomous and
+  human Skills from saved content, even when source changes or disappears.
+  Catalog validation belongs to new selection, not recovery of a saved Flow.
+- Invocation identity must participate in claims and human Session tokens.
+  Version and worker generation fence distinct races; restart may reuse their
+  numbers, so neither alone identifies the invocation. Validate the launch
+  capability before preparation side effects. Never reconstruct a newer human
+  position for a late child.
+- Worker settlement belongs to Task transactions that atomically fence the
+  cursor and write timestamps/events without overwriting newer Task facts.
+  Position-only SQLite settlement APIs were test-only alternate writers and
+  were deleted. Tests now assert rejected claims leave both domain evidence and
+  position unchanged, and accepted evidence appears once.
+- Interruption retains the cursor; nonfinal completion advances once; final
+  completion keeps the last valid cursor until the transaction removes the row.
+  Task completion must never inherit Wave root wraparound. Human Approve and
+  Iterate compare exact saved evidence and clear Session binding on transition.
+- Ordinary provider errors remain Run evidence and release the exact claim.
+  Unsafe persisted state uses `TaskFlowBlocker`; a missing executable definition
+  requires explicit restart and cannot be unlocked by ordinary retry.
+- Process death requires existing exact process evidence. Silence, age, tmux
+  presence, provider history, and app visibility cannot confer ownership.
+  The PR landing watcher is a narrow precedent, not a reason to add another
+  general liveness ledger or copy its heartbeat policy into Task takeover.
+- Wave's Playhead still serves queued continuations and journal replay. Keep
+  historical event decoding after deleting writers. A complete unreadable
+  JSONL record must fail without truncating it or later conversation. Historical
+  execution needs explicit disposition before restart, including queued work.
+- Swift's Project Flow mirror now matches optional `recommended`; migrate Rust,
+  Swift, and current JSON fixtures together. Historical migration fixtures stay
+  historical. The optional PM Flow envelope distinguishes unknown cached data
+  from an explicitly empty recommendation before remote content rewrites.
+  Provider labels and Project iteration still have consumers.
+
+### Project reduction (checkpoint `b302db9b5`)
+
+Project now persists planning facts, ownership, completed-operation count,
+abandonment intent, and timestamps. The unused `last_state_fingerprint` and
+no-op validation API are removed across model, SQLite, and callers.
+`project run` composes the existing prepare and launch operations. Independent planning
+fact updates still cannot overwrite completed-operation progress. Keep Task
+worker claims, Wave queues, and invocation progress: they fence executors or
+preserve continuations, unlike the unused fingerprint.
+
+Installed development builds record draft migration checksums too. The forward
+`drop_project_fingerprint` draft follows `work_domain_state`; rewriting the
+earlier draft would invalidate installed history. Preserve historical fixtures
+and prove remaining facts against a populated prior schema. This rule also
+lives in `.lf/skills/compress.md` where reductions exercise it.
+
+The compression receipt records passing planning-update, populated migration,
+sibling-observation, and CLI repository-matrix tests plus Clippy, formatting,
+migration, and architecture checks. The matrix uses a missing worker executable
+and proves reservation behavior only. It does not supply a real finite Project
+Run or settle the broader cutover obligations below; no full CI pass is claimed.
+
+### Evidence limits and remaining obligations
+
+LOO-286 retains the configured CLI/Home/app proof: a real finite Project Run;
+concurrent Task starts converging on one owned worker; actual provider death and
+same-cursor replacement; late-result rejection; helpers unable to settle; and
+exact human continuation across app close/reopen with the optional service
+stopped. Repeat Flow selection after changing planning input and prove the old
+worker recorded no successor intent. Capture receipts, Run ids, invocation,
+version/generation, Session token, process evidence, and truthful failure/wait
+states. A seeded store, killed `sleep`, account-preflight error, parser/help
+check, or UI fixture proves only its own boundary.
+
+The later slice review's approval does not settle all retained counterexamples.
+Source inspection during this curation still finds `work_domain_state` dropping
+Task controller progress; `task_worker_claim` copies only existing position rows.
+Its test explicitly expects no row for controller-only progress and retains the
+old human row for a newer controller cursor. Historical Project positions are
+also discarded. Preserve/dispose that evidence explicitly before claiming
+lossless cutover; the green migration test does not establish that contract.
+Wave startup now stops at historical definitions and exposes explicit restart,
+which repairs the earlier silent reset at the source level.
+
+Recorded focused cursor/store/human/DTO checks and static analysis passed in the
+compression checkpoints. The earlier full library run had two environment-shared
+failures that passed only in isolation; no subsequent full-green run, configured
+provider recovery, or desktop proof is recorded. This curation ran no behavioral
+suite and does not upgrade that evidence. Production line reduction and bounded
+architecture checks are supporting evidence, never acceptance on their own.
+
+### History that constrains the next change
+
+Two one-way deletions removed competing execution authority: `a7044e2b5`
+(2026-07-18) removed Session/body leases; `5f7f66833` (2026-08-25) removed the
+Invocation/Epoch/Basis stack and the four-day-old `run_liveness` reconciler
+introduced by `521ae7d3f`. Durable Work, attributed Runs, Steers, exact human
+boundaries, and process evidence survived. `fa0186c4d` (2026-08-28) separated
+Work from optional controllers but left launch/recovery dependencies. Prompt
+fallback was added (`d76118b7b`), deleted (`309575f8e`), and restored
+(`eecde0b2e`) because the ordinary path still failed. Remove that failure in the
+operation; deleting recovery prose alone has already failed once.
+
+The app repeatedly replaced control rooms and Ask/attention models; shared
+records survived. Keep UI as projection and trigger. Preserve last-good evidence
+and missingness, use real Runs and human Sessions, and never invent a synthetic
+controller Session or app scheduler. Historical generic `advance_work` proposals
+in the research are superseded by Task-only execution; they are not a mandate
+to restore Wave/Project cursor symmetry.
+
+The operational incident behind removing `run_liveness` remains unknown; commit
+messages establish deletion, not its complete cause. Automatic idle-Task
+triggers, finite default wait semantics, worker lifetime, composite Flow source
+independence, remaining Wave governance, and installed/runtime projection
+consistency must be reconciled with the full design in LOO-286/LOO-287. Do not
+split every historical remainder into a new Task or silently widen their KRs.
+Research runs twice exhausted their turns without artifacts: write evidence
+incrementally and preserve it outside the provider transcript.
+
 ## Shipped
 
 - **Install syncs skills** — the repo refresh and local `--use` paths run `lf sync-skills --yes` after installing `lf`, so `~/.claude/skills` and `~/.agents/skills` track the freshly installed binary. Sync failure warns but never fails the install; the binary is already in place. First increment of "one command keeps local fresh."
@@ -92,14 +235,6 @@ not override the accepted chapter or current Linear directives.
   Linear moves an issue, historical Task Runs retain their evidence but lose
   automated PR and completion authority; fail closed before side effects and
   preserve the full Work, Run, Steer, and PR history for remediation.
-- **A live parent Run is not proof of child-control authority** (learned
-  2026-08-22). A relaunched Project can have a healthy provider process yet
-  lack the durable Turn Basis required to reserve its Task Run. Wave-level
-  Task control then correctly fails because only the immediate parent may act.
-  Preserve the existing Task, Work, and PR; do not retry into duplicate Runs
-  or publications. Wake pursuit only when a basis-bearing immediate-parent Run
-  exists. Cross-Work judgment now starts a fresh Work-bound Run and never
-  substitutes for missing immediate-parent control authority.
 - **Historical continuity currently short-circuits daily telemetry** (observed
   2026-08-23). `telemetry-daily` stops in `doctor` on the same eight 2026-08-04
   through 2026-08-11 gap days before its scorecard runs. LOO-241 owns making
@@ -133,9 +268,9 @@ not override the accepted chapter or current Linear directives.
   PR finalization now does.
 - **The database is durable control state, not a message bus.** Radio,
   `bus_messages`, `bus_cursors`, channel identity, bylines, and retention are
-  deleted. Authored input is a durable Work Steer. Best-effort process nudges may
-  reduce latency, but the server follow-up must make Home-owned Ready scanning
-  the correctness path so a stopped Project cannot miss child Feedback.
+  deleted. Authored input is a durable Work Steer. Observation delivery must
+  preserve input without requiring a resident Project. Automatic dispatch policy
+  remains open; a nudge must not invent a second execution authority.
 - **Supported Wave startup is one event-driven Home lifecycle** (decided
   2026-07-21). `lf start` opens the selected Home registry and uses its current
   `lf`/`lfd` control pair without promoting or replacing binaries. Daemon boot
@@ -149,41 +284,14 @@ not override the accepted chapter or current Linear directives.
   never startup acknowledgement.
 - **Controller evidence is not an agent Run** (learned 2026-07-20). When a
   merged PR or another controller fact completes a Task, persist the Task
-  lifecycle, Work Epoch, and completion event in one transaction. Never mint a
+  domain transition and completion event in one transaction. Never mint a
   synthetic Run to reuse a Run-owned terminal transition. Prove this boundary
   with a zero-agent-boundary fixture and repeated reads that count Runs and
   completion events.
-- **Task resident state is an optional execution overlay** (revised
-  2026-08-27). Lifecycle playhead, gate proposal, provider choice, and
-  continuation live in `task_residents`, not Task identity. The supported
-  resident has one stable local session and restart stops that route before
-  resetting it. Generic Task-bound Runs remain legal and gain no resident or
-  worktree authority from attribution; there is no phase generation or stale
-  writer fence to turn one process into “the Task.”
-- **Phase-owned state needs the same freshness boundary in memory and storage**
-  (learned 2026-07-20). Passive reconciliation may advance a durable Task to
-  finally while its active Run still holds a pre-final snapshot. Refresh a gate
-  proposal only within the same finally epoch; first/loop snapshots keep no
-  proposal and the store's `phase_epoch` fence preserves newer durable truth.
-  Validation runs before SQL, so a persistence fence cannot repair a torn local
-  refresh. Terminal Work remains authoritative over stale resumable failure
-  observations.
-- **A declared human Task FlowStep is the only blocking human-input primitive.**
-  The Task persists one exact flow/node/skill/iteration playhead, launches that
-  named Skill through ordinary `lf --as task:<id>`, and advances only through
-  typed accept/decline settlement. Closing the terminal leaves it waiting.
-   Agent-to-agent questions remain synchronous fresh Runs and own no planning
-   state.
-- **Persisted executable references are an installed-state invariant** (learned
-  2026-07-21). Removing or renaming a builtin flow requires a forward migration
-  for every surviving Task pin, plus catalog resolution before Run reservation.
-  A non-empty stored name is not proof that the installed binary and worktree
-  can execute it.
-- **One Task failure is one atomic durable fact** (learned 2026-07-21). The
-  failure event and Run/Invocation terminal state commit together; if the event
-  cannot persist, the Run stays open and recoverable. Automatic relaunch is
-  progress-relative and bounded, and only durable progress or explicit User
-  input resets its budget. An empty Run slot alone never authorizes retries.
+- **Execution authority changed on the Task-worker branch.** The former
+  resident session, lifecycle/gate epochs, mutable Flow pins, and parent Turn
+  Basis are historical models. Use the Task execution section above for current
+  ownership, human decisions, failure evidence, and migration constraints.
 - **Performance evidence preserves missingness at every boundary** (learned
   2026-07-21). A provider receipt absent, one missing field, and a reported
   zero are distinct facts; the first accepted per-Turn receipt wins and a
@@ -217,9 +325,9 @@ not override the accepted chapter or current Linear directives.
 - **Cadenza release parity** — same nightly/weekly cadence, one-command updater, tests, self-hosted assumptions; document any deliberate divergence.
 - **Cron host bootstrap** — bring up the first maintained `lf cron` host (Mac mini default), Doppler configured, with scheduled checks.
 - **Release feedback loop** — failed nightly/weekly runs surface as attention items or focused fix PRs, distinguishing verification vs publish vs host vs stale-local drift.
-- **Installed-upgrade semantic gate** — resolve every active placed Work's
-  persisted lifecycle through the candidate builtin and repo-local catalogs
-  after migrations, before that binary becomes the Home launcher.
+- **Installed-upgrade semantic gate** — preserve saved Task invocations and
+  historical stops through migration; validate new selections against the
+  candidate catalog without re-resolving active definitions.
 - **Project terminal-receipt parity** — make Project failure events and
   Run/Invocation settlement share the atomic receipt boundary now used by
   Tasks, with a fault-injection proof.

@@ -216,9 +216,7 @@ pub struct PmProjectWriteOptions {
     pub title: Option<String>,
     pub definition: Option<String>,
     pub krs: Vec<String>,
-    pub first: Option<String>,
-    pub loop_: Option<String>,
-    pub finally: Option<String>,
+    pub recommended: Option<String>,
 }
 
 #[derive(Debug, Clone, PartialEq, Eq)]
@@ -2385,19 +2383,11 @@ async fn pm_project_write_async(
                 .clone()
                 .unwrap_or_else(|| project.definition.clone()),
             flows: ProjectFlowPlan {
-                first: options
-                    .first
-                    .clone()
-                    .or_else(|| project.flows.as_ref().and_then(|flows| flows.first.clone())),
-                loop_: options
-                    .loop_
-                    .clone()
-                    .or_else(|| project.flows.as_ref().and_then(|flows| flows.loop_.clone())),
-                finally: options.finally.clone().or_else(|| {
+                recommended: options.recommended.clone().or_else(|| {
                     project
                         .flows
                         .as_ref()
-                        .and_then(|flows| flows.finally.clone())
+                        .and_then(|flows| flows.recommended.clone())
                 }),
             },
             krs: if options.krs.is_empty() {
@@ -2428,9 +2418,7 @@ async fn pm_project_write_async(
                 OpsError::Message("`lf pm project create --definition` is required".to_string())
             })?,
             flows: ProjectFlowPlan {
-                first: options.first.clone(),
-                loop_: options.loop_.clone(),
-                finally: options.finally.clone(),
+                recommended: options.recommended.clone(),
             },
             krs: requested_krs.clone(),
         };
@@ -3490,9 +3478,7 @@ mod tests {
                 summary: "Stay in flow.".to_string(),
                 definition: "Conversation stays in flow.".to_string(),
                 flows: Some(ProjectFlowPlan {
-                    first: Some("task-design".to_string()),
-                    loop_: Some("slice".to_string()),
-                    finally: Some("ship".to_string()),
+                    recommended: Some("task-design".to_string()),
                 }),
                 krs: vec![PmKr {
                     text: "Replies survive restarts.".to_string(),
@@ -3511,7 +3497,7 @@ mod tests {
             value["projects"][0]["definition"],
             "Conversation stays in flow."
         );
-        assert_eq!(value["projects"][0]["flows"]["loop"], "slice");
+        assert_eq!(value["projects"][0]["flows"]["recommended"], "task-design");
         assert_eq!(value["projects"][0]["krs"][0]["holds"], true);
         assert_eq!(value["items"], serde_json::json!([]));
     }

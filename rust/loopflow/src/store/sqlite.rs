@@ -20,7 +20,6 @@ use crate::work::wave::{Wave, WaveLocator};
 
 mod children;
 mod ci_incidents;
-mod controller;
 mod durable;
 mod metrics;
 mod pr_landings;

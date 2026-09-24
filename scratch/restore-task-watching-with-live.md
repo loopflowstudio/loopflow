@@ -133,45 +133,51 @@ shared Task identities where available. No dependency on its landing.
 
 ## This slice
 
-Integrate Watch with the rebased main-view-task navigation. The primary workspace
-now owns selected Work, details and retained terminals together. Add Watch as
-selected Task content in that owner; remove WorkSurfaceView's restored modal
-workspace and terminal-store observation. Retain the same TaskWatchView for the
-legacy Roadmap/Wave sheets. This adapts presentation placement without changing
-the accepted passive-read, exact-history or full-feed contract.
+Human direction, 2026-09-24: the deliverable is the desktop Task view. Keep the
+existing snapshot and output reads as its plumbing; avoid additional commands,
+DTOs or service APIs unless a concrete desktop interaction requires them. After
+reviewing this continuation change, implement the output feed in the existing
+Watch view and resolve reader limits as that integration requires. A successful
+CLI read alone is not the product finish line.
 
-Retain each visited Task's inspection selection in its existing per-window,
-per-repository navigation state. Mount the Watch reader only while Watch is the
-visible content; terminal surfaces remain mounted under their current owner.
-Switching Task, repository, details, terminals or overview cancels Watch's query.
-Return to Watch with the same Task selection/snapshot; never open or replace a
-provider just to inspect it. Continue manual refresh until discovery is bounded.
+Separate live continuation from historical pagination through the existing output
+reader. `task output --tail` starts an independent cursor at each discovered
+source's current boundary; ordinary `task output` still reads from the beginning.
+Continue either with `--cursor FILE`. New Runs discovered by an established live
+cursor start at the beginning, preserving their first output. If seeding cannot
+establish a source boundary or capture mode, report `tail_unavailable` and retain
+its ordinary read from the beginning. No additional transcript storage or provider control is introduced.
 
-Keep completed Tasks in the shared presentation projection. The navigator offers
-Show completed Tasks, also finds completed history through search, and never
-hides a selected Task or an open Session merely because it completed. No second
-history inventory, Task registry or completed-task query is introduced. Tasks
-absent from the supplied roadmap remain an explicit limit of this entry point.
+Seed existing sources before returning the live cursor, so an unread historical
+page cannot hold up future output. JSONL retains incomplete trailing records and
+validates native Session identity; journal capture mode must survive the seek.
+OpenCode starts at its current timestamp boundary and includes unfinished parts,
+including older parts whose provider timestamp may remain unchanged. Transcript
+payload pages remain bounded; initial source discovery/seeding and retained
+per-Run/unfinished-part state still scale with the source inventory. Automatic polling remains disabled
+until that separate bound is implemented.
 
-Done when focused navigation/Watch tests prove completed Tasks without Sessions
-are reachable, switching content/repositories retains independent Watch selections
-and existing terminal layout, the primary Watch action changes unified content,
-and hidden content has no mounted Watch reader. Build the Mac target and retain
-existing Watch stale-state/cancellation proofs. Human Session links still need
-exact shared association evidence: Flow Session IDs are not their provider Run
-IDs, so never join them by step name or fabricate a Session ID in Swift.
+Done when focused tests prove history can remain partially unread while appended
+journal/native output arrives through the independent cursor; new auxiliary Runs
+retain their first records; incomplete JSONL and source resets remain visible;
+and older unfinished OpenCode parts plus same-timestamp edits survive the live
+start. Wire the option through both CLI dispatch paths and RegistryQuery, keeping
+cursor contents in the existing private temporary transport file.
 
-The live feed, bounded discovery/state, independent history/live cursors, human
-Session navigation and full configured demonstration remain in this same PR.
+The live feed, connected diagram, bounded discovery/state, human Session links,
+full capture and configured human demonstration remain in this same PR. History
+and live may overlap by source identity/revision; the future feed must merge them
+without allowing an older historical revision to replace newer observed output.
 
 ## Remaining slices and full Done When
 
-1. Flow facts are implemented. Current: native source receipts, passive readers,
-   bounded output continuation, discovery, and the shared output fixture.
-2. Finish provider-specific configured capture proof, the Watch snapshot, and
-   separate historical paging/live continuation.
-3. Watch UI and all Task entry points. Swift tests prove filtering and Follow
-   live across transitions. Complete the configured-path demo and human gate.
+1. Connect the existing output read to the desktop Watch inspector: feed,
+   history/live merging, filters and Follow live. Keep plan and output in the
+   existing Task workspace; prove the visible behavior with Swift tests.
+2. Resolve bounded discovery/initialization/state for visible polling, complete
+   capture and provider-specific configured proof, and exact human Session links.
+3. Finish the connected diagram and configured desktop demonstration, including
+   transitions, auxiliary Runs, Iterate and completed history; enter the human gate.
 
 The configured demo must show autonomous text/tool output before completion, a
 stage transition without reopening, inspection of the earlier stage and Follow
@@ -184,6 +190,48 @@ owned by the pinned lifecycle. No multi-Task dashboard, graph editing, or remote
 transport expansion is in scope.
 
 ## Evidence ledger
+
+- 2026-09-24 independent continuation: `task output --tail` now seeds live
+  positions separately from ordinary historical pagination. Both CLI dispatch
+  paths and RegistryQuery use the existing read operation and cursor transport;
+  the shared output DTO and fixtures are unchanged. Newly discovered Runs read
+  from the beginning. Initialization seeds every discovered Run before paginating,
+  so output written before an unvisited Run's first round-robin turn survives.
+- JSONL seeds stop at the last complete line, verify native Session identity and
+  retain capture mode. OpenCode seeds its timestamp boundary and exact unfinished
+  IDs in one read-only transaction; an older part completing at the same timestamp
+  before its first page remains readable. Existing reset and revision handling
+  remain in the same source reader. No provider, flow, Session or persistence
+  authority was added.
+- Focused proof: three reader tests pass in `/tmp/loo293-tail-readers-final.log`;
+  the 51-existing-Run/new-auxiliary continuation test passes in
+  `/tmp/loo293-tail-discovery-final.log`. These cover unread history alongside new
+  output, incomplete lines, native identity/reset, journal mirror suppression
+  across retry, and OpenCode unfinished/boundary revisions. Two Swift query/DTO
+  tests pass in `/tmp/loo293-tail-swift.log`; the Mac product links. `cargo fmt`,
+  `cargo clippy --all-targets -- -D warnings`, the CLI build and whitespace checks
+  pass. No affected-suite or full repository gate ran.
+- Review/configured correction: the first real read hit `tail_unavailable` on a
+  15,481,798-byte normalized journal because its attempt start lay outside the
+  8 MiB window. The strengthened journal regression reproduced that failure
+  (`/tmp/loo293-tail-large-before.log`). The bounded reader now also accepts
+  positive canonical conversation evidence after the last unreadable record;
+  it never guesses mode from a summary mirror. It reduces records sequentially,
+  without retaining a parsed copy of the entire tail window.
+- Fresh configured CLI proof from `/tmp`, with the published Home selected
+  explicitly, now reads all three LOO-293 sources successfully, with zero records
+  and zero gaps on both live initialization and file-cursor continuation. Recorded
+  durations are 2.426 s and 0.327 s, not performance budgets. Binary identity and
+  scope are in `watch-tail-proof.json`. This proves a quiet passive start and
+  reconnect against real data; it supplies no new live-arrival/provider or UI demo.
+- Remaining: discovery/initialization and retained per-Run/unfinished-part state
+  still scale with inventory; a source whose tail cannot establish identity or
+  journal capture mode reports `tail_unavailable` and reads retained history.
+  History can overlap live output, so the feed must merge identities/revisions
+  and avoid replacing a newer live revision with an older historical one. Bounded
+  discovery/state, complete capture, connected diagram/feed/filtering/Follow live,
+  exact human Session navigation and the configured human demo remain in this
+  same Task/PR. No publication, landing or Task completion occurred in this pass.
 
 - 2026-09-23 inline layout follow-through: extended the existing window-backed
   Watch rendering proof to mount the full SessionsView with the Work navigator

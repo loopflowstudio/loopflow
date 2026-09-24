@@ -166,8 +166,9 @@ public struct RegistryQuery: Sendable {
         return try Self.decode(TaskWatchSnapshot.self, from: stdout)
     }
 
-    public func taskOutput(issue: String, cursor: String?, cwd: String?) async throws -> TaskOutputPage {
+    public func taskOutput(issue: String, cursor: String?, tail: Bool = false, cwd: String?) async throws -> TaskOutputPage {
         var args = ["task", "output", issue, "--json"]
+        if tail { args.append("--tail") }
         // Cursor contents can exceed argv limits. This temporary transport file
         // has no lifetime beyond the query and is never a transcript cache.
         var directory: URL?

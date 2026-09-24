@@ -86,6 +86,7 @@ lf task restart INF-123 "reconcile all scratch first" # checkpoint and begin a n
 lf task status INF-123 --json                         # inspect durable state
 lf task watch INF-123 --json                          # inspect retained stages, attempts, and Runs
 lf task output INF-123 --json                         # read passive output; continue with --cursor
+lf task output INF-123 --tail --json                  # start an independent live continuation
 lf pr arm -c                                          # request exact-head auto-merge and return
 lf pr land -c                                         # watch, repair CI, merge, then complete the Task
 ```
@@ -100,11 +101,25 @@ Unreadable Run manifests appear in page-level `gaps` while healthy sources remai
 readable. Native tool calls and results share their conversation item ID; their
 source record IDs stay distinct.
 
+Keep separate cursor files for history and live output. Start history without
+`--tail`, start live output with it, then continue either using `--cursor FILE`
+without `--tail`. Existing JSONL sources start after their last complete record;
+OpenCode includes its latest timestamp boundary and unfinished parts. Newly
+discovered Runs start from their first record. Merge overlapping history/live
+records by source identity and revision. A failed live start reports
+`tail_unavailable` and reads that source from the beginning instead of skipping
+unverified output.
+
 `task watch` reads the recorded plan, attempt history, transitions, and attributed
 Runs even after completion or worktree removal. Missing historical evidence is
 reported in `gaps`; the snapshot does not imply a provider is still running.
-These CLI reads do not yet provide independent history/live cursors or a Mac
-Watch tab. Snapshot and Run discovery currently scan all retained evidence.
+The Mac Watch view currently inspects the plan with manual refresh; its live feed
+is still in progress. Snapshot and Run discovery scan all retained evidence, and
+live initialization seeds all discovered sources. These costs and retained cursor
+state still need bounds before automatic polling. Journal live starts require
+either normalized conversation evidence or the latest attempt boundary within
+the last 8 MiB; otherwise they report the explicit gap above. Reading from
+history remains available.
 
 Turn a reviewed design into work without another planning subsystem:
 

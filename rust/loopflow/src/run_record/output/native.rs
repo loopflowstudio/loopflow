@@ -270,6 +270,59 @@ struct PartRevision {
     unfinished: bool,
 }
 
+pub(super) fn tail_parts(path: &Path, session: &str) -> io::Result<PartCursor> {
+    (|| -> anyhow::Result<PartCursor> {
+        let mut conn = Connection::open_with_flags(
+            path,
+            OpenFlags::SQLITE_OPEN_READ_ONLY | OpenFlags::SQLITE_OPEN_NO_MUTEX,
+        )?;
+        conn.busy_timeout(std::time::Duration::from_millis(100))?;
+        let tx = conn.transaction()?;
+        let session_created = tx.query_row(
+            "SELECT time_created FROM session WHERE id=?1",
+            [session],
+            |row| row.get(0),
+        )?;
+        let (part_count, watermark) = tx.query_row(
+            "SELECT COUNT(*),COALESCE(MAX(time_updated),0) FROM part WHERE session_id=?1",
+            [session],
+            |row| Ok((row.get(0)?, row.get(1)?)),
+        )?;
+        // Capture IDs in this same snapshot: a part may complete with an unchanged
+        // timestamp before the first page reaches it. Its revision still belongs
+        // to the live reader even when it leaves the unfinished SQL predicate.
+        let mut statement = tx.prepare(
+            "SELECT id,time_updated FROM part WHERE session_id=?1 AND
+             CASE WHEN json_valid(data) THEN
+               (json_extract(data,'$.type')='text' AND json_extract(data,'$.time.end') IS NULL)
+               OR (json_extract(data,'$.type')='tool' AND
+                   COALESCE(json_extract(data,'$.state.status'),'') NOT IN ('completed','error'))
+             ELSE 1 END",
+        )?;
+        let seen = statement
+            .query_map([session], |row| {
+                Ok((
+                    row.get(0)?,
+                    PartRevision {
+                        updated: row.get(1)?,
+                        hash: String::new(),
+                        unfinished: true,
+                    },
+                ))
+            })?
+            .collect::<Result<BTreeMap<_, _>, _>>()?;
+        Ok(PartCursor {
+            session_created,
+            part_count,
+            watermark,
+            ceiling: watermark,
+            after: None,
+            seen,
+        })
+    })()
+    .map_err(io::Error::other)
+}
+
 pub(super) fn read_parts(path: &Path, session: &str, page: &mut SourcePage) -> io::Result<()> {
     let result = read_parts_in(path, session, page);
     result.map_err(io::Error::other)

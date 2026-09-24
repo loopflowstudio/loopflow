@@ -94,6 +94,113 @@ fn anchor(file: &mut File, offset: u64) -> io::Result<String> {
     Ok(digest(&bytes))
 }
 
+/// Start a separate live reader without consuming its historical continuation.
+pub(crate) fn tail_cursor(
+    path: &Path,
+    source: OutputSource,
+    session: Option<&str>,
+) -> io::Result<OutputCursor> {
+    if source == OutputSource::OpenCode {
+        let file = File::open(path)?;
+        return Ok(OutputCursor {
+            source,
+            session_id: session.map(str::to_owned),
+            location: path.to_string_lossy().into_owned(),
+            identity: file_identity(&file)?,
+            offset: 0,
+            anchor: digest(&[]),
+            session_verified: true,
+            discarding_record: false,
+            journal_conversation: None,
+            parts: Some(native::tail_parts(
+                path,
+                session.ok_or_else(|| io::Error::other("missing native Session identity"))?,
+            )?),
+        });
+    }
+    let head = read_source(path, source, session, None)?;
+    if source != OutputSource::Journal && !head.cursor.session_verified {
+        return Err(io::Error::other(
+            "Native Session identity is not yet readable",
+        ));
+    }
+    let mut cursor = head.cursor;
+    let mut file = File::open(path)?;
+    if file_identity(&file)? != cursor.identity
+        || anchor(&mut file, cursor.offset)? != cursor.anchor
+    {
+        return Err(io::Error::other(
+            "Output source changed while starting its live cursor",
+        ));
+    }
+    let end = file.metadata()?.len();
+    let start = end.saturating_sub(PAGE_BYTES as u64);
+    file.seek(SeekFrom::Start(start))?;
+    let mut bytes = Vec::new();
+    file.by_ref().take(end - start).read_to_end(&mut bytes)?;
+    let complete = bytes.iter().rposition(|byte| *byte == b'\n').map(|i| i + 1);
+    let Some(complete) = complete else {
+        if start != 0 {
+            return Err(io::Error::other(
+                "Incomplete trailing output exceeds the live-start byte bound",
+            ));
+        }
+        cursor.offset = 0;
+        cursor.anchor = digest(&[]);
+        return Ok(cursor);
+    };
+    if source == OutputSource::Journal {
+        // Capture mode belongs to an attempt. Never carry the first attempt's
+        // mode past an unseen retry or guess it from a trailing summary mirror.
+        let first = if start == 0 {
+            0
+        } else {
+            bytes
+                .iter()
+                .position(|byte| *byte == b'\n')
+                .expect("complete line exists")
+                + 1
+        };
+        let mut known_mode = start == 0;
+        cursor.journal_conversation = None;
+        for line in bytes[first..complete].split_inclusive(|byte| *byte == b'\n') {
+            let envelope = match serde_json::from_slice::<super::EventEnvelope>(line) {
+                Ok(envelope) if envelope.schema_version == super::SCHEMA_VERSION => envelope,
+                _ => {
+                    // An unreadable record may itself be an attempt boundary.
+                    known_mode = false;
+                    cursor.journal_conversation = None;
+                    continue;
+                }
+            };
+            if matches!(
+                envelope.event,
+                super::RunEvent::ProviderAttemptStarted { .. }
+            ) {
+                known_mode = true;
+            } else if !known_mode && matches!(envelope.event, super::RunEvent::Conversation { .. })
+            {
+                // Positive canonical evidence establishes mode without scanning
+                // back to a launch that may be outside this bounded window.
+                known_mode = true;
+                cursor.journal_conversation = Some(true);
+            }
+            if known_mode {
+                journal_event(envelope.event, envelope.seq, &mut cursor);
+            }
+        }
+        if !known_mode {
+            return Err(io::Error::other(
+                "Journal capture mode is unavailable in the live-start byte window; read history to continue",
+            ));
+        }
+    }
+    cursor.offset = start + complete as u64;
+    cursor.discarding_record = false;
+    cursor.anchor = anchor(&mut file, cursor.offset)?;
+    Ok(cursor)
+}
+
 pub(crate) fn read_source(
     path: &Path,
     source: OutputSource,
@@ -311,7 +418,7 @@ pub(crate) async fn resolve_native(
 
 #[cfg(test)]
 mod tests {
-    use super::{read_source, OutputSource, PAGE_BYTES, PAGE_RECORDS};
+    use super::{read_source, tail_cursor, OutputSource, PAGE_BYTES, PAGE_RECORDS};
     use crate::chat::types::ConversationEvent;
     use std::io::Write;
 
@@ -320,6 +427,199 @@ mod tests {
             "{}\n",
             serde_json::json!({"type":"assistant","sessionId":"session","uuid":id,"message":{"content":[{"type":"text","text":text}]}})
         )
+    }
+
+    #[test]
+    fn native_tail_receives_output_while_history_remains_unread() {
+        for source in [OutputSource::Claude, OutputSource::Codex] {
+            let dir = tempfile::tempdir().unwrap();
+            let path = dir.path().join("native.jsonl");
+            let mut file = std::fs::File::create(&path).unwrap();
+            if source == OutputSource::Codex {
+                writeln!(
+                    file,
+                    "{}",
+                    serde_json::json!({"type":"session_meta","payload":{"id":"session"}})
+                )
+                .unwrap();
+            }
+            let record = |id: &str| {
+                if source == OutputSource::Claude {
+                    claude(id, id)
+                } else {
+                    format!(
+                        "{}\n",
+                        serde_json::json!({"type":"response_item","payload":{"id":id,"type":"message","role":"assistant","content":id}})
+                    )
+                }
+            };
+            for index in 0..PAGE_RECORDS * 3 {
+                write!(file, "{}", record(&format!("history-{index}"))).unwrap();
+            }
+            let history = read_source(&path, source, Some("session"), None).unwrap();
+            assert!(history.has_more);
+            let unfinished = record("arriving");
+            write!(file, "{}", &unfinished[..unfinished.len() - 1]).unwrap();
+            let live = tail_cursor(&path, source, Some("session")).unwrap();
+            assert!(read_source(&path, source, Some("session"), Some(&live))
+                .unwrap()
+                .records
+                .is_empty());
+            writeln!(file).unwrap();
+            let output = read_source(&path, source, Some("session"), Some(&live)).unwrap();
+            assert_eq!(output.records.len(), 1);
+            assert!(output.records[0].source_item_id.starts_with("arriving"));
+            let older = read_source(&path, source, Some("session"), Some(&history.cursor)).unwrap();
+            assert!(older.has_more);
+            assert!(older
+                .records
+                .iter()
+                .all(|record| record.source_item_id.starts_with("history-")));
+            assert!(
+                read_source(&path, source, Some("session"), Some(&output.cursor))
+                    .unwrap()
+                    .records
+                    .is_empty()
+            );
+            assert!(tail_cursor(&path, source, Some("wrong-session")).is_err());
+            std::fs::write(&path, record("replacement")).unwrap();
+            if source == OutputSource::Claude {
+                let reset =
+                    read_source(&path, source, Some("session"), Some(&output.cursor)).unwrap();
+                assert!(reset.reset);
+                assert_eq!(reset.records[0].source_item_id, "replacement:0");
+            } else {
+                assert!(read_source(&path, source, Some("session"), Some(&output.cursor)).is_err());
+            }
+        }
+    }
+
+    #[test]
+    fn journal_tail_preserves_the_latest_attempt_capture_mode() {
+        use crate::run_record::{EventEnvelope, RunEvent, SCHEMA_VERSION};
+
+        let dir = tempfile::tempdir().unwrap();
+        let path = dir.path().join("events.jsonl");
+        let mut file = std::fs::File::create(&path).unwrap();
+        let mut seq = 0;
+        let mut append = |event| {
+            writeln!(
+                file,
+                "{}",
+                serde_json::to_string(&EventEnvelope {
+                    schema_version: SCHEMA_VERSION,
+                    seq,
+                    observed_at: time::OffsetDateTime::now_utc(),
+                    event,
+                })
+                .unwrap()
+            )
+            .unwrap();
+            seq += 1;
+        };
+        for _ in 0..PAGE_RECORDS * 2 {
+            append(RunEvent::Text {
+                text: "old summary capture".into(),
+            });
+        }
+        append(RunEvent::ProviderAttemptStarted {
+            provider: "codex".into(),
+            model: None,
+            account_id: None,
+            attempt_key: "retry".into(),
+        });
+        append(RunEvent::ProviderOutput {
+            stream: "stdout".into(),
+            line: "x".repeat(PAGE_BYTES),
+        });
+        append(RunEvent::Conversation {
+            event: Box::new(ConversationEvent::TextDelta {
+                turn_id: "turn".into(),
+                content: "normalized history".into(),
+            }),
+        });
+        let live = tail_cursor(&path, OutputSource::Journal, None).unwrap();
+        // Start between a normalized event and its summary mirror.
+        append(RunEvent::Text {
+            text: "mirror".into(),
+        });
+        append(RunEvent::Conversation {
+            event: Box::new(ConversationEvent::TextDelta {
+                turn_id: "turn".into(),
+                content: "new output".into(),
+            }),
+        });
+        let page = read_source(&path, OutputSource::Journal, None, Some(&live)).unwrap();
+        assert_eq!(page.records.len(), 1);
+        assert!(page.gaps.is_empty());
+        assert!(
+            matches!(&page.records[0].event, ConversationEvent::TextDelta {content, ..} if content == "new output")
+        );
+    }
+
+    #[test]
+    fn opencode_tail_retains_old_unfinished_parts_and_boundary_revisions() {
+        let dir = tempfile::tempdir().unwrap();
+        let path = dir.path().join("opencode.db");
+        let writer = rusqlite::Connection::open(&path).unwrap();
+        writer.execute_batch("PRAGMA journal_mode=WAL; CREATE TABLE session(id TEXT PRIMARY KEY,time_created INTEGER); CREATE TABLE message(id TEXT PRIMARY KEY,session_id TEXT,data TEXT); CREATE TABLE part(id TEXT PRIMARY KEY,message_id TEXT,session_id TEXT,time_updated INTEGER,data TEXT); INSERT INTO session VALUES('session',1); INSERT INTO message VALUES('message','session','{\"role\":\"assistant\"}'); INSERT INTO part VALUES('unfinished','message','session',1,'{\"type\":\"text\",\"text\":\"in progress\"}');").unwrap();
+        for index in 2..=400 {
+            writer
+                .execute(
+                    "INSERT INTO part VALUES(?1,'message','session',?2,?3)",
+                    rusqlite::params![
+                        format!("part{index}"),
+                        index,
+                        serde_json::json!({"type":"text","text":"history","time":{"end":index}})
+                            .to_string()
+                    ],
+                )
+                .unwrap();
+        }
+        let history = read_source(&path, OutputSource::OpenCode, Some("session"), None).unwrap();
+        assert!(history.has_more);
+        let live = tail_cursor(&path, OutputSource::OpenCode, Some("session")).unwrap();
+        writer.execute("UPDATE part SET data=?1 WHERE id='unfinished'", [serde_json::json!({"type":"text","text":"finished without a timestamp change","time":{"end":400}}).to_string()]).unwrap();
+        let first =
+            read_source(&path, OutputSource::OpenCode, Some("session"), Some(&live)).unwrap();
+        assert_eq!(
+            first
+                .records
+                .iter()
+                .map(|record| record.source_item_id.as_str())
+                .collect::<Vec<_>>(),
+            ["unfinished", "part400"]
+        );
+        writer.execute("UPDATE part SET data=?1 WHERE id='part400'", [serde_json::json!({"type":"text","text":"same timestamp edit","time":{"end":400}}).to_string()]).unwrap();
+        let changed = read_source(
+            &path,
+            OutputSource::OpenCode,
+            Some("session"),
+            Some(&first.cursor),
+        )
+        .unwrap();
+        assert_eq!(changed.records.len(), 1);
+        assert_eq!(changed.records[0].source_item_id, "part400");
+        assert_ne!(changed.records[0].revision, first.records[1].revision);
+        assert!(read_source(
+            &path,
+            OutputSource::OpenCode,
+            Some("session"),
+            Some(&changed.cursor)
+        )
+        .unwrap()
+        .records
+        .is_empty());
+        assert!(
+            read_source(
+                &path,
+                OutputSource::OpenCode,
+                Some("session"),
+                Some(&history.cursor)
+            )
+            .unwrap()
+            .has_more
+        );
     }
 
     #[test]

@@ -1,0 +1,33 @@
+{
+  "binary_sha256": "4896c836658b14ec99c8cbb1b75a7a80a8f5b13ea2b5107c6fd06701f10dcde1",
+  "receipts": [
+    {
+      "read": "live",
+      "exit": 0,
+      "seconds": 2.426,
+      "task_id": "task_97e04da37e5e4231bde30f4d1d93a5fa",
+      "sources": 3,
+      "available": 3,
+      "records": 0,
+      "page_gaps": [],
+      "source_gaps": []
+    },
+    {
+      "read": "continued",
+      "exit": 0,
+      "seconds": 0.327,
+      "task_id": "task_97e04da37e5e4231bde30f4d1d93a5fa",
+      "sources": 3,
+      "available": 3,
+      "records": 0,
+      "page_gaps": [],
+      "source_gaps": []
+    }
+  ],
+  "artifacts": "/var/folders/m6/r3tllnrs1yq7yfbwm680tss40000gn/T/loo293-tail-final-ptet3p04",
+  "command": "lf task output LOO-293 --tail --json; then lf task output LOO-293 --cursor FILE --json",
+  "cwd": "/tmp",
+  "control_home": "/Users/jack/.lf",
+  "control_database": "/Users/jack/.lf/loopflow.db",
+  "scope": "Read-only configured quiet sources. No arriving output, app interaction, or provider control exercised."
+}

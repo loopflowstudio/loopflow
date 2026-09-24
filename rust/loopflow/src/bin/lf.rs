@@ -1028,9 +1028,14 @@ fn run_task_watch(issue: &str, json: bool) -> anyhow::Result<()> {
     Ok(())
 }
 
-fn run_task_output(issue: &str, cursor: Option<&str>, json: bool) -> anyhow::Result<()> {
+fn run_task_output(
+    issue: &str,
+    cursor: Option<&str>,
+    tail: bool,
+    json: bool,
+) -> anyhow::Result<()> {
     let cursor = cursor.map(read_task_output_cursor).transpose()?;
-    let page = loopflow::ops::task::task_output(issue, cursor.as_deref())?;
+    let page = loopflow::ops::task::task_output(issue, cursor.as_deref(), tail)?;
     if json {
         println!("{}", serde_json::to_string(&page)?);
     } else {
@@ -1145,8 +1150,9 @@ fn run_task_command(repo: &Path, command: &TaskCommand) -> anyhow::Result<()> {
         TaskCommand::Output {
             issue,
             cursor,
+            tail,
             json,
-        } => run_task_output(issue, cursor.as_deref(), *json),
+        } => run_task_output(issue, cursor.as_deref(), *tail, *json),
         TaskCommand::Changes { issue, json } => {
             let snapshot = loopflow::ops::task::task_changes(issue)?;
             if *json {
@@ -1660,9 +1666,10 @@ fn main() -> anyhow::Result<()> {
                     TaskCommand::Output {
                         issue,
                         cursor,
+                        tail,
                         json,
                     },
-            }) => run_task_output(issue, cursor.as_deref(), *json),
+            }) => run_task_output(issue, cursor.as_deref(), *tail, *json),
             Some(Commands::Task {
                 cmd: TaskCommand::Watch { issue, json },
             }) => run_task_watch(issue, *json),

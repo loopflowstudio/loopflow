@@ -1030,6 +1030,9 @@ pub enum TaskCommand {
         /// Read continuation from FILE, or - for stdin
         #[arg(long, value_name = "FILE")]
         cursor: Option<String>,
+        /// Start a separate live cursor; omit this flag when continuing it
+        #[arg(long, conflicts_with = "cursor")]
+        tail: bool,
         #[arg(long)]
         json: bool,
     },

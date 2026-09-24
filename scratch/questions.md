@@ -1,5 +1,10 @@
 # Assumptions and remaining proof
 
+- Human direction, 2026-09-24: prioritize desktop views. Reuse the existing Watch
+  snapshot/output reads; introduce another API only for a demonstrated desktop
+  need. The next implementation should connect output to Watch, including the
+  reader bounds needed for visible polling, rather than expand standalone CLI scope.
+
 - Gate 2026-09-23: affected suites stopped at resource preflight (active main
   build 19.1 GiB / 12 GiB); documented recovery could not remove it. Architecture,
   Swift boundary, formatting, and whitespace checks passed, but product suites
@@ -13,7 +18,8 @@
 - Flow facts, launch-owned native source receipts, passive readers, incremental
   Task output, the shared Watch snapshot/CLI/Swift reader, and their DTO fixtures
   are implemented. Mac Watch now inspects plans/attempts with manual refresh,
-  stable selection and stale evidence. Separate history/live cursors, bounded
+  stable selection and stale evidence. Independent history/live starts now exist
+  through `task output --tail`. Bounded
   snapshot/discovery, the live feed/Follow live, human Session navigation, and
   the configured demo remain. No automatic poll is installed yet.
 - The primary workspace now owns Watch alongside details and retained terminals.
@@ -29,8 +35,9 @@
 - Native sources can persist at message/tool boundaries. Live output must arrive
   before Session completion; token-by-token capture is not promised.
 - Discovery currently reads all immutable Run manifests and Task flow facts on
-  each request, while transcript pages are bounded. Incremental discovery and
-  historical/live cursor separation still need implementation and measurement.
+  each request, while transcript pages are bounded. Independent live initialization
+  seeds every discovered source once. Incremental
+  discovery and bounded initialization still need implementation and measurement.
 - OpenCode continuation detects source replacement, Session creation changes,
   reduced part counts, and removal of retained boundary/unfinished parts. An
   equal-count rewrite of older completed parts needs further investigation before
@@ -44,7 +51,7 @@
 - Cursor transport now uses `--cursor FILE` or stdin (`-`), including the Swift
   caller. Completed interior OpenCode history no longer accumulates in cursor
   state. Same-timestamp/unfinished parts and per-Run state can still hit the 4 MiB
-  bound; bounded discovery and independent history/live continuation remain.
+  bound; bounded discovery/state and UI use of the two continuations remain.
 - OpenCode now freezes a sweep timestamp and retains both inclusive boundaries
   until pagination ends. This handles boundary edits interleaved with newer
   writes; it does not prove arbitrary completed-history rewrites with backdated

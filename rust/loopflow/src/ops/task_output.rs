@@ -7,7 +7,7 @@ use anyhow::{anyhow, Result};
 use base64::{engine::general_purpose::URL_SAFE_NO_PAD, Engine};
 use serde::{Deserialize, Serialize};
 
-use crate::run_record::output::{gap, read_source, resolve_native, OutputCursor};
+use crate::run_record::output::{gap, read_source, resolve_native, tail_cursor, OutputCursor};
 use crate::run_record::{read_provider_session, RunManifest};
 use crate::store::SharedStore;
 use crate::work::task::flow_history::{TaskFlowEvent, TaskFlowStage};
@@ -55,7 +55,11 @@ pub async fn read_task_output(
     task: &Task,
     home: &Path,
     cursor: Option<&str>,
+    tail: bool,
 ) -> Result<TaskOutputPage> {
+    if tail && cursor.is_some() {
+        return Err(anyhow!("Start live output without a continuation cursor"));
+    }
     let mut cursor = match cursor {
         Some(encoded) => {
             if encoded.len() > MAX_CURSOR_BYTES {
@@ -96,6 +100,30 @@ pub async fn read_task_output(
         gaps: discovery.gaps,
         next_cursor: String::new(),
     };
+    if tail {
+        // Seed the whole discovered inventory once. A later round-robin visit
+        // must not skip output written after this initial request. New Runs
+        // have no cursor and are read from their beginning.
+        for (dir, manifest) in &runs {
+            let source = output_source(manifest);
+            match resolve_source(store, dir, manifest, source)
+                .await
+                .and_then(|(path, session)| {
+                    tail_cursor(&path, source, session.as_deref()).map_err(Into::into)
+                }) {
+                Ok(position) => {
+                    cursor.sources.insert(manifest.run_id.to_string(), position);
+                }
+                Err(error) => page.gaps.push(gap(
+                    "tail_unavailable",
+                    format!(
+                        "{}: {error}; retained output will be read from the beginning",
+                        manifest.run_id
+                    ),
+                )),
+            }
+        }
+    }
     let total = runs.len();
     let start = if total == 0 {
         0
@@ -107,43 +135,7 @@ pub async fn read_task_output(
         let (dir, manifest) = &runs[(start + index) % total];
         let run_id = manifest.run_id.to_string();
         let source = output_source(manifest);
-        let resolved = async {
-            if source == OutputSource::Journal {
-                if manifest.surface == "tui" {
-                    return Err(anyhow!("Native output is unsupported for this provider"));
-                }
-                return Ok((dir.join("events.jsonl"), None));
-            }
-            if !dir.join("provider-session.json").is_file() {
-                return Err(anyhow!("Run has no native Session receipt"));
-            }
-            let session = read_provider_session(dir)?
-                .ok_or_else(|| anyhow!("Run has no native Session receipt"))?;
-            let native = resolve_native(store, manifest, &session)
-                .await?
-                .ok_or_else(|| {
-                    anyhow!("Run has no recorded native location or exact account source")
-                })?;
-            if matches!(
-                (&native, source),
-                (
-                    crate::run_record::native_source::NativeSource::OpenCode { .. },
-                    OutputSource::Claude | OutputSource::Codex
-                ) | (
-                    crate::run_record::native_source::NativeSource::Jsonl { .. },
-                    OutputSource::OpenCode
-                )
-            ) {
-                return Err(anyhow!(
-                    "Native location kind does not match its recorded provider"
-                ));
-            }
-            Ok((
-                native.path().to_path_buf(),
-                Some(session.provider_session_id),
-            ))
-        }
-        .await;
+        let resolved = resolve_source(store, dir, manifest, source).await;
         let result = resolved.and_then(|(path, session)| {
             read_source(
                 &path,
@@ -193,6 +185,46 @@ pub async fn read_task_output(
         ));
     }
     Ok(page)
+}
+
+async fn resolve_source(
+    store: &SharedStore,
+    dir: &Path,
+    manifest: &RunManifest,
+    source: OutputSource,
+) -> Result<(std::path::PathBuf, Option<String>)> {
+    if source == OutputSource::Journal {
+        if manifest.surface == "tui" {
+            return Err(anyhow!("Native output is unsupported for this provider"));
+        }
+        return Ok((dir.join("events.jsonl"), None));
+    }
+    if !dir.join("provider-session.json").is_file() {
+        return Err(anyhow!("Run has no native Session receipt"));
+    }
+    let session =
+        read_provider_session(dir)?.ok_or_else(|| anyhow!("Run has no native Session receipt"))?;
+    let native = resolve_native(store, manifest, &session)
+        .await?
+        .ok_or_else(|| anyhow!("Run has no recorded native location or exact account source"))?;
+    if matches!(
+        (&native, source),
+        (
+            crate::run_record::native_source::NativeSource::OpenCode { .. },
+            OutputSource::Claude | OutputSource::Codex
+        ) | (
+            crate::run_record::native_source::NativeSource::Jsonl { .. },
+            OutputSource::OpenCode
+        )
+    ) {
+        return Err(anyhow!(
+            "Native location kind does not match its recorded provider"
+        ));
+    }
+    Ok((
+        native.path().to_path_buf(),
+        Some(session.provider_session_id),
+    ))
 }
 
 fn output_source(manifest: &RunManifest) -> OutputSource {
@@ -285,7 +317,7 @@ mod tests {
         let mut cursor = None;
         let mut seen = std::collections::BTreeSet::new();
         for _ in 0..7 {
-            let page = read_task_output(&store, &task, home.path(), cursor.as_deref())
+            let page = read_task_output(&store, &task, home.path(), cursor.as_deref(), false)
                 .await
                 .unwrap();
             assert!(page.sources.iter().all(|source| source.available));
@@ -313,7 +345,7 @@ mod tests {
         std::fs::write(&unrelated_manifest, "{broken").unwrap();
         let new = launch(format!("task:{}", task.id));
         for _ in 0..7 {
-            let page = read_task_output(&store, &task, home.path(), cursor.as_deref())
+            let page = read_task_output(&store, &task, home.path(), cursor.as_deref(), false)
                 .await
                 .unwrap();
             assert_eq!(page.gaps.len(), 1);
@@ -335,24 +367,71 @@ mod tests {
         // A Run directory can appear before its atomic manifest install, or
         // disappear during discovery. Neither hides healthy Task output.
         std::fs::remove_file(&unrelated_manifest).unwrap();
-        let missing = read_task_output(&store, &task, home.path(), cursor.as_deref())
+        let missing = read_task_output(&store, &task, home.path(), cursor.as_deref(), false)
             .await
             .unwrap();
         assert_eq!(missing.gaps.len(), 1);
         assert_eq!(missing.gaps[0].code, "discovery_incomplete");
         assert!(missing.sources.iter().all(|source| source.available));
         std::fs::write(&unrelated_manifest, original).unwrap();
-        let recovered = read_task_output(&store, &task, home.path(), Some(&missing.next_cursor))
-            .await
-            .unwrap();
+        let recovered = read_task_output(
+            &store,
+            &task,
+            home.path(),
+            Some(&missing.next_cursor),
+            false,
+        )
+        .await
+        .unwrap();
         assert!(recovered.gaps.is_empty());
         assert!(recovered
             .sources
             .iter()
             .all(|source| source.records.is_empty()));
+        let live = read_task_output(&store, &task, home.path(), None, true)
+            .await
+            .unwrap();
+        assert!(live.gaps.is_empty());
+        assert!(live.sources.iter().all(|source| source.records.is_empty()));
+        // Every existing Run is seeded, including those outside the first
+        // eight-source page. None may skip output before its next visit.
+        for capture in &runs {
+            capture.record_conversation(ConversationEvent::TextDelta {
+                turn_id: "turn".into(),
+                content: "after live start".into(),
+            });
+        }
+        let concurrent = launch(format!("task:{}", task.id));
+        let mut live_cursor = live.next_cursor;
+        let mut arrivals = std::collections::BTreeSet::new();
+        for _ in 0..8 {
+            let page = read_task_output(&store, &task, home.path(), Some(&live_cursor), false)
+                .await
+                .unwrap();
+            for source in page
+                .sources
+                .into_iter()
+                .filter(|source| !source.records.is_empty())
+            {
+                assert!(arrivals.insert(source.run_id));
+                if source.records.len() == 1 {
+                    assert!(
+                        matches!(&source.records[0].event, ConversationEvent::TextDelta {content, ..} if content == "after live start")
+                    );
+                } else {
+                    assert_eq!(source.records.len(), 2);
+                    assert!(
+                        matches!(&source.records[0].event, ConversationEvent::TextDelta {content, ..} if content == "live text")
+                    );
+                }
+            }
+            live_cursor = page.next_cursor;
+        }
+        assert_eq!(arrivals.len(), 52);
+        drop(concurrent);
         task.id = crate::durable::TaskId::new();
         assert!(
-            read_task_output(&store, &task, home.path(), cursor.as_deref())
+            read_task_output(&store, &task, home.path(), cursor.as_deref(), false)
                 .await
                 .is_err()
         );

@@ -4058,6 +4058,7 @@ pub fn task_watch(issue: &str) -> OpsResult<crate::ops::task_watch::TaskWatchSna
 pub fn task_output(
     issue: &str,
     cursor: Option<&str>,
+    tail: bool,
 ) -> OpsResult<crate::ops::task_output::TaskOutputPage> {
     block_on_task(async {
         let (store, task) = read_task_for_inspection(issue).await?;
@@ -4066,6 +4067,7 @@ pub fn task_output(
             &task,
             &crate::store::observability_home_dir(),
             cursor,
+            tail,
         )
         .await
         .map_err(|error| task_error(error.to_string()))

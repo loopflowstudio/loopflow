@@ -20,18 +20,11 @@ enum WorkspacePresentation: String, CaseIterable {
     case sessions = "Sessions"
 }
 
-struct WorkspaceProject: Identifiable {
-    let id: WorkspaceNodeKey
-    let project: RoadmapProject
-    let sessions: [SessionRecord]
-    let tasks: [WorkspaceTask]
-}
-
 struct WorkspaceWave: Identifiable {
     let id: WorkspaceNodeKey
     let roadmap: WaveRoadmap
     let sessions: [SessionRecord]
-    let projects: [WorkspaceProject]
+    let tasks: [WorkspaceTask]
 }
 
 /// A presentation of the two shared readings, never another inventory.
@@ -52,23 +45,22 @@ struct WorkspaceProjection {
             return WorkspaceWave(
                 id: WorkspaceNodeKey(repo: repo, work: .wave(id: wave.wave.id)),
                 roadmap: wave,
-                sessions: attached(to: .wave(id: wave.wave.id)),
-                projects: wave.projects.items.map { project in
-                    WorkspaceProject(
-                        id: WorkspaceNodeKey(repo: repo, work: .project(id: project.id)),
-                        project: project,
-                        sessions: attached(to: project.runtime.map { .project(id: $0.workId) }),
-                        tasks: project.tasks.sorted { $0.task.rank < $1.task.rank }.compactMap { task in
-                            let records = attached(to: task.runtime.map { .task(id: $0.workId) })
-                            let providerInCheckout = task.reference.workspace.map { activeWorktrees.contains($0.worktree) } ?? false
-                            guard !task.task.completed || !records.isEmpty || providerInCheckout
-                                || task.reference.workspace?.localExists == true else { return nil }
-                            return WorkspaceTask(
-                                id: WorkspaceNodeKey(repo: repo, work: .task(id: task.id)),
-                                task: task,
-                                sessions: records
-                            )
-                        }
+                sessions: {
+                    let records = sessions.filter {
+                        $0.work == .wave(id: wave.wave.id)
+                            || ($0.work?.kind == .project && $0.waveId == wave.wave.id)
+                    }
+                    matched.formUnion(records.map(\.id))
+                    return records
+                }(),
+                tasks: wave.tasks.items.sorted { $0.task.rank < $1.task.rank }.compactMap { task in
+                    let records = attached(to: task.runtime.map { .task(id: $0.workId) })
+                    let providerInCheckout = task.reference.workspace.map { activeWorktrees.contains($0.worktree) } ?? false
+                    guard !task.task.completed || !records.isEmpty || providerInCheckout
+                        || task.reference.workspace?.localExists == true else { return nil }
+                    return WorkspaceTask(
+                        id: WorkspaceNodeKey(repo: repo, work: .task(id: task.id)),
+                        task: task, sessions: records
                     )
                 }
             )
@@ -81,11 +73,8 @@ struct WorkspaceProjection {
     func subject(for sessionId: String) -> WorkReference? {
         for wave in waves {
             if wave.sessions.contains(where: { $0.id == sessionId }) { return wave.id.work }
-            for project in wave.projects {
-                if project.sessions.contains(where: { $0.id == sessionId }) { return project.id.work }
-                if let task = project.tasks.first(where: { $0.sessions.contains { $0.id == sessionId } }) {
-                    return task.id.work
-                }
+            if let task = wave.tasks.first(where: { $0.sessions.contains { $0.id == sessionId } }) {
+                return task.id.work
             }
         }
         return nil
@@ -171,11 +160,11 @@ extension WorkspaceProjection {
         for wave in waves {
             let waveSubject = WorkspaceOutlineSubject(key: wave.id, title: wave.roadmap.wave.name)
             let complete: Bool
-            if case .available(_, false) = wave.roadmap.projects {
-                complete = planningReadable && wave.roadmap.unavailableProjects.isEmpty
+            if case .available(_, false) = wave.roadmap.tasks {
+                complete = planningReadable && wave.roadmap.unavailableTasks.isEmpty
             } else { complete = false }
             let flat = presentation == .sessions
-            let waveHasChildren = !wave.projects.isEmpty || !wave.sessions.isEmpty
+            let waveHasChildren = !wave.tasks.isEmpty || !wave.sessions.isEmpty
             let omitWave = flat || (presentation == .compact && waves.count == 1 && complete
                 && waveHasChildren && expanded(wave.id))
             let waveStart = rows.count
@@ -183,40 +172,24 @@ extension WorkspaceProjection {
             if flat || expanded(wave.id) {
                 let waveDepth = omitWave ? 0 : 1
                 for session in wave.sessions { appendSession(session, depth: waveDepth, ancestors: [waveSubject]) }
-                for project in wave.projects {
-                    let subject = WorkspaceOutlineSubject(key: project.id, title: project.project.project.name)
-                    let projectHasChildren = !project.tasks.isEmpty || !project.sessions.isEmpty
-                    let omitProject = flat || (presentation == .compact && wave.projects.count == 1 && complete
-                        && projectHasChildren && expanded(project.id))
-                    let projectStart = rows.count
-                    if !omitProject {
-                        appendWork(subject, depth: waveDepth, ancestors: [waveSubject],
-                                   hasChildren: projectHasChildren)
+                let ancestors = [waveSubject]
+                for task in wave.tasks {
+                    let taskSubject = WorkspaceOutlineSubject(key: task.id, title: task.task.task.name)
+                    let taskMatches = matches(taskSubject.title) || matches(task.task.task.identifier)
+                        || matches(waveSubject.title)
+                        || task.sessions.contains(where: { matches($0.title) || matches($0.detail) })
+                    guard taskMatches else { continue }
+                    if !flat {
+                        appendWork(taskSubject, detail: task.task.task.identifier, depth: waveDepth,
+                                   ancestors: ancestors, hasChildren: !task.sessions.isEmpty)
                     }
-                    if flat || expanded(project.id) {
-                        let depth = omitProject ? waveDepth : waveDepth + 1
-                        let ancestors = [waveSubject, subject]
-                        for session in project.sessions { appendSession(session, depth: depth, ancestors: ancestors) }
-                        for task in project.tasks {
-                            let taskSubject = WorkspaceOutlineSubject(key: task.id, title: task.task.task.name)
-                            let taskMatches = matches(taskSubject.title) || matches(task.task.task.identifier)
-                                || ancestors.contains(where: { matches($0.title) })
-                                || task.sessions.contains(where: { matches($0.title) || matches($0.detail) })
-                            guard taskMatches else { continue }
-                            if !flat {
-                                appendWork(taskSubject, detail: task.task.task.identifier, depth: depth,
-                                           ancestors: ancestors, hasChildren: !task.sessions.isEmpty)
-                            }
-                            if flat || expanded(task.id) {
-                                for session in task.sessions {
-                                    appendSession(session, depth: flat ? 0 : depth + 1, ancestors: ancestors + [taskSubject],
-                                                  include: matches(task.task.task.identifier))
-                                }
-                            }
+                    if flat || expanded(task.id) {
+                        for session in task.sessions {
+                            appendSession(session, depth: flat ? 0 : waveDepth + 1,
+                                          ancestors: ancestors + [taskSubject],
+                                          include: matches(task.task.task.identifier))
                         }
                     }
-                    if !query.isEmpty, !omitProject, rows.count == projectStart + 1,
-                       !matches(subject.title), !matches(waveSubject.title) { rows.removeLast() }
                 }
             }
             if !query.isEmpty, !omitWave, rows.count == waveStart + 1, !matches(waveSubject.title) { rows.removeLast() }
@@ -258,6 +231,7 @@ final class WorkspaceNavigation {
     var collapsed: Set<WorkspaceNodeKey> = []
     var search = ""
     var selection: WorkReference?
+    var selectedTaskEvidence: (wave: WaveRoadmap, task: RoadmapTask)?
     var listScrollOffset: CGFloat = 0
     var taskPanes: [String: (path: String, pane: PaneState)] = [:]
 

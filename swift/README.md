@@ -36,7 +36,8 @@ The app logs the CoreVideo error code; the user's Ghostty configuration is uncha
 
 Select a repository in the outline, then choose a Task or Session. Use the
 outline menu for **Compact**, **Full hierarchy**, or **Sessions**. Compact
-promotes descendants of singleton Waves and Projects when planning is readable;
+shows repo → Wave → Task → Session and promotes descendants of singleton Waves
+when planning is readable;
 Tasks remain visible even before they have a Session. Disclosure folds a branch,
 while presentation changes preserve its saved expansion and selection.
 Same-named Sessions show distinguishing ancestry. Repository conversations and
@@ -60,8 +61,10 @@ ownership evidence is visible and cannot report confirmed emptiness. Closing a
 Monitor closes observation only. **Sessions** selects an exact conversation and
 returns keyboard focus to its terminal with unfinished input retained.
 
-Task details include the directive, recorded condition, Project definition and
-KR proof, Activity, PR and worktree references. Choose **Edit directive**, then
+Wave details show the objective, current chapter plan/KRs, all Tasks and chapter
+history. Projects are internal chapter records and add no navigation tier. Task
+details include the directive, recorded condition, current KRs, Activity, PR and
+worktree references. Choose **Edit directive**, then
 **Save directive** to write through the shared PM API. Failed saves retain your
 text; an accepted write with unavailable readback retains the draft and explains
 what happened. Wave details expose Work outside the current plan. Failed and

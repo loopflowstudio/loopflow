@@ -2129,6 +2129,21 @@ pub(crate) async fn attributed_work(
     if exact.is_some() {
         return exact;
     }
+    // Historical Project subjects remain readable after Project launch selectors
+    // are removed. Resolve stored identity without reopening a planning workflow.
+    if kind == "project" {
+        return match store.get_project_by_project(id).await {
+            Ok(Some(project)) => Some(crate::durable::WorkRef::Project(project.id)),
+            Ok(None) => {
+                tracing::warn!(%selector, run_id = %manifest.run_id, "Historical Run subject unavailable");
+                None
+            }
+            Err(error) => {
+                tracing::warn!(%error, %selector, run_id = %manifest.run_id, "Historical Run subject unavailable");
+                None
+            }
+        };
+    }
     match crate::ops::resolve_work_binding(store, &manifest.cwd, &selector).await {
         Ok(binding) => Some(binding.work),
         Err(error) => {

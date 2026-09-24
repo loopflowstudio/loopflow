@@ -94,7 +94,7 @@ private actor DirectiveSource {
             }
             if outcome == .rejected { throw RegistryQueryError("Write rejected") }
             let snapshot = try JSONDecoder().decode(RoadmapSnapshot.self, from: Data(original.utf8))
-            let old = snapshot.waves[0].projects.items[0].tasks.first { $0.id == "issue-review" }!.task.description
+            let old = snapshot.waves[0].tasks.items.first { $0.id == "issue-review" }!.task.description
             let text = String(args[7].dropFirst("--notes=".count)) + "\nProvider-normalized."
             let oldJSON = String(decoding: try JSONEncoder().encode(old), as: UTF8.self)
             let newJSON = String(decoding: try JSONEncoder().encode(text), as: UTF8.self)

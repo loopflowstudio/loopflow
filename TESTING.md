@@ -12,8 +12,13 @@ uv run python scripts/check_architecture.py            # architecture owners and
 uv run python scripts/test.py --list                   # affected-suite plan
 uv run python scripts/test.py --reuse-passing          # affected suites once per exact tree
 uv run pytest python/tests/test_lifecycle_scorecard.py # scorecard behavior
+uv run python scripts/desktop_performance.py run --output /tmp/desktop-check --samples 1
 lf telemetry-daily                                     # maintainer report
 ```
+
+The opt-in desktop command exercises the native outline and retained Task panes.
+Use it for relevant UI changes; see [performance measurements](performance/README.md)
+for full sampling, comparison and the explicit capture-versus-presentation boundary.
 
 Escalate from a focused behavior to affected suites when crossing a component
 boundary. CI and release own the full matrix. Run `scripts/test.py --all` only

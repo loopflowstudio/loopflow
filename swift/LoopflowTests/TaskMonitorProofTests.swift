@@ -70,7 +70,7 @@ struct TaskMonitorProofTests {
     }
 
 #if canImport(GhosttyKit)
-    @Test("Monitor shares the split tree and preserves real Session and companion input through zoom and return")
+    @Test("Chapter transfer preserves Monitor attribution, Session draft and companion in the same split tree")
     func monitorRetainsNativeDraftAndCompanion() async throws {
         _ = NSApplication.shared
         GhosttyManager.shared.initialize()
@@ -116,6 +116,44 @@ struct TaskMonitorProofTests {
         #expect(multiplexer.layout.pane(for: sessionPane)?.content == .session(id: "monitor-review"))
         #expect(multiplexer.layout.pane(for: shellPane)?.content == .shell)
         #expect(!terminals.contains { window.firstResponder === $0 })
+        let sessionRun = model.sessions.value?.first?.runId
+        let taskWork = model.task(id: "issue-review")?.task.runtime?.workId
+        let root = URL(fileURLWithPath: #filePath).deletingLastPathComponent()
+            .deletingLastPathComponent().deletingLastPathComponent()
+        let data = try Data(contentsOf: root.appendingPathComponent("tests/fixtures/dto/roadmap_snapshot.json"))
+        var wire = try #require(JSONSerialization.jsonObject(with: data) as? [String: Any])
+        var waves = try #require(wire["waves"] as? [[String: Any]])
+        var chapter = try #require(waves[0]["chapter"] as? [String: Any])
+        var tasks = try #require(waves[0]["tasks"] as? [String: Any])
+        var items = try #require(tasks["items"] as? [[String: Any]])
+        for index in items.indices {
+            if var runtime = items[index]["runtime"] as? [String: Any] {
+                runtime["project_id"] = "successor-work"
+                items[index]["runtime"] = runtime
+            }
+        }
+        tasks["items"] = items
+        chapter["id"] = "next-chapter"
+        chapter["source_project_id"] = "successor-project"
+        chapter["source_work_id"] = "successor-work"
+        for transferring in [true, false] {
+            chapter["phase"] = transferring ? "transferring" : "complete"
+            waves[0]["chapter"] = chapter
+            waves[0]["tasks"] = transferring ? ["state": "ok", "items": [], "truncated": false] : tasks
+            wire["waves"] = waves
+            let snapshot = try JSONDecoder().decode(RoadmapSnapshot.self, from: JSONSerialization.data(withJSONObject: wire))
+            model.applyFixture(roadmap: .available(snapshot), waves: model.waves,
+                processActivity: model.processActivity, workActivity: model.workActivity, repos: model.repos)
+            try await settle(window)
+            #expect(model.selection == .task(id: "issue-review"))
+            #expect(model.task(id: "issue-review")?.task.runtime?.workId == taskWork)
+            if !transferring { #expect(model.task(id: "issue-review")?.task.runtime?.projectId == "successor-work") }
+            #expect(model.sessions.value?.first?.runId == sessionRun)
+            #expect(multiplexer.focusedPaneId == monitorPane)
+            #expect(terminals[0].surface == surfaces[0])
+            #expect(terminals[1].surface == surfaces[1])
+            #expect(throws: Never.self) { try TaskMonitorView(taskId: "issue-review", model: model).inspect().find(text: "Retained Task Run") }
+        }
         let stray = "monitor-only-input"
         for character in stray {
             let event = try #require(NSEvent.keyEvent(
@@ -189,12 +227,20 @@ struct TaskMonitorProofTests {
           "title":"Other Task Session","detail":"Owned cat PTY","cwd":"/src/loopflow",
           "state":"active","ready_summary":null,"work_path":null,"actions":\(sessionActionFixtureJSON(kind: "interactive", state: "active")),"terminal_ids":[],"open_argv":["/bin/cat"]}]
         """
+        var active = try #require(JSONSerialization.jsonObject(with: Data(contentsOf: root.appendingPathComponent("tests/fixtures/dto/active_runs.json"))) as? [String: Any])
+        var run = try #require((active["runs"] as? [[String: Any]])?.first)
+        run["id"] = "monitor-review"
+        run["work"] = ["kind": "task", "id": "ts_review00000000000000000000000000"]
+        run["label"] = "Retained Task Run"
+        active["runs"] = [run]
+        active["gaps"] = []
+        let activeJSON = String(decoding: try JSONSerialization.data(withJSONObject: active), as: UTF8.self)
         return RegistryQuery { args, _ in
             switch args.first {
             case "roadmap": return roadmap
             case "ls": return "[]"
             case "session" where args.dropFirst().first == "list": return records
-            case "runs": return #"{"home":"proof","observed_at":1,"task":null,"runs":[],"gaps":[]}"#
+            case "runs": return activeJSON
             case "activity": return #"{"generated_at":1,"since":0,"limit":50,"truncated":false,"items":[]}"#
             default: throw RegistryQueryError("No provider launch is available in this proof")
             }

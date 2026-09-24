@@ -6,6 +6,10 @@
   supply planning, human-work and live-process evidence through RegistryQuery.
   Activity has Exec and ProviderProcess nodes; checkout location is separate
   from Work attribution and native terminal attachment.
+- The public outline is repo → Wave → Task → Session. One internal chapter
+  Project owns the current plan; chapter receipts preserve historical membership.
+  Task runtime exposes its current parent through `project_id` only. Shared
+  Wave ancestry keeps historical Project-bound Sessions reachable.
 - `ActiveRunsSnapshot` joins current capture intervals and native client receipts
   to one verified process observation. Run records own the Work resolver shared
   with Sessions. Podium owns one demand-refreshed Home observation shared by all
@@ -50,6 +54,66 @@
   focus cannot route ordinary input to a retained terminal.
 
 ## Before and after
+
+### Iteration 21 — remove duplicate Task routing identity (2026-09-24)
+
+Before, TaskRuntimeSnapshot exposed both required `project_id` and optional
+`routing_project_id`. The latter always copied the former; no production Swift
+consumer read it. Its comment described a historical successor-routing model
+that chapter transfer no longer uses. The builder retained an unused store
+argument, async signature and Result from that removed lookup.
+
+After, Rust status/roadmap and the Swift mirror expose the actual current parent
+once. Removed the duplicate field, serializer key, fixture values and native
+transfer-test assignment across eight files. The builder now directly returns
+TaskRuntimeSnapshot, with no store argument, await or impossible error path.
+Current contract fixtures changed; archived evidence and persisted migrations
+were left intact. No compatibility alias or replacement field was introduced.
+
+Traced chapter membership storage → shared status/roadmap → RegistryQuery →
+Podium/outline/inspection → retained Task Monitor and Session panes. Compared
+TaskRuntimeSnapshot, ChapterSummary, SessionRecord and ActiveRunsSnapshot fields
+between Rust and Swift, and inspected their fixtures. Searches retain one Podium
+caller per inventory, one root workspace registry and one production capture
+binding writer. The removed routing field has no remaining source/current-fixture
+references. The preceding Wave integration and concurrent performance work remain
+their existing contributions.
+
+Other candidates retained deliberately:
+
+- `project_id` names real current membership. Chapter source IDs/slugs/local Work
+  IDs resolve distinct historical references; removing them would lose access.
+  Historical Project Work and activity filters remain diagnostics, not navigation.
+- Selected Task evidence bridges temporarily absent membership during transfer;
+  saved PaneState detects reused content. Neither duplicates a planning writer
+  or layout owner. The native transfer proof still changes actual `project_id`.
+- Session `wave_id` supplies ancestry even when its Project is no longer current;
+  `work_path` is shared display text, while `work` retains exact provenance.
+  Deriving ancestry only from the current plan would lose historical Sessions.
+- Native receipts and generic capture intervals establish different ownership
+  lifetimes. Combining active discovery with historical Run reduction would add
+  work and restore history-limit risks. Bounded discovery is still implementation
+  work, not a behavior-preserving deletion.
+- Wave objective/metric-target ownership is an outstanding sibling correction.
+  Removing chapter definition or target data locally would discard content;
+  integrate its complete writer/storage/read change separately.
+
+Verification: eight Rust DTO tests and three Swift checks pass (status/roadmap
+decoding and mounted native chapter transfer with retained draft/companion PTYs).
+Logs: `/tmp/loo291-compress-chapter-dto.log` and
+`/tmp/loo291-compress-chapter-swift-final.log`. The first Swift attempt stopped
+because PodiumModel changed during compilation; it is not a behavioral verdict.
+No new tests or broader suite were added. `cargo clippy --all-targets -- -D warnings`
+passes (`/tmp/loo291-compress-chapter-clippy.log`), as do `cargo fmt --all --check`
+and `git diff --check`. Final source fingerprints are recorded in
+`/tmp/loo291-compress-chapter-sources.json`.
+Pre-edit copies at `/tmp/loo291-compress-routing-before` isolate this
+contribution without staging another writer's shared work.
+
+This removes a wire fossil, not chapter history, public commands or user capability.
+Configured acceptance, bounded discovery, remaining performance endpoints and
+fallback compilation keep their prior open status. No publication, migration,
+installation, Task completion or PM mutation occurred.
 
 ### Iteration 20 — Monitor integration and retained pane choice (2026-09-24)
 

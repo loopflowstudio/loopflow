@@ -83,6 +83,19 @@ struct PodiumModelTests {
         model.select(.task(id: "issue-now"))
         var wire = try #require(JSONSerialization.jsonObject(with: Data(fixture.roadmapJSON.utf8)) as? [String: Any])
         var waves = try #require(wire["waves"] as? [[String: Any]])
+        var tasks = try #require(waves[0]["tasks"] as? [String: Any])
+        var items = try #require(tasks["items"] as? [[String: Any]])
+        let index = try #require(items.firstIndex { ($0["task"] as? [String: Any])?["id"] as? String == "issue-now" })
+        var planning = try #require(items[index]["task"] as? [String: Any])
+        planning["name"] = "Updated while selected"
+        items[index]["task"] = planning
+        tasks["items"] = items
+        waves[0]["tasks"] = tasks
+        wire["waves"] = waves
+        let updated = try JSONDecoder().decode(RoadmapSnapshot.self, from: JSONSerialization.data(withJSONObject: wire))
+        model.applyFixture(roadmap: .available(updated), waves: .available(fixture.waves),
+            processActivity: .available(fixture.processActivity), workActivity: .available(fixture.workActivity), repos: [])
+        #expect(model.task(id: "issue-now")?.task.task.name == "Updated while selected")
         var chapter = try #require(waves[0]["chapter"] as? [String: Any])
         chapter["id"] = "next"
         chapter["phase"] = "transferring"
@@ -94,6 +107,7 @@ struct PodiumModelTests {
             processActivity: .available(fixture.processActivity), workActivity: .available(fixture.workActivity), repos: [])
         #expect(model.selection == .task(id: "issue-now"))
         #expect(model.task(id: "issue-now")?.task.task.identifier == "W2-144")
+        #expect(model.task(id: "issue-now")?.task.task.name == "Updated while selected")
         #expect(model.task(id: "issue-now")?.wave.chapter?.id == "next")
     }
 
@@ -115,6 +129,35 @@ struct PodiumModelTests {
 
         #expect(model.historyWave?.id == "wave-1")
         #expect(model.selection == .wave(id: "wave-1"))
+    }
+
+    @Test("A delayed historical reference cannot replace newer navigation", arguments: ["history", "task", "repo"])
+    func historicalReferenceRespectsNavigation(destination: String) async throws {
+        let fixture = try PodiumTestFixture.load()
+        let deferred = DeferredActivityResponse()
+        let model = PodiumModel(query: RegistryQuery { _, _ in await deferred.response() }, repoPath: "/src/loopflow")
+        model.applyFixture(roadmap: .available(fixture.roadmap), waves: .available(fixture.waves),
+            processActivity: .available(fixture.processActivity), workActivity: .available(fixture.workActivity), repos: [])
+        model.select(.project(id: "old-plan"))
+        let lookup = try #require(model.historyLookup)
+        await deferred.waitUntilRequested()
+        if destination == "task" { model.select(.task(id: "issue-now")) }
+        if destination == "repo" { model.setRepoPath("/src/context") }
+        await deferred.release(#"[{"id":"previous","source_project_id":"old-plan","source_project_slug":"old","source_work_id":null,"closed_at":1,"phase":"complete"}]"#)
+        await lookup.value
+        switch destination {
+        case "history":
+            #expect(model.selection == .wave(id: "wave-1"))
+            #expect(model.historyWave?.id == "wave-1")
+            #expect(model.historyReference == "old-plan")
+        case "task":
+            #expect(model.selection == .task(id: "issue-now"))
+            #expect(model.historyWave == nil)
+        default:
+            #expect(model.repoPath == "/src/context")
+            #expect(model.selection == nil)
+            #expect(model.historyWave == nil)
+        }
     }
 
     @Test("Refresh failure preserves last-good evidence and exposes the reason")

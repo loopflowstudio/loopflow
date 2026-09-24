@@ -2,8 +2,11 @@
 
 - Public planning navigation targets repo → Wave → Task → Session. Each Wave's
   current chapter Project is internal; do not add a Project or Chapter tier.
-  Consume the shared chapter/direct-Task contract when integrating that change;
-  preserve historical Session/Run attribution and unavailable Task evidence.
+  Read the shared chapter summary, direct Tasks and unavailable Task evidence.
+  Historical Project-bound Sessions use shared Wave ancestry. Retained Task
+  evidence during chapter transfer belongs to repository/window navigation.
+  Task runtime exposes its current parent once through `project_id`; chapter
+  transfer changes that parent, not a separate successor-routing identity.
 
 - Current Wave navigation consumes `lf ls --all --current --json`; the shared
   CLI owns lifecycle filtering. `lf ls` without `--current` retains registry

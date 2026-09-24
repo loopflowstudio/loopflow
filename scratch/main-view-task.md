@@ -192,7 +192,7 @@ Replace the root switch and parallel navigation with the unified tree, including
 Additive series. The keystone is an indivisible navigation replacement shipping as one PR; its internal slices are:
 
 1. Join shared Work/Session readings into the compact unified list and A/D workspace presentations; keep autonomous and upcoming Tasks visible, integrate existing detail/Session access, preserve live terminals, and prove the behavior. Reconcile current main with `lf-new` and LOO-284 before selecting shared API changes; do not build parallel ownership or lifecycle logic.
-2. **This slice:** integrate the committed `loopflow.projects` chapter binding and direct-Task shared reads with this branch's retained outline and Monitor. Public navigation is repo → Wave → Task → Session; remove Project selection and ordinary launch targets without restoring old workspace owners. Preserve unavailable and historical work and required Session-to-Run links. Prove direct Task navigation and stable Task pane/Session/Monitor/companion identity when chapter membership changes. Keep the sibling's uncommitted ownership correction separate. Bounded active discovery, shared automatic refresh, both performance runners and baselines remain the next core slice; the existing demand-refresh Monitor does not waive them.
+2. **This slice:** establish one repeatable native measurement command for the reconciled repo → Wave → Task → Session outline and retained Task workspace. Use fixed small/large shared DTO populations, three owned PTYs, actual captured pixels and retained focus/input checks; journal every started attempt and preserve failures, timeouts and source drift. Provide per-scenario first/warm samples and like-for-like comparison reports before choosing an optimization. The SwiftPM host did not expose SwiftUI accessibility descendants, so this increment measures forced native bitmap capture plus text verification and PTY response, with observer overhead explicit. It is not compositor presentation or frame-hitch evidence. Production correlated phases, scrolling during refresh, configured registry/provider costs, rendered/usable regression budgets and human acceptance remain the full measurement contract. Preserve the integrated chapter/direct-Task ownership and keep bounded active discovery/shared refresh in this core.
 3. Remove superseded navigation, integrate remaining inspectors, and prove configured behavior. No runtime/cardinality or terminal-ownership shortcuts count as completion.
 
 Follow-up: Task-directive editing through the existing PM API, preserving unsaved text on rejected writes and displaying authoritative refreshed text after success. This remains part of LOO-291's requested outcome; shipping the keystone alone does not complete that Task. External-work trials and long-lived-registry performance measurement remain its full proof obligations. Do not create follow-up Tasks during design.
@@ -217,6 +217,21 @@ No separate authorities for Work/Sessions inventories, oversized parent cards, c
 - 2026-09-23: the human clarified conversations are optional and fresh starts should be encouraged. One-current-at-a-time is a cardinality constraint, not a permanent conversation per subject. Start/Continue/Finish/Start fresh above are proposed controls for that intent.
 - 2026-09-23: the human requested advancing the Task, then clarified that the pre-identified Task should receive this design. Reuse LOO-291 rather than create a duplicate. Earlier queue timing does not block this explicit advance; external-work proof remains unselected and must not be fabricated.
 - Open: per-subject Session lifecycle, checkout choice/taskification, first-open presentation, repository breadth, external proving workflow, and the directive-editing follow-up.
+
+## Slice ledger — Wave-only integration, 2026-09-24
+
+[Wave integration](wave-integration.md) brings committed chapter binding/direct-Task
+reads into this branch through a local Loopflow rebase. Removed Project outline
+nodes, ordinary Project conversation scope and inspector; retained chapter history,
+full Wave Task inspection, unknown-work evidence and exact Session/Run attribution.
+Historical Project-bound Sessions resolve through shared Wave ancestry. Each
+repository/window retains its selected Task evidence during transfer. A mounted
+native proof changes chapter membership while the original Monitor, Session draft
+and companion PTY remain usable. The 62-test focused Swift pass, Rust DTO/ancestry
+receipts and static analysis are recorded in the integration report. The sibling's
+uncommitted metric-ownership correction is excluded; no live migration or installation.
+Both performance experiences, bounded discovery and configured/human acceptance
+remain full-Task work. Concurrent performance code is preserved separately.
 
 ## Slice ledger — Task Monitor panes, 2026-09-24
 

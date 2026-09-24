@@ -135,16 +135,18 @@ fn status_and_roadmap_require_the_shared_metric_portfolio() {
         None
     );
     assert_eq!(
-        items[0].tasks[0]
-            .reference
-            .workspace
-            .as_ref()
-            .unwrap()
-            .local_exists,
+        items[0].reference.workspace.as_ref().unwrap().local_exists,
         Some(false)
     );
+    let Evidence::Ok {
+        items: detail_tasks,
+        ..
+    } = &detail.tasks
+    else {
+        panic!("fixture has Task evidence")
+    };
     assert_eq!(
-        detail.projects[0].tasks[0]
+        detail_tasks[0]
             .reference
             .workspace
             .as_ref()

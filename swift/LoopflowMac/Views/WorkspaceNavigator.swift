@@ -120,9 +120,9 @@ struct WorkspaceNavigator: View {
         if model.sessions.isLoading { Text("Reading Sessions…").foregroundStyle(palette.textSecondary) }
         if let error = model.sessions.errorMessage { warning("Sessions unavailable: \(error)") }
         ForEach(model.workspace.waves) { wave in
-            if let reason = wave.roadmap.projects.unavailableReason { warning(reason) }
-            if case .available(_, let truncated) = wave.roadmap.projects, truncated {
-                warning("Planning is partial; more Projects exist.")
+            if let reason = wave.roadmap.tasks.unavailableReason { warning(reason) }
+            if case .available(_, let truncated) = wave.roadmap.tasks, truncated {
+                warning("Planning is partial; more Tasks exist.")
             }
         }
     }

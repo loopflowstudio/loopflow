@@ -1,0 +1,195 @@
+[0/1] Planning build
+Building for debugging...
+[0/5] Write sources
+[1/5] Write swift-version--58304C5D6DBC2206.txt
+[3/8] Compiling LoopflowMac WorkspaceProjection.swift
+[4/8] Emitting module LoopflowMac
+[5/8] Compiling LoopflowMac PodiumModel.swift
+[6/16] Compiling LoopflowMac WorkSurfaceView.swift
+[7/16] Compiling LoopflowMac WorkspaceNavigator.swift
+[8/16] Compiling LoopflowMac ConversationLaunch.swift
+[9/16] Compiling LoopflowMac PodiumView.swift
+[10/16] Compiling LoopflowMac RoadmapView.swift
+[11/16] Compiling LoopflowMac SessionsView.swift
+[12/16] Compiling LoopflowMac TaskMonitorView.swift
+[13/16] Compiling LoopflowMac WorkActivityView.swift
+[14/19] Compiling LoopflowMac PodiumFixture.swift
+[15/19] Compiling LoopflowMac LoopflowApp.swift
+[16/19] Compiling LoopflowMac WavesView.swift
+[16/21] Write Objects.LinkFileList
+[17/21] Linking LoopflowMac
+[18/21] Applying LoopflowMac
+[20/28] Emitting module LoopflowTests
+[21/28] Compiling LoopflowTests DesktopPerformanceTests.swift
+[22/28] Compiling LoopflowTests PodiumModelTests.swift
+[23/28] Compiling LoopflowTests TaskMonitorTests.swift
+[24/28] Compiling LoopflowTests WorkspaceNavigationProofTests.swift
+[25/28] Compiling LoopflowTests TaskDirectiveEditorTests.swift
+[26/28] Compiling LoopflowTests TaskMonitorProofTests.swift
+[27/29] Compiling LoopflowTests WorkspaceNavigationTests.swift
+[27/29] Write Objects.LinkFileList
+[28/29] Linking LoopflowSwiftPackageTests
+Build complete! (16.16s)
+Test Suite 'Selected tests' started at 2026-09-24 15:06:12.559.
+Test Suite 'LoopflowSwiftPackageTests.xctest' started at 2026-09-24 15:06:12.560.
+Test Suite 'LoopflowSwiftPackageTests.xctest' passed at 2026-09-24 15:06:12.560.
+	 Executed 0 tests, with 0 failures (0 unexpected) in 0.000 (0.000) seconds
+Test Suite 'Selected tests' passed at 2026-09-24 15:06:12.560.
+	 Executed 0 tests, with 0 failures (0 unexpected) in 0.000 (0.001) seconds
+◇ Test run started.
+↳ Testing Library Version: 1501
+↳ Target Platform: arm64e-apple-macos14.0
+◇ Suite "DTO Fixtures" started.
+◇ Test "Active Runs preserve exact attribution, waiting clients, and evidence gaps" started.
+✔ Test "Active Runs preserve exact attribution, waiting clients, and evidence gaps" passed after 0.002 seconds.
+◇ Test "Wave plan uses the same chapter as status" started.
+✔ Test "Wave plan uses the same chapter as status" passed after 0.002 seconds.
+◇ Test "Chapter history retains dated evidence for a moved Task" started.
+✔ Test "Chapter history retains dated evidence for a moved Task" passed after 0.001 seconds.
+◇ Test "Activity fixture preserves exact OS-live process state" started.
+✔ Test "Activity fixture preserves exact OS-live process state" passed after 0.001 seconds.
+◇ Test "Work Activity fixture preserves proof links and typed facts" started.
+✔ Test "Work Activity fixture preserves proof links and typed facts" passed after 0.001 seconds.
+◇ Test "wave detail fixture preserves Project and Task identity" started.
+✔ Test "wave detail fixture preserves Project and Task identity" passed after 0.001 seconds.
+◇ Test "roadmap fixture preserves sections and durable Task references" started.
+✔ Test "roadmap fixture preserves sections and durable Task references" passed after 0.001 seconds.
+◇ Test "metric portfolio fixture preserves every closed evidence payload" started.
+✔ Test "metric portfolio fixture preserves every closed evidence payload" passed after 0.001 seconds.
+◇ Test "child activity preserves typed delivery evidence" started.
+✔ Test "child activity preserves typed delivery evidence" passed after 0.001 seconds.
+◇ Test "Sessions fixture preserves the unresolved Session projection" started.
+✔ Test "Sessions fixture preserves the unresolved Session projection" passed after 0.001 seconds.
+◇ Test "Every Session kind has a required Run reference independent of its boundary ID" started.
+✔ Test "Every Session kind has a required Run reference independent of its boundary ID" passed after 0.001 seconds.
+◇ Test "Flow Session fixture preserves readiness and its open command" started.
+✔ Test "Flow Session fixture preserves readiness and its open command" passed after 0.001 seconds.
+◇ Test "Work status fixture preserves every status" started.
+✔ Test "Work status fixture preserves every status" passed after 0.001 seconds.
+✔ Suite "DTO Fixtures" passed after 0.010 seconds.
+◇ Suite "Podium model" started.
+◇ Test "Repository scope filters one shared snapshot and clears outside selection" started.
+✔ Test "Repository scope filters one shared snapshot and clears outside selection" passed after 0.154 seconds.
+◇ Test "Registry Wave paths cannot create repository choices" started.
+✔ Test "Registry Wave paths cannot create repository choices" passed after 0.001 seconds.
+◇ Test "Stable Work selection resolves against the latest snapshot" started.
+✔ Test "Stable Work selection resolves against the latest snapshot" passed after 0.001 seconds.
+◇ Test "Current chapter source references navigate directly to the Wave" started.
+✔ Test "Current chapter source references navigate directly to the Wave" passed after 0.001 seconds.
+◇ Test "Selected Task survives a chapter transfer with temporarily absent membership" started.
+✔ Test "Selected Task survives a chapter transfer with temporarily absent membership" passed after 0.001 seconds.
+◇ Test "Refresh failure preserves last-good evidence and exposes the reason" started.
+✔ Test "Refresh failure preserves last-good evidence and exposes the reason" passed after 0.001 seconds.
+◇ Test "A slow process read does not hold back fleet, Sessions, or roadmap" started.
+✔ Test "A slow process read does not hold back fleet, Sessions, or roadmap" passed after 0.001 seconds.
+◇ Test "Live refresh changes only process evidence and preserves its last good frame" started.
+✔ Test "Live refresh changes only process evidence and preserves its last good frame" passed after 0.001 seconds.
+◇ Test "Live process refreshes never overlap" started.
+✔ Test "Live process refreshes never overlap" passed after 0.001 seconds.
+◇ Test "Authored Waves remain visible without active Runs" started.
+✔ Test "Authored Waves remain visible without active Runs" passed after 1.160 seconds.
+◇ Test "A development worktree becomes one main-repository choice" started.
+✔ Test "A development worktree becomes one main-repository choice" passed after 2.184 seconds.
+◇ Test "Work selection becomes one server-side Activity filter" started.
+✔ Test "Work selection becomes one server-side Activity filter" passed after 0.001 seconds.
+◇ Test "A late Activity query cannot replace evidence for a newer selection" started.
+✔ Test "A late Activity query cannot replace evidence for a newer selection" passed after 0.001 seconds.
+◇ Test "Session refresh reads Task FlowSteps" started.
+✔ Test "Session refresh reads Task FlowSteps" passed after 0.001 seconds.
+◇ Test "Changing repository clears cached Sessions" started.
+✔ Test "Changing repository clears cached Sessions" passed after 0.018 seconds.
+◇ Test "A late Session refresh cannot cross repository scope" started.
+✔ Test "A late Session refresh cannot cross repository scope" passed after 0.001 seconds.
+✔ Suite "Podium model" passed after 3.529 seconds.
+◇ Suite "Podium process signal" started.
+◇ Test "Exact provider process state drives the signal" started.
+✔ Test "Exact provider process state drives the signal" passed after 0.001 seconds.
+✔ Suite "Podium process signal" passed after 0.001 seconds.
+◇ Suite "Task directive editing" started.
+◇ Test "Directive updates keep their Task target and distinguish rejected writes from unavailable refreshed planning" started.
+◇ Test case passing 1 argument outcome → .rejected to "Directive updates keep their Task target and distinguish rejected writes from unavailable refreshed planning" started.
+◇ Test case passing 1 argument outcome → .unreadable to "Directive updates keep their Task target and distinguish rejected writes from unavailable refreshed planning" started.
+✔ Test "Directive updates keep their Task target and distinguish rejected writes from unavailable refreshed planning" with 2 test cases passed after 0.051 seconds.
+◇ Test "A polling response started before Save cannot restore the old directive" started.
+✔ Test "A polling response started before Save cannot restore the old directive" passed after 0.001 seconds.
+✔ Suite "Task directive editing" passed after 0.052 seconds.
+◇ Suite "Task Monitor integration proof" started.
+◇ Test "Focusing another Task's pane cannot replace the selected Task's saved choice" started.
+✔ Test "Focusing another Task's pane cannot replace the selected Task's saved choice" passed after 0.723 seconds.
+◇ Test "Returning to a Task never restores another Task's Session in a reused pane" started.
+✔ Test "Returning to a Task never restores another Task's Session in a reused pane" passed after 0.027 seconds.
+◇ Test "Chapter transfer preserves Monitor attribution, Session draft and companion in the same split tree" started.
+✔ Test "Chapter transfer preserves Monitor attribution, Session draft and companion in the same split tree" passed after 1.137 seconds.
+✔ Suite "Task Monitor integration proof" passed after 1.888 seconds.
+◇ Suite "Task Monitor" started.
+◇ Test "Monitor isolates Task identity and distinguishes stale, incomplete and empty observations" started.
+✔ Test "Monitor isolates Task identity and distinguishes stale, incomplete and empty observations" passed after 0.030 seconds.
+◇ Test "Monitor shares split, focus, zoom, Close and Undo with terminals" started.
+✔ Test "Monitor shares split, focus, zoom, Close and Undo with terminals" passed after 0.001 seconds.
+◇ Test "Task selection and Monitor preserve native Session input and its companion" started.
+✔ Test "Task selection and Monitor preserve native Session input and its companion" passed after 1.240 seconds.
+✔ Suite "Task Monitor" passed after 1.270 seconds.
+◇ Suite "Unified Work and Session navigation" started.
+◇ Test "Compression promotes leaves without changing identity or hiding upcoming Tasks" started.
+✔ Test "Compression promotes leaves without changing identity or hiding upcoming Tasks" passed after 0.008 seconds.
+◇ Test "Compact keeps an empty Wave available for inspection and conversation" started.
+✔ Test "Compact keeps an empty Wave available for inspection and conversation" passed after 0.001 seconds.
+◇ Test "Compact preserves Wave context when planning is multiple, partial or unavailable" started.
+◇ Test case passing 1 argument evidence → "multiple" to "Compact preserves Wave context when planning is multiple, partial or unavailable" started.
+◇ Test case passing 1 argument evidence → "partial" to "Compact preserves Wave context when planning is multiple, partial or unavailable" started.
+◇ Test case passing 1 argument evidence → "unavailable" to "Compact preserves Wave context when planning is multiple, partial or unavailable" started.
+✔ Test "Compact preserves Wave context when planning is multiple, partial or unavailable" with 3 test cases passed after 0.001 seconds.
+◇ Test "Session list disambiguates same-named conversations and retains unknown ancestry" started.
+✔ Test "Session list disambiguates same-named conversations and retains unknown ancestry" passed after 0.001 seconds.
+◇ Test "Every presentation opens the exact Session without changing the selected Work" started.
+✔ Test "Every presentation opens the exact Session without changing the selected Work" passed after 0.022 seconds.
+◇ Test "Autonomous, upcoming and human work share stable ranked planning rows" started.
+✔ Test "Autonomous, upcoming and human work share stable ranked planning rows" passed after 0.001 seconds.
+◇ Test "An existing Task checkout remains visible across provider gaps, including completed planning work" started.
+✔ Test "An existing Task checkout remains visible across provider gaps, including completed planning work" passed after 0.001 seconds.
+◇ Test "Typed durable joins preserve top-level, multiple, completed and unmatched Sessions" started.
+✔ Test "Typed durable joins preserve top-level, multiple, completed and unmatched Sessions" passed after 0.001 seconds.
+◇ Test "Presentation and repo changes preserve selection, expansion, search and terminal splits" started.
+✔ Test "Presentation and repo changes preserve selection, expansion, search and terminal splits" passed after 0.001 seconds.
+◇ Test "Failed reads keep last-good work and exact Sessions with a visible error" started.
+✔ Test "Failed reads keep last-good work and exact Sessions with a visible error" passed after 0.006 seconds.
+◇ Test "Returning to a repository retains its last-good Sessions when refresh fails" started.
+✔ Test "Returning to a repository retains its last-good Sessions when refresh fails" passed after 0.001 seconds.
+◇ Test "Incomplete planning preserves the repository's selected Task" started.
+◇ Test case passing 1 argument truncated → false to "Incomplete planning preserves the repository's selected Task" started.
+◇ Test case passing 1 argument truncated → true to "Incomplete planning preserves the repository's selected Task" started.
+✔ Test "Incomplete planning preserves the repository's selected Task" with 2 test cases passed after 2.182 seconds.
+◇ Test "Completing a Session removes its link without completing its Task" started.
+✔ Test "Completing a Session removes its link without completing its Task" passed after 0.001 seconds.
+◇ Test "Task details expose directive and current chapter proof from the same snapshot" started.
+✔ Test "Task details expose directive and current chapter proof from the same snapshot" passed after 0.026 seconds.
+◇ Test "Inspection distinguishes no Sessions from an unavailable reading" started.
+◇ Test case passing 1 argument hasSession → true to "Inspection distinguishes no Sessions from an unavailable reading" started.
+◇ Test case passing 1 argument hasSession → false to "Inspection distinguishes no Sessions from an unavailable reading" started.
+✔ Test "Inspection distinguishes no Sessions from an unavailable reading" with 2 test cases passed after 0.045 seconds.
+◇ Test "Work outside the plan remains explained in Wave details" started.
+✔ Test "Work outside the plan remains explained in Wave details" passed after 0.026 seconds.
+◇ Test "Incomplete planning keeps out-of-plan Work reachable" started.
+◇ Test case passing 1 argument hasUnplannedWork → false to "Incomplete planning keeps out-of-plan Work reachable" started.
+◇ Test case passing 1 argument hasUnplannedWork → true to "Incomplete planning keeps out-of-plan Work reachable" started.
+✔ Test "Incomplete planning keeps out-of-plan Work reachable" with 2 test cases passed after 0.024 seconds.
+◇ Test "Slow planning does not gate Session reading or navigation" started.
+✔ Test "Slow planning does not gate Session reading or navigation" passed after 0.001 seconds.
+◇ Test "New conversation follows the visible subject and repository scope" started.
+✔ Test "New conversation follows the visible subject and repository scope" passed after 0.001 seconds.
+✔ Suite "Unified Work and Session navigation" passed after 2.352 seconds.
+◇ Suite "Worktree workspaces" started.
+◇ Test "Switching worktrees restores companion terminals, layout and focus" started.
+✔ Test "Switching worktrees restores companion terminals, layout and focus" passed after 0.001 seconds.
+◇ Test "Both split levels are independent and closing an outer slot retains its workspace" started.
+✔ Test "Both split levels are independent and closing an outer slot retains its workspace" passed after 0.001 seconds.
+◇ Test "Selecting an already visible worktree focuses it without duplicating its surfaces" started.
+✔ Test "Selecting an already visible worktree focuses it without duplicating its surfaces" passed after 0.001 seconds.
+◇ Test "A conversation launch does not replace a live shell or another conversation" started.
+✔ Test "A conversation launch does not replace a live shell or another conversation" passed after 0.001 seconds.
+✔ Suite "Worktree workspaces" passed after 0.001 seconds.
+◇ Suite "Scope-aware conversations" started.
+◇ Test "Each zoom level binds its subject and keeps the configured destination" started.
+✔ Test "Each zoom level binds its subject and keeps the configured destination" passed after 0.001 seconds.
+✔ Suite "Scope-aware conversations" passed after 0.001 seconds.
+✔ Test run with 62 tests in 9 suites passed after 9.107 seconds.

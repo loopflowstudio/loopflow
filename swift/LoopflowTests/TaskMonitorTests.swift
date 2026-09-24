@@ -194,16 +194,14 @@ struct TaskMonitorTests {
     private func query(frames: MonitorFrames, sessions: String = "[]") throws -> RegistryQuery {
         var roadmap = try #require(JSONSerialization.jsonObject(with: fixture("roadmap_snapshot")) as? [String: Any])
         var waves = try #require(roadmap["waves"] as? [[String: Any]])
-        var projects = try #require(waves[0]["projects"] as? [String: Any])
-        var items = try #require(projects["items"] as? [[String: Any]])
-        var tasks = try #require(items[0]["tasks"] as? [[String: Any]])
+        var evidence = try #require(waves[0]["tasks"] as? [String: Any])
+        var tasks = try #require(evidence["items"] as? [[String: Any]])
         for index in tasks.indices {
             // Tasks without local checkouts use the repository's existing workspace.
             tasks[index]["reference"] = ["issue_url": NSNull(), "workspace": NSNull()]
         }
-        items[0]["tasks"] = tasks
-        projects["items"] = items
-        waves[0]["projects"] = projects
+        evidence["items"] = tasks
+        waves[0]["tasks"] = evidence
         roadmap["waves"] = waves
         let text = String(decoding: try JSONSerialization.data(withJSONObject: roadmap), as: UTF8.self)
         return RegistryQuery { args, _ in

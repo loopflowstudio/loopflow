@@ -89,7 +89,6 @@ struct ConversationLaunchTests {
         let cases: [(ConversationScope, [String], String)] = [
             (.repo("/repo"), [], "repository"),
             (.wave(repo: "/repo", id: "product"), ["--wave", "product"], "Wave"),
-            (.project(repo: "/repo", id: "desktop"), ["--project", "desktop"], "Project"),
             (.task(repo: "/repo.task", id: "LOO-123"), ["--task", "LOO-123"], "Task"),
         ]
         for (scope, binding, subject) in cases {

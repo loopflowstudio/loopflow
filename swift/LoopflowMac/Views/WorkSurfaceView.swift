@@ -33,6 +33,9 @@ struct WorkSurfaceView: View {
             content
         }
         .background(palette.background)
+        .sheet(item: $model.historyWave) { wave in
+            ChapterHistoryView(wave: wave.name, repo: wave.repo, sourceReference: model.historyReference)
+        }
         .sheet(item: $editingTask) { selection in
             TaskDirectiveEditor(model: model, task: selection.task, wave: selection.wave)
         }
@@ -67,7 +70,7 @@ struct WorkSurfaceView: View {
             case .wave:
                 waveDetail
             case .project:
-                projectDetail
+                missingSelection
             case .task:
                 taskDetail
             }
@@ -156,6 +159,11 @@ struct WorkSurfaceView: View {
                         )
                     }
                 }
+                WaveMetricPortfolioView(portfolio: roadmap.metricPortfolio)
+                ForEach(roadmap.unavailableTasks, id: \.taskId) { task in
+                    Text("\(task.taskIdentifier): \(task.reason) · \(task.recovery)")
+                        .foregroundStyle(Color.statusWarning)
+                }
             }
         } else if let selection = model.selection, let roster = model.rosterWave(id: selection.id) {
             // Authored but never served: there is no roadmap to show yet.
@@ -170,56 +178,6 @@ struct WorkSurfaceView: View {
         }
     }
 
-    // MARK: - Project detail
-
-    @ViewBuilder
-    private var projectDetail: some View {
-        if let selection = model.selection, let found = model.project(id: selection.id) {
-            scrollingDetail(identifier: "podium-detail-project") {
-                VStack(alignment: .leading, spacing: Spacing.xxs) {
-                    HStack(alignment: .firstTextBaseline, spacing: Spacing.sm) {
-                        surfaceHeader(
-                            found.project.project.name,
-                            subtitle: "\(found.wave.wave.name) · \(found.project.nextMove.owner.rawValue)"
-                        )
-                        sectionBadge(found.project.section)
-                    }
-                    if !found.project.project.definition.isEmpty {
-                        Text(found.project.project.definition)
-                            .font(Typography.body(13))
-                            .foregroundStyle(palette.textSecondary)
-                    }
-                    Text(found.project.nextMove.reason)
-                        .font(Typography.caption(11))
-                        .foregroundStyle(palette.textSecondary)
-                }
-
-                projectProof(found.project.project)
-
-                if found.project.tasks.isEmpty {
-                    Text("No Tasks filed under this Project yet.")
-                        .font(Typography.caption(11))
-                        .foregroundStyle(palette.textSecondary)
-                } else {
-                    ForEach(found.project.tasks) { task in
-                        RoadmapTaskRow(
-                            task: task,
-                            isSelected: false,
-                            activeControlId: activeControlId,
-                            onSelect: { model.select(.task(id: task.id)) },
-                            onAction: { action in
-                                perform(action, on: WorkTaskSelection(wave: found.wave.wave, task: task))
-                            },
-                            onOpenWorktree: openWorktree
-                        )
-                    }
-                }
-            }
-        } else {
-            missingSelection
-        }
-    }
-
     // MARK: - Task detail
 
     @ViewBuilder
@@ -228,7 +186,7 @@ struct WorkSurfaceView: View {
             let task = found.task
             scrollingDetail(identifier: "podium-detail-task") {
                 VStack(alignment: .leading, spacing: Spacing.sm) {
-                    Text("\(found.wave.wave.name) · \(found.project.project.name)")
+                    Text(found.wave.wave.name)
                         .font(Typography.caption(10).weight(.semibold))
                         .tracking(0.8)
                         .textCase(.uppercase)
@@ -288,10 +246,7 @@ struct WorkSurfaceView: View {
                     Text(workspace.worktree)
                         .font(Typography.code(11)).textSelection(.enabled)
                 }
-                Text(found.project.project.name).font(.system(size: 14, weight: .semibold))
-                Text(found.project.project.definition)
-                    .font(Typography.body(13)).textSelection(.enabled)
-                projectProof(found.project.project)
+                if let chapter = found.wave.chapter { WaveChapterView(chapter: chapter) }
             }
         } else {
             missingSelection
@@ -299,22 +254,6 @@ struct WorkSurfaceView: View {
     }
 
     // MARK: - Shared pieces
-
-    private func projectProof(_ project: ProjectPlanningSnapshot) -> some View {
-        VStack(alignment: .leading, spacing: Spacing.sm) {
-            Text("Key results").font(.system(size: 14, weight: .semibold))
-            if project.krs.isEmpty {
-                Text("No key results recorded.")
-            }
-            ForEach(project.krs) { kr in
-                Label(kr.text, systemImage: kr.holds ? "checkmark.circle.fill" : "circle")
-                    .textSelection(.enabled)
-                    .accessibilityLabel("\(kr.holds ? "Holds" : "Not established"): \(kr.text)")
-            }
-        }
-        .font(Typography.body(12))
-        .accessibilityIdentifier("workspace-project-proof")
-    }
 
     private var missingSelection: some View {
         ContentUnavailableView(

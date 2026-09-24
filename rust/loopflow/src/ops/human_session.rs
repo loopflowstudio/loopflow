@@ -466,16 +466,6 @@ pub(crate) async fn list(store: &SharedStore) -> Result<Vec<SessionRecord>> {
     sessions.extend(crate::ops::flow_session::list()?);
     let boundary_runs = boundary_run_ids(store).await?;
     sessions.extend(list_interactive_sessions(store, &boundary_runs).await?);
-    for session in &mut sessions {
-        session.wave_id = match &session.work {
-            Some(WorkRef::Wave(id)) => Some(id.clone()),
-            Some(WorkRef::Task(id)) => store.get_task(id).await?.map(|task| task.wave_id),
-            Some(WorkRef::Project(id)) => {
-                store.get_project(id).await?.map(|project| project.wave_id)
-            }
-            None => None,
-        };
-    }
     sessions.sort_by(|left, right| left.title.cmp(&right.title).then(left.id.cmp(&right.id)));
     Ok(sessions)
 }
@@ -1091,7 +1081,7 @@ async fn interactive_surface(
         id: manifest.run_id.to_string(),
         run_id: manifest.run_id.clone(),
         kind: SessionKind::Interactive,
-        wave_id: None,
+        wave_id: session_wave_id(store, work.as_ref()).await?,
         work_path: session_work_path(store, work.as_ref()).await?,
         work,
         actions: session_actions(SessionKind::Interactive, state),
@@ -1116,41 +1106,34 @@ async fn interactive_surface(
     })
 }
 
+async fn session_wave_id(
+    store: &SharedStore,
+    work: Option<&WorkRef>,
+) -> Result<Option<crate::id::WaveId>> {
+    Ok(match work {
+        Some(WorkRef::Wave(id)) => Some(id.clone()),
+        Some(WorkRef::Task(id)) => store.get_task(id).await?.map(|task| task.wave_id),
+        Some(WorkRef::Project(id)) => store.get_project(id).await?.map(|project| project.wave_id),
+        None => None,
+    })
+}
+
 async fn session_work_path(store: &SharedStore, work: Option<&WorkRef>) -> Result<Option<String>> {
-    let Some(work) = work else {
-        return Ok(None);
-    };
+    let Some(work) = work else { return Ok(None) };
     let mut labels = Vec::new();
-    let (wave_id, project_id) = match work {
-        WorkRef::Task(id) => match store.get_task(id).await? {
-            Some(task) => {
-                labels.push(task.plan.identifier);
-                (Some(task.wave_id), Some(task.project_id))
-            }
+    if let WorkRef::Task(id) = work {
+        match store.get_task(id).await? {
+            Some(task) => labels.push(task.plan.identifier),
             None => return Ok(Some(format!("Task {id} (unavailable)"))),
-        },
-        WorkRef::Project(id) => (None, Some(id.clone())),
-        WorkRef::Wave(id) => (Some(id.clone()), None),
-    };
-    let wave_id = if let Some(id) = project_id {
-        match store.get_project(&id).await? {
-            Some(project) => {
-                labels.push(project.plan.name);
-                Some(project.wave_id)
-            }
-            None => {
-                labels.push(format!("Project {id} (unavailable)"));
-                wave_id
-            }
         }
-    } else {
-        wave_id
-    };
-    if let Some(id) = wave_id {
+    }
+    if let Some(id) = session_wave_id(store, Some(work)).await? {
         labels.push(match store.get_wave(&id).await? {
             Some(wave) => wave.name().to_string(),
             None => format!("Wave {id} (unavailable)"),
         });
+    } else if let WorkRef::Project(id) = work {
+        return Ok(Some(format!("Historical Work {id} (unavailable)")));
     }
     labels.reverse();
     Ok(Some(labels.join(" / ")))
@@ -1463,7 +1446,7 @@ async fn ask_surface(store: &SharedStore, record: &AskSessionRecord) -> Result<S
         id: record.id.clone(),
         run_id: session_run_id(&record.id, record.session_run_id.as_ref())?,
         kind: SessionKind::Ask,
-        wave_id: None,
+        wave_id: session_wave_id(store, record.work.as_ref()).await?,
         work: record.work.clone(),
         work_path: session_work_path(store, record.work.as_ref()).await?,
         actions: session_actions(SessionKind::Ask, runtime),
@@ -2280,10 +2263,7 @@ mod tests {
                 session.actions,
                 super::session_actions(session.kind, session.state)
             );
-            assert_eq!(
-                session.work_path.as_deref(),
-                Some("product / Desktop / LOO-291")
-            );
+            assert_eq!(session.work_path.as_deref(), Some("product / LOO-291"));
             assert_eq!(
                 serde_json::from_value::<super::SessionRecord>(
                     serde_json::to_value(&session).unwrap()
@@ -2362,6 +2342,64 @@ mod tests {
             .await
             .unwrap()
             .as_deref(),
+            Some("product")
+        );
+        let now = time::OffsetDateTime::now_utc();
+        let project = crate::work::project::Project {
+            id: crate::durable::ProjectId::new(),
+            plan: crate::planning::ProjectPlan {
+                id: crate::planning::LinearProjectId::new("historical-project").unwrap(),
+                slug: "previous-chapter".to_string(),
+                name: "Obsolete public tier".to_string(),
+                prompt_context: String::new(),
+                pm_snapshot_synced_at: now.unix_timestamp(),
+            },
+            wave_id: wave.id().clone(),
+            iteration: 0,
+            abandon_intent: None,
+            created_at: now,
+            updated_at: now,
+        };
+        store.create_project(&project).await.unwrap();
+        let subject = crate::durable::WorkRef::Project(project.id.clone());
+        let mut manifest = RunManifest {
+            schema_version: 1,
+            run_id: crate::durable::RunId::new(),
+            parent_run_id: None,
+            created_at: now,
+            harness: "fixture".to_string(),
+            model: None,
+            surface: "tui".to_string(),
+            cwd: directory.path().to_path_buf(),
+            repo: None,
+            worktree: None,
+            skill: None,
+            subjects: Vec::new(),
+            launch: None,
+            context: None,
+            runtime_path: None,
+            runtime_digest: None,
+            host: "fixture".to_string(),
+            boot_id: None,
+        };
+        for selector in [&project.plan.slug, project.plan.id.as_str()] {
+            manifest.subjects = vec![SubjectAttribution::declared(format!("project:{selector}"))];
+            assert_eq!(
+                crate::run_record::attributed_work(&store, &manifest).await,
+                Some(subject.clone())
+            );
+        }
+        assert_eq!(
+            super::session_wave_id(&store, Some(&subject))
+                .await
+                .unwrap(),
+            Some(wave.id().clone())
+        );
+        assert_eq!(
+            super::session_work_path(&store, Some(&subject))
+                .await
+                .unwrap()
+                .as_deref(),
             Some("product")
         );
         assert_eq!(super::session_work_path(&store, None).await.unwrap(), None);

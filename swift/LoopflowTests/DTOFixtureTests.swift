@@ -254,7 +254,7 @@ struct DTOFixtureTests {
         #expect(session.title == "Simplify cross-Work questions")
         #expect(session.detail == "review-design")
         #expect(session.state == .active)
-        #expect(session.workPath == "product / Desktop / LOO-291")
+        #expect(session.workPath == "product / LOO-291")
         #expect(session.action(.approve)?.unavailableReason == "The session agent has not marked this ready")
 
         let encoded = try JSONEncoder().encode(sessions)

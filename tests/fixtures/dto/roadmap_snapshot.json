@@ -105,7 +105,7 @@
                 "slug": "make-lf-work-the-machine",
                 "branch": "jack-heart/make-lf-work-the-machine",
                 "worktree": "/src/loopflow.make-lf-work-the-machine",
-                "local_exists": true
+                "local_exists": false
               }
             },
             "runtime": {
@@ -156,7 +156,7 @@
                 "slug": "all-wave-roadmap",
                 "branch": "jack-heart/all-wave-roadmap",
                 "worktree": "/src/loopflow.all-wave-roadmap",
-                "local_exists": true
+                "local_exists": false
               }
             },
             "runtime": {
@@ -276,7 +276,7 @@
                 "slug": "now-available-research",
                 "branch": "jack-heart/now-available-research",
                 "worktree": "/src/loopflow.now-available-research",
-                "local_exists": true
+                "local_exists": false
               }
             },
             "runtime": {

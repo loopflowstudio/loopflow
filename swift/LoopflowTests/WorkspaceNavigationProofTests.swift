@@ -21,11 +21,10 @@ struct WorkspaceNavigationProofTests {
         let data = try Data(contentsOf: root.appendingPathComponent("tests/fixtures/dto/roadmap_snapshot.json"))
         var snapshot = try #require(JSONSerialization.jsonObject(with: data) as? [String: Any])
         var waves = try #require(snapshot["waves"] as? [[String: Any]])
-        var projects = try #require(waves[0]["projects"] as? [String: Any])
-        var items = try #require(projects["items"] as? [[String: Any]])
-        let tasks = try #require(items[0]["tasks"] as? [[String: Any]])
+        var evidence = try #require(waves[0]["tasks"] as? [String: Any])
+        let tasks = try #require(evidence["items"] as? [[String: Any]])
         let template = try #require(tasks.last)
-        items[0]["tasks"] = try (0..<80).map { index in
+        evidence["items"] = try (0..<80).map { index in
             var task = template
             var planning = try #require(task["task"] as? [String: Any])
             planning["id"] = "scroll-task-\(index)"
@@ -36,8 +35,7 @@ struct WorkspaceNavigationProofTests {
             task["runtime"] = NSNull()
             return task
         }
-        projects["items"] = items
-        waves[0]["projects"] = projects
+        waves[0]["tasks"] = evidence
         snapshot["waves"] = waves
         let roadmap = String(decoding: try JSONSerialization.data(withJSONObject: snapshot), as: UTF8.self)
         let query = RegistryQuery { args, _ in

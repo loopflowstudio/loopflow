@@ -444,3 +444,49 @@ Task compensation, notes/tools/worktree child ownership, historical telemetry
 linkage and bounded retry, dated repair ownership, closed obligations and
 configured acceptance remain open. This compression review does not approve the
 branch or establish either required automatic settlement.
+
+## Lockfile ownership compression review at `e70332dd4c`
+
+No executable reduction selected. Before and after this pass, an obligation
+retains original due opportunities; each execution owner retains attempts with
+selection, verification and product outcome. Collapsed opportunities reference
+that owner. `settle` writes verification and outcome atomically. Physical cron
+receipts describe process results; publisher receipts retain artifact stages and
+public observations. Scheduled attribution, target exclusion and exact checkout
+protection remain separate capabilities.
+
+Inspected accounting types, `begin`, `finish_process` and `settle`, release entry
+and history qualification, then followed preparation into the shared manifest
+updater and its Cargo/uv commands. Checked standalone bump, target/checkout
+inheritance and shared command output/error conversion. The complete Task patch
+was available without truncation (719,646 characters); this review concentrated
+on those model paths and the latest lockfile ownership change.
+
+Mirrors checked: CLI/Flow cron context, release-history text/JSON, its JSON
+fixture and round-trip consumer, Python artifact/public receipt types and
+descriptor forwarding, the lockfile survival fixture, release README, cron host
+guide and release-evidence direction. Search found no Swift consumer of
+`ReleaseHistory`, `ReleaseOpportunity` or `PublicReleaseReceipt`.
+
+| Candidate | Why retained |
+|---|---|
+| Standalone bump and release preparation | Both use one manifest updater. Preparation supplies capabilities it already owns; standalone bump supplies none. Combining their entry points would change user-visible behavior or introduce implicit ownership. |
+| `inherit_tools`, Git and PR inheritance callbacks | These configure existing commands at distinct, partially covered boundaries. A generic execution context adds vocabulary without removing an owner or protecting the remaining notes/Task/worktree children. |
+| Cargo/Python changed flags | They record whether any corresponding manifest changed, so each existing lockfile is updated once. A tool registry or manifest-state enum would replace two local facts with more machinery. The command loop is already shared. |
+| `run_stdout`, `run_locked_stdout`, `command_stdout` | Construction differs, but output/error conversion has one implementation. Flattening the short constructors spreads syntax without reducing the domain or public API. |
+| Target lock, checkout lease and cron descriptor | They protect different scopes: release mutation, exact checkout removal and scheduled attribution. Merging them changes authority and independent-scope behavior. |
+| Selection/outcome, process/product and stage/public evidence | Selection survives before success; wrapper exit can disagree with settlement; public read-back proves more than completed publisher stages. Removing these distinctions loses recovery or proof. |
+| Frozen coverage and current collapse links | Saved coverage preserves historical timing; current links identify catch-up ownership. One cannot reconstruct the other across retries. |
+
+Searches found no restored duplicate success-proof wrappers, separate
+`record_verification` writer or Python candidate/publish receipt classes.
+Historical schema-1 physical receipts remain required evidence. No API, DTO,
+field, storage format or executable code changed; only this report changed.
+No tests or static checks were rerun. Prior focused validation remains recorded
+in [release-lockfile-ownership.md](release-lockfile-ownership.md).
+
+Task compensation, notes and source/worktree child ownership, historical
+telemetry linkage and bounded retry, dated repair ownership, closed-obligation
+continuation and configured acceptance remain open. The scorecard blocker,
+required UI/public proof and two adjacent automatic settlements remain unresolved.
+This compression review does not approve the branch or complete the Task.

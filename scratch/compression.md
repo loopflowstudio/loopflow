@@ -612,3 +612,60 @@ ownership, closed-obligation continuation and configured acceptance remain open.
 The scorecard blocker, required UI/public proof and two adjacent automatic
 settlements remain unresolved. No installation, cron trigger, production release,
 PM handoff, PR publication, landing or Task completion is part of this pass.
+
+## Task compensation compression review at `3e4d55726`
+
+No executable reduction selected. Before and after this review, an obligation
+retains original due opportunities; each execution owner retains attempts with
+selection, verification and outcome. Collapsed opportunities reference that
+owner. Atomic `settle` owns product evidence; physical receipts retain process
+results, and publisher receipts retain stages and public observations. Task PRs
+separately own publication intent, reviewer copy, observed GitHub identity and
+exact-head merge intent. Command inheritance carries existing release target
+and checkout capabilities through Task revocation without adding another owner.
+
+Obtained the complete Task patch with `lf task diff LOO-285 --json`: 848,871
+characters, `binary: false`, `truncated: false`. Inspection concentrated on
+accounting types and `begin`/`finish_process`/`settle`/receipt validation, history
+qualification, release locking and completion, and the latest Task compensation
+change. Followed shared commit and PR finalization into clearing, replacement,
+stale-head invalidation and their ordinary observation/restart/rebase callers.
+Patch availability is not a claim of exhaustive review of every historical diff.
+
+Mirrors checked: CLI/Flow receipt context, release-history/disposition output and
+JSON fixture; Task publication/merge domain types, Rust Wave snapshots, Swift
+`WaveWorkMap`/`WorkActivity` models and Task/activity fixtures; Python artifact and
+public receipt types; the new survival/replay regression; release README, cron
+host guide, release-evidence direction and current design/implementation report.
+Swift's GitHub snapshot mirrors the Rust public projection, which exposes number
+and URL rather than the domain object's optional observed head. Searches found
+no Swift consumer of the release-history/opportunity/public-receipt types.
+
+| Candidate | Why retained |
+|---|---|
+| Task resolution wrapper and store-based clearing | Callers enter with different existing context. Both reach one clearing implementation; collapsing them would repeat resolution or spread runtime plumbing. |
+| Clearing, replacement and stale-head invalidation | They handle local mutation, a new requested disposition and observed remote change. They share remote revocation, but retain different validation and persistence boundaries. A mode-driven helper would add branching without removing an owner. |
+| Head in presentation, GitHub observation and merge request | Each binds an independently acquired fact. Equality is checked, not assumed; a single head would erase the disagreement that invalidation must detect. |
+| Conditional versus unconditional clearing | Both modes have live callers. Explicit mutation/resume and ordinary push/rebase have different invalidation conditions; this is not an unused mode like the removed worktree sync flag. |
+| Task PR guard, target lock, checkout lease and cron descriptor | They serialize Task mutation, exclude release mutation, protect exact source and authenticate scheduled attribution respectively. Combining them changes authority and independent scopes. |
+| Inheritance callbacks and ordinary no-op callers | These configure existing commands with borrowed capabilities. A new context or executor would group syntax without deleting a domain concept; ambient lookup would conceal ownership. |
+| Interventions copied onto a catch-up owner | This is denormalized provenance. Deleting the copy alone removes no type, field or writer and changes the raw owner's evidence contract. A coherent change would first choose one provenance owner across collapse, replay and history; this pass does not claim that redesign is proved unnecessary. |
+| Selection/outcome, process/product, stage/public proof and frozen coverage/current links | These retain facts from different boundaries, including failed attempts and changed ownership. Combining them would lose recovery or qualification evidence. |
+
+The simulated review checked that revocation still precedes local clearing or
+replacement, errors retain merge intent, and ordinary callers gain no release
+authority. The survival fixture checks retained durable intent and the eventual
+bare-origin head, not callback wiring. Other compensation routes have source
+propagation and ordinary checks, not independent killed-child proof. Searches
+found no restored duplicate success-proof wrappers, separate verification writer
+or separate Python candidate/publish receipt classes. Historical schema-1 cron
+receipts remain required history.
+
+No API, DTO, persisted field, migration or executable code changed. No behavioral
+tests or static checks were rerun for this documentation-only review; the focused
+passes in [release-task-compensation.md](release-task-compensation.md) remain
+their recorded evidence. Historical telemetry association and bounded recovery,
+dated repair ownership, closed-obligation continuation, remaining interruption
+proof and configured acceptance stay open. The missing `agent_turns` scorecard
+blocker, required UI/public proof and two adjacent automatic settlements remain
+unresolved. This pass neither approves the branch nor completes the Task.

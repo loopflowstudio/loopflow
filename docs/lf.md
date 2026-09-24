@@ -345,9 +345,9 @@ Bare `lf start` is the automatic form: it starts only repo Waves whose optional
 placement is local and enabled. The named form is the explicit override.
 `lf wave <name>` runs that Wave listener and resident in the foreground for
 development. `lf project run` launches one finite `project/operate` Run without
-a Project worktree or resident process. Each operation refreshes Linear before
-it starts, so definition, recommended Task Flow, and KR edits take effect on
-the next invocation without replacing Project Work or its direction.
+a Project worktree or resident process. It starts with stored Project context
+and reads the available planning evidence during the operation. A failed PM
+read does not prevent the skill from continuing with its known KRs.
 Project and Task Work have stable identities and small state:
 `ready`, `done`, or `abandoned`. Process liveness, Task condition, Sessions,
 PR state, Flow position, and Run evidence stay separate. `task prepare` ensures the
@@ -1052,7 +1052,7 @@ lf pm reteam --apply                    # migrate when no Task Run can write old
 lf pm doctor                            # flag ownership and title drift
 ```
 
-Connect Linear first with `lf auth linear`. `lf pm init` pins the Initiative
+Connect Linear first with `doppler run -- lf auth linear`. `lf pm init` pins the Initiative
 into `GOAL.md` and the repository Team into `.lf/config.yaml`. Every Wave in
 that repository reuses the Team and Task prefix (`LOO-1`, `LOO-2`); Initiatives
 and Project membership decide which Wave owns a Task. `pm init --all` discovers
@@ -1077,6 +1077,15 @@ snapshots younger than an hour without a network request, tries a
 five-second refresh for older ones, and refuses to silently serve a snapshot
 older than a week. Use `--no-sync` in agents and UI paths so rendering never
 waits on Linear.
+
+Fresh PM operations renew expiring Linear credentials automatically and store
+the rotated access/refresh pair together. Temporary endpoint failures get one
+retry within the read deadline; `--sync` reports failure if it cannot obtain a
+fresh snapshot. Retry a temporary failure with `lf pm sync --wave <wave>`.
+Reconnect with `doppler run -- lf auth linear` only when the error identifies a
+missing credential or unusable refresh grant/client configuration. A timeout
+during persistence can leave its outcome pending; the next read checks the
+stored credential before attempting another exchange.
 
 `lf pm reteam` migrates every linked Wave onto the repository Team. It
 **defaults to a dry run** and only mutates with `--apply`; it defers an issue

@@ -91,7 +91,7 @@ struct SessionsPolishTests {
             from: Data(
                 """
                 {
-                  "id": "polish",
+                  "id": "polish", "run_id": "polish",
                   "kind": "\(kind)",
                   "work": null,
                   "title": "Polish fixture",

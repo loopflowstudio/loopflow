@@ -2,6 +2,22 @@
 
 ## Latest human direction — 2026-09-24
 
+**Latest amendment: one Wave, one current chapter Project.** The human directed
+this work to reconcile with `loopflow.projects` to remove organizational clutter.
+The public outline is now **repo → Wave → Task → Session**. Project is an internal
+chapter record, never another row, picker, breadcrumb or replacement Chapter tier.
+Wave owns the enduring objective; its current Project owns Tasks, KRs and metric
+targets, presented together through Wave details. This supersedes the separate
+Project level in all older proposals below, including Full presentation.
+
+The sibling already has shared Rust/Swift roadmap fields `chapter`, direct `tasks`
+and `unavailable_tasks`. Integrate that contract with this branch's retained
+outline and multiplexer; do not copy its older navigation or hide a Project array
+only in Swift. Preserve Task identity and Session/Run links across chapter moves,
+including historical and unmatched Sessions. Read-only comparison and the remaining
+integration proof are in [the reconciliation review](review-wave-reconciliation.md).
+The two performance experiences and one optimization Task per area remain in scope.
+
 The human finds the current app confusing and wants to strip the interface back,
 then design elements together one by one. This is not a customizable widget
 canvas. They requested performance testing and one first-pass optimization Task
@@ -176,7 +192,7 @@ Replace the root switch and parallel navigation with the unified tree, including
 Additive series. The keystone is an indivisible navigation replacement shipping as one PR; its internal slices are:
 
 1. Join shared Work/Session readings into the compact unified list and A/D workspace presentations; keep autonomous and upcoming Tasks visible, integrate existing detail/Session access, preserve live terminals, and prove the behavior. Reconcile current main with `lf-new` and LOO-284 before selecting shared API changes; do not build parallel ownership or lifecycle logic.
-2. **This slice:** implement the [canvas launch decision](canvas-chapter-review.md): one native compressible outline, exact Task-active-Run Monitor content in the existing multiplexer, and the two repeatable native experience measurements. The [outline study](hierarchy-study.html) is design evidence only. Replace the competing navigation controls while preserving contextual details/actions and retained terminals. Establish shared Run attribution/liveness and small/large measurement populations before optimization. Keep the external edit/trials, configured human actions/input, published budgets and final human demo as explicit acceptance obligations. Do not launch a second worker or file the deferred optimization Tasks.
+2. **This slice:** integrate the committed `loopflow.projects` chapter binding and direct-Task shared reads with this branch's retained outline and Monitor. Public navigation is repo → Wave → Task → Session; remove Project selection and ordinary launch targets without restoring old workspace owners. Preserve unavailable and historical work and required Session-to-Run links. Prove direct Task navigation and stable Task pane/Session/Monitor/companion identity when chapter membership changes. Keep the sibling's uncommitted ownership correction separate. Bounded active discovery, shared automatic refresh, both performance runners and baselines remain the next core slice; the existing demand-refresh Monitor does not waive them.
 3. Remove superseded navigation, integrate remaining inspectors, and prove configured behavior. No runtime/cardinality or terminal-ownership shortcuts count as completion.
 
 Follow-up: Task-directive editing through the existing PM API, preserving unsaved text on rejected writes and displaying authoritative refreshed text after success. This remains part of LOO-291's requested outcome; shipping the keystone alone does not complete that Task. External-work trials and long-lived-registry performance measurement remain its full proof obligations. Do not create follow-up Tasks during design.
@@ -201,6 +217,54 @@ No separate authorities for Work/Sessions inventories, oversized parent cards, c
 - 2026-09-23: the human clarified conversations are optional and fresh starts should be encouraged. One-current-at-a-time is a cardinality constraint, not a permanent conversation per subject. Start/Continue/Finish/Start fresh above are proposed controls for that intent.
 - 2026-09-23: the human requested advancing the Task, then clarified that the pre-identified Task should receive this design. Reuse LOO-291 rather than create a duplicate. Earlier queue timing does not block this explicit advance; external-work proof remains unselected and must not be fabricated.
 - Open: per-subject Session lifecycle, checkout choice/taskification, first-open presentation, repository breadth, external proving workflow, and the directive-editing follow-up.
+
+## Slice ledger — Task Monitor panes, 2026-09-24
+
+[Task Monitor implementation](task-monitor-implementation.md) adds a retained
+Task-bound Monitor to the existing multiplexer and restores each Task's pane
+choice. One Podium demand reading supplies exact Run attribution and visible
+stale/incomplete evidence. Six focused tests pass, including both real direct
+Session and shell-attached PTY draft/focus/companion proofs. Saved-pane content
+validation and a native Monitor focus target correct reproduced failures.
+Fallback compilation is blocked at resource preflight; no compiler verdict.
+
+Continuous refresh remains blocked on bounded native discovery. Both experience
+runners/baselines, configured trials and the simplified human demo remain core
+requirements. The observation time and explicit Refresh action describe this
+usable first increment without claiming live polling or performance completion.
+
+## Slice ledger — required Session → Run, 2026-09-24
+
+Rust and Swift now require the explicit Run reference on every projected Session.
+Ask publication and human Flow transitions prepare the Run before the boundary
+is visible; launch consumes that identity and native resume keeps it. Existing
+boundary IDs continue to target actions. The child-to-parent temporary binding
+file and late identity/Ready writes are removed. Unbound persisted boundaries
+use explicit `session open --json` preparation; listing remains read-only and
+reports an actionable error until prepared.
+
+Focused capture, CLI, Flow transition and cross-language contract evidence is
+in [session-run-implementation.md](session-run-implementation.md). This slice
+establishes identity, not live ownership or configured provider readiness. The
+active-Run projection, Monitor panes, both native performance measurements and
+the simplified human demo remain open. Concurrent outline work is preserved
+without being claimed as this slice's implementation. LOO-293 is not adopted,
+closed or removed. No publication or Task completion.
+
+The subsequent [recovery correction](session-run-review.md) releases the
+preparation lock before waiting on a resumed conversation. A real CLI regression
+reproduced the blocked second open; first-launch and resume cases now pass with
+a local stand-in provider, preserving the prepared Run identity. Configured
+provider/UI and remaining canvas obligations are unchanged.
+
+The subsequent [active discovery review](active-runs-discovery-review.md) fixes
+existing native clients being omitted when the new generic capture binding is
+absent. Native discovery uses existing per-Run receipts independently; generic
+capture intervals still establish exact Exec attribution. All 16 configured
+Session Run references resolve, and five active Session Runs are observed.
+One unbound live Exec remains explicit incomplete evidence. Discovery still
+visits retained Run directories; Monitor integration and both experience
+measurement runners remain required next work.
 
 ## Slice ledger — navigation implementation, 2026-09-23
 
@@ -570,3 +634,28 @@ compression, and selected-content placement remain proposals for human review.
 The next native increment must include the canvas measurement contract and retain
 the existing terminal/multiplexer ownership. No production source, user client,
 PM Task, installed app, publication or Task completion changed in this pass.
+
+## Slice ledger — native outline contribution, 2026-09-24
+
+[Native implementation and proof](outline-implementation.md) replaces the competing
+navigation controls with compact/full/Session presentations and explicit leaves.
+The existing multiplexer retains real PTYs across these presentations. Repository
+selection remains through the existing scoped reader. Monitor, cross-repository
+flat coverage, performance measurements and configured acceptance remain open.
+The concurrent Session → Run contract slice above remains its existing writer’s
+work; this ledger does not relabel that backend work or complete LOO-291.
+
+## Slice ledger — shared active Runs, 2026-09-24
+
+`lf runs --active [--task …]` now joins capture intervals and existing native
+client receipts to shared OS ownership evidence, then resolves typed Work through
+the same Run attribution reader as Sessions. Swift has the matching required DTO
+and RegistryQuery read. Seven Rust tests, one Swift test and clippy pass; exact
+commands/source hashes and limits are in [active-runs-implementation.md](active-runs-implementation.md).
+
+The concurrent native-discovery regression showed that a new index alone lost
+clients from already-running launchers. Existing receipts remain authoritative,
+which currently requires walking retained Run directories. Bounded discovery is
+still core work before frequent Monitor polling. Monitor panes, retained Task
+pane choice, both native performance journeys, external trials and the final
+human demo remain open. This slice establishes no publication or Task completion.

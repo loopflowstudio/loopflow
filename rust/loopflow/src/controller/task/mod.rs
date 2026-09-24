@@ -659,6 +659,7 @@ async fn settle_claimed_task_position(
     next.session_run_id = None;
     next.ready_summary = None;
     next.updated_at = time::OffsetDateTime::now_utc();
+    crate::ops::human_session::prepare_flow_run(task, &mut next)?;
     let summary = progress_summary(text);
     let next = store
         .settle_task_worker(
@@ -801,6 +802,7 @@ pub(crate) async fn complete_human_flow_step(
     position.session_run_id = None;
     position.ready_summary = None;
     position.updated_at = time::OffsetDateTime::now_utc();
+    crate::ops::human_session::prepare_flow_run(&task, &mut position)?;
     store
         .complete_human_task_boundary(&task, &expected, &position, text)
         .await?;
@@ -813,7 +815,11 @@ pub(crate) async fn ensure_flow_position(
     selected_flow: Option<&str>,
 ) -> Result<FlowPosition> {
     let task = load_task(store, task_id).await?;
-    if let Some(current) = store.flow_position(&task.id).await? {
+    if let Some(mut current) = store.flow_position(&task.id).await? {
+        if current.is_human() && current.session_run_id.is_none() {
+            crate::ops::human_session::prepare_flow_run(&task, &mut current)?;
+            return Ok(store.set_flow_position(&task.id, current).await?);
+        }
         return Ok(current);
     }
     let selected_flow = selected_flow.ok_or_else(|| {
@@ -823,7 +829,8 @@ pub(crate) async fn ensure_flow_position(
             task.plan.identifier
         )
     })?;
-    let candidate = start_task_flow(&task, selected_flow)?;
+    let mut candidate = start_task_flow(&task, selected_flow)?;
+    crate::ops::human_session::prepare_flow_run(&task, &mut candidate)?;
     let candidate = store.set_flow_position(&task.id, candidate).await?;
     if candidate.is_human() {
         let node_id = candidate
@@ -1125,6 +1132,15 @@ impl Drop for TestLfBinGuard {
         match &self.previous {
             Some(value) => std::env::set_var("LF_BIN", value),
             None => std::env::remove_var("LF_BIN"),
+        }
+        for (key, previous) in [
+            ("LF_HOME", &self.previous_home),
+            ("LF_CONTROL_HOME", &self.previous_control_home),
+        ] {
+            match previous {
+                Some(value) => std::env::set_var(key, value),
+                None => std::env::remove_var(key),
+            }
         }
     }
 }
@@ -2380,6 +2396,20 @@ mod planning_tests {
         assert!(settled.claim.is_none());
         assert_eq!(settled.version, initial.version + 1);
         assert_eq!(store.human_task_flow_positions().await.unwrap().len(), 1);
+        let run_id = settled.session_run_id.as_ref().unwrap();
+        let (dir, manifest) = crate::run_record::resolve_manifest(
+            &crate::store::observability_home_dir(),
+            run_id.as_str(),
+        )
+        .unwrap();
+        assert_eq!(&manifest.run_id, run_id);
+        assert!(dir.join("prepared").is_file());
+        assert!(!dir.join("provider-clients").exists());
+        let restarted = super::ensure_flow_position(&store, &task.id, None)
+            .await
+            .unwrap();
+        assert_eq!(restarted.session_run_id.as_ref(), Some(run_id));
+        assert_eq!(restarted.version, settled.version);
     }
 
     #[tokio::test]

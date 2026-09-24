@@ -49,7 +49,6 @@ struct WorkspaceNavigationProofTests {
             }
         }
         let model = PodiumModel(query: query, repoPath: "/src/loopflow")
-        model.navigation.taskQuery = .all
         await model.refresh()
         let registry = SessionsWorkspaceRegistry()
         let view = SessionsView(model: model, repoPath: "/src/loopflow", workspaces: registry, query: query)
@@ -68,13 +67,13 @@ struct WorkspaceNavigationProofTests {
         try #require(offset > 1000)
         model.select(.task(id: "scroll-task-30"))
         try await settle(window)
-        try view.inspect().find(viewWithAccessibilityIdentifier: "workspace-toggle-list").button().tap()
+        model.navigation.content = .terminals
         try await settle(window)
         #expect(abs(scroll.contentView.bounds.minY - offset) < 1)
         await model.refresh()
         try await settle(window)
         #expect(abs(scroll.contentView.bounds.minY - offset) < 1)
-        try view.inspect().find(viewWithAccessibilityIdentifier: "workspace-all-work").button().tap()
+        model.navigation.content = .overview
         try await settle(window)
         #expect(abs(scroll.contentView.bounds.minY - offset) < 1)
         model.setRepoPath("/src/context")
@@ -127,7 +126,7 @@ struct WorkspaceNavigationProofTests {
             let shell = workspace.multiplexer.layout.firstPane.id
             workspace.multiplexer.setFocusedPane(shell)
             records.append([
-                "id": "row-\(index)", "kind": "interactive", "work": NSNull(),
+                "id": "row-\(index)", "run_id": "row-\(index)", "kind": "interactive", "work": NSNull(),
                 "title": "Conversation \(index)", "detail": "Local shell", "cwd": path,
                 "state": "active", "ready_summary": NSNull(), "work_path": NSNull(), "actions": sessionActionFixture(kind: "interactive", state: "active"), "terminal_ids": [shell],
                 "open_argv": ["must-not-launch"],
@@ -148,7 +147,6 @@ struct WorkspaceNavigationProofTests {
         let model = PodiumModel(query: query, repoPath: repo)
         await model.refreshSessions()
         model.navigation.content = .terminals
-        model.navigation.showsList = true
         let view = SessionsView(model: model, repoPath: repo, workspaces: registry, query: query)
         let window = NSWindow(contentRect: CGRect(x: 0, y: 0, width: 1400, height: 700),
                               styleMask: [.titled], backing: .buffered, defer: false)
@@ -218,7 +216,7 @@ struct WorkspaceNavigationProofTests {
         defer { registry.surfaces.release(.shell(pane)) }
         let surface = try #require(terminal.surface)
         let records = try String(decoding: JSONSerialization.data(withJSONObject: ["shell-conversation", "second-conversation"].map { id in
-            ["id": id, "kind": "interactive", "work": NSNull(),
+            ["id": id, "run_id": id, "kind": "interactive", "work": NSNull(),
              "title": id, "detail": "Local PTY", "cwd": "/tmp",
              "state": "active", "ready_summary": NSNull(), "work_path": NSNull(), "actions": sessionActionFixture(kind: "interactive", state: "active"), "terminal_ids": [pane],
              "open_argv": ["unused"]] as [String: Any]
@@ -297,7 +295,7 @@ struct WorkspaceNavigationProofTests {
         defer { registry.surfaces.release(.session("review-decision")) }
         let surface = try #require(terminal.surface)
         let records = """
-        [{"id":"review-decision","kind":"flow","work":null,"work_path":null,
+        [{"id":"review-decision", "run_id": "review-decision","kind":"flow","work":null,"work_path":null,
           "title":"Review decision","detail":"Human review","cwd":"/tmp",
           "state":"ready","ready_summary":"Ready for review","terminal_ids":[],
           "actions":\(sessionActionFixtureJSON(kind: "flow", state: "ready")),"open_argv":["/bin/cat"]}]
@@ -437,13 +435,13 @@ struct WorkspaceNavigationProofTests {
             "tests/fixtures/dto/roadmap_snapshot.json"
         ), encoding: .utf8)
         let records = """
-        [{"id":"navigation-split","kind":"interactive",
+        [{"id":"navigation-split", "run_id": "navigation-split","kind":"interactive",
           "work":{"kind":"task","id":"ts_review00000000000000000000000000"},
           "title":"Navigation proof","detail":"Local cat PTY","cwd":"/tmp",
           "state":"active","ready_summary":null,"work_path":null,"actions":\(sessionActionFixtureJSON(kind: "interactive", state: "active")),"terminal_ids":[],"open_argv":["/bin/cat"]}]
         """
         let otherRecords = """
-        [{"id":"context-session","kind":"interactive","work":null,
+        [{"id":"context-session", "run_id": "context-session","kind":"interactive","work":null,
           "title":"Other repository conversation","detail":"Existing external client","cwd":"/src/context",
           "state":"active","ready_summary":null,"work_path":null,"actions":\(sessionActionFixtureJSON(kind: "interactive", state: "active")),"terminal_ids":[],"open_argv":["lf","session","open","context-session"]}]
         """
@@ -520,10 +518,15 @@ struct WorkspaceNavigationProofTests {
         let draft = "split-draft"
         draft.withCString { ghostty_surface_text(sessionSurface, $0, UInt(draft.utf8.count)) }
 
-        for identifier in ["workspace-toggle-list", "workspace-work-details", "workspace-all-work",
-                           "workspace-return-terminals", "workspace-toggle-list"] {
-            try view.inspect().find(viewWithAccessibilityIdentifier: identifier).button().tap()
+        for presentation in WorkspacePresentation.allCases {
+            model.navigation.presentation = presentation
+            model.navigation.content = presentation == .full ? .details : .terminals
             try await settle(window)
+            if let directory = ProcessInfo.processInfo.environment["LOOPFLOW_OUTLINE_CAPTURE_DIR"] {
+                let path = URL(fileURLWithPath: directory)
+                    .appendingPathComponent("\(presentation.rawValue)-\(switchBeforeCompletion).png")
+                _ = try SnapshotService().snapshotWindow(window, to: path)
+            }
             #expect(terminals[0].surface == sessionSurface)
             #expect(terminals[1].surface == shellSurface)
             #expect(Array(_terminalText(shellSurface, viewport: true).components(separatedBy: "\n").prefix(5)) == historyTop)
@@ -614,12 +617,10 @@ struct WorkspaceNavigationProofTests {
         #expect(model.sessions.value?.isEmpty == true)
         #expect(model.selection == .task(id: "issue-review"))
         #expect(model.task(id: "issue-review")?.task.task.completed == false)
-        try view.inspect().find(viewWithAccessibilityIdentifier: "workspace-work-details").button().tap()
+        model.select(.task(id: "issue-review"))
         try await settle(window)
-        #expect(throws: Never.self) {
-            try view.inspect().find(text: "No open Sessions for this Work")
-        }
-        try view.inspect().find(viewWithAccessibilityIdentifier: "workspace-return-terminals").button().tap()
+        #expect(model.workspace.subject(for: "human") == nil)
+        model.navigation.content = .terminals
         try await settle(window)
         #expect(window.firstResponder === terminals[1])
         try #require(terminals[1].surface == shellSurface)

@@ -130,6 +130,12 @@ public struct RegistryQuery: Sendable {
         return try Self.decode(String?.self, from: stdout)
     }
 
+    public func activeRuns(task: String? = nil) async throws -> ActiveRunsSnapshot {
+        var args = ["runs", "--active", "--json"]
+        if let task { args += ["--task", task] }
+        return try Self.decode(ActiveRunsSnapshot.self, from: await run(args, nil))
+    }
+
     /// Durable Work facts across creation, Runs, PR lifecycle, and Steers.
     /// Filters are composed by `lf` before its bounded presentation window.
     public func workActivity(
@@ -511,7 +517,7 @@ public struct RunSnapshot: Decodable, Sendable, Identifiable, Hashable {
     }
 }
 
-public struct RunSubjectAttribution: Decodable, Sendable, Hashable {
+public struct RunSubjectAttribution: Codable, Sendable, Hashable {
     public let selector: String
     public let source: String
 }

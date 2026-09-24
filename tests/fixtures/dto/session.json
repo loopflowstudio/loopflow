@@ -38,5 +38,6 @@
       "help": "Return to autonomous Task work with your direction",
       "unavailable_reason": null
     }
-  ]
+  ],
+  "run_id": "run_00000000000000000000000000000001"
 }

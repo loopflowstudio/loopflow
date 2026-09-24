@@ -1,0 +1,72 @@
+{
+  "run_id": "run_b9e699194da44e3a84cfeaf1a48b54e7",
+  "session_before": "active",
+  "session_after": "active",
+  "before": {
+    "home": "/var/folders/m6/r3tllnrs1yq7yfbwm680tss40000gn/T/loo291-review19-49wn13hp",
+    "observed_at": 1790284972,
+    "task": null,
+    "runs": [
+      {
+        "id": "run_b9e699194da44e3a84cfeaf1a48b54e7",
+        "work": null,
+        "subjects": [],
+        "label": "opencode",
+        "harness": "opencode",
+        "model": null,
+        "repo": null,
+        "processes": [
+          {
+            "pid": 86750,
+            "provider": "opencode",
+            "state": "waiting"
+          }
+        ]
+      }
+    ],
+    "gaps": []
+  },
+  "without_bindings": {
+    "home": "/var/folders/m6/r3tllnrs1yq7yfbwm680tss40000gn/T/loo291-review19-49wn13hp",
+    "observed_at": 1790284974,
+    "task": null,
+    "runs": [
+      {
+        "id": "run_b9e699194da44e3a84cfeaf1a48b54e7",
+        "work": null,
+        "subjects": [],
+        "label": "opencode",
+        "harness": "opencode",
+        "model": null,
+        "repo": null,
+        "processes": [
+          {
+            "pid": 86750,
+            "provider": "opencode",
+            "state": "waiting"
+          }
+        ]
+      }
+    ],
+    "gaps": []
+  },
+  "provider_still_running": true,
+  "binding_count_removed": 0,
+  "after_exit": {
+    "home": "/var/folders/m6/r3tllnrs1yq7yfbwm680tss40000gn/T/loo291-review19-49wn13hp",
+    "observed_at": 1790284975,
+    "task": null,
+    "runs": [],
+    "gaps": []
+  },
+  "corrupt_receipt": {
+    "home": "/var/folders/m6/r3tllnrs1yq7yfbwm680tss40000gn/T/loo291-review19-49wn13hp",
+    "observed_at": 1790284976,
+    "task": null,
+    "runs": [],
+    "gaps": [
+      "EOF while parsing an object at line 1 column 1"
+    ]
+  },
+  "corrupt_receipt_text": "Unavailable: EOF while parsing an object at line 1 column 1\n"
+}

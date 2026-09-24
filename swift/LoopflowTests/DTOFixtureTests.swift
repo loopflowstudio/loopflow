@@ -7,6 +7,23 @@ import Testing
 /// the Mac app.
 @Suite("DTO Fixtures")
 struct DTOFixtureTests {
+    @Test("Active Runs preserve exact attribution, waiting clients, and evidence gaps")
+    func activeRunsFixture() async throws {
+        let data = try loadFixtureData("active_runs.json")
+        let query = RegistryQuery { _, _ in String(decoding: data, as: UTF8.self) }
+        let snapshot = try await query.activeRuns()
+        #expect(snapshot.runs[0].work == snapshot.task)
+        #expect(snapshot.runs[0].processes[0].state == .waiting)
+        #expect(snapshot.gaps.count == 1)
+        #expect(try JSONDecoder().decode(ActiveRunsSnapshot.self, from: JSONEncoder().encode(snapshot)) == snapshot)
+        var missing = try #require(JSONSerialization.jsonObject(with: data) as? [String: Any])
+        missing.removeValue(forKey: "gaps")
+        let incomplete = try JSONSerialization.data(withJSONObject: missing)
+        #expect(throws: DecodingError.self) {
+            try JSONDecoder().decode(ActiveRunsSnapshot.self, from: incomplete)
+        }
+    }
+
     @Test("Wave plan uses the same chapter as status")
     func planUsesChapterSnapshot() async throws {
         let json = String(decoding: try loadFixtureData("wave_detail.json"), as: UTF8.self)
@@ -243,6 +260,26 @@ struct DTOFixtureTests {
         let encoded = try JSONEncoder().encode(sessions)
         let decoded = try JSONDecoder().decode([SessionRecord].self, from: encoded)
         #expect(decoded == sessions)
+    }
+
+    @Test("Every Session kind has a required Run reference independent of its boundary ID")
+    func sessionRequiresRun() throws {
+        let data = try loadFixtureData("session.json")
+        for kind in ["interactive", "ask", "flow"] {
+            var value = try #require(JSONSerialization.jsonObject(with: data) as? [String: Any])
+            value["kind"] = kind
+            let session = try JSONDecoder().decode(SessionRecord.self, from: JSONSerialization.data(withJSONObject: value))
+            #expect(session.runId == "run_00000000000000000000000000000001")
+            #expect(session.runId != session.id)
+            value.removeValue(forKey: "run_id")
+            #expect(throws: DecodingError.self) {
+                try JSONDecoder().decode(SessionRecord.self, from: JSONSerialization.data(withJSONObject: value))
+            }
+            value["run_id"] = NSNull()
+            #expect(throws: DecodingError.self) {
+                try JSONDecoder().decode(SessionRecord.self, from: JSONSerialization.data(withJSONObject: value))
+            }
+        }
     }
 
     @Test("Flow Session fixture preserves readiness and its open command")

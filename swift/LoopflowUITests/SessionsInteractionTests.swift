@@ -43,13 +43,12 @@ final class SessionsInteractionTests: XCTestCase {
             XCTAssertTrue(waitForAbsence(app, id: "sessions-empty-new-shell"))
 
             if fixture == .interactive {
-                element(app, id: "workspace-all-work").click()
-                XCTAssertTrue(waitForAbsence(app, id: "sessions-multiplexer"))
-                element(app, id: "workspace-return-terminals").click()
-                XCTAssertTrue(pane.waitForExistence(timeout: 8))
-                element(app, id: "workspace-toggle-list").click()
-                XCTAssertTrue(element(app, id: "session-row-\(fixture.id)").exists)
-                XCTAssertTrue(pane.exists)
+                for presentation in ["Full hierarchy", "Sessions", "Compact"] {
+                    element(app, id: "workspace-presentation").click()
+                    app.menuItems[presentation].click()
+                    XCTAssertTrue(element(app, id: "session-row-\(fixture.id)").exists)
+                    XCTAssertTrue(pane.exists)
+                }
             }
 
             let complete = element(app, id: "session-action-complete")

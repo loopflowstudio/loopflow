@@ -335,44 +335,46 @@ struct SessionsView: View {
     }
 
     private var navigation: WorkspaceNavigation { model.navigation }
-    private var listVisible: Bool { navigation.content == .overview || navigation.showsList }
     private var terminalsVisible: Bool { navigation.content == .terminals }
 
     var body: some View {
         let _ = layoutRevision
         VStack(spacing: 0) {
-            toolbar
             if let error = model.sessions.errorMessage {
                 Text("Sessions unavailable — \(error)")
                     .font(Typography.caption(11)).foregroundStyle(Color.statusWarning)
                     .padding(Spacing.sm)
             }
             HStack(spacing: 0) {
-                // Keep this view mounted so A/D transitions preserve list scroll.
                 WorkspaceNavigator(model: model, onOpenSession: openSession, sessionStatus: { record in
                     guard let item = store.sessions.first(where: { $0.id == record.id }) else {
                         return record.state.rawValue.uppercased()
                     }
                     return _status(item, pane: _pane(for: record.id))
-                })
-                    .frame(maxWidth: navigation.content == .overview ? .infinity : nil)
-                    .frame(width: listVisible && navigation.content != .overview ? 300 : nil)
-                    .frame(width: listVisible ? nil : 0)
-                    .clipped()
-                    .accessibilityHidden(!listVisible)
-                    .allowsHitTesting(listVisible)
-                if listVisible && navigation.content != .overview { Divider() }
-                ZStack {
-                    WorktreeNodeView(
-                        node: worktreeLayout.layout, layout: worktreeLayout,
-                        workspaces: workspaces, paths: availablePaths, isActive: terminalsVisible, sessions: store
-                    )
-                    .opacity(terminalsVisible ? 1 : 0)
-                    .disabled(!terminalsVisible)
-                    .allowsHitTesting(terminalsVisible)
-                    .accessibilityHidden(!terminalsVisible)
-                    VStack(spacing: 0) {
-                            subjectSessions
+                }, onConversation: { work in
+                    model.select(work)
+                    startConversation()
+                }, onNewShell: {
+                    if worktreeLayout.focusedPath == nil { worktreeLayout.select(store.repoPath) }
+                    multiplexer.newShell()
+                    navigation.content = .terminals
+                }, onShowTerminals: { navigation.content = .terminals }, onOpenTask: openTask)
+                    .frame(width: 300)
+                Divider()
+                VStack(spacing: 0) {
+                    if let selected = model.selection, selected.kind == .task {
+                        taskControls(selected.id)
+                    }
+                    ZStack {
+                        WorktreeNodeView(
+                            node: worktreeLayout.layout, layout: worktreeLayout,
+                            workspaces: workspaces, paths: availablePaths, isActive: terminalsVisible, sessions: store
+                        )
+                        .opacity(terminalsVisible ? 1 : 0)
+                        .disabled(!terminalsVisible)
+                        .allowsHitTesting(terminalsVisible)
+                        .accessibilityHidden(!terminalsVisible)
+                        VStack(spacing: 0) {
                             HSplitView {
                                 WorkSurfaceView(model: model)
                                     .frame(minWidth: 300, maxWidth: .infinity)
@@ -380,17 +382,18 @@ struct SessionsView: View {
                                     .frame(minWidth: 230, idealWidth: 280, maxWidth: 360)
                             }
                         }
-                    .background(palette.background)
-                    .opacity(navigation.content == .details ? 1 : 0)
-                    .allowsHitTesting(navigation.content == .details)
-                    .accessibilityHidden(navigation.content != .details)
+                        .background(palette.background)
+                        .opacity(navigation.content == .details ? 1 : 0)
+                        .allowsHitTesting(navigation.content == .details)
+                        .accessibilityHidden(navigation.content != .details)
+                    }
+                    .frame(maxWidth: .infinity)
+                    .clipped()
                 }
-                .frame(maxWidth: navigation.content == .overview ? nil : .infinity)
-                .frame(width: navigation.content == .overview ? 0 : nil)
-                .clipped()
             }
         }
         .background(palette.background)
+        .environment(model)
         .overlay {
             if terminalsVisible {
                 SessionsShortcutMonitor { _handle($0) }
@@ -398,8 +401,11 @@ struct SessionsView: View {
             }
         }
         .onReceive(NotificationCenter.default.publisher(for: .multiplexerStoreDidChange)) { notification in
-            guard notification.object is MultiplexerStore else { return }
+            guard let source = notification.object as? MultiplexerStore else { return }
             layoutRevision += 1
+            if source === multiplexer {
+                rememberTaskPane()
+            }
         }
         .onChange(of: model.sessions.value, initial: true) { _, records in
             guard let records else { return }
@@ -419,7 +425,6 @@ struct SessionsView: View {
         }
         .onReceive(NotificationCenter.default.publisher(for: .openSessions)) { _ in
             navigation.content = .terminals
-            navigation.showsList = true
         }
         .alert("Could not start conversation", isPresented: Binding(
             get: { launchError != nil },
@@ -430,92 +435,10 @@ struct SessionsView: View {
         .accessibilityIdentifier("sessions-surface")
     }
 
-    private var toolbar: some View {
-        HStack(spacing: Spacing.md) {
-            Button {
-                navigation.content = .overview
-            } label: { Label("All work", systemImage: "list.bullet") }
-            .accessibilityIdentifier("workspace-all-work")
-            if navigation.content != .overview {
-                Button {
-                    navigation.showsList.toggle()
-                } label: {
-                    Label(navigation.showsList ? "Hide work list" : "Show work list", systemImage: "sidebar.left")
-                }
-                .accessibilityIdentifier("workspace-toggle-list")
-            }
-            if model.selection != nil, terminalsVisible {
-                Button("Work details") { navigation.content = .details }
-                    .accessibilityIdentifier("workspace-work-details")
-            }
-            if !terminalsVisible, worktreeLayout.knownPaths.contains(where: { path in
-                workspaces.workspace(for: path).multiplexer.layout.allPanes.contains { $0.content != .empty }
-            }) {
-                Button("Return to terminals") { navigation.content = .terminals }
-                    .accessibilityIdentifier("workspace-return-terminals")
-            }
-            Spacer()
-            if let generatedAt = model.roadmap.value?.generatedAt {
-                Text("Planning read: \(generatedAt)")
-                    .font(Typography.caption(9)).foregroundStyle(palette.textSecondary)
-                    .help("Snapshot generation time; source sync freshness is not supplied by this read.")
-            }
-            Button { startConversation() } label: {
-                Label("New conversation · \(model.conversationLabel ?? "Work")", systemImage: "plus.bubble")
-                    .lineLimit(1)
-            }
-            .disabled(model.conversationScope == nil)
-            .help("Start a conversation about \(model.conversationLabel ?? "this work") using your configured app or terminal")
-            .accessibilityIdentifier("sessions-new-conversation")
-            Button {
-                if worktreeLayout.focusedPath == nil { worktreeLayout.select(store.repoPath) }
-                multiplexer.newShell()
-                navigation.content = .terminals
-            } label: { Label("New terminal", systemImage: "terminal") }
-            .accessibilityIdentifier("sessions-new-shell")
-        }
-        .buttonStyle(.plain)
-        .font(Typography.body(11))
-        .padding(Spacing.md)
-    }
-
-    private var subjectSessions: some View {
-        HStack(spacing: Spacing.sm) {
-            if model.sessions.isLoading {
-                Text("Reading Sessions…")
-            } else if let error = model.sessions.errorMessage {
-                Label("Sessions unavailable", systemImage: "exclamationmark.triangle").help(error)
-            } else if !selectedSubjectIsAvailable {
-                Text("Session association unavailable — use the work list")
-                    .accessibilityIdentifier("workspace-session-association-unavailable")
-            } else if model.workspace.sessions(for: model.selection).isEmpty {
-                Text("No open Sessions for this Work")
-                    .accessibilityIdentifier("workspace-no-sessions")
-            }
-            ForEach(model.workspace.sessions(for: model.selection)) { record in
-                Button { openSession(record) } label: {
-                    Label(record.title, systemImage: "terminal")
-                }
-                .accessibilityIdentifier("workspace-open-session-\(record.id)")
-            }
-            Spacer()
-        }
-        .font(Typography.caption(11))
-        .padding(Spacing.md)
-    }
-
-    private var selectedSubjectIsAvailable: Bool {
-        guard let selection = model.selection else { return false }
-        return switch selection.kind {
-        case .wave: model.wave(id: selection.id) != nil
-        case .project: model.project(id: selection.id) != nil
-        case .task: model.task(id: selection.id) != nil
-        }
-    }
-
     private func openSession(_ record: SessionRecord) {
         let subject = model.workspace.subject(for: record.id)
         model.select(subject)
+        navigation.selectedSessionId = record.id
         navigation.content = .terminals
         // Place the opening/error/elsewhere pane immediately. A slow preparation
         // must never change focus after the human selects another subject.
@@ -530,7 +453,77 @@ struct SessionsView: View {
             store.surfaces.focus(.session(record.id))
         }
         store.beginPaneLoad(record.id)
+        rememberTaskPane()
         Task { @MainActor in await store.select(record.id) }
+    }
+
+    private func openTask(_ work: WorkReference) {
+        model.select(work)
+        if let saved = navigation.taskPanes[work.id],
+           let pane = workspaces.workspace(for: saved.path).multiplexer.layout.pane(for: saved.pane.id),
+           pane == saved.pane {
+            worktreeLayout.select(saved.path)
+            multiplexer.setFocusedPane(saved.pane.id)
+            navigation.content = .terminals
+            if case .shell = multiplexer.focusedPane.content {
+                store.surfaces.focus(.shell(saved.pane.id))
+            } else if case .session(let id) = multiplexer.focusedPane.content {
+                navigation.selectedSessionId = id
+                store.surfaces.focus(.session(id))
+            }
+            if case .monitor = multiplexer.focusedPane.content {
+                Task { await model.refreshActiveRuns() }
+            }
+        } else {
+            showMonitor(work.id)
+        }
+    }
+
+    private func showMonitor(_ taskId: String) {
+        let workspace = model.task(id: taskId)?.task.reference.workspace
+        let existing = workspaces.paths.first { path in
+            workspaces.workspace(for: path).multiplexer.layout.allPanes.contains {
+                $0.content == .monitor(taskId: taskId)
+            }
+        }
+        let path = existing ?? workspace.flatMap { $0.localExists == true ? $0.worktree : nil } ?? store.repoPath
+        worktreeLayout.select(path)
+        navigation.selectedSessionId = nil
+        navigation.content = .terminals
+        multiplexer.showMonitor(taskId: taskId)
+        rememberTaskPane()
+        Task { await model.refreshActiveRuns() }
+    }
+
+    private func rememberTaskPane() {
+        guard navigation.content == .terminals,
+              let work = model.selection, work.kind == .task,
+              let path = worktreeLayout.focusedPath else { return }
+        if case .monitor(let id) = multiplexer.focusedPane.content, id != work.id { return }
+        if case .session(let id) = multiplexer.focusedPane.content,
+           model.workspace.subject(for: id) != work { return }
+        guard multiplexer.focusedPane.content != .empty else { return }
+        navigation.taskPanes[work.id] = (path, multiplexer.focusedPane)
+    }
+
+    private func taskControls(_ taskId: String) -> some View {
+        let work = model.task(id: taskId)?.task.runtime.map { WorkReference.task(id: $0.workId) }
+        let records = store.sessions.filter { work != nil && $0.record.work == work }
+        return HStack(spacing: 12) {
+            Menu("Sessions") {
+                ForEach(records) { item in
+                    Button(item.record.title) { openSession(item.record) }
+                }
+            }
+            .disabled(records.isEmpty)
+            .accessibilityIdentifier("task-sessions-\(taskId)")
+            Button("Monitor") { showMonitor(taskId) }
+                .accessibilityIdentifier("task-show-monitor-\(taskId)")
+            Spacer()
+            Button("Inspect") { model.select(.task(id: taskId)) }
+        }
+        .font(.system(size: 12))
+        .padding(8)
     }
 
     private func _pane(for sessionId: String) -> PaneState? {
@@ -566,7 +559,7 @@ struct SessionsView: View {
 
     private func _destroySurface(in pane: PaneState) {
         switch pane.content {
-        case .empty:
+        case .empty, .monitor:
             return
         case .shell:
             store.surfaces.release(.shell(pane.id))
@@ -838,6 +831,7 @@ private struct SplitDivider: View {
 }
 
 private struct SessionPaneView: View {
+    @Environment(PodiumModel.self) private var model
     let pane: PaneState
     let isFocused: Bool
     let workingDirectory: String
@@ -1084,6 +1078,10 @@ private struct SessionPaneView: View {
                 onFocus: { store.setFocusedPane(pane.id) }
             )
             .id(pane.id)
+        case .monitor(let taskId):
+            TaskMonitorView(taskId: taskId, model: model)
+                .background(MonitorFocusTarget(isFocused: isFocused))
+                .simultaneousGesture(TapGesture().onEnded { store.setFocusedPane(pane.id) })
         }
     }
 
@@ -1214,6 +1212,7 @@ private struct SessionPaneView: View {
         case .empty: "Workspace"
         case .session: item?.record.detail ?? "Workspace"
         case .shell: "Shell"
+        case .monitor: "Monitor"
         }
     }
 
@@ -1223,8 +1222,40 @@ private struct SessionPaneView: View {
             item?.surface.map { .session($0.id) }
         case .shell:
             .shell(pane.id)
-        case .empty:
+        case .empty, .monitor:
             nil
+        }
+    }
+}
+
+// Giving AppKit an observation responder prevents clearing terminal focus from
+// advancing straight to another visible terminal in the same key-view loop.
+private struct MonitorFocusTarget: NSViewRepresentable {
+    let isFocused: Bool
+
+    func makeNSView(context: Context) -> FocusView { FocusView() }
+
+    func updateNSView(_ view: FocusView, context: Context) {
+        guard view.focusRequested != isFocused else { return }
+        view.focusRequested = isFocused
+        view.applyFocus()
+    }
+
+    final class FocusView: NSView {
+        var focusRequested = false
+        override var acceptsFirstResponder: Bool { focusRequested }
+
+        override func viewDidMoveToWindow() {
+            super.viewDidMoveToWindow()
+            applyFocus()
+        }
+
+        func applyFocus() {
+            if focusRequested {
+                window?.makeFirstResponder(self)
+            } else if window?.firstResponder === self {
+                window?.makeFirstResponder(nil)
+            }
         }
     }
 }

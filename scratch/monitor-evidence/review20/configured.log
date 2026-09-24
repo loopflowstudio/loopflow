@@ -1,0 +1,10 @@
+Observed at 2026-09-24T21:49:07Z
+Owned app PID 67802 Home /Users/jack/.lf-dev/installed/local-be852452823d43d7b7fde663651a7590
+PASS configured Task selected by exact planning ID ee671927-255f-41e6-8429-b830d59cc1de and Monitor refresh available
+PASS Monitor exact Run IDs match sequential CLI observation [] gaps 0
+PASS explicit Refresh accepted
+PASS Inspect retains Task directive access
+PASS one menu exposes Compact, Full hierarchy and Sessions
+PASS Full presentation preserves selected Task and inspection
+PASS configured Session identities unchanged; no Session action issued
+Owned app termination requested true

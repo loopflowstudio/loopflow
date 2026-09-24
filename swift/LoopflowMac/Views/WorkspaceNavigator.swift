@@ -4,282 +4,233 @@ import SwiftUI
 struct WorkspaceNavigator: View {
     @Bindable var model: PodiumModel
     let onOpenSession: (SessionRecord) -> Void
+    let onOpenTask: ((WorkReference) -> Void)?
     let sessionStatus: (SessionRecord) -> String
+    let onConversation: ((WorkReference?) -> Void)?
+    let onNewShell: (() -> Void)?
+    let onShowTerminals: (() -> Void)?
     @Environment(\.palette) private var palette
     @State private var scrollPosition: ScrollPosition
 
     init(model: PodiumModel, onOpenSession: @escaping (SessionRecord) -> Void,
-         sessionStatus: @escaping (SessionRecord) -> String = { $0.state.rawValue.uppercased() }) {
+         sessionStatus: @escaping (SessionRecord) -> String = { $0.state.rawValue.capitalized },
+         onConversation: ((WorkReference?) -> Void)? = nil,
+         onNewShell: (() -> Void)? = nil, onShowTerminals: (() -> Void)? = nil,
+         onOpenTask: ((WorkReference) -> Void)? = nil) {
         self.model = model
         self.onOpenSession = onOpenSession
+        self.onOpenTask = onOpenTask
         self.sessionStatus = sessionStatus
+        self.onConversation = onConversation
+        self.onNewShell = onNewShell
+        self.onShowTerminals = onShowTerminals
         _scrollPosition = State(initialValue: ScrollPosition(y: model.navigation.listScrollOffset))
     }
 
-    private var projection: WorkspaceProjection { model.workspace }
-    private var taskQuery: TaskQuery { model.navigation.taskQuery }
-    private var hasUnknownWorktrees: Bool {
-        projection.waves.contains { wave in
-            wave.projects.contains { project in
-                project.project.tasks.contains { task in
-                    task.reference.workspace.map { $0.localExists == nil } ?? false
-                }
-            }
-        }
+    private var rows: [WorkspaceOutlineRow] {
+        model.workspace.outline(
+            presentation: model.navigation.presentation, collapsed: model.navigation.collapsed,
+            search: model.navigation.search,
+            planningReadable: model.roadmap.value != nil && model.roadmap.errorMessage == nil
+        )
     }
-    private var search: String { model.navigation.search.trimmingCharacters(in: .whitespacesAndNewlines) }
+
+    private var repositories: [String] {
+        Set(model.allRepos.map(\.path) + model.visibleRoadmaps.map { $0.wave.repo }
+            + [model.repoPath].compactMap { $0 }).sorted()
+    }
 
     var body: some View {
         @Bindable var navigation = model.navigation
+        let rows = rows
+        let repositories = repositories
         VStack(spacing: 0) {
             HStack {
-                Text("Tasks").font(Typography.sectionTitle(20))
-                Spacer()
-                if let error = model.roadmap.errorMessage {
-                    Image(systemName: "exclamationmark.triangle").help(error)
-                }
+                TextField("Find work or Sessions", text: $navigation.search)
+                    .textFieldStyle(.plain)
+                    .accessibilityIdentifier("workspace-search")
+                Menu {
+                    Picker("Presentation", selection: $navigation.presentation) {
+                        ForEach(WorkspacePresentation.allCases, id: \.self) { presentation in
+                            Text(presentation.rawValue).tag(presentation)
+                        }
+                    }
+                    if let onShowTerminals {
+                        Divider()
+                        Button("Show retained terminals", action: onShowTerminals)
+                            .accessibilityIdentifier("workspace-return-terminals")
+                    }
+                } label: { Image(systemName: "line.3.horizontal.decrease") }
+                .menuStyle(.borderlessButton)
+                .fixedSize()
+                .accessibilityLabel("Outline presentation")
+                .accessibilityIdentifier("workspace-presentation")
             }
-            .padding(.horizontal, Spacing.md)
-            .padding(.top, Spacing.md)
-            Picker("Task view", selection: $navigation.taskQuery) {
-                ForEach(TaskQuery.allCases, id: \.self) { query in
-                    Text(query.rawValue).tag(query)
-                }
-            }
-            .pickerStyle(.segmented)
-            .padding(.horizontal, Spacing.md)
-            .padding(.top, Spacing.sm)
-            .accessibilityIdentifier("workspace-task-view")
-            TextField("Find work or Sessions", text: $navigation.search,
-                      prompt: Text("Find work or Sessions").foregroundStyle(palette.textSecondary))
-                .textFieldStyle(.plain)
-                .padding(Spacing.sm)
-                .background(palette.surfaceMuted, in: RoundedRectangle(cornerRadius: 5))
-                .padding(Spacing.md)
-                .accessibilityIdentifier("workspace-search")
+            .padding(12)
             ScrollView {
-                LazyVStack(alignment: .leading, spacing: Spacing.xs) {
-                    if model.roadmap.isLoading {
-                        Text("Reading planning…").foregroundStyle(palette.textSecondary)
-                            .accessibilityIdentifier("workspace-planning-loading")
-                    }
-                    if let error = model.roadmap.errorMessage {
-                        warning("Planning unavailable: \(error)")
-                            .accessibilityIdentifier("workspace-planning-unavailable")
-                    }
-                    if let error = model.sessions.errorMessage { warning("Sessions unavailable: \(error)") }
-                    if model.sessions.isLoading, model.repoPath != nil {
-                        Text("Reading Sessions…").foregroundStyle(palette.textSecondary)
-                    }
-                    ForEach(projection.waves.filter { includes($0) && matches($0) }) { wave in
-                        waveGroup(wave)
-                    }
-                    if taskQuery == .active {
-                        if hasUnknownWorktrees {
-                            warning("Some local worktrees could not be checked; Active may be incomplete.")
-                        }
-                        if model.processActivity.isLoading {
-                            Text("Reading activity…").foregroundStyle(palette.textSecondary)
-                        }
-                        if let error = model.processActivity.errorMessage {
-                            warning("Activity unavailable: \(error)")
-                        }
-                        if !model.roadmap.isLoading, !model.sessions.isLoading,
-                           !model.processActivity.isLoading, model.roadmap.errorMessage == nil,
-                           model.sessions.errorMessage == nil, model.processActivity.errorMessage == nil,
-                           !hasUnknownWorktrees, projection.waves.allSatisfy(planningIsComplete),
-                           !projection.waves.contains(where: { $0.projects.contains(where: { $0.tasks.contains(where: taskQuery.matches) }) }) {
-                            Text("No active Tasks in this repository.")
-                                .foregroundStyle(palette.textSecondary)
-                        }
-                    }
-                    if !projection.unmatchedSessions.isEmpty {
-                        Text("Other open Sessions")
-                            .font(Typography.caption(10).weight(.semibold))
-                            .foregroundStyle(palette.textSecondary)
-                            .padding(.top, Spacing.md)
-                        Text("Repository conversations or Work absent from this planning read.")
-                            .font(Typography.caption(9))
-                            .foregroundStyle(palette.textSecondary)
-                        ForEach(projection.unmatchedSessions.filter { matches($0.title) || matches($0.detail) }) { session in
-                            Button { onOpenSession(session) } label: {
-                                HStack {
-                                    VStack(alignment: .leading, spacing: Spacing.xs) {
-                                        Label(session.title, systemImage: "terminal")
-                                        if let path = session.workPath {
-                                            Text(path).font(Typography.caption(9)).foregroundStyle(palette.textSecondary)
-                                        }
-                                    }
-                                    Spacer()
-                                    Text(sessionStatus(session)).font(Typography.caption(8))
-                                }
-                                .padding(.vertical, Spacing.xs)
+                LazyVStack(alignment: .leading, spacing: 2) {
+                    forReadErrors
+                    ForEach(repositories, id: \.self) { repo in
+                        let selected = model.repoPath.map { model.repoIdentity($0) == model.repoIdentity(repo) } ?? false
+                        let omitRoot = repositories.count == 1 && selected && navigation.presentation != .full
+                            && !navigation.repositoryCollapsed && model.roadmap.value != nil
+                            && model.roadmap.errorMessage == nil
+                        if !omitRoot { repositoryRow(repo, selected: selected) }
+                        if selected && (!navigation.repositoryCollapsed || !navigation.search.isEmpty) {
+                            ForEach(rows) { row in
+                                outlineRow(row)
+                                    .padding(.leading, omitRoot ? 0 : 14)
                             }
-                            .accessibilityIdentifier("session-row-\(session.id)")
+                            if rows.isEmpty, !model.roadmap.isLoading, !model.sessions.isLoading,
+                               model.roadmap.errorMessage == nil, model.sessions.errorMessage == nil {
+                                Text(navigation.presentation == .sessions ? "No open Sessions." : "No matching Work.")
+                                    .foregroundStyle(palette.textSecondary).padding(8)
+                            }
                         }
                     }
-                    if projection.waves.isEmpty, model.roadmap.errorMessage == nil, !model.roadmap.isLoading {
-                        Text("No planned Work in this scope.").foregroundStyle(palette.textSecondary)
-                            .accessibilityIdentifier("workspace-planning-empty")
+                    // Before a repository is selected, keep mandatory boundaries
+                    // visible even if planning has not supplied its roots yet.
+                    if model.repoPath == nil {
+                        ForEach(rows.filter { $0.session != nil }) { row in outlineRow(row) }
                     }
                 }
-                .font(Typography.body(12))
-                .buttonStyle(.plain)
-                .padding(Spacing.md)
+                .padding(.horizontal, 8)
+                .padding(.bottom, 8)
             }
             .scrollPosition($scrollPosition)
             .onScrollGeometryChange(for: CGFloat.self) { geometry in
                 max(0, geometry.contentOffset.y + geometry.contentInsets.top)
-            } action: { _, offset in
-                navigation.listScrollOffset = offset
-            }
+            } action: { _, offset in navigation.listScrollOffset = offset }
         }
+        .font(.system(size: 12))
+        .buttonStyle(.plain)
         .background(palette.surface)
+        .contextMenu { repositoryActions }
         .accessibilityIdentifier("workspace-navigator")
     }
 
-    private func waveGroup(_ wave: WorkspaceWave) -> some View {
-        VStack(alignment: .leading, spacing: Spacing.xs) {
-            heading(wave.roadmap.wave.name, key: wave.id,
-                    count: taskCount(wave),
-                    sessions: wave.sessions,
-                    containedSessions: wave.sessions + wave.projects.flatMap { $0.sessions + $0.tasks.flatMap(\.sessions) })
-            if model.navigation.isExpanded(wave.id) {
-                if let reason = wave.roadmap.projects.unavailableReason { warning(reason) }
-                if case .available(_, let truncated) = wave.roadmap.projects, truncated {
-                    warning("Planning is partial; more Projects exist.")
-                }
-                ForEach(wave.projects.filter { includes($0) && (matches(wave.roadmap.wave.name) || matches($0)) }) { project in
-                    projectGroup(project, waveMatches: matches(wave.roadmap.wave.name))
-                }
+    @ViewBuilder private var forReadErrors: some View {
+        if model.roadmap.isLoading {
+            Text("Reading planning…").foregroundStyle(palette.textSecondary)
+                .accessibilityIdentifier("workspace-planning-loading")
+        }
+        if let error = model.roadmap.errorMessage {
+            warning("Planning unavailable: \(error)").accessibilityIdentifier("workspace-planning-unavailable")
+        }
+        if model.sessions.isLoading { Text("Reading Sessions…").foregroundStyle(palette.textSecondary) }
+        if let error = model.sessions.errorMessage { warning("Sessions unavailable: \(error)") }
+        ForEach(model.workspace.waves) { wave in
+            if let reason = wave.roadmap.projects.unavailableReason { warning(reason) }
+            if case .available(_, let truncated) = wave.roadmap.projects, truncated {
+                warning("Planning is partial; more Projects exist.")
             }
         }
-        .padding(.bottom, Spacing.sm)
     }
 
-    private func projectGroup(_ project: WorkspaceProject, waveMatches: Bool) -> some View {
-        VStack(alignment: .leading, spacing: Spacing.xs) {
-            heading(project.project.project.name, key: project.id, count: project.tasks.filter(taskQuery.matches).count,
-                    sessions: project.sessions,
-                    containedSessions: project.sessions + project.tasks.flatMap(\.sessions))
-            if model.navigation.isExpanded(project.id) {
-                ForEach(project.tasks.filter { taskQuery.matches($0) && (waveMatches || matches(project.project.project.name) || matches($0)) }) { task in
-                    HStack(spacing: Spacing.sm) {
-                        Button { select(task.id) } label: {
-                            VStack(alignment: .leading, spacing: Spacing.xxs) {
-                                Text(task.task.task.name).lineLimit(2)
-                                HStack(spacing: Spacing.sm) {
-                                    Text(task.task.task.identifier)
-                                    if task.hasProviderInCheckout { Text("Provider in checkout") }
-                                    else if task.task.reference.workspace?.localExists == true { Text("Local worktree") }
-                                    Text(task.task.task.completed ? "Completed" : task.task.condition.state.rawValue.capitalized)
-                                }
-                                .font(Typography.caption(9))
-                                .foregroundStyle(palette.textSecondary)
-                            }
-                            .frame(maxWidth: .infinity, alignment: .leading)
-                            .contentShape(Rectangle())
-                        }
-                        .accessibilityIdentifier("workspace-task-\(task.task.id)")
-                        sessionAccess(task.sessions)
+    private func repositoryRow(_ repo: String, selected: Bool) -> some View {
+        HStack(spacing: 4) {
+            Button {
+                if selected { model.navigation.repositoryCollapsed.toggle() }
+                else { selectRepository(repo) }
+            } label: {
+                Image(systemName: selected && !model.navigation.repositoryCollapsed ? "chevron.down" : "chevron.right")
+                    .frame(width: 16, height: 26)
+            }
+            .accessibilityLabel("Toggle repository \(repo)")
+            Button { selectRepository(repo) } label: {
+                Text(URL(fileURLWithPath: repo).lastPathComponent)
+                    .frame(maxWidth: .infinity, alignment: .leading).contentShape(Rectangle())
+            }
+            .help(repo)
+            .accessibilityIdentifier("workspace-repository-\(repo)")
+        }
+        .contextMenu {
+            Button("Open repository") { selectRepository(repo) }
+            if selected { repositoryActions }
+        }
+    }
+
+    private func outlineRow(_ row: WorkspaceOutlineRow) -> some View {
+        HStack(spacing: 4) {
+            if case .work(let subject, true) = row.content {
+                let key = subject.key
+                Button { model.navigation.toggle(key) } label: {
+                    Image(systemName: model.navigation.isExpanded(key) ? "chevron.down" : "chevron.right")
+                        .frame(width: 16, height: 26)
+                }
+                .accessibilityLabel("Toggle \(row.title)")
+                .accessibilityIdentifier("workspace-disclose-\(key.work.kind.rawValue)-\(key.work.id)")
+            } else {
+                Image(systemName: row.session == nil ? "minus" : "terminal")
+                    .foregroundStyle(palette.textSecondary).frame(width: 16)
+            }
+            Button {
+                switch row.content {
+                case .session(let session): onOpenSession(session)
+                case .work(let subject, _):
+                    if subject.key.work.kind == .task, let onOpenTask {
+                        onOpenTask(subject.key.work)
+                    } else {
+                        model.select(subject.key.work)
                     }
-                    .padding(Spacing.sm)
-                    .background(model.selection == task.id.work ? palette.surfaceMuted : Color.clear,
-                                in: RoundedRectangle(cornerRadius: 5))
                 }
-            }
-        }
-    }
-
-    private func heading(
-        _ title: String, key: WorkspaceNodeKey, count: Int?,
-        sessions: [SessionRecord], containedSessions: [SessionRecord]
-    ) -> some View {
-        HStack(spacing: Spacing.xs) {
-            Button { model.navigation.toggle(key) } label: {
-                Image(systemName: model.navigation.isExpanded(key) ? "chevron.down" : "chevron.right")
-                    .font(.system(size: 9, weight: .semibold))
-                    .frame(width: 20, height: 26)
-            }
-            .accessibilityLabel("Toggle \(title)")
-            .accessibilityIdentifier("workspace-disclose-\(key.work.kind.rawValue)-\(key.work.id)")
-            Button { select(key) } label: {
-                Text(title).font(Typography.caption(key.work.kind == .wave ? 12 : 10).weight(.semibold))
-                    .frame(maxWidth: .infinity, alignment: .leading)
-            }
-            .accessibilityIdentifier("workspace-\(key.work.kind.rawValue)-\(key.work.id)")
-            if !model.navigation.isExpanded(key) {
-                Text(count.map(String.init) ?? "?")
-                    .font(Typography.caption(9)).foregroundStyle(palette.textSecondary)
-            }
-            sessionAccess(model.navigation.isExpanded(key) ? sessions : containedSessions)
-        }
-        .foregroundStyle(key.work.kind == .wave ? palette.text : palette.textSecondary)
-        .padding(.top, Spacing.xs)
-    }
-
-    @ViewBuilder
-    private func sessionAccess(_ sessions: [SessionRecord]) -> some View {
-        if sessions.count == 1, let session = sessions.first {
-            Button { onOpenSession(session) } label: {
-                Label(sessionStatus(session), systemImage: "terminal")
-                    .font(Typography.caption(8))
-            }
-                .help([session.workPath, session.title].compactMap { $0 }.joined(separator: " · "))
-                .accessibilityLabel("Open Session: \(session.title)")
-                .accessibilityIdentifier("session-row-\(session.id)")
-        } else if !sessions.isEmpty {
-            Menu {
-                ForEach(sessions) { session in
-                    Button("\(session.title) · \(sessionStatus(session))") { onOpenSession(session) }
-                        .accessibilityIdentifier("session-row-\(session.id)")
+            } label: {
+                VStack(alignment: .leading, spacing: 2) {
+                    Text(row.title).lineLimit(2)
+                    if let detail = row.detail { Text(detail).foregroundStyle(palette.textSecondary).lineLimit(2) }
                 }
-            } label: { Label("\(sessions.count)", systemImage: "terminal") }
-            .menuStyle(.borderlessButton)
-            .fixedSize()
+                .frame(maxWidth: .infinity, alignment: .leading)
+                .contentShape(Rectangle())
+            }
+            .accessibilityIdentifier(identifier(row))
+            if let session = row.session {
+                Text(sessionStatus(session)).foregroundStyle(palette.textSecondary)
+            }
+        }
+        .padding(.vertical, 4)
+        .padding(.horizontal, 6)
+        .background(isSelected(row) ? palette.surfaceMuted : Color.clear, in: RoundedRectangle(cornerRadius: 4))
+        .padding(.leading, CGFloat(row.depth) * 14)
+        .contextMenu {
+            if let key = row.workKey { subjectActions(key.work, title: row.title) }
+            ForEach(row.ancestors, id: \.key) { ancestor in
+                subjectActions(ancestor.key.work, title: ancestor.title)
+            }
+            Divider()
+            repositoryActions
         }
     }
 
-    private func taskCount(_ wave: WorkspaceWave) -> Int? {
-        guard planningIsComplete(wave) else { return nil }
-        return wave.projects.reduce(0) { $0 + $1.tasks.filter(taskQuery.matches).count }
+    @ViewBuilder private func subjectActions(_ work: WorkReference, title: String) -> some View {
+        Button("Inspect \(title)") { model.select(work) }
+        if let onConversation { Button("New conversation · \(title)") { onConversation(work) } }
     }
 
-    private func select(_ key: WorkspaceNodeKey) {
-        if model.repoPath == nil { model.setRepoPath(key.repo) }
-        model.select(key.work)
+    @ViewBuilder private var repositoryActions: some View {
+        if let onConversation { Button("New repository conversation") { onConversation(nil) } }
+        if let onNewShell { Button("New terminal", action: onNewShell).accessibilityIdentifier("sessions-new-shell") }
+        if let onShowTerminals { Button("Show retained terminals", action: onShowTerminals) }
     }
 
-    private func includes(_ project: WorkspaceProject) -> Bool {
-        taskQuery == .all || !project.sessions.isEmpty || project.tasks.contains(where: taskQuery.matches)
+    private func selectRepository(_ path: String) {
+        model.setRepoPath(path)
+        Task.detached { try? saveLoopflowState(LoopflowState(selectedRepoPath: path.normalizedFilePath)) }
     }
 
-    private func includes(_ wave: WorkspaceWave) -> Bool {
-        taskQuery == .all || !wave.sessions.isEmpty || wave.projects.contains(where: includes)
-            || !planningIsComplete(wave)
+    private func identifier(_ row: WorkspaceOutlineRow) -> String {
+        switch row.id {
+        case .session(let id): "session-row-\(id)"
+        case .work(let key): "workspace-\(key.work.kind.rawValue)-\(key.work.id)"
+        }
     }
 
-    private func planningIsComplete(_ wave: WorkspaceWave) -> Bool {
-        guard case .available(_, false) = wave.roadmap.projects else { return false }
-        return wave.roadmap.unavailableProjects.isEmpty
+    private func isSelected(_ row: WorkspaceOutlineRow) -> Bool {
+        if let session = row.session { return model.navigation.selectedSessionId == session.id }
+        return model.navigation.selectedSessionId == nil && row.workKey?.work == model.selection
     }
 
-    private func matches(_ value: String) -> Bool { search.isEmpty || value.localizedCaseInsensitiveContains(search) }
-    private func matches(_ task: WorkspaceTask) -> Bool {
-        matches(task.task.task.name) || matches(task.task.task.identifier)
-            || task.sessions.contains { matches($0.title) }
-    }
-    private func matches(_ project: WorkspaceProject) -> Bool {
-        matches(project.project.project.name) || project.tasks.contains(where: matches)
-            || project.sessions.contains { matches($0.title) }
-    }
-    private func matches(_ wave: WorkspaceWave) -> Bool {
-        matches(wave.roadmap.wave.name) || wave.projects.contains(where: matches)
-            || wave.sessions.contains { matches($0.title) }
-    }
     private func warning(_ text: String) -> some View {
         Label(text, systemImage: "exclamationmark.triangle")
-            .font(Typography.caption(10)).foregroundStyle(Color.statusWarning)
-            .textSelection(.enabled)
+            .foregroundStyle(Color.statusWarning).textSelection(.enabled).padding(4)
     }
 }

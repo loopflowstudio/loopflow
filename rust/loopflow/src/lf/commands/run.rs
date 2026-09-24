@@ -753,7 +753,14 @@ fn begin_run_capture(
         skill: built.skill_name.clone(),
         subjects,
     };
-    let capture = if surface == "headless" {
+    let capture = if let Some(id) = crate::ops::human_session::prepared_run_id()? {
+        crate::run_record::CaptureHandle::start_prepared(
+            &crate::store::lf_home_dir(),
+            &id,
+            spec,
+            &built.context,
+        )
+    } else if surface == "headless" {
         let launch = crate::run_record::RunLaunchRequest::from_prepared(
             prepared_config,
             &built.capabilities,
@@ -768,7 +775,6 @@ fn begin_run_capture(
     }
     .map_err(|error| anyhow!("failed to publish Run manifest before agent launch: {error}"))?;
     capture.record_input("initial", &built.context.task.text);
-    crate::ops::human_session::publish_run_binding(&capture.run_id())?;
     crate::ops::flow_run::bind_run(&capture.run_id(), &capture.artifact_dir())?;
     Ok(capture)
 }

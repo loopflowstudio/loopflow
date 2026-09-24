@@ -22,7 +22,7 @@ private enum SessionFixtureKind: String {
         }
         return """
         {
-          "id": "\(id)",
+          "id": "\(id)", "run_id": "\(id)",
           "kind": "\(rawValue)",
           "work": \(work),
           "title": "\(rawValue.capitalized) fixture",

@@ -1610,6 +1610,7 @@ fn main() -> anyhow::Result<()> {
                 *json,
             ),
             Some(Commands::Runs {
+                active,
                 run,
                 parent,
                 events,
@@ -1620,6 +1621,9 @@ fn main() -> anyhow::Result<()> {
                 project,
                 json,
             }) => match run {
+                None if *active => {
+                    loopflow::lf::commands::runs::list_active(*json, task.as_deref())
+                }
                 Some(run) if *resume => loopflow::lf::commands::runs::resume_run(run),
                 Some(run) => {
                     loopflow::lf::commands::runs::inspect(run, *events, *final_answer, *json)

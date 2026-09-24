@@ -1,0 +1,23 @@
+{
+  "command": "swift test --package-path swift -Xswiftc -gnone --jobs 4 --no-parallel --filter 'TaskMonitorTests|TaskMonitorProofTests|WorkspaceNavigationProofTests/hiddenTerminalPreservesDraft'",
+  "tests_passed": 6,
+  "proof": "Native mounted workspace with real owned cat PTYs and fixture CLI transport",
+  "after_test_changes": "Whitespace-only SessionsView formatting; removed leftover whitespace from rejected Ghostty focus attempt; documentation.",
+  "source_sha256": {
+    "swift/Loopflow/Models/MultiplexerLayout.swift": "f49b42cb5454a548201b899662f3f62c168fa9b161951a5e818a21b94158b771",
+    "swift/Loopflow/Models/MultiplexerStore.swift": "6644ce3a041b4bbb92b00a1297a68be22fd42ed77740c064c639d930493f5d71",
+    "swift/LoopflowMac/PodiumModel.swift": "7fb9b278748201d162054a7554c1a5e7650d6b35445ce3a215a40666a36d96fb",
+    "swift/LoopflowMac/WorkspaceProjection.swift": "d1127a6e2bab41a7e8f7e63b58d3cfc32cb88b2abb5368fc44421419eff45fd2",
+    "swift/LoopflowMac/Views/WorkspaceNavigator.swift": "b7e137c461efa3263add6d1329cec3a20767927f53325002945585aacc3927d1",
+    "swift/LoopflowMac/Views/SessionsView.swift": "f1b9f8ec922809ba5c687bfd7f06d293144531c2d0c4121bdd9eeb0bbcf4eafa",
+    "swift/LoopflowMac/Views/TaskMonitorView.swift": "4b257784eade9ff15827653dbbee8495f9bd733a3f055f9896bb4446e2f6b7b4",
+    "swift/LoopflowTests/TaskMonitorTests.swift": "635fcd9e99e0155264f41bbd9a2c95f31184e06d6a6c0580a2053b591010fe90",
+    "swift/LoopflowTests/TaskMonitorProofTests.swift": "0c904f631dc4f3a06f89b355555eab6f211d8306ce8b180480dfde6b930f608b"
+  },
+  "remaining": [
+    "Bounded discovery and automatic refresh",
+    "Native hierarchy and workspace performance runners and baselines",
+    "Fallback compile blocked at resource preflight",
+    "Configured and human acceptance"
+  ]
+}

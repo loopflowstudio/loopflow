@@ -20,7 +20,7 @@ struct PodiumModelTests {
         model.setRepoPath("/src/context")
 
         #expect(model.visibleRoadmaps.map(\.wave.name) == ["context"])
-        #expect(model.waveSummary?.waves == 1)
+        #expect(model.visibleWaves.count == 1)
         #expect(model.selection == nil)
     }
 
@@ -143,7 +143,7 @@ struct PodiumModelTests {
         #expect(model.processActivity.errorMessage == "registry unavailable")
         #expect(model.workActivity.value == fixture.workActivity)
         #expect(model.workActivity.errorMessage == "registry unavailable")
-        #expect(model.waveSummary?.waves == 2)
+        #expect(model.visibleWaves.count == 2)
     }
 
     @Test("A slow process read does not hold back fleet, Sessions, or roadmap")
@@ -166,7 +166,7 @@ struct PodiumModelTests {
         await deferred.waitUntilRequested()
         await model.refresh()
 
-        #expect(model.waveSummary?.waves == 2)
+        #expect(model.visibleWaves.count == 2)
         #expect(model.visibleRoadmaps.map(\.wave.name) == ["product", "context"])
         #expect(model.sessions.value == [])
 
@@ -239,8 +239,8 @@ struct PodiumModelTests {
         #expect(model.processActivity.value?.observedAt == 3)
     }
 
-    @Test("Wave summary counts authored Waves without active Runs")
-    func waveSummaryCountsAuthoredWaves() async throws {
+    @Test("Authored Waves remain visible without active Runs")
+    func authoredWavesRemainVisible() async throws {
         let fixture = try PodiumTestFixture.load()
         let repo = FileManager.default.temporaryDirectory
             .appendingPathComponent("podium-authored-\(UUID().uuidString)", isDirectory: true)
@@ -271,7 +271,6 @@ struct PodiumModelTests {
         #expect(model.visibleWaves.map(\.displayName) == [
             "infrastructure", "intelligence", "product",
         ])
-        #expect(model.waveSummary?.waves == 3)
     }
 
     @Test("A development worktree becomes one main-repository choice")
@@ -329,7 +328,6 @@ struct PodiumModelTests {
         #expect(model.repoIdentity(model.visibleRepos[0].path) == model.repoIdentity(worktree.path))
         #expect(model.visibleWaves.map(\.displayName) == ["product"])
         #expect(model.visibleWaves.map(\.isRegistered) == [true])
-        #expect(model.waveSummary == WaveSummary(waves: 1))
 
         let restored = PodiumModel(query: fixture.query, repoPath: worktree.path)
         await restored.refreshPortfolio(initialRepoPath: nil)

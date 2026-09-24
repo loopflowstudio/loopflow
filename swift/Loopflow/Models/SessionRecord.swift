@@ -37,6 +37,7 @@ public struct SessionAction: Codable, Sendable, Hashable {
 /// Rust owns completion, FlowStep decisions, and provider-client liveness.
 public struct SessionRecord: Codable, Sendable, Hashable, Identifiable {
     public let id: String
+    public let runId: String
     public let kind: SessionKind
     public let work: WorkReference?
     public let waveId: String?
@@ -58,6 +59,7 @@ public struct SessionRecord: Codable, Sendable, Hashable, Identifiable {
         case id, kind, work, title, detail, cwd, state
         case waveId = "wave_id"
         case actions
+        case runId = "run_id"
         case workPath = "work_path"
         case readySummary = "ready_summary"
         case openArgv = "open_argv"

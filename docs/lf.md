@@ -551,6 +551,14 @@ start before the desktop is present. That cradle is not Session identity,
 readiness storage, liveness authority, or the attachment surface. The boundary
 record owns resolution; the ordinary Run owns provider identity and history.
 
+Every Session JSON record includes a required `run_id`. Use it for Run lookup;
+do not parse the Session ID. Ask and FlowStep boundaries prepare their Run before
+publication, so an unopened Session already has an identity without a provider
+process. Launch fills in that Run's context; native resume retains its identity.
+For an older boundary without a Run, `lf session open <id> --json` prepares it
+without starting a provider. Listing fails with that recovery command until the
+boundary is prepared; it never allocates a Run itself.
+
 `--stack-on` places a new Task worktree on another Task's published PR. Its PR
 targets that parent branch automatically, then collapses onto `main` after the
 parent merges. The two Tasks keep separate identities, worktrees, and workers.
@@ -642,6 +650,8 @@ lf roadmap --json               # current plan plus that portfolio on every Wave
 lf activity                     # durable Work changes, newest first
 lf activity --task INF-123 --json # filter before the bounded typed snapshot
 lf runs                         # recent Home-local Run records
+lf runs --active --json          # current provider-backed Runs and observation gaps
+lf runs --active --task LOO-291  # exact Task attribution, independent of checkout
 lf runs --project parser        # one Project's Runs, filtered before the result cap
 lf runs --parent run_ab12 --json # every direct child Run, uncapped
 lf runs run_ab12                 # inspect one Run by unambiguous prefix
@@ -689,7 +699,22 @@ planning and runtime projection. `lf roadmap` overlays the current
 Linear-backed plan without creating a second runtime model. `lf activity`
 orders durable Work creation, Run, Task PR, and Steer facts; it reuses
 `WorkRef` identity and does not read reconstructable Task or Project wake
-events. `lf runs`, `lf replay`, and `lf usage` scan `$LF_HOME/runs/` directly.
+events. Historical `lf runs`, `lf replay`, and `lf usage` scan `$LF_HOME/runs/` directly.
+
+`lf runs --active` reads current capture bindings and native client receipts
+against one OS process observation. Native discovery visits retained Run
+directories but loads manifests only for nonempty client namespaces; it never
+requires an older native launcher to publish a new index entry. Generic captures
+use their current Exec binding. The read has no history window or
+result cap. Waiting native clients count while their owned process remains live;
+unfinished Run metadata alone does not. JSON includes `home`, `observed_at`,
+optional `task`, `runs`, and `gaps`. An empty `runs` array confirms no active Runs
+only when `gaps` is also empty. Missing or ambiguous ownership remains unavailable.
+Use the unfiltered Home observation to feed several Task views; filter by each
+row's typed `work`, never its checkout. The first active read supports Task scope;
+Wave/Project filters remain history reads. Native receipt discovery currently
+walks Run directories so already-running clients remain visible; it does not
+read historical events or reduce usage. Its cost still grows with retained Runs.
 The `--parent` drill resolves one exact Run and returns all direct children
 without the seven-day presentation cap. The one-Run `--final` read projects the
 last durable provider conclusion from normalized conversation events. Records

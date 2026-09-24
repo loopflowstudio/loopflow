@@ -1,0 +1,38 @@
+{
+  "run_id": "run_a43e9829dfa24287be2c8d7a593d9cce",
+  "session_before": "active",
+  "session_after": "active",
+  "before": {
+    "home": "/var/folders/m6/r3tllnrs1yq7yfbwm680tss40000gn/T/loo291-review2-ifvvfn8y",
+    "observed_at": 1790283841,
+    "task": null,
+    "runs": [
+      {
+        "id": "run_a43e9829dfa24287be2c8d7a593d9cce",
+        "work": null,
+        "subjects": [],
+        "label": "opencode",
+        "harness": "opencode",
+        "model": null,
+        "repo": null,
+        "processes": [
+          {
+            "pid": 68557,
+            "provider": "opencode",
+            "state": "waiting"
+          }
+        ]
+      }
+    ],
+    "gaps": []
+  },
+  "without_bindings": {
+    "home": "/var/folders/m6/r3tllnrs1yq7yfbwm680tss40000gn/T/loo291-review2-ifvvfn8y",
+    "observed_at": 1790283842,
+    "task": null,
+    "runs": [],
+    "gaps": []
+  },
+  "provider_still_running": true,
+  "binding_count_removed": 1
+}

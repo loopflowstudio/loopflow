@@ -1,0 +1,29 @@
+Building for debugging...
+[0/5] Write sources
+[1/5] Write swift-version--58304C5D6DBC2206.txt
+[3/5] Emitting module LoopflowTests
+[4/5] Compiling LoopflowTests WorkspaceNavigationTests.swift
+[4/6] Write Objects.LinkFileList
+[5/6] Linking LoopflowSwiftPackageTests
+Build complete! (2.19s)
+Test Suite 'Selected tests' started at 2026-09-24 13:29:32.337.
+Test Suite 'LoopflowSwiftPackageTests.xctest' started at 2026-09-24 13:29:32.338.
+Test Suite 'LoopflowSwiftPackageTests.xctest' passed at 2026-09-24 13:29:32.338.
+	 Executed 0 tests, with 0 failures (0 unexpected) in 0.000 (0.000) seconds
+Test Suite 'Selected tests' passed at 2026-09-24 13:29:32.338.
+	 Executed 0 tests, with 0 failures (0 unexpected) in 0.000 (0.001) seconds
+◇ Test run started.
+↳ Testing Library Version: 1501
+↳ Target Platform: arm64e-apple-macos14.0
+◇ Suite "Unified Work and Session navigation" started.
+◇ Test "Compact keeps empty planning subjects available for inspection and conversation" started.
+◇ Test case passing 1 argument hasProject → false to "Compact keeps empty planning subjects available for inspection and conversation" started.
+◇ Test case passing 1 argument hasProject → true to "Compact keeps empty planning subjects available for inspection and conversation" started.
+✘ Test "Compact keeps empty planning subjects available for inspection and conversation" recorded an issue with 1 argument hasProject → false at WorkspaceNavigationTests.swift:64:9: Expectation failed: (rows.count → 0) == 1
+✘ Test "Compact keeps empty planning subjects available for inspection and conversation" recorded an issue with 1 argument hasProject → false at WorkspaceNavigationTests.swift:65:9: Expectation failed: (rows.first?.workKey?.work.kind → nil) == ((hasProject ? .project : .wave) → .wave)
+✘ Test "Compact keeps empty planning subjects available for inspection and conversation" recorded an issue with 1 argument hasProject → true at WorkspaceNavigationTests.swift:64:9: Expectation failed: (rows.count → 0) == 1
+✘ Test "Compact keeps empty planning subjects available for inspection and conversation" recorded an issue with 1 argument hasProject → true at WorkspaceNavigationTests.swift:65:9: Expectation failed: (rows.first?.workKey?.work.kind → nil) == ((hasProject ? .project : .wave) → .project)
+✘ Test "Compact keeps empty planning subjects available for inspection and conversation" recorded an issue with 1 argument hasProject → true at WorkspaceNavigationTests.swift:66:25: Expectation failed: (rows.first?.ancestors.map(\.key.work.kind) → nil) == ([.wave] → [Loopflow.WorkReference.Kind.wave])
+✘ Test "Compact keeps empty planning subjects available for inspection and conversation" with 2 test cases failed after 0.003 seconds with 5 issues.
+✘ Suite "Unified Work and Session navigation" failed after 0.003 seconds with 5 issues.
+✘ Test run with 1 test in 1 suite failed after 0.003 seconds with 5 issues.

@@ -34,38 +34,40 @@ excluded by the pinned Ghostty build.
 If macOS cannot provide Ghostty's display link, terminals use timer rendering.
 The app logs the CoreVideo error code; the user's Ghostty configuration is unchanged.
 
-Open a repository to see **Active** Tasks: those with an existing local worktree,
-an open Session, or an owned live provider in their Task checkout. Tasks stay
-visible between Runs while their worktree exists. **Provider in checkout** describes
-that local activity; it does not establish Task execution or success. Switch to **All tasks** to include
-queued work. Both views filter the same in-memory reading and retain compact
-Wave/Project context; changing views does not fetch data or restart terminals. Select a Task to inspect its
-directive, recorded condition, Project definition and KR proof, Activity, PR,
-and worktree references. A Task with no open Sessions says so explicitly.
-Choose **Edit directive** to update the selected Task, then **Save directive**
-to write through the shared PM API and display refreshed planning. Failed saves
-keep your text and show the error. If the write succeeds but planning cannot be
-read back, the editor says so and retains the draft.
-Select a Wave heading to inspect Work records outside its current plan. Those
-diagnostics live in Wave details; failed or partial planning reads remain visible
-in the Task list. Active keeps these Wave headings reachable and withholds an
-empty-state claim while planning cannot account for their Work.
+Select a repository in the outline, then choose a Task or Session. Use the
+outline menu for **Compact**, **Full hierarchy**, or **Sessions**. Compact
+promotes descendants of singleton Waves and Projects when planning is readable;
+Tasks remain visible even before they have a Session. Disclosure folds a branch,
+while presentation changes preserve its saved expansion and selection.
+Same-named Sessions show distinguishing ancestry. Repository conversations and
+Sessions with unavailable ancestry remain reachable in the same outline.
 
-Open a Session from its subject's terminal button. Sessions absent from the
-planning read remain reachable under **Other open Sessions**; existing multiple
-conversations and required human decisions stay available. Task joins use the
-shared durable Work relationship, never titles or checkout guesses.
+Right-click a row to inspect its subject or ancestors, start a scoped conversation,
+or open an ordinary terminal. Right-click the outline background for repository
+actions. **Show retained terminals** restores the existing pane layout. Search,
+scroll, presentation, expansion and selection survive repository switches within
+the window. Selecting a Task restores its last pane, initially **Monitor**;
+selecting a Session opens its exact terminal through the shared Session action.
+Use **Inspect** or the row's context menu for details. Presentation changes never
+start a provider or resolve a Session.
 
-Work opens full-width. **Show work list** adds the compact navigator alongside
-it; **Hide work list** restores full width. **All work** returns to the overview,
-and **Return to terminals** restores the retained pane layout. List visibility,
-search, list scroll position, group expansion, and Work selection survive
-repository switches for this window. Searching temporarily reveals matching groups without changing
-saved expansion. Navigation never starts a provider or resolves a Session.
-Launching the app from a Wave's terminal does not restrict the workspace to that
-Wave; the app uses its selected repository and explicit Work targets.
+**Monitor** opens beside retained Sessions and shells in the same multiplexer.
+Split, resize, zoom, close and Undo work for all pane content. Monitor shows the
+selected Task's active Runs at the displayed observation time. Choose **Refresh**
+for a new shared reading; this first version refreshes on opening and on request.
+Read failures retain the last successful observation with an error; incomplete
+ownership evidence is visible and cannot report confirmed emptiness. Closing a
+Monitor closes observation only. **Sessions** selects an exact conversation and
+returns keyboard focus to its terminal with unfinished input retained.
 
-Each pane owns one native libghostty surface. Session badges distinguish
+Task details include the directive, recorded condition, Project definition and
+KR proof, Activity, PR and worktree references. Choose **Edit directive**, then
+**Save directive** to write through the shared PM API. Failed saves retain your
+text; an accepted write with unavailable readback retains the draft and explains
+what happened. Wave details expose Work outside the current plan. Failed and
+partial reads remain visible in the outline.
+
+Each terminal pane owns one native libghostty surface. Session badges distinguish
 **VIEWING**, **RUNNING**, **ELSEWHERE**, **OPENING**, and **RETRY**. Sessions
 include interactive provider Runs, Task human FlowSteps, and ad-hoc Asks.
 Runs resumed interactively also appear, including those originally launched
@@ -94,6 +96,9 @@ Task FlowSteps run ordinary `lf --tui --as task:<id> <skill>` provider Runs.
 Ad-hoc Asks run in the originating Run's exact checkout so the session can edit
 files before the caller resumes. The app lists, opens, and acts on the shared
 Rust `SessionRecord` projection; it owns no parallel queue.
+Every record carries a required `runId` for Run lookup, including unopened Ask
+and FlowStep Sessions. The Session ID targets human actions; `runId` targets the
+Run. A prepared Run alone does not establish live provider activity.
 Use **New conversation** to talk about the selected repo, Wave, Project, or Task
 in the configured app or terminal. It opens an interactive prompt without
 creating a Task or running an autonomous operating pass. **New terminal** opens
@@ -117,21 +122,18 @@ Session reads and preparation run in the opened repository rather than a
 machine-wide aggregate.
 
 Planning and Sessions share the Podium readings; there is no separate
-Sessions-only roadmap query. The displayed planning timestamp is snapshot
-generation time, not evidence of a fresh provider sync. A failed read keeps its
-last useful evidence and exposes the error. Unknown Session counts show **?**.
+Sessions-only roadmap query. A failed read keeps its last useful evidence and
+exposes the error. Inspection shows the planning snapshot's generation time,
+which does not establish a fresh provider sync, and an explicit no-Session state
+only after a successful Session read. Compact retains an empty Wave or Project
+as an inspectable leaf; it compresses structural levels only when descendants
+can take their place.
 
 Current Wave navigation reads `lf ls --all --current --json`. The CLI excludes
 abandoned and retired registrations; unfiltered `lf ls` retains historical
 registry visibility. Authored `wave/<name>/GOAL.md` files still appear before
 their first registration.
 
-The compact Podium bar reads live process evidence from `lf ps --json`. Its
-lamp reflects OS-live state: black is off, green is working, blue is stalled,
-and amber is waiting or unknown. Wave count, active Runs, and
-Run-without-listener warnings come from `lf ls --all --current --json`.
-Its Sessions badge uses the same repo-scoped `lf session list --json` reading
-and reveals the work list.
 Repository scope filters the Work and Wave snapshots locally; live process
 evidence remains machine-wide.
 Provider activity remains separate from Task condition and human Session presence.
@@ -282,3 +284,9 @@ xcodebuild -quiet \
 ```
 
 The repository-wide gate is `uv run python scripts/test.py --all`.
+
+Task Monitor's shared reader is `RegistryQuery.activeRuns(task:)`, backed by
+`lf runs --active --json`. Its typed Work references and verified live processes
+are separate from Session rows and historical Run outcomes. Keep `gaps` visible:
+an empty Run array with gaps is unavailable evidence. One Home observation can
+feed multiple Task panes.

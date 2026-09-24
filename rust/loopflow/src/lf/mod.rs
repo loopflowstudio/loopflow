@@ -538,6 +538,9 @@ pub enum Commands {
     },
     /// Show recent agent-backed skill runs with context and token evidence
     Runs {
+        /// Observe current provider-backed Runs without the history window or cap
+        #[arg(long, conflicts_with_all = ["run", "parent", "wave", "project"])]
+        active: bool,
         /// Inspect one Run by full id or unambiguous displayed prefix
         #[arg(conflicts_with_all = ["parent", "task", "project", "wave"])]
         run: Option<String>,

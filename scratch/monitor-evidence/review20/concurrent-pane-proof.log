@@ -1,0 +1,22 @@
+[0/1] Planning build
+Building for debugging...
+[0/4] Write swift-version--58304C5D6DBC2206.txt
+Build complete! (0.17s)
+Test Suite 'Selected tests' started at 2026-09-24 14:51:38.812.
+Test Suite 'LoopflowSwiftPackageTests.xctest' started at 2026-09-24 14:51:38.813.
+Test Suite 'LoopflowSwiftPackageTests.xctest' passed at 2026-09-24 14:51:38.813.
+	 Executed 0 tests, with 0 failures (0 unexpected) in 0.000 (0.000) seconds
+Test Suite 'Selected tests' passed at 2026-09-24 14:51:38.813.
+	 Executed 0 tests, with 0 failures (0 unexpected) in 0.000 (0.001) seconds
+◇ Test run started.
+↳ Testing Library Version: 1501
+↳ Target Platform: arm64e-apple-macos14.0
+◇ Suite "Task Monitor integration proof" started.
+◇ Test "Focusing another Task's pane cannot replace the selected Task's saved choice" started.
+✔ Test "Focusing another Task's pane cannot replace the selected Task's saved choice" passed after 0.748 seconds.
+◇ Test "Returning to a Task never restores another Task's Session in a reused pane" started.
+✔ Test "Returning to a Task never restores another Task's Session in a reused pane" passed after 0.012 seconds.
+◇ Test "Monitor shares the split tree and preserves real Session and companion input through zoom and return" started.
+✔ Test "Monitor shares the split tree and preserves real Session and companion input through zoom and return" passed after 0.906 seconds.
+✔ Suite "Task Monitor integration proof" passed after 1.668 seconds.
+✔ Test run with 3 tests in 1 suite passed after 1.668 seconds.

@@ -135,6 +135,157 @@ struct OwnedProviderProcess {
     process: OsProcess,
 }
 
+#[derive(Debug, Clone, Serialize, Deserialize, PartialEq, Eq)]
+pub struct LiveProviderProcess {
+    pub pid: u32,
+    pub provider: String,
+    pub state: ActivityState,
+}
+
+#[derive(Debug)]
+pub(crate) struct LiveExecProviders {
+    pub receipt: ExecProcessReceipt,
+    pub providers: Vec<LiveProviderProcess>,
+}
+
+#[derive(Debug)]
+pub(crate) struct LiveRunProcesses {
+    pub execs: Vec<LiveExecProviders>,
+    pub clients: Vec<(crate::durable::RunId, LiveProviderProcess)>,
+    pub gaps: Vec<String>,
+}
+
+/// Run observations use the same process and ownership evidence as `ps`,
+/// without loading the Exec event ledger or provider output.
+pub(crate) fn live_exec_providers(
+    lf_home: &Path,
+    now: i64,
+    bound_owners: &[crate::durable::TaskWorkerOwner],
+    clients: &[(
+        crate::durable::RunId,
+        crate::run_record::ProviderClientRef,
+        String,
+    )],
+) -> Result<LiveRunProcesses> {
+    let snapshot = observe_processes(now, lf_home)?;
+    let mut native = Vec::new();
+    for process in &snapshot.processes {
+        if process.kernel_state.starts_with('Z') {
+            continue;
+        }
+        for (run_id, client, harness) in clients {
+            if crate::run_record::provider_client_matches(
+                client,
+                harness,
+                process.pid,
+                process.started_at,
+                &process.command,
+            ) {
+                native.push((
+                    run_id.clone(),
+                    LiveProviderProcess {
+                        pid: process.pid,
+                        provider: harness.clone(),
+                        state: os_activity_state(process),
+                    },
+                ));
+            }
+        }
+    }
+    let native_pids = native
+        .iter()
+        .map(|(_, process)| process.pid)
+        .collect::<HashSet<_>>();
+    let by_pid = snapshot
+        .processes
+        .iter()
+        .map(|process| (process.pid, process))
+        .collect::<HashMap<_, _>>();
+    let receipts = snapshot
+        .receipts
+        .iter()
+        .filter(|receipt| receipt_matches_live_lf(receipt, &by_pid))
+        .collect::<Vec<_>>();
+    let owners = receipts
+        .iter()
+        .map(|receipt| (receipt.pid, receipt.exec_id.clone()))
+        .collect::<HashMap<_, _>>();
+    let mut gaps = Vec::new();
+    for owner in bound_owners {
+        if by_pid.get(&owner.pid).is_some_and(|process| {
+            (process.started_at - owner.started_at).abs() <= PROCESS_START_TOLERANCE_SECONDS
+        }) && !receipts.iter().any(|receipt| {
+            receipt.exec_id == owner.exec_id.as_str()
+                && receipt.trace_id == owner.trace_id.as_str()
+                && receipt.pid == owner.pid
+                && receipt.started_at == owner.started_at
+        }) {
+            gaps.push(format!(
+                "Exec {} is live but its ownership receipt is unavailable",
+                owner.exec_id
+            ));
+        }
+    }
+    let (providers, unclaimed) = claim_provider_processes(&snapshot, &by_pid, &owners);
+    let unclaimed = unclaimed
+        .iter()
+        .filter(|process| {
+            process.claim == ProviderClaim::Orphaned && !native_pids.contains(&process.pid)
+        })
+        .count()
+        + snapshot
+            .processes
+            .iter()
+            .filter(|process| {
+                process.kind.is_none()
+                    && !native_pids.contains(&process.pid)
+                    && nearest_exec_owner(process.ppid, &by_pid, &owners).is_some()
+                    && process
+                        .command
+                        .split_whitespace()
+                        .next()
+                        .and_then(|word| Path::new(word).file_name())
+                        .is_some_and(|name| name == "opencode")
+            })
+            .count();
+    let execs = receipts
+        .into_iter()
+        .map(|receipt| LiveExecProviders {
+            receipt: receipt.clone(),
+            providers: providers
+                .iter()
+                .filter(|provider| {
+                    provider.exec_id == receipt.exec_id
+                        && !native_pids.contains(&provider.process.pid)
+                        && !provider.process.kernel_state.starts_with('Z')
+                })
+                .map(|provider| LiveProviderProcess {
+                    pid: provider.process.pid,
+                    provider: provider
+                        .process
+                        .kind
+                        .expect("owned process is a provider")
+                        .label()
+                        .to_owned(),
+                    state: os_activity_state(&provider.process),
+                })
+                .collect(),
+        })
+        .collect();
+    if unclaimed > 0 {
+        gaps.push(format!(
+            "{unclaimed} Home-owned provider processes have no verified Run attribution"
+        ));
+    }
+    gaps.sort();
+    gaps.dedup();
+    Ok(LiveRunProcesses {
+        execs,
+        clients: native,
+        gaps,
+    })
+}
+
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 enum ProcessKind {
     Lf,
@@ -349,13 +500,8 @@ fn observe_processes(now: i64, lf_home: &Path) -> Result<ProcessSnapshot> {
         return Err(anyhow!("ps failed while collecting Loopflow activity"));
     }
     let processes = parse_processes(&String::from_utf8_lossy(&output.stdout), now);
-    let opencode_servers = match registered_opencode_servers_at(lf_home) {
-        Ok(servers) => servers,
-        Err(error) => {
-            tracing::warn!(error = %error, "OpenCode ownership registry unavailable");
-            Vec::new()
-        }
-    };
+    let opencode_servers = registered_opencode_servers_at(lf_home)
+        .context("OpenCode ownership registry unavailable")?;
     Ok(ProcessSnapshot {
         processes,
         receipts: read_exec_process_receipts_at(lf_home)

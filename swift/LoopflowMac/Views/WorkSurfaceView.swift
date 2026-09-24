@@ -80,6 +80,22 @@ struct WorkSurfaceView: View {
     ) -> some View {
         ScrollView {
             VStack(alignment: .leading, spacing: Spacing.lg) {
+                VStack(alignment: .leading, spacing: 4) {
+                    if let snapshot {
+                        Text("Planning snapshot: \(snapshot.generatedAt)")
+                            .help("Snapshot generation time; not a fresh provider sync.")
+                    }
+                    if let selection = model.selection, model.sessions.errorMessage == nil,
+                       let records = model.sessions.value {
+                        let workspace = model.workspace
+                        if !records.contains(where: { workspace.subject(for: $0.id) == selection }) {
+                            Text("No open Sessions for this Work.")
+                                .accessibilityIdentifier("workspace-no-sessions")
+                        }
+                    }
+                }
+                .font(.system(size: 12))
+                .foregroundStyle(palette.textSecondary)
                 body()
             }
             .padding(Spacing.xl)
@@ -227,7 +243,7 @@ struct WorkSurfaceView: View {
                                 .foregroundStyle(palette.textSecondary)
                         }
                         Text(task.task.name)
-                            .font(Typography.sectionTitle(20))
+                            .font(.system(size: 14, weight: .semibold))
                             .foregroundStyle(palette.text)
                         Spacer()
                         Text(task.section.label)
@@ -257,7 +273,7 @@ struct WorkSurfaceView: View {
                         .stroke(palette.border, lineWidth: 1)
                 }
                 HStack {
-                    Text("Task directive").font(Typography.sectionTitle(16))
+                    Text("Task directive").font(.system(size: 14, weight: .semibold))
                     Spacer()
                     Button("Edit directive") {
                         editingTask = WorkTaskSelection(wave: found.wave.wave, task: task)
@@ -272,7 +288,7 @@ struct WorkSurfaceView: View {
                     Text(workspace.worktree)
                         .font(Typography.code(11)).textSelection(.enabled)
                 }
-                Text(found.project.project.name).font(Typography.sectionTitle(16))
+                Text(found.project.project.name).font(.system(size: 14, weight: .semibold))
                 Text(found.project.project.definition)
                     .font(Typography.body(13)).textSelection(.enabled)
                 projectProof(found.project.project)
@@ -286,7 +302,7 @@ struct WorkSurfaceView: View {
 
     private func projectProof(_ project: ProjectPlanningSnapshot) -> some View {
         VStack(alignment: .leading, spacing: Spacing.sm) {
-            Text("Key results").font(Typography.sectionTitle(16))
+            Text("Key results").font(.system(size: 14, weight: .semibold))
             if project.krs.isEmpty {
                 Text("No key results recorded.")
             }
@@ -311,7 +327,7 @@ struct WorkSurfaceView: View {
     private func surfaceHeader(_ title: String, subtitle: String) -> some View {
         VStack(alignment: .leading, spacing: Spacing.xxs) {
             Text(title)
-                .font(Typography.sectionTitle(22))
+                .font(.system(size: 14, weight: .semibold))
                 .foregroundStyle(palette.text)
             Text(subtitle)
                 .font(Typography.caption(11))
@@ -448,7 +464,7 @@ struct TaskDirectiveEditor: View {
     var body: some View {
         VStack(alignment: .leading, spacing: Spacing.md) {
             Text("Edit directive · \(task.task.identifier)")
-                .font(Typography.sectionTitle(18))
+                .font(.system(size: 14, weight: .semibold))
             TextEditor(text: $draft)
                 .font(Typography.body(13))
                 .scrollContentBackground(.hidden)

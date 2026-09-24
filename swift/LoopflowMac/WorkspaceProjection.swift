@@ -12,17 +12,12 @@ struct WorkspaceTask: Identifiable {
     let id: WorkspaceNodeKey
     let task: RoadmapTask
     let sessions: [SessionRecord]
-    let hasProviderInCheckout: Bool
 }
 
-enum TaskQuery: String, CaseIterable {
-    case active = "Active"
-    case all = "All tasks"
-
-    func matches(_ task: WorkspaceTask) -> Bool {
-        self == .all || task.task.reference.workspace?.localExists == true
-            || task.sessions.contains { $0.state != .closed } || task.hasProviderInCheckout
-    }
+enum WorkspacePresentation: String, CaseIterable {
+    case compact = "Compact"
+    case full = "Full hierarchy"
+    case sessions = "Sessions"
 }
 
 struct WorkspaceProject: Identifiable {
@@ -71,8 +66,7 @@ struct WorkspaceProjection {
                             return WorkspaceTask(
                                 id: WorkspaceNodeKey(repo: repo, work: .task(id: task.id)),
                                 task: task,
-                                sessions: records,
-                                hasProviderInCheckout: providerInCheckout
+                                sessions: records
                             )
                         }
                     )
@@ -82,20 +76,6 @@ struct WorkspaceProjection {
         // Missing planning and unattributed Sessions remain reachable, including
         // mandatory human boundaries and multiple conversations on one subject.
         unmatchedSessions = sessions.filter { !matched.contains($0.id) }
-    }
-
-    func sessions(for work: WorkReference?) -> [SessionRecord] {
-        guard let work else { return unmatchedSessions }
-        for wave in waves {
-            if wave.id.work == work { return wave.sessions }
-            for project in wave.projects {
-                if project.id.work == work { return project.sessions }
-                if let task = project.tasks.first(where: { $0.id.work == work }) {
-                    return task.sessions
-                }
-            }
-        }
-        return []
     }
 
     func subject(for sessionId: String) -> WorkReference? {
@@ -112,25 +92,181 @@ struct WorkspaceProjection {
     }
 }
 
+struct WorkspaceOutlineSubject {
+    let key: WorkspaceNodeKey
+    let title: String
+}
+
+/// Disposable visible rows. Planning and Session identities remain the source.
+struct WorkspaceOutlineRow: Identifiable {
+    enum Content {
+        case work(WorkspaceOutlineSubject, hasChildren: Bool)
+        case session(SessionRecord)
+    }
+
+    enum ID: Hashable {
+        case work(WorkspaceNodeKey)
+        case session(String)
+    }
+
+    let content: Content
+    var detail: String?
+    var depth: Int
+    let ancestors: [WorkspaceOutlineSubject]
+
+    var id: ID {
+        switch content {
+        case .work(let subject, _): .work(subject.key)
+        case .session(let session): .session(session.id)
+        }
+    }
+
+    var title: String {
+        switch content {
+        case .work(let subject, _): subject.title
+        case .session(let session): session.title
+        }
+    }
+
+    var session: SessionRecord? {
+        guard case .session(let session) = content else { return nil }
+        return session
+    }
+
+    var workKey: WorkspaceNodeKey? {
+        guard case .work(let subject, _) = content else { return nil }
+        return subject.key
+    }
+}
+
+extension WorkspaceProjection {
+    func outline(
+        presentation: WorkspacePresentation, collapsed: Set<WorkspaceNodeKey>,
+        search: String, planningReadable: Bool
+    ) -> [WorkspaceOutlineRow] {
+        let query = search.trimmingCharacters(in: .whitespacesAndNewlines)
+        func matches(_ text: String) -> Bool {
+            query.isEmpty || text.localizedCaseInsensitiveContains(query)
+        }
+        func expanded(_ key: WorkspaceNodeKey) -> Bool {
+            !query.isEmpty || !collapsed.contains(key)
+        }
+        var rows: [WorkspaceOutlineRow] = []
+        func appendSession(_ session: SessionRecord, depth: Int, ancestors: [WorkspaceOutlineSubject], include: Bool = false) {
+            guard include || matches(session.title) || matches(session.detail)
+                || ancestors.contains(where: { matches($0.title) }) else { return }
+            rows.append(WorkspaceOutlineRow(
+                content: .session(session),
+                detail: ancestors.isEmpty ? session.workPath ?? "Repository or unavailable ancestry" : nil,
+                depth: depth, ancestors: ancestors
+            ))
+        }
+        func appendWork(_ subject: WorkspaceOutlineSubject, detail: String? = nil, depth: Int,
+                        ancestors: [WorkspaceOutlineSubject], hasChildren: Bool) {
+            rows.append(WorkspaceOutlineRow(
+                content: .work(subject, hasChildren: hasChildren), detail: detail, depth: depth,
+                ancestors: ancestors
+            ))
+        }
+        for wave in waves {
+            let waveSubject = WorkspaceOutlineSubject(key: wave.id, title: wave.roadmap.wave.name)
+            let complete: Bool
+            if case .available(_, false) = wave.roadmap.projects {
+                complete = planningReadable && wave.roadmap.unavailableProjects.isEmpty
+            } else { complete = false }
+            let flat = presentation == .sessions
+            let waveHasChildren = !wave.projects.isEmpty || !wave.sessions.isEmpty
+            let omitWave = flat || (presentation == .compact && waves.count == 1 && complete
+                && waveHasChildren && expanded(wave.id))
+            let waveStart = rows.count
+            if !omitWave { appendWork(waveSubject, depth: 0, ancestors: [], hasChildren: waveHasChildren) }
+            if flat || expanded(wave.id) {
+                let waveDepth = omitWave ? 0 : 1
+                for session in wave.sessions { appendSession(session, depth: waveDepth, ancestors: [waveSubject]) }
+                for project in wave.projects {
+                    let subject = WorkspaceOutlineSubject(key: project.id, title: project.project.project.name)
+                    let projectHasChildren = !project.tasks.isEmpty || !project.sessions.isEmpty
+                    let omitProject = flat || (presentation == .compact && wave.projects.count == 1 && complete
+                        && projectHasChildren && expanded(project.id))
+                    let projectStart = rows.count
+                    if !omitProject {
+                        appendWork(subject, depth: waveDepth, ancestors: [waveSubject],
+                                   hasChildren: projectHasChildren)
+                    }
+                    if flat || expanded(project.id) {
+                        let depth = omitProject ? waveDepth : waveDepth + 1
+                        let ancestors = [waveSubject, subject]
+                        for session in project.sessions { appendSession(session, depth: depth, ancestors: ancestors) }
+                        for task in project.tasks {
+                            let taskSubject = WorkspaceOutlineSubject(key: task.id, title: task.task.task.name)
+                            let taskMatches = matches(taskSubject.title) || matches(task.task.task.identifier)
+                                || ancestors.contains(where: { matches($0.title) })
+                                || task.sessions.contains(where: { matches($0.title) || matches($0.detail) })
+                            guard taskMatches else { continue }
+                            if !flat {
+                                appendWork(taskSubject, detail: task.task.task.identifier, depth: depth,
+                                           ancestors: ancestors, hasChildren: !task.sessions.isEmpty)
+                            }
+                            if flat || expanded(task.id) {
+                                for session in task.sessions {
+                                    appendSession(session, depth: flat ? 0 : depth + 1, ancestors: ancestors + [taskSubject],
+                                                  include: matches(task.task.task.identifier))
+                                }
+                            }
+                        }
+                    }
+                    if !query.isEmpty, !omitProject, rows.count == projectStart + 1,
+                       !matches(subject.title), !matches(waveSubject.title) { rows.removeLast() }
+                }
+            }
+            if !query.isEmpty, !omitWave, rows.count == waveStart + 1, !matches(waveSubject.title) { rows.removeLast() }
+        }
+        for session in unmatchedSessions { appendSession(session, depth: 0, ancestors: []) }
+        if presentation == .sessions {
+            // The shortest ancestry suffix that distinguishes equal titles. IDs
+            // remain the tie-breaker for two conversations on the same subject.
+            let all = rows
+            rows = all.map { row in
+                var row = row
+                let peers = all.filter { $0.title == row.title }
+                if peers.count > 1 {
+                    for count in 1...max(1, row.ancestors.count) {
+                        let suffix = row.ancestors.suffix(count).map(\.title).joined(separator: " / ")
+                        if !suffix.isEmpty { row.detail = suffix }
+                        if peers.filter({ $0.ancestors.suffix(count).map(\.title).joined(separator: " / ") == suffix }).count == 1 { break }
+                    }
+                    if peers.filter({ $0.ancestors.map(\.title) == row.ancestors.map(\.title) }).count > 1,
+                       let id = row.session?.id { row.detail = [row.detail, id].compactMap { $0 }.joined(separator: " · ") }
+                }
+                row.depth = 0
+                return row
+            }
+        }
+        return rows
+    }
+}
+
 /// Per-window/repository navigation; independent of terminal layout and liveness.
 @MainActor
 @Observable
 final class WorkspaceNavigation {
     enum Content { case overview, details, terminals }
     var content: Content = .overview
-    var showsList = false
-    var taskQuery: TaskQuery = .active
+    var presentation: WorkspacePresentation = .compact
+    var selectedSessionId: String?
+    var repositoryCollapsed = false
     var collapsed: Set<WorkspaceNodeKey> = []
     var search = ""
     var selection: WorkReference?
     var listScrollOffset: CGFloat = 0
+    var taskPanes: [String: (path: String, pane: PaneState)] = [:]
 
     func isExpanded(_ key: WorkspaceNodeKey) -> Bool {
-        !search.isEmpty || !collapsed.contains(key)
+        !search.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty || !collapsed.contains(key)
     }
 
     func toggle(_ key: WorkspaceNodeKey) {
-        guard search.isEmpty else { return }
+        guard search.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty else { return }
         if !collapsed.insert(key).inserted { collapsed.remove(key) }
     }
 }

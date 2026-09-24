@@ -1,0 +1,9 @@
+warning: `VIRTUAL_ENV=/Users/jack/src/loopflow/.venv` does not match the project environment path `.venv` and will be ignored; use `--active` to target the active environment instead
+Gate budget: 7740s across 5 suites (architecture, rust, website, swift, loopflow)
+Artifacts on failure: /Users/jack/src/loopflow.main-view-task/.lf/tmp/gate/run-88543
+
+RESOURCE PRESSURE: verification did not start inside its envelope.
+- build:main (main): build uses 19.1 GiB / 12.0 GiB budget
+  NEXT ACTION: run `uv run python scripts/resource_envelope.py --recover`; recovery removes only build roots from inactive worktrees
+
+Result: FAIL (resource preflight; product suites not run)

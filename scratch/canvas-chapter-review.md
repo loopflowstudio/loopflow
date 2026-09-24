@@ -1,5 +1,16 @@
 # Canvas reset and performance — 2026-09-24
 
+## Latest hierarchy amendment
+
+The human's one-Wave/one-current-Project direction supersedes the exposed Project
+tier below. Public navigation is repo → Wave → Task → Session in one outline;
+Full presentation does not restore Projects. Chapter Projects remain internal
+content/history ownership. Integrate `loopflow.projects`' shared chapter/direct-Task
+projection while retaining this branch's outline, pane ownership and exact Run
+links. Keep compression and flat Sessions, both performance scenarios, and one
+optimization Task per area. See [the reconciliation review](review-wave-reconciliation.md)
+for observed source and the next integration boundary.
+
 ## Launch decision — LOO-291
 
 Keep one end-to-end core in the existing Product / Desktop Task, checkout and

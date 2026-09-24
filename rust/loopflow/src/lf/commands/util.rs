@@ -355,16 +355,13 @@ fn provider_client_is_live(client: &ProviderClientRef, harness: &str) -> bool {
     };
     let command = fields.collect::<Vec<_>>().join(" ");
     let expected_start = OffsetDateTime::now_utc().unix_timestamp() - elapsed as i64;
-    if (expected_start - client.started_at.unix_timestamp()).abs() > 5 {
-        return false;
-    }
-    command.split_whitespace().any(|word| {
-        Path::new(word)
-            .file_name()
-            .and_then(|name| name.to_str())
-            .is_some_and(|name| name == harness || name.starts_with(&format!("{harness}-")))
-            || word.contains(&format!("/{harness}"))
-    })
+    crate::run_record::provider_client_matches(
+        client,
+        harness,
+        client.pid,
+        expected_start,
+        &command,
+    )
 }
 
 fn elapsed_seconds(value: &str) -> Option<u64> {

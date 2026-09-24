@@ -280,7 +280,7 @@ private func records(_ entries: [String]) throws -> [SessionRecord] {
 private func session(id: String, state: String, kind: String = "flow", replacing: Bool = false) -> String {
     """
     {
-      "id": "\(id)",
+      "id": "\(id)", "run_id": "\(id)",
       "kind": "\(kind)",
       "work": { "kind": "task", "id": "task-\(id)" },
       "title": "Design the control surface",

@@ -1,0 +1,25 @@
+[0/1] Planning build
+Building for debugging...
+[0/5] Write sources
+[1/5] Write swift-version--58304C5D6DBC2206.txt
+[3/5] Compiling LoopflowTests TaskMonitorProofTests.swift
+[4/5] Emitting module LoopflowTests
+[4/6] Write Objects.LinkFileList
+[5/6] Linking LoopflowSwiftPackageTests
+Build complete! (3.76s)
+Test Suite 'Selected tests' started at 2026-09-24 14:37:16.563.
+Test Suite 'LoopflowSwiftPackageTests.xctest' started at 2026-09-24 14:37:16.564.
+Test Suite 'LoopflowSwiftPackageTests.xctest' passed at 2026-09-24 14:37:16.564.
+	 Executed 0 tests, with 0 failures (0 unexpected) in 0.000 (0.000) seconds
+Test Suite 'Selected tests' passed at 2026-09-24 14:37:16.564.
+	 Executed 0 tests, with 0 failures (0 unexpected) in 0.000 (0.002) seconds
+◇ Test run started.
+↳ Testing Library Version: 1501
+↳ Target Platform: arm64e-apple-macos14.0
+◇ Suite "Task Monitor integration proof" started.
+◇ Test "Returning to a Task never restores another Task's Session in a reused pane" started.
+✔ Test "Returning to a Task never restores another Task's Session in a reused pane" passed after 0.145 seconds.
+◇ Test "Monitor shares the split tree and preserves real Session and companion input through zoom and return" started.
+✔ Test "Monitor shares the split tree and preserves real Session and companion input through zoom and return" passed after 1.403 seconds.
+✔ Suite "Task Monitor integration proof" passed after 1.549 seconds.
+✔ Test run with 2 tests in 1 suite passed after 1.549 seconds.

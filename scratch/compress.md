@@ -6,38 +6,183 @@
   supply planning, human-work and live-process evidence through RegistryQuery.
   Activity has Exec and ProviderProcess nodes; checkout location is separate
   from Work attribution and native terminal attachment.
+- `ActiveRunsSnapshot` joins current capture intervals and native client receipts
+  to one verified process observation. Run records own the Work resolver shared
+  with Sessions. Podium owns one demand-refreshed Home observation shared by all
+  Task Monitor panes. Native discovery still traverses retained Run directories;
+  bounded discovery and automatic refresh remain unfinished.
 - Rust projects Session action descriptors and Work display paths from the
   existing boundary and stored ancestry. CLI text and Swift controls consume
   those values. Flow settlement checks the same policy against its current
-  playhead; Swift owns only local presentation and dispatch.
+  playhead; Swift owns only local presentation and dispatch. Every Session now
+  carries a required Run reference. Preparation persists that identity before
+  publishing an Ask or human Flow boundary; it does not establish live ownership.
 - GUI process preparation clears inherited execution and terminal markers while
   preserving Home/account selection. CLI queries supply explicit scope;
   ConversationLaunch captures the visible subject and honors lf's destination.
 - PodiumModel owns readings, last-good evidence and read generations.
   WorkspaceProjection derives typed planning-to-Session associations, preserving
-  upcoming Tasks and every unmatched human boundary. TaskQuery selects Active
-  or All tasks over that projection; Active includes an existing local worktree,
-  open Sessions or owned provider activity in the recorded Task checkout. It
-  stores nothing. Unknown filesystem evidence remains explicit.
+  upcoming Tasks and every unmatched human boundary. One outline presents full,
+  compact and Session-leaf rows. Each row contains either a planning subject or
+  a Session; its identity and title derive from that payload. Completed Tasks
+  remain included when a Session, existing local checkout or provider process
+  in that checkout supplies a reason to retain them. That inclusion rule is not
+  exact Task/Run attribution. Unknown filesystem evidence remains explicit.
 - TaskDirectiveEditor owns an unsaved draft and its captured Task/Wave target.
   RegistryQuery sends the existing PM update; Podium refreshes authoritative
   planning and invalidates older polling results. The sheet owns submission
   feedback, not a second planning record.
 - WorkspaceNavigation owns selected Work, presentation, search, expansion and
-  list scroll offset per repository/window. PodiumModel forwards selection to
-  that owner; SwiftUI controls the mounted navigator's scrolling.
+  list scroll offset per repository/window. It retains each Task's last pane
+  location and content so a reused pane cannot restore another Task's Session.
+  PodiumModel forwards selection to that owner; SwiftUI controls scrolling.
 - SessionsWorkspaceRegistry retains checkout workspaces and repository-level
   WorktreeLayoutStores inside one window, sharing that window's surface pool.
-  Outer slots select checkouts; each checkout's MultiplexerStore owns terminals.
+  Outer slots select checkouts; each checkout's MultiplexerStore owns the layout
+  of Session, shell and Task Monitor panes. Monitor adds no second layout tree.
   The repository's retained SessionsStore owns opening/prepared presentation and
   resolution errors, and calls shared actions. Rust projects actual client
   terminal attachment.
 - GhosttyMetalView owns its surface, latest title and focus request across attachment and
   visibility changes. AppKit owns actual first responder. GhosttyManager owns
   library initialization and configuration, including the measured CoreVideo
-  capability adaptation.
+  capability adaptation. Monitor supplies its own AppKit responder so observation
+  focus cannot route ordinary input to a retained terminal.
 
 ## Before and after
+
+### Iteration 20 — Monitor integration and retained pane choice (2026-09-24)
+
+No further coherent model/API reduction was established. No executable code,
+type, field, writer or persistence path changes in this pass. Updated the model
+above and removed the README's stale statement that Monitor integration was
+pending. The saved-pane and native-focus corrections belong to the preceding
+implementation, not this compression review.
+
+Traced capture intervals and native receipts through verified process observation,
+shared Work attribution, `runs --active`, RegistryQuery, Podium and TaskMonitorView.
+Compared Rust/Swift ActiveRunsSnapshot, ActiveRun, LiveProviderProcess, SessionRecord
+and SessionAction fields and inspected shared fixture assertions. Followed Task
+and Session selection through WorkspaceNavigation, the window workspace registry,
+outer checkout layout, MultiplexerStore and native focus. Searches retain one
+production capture-binding writer, one shared attribution resolver, one Podium
+active-Run query caller and one root workspace registry. SessionScope,
+FlowResolutionAction, requestedSessionId and the rejected clearFocus path remain
+absent.
+
+Candidates retained:
+
+- Saved PaneState is an expected content snapshot, not a second layout owner.
+  Deriving it from the current pane ID restores the demonstrated cross-Task
+  Session bug. Planning Task identity also cannot be replaced by runtime Work:
+  upcoming Tasks need Monitor placement before runtime exists.
+- Session load can reuse a viewing slot; Monitor preserves occupied terminals;
+  a new shell needs its own process. Combining these into one generic opening
+  API would move their different policies into flags without removing an owner.
+  Outer checkout membership still retains hidden and shell-only workspaces.
+- The in-flight read flag coexists with last-good evidence and prevents duplicate
+  requests. Pane subject remains independent of current navigation selection.
+  Neither belongs in shared Run liveness or a new per-pane reader.
+- Monitor's native responder prevents AppKit from advancing to a visible terminal
+  when focus is cleared. It owns no terminal surface or process; putting it in
+  Ghostty's pool would conflate observation focus with terminal lifetime.
+- Capture intervals and retained native receipts describe different ownership
+  lifetimes. Run subjects, resolved Work, launch metadata and observed providers
+  remain distinct evidence. Combining active Runs with historical Run reduction
+  would add event/usage work and still not settle bounded discovery.
+
+All nine source hashes in [the Monitor receipt](monitor-evidence/receipt.json)
+and all fourteen in [the active-Run receipt](active-runs-evidence/receipt.json)
+match. Inspected the existing six-test mounted native/model pass, including real
+PTY input and companion retention, and the shared DTO assertions. These are prior
+receipts, not fresh tests. No executable edits or test reruns; `git diff --check`
+passes. Bounded discovery, both experience benchmarks, fallback compilation and
+human acceptance remain open. No publication or Task completion occurred.
+
+### Iteration 19 — active Run ownership and wire projection (2026-09-24)
+
+No coherent model/API reduction was established. Only this report changes;
+no type, field, writer, command or persistence path was removed in this pass.
+The shared attribution resolver and deleted native binding writer belong to
+the preceding implementation and discovery review, whose changes are preserved.
+
+Traced capture publication/settlement and native client receipts through the
+shared process observation, exact Exec join, Work resolution, `runs --active`,
+RegistryQuery and fixtures. Compared every Rust/Swift field in ActiveRunsSnapshot,
+ActiveRun, LiveProviderProcess and SessionRecord. Inspected the outline's Session
+opening path and retained workspace/multiplexer ownership. Searches retain one
+production capture-binding writer, one shared Run Work resolver, one Podium
+reader per existing inventory and one root workspace registry. The obsolete
+Session binding writer and removed Swift action/scope types remain absent.
+
+Candidates retained:
+
+- Capture intervals distinguish successive Runs inside one Exec; native receipts
+  identify clients directly and survive exit for Session continuity. Neither can
+  replace the other. Requiring a new interval for existing native clients would
+  restore the discovery review's demonstrated false empty.
+- Subjects preserve declared/inferred attribution; resolved Work supplies exact
+  identity. Launch harness/model and observed provider processes describe different
+  facts, including provider changes. Historical RunSnapshot additionally requires
+  event/usage reduction; reusing it would add historical work to active discovery.
+- Optional capture ownership and snapshot gaps preserve unavailable evidence.
+  Removing either would turn incomplete observation into an apparent empty list.
+  The Run-ID parse is not redundant validation: durable IDs currently derive
+  transparent deserialization without invoking their validating parser.
+- Session boundary identity, required Run reference and retained pane identity
+  have different lifetimes. Prepared opening state and resolution errors likewise
+  cannot collapse into shared Session state without losing local commands/errors.
+  Adding Monitor content or changing discovery indexing is implementation work,
+  not a behavior-preserving compression of these owners.
+
+All 14 source/fixture hashes in [the active-Run receipt](active-runs-evidence/receipt.json)
+still match. Inspected its existing five Rust ownership tests, CLI launch/resume
+test, Rust and Swift fixture tests, and passing clippy log. These are prior
+receipts, not fresh tests. No executable edits or test reruns; `git diff --check`
+passes. Monitor integration, bounded discovery cost, both experience benchmarks
+and human acceptance remain open. No app/provider interaction, publication or
+Task completion occurred.
+
+### Iteration 18 — one outline row payload (2026-09-24)
+
+Before, each visible row independently stored a discriminated ID, title,
+optional Session and child flag. A row could describe a Work ID with a Session
+payload, or a Session with children. Flattening copied all those fields and
+the view handled an impossible unidentified-row fallback. After, `Content`
+contains either the planning subject and child flag or the exact Session.
+Identity, title and optional convenience accessors derive from it. Flattening
+changes only presentation detail/depth; selection dispatch is exhaustive.
+
+Removed the unused `WorkspaceProjection.sessions(for:)` lookup left behind by
+the second Session navigator, `WaveSummary` and its computed status-bar API,
+and `WorkspaceTask.hasProviderInCheckout`. The checkout predicate still serves
+completed-Task inclusion locally. Tests observe the existing reverse subject
+join, nested Task Sessions and visible Wave list instead of preserving dead
+APIs. No wire field, reader, persistence path or terminal owner changed.
+
+Compared Rust/Swift SessionRecord, SessionAction, RoadmapProject/Task,
+TaskWorkspaceSnapshot and Activity fields; inspected required-Run fixture
+assertions, Run preparation/consumption and Ask/Flow publication. Traced the
+outline's Session action through the retained workspace registry, native focus
+and multiplexer. The concurrent required-Run implementation is preserved, not
+claimed as this pass's work. Its preparation marker and boundary reference
+serve different atomic-launch and continuity responsibilities. Session IDs and
+Run IDs also differ for Ask/Flow boundaries; neither replaces the other.
+
+Review retained the separate planning/runtime identity join, selected Work and
+Session leaf, last-good readings and prepared opening state, and outer checkout
+versus inner terminal layout. Collapsing those would respectively re-key upcoming
+Tasks, lose context after completion, overwrite pending launch commands, or
+discard hidden shell membership. Monitor and benchmarks remain implementation
+work; neither is a reason to add another owner during compression.
+
+Verification: `swift test --package-path swift -Xswiftc -gnone --jobs 4 --filter
+'WorkspaceNavigationTests|PodiumModelTests|WorkspaceNavigationProofTests/sessionRowRestoresWorktree'`
+passed 33 tests in four suites, exit 0. Log: `/tmp/loo291-compress18.log`.
+This includes native Session-row workspace restoration with real PTYs and
+fixture records, not configured-provider or human acceptance evidence. No
+executable edits followed that pass; `git diff --check` passes. No broad gate,
+fallback build, performance measurement, publication or Task completion ran.
 
 ### Iteration 17 — hierarchy study and retained ownership (2026-09-24)
 

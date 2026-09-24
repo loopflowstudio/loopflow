@@ -1,0 +1,11 @@
+{
+  "swift/LoopflowMac/WorkspaceProjection.swift": "b4aa0afe7516bddf27813e6993ce88fec53945986cf72ddd39e660da7dd2976e",
+  "swift/LoopflowMac/PodiumModel.swift": "717c624792c5bf634c3ac74524f259f8692c64fd4702e1623fb79b1e46e711e5",
+  "swift/LoopflowMac/Views/WorkspaceNavigator.swift": "3198ecece49d96fae9eeb1e0bb24dbbda448519c6b92bf0e9851e19992ef4f0f",
+  "swift/LoopflowMac/Views/PodiumView.swift": "9e58c09d5981f29de16f9f2272c6c952d6bc0709333084c8a477b27e093995b1",
+  "swift/LoopflowMac/Views/SessionsView.swift": "8a255bf6ee0f27be1cb7621f8cf2cde358b5838782dadda844aa4302332fc0f7",
+  "swift/LoopflowMac/Views/WorkSurfaceView.swift": "86d2a9362bb06c0cfce0d6ae0dd9f75f57008f361ac6e84d53aa0e44f67fbfca",
+  "swift/LoopflowTests/WorkspaceNavigationTests.swift": "f77cc89c5697f740c65b1f959706482cf3aaab45cdce6d3d0021b0e05128dd35",
+  "swift/LoopflowTests/WorkspaceNavigationProofTests.swift": "e1c4079df7995a8509db30ce0067ff8ff1dd77930c09ec31b2b2b6e3ed015cfb",
+  "swift/Loopflow/Models/SessionRecord.swift": "a1c2e77562a328cc04fbd46612970f662ffdf45d68c14a948660664c0827ce0b"
+}

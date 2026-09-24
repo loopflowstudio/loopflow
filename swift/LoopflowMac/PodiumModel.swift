@@ -35,10 +35,6 @@ enum PodiumReading<Value> {
     }
 }
 
-struct WaveSummary: Equatable {
-    let waves: Int
-}
-
 @MainActor
 @Observable
 final class PodiumModel {
@@ -64,6 +60,8 @@ final class PodiumModel {
     private(set) var roadmap: PodiumReading<RoadmapSnapshot> = .loading
     private(set) var waves: PodiumReading<[Wave]> = .loading
     private(set) var processActivity: PodiumReading<ActivitySnapshot> = .loading
+    private(set) var activeRuns: PodiumReading<ActiveRunsSnapshot> = .loading
+    private(set) var isRefreshingActiveRuns = false
     private var sessionReadings: [String: PodiumReading<[SessionRecord]>] = [:]
     private(set) var sessions: PodiumReading<[SessionRecord]> {
         get { sessionReadings[repoPath ?? ""] ?? .loading }
@@ -122,11 +120,6 @@ final class PodiumModel {
         return result.sorted {
             $0.displayName.localizedCaseInsensitiveCompare($1.displayName) == .orderedAscending
         }
-    }
-
-    var waveSummary: WaveSummary? {
-        guard waves.value != nil else { return nil }
-        return WaveSummary(waves: visibleWaves.count)
     }
 
     var visibleRepos: [PortfolioRepo] {
@@ -196,6 +189,20 @@ final class PodiumModel {
             from: await readProcessActivity(),
             lastGood: previous
         )
+    }
+
+    /// One Home reading serves every retained Monitor, independent of selection.
+    /// Refresh is explicit until discovery cost is bounded for continuous polling.
+    func refreshActiveRuns() async {
+        guard !isRefreshingActiveRuns else { return }
+        isRefreshingActiveRuns = true
+        defer { isRefreshingActiveRuns = false }
+        let previous = activeRuns.value
+        do {
+            activeRuns = .available(try await query.activeRuns())
+        } catch {
+            activeRuns = .unavailable(lastGood: previous, reason: error.localizedDescription)
+        }
     }
 
     func refreshPortfolio(
@@ -273,6 +280,7 @@ final class PodiumModel {
     }
 
     func select(_ selection: WorkReference?) {
+        navigation.selectedSessionId = nil
         navigation.content = selection == nil ? .overview : .details
         setSelection(selection)
         clearSelectionIfOutsideScope()
@@ -310,12 +318,19 @@ final class PodiumModel {
         let result = await readSessions(repoPath: repoPath)
         guard sessionsGeneration == generation else { return }
         sessions = reading(from: result, lastGood: previous)
+        if case .success(let records) = result,
+           let selected = navigation.selectedSessionId, !records.contains(where: { $0.id == selected }) {
+            navigation.selectedSessionId = nil
+        }
     }
 
     func sessionResolved(_ id: String, repo: String) {
         // A pre-resolution read must not resurrect the completed human boundary.
         // Resolution may finish after the human has switched repositories.
         sessionsGeneration &+= 1
+        if navigationByRepo[repo]?.selectedSessionId == id {
+            navigationByRepo[repo]?.selectedSessionId = nil
+        }
         switch sessionReadings[repo] {
         case .available(let records):
             sessionReadings[repo] = .available(records.filter { $0.id != id })

@@ -5,7 +5,7 @@ final class PodiumStateTests: XCTestCase {
     override func setUp() { continueAfterFailure = false }
 
     @MainActor
-    func testUnifiedListOpensUpcomingWorkInBothPresentations() {
+    func testOutlineKeepsUpcomingWorkBesideDetails() {
         for width in [900.0, 1440.0] {
             var launch = WaveSurfaceLaunch()
             launch.mode = "mock-waves"
@@ -22,18 +22,16 @@ final class PodiumStateTests: XCTestCase {
             XCTAssertTrue(element(app, "podium-detail-task").waitForExistence(timeout: 8))
             XCTAssertTrue(element(app, "workspace-task-directive").exists)
             XCTAssertTrue(element(app, "workspace-project-proof").exists)
-            XCTAssertTrue(element(app, "workspace-no-sessions").exists)
-            XCTAssertFalse(element(app, "workspace-navigator").exists)
-            app.buttons["workspace-toggle-list"].click()
+            XCTAssertFalse(app.buttons["workspace-all-work"].exists)
             XCTAssertTrue(element(app, "workspace-navigator").exists)
             XCTAssertTrue(element(app, "podium-detail-task").exists)
+            element(app, "workspace-presentation").click()
+            app.menuItems["Full hierarchy"].click()
             app.buttons["workspace-project-project-1"].click()
             XCTAssertTrue(element(app, "podium-detail-project").waitForExistence(timeout: 4))
             app.buttons["workspace-wave-wave-1"].click()
             XCTAssertTrue(element(app, "podium-detail-wave").waitForExistence(timeout: 4))
             app.buttons["workspace-disclose-wave-wave-1"].click()
-            XCTAssertFalse(app.buttons["workspace-task-issue-available"].exists)
-            app.buttons["workspace-all-work"].click()
             XCTAssertFalse(app.buttons["workspace-task-issue-available"].exists)
             app.buttons["workspace-disclose-wave-wave-1"].click()
             XCTAssertTrue(app.buttons["workspace-task-issue-available"].exists)

@@ -1,0 +1,16 @@
+{
+  "home": "/fixture/home",
+  "observed_at": 1790270400,
+  "task": {"kind": "task", "id": "task_00000000000000000000000000000001"},
+  "runs": [{
+    "id": "run_00000000000000000000000000000002",
+    "work": {"kind": "task", "id": "task_00000000000000000000000000000001"},
+    "subjects": [{"selector": "task:task_00000000000000000000000000000001", "source": "declared"}],
+    "label": "implement",
+    "harness": "claude",
+    "model": null,
+    "repo": "/fixture/repo",
+    "processes": [{"pid": 345, "provider": "claude", "state": "waiting"}]
+  }],
+  "gaps": ["Another Exec has live providers without a current Run binding"]
+}

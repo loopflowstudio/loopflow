@@ -39,6 +39,7 @@
         "help": "Return to autonomous Task work with your direction",
         "unavailable_reason": "The session agent has not marked this ready"
       }
-    ]
+    ],
+    "run_id": "run_00000000000000000000000000000001"
   }
 ]

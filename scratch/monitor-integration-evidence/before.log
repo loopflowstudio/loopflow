@@ -1,0 +1,30 @@
+Another instance of SwiftPM (PID: 87606) is already running using '/Users/jack/src/loopflow.main-view-task/swift/.build', waiting until that process has finished execution...[0/1] Planning build
+Building for debugging...
+[0/6] Write sources
+[1/6] Write swift-version--58304C5D6DBC2206.txt
+[3/6] Emitting module LoopflowTests
+[4/6] Compiling LoopflowTests TaskMonitorProofTests.swift
+[4/6] Write Objects.LinkFileList
+[5/6] Linking LoopflowSwiftPackageTests
+Build complete! (2.17s)
+Test Suite 'Selected tests' started at 2026-09-24 14:33:18.585.
+Test Suite 'LoopflowSwiftPackageTests.xctest' started at 2026-09-24 14:33:18.586.
+Test Suite 'LoopflowSwiftPackageTests.xctest' passed at 2026-09-24 14:33:18.586.
+	 Executed 0 tests, with 0 failures (0 unexpected) in 0.000 (0.000) seconds
+Test Suite 'Selected tests' passed at 2026-09-24 14:33:18.586.
+	 Executed 0 tests, with 0 failures (0 unexpected) in 0.000 (0.001) seconds
+◇ Test run started.
+↳ Testing Library Version: 1501
+↳ Target Platform: arm64e-apple-macos14.0
+◇ Suite "Task Monitor integration proof" started.
+◇ Test "Returning to a Task never restores another Task's Session in a reused pane" started.
+✘ Test "Returning to a Task never restores another Task's Session in a reused pane" recorded an issue at TaskMonitorProofTests.swift:36:9: Expectation failed: (multiplexer.focusedPane.content → .session(id: "monitor-other")) != .session(id: "monitor-other")
+✘ Test "Returning to a Task never restores another Task's Session in a reused pane" recorded an issue at TaskMonitorProofTests.swift:37:9: Expectation failed: (model.navigation.selectedSessionId → "monitor-other") != "monitor-other"
+✘ Test "Returning to a Task never restores another Task's Session in a reused pane" failed after 0.106 seconds with 2 issues.
+◇ Test "Incomplete activity remains visible and cannot become a confirmed empty Monitor" started.
+✔ Test "Incomplete activity remains visible and cannot become a confirmed empty Monitor" passed after 0.019 seconds.
+◇ Test "Monitor shares the split tree and preserves real Session and companion input through zoom and return" started.
+✘ Test "Monitor shares the split tree and preserves real Session and companion input through zoom and return" recorded an issue at TaskMonitorProofTests.swift:98:9: Expectation failed: !(terminals.contains { window.firstResponder === $0 } → <not evaluated>)
+✘ Test "Monitor shares the split tree and preserves real Session and companion input through zoom and return" failed after 0.942 seconds with 1 issue.
+✘ Suite "Task Monitor integration proof" failed after 1.068 seconds with 3 issues.
+✘ Test run with 3 tests in 1 suite failed after 1.068 seconds with 3 issues.

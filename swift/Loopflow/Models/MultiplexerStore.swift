@@ -140,9 +140,12 @@ public final class MultiplexerStore {
             return
         }
 
-        if focusedPane.content == .shell {
+        switch focusedPane.content {
+        case .shell, .monitor:
             _ = _split(focusedPaneId, axis: .vertical, content: .session(id: sessionId))
             return
+        case .empty, .session:
+            break
         }
 
         layout = layout.replacingContent(
@@ -166,6 +169,20 @@ public final class MultiplexerStore {
         }
         closedState = nil
         _notify()
+    }
+
+    /// Reveal one Task's observation beside existing terminals, never replacing them.
+    public func showMonitor(taskId: String) {
+        let content = PaneContent.monitor(taskId: taskId)
+        if let pane = layout.allPanes.first(where: { $0.content == content }) {
+            setFocusedPane(pane.id)
+        } else if focusedPane.content == .empty {
+            layout = layout.replacingContent(of: focusedPaneId, with: content)
+            closedState = nil
+            _notify()
+        } else {
+            _ = _split(focusedPaneId, axis: .vertical, content: content)
+        }
     }
 
     public func toggleZoom(_ paneId: String) {

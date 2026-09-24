@@ -1,14 +1,40 @@
 # Unified navigation slice review — 2026-09-23
 
-Latest review: [iteration 17](review-slice-iteration17.md). Fresh browser checks
-pass for the hierarchy study's selection, simulated drafts and six Session leaves.
-The executable diff is unchanged since review 16. The new launch decision changes
-the acceptance target: the native compressible outline, mixed Monitor/terminal
-panes, exact live Task-Run projection and repeatable experience measurements remain
-unimplemented. Return to implementation under that decision; another study or old
-app count trial cannot close those gaps. Earlier bounded receipts remain evidence
-at their original scope. Full external trials/edit, budgets and human acceptance
-remain open. No publication, landing or Task completion.
+Latest direction and bounded correction: [Wave reconciliation](review-wave-reconciliation.md).
+Public hierarchy is now repo → Wave → Task → Session, consuming the sibling's
+flat shared contract. Fixed another Task's focused Session overwriting the selected
+Task's saved pane; six focused tests pass. Project integration and performance
+proof remain open. Iteration 20's configured receipt below retains its own scope.
+
+Latest Monitor review: [iteration 20](review-slice-iteration20.md). Fresh configured
+Task selection opens Monitor; its confirmed-empty observation agrees with the
+scoped CLI. Refresh accepts the action, Inspect exposes the directive, Full
+presentation retains selection, and Session IDs remain unchanged. A concurrent
+cross-Task pane-choice correction passes three fresh focused tests. Bounded discovery, both experience
+measurements, fallback compilation and human/external acceptance remain open.
+No publication or Task completion.
+
+Latest contract verification: [iteration 19](review-slice-iteration19.md).
+Fresh CLI trials confirm native discovery without a new marker, removal after
+exit, and explicit failed-read evidence. All three active Sessions in the new
+configured read appear among six active Runs, with no observed gaps. These are
+sequential CLI observations; Monitor and native performance proof remain open.
+
+Latest shared-contract review: [active Run discovery](active-runs-discovery-review.md).
+Fixed existing native clients disappearing when a new capture binding was absent.
+All 16 configured Sessions resolve to their required Runs; all five active
+Sessions appear in the active snapshot, which also reports one unresolved Exec
+ownership gap. Monitor panes and both experience measurements remain open.
+No publication or Task completion.
+
+Latest UI review: [iteration 18](review-slice-iteration18.md). Fixed Compact hiding
+empty Wave/Project subjects and restored inspection's no-Session and snapshot
+evidence. Focused native/CLI proofs and configured read-only Task navigation pass.
+The required Session–Run contract and concurrent resume-lock correction advance
+the foundation. Monitor in the existing multiplexer, exact active Task Runs,
+repeatable experience measurements, fallback compilation and retained human/external
+acceptance remain open. Return to that implementation boundary; no publication,
+landing or Task completion.
 
 ## Iteration 9 review — viewport proof confirmed; exact focus unavailable
 

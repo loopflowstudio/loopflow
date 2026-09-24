@@ -36,14 +36,6 @@ struct PodiumView: View {
     var body: some View {
         @Bindable var model = model
         VStack(spacing: 0) {
-            PodiumBar(
-                model: model,
-                onOpenSessions: {
-                    model.navigation.showsList = true
-                    model.navigation.content = .overview
-                }
-            )
-            Divider()
             Group {
                 if let repoPath = model.repoPath {
                     SessionsView(
@@ -108,111 +100,6 @@ struct PodiumView: View {
     }
 }
 
-private struct PodiumBar: View {
-    @Bindable var model: PodiumModel
-    let onOpenSessions: () -> Void
-
-    private var repoTitle: String {
-        guard let repoPath = model.repoPath else { return "All repositories" }
-        return model.allRepos.first {
-            model.repoIdentity($0.path) == model.repoIdentity(repoPath)
-        }?.displayName ?? URL(fileURLWithPath: repoPath).lastPathComponent
-    }
-
-    var body: some View {
-        HStack(spacing: Spacing.lg) {
-            repoSelector
-
-            Rectangle()
-                .fill(Color.white.opacity(0.18))
-                .frame(width: 1, height: 30)
-
-            if let summary = model.waveSummary {
-                HStack(spacing: Spacing.md) {
-                    compactMetric(summary.waves == 1 ? "Wave" : "Waves", summary.waves)
-                }
-                .accessibilityIdentifier("podium-wave-summary")
-            }
-
-            Spacer(minLength: Spacing.sm)
-
-            SessionsButton(model: model, onOpen: onOpenSessions)
-
-            ProcessActivityInstrument(reading: model.processActivity)
-                .accessibilityIdentifier("podium-process-activity")
-        }
-        .padding(.horizontal, Spacing.lg)
-        .padding(.vertical, Spacing.sm)
-        .frame(maxWidth: .infinity, minHeight: 64, alignment: .leading)
-        .background(Color.loopflowBurgundy)
-        .accessibilityElement(children: .contain)
-        .accessibilityIdentifier("podium-bar")
-    }
-
-    /// The bar leads with where you're conducting, not a product name: the
-    /// repository selector wears the old title block's clothes. Selection
-    /// persists the same way the retired sidebar's selector did.
-    private var repoSelector: some View {
-        Menu {
-            Button {
-                selectRepo(nil)
-            } label: {
-                Label("All repositories", systemImage: "square.stack.3d.up")
-            }
-            if !model.allRepos.isEmpty { Divider() }
-            ForEach(model.allRepos) { repo in
-                Button {
-                    selectRepo(repo.path)
-                } label: {
-                    Label(repo.displayName, systemImage: "folder")
-                }
-            }
-        } label: {
-            VStack(alignment: .leading, spacing: 0) {
-                Text("CONDUCTING WAVES")
-                    .font(Typography.caption(8).weight(.bold))
-                    .tracking(1.7)
-                    .foregroundStyle(.white.opacity(0.68))
-                HStack(spacing: Spacing.xs) {
-                    Text(repoTitle)
-                        .font(Typography.sectionTitle(19))
-                        .foregroundStyle(.white)
-                        .lineLimit(1)
-                        .truncationMode(.tail)
-                    Image(systemName: "chevron.down")
-                        .font(.system(size: 9, weight: .semibold))
-                        .foregroundStyle(.white.opacity(0.6))
-                }
-            }
-            .contentShape(Rectangle())
-        }
-        .menuStyle(.button)
-        .buttonStyle(.plain)
-        .menuIndicator(.hidden)
-        .fixedSize()
-        .accessibilityIdentifier("podium-repo-scope")
-        .accessibilityLabel("Repository: \(repoTitle)")
-    }
-
-    private func selectRepo(_ path: String?) {
-        model.setRepoPath(path)
-        Task.detached {
-            try? saveLoopflowState(LoopflowState(selectedRepoPath: path?.normalizedFilePath))
-        }
-    }
-
-    private func compactMetric(_ label: String, _ value: Int) -> some View {
-        HStack(spacing: Spacing.xs) {
-            Text(value.formatted())
-                .font(Typography.code(10).weight(.bold))
-                .foregroundStyle(.white)
-            Text(label)
-                .font(Typography.caption(9))
-                .foregroundStyle(.white.opacity(0.58))
-        }
-    }
-}
-
 enum PodiumSignalState: Equatable {
     case off
     case producing
@@ -249,48 +136,5 @@ enum PodiumSignalState: Equatable {
         case .waiting: "Waiting"
         case .unknown: "Unknown"
         }
-    }
-}
-
-private struct ProcessActivityInstrument: View {
-    let reading: PodiumReading<ActivitySnapshot>
-
-    private var snapshot: ActivitySnapshot? { reading.value }
-    private var state: PodiumSignalState {
-        snapshot.map(PodiumSignalState.from) ?? .unknown
-    }
-
-    var body: some View {
-        HStack(spacing: Spacing.sm) {
-            VStack(alignment: .trailing, spacing: Spacing.xxs) {
-                Text(state.label)
-                    .font(Typography.code(12).weight(.bold))
-                    .foregroundStyle(.white)
-                    .monospacedDigit()
-                Text(detailLabel)
-                    .font(Typography.caption(8))
-                    .foregroundStyle(.white.opacity(0.68))
-                    .lineLimit(1)
-            }
-
-            FaderSwitch(
-                phase: ConsoleSignal.phase(humanStop: false, agentRunning: false, signal: state),
-                width: 20,
-                height: 48,
-                verb: nil,
-                accessibilityId: "podium-master-fader",
-                accessibilityLabel: "Provider process activity"
-            )
-        }
-        .help("Exact live provider processes across every Wave. \(state.label).")
-        .accessibilityElement(children: .ignore)
-        .accessibilityLabel("Provider process activity")
-        .accessibilityValue("\(state.label). \(detailLabel)")
-    }
-
-    private var detailLabel: String {
-        guard let snapshot else { return reading.errorMessage ?? "Signal unavailable" }
-        let count = snapshot.nodes.filter { $0.kind == .providerProcess }.count
-        return "\(count) exact live provider \(count == 1 ? "process" : "processes")"
     }
 }

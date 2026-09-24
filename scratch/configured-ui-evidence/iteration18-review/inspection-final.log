@@ -1,0 +1,28 @@
+Building for debugging...
+[0/5] Write sources
+[1/5] Write swift-version--58304C5D6DBC2206.txt
+[3/7] Emitting module LoopflowMac
+[4/7] Compiling LoopflowMac WorkSurfaceView.swift
+[4/8] Write Objects.LinkFileList
+[5/9] Linking LoopflowMac
+[6/9] Applying LoopflowMac
+[8/10] Emitting module LoopflowTests
+[8/10] Write Objects.LinkFileList
+[9/10] Linking LoopflowSwiftPackageTests
+Build complete! (2.68s)
+Test Suite 'Selected tests' started at 2026-09-24 13:39:27.745.
+Test Suite 'LoopflowSwiftPackageTests.xctest' started at 2026-09-24 13:39:27.746.
+Test Suite 'LoopflowSwiftPackageTests.xctest' passed at 2026-09-24 13:39:27.746.
+	 Executed 0 tests, with 0 failures (0 unexpected) in 0.000 (0.000) seconds
+Test Suite 'Selected tests' passed at 2026-09-24 13:39:27.746.
+	 Executed 0 tests, with 0 failures (0 unexpected) in 0.000 (0.001) seconds
+◇ Test run started.
+↳ Testing Library Version: 1501
+↳ Target Platform: arm64e-apple-macos14.0
+◇ Suite "Unified Work and Session navigation" started.
+◇ Test "Inspection distinguishes no Sessions from an unavailable reading" started.
+◇ Test case passing 1 argument hasSession → true to "Inspection distinguishes no Sessions from an unavailable reading" started.
+◇ Test case passing 1 argument hasSession → false to "Inspection distinguishes no Sessions from an unavailable reading" started.
+✔ Test "Inspection distinguishes no Sessions from an unavailable reading" with 2 test cases passed after 0.145 seconds.
+✔ Suite "Unified Work and Session navigation" passed after 0.146 seconds.
+✔ Test run with 1 test in 1 suite passed after 0.146 seconds.

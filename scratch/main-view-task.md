@@ -270,3 +270,11 @@ Undo remains cleared, and the original Task context and companion child survive
 return. No production change was needed. This is native fixture evidence with a
 mocked CLI response; configured provider interaction and timing obligations
 remain open. Exact receipt and limits are in `navigation-proof.md`.
+
+Iteration 5 review correction, 2026-09-23: Close view followed by external Session
+disappearance could leave a stale Undo layout. A focused regression reproduced
+the pane returning and taking companion focus. Reconciliation now invalidates
+that saved layout when it contains an absent Session, while preserving Undo for
+a still-present Session. Both cases and the two mounted completion cases pass;
+`review-slice.md` records the receipts. Configured interaction and timing proof
+remain open; the broader Task scope is unchanged.

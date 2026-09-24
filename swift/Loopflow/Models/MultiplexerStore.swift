@@ -215,7 +215,11 @@ public final class MultiplexerStore {
             guard case .session(let id) = pane.content else { return false }
             return !sessionIds.contains(id)
         }
-        guard !stale.isEmpty else { return }
+        let undoIsStale = closedState?.layout.allPanes.contains { pane in
+            guard case .session(let id) = pane.content else { return false }
+            return !sessionIds.contains(id)
+        } == true
+        guard !stale.isEmpty || undoIsStale else { return }
 
         for pane in stale {
             if layout.allPanes.count == 1 {

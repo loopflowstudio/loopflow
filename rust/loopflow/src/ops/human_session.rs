@@ -1705,7 +1705,8 @@ mod tests {
         .unwrap();
 
         assert!(!session_run_is_resumable(dir.path(), &manifest).unwrap());
-        crate::run_record::write_provider_session(dir.path(), "provider-session", None).unwrap();
+        crate::run_record::write_provider_session(dir.path(), "provider-session", None, None)
+            .unwrap();
         assert!(!session_run_is_resumable(dir.path(), &manifest).unwrap());
         crate::run_record::write_provider_client(dir.path(), std::process::id()).unwrap();
         assert!(session_run_is_resumable(dir.path(), &manifest).unwrap());

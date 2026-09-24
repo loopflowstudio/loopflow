@@ -7,6 +7,29 @@ import Testing
 /// the Mac app.
 @Suite("DTO Fixtures")
 struct DTOFixtureTests {
+    @Test("Task output preserves source revisions, stage identity, and missing sources")
+    func taskOutputFixture() async throws {
+        let data = try loadFixtureData("task_output.json")
+        let query = RegistryQuery { _, _ in String(decoding: data, as: UTF8.self) }
+        let page = try await query.taskOutput(issue: "LOO-293", cursor: nil, cwd: nil)
+        #expect(page.sources[0].source == .openCode)
+        #expect(page.sources[0].records[0].sourceItemId == "part-1")
+        #expect(page.sources[0].records[0].revision == "revision-2")
+        #expect(page.sources[0].stage?.iteration == 1)
+        #expect(page.sources[1].stage == nil)
+        #expect(!page.sources[2].available)
+        #expect(page.sources[2].records.isEmpty)
+        #expect(page.sources[2].provider == "claude")
+        #expect(page.sources[1].records[0].sourceItemId == "12")
+        if case let .itemCompleted(_, item) = page.sources[0].records[0].event {
+            #expect(item.id == "part-1")
+        } else { Issue.record("Expected a native item snapshot") }
+        var missing = try #require(JSONSerialization.jsonObject(with: data) as? [String: Any])
+        missing.removeValue(forKey: "next_cursor")
+        let invalid = try JSONSerialization.data(withJSONObject: missing)
+        #expect(throws: DecodingError.self) { try JSONDecoder().decode(TaskOutputPage.self, from: invalid) }
+    }
+
     @Test("PM snapshot fixture preserves repository Team and Project ownership")
     func pmShowFixturePreservesOwnership() async throws {
         let data = try loadFixtureData("pm_show.json")

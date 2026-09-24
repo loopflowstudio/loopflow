@@ -1,5 +1,96 @@
 # Compression review — 2026-09-23
 
+Current pass: continuation repairs. No executable changes. The earlier grouping
+reduction remains in place; this pass found no further coherent reduction to take
+without changing behavior or designing the unfinished history/live API.
+
+## Effective model, before and after
+
+Unchanged: FlowPosition and claims authorize execution; Task events retain exact
+plan/stage/Run facts. Run journals and provider-native history own output, with
+native locations recorded beside provider Session identity at launch or callback.
+The passive reader returns ordered sources with their labels, records, and gaps.
+An opaque cursor holds reader progress only. The CLI accepts that value through a
+file or stdin; Swift creates and removes a private file for each continued query.
+
+The previous compression removed TaskOutputRecord, its per-record labels, and the
+parallel top-level records array. TaskOutputSource now owns labels and records;
+OutputRecord carries item identity, revision, and ConversationEvent. Rust, CLI,
+Swift, and the shared fixture still use that one shape. No old wrapper or decoder
+was found. This pass removes no additional APIs, DTOs, types, or fields.
+
+## Model and API path inspected
+
+Read flow_history.rs and TaskEventKind's observation exclusion; ProviderSessionRef
+and its source-preserving writer; native_source.rs resolution and launch/callback
+call sites; OutputCursor, JSONL continuation and journal normalization;
+PartCursor/read_parts_in and the new boundary-retention logic; task_run_manifests,
+read_task_output and read-only Task dispatch; CLI cursor-file/stdin input and its
+shared size bound. Checked README and architecture/planning.md against that path.
+
+Compared TaskOutput.swift field-by-field with Rust and task_output.json. Read
+RegistryQuery.taskOutput, RegistryQueryLocal, both fixture tests, the large-cursor
+cleanup test, the CLI transport test, and the three focused OpenCode tests.
+Watch snapshot, filtering store, and UI remain unimplemented; none was treated as
+an existing caller to justify a reduction.
+
+## Suspected reductions left intentionally
+
+- **Watermark, ceiling, and after:** the old inclusive boundary, fixed sweep upper
+  boundary, and page position differ while paging. The interleaving regression
+  requires both timestamp boundaries; substituting the latest row timestamp loses
+  edits, and pruning the old boundary early replays records.
+- **Part revisions and wire revisions:** the private hash compares provider JSON;
+  the wire revision identifies normalized output. Updated timestamps govern
+  retention independently of content, and unfinished parts need continued reads.
+  Collapsing these would change normalization or revisit behavior.
+- **Source location, file identity, Session identity, and verification:** location
+  resolves storage, file identity detects replacement, Session identity prevents
+  borrowing another conversation, and verification survives JSONL pages whose
+  identity header was already read. None replaces the others.
+- **Byte state versus part state:** OutputCursor mixes protocol-specific fields.
+  A tagged private continuation could eliminate invalid combinations, but doing
+  that alone adds variants/structs without removing an owner or public concept.
+  Leave the whole cursor-shape change for independent history/live continuation,
+  where it must also resolve retained-state growth and discovery. Do not add
+  accessors or adapters solely to hide the current fields.
+- **NativeSource versus OutputSource:** launch-owned storage provenance and
+  observer normalization protocol differ; journals have no native receipt.
+  Combining them would push reader state into the receipt or paths into the feed.
+- **Provider versus source:** a journal's normalization source does not identify
+  its provider. Removing provider loses attribution; the existing manifest label
+  still does not establish faithful per-attempt failover attribution.
+- **SourcePage versus TaskOutputSource:** a successful low-level read owns its
+  continuation, while the Task projection adds attribution and unavailable-source
+  evidence. Folding them would make provider readers own Task presentation.
+- **Availability, reset, has_more, and gaps:** quiet, unreadable, reset, paginated,
+  and partially malformed output are distinct observations. A single status enum
+  or an empty-record check would lose combinations the current contract exposes.
+- **Transport files and bounded input:** the private Swift file exists because
+  the runner accepts argv, and cursor values exceed argv capacity. Moving cursor
+  state into a persistent cache creates another owner; changing every query runner
+  to accept stdin is a larger transport change, not a local model reduction.
+  The CLI read bound, operation input bound, and returned-cursor bound protect
+  different boundaries and use one constant.
+
+## Verification and remaining work
+
+No tests or lint rerun: this pass changes only this report. Prior implementation
+receipts remain three OpenCode tests, one CLI cursor test, one Task discovery test,
+one Swift transport/cleanup test, formatting and full-target Clippy. The configured
+file/stdin proof returned 469 distinct revisions and accepted a 2,186,420-byte
+padded cursor; it proved transport, not live arrival or a large real Task state.
+
+Independent history/live continuation, bounded discovery/state, complete capture,
+Watch and its configured human demonstration remain required in this same PR.
+This no-op compression review does not approve those unfinished requirements.
+
+---
+
+# Retained main-view-task evidence (LOO-291)
+
+# Compression review — 2026-09-23
+
 ## Effective model
 
 - Shared Rust/Swift `RoadmapSnapshot` and `SessionRecord` supply planning and

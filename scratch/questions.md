@@ -1,3 +1,41 @@
+# Assumptions and remaining proof
+
+- Product / Desktop ownership is resolved by the Task directive; no PM mutation
+  is needed. This remains one PR, with the pinned human and settlement gates.
+- Flow facts, launch-owned native source receipts, passive readers, incremental
+  Task output, and the Rust/Swift output fixture are implemented. Watch snapshot,
+  separate history/live cursors, the Mac surface, and its configured demo remain.
+- A configured Codex reader observed new prose and tools with the original owned
+  client unchanged. Claude and OpenCode have local reader/source tests only;
+  all-provider live coverage is not established. No replacement client was used.
+- Native sources can persist at message/tool boundaries. Live output must arrive
+  before Session completion; token-by-token capture is not promised.
+- Discovery currently reads all immutable Run manifests and Task flow facts on
+  each request, while transcript pages are bounded. Incremental discovery and
+  historical/live cursor separation still need implementation and measurement.
+- OpenCode continuation detects source replacement, Session creation changes,
+  reduced part counts, and removal of retained boundary/unfinished parts. An
+  equal-count rewrite of older completed parts needs further investigation before
+  claiming arbitrary compaction coverage; do not hide it behind a quiet source.
+
+- Summary-only journal attempts now report `limited_capture`: their normalized
+  stream lacks complete tool results. The full Task still requires resolving
+  those autonomous/auxiliary capture paths; explicit gaps are failure handling,
+  not satisfaction of complete output coverage.
+
+- Cursor transport now uses `--cursor FILE` or stdin (`-`), including the Swift
+  caller. Completed interior OpenCode history no longer accumulates in cursor
+  state. Same-timestamp/unfinished parts and per-Run state can still hit the 4 MiB
+  bound; bounded discovery and independent history/live continuation remain.
+- OpenCode now freezes a sweep timestamp and retains both inclusive boundaries
+  until pagination ends. This handles boundary edits interleaved with newer
+  writes; it does not prove arbitrary completed-history rewrites with backdated
+  timestamps or equal-count compaction.
+
+---
+
+# Retained main-view-task evidence (LOO-291)
+
 # Open decisions and limits
 
 ## Implemented interpretation

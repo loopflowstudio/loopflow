@@ -7,6 +7,31 @@ import Testing
 
 @Suite("RegistryQuery")
 struct RegistryQueryTests {
+    @Test("Task output transports a large cursor and removes it after failure")
+    func taskOutputLargeCursor() async throws {
+        let cursor = String(repeating: "x", count: 2 * 1024 * 1024)
+        let query = RegistryQuery { args, _ in
+            let file = URL(fileURLWithPath: try #require(args.last))
+            #expect(try String(contentsOf: file, encoding: .utf8) == cursor)
+            let attributes = try FileManager.default.attributesOfItem(
+                atPath: file.deletingLastPathComponent().path
+            )
+            #expect((attributes[.posixPermissions] as? NSNumber)?.intValue == 0o700)
+            // Return the path as the failure so cleanup can be checked after
+            // the complete async query lifetime, including error unwinding.
+            throw RegistryQueryError(file.path)
+        }
+        do {
+            _ = try await query.taskOutput(issue: "LOO-293", cursor: cursor, cwd: nil)
+            Issue.record("Expected the failed query to propagate its error")
+        } catch let error as RegistryQueryError {
+            #expect(!FileManager.default.fileExists(atPath: error.message))
+            #expect(!FileManager.default.fileExists(
+                atPath: URL(fileURLWithPath: error.message).deletingLastPathComponent().path
+            ))
+        }
+    }
+
     @Test("lf ls decodes and scopes to the repo")
     func wavesDecodeAndScope() async throws {
         let json = """

@@ -579,6 +579,15 @@ fn session_command_status_with_env(
             account_route
                 .as_ref()
                 .map(|route| route.account_id().clone()),
+            crate::run_record::native_source::source_for_command(
+                &process,
+                &command.program,
+                provider_session_id,
+            )
+            .unwrap_or_else(|error| {
+                tracing::warn!(%error, "native output location unavailable");
+                None
+            }),
         )?;
     }
     if command.program == "opencode"
@@ -673,6 +682,12 @@ fn run_opencode_with_session_observer(
             .expect("OpenCode observer requires a Run directory"),
     );
     process.stderr(Stdio::piped());
+    let native_source =
+        crate::run_record::native_source::source_for_command(&process, "opencode", "")
+            .unwrap_or_else(|error| {
+                tracing::warn!(%error, "native output location unavailable");
+                None
+            });
     let mut child = process.spawn()?;
     let client = match ProviderClientGuard::publish(environment, child.id()) {
         Ok(client) => client,
@@ -698,6 +713,7 @@ fn run_opencode_with_session_observer(
                         &run_dir,
                         provider_session_id,
                         None,
+                        native_source.clone(),
                     ) {
                         write_error = Some(error);
                     }

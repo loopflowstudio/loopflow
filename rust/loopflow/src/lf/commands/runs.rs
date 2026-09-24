@@ -192,8 +192,23 @@ pub fn observe_provider_session() -> Result<()> {
         .map(|value| crate::store::ProviderAccountId::parse(&value))
         .transpose()
         .map_err(|error| anyhow!("invalid provider account in session callback: {error}"))?;
-    crate::run_record::write_provider_session(&run_dir, provider_session_id, account_id)
-        .map_err(|error| anyhow!("cannot preserve provider session: {error}"))
+    let manifest = crate::run_record::read_manifest(&run_dir)?;
+    let native_source = crate::run_record::native_source::source_for_callback(
+        &manifest.harness,
+        provider_session_id,
+        &payload,
+    )
+    .unwrap_or_else(|error| {
+        tracing::warn!(%error, "native output location unavailable");
+        None
+    });
+    crate::run_record::write_provider_session(
+        &run_dir,
+        provider_session_id,
+        account_id,
+        native_source,
+    )
+    .map_err(|error| anyhow!("cannot preserve provider session: {error}"))
 }
 
 pub fn inspect(selector: &str, events: bool, final_answer: bool, json: bool) -> Result<()> {

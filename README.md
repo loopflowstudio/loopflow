@@ -84,9 +84,17 @@ lf task interrupt INF-123                             # end this turn so fresh d
 lf --task INF-123 research "write scratch/runtime.md"    # one independent Task-bound Run
 lf task restart INF-123 "reconcile all scratch first" # checkpoint and begin a new kickoff
 lf task status INF-123 --json                         # inspect durable state
+lf task output INF-123 --json                         # read passive output; continue with --cursor
 lf pr arm -c                                          # request exact-head auto-merge and return
 lf pr land -c                                         # watch, repair CI, merge, then complete the Task
 ```
+
+`task output` returns bounded pages grouped by source. Each source carries its
+Run/provider/stage labels, ordered `records`, and explicit gaps. Records retain
+item identities and revisions. Save `next_cursor` in a file and pass its path as
+`--cursor FILE`, or pipe the value with `--cursor -`, to continue and discover new
+Runs. Cursor contents travel outside command arguments so long continuations can
+be read. Reading native history leaves the existing provider client running.
 
 Turn a reviewed design into work without another planning subsystem:
 

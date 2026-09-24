@@ -1,3 +1,128 @@
+# Slice review — 2026-09-23
+
+Disposition: retain the flow-history and passive-reader foundation; return to
+implementation. Capture coverage and continuation are still incomplete, so this
+is not a passed slice and does not advance to publication or the human demo gate.
+The grouping reduction is coherent and creates no competing authority.
+
+## Evidence matrix
+
+| Claim | Planned behavior | Implemented behavior | Proof | Result |
+|---|---|---|---|---|
+| Exact flow history | Repeated skills, retries, Iterate, restart, completion retain attribution atomically without parent wakes | Transactional Task flow facts and explicit Run bindings | Prior eight store tests and controller review; owning transactions and observation exclusion remain unchanged | pass |
+| Passive configured read | Read available Task output without a checkout or client takeover | Direct CLI read-only dispatch over existing registry, journals, and recorded native sources | Fresh branch build; four `lf task output LOO-293 --json` pages from `/tmp` | pass |
+| Incremental pages | Preserve records and continue without replay | Byte offsets, source identities/revisions, and bounded round-robin transcript reads | Fresh configured pages: 167, 145, 128, 128 records; zero repeated revisions or gaps; same Task and three sources | pass |
+| All/new Runs | No seven-day/fifty-Run cap; discover auxiliary Runs | Full manifest scan plus exact durable-ID/issue attribution | Compression proof: 51 historical Runs plus one new Run, two ordered records each; no replay | pass |
+| Native live arrival | Prose/tools visible before native Session completion without replacement | Passive Claude/Codex JSONL and OpenCode SQLite readers | Prior configured Codex proof: one prose item, five tool records, same exact client; no fresh all-provider proof | gap |
+| Complete capture | All supported native and autonomous/auxiliary output | Summary journals still report limited_capture; Claude/OpenCode live paths remain unproved | Source normalization and current evidence ledger | gap |
+| OpenCode revision continuation | Emit only changed revisions at inclusive timestamp boundaries | Timestamp-only updates previously dropped retained hashes and replayed content; fixed here | New regression failed before correction; focused proof recorded below | pass after correction |
+| Reset/compaction coverage | Replacement or lost continuation must be explicit | File identity, Session creation, reduced counts, retained-part deletion detected | Prior local reset/compaction tests; arbitrary equal-count older rewrites still unproved | gap |
+| Bounded reconnect/history | Bounded discovery and independent history/live cursors that remain usable | All manifests and flow facts reread; one cursor accumulates per-Run/part state and travels in argv | CLI and Swift source; local exec limit reproduction below | gap |
+| Shared wire contract | Rust/Swift agree on labels, revisions, availability, gaps | One ordered source list owns records and labels; no attributed-record wrapper | Prior compression Rust and Swift fixture passes; mirrors inspected here | pass |
+| Watch experience | Diagram, ancestry, attempts, filters, Follow live, earlier invocations, accessible controls and existing Session links | No TaskWatchSnapshot or Watch UI; Task workspace still offers Changes/Terminal behind runtime/workspace prerequisites | TaskWorkspaceView, CLI symbols, RegistryQuery and Swift model search | gap |
+| Complete configured demo | Autonomous/native live output, transition, earlier-stage inspection, auxiliary Run, Iterate return, reopen | CLI reader evidence only; no Watch surface exists | Current configured read is historical continuation, not a live Watch demo | gap |
+
+## Configured proof
+
+Built the branch with `cargo build -p loopflow --bin lf`. Ran the resulting
+`lf task output LOO-293 --json` from `/tmp`, with the existing Home selected and
+successive next_cursor values passed back. Only counts, event kinds, gaps and
+identity comparisons were printed; conversation text and credentials were not.
+
+The four reads returned 167, 145, 128, and 128 records from three sources with
+zero repeated `(Run, source, item, revision)` tuples, no gaps, and no stderr.
+Observed first-read duration was 2.214 seconds; subsequent reads were 0.322,
+0.318, and 0.318 seconds. These are four observations, not a published latency
+budget or percentile. All four pages still had history remaining. They prove the
+current grouped contract and continuation, not that the reader reached the live
+tail or that new output arrived before completion in this review.
+
+No production Task was advanced, provider launched/resumed/attached/interrupted,
+or native transcript modified to create evidence. The previous Codex live proof
+remains dated implementation evidence; it was not repeated or broadened here.
+
+## Bounded correction
+
+OpenCode parts can receive a new time_updated value without changed JSON content.
+The unchanged-hash branch skipped updating the retained timestamp. Advancing the
+watermark then pruned that hash, and the next inclusive poll emitted the same
+content again. The new production-reader regression failed on that third read.
+The correction updates the retained timestamp before skipping unchanged content.
+Item identity, revision, provider storage, and the public wire contract stay intact.
+
+## Remaining continuation defect
+
+The public output reader accepts an encoded cursor up to 4 MiB and returns a cursor
+whose state grows with observed Runs and retained OpenCode parts. RegistryQuery
+passes the whole cursor as one command argument. This host reports SC_ARG_MAX of
+1,048,576 bytes; an isolated `/usr/bin/true` invocation accepted a 300 KiB argument
+but rejected a 2 MiB argument with E2BIG before starting the process. No large
+production Task was manufactured. This demonstrates a transport ceiling below
+the accepted input bound, not the exact threshold for every environment.
+
+Resolve cursor transport and bounded state together with independent history/live
+continuation. Merely raising a byte limit or reporting unavailable output after
+argv overflow cannot satisfy long-history watching. Discovery also still scans
+all manifests and flow facts every poll; transcript page bounds do not bound the
+whole query. An unrelated corrupt manifest currently fails the whole Task read
+rather than returning healthy emptiness; its recovery behavior needs deliberate
+handling in bounded discovery.
+
+## Ownership and negative architectural proof
+
+Traced native-source receipt writers at launch/resume and provider callbacks,
+read-only registry opening, manifest discovery, source resolution, source readers,
+Task binding projection, CLI rendering, RegistryQuery and both wire fixtures.
+No watcher launch/control call, credential selection, transcript dual write,
+new table/migration, daemon path, direct Swift provider-storage read, or old-shape
+compatibility decoder is reachable from the output read. SQLite native reads use
+read-only flags; their statements select Session/message/part rows.
+
+The existing launch process writes source provenance beside Session identity.
+Watch uses the recorded location or exact recorded account, with explicit gaps
+when identity cannot resolve. The Task projection only reads RunBound facts;
+it does not choose a next stage or infer completion from output. Flow facts remain
+excluded from parent observation delivery. Provider labels still mean the Run's
+manifest harness; per-attempt provider changes are not newly represented here.
+
+## Required next implementation
+
+1. Finish capture: configured Claude/OpenCode live proof, complete summary-only
+   autonomous/auxiliary tool output, and faithful provider attribution across
+   attempts. Explicit source gaps are necessary failure handling, not coverage.
+2. Implement bounded discovery and practical cursor transport/state with separate
+   history/live continuation. Extend mutable-part tests to edits and new records
+   interleaved across page boundaries; complete compaction/reset guarantees.
+3. Add shared Watch snapshot/fixtures and the Mac Watch surface at all Task entry
+   points; prove stage/Run filtering, Follow live, stale evidence, and completed
+   history without a worker or worktree.
+4. Run the complete configured demo, then the pinned human gate. Landing and Task
+   completion remain owned by the pinned final flow.
+
+Publication rule: the invoked [review-slice skill](/Users/jack/.agents/skills/review-slice/SKILL.md) says, “When all applicable
+`Done when` claims hold and the slice is coherent, publish or refresh the Task PR
+with `lf pr publish`.” Capture and continuation gaps above leave that condition
+unsatisfied. No publication or landing was attempted.
+
+## Validation in this review
+
+- `cargo build -p loopflow --bin lf`: passed before the configured CLI proof.
+- `cargo test -p loopflow --lib opencode_timestamp_only_update --no-fail-fast`:
+  the new regression failed before the correction, proving replay on the third read.
+- `cargo test -p loopflow --lib opencode_ --no-fail-fast`: 63 passed after the
+  correction, including the new regression and existing mutable-part paging test.
+  This name filter also includes OpenCode launch, harness, and authentication tests;
+  it is not 63 passive-reader tests or configured-provider coverage.
+- `cargo fmt --all -- --check`: passed.
+- `cargo clippy --all-targets -- -D warnings`: passed.
+
+Prior store/controller, source-account, and shared fixture passes are explicitly
+prior receipts above. No full repository suite or Watch demo ran in this review.
+
+---
+
+# Retained main-view-task evidence (LOO-291)
+
 # Unified navigation slice review — 2026-09-23
 
 Latest: [iteration 10 integrated review](review-slice-iteration10.md). Session-row

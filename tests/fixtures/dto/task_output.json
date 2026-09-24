@@ -1,0 +1,77 @@
+{
+  "task_id": "task_00000000000000000000000000000001",
+  "sources": [
+    {
+      "run_id": "run_00000000000000000000000000000001",
+      "source": "open_code",
+      "available": true,
+      "has_more": false,
+      "reset": false,
+      "gaps": [],
+      "provider": "opencode",
+      "stage": {
+        "invocation_id": "flow-1",
+        "step_index": 2,
+        "iteration": 1
+      },
+      "records": [
+        {
+          "source_item_id": "part-1",
+          "revision": "revision-2",
+          "event": {
+            "type": "item_completed",
+            "turn_id": "message-1",
+            "item": {
+              "type": "tool",
+              "id": "part-1",
+              "name": "bash",
+              "status": "running",
+              "input": {
+                "command": "echo live"
+              },
+              "output": "live"
+            }
+          }
+        }
+      ]
+    },
+    {
+      "run_id": "run_00000000000000000000000000000002",
+      "source": "journal",
+      "available": true,
+      "has_more": true,
+      "reset": false,
+      "gaps": [],
+      "provider": "codex",
+      "stage": null,
+      "records": [
+        {
+          "source_item_id": "12",
+          "revision": "revision-1",
+          "event": {
+            "type": "text_delta",
+            "turn_id": "turn-2",
+            "content": "Concurrent auxiliary output"
+          }
+        }
+      ]
+    },
+    {
+      "run_id": "run_00000000000000000000000000000003",
+      "source": "claude",
+      "available": false,
+      "has_more": false,
+      "reset": false,
+      "gaps": [
+        {
+          "code": "source_unavailable",
+          "message": "Recorded native source is missing"
+        }
+      ],
+      "provider": "claude",
+      "stage": null,
+      "records": []
+    }
+  ],
+  "next_cursor": "opaque-continuation"
+}

@@ -1,5 +1,8 @@
 //! Authoritative, Home-local evidence for one Loopflow harness launch.
 
+pub(crate) mod native_source;
+pub(crate) mod output;
+
 use std::collections::{BTreeMap, HashMap};
 use std::fs::{self, File, OpenOptions};
 use std::io::{BufRead, BufReader, Write};
@@ -153,6 +156,7 @@ pub(crate) struct ProviderSessionRef {
     schema_version: u32,
     pub(crate) provider_session_id: String,
     pub(crate) account_id: Option<crate::store::ProviderAccountId>,
+    pub(crate) native_source: Option<native_source::NativeSource>,
 }
 
 #[derive(Debug, Clone, Serialize, Deserialize, PartialEq, Eq)]
@@ -512,36 +516,17 @@ fn record_dirs(lf_home: &Path) -> std::io::Result<Vec<PathBuf>> {
     };
     let mut records = Vec::new();
     for prefix in prefixes {
-        let prefix = match prefix {
-            Ok(prefix) if prefix.file_type().is_ok_and(|kind| kind.is_dir()) => prefix,
-            Ok(_) => continue,
-            Err(error) => {
-                tracing::warn!(%error, root = %root.display(), "Run record prefix unavailable");
-                continue;
+        let prefix = prefix?;
+        if !prefix.file_type()?.is_dir() {
+            continue;
+        }
+        for record in fs::read_dir(prefix.path())? {
+            let record = record?;
+            if !record.file_name().to_string_lossy().starts_with('.')
+                && record.file_type()?.is_dir()
+            {
+                records.push(record.path());
             }
-        };
-        let entries = match fs::read_dir(prefix.path()) {
-            Ok(entries) => entries,
-            Err(error) => {
-                tracing::warn!(%error, prefix = %prefix.path().display(), "Run record directory unavailable");
-                continue;
-            }
-        };
-        for record in entries {
-            let record = match record {
-                Ok(record)
-                    if !record.file_name().to_string_lossy().starts_with('.')
-                        && record.file_type().is_ok_and(|kind| kind.is_dir()) =>
-                {
-                    record
-                }
-                Ok(_) => continue,
-                Err(error) => {
-                    tracing::warn!(%error, prefix = %prefix.path().display(), "Run record unavailable");
-                    continue;
-                }
-            };
-            records.push(record.path());
         }
     }
     Ok(records)
@@ -584,6 +569,34 @@ pub(crate) fn resolve_manifest(
             format!("Run prefix {selector} is ambiguous"),
         )),
     }
+}
+
+pub(crate) fn task_run_manifests(
+    home: &Path,
+    task: &crate::work::task::Task,
+) -> std::io::Result<Vec<(PathBuf, RunManifest)>> {
+    let selectors = [
+        format!("task:{}", task.id),
+        format!("task:{}", task.plan.identifier),
+    ];
+    let mut runs = Vec::new();
+    for dir in record_dirs(home)? {
+        let manifest = read_manifest(&dir)?;
+        validate_manifest_path(&dir, &manifest)?;
+        if manifest
+            .subjects
+            .iter()
+            .any(|subject| selectors.contains(&subject.selector))
+        {
+            runs.push((dir, manifest));
+        }
+    }
+    runs.sort_by(|(_, left), (_, right)| {
+        left.created_at
+            .cmp(&right.created_at)
+            .then_with(|| left.run_id.as_str().cmp(right.run_id.as_str()))
+    });
+    Ok(runs)
 }
 
 pub(crate) fn read_run_snapshot(dir: &Path) -> std::io::Result<RunSnapshot> {
@@ -678,6 +691,7 @@ pub(crate) fn read_provider_session(dir: &Path) -> std::io::Result<Option<Provid
                 schema_version: SCHEMA_VERSION,
                 provider_session_id: observed,
                 account_id: None,
+                native_source: None,
             });
         }
     }
@@ -764,6 +778,7 @@ pub(crate) fn write_provider_session(
     dir: &Path,
     provider_session_id: &str,
     account_id: Option<crate::store::ProviderAccountId>,
+    native_source: Option<native_source::NativeSource>,
 ) -> std::io::Result<()> {
     if provider_session_id.is_empty() {
         return Err(std::io::Error::new(
@@ -772,6 +787,15 @@ pub(crate) fn write_provider_session(
         ));
     }
     read_manifest(dir)?;
+    let native_source = native_source.or_else(|| {
+        read_provider_session(dir)
+            .ok()
+            .flatten()
+            .filter(|old| {
+                old.provider_session_id == provider_session_id && old.account_id == account_id
+            })
+            .and_then(|old| old.native_source)
+    });
     let path = dir.join("provider-session.json");
     let staging = dir.join(format!(".provider-session-{}.staging", Uuid::new_v4()));
     write_private_exclusive(
@@ -780,6 +804,7 @@ pub(crate) fn write_provider_session(
             schema_version: SCHEMA_VERSION,
             provider_session_id: provider_session_id.to_string(),
             account_id,
+            native_source,
         })
         .map_err(std::io::Error::other)?,
     )?;
@@ -1018,7 +1043,7 @@ struct UsageStream {
     cost_usd: Option<f64>,
 }
 
-fn read_manifest(dir: &Path) -> std::io::Result<RunManifest> {
+pub(crate) fn read_manifest(dir: &Path) -> std::io::Result<RunManifest> {
     let bytes = fs::read(dir.join("manifest.json"))?;
     let manifest = serde_json::from_slice::<RunManifest>(&bytes).map_err(std::io::Error::other)?;
     if manifest.schema_version != SCHEMA_VERSION {
@@ -1459,7 +1484,7 @@ impl CaptureHandle {
                         .as_ref()
                         .and_then(|launch| launch.account_id.clone())
                 });
-            write_provider_session(&capture.dir, &session_id, account_id)?;
+            write_provider_session(&capture.dir, &session_id, account_id, None)?;
             capture.append_event(RunEvent::ProviderSessionObserved {
                 attempt_key: capture.attempt_key(),
                 provider_session_id: session_id,
@@ -2346,18 +2371,30 @@ mod tests {
         let home = tempfile::tempdir().unwrap();
         let capture = CaptureHandle::begin_at(home.path(), spec(home.path())).unwrap();
         let account_id = crate::store::ProviderAccountId::parse("primary").unwrap();
+        let source = super::native_source::NativeSource::Jsonl {
+            path: home.path().join("native.jsonl"),
+        };
         super::write_provider_session(
             &capture.artifact_dir(),
             "provider-session",
             Some(account_id.clone()),
+            Some(source.clone()),
         )
         .unwrap();
 
+        capture.set_provider_session_id(Some("provider-session".into()));
         let session = read_provider_session(&capture.artifact_dir())
             .unwrap()
             .expect("provider session reference");
         assert_eq!(session.provider_session_id, "provider-session");
         assert_eq!(session.account_id, Some(account_id));
+        assert_eq!(session.native_source, Some(source));
+        capture.set_provider_session_id(Some("replacement-session".into()));
+        assert!(read_provider_session(&capture.artifact_dir())
+            .unwrap()
+            .unwrap()
+            .native_source
+            .is_none());
     }
 
     #[test]
@@ -2386,7 +2423,7 @@ mod tests {
         let home = tempfile::tempdir().unwrap();
         let capture = CaptureHandle::begin_at(home.path(), spec(home.path())).unwrap();
         let dir = capture.artifact_dir();
-        write_provider_session(&dir, "provider-session", None).unwrap();
+        write_provider_session(&dir, "provider-session", None, None).unwrap();
 
         assert!(!provider_session_is_resolved(&dir).unwrap());
         resolve_provider_session(&dir).unwrap();
@@ -2408,16 +2445,16 @@ mod tests {
         let mut open_spec = spec(home.path());
         open_spec.surface = "tui".to_string();
         let open = CaptureHandle::begin_at(home.path(), open_spec).unwrap();
-        write_provider_session(&open.artifact_dir(), "open-session", None).unwrap();
+        write_provider_session(&open.artifact_dir(), "open-session", None, None).unwrap();
 
         let mut resolved_spec = spec(home.path());
         resolved_spec.surface = "tui".to_string();
         let resolved = CaptureHandle::begin_at(home.path(), resolved_spec).unwrap();
-        write_provider_session(&resolved.artifact_dir(), "resolved-session", None).unwrap();
+        write_provider_session(&resolved.artifact_dir(), "resolved-session", None, None).unwrap();
         resolve_provider_session(&resolved.artifact_dir()).unwrap();
 
         let headless = CaptureHandle::begin_at(home.path(), spec(home.path())).unwrap();
-        write_provider_session(&headless.artifact_dir(), "headless-session", None).unwrap();
+        write_provider_session(&headless.artifact_dir(), "headless-session", None, None).unwrap();
 
         let runs = scan_unresolved_provider_runs(home.path()).unwrap();
         assert_eq!(runs.len(), 1);

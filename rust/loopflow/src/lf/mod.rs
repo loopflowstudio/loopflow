@@ -1018,6 +1018,15 @@ pub enum TaskCommand {
         #[arg(long)]
         json: bool,
     },
+    /// Read a bounded page of Task output without opening a provider client
+    Output {
+        issue: String,
+        /// Read continuation from FILE, or - for stdin
+        #[arg(long, value_name = "FILE")]
+        cursor: Option<String>,
+        #[arg(long)]
+        json: bool,
+    },
     /// List files changed from this Task's recorded base commit
     Changes {
         issue: String,

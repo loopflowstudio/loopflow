@@ -161,6 +161,29 @@ public struct RegistryQuery: Sendable {
         return try Self.decode(TaskChangesSnapshot.self, from: stdout)
     }
 
+    public func taskOutput(issue: String, cursor: String?, cwd: String?) async throws -> TaskOutputPage {
+        var args = ["task", "output", issue, "--json"]
+        // Cursor contents can exceed argv limits. This temporary transport file
+        // has no lifetime beyond the query and is never a transcript cache.
+        var directory: URL?
+        defer {
+            if let directory { try? FileManager.default.removeItem(at: directory) }
+        }
+        if let cursor {
+            let path = FileManager.default.temporaryDirectory
+                .appendingPathComponent("loopflow-output-\(UUID().uuidString)", isDirectory: true)
+            try FileManager.default.createDirectory(
+                at: path, withIntermediateDirectories: false,
+                attributes: [.posixPermissions: 0o700]
+            )
+            directory = path
+            let file = path.appendingPathComponent("cursor")
+            try Data(cursor.utf8).write(to: file)
+            args.append(contentsOf: ["--cursor", file.path])
+        }
+        return try Self.decode(TaskOutputPage.self, from: await run(args, cwd))
+    }
+
     /// One Task's complete patch, or the patch for a selected changed file.
     public func taskDiff(
         issue: String,

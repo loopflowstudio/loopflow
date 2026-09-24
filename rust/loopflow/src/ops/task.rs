@@ -4027,6 +4027,33 @@ pub fn task_snapshot(task: &Task) -> OpsResult<TaskSnapshot> {
     })
 }
 
+pub fn task_output(
+    issue: &str,
+    cursor: Option<&str>,
+) -> OpsResult<crate::ops::task_output::TaskOutputPage> {
+    block_on_task(async {
+        let store = Arc::new(Store {
+            sqlite: crate::store::sqlite::SqliteStore::open_run_ledger_read_only(
+                &crate::store::observability_database_path()?,
+            )
+            .map_err(|error| task_error(error.to_string()))?,
+        });
+        let task = store
+            .get_task_by_issue(issue)
+            .await
+            .map_err(|error| task_error(error.to_string()))?
+            .ok_or_else(|| task_error(format!("no Task exists for {issue:?}")))?;
+        crate::ops::task_output::read_task_output(
+            &store,
+            &task,
+            &crate::store::observability_home_dir(),
+            cursor,
+        )
+        .await
+        .map_err(|error| task_error(error.to_string()))
+    })
+}
+
 pub fn task_changes(issue: &str) -> OpsResult<TaskChangesSnapshot> {
     let task = task_status(issue)?;
     let pr = active_pr(&task)?;

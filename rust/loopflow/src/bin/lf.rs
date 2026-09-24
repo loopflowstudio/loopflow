@@ -964,6 +964,46 @@ fn run_project_command(repo: &Path, command: &ProjectCommand) -> anyhow::Result<
     }
 }
 
+fn run_task_output(issue: &str, cursor: Option<&str>, json: bool) -> anyhow::Result<()> {
+    let cursor = cursor.map(read_task_output_cursor).transpose()?;
+    let page = loopflow::ops::task::task_output(issue, cursor.as_deref())?;
+    if json {
+        println!("{}", serde_json::to_string(&page)?);
+    } else {
+        for source in page.sources {
+            for record in source.records {
+                println!(
+                    "{} [{}] {}",
+                    source.run_id,
+                    source.provider,
+                    serde_json::to_string(&record.event)?
+                );
+            }
+            for gap in source.gaps {
+                eprintln!("{}: {}: {}", source.run_id, gap.code, gap.message);
+            }
+        }
+    }
+    Ok(())
+}
+
+fn read_task_output_cursor(path: &str) -> anyhow::Result<String> {
+    let limit = loopflow::ops::task_output::MAX_CURSOR_BYTES;
+    let reader: Box<dyn Read> = if path == "-" {
+        Box::new(std::io::stdin())
+    } else {
+        Box::new(std::fs::File::open(path)?)
+    };
+    let mut cursor = String::new();
+    reader
+        .take((limit + 1) as u64)
+        .read_to_string(&mut cursor)?;
+    if cursor.len() > limit {
+        anyhow::bail!("Task output cursor is too large");
+    }
+    Ok(cursor.trim().to_owned())
+}
+
 fn run_task_command(repo: &Path, command: &TaskCommand) -> anyhow::Result<()> {
     match command {
         TaskCommand::Worker { .. } => {
@@ -1034,6 +1074,11 @@ fn run_task_command(repo: &Path, command: &TaskCommand) -> anyhow::Result<()> {
             let task = loopflow::ops::task::task_status(issue)?;
             print_task(&task, *json)
         }
+        TaskCommand::Output {
+            issue,
+            cursor,
+            json,
+        } => run_task_output(issue, cursor.as_deref(), *json),
         TaskCommand::Changes { issue, json } => {
             let snapshot = loopflow::ops::task::task_changes(issue)?;
             if *json {
@@ -1542,6 +1587,14 @@ fn main() -> anyhow::Result<()> {
                 tokio::runtime::Runtime::new()?
                     .block_on(loopflow::controller::task::run_worker(task_id.clone()))
             }),
+            Some(Commands::Task {
+                cmd:
+                    TaskCommand::Output {
+                        issue,
+                        cursor,
+                        json,
+                    },
+            }) => run_task_output(issue, cursor.as_deref(), *json),
             Some(Commands::Task { cmd }) => {
                 in_repo_runtime(&args, |repo| run_task_command(repo, cmd))
             }
@@ -1778,6 +1831,27 @@ mod tests {
     }
 
     static PROCESS_STATE_LOCK: std::sync::Mutex<()> = std::sync::Mutex::new(());
+
+    #[test]
+    fn task_output_cursor_file_exceeds_argv_capacity_and_enforces_read_bound() {
+        let directory = tempfile::tempdir().unwrap();
+        let path = directory.path().join("cursor");
+        let cursor = "x".repeat(2 * 1024 * 1024);
+        std::fs::write(&path, format!("{cursor}\n")).unwrap();
+        assert_eq!(
+            super::read_task_output_cursor(path.to_str().unwrap()).unwrap(),
+            cursor
+        );
+        std::fs::write(
+            &path,
+            vec![b'x'; loopflow::ops::task_output::MAX_CURSOR_BYTES + 1],
+        )
+        .unwrap();
+        assert!(super::read_task_output_cursor(path.to_str().unwrap())
+            .unwrap_err()
+            .to_string()
+            .contains("too large"));
+    }
 
     fn published_pr() -> TaskPr {
         let now = time::OffsetDateTime::now_utc();

@@ -189,3 +189,33 @@ fn metric_portfolio_fixture_locks_every_tagged_payload() {
     with_unknown_field["metrics"][0]["future_field"] = serde_json::json!(true);
     serde_json::from_value::<MetricPortfolioDto>(with_unknown_field).unwrap();
 }
+
+#[test]
+fn task_output_preserves_native_revisions_and_explicit_source_gaps() {
+    use loopflow::ops::task_output::{OutputSource, TaskOutputPage};
+    let fixture: serde_json::Value =
+        serde_json::from_str(include_str!("../../../tests/fixtures/dto/task_output.json")).unwrap();
+    let page: TaskOutputPage = serde_json::from_value(fixture.clone()).unwrap();
+    assert_eq!(page.sources[0].source, OutputSource::OpenCode);
+    assert_eq!(page.sources[0].records[0].source_item_id, "part-1");
+    assert_eq!(page.sources[0].records[0].revision, "revision-2");
+    assert_eq!(page.sources[0].stage.as_ref().unwrap().iteration, 1);
+    assert!(page.sources[1].stage.is_none());
+    assert!(!page.sources[2].available);
+    assert!(page.sources[2].records.is_empty());
+    assert_eq!(page.sources[2].provider, "claude");
+    assert_eq!(page.sources[1].records[0].source_item_id, "12");
+    assert_eq!(serde_json::to_value(&page).unwrap(), fixture);
+    let mut missing_records = fixture.clone();
+    missing_records["sources"][2]
+        .as_object_mut()
+        .unwrap()
+        .remove("records");
+    assert!(serde_json::from_value::<TaskOutputPage>(missing_records).is_err());
+    let mut missing = fixture;
+    missing["sources"][0]
+        .as_object_mut()
+        .unwrap()
+        .remove("available");
+    assert!(serde_json::from_value::<TaskOutputPage>(missing).is_err());
+}

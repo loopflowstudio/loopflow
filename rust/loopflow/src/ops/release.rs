@@ -484,7 +484,7 @@ pub fn release_bump(
     let (main_repo, target) = resolve_repo_and_target(repo, target_name)?;
 
     let version = normalize_version(version);
-    bump_manifest_versions(&main_repo, &target, &version, progress)
+    bump_manifest_versions(&main_repo, &target, &version, progress, &|_| {})
 }
 
 /// Create a git tag and push it to the remote.
@@ -1855,7 +1855,10 @@ fn prepare_release_in_worktree(
         "Bumping manifests for {}...",
         target_tag(target, version)
     ));
-    bump_manifest_versions(wt_path, target, version, progress)?;
+    bump_manifest_versions(wt_path, target, version, progress, &|command| {
+        lock.inherit(command);
+        lease.inherit(command);
+    })?;
 
     if !target.prepare.is_empty() {
         progress.status("Running repository release preparation...");
@@ -3648,6 +3651,7 @@ fn bump_manifest_versions(
     target: &ReleaseTarget,
     version: &str,
     progress: &impl Progress,
+    inherit_tools: &impl Fn(&mut Command),
 ) -> OpsResult<()> {
     if target.manifests.is_empty() {
         progress.status("No manifest version files detected; skipping version bump.");
@@ -3687,11 +3691,21 @@ fn bump_manifest_versions(
     }
 
     // Update lock files so they stay in sync with manifest versions.
-    if bumped_cargo && repo.join("Cargo.lock").exists() {
-        run_stdout(repo, "cargo", &["update", "--workspace"])?;
-    }
-    if bumped_pyproject && repo.join("uv.lock").exists() {
-        run_stdout(repo, "uv", &["lock"])?;
+    for (bumped, lockfile, program, args) in [
+        (
+            bumped_cargo,
+            "Cargo.lock",
+            "cargo",
+            &["update", "--workspace"][..],
+        ),
+        (bumped_pyproject, "uv.lock", "uv", &["lock"][..]),
+    ] {
+        if bumped && repo.join(lockfile).exists() {
+            let mut command = Command::new(program);
+            command.args(args).current_dir(repo);
+            inherit_tools(&mut command);
+            command_stdout(&mut command)?;
+        }
     }
 
     Ok(())

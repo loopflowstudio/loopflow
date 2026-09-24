@@ -120,6 +120,9 @@ also preserves the checkout and reports its path for later cleanup.
 Configured repository verification and preparation hooks retain both the target
 lock and their checkout lease, including preparation during PR rebuild. A
 surviving hook keeps cleanup and another release blocked until it exits.
+Manifest lockfile updates (`cargo update --workspace` and `uv lock`) retain both
+locks during preparation, so their surviving children also keep the checkout
+available and competing releases deferred.
 PR rebuild uses the same exact-source recovery checks as candidate preparation:
 divergent local branches and dirty existing checkouts remain intact for repair.
 Release PR creation, base/title/body edits, readiness and auto-merge commands

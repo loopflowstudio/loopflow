@@ -528,22 +528,20 @@ half-contracts.
 
 ## This slice
 
-Carry the existing release target lock and exact checkout lease through shared
-Git staging, commit and branch push commands, including upstream establishment
-and the force-with-lease fallback. Extend the existing owners with explicit
-command inheritance; ordinary callers supply no release capability. Preserve
-one commit and push implementation and its Task settlement fence.
+Carry the existing release target lock and exact checkout lease through manifest
+lockfile tools (`cargo update --workspace` and `uv lock`). Extend the existing
+manifest updater with explicit command inheritance; standalone bump callers
+supply no release capability. Preserve its version selection and error handling.
 
-Prove through the built CLI that a surviving Git child or failed launcher's
-descendant excludes another release and preserves its checkout. Observe the
-actual staged/committed bytes and bare-origin branch after the child completes,
-and retain normal release preparation and ordinary commit behavior.
+Prove through the built CLI that each surviving tool or failed launcher's
+descendant excludes another release and preserves its checkout. Execute real
+local dependency-free lockfile updates after the barrier, inspect their version,
+and retain caller HEAD, branch, index and edited bytes through both exit modes.
 
-Task compensation, notes agents, lockfile tools, source/worktree children,
-historical telemetry linkage/recovery, closed obligations and configured
-acceptance remain in this serial Task. This slice changes neither settlement nor
-prerequisite policy and retains the scorecard blocker. Local process proofs do
-not supply either configured automatic settlement.
+Task compensation, notes agents, source/worktree children, historical telemetry
+linkage/recovery, closed obligations and configured acceptance remain in this
+serial Task. Settlement and prerequisite policy are unchanged. The scorecard
+blocker and both configured automatic settlements remain open.
 
 ## Slice ledger
 
@@ -779,6 +777,17 @@ results. No additional bounded defect was established and no executable code
 changed. Task compensation, notes/tools/worktree children, historical telemetry
 linkage/retry and dated repair ownership, closed-obligation continuation and
 configured acceptance remain open. See [review-git.md](review-git.md).
+
+- 2026-09-24: manifest lockfile tools now inherit the existing release target
+  lock and exact checkout lease. The built-CLI regression first reproduced a
+  competing tag while the Cargo launcher survived controller death. Four
+  Cargo/uv and killed-controller/failed-launcher cases passed after repair
+  (18.34s), including real offline lockfile updates and exact caller-state
+  preservation. Ordinary bump, release reintegration, formatting and all-target
+  Clippy also passed. Task
+  compensation, notes/worktree children, historical telemetry recovery, closed
+  obligations and configured acceptance remain open. See
+  [release-lockfile-ownership.md](release-lockfile-ownership.md).
 
 ## Measure
 

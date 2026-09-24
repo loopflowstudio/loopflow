@@ -797,6 +797,145 @@ fi
 }
 
 #[test]
+fn surviving_release_lockfile_tool_retains_target_and_checkout() {
+    for tool in ["cargo", "uv"] {
+        let path = Command::new("which").arg(tool).output().unwrap();
+        assert!(
+            path.status.success(),
+            "{tool} is required for the lockfile proof"
+        );
+        let real_tool = String::from_utf8(path.stdout).unwrap();
+        let real_tool = real_tool.trim();
+        for kill_controller in [true, false] {
+            eprintln!("Lockfile tool {tool}, killed controller: {kill_controller}");
+            let state = tempfile::tempdir().unwrap();
+            let barrier = blocking_mutation(
+                state.path(),
+                &format!(
+                    "'{real_tool}' \"$@\" > '{}/tool.log' 2>&1 || exit $?",
+                    state.path().display()
+                ),
+            );
+            let script = format!("pwd > '{}/checkout'\n{barrier}", state.path().display());
+            let script = if kill_controller {
+                format!("#!/bin/sh\n{script}")
+            } else {
+                format!(
+                    "#!/bin/sh\n(\n{script}) > '{}/descendant.log' 2>&1 &\nexit 1\n",
+                    state.path().display()
+                )
+            };
+            let gh = "#!/bin/sh\ncase \"$1 $2\" in\n'--version ') exit 0;;\n'run list'|'pr list') echo '[]';;\n'release view') exit 1;;\n*) exit 91;;\nesac\n";
+            let _env = EnvGuard::new(&[(tool, &script), ("gh", gh)]);
+            let repo = TestRepo::new();
+            let (manifest, lockfile, content, args) = if tool == "cargo" {
+                fs::create_dir(repo.path().join("src")).unwrap();
+                fs::write(repo.path().join("src/lib.rs"), "pub fn version() {}\n").unwrap();
+                (
+                    "Cargo.toml",
+                    "Cargo.lock",
+                    "[package]\nname = \"lock-proof\"\nversion = \"0.9.0\"\nedition = \"2021\"\n",
+                    vec!["update", "--workspace"],
+                )
+            } else {
+                ("pyproject.toml", "uv.lock", "[project]\nname = \"lock-proof\"\nversion = \"0.9.0\"\nrequires-python = \">=3.11\"\n", vec!["lock"])
+            };
+            fs::write(repo.path().join(manifest), content).unwrap();
+            let initial = Command::new(real_tool)
+                .args(&args)
+                .env("CARGO_NET_OFFLINE", "true")
+                .env("UV_OFFLINE", "true")
+                .current_dir(repo.path())
+                .output()
+                .unwrap();
+            assert!(initial.status.success(), "{initial:?}");
+            let git = |args: &[&str]| {
+                let output = Command::new("git")
+                    .args(args)
+                    .current_dir(repo.path())
+                    .output()
+                    .unwrap();
+                assert!(output.status.success(), "{output:?}");
+                output.stdout
+            };
+            git(&["add", "."]);
+            git(&["commit", "-m", "Configure dependency-free manifest"]);
+            git(&["push", "origin", "HEAD"]);
+            fs::write(repo.path().join("local.txt"), "unpublished commit\n").unwrap();
+            git(&["add", "local.txt"]);
+            git(&["commit", "-m", "Keep caller work local"]);
+            fs::write(repo.path().join("local.txt"), "staged caller work\n").unwrap();
+            git(&["add", "local.txt"]);
+            fs::write(repo.path().join("local.txt"), "unstaged caller work\n").unwrap();
+            fs::write(repo.path().join("untracked.txt"), "untracked caller work\n").unwrap();
+            let head = git(&["rev-parse", "HEAD"]);
+            let branch = git(&["branch", "--show-current"]);
+            let index = fs::read(repo.path().join(".git/index")).unwrap();
+            // The wrapper inherits these settings; no external package resolution occurs.
+            let log = fs::File::create(state.path().join("controller.log")).unwrap();
+            let child = Command::new(env!("CARGO_BIN_EXE_lf"))
+                .args(["release", "run", "0.9.1"])
+                .current_dir(repo.path())
+                .env_remove("LF_RELEASE_LOCK_FD")
+                .env("CARGO_NET_OFFLINE", "true")
+                .env("UV_OFFLINE", "true")
+                .stdout(Stdio::from(log.try_clone().unwrap()))
+                .stderr(Stdio::from(log))
+                .spawn()
+                .unwrap();
+            let mut parent = MutationParent {
+                child,
+                state: state.path().to_path_buf(),
+            };
+            wait_for(&state.path().join("ready"));
+            let checkout = PathBuf::from(
+                fs::read_to_string(state.path().join("checkout"))
+                    .unwrap()
+                    .trim(),
+            );
+            if kill_controller {
+                parent.child.kill().unwrap();
+            } else {
+                let deadline = Instant::now() + Duration::from_secs(20);
+                while parent.child.try_wait().unwrap().is_none() {
+                    assert!(Instant::now() < deadline, "{tool} controller did not exit");
+                    thread::sleep(Duration::from_millis(10));
+                }
+            }
+            assert!(!parent.child.wait().unwrap().success());
+            let contender = release_tag(repo.path(), "0.9.2", None);
+            let removal = worktree_remove(repo.path(), &checkout);
+            fs::write(state.path().join("allow"), "").unwrap();
+            assert!(
+                matches!(contender, Err(OpsError::ReleaseDeferred { .. })),
+                "{tool}: {contender:?}"
+            );
+            assert!(removal.is_err(), "removed surviving {tool} checkout");
+            wait_for(&state.path().join("completed"));
+            assert!(fs::read_to_string(checkout.join(lockfile))
+                .unwrap()
+                .contains("version = \"0.9.1\""));
+            assert_eq!(git(&["rev-parse", "HEAD"]), head);
+            assert_eq!(git(&["branch", "--show-current"]), branch);
+            assert_eq!(fs::read(repo.path().join(".git/index")).unwrap(), index);
+            assert_eq!(
+                fs::read_to_string(repo.path().join("local.txt")).unwrap(),
+                "unstaged caller work\n"
+            );
+            assert_eq!(
+                fs::read_to_string(repo.path().join("untracked.txt")).unwrap(),
+                "untracked caller work\n"
+            );
+            assert!(fs::read_to_string(repo.path().join(lockfile))
+                .unwrap()
+                .contains("version = \"0.9.0\""));
+            wait_until_released(|| release_tag(repo.path(), "0.9.2", None).map(|_| ()));
+            worktree_remove(repo.path(), &checkout).unwrap();
+        }
+    }
+}
+
+#[test]
 fn surviving_release_hook_retains_target_and_checkout_ownership() {
     for (phase, kill_controller) in [
         ("verify", true),

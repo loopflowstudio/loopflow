@@ -122,10 +122,17 @@ selection and retained terminals. Each Task's Watch selection survives switching
 Tasks or repositories. Enable **Show completed Tasks**, or search by title or
 identifier, to inspect completed Tasks present in the planning snapshot.
 
-**Refresh** reads the latest snapshot while preserving your selection. Failed
-reads leave the previous snapshot visible with a stale notice; hiding Watch
-cancels its query. This surface currently inspects recorded plans and attempts;
-the live output feed and automatic following remain in development.
+**Refresh** reads the plan and arriving output. The lower pane groups available
+prose, commands, tool output and failures by Run, with provider and stage labels.
+Select a stage to filter its attempts; click a Run to narrow further. **Load
+history** pages earlier output independently of arrivals. **Follow live** clears
+filters and follows the most recently updated Run; scrolling pauses following.
+Updates are currently manual while automatic polling is in development.
+
+Failed reads retain the last evidence with a stale notice; unavailable sources
+and capture gaps stay visible. **Reload output** restarts both readers after a
+source replacement. Hiding Watch cancels its query and preserves loaded output
+and inspection state. Watching never resumes or takes control of a provider.
 
 The compact Podium bar reads live process evidence from `lf ps --json`. Its
 lamp reflects OS-live state: black is off, green is working, blue is stalled,
@@ -200,7 +207,7 @@ codebase tree, and registry health.
 - `LoopflowMac/Views/WaveDetailPane.swift` — Wave Chat plus Project/Task work
 - `LoopflowMac/Views/TaskWorkspaceView.swift` — Task diff, file, Ghostty, and Warp surface
 - `LoopflowMac/Views/TaskWatchView.swift` — retained plans, attempts, and transition navigation
-- `LoopflowMac/TaskWatchStore.swift` — snapshot freshness and stable inspection selection
+- `LoopflowMac/TaskWatchStore.swift` — snapshot/output freshness, independent continuations and inspection selection
 - `LoopflowMac/PortfolioRepoState.swift` — one repository's Wave projection
 - `Loopflow/Services/RegistryQuery.swift` — typed `lf --json` reads
 - `Loopflow/Services/WaveChatClient.swift` — per-Wave event and message client

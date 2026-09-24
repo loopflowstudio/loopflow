@@ -8,8 +8,39 @@ struct TaskWatchView: View {
 
     @Environment(\.palette) private var palette
     @State private var refresh = 0
+    @State private var loadHistory = false
+    @State private var reloadOutput = false
 
     var body: some View {
+        VSplitView {
+            plan.frame(minHeight: 180, idealHeight: 310)
+            TaskWatchOutputView(store: store, onHistory: {
+                store.followsOutput = false
+                loadHistory = true
+                refresh += 1
+            }, onFollow: {
+                store.followLive()
+                refresh += 1
+            }, onReload: {
+                reloadOutput = true
+                refresh += 1
+            })
+            .frame(minHeight: 180, idealHeight: 350)
+        }
+        .foregroundStyle(palette.text)
+        .background(palette.background)
+        .task(id: refresh) {
+            let history = loadHistory
+            let reload = reloadOutput
+            loadHistory = false
+            reloadOutput = false
+            await store.refresh(issue: issue, query: RegistryQueryLocal.shared)
+            guard !Task.isCancelled else { return }
+            await store.readOutput(issue: issue, query: RegistryQueryLocal.shared, history: history, reload: reload)
+        }
+    }
+
+    private var plan: some View {
         VStack(spacing: 0) {
             HStack {
                 Text("Recorded plan")
@@ -17,7 +48,7 @@ struct TaskWatchView: View {
                 Spacer()
                 if store.isRefreshing { ProgressView().controlSize(.small) }
                 Button("Refresh", systemImage: "arrow.clockwise") { refresh += 1 }
-                    .disabled(store.isRefreshing)
+                    .disabled(store.isRefreshing || store.isReadingOutput)
                     .accessibilityLabel("Refresh Task Watch")
             }
             .padding(Spacing.md)
@@ -48,7 +79,10 @@ struct TaskWatchView: View {
                     HStack {
                         Picker("Invocation", selection: Binding(
                             get: { store.invocationId },
-                            set: { store.selectInvocation($0) }
+                            set: {
+                                store.selectInvocation($0)
+                                store.inspectStage(store.stepIndex)
+                            }
                         )) {
                             ForEach(snapshot.invocations) { invocation in
                                 Text("\(invocation.flow) · \(invocation.id) · \(invocation.settlement?.rawValue ?? "unsettled")")
@@ -70,7 +104,10 @@ struct TaskWatchView: View {
                         VStack(alignment: .leading, spacing: Spacing.xs) {
                             ForEach(snapshot.runs, id: \.runId) { run in
                                 HStack {
-                                    runLabel(run.runId, provider: run.provider)
+                                    Button { store.inspectRun(run.runId) } label: {
+                                        runLabel(run.runId, provider: run.provider)
+                                    }
+                                    .buttonStyle(.link)
                                     Spacer()
                                     if let stage = run.stage {
                                         Button("Stage \(stage.stepIndex + 1) · iteration \(stage.iteration)") {
@@ -95,15 +132,10 @@ struct TaskWatchView: View {
                 Spacer()
             }
         }
-        .foregroundStyle(palette.text)
-        .background(palette.background)
-        .task(id: refresh) {
-            await store.refresh(issue: issue, query: RegistryQueryLocal.shared)
-        }
     }
 
     private var stages: some View {
-        List(selection: $store.stepIndex) {
+        List(selection: Binding(get: { store.stepIndex }, set: { store.inspectStage($0) })) {
             if let invocation = store.invocation {
                 ForEach(Array(invocation.stages.enumerated()), id: \.element.stepIndex) { index, stage in
                     VStack(alignment: .leading, spacing: Spacing.xs) {
@@ -155,7 +187,10 @@ struct TaskWatchView: View {
                             Text("Attempt \(index + 1) · iteration \(attempt.iteration) · \(attempt.state.rawValue)")
                                 .font(Typography.body(12).weight(.semibold))
                             if let run = attempt.runId {
-                                runLabel(run, provider: store.snapshot?.runs.first { $0.runId == run }?.provider)
+                                Button { store.inspectRun(run) } label: {
+                                    runLabel(run, provider: store.snapshot?.runs.first { $0.runId == run }?.provider)
+                                }
+                                .buttonStyle(.link)
                             }
                             if let summary = attempt.readySummary { Text(summary) }
                             if let failure = attempt.failure {

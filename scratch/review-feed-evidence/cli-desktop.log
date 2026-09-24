@@ -1,0 +1,27 @@
+[0/1] Planning build
+Building for debugging...
+[0/6] Write sources
+[1/6] Write swift-version--58304C5D6DBC2206.txt
+[3/6] Emitting module LoopflowTests
+[4/6] Compiling LoopflowTests WatchCLIDesktopReview.swift
+[4/6] Write Objects.LinkFileList
+[5/6] Linking LoopflowSwiftPackageTests
+Build complete! (1.59s)
+Test Suite 'Selected tests' started at 2026-09-24 07:40:58.390.
+Test Suite 'LoopflowSwiftPackageTests.xctest' started at 2026-09-24 07:40:58.391.
+Test Suite 'LoopflowSwiftPackageTests.xctest' passed at 2026-09-24 07:40:58.391.
+	 Executed 0 tests, with 0 failures (0 unexpected) in 0.000 (0.000) seconds
+Test Suite 'Selected tests' passed at 2026-09-24 07:40:58.391.
+	 Executed 0 tests, with 0 failures (0 unexpected) in 0.000 (0.001) seconds
+◇ Test run started.
+↳ Testing Library Version: 1501
+↳ Target Platform: arm64e-apple-macos14.0
+◇ Suite "Watch CLI desktop review" started.
+◇ Test nativeArrivals() started.
+PASS real CLI -> RegistryQuery -> Store -> View: two native arrivals, retained commands, no replay, Run filter, Follow live
+✔ Test nativeArrivals() passed after 1.570 seconds.
+◇ Test configuredHistory() started.
+PASS configured passive history: sources=3, rows=59, invocations=0
+✔ Test configuredHistory() passed after 1.111 seconds.
+✔ Suite "Watch CLI desktop review" passed after 2.681 seconds.
+✔ Test run with 2 tests in 1 suite passed after 2.681 seconds.

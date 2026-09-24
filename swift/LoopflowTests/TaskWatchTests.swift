@@ -18,7 +18,7 @@ struct TaskWatchTests {
         #expect(store.invocationId == "flow-one")
         #expect(store.stepIndex == 0)
         #expect(store.stage?.attempts.count == 3)
-        store.stepIndex = 1
+        store.inspectStage(1)
 
         var next = try #require(JSONSerialization.jsonObject(with: initial) as? [String: Any])
         next["active_stage"] = ["invocation_id": "flow-one", "step_index": 2, "iteration": 1]
@@ -146,6 +146,10 @@ struct TaskWatchTests {
         model.navigation.showsList = true
         let store = model.navigation.watch(for: "issue-review")
         await store.refresh(issue: "LOO-293", query: query(try fixture()))
+        let output = try Data(contentsOf: root.appendingPathComponent("tests/fixtures/dto/task_output.json"))
+        await store.readOutput(issue: "LOO-293", query: query(output))
+        #expect(store.visibleOutput.count == 3)
+        #expect(store.visibleOutput.first?.rows.first?.title == "bash · running")
         let workspace = SessionsView(
             model: model, repoPath: "/src/loopflow",
             workspaces: SessionsWorkspaceRegistry(), query: planning

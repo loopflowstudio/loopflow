@@ -1,0 +1,9 @@
+{
+  "target/debug/lf": "4896c836658b14ec99c8cbb1b75a7a80a8f5b13ea2b5107c6fd06701f10dcde1",
+  "swift/.build/debug/LoopflowMac": "88149a1a3c44603cadf63e52447a19391c843b382ad5943d259034e1e8836271",
+  "swift/LoopflowMac/TaskWatchOutput.swift": "665f0dec98a3375b00ad45a898cbbc578c10c64fcffe698096b7e46a9151bf1a",
+  "swift/LoopflowMac/TaskWatchStore.swift": "902262062eb55d131b5c9cde3a4dfb903f6677a9c9c826ea1097efb615199777",
+  "swift/LoopflowMac/Views/TaskWatchView.swift": "7e8a968ab0b425ad0ef1ed4279f22d93f70ceefbd318274e2d64fb6b59f5b18a",
+  "swift/LoopflowMac/Views/TaskWatchOutputView.swift": "07de828ca1141374a9f071cf4145e9d9b403877dac2d1e286aef6801560b0be3",
+  "swift/LoopflowTests/TaskWatchOutputTests.swift": "aa235d4e37782c0aaa6d8a8062f797a8297229042fd7e808f3604819f73f0493"
+}

@@ -1,0 +1,63 @@
+[0/1] Planning build
+Building for debugging...
+[0/5] Write sources
+[1/5] Write swift-version--58304C5D6DBC2206.txt
+[3/7] Emitting module LoopflowMac
+[4/7] Compiling LoopflowMac TaskWatchOutput.swift
+[4/9] Write Objects.LinkFileList
+[5/9] Linking LoopflowMac
+[6/9] Applying LoopflowMac
+[8/10] Emitting module LoopflowTests
+[8/10] Write Objects.LinkFileList
+[9/10] Linking LoopflowSwiftPackageTests
+Build complete! (2.96s)
+Test Suite 'Selected tests' started at 2026-09-24 07:39:10.885.
+Test Suite 'LoopflowSwiftPackageTests.xctest' started at 2026-09-24 07:39:10.886.
+Test Suite 'LoopflowSwiftPackageTests.xctest' passed at 2026-09-24 07:39:10.886.
+	 Executed 0 tests, with 0 failures (0 unexpected) in 0.000 (0.000) seconds
+Test Suite 'Selected tests' passed at 2026-09-24 07:39:10.886.
+	 Executed 0 tests, with 0 failures (0 unexpected) in 0.000 (0.001) seconds
+◇ Test run started.
+↳ Testing Library Version: 1501
+↳ Target Platform: arm64e-apple-macos14.0
+◇ Suite "Task Watch" started.
+◇ Suite "Task Watch feed" started.
+◇ Suite "Task Watch output presentation" started.
+◇ Test "Failure and a superseded response cannot destroy newer displayed output" started.
+◇ Test "Follow tracks arrivals in an earlier Run and quiet pages do not move it" started.
+◇ Test "A completed tool snapshot replaces its accumulated output without replay" started.
+◇ Test "Native tool results retain their exact call name and input" started.
+◇ Test "Watch remains reachable without Task runtime or a worktree" started.
+◇ Test "Hiding output cancels its read without accepting a late page" started.
+◇ Test "Watch renders retained attempts alone and inside the Work workspace" started.
+◇ Test "A quiet historical page cannot hide a failed live start" started.
+◇ Test "Source reset preserves evidence until both continuations are explicitly reloaded" started.
+◇ Test "Inspection survives transitions, repeated names, completion, and failed refreshes" started.
+◇ Test "Hiding a query cancels its subprocess, including cancellation before spawn" started.
+◇ Test "Text before and after a command retains its source order" started.
+◇ Test "Exact stage and Run filters survive transitions; Follow live rejoins every Run" started.
+◇ Test "Reopening Watch reads again while the hidden query is still finishing" started.
+◇ Test case passing 1 argument inWorkspace → true to "Watch renders retained attempts alone and inside the Work workspace" started.
+◇ Test case passing 1 argument inWorkspace → false to "Watch renders retained attempts alone and inside the Work workspace" started.
+◇ Test "Unread history cannot delay new output or overwrite a newer revision" started.
+◇ Test case passing 1 argument source → .codex to "Native tool results retain their exact call name and input" started.
+◇ Test case passing 1 argument source → .claude to "Native tool results retain their exact call name and input" started.
+✔ Test "Text before and after a command retains its source order" passed after 0.024 seconds.
+✔ Test "A quiet historical page cannot hide a failed live start" passed after 0.024 seconds.
+✔ Test "Watch remains reachable without Task runtime or a worktree" passed after 0.024 seconds.
+✔ Test "A completed tool snapshot replaces its accumulated output without replay" passed after 0.024 seconds.
+✔ Test "Native tool results retain their exact call name and input" with 2 test cases passed after 0.024 seconds.
+✔ Test "Hiding a query cancels its subprocess, including cancellation before spawn" passed after 0.075 seconds.
+✔ Test "Inspection survives transitions, repeated names, completion, and failed refreshes" passed after 0.075 seconds.
+✔ Test "Follow tracks arrivals in an earlier Run and quiet pages do not move it" passed after 0.079 seconds.
+✔ Suite "Task Watch output presentation" passed after 0.079 seconds.
+✔ Test "Source reset preserves evidence until both continuations are explicitly reloaded" passed after 0.079 seconds.
+✔ Test "Reopening Watch reads again while the hidden query is still finishing" passed after 0.079 seconds.
+✔ Test "Exact stage and Run filters survive transitions; Follow live rejoins every Run" passed after 0.079 seconds.
+✔ Test "Unread history cannot delay new output or overwrite a newer revision" passed after 0.079 seconds.
+✔ Test "Hiding output cancels its read without accepting a late page" passed after 0.079 seconds.
+✔ Test "Watch renders retained attempts alone and inside the Work workspace" with 2 test cases passed after 0.649 seconds.
+✔ Suite "Task Watch" passed after 0.649 seconds.
+✔ Test "Failure and a superseded response cannot destroy newer displayed output" passed after 0.668 seconds.
+✔ Suite "Task Watch feed" passed after 0.668 seconds.
+✔ Test run with 15 tests in 3 suites passed after 0.668 seconds.

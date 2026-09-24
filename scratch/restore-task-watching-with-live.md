@@ -105,15 +105,17 @@ sources, not configured live capture proof.
 
 ## Shared read API
 
-`lf task watch ISSUE --json` → TaskWatchSnapshot: Task identity, invocation plans,
-stages/transitions, attributed Runs, source availability, history cursor.
+`lf task watch ISSUE --json` → TaskWatchSnapshot: Task identity, active stage,
+invocation plans, stages/attempts/transitions, attributed Runs, and evidence gaps.
+This snapshot currently reads all retained flow facts; it has no history cursor.
 
 `lf task output ISSUE --json [--cursor FILE]` (use `-` for stdin) → TaskOutputPage: ordered source
 entries, each carrying its Run/provider/stage labels, ordered records, availability,
 reset state, and gaps. OutputRecord carries only source item identity, revision,
 and the normalized conversation event. Clients retain source order and record
 order without joining a separate status list. The page carries Task identity and
-opaque continuation; separate historical continuation remains to implement.
+opaque continuation. Start live output with `--tail`, then continue without that
+flag. History starts without `--tail`; the desktop retains both cursors independently.
 Required fields or explicit Option only; shared Rust/Swift fixtures pin the DTOs.
 
 `read_task_watch(store, task_id)` joins the Task ledger and attributed Runs.
@@ -126,10 +128,13 @@ and live continuation are separate cursors so loading history cannot lose the
 live tail. Native and normalized autonomous copies must not both appear.
 
 RegistryQuery.taskWatch/taskOutput expose typed CLI reads. TaskWatchStore.refresh
-merges records, preserves filters and last-good evidence, and marks stale reads
-explicitly. Poll once per second while visible; cancel subprocess reads when
-hidden. Reuse the existing Session navigation for checkpoints and LOO-291's
-shared Task identities where available. No dependency on its landing.
+retains the snapshot and inspection selection; readOutput merges records using
+independent history/live cursors. Both preserve last-good evidence and expose
+failed reads. Updates are currently manual. The complete target polls once per
+second while visible after discovery and retained state are bounded; hidden
+views cancel subprocess reads. Reuse the existing Session navigation for
+checkpoints and LOO-291's shared Task identities where available. No dependency
+on its landing.
 
 ## This slice
 
@@ -140,34 +145,33 @@ reviewing this continuation change, implement the output feed in the existing
 Watch view and resolve reader limits as that integration requires. A successful
 CLI read alone is not the product finish line.
 
-Separate live continuation from historical pagination through the existing output
-reader. `task output --tail` starts an independent cursor at each discovered
-source's current boundary; ordinary `task output` still reads from the beginning.
-Continue either with `--cursor FILE`. New Runs discovered by an established live
-cursor start at the beginning, preserving their first output. If seeding cannot
-establish a source boundary or capture mode, report `tail_unavailable` and retain
-its ordinary read from the beginning. No additional transcript storage or provider control is introduced.
+Connect the existing output read to the retained desktop Watch store and view.
+Seed an independent live cursor before reading the first historical page; Refresh
+advances live output, and Load history advances history without moving the live
+cursor. Keep the UI explicit that updates are manual while discovery and cursor
+state remain inventory-dependent. Automatic polling is still a required later
+slice in this PR, not silently enabled by the Follow live control.
 
-Seed existing sources before returning the live cursor, so an unread historical
-page cannot hold up future output. JSONL retains incomplete trailing records and
-validates native Session identity; journal capture mode must survive the seek.
-OpenCode starts at its current timestamp boundary and includes unfinished parts,
-including older parts whose provider timestamp may remain unchanged. Transcript
-payload pages remain bounded; initial source discovery/seeding and retained
-per-Run/unfinished-part state still scale with the source inventory. Automatic polling remains disabled
-until that separate bound is implemented.
+Retain output only as window-local presentation. Merge by Run, source and source
+record identity; preserve each reader's order, deduplicate overlaps, and prefer
+live revisions over overlapping historical revisions. Fold normalized item
+snapshots and deltas for display. Show source availability, paging and gaps beside
+the attributed output. A reset freezes the last display with a reload notice;
+explicit Reload output discards both continuations before reading fresh evidence,
+so independent cursors cannot combine different source generations.
 
-Done when focused tests prove history can remain partially unread while appended
-journal/native output arrives through the independent cursor; new auxiliary Runs
-retain their first records; incomplete JSONL and source resets remain visible;
-and older unfinished OpenCode parts plus same-timestamp edits survive the live
-start. Wire the option through both CLI dispatch paths and RegistryQuery, keeping
-cursor contents in the existing private temporary transport file.
+Stage selection filters all attempts at the exact invocation/step; Run selection
+narrows further. Follow live clears both filters and rejoins the active invocation
+and the displayed tail. Scrolling suspends following. Keep the plan and output in
+the same workspace, retaining inspection through Task/repository navigation and
+cancelling reads when hidden. No new command, DTO, provider control or persistence.
 
-The live feed, connected diagram, bounded discovery/state, human Session links,
-full capture and configured human demonstration remain in this same PR. History
-and live may overlap by source identity/revision; the future feed must merge them
-without allowing an older historical revision to replace newer observed output.
+Done when focused Swift tests prove independent live/history progress, overlap
+and revision merging, exact filters across transitions and auxiliary Runs, failed
+and superseded reads, reset/reload, and visible output alongside the plan. Render
+and inspect the integrated view. This is local desktop proof; automatic polling,
+bounded discovery/state, complete capture, connected diagram, exact human Session
+links and the full configured human demonstration remain required in this PR.
 
 ## Remaining slices and full Done When
 
@@ -190,6 +194,36 @@ owned by the pinned lifecycle. No multi-Task dashboard, graph editing, or remote
 transport expansion is in scope.
 
 ## Evidence ledger
+
+- 2026-09-24 desktop feed review fixed native tool-result folding: Codex results
+  previously erased command/input, while Claude results in another message left
+  calls running. Display folding now correlates the shared native call ID within
+  its Run/source, retaining name/input and applying result/status. Both provider
+  regression cases failed before and pass after. Fifteen focused tests pass;
+  two additional CLI-to-desktop probes prove disposable native arrivals and
+  configured historical reading. See `review-watch-feed.md` for scope and receipts.
+  These are not an installed-app interaction or the complete configured demo.
+- 2026-09-24 desktop output slice: Watch now consumes `taskOutput` beneath
+  the retained plan. The existing TaskWatchStore owns independent history/live
+  continuations, exact stage/Run filtering, source gaps and last-good evidence.
+  Source records merge by Run/source/item identity; live revisions survive
+  overlapping history. Tool snapshots replace accumulated output, and adjacent
+  text folds without moving prose across a command. A source reset requires an
+  explicit reload of both readers. No CLI, DTO, provider or persistence changes.
+- Follow live clears filters and tracks active stages on snapshot refresh;
+  scrolling pauses following. With this slice's Run grouping, following anchors
+  to the most recently changed Run rather than a quiet Run at the overall bottom.
+  Automatic polling remains off and is labeled in the view. Cross-Run contiguous
+  observation ordering remains part of the complete feed, alongside the existing
+  bounded discovery/state and configured capture obligations.
+- Focused final proof: 14 tests in TaskWatchTests, TaskWatchFeedTests and
+  TaskWatchOutputTests pass with `-Xswiftc -gnone --jobs 4`; receipt
+  `/tmp/loo293-feed-verified.log`. Includes independent cursors/revisions,
+  filtering/transitions, source reset/reload, gaps, cancellation/supersession,
+  source order, tool folding and the Follow action/target. Both standalone and
+  integrated plan/output PNGs rendered and were inspected. This is local model,
+  query-boundary and rendered-fixture evidence, not configured arrivals or native
+  scrolling/human interaction proof. Full Task acceptance remains open.
 
 - 2026-09-24 independent continuation: `task output --tail` now seeds live
   positions separately from ordinary historical pagination. Both CLI dispatch

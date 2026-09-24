@@ -1,0 +1,34 @@
+[0/1] Planning build
+Building for debugging...
+[0/5] Write sources
+[1/5] Write swift-version--58304C5D6DBC2206.txt
+[3/5] Compiling LoopflowTests TaskWatchOutputTests.swift
+[4/5] Emitting module LoopflowTests
+[4/6] Write Objects.LinkFileList
+[5/6] Linking LoopflowSwiftPackageTests
+Build complete! (1.54s)
+Test Suite 'Selected tests' started at 2026-09-24 07:38:33.369.
+Test Suite 'LoopflowSwiftPackageTests.xctest' started at 2026-09-24 07:38:33.370.
+Test Suite 'LoopflowSwiftPackageTests.xctest' passed at 2026-09-24 07:38:33.370.
+	 Executed 0 tests, with 0 failures (0 unexpected) in 0.000 (0.000) seconds
+Test Suite 'Selected tests' passed at 2026-09-24 07:38:33.370.
+	 Executed 0 tests, with 0 failures (0 unexpected) in 0.000 (0.001) seconds
+◇ Test run started.
+↳ Testing Library Version: 1501
+↳ Target Platform: arm64e-apple-macos14.0
+◇ Suite "Task Watch output presentation" started.
+◇ Test "Native tool results retain their exact call name and input" started.
+◇ Test case passing 1 argument source → .codex to "Native tool results retain their exact call name and input" started.
+◇ Test case passing 1 argument source → .claude to "Native tool results retain their exact call name and input" started.
+✘ Test "Native tool results retain their exact call name and input" recorded an issue with 1 argument source → .codex at TaskWatchOutputTests.swift:78:9: Expectation failed: (output.rows.map(\.title) → ["tool_result · failed", "tool_result · completed"]) == ["bash · failed", "bash · completed"]
+± inserted ["tool_result · failed", "tool_result · completed"], removed ["bash · failed", "bash · completed"]
+✘ Test "Native tool results retain their exact call name and input" recorded an issue with 1 argument source → .codex at TaskWatchOutputTests.swift:79:9: Expectation failed: (output.rows.map(\.text) → ["{call_id: first}\nresult first", "{call_id: second}\nresult second"]) == ["echo first\nresult first", "echo second\nresult second"]
+± inserted ["{call_id: first}\nresult first", "{call_id: second}\nresult second"], removed ["echo first\nresult first", "echo second\nresult second"]
+✘ Test "Native tool results retain their exact call name and input" recorded an issue with 1 argument source → .claude at TaskWatchOutputTests.swift:78:9: Expectation failed: (output.rows.map(\.title) → ["bash · running", "bash · running", "tool_result · completed", "tool_result · failed"]) == ["bash · failed", "bash · completed"]
+± inserted ["bash · running", "bash · running", "tool_result · completed", "tool_result · failed"], removed ["bash · failed", "bash · completed"]
+✘ Test "Native tool results retain their exact call name and input" recorded an issue with 1 argument source → .claude at TaskWatchOutputTests.swift:79:9: Expectation failed: (output.rows.map(\.text) → ["echo first", "echo second", "{call_id: second}\nresult second", "{call_id: first}\nresult first"]) == ["echo first\nresult first", "echo second\nresult second"]
+± inserted ["echo first", "echo second", "{call_id: second}\nresult second", "{call_id: first}\nresult first"], removed ["echo first\nresult first", "echo second\nresult second"]
+✘ Test "Native tool results retain their exact call name and input" recorded an issue with 1 argument source → .claude at TaskWatchOutputTests.swift:81:9: Expectation failed: (output.rows.count → 4) == 2
+✘ Test "Native tool results retain their exact call name and input" with 2 test cases failed after 0.001 seconds with 5 issues.
+✘ Suite "Task Watch output presentation" failed after 0.001 seconds with 5 issues.
+✘ Test run with 1 test in 1 suite failed after 0.001 seconds with 5 issues.

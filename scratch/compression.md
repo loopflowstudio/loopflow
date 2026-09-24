@@ -190,3 +190,50 @@ or static checks were rerun for this documentation-only review. The prior focuse
 passes remain their recorded evidence. Shared PR/hook/worktree child exclusion,
 telemetry linkage/recovery, closed-obligation continuation, and configured
 acceptance remain open; this compression review does not approve the branch.
+
+## Publisher checkout compression review at `5ca558676`
+
+No executable reduction selected. The model before and after this pass is
+unchanged: an obligation retains original due opportunities; each execution
+owner retains attempts with selection, verification and product outcome.
+`settle` atomically writes that evidence. Physical receipts describe process
+results, and publisher receipts describe artifact stages and public observations.
+Scheduled attribution, target mutation exclusion and checkout removal protection
+remain separate capabilities. Child inheritance extends an existing OS lock's
+lifetime without adding durable execution state.
+
+Inspected obligation/attempt types, settlement and history consumers, then
+followed `ReleaseLock` and `WorktreeLease` through preparation, publication,
+public reconciliation and ordinary/owned checkout removal. The complete Task
+patch was available without truncation (531,176 characters); this pass focused
+on the new checkout preservation path and its direct owners and mirrors.
+
+Mirrors checked: explicit CLI receipt/descriptor arguments and Flow dispatch,
+release history/disposition output and its JSON fixture, Python artifact/public
+receipt types, descriptor forwarding in publisher/deployment/packaging scripts,
+the Rust parent-death fixture, Python descendant and entry-authority cases,
+release README, cron host guide and the current design/report. Searches found
+no Swift consumer of the release-history, opportunity, public-receipt or
+checkout-descriptor names.
+
+| Candidate | Why retained |
+| --- | --- |
+| `WorktreeLease` beside `ReleaseLock` | Ordinary removal protects one checkout, including non-release work; the target lock excludes release mutations across checkouts. Combining them changes scope and independent-checkout behavior. |
+| Lease `path` and `file` fields | The path binds owned removal to the exact checkout; the file holds the OS lock and supplies child inheritance. Neither duplicates release selection or durable history. |
+| Two descriptor environment keys | Descendants need both lifetimes. Checkout possession alone cannot authorize publisher entry; replacing the keys with an undifferentiated capability would lose that boundary. |
+| Rust inheritance methods and Python forwarding lists | These are short process-boundary mechanics, not competing lock owners. A generic launcher or shared script module would relocate syntax without reducing domain/API vocabulary. |
+| Ordinary and owned removal entry points | One acquires protection; the other borrows existing protection and checks its checkout. Collapsing them would require implicit ownership or reacquiring an already held lock. |
+| Cron context, attempt evidence and publisher receipts | Attribution, product settlement and independently observed artifact stages still answer different questions. The new lease adds no persisted mirror to remove. |
+
+Negative searches found no restored duplicate success-proof wrappers,
+`record_verification`, separate candidate/publish receipt classes or
+release-selection `sync_main` path. Historical schema-1 process receipts remain
+required history, not a removable compatibility seam.
+
+No APIs, DTOs, fields, storage formats or executable code changed. No tests or
+static checks were rerun for this documentation-only pass; the preceding
+implementation's focused results remain recorded in
+[publisher-checkout-preservation.md](publisher-checkout-preservation.md).
+Shared mutation-child exclusion, historical telemetry linkage/recovery and repair
+ownership, closed-obligation continuation and configured acceptance remain open.
+This review neither approves the branch nor supplies the two automatic settlements.

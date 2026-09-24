@@ -738,6 +738,13 @@ See [review-release-hooks.md](review-release-hooks.md).
   mutation children, historical telemetry recovery, closed obligations and
   configured acceptance remain open. See [release-auto-merge-ownership.md](release-auto-merge-ownership.md).
 
+Auto-merge review remains **iterate**. The built-CLI demonstration passed all
+eight survival scenarios again (45.04s); no additional bounded defect was
+established and no executable code changed. Shared mutation children, historical
+telemetry association/recovery and repair ownership, closed-obligation
+continuation and configured acceptance remain open. See
+[review-auto-merge.md](review-auto-merge.md).
+
 ## Measure
 
 Use the Reliability KR's actual due population, not successful process counts.

@@ -729,3 +729,54 @@ natural scheduled evidence; the simulated recovery does not prove that the real
 telemetry Flow passes. The scorecard blocker, required UI/public proof and two
 adjacent automatic settlements remain unresolved. No publication, installation,
 PM handoff, landing or Task completion was performed.
+
+## Interrupted telemetry compression review at `80879d1cd`
+
+No executable reduction selected. Before and after this pass, an obligation
+owns original due opportunities; each execution owner retains attempts with
+frozen coverage, prerequisite observations, selection, verification and outcome.
+Physical cron receipts own process observations. A prerequisite snapshot reserves
+one recovery receipt before launch; `settle` atomically writes product evidence.
+The new runner start observation permits a recovery attempt after confirmed
+runner death, while the existing inherited job lock excludes surviving children.
+
+Inspected `CronReceipt` creation, serialization and `runner_evidence`; the shared
+journal process probe and Task registration/terminal-event checks; release's
+`verify_scheduled_telemetry`; the common cron executor and child launch; and
+`ReleaseAttempt`, `TelemetryPrerequisite`, `record_telemetry`, `finish_process`
+and `settle`. Followed references into history's linked-receipt reader and
+doctor's scheduling continuity. This is a review of the latest slice and its
+direct owners, not a fresh exhaustive review of all earlier release mutations.
+
+Mirrors checked: cron CLI source/outcome rendering and trigger waiting, receipt
+JSON and the release-history fixture, direct Rust receipt constructors, joined
+interruption/legacy-identity scenarios, release README, cron host guide and the
+implementation report. Searches found no Swift or Python mirror of the cron,
+telemetry or release-history types. Python's public artifact receipt remains a
+separate publication proof. The repository release Flow remains one mechanical
+operation.
+
+| Candidate | Why retained |
+|---|---|
+| `runner_started_at` and receipt `started_at` | OS process birth and this execution's start can differ, especially for an in-process prerequisite retry. Substitution loses identity or execution timing. |
+| Optional runner identity | Historical schema-1 receipts and failed OS observations remain unknown. Requiring or synthesizing a value would discard history or invent recovery authority. |
+| Cron and Task evidence entry points | They share the PID/start comparison already. Task additionally requires its registered Exec or terminal event; importing that owner into cron would add a dependency, while removing it from Task would weaken authority. |
+| Runner evidence and job lock | A dead controller can leave a live child. Neither observation replaces the other; combining them into a new liveness object adds an owner without removing either boundary. |
+| Stale receipt and exact runner evidence | Staleness labels CLI output and ends trigger waiting with an error; it does not authorize recovery. Replacing it with exact identity changes existing wait behavior, while using age for recovery violates the design. |
+| Original Running receipt and Recovery result | The old invocation's result remains unknown. A new successful check proves current verification, so replacing the old outcome would erase evidence. |
+| Prerequisite reservation and terminal verification | The reservation fences launch before side effects; verification binds the resulting receipt afterward. One terminal write cannot perform both jobs. |
+
+The simulated review followed reservation-before-launch, the surviving-child
+lock, unknown-identity deferral and history retention. The shared process probe
+adds no persisted liveness state. `finish_process` still cannot promote process
+success to publication, and `settle` remains the product-success writer.
+
+Only this report changed; no API, DTO, field, migration or executable code was
+removed or changed. No behavioral tests or compiler/lint checks were rerun.
+The ten CLI scenarios, four focused library checks and static checks recorded in
+[release-interrupted-telemetry.md](release-interrupted-telemetry.md) remain prior
+implementation evidence. Bounded target runtime, real telemetry continuity,
+previous obligation segments, dated repair ownership, closed obligations and
+configured acceptance remain open. The scorecard blocker, required UI/public
+proof and two adjacent automatic settlements are unchanged; this compression
+review does not approve the branch or complete the Task.

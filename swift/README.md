@@ -63,7 +63,7 @@ lost, and the pane says so before you commit.
 
 The green **Complete** action stops an interactive provider client and removes
 its Session from the queue while retaining provider-native history. Undo does
-not restore a completed Session's pane. Closing a
+not restore a completed Session's pane, even if you hid it before completion. Closing a
 pane only hides the view: the terminal and its provider client keep running
 (the row shows RUNNING) and reopen exactly as left. An Ask agent
 can mark itself ready, but the row and terminal remain until the user completes

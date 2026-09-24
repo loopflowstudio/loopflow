@@ -7,7 +7,9 @@ navigator and shared identity join have focused behavioral evidence. Mounted
 native navigation now preserves splits, draft, focus and terminal viewport in
 the integration fixture. Navigator scroll also has a native regression covering
 repository return. Local completion now also proves that Undo cannot restore the
-completed pane while the selected Task and companion remain usable. Configured
+completed pane while the selected Task and companion remain usable, including
+completion after repository navigation. Reconciliation also invalidates Undo
+when its hidden Session disappears from shared evidence. Configured
 provider interaction/resolution and before/after
 timing comparisons remain unproven. No PR
 publication, landing, Task completion, PM mutation or external-product trial was
@@ -18,6 +20,57 @@ LOO-291 directive. Bounded conversations, Task-directive editing, LOO-284 shared
 actions/display path, lf-new's nested workspaces, external trials and measured
 budgets remain explicitly outstanding. No new kickoff or alternative design is
 needed.
+
+## Iteration 5 review — 2026-09-23
+
+Reviewed HEAD `1aa2e3dca` plus the bounded correction below. Recovered the complete
+Task patch (`truncated: false`, 5,660 lines) in
+`/tmp/loo291-review-iteration5.{json,patch}`. Compared all sections against the
+iteration 4 receipt: 26 unchanged, seven changed by the preceding review fix,
+expanded native proof and notes. Read those changes and traced the current
+shared-reading, projection, opening, resolution, pane and surface paths.
+
+| Claim | Planned behavior | Implemented behavior | Proof | Result |
+|---|---|---|---|---|
+| Completion after navigation | Reconcile the originating workspace without disturbing the active repository | Original pane/surface removed before return; other reading, selection and layout intact | Both serialized `workspaceRetainsNativeSplit` cases | pass, native fixture with mocked CLI |
+| Undo respects resolution | Restore hidden views only while their Sessions remain unresolved | Reconciliation now checks the saved Undo layout as well as visible panes | `hiddenSessionReconciliation`, retained/disappeared cases | pass, model regression |
+| Navigation continuity | Retain Work, companion, split, draft and viewport through A/D and repository return | Same native surfaces and companion child survive; selected Task stays incomplete | Mounted native proof plus unchanged navigator-scroll receipt | pass, native fixture |
+| Shared evidence | Read current scoped planning and exact Session attribution | Product, two Projects, nine incomplete Tasks, three Sessions; zero planned-Task associations | Fresh CLI receipts below | pass, CLI; configured population gap |
+| Configured interaction and timing | Operate the real provider path and compare paint/readiness on the same population | Prior AX probe could not reach controls; no timing comparison | Existing configured-probe receipt; fixtures do not substitute | gap |
+| Shared authority | One inventory reader and retained workspace owner | Removed paths remain absent; no new Session policy or API | Negative searches and Rust/Swift/main/lf-new comparison | pass, source; LOO-284 integration remains |
+
+The new regression reproduces a distinct Undo failure: Close view hides a Session,
+then shared evidence removes it while no visible Session pane remains. The old
+early return left its saved layout intact, so Undo restored the absent Session
+and took focus from the companion. Reconciliation now also detects stale Session
+identities in that saved layout and uses its existing invalidation/notification
+path. The retained-Session case proves ordinary Close-view Undo still works.
+No new state, lifecycle authority or cleanup owner was introduced.
+
+Before correction, the regression failed four assertions in
+`/tmp/loo291-review-hidden-undo-before.log` (exit 1). Final focused command:
+
+```sh
+swift test --package-path swift -Xswiftc -gnone --jobs 4 --filter 'MultiplexerStoreTests/hiddenSessionReconciliation|WorkspaceNavigationProofTests/workspaceRetainsNativeSplit'
+```
+
+Two tests, four cases passed; exit 0,
+`/tmp/loo291-review-hidden-undo-after.log`. No Swift edits followed; no broad gate
+ran. This proves local reconciliation, not backend resolution or caller release.
+
+Live roadmap generation: `2026-09-24T01:03:14.141358Z` (23 September locally).
+Receipts: `/tmp/loo291-review-iteration5-{roadmap,sessions}.json`. The Sessions
+are two active unbound interactive records and one ready Task FlowStep absent
+from the plan. No live Session was opened, moved or resolved. The unchanged AX
+boundary was not retried; another launch-only capture would not close its gap.
+
+Negative searches still find one Podium caller per inventory read and one root
+workspace registry, with no removed navigation/scope types. SessionRecord in
+current main, lf-new and this checkout retains the hash below and lacks shared
+legal-action/display-path fields. The slice advances the accepted design; full
+LOO-291 scope remains unchanged. Publication remains withheld because configured
+interaction and timing claims do not meet review-slice's condition, "When all
+applicable `Done when` claims hold".
 
 ## Iteration 4 review — 2026-09-23
 

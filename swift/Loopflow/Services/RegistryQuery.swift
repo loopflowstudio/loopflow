@@ -161,6 +161,11 @@ public struct RegistryQuery: Sendable {
         return try Self.decode(TaskChangesSnapshot.self, from: stdout)
     }
 
+    public func taskWatch(issue: String, cwd: String?) async throws -> TaskWatchSnapshot {
+        let stdout = try await run(["task", "watch", issue, "--json"], cwd)
+        return try Self.decode(TaskWatchSnapshot.self, from: stdout)
+    }
+
     public func taskOutput(issue: String, cursor: String?, cwd: String?) async throws -> TaskOutputPage {
         var args = ["task", "output", issue, "--json"]
         // Cursor contents can exceed argv limits. This temporary transport file

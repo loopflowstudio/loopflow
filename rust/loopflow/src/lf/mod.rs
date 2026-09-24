@@ -1018,6 +1018,12 @@ pub enum TaskCommand {
         #[arg(long)]
         json: bool,
     },
+    /// Inspect retained Task flow plans, attempts, and Run attribution
+    Watch {
+        issue: String,
+        #[arg(long)]
+        json: bool,
+    },
     /// Read a bounded page of Task output without opening a provider client
     Output {
         issue: String,

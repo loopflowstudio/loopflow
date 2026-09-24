@@ -964,6 +964,63 @@ fn run_project_command(repo: &Path, command: &ProjectCommand) -> anyhow::Result<
     }
 }
 
+fn run_task_watch(issue: &str, json: bool) -> Result<()> {
+    let snapshot = loopflow::ops::task::task_watch(issue)?;
+    if json {
+        println!("{}", serde_json::to_string_pretty(&snapshot)?);
+        return Ok(());
+    }
+    println!(
+        "{issue} · {} invocations · {} Runs",
+        snapshot.invocations.len(),
+        snapshot.runs.len()
+    );
+    for invocation in snapshot.invocations {
+        println!(
+            "{} · {} · {:?}",
+            invocation.id, invocation.flow, invocation.settlement
+        );
+        for stage in invocation.stages {
+            println!(
+                "  {}  {}{} · {} attempts",
+                stage.step_index,
+                stage.name,
+                if stage.human { " [human]" } else { "" },
+                stage.attempts.len()
+            );
+            for attempt in stage.attempts {
+                println!(
+                    "      iteration {} · {} · {:?}",
+                    attempt.iteration,
+                    attempt.run_id.as_deref().unwrap_or("no bound Run"),
+                    attempt.state
+                );
+            }
+        }
+        for edge in invocation.transitions {
+            println!(
+                "  {:?}: {}:{} -> {}:{}",
+                edge.reason,
+                edge.from.step_index,
+                edge.from.iteration,
+                edge.to.step_index,
+                edge.to.iteration
+            );
+        }
+    }
+    for run in snapshot.runs.iter().filter(|run| run.stage.is_none()) {
+        println!(
+            "  {} · {} · unassigned",
+            run.run_id,
+            run.provider.as_deref().unwrap_or("unknown provider")
+        );
+    }
+    for gap in snapshot.gaps {
+        println!("{}: {}", gap.code, gap.message);
+    }
+    Ok(())
+}
+
 fn run_task_output(issue: &str, cursor: Option<&str>, json: bool) -> anyhow::Result<()> {
     let cursor = cursor.map(read_task_output_cursor).transpose()?;
     let page = loopflow::ops::task::task_output(issue, cursor.as_deref())?;
@@ -1074,6 +1131,7 @@ fn run_task_command(repo: &Path, command: &TaskCommand) -> anyhow::Result<()> {
             let task = loopflow::ops::task::task_status(issue)?;
             print_task(&task, *json)
         }
+        TaskCommand::Watch { issue, json } => run_task_watch(issue, *json),
         TaskCommand::Output {
             issue,
             cursor,
@@ -1595,6 +1653,9 @@ fn main() -> anyhow::Result<()> {
                         json,
                     },
             }) => run_task_output(issue, cursor.as_deref(), *json),
+            Some(Commands::Task {
+                cmd: TaskCommand::Watch { issue, json },
+            }) => run_task_watch(issue, *json),
             Some(Commands::Task { cmd }) => {
                 in_repo_runtime(&args, |repo| run_task_command(repo, cmd))
             }

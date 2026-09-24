@@ -5,8 +5,9 @@
 Advances the accepted design; **not yet approved for publication**. The compact
 navigator and shared identity join have focused behavioral evidence. Mounted
 native navigation now preserves splits, draft, focus and terminal viewport in
-the integration fixture. Configured provider interaction/resolution, navigator
-scroll and before/after timing comparisons remain unproven. No PR
+the integration fixture. Navigator scroll also has a native regression covering
+repository return. Configured provider interaction/resolution and before/after
+timing comparisons remain unproven. No PR
 publication, landing, Task completion, PM mutation or external-product trial was
 performed by this review.
 
@@ -15,6 +16,63 @@ LOO-291 directive. Bounded conversations, Task-directive editing, LOO-284 shared
 actions/display path, lf-new's nested workspaces, external trials and measured
 budgets remain explicitly outstanding. No new kickoff or alternative design is
 needed.
+
+## Iteration 3 review — 2026-09-23
+
+Reviewed HEAD `739e24061`. Recovered the complete Task patch with
+`lf task diff LOO-291 --json`: `truncated: false`, 5,271 lines. Receipts:
+`/tmp/loo291-review-iteration3.json` and `.patch`. Compared every file section
+with the prior review receipt: 25 sections are byte-identical; the eight changed
+sections contain the scroll implementation/test, its README and design/proof
+notes, plus the preceding review's stronger companion-child assertion. Read that
+delta and traced the current navigation, shared-reading and Session-opening paths.
+
+| Claim | Planned behavior | Implemented behavior | Proof | Result |
+|---|---|---|---|---|
+| Navigator retention | Preserve list position through A/D, refresh and repository return | Window/repository navigation retains observed offset; remounted SwiftUI view restores it | `navigatorRetainsScroll` checks native clip-view bounds at 1,200 points and zero in another repository | pass, native fixture |
+| Native workspace continuity | Retain Session and companion panes, draft, focus and terminal viewport | Existing workspace and surfaces survive navigation; both children respond | Prior strengthened `workspaceRetainsNativeSplit` receipt; unchanged ownership paths | pass, native fixture |
+| Current shared evidence | Present scoped planning and exact human boundaries | Live CLI exposes Product, two Projects, nine incomplete Tasks and three Sessions | `/tmp/loo291-review-iteration3-{roadmap,sessions}.json` | pass, read-only CLI; no planned Task has an associated Session in this population |
+| Configured interaction | Navigate real controls, continue a provider and reconcile resolution | No new configured interaction result; earlier AX traversal could not reach workspace controls | Prior AX receipt; local regressions use AppKit/ViewInspector | gap |
+| Paint/readiness comparison | Compare before/after on the same population | No measured comparison | Test duration and capture delay are not user-path latency | gap |
+| Shared authority | One planning/Session reader and retained workspace owner | Removed paths remain absent; no launch or wire-contract change | Negative searches, Rust/Swift contract inspection and main/lf-new SessionRecord hashes | pass, source; LOO-284 integration remains |
+
+The new regression checks actual viewport restoration, not merely the saved
+CGFloat. It reproduces Podium's repository identity boundary by remounting
+SessionsView with `.id(repoPath)`. Geometry writes capture the navigation owner
+for that render; terminal layout and Session reconciliation remain separate.
+No bounded source correction was established. The implementation advances the
+accepted first slice without creating a competing workspace or Session authority.
+
+Reused the existing final focused receipt:
+
+```sh
+swift test --package-path swift -Xswiftc -gnone --jobs 4 \
+  --filter WorkspaceNavigationProofTests/navigatorRetainsScroll
+```
+
+One test passed, exit 0; `/tmp/loo291-navigator-scroll-final.log`. Production and
+test content have not changed since that pass. No tests were rerun in this
+review; no broad gate ran. Earlier native/model receipts retain their stated
+proof levels. `git diff --check` passes.
+
+The live roadmap was generated at `2026-09-24T00:42:43.244651Z` (23 September
+locally). Two Sessions are active unbound interactive records; the third is a
+ready Task FlowStep whose Work is absent from this plan. This supersedes the
+prior two-record count without establishing why membership changed. No Session
+was opened, moved or resolved. The previous inaccessible AX boundary was not
+retested; another static capture would not close the interaction gap.
+
+Current main, lf-new and this checkout still have the same SessionRecord hash
+recorded below. The shared legal-action/display-path fields remain absent.
+Searches confirm one Podium caller per inventory read, one root workspace
+registry, and none of the removed scope/navigation types. No planning writer,
+schema, lifecycle policy or launch authority was added.
+
+Next proof remains the configured interaction trial below and same-population
+timing comparison. Navigator retention now has local evidence and should not be
+listed as wholly untested. Full LOO-291 requirements remain unchanged. Under
+review-slice's condition, "When all applicable `Done when` claims hold," this
+review cannot publish: configured interaction and timing claims still have gaps.
 
 ## Iteration 2 review — 2026-09-23
 

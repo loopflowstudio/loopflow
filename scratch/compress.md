@@ -20,6 +20,37 @@
 
 ## Before and after
 
+### Iteration 5 — completion after repository navigation
+
+Reviewed HEAD `100c518c6`. The effective model is unchanged; no coherent
+model/API reduction was established. This pass changes only this report. No
+type, field, DTO, route, persistence path or configuration key was removed.
+
+Traced WorkspaceProjection through Podium's per-repository readings, retained
+SessionsWorkspace/Store, mounted observers, Complete and FlowStep continuations,
+and MultiplexerStore reconciliation/Close view/Undo. Compared Rust/Swift
+SessionRecord and roadmap Project/Task fields and RegistryQuery's Session
+contract. Searches still find one Podium caller per inventory read, one root
+workspace registry, and none of the removed navigation/scope types.
+
+The new two-case native proof closes the earlier Complete-after-unmount coverage
+gap. It also covers Undo after Complete, superseding iteration 4's coverage note.
+It does not cover FlowStep resolution after unmounting or external resolution
+of a Session already hidden by Close view. Cleanup consolidation must encompass
+those paths at the retained workspace boundary; deleting an observer or action
+tail alone would remove a distinct delivery path. No partial helper extraction
+is warranted. Podium's read invalidation and SessionsStore's prepared/error state
+still have different lifetimes. Likewise, Complete and FlowStep decisions remain
+distinct shared operations, and the absent LOO-284 action/display contract cannot
+be replaced by moving Swift policy between helpers.
+
+Inspected `/tmp/loo291-completion-repository-proof.log`: the focused
+`WorkspaceNavigationProofTests/workspaceRetainsNativeSplit` test passed both
+serialized cases. No executable content changed and no tests were rerun. This
+remains native fixture evidence with a mocked CLI response; configured provider
+interaction, caller release, visual quality and timing obligations remain open.
+Full LOO-291 scope and publication disposition are unchanged.
+
 ### Iteration 4 — completion reconciliation
 
 Reviewed HEAD `1013225cb`. The effective model above is unchanged. No coherent

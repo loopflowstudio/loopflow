@@ -867,6 +867,14 @@ acceptance remain open. See [review-source.md](review-source.md).
   closed obligations and configured acceptance remain open. See
   [release-task-compensation.md](release-task-compensation.md).
 
+Task compensation review remains **iterate**. The built-CLI demonstration passed
+both interruption modes and ordinary replay again (12.00s), preserving release
+exclusion, checkout, durable intent, caller state and the eventual bare-origin
+head. No additional bounded defect was established and no executable code changed.
+Historical telemetry linkage/retry and dated repair ownership, closed-obligation
+continuation, remaining interruption proof and configured acceptance remain open.
+See [review-task-compensation.md](review-task-compensation.md).
+
 ## Measure
 
 Use the Reliability KR's actual due population, not successful process counts.

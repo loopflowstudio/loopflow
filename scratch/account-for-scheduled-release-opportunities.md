@@ -551,6 +551,12 @@ External services and publisher evidence in this Rust test are simulated; Python
 recovery cases separately execute a real temporary installer and binary smoke.
 These fixtures do not supply configured automatic settlements.
 
+The follow-up review repaired two history projections: operator provenance on
+collapsed misses now disqualifies the owning execution's unattended pair, and
+collapse preserves each due time's earliest attempt timing. Both regressions
+failed before repair and passed afterward without rewriting stored evidence.
+See [review-followup.md](review-followup.md) for the current evidence matrix.
+
 The previous review's iterate verdict remains applicable. Historical telemetry
 linkage/recovery, mutation-child exclusion outside publisher subprocesses, and
 closed-obligation continuation still need implementation. Slice 5 remains open:
@@ -655,6 +661,14 @@ or PR publication occurred. The pinned lifecycle retains landing authority.
   and mocked external proof remain explicitly ineligible for the configured KR.
 - Rust formatting/all-target Clippy and Python Ruff check/format passed for this
   cut. No broader suite, hosted matrix, installed cutover, or live acceptance ran.
+
+- Follow-up review repeated the joined real-CLI demonstration (five scenarios,
+  39.68 seconds) and eleven focused publisher recovery cases. Two new history
+  counterexamples reproduced false unattended qualification and lost on-time
+  classification after collapse. The corrected read projection passed all four
+  history tests, retaining product counts and the existing DTO shape. The
+  verdict remains iterate; configured acceptance and retained execution gaps
+  remain open in the same Task.
 
 ## Measure
 

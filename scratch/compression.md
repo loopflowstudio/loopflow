@@ -97,3 +97,46 @@ failed attempt, rather than creating an impossible retry after accepted success.
 - Rust formatting and all-target Clippy passed; Python Ruff check/format passed.
 - No affected-suite gate or full CI run was added. The scorecard schema blocker,
   real UI-host proof, and two configured automatic settlements remain open.
+
+## Follow-up compression review at `4a8a9f312`
+
+No further executable reduction selected. The effective model remains:
+an installed obligation owns original due opportunities; coalesced opportunities
+refer to one execution owner; each attempt retains selection, verification, and
+outcome. Atomic settlement owns product truth. Physical process receipts,
+publisher stage evidence, and fresh public observations retain their separate
+meanings. The joined execution and publisher-recovery changes did not introduce
+another settlement writer.
+
+Reviewed the accounting types and `begin`/`finish_process`/`settle` writers,
+history qualification and disposition, release selection/completion, publisher
+receipts and recovery, and explicit cron/lock context. Followed these into CLI
+flow dispatch, catalog selection, release output, history JSON, the DTO fixture,
+the joined scheduled-release test, publisher counterexamples, release README,
+cron host guide, and release-evidence direction. Search found no Swift consumer
+of these release-history or publisher receipt types.
+
+| Suspected duplication | Why it remains |
+| --- | --- |
+| Selection and successful outcome both name a tag/commit | Selection exists before success and survives preflight or publication failure. Deriving it from settlement would erase recovery identity. |
+| Physical receipt and attempt both describe execution | Wrapper exit and release settlement can disagree. Their completion timestamps describe different boundaries; historical schema-1 receipts remain required evidence. |
+| Manual `ReleaseRunOutcome` and scheduled outcome | Manual results report selection/recovery and CLI output. Scheduled settlement additionally requires current telemetry and public proof. Merging them would overstate manual evidence. |
+| `ArtifactReceipt`, `PublicReleaseReceipt`, Rust `PublicReleaseProof` | Preparation/stage evidence and public observations differ. Rust validates the publisher's identity and required stages while retaining the complete JSON; it does not reimplement artifact download or smoke. |
+| Publisher `verify` and `reconcile` | Both enter the same verification function. Only reconciliation may repair missing/stale stages; collapsing their public commands would change side-effect permission. |
+| Initial public checks and post-repair read-back | The former selects permitted repairs; the latter proves external availability after mutation. Reusing initial observations would accept stale proof. A generic stage runner would add machinery around four concrete operations. |
+| Job, accounting, and target locks | They protect execution attribution, short atomic record updates, and release mutation respectively. Merging them would change lock scope and ordering, while leaving the missing mutation-child inheritance unresolved. |
+| Catalog target and installed target kind | Discovery holds executable content; installed kind records launch provenance. Declarative cron's Flow requirement and general direct target selection have different contracts. |
+
+The local `ReleaseArtifacts` argument bundle and repeated JSON/file-writing
+mechanics offer small helper cleanups, but no competing domain authority or
+public representation to remove. They do not justify a structural change in
+this pass. Negative searches confirm the earlier duplicate evidence wrappers,
+`record_verification`, separate candidate/publish receipt classes, and release
+selection's `sync_main` path remain absent from the inspected production files.
+
+No API, DTO, persisted field, or executable code changed; no tests or static
+checks were rerun. Earlier test results above remain historical evidence, not
+new validation. The review's iterate verdict and the follow-up's telemetry
+linkage/retry, mutation-child exclusion, closed-obligation continuation, and
+configured acceptance obligations remain open. This review does not establish
+two automatic settlements or resolve the observed scorecard schema blocker.

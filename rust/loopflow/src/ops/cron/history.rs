@@ -214,10 +214,12 @@ fn summarize(
                 .and_then(|id| record.opportunities.iter().find(|o| &o.id == id))
                 .unwrap_or(opportunity);
             summary.accounted += usize::from(!owner.attempts.is_empty() || owner.wait.is_some());
-            if let Some(first) = owner
-                .attempts
+            if let Some(first) = record
+                .opportunities
                 .iter()
-                .find(|a| a.covered.contains(&opportunity.id))
+                .flat_map(|o| &o.attempts)
+                .filter(|a| a.covered.contains(&opportunity.id))
+                .min_by_key(|a| a.started_at)
             {
                 if first.started_at >= opportunity.due_at
                     && first.started_at < opportunity.due_at + 60
@@ -271,7 +273,7 @@ fn summarize(
             if left.next_due_at != right.due_at {
                 continue;
             }
-            if let (Some(a), Some(b)) = (qualifying(left), qualifying(right)) {
+            if let (Some(a), Some(b)) = (qualifying(record, left), qualifying(record, right)) {
                 let one_publication = matches!(a, ScheduledReleaseOutcome::Published { .. })
                     || matches!(b, ScheduledReleaseOutcome::Published { .. });
                 let duplicate = matches!((a, b), (ScheduledReleaseOutcome::Published { tag: a_tag, commit: a_commit, .. }, ScheduledReleaseOutcome::Published { tag: b_tag, commit: b_commit, .. }) if a_tag == b_tag && a_commit == b_commit);
@@ -306,14 +308,22 @@ fn summarize(
     summary
 }
 
-fn qualifying(opportunity: &ReleaseOpportunity) -> Option<&ScheduledReleaseOutcome> {
+fn qualifying<'a>(
+    record: &'a ReleaseObligation,
+    opportunity: &'a ReleaseOpportunity,
+) -> Option<&'a ScheduledReleaseOutcome> {
     if opportunity.historical_timezone_unknown
-        || !opportunity.interventions.is_empty()
         || opportunity.coalesced_into.is_some()
-        || opportunity
-            .attempts
+        || record
+            .opportunities
             .iter()
-            .any(|a| a.source != CronSource::Scheduled)
+            .filter(|o| {
+                o.id == opportunity.id || o.coalesced_into.as_ref() == Some(&opportunity.id)
+            })
+            .any(|o| {
+                !o.interventions.is_empty()
+                    || o.attempts.iter().any(|a| a.source != CronSource::Scheduled)
+            })
     {
         return None;
     }
@@ -390,6 +400,80 @@ mod tests {
             0,
         );
         assert_eq!(serde_json::to_value(summary).unwrap(), original["summary"]);
+    }
+
+    #[test]
+    fn collapsed_intervention_cannot_qualify_a_later_automatic_pair() {
+        for source in [
+            CronSource::Scheduled,
+            CronSource::Triggered,
+            CronSource::Manual,
+        ] {
+            let mut report = fixture();
+            let obligation = &mut report.obligations[0];
+            obligation.installation_activated_at = -86400;
+            obligation.activated_at = -86400;
+            obligation.observed_at = -86400;
+            let opportunities = &mut obligation.opportunities;
+            let mut earlier = opportunities[0].clone();
+            earlier.id = "earlier_failed_opportunity".into();
+            earlier.due_at -= 86400;
+            earlier.due_local = "1969-12-31T10:00:00+00:00".into();
+            earlier.next_due_at -= 86400;
+            earlier.coalesced_into = Some(opportunities[0].id.clone());
+            let attempt = &mut earlier.attempts[0];
+            attempt.receipt_id = crate::durable::CronReceiptId::new();
+            attempt.started_at -= 86400;
+            attempt.finished_at = attempt.finished_at.map(|finished| finished - 86400);
+            attempt.source = source;
+            attempt.covered = vec![earlier.id.clone()];
+            attempt.selection = None;
+            attempt.verification.clear();
+            attempt.outcome = crate::ops::cron::accounting::ScheduledReleaseOutcome::Failed {
+                cause: "verification failed before selecting a candidate".into(),
+            };
+            opportunities[0].attempts[0]
+                .covered
+                .push(earlier.id.clone());
+            opportunities.insert(0, earlier);
+
+            let summary = summarize(
+                &report.obligations,
+                &report.receipts,
+                &report.dispositions,
+                0,
+            );
+            assert_eq!(summary.published, 1);
+            assert_eq!(summary.no_change, 1);
+            assert_eq!(
+                summary.qualifying_pairs.len(),
+                usize::from(source == CronSource::Scheduled),
+                "source {source:?}"
+            );
+        }
+    }
+
+    #[test]
+    fn collapsing_a_failed_due_preserves_its_first_attempt_timing() {
+        let mut report = fixture();
+        let opportunities = &mut report.obligations[0].opportunities;
+        opportunities[0].coalesced_into = Some(opportunities[1].id.clone());
+        opportunities[0].attempts[0].selection = None;
+        opportunities[0].attempts[0].outcome =
+            crate::ops::cron::accounting::ScheduledReleaseOutcome::Failed {
+                cause: "verification failed before selection".into(),
+            };
+        let earlier = opportunities[0].id.clone();
+        opportunities[1].attempts[0].covered.push(earlier);
+        let summary = summarize(
+            &report.obligations,
+            &report.receipts,
+            &report.dispositions,
+            0,
+        );
+        assert_eq!(summary.on_time, 2);
+        assert_eq!(summary.caught_up, 0);
+        assert_eq!(summary.collapsed, 1);
     }
 
     #[test]

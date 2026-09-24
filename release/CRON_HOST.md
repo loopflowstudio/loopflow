@@ -111,6 +111,9 @@ one release operation. Earlier misses point to that execution; they cannot
 supply extra publication or no-change settlements. Due times arriving while
 it runs wait for the next wake. An incomplete candidate keeps its original
 owner, tag, and commit through recovery.
+Collapse preserves each due time's first-attempt timing. Operator-triggered or
+manual attempts on covered misses still disqualify the owner's unattended pair,
+including when those misses fall before the displayed history window.
 
 `release history` joins retained obligations, execution attempts, verification,
 product outcomes, and physical cron receipts. It also reports failed telemetry

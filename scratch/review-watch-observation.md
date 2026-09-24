@@ -1,5 +1,51 @@
 # Observation-order Watch review — 2026-09-24
 
+## Independent committed-head check
+
+Reviewed `6e4538549` against `782dd3e75`, the complete Task directive read from
+the configured registry, the current slice and full target, and the earlier
+foundation/feed/diagram boundaries. The tree was clean. No executable correction
+was needed; the applicable observation-order slice claims pass. Refresh the
+in-progress PR, without landing or completing the Task.
+
+| Claim | Planned behavior | Implemented behavior | Proof | Result |
+|---|---|---|---|---|
+| Alternating Runs | Contiguous A/B/A blocks, adjacent prose folding | Shared observation positions and derived groups | Matching committed-source hashes, 12-test model receipt and inspected feed render | pass |
+| Late history/revisions | One current value, history cannot overwrite live; exact changed-row focus | Per-record position, live precedence and last-change ordinal | Existing overlap, tool-correlation and exact-Follow tests; source trace | pass |
+| Desktop path | Existing reads supply diagram/feed and preserve auxiliary Runs | RegistryQuery → retained store → native views | Matching two-test real CLI-to-desktop receipt; inspected integrated render | pass locally |
+| Passive configured read | No provider control or manufactured history | Three Runs; three readable quiet output sources; absent plan explicit | Fresh read from `/tmp`, receipt below | pass for reading; no live-arrival claim |
+| Full Watch | Automatic arrival, complete capture, checkpoint navigation and configured demo | Still incomplete | Accepted directive and current implementation | gap, retained Task scope |
+
+All six production/test hashes, the branch reader binary, and both review-probe
+hashes match `watch-observation-evidence/review-hashes.json`. Reused the exact
+source-matched model/render and two-test CLI-to-desktop receipts rather than
+rerunning unchanged suites. Inspected both `feed.png` and `workspace.png`:
+alternating provider/Run labels, source warning counts, tools/prose, connected
+stages and explicit manual-update status remain visible. These renders do not
+prove physical scrolling or the installed-app demonstration.
+
+Fresh `task watch LOO-293 --json` returned three Runs, zero invocations and
+`position_unavailable` in 0.562 s. Fresh `task output LOO-293 --json --tail`
+returned three available sources, zero records and no gaps in 2.029 s. Both used
+the branch CLI from `/tmp` against the existing read-only registry with empty
+stderr. No provider or Task was mutated. Counts-only receipt:
+`/tmp/loo293-independent-observation-read.json`. Quiet output and missing plans
+cannot establish the full configured demonstration.
+
+Independent negative searches confirm the Watch path calls only the existing
+snapshot/output reads. Removed order arrays, latest-Run target and legacy DTO
+names remain absent. No direct Swift provider reader, durable transcript,
+parallel Session inventory, lifecycle action or additional service API appeared.
+The source/reference/position types describe transient display state. Keep the
+next discovery/retention work at these existing owners; no speculative API is
+needed by this review.
+
+Before PR refresh, formatting, full-target Clippy and whitespace checks passed.
+Only this report changed during the independent check; no new behavioral suite
+or configured live-arrival verdict is implied by those static checks.
+
+## Earlier review evidence
+
 The observation-order slice is coherent for PR refresh. It advances the accepted
 one-PR Watch design; it does not establish full Task acceptance. No bounded
 production defect was found and no executable production/test file was changed

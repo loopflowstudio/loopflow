@@ -1,5 +1,11 @@
 # Release evidence reduction
 
+> Evidence correction at `8bb7eca0cedb3845def0017da3496c948a160040`:
+> earlier sections missed indirect `sync_main` calls through worktree creation.
+> The hook implementation reproduced and removed those calls; see
+> [release-hook-ownership.md](release-hook-ownership.md). Earlier negative
+> searches establish only their inspected coverage, not complete reachability.
+
 ## Model and proof boundary
 
 The effective model is an installed obligation with original due opportunities.
@@ -237,3 +243,56 @@ implementation's focused results remain recorded in
 Shared mutation-child exclusion, historical telemetry linkage/recovery and repair
 ownership, closed-obligation continuation and configured acceptance remain open.
 This review neither approves the branch nor supplies the two automatic settlements.
+
+## Hook ownership compression review at `8bb7eca0ce`
+
+No further executable reduction selected. Before and after this pass, an
+obligation owns original due opportunities; each execution owner retains attempts
+with selection, verification and product outcome. Collapsed opportunities refer
+to that owner. Atomic `settle` writes product evidence; process receipts describe
+wrapper execution; publisher receipts retain artifact stages and public
+observations. Cron attribution, target mutation exclusion and checkout removal
+protection remain distinct capabilities. Hook inheritance extends their existing
+lifetimes without another execution record.
+
+Inspected the accounting types and `begin`/`finish_process`/`settle`/receipt-context
+path, history timing/qualification/disposition readers, then release run and
+selection, verification hooks, preparation/rebuild, target acquisition/inheritance,
+checkout acquisition and cleanup. The complete Task patch was available without
+truncation (571,234 characters); this pass concentrated on those model paths and
+the latest hook implementation. The effective public contract remains one
+mechanical release operation plus separate scheduling and product history.
+
+Mirrors checked: explicit cron context through CLI Flow dispatch, manual release
+output, history/disposition DTOs and the release-history JSON fixture; Python
+artifact/public receipt types and descriptor forwarding in publisher, deployment
+and packaging helpers; hook survival/caller-preservation fixtures; release README,
+cron host guide, evidence direction and full design. Searches found no Swift
+consumer of the release-history, opportunity, public-receipt or checkout-fd names.
+
+| Suspected reduction | Disposition |
+| --- | --- |
+| Hook arguments wrapped in a new context/runner | Would group syntax without deleting a domain concept or writer. Explicit target lock and checkout lease show which authority reaches the child. |
+| Target lock, checkout lease and cron descriptor | Different scopes: repository/target mutation, exact checkout removal, scheduled attribution. Unification changes capability boundaries and independent-checkout behavior. |
+| `PreparedRelease` and durable candidate selection | The former is private PR number/head evidence before merge; the latter retains candidate/tag recovery identity. Neither can replace the other without discarding a stage's evidence. |
+| Separate rebuild helper and optional cleanup lease | Already removed by implementation. Rebuild is beside its lease owner, cleanup requires ownership, and preparation takes the existing `ReleaseChangeSet`. No remaining alternative representation to remove here. |
+| Verification and preparation hook lists | Same runner, different configured phases and source subjects. Combining the lists would change execution order and verification meaning. |
+| Physical receipt versus attempt; selection versus outcome | Wrapper exit may disagree with product settlement, and selection must survive before or without success. These are preservation evidence, not duplicate lifecycle authorities. |
+| Publisher stage receipt versus public receipt | Preparation/publication effects and fresh external observations have different proof obligations. Flattening away that distinction would overstate completion. |
+| Frozen covered keys versus current collapse links | Historical execution coverage preserves timing and provenance across retries; current links identify the owning result. One cannot reconstruct the other after ownership changes. |
+
+All three release worktree-creation calls now explicitly disable default-branch
+sync; inspected helper code performs sync only when that argument is true.
+This narrower source finding supersedes the earlier missed indirect path.
+Searches also found no restored success-proof wrappers, separate verification
+writer, or rebuild adapter. Shared PR/notes/source/cleanup subprocess inheritance
+remains incomplete; hiding those reachable gaps behind a generic command wrapper
+would not establish their ownership contract.
+
+No API, DTO, persisted field, migration or executable code changed. No tests or
+static checks were rerun; the preceding implementation's focused results remain
+recorded evidence. Only this report and its correction changed. Historical
+telemetry association/recovery and repair ownership, closed-obligation
+continuation, remaining mutation children and configured acceptance remain open.
+The scorecard blocker and required UI/public proof are retained; no PR approval,
+publication or two-settlement claim follows from this compression review.

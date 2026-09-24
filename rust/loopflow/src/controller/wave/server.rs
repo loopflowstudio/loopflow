@@ -55,11 +55,9 @@
 //!     pre-turn snapshot and optional typed provider thread; serving it drains
 //!     pending child observations first.
 //! - `POST /messages {id?, op, text}` → `{message, state, epoch}`. `op` is
-//!   required — `"message"` (queued; the next turn answers it), `"steer"`
-//!   (into the live turn when the harness supports it, else degrades to a
-//!   queued message), `"interrupt"` (cancel the open turn; non-empty text
-//!   becomes the next turn — "interrupt & send"; while idle, an interrupt is
-//!   a no-op success). `text` may be empty only for `interrupt` (400
+//!   required — `"message"` (observed on the channel) or `"interrupt"`
+//!   (cancel the open turn with empty text; a no-op while idle).
+//!   A message requires text; an interrupt requires empty text (400
 //!   otherwise). A local epoch journals immediately; a Discord epoch uses
 //!   `id` as an enforced provider nonce and returns the source-bearing provider
 //!   message, which the adapter then queues from its canonical Discord id.
@@ -602,7 +600,7 @@ async fn conversation_handler(
 /// The door is opaque on resident ops: this handler validates SHAPE only —
 /// `text` may be empty only for
 /// `interrupt` — then hands the op to the runtime uninterpreted
-/// ([`WaveRuntime::try_deliver`]). What steer or interrupt *means* lives with the
+/// ([`WaveRuntime::try_deliver`]). What a message or interrupt means lives with the
 /// resident, not the ear. Honest partial: the `{turn, state}` echo still
 /// leaks that a bare interrupt appends nothing (`turn: null`), but that fact
 /// comes back from the runtime's return, not from the door interpreting.
@@ -610,6 +608,18 @@ async fn messages_handler(
     State(state): State<ServerState>,
     Json(body): Json<PostMessage>,
 ) -> axum::response::Response {
+    if body.op == MessageOp::Steer
+        || (body.op == MessageOp::Interrupt && !body.text.trim().is_empty())
+    {
+        return (
+            StatusCode::BAD_REQUEST,
+            Json(PostMessageErrorResponse {
+                error: "Wave steering was removed; use wave/operate with instructions".to_string(),
+                epoch: state.runtime.active_conversation_epoch(),
+            }),
+        )
+            .into_response();
+    }
     if body.text.trim().is_empty() && !matches!(body.op, MessageOp::Interrupt) {
         return (
             StatusCode::BAD_REQUEST,
@@ -1497,6 +1507,44 @@ mod tests {
         assert_eq!(transcript.len(), 1);
         assert_eq!(transcript[0].id, "turn-2");
         assert_eq!(transcript[0].text, "keep this");
+    }
+
+    #[tokio::test]
+    async fn wave_steering_is_rejected_without_journaling() {
+        let tmp = tempfile::tempdir().unwrap();
+        let runtime = WaveRuntime::open("ship".into(), tmp.path().to_path_buf()).unwrap();
+        let app = router_with_observer(
+            runtime.clone(),
+            ResidentDoor::new("resident"),
+            Arc::new(ObserverSlot::new(runtime.clone(), None)),
+            None,
+            ShutdownDoor::new(),
+        );
+        let listener = tokio::net::TcpListener::bind("127.0.0.1:0").await.unwrap();
+        let url = format!("http://{}/messages", listener.local_addr().unwrap());
+        let server = tokio::spawn(async move {
+            axum::serve(listener, app).await.unwrap();
+        });
+        let client = reqwest::Client::new();
+        for op in ["steer", "interrupt"] {
+            let response = client
+                .post(&url)
+                .json(&serde_json::json!({"op": op, "text": "change direction"}))
+                .send()
+                .await
+                .unwrap();
+            assert_eq!(response.status(), StatusCode::BAD_REQUEST);
+        }
+        assert!(runtime.thread_snapshot().is_empty());
+        let response = client
+            .post(&url)
+            .json(&serde_json::json!({"op": "message", "text": "hello"}))
+            .send()
+            .await
+            .unwrap();
+        assert_eq!(response.status(), StatusCode::OK);
+        assert_eq!(runtime.thread_snapshot().len(), 1);
+        server.abort();
     }
 
     #[tokio::test]

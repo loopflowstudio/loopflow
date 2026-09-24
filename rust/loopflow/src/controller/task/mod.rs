@@ -21,6 +21,14 @@ use crate::work::wave::Wave;
 /// for a steer reaching a working provider (the boundary seed is the fallback).
 const STEER_POLL_INTERVAL: Duration = Duration::from_secs(5);
 
+struct CommentRefresh(tokio::task::JoinHandle<()>);
+
+impl Drop for CommentRefresh {
+    fn drop(&mut self) {
+        self.0.abort();
+    }
+}
+
 #[derive(Debug)]
 struct PreparedTaskStep {
     turn: crate::lf::commands::run::PreparedHarnessTurn,
@@ -140,6 +148,7 @@ async fn run_task_with(
     if flow.current().kind == StepKind::Op {
         return run_task_op_boundary(store, task, wave, project, flow, launch_claim).await;
     }
+    crate::ops::linear_observe::refresh_task_comments(&store, &task).await?;
     let mut prepared = prepare_task_flow_step(&store, &task, wave.name(), &flow).await?;
     let (harness_name, _) = crate::engine::config::parse_agent(
         prepared
@@ -162,6 +171,7 @@ async fn run_task_with(
         &prepared.turn.context,
     )?;
     capture.record_input("initial", &prepared.turn.input);
+    capture.record_input("steer_seed_through", &prepared.seeded_steer_id.to_string());
     prepared.turn.config.env.extend(capture.environment());
     capture.mark_spawn_requested();
     let capture = Some(capture);
@@ -214,6 +224,21 @@ async fn run_task_with(
         "task {}> attached; /status, /interrupt, /detach, or type a message/instruction",
         task.plan.identifier
     );
+    let comment_store = store.clone();
+    let comment_task = task.clone();
+    let comment_refresh = tokio::spawn(async move {
+        let mut tick = tokio::time::interval(Duration::from_secs(15));
+        loop {
+            tick.tick().await;
+            if let Err(error) =
+                crate::ops::linear_observe::refresh_task_comments(&comment_store, &comment_task)
+                    .await
+            {
+                tracing::warn!(%error, "Linear comment refresh failed; retaining last confirmed Task direction");
+            }
+        }
+    });
+    let _comment_refresh = CommentRefresh(comment_refresh);
     let mut last_text = String::new();
     let mut command_failures = Vec::new();
     // Steers land as durable comments on this Work; a live turn injects any that
@@ -226,9 +251,14 @@ async fn run_task_with(
     loop {
         tokio::select! {
             _ = steer_tick.tick() => {
-                crate::ops::child::inject_live_steers(
-                    &store, &work, harness.as_mut(), &mut steer_cursor,
+                let delivered = crate::ops::child::inject_live_steers(
+                    &store, &task.id, harness.as_mut(), &mut steer_cursor,
                 ).await;
+                if let Some(capture) = &capture {
+                    for steer in delivered {
+                        capture.record_input(&format!("steer_transport_accepted:{}", steer.id), &steer.text);
+                    }
+                }
                 crate::ops::child::observe_interrupt(
                     &store, &work, harness.as_mut(), &mut interrupt_cursor,
                 ).await;
@@ -506,7 +536,7 @@ async fn prepare_task_flow_step(
     let work = store
         .work_for_child(&ChildRef::Task(task.id.clone()))
         .await?;
-    let steers = store.work_steers(&work).await?;
+    let steers = store.task_steers(&task.id).await?;
     let seeded_steer_id = steers.last().map_or(0, |steer| steer.id);
     let interrupt_id = store.latest_interrupt_id(&work).await?;
     let crate::engine::ConcreteStep::Skill(skill) = flow.current_plan() else {
@@ -608,14 +638,9 @@ pub(crate) async fn decide_human_flow_step(
     position.updated_at = time::OffsetDateTime::now_utc();
     match iterate_direction {
         Some(direction) => {
+            crate::ops::linear_observe::publish_task_steer(store, &task, &direction).await?;
             store
-                .iterate_human_task_boundary(
-                    &task,
-                    &expected,
-                    &position,
-                    &crate::durable::Author::User,
-                    &direction,
-                )
+                .iterate_human_task_boundary(&task, &expected, &position)
                 .await?;
         }
         None => {
@@ -771,17 +796,12 @@ async fn handle_attachment(
             .status();
         return Ok(());
     }
-    let target = ChildRef::Task(task.id.clone());
     if line == "/interrupt" {
         harness.interrupt().await?;
         println!("interrupted active provider turn");
     } else {
-        let work = store.work_for_child(&target).await?;
-        let steer = store
-            .append_steer(&work, crate::durable::Author::User, line)
-            .await?;
-        harness.send_input(line).await?;
-        println!("queued {}", steer.id);
+        let comment_id = crate::ops::linear_observe::publish_task_steer(store, task, line).await?;
+        println!("posted to Linear {comment_id}");
     }
     Ok(())
 }
@@ -944,6 +964,8 @@ fn progress_summary(text: &str) -> String {
 #[cfg(test)]
 struct TestLfBinGuard {
     previous: Option<std::ffi::OsString>,
+    previous_db: Option<std::ffi::OsString>,
+    _home: tempfile::TempDir,
     _lock: std::sync::MutexGuard<'static, ()>,
 }
 
@@ -952,9 +974,14 @@ impl TestLfBinGuard {
     fn pin() -> Self {
         let lock = crate::journal::test_env_lock();
         let previous = std::env::var_os("LF_BIN");
+        let previous_db = std::env::var_os("LF_DB_PATH");
+        let home = tempfile::tempdir().unwrap();
+        std::env::set_var("LF_DB_PATH", home.path().join("loopflow.db"));
         std::env::set_var("LF_BIN", std::env::current_exe().unwrap());
         Self {
             previous,
+            previous_db,
+            _home: home,
             _lock: lock,
         }
     }
@@ -963,6 +990,10 @@ impl TestLfBinGuard {
 #[cfg(test)]
 impl Drop for TestLfBinGuard {
     fn drop(&mut self) {
+        match &self.previous_db {
+            Some(value) => std::env::set_var("LF_DB_PATH", value),
+            None => std::env::remove_var("LF_DB_PATH"),
+        }
         match &self.previous {
             Some(value) => std::env::set_var("LF_BIN", value),
             None => std::env::remove_var("LF_BIN"),
@@ -1359,6 +1390,117 @@ mod planning_tests {
     }
 
     #[tokio::test]
+    async fn posted_direction_on_an_idle_task_does_not_start_advancement() {
+        let (store, task, _) = human_task_fixture().await;
+        assert!(store.flow_position(&task.id).await.unwrap().is_none());
+        let id = crate::ops::linear_observe::tests::with_posted_comment(
+            &store,
+            &task,
+            "keep the API",
+            crate::ops::linear_observe::publish_task_steer(&store, &task, "keep the API"),
+        )
+        .await
+        .unwrap();
+        assert_eq!(id, "comment-1");
+        assert!(store.flow_position(&task.id).await.unwrap().is_none());
+        let steers = store.task_steers(&task.id).await.unwrap();
+        assert_eq!(steers.len(), 1);
+        assert!(steers[0].text.contains("keep the API"));
+    }
+
+    #[tokio::test]
+    async fn comment_sync_recovers_history_and_deduplicates_edits_and_webhooks() {
+        let (store, task, _) = human_task_fixture().await;
+        let now = time::OffsetDateTime::now_utc();
+        let observation = |issue_revision: &str, comment_revision: &str, body: &str| {
+            crate::pm::IssueObservation {
+                revision: issue_revision.into(),
+                title: task.plan.title.clone(),
+                description: task.plan.description.clone(),
+                comments: vec![crate::pm::IssueComment {
+                    id: "c-1".into(),
+                    revision: Some(comment_revision.into()),
+                    body: body.into(),
+                    author_id: Some("my-account".into()),
+                }],
+            }
+        };
+        let first = observation(
+            "2026-09-23T00:00:00Z",
+            "2026-09-22T00:00:00Z",
+            "first advice",
+        );
+        let imported = crate::ops::linear_observe::reconcile_linear_observation(
+            &store,
+            &task,
+            first.clone(),
+            "my-account",
+            now,
+        )
+        .await
+        .unwrap();
+        assert_eq!(imported.follow_ups_created.len(), 1);
+        assert!(crate::ops::linear_observe::reconcile_linear_observation(
+            &store,
+            &task,
+            first.clone(),
+            "my-account",
+            now
+        )
+        .await
+        .unwrap()
+        .follow_ups_created
+        .is_empty());
+        // A stale issue revision can carry a newer comment edit.
+        let edited = observation(
+            "2026-09-21T00:00:00Z",
+            "2026-09-24T00:00:00Z",
+            "revised advice",
+        );
+        assert_eq!(
+            crate::ops::linear_observe::reconcile_linear_observation(
+                &store,
+                &task,
+                edited,
+                "my-account",
+                now
+            )
+            .await
+            .unwrap()
+            .follow_ups_created
+            .len(),
+            1
+        );
+        let event = crate::webhook::WebhookEvent::Comment {
+            issue_id: task.plan.id.as_str().into(),
+            comment_id: "c-1".into(),
+            revision: Some("2026-09-24T00:00:00Z".into()),
+            body: "revised advice".into(),
+            author_id: Some("my-account".into()),
+        };
+        assert_eq!(
+            crate::webhook::ingest_event(&store, event, "my-account", now)
+                .await
+                .unwrap(),
+            crate::webhook::WebhookOutcome::Comment { delivered: false }
+        );
+        assert!(crate::ops::linear_observe::reconcile_linear_observation(
+            &store,
+            &task,
+            first,
+            "my-account",
+            now
+        )
+        .await
+        .unwrap()
+        .follow_ups_created
+        .is_empty());
+        let steers = store.task_steers(&task.id).await.unwrap();
+        assert_eq!(steers.len(), 2);
+        assert!(steers[1].text.contains("revised advice"));
+    }
+
+    #[tokio::test]
     async fn stale_task_child_cannot_rewrite_a_replacement_human_boundary() {
         let (store, task, human_flow) = human_task_fixture().await;
         let autonomous = super::start_task_flow(&task, "task-design").unwrap();
@@ -1386,10 +1528,7 @@ mod planning_tests {
             outcome => panic!("unexpected claim outcome: {outcome:?}"),
         };
 
-        store
-            .restart_task_flow(&task, &Author::User, "replace invocation", "deadbeef")
-            .await
-            .unwrap();
+        store.restart_task_flow(&task, "deadbeef").await.unwrap();
         let replacement = store
             .set_flow_position(&task.id, human_flow.clone())
             .await
@@ -1422,15 +1561,7 @@ mod planning_tests {
         });
         let blocked = store.set_flow_position(&task.id, blocked).await.unwrap();
 
-        let error = store
-            .retry_task_flow(
-                &task.id,
-                &blocked,
-                &Author::User,
-                "pretend this was repaired",
-            )
-            .await
-            .unwrap_err();
+        let error = store.retry_task_flow(&task.id, &blocked).await.unwrap_err();
 
         assert!(error.to_string().contains("explicit Flow restart"));
         assert_eq!(store.flow_position(&task.id).await.unwrap(), Some(blocked));
@@ -1461,7 +1592,8 @@ mod planning_tests {
         let mut steer_cursor = prepared.seeded_steer_id;
         let mut interrupt_cursor = prepared.interrupt_id;
 
-        crate::ops::child::inject_live_steers(&store, &work, &mut harness, &mut steer_cursor).await;
+        crate::ops::child::inject_live_steers(&store, &task.id, &mut harness, &mut steer_cursor)
+            .await;
         crate::ops::child::observe_interrupt(&store, &work, &mut harness, &mut interrupt_cursor)
             .await;
 
@@ -1810,22 +1942,26 @@ mod planning_tests {
         let (store, task, flow) = human_task_fixture().await;
         let token = park_human_task(&store, &task, &flow).await;
 
-        super::decide_human_flow_step(
+        crate::ops::linear_observe::tests::with_posted_comment(
             &store,
-            &token,
-            crate::ops::human_session::FlowDecision::Iterate,
+            &task,
             "narrow the design",
+            super::decide_human_flow_step(
+                &store,
+                &token,
+                crate::ops::human_session::FlowDecision::Iterate,
+                "narrow the design",
+            ),
         )
         .await
         .unwrap();
 
-        let work = WorkRef::Task(task.id.clone());
         let position = store.flow_position(&task.id).await.unwrap().unwrap();
         assert_eq!(position.current().step, "kickoff");
         assert_eq!(position.iteration, 1);
         assert!(!position.is_human());
         assert!(store
-            .work_steers(&work)
+            .task_steers(&task.id)
             .await
             .unwrap()
             .iter()
@@ -1841,20 +1977,28 @@ mod planning_tests {
         let iterate_store = store.clone();
         let iterate_token = token.clone();
 
-        let (approve, iterate) = tokio::join!(
-            super::decide_human_flow_step(
-                &approve_store,
-                &approve_token,
-                crate::ops::human_session::FlowDecision::Approve,
-                "approve",
-            ),
-            super::decide_human_flow_step(
-                &iterate_store,
-                &iterate_token,
-                crate::ops::human_session::FlowDecision::Iterate,
-                "iterate",
-            ),
-        );
+        let (approve, iterate) = crate::ops::linear_observe::tests::with_posted_comment(
+            &store,
+            &task,
+            "iterate",
+            async {
+                tokio::join!(
+                    super::decide_human_flow_step(
+                        &approve_store,
+                        &approve_token,
+                        crate::ops::human_session::FlowDecision::Approve,
+                        "approve",
+                    ),
+                    super::decide_human_flow_step(
+                        &iterate_store,
+                        &iterate_token,
+                        crate::ops::human_session::FlowDecision::Iterate,
+                        "iterate",
+                    ),
+                )
+            },
+        )
+        .await;
 
         assert_ne!(approve.is_ok(), iterate.is_ok());
         assert!(!crate::ops::human_session::token_is_current(&store, &token)

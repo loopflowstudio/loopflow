@@ -62,18 +62,6 @@
       "reason": "completed"
     },
     {
-      "kind": "turn_steered",
-      "answers": [
-        "msg-6"
-      ]
-    },
-    {
-      "kind": "messages_requeued",
-      "ids": [
-        "msg-6"
-      ]
-    },
-    {
       "kind": "loop_state",
       "to": "interrupting",
       "reason": "user interrupt"

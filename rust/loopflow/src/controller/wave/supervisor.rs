@@ -36,7 +36,6 @@ use tokio::time::Instant;
 
 use crate::chat::turns::{ChatRole, ChatTurn};
 use crate::chat::types::Lifecycle;
-use crate::controller::wave::journal::MessageOp;
 use crate::controller::wave::registry::process_alive;
 use crate::controller::wave::runtime::{InboxItem, TurnBroadcast, WaveRuntime};
 use crate::controller::wave::server::ResidentDoor;
@@ -347,9 +346,9 @@ impl Supervisor {
     async fn on_inbox(&mut self, item: InboxItem) {
         let is_interrupt = match &item {
             InboxItem::Interrupt | InboxItem::Skip => true,
-            InboxItem::Message(message) => {
+            InboxItem::Message(_) => {
                 // A human message revives a dead resident immediately —
-                // ladder or no ladder ("interrupt & send" included).
+                // regardless of the restart backoff.
                 if self.spawner.is_some()
                     && self.child.is_none()
                     && matches!(self.runtime.loop_state(), LoopState::Failed { .. })
@@ -360,7 +359,7 @@ impl Supervisor {
                     );
                     self.spawn().await;
                 }
-                message.op == MessageOp::Interrupt
+                false
             }
             InboxItem::Task(_) | InboxItem::Project(_) | InboxItem::Promotion { .. } => {
                 if self.spawner.is_some()
@@ -489,7 +488,7 @@ mod tests {
     use std::sync::atomic::{AtomicU32, Ordering};
     use std::time::Duration;
 
-    use crate::controller::wave::journal::{journal_path, EventKind, Journal};
+    use crate::controller::wave::journal::{journal_path, EventKind, Journal, MessageOp};
     use crate::controller::wave::wire::ResidentDelta;
 
     fn open_runtime(repo: &std::path::Path) -> Arc<WaveRuntime> {

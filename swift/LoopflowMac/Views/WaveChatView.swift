@@ -5,8 +5,7 @@ import Loopflow
 /// WaveChat: the live conversation with a running `lf wave <name>`. Discovers the
 /// wave's chat server through its `.wave-endpoint` pointer, replays + streams the
 /// thread over SSE, and posts messages back through the composer. The composer is
-/// verb-aware — Send while idle, Steer / Interrupt & Send / Interrupt while a turn
-/// runs — keyed off the streamed loop state. When the wave isn't running (no
+/// offers Send, or Interrupt while a turn runs and the composer is empty. When the wave isn't running (no
 /// pointer file, or the server refuses), it shows a clear not-running state and
 /// keeps polling so it attaches the moment the wave comes up.
 struct WaveChatView: View {
@@ -527,8 +526,7 @@ struct WaveChatView: View {
     // MARK: - Composer
     //
     // The composer is verb-aware: it keys off the streamed loop state.
-    // Idle + text → Send (op=message). Turning + text → Steer into the live
-    // turn, with Interrupt & Send one click away. Turning + empty → Interrupt.
+    // Text always sends a channel message. Turning + empty offers Interrupt.
     // Verb selection lives in `composerVerbs` (Loopflow), tested there.
 
     private var isLive: Bool { connection?.phase == .live }
@@ -640,12 +638,7 @@ struct WaveChatView: View {
                 .onSubmit { perform(verbs.primary) }
                 .accessibilityIdentifier("wave-chat-composer")
 
-            if let secondary = verbs.secondary {
-                Button(label(for: secondary)) { perform(secondary) }
-                    .buttonStyle(.bordered)
-                    .disabled(!isLive)
-                    .accessibilityIdentifier("wave-chat-secondary")
-            }
+
 
             Button(label(for: verbs.primary)) { perform(verbs.primary) }
                 .keyboardShortcut(.return, modifiers: .command)
@@ -662,9 +655,7 @@ struct WaveChatView: View {
     private func label(for verb: ComposerVerb) -> String {
         switch verb {
         case .send: return "Send"
-        case .steer: return "Steer"
         case .interrupt: return "Interrupt"
-        case .interruptAndSend: return "Interrupt & Send"
         }
     }
 
@@ -673,8 +664,7 @@ struct WaveChatView: View {
         let op: WaveMessageOp
         switch verb {
         case .send: op = .message
-        case .steer: op = .steer
-        case .interrupt, .interruptAndSend: op = .interrupt
+        case .interrupt: op = .interrupt
         }
         // A bare interrupt carries no text; everything else requires some.
         guard verb == .interrupt || !text.isEmpty else { return }

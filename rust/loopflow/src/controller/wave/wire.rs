@@ -8,14 +8,13 @@
 //!   (the resident sends serially and awaits each response, so per-turn order
 //!   is the connection's order). The old in-process `TurnSink` vocabulary —
 //!   Opened / Text / Item / Finished — IS this wire, promoted to full
-//!   DTO discipline, plus the consumption markers (`TurnOpened.answers`,
-//!   `TurnSteered.answers` — the RESIDENT decides what a turn answers; the
+//!   DTO discipline, plus the consumption markers (`TurnOpened.answers` — the RESIDENT decides what a turn answers; the
 //!   listener validates against its queue fold and journals), the resident's
 //!   reported loop state, and the body's provider session id. The single writer stays
 //!   with the listener: the resident never touches journal files.
 //! - **Listener → resident**: the resident consumes its own wave's `/events`
 //!   subscription with `?inbox=true` — `inbox` SSE frames ([`InboxFrame`])
-//!   carry queued messages, typed Task observations, steer, and interrupt ops
+//!   carry queued messages, typed Task observations, and interrupt ops
 //!   (replayed pending queue on connect, then live).
 //!
 //! DTO discipline: every field is required or explicitly `Option` — no serde
@@ -79,17 +78,6 @@ pub enum ResidentDelta {
         status: Lifecycle,
         reason: Option<String>,
     },
-    /// Mid-turn consumption: the harness accepted these queued messages as
-    /// steering input, so the CURRENT turn answers them (journaled as
-    /// `TurnSteered.answers`). Validated like `TurnOpened.answers`.
-    TurnSteered { answers: Vec<String> },
-    /// The undo of a consumption claim: these message ids were declared
-    /// consumed (`TurnSteered`) but the vendor never received the input —
-    /// the harness send failed AFTER the claim was journaled. The listener
-    /// returns them to its pending fold so the next resident's replay
-    /// re-delivers them. The claim rides first, the undo is explicit:
-    /// at-most-once to the vendor, never a silent redelivery.
-    MessagesRequeued { ids: Vec<String> },
     /// A fresh body took the current logical playhead step.
     BodyStarted { body: BodyProvenance },
     /// The harness announced its provider session after the body opened.
@@ -224,12 +212,6 @@ mod tests {
             ResidentDelta::TurnFinished {
                 status: Lifecycle::Completed,
                 reason: None,
-            },
-            ResidentDelta::TurnSteered {
-                answers: vec!["msg-3".into()],
-            },
-            ResidentDelta::MessagesRequeued {
-                ids: vec!["msg-3".into()],
             },
             ResidentDelta::LoopState {
                 to: ResidentStateTo::Failed,

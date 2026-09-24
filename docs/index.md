@@ -38,7 +38,7 @@ Start a Wave after authoring `wave/engbot/GOAL.md`:
 
 ```bash
 lf start engbot
-lf chat --steer "ship the parser fix first"
+lf --wave <wave> wave/operate "ship the parser fix first"
 lf status engbot
 lf stop engbot
 ```

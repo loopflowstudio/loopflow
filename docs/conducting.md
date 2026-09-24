@@ -97,9 +97,9 @@ much of CI repair happened without a human.
 Reading is half; the system stays steerable while it runs.
 
 ```bash
-lf chat --steer "ship the parser fix first"   # reach the live wave body, else queue
+lf --wave <wave> wave/operate "ship the parser fix first"
 lf chat --follow                              # replay and tail the conversation
-lf task steer INF-123 "smaller PR"            # store direction; inject live when possible
+lf task steer INF-123 "smaller PR"            # post a Linear comment; deliver to the advancer
 lf task interrupt INF-123                     # end this turn and re-read direction
 lf session list --json                        # unresolved human Sessions
 lf session open <session-id> --json           # recover one exact conversation
@@ -107,13 +107,11 @@ lf ask list --user --json                     # requested sessions needing atten
 lf ask open ask_...                            # open one Ask session
 ```
 
-Task and Project steering appends durable Work comments. Task Steer requests a
-bounded worker; Project Steer launches a finite operation. A running Task
-worker accepts new comments when possible; the next Skill seed always reads
-them. Task interrupt ends the active
-turn so the next boundary reads immediately. Neither a stored Steer nor
-transport acceptance proves that an agent applied the direction — see
-[The Agent API](agent-api.md#steer).
+Task steering posts a Linear Task comment; commenting in Linear also steers the
+advancing worker. Independent Runs receive no live injection. Idle Tasks retain
+comments without starting execution. Task interrupt ends the active turn so
+advancement re-reads direction. Publication and transport acceptance do not
+prove that the agent applied the correction. See [The Agent API](agent-api.md#steer).
 
 `lf ask` is a synchronous boundary with a human. It opens an ordinary TUI Run
 against the caller's exact checkout, enters the Sessions surface, and blocks
@@ -133,7 +131,7 @@ The Loopflow app is the podium. It opens on a repository rail, the wave list,
 and the machine-wide roadmap, and it is a pure client over `lf --json` — no
 second database, no machine-wide service. What the CLI reads, it renders:
 
-- **Wave Chat** — the persistent conversation, with send, steer, and interrupt.
+- **Wave Chat** — the persistent conversation, with ordinary messages and an explicit interrupt.
 - **Roadmap** — every Task across every wave with lifecycle controls and one
   condition: waiting, blocked, clear, or unknown.
 - **Sessions** — interactive Runs, Asks, and Task FlowSteps with their exact
@@ -153,7 +151,7 @@ tmux attach -r -t <name>    # read-only look inside one
 
 Use the [Sessions lifecycle](../README.md#sessions) to open and explicitly
 resolve every unresolved human Session.
-Use `lf chat --steer` or `lf task steer` for unsolicited durable direction,
+Use `lf task steer` for durable Task direction,
 `lf --as` for another agent perspective, and `lf ask` for a new human boundary.
 
 ## Next

@@ -13,7 +13,7 @@ use super::{
     linear_refresh_lock, pm_show_async, resolve_local_pm_token, PmRefresh, PmShowOptions,
     PmTestContext, PM_TEST_CONTEXT,
 };
-use crate::durable::{Author, WorkRef};
+use crate::durable::Author;
 use crate::id::WaveId;
 use crate::ops::error::OpsResult;
 use crate::ops::NullProgress;
@@ -226,10 +226,15 @@ async fn pm_read_linear_oauth_recovers() {
         updated_at: timestamp,
     };
     fixture.store.create_project(&project).await.unwrap();
-    let work = WorkRef::Project(project.id.clone());
-    let steer = fixture
+    fixture
         .store
-        .append_steer(&work, Author::User, "Preserve the current direction.")
+        .append_project_event(
+            &project.id,
+            &crate::work::project::ProjectEventKind::Steer {
+                author: Author::User,
+                text: "Preserve historical direction.".into(),
+            },
+        )
         .await
         .unwrap();
     let history = fixture
@@ -275,7 +280,6 @@ async fn pm_read_linear_oauth_recovers() {
         fixture.store.get_project(&project.id).await.unwrap(),
         Some(project.clone())
     );
-    assert_eq!(fixture.store.work_steers(&work).await.unwrap(), vec![steer]);
     assert_eq!(
         fixture
             .store

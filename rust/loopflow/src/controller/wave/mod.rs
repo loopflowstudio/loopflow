@@ -797,6 +797,8 @@ mod tests {
             }),
             serde_json::json!({ "op": "say", "text": "anon" }),
             serde_json::json!({ "op": "message", "text": "hello", "from": "cli" }),
+            serde_json::json!({ "op": "steer", "text": "change course" }),
+            serde_json::json!({ "op": "interrupt", "text": "stop here" }),
         ] {
             let response = client
                 .post(format!("{base}/messages"))
@@ -811,8 +813,7 @@ mod tests {
 
         for body in [
             serde_json::json!({ "op": "message", "text": "hello" }),
-            serde_json::json!({ "op": "steer", "text": "change course" }),
-            serde_json::json!({ "op": "interrupt", "text": "stop here" }),
+            serde_json::json!({ "op": "interrupt", "text": "" }),
         ] {
             let response = client
                 .post(format!("{base}/messages"))
@@ -822,6 +823,9 @@ mod tests {
                 .unwrap();
             assert!(response.status().is_success());
         }
+        let thread = runtime.thread_snapshot();
+        assert_eq!(thread.len(), 1, "bare interrupt adds no speech");
+        assert_eq!(thread[0].text, "hello");
     }
 
     #[tokio::test]

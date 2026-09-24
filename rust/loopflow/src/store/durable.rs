@@ -2,8 +2,8 @@ use time::OffsetDateTime;
 
 use crate::child::ChildRef;
 use crate::durable::{
-    AbandonReceipt, Author, FlowPosition, Home, HomeId, Placement, RunId, Steer, SteerComment,
-    TaskId, TaskWorkerClaim, TaskWorkerClaimOutcome, TaskWorkerOwner, ToolResponseReceipt,
+    AbandonReceipt, FlowPosition, Home, HomeId, Placement, RunId, Steer, SteerComment, TaskId,
+    TaskWorkerClaim, TaskWorkerClaimOutcome, TaskWorkerOwner, ToolResponseReceipt,
     ToolResponseWrite, WorkRef, WorkStatus,
 };
 
@@ -147,9 +147,9 @@ impl Store {
         run_sqlite(&self.sqlite, move |store| store.work_for_child(&target)).await
     }
 
-    pub async fn work_steers(&self, work: &WorkRef) -> StoreResult<Vec<Steer>> {
-        let work = work.clone();
-        run_sqlite(&self.sqlite, move |store| store.work_steers(&work)).await
+    pub async fn task_steers(&self, task_id: &TaskId) -> StoreResult<Vec<Steer>> {
+        let task_id = task_id.clone();
+        run_sqlite(&self.sqlite, move |store| store.task_steers(&task_id)).await
     }
 
     pub async fn steers_since(&self, since: i64) -> StoreResult<Vec<SteerComment>> {
@@ -166,18 +166,11 @@ impl Store {
         run_sqlite(&self.sqlite, move |store| store.latest_interrupt_id(&work)).await
     }
 
-    pub(crate) async fn work_steers_for_child(&self, target: &ChildRef) -> StoreResult<Vec<Steer>> {
-        let target = target.clone();
-        run_sqlite(&self.sqlite, move |store| {
-            store.work_steers_for_child(&target)
-        })
-        .await
-    }
-
+    #[cfg(test)]
     pub(crate) async fn append_steer(
         &self,
         work: &WorkRef,
-        author: Author,
+        author: crate::durable::Author,
         text: &str,
     ) -> StoreResult<Steer> {
         let work = work.clone();

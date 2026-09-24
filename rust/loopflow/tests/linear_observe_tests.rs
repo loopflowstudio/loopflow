@@ -1,6 +1,5 @@
 mod support;
 
-use loopflow::child::ChildRef;
 use loopflow::ops::linear_observe::reconcile_linear_observation;
 use loopflow::pm::IssueObservation;
 use loopflow_test_support::TestRepo;
@@ -37,7 +36,6 @@ fn linear_edits_and_comments_stream_into_task_control_exactly_once() {
     repo.commit("seed");
     repo.push_new_branch(branch);
     let task = register_task(home.path(), repo.path(), branch, &base);
-    let target = ChildRef::Task(task.task.id.clone());
     let rt = tokio::runtime::Runtime::new().expect("runtime");
     let now = OffsetDateTime::now_utc();
 
@@ -67,11 +65,8 @@ fn linear_edits_and_comments_stream_into_task_control_exactly_once() {
         .block_on(task.store.get_task(&task.task.id))
         .expect("read Task")
         .expect("Task");
-    let work = rt
-        .block_on(task.store.work_for_child(&target))
-        .expect("work");
     let steers = rt
-        .block_on(task.store.work_steers(&work))
+        .block_on(task.store.task_steers(&task.task.id))
         .expect("Work steers");
     assert_eq!(steers.len(), 1);
     assert!(steers[0].text.contains("New title"));
@@ -109,7 +104,7 @@ fn linear_edits_and_comments_stream_into_task_control_exactly_once() {
     assert!(duplicate.is_none(), "redelivery is a no-op");
 
     let steers = rt
-        .block_on(task.store.work_steers(&work))
+        .block_on(task.store.task_steers(&task.task.id))
         .expect("Work steers");
     assert_eq!(steers.len(), 2, "one edit + one comment, no dup");
     assert!(steers[1].text.contains("please prioritize"));

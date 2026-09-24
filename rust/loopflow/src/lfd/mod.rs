@@ -1936,6 +1936,7 @@ mod tests {
         let comment = WebhookEvent::Comment {
             issue_id: "i-1".into(),
             comment_id: "c-1".into(),
+            revision: None,
             body: "hi".into(),
             author_id: None,
         };

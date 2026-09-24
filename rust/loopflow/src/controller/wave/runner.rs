@@ -17,12 +17,9 @@
 //! [`InboxItem`]s by the resident:
 //! - **Message while idle** → a pass starts now; the `TurnOpened` delta's
 //!   `answers` names the message plus anything already queued.
-//! - **Message while a pass runs** → a `steer` reaches a capable live harness;
-//!   other messages queue (append-and-coalesce, never rejected) for the next
-//!   body. Harnesses without live steering degrade `steer` to that queue.
-//! - **Interrupt while a pass runs** → the child is killed and the turn
-//!   closes `Interrupted`; non-empty interrupt text queues for the next pass.
-//! - **Interrupt while idle** → no-op; text, if any, queues like a message.
+//! - **Message while a pass runs** → queues for the next body.
+//! - **Interrupt while a pass runs** → the child stops and the turn closes
+//!   `Interrupted`. An idle interrupt is a no-op.
 //! - **Heartbeat**: idle for [`HEARTBEAT_IDLE`] with an empty queue → a
 //!   progress pass carrying a compact nudge.
 //! - **Cron**: the wave's `crons:` frontmatter (GOAL.md, re-read at every
@@ -59,14 +56,14 @@ use tokio::sync::mpsc;
 use tokio::time::Instant;
 
 use crate::chat::types::{ConversationEvent, Lifecycle};
-use crate::controller::wave::journal::{MessageDestination, MessageId, MessageOp, PendingMessage};
+use crate::controller::wave::journal::{MessageDestination, MessageId, PendingMessage};
 use crate::controller::wave::playhead::{BodyProvenance, StepKind, StepOutcome, StepRef};
 use crate::controller::wave::resident::ListenerClient;
 use crate::controller::wave::runtime::InboxItem;
 use crate::controller::wave::supervisor::sleep_until_opt;
 use crate::controller::wave::wire::{ProviderSessionRef, ResidentDelta, ResidentStateTo};
 use crate::durable::WorkRef;
-use crate::harness::{default_create_harness, ApprovalPolicy, Harness, SendCurrentOutcome};
+use crate::harness::{default_create_harness, ApprovalPolicy, Harness};
 use crate::id::WaveId;
 use crate::store::{open_store, storage_config_from_env, Store};
 use crate::work::wave::config::{read_wave_config, WaveCronDef};
@@ -1167,21 +1164,7 @@ impl WaveLoop {
                             finish_capture(capture.as_ref(), "interrupted");
                             return;
                         }
-                        InboxAction::Deliver(item) => match *item {
-                            InboxItem::Message(message) if message.op == MessageOp::Steer => {
-                                if message.destination() == *destination {
-                                    if self
-                                        .steer_harness(message, harness.as_mut())
-                                        .await
-                                    {
-                                        timeout.as_mut().reset(Instant::now() + self.config.pass_timeout);
-                                    }
-                                } else {
-                                    self.on_inbox(InboxItem::Message(message)).await;
-                                }
-                            }
-                            item => self.on_inbox(item).await,
-                        },
+                        InboxAction::Deliver(item) => self.on_inbox(*item).await,
                         InboxAction::ListenerGone => {
                             let _ = harness.stop().await;
                             finish_capture(capture.as_ref(), "interrupted");
@@ -1299,47 +1282,6 @@ impl WaveLoop {
         .await;
     }
 
-    async fn steer_harness(&mut self, message: PendingMessage, harness: &mut dyn Harness) -> bool {
-        if !self.seen.insert(message.id.clone()) {
-            return false;
-        }
-        let id = message.id.0.clone();
-        self.send(vec![ResidentDelta::TurnSteered {
-            answers: vec![id.clone()],
-        }])
-        .await;
-        if self.end.is_some() {
-            return false;
-        }
-        match harness.send_current(&message.text).await {
-            SendCurrentOutcome::Sent { .. } => {
-                if message.source.is_some() {
-                    return true;
-                }
-                // Live delivery improves latency; it does not advance the
-                // Turn's immutable starting input. Keep the message pending so
-                // a later boundary can incorporate it durably.
-                self.send(vec![ResidentDelta::MessagesRequeued { ids: vec![id] }])
-                    .await;
-                self.queue.push(message);
-                true
-            }
-            SendCurrentOutcome::NotSteerable => {
-                self.send(vec![ResidentDelta::MessagesRequeued { ids: vec![id] }])
-                    .await;
-                self.queue.push(message);
-                false
-            }
-            SendCurrentOutcome::Failed { error } | SendCurrentOutcome::Unknown { error, .. } => {
-                tracing::warn!(%error, "live steering was not confirmed; retaining message for next seed");
-                self.send(vec![ResidentDelta::MessagesRequeued { ids: vec![id] }])
-                    .await;
-                self.queue.push(message);
-                false
-            }
-        }
-    }
-
     /// The interrupt protocol: announce, tear the body down, close the pass.
     /// Only the teardown differs between a harness session and a child process.
     async fn announce_interrupt(&mut self) {
@@ -1357,22 +1299,11 @@ impl WaveLoop {
         self.finish_interrupted_pass(body_id, skip).await;
     }
 
-    /// Classify an inbox item at a running body. Interrupt-shaped items
-    /// resolve here — including queueing an interrupt's text for the next
-    /// pass — so interrupt semantics stay in lockstep across the process and
-    /// harness loops. Everything else is handed back: the loops differ in
-    /// what a live body can absorb (a steer-capable harness takes input
-    /// mid-turn; a child process cannot).
+    /// Interrupt controls end the current body; messages wait for the next pass.
     fn inbox_action(&mut self, item: Option<InboxItem>) -> InboxAction {
         match item {
             Some(InboxItem::Interrupt) => InboxAction::Interrupt { skip: false },
             Some(InboxItem::Skip) => InboxAction::Interrupt { skip: true },
-            Some(InboxItem::Message(message)) if message.op == MessageOp::Interrupt => {
-                if self.seen.insert(message.id.clone()) {
-                    self.queue.push(message);
-                }
-                InboxAction::Interrupt { skip: false }
-            }
             Some(item) => InboxAction::Deliver(Box::new(item)),
             None => {
                 self.end = Some(LoopEnd::ListenerGone);
@@ -1625,10 +1556,10 @@ fn spawn_wave_step(
 #[cfg(test)]
 mod tests {
     use super::*;
+    use crate::controller::wave::journal::MessageOp;
     use std::sync::{Arc, Mutex};
 
     use crate::chat::turns::{ChatRole, ChatTurn};
-    use crate::chat::types::TurnUsage;
     use crate::controller::wave::journal::{
         journal_path, DiscordChatBinding, DiscordMessageSource, EventKind, Journal,
     };
@@ -2132,21 +2063,10 @@ mod tests {
             .collect()
     }
 
-    fn message_id(turn: &ChatTurn) -> MessageId {
-        let seq = turn.id.strip_prefix("turn-").expect("user turn id");
-        MessageId(format!("msg-{seq}"))
-    }
-
     fn wake_of(seed: &str) -> String {
         let start = seed.find("<wake>\n").expect("seed has a wake") + "<wake>\n".len();
         let end = seed.find("\n</wake>").expect("seed closes the wake");
         seed[start..end].to_string()
-    }
-
-    struct SteeringHarness {
-        events: mpsc::UnboundedSender<ConversationEvent>,
-        inputs: Arc<Mutex<Vec<String>>>,
-        accepts_current_send: bool,
     }
 
     struct CompletingHarness {
@@ -2180,10 +2100,6 @@ mod tests {
             Ok(())
         }
 
-        async fn send_current(&mut self, _content: &str) -> SendCurrentOutcome {
-            SendCurrentOutcome::NotSteerable
-        }
-
         async fn interrupt(&mut self) -> Result<()> {
             Ok(())
         }
@@ -2195,223 +2111,6 @@ mod tests {
         fn provider_session_id(&self) -> Option<String> {
             None
         }
-    }
-
-    #[async_trait]
-    impl Harness for SteeringHarness {
-        async fn start(&mut self, _config: &crate::engine::AgentConfig) -> Result<()> {
-            Ok(())
-        }
-
-        async fn send_input(&mut self, content: &str) -> Result<()> {
-            let mut inputs = self.inputs.lock().expect("inputs lock");
-            inputs.push(content.to_string());
-            let index = inputs.len();
-            drop(inputs);
-            if index == 1 {
-                let _ = self.events.send(ConversationEvent::TurnStarted {
-                    turn_id: "vendor-turn".to_string(),
-                });
-                let _ = self.events.send(ConversationEvent::TextDelta {
-                    turn_id: "vendor-turn".to_string(),
-                    content: "hello".to_string(),
-                });
-            } else {
-                let _ = self.events.send(ConversationEvent::TextDelta {
-                    turn_id: "vendor-turn".to_string(),
-                    content: " world".to_string(),
-                });
-                let _ = self.events.send(ConversationEvent::UsageCheckpoint {
-                    turn_id: "vendor-turn".to_string(),
-                    usage: TurnUsage {
-                        input_tokens: Some(20),
-                        output_tokens: Some(2),
-                        ..TurnUsage::default()
-                    },
-                    final_receipt: true,
-                });
-                let _ = self.events.send(ConversationEvent::TurnCompleted {
-                    turn_id: "vendor-turn".to_string(),
-                    status: Lifecycle::Completed,
-                });
-            }
-            Ok(())
-        }
-
-        async fn send_current(&mut self, content: &str) -> SendCurrentOutcome {
-            if !self.accepts_current_send {
-                return SendCurrentOutcome::NotSteerable;
-            }
-            match self.send_input(content).await {
-                Ok(()) => SendCurrentOutcome::Sent {
-                    provider_turn_id: "vendor-turn".to_string(),
-                },
-                Err(error) => SendCurrentOutcome::Failed {
-                    error: error.to_string(),
-                },
-            }
-        }
-
-        async fn interrupt(&mut self) -> Result<()> {
-            Ok(())
-        }
-
-        async fn stop(&mut self) -> Result<()> {
-            Ok(())
-        }
-
-        fn provider_session_id(&self) -> Option<String> {
-            (!self.inputs.lock().expect("inputs lock").is_empty())
-                .then(|| "vendor-session".to_string())
-        }
-    }
-
-    #[tokio::test]
-    async fn steer_reaches_the_live_body_and_streams_into_one_turn() {
-        let tmp = tempfile::tempdir().expect("tempdir");
-        init_test_git_repo(tmp.path());
-
-        let inputs = Arc::new(Mutex::new(Vec::new()));
-        let harness_inputs = inputs.clone();
-        let backend = BodyBackend::Harness {
-            prepare: Box::new(|skill, seed, _wave, max_turns, _surface| {
-                Ok(crate::lf::commands::run::PreparedHarnessTurn {
-                    config: crate::engine::AgentConfig {
-                        agent: Some("fake".to_string()),
-                        cwd: None,
-                        max_turns,
-                        ..crate::engine::AgentConfig::default()
-                    },
-                    input: format!("{}\n{seed}", skill.name),
-                    context: crate::trace::PreparedTurnContext::from_prompts(
-                        "",
-                        &format!("{}\n{seed}", skill.name),
-                    ),
-                    harness: "fake".to_string(),
-                    model: None,
-                })
-            }),
-            create: Box::new(move |_name, _approval, events| {
-                Ok(Box::new(SteeringHarness {
-                    events,
-                    inputs: harness_inputs.clone(),
-                    accepts_current_send: true,
-                }))
-            }),
-        };
-        let loop_ = boot_backend(
-            tmp,
-            test_config(Duration::from_secs(600)),
-            backend,
-            Arc::new(Mutex::new(Vec::new())),
-            // A harness body runs in-process; it spawns no pass to await.
-            mpsc::unbounded_channel().1,
-            None,
-        )
-        .await;
-        let runtime = loop_.runtime.clone();
-
-        wake_governance(&runtime, "begin");
-        wait_for("initial live input", || inputs.lock().unwrap().len() == 1).await;
-        let steer = runtime
-            .deliver(MessageOp::Steer, "finish".into())
-            .expect("user turn");
-        wait_for("completed streamed turn", || {
-            runtime.thread_snapshot().iter().any(|turn| {
-                turn.role == ChatRole::Assistant
-                    && turn.status == Lifecycle::Completed
-                    && turn.text == "hello world"
-            })
-        })
-        .await;
-
-        assert_eq!(inputs.lock().unwrap()[1], "finish");
-        let completed = runtime
-            .thread_snapshot()
-            .into_iter()
-            .find(|turn| turn.role == ChatRole::Assistant)
-            .expect("assistant turn");
-        assert_eq!(
-            completed.body.and_then(|body| body.session_id),
-            Some("vendor-session".to_string())
-        );
-        assert!(loop_.journal_events().iter().any(|kind| matches!(
-            kind,
-            EventKind::TurnSteered { answers, .. }
-                if answers == &[message_id(&steer)]
-        )));
-        assert!(inputs.lock().unwrap()[0].contains("wave/operate"));
-    }
-
-    #[tokio::test]
-    async fn unsupported_steer_waits_for_the_next_wave_boundary() {
-        let tmp = tempfile::tempdir().expect("tempdir");
-        init_test_git_repo(tmp.path());
-
-        let inputs = Arc::new(Mutex::new(Vec::new()));
-        let harness_inputs = inputs.clone();
-        let backend = BodyBackend::Harness {
-            prepare: Box::new(|skill, seed, _wave, max_turns, _surface| {
-                Ok(crate::lf::commands::run::PreparedHarnessTurn {
-                    config: crate::engine::AgentConfig {
-                        agent: Some("fake".to_string()),
-                        cwd: None,
-                        max_turns,
-                        ..crate::engine::AgentConfig::default()
-                    },
-                    input: format!("{}\n{seed}", skill.name),
-                    context: crate::trace::PreparedTurnContext::from_prompts(
-                        "",
-                        &format!("{}\n{seed}", skill.name),
-                    ),
-                    harness: "fake".to_string(),
-                    model: None,
-                })
-            }),
-            create: Box::new(move |_name, _approval, events| {
-                Ok(Box::new(SteeringHarness {
-                    events,
-                    inputs: harness_inputs.clone(),
-                    accepts_current_send: false,
-                }))
-            }),
-        };
-        let loop_ = boot_backend(
-            tmp,
-            test_config(Duration::from_secs(600)),
-            backend,
-            Arc::new(Mutex::new(Vec::new())),
-            // A harness body runs in-process; it spawns no pass to await.
-            mpsc::unbounded_channel().1,
-            None,
-        )
-        .await;
-        let runtime = loop_.runtime.clone();
-
-        wake_governance(&runtime, "begin");
-        wait_for("initial live input", || inputs.lock().unwrap().len() == 1).await;
-        runtime
-            .deliver(MessageOp::Steer, "finish differently".into())
-            .expect("steer");
-        wait_for("steer requeued", || {
-            loop_
-                .journal_events()
-                .iter()
-                .any(|event| matches!(event, EventKind::MessagesRequeued { .. }))
-        })
-        .await;
-
-        let inputs = inputs.lock().unwrap();
-        assert!(inputs[0].starts_with("wave/operate\n"));
-        assert_eq!(
-            inputs.len(),
-            1,
-            "plain steering does not interrupt the Turn"
-        );
-        assert!(!runtime
-            .thread_snapshot()
-            .iter()
-            .any(|turn| turn.status == Lifecycle::Interrupted));
     }
 
     #[test]

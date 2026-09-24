@@ -5,7 +5,7 @@ it chose:
 
 ```bash
 lf start shipper
-lf chat --steer "invoices first"
+lf --wave <wave> wave/operate "invoices first"
 lf status shipper
 ```
 
@@ -28,7 +28,7 @@ CLI:
 
 ```bash
 lf start shipper                       # explicitly start the Wave on this machine
-lf chat --steer "invoices first"       # steer the live body, else queue
+lf --wave <wave> wave/operate "invoices first"
 lf status shipper                      # its Project → Task hierarchy
 lf pause shipper                       # refuse new turns; keep listening and queueing
 lf resume shipper                      # start the next queued turn
@@ -216,7 +216,7 @@ cursor advances. The Wave reads that durable channel tail, including its own
 replies, so restart recovery needs no consumed-message queue.
 
 The Mac composer and `lf chat "text"` post through the bot, visibly prefix the
-message with the Wave name, and preserve message, steer, or interrupt intent
+message with the Wave name, and preserve message or bare interrupt intent
 when the provider echo reaches the listener. The Open in Discord action stays
 beside the native composer. A provider failure never falls through to a hidden
 local message. Human and agent speech appears only after Discord returns its

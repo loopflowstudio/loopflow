@@ -143,9 +143,7 @@ impl TurnBroadcast {
 /// (`inbox` SSE frames) and the supervisor.
 #[derive(Debug, Clone)]
 pub enum InboxItem {
-    /// A journaled user message (`message`, `steer`, or `interrupt`
-    /// carrying text — "interrupt & send"), awaiting consumption (named in a
-    /// `TurnStarted.answers` or `TurnSteered.answers`).
+    /// A journaled channel message awaiting observation by a pass.
     Message(PendingMessage),
     /// A typed Task ledger observation awaiting the same durable turn
     /// consumption acknowledgement as a queued message.
@@ -227,7 +225,7 @@ struct OpenTurn {
     /// Prose fragments so far, for `Message` item ids (`"text-<n>"`).
     text_items: usize,
     /// Message ids this turn claimed (`TurnOpened.answers` plus any mid-turn
-    /// `TurnSteered.answers`). Requeued if the turn ends without completing.
+    /// historical `TurnSteered.answers`). Requeued if the turn ends without completing.
     claims: Vec<MessageId>,
     /// Channel message this turn explicitly answers. This is a visible reply
     /// edge, independent of the old scheduler-consumption claims.
@@ -253,11 +251,6 @@ struct Inner {
     drop_deltas_until_opened: bool,
     state: LoopState,
     playhead: Option<Playhead>,
-    /// Id of the loop's current or most recently committed assistant turn —
-    /// what `journal_steered` falls back to when the turn closed during the
-    /// send (the thread's *last* turn at that point is usually the steer's
-    /// own user turn, which must never be named as a consumer).
-    last_assistant_turn_id: Option<String>,
     /// Durable scheduler queue folded from the journal on boot.
     pending_messages: Vec<PendingMessage>,
     /// Every journaled input by id — requeues restore pending entries from it.
@@ -382,13 +375,7 @@ impl WaveRuntime {
                 ids: requeued.clone(),
             });
         }
-        // Seed the steer-consumption fallback from the replayed thread.
-        let last_assistant_turn_id = fold
-            .turns
-            .iter()
-            .rev()
-            .find(|turn| turn.role == ChatRole::Assistant)
-            .map(|turn| turn.id.clone());
+
         // Janitor: no turn is live on a fresh boot, whatever the log says.
         let state = if fold.state == LoopState::Idle {
             LoopState::Idle
@@ -471,7 +458,6 @@ impl WaveRuntime {
                 drop_deltas_until_opened: false,
                 state,
                 playhead,
-                last_assistant_turn_id,
                 pending_messages: fold.pending_messages,
                 messages: fold.messages,
                 discord: fold.discord,
@@ -688,13 +674,7 @@ impl WaveRuntime {
             source: Some(source.clone()),
         };
         inner.messages.insert(pending.id.clone(), pending.clone());
-        // Plain chat is observed off the channel tail, never drained from a
-        // queue; only steers/interrupts still fold into pending for the live
-        // body's consumption (that path is retired when steers become task
-        // comments).
-        if pending.op != MessageOp::Message {
-            inner.pending_messages.push(pending.clone());
-        }
+
         let _ = self.inbox_tx.send(InboxItem::Message(pending));
         Ok(true)
     }
@@ -1228,9 +1208,6 @@ impl WaveRuntime {
     fn commit_locked(&self, inner: &mut Inner, turn: ChatTurn) -> ChatTurn {
         turn.validate()
             .expect("Wave thread entries must satisfy the ChatTurn wire invariant");
-        if turn.role == ChatRole::Assistant {
-            inner.last_assistant_turn_id = Some(turn.id.clone());
-        }
         inner.thread.push(turn.clone());
         // A send error just means no live subscribers — the store has it. The
         // finalized whole turn re-baselines any client that grew it from deltas.
@@ -1323,12 +1300,7 @@ impl WaveRuntime {
             source: None,
         };
         inner.messages.insert(pending.id.clone(), pending.clone());
-        // Plain chat is observed off the channel tail, never drained; only
-        // steers/interrupts still fold into pending for the live body to
-        // consume (retired when steers become task comments).
-        if pending.op != MessageOp::Message {
-            inner.pending_messages.push(pending.clone());
-        }
+
         // Inbox broadcast still under the lock, so inbox order == journal
         // order — sending after release lets two deliveries invert.
         let _ = self.inbox_tx.send(InboxItem::Message(pending));
@@ -1487,8 +1459,6 @@ impl WaveRuntime {
             ResidentDelta::TurnFinished { status, reason } => {
                 self.resident_turn_finished(status, reason)
             }
-            ResidentDelta::TurnSteered { answers } => self.resident_turn_steered(answers),
-            ResidentDelta::MessagesRequeued { ids } => self.resident_requeue(ids),
             ResidentDelta::BodyStarted { body } => {
                 if let Err(err) = self.start_body(body) {
                     tracing::warn!(error = %err, "resident body start rejected");
@@ -1753,59 +1723,6 @@ impl WaveRuntime {
         inner
             .discord_deliveries
             .insert(delivery.delivery_id.clone(), delivery);
-    }
-
-    /// Steer consumption (`TurnSteered.answers`). Normally the live turn
-    /// consumed the message; when the turn closed between the harness
-    /// accepting the input and this delta arriving (the send/journal race),
-    /// consumption lands against the last assistant turn — the vendor heard
-    /// the text either way, and an unmarked message would stay pending
-    /// forever and be re-sent on every resident restart. A user turn is never
-    /// named. With no assistant turn anywhere (unreachable through the
-    /// resident's steer path, which requires an open turn) nothing is claimed
-    /// or journaled — the message stays pending.
-    fn resident_turn_steered(&self, answers: Vec<String>) {
-        let mut inner = self.inner();
-        let (turn_id, turn_live) = match inner.state.clone() {
-            LoopState::Turning { turn_id } | LoopState::Interrupting { turn_id } => (turn_id, true),
-            _ => match inner.last_assistant_turn_id.clone() {
-                Some(turn_id) => (turn_id, false),
-                None => {
-                    tracing::warn!("TurnSteered with no assistant turn anywhere; kept pending");
-                    return;
-                }
-            },
-        };
-        let answers = claim_answers(&mut inner, answers);
-        if answers.is_empty() {
-            return;
-        }
-        // Steered into the live turn: part of its claims, requeued with them
-        // if the turn ends without completing. The boundary-race fallback
-        // names a turn that already closed completed — nothing to track.
-        if turn_live {
-            if let Some(open) = inner.open.as_mut() {
-                open.claims.extend(answers.iter().cloned());
-            }
-        }
-        inner
-            .journal
-            .append(|_| EventKind::TurnSteered { turn_id, answers });
-    }
-
-    /// The resident's explicit consumption undo ([`ResidentDelta::
-    /// MessagesRequeued`]): it claimed these ids but the vendor never
-    /// received the input (harness send failed after the claim journaled).
-    /// Restore them to the pending fold — the next replay re-delivers; ids
-    /// still pending or unknown are dropped by the restore's own guards.
-    fn resident_requeue(&self, ids: Vec<String>) {
-        let mut inner = self.inner();
-        let ids: Vec<MessageId> = ids.into_iter().map(MessageId).collect();
-        // Undone claims must not requeue a second time when the turn ends.
-        if let Some(open) = inner.open.as_mut() {
-            open.claims.retain(|claim| !ids.contains(claim));
-        }
-        self.requeue_locked(&mut inner, &ids);
     }
 }
 
@@ -2880,30 +2797,6 @@ mod tests {
         assert_eq!(rt2.pending_messages().len(), 1);
     }
 
-    /// The resident's explicit consumption undo (`MessagesRequeued`): a claim
-    /// the vendor never received is returned to pending, and the turn's own
-    /// terminal delta does not requeue it a second time.
-    #[test]
-    fn resident_requeue_undoes_a_claim_at_most_once() {
-        let tmp = tempfile::tempdir().expect("tempdir");
-        let rt = open_runtime(tmp.path());
-        let m = deliver_wake(&rt, 1, "steer");
-        rt.apply_resident_delta(d_opened(&[&m.0]));
-        // The harness send failed after the claim: the resident undoes it.
-        rt.apply_resident_delta(ResidentDelta::MessagesRequeued {
-            ids: vec![m.0.clone()],
-        });
-        assert_eq!(
-            rt.pending_messages().len(),
-            1,
-            "undone claim back to pending"
-        );
-        // The turn then finishes failed: the already-undone claim is not
-        // requeued a second time (still exactly one pending).
-        rt.apply_resident_delta(d_finished(Lifecycle::Failed));
-        assert_eq!(rt.pending_messages().len(), 1, "no double requeue");
-    }
-
     /// A paused wave (GOAL.md `paused: true`) refuses to START a turn: the
     /// TurnOpened is dropped, its would-be claims stay pending, and the loop
     /// settles without a thread turn. Unpausing lets the next turn through.
@@ -2947,11 +2840,6 @@ mod tests {
             "unpaused turn answered it"
         );
     }
-
-    // (Removed: turn_steered_consumes / turn_steered_fallback — mid-turn
-    // consumption of a chat steer against the pending fold is obsolete. Chat is
-    // a stream to observe; wave-level steering is an observed channel message,
-    // and task steering rides task comments + send_current, not TurnSteered.)
 
     /// The served Wave owns one journal for all accepted thread messages.
     #[test]
@@ -3125,10 +3013,6 @@ mod tests {
             Some("101")
         );
     }
-
-    // (Removed: discord_app_steer_keeps_its_operation_after_restart — an app
-    // steer queued in the pending fold is obsolete; discord messages are
-    // observed, not queued.)
 
     #[test]
     fn discord_chat_answer_is_planned_in_chunks_before_receipts() {

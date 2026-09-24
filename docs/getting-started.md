@@ -17,7 +17,7 @@ Requires macOS or Linux, and one of: [Claude Code](https://docs.anthropic.com/en
 |---|---|
 | Try loopflow from terminal | `lf init` |
 | Run autonomous waves | Author `wave/<name>/GOAL.md`, open it in Loopflow (macOS) |
-| Steer and inspect from terminal | `lf start <name>` → `lf chat --steer` / `lf status` |
+| Steer and inspect from terminal | `lf start <name>` → `lf chat` / `lf status` |
 | Run on another machine | `lf ssh <home-id> start <name>` ([Go Remote](#go-remote)) |
 
 ---

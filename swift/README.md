@@ -123,7 +123,7 @@ codebase tree, and registry health.
 ## Product ownership
 
 - **Wave Chat** owns the human conversation, the active Wave turn, and
-  send/steer/interrupt behavior.
+  Send and bare Interrupt controls.
 - **Projects and Tasks** appear in the Wave work map. Linear owns their planning
   identity; Loopflow's registry owns their runtime state.
 - **Tasks** own implementation worktrees and PR delivery. Every Task

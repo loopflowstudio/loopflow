@@ -3,7 +3,7 @@ use std::sync::Arc;
 use std::time::Duration;
 
 use crate::child::ChildRef;
-use crate::durable::{Author, RunId, WorkRef, WorkStatus};
+use crate::durable::{RunId, WorkRef, WorkStatus};
 use crate::engine::git::{current_branch, get_default_branch, is_clean, worktree_root};
 use crate::engine::process::{resolve_lf_binary, start_lf_session, tmux_session_slug};
 use crate::id::WaveId;
@@ -95,20 +95,16 @@ pub(crate) fn require_registered_wave(repo: &Path, wave: &str) -> OpsResult<Wave
 }
 
 pub fn project_run(repo: &Path, project_id: &str, directive: Option<String>) -> OpsResult<Project> {
-    let project = project_prepare(repo, project_id, directive)?;
+    let directive = normalize_directive(directive)?;
+    let project = project_prepare(repo, project_id)?;
     block_on_project(async move {
         let store = project_store().await?;
-        launch_project_operation(&store, &project).await?;
+        launch_project_operation(&store, &project, directive.as_deref()).await?;
         Ok(project)
     })
 }
 
-pub fn project_prepare(
-    repo: &Path,
-    project_id: &str,
-    directive: Option<String>,
-) -> OpsResult<Project> {
-    let directive = normalize_directive(directive)?;
+pub fn project_prepare(repo: &Path, project_id: &str) -> OpsResult<Project> {
     if let Some(existing) = block_on_project(async {
         let store = project_store().await?;
         let Some(existing) = store
@@ -124,12 +120,6 @@ pub fn project_prepare(
         ) {
             return Ok(None);
         }
-        if directive.is_some() {
-            return Err(project_error(format!(
-                "Project {} already exists; use `lf project steer {} <new-direction>`",
-                existing.plan.slug, existing.plan.slug,
-            )));
-        }
         Ok(Some(existing))
     })? {
         return Ok(existing);
@@ -138,22 +128,15 @@ pub fn project_prepare(
     let repo = ensure_clean_main(repo, "Project prepare")?;
     let resolved =
         crate::ops::task_pm::resolve_project(&repo, project_id, crate::ops::pm::PmRefresh::Auto)?;
-    reserve_project(&repo, resolved, directive)
+    reserve_project(&repo, resolved)
 }
 
 pub(crate) fn reserve_project(
     repo: &Path,
     resolved: crate::ops::task_pm::ResolvedProject,
-    directive: Option<String>,
 ) -> OpsResult<Project> {
     let locator = crate::work::wave::WaveLocator::discover(repo, &resolved.snapshot.wave)
         .map_err(|error| project_error(error.to_string()))?;
-    let directive = directive.unwrap_or_else(|| {
-        format!(
-            "Pursue {}.\n\n{}",
-            resolved.project.name, resolved.project.definition
-        )
-    });
     block_on_project(async move {
         let store = project_store().await?;
         let predecessor = store
@@ -195,13 +178,9 @@ pub(crate) fn reserve_project(
             updated_at: now,
         };
         let reserved = if predecessor.is_some() {
-            store
-                .reopen_project(&project, Author::User, &directive)
-                .await
+            store.reopen_project(&project).await
         } else {
-            store
-                .create_project_with_steer(&project, Author::User, &directive)
-                .await
+            store.create_project(&project).await
         };
         if let Err(error) = reserved {
             if let Some(existing) = store
@@ -240,7 +219,7 @@ pub(crate) fn ensure_project_for_task(
     repo: &Path,
     resolved: crate::ops::task_pm::ResolvedProject,
 ) -> OpsResult<Project> {
-    let project = reserve_project(repo, resolved, None)?;
+    let project = reserve_project(repo, resolved)?;
     Ok(project)
 }
 
@@ -317,6 +296,7 @@ pub fn project_start(
 pub(crate) async fn launch_project_operation(
     store: &SharedStore,
     project: &Project,
+    guidance: Option<&str>,
 ) -> OpsResult<()> {
     let wave = owning_wave(store, project).await?;
     ensure_clean_main(Path::new(wave.repo()), "Project turn")?;
@@ -335,13 +315,16 @@ pub(crate) async fn launch_project_operation(
         tmux_session_slug(&project.plan.slug),
         &operation_id.to_string()[4..12],
     );
-    let argv = vec![
+    let mut argv = vec![
         resolve_lf_binary().display().to_string(),
         "--project".to_string(),
         project.id.to_string(),
         "--batch".to_string(),
         "project/operate".to_string(),
     ];
+    if let Some(guidance) = guidance {
+        argv.push(guidance.to_string());
+    }
     start_lf_session(&session, Path::new(wave.repo()), &argv)
         .await
         .map_err(|error| project_error(format!("failed to start Project operation: {error}")))
@@ -433,31 +416,6 @@ pub fn project_snapshot(project: &Project) -> OpsResult<ProjectSnapshot> {
     })
 }
 
-fn queue_project_steer(project: &str, message: String) -> OpsResult<ProjectControlResult> {
-    block_on_project(async move {
-        let store = project_store().await?;
-        let project = store
-            .get_project_by_project(project)
-            .await
-            .map_err(|error| project_error(error.to_string()))?
-            .ok_or_else(|| project_error(format!("no Project exists for {project:?}")))?;
-        let steer =
-            super::child::append_steer(&store, ChildRef::Project(project.id.clone()), &message)
-                .await?;
-        launch_project_operation(&store, &project).await?;
-        Ok(ProjectControlResult {
-            id: project.id.to_string(),
-            external_project_id: project.plan.id.as_str().to_string(),
-            receipt_id: steer.id.to_string(),
-            action: "steered".to_string(),
-        })
-    })
-}
-
-pub fn project_steer(project: &str, message: String) -> OpsResult<ProjectControlResult> {
-    queue_project_steer(project, message)
-}
-
 pub fn project_abandon(project: &str, reason: String) -> OpsResult<ProjectControlResult> {
     block_on_project(async move {
         let store = project_store().await?;
@@ -496,7 +454,7 @@ pub(crate) async fn wake_project(project_id: &ProjectId) -> OpsResult<()> {
     ) {
         return Ok(());
     }
-    launch_project_operation(&store, &project).await
+    launch_project_operation(&store, &project, None).await
 }
 
 pub(crate) async fn wake_task_project_route(_store: &Store, task: &Task) -> OpsResult<()> {

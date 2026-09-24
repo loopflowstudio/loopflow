@@ -393,7 +393,6 @@ struct WaveChatConnectionTests {
     @Test("message ops encode to the wire values the server expects")
     func opWireEncoding() {
         #expect(WaveMessageOp.message.rawValue == "message")
-        #expect(WaveMessageOp.steer.rawValue == "steer")
         #expect(WaveMessageOp.interrupt.rawValue == "interrupt")
     }
 
@@ -520,19 +519,17 @@ struct ComposerVerbTests {
         let withText = composerVerbs(state: .idle, hasText: true)
         #expect(withText.primary == .send)
         #expect(withText.primaryEnabled)
-        #expect(withText.secondary == nil)
 
         let empty = composerVerbs(state: .idle, hasText: false)
         #expect(empty.primary == .send)
         #expect(!empty.primaryEnabled)
     }
 
-    @Test("turning + text steers, with Interrupt & Send one skill away")
-    func turningSteers() {
+    @Test("turning + text sends an ordinary channel message")
+    func turningSends() {
         let verbs = composerVerbs(state: .turning, hasText: true)
-        #expect(verbs.primary == .steer)
+        #expect(verbs.primary == .send)
         #expect(verbs.primaryEnabled)
-        #expect(verbs.secondary == .interruptAndSend)
     }
 
     @Test("turning + empty interrupts")
@@ -540,7 +537,6 @@ struct ComposerVerbTests {
         let verbs = composerVerbs(state: .turning, hasText: false)
         #expect(verbs.primary == .interrupt)
         #expect(verbs.primaryEnabled)
-        #expect(verbs.secondary == nil)
     }
 
     @Test("interrupting degrades: text queues a Send, re-interrupt is disabled")
@@ -548,7 +544,6 @@ struct ComposerVerbTests {
         let withText = composerVerbs(state: .interrupting, hasText: true)
         #expect(withText.primary == .send)
         #expect(withText.primaryEnabled)
-        #expect(withText.secondary == nil)
 
         let empty = composerVerbs(state: .interrupting, hasText: false)
         #expect(empty.primary == .interrupt)

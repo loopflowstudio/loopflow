@@ -3,7 +3,9 @@ mod support;
 use std::fs;
 use std::os::unix::fs::PermissionsExt;
 use std::path::{Path, PathBuf};
-use std::process::Command;
+use std::process::{Child, Command, Stdio};
+use std::thread;
+use std::time::{Duration, Instant};
 
 use chrono::{Local, Timelike, Utc};
 use loopflow::durable::HomeId;
@@ -14,6 +16,7 @@ use loopflow::ops::{
     SystemLaunchctl,
 };
 use loopflow_test_support::TestRepo;
+use sha2::Digest;
 use support::EnvGuard;
 
 fn git(repo: &Path, args: &[&str]) -> String {
@@ -32,7 +35,7 @@ fn git(repo: &Path, args: &[&str]) -> String {
 
 #[test]
 fn scheduled_release_flow_settles_product_results_and_preserves_failures() {
-    for scenario in [
+    run_scenarios(&[
         "published",
         "no-change",
         "telemetry-failure",
@@ -41,7 +44,21 @@ fn scheduled_release_flow_settles_product_results_and_preserves_failures() {
         "telemetry-history",
         "smoke-failure",
         "missing-stage",
-    ] {
+    ]);
+}
+
+#[test]
+fn interrupted_telemetry_recovers_only_after_its_runner_and_child_exit() {
+    run_scenarios(&["telemetry-interrupted"]);
+}
+
+#[test]
+fn legacy_telemetry_without_runner_identity_stays_unresolved() {
+    run_scenarios(&["telemetry-unknown"]);
+}
+
+fn run_scenarios(scenarios: &[&str]) {
+    for &scenario in scenarios {
         let home = tempfile::tempdir().unwrap();
         let state = tempfile::tempdir().unwrap();
         let published = state.path().join("published");
@@ -163,14 +180,14 @@ esac
 
         let agents = home.path().join("Library/LaunchAgents");
         let lf_home = home.path().join(".lf");
-        let host = CronHost {
+        let mut host = CronHost {
             home_id: HomeId::new(),
             lf_home: lf_home.clone(),
             db_path: lf_home.join("loopflow.db"),
             path_env: std::env::var("PATH").unwrap(),
         };
         let runtime = tokio::runtime::Runtime::new().unwrap();
-        runtime.block_on(async {
+        host.home_id = runtime.block_on(async {
             let store = loopflow::store::open_ephemeral_store(
                 &loopflow::store::StorageConfig::sqlite(host.db_path.clone()),
             )
@@ -182,6 +199,7 @@ esac
                 repo_path.display().to_string(),
             );
             store.create_wave(&wave).await.unwrap();
+            store.local_home().await.unwrap().id
         });
         let scheduled = Local::now() - chrono::Duration::minutes(1);
         let schedule = schedule_from_cron(&format!(
@@ -197,12 +215,18 @@ esac
             format!(
                 r#"#!/bin/sh
 printf 'attempt\n' >> '{}'
+if [ '{scenario}' = telemetry-interrupted ] && [ ! -f '{state}/allow' ]; then
+  touch '{state}/ready'
+  while [ ! -f '{state}/allow' ]; do sleep 0.05; done
+  printf 'original check finished\n' > '{state}/completed'
+fi
 [ '{scenario}' != telemetry-failure ] || exit 71
 if [ '{scenario}' = telemetry-recovered ] && [ "$(wc -l < '{}')" -eq 1 ]; then exit 72; fi
 exit 0
 "#,
                 telemetry_calls.display(),
-                telemetry_calls.display()
+                telemetry_calls.display(),
+                state = state.path().display()
             ),
         )
         .unwrap();
@@ -218,7 +242,35 @@ exit 0
             host: host.clone(),
         };
         add_cron(&agents, &telemetry, &SystemLaunchctl).unwrap();
-        if scenario != "telemetry-missing" {
+        let mut interrupted = if scenario == "telemetry-interrupted" {
+            let log = fs::File::create(state.path().join("controller.log")).unwrap();
+            let child = Command::new(env!("CARGO_BIN_EXE_lf"))
+                .args([
+                    "cron",
+                    "run",
+                    "--wave",
+                    "infrastructure",
+                    "--flow",
+                    "telemetry-daily",
+                    "--scheduled",
+                ])
+                .current_dir(&repo_path)
+                .env("LF_HOME", &lf_home)
+                .env("LF_DB_PATH", &host.db_path)
+                .stdout(Stdio::from(log.try_clone().unwrap()))
+                .stderr(Stdio::from(log))
+                .spawn()
+                .unwrap();
+            let parent = TelemetryParent {
+                child,
+                state: state.path().to_path_buf(),
+            };
+            wait_for(&state.path().join("ready"));
+            Some(parent)
+        } else {
+            None
+        };
+        if !matches!(scenario, "telemetry-missing" | "telemetry-interrupted") {
             let telemetry_result = run_cron(
                 &agents,
                 &telemetry.wave,
@@ -239,6 +291,21 @@ exit 0
             5,
         )
         .unwrap();
+
+        if scenario == "telemetry-unknown" {
+            let receipt = &mut original_receipts[0];
+            receipt.runner_pid = u32::MAX;
+            receipt.runner_started_at = None;
+            receipt.outcome = loopflow::ops::CronOutcome::Running;
+            receipt.finished_at = None;
+            receipt.exit_code = None;
+            let path = loopflow::ops::receipt_root(&lf_home)
+                .join("infrastructure/telemetry-daily")
+                .join(format!("{}-{}.json", receipt.started_at, receipt.id));
+            let mut legacy = serde_json::to_value(receipt).unwrap();
+            legacy.as_object_mut().unwrap().remove("runner_started_at");
+            fs::write(path, serde_json::to_vec_pretty(&legacy).unwrap()).unwrap();
+        }
 
         if scenario == "telemetry-recovered" {
             // A same-second pass with a lexically later UUID cannot establish
@@ -319,6 +386,123 @@ exit 0
             original_receipts.push(old);
         }
 
+        if let Some(parent) = interrupted.as_mut() {
+            // A live exact runner cannot be displaced, even though its receipt
+            // has no terminal result. No retry is reserved in this wake.
+            assert!(run_cron(
+                &agents,
+                &release.wave,
+                &release.flow,
+                &host.home_id,
+                &host.home_id,
+                CronSource::Scheduled
+            )
+            .is_err());
+            let first = release_history(
+                &lf_home,
+                &repo_path,
+                &release.wave,
+                5,
+                Utc::now().timestamp(),
+            )
+            .unwrap();
+            let attempt = first
+                .obligations
+                .iter()
+                .flat_map(|r| &r.opportunities)
+                .flat_map(|o| &o.attempts)
+                .last()
+                .unwrap();
+            assert!(matches!(
+                attempt.outcome,
+                ScheduledReleaseOutcome::Deferred { .. }
+            ));
+            assert!(attempt
+                .telemetry
+                .as_ref()
+                .unwrap()
+                .recovery_receipt
+                .is_none());
+            assert!(!published.exists());
+            parent.child.kill().unwrap();
+            parent.child.wait().unwrap();
+
+            // The controller is gone, but its check still owns the job lock.
+            assert!(run_cron(
+                &agents,
+                &release.wave,
+                &release.flow,
+                &host.home_id,
+                &host.home_id,
+                CronSource::Scheduled
+            )
+            .is_err());
+            let second = release_history(
+                &lf_home,
+                &repo_path,
+                &release.wave,
+                5,
+                Utc::now().timestamp(),
+            )
+            .unwrap();
+            let attempt = second
+                .obligations
+                .iter()
+                .flat_map(|r| &r.opportunities)
+                .flat_map(|o| &o.attempts)
+                .last()
+                .unwrap();
+            assert!(matches!(
+                attempt.outcome,
+                ScheduledReleaseOutcome::Deferred { .. }
+            ));
+            assert!(
+                attempt
+                    .telemetry
+                    .as_ref()
+                    .unwrap()
+                    .recovery_receipt
+                    .is_some(),
+                "confirmed runner death must reach the executor's surviving-child fence"
+            );
+            let reservation = attempt
+                .telemetry
+                .as_ref()
+                .unwrap()
+                .recovery_receipt
+                .as_ref()
+                .unwrap();
+            let blocked = second
+                .receipts
+                .iter()
+                .find(|r| &r.id == reservation)
+                .unwrap();
+            assert_eq!(blocked.outcome, loopflow::ops::CronOutcome::Failed);
+            assert!(blocked.error.as_ref().unwrap().contains("already active"));
+            assert_eq!(
+                fs::read_to_string(&telemetry_calls)
+                    .unwrap()
+                    .lines()
+                    .count(),
+                1
+            );
+            assert!(!published.exists());
+            fs::write(state.path().join("allow"), "").unwrap();
+            wait_for(&state.path().join("completed"));
+            // The completion marker precedes shell exit; acquire the same job
+            // lock before the next firing so this assertion is not a timing guess.
+            let key = hex::encode(sha2::Sha256::digest(
+                serde_json::to_vec(&(&repo_path, "infrastructure", "telemetry-daily")).unwrap(),
+            ));
+            let lock = fs::File::open(lf_home.join("cron/locks").join(key)).unwrap();
+            let deadline = Instant::now() + Duration::from_secs(20);
+            while fs2::FileExt::try_lock_exclusive(&lock).is_err() {
+                assert!(Instant::now() < deadline, "surviving check did not exit");
+                thread::sleep(Duration::from_millis(10));
+            }
+            drop(lock);
+        }
+
         let result = run_cron(
             &agents,
             &release.wave,
@@ -348,19 +532,35 @@ exit 0
             .flat_map(|r| &r.opportunities)
             .flat_map(|o| &o.attempts)
             .collect();
-        assert_eq!(attempts.len(), 1, "{scenario}: {log}");
-        let attempt = attempts[0];
+        assert_eq!(
+            attempts.len(),
+            if interrupted.is_some() { 3 } else { 1 },
+            "{scenario}: {log}"
+        );
+        let attempt = *attempts.last().unwrap();
         assert!(attempt.covered.len() >= 3);
         assert!(
             history.summary.qualifying_pairs.is_empty(),
             "synthetic historical coverage cannot qualify"
         );
         match scenario {
+            "telemetry-unknown" => {
+                assert!(result.is_err(), "{scenario}: {log}");
+                assert!(
+                    matches!(&attempt.outcome, ScheduledReleaseOutcome::Deferred { reason, .. }
+                if reason.contains("Unknown")),
+                    "{attempt:?}"
+                );
+                assert!(attempt.selection.is_none());
+                assert!(!published.exists());
+                assert_eq!(history.summary.published + history.summary.no_change, 0);
+            }
             "published"
             | "no-change"
             | "telemetry-recovered"
             | "telemetry-missing"
-            | "telemetry-history" => {
+            | "telemetry-history"
+            | "telemetry-interrupted" => {
                 assert!(result.is_ok(), "{scenario}: {result:?}\n{log}");
                 if scenario != "no-change" {
                     assert!(
@@ -443,7 +643,10 @@ exit 0
         }
         let recovered = matches!(
             scenario,
-            "telemetry-failure" | "telemetry-recovered" | "telemetry-missing"
+            "telemetry-failure"
+                | "telemetry-recovered"
+                | "telemetry-missing"
+                | "telemetry-interrupted"
         );
         assert_eq!(prerequisite.recovery_receipt.is_some(), recovered);
         let calls = fs::read_to_string(&telemetry_calls)
@@ -462,6 +665,14 @@ exit 0
         if let Some(id) = &prerequisite.recovery_receipt {
             let receipt = history.receipts.iter().find(|r| &r.id == id).unwrap();
             assert_eq!(receipt.source, CronSource::Recovery);
+            if scenario != "telemetry-failure" {
+                let proof = attempt
+                    .verification
+                    .iter()
+                    .find(|p| p.name == "scheduled-telemetry" && p.passed)
+                    .unwrap();
+                assert_eq!(proof.subject, id.as_str());
+            }
         }
         if scenario == "telemetry-recovered" {
             assert_eq!(history.summary.failed_verifications, 1);
@@ -471,5 +682,26 @@ exit 0
                 .contains(&original_receipts[0].id.to_string()));
         }
         assert_eq!(caller_state(), before, "{scenario}: caller work changed");
+    }
+}
+
+struct TelemetryParent {
+    child: Child,
+    state: PathBuf,
+}
+
+impl Drop for TelemetryParent {
+    fn drop(&mut self) {
+        let _ = self.child.kill();
+        let _ = self.child.wait();
+        let _ = fs::write(self.state.join("allow"), "");
+    }
+}
+
+fn wait_for(path: &Path) {
+    let deadline = Instant::now() + Duration::from_secs(20);
+    while !path.exists() {
+        assert!(Instant::now() < deadline, "waiting for {}", path.display());
+        thread::sleep(Duration::from_millis(10));
     }
 }

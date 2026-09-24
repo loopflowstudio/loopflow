@@ -45,9 +45,13 @@
   the earlier no-retry draft: a missing/failed current prerequisite now receives
   at most one automatic retry per release wake through the installed executor.
   The attempt reserves that receipt before launch and retains original failures.
-  Running prerequisites defer. The existing executor is synchronous; bounding
-  target duration and recovery after its controller dies remain interruption
-  obligations, not proof supplied by the retry-count limit.
+  Running prerequisites defer while the recorded runner is live or unknown.
+  New receipts retain its observed OS start time; confirmed runner death permits
+  one reserved recovery through the existing job lock. A surviving child still
+  excludes execution. The old receipt stays unchanged and unresolved. Historical
+  receipts without start identity never gain authority from age or a missing PID.
+  The existing executor remains synchronous; bounding target duration remains
+  an interruption obligation, not proof supplied by the retry-count limit.
 - Original prerequisite associations use observed release timezone and the
   unchanged installed telemetry schedule. Dates preceding that observation or
   installation stay explicitly unknown. Retaining and reconciling previous

@@ -98,6 +98,7 @@ fn install_current_telemetry_obligation(home: &Path) {
         schema_version: 1,
         id: CronReceiptId::new(),
         runner_pid: 123,
+        runner_started_at: None,
         home_id,
         wave: "infrastructure".to_string(),
         flow: "telemetry-daily".to_string(),

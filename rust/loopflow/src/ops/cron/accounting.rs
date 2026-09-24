@@ -1155,6 +1155,7 @@ mod tests {
             schema_version: 1,
             id: CronReceiptId::new(),
             runner_pid: 1,
+            runner_started_at: None,
             home_id: spec.host.home_id.clone(),
             wave: spec.wave.clone(),
             flow: spec.flow.clone(),

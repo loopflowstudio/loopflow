@@ -804,6 +804,7 @@ mod tests {
             schema_version: 1,
             id: CronReceiptId::new(),
             runner_pid: 123,
+            runner_started_at: None,
             home_id: obligation.home_id.clone(),
             wave: obligation.wave.clone(),
             flow: obligation.flow.clone(),

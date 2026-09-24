@@ -1355,9 +1355,17 @@ fn verify_scheduled_telemetry(
         .current_receipts
         .last()
         .and_then(|id| receipts.iter().find(|r| &r.id == id));
-    if attempt.telemetry.is_none() && current.is_none_or(|r| r.outcome == CronOutcome::Failed) {
+    if attempt.telemetry.is_none()
+        && current.is_none_or(|r| {
+            r.outcome == CronOutcome::Failed
+                || (r.outcome == CronOutcome::Running
+                    && r.runner_evidence() == crate::journal::ProcessIdentityEvidence::Dead)
+        })
+    {
         // The physical receipt is reserved in this attempt before the common
         // executor launches anything. Re-entry observes it; it cannot retry twice.
+        // Exact runner death does not prove its child exited: the executor must
+        // still acquire the inherited job lock. Never rewrite the old result.
         let result = run_cron_recorded(
             &launch_agents,
             &context.wave,
@@ -1406,8 +1414,9 @@ fn verify_scheduled_telemetry(
     if receipt.outcome == CronOutcome::Running {
         return Err(OpsError::ReleaseDeferred {
             reason: format!(
-                "required telemetry {} has no terminal result yet",
-                receipt.id
+                "required telemetry {} has no terminal result; runner evidence: {:?}",
+                receipt.id,
+                receipt.runner_evidence()
             ),
             continuation: format!(
                 "observe {} at {}; next configured release due {next_due}",

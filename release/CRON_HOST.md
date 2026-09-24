@@ -137,10 +137,15 @@ response even when older than its requested window.
 Missing or failed current telemetry gets at most one automatic retry through the
 installed cron executor before release selection. Its receipt has source
 `recovery` and is reserved on the attempt before launch. Catch-up does not retry
-once per missed day. A running prerequisite defers release; a failed retry stops
-it. Recovery does not rewrite failures, supply repair ownership, or change
-`doctor`'s scheduling-continuity checks. The existing target executor remains
-synchronous; this limit bounds retry count, not target runtime.
+once per missed day. A running prerequisite defers release while its runner is
+live or its identity is unknown. New receipts retain the runner's OS start time;
+confirmed runner death permits recovery only after the existing job lock can be
+acquired. A surviving check keeps that lock. Historical receipts without start
+identity remain unresolved, regardless of age or PID availability. Recovery
+retains the interrupted receipt without inventing its result; a failed retry
+stops release. Recovery does not rewrite failures, supply repair ownership, or
+change `doctor`'s scheduling-continuity checks. The existing target executor
+remains synchronous; this limit bounds retry count, not target runtime.
 
 A repair disposition references an existing registered Task and records local
 repair ownership. It does not start work, assign a remote issue, or erase the

@@ -125,6 +125,7 @@ pub struct CronReceipt {
     pub schema_version: u32,
     pub id: CronReceiptId,
     pub runner_pid: u32,
+    pub runner_started_at: Option<i64>,
     pub home_id: HomeId,
     pub wave: String,
     pub flow: String,
@@ -139,6 +140,15 @@ pub struct CronReceipt {
     pub outcome: CronOutcome,
     pub exit_code: Option<i32>,
     pub error: Option<String>,
+}
+
+impl CronReceipt {
+    pub(crate) fn runner_evidence(&self) -> crate::journal::ProcessIdentityEvidence {
+        self.runner_started_at.map_or(
+            crate::journal::ProcessIdentityEvidence::Unknown,
+            |started_at| crate::journal::process_identity_evidence(self.runner_pid, started_at),
+        )
+    }
 }
 
 #[derive(Debug, Clone, PartialEq, Eq)]
@@ -960,6 +970,9 @@ fn new_receipt(spec: &CronSpec, home_id: &HomeId, source: CronSource) -> CronRec
         schema_version: 1,
         id: CronReceiptId::new(),
         runner_pid: std::process::id(),
+        runner_started_at: crate::journal::process_started_at(std::process::id())
+            .ok()
+            .flatten(),
         home_id: home_id.clone(),
         wave: spec.wave.clone(),
         flow: spec.flow.clone(),
@@ -1344,6 +1357,38 @@ mod tests {
             lf_path: lf_path.to_path_buf(),
             host: host(root),
         }
+    }
+
+    #[test]
+    fn cron_runner_identity_preserves_unknown_history_and_rejects_reused_pid() {
+        use crate::journal::ProcessIdentityEvidence;
+
+        let temp = tempfile::TempDir::new().unwrap();
+        let cron = spec(temp.path(), Path::new("/usr/bin/true"));
+        let receipt = new_receipt(&cron, &cron.host.home_id, CronSource::Scheduled);
+        assert_eq!(receipt.runner_evidence(), ProcessIdentityEvidence::Live);
+
+        let mut reused = receipt.clone();
+        reused.runner_started_at = Some(receipt.runner_started_at.unwrap() - 86_400);
+        assert_eq!(reused.runner_evidence(), ProcessIdentityEvidence::Dead);
+
+        // Historical schema-1 receipts have no start identity. Neither an old
+        // timestamp nor a missing PID can turn that absence into ownership proof.
+        let mut historical = serde_json::to_value(&receipt).unwrap();
+        historical
+            .as_object_mut()
+            .unwrap()
+            .remove("runner_started_at");
+        historical["runner_pid"] = u32::MAX.into();
+        historical["started_at"] = 1.into();
+        let historical: CronReceipt = serde_json::from_value(historical).unwrap();
+        assert_eq!(historical.runner_started_at, None);
+        assert_eq!(
+            historical.runner_evidence(),
+            ProcessIdentityEvidence::Unknown
+        );
+        assert_eq!(historical.outcome, CronOutcome::Running);
+        assert_eq!(historical.finished_at, None);
     }
 
     #[test]
@@ -1754,6 +1799,7 @@ mod tests {
             schema_version: 1,
             id: CronReceiptId::new(),
             runner_pid: u32::MAX,
+            runner_started_at: None,
             home_id: HomeId::new(),
             wave: "infra".to_string(),
             flow: "telemetry".to_string(),

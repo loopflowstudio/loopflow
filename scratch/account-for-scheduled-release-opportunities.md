@@ -528,26 +528,21 @@ half-contracts.
 
 ## This slice
 
-Retain each frozen covered due time's telemetry prerequisite observation and
-original receipt references on its release attempt. Preserve explicit uncertainty
-where historical schedule/timezone authority is missing. Replace the two-day
-lookup with retained receipt reads, and keep referenced failures in history even
-outside the display window.
+Recover a current telemetry prerequisite left Running after its exact cron
+runner dies. New physical receipts retain the runner's observed OS start time;
+legacy receipts without identity remain unknown. Reuse the existing process
+identity probe and cron job lock: confirmed runner death permits one reserved
+recovery attempt, while a surviving target keeps execution excluded. Preserve
+the original receipt unchanged; a fresh successful check proves current recovery,
+not the interrupted check's result. Live or unknown runners still defer.
 
-A missing/failed current prerequisite gets one automatic retry through the
-existing installed cron executor. Reserve its physical receipt before launch;
-re-entry cannot replace the reservation or retry once per collapsed day. Keep
-current recovery separate from original failures and from manual/natural wake
-provenance. Preserve placement checks, existing doctor semantics, release
-selection/publication gates and caller bytes.
-
-Prove recovery success/failure/missing evidence through the real release CLI,
-frozen coverage, historical linkage and stale-reservation fencing in disposable
-Homes. Telemetry checks and public services in this proof remain simulated.
-Previous telemetry obligation segments, dated repair ownership, bounded target
-runtime/controller recovery, closed-obligation continuation and configured
-acceptance remain in this serial Task. Preserve the scorecard blocker, required
-UI/public proof and two automatic settlements.
+Prove live-runner deferral, killed-controller/surviving-child exclusion, and
+recovery after child exit through the built CLI and real OS locks in a disposable
+Home. Keep frozen coverage, one reservation per wake, history and caller bytes.
+Bounded target runtime, the real telemetry Flow's continuity boundary, previous
+obligation segments, repair ownership, closed-obligation continuation and
+configured acceptance remain in this serial Task. Retain the scorecard blocker,
+required UI/public proof and two automatic settlements.
 
 ## Slice ledger
 
@@ -903,6 +898,23 @@ defect was established and no executable code changed. Bounded target waiting
 and recovery from retained Running receipts, the real telemetry Flow's continuity
 boundary, prior obligation segments, dated repair ownership, closed obligations
 and configured acceptance remain open. See [review-telemetry.md](review-telemetry.md).
+
+- 2026-09-24: new physical cron receipts retain the runner's observed OS start
+  time. Confirmed runner death permits one reserved telemetry recovery through
+  the existing executor; a surviving child still excludes it with the job lock.
+  Live and unknown runners defer. Interrupted receipts remain unchanged, and
+  historical schema-1 receipts without identity remain explicitly unknown.
+- The built-CLI regression reproduced permanent deferral after controller death,
+  then passed live-runner, surviving-child and post-exit recovery boundaries.
+  Final joined proof passed three tests / ten scenarios (85.50s), including
+  legacy unknown identity, frozen coverage, receipt preservation, current proof
+  subject and caller preservation. Four focused library checks, formatting and
+  all-target Clippy passed. External verification/public services are simulated.
+- Bounded target runtime, actual telemetry continuity, previous obligation
+  segments, dated repair ownership, closed obligations and configured acceptance
+  remain open. No installed cutover or qualifying automatic pair is claimed.
+  Details: [release-interrupted-telemetry.md](release-interrupted-telemetry.md).
+
 
 ## Measure
 

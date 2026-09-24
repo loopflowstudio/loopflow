@@ -100,7 +100,10 @@ In history JSON, `attempts[].verification` holds those checks once; each attempt
 saves its checks and product outcome together. `attempts[].telemetry` retains
 original prerequisite associations and the current execution's automatic retry,
 if needed. Successful recovery leaves the earlier failure and its repair
-disposition visible.
+disposition visible. An interrupted telemetry runner can recover after its exact
+process identity is confirmed gone and its surviving children release the cron
+job lock. The original receipt remains unresolved; the new check supplies current
+verification. Receipts without runner identity cannot authorize that recovery.
 
 The publisher controller runs from current main while its source path is the
 leased exact-tag worktree. This lets an incomplete immutable tag resume with a

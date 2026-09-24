@@ -704,13 +704,7 @@ pub(crate) fn task_worker_owner_evidence(
             && receipt.started_at == owner.started_at
     });
     if receipt.is_some() {
-        return match process_started_at(owner.pid) {
-            Ok(Some(started_at)) if (started_at - owner.started_at).abs() <= 3 => {
-                ProcessIdentityEvidence::Live
-            }
-            Ok(Some(_)) | Ok(None) => ProcessIdentityEvidence::Dead,
-            Err(_) => ProcessIdentityEvidence::Unknown,
-        };
+        return process_identity_evidence(owner.pid, owner.started_at);
     }
 
     let Ok(path) = crate::store::observability_database_path() else {
@@ -737,7 +731,15 @@ pub(crate) fn task_worker_owner_evidence(
     }
 }
 
-fn process_started_at(pid: u32) -> Result<Option<i64>, std::io::Error> {
+pub(crate) fn process_identity_evidence(pid: u32, started_at: i64) -> ProcessIdentityEvidence {
+    match process_started_at(pid) {
+        Ok(Some(observed)) if observed.abs_diff(started_at) <= 3 => ProcessIdentityEvidence::Live,
+        Ok(Some(_)) | Ok(None) => ProcessIdentityEvidence::Dead,
+        Err(_) => ProcessIdentityEvidence::Unknown,
+    }
+}
+
+pub(crate) fn process_started_at(pid: u32) -> Result<Option<i64>, std::io::Error> {
     let output = Command::new("ps")
         .args(["-p", &pid.to_string(), "-o", "etime="])
         .output()?;

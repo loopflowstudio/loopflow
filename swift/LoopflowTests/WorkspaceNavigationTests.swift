@@ -87,6 +87,60 @@ struct WorkspaceNavigationTests {
         #expect(workspace.multiplexer.layout == layout)
     }
 
+    @Test("Watch retains four recent Tasks and reloads released history without old cursors")
+    func boundedWatchRetention() async throws {
+        let navigation = WorkspaceNavigation()
+        let root = URL(fileURLWithPath: #filePath).deletingLastPathComponent()
+            .deletingLastPathComponent().deletingLastPathComponent()
+        let snapshot = try String(contentsOf: root.appendingPathComponent("tests/fixtures/dto/task_watch.json"), encoding: .utf8)
+        let output = try String(contentsOf: root.appendingPathComponent("tests/fixtures/dto/task_output.json"), encoding: .utf8)
+        let query = RegistryQuery { args, _ in
+            if args[1] == "watch" { return snapshot }
+            // A continuation has no early history. Reopening must start both readers again.
+            if args.contains("--cursor") || args.contains("--tail") {
+                return #"{"task_id":"task","sources":[],"gaps":[],"next_cursor":"continued"}"#
+            }
+            return output
+        }
+        var observed: [() -> TaskWatchStore?] = []
+        for index in 0..<4 {
+            let watch = navigation.watch(for: "task-\(index)")
+            await watch.refresh(issue: "LOO-293", query: query)
+            await watch.readOutput(issue: "LOO-293", query: query)
+            watch.selectInvocation("flow-1")
+            watch.inspectStage(2)
+            watch.inspectRun("run_00000000000000000000000000000001")
+            observed.append { [weak watch] in watch }
+        }
+        #expect(observed.allSatisfy { $0()?.snapshot != nil && $0()?.output.count == 3 })
+        #expect(navigation.watch(for: "task-0") === observed[0]())
+        _ = navigation.watch(for: "task-4")
+        #expect(observed[1]() == nil) // Released its snapshot, transcript and both cursors.
+        #expect(observed[0]() != nil)
+        #expect(observed[2]() != nil)
+        #expect(observed[3]() != nil)
+        let recent = navigation.watch(for: "task-0")
+        #expect(recent.stepIndex == 2)
+        #expect(recent.runId == "run_00000000000000000000000000000001")
+        #expect(!recent.followsOutput)
+        #expect(recent.visibleOutput.first?.rows.first?.text == "{command: echo live}\nlive")
+
+        let reopened = navigation.watch(for: "task-1")
+        #expect(reopened.snapshot == nil)
+        #expect(reopened.output.isEmpty)
+        #expect(reopened.runId == nil)
+        #expect(reopened.followsOutput)
+        await reopened.refresh(issue: "LOO-293", query: query)
+        await reopened.readOutput(issue: "LOO-293", query: query)
+        #expect(reopened.snapshot?.invocations.isEmpty == false)
+        #expect(reopened.output.count == 3)
+        #expect(reopened.outputError == nil)
+        #expect(reopened.output.flatMap(\.rows).map(\.text) == ["{command: echo live}\nlive", "Concurrent auxiliary output"])
+        reopened.followLive()
+        await reopened.readOutput(issue: "LOO-293", query: query)
+        #expect(reopened.output.flatMap(\.rows).count == 2)
+    }
+
     @Test("Typed durable joins preserve top-level, multiple, completed and unmatched Sessions")
     func everyHumanBoundaryRemainsReachable() throws {
         let records = try [

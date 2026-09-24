@@ -140,40 +140,39 @@ on its landing.
 
 Human direction, 2026-09-24: the deliverable is the desktop Task view. Keep the
 existing snapshot and output reads as its plumbing; avoid additional commands,
-DTOs or service APIs unless a concrete desktop interaction requires them. After
-reviewing this continuation change, implement the output feed in the existing
-Watch view and resolve reader limits as that integration requires. A successful
-CLI read alone is not the product finish line.
+DTOs or service APIs unless a concrete desktop interaction requires them. Resolve
+reader and retention limits in the existing Watch view before enabling polling.
+A successful CLI read alone is not the product finish line.
 
-Bound the loaded transcript in each retained TaskWatchStore to 4,096 records
-and 16 MiB of accounted payload across all Runs. Keep one revision map per source;
-remove page payloads from retained source metadata. Evict least recently observed
-records when new pages or revisions exceed either budget, retaining display
-positions for surviving records. Newly loaded historical pages must remain
-inspectable even after the window fills. This is a display window, not deletion
-from the Rust-owned sources or a second transcript.
+Bound navigation-retained Watch views to the four most recently viewed Tasks
+in each repository/window. WorkspaceNavigation remains the owner; replace its
+unbounded dictionary with one ordered collection of Task IDs and existing stores.
+Revisiting a retained Task promotes that same store. Visiting a fifth releases the
+least recently viewed store, including its snapshot, output and both cursors.
+Do not keep a second selection cache, eviction tombstones, or discarded payloads.
+The existing per-Task 4,096-record / 16 MiB payload window still applies.
 
-Show when output has left the window. **Restart history** clears the display only
-after the first historical page succeeds, rewinds only the historical reader,
-and preserves the live continuation so arrivals during browsing are not skipped.
-Filters and plan selection survive. A late tool result whose call is outside the
-window must label missing context; retained calls still correlate normally.
-A record larger than the payload budget cannot remain loaded and the window
-notice must say that oversized records may be omitted. No unbounded tombstone or
-call cache substitutes for the evicted records.
+Opening an evicted Task creates a fresh Watch presentation and uses the existing
+mounted view's snapshot and independent tail/history reads. History remains in
+Rust/provider storage and Load history remains available. Selection/filter and
+loaded-page retention are limited to the recent four; document this behavior.
+Repository and window caches stay independent. Terminal surfaces, pane layout,
+provider processes, Work identity and durable history retain their existing owners.
 
-Done when focused Swift behavior tests cross the actual record and payload
-budgets with concurrent Runs, retain newly loaded history and changed revisions,
-show truthful late-tool context, recover early history without losing later live
-arrivals, and retain last-good output on failed/cancelled restart. Exercise the
-native restart control and inspect a rendered window notice. Existing ordering,
-filtering and correlation proofs must still pass.
+Done when a focused Swift behavior test fills the four real stores with plans
+and output, revisits one, and proves the least recently viewed store is released.
+Recent filters/output must survive. Reopening a released Task must recover its
+plan and early output through RegistryQuery without reusing discarded cursors;
+subsequent Follow must not duplicate rows. The existing workspace proof must
+still cover repository isolation, retained terminal layout and unmounting Watch
+while hidden. Verify Mac compilation as part of these focused tests.
 
-This slice bounds retained transcript payload per Task, not total app memory.
-Source/snapshot inventories, the number of navigation-retained Tasks, incoming
-page decoding, Rust discovery/tail initialization and cursor growth remain
-separate bounds. Keep updates manual. Automatic polling, complete capture, exact
-checkpoint Session links and the configured human demo remain in this Task/PR.
+This bounds cached Watch store count per repository/window, not total app memory.
+Other windows/repositories, mounted sheet views and finishing cancelled reads
+have independent lifetimes. Source/snapshot inventories, incoming page decoding,
+Rust discovery/tail initialization and cursor growth still require bounds.
+Keep updates manual. Complete capture, checkpoint Session links, the configured
+Watch demonstration and the human gate remain required in this Task/PR.
 
 ## Remaining slices and full Done When
 
@@ -197,6 +196,22 @@ transport expansion is in scope.
 
 ## Evidence ledger
 
+- 2026-09-24 navigation retention review: configured read-only CLI → RegistryQuery
+  → navigation store proof releases an evicted LOO-293 presentation, then recovers
+  all 59 previously loaded rows from three sources and follows without duplicates.
+  Zero retained plans remain explicit. Existing two-test fixture/view proof is
+  source-matched; no production correction was needed. [Review](review-watch-cache.md)
+  accepts this slice for an in-progress PR refresh, not full Watch acceptance.
+- 2026-09-24 bounded navigation retention: WorkspaceNavigation now retains the
+  four most recently viewed TaskWatchStores per repository/window. One ordered
+  collection replaces the unbounded dictionary; eviction releases the complete
+  presentation and reopening uses the existing snapshot/history/tail reads.
+  Two focused tests pass, covering store release, recent filters/output, early
+  history recovery, Follow deduplication, repository isolation, terminal layout
+  retention and hidden Watch removal. Mac compilation/linking passes.
+  [Proof and remaining limits](watch-cache-proof.md). This bounds cached store
+  count only; reader/inventory bounds, capture, polling, checkpoint Session links
+  and the configured human demo remain required. No publication or settlement.
 - 2026-09-24 retention review: real CLI/native-reader integration paged 4,608
   disposable Claude/Codex records into the 4,096-record window, recovered early
   history and preserved two later arrivals. Review reproduced and fixed Restart

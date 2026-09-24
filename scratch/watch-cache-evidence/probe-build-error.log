@@ -1,0 +1,22 @@
+[0/1] Planning build
+Building for debugging...
+[0/6] Write sources
+[1/6] Write swift-version--58304C5D6DBC2206.txt
+[3/6] Emitting module LoopflowTests
+[4/6] Compiling LoopflowTests WatchCacheCLIReview.swift
+/Users/jack/src/loopflow.restore-task-watching-with-live/swift/LoopflowTests/WatchCacheCLIReview.swift:53:13: error: the compiler is unable to type-check this expression in reasonable time; try breaking up the expression into distinct sub-expressions
+51 |             #expect(store.error == nil && store.outputError == nil)
+52 |             #expect(store.snapshot?.taskId == task)
+53 |             before = Set(store.output.flatMap { source in
+   |             `- error: the compiler is unable to type-check this expression in reasonable time; try breaking up the expression into distinct sub-expressions
+54 |                 source.rows.map { source.source.runId + ":" + $0.id + ":" + $0.text }
+55 |             })
+
+/Users/jack/src/loopflow.restore-task-watching-with-live/swift/LoopflowTests/WatchCacheCLIReview.swift:70:13: error: the compiler is unable to type-check this expression in reasonable time; try breaking up the expression into distinct sub-expressions
+68 |         #expect(reopened.error == nil && reopened.outputError == nil)
+69 |         #expect(reopened.snapshot?.taskId == task)
+70 |         let recovered = Set(reopened.output.flatMap { source in
+   |             `- error: the compiler is unable to type-check this expression in reasonable time; try breaking up the expression into distinct sub-expressions
+71 |             source.rows.map { source.source.runId + ":" + $0.id + ":" + $0.text }
+72 |         })
+error: fatalError

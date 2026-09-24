@@ -121,8 +121,12 @@ picker includes earlier flows; **All Task Runs** includes unassigned Runs.
 Watch works without a worker or worktree. Changes and Terminal still need the
 Task workspace. In the unified workspace, Watch replaces the selected Task's
 details in place; **Work details** and **Return to terminals** keep the same
-selection and retained terminals. Each Task's Watch selection survives switching
-Tasks or repositories. Enable **Show completed Tasks**, or search by title or
+selection and retained terminals. The four most recently viewed Tasks in each
+repository and window keep their Watch selection and loaded output. Opening an
+older Watch reloads its saved plan and output at the current stage with filters
+cleared; use **Load history** to browse further. Switching repositories keeps
+their recent views independently.
+Enable **Show completed Tasks**, or search by title or
 identifier, to inspect completed Tasks present in the planning snapshot.
 
 **Refresh** reads the plan and arriving output. The lower pane groups available
@@ -144,8 +148,8 @@ Tool results label missing context when their earlier call is no longer loaded.
 
 Failed reads retain the last evidence with a stale notice; unavailable sources
 and capture gaps stay visible. **Reload output** restarts both readers after a
-source replacement. Hiding Watch cancels its query and preserves loaded output
-and inspection state. Watching never resumes or takes control of a provider.
+source replacement. Hiding Watch cancels its query; recent views preserve loaded
+output and inspection state. Watching never resumes or takes control of a provider.
 
 The compact Podium bar reads live process evidence from `lf ps --json`. Its
 lamp reflects OS-live state: black is off, green is working, blue is stalled,

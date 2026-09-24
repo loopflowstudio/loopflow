@@ -109,13 +109,18 @@ final class WorkspaceNavigation {
     var selection: WorkReference?
     var listScrollOffset: CGFloat = 0
     var showsCompletedTasks = false
-    @ObservationIgnored private var watches: [String: TaskWatchStore] = [:]
+    @ObservationIgnored private var watches: [(taskId: String, store: TaskWatchStore)] = []
 
-    /// Retained presentation state for visited Tasks, scoped to this window/repo.
+    /// Keep the four most recently viewed Tasks; older views reload from shared readers.
     func watch(for taskId: String) -> TaskWatchStore {
-        if let watch = watches[taskId] { return watch }
+        if let index = watches.firstIndex(where: { $0.taskId == taskId }) {
+            let entry = watches.remove(at: index)
+            watches.append(entry)
+            return entry.store
+        }
         let watch = TaskWatchStore()
-        watches[taskId] = watch
+        watches.append((taskId, watch))
+        if watches.count > 4 { watches.removeFirst() }
         return watch
     }
 

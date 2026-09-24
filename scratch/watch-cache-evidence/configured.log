@@ -1,0 +1,23 @@
+Building for debugging...
+[0/6] Write sources
+[1/6] Write swift-version--58304C5D6DBC2206.txt
+[3/6] Emitting module LoopflowTests
+[4/6] Compiling LoopflowTests WatchCacheCLIReview.swift
+[4/6] Write Objects.LinkFileList
+[5/6] Linking LoopflowSwiftPackageTests
+Build complete! (1.62s)
+Test Suite 'Selected tests' started at 2026-09-24 13:19:30.103.
+Test Suite 'LoopflowSwiftPackageTests.xctest' started at 2026-09-24 13:19:30.104.
+Test Suite 'LoopflowSwiftPackageTests.xctest' passed at 2026-09-24 13:19:30.104.
+	 Executed 0 tests, with 0 failures (0 unexpected) in 0.000 (0.000) seconds
+Test Suite 'Selected tests' passed at 2026-09-24 13:19:30.104.
+	 Executed 0 tests, with 0 failures (0 unexpected) in 0.000 (0.001) seconds
+◇ Test run started.
+↳ Testing Library Version: 1501
+↳ Target Platform: arm64e-apple-macos14.0
+◇ Suite "Watch cache CLI review" started.
+◇ Test configuredEvictionRecovery() started.
+PASS configured cache eviction and fresh recovery: sources=3, recoveredRows=59, invocations=0; Follow has unique row identities
+✔ Test configuredEvictionRecovery() passed after 2.684 seconds.
+✔ Suite "Watch cache CLI review" passed after 2.684 seconds.
+✔ Test run with 1 test in 1 suite passed after 2.684 seconds.

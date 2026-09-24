@@ -1,0 +1,24 @@
+Building for debugging...
+[0/5] Write sources
+[1/5] Write swift-version--58304C5D6DBC2206.txt
+[3/5] Compiling LoopflowTests WorkspaceNavigationTests.swift
+[4/5] Emitting module LoopflowTests
+[4/6] Write Objects.LinkFileList
+[5/6] Linking LoopflowSwiftPackageTests
+Build complete! (1.90s)
+Test Suite 'Selected tests' started at 2026-09-24 13:10:50.118.
+Test Suite 'LoopflowSwiftPackageTests.xctest' started at 2026-09-24 13:10:50.119.
+Test Suite 'LoopflowSwiftPackageTests.xctest' passed at 2026-09-24 13:10:50.119.
+	 Executed 0 tests, with 0 failures (0 unexpected) in 0.000 (0.000) seconds
+Test Suite 'Selected tests' passed at 2026-09-24 13:10:50.119.
+	 Executed 0 tests, with 0 failures (0 unexpected) in 0.000 (0.001) seconds
+◇ Test run started.
+↳ Testing Library Version: 1501
+↳ Target Platform: arm64e-apple-macos14.0
+◇ Suite "Unified Work and Session navigation" started.
+◇ Test "Watch retains four recent Tasks and reloads released history without old cursors" started.
+◇ Test "Watch uses selected Task content and unmounts its reader when hidden" started.
+✔ Test "Watch uses selected Task content and unmounts its reader when hidden" passed after 0.332 seconds.
+✔ Test "Watch retains four recent Tasks and reloads released history without old cursors" passed after 0.334 seconds.
+✔ Suite "Unified Work and Session navigation" passed after 0.334 seconds.
+✔ Test run with 2 tests in 1 suite passed after 0.334 seconds.

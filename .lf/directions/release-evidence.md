@@ -15,3 +15,7 @@ parent exit alone cannot authorize another publisher while a child survives.
 Required UI-host verification is separate from `--all` and native package
 smoke. Retain exact-source proof or run it; never infer capability from an old
 permission incident or waive the gate because artifacts are already visible.
+
+Verify the selected immutable candidate before tagging or publication, including
+first resume. A passing fetched main is not evidence for an older tag. Preflight
+failure must preserve the saved candidate and target for the next retry.

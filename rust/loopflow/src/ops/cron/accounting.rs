@@ -370,8 +370,8 @@ pub(crate) fn preflight_failure(
                 finished_at: receipt.finished_at,
                 source: receipt.source,
                 covered: vec![due.id.clone()],
-                selection: None,
-                target: None,
+                selection: due.attempts.last().and_then(|a| a.selection.clone()),
+                target: due.attempts.last().and_then(|a| a.target.clone()),
                 verification: Vec::new(),
                 outcome: ScheduledReleaseOutcome::Failed {
                     cause: receipt
@@ -1155,6 +1155,11 @@ mod tests {
         first.finished_at = Some(36002);
         first.error = Some("verification failed".into());
         finish_process(&spec.host.lf_home, &first).unwrap();
+        let mut blocked = receipt(&spec, 36003);
+        blocked.outcome = CronOutcome::Failed;
+        blocked.finished_at = Some(36004);
+        blocked.error = Some("placement authority unavailable".into());
+        super::preflight_failure(&spec.host.lf_home, &id, &blocked).unwrap();
         let second = receipt(&spec, 86400 + 36001);
         assert_eq!(begin(&spec.host.lf_home, &id, &second).unwrap(), owner);
         let rows = history(
@@ -1166,7 +1171,8 @@ mod tests {
         .unwrap();
         assert_eq!(rows[0].observed_at, 0);
         let attempts = &rows[0].opportunities[0].attempts;
-        assert_eq!(attempts.len(), 2);
+        assert_eq!(attempts.len(), 3);
+        assert_eq!(attempts[2].selection, attempts[0].selection);
         assert!(matches!(
             attempts[0].outcome,
             ScheduledReleaseOutcome::Failed { .. }

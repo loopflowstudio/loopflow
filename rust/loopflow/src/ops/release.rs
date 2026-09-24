@@ -692,15 +692,6 @@ pub(crate) fn release_run_with_cron(
             })
             .and_then(|a| a.selection.as_ref());
         let result = if let Some(selection) = saved {
-            let version = version_from_tag(&selection.tag, &target)?;
-            verification.push(verify_source(
-                &main_repo,
-                &selection.commit,
-                &target,
-                &version,
-                None,
-                progress,
-            )?);
             let candidate = ReleaseCandidate::new(&target, &selection.tag, &selection.commit);
             finish_candidate(
                 &main_repo,
@@ -709,6 +700,7 @@ pub(crate) fn release_run_with_cron(
                 progress,
                 &lock,
                 cron_receipt,
+                &mut verification,
             )?
         } else {
             release_run_inner(
@@ -834,6 +826,7 @@ fn release_run_inner(
                     progress,
                     lock,
                     cron_receipt,
+                    verification,
                 );
             }
         } else if target.publisher.is_empty()
@@ -841,7 +834,15 @@ fn release_run_inner(
             && !release_completion_satisfied(&main_repo, tag, &target)?
         {
             progress.status(&format!("Resuming release completion for {tag}..."));
-            return resume_existing_release(&main_repo, tag, &target, progress, lock, cron_receipt);
+            return resume_existing_release(
+                &main_repo,
+                tag,
+                &target,
+                progress,
+                lock,
+                cron_receipt,
+                verification,
+            );
         }
     }
 
@@ -857,6 +858,7 @@ fn release_run_inner(
                 progress,
                 lock,
                 cron_receipt,
+                verification,
             );
         }
     }
@@ -896,6 +898,7 @@ fn release_run_inner(
             progress,
             lock,
             cron_receipt,
+            verification,
         );
     }
 
@@ -1028,6 +1031,7 @@ fn release_run_inner(
         progress,
         lock,
         cron_receipt,
+        verification,
     )
 }
 
@@ -1038,9 +1042,18 @@ fn resume_existing_release(
     progress: &impl Progress,
     lock: &ReleaseLock,
     cron_receipt: Option<&str>,
+    verification: &mut Vec<VerificationEvidence>,
 ) -> OpsResult<ReleaseRunOutcome> {
     let candidate = release_candidate_for_tag(repo, tag, target)?;
-    finish_candidate(repo, &candidate, target, progress, lock, cron_receipt)
+    finish_candidate(
+        repo,
+        &candidate,
+        target,
+        progress,
+        lock,
+        cron_receipt,
+        verification,
+    )
 }
 
 fn finish_candidate(
@@ -1050,6 +1063,7 @@ fn finish_candidate(
     progress: &impl Progress,
     lock: &ReleaseLock,
     cron_receipt: Option<&str>,
+    verification: &mut Vec<VerificationEvidence>,
 ) -> OpsResult<ReleaseRunOutcome> {
     let tagged = remote_tag_sha(repo, &candidate.tag)?;
     if tagged.as_ref().is_some_and(|sha| sha != &candidate.commit) {
@@ -1073,6 +1087,15 @@ fn finish_candidate(
         Ok(())
     };
     save_selection(None)?;
+    // Origin preflight cannot prove a resumed or newly merged candidate.
+    verification.push(verify_source(
+        repo,
+        &candidate.commit,
+        target,
+        &version_from_tag(&candidate.tag, target)?,
+        None,
+        progress,
+    )?);
     let workflow = if tagged.is_some() {
         wait_for_release_workflow(repo, candidate, target, progress, false)?
     } else {

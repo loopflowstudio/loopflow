@@ -528,18 +528,21 @@ half-contracts.
 
 ## This slice
 
-Slices 1–4 have a first implementation in this checkout: retained daily
-obligations, atomic opportunity/coalescing updates, explicit cron execution
-context, mechanical release flow, shared mutation locking, exact candidate
-recovery, verification and public read-back, failure disposition, and history.
-Focused implementation validation passed; model reduction and its focused proof
-are recorded in [compression.md](compression.md). The complete contract above still
-governs review; this is not a configured publication or a completed Task.
+Review verdict: **iterate**. Slices 1–4 have a first implementation, but review
+found remaining contract gaps in the joined scheduled path, historical telemetry
+linkage, child mutation exclusion, full publication-stage reconstruction, and
+closed-obligation recovery. See [review-slice.md](review-slice.md) for the evidence
+matrix and ordered next cut. The earlier focused passes remain bounded evidence.
 
-Slice 5 remains open. The observed scorecard schema failure still blocks current
-scheduled verification, and the required host UI gate has not been run by this
-implementation session. No install, cron sync/trigger, publication, PM write, or
-repair handoff has occurred. The pinned lifecycle retains landing authority.
+This review repaired two reproduced defects: initial resume borrowing current
+main's verification instead of checking the exact candidate, and failed preflight
+losing the saved candidate before retry. Neither repair completes the full proof.
+
+Slice 5 remains open. The observed scorecard schema failure blocks current
+scheduled verification; required host UI and exact public smoke have not been
+run. The real CLI still reports 36 failed telemetry targets and no qualifying
+pair. No install, cron sync/trigger, publication, PM write, repair handoff, or PR
+publication occurred. The pinned lifecycle retains landing authority.
 
 ## Slice ledger
 
@@ -615,6 +618,12 @@ repair handoff has occurred. The pinned lifecycle retains landing authority.
   separate verification writer across producers, history, and the JSON fixture.
   Publisher preparation/publication use one artifact receipt type; stage evidence
   and public observations remain distinct. See [compression.md](compression.md).
+
+- Review reproduced and repaired wrong-source verification on initial tag resume
+  and lost candidate ownership after an intervening preflight failure. Both
+  regression tests failed before and passed after their fixes. The candidate
+  preparation success test also passed with exact-candidate checks in the shared
+  completion path. Detailed verdict and remaining work: [review-slice.md](review-slice.md).
 
 ## Measure
 

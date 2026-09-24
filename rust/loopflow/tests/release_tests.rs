@@ -2261,3 +2261,28 @@ fn release_nochange_and_failed_verification_preserve_caller_branch_index_and_byt
         );
     }
 }
+
+#[test]
+fn release_resume_rejects_candidate_that_fails_checks_even_when_origin_passes() {
+    let gh_script = write_gh_status_script("[]", r#"{"isDraft":false}"#);
+    let _env = EnvGuard::new(&[("gh", gh_script.as_str())]);
+    let repo = TestRepo::new();
+    fs::create_dir_all(repo.path().join(".lf")).unwrap();
+    fs::write(
+        repo.path().join(".lf/config.yaml"),
+        "release:\n  targets:\n    default:\n      verify: ['test -f VERIFIED']\n",
+    )
+    .unwrap();
+    repo.stage_all();
+    repo.commit("Candidate missing required verification input");
+    release_tag(repo.path(), "0.9.1", None).unwrap();
+    repo.create_file("VERIFIED", "new main passes; the immutable tag still fails");
+    repo.stage_all();
+    repo.commit("Fix verification input on main");
+    git(&repo, &["push", "origin", "main"]);
+
+    let error = release_run(repo.path(), "0.9.1", None, &NullProgress)
+        .expect_err("passing origin checks must not qualify a failing exact tag");
+    assert!(error.to_string().contains("verification"), "{error}");
+    assert!(repo.path().join("VERIFIED").exists());
+}

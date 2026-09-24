@@ -2,6 +2,7 @@ import io
 import json
 import subprocess
 import tarfile
+import urllib.error
 from pathlib import Path
 
 import pytest
@@ -206,9 +207,8 @@ def test_public_artifact_hashes_reject_modified_and_missing_assets(tmp_path: Pat
         publish_release._check_public_hashes(tmp_path, hashes)
 
 
-def test_public_proof_recovers_after_publisher_dies_before_final_receipt(
-    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
-):
+@pytest.fixture
+def public_release(tmp_path: Path, monkeypatch: pytest.MonkeyPatch):
     artifacts = tmp_path / "artifacts"
     artifacts.mkdir()
     for target in publish_release.TARGETS:
@@ -234,11 +234,25 @@ def test_public_proof_recovers_after_publisher_dies_before_final_receipt(
         "v1.2.3", "exact-commit", "42", hashes, publish_release.CANDIDATE_STAGES
     )
     publish_release._write_receipt(candidate, ".candidate")
+    remote = {f"https://public/{p.name}": p.read_bytes() for p in artifacts.iterdir()}
+    remote.update(
+        {
+            "https://downloads.loopflow.studio/Loopflow-1.2.3.dmg": b"notarized artifact",
+            "https://downloads.loopflow.studio/Loopflow-latest.dmg": b"notarized artifact",
+            "https://loopflow.studio/healthz": b'{"status":"ok","release":"v1.2.3"}',
+            "https://crates.io/api/v1/crates/loopflow/1.2.3": b'{"version":{"num":"1.2.3"}}',
+            "github-latest": b"v1.2.3",
+        }
+    )
     run = publish_release._run
 
     def external_command(command, **kwargs):
         if command[:3] == ["git", "rev-parse", "HEAD"]:
             return subprocess.CompletedProcess(command, 0, "exact-commit\n", "")
+        if command == ["gh", "release", "view", "--json", "tagName"]:
+            return subprocess.CompletedProcess(
+                command, 0, json.dumps({"tagName": remote["github-latest"].decode()}), ""
+            )
         if command[:3] == ["gh", "release", "view"]:
             return subprocess.CompletedProcess(
                 command,
@@ -257,24 +271,157 @@ def test_public_proof_recovers_after_publisher_dies_before_final_receipt(
         return run(command, **kwargs)
 
     def download(url: str, destination: Path) -> None:
-        if url.endswith("/healthz"):
-            destination.write_text('{"status":"ok","release":"v1.2.3"}')
-        elif "crates.io" in url:
-            destination.write_text('{"version":{"num":"1.2.3"}}')
-        elif url.endswith("Loopflow-1.2.3.dmg"):
-            destination.write_bytes((artifacts / "Loopflow.dmg").read_bytes())
-        else:
-            destination.write_bytes((artifacts / url.rsplit("/", 1)[1]).read_bytes())
+        if url not in remote:
+            raise urllib.error.HTTPError(url, 404, "missing", None, None)
+        destination.write_bytes(remote[url])
+
+    def upload(path: Path, name: str, _cache: str) -> None:
+        remote[f"https://downloads.loopflow.studio/{name}"] = path.read_bytes()
+
+    def deploy(tag: str) -> None:
+        remote["https://loopflow.studio/healthz"] = json.dumps(
+            {"status": "ok", "release": tag}, separators=(",", ":")
+        ).encode()
+
+    def publish_crate() -> None:
+        remote["https://crates.io/api/v1/crates/loopflow/1.2.3"] = b'{"version":{"num":"1.2.3"}}'
 
     monkeypatch.setattr(publish_release, "_run", external_command)
     monkeypatch.setattr(publish_release, "_download", download)
-    result = publish_release.verify_release("v1.2.3")
+    monkeypatch.setattr(publish_release, "_upload_dmg", upload)
+    monkeypatch.setattr(publish_release, "_deploy_website", deploy)
+    monkeypatch.setattr(publish_release, "_publish_crate", publish_crate)
+    return remote, hashes
+
+
+def test_public_proof_recovers_after_publisher_dies_before_final_receipt(
+    tmp_path: Path, public_release
+):
+    remote, hashes = public_release
+    before = dict(remote)
+    result = publish_release.verify_release("v1.2.3", repair=True)
+    assert remote == before
     assert result.artifact_sha256 == hashes
     assert "exact_tag_smoke_passed" in result.completed_stages
     assert "public_artifacts_verified" in result.completed_stages
+    assert "latest_dmg_verified" in result.completed_stages
     assert not (tmp_path / ".lf/logs/release.v1.2.3.json").exists()
     assert (tmp_path / ".lf/logs/release.v1.2.3.verified.json").exists()
 
+
+@pytest.mark.parametrize("latest", ["missing", "different"])
+def test_public_proof_requires_latest_dmg(tmp_path: Path, public_release, latest: str):
+    remote, hashes = public_release
+    url = "https://downloads.loopflow.studio/Loopflow-latest.dmg"
+    if latest == "missing":
+        del remote[url]
+    else:
+        remote[url] = b"different release"
+    before = dict(remote)
+    with pytest.raises(RuntimeError, match="latest DMG"):
+        publish_release.verify_release("v1.2.3")
+    assert remote == before
+    assert not (tmp_path / ".lf/logs/release.v1.2.3.verified.json").exists()
+    assert (
+        json.loads((tmp_path / ".lf/logs/release.v1.2.3.candidate.json").read_text())[
+            "artifact_sha256"
+        ]
+        == hashes
+    )
+
+
+def test_reconcile_repairs_missing_publication_stages_from_exact_artifacts(
+    tmp_path: Path, public_release
+):
+    remote, hashes = public_release
+    expected = dict(remote)
+    del remote["https://downloads.loopflow.studio/Loopflow-1.2.3.dmg"]
+    del remote["https://crates.io/api/v1/crates/loopflow/1.2.3"]
+    remote["https://loopflow.studio/healthz"] = b'{"status":"ok","release":"v1.2.2"}'
+    remote["https://downloads.loopflow.studio/Loopflow-latest.dmg"] = b"previous release"
+    result = publish_release.verify_release("v1.2.3", repair=True)
+    assert remote == expected
+    assert result.artifact_sha256 == hashes
+    assert result.smoke_versions == {"lf": "lf 1.2.3", "lfd": "lfd 1.2.3"}
+    assert {
+        "crate_published",
+        "versioned_dmg_uploaded",
+        "website_deployed",
+        "latest_dmg_uploaded",
+    }.issubset(result.completed_stages)
+    saved = json.loads((tmp_path / ".lf/logs/release.v1.2.3.verified.json").read_text())
+    assert saved["artifact_sha256"] == hashes
+
+
+@pytest.mark.parametrize("damage", ["newer_release", "immutable_conflict", "unavailable"])
+def test_reconcile_preserves_publication_when_repair_is_unsafe(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch, public_release, damage: str
+):
+    remote, _ = public_release
+    del remote["https://downloads.loopflow.studio/Loopflow-latest.dmg"]
+    if damage == "newer_release":
+        remote["github-latest"] = b"v1.2.4"
+        expected_error = "latest release is v1.2.4"
+    elif damage == "immutable_conflict":
+        remote["https://downloads.loopflow.studio/Loopflow-1.2.3.dmg"] = b"conflict"
+        expected_error = "versioned public DMG differs"
+    else:
+        download = publish_release._download
+
+        def unavailable(url: str, destination: Path) -> None:
+            if url.endswith("/healthz"):
+                raise urllib.error.HTTPError(url, 503, "unavailable", None, None)
+            download(url, destination)
+
+        monkeypatch.setattr(publish_release, "_download", unavailable)
+        expected_error = "503"
+    before = dict(remote)
+    with pytest.raises((RuntimeError, urllib.error.HTTPError), match=expected_error):
+        publish_release.verify_release("v1.2.3", repair=True)
+    assert remote == before
+    assert not (tmp_path / ".lf/logs/release.v1.2.3.verified.json").exists()
+
+
+def test_reconcile_rejects_successful_upload_without_public_readback(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch, public_release
+):
+    remote, _ = public_release
+    remote["https://downloads.loopflow.studio/Loopflow-latest.dmg"] = b"stale edge"
+    monkeypatch.setattr(publish_release, "_upload_dmg", lambda *args: None)
+    with pytest.raises(RuntimeError, match="did not pass public read-back"):
+        publish_release.verify_release("v1.2.3", repair=True)
+    assert not (tmp_path / ".lf/logs/release.v1.2.3.verified.json").exists()
+
+
+def test_smoke_failure_retains_repaired_external_publication_without_success_receipt(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch, public_release
+):
+    remote, _ = public_release
+    expected = dict(remote)
+    del remote["https://downloads.loopflow.studio/Loopflow-latest.dmg"]
+    run = publish_release._run
+
+    def failing_installer(command, **kwargs):
+        if command[0] == "sh":
+            return run(["sh", "-c", "exit 19"], **kwargs)
+        return run(command, **kwargs)
+
+    monkeypatch.setattr(publish_release, "_run", failing_installer)
+    with pytest.raises(subprocess.CalledProcessError) as error:
+        publish_release.verify_release("v1.2.3", repair=True)
+    assert error.value.returncode == 19
+    assert remote == expected
+    assert not (tmp_path / ".lf/logs/release.v1.2.3.verified.json").exists()
+    assert (tmp_path / ".lf/logs/release.v1.2.3.candidate.json").exists()
+    repaired = json.loads((tmp_path / ".lf/logs/release.v1.2.3.json").read_text())
+    assert "latest_dmg_uploaded" in repaired["completed_stages"]
+    assert "exact_tag_smoke_passed" not in repaired["completed_stages"]
+
+
+def test_public_proof_requires_ui_gate(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch, public_release
+):
+    _, hashes = public_release
     # Historic preparation without the required host gate cannot gain a pass
     # simply because assets are already public.
     candidate = publish_release.ArtifactReceipt(
@@ -317,12 +464,11 @@ def test_publisher_child_retains_release_lock_through_uv(
         assert int(result.stdout.strip()) == lock_path.stat().st_ino
 
 
+@pytest.mark.parametrize("stage", ["verify", "reconcile"])
 def test_direct_publisher_stage_cannot_bypass_the_owning_release_operation(
-    monkeypatch: pytest.MonkeyPatch,
+    monkeypatch: pytest.MonkeyPatch, stage: str
 ):
     monkeypatch.delenv("LF_RELEASE_LOCK_FD", raising=False)
-    monkeypatch.setattr(
-        publish_release.sys, "argv", ["publish_release", "verify", "--tag", "v1.2.3"]
-    )
+    monkeypatch.setattr(publish_release.sys, "argv", ["publish_release", stage, "--tag", "v1.2.3"])
     with pytest.raises(RuntimeError, match="invoke lf release run"):
         publish_release.main()

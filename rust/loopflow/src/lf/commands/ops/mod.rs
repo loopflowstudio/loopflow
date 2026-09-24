@@ -1677,6 +1677,12 @@ fn cron_specs(authority: &CronAuthority, wave: &str) -> Result<Vec<CronSpec>> {
                 )
             })?;
             let target_kind = cron_target_kind(&authority.repo, &cron.flow)?;
+            if target_kind != CronTargetKind::Flow {
+                return Err(anyhow!(
+                    "configured cron flow {} is missing; refusing to replace it with a skill",
+                    cron.flow
+                ));
+            }
             Ok(CronSpec {
                 wave: wave.to_string(),
                 flow: cron.flow,
@@ -1688,6 +1694,50 @@ fn cron_specs(authority: &CronAuthority, wave: &str) -> Result<Vec<CronSpec>> {
             })
         })
         .collect()
+}
+
+#[cfg(test)]
+mod cron_catalog_tests {
+    use super::{cron_specs, CronAuthority};
+    use crate::durable::HomeId;
+    use crate::ops::{CronHost, CronTargetKind};
+    use std::fs;
+
+    #[test]
+    fn declared_cron_flow_cannot_fall_back_to_builtin_skill() {
+        let repo = tempfile::tempdir().unwrap();
+        fs::create_dir_all(repo.path().join("wave/infrastructure")).unwrap();
+        fs::create_dir_all(repo.path().join(".lf/flows")).unwrap();
+        fs::write(
+            repo.path().join("wave/infrastructure/GOAL.md"),
+            "---\ncrons:\n- flow: release-run\n  schedule: '0 0 10 * * *'\n---\n",
+        )
+        .unwrap();
+        let flow = repo.path().join(".lf/flows/release-run.yaml");
+        fs::write(&flow, "- op: release run patch\n").unwrap();
+        let home = HomeId::new();
+        let authority = CronAuthority {
+            host: CronHost {
+                home_id: home.clone(),
+                lf_home: repo.path().join("home"),
+                db_path: repo.path().join("home/loopflow.db"),
+                path_env: "/usr/bin:/bin".into(),
+            },
+            local_home: home.clone(),
+            placed_home: home,
+            repo: repo.path().to_path_buf(),
+        };
+        let specs = cron_specs(&authority, "infrastructure").unwrap();
+        assert_eq!(specs.len(), 1);
+        assert_eq!(specs[0].target_kind, CronTargetKind::Flow);
+        fs::remove_file(&flow).unwrap();
+        assert!(cron_specs(&authority, "infrastructure")
+            .unwrap_err()
+            .to_string()
+            .contains("refusing to replace it with a skill"));
+        fs::write(flow, "[").unwrap();
+        assert!(cron_specs(&authority, "infrastructure").is_err());
+    }
 }
 
 fn require_release_cron_binary() -> Result<()> {

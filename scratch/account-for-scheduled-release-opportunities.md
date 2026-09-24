@@ -528,21 +528,36 @@ half-contracts.
 
 ## This slice
 
-Review verdict: **iterate**. Slices 1–4 have a first implementation, but review
-found remaining contract gaps in the joined scheduled path, historical telemetry
-linkage, child mutation exclusion, full publication-stage reconstruction, and
-closed-obligation recovery. See [review-slice.md](review-slice.md) for the evidence
-matrix and ordered next cut. The earlier focused passes remain bounded evidence.
+The current cut implements joined scheduled-path proof and post-publication
+reconciliation. The real CLI fixture exposed an additional execution blocker:
+repository `release-run` was displayed as a flow but dispatched as the built-in
+skill. Repository flows now win that collision, and declarative cron sync rejects
+a missing or malformed flow instead of selecting a skill.
 
-This review repaired two reproduced defects: initial resume borrowing current
-main's verification instead of checking the exact candidate, and failed preflight
-losing the saved candidate before retry. Neither repair completes the full proof.
+The existing publisher now checks the latest DMG as well as immutable artifacts.
+Scheduled reconciliation repairs demonstrably missing crate/versioned-DMG stages
+and stale website/latest-DMG stages from exact retained artifacts, only while this
+tag remains GitHub's latest release. It persists completed repairs before the
+next operation and repeats public read-back and exact-version smoke. Conflicting
+immutable bytes, unavailable services, and a superseding release remain failures.
+See [implementation-followup.md](implementation-followup.md) for proof and limits.
 
-Slice 5 remains open. The observed scorecard schema failure blocks current
-scheduled verification; required host UI and exact public smoke have not been
-run. The real CLI still reports 36 failed telemetry targets and no qualifying
-pair. No install, cron sync/trigger, publication, PM write, repair handoff, or PR
-publication occurred. The pinned lifecycle retains landing authority.
+The joined disposable-Home test traverses cron execution, the real CLI flow,
+release selection, publisher reconciliation, atomic settlement, and history. Five
+scenarios cover publication, no-change, rejected telemetry, smoke failure after
+publication, and missing public-stage proof. Each preserves caller commits,
+branch, byte-identical index, staged/unstaged content, and untracked files.
+External services and publisher evidence in this Rust test are simulated; Python
+recovery cases separately execute a real temporary installer and binary smoke.
+These fixtures do not supply configured automatic settlements.
+
+The previous review's iterate verdict remains applicable. Historical telemetry
+linkage/recovery, mutation-child exclusion outside publisher subprocesses, and
+closed-obligation continuation still need implementation. Slice 5 remains open:
+the observed scorecard schema failure blocks scheduled verification, and real
+UI-host/public smoke plus two adjacent automatic settlements remain unproved.
+No install, production cron sync/trigger, publication, PM write, repair handoff,
+or PR publication occurred. The pinned lifecycle retains landing authority.
 
 ## Slice ledger
 
@@ -624,6 +639,22 @@ publication occurred. The pinned lifecycle retains landing authority.
   regression tests failed before and passed after their fixes. The candidate
   preparation success test also passed with exact-candidate checks in the shared
   completion path. Detailed verdict and remaining work: [review-slice.md](review-slice.md).
+
+- Implementation follow-up: the joined real-CLI fixture reproduced built-in skill
+  shadowing of the authored release flow. Central discovery now gives repository
+  flows precedence; declared cron flows fail on absence or invalid content.
+- Publisher reconciliation now observes every configured public endpoint,
+  including the latest DMG alias. It repairs known missing/stale stages using the
+  existing publisher operations, retains stage receipts after each repair, and
+  refuses unavailable authority, immutable conflicts, or rollback of a newer tag.
+- Thirteen focused Python cases passed, including candidate-only recovery,
+  missing/stale-stage repair, unavailable service, immutable conflict, newer
+  release, failed read-back, missing UI proof, and real failing installer smoke.
+- The joined Rust fixture passed all five outcomes and caller preservation in
+  35.13 seconds. The declared-flow catalog regression passed. Synthetic due times
+  and mocked external proof remain explicitly ineligible for the configured KR.
+- Rust formatting/all-target Clippy and Python Ruff check/format passed for this
+  cut. No broader suite, hosted matrix, installed cutover, or live acceptance ran.
 
 ## Measure
 

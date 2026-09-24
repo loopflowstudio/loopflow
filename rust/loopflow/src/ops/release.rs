@@ -1376,7 +1376,7 @@ fn verify_release_outcome(
     lock.inherit(&mut command);
     command
         .args(args)
-        .args(["verify", "--tag", &tag])
+        .args(["reconcile", "--tag", &tag])
         .env("LF_RELEASE_SOURCE_REPO", &wt.path)
         .env("LF_RELEASE_MAIN_REPO", repo)
         .env("LF_RELEASE_WORKFLOW_RUN_ID", workflow_id.to_string())
@@ -1397,18 +1397,17 @@ fn verify_release_outcome(
     if proof.tag != tag
         || proof.source_commit != commit
         || proof.workflow_run_id != workflow_id.to_string()
-        || !proof
-            .completed_stages
-            .iter()
-            .any(|s| s == "public_artifacts_verified")
-        || !proof
-            .completed_stages
-            .iter()
-            .any(|s| s == "exact_tag_smoke_passed")
-        || !proof
-            .completed_stages
-            .iter()
-            .any(|s| s == "ui_host_verified")
+        || ![
+            "ui_host_verified",
+            "public_artifacts_verified",
+            "versioned_dmg_verified",
+            "latest_dmg_verified",
+            "website_release_verified",
+            "crate_version_verified",
+            "exact_tag_smoke_passed",
+        ]
+        .iter()
+        .all(|required| proof.completed_stages.iter().any(|stage| stage == required))
     {
         return Err(OpsError::Message(
             "publisher returned incomplete or mismatched public release proof".into(),

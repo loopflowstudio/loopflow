@@ -56,8 +56,10 @@ crons:
 ```
 
 `lf cron sync --wave infrastructure` validates both targets and both fixed
-daily schedules before it writes a plist. It captures the non-secret host path,
-Home id, Home/store paths, authoritative checkout, installed binary, exact
+daily schedules before it writes a plist. A declared `flow` must resolve to a
+flow; missing or malformed repository content cannot fall back to a same-named
+skill. Repository flows take precedence over reusable skills. Sync captures the
+non-secret host path, Home id, Home/store paths, authoritative checkout, installed binary, exact
 schedule, and log path. Scheduled execution repeats the placement check and
 fails with a receipt instead of running after ownership moves.
 

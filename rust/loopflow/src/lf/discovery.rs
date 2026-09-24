@@ -19,9 +19,15 @@ pub enum Target {
     Flow(Flow),
 }
 
-/// Discover a skill or flow by name. Authored lifecycle entrypoints win their
-/// exact builtin skill collision; other names keep the reusable-skill default.
+/// Repository flows override reusable skills with the same name. A broken
+/// authored flow is an error, never permission to fall back to an agent skill.
 pub fn discover_target(repo: &Path, name: &str) -> Result<Target> {
+    if crate::engine::flow::repo_flow_names(repo)
+        .iter()
+        .any(|flow| flow == name)
+    {
+        return Ok(Target::Flow(crate::engine::load_flow(name, repo)?));
+    }
     if matches!(name, "design" | "launch-plan") {
         if let Ok(flow) = crate::engine::load_flow(name, repo) {
             return Ok(Target::Flow(flow));

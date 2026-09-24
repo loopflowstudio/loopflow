@@ -116,11 +116,16 @@ concurrent re-entry and worktree cleanup cannot remove a checkout still in use.
 
 Preparation runs the required `scripts/test.py --ui-host` gate before tagging.
 The publisher retains candidate hashes and gate evidence before external writes.
-Its `verify --tag <tag>` mode checks the public asset set and hashes, versioned
-DMG, website release identity, crate version, and installed `lf`/`lfd` versions in
-an isolated Home. A crash after publication resumes this read-back for the same
-candidate. A missing historical host-gate result must be executed against that
-exact source; published assets cannot substitute for the check.
+Its `verify --tag <tag>` mode checks the public asset set and hashes, both versioned
+and latest DMGs, website release identity, crate version, and installed `lf`/`lfd`
+versions in an isolated Home. Scheduled settlement uses `reconcile --tag <tag>`:
+it repairs missing crate/versioned-DMG publication and stale website/latest-DMG
+stages from the exact source and verified public artifacts, then repeats read-back.
+Repair requires this tag to remain GitHub's latest release. Unavailable services
+and conflicting immutable bytes fail without overwriting them. A crash after
+publication does not require signing again or republishing GitHub assets just to
+obtain a receipt. A missing historical host-gate result must be executed against
+that exact source; published assets cannot substitute for the check.
 
 Append to `release/unreleased/DECISIONS.md` only when the change captures durable intent: policy choices, scope calls, paths not taken, or decisions a contributor would cite months later. Skip bug-fix churn and mechanical edits.
 

@@ -11,8 +11,9 @@
 - Product / Desktop ownership is resolved by the Task directive; no PM mutation
   is needed. This remains one PR, with the pinned human and settlement gates.
 - Flow facts, launch-owned native source receipts, passive readers, incremental
-  Task output, and the Rust/Swift output fixture are implemented. Watch snapshot,
-  separate history/live cursors, the Mac surface, and its configured demo remain.
+  Task output, the shared Watch snapshot/CLI/Swift reader, and their DTO fixtures
+  are implemented. Separate history/live cursors, bounded snapshot/discovery,
+  the Mac surface, and its configured demo remain.
 - A configured Codex reader observed new prose and tools with the original owned
   client unchanged. Claude and OpenCode have local reader/source tests only;
   all-provider live coverage is not established. No replacement client was used.

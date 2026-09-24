@@ -219,6 +219,18 @@ transport expansion is in scope.
   retaining available history and Runs, without migrating the database. The
   focused read-only missing-table regression passed and verified no table was
   recreated. This is explicit unavailable evidence, not a legacy position reader.
+- Final configured proof: the rebuilt `lf task watch LOO-293 --json` succeeded
+  from `/tmp` against the existing Home in 0.343 seconds, returning three Runs,
+  zero retained invocation plans/attempts, and `position_unavailable`, with no
+  stderr. It proves passive access and truthful older-Home evidence, not a live
+  stage diagram. The synthetic CLI proof also returned both healthy Runs and
+  `discovery_incomplete` through Watch with the corrupt manifest present.
+  `cargo fmt --all -- --check`, `git diff --check`, and
+  `cargo clippy --all-targets -- -D warnings` passed after integration. The
+  missing-attempt settlement regression was also checked against the final
+  compiled test executable. No broad gate or configured Mac Watch demo was run
+  by this implementation pass; the separate concurrent gate report retains its
+  own resource-preflight limitation.
 
 - 2026-09-23: transactional flow facts implemented. Final focused command
   `cargo test -p loopflow --lib durable_store_tests --no-fail-fast`: 8 passed,

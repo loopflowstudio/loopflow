@@ -16,6 +16,70 @@ actions/display path, lf-new's nested workspaces, external trials and measured
 budgets remain explicitly outstanding. No new kickoff or alternative design is
 needed.
 
+## Current review after native restoration — 2026-09-23
+
+Reviewed HEAD `39d4c4653` using the complete Task diff (`truncated: false`,
+4,736 lines), the changes since the previous review, and the reachable owners.
+Receipt: `/tmp/loo291-review-restored.json`; extracted patch:
+`/tmp/loo291-review-restored.patch`. The native changes advance the accepted
+design: one retained view owns the focus request, and the CoreVideo adaptation
+uses Ghostty's existing renderer. No further bounded source correction was
+established in this review.
+
+| Claim | Planned behavior | Implemented behavior | Proof | Result |
+|---|---|---|---|---|
+| Real planning paints | Compact Wave/Project grouping with all incomplete Tasks | Product, Desktop and Company Dogfood render nine Tasks from the actual registry | Temporary bundle, live capture; `review-live-planning.png` | pass, real-data rendering only |
+| Failed reads stay explicit | Missing evidence cannot look like healthy emptiness | Bare executable shows Unknown, Sessions unavailable and Planning unavailable when its bundled helper is absent | `/tmp/loo291-review-live.png`, inspected image | pass, real failure rendering |
+| Native draft/focus retention | Preserve input through hiding and resizing | View-owned request also preserves manually acquired Task-terminal focus | Existing final compression receipt, one real-PTY test | pass, fixture; no new test run |
+| Complete navigation interaction | A/D, exact Session access, split/draft/scroll retention and resolution | Source and focused fixtures support it; current external automation did not reach workspace controls | AX/capture attempts below | gap; publication remains unapproved |
+
+Fresh read-only `lf roadmap --json` and `lf session list --json` succeeded.
+The roadmap receipt is generated at `2026-09-24T00:13:52.840193Z` (23 September
+locally). Sessions now contains **three** records: two active unbound interactive
+Sessions and one ready Task FlowStep whose Work is absent from the Product plan.
+The earlier two-Session observation below is historical. No Session was opened,
+moved, resolved or modified by this review.
+
+Attempted the actual built app before falling back to the existing live capture
+mode. `AXIsProcessTrusted()` and `CGPreflightScreenCaptureAccess()` return true
+for the probe process. Nevertheless, AX traversal of this review's app returns
+application/menu elements even through `AXWindows`, without workspace controls;
+setting `AXManualAccessibility` returns `-25205`. External capture of its own
+window reports `could not create image from window`. These observations do not
+establish the cause or prove that the hosted UI runner has permission. Receipt:
+`/tmp/loo291-review-interaction-ax.log`. No blind clicks or global keystrokes were
+used to work around the inaccessible controls.
+
+The app's existing `live` capture mode works. The initial bare SwiftPM launch
+correctly reports the missing bundled `lf`; it is not a configured-app verdict.
+A temporary `/tmp/loo291-review/Loopflow Review.app` then used this checkout's
+unchanged SwiftPM executable/resources and the existing development control
+configuration pointing to the same installed `lf` used by the live CLI reads.
+Its distinct bundle identifier avoids replacing the installed app. With
+`LOOPFLOW_UI_TEST_MODE=live`, a snapshot path, a 12-second capture delay, and
+`--repo /Users/jack/src/loopflow.main-view-task`, it renders the real scoped plan,
+three-Session count, and planning-read timestamp. No fixture records are injected.
+The capture delay is not a measured paint time or budget. This proves static
+rendering, not interaction, native terminal rendering or external-product use.
+All review-owned app processes exited; no user app was stopped.
+
+Rechecked Rust/Swift Session and roadmap fields and current main's Session DTO;
+the three Session mirrors retain the hash recorded below. Main and lf-new still
+have no shared legal-action/display-path contract to consume. Negative searches
+still find one Podium inventory caller per shared read, one root workspace
+registry, and none of the removed scope/navigation types. No new persistence,
+writer, compatibility path or launch authority was introduced.
+
+No production or test source changed, so no tests were rerun. The final manual
+focus correction's receipt is `/tmp/loo291-compress-manual-focus-after.log`;
+the previous 25 model tests and independent native window-isolation receipt
+remain applicable at their stated proof levels. `git diff --check` passes.
+
+Next work remains the configured interaction trial described below, including
+retained split/scroll state and a disposable authorized human boundary. Restore
+access to actual workspace controls on that host before attempting it; another
+launch screenshot does not close that gap. Full LOO-291 scope is unchanged.
+
 ## Evidence matrix
 
 Pass describes the stated proof level; model fixtures do not establish native

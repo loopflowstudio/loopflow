@@ -72,6 +72,13 @@ scroll retention, or any external-product trial. The configured app interaction
 gap recorded in `review-slice.md` remains; no publication or completion follows
 from this test.
 
+Iteration 2 review strengthened the companion-child assertion: PTY input echo
+alone no longer suffices; the test waits for both cat children to reply after
+navigation. The same focused command passed one test, exit 0, in
+`/tmp/loo291-review-mounted-child-proof.log`. This supersedes the prior mounted
+test receipt for current test source. Production code and the proof limits above
+are unchanged.
+
 **Latest implement result:** surface initialization is restored and both
 `hiddenTerminalPreservesDraft` and `releaseSurfaceIsWindowLocal` pass with the
 real Ghostty artifact and PTYs. CoreVideo rejected display-link creation;

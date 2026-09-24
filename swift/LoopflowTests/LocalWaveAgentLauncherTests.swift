@@ -134,7 +134,7 @@ struct LocalWaveAgentLauncherTests {
         let query = RegistryQuery { args, cwd in
             #expect(args == ["ps", "--json"])
             #expect(cwd == nil)
-            return try LocalWaveAgentLauncher.queryLf(args, cwd: cwd)
+            return try await LocalWaveAgentLauncher.queryLf(args, cwd: cwd)
         }
 
         let snapshot = try await query.processActivity()

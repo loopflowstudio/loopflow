@@ -110,6 +110,19 @@ abandoned and retired registrations; unfiltered `lf ls` retains historical
 registry visibility. Authored `wave/<name>/GOAL.md` files still appear before
 their first registration.
 
+Select a Task in Work, Roadmap, or Wave detail, then choose **Watch**. Inspect
+its retained invocation plan, select stages with the keyboard or pointer, and
+follow recorded Iterate links to their return stages. Attempts retain their
+Run IDs, provider labels, readiness summaries, and failures. The invocation
+picker includes earlier flows; **All Task Runs** includes unassigned Runs.
+Watch works without a worker or worktree. Changes and Terminal still need the
+Task workspace.
+
+**Refresh** reads the latest snapshot while preserving your selection. Failed
+reads leave the previous snapshot visible with a stale notice; closing Watch
+cancels its query. This surface currently inspects recorded plans and attempts;
+the live output feed and automatic following remain in development.
+
 The compact Podium bar reads live process evidence from `lf ps --json`. Its
 lamp reflects OS-live state: black is off, green is working, blue is stalled,
 and amber is waiting or unknown. Wave count, active Runs, and
@@ -158,7 +171,7 @@ codebase tree, and registry health.
 - **Tasks** own implementation worktrees and PR delivery. Every Task
   reports through its Project Work; the Wave retains root inspection and
   override. Waves and Projects remain control-plane processes in main.
-- **Task workspace presentation** reads `lf task changes/diff/file --json`.
+- **Task workspace presentation** reads `lf task watch/changes/diff/file --json`.
   Lifecycle mutations remain `lf task run/resume/interrupt`; human nodes use
   the Task's persisted flow position and provider Run identity.
 - **Registry queries** own durable reads. `RegistryQuery` runs
@@ -182,6 +195,8 @@ codebase tree, and registry health.
 - `LoopflowMac/Views/RoadmapView.swift` — all-Wave roadmap and lifecycle controls
 - `LoopflowMac/Views/WaveDetailPane.swift` — Wave Chat plus Project/Task work
 - `LoopflowMac/Views/TaskWorkspaceView.swift` — Task diff, file, Ghostty, and Warp surface
+- `LoopflowMac/Views/TaskWatchView.swift` — retained plans, attempts, and transition navigation
+- `LoopflowMac/TaskWatchStore.swift` — snapshot freshness and stable inspection selection
 - `LoopflowMac/PortfolioRepoState.swift` — one repository's Wave projection
 - `Loopflow/Services/RegistryQuery.swift` — typed `lf --json` reads
 - `Loopflow/Services/WaveChatClient.swift` — per-Wave event and message client

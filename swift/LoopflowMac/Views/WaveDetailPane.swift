@@ -1043,11 +1043,12 @@ private struct WaveWorkInspector: View {
                     location: taskLocation,
                     prs: task.prs
                 )
-                if task.reference.workspace != nil {
-                    Button("Open Task workspace") { showsTaskWorkspace = true }
-                        .buttonStyle(.borderedProminent)
-                        .controlSize(.small)
+                Button("Watch", systemImage: "point.3.connected.trianglepath.dotted") {
+                    showsTaskWorkspace = true
                 }
+                .buttonStyle(.borderedProminent)
+                .controlSize(.small)
+                .accessibilityIdentifier("task-watch-\(task.task.identifier)")
             }
         }
         .padding(Spacing.md)
@@ -1061,7 +1062,7 @@ private struct WaveWorkInspector: View {
                     runtime: task.runtime,
                     repoPath: repoPath,
                     terminalStore: terminalStore,
-                    initialSection: .changes
+                    initialSection: .watch
                 )
             }
         }

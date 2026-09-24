@@ -176,9 +176,18 @@ enum LocalWaveAgentLauncher {
     /// stdout. Backs `RegistryQuery` on macOS: the wave dashboard reads durable
     /// facts by shelling the daemonless Home `lf` over the local store, not
     /// by streaming a center. Throws on a spawn failure or a non-zero exit.
-    static func queryLf(_ subargs: [String], cwd: String?) throws -> String {
+    static func queryLf(_ subargs: [String], cwd: String?) async throws -> String {
         let lfPath = try controlLfPath()
-        guard let result = run([lfPath] + subargs, cwd: cwd) else {
+        let cancellation = QueryCancellation()
+        let captured = await withTaskCancellationHandler {
+            await Task.detached(priority: .userInitiated) {
+                run([lfPath] + subargs, cwd: cwd, cancellation: cancellation)
+            }.value
+        } onCancel: {
+            cancellation.cancel()
+        }
+        try Task.checkCancellation()
+        guard let result = captured else {
             throw LocalLfError(
                 errorDescription: "Failed to spawn: lf \(subargs.joined(separator: " "))"
             )
@@ -224,7 +233,8 @@ enum LocalWaveAgentLauncher {
 
     private static func run(
         _ args: [String],
-        cwd: String? = nil
+        cwd: String? = nil,
+        cancellation: QueryCancellation? = nil
     ) -> (status: Int32, stdout: String, stderr: String)? {
         let process = Process()
         let stdout = Pipe()
@@ -246,7 +256,11 @@ enum LocalWaveAgentLauncher {
         let errHandle = stderr.fileHandleForReading
 
         do {
-            try process.run()
+            if let cancellation {
+                try cancellation.start(process)
+            } else {
+                try process.run()
+            }
         } catch {
             return nil
         }
@@ -262,6 +276,7 @@ enum LocalWaveAgentLauncher {
         queue.async(group: group) { collector.setStderr(errHandle.readDataToEndOfFile()) }
 
         process.waitUntilExit()
+        cancellation?.finished()
         group.wait()
 
         return (
@@ -269,6 +284,33 @@ enum LocalWaveAgentLauncher {
             String(data: collector.stdout, encoding: .utf8) ?? "",
             String(data: collector.stderr, encoding: .utf8) ?? ""
         )
+    }
+}
+
+/// Serializes cancellation with spawn so hiding a view cannot leave a query
+/// starting after its cancellation. This owns only the query subprocess.
+final class QueryCancellation: @unchecked Sendable {
+    private let lock = NSLock()
+    private var process: Process?
+    private var cancelled = false
+
+    func start(_ process: Process) throws {
+        try lock.withLock {
+            if cancelled { throw CancellationError() }
+            try process.run()
+            self.process = process
+        }
+    }
+
+    func cancel() {
+        lock.withLock {
+            cancelled = true
+            if let process, process.isRunning { process.terminate() }
+        }
+    }
+
+    func finished() {
+        lock.withLock { process = nil }
     }
 }
 

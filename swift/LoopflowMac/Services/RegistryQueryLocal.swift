@@ -8,9 +8,7 @@ import Loopflow
 
 enum RegistryQueryLocal {
     static let shared = RegistryQuery { args, cwd in
-        try await Task.detached(priority: .userInitiated) {
-            try LocalWaveAgentLauncher.queryLf(args, cwd: cwd)
-        }.value
+        try await LocalWaveAgentLauncher.queryLf(args, cwd: cwd)
     }
 }
 #endif

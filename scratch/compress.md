@@ -1,27 +1,88 @@
-# Compression validation — 2026-09-23
+# Watch model compression review — 2026-09-23
 
-Review of committed model at `cc2dff810`; no executable changes or fresh test
-runs. Durable ownership and continuation findings now live in
-[Product memory](../wave/product/MEMORY.md#passive-task-watch-loo-293-branch-evidence-2026-09-23).
-Concurrent snapshot work was outside that review.
+No further model or API reduction taken. Reviewed the snapshot and grouped output
+contracts at `63bfcb9b7`, including directory-recovery code committed by another
+run. This pass changes this report and removes a duplicate README example. No
+executable changes, DTO removals, or fresh behavioral proof.
 
-## Checks for subsequent changes
+## Effective model, before and after
 
-- Keep one grouped Rust/Swift output contract: TaskOutputSource owns labels,
-  records, and source evidence; OutputRecord owns item identity, revision, and
-  ConversationEvent. Compare both decoders with `tests/fixtures/dto/task_output.json`.
-- For continuation changes, run the focused OpenCode interleaving tests. Verify
-  same-timestamp edits survive newer writes between pages, timestamp-only edits
-  do not replay, and 1,000 completed parts do not accumulate historical hashes.
-  Measure same-timestamp/unfinished sets and per-Run state separately.
-- For transport changes, prove file and stdin input near the shared cursor bound
-  plus Swift cleanup after success/failure. Prior configured reads returned 469
-  distinct revisions and accepted a 2,186,420-byte padded cursor; padding proves
-  transport only, not realistic retained state or live arrival.
-- Independent history/live continuation, bounded discovery/state, complete
-  capture, and the configured Watch demonstration remain acceptance checks in
-  the active Task design. A source review or quiet readable page cannot replace
-  them. Do not infer provider attribution from a journal source discriminator.
+Unchanged: FlowPosition and its claim authorize execution. Task events retain
+immutable plans and committed stage/attempt facts. Rust folds them into Watch
+snapshots, joining Run manifests without reconstructing missing plans. Journals
+and provider-native history own output. TaskOutputSource groups attribution,
+ordered records, and source evidence; OutputRecord owns source identity, revision,
+and ConversationEvent. Cursors hold private reader progress. Swift decodes the
+projections and carries continuation through temporary files.
+
+The earlier removal of TaskOutputRecord and the parallel records array remains
+intact. Both commands already share read-only Task lookup and manifest discovery.
+Swift reuses PlayheadStepKind and TaskFlowStage. No compatibility alias, second
+transcript store, or Swift Watch reducer was found to delete.
+
+## Path and mirrors inspected
+
+Read `work/task/flow_history.rs`, Task event observation exclusion, transactional
+history reads and the position writer in `store/sqlite/durable.rs`, and both
+`ops/task_watch.rs` and `ops/task_output.rs`. Followed `ops/task.rs` read-only
+lookup through CLI dispatch and human/JSON rendering. Reviewed `run_record.rs`
+discovery, `native_source.rs`, `output.rs`, and `output/native.rs` continuation
+and normalization.
+
+Compared Watch/output DTO fields with `TaskWatch.swift`, `TaskOutput.swift`, both
+shared JSON fixtures, and Rust/Swift fixture assertions. Read RegistryQuery's
+typed reads and temporary-file transport, the shared PlayheadStepKind, CLI
+examples, planning documentation, and the active design. Searched for obsolete
+TaskOutputRecord and TaskWatchStepKind names; neither remains.
+
+## Candidates left intentionally
+
+- **Attempts and Runs:** attempts retain entry/readiness/failure and separate
+  retries. The Run list also represents auxiliary Runs and bindings whose plans
+  are missing. Deriving either exclusively from the other loses evidence.
+  Output carries attribution so each page is independently interpretable.
+- **State, settlement, active stage:** replacement can leave a bound attempt;
+  invocation completion is separate from Task completion. Active position cannot
+  be inferred from the last event. Ready summaries and failures survive later
+  states, so payload presence cannot replace the attempt-state enum.
+- **Stage coordinates and edges:** TaskFlowStage is shared by receipts, active
+  position, Run bindings, and transitions. Omitting invocation IDs inside edges
+  would introduce another coordinate type and conversions just to save repeated
+  fields. TaskWatchTransition restricts the projection to edges; exposing the
+  entire TaskFlowEvent enum would move filtering to clients. Kind, human policy,
+  authored node ID, and expanded ancestry describe different plan facts.
+- **History/discovery envelopes:** TaskFlowHistory holds one transaction's
+  position and events; unavailable storage differs from no active position.
+  TaskRunManifests carries healthy manifests with attribution uncertainty.
+  Neither is a one-object wrapper or parallel store. An enum replacing private
+  availability fields alone would remove no owner or public concept.
+- **Evidence fields:** page-level discovery gaps may have no known source.
+  Source availability, reset, pagination, and malformed records are independent
+  observations; an empty page cannot stand in for them.
+- **Output identities:** journal protocol does not identify provider. Native
+  calls/results share conversation identity but remain separate source records;
+  revisions identify changing normalized content. Collapsing these would undo
+  the tool-correlation repair. SourcePage owns successful reader continuation;
+  TaskOutputSource adds attribution and unavailable-source evidence.
+- **Provenance and continuation:** launch-owned location, file identity, Session
+  identity, verified headers, and byte anchors serve different checks. OpenCode
+  watermark, frozen ceiling, page position, and boundary/unfinished hashes prevent
+  different loss/replay cases. A tagged private cursor alone adds variants without
+  solving bounded discovery or retained-state growth. Revisit its shape with
+  independent history/live continuation. Swift's query-scoped transport file is
+  not durable watcher state and should not become a persistent cache.
+
+## Verification and remaining work
+
+No tests, builds, or lint rerun: executable behavior is unchanged. Documentation
+whitespace checked with `git diff --check`. Earlier focused passes remain dated
+implementation receipts, not fresh validation from this pass.
+
+Independent history/live continuation, bounded discovery/state, complete capture,
+the Mac Watch surface, and the configured demonstration remain required in this
+PR. Directory recovery is present by source inspection; its behavioral proof
+belongs to the repair pass. This review establishes no polling readiness,
+publication readiness, or Task completion.
 
 ---
 

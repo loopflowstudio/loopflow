@@ -133,45 +133,32 @@ shared Task identities where available. No dependency on its landing.
 
 ## This slice
 
-First repair the two reader findings: preserve Claude/Codex native call IDs in
-conversation item identity while keeping source record identity distinct; return
-healthy Task output with explicit page-level discovery gaps for unreadable Run
-manifests. Use that same discovery result in the Watch snapshot. Prove reversed
-concurrent tool results and malformed/missing unrelated manifest recovery through
-the actual readers, fixtures, and CLI before finishing the snapshot below.
+Make the completed shared snapshot inspectable in Mac Watch. Add Watch beside
+Changes and Terminal, and a Watch action in Work, Roadmap, and Wave Task detail.
+Only Changes and Terminal require runtime/workspace evidence. Watch reads the
+Task by identifier even after its worker/worktree is gone.
 
-Implement the shared Watch snapshot over the committed provenance foundation.
-`lf task watch ISSUE --json` and `RegistryQuery.taskWatch` expose persisted
-invocations, expanded stage labels/ancestry, separate attempts, recorded
-transitions/settlement, the active stage, and every attributed Run. Rust folds
-history; Swift only decodes it. Read the active position and ledger in one SQLite
-read transaction. Missing plan or Run receipts remain explicit gaps. Never load
-current YAML or require a worktree, worker, or provider client.
+Render the selected persisted invocation as connected, selectable stages with
+kind, ancestry, recorded state, attempt count, and exact Iterate return links.
+Selecting a stage shows its distinct attempts, readiness/failure evidence and
+Run/provider labels. Earlier invocations and unassigned auxiliary Runs remain
+inspectable. Keyboard selection uses native controls; avoid motion entirely.
+Swift holds only the snapshot, selection and request state, never reconstructs
+flow history or infers execution authority.
 
-The configured Home predates Task flow-position storage. When that table is
-absent, keep reading retained events and manifests and report
-`position_unavailable`; never interpret its absence as proven completion or
-migrate the database from a Watch read. No legacy position reader is added.
+Read once on opening and on explicit Refresh. Keep the last good snapshot with
+an explicit stale message after a failed refresh, preserve the selected historical
+stage across transitions, and cancel reads when hidden. Do not install the
+one-second poll before bounded discovery is implemented. Do not label snapshot
+inspection as live output or add a fake Follow live action.
 
-Each stage owns attempts (iteration, optional Run identity, descriptive state,
-ready summary, failure); transitions retain exact from/to stages and reasons.
-A retry preserves its blocked attempt and starts a new attempt when a new Run
-binds. Settlement never marks an interrupted/replaced attempt completed. Run
-labels remain manifest provider labels, with missing manifests explicitly unknown.
-Output availability and capture gaps remain owned by TaskOutputPage, avoiding a
-second source-health interpretation in the diagram snapshot.
-
-This first snapshot reads retained history and immutable manifests completely;
-it does not claim bounded discovery or history paging. Those remain required
-before the one-second Watch poll. No paging cursor is fabricated for an unpaged
-read. Snapshot tests prove repeated skills, human Iterate/retry, completion,
-replacement, missing evidence, and concurrent auxiliary Run attribution. A shared
-Rust/Swift fixture pins the exact shape. A passive configured CLI read from outside
-the worktree proves the real read path without changing Task/provider state.
-
-The narrow checkpoint is complete; its former stop boundary applied to that pass.
-The full Watch UI, capture proof, independent output history/live continuation,
-and configured human demo remain in the same PR's subsequent slices.
+Done when focused Swift tests prove exact stage identity despite repeated names,
+selection retention across transition/completion, separate attempts/Iterate
+links, stale evidence/recovery, and Watch access without runtime/workspace. Build
+the Mac target and inspect a rendered fixture of the real Watch view. The full
+output feed, independent cursors/bounded discovery, Session decision navigation,
+automatic following, and configured end-to-end human demo remain subsequent
+slices in this same PR.
 
 ## Remaining slices and full Done When
 
@@ -193,6 +180,27 @@ owned by the pinned lifecycle. No multi-Task dashboard, graph editing, or remote
 transport expansion is in scope.
 
 ## Evidence ledger
+
+- 2026-09-23 Mac snapshot inspection: Watch now opens from Work, Roadmap, and
+  Wave Task detail without runtime/workspace prerequisites. It renders retained
+  invocations, selectable stages, ancestry/kinds, attempts, readiness/failures,
+  exact transition links, and all attributed Runs. Selection survives refresh and
+  completion; unavailable reads preserve the last snapshot with a stale notice.
+- Watch reads on opening/manual Refresh only. RegistryQueryLocal now propagates
+  cancellation through the existing launcher runner to its exact query subprocess;
+  no provider client or Session operation is involved. A newer refresh supersedes
+  a still-finishing query so reopening cannot strand an empty Watch or overwrite
+  fresh evidence with the older error.
+- `LF_WATCH_RENDER_PATH=/tmp/loo293-watch-snapshot.png swift test --package-path
+  swift --filter TaskWatchTests` passed all 5 focused tests and built/linked the
+  Mac target. Tests cover selection across transitions/completion/repeated names,
+  stale evidence/recovery, Iterate navigation/separate attempts, no-workspace
+  access, cancellation before/after subprocess spawn, and overlapping refreshes.
+  The real Watch view was rendered from the shared DTO fixture in an offscreen
+  AppKit window and visually inspected. This is fixture UI proof, not a configured
+  live demo. Swift boundary and whitespace checks passed; existing Ghostty symbol
+  warnings remain. No Rust, broad-suite, Xcode hosted, publication, or human gate
+  was run for this slice. See `watch-plan-inspection.md` for its review limits.
 
 - 2026-09-23 slice review: repaired shared Run-directory discovery after a real
   unreadable-prefix CLI regression failed with exit 1. Individual enumeration

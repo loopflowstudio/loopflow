@@ -11,6 +11,8 @@ struct WorkSurfaceView: View {
     @Environment(\.palette) private var palette
     @State private var controlError: String?
     @State private var activeControlId: String?
+    @State private var workspaceSelection: WorkTaskSelection?
+    @ObservedObject private var terminalStore = TaskTerminalStore.shared
 
     private var snapshot: RoadmapSnapshot? { model.roadmap.value }
     private var queryError: String? { model.roadmap.errorMessage }
@@ -32,7 +34,16 @@ struct WorkSurfaceView: View {
             content
         }
         .background(palette.background)
-
+        .sheet(item: $workspaceSelection) { selection in
+            TaskWorkspaceView(
+                task: selection.task.task,
+                reference: selection.task.reference,
+                runtime: selection.task.runtime,
+                repoPath: selection.wave.repo,
+                terminalStore: terminalStore,
+                initialSection: .watch
+            )
+        }
     }
 
     // MARK: - Content routing
@@ -241,6 +252,10 @@ struct WorkSurfaceView: View {
                         .foregroundStyle(palette.textSecondary)
                         .accessibilityLabel(taskConditionAccessibilityLabel(task))
                     WorkChannelChips(task: task)
+                    Button("Watch", systemImage: "point.3.connected.trianglepath.dotted") {
+                        workspaceSelection = WorkTaskSelection(wave: found.wave.wave, task: task)
+                    }
+                    .accessibilityIdentifier("task-watch-\(task.task.identifier)")
                     TaskActionCluster(
                         task: task,
                         isActing: activeControlId == "task:\(task.id)",

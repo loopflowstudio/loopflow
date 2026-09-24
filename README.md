@@ -85,7 +85,6 @@ lf --task INF-123 research "write scratch/runtime.md"    # one independent Task-
 lf task restart INF-123 "reconcile all scratch first" # checkpoint and begin a new kickoff
 lf task status INF-123 --json                         # inspect durable state
 lf task watch INF-123 --json                          # inspect retained stages, attempts, and Runs
-lf task watch INF-123 --json                          # inspect saved flow plans, attempts, and Runs
 lf task output INF-123 --json                         # read passive output; continue with --cursor
 lf pr arm -c                                          # request exact-head auto-merge and return
 lf pr land -c                                         # watch, repair CI, merge, then complete the Task

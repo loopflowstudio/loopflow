@@ -167,7 +167,7 @@ struct RoadmapView: View {
                 runtime: selection.task.runtime,
                 repoPath: selection.wave.repo,
                 terminalStore: terminalStore,
-                initialSection: .changes
+                initialSection: .watch
             )
         }
     }
@@ -457,16 +457,22 @@ struct RoadmapView: View {
     }
 
     private func taskCard(_ task: RoadmapTask, wave: WaveSnapshot) -> some View {
-        RoadmapTaskRow(
-            task: task,
-            isSelected: true,
-            activeControlId: activeControlId,
-            onSelect: {},
-            onAction: { action in
-                perform(action, on: RoadmapTaskSelection(wave: wave, task: task))
-            },
-            onOpenWorktree: openWorktree
-        )
+        VStack(alignment: .leading, spacing: Spacing.sm) {
+            RoadmapTaskRow(
+                task: task,
+                isSelected: true,
+                activeControlId: activeControlId,
+                onSelect: {},
+                onAction: { action in
+                    perform(action, on: RoadmapTaskSelection(wave: wave, task: task))
+                },
+                onOpenWorktree: openWorktree
+            )
+            Button("Watch", systemImage: "point.3.connected.trianglepath.dotted") {
+                workspaceSelection = RoadmapTaskSelection(wave: wave, task: task)
+            }
+            .accessibilityIdentifier("task-watch-\(task.task.identifier)")
+        }
         .padding(Spacing.lg)
         .background(palette.surface)
         .clipShape(RoundedRectangle(cornerRadius: CornerRadius.lg))

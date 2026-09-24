@@ -71,6 +71,7 @@ final class TaskTerminalStore: ObservableObject {
 }
 
 enum TaskWorkspaceSection: String, CaseIterable, Identifiable, Hashable {
+    case watch = "Watch"
     case changes = "Changes"
     case terminal = "Terminal"
 
@@ -100,6 +101,7 @@ struct TaskWorkspaceView: View {
     @State private var file: TaskFileSnapshot?
     @State private var error: String?
     @State private var loading = false
+    @State private var watchStore = TaskWatchStore()
 
     init(
         task: TaskPlanningSnapshot,
@@ -126,11 +128,12 @@ struct TaskWorkspaceView: View {
         VStack(spacing: 0) {
             header
             Divider()
-            if let runtime, let workspace {
-                switch section {
-                case .changes:
+            if section == .watch {
+                TaskWatchView(issue: task.identifier, store: watchStore)
+            } else if let runtime, let workspace {
+                if section == .changes {
                     changesView
-                case .terminal:
+                } else {
                     TaskTerminalWorkspaceView(
                         taskId: runtime.workId,
                         issueIdentifier: task.identifier,
@@ -140,15 +143,17 @@ struct TaskWorkspaceView: View {
                 }
             } else {
                 ContentUnavailableView(
-                    "Task has not started",
+                    "Workspace unavailable",
                     systemImage: "hammer",
-                    description: Text("Start the Task before opening a workspace.")
+                    description: Text("Changes and Terminal require a Task worktree. Watch can inspect retained history.")
                 )
             }
         }
         .frame(minWidth: 820, minHeight: 560)
         .background(palette.background)
-        .task(id: runtime?.workId) { await loadChanges() }
+        .task(id: "\(task.identifier)|\(runtime?.workId ?? "")|\(section.rawValue)") {
+            if section == .changes { await loadChanges() }
+        }
         .task(id: previewIdentity) { await loadPreview() }
     }
 
@@ -169,20 +174,23 @@ struct TaskWorkspaceView: View {
             Picker("Workspace", selection: $section) {
                 ForEach(TaskWorkspaceSection.allCases) { section in
                     Text(section.rawValue).tag(section)
+                        .disabled(section != .watch && (runtime == nil || workspace == nil))
                 }
             }
             .pickerStyle(.segmented)
-            .frame(width: 210)
+            .frame(width: 280)
             Button("Warp") { openWarp() }
                 .disabled(workspace == nil)
-            Button {
-                Task { await loadChanges() }
-            } label: {
-                Image(systemName: "arrow.clockwise")
+            if section == .changes {
+                Button {
+                    Task { await loadChanges() }
+                } label: {
+                    Image(systemName: "arrow.clockwise")
+                }
+                .buttonStyle(.borderless)
+                .help("Refresh Task changes")
+                .disabled(runtime == nil || workspace == nil || loading)
             }
-            .buttonStyle(.borderless)
-            .help("Refresh Task changes")
-            .disabled(runtime == nil || workspace == nil || loading)
         }
         .padding(Spacing.md)
     }
@@ -294,7 +302,7 @@ struct TaskWorkspaceView: View {
 
     @MainActor
     private func loadChanges() async {
-        guard runtime != nil else { return }
+        guard runtime != nil, workspace != nil else { return }
         loading = true
         defer { loading = false }
         do {

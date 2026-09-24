@@ -197,3 +197,10 @@ process sees a screen and Metal device; the earlier no-rendering explanation
 is not established. `native-surface-diagnostic.md` and its probe preserve the
 reproduction. Restore that boundary before the configured navigation trial;
 no production change or publication is justified by this diagnostic alone.
+
+Second review correction, 2026-09-23: portfolio discovery also reconciled selected
+Work against partial planning. Removed that redundant call and extended the
+regression through portfolio refresh and repository return. All 25 focused
+navigation/model tests pass; complete planning refresh and explicit selection
+validation retain their behavior. Configured native proof remains unmet, so
+publication and Task completion remain unclaimed.

@@ -111,6 +111,11 @@ unimplemented per-worktree layout.
 
 ## Next proof, without redesign
 
+First restore Ghostty surface initialization using the isolated reproduction in
+`native-surface-diagnostic.md`. Repeating navigation tests against the same nil
+surface cannot establish the missing native behavior. The diagnostic narrows the
+failure boundary; it neither proves its cause nor waives configured proof.
+
 Use the configured native app on a rendering-capable, permissioned host. In one
 repository show autonomous/upcoming/human Tasks; open the exact existing Session;
 retain an unfinished draft in a split beside a running shell. Inspect Task and
@@ -122,3 +127,44 @@ Complete a disposable authorized Session and prove pane reconciliation without
 Task completion. Do not transfer or resolve the human's current Sessions merely
 to manufacture evidence. Retain the native regression alongside that configured
 trial. Until this succeeds, the skill's publication condition is unmet.
+
+## Second review after native diagnosis — 2026-09-23
+
+Disposition remains **not approved for publication**. Re-read the complete
+current Task patch via `lf task diff LOO-291 --json` (`truncated: false`), comparing
+its source delta with the already reviewed patch. Receipts:
+`/tmp/main-view-task-review-current.json` and
+`/tmp/main-view-task-review-delta.diff`. The intervening implement/compress passes
+added diagnosis and review notes, without production changes. The claim matrix
+above still applies, with this additional corrected selection path:
+
+| Claim | Planned behavior | Implemented behavior | Proof | Result |
+|---|---|---|---|---|
+| Portfolio refresh preserves Work context | Repository discovery cannot declare Work removed during partial planning | Removed discovery's redundant selection reconciliation; complete planning refresh still reconciles | Extended unavailablePlanningPreservesRepositorySelection, both cases; PodiumModelTests | pass, model |
+
+The regression first failed for both unavailable and truncated planning after
+`refreshPortfolio(initialRepoPath: nil)` cleared the selected Task. The final fix
+removes that one reconciliation call. Explicit selection validation and complete
+planning refresh retain their existing behavior. Moving the completeness check
+into every selection call was rejected after the existing missing-selection test
+caught its changed behavior; that approach is absent from the final source.
+
+Final focused command passed 25 tests, including both partial-planning cases:
+
+```sh
+swift test --package-path swift -Xswiftc -gnone --jobs 4 \
+  --filter 'WorkspaceNavigationTests|PodiumModelTests'
+```
+
+Exit 0; `/tmp/main-view-task-review-portfolio-final.log`. Pre-fix failure:
+`/tmp/main-view-task-review-portfolio-before.log`. Intermediate rejected fix:
+`/tmp/main-view-task-review-portfolio-after.log`. No production/test source edits
+followed the final pass. This is local model/view evidence; no native or external
+trial is included in the count.
+
+Repeated negative searches confirm no removed navigation/scope types returned,
+one Podium caller for each shared Session/roadmap inventory read, and one root
+window registry. No launch path, DTO, schema, migration, Session action policy,
+or native ownership changed. The slice advances the accepted design, with the
+same native proof boundary and remaining LOO-291 scope. Nothing was published,
+landed, or marked complete.

@@ -143,6 +143,8 @@ struct WorkspaceNavigationTests {
         await source.replaceRoadmap(String(decoding: try JSONSerialization.data(withJSONObject: snapshot), as: UTF8.self))
         await model.refresh()
         #expect(model.selection == .task(id: "issue-review"))
+        await model.refreshPortfolio(initialRepoPath: nil)
+        #expect(model.selection == .task(id: "issue-review"))
         model.setRepoPath("/src/context")
         model.setRepoPath("/src/loopflow")
         #expect(model.selection == .task(id: "issue-review"))

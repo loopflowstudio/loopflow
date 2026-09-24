@@ -34,6 +34,44 @@ remain the existing path. The separate lf-new checkout was not edited.
 
 ## Recorded validation
 
+**Iteration 2 mounted-workspace proof, 2026-09-23:**
+`WorkspaceNavigationProofTests.workspaceRetainsNativeSplit` now hosts the real
+`SessionsView` in an AppKit window with two retained Ghostty surfaces. It invokes
+the existing SwiftUI toolbar actions through ViewInspector: show list, Work
+details, All work, Return to terminals, hide list. It then switches repository
+and reconstructs the view with the same repository identity boundary used by
+Podium. At each transition it checks the original surfaces, split layout and
+focused pane; hidden terminals relinquish first responder. Returning restores
+native focus and selected Work. A Session's unfinished input reaches its same
+cat child afterward, and the companion child still accepts input.
+
+The companion emits 120 numbered history rows. The test scrolls to the top and
+checks the same first five viewport lines across navigation and repository
+return. This checks actual Ghostty scroll position rather than a saved model
+value. Initial fixture failures assumed the first row lacked a login banner;
+the final fixture retains that banner and emits history from the child to avoid
+PTY input echo interleaving with cat output. No production assertion or behavior
+was weakened to pass.
+
+Final command:
+
+```sh
+swift test --package-path swift -Xswiftc -gnone --jobs 4 \
+  --filter WorkspaceNavigationProofTests/workspaceRetainsNativeSplit
+```
+
+One test passed, exit 0; `/tmp/loo291-mounted-navigation-final.log`. No Swift
+edits followed this pass. The implementation needed no production correction.
+Only this new behavioral proof ran; no broad gate was run.
+
+Limits: planning and Session records are fixtures, both surfaces are prepared
+before mounting, and the actions use ViewInspector rather than external mouse
+or accessibility input. This is native integration evidence, not configured
+provider startup/continuation, Session resolution, a paint budget, navigator
+scroll retention, or any external-product trial. The configured app interaction
+gap recorded in `review-slice.md` remains; no publication or completion follows
+from this test.
+
 **Latest implement result:** surface initialization is restored and both
 `hiddenTerminalPreservesDraft` and `releaseSurfaceIsWindowLocal` pass with the
 real Ghostty artifact and PTYs. CoreVideo rejected display-link creation;

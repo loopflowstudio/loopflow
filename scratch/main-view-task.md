@@ -223,3 +223,13 @@ focus request; its update distinguishes disabling from unchanged selection.
 The extended real-PTY regression failed before the correction and passes after,
 including the previous draft/hiding/search checks. No further model/API reduction
 was justified; `compress.md` records the inspected paths and intentional boundaries.
+
+Iteration 2 proof, 2026-09-23: added a mounted SessionsView regression using real
+Ghostty PTYs, fixture planning/Session records, and the existing toolbar actions.
+The final focused test passes: A/D and detail/overview navigation plus repository
+return preserve both surfaces, split layout, selected Work, native focus,
+unfinished input and the companion terminal's scrolled viewport. No production
+change was needed. `navigation-proof.md` records its exact command and limits.
+Configured provider continuation/resolution, navigator scroll, visual quality
+and timing proof remain open; the integration fixture is not that human-path
+trial and does not change full LOO-291 scope or publication disposition.

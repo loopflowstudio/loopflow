@@ -23,7 +23,7 @@ final class TaskWatchStore {
     private(set) var outputError: String?
     private(set) var needsOutputReload = false
     private(set) var outputRevision = 0
-    private(set) var latestOutputSource: TaskWatchOutput.ID?
+    private var outputObservation = 0
     private var liveCursor: String?
     private var historyCursor: String?
     private var outputRequest: UUID?
@@ -35,6 +35,29 @@ final class TaskWatchStore {
                 && (!filtersStage || (source.source.stage?.invocationId == invocationId
                     && source.source.stage?.stepIndex == stepIndex))
         }
+    }
+
+    var outputGroups: [TaskWatchOutputGroup] {
+        let rows = visibleOutput.flatMap { output in output.rows.map { (output.source, $0) } }
+            .sorted { $0.1.position < $1.1.position }
+        var groups: [TaskWatchOutputGroup] = []
+        for (source, row) in rows {
+            if let last = groups.last, last.source.runId == source.runId,
+               last.source.source == source.source, last.history == row.position.history {
+                groups[groups.count - 1].rows.append(row)
+            } else {
+                groups.append(TaskWatchOutputGroup(source: source, rows: [row]))
+            }
+        }
+        return groups
+    }
+
+    var latestOutputRow: TaskWatchOutputRowReference? {
+        output.flatMap { output in
+            output.rows.compactMap { row in
+                row.lastLiveObservation.map { ($0, TaskWatchOutputRowReference(source: output.id, row: row.id)) }
+            }
+        }.max { $0.0 < $1.0 }?.1
     }
 
     func inspectStage(_ index: UInt32?) {
@@ -86,7 +109,7 @@ final class TaskWatchStore {
             liveCursor = nil
             historyCursor = nil
             output = []
-            latestOutputSource = nil
+            outputObservation = 0
             historyGaps = []
             liveGaps = []
             needsOutputReload = false
@@ -131,14 +154,10 @@ final class TaskWatchStore {
         }
         for source in page.sources {
             if let index = output.firstIndex(where: { $0.source.runId == source.runId && $0.source.source == source.source }) {
-                if !history, source.records.contains(where: { !output[index].containsRevision($0) }) {
-                    latestOutputSource = output[index].id
-                }
-                output[index].merge(source, history: history)
+                output[index].merge(source, history: history, observation: &outputObservation)
             } else {
                 var group = TaskWatchOutput(source: source)
-                group.merge(source, history: history)
-                if !history, !source.records.isEmpty { latestOutputSource = group.id }
+                group.merge(source, history: history, observation: &outputObservation)
                 output.append(group)
             }
         }

@@ -14,7 +14,7 @@ struct TaskWatchOutputTests {
         let original = try fixture()
         await store.readOutput(issue: "LOO-293", query: query(original))
         let first = try #require(store.output.first?.id)
-        #expect(store.latestOutputSource == store.output[1].id)
+        #expect(store.latestOutputRow?.source == store.output[1].id)
 
         var changed = try #require(JSONSerialization.jsonObject(with: original) as? [String: Any])
         var sources = try #require(changed["sources"] as? [[String: Any]])
@@ -24,12 +24,12 @@ struct TaskWatchOutputTests {
         sources[1]["records"] = []
         changed["sources"] = sources
         await store.readOutput(issue: "LOO-293", query: query(try JSONSerialization.data(withJSONObject: changed)))
-        #expect(store.latestOutputSource == first)
+        #expect(store.latestOutputRow?.source == first)
         #expect(store.output.first?.rows.last?.text == "New output from the first Run")
         sources[0]["records"] = []
         changed["sources"] = sources
         await store.readOutput(issue: "LOO-293", query: query(try JSONSerialization.data(withJSONObject: changed)))
-        #expect(store.latestOutputSource == first)
+        #expect(store.latestOutputRow?.source == first)
 
         store.inspectRun("missing-run")
         #expect(store.visibleOutput.isEmpty)
@@ -47,9 +47,10 @@ struct TaskWatchOutputTests {
             OutputRecord(sourceItemId: "end", revision: "1", event: .itemCompleted(turnId: "turn", item: .tool(id: "tool", name: "bash", status: .completed, input: nil, output: "hello")))
         ]
         let source = TaskOutputSource(runId: "run", provider: "codex", stage: nil, records: records, source: .journal, available: true, hasMore: false, reset: false, gaps: [])
+        var observation = 0
         var output = TaskWatchOutput(source: source)
-        output.merge(source, history: false)
-        output.merge(source, history: true)
+        output.merge(source, history: false, observation: &observation)
+        output.merge(source, history: true, observation: &observation)
         #expect(output.rows.count == 1)
         #expect(output.rows.first?.text == "hello")
         #expect(output.rows.first?.title == "bash · completed")
@@ -72,12 +73,13 @@ struct TaskWatchOutputTests {
                 item: .tool(id: id, name: "tool_result", status: id == "first" ? .failed : .completed,
                             input: .object(["call_id": .string(id)]), output: "result \(id)")))
         })
+        var observation = 0
         var output = TaskWatchOutput(source: calls)
-        output.merge(results, history: false)
-        output.merge(calls, history: true)
+        output.merge(results, history: false, observation: &observation)
+        output.merge(calls, history: true, observation: &observation)
         #expect(output.rows.map(\.title) == ["bash · failed", "bash · completed"])
         #expect(output.rows.map(\.text) == ["echo first\nresult first", "echo second\nresult second"])
-        output.merge(results, history: true)
+        output.merge(results, history: true, observation: &observation)
         #expect(output.rows.count == 2)
     }
 

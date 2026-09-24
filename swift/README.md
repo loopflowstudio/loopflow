@@ -126,10 +126,13 @@ Tasks or repositories. Enable **Show completed Tasks**, or search by title or
 identifier, to inspect completed Tasks present in the planning snapshot.
 
 **Refresh** reads the plan and arriving output. The lower pane groups available
-prose, commands, tool output and failures by Run, with provider and stage labels.
-Select a stage to filter its attempts; click a Run to narrow further. **Load
-history** pages earlier output independently of arrivals. **Follow live** clears
-filters and follows the most recently updated Run; scrolling pauses following.
+prose, commands, tool output and failures into contiguous Run blocks, with provider
+and stage labels. Arrivals follow observation order across Runs. Tool revisions
+update their original row. Select a stage to filter its attempts; click a Run to
+narrow further. **Load history** pages earlier output independently of arrivals;
+loaded history appears before arrivals with its own label. **Follow live** clears
+filters and follows the most recently changed row; scrolling pauses following.
+Expand **Sources** for availability, capture warnings and unread-page details.
 Updates are currently manual while automatic polling is in development.
 
 Failed reads retain the last evidence with a stale notice; unavailable sources

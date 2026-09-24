@@ -26,7 +26,7 @@ struct TaskWatchOutputView: View {
             }
             .padding(Spacing.md)
             HStack {
-                Text("Updates on refresh · grouped by Run; no cross-Run time ordering")
+                Text("Updates on refresh · arrivals in observation order")
                 Spacer()
                 Text(store.followsOutput ? "Following output" : "Scroll paused")
             }
@@ -57,8 +57,44 @@ struct TaskWatchOutputView: View {
                                 .font(Typography.body(12))
                                 .foregroundStyle(palette.textSecondary)
                         }
-                        ForEach(store.visibleOutput) { output in
-                            source(output)
+                        if !store.visibleOutput.isEmpty && store.outputGroups.isEmpty {
+                            Text("No output in the pages read. Expand Sources for availability, or Load history.")
+                                .font(Typography.body(12))
+                                .foregroundStyle(palette.textSecondary)
+                        }
+                        if !store.visibleOutput.isEmpty {
+                            DisclosureGroup {
+                                ForEach(store.visibleOutput) { output in sourceEvidence(output) }
+                            } label: {
+                                HStack {
+                                    Text("Sources (\(store.visibleOutput.count))")
+                                    let unavailable = store.visibleOutput.filter { !$0.source.available }.count
+                                    let warnings = store.visibleOutput.filter { !$0.source.gaps.isEmpty }.count
+                                    if unavailable > 0 {
+                                        Label("\(unavailable) unavailable", systemImage: "exclamationmark.triangle")
+                                    }
+                                    if warnings > 0 {
+                                        Label("\(warnings) with warnings", systemImage: "exclamationmark.triangle")
+                                    }
+                                }
+                                .font(Typography.caption(11))
+                            }
+                        }
+                        ForEach(store.outputGroups) { group in
+                            VStack(alignment: .leading, spacing: Spacing.sm) {
+                                sourceHeader(group.source)
+                                Text(group.history ? "Loaded history" : "Live arrivals")
+                                    .font(Typography.caption(10))
+                                    .foregroundStyle(palette.textSecondary)
+                                ForEach(group.rows) { row in
+                                    TaskWatchOutputRowView(row: row)
+                                        .id(TaskWatchOutputRowReference(source: group.sourceId, row: row.id))
+                                }
+                            }
+                            .padding(Spacing.md)
+                            .frame(maxWidth: .infinity, alignment: .leading)
+                            .background(palette.surfaceMuted)
+                            .clipShape(RoundedRectangle(cornerRadius: CornerRadius.md))
                         }
                         Color.clear.frame(height: 1).id("output-bottom")
                     }
@@ -80,32 +116,36 @@ struct TaskWatchOutputView: View {
     }
 
     private func follow(_ proxy: ScrollViewProxy) {
-        if let source = store.latestOutputSource {
-            proxy.scrollTo(source, anchor: .bottom)
+        if let row = store.latestOutputRow {
+            proxy.scrollTo(row, anchor: .bottom)
         } else {
             proxy.scrollTo("output-bottom", anchor: .bottom)
         }
     }
 
-    private func source(_ output: TaskWatchOutput) -> some View {
-        VStack(alignment: .leading, spacing: Spacing.sm) {
-            HStack {
-                Button { store.inspectRun(output.source.runId) } label: {
-                    Text("\(output.source.provider) · \(output.source.runId)")
-                        .font(Typography.code(11))
-                }
-                .buttonStyle(.link)
-                Spacer()
-                if let stage = output.source.stage {
-                    Button("Stage \(stage.stepIndex + 1) · attempt iteration \(stage.iteration)") {
-                        store.selectStage(stage)
-                    }
-                    .help(stage.invocationId)
-                } else {
-                    Text("Unassigned Run").foregroundStyle(palette.textSecondary)
-                }
+    private func sourceHeader(_ source: TaskOutputSource) -> some View {
+        HStack {
+            Button { store.inspectRun(source.runId) } label: {
+                Text("\(source.provider) · \(source.runId)")
+                    .font(Typography.code(11))
             }
-            .font(Typography.caption(11))
+            .buttonStyle(.link)
+            Spacer()
+            if let stage = source.stage {
+                Button("Stage \(stage.stepIndex + 1) · attempt iteration \(stage.iteration)") {
+                    store.selectStage(stage)
+                }
+                .help(stage.invocationId)
+            } else {
+                Text("Unassigned Run").foregroundStyle(palette.textSecondary)
+            }
+        }
+        .font(Typography.caption(11))
+    }
+
+    private func sourceEvidence(_ output: TaskWatchOutput) -> some View {
+        VStack(alignment: .leading, spacing: Spacing.sm) {
+            sourceHeader(output.source)
             if !output.source.available {
                 Label("Output source unavailable", systemImage: "exclamationmark.triangle")
             } else if output.rows.isEmpty {
@@ -116,10 +156,6 @@ struct TaskWatchOutputView: View {
             ForEach(output.source.gaps, id: \.self) { gap in
                 Label(gap.message, systemImage: "exclamationmark.triangle")
             }
-            ForEach(output.rows) { row in
-                TaskWatchOutputRowView(row: row)
-            }
-            Color.clear.frame(height: 1).id(output.id)
         }
         .font(Typography.caption(11))
         .textSelection(.enabled)

@@ -145,27 +145,31 @@ reviewing this continuation change, implement the output feed in the existing
 Watch view and resolve reader limits as that integration requires. A successful
 CLI read alone is not the product finish line.
 
-Replace the stage list with a connected diagram of the existing immutable plan.
-Group adjacent stages by their retained ancestry. Keep stage selection, attempt
-inspection and output filtering in TaskWatchStore; the diagram derives geometry
-from its native stage buttons and introduces no flow model or read operation.
-Dashed connectors denote plan order; solid connectors denote recorded transitions.
-Draw Iterate and retry paths to their exact recorded coordinates, including a
-retry on the same stage. Never infer completion from a connector or a missing
-active stage. Historical invocations and repeated names remain distinct.
+Render contiguous output blocks in cross-Run observation order through the
+existing TaskWatchStore and TaskWatchOutput. Keep per-source record/revision
+ownership and native tool correlation in TaskWatchOutput. Retain an ephemeral
+observation position alongside each loaded record; derive blocks from folded
+rows rather than persisting another transcript or changing the read contract.
+New prose after another Run's output must form a new block, even in the same
+provider Turn. Repeated pages must not duplicate output or change the follow
+target. Tool revisions update their existing row; Follow targets that exact row.
 
-Use native focusable buttons, arrow-key selection and explicit transition links;
-keep text and icons alongside color. Selection scrolls into view without animation,
-including when reduced motion is enabled. Empty historical plans stay explicitly
-empty. Preserve the existing output feed and manual refresh until the reader's
-bounded-discovery and retained-state requirements are resolved.
+History is ordered separately before arrivals and labeled as loaded history.
+When history reaches an already loaded live record, keep one current revision
+and place it in its source's historical order. Historical pages never overwrite
+live revisions or count as new arrivals. Cross-Run history order describes reader
+observation, not provider timestamps. Filtering derives from the same source
+labels and must not lose auxiliary Runs. Preserve availability/capture/paging
+evidence even for sources without visible output.
 
-Done when a focused Swift proof selects repeated-name custom stages through the
-rendered controls, follows an exact Iterate target, retains retry attempts, and
-inspects completed and missing-plan invocations. Render and inspect the complete
-diagram and its placement beside attempts above the output feed. This slice does
-not establish automatic polling, complete capture, cross-Run observation ordering,
-exact checkpoint Session navigation, or the configured human demonstration.
+Done when focused Swift tests prove A/B/A arrivals produce three labeled blocks,
+adjacent same-Run prose folds, late history and overlapping revisions do not
+replay output, native tool completions remain correlated, and Follow clears
+filters and targets the most recently changed row across Runs. Render and inspect
+the integrated diagram/feed with alternating Runs. Keep manual updates: bounded
+discovery, initialization, retention, automatic polling, full capture, exact
+checkpoint Session navigation and the configured human demo remain required in
+this Task/PR.
 
 ## Remaining slices and full Done When
 
@@ -188,6 +192,26 @@ owned by the pinned lifecycle. No multi-Task dashboard, graph editing, or remote
 transport expansion is in scope.
 
 ## Evidence ledger
+
+- 2026-09-24 observation-order slice: output now derives contiguous Run/source
+  blocks from each retained record's history/arrival position. A/B/A arrivals
+  stay A/B/A, including same-Turn prose; adjacent deltas still fold. Revisions
+  update their original row, and Follow targets the exact most recently changed
+  row. History remains separately labeled, deduplicates overlapping records, and
+  cannot overwrite live revisions. Removed the per-source order arrays and
+  membership sets and the retained latest-Run scroll target. No DTO, CLI read,
+  provider authority or durable transcript changed.
+- Twelve focused feed/output tests passed, including alternating Runs, late
+  history, duplicate/revised records, tool correlation and completion targeting.
+  After the view and fixture refinements, three focused tests passed for the
+  ordering case, rendered Follow control and two Watch render cases; the Mac
+  product compiled/linked. Inspected complete A/B/A feed and integrated workspace
+  images. Source status is presented once, with unavailable/warning counts
+  visible when details are collapsed. See `watch-observation-proof.md` and its
+  receipts. This is local fixture/control evidence, not configured scrolling or
+  provider arrival proof. Discovery/initialization/retention remain unbounded;
+  automatic polling, full capture, checkpoint Session links and the configured
+  human demo remain required before Task settlement.
 
 - 2026-09-24 connected diagram slice: replaced the stage List with native
   selectable nodes grouped by retained ancestry. Measured node anchors draw

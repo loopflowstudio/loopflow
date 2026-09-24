@@ -9,11 +9,14 @@ struct TaskWatchOutput: Identifiable {
     }
 
     private(set) var source: TaskOutputSource
-    private var records: [String: OutputRecord] = [:]
-    private var historyOrder: [String] = []
-    private var liveOrder: [String] = []
-    private var liveIds: Set<String> = []
-    private var historyIds: Set<String> = []
+    private struct ObservedRecord {
+        var value: OutputRecord
+        var position: TaskWatchOutputPosition
+        var hasLiveRevision: Bool
+        var lastLiveObservation: Int?
+    }
+
+    private var records: [String: ObservedRecord] = [:]
     private(set) var historyHasMore = false
     private(set) var liveHasMore = false
 
@@ -21,22 +24,33 @@ struct TaskWatchOutput: Identifiable {
 
     init(source: TaskOutputSource) { self.source = source }
 
-    func containsRevision(_ record: OutputRecord) -> Bool {
-        records[record.sourceItemId]?.revision == record.revision
-    }
-
-    mutating func merge(_ page: TaskOutputSource, history: Bool) {
+    mutating func merge(_ page: TaskOutputSource, history: Bool, observation: inout Int) {
         source = page
         if history { historyHasMore = page.hasMore } else { liveHasMore = page.hasMore }
         for record in page.records {
             let id = record.sourceItemId
-            if history {
-                if historyIds.insert(id).inserted { historyOrder.append(id) }
-                if !liveIds.contains(id) { records[id] = record }
-            } else {
-                if liveIds.insert(id).inserted { liveOrder.append(id) }
-                records[id] = record
+            guard var observed = records[id] else {
+                observation += 1
+                records[id] = ObservedRecord(value: record,
+                    position: .init(history: history, offset: observation),
+                    hasLiveRevision: !history, lastLiveObservation: history ? nil : observation)
+                continue
             }
+            if history {
+                if !observed.position.history {
+                    observation += 1
+                    observed.position = .init(history: true, offset: observation)
+                }
+                if !observed.hasLiveRevision { observed.value = record }
+            } else {
+                if observed.value.revision != record.revision {
+                    observation += 1
+                    observed.lastLiveObservation = observation
+                }
+                observed.hasLiveRevision = true
+                observed.value = record
+            }
+            records[id] = observed
         }
     }
 
@@ -45,16 +59,28 @@ struct TaskWatchOutput: Identifiable {
         var positions: [TaskWatchOutputRow.ID: Int] = [:]
         var textRun: TaskWatchOutputRow.ID?
         var nativeCalls: [String: (turn: String, item: ConversationItem)] = [:]
-        func put(_ row: TaskWatchOutputRow, append: Bool = false) {
+        var previousPosition: TaskWatchOutputPosition?
+        var lastLiveObservation: Int?
+        func put(_ value: TaskWatchOutputRow, append: Bool = false) {
+            var row = value
+            row.lastLiveObservation = lastLiveObservation
             if let index = positions[row.id] {
-                if append { result[index].text += row.text } else { result[index] = row }
+                row.position = result[index].position
+                row.lastLiveObservation = [row.lastLiveObservation, result[index].lastLiveObservation].compactMap { $0 }.max()
+                if append { row.text = result[index].text + row.text }
+                result[index] = row
             } else {
                 positions[row.id] = result.count
                 result.append(row)
             }
         }
-        for id in historyOrder + liveOrder.filter({ !historyIds.contains($0) }) {
-            guard let record = records[id] else { continue }
+        for observed in records.values.sorted(by: { $0.position < $1.position }) {
+            let record = observed.value
+            let id = record.sourceItemId
+            let position = observed.position
+            lastLiveObservation = observed.lastLiveObservation
+            if !position.immediatelyFollows(previousPosition) { textRun = nil }
+            defer { previousPosition = position }
             // Combine adjacent deltas, never move prose across an intervening
             // tool or message merely because both belong to the same turn.
             switch record.event {
@@ -69,42 +95,43 @@ struct TaskWatchOutput: Identifiable {
                    case let .tool(id, name, status, _, output) = item {
                     if name == "tool_result", let call = nativeCalls[id],
                        case let .tool(_, callName, _, input, _) = call.item {
-                        put(TaskWatchOutputRow(turn: call.turn, item: .tool(
+                        put(TaskWatchOutputRow(position: position, turn: call.turn, item: .tool(
                             id: id, name: callName, status: status, input: input, output: output
                         )))
                         continue
                     }
                     if name != "tool_result" { nativeCalls[id] = (turn, item) }
                 }
-                put(TaskWatchOutputRow(turn: turn, item: item))
+                put(TaskWatchOutputRow(position: position, turn: turn, item: item))
             case let .itemUpdated(turn, item, delta):
                 switch delta {
                 case let .output(text), let .planText(text):
                     let key = TaskWatchOutputRow.ID(turn: turn, item: item, kind: .item)
                     if let index = positions[key] {
                         result[index].text += text
+                        result[index].lastLiveObservation = [result[index].lastLiveObservation, lastLiveObservation].compactMap { $0 }.max()
                     } else {
-                        put(TaskWatchOutputRow(id: key, title: "Tool output (earlier context not loaded)", text: text, code: true))
+                        put(TaskWatchOutputRow(position: position, id: key, title: "Tool output (earlier context not loaded)", text: text, code: true))
                     }
                 }
             case let .textDelta(turn, text):
                 let key = textRun.flatMap { $0.turn == turn && $0.kind == .text ? $0 : nil }
                     ?? .init(turn: turn, item: id, kind: .text)
-                put(TaskWatchOutputRow(id: key, title: "Streaming text", text: text), append: true)
+                put(TaskWatchOutputRow(position: position, id: key, title: "Streaming text", text: text), append: true)
                 textRun = key
             case let .reasoningDelta(turn, text):
                 let key = textRun.flatMap { $0.turn == turn && $0.kind == .reasoning ? $0 : nil }
                     ?? .init(turn: turn, item: id, kind: .reasoning)
-                put(TaskWatchOutputRow(id: key, title: "Reasoning", text: text), append: true)
+                put(TaskWatchOutputRow(position: position, id: key, title: "Reasoning", text: text), append: true)
                 textRun = key
             case let .error(code, message, _):
-                put(TaskWatchOutputRow(id: .init(turn: "", item: id, kind: .event), title: "Error · \(code)", text: message))
+                put(TaskWatchOutputRow(position: position, id: .init(turn: "", item: id, kind: .event), title: "Error · \(code)", text: message))
             case let .turnCompleted(turn, status):
-                put(TaskWatchOutputRow(id: .init(turn: turn, item: id, kind: .event), title: "Turn \(status.rawValue)", text: ""))
+                put(TaskWatchOutputRow(position: position, id: .init(turn: turn, item: id, kind: .event), title: "Turn \(status.rawValue)", text: ""))
             case let .diffUpdated(turn, diff):
-                put(TaskWatchOutputRow(id: .init(turn: turn, item: "", kind: .diff), title: "Changes", text: diff, code: true))
+                put(TaskWatchOutputRow(position: position, id: .init(turn: turn, item: "", kind: .diff), title: "Changes", text: diff, code: true))
             case let .statusChanged(status):
-                put(TaskWatchOutputRow(id: .init(turn: "", item: id, kind: .event), title: status, text: ""))
+                put(TaskWatchOutputRow(position: position, id: .init(turn: "", item: id, kind: .event), title: status, text: ""))
             case .turnStarted, .usageCheckpoint, .suggestedActions:
                 break
             }
@@ -121,18 +148,22 @@ struct TaskWatchOutputRow: Identifiable {
         let kind: Kind
     }
     let id: ID
+    var position: TaskWatchOutputPosition
+    var lastLiveObservation: Int?
     var title: String
     var text: String
     var code = false
 
-    init(id: ID, title: String, text: String, code: Bool = false) {
+    init(position: TaskWatchOutputPosition, id: ID, title: String, text: String, code: Bool = false) {
+        self.position = position
         self.id = id
         self.title = title
         self.text = text
         self.code = code
     }
 
-    init(turn: String, item: ConversationItem) {
+    init(position: TaskWatchOutputPosition, turn: String, item: ConversationItem) {
+        self.position = position
         id = ID(turn: turn, item: item.id, kind: .item)
         switch item {
         case let .message(_, text, phase):
@@ -158,4 +189,32 @@ struct TaskWatchOutputRow: Identifiable {
             text = ""
         }
     }
+}
+
+/// History pages precede arrivals; neither lane asserts cross-provider chronology.
+struct TaskWatchOutputPosition: Comparable, Hashable {
+    let history: Bool
+    let offset: Int
+
+    static func < (lhs: Self, rhs: Self) -> Bool {
+        lhs.history == rhs.history ? lhs.offset < rhs.offset : lhs.history
+    }
+
+    func immediatelyFollows(_ previous: Self?) -> Bool {
+        previous?.history == history && previous?.offset == offset - 1
+    }
+}
+
+struct TaskWatchOutputRowReference: Hashable {
+    let source: TaskWatchOutput.ID
+    let row: TaskWatchOutputRow.ID
+}
+
+/// A contiguous stretch of one source in the observed feed, derived from loaded rows.
+struct TaskWatchOutputGroup: Identifiable {
+    let source: TaskOutputSource
+    var rows: [TaskWatchOutputRow]
+    var id: TaskWatchOutputPosition { rows[0].position }
+    var sourceId: TaskWatchOutput.ID { .init(run: source.runId, source: source.source) }
+    var history: Bool { rows[0].position.history }
 }

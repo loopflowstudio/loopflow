@@ -125,8 +125,9 @@ struct TaskWatchFeedTests {
         ]
         let page = try JSONDecoder().decode(TaskOutputPage.self, from: Data(page("next", sources: [source("run-first", records: records)]).utf8))
         let source = try #require(page.sources.first)
+        var observation = 0
         var output = TaskWatchOutput(source: source)
-        output.merge(source, history: false)
+        output.merge(source, history: false, observation: &observation)
         #expect(output.rows.count == 3)
         #expect(output.rows.first?.text == "Before command")
         #expect(output.rows.last?.text == "After command")
@@ -165,6 +166,93 @@ struct TaskWatchFeedTests {
         let query = reader(["tail": failedTail, "start": try page("history", sources: [])])
         await store.readOutput(issue: "LOO-293", query: query)
         #expect(store.outputGaps.contains { $0.code == "tail_unavailable" })
+    }
+
+    @Test("Alternating Runs stay in observation order, including split prose and late overlapping history")
+    func observationBlocks() async throws {
+        func delta(_ id: String, _ text: String, revision: String = "1") -> [String: Any] {
+            ["source_item_id": id, "revision": revision, "event": [
+                "type": "text_delta", "turn_id": "same-turn", "content": text
+            ]]
+        }
+        let store = TaskWatchStore()
+        let query = reader([
+            "tail": try page("live-1", sources: []),
+            "start": try page("history-1", sources: []),
+            "live-1": try page("live-2", sources: [
+                source("run-a", records: [delta("a1", "First arrival")]),
+                source("run-b", records: [delta("a1", "Auxiliary arrival")], step: nil)
+            ]),
+            "live-2": try page("live-3", sources: [source("run-a", records: [
+                delta("a2", "Next "), delta("a3", "part")
+            ])]),
+            "live-3": try page("live-3", sources: [source("run-a", records: [delta("a3", "part")])]),
+            "history-1": try page("history-2", sources: [
+                source("run-a", records: [message("old-a", "Earlier A"), delta("a1", "stale", revision: "old")]),
+                source("run-b", records: [message("old-b", "Earlier B")], step: nil)
+            ])
+        ])
+        await store.readOutput(issue: "LOO-293", query: query)
+        await store.readOutput(issue: "LOO-293", query: query)
+        await store.readOutput(issue: "LOO-293", query: query)
+        #expect(store.outputGroups.map { $0.source.runId } == ["run-a", "run-b", "run-a"])
+        #expect(store.outputGroups.flatMap { $0.rows.map(\.text) } == ["First arrival", "Auxiliary arrival", "Next part"])
+        #expect(store.outputGroups.allSatisfy { !$0.history })
+        let latest = try #require(store.latestOutputRow)
+        #expect(latest.row.item == "a2") // Adjacent deltas share one display row.
+        let blocks = store.outputGroups.map(\.id)
+        await store.readOutput(issue: "LOO-293", query: query)
+        #expect(store.outputGroups.map(\.id) == blocks)
+        #expect(store.latestOutputRow == latest)
+
+        await store.readOutput(issue: "LOO-293", query: query, history: true)
+        #expect(store.outputGroups.map { $0.source.runId } == ["run-a", "run-b", "run-b", "run-a"])
+        #expect(store.outputGroups.map(\.history) == [true, true, false, false])
+        #expect(store.outputGroups.flatMap { $0.rows.map(\.text) } == [
+            "Earlier A", "First arrival", "Earlier B", "Auxiliary arrival", "Next part"
+        ])
+        #expect(store.latestOutputRow == latest)
+        store.inspectRun("run-a")
+        #expect(store.outputGroups.map { $0.source.runId } == ["run-a", "run-a"])
+        store.followLive()
+        #expect(store.outputGroups.count == 4)
+    }
+
+    @Test("A late tool completion updates its original block and becomes the exact follow target")
+    func followsToolRevision() async throws {
+        func tool(_ status: String, id: String, text: String) -> [String: Any] {
+            ["source_item_id": id, "revision": "1", "event": [
+                "type": "item_completed", "turn_id": "turn", "item": [
+                    "type": "tool", "id": "tool", "name": "bash", "status": status,
+                    "input": "echo hello", "output": text
+                ]
+            ]]
+        }
+        let store = TaskWatchStore()
+        let query = reader([
+            "tail": try page("live-1", sources: []),
+            "start": try page("history", sources: []),
+            "live-1": try page("live-2", sources: [
+                source("run-a", records: [tool("running", id: "start", text: "")]),
+                source("run-b", records: [message("other", "Other Run")], step: nil)
+            ]),
+            "live-2": try page("live-3", sources: [source("run-a", records: [message("later", "Later prose")])]),
+            "live-3": try page("live-4", sources: [source("run-a", records: [tool("completed", id: "end", text: "hello")])]),
+            "live-4": try page("live-4", sources: [])
+        ])
+        await store.readOutput(issue: "LOO-293", query: query)
+        await store.readOutput(issue: "LOO-293", query: query)
+        await store.readOutput(issue: "LOO-293", query: query)
+        let blocks = store.outputGroups.map(\.id)
+        #expect(store.latestOutputRow?.row.item == "later")
+        await store.readOutput(issue: "LOO-293", query: query)
+        #expect(store.outputGroups.map(\.id) == blocks)
+        #expect(store.outputGroups.map { $0.source.runId } == ["run-a", "run-b", "run-a"])
+        #expect(store.outputGroups.first?.rows.first?.title == "bash · completed")
+        #expect(store.outputGroups.first?.rows.first?.text == "echo hello\nhello")
+        #expect(store.latestOutputRow?.row.item == "tool")
+        await store.readOutput(issue: "LOO-293", query: query)
+        #expect(store.latestOutputRow?.row.item == "tool")
     }
 
     private func reader(_ responses: [String: String]) -> RegistryQuery {

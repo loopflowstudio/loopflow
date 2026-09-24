@@ -1,0 +1,27 @@
+[0/1] Planning build
+Building for debugging...
+[0/6] Write sources
+[1/6] Write swift-version--58304C5D6DBC2206.txt
+[3/6] Compiling LoopflowTests WatchObservationCLIReview.swift
+[4/6] Emitting module LoopflowTests
+[4/6] Write Objects.LinkFileList
+[5/6] Linking LoopflowSwiftPackageTests
+Build complete! (1.53s)
+Test Suite 'Selected tests' started at 2026-09-24 08:24:31.619.
+Test Suite 'LoopflowSwiftPackageTests.xctest' started at 2026-09-24 08:24:31.620.
+Test Suite 'LoopflowSwiftPackageTests.xctest' passed at 2026-09-24 08:24:31.620.
+	 Executed 0 tests, with 0 failures (0 unexpected) in 0.000 (0.000) seconds
+Test Suite 'Selected tests' passed at 2026-09-24 08:24:31.620.
+	 Executed 0 tests, with 0 failures (0 unexpected) in 0.000 (0.001) seconds
+◇ Test run started.
+↳ Testing Library Version: 1501
+↳ Target Platform: arm64e-apple-macos14.0
+◇ Suite "Watch observation CLI review" started.
+◇ Test nativeArrivals() started.
+PASS real CLI -> RegistryQuery -> Store -> View: A/B/A arrivals, original tool row updated, exact Follow target, quiet deduplication, Run filter and Follow action
+✔ Test nativeArrivals() passed after 2.296 seconds.
+◇ Test configuredHistory() started.
+PASS configured passive history: sources=3, rows=59, invocations=0
+✔ Test configuredHistory() passed after 1.112 seconds.
+✔ Suite "Watch observation CLI review" passed after 3.409 seconds.
+✔ Test run with 2 tests in 1 suite passed after 3.409 seconds.

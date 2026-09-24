@@ -187,7 +187,18 @@ struct TaskWatchTests {
         let store = model.navigation.watch(for: "issue-review")
         await store.refresh(issue: "LOO-293", query: query(try fixture()))
         let output = try Data(contentsOf: root.appendingPathComponent("tests/fixtures/dto/task_output.json"))
-        await store.readOutput(issue: "LOO-293", query: query(output))
+        let emptyHistory = #"{"task_id":"task-watch","sources":[],"gaps":[],"next_cursor":"history"}"#
+        await store.readOutput(issue: "LOO-293", query: RegistryQuery { args, _ in
+            args.contains("--tail") ? String(decoding: output, as: UTF8.self) : emptyHistory
+        })
+        var arrival = try #require(JSONSerialization.jsonObject(with: output) as? [String: Any])
+        var sources = try #require(arrival["sources"] as? [[String: Any]])
+        sources[0]["records"] = [["source_item_id": "later-prose", "revision": "1", "event": [
+            "type": "text_delta", "turn_id": "turn", "content": "The command is still running; inspecting the next stage."
+        ]]]
+        arrival["sources"] = [sources[0]]
+        await store.readOutput(issue: "LOO-293", query: query(try JSONSerialization.data(withJSONObject: arrival)))
+        #expect(store.outputGroups.map { $0.source.runId } == [sources[0]["run_id"] as? String, sources[1]["run_id"] as? String, sources[0]["run_id"] as? String])
         #expect(store.visibleOutput.count == 3)
         #expect(store.visibleOutput.first?.rows.first?.title == "bash · running")
         let workspace = SessionsView(
@@ -226,6 +237,21 @@ struct TaskWatchTests {
                 ? destination.deletingPathExtension().appendingPathExtension("workspace.png")
                 : destination
             try png.write(to: output)
+            if !inWorkspace {
+                let feed = NSHostingView(rootView: TaskWatchOutputView(
+                    store: store, onHistory: {}, onFollow: { store.followLive() }, onReload: {}
+                ).frame(width: 1000, height: 720)
+                    .foregroundStyle(LoopflowPalette.light.text)
+                    .background(LoopflowPalette.light.background)
+                    .environment(\.palette, LoopflowPalette.light))
+                window.contentView = feed
+                feed.layoutSubtreeIfNeeded()
+                window.displayIfNeeded()
+                let feedBitmap = try #require(feed.bitmapImageRepForCachingDisplay(in: feed.bounds))
+                feed.cacheDisplay(in: feed.bounds, to: feedBitmap)
+                let feedPNG = try #require(feedBitmap.representation(using: .png, properties: [:]))
+                try feedPNG.write(to: destination.deletingPathExtension().appendingPathExtension("feed.png"))
+            }
             if !inWorkspace {
                 let diagram = NSHostingView(rootView: TaskWatchDiagram(store: store)
                     .frame(width: 360, height: 540)

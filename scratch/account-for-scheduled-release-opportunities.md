@@ -773,6 +773,13 @@ closed-obligation continuation and configured acceptance remain open. See
   open. See [release-git-ownership.md](release-git-ownership.md). No publication,
   installation or Task completion occurred in this cut.
 
+Git ownership review remains **iterate**. The built-CLI demonstration passed all
+ten survival scenarios again (43.50s), including actual index/commit and bare-origin
+results. No additional bounded defect was established and no executable code
+changed. Task compensation, notes/tools/worktree children, historical telemetry
+linkage/retry and dated repair ownership, closed-obligation continuation and
+configured acceptance remain open. See [review-git.md](review-git.md).
+
 ## Measure
 
 Use the Reliability KR's actual due population, not successful process counts.

@@ -90,7 +90,7 @@ directory does not move it into another workspace.
 
 Manually launched agents in these shells register against their actual terminal.
 Selecting their Session focuses the existing shell. External clients still read
-ELSEWHERE and require explicit Move here. Terminals survive Work list and detail
+ELSEWHERE and require explicit Move here. Terminals and their command titles survive Work list and detail
 navigation and repository switches within a window. Native surfaces belong to
 that window and are never mounted twice.
 Session reads and preparation run in the opened repository rather than a

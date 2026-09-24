@@ -1,0 +1,43 @@
+Building for debugging...
+[0/5] Write sources
+[1/5] Write swift-version--58304C5D6DBC2206.txt
+[3/9] Emitting module LoopflowMac
+[4/9] Compiling LoopflowMac GhosttyManager.swift
+/Users/jack/src/loopflow.main-view-task/swift/LoopflowMac/Services/Ghostty/GhosttyManager.swift:178:33: warning: 'CVDisplayLinkCreateWithActiveCGDisplays' was deprecated in macOS 15.0: use NSView.displayLink(target:selector:), NSWindow.displayLink(target:selector:), or NSScreen.displayLink(target:selector:)  [#DeprecatedDeclaration]
+176 |         // and refuses every surface. Its timer renderer works without that link.
+177 |         var displayLink: CVDisplayLink?
+178 |         let displayLinkStatus = CVDisplayLinkCreateWithActiveCGDisplays(&displayLink)
+    |                                 `- warning: 'CVDisplayLinkCreateWithActiveCGDisplays' was deprecated in macOS 15.0: use NSView.displayLink(target:selector:), NSWindow.displayLink(target:selector:), or NSScreen.displayLink(target:selector:)  [#DeprecatedDeclaration]
+179 |         if displayLinkStatus != kCVReturnSuccess || displayLink == nil {
+180 |             embeddedConfig += "\nwindow-vsync = false\n"
+
+[#DeprecatedDeclaration]: <https://docs.swift.org/compiler/documentation/diagnostics/deprecated-declaration>
+[5/9] Compiling LoopflowMac SessionsView.swift
+[6/9] Compiling LoopflowMac GhosttyTerminalView.swift
+[7/10] Compiling LoopflowMac TaskWorkspaceView.swift
+[7/12] Write Objects.LinkFileList
+[8/12] Linking LoopflowMac
+[9/12] Applying LoopflowMac
+[11/16] Emitting module LoopflowTests
+[12/16] Compiling LoopflowTests GhosttyTerminalInputTests.swift
+[13/16] Compiling LoopflowTests WorkspaceNavigationProofTests.swift
+[14/16] Compiling LoopflowTests SessionsPolishTests.swift
+[14/16] Write Objects.LinkFileList
+[15/16] Linking LoopflowSwiftPackageTests
+Build complete! (9.58s)
+Test Suite 'Selected tests' started at 2026-09-23 19:37:26.720.
+Test Suite 'LoopflowSwiftPackageTests.xctest' started at 2026-09-23 19:37:26.721.
+Test Suite 'LoopflowSwiftPackageTests.xctest' passed at 2026-09-23 19:37:26.721.
+	 Executed 0 tests, with 0 failures (0 unexpected) in 0.000 (0.000) seconds
+Test Suite 'Selected tests' passed at 2026-09-23 19:37:26.721.
+	 Executed 0 tests, with 0 failures (0 unexpected) in 0.000 (0.001) seconds
+◇ Test run started.
+↳ Testing Library Version: 1501
+↳ Target Platform: arm64e-apple-macos14.0
+◇ Suite "Unified workspace navigation proof" started.
+◇ Test "The workspace retains navigation and reconciles completion in its originating repository" started.
+◇ Test case passing 1 argument switchBeforeCompletion → false to "The workspace retains navigation and reconciles completion in its originating repository" started.
+◇ Test case passing 1 argument switchBeforeCompletion → true to "The workspace retains navigation and reconciles completion in its originating repository" started.
+✔ Test "The workspace retains navigation and reconciles completion in its originating repository" with 2 test cases passed after 4.820 seconds.
+✔ Suite "Unified workspace navigation proof" passed after 4.821 seconds.
+✔ Test run with 1 test in 1 suite passed after 4.821 seconds.

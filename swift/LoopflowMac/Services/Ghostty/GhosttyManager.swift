@@ -217,6 +217,9 @@ final class GhosttyManager: ObservableObject {
             if action.tag == GHOSTTY_ACTION_SET_TITLE,
                let title = action.action.set_title.title {
                 let value = String(cString: title)
+                MainActor.assumeIsolated {
+                    Unmanaged<GhosttyMetalView>.fromOpaque(userdata).takeUnretainedValue().terminalTitle = value
+                }
                 Task { @MainActor in
                     NotificationCenter.default.post(
                         name: .ghosttyTerminalTitle,

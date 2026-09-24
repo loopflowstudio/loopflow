@@ -1,0 +1,22 @@
+{
+  "before": {
+    "generated_at": "2026-09-24T01:47:45.926082Z",
+    "waves": 3,
+    "projects": 5,
+    "tasks": 144,
+    "incomplete_tasks": 18,
+    "sessions": 1,
+    "planning_session_digest": "320f8def4d93f7b052bbcf87f13b7e97b27580b1c986f10cf100787a24a7babb",
+    "loo291_completed": false
+  },
+  "after": {
+    "generated_at": "2026-09-24T01:48:28.8967Z",
+    "waves": 3,
+    "projects": 5,
+    "tasks": 144,
+    "incomplete_tasks": 18,
+    "sessions": 1,
+    "planning_session_digest": "320f8def4d93f7b052bbcf87f13b7e97b27580b1c986f10cf100787a24a7babb",
+    "loo291_completed": false
+  }
+}

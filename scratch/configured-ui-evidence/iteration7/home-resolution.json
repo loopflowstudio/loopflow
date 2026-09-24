@@ -1,0 +1,15 @@
+{
+  "installed_binary": "/Users/jack/.lf/bin/lf-f1f15f84852857b6c56505aafea27ebe070ab2e11e783fcbdad4867a005ef0c4",
+  "doctor_receipt": "/tmp/loo291-iteration7-doctor.json",
+  "build_provenance": "development",
+  "source_root": "/Users/jack/src/loopflow.lf-new",
+  "source_revision": "561eadccefa6bbf1d67cd832cbe7b5df728d6c8e",
+  "inherited_read_home": "/Users/jack/.lf",
+  "installed_write_home": "/Users/jack/.lf-dev/installed/local-be852452823d43d7b7fde663651a7590",
+  "owned_run": "run_9544c29c5a6747c391e31c8523d18f4e",
+  "provider_conversation": "01a0d10f-4512-79a3-8fc3-ecaab404d709",
+  "typed_task_work": "task_2aa71a7e36fe416d8a721e2b2f7c54e7",
+  "read_command": "env -u LF_CONTROL_HOME -u LF_CONTROL_DB_PATH -u LF_WAVE_ID lf session list --json",
+  "matching_home_receipt": "/tmp/loo291-iteration7-installed-sessions.json",
+  "result": "Exact owned closed Session found in installed Home; subsequently resumed and completed through configured UI. No installed binary or registry modification."
+}

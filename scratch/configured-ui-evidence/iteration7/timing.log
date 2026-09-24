@@ -1,0 +1,60 @@
+Build base; trial 1
+Owned PID 96454
+Probe executable /tmp/loo291-iteration7-timing.swift AX trusted true
+AXWindows 0 count 0
+Owned onscreen windows 0 active true hidden false
+PASS This exact probe host has Accessibility permission
+COUNT_ENDPOINT 1 Sessions observed true milliseconds 1831.1674166470766
+PASS Correct scoped Session count visible
+Owned termination requested true
+
+Build current; trial 1
+Owned PID 99732
+Probe executable /tmp/loo291-iteration7-timing.swift AX trusted true
+AXWindows 0 count 0
+Owned onscreen windows 0 active true hidden false
+PASS This exact probe host has Accessibility permission
+COUNT_ENDPOINT 1 Sessions observed true milliseconds 1188.2949583232403
+PASS Correct scoped Session count visible
+Owned termination requested true
+
+Build base; trial 2
+Owned PID 3442
+Probe executable /tmp/loo291-iteration7-timing.swift AX trusted true
+AXWindows 0 count 0
+Owned onscreen windows 0 active true hidden false
+PASS This exact probe host has Accessibility permission
+COUNT_ENDPOINT 1 Sessions observed true milliseconds 1951.6133333090693
+PASS Correct scoped Session count visible
+Owned termination requested true
+
+Build current; trial 2
+Owned PID 8442
+Probe executable /tmp/loo291-iteration7-timing.swift AX trusted true
+AXWindows 0 count 0
+Owned onscreen windows 0 active true hidden false
+PASS This exact probe host has Accessibility permission
+COUNT_ENDPOINT 1 Sessions observed true milliseconds 1300.3644582349807
+PASS Correct scoped Session count visible
+Owned termination requested true
+
+Build base; trial 3
+Owned PID 10232
+Probe executable /tmp/loo291-iteration7-timing.swift AX trusted true
+AXWindows 0 count 0
+Owned onscreen windows 0 active true hidden false
+PASS This exact probe host has Accessibility permission
+COUNT_ENDPOINT 1 Sessions observed true milliseconds 1735.8138333074749
+PASS Correct scoped Session count visible
+Owned termination requested true
+
+Build current; trial 3
+Owned PID 13978
+Probe executable /tmp/loo291-iteration7-timing.swift AX trusted true
+AXWindows 0 count 0
+Owned onscreen windows 0 active true hidden false
+PASS This exact probe host has Accessibility permission
+COUNT_ENDPOINT 1 Sessions observed true milliseconds 1210.610499838367
+PASS Correct scoped Session count visible
+Owned termination requested true
+

@@ -34,6 +34,43 @@ remain the existing path. The separate lf-new checkout was not edited.
 
 ## Recorded validation
 
+**Iteration 6 configured planning and AX navigation, 2026-09-23:**
+The minimal AppKit control exposes one AX window and an onscreen CG window
+(`/tmp/loo291-ax-boundary.log`). Launching the current temporary review bundle
+with activation requested also exposes workspace controls. This supersedes the
+earlier inaccessible-control observation; it does not establish why those
+earlier launches differed. No production accessibility change was made.
+
+The real app then showed `Planning unavailable`: the inherited `LF_WAVE_ID`
+selected the launching agent's Wave despite `roadmap --all`, and resolution
+rejected the app's `/` cwd. Receipt:
+`/tmp/loo291-configured-values-probe.log`. The same installed CLI succeeds from
+`/` when only `LF_WAVE_ID` is removed (`/tmp/loo291-iteration6-root-roadmap.json`).
+LocalWaveAgentLauncher's existing process boundary now removes that variable
+after enriching PATH. Home/registry configuration and explicit command targets
+are preserved. No shared API, planning scope model or second reader was added.
+
+`swift build --package-path swift -Xswiftc -gnone --jobs 4 --product LoopflowMac`
+passes (`/tmp/loo291-iteration6-app-build.log`). The updated executable was copied
+only into the existing temporary review bundle, retaining its development
+configuration pointing to the installed `lf`. The first configured AX trial
+passed with deliberately unrelated `LF_WAVE_ID=loo291-unrelated-launching-wave`:
+17 accessible Task rows, exact LOO-291 selection, authoritative directive,
+explicit no-Session state, Show/Hide work list, return to overview, exact Task
+search and search retention through a 16-second polling interval. Receipt:
+`/tmp/loo291-configured-navigation.log`. The accessible-row count is not a
+complete portfolio count, and the polling interval is not a latency budget.
+
+This is real LaunchServices/AX interaction against the long-lived registry,
+without fixture or capture mode. The subsequent owned provider trial establishes
+native continuation and UI completion with companion and Task survival. Exact
+draft fidelity remains a gap: provider history caught two missing characters
+that the reply-only assertion missed. One launch also exposed no Task controls
+within the observation window. [Configured proof](configured-ui-proof.md) records
+these failures, per-run permission/window evidence, scoped timings, exact
+receipts and the remaining procedure. It supersedes a generic AX-blocked status;
+external trials, visual/scroll proof and controlled timing comparisons remain.
+
 **Iteration 5 completion across repository navigation, 2026-09-23:**
 The mounted native regression now runs two serialized cases: complete while
 viewing the original workspace, and complete after switching repositories. An

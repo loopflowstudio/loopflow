@@ -1,5 +1,11 @@
 # Unified navigation slice review — 2026-09-23
 
+Implementation update after this review: iteration 6 now has real configured
+AX navigation, provider-native continuation and UI completion evidence. The
+[configured proof](configured-ui-proof.md) records exact host permissions,
+scoped timings, a failed launch observation and an unresolved exact-draft gap.
+The review below predates that evidence; no new publication approval is implied.
+
 ## Disposition
 
 Advances the accepted design; **not yet approved for publication**. The compact

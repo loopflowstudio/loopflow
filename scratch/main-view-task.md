@@ -278,3 +278,19 @@ that saved layout when it contains an absent Session, while preserving Undo for
 a still-present Session. Both cases and the two mounted completion cases pass;
 `review-slice.md` records the receipts. Configured interaction and timing proof
 remain open; the broader Task scope is unchanged.
+
+Iteration 6 configured planning, 2026-09-23: an activated LaunchServices launch
+now exposes the real workspace through AX. That path revealed inherited
+`LF_WAVE_ID` narrowing the machine roadmap read and failing from the app's `/`
+working directory. The existing CLI launcher now clears only that ambient Wave
+variable; Home configuration, explicit targets and the shared roadmap API remain
+unchanged. Real AX navigation proves the Task directive/no-Session state, A/D
+switching and search retention through a planning poll. A proof-owned provider
+then continued the same conversation in the native terminal; UI completion
+removed its pane while preserving the companion process and incomplete Task.
+Exact draft fidelity is unproven: the submitted prefix lost two characters.
+One launch exposed no Task controls by the observation deadline. Scoped AX
+latencies, the failures and the concrete next procedure are in
+`configured-ui-proof.md`; no generic permission blocker is inferred. Configured
+scroll/repository/visual proof, controlled before/after timings and the full
+Task obligations remain open.

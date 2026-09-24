@@ -1,0 +1,23 @@
+Owned PID 38873
+Probe executable /tmp/loo291-configured-provider.swift AX trusted true
+AXWindows 0 count 1
+Owned onscreen windows 1 active true hidden false
+PASS This exact probe host has Accessibility permission
+TIMING launch_to_observed_task_ms 2647.0148749649525
+PASS Ambient Wave does not block planning
+PASS Real Task list loaded (6 rows)
+PASS Open Task trial 1
+PASS Directive observed trial 1
+TIMING task_to_observed_directive_ms 1 441.70704181306064
+PASS Press All work
+PASS Open Task trial 2
+PASS Directive observed trial 2
+TIMING task_to_observed_directive_ms 2 320.6197083927691
+PASS Press All work
+PASS Open Task trial 3
+PASS Directive observed trial 3
+TIMING task_to_observed_directive_ms 3 345.05904163233936
+PASS Press All work
+PASS Open Task for owned Session
+FAIL Failure(message: "Missing workspace-open-session-run_edb7d3ad4ac94ddcbaeca8679503845f")
+Owned termination requested true

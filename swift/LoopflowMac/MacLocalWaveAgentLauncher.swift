@@ -233,7 +233,11 @@ enum LocalWaveAgentLauncher {
         process.arguments = args
         process.standardOutput = stdout
         process.standardError = stderr
-        process.environment = GUIProcessEnvironment.enriched(ProcessInfo.processInfo.environment)
+        var environment = GUIProcessEnvironment.enriched(ProcessInfo.processInfo.environment)
+        // The GUI chooses Work explicitly; its launching agent's Wave is not
+        // ambient context for registry reads or controls in this window.
+        environment.removeValue(forKey: "LF_WAVE_ID")
+        process.environment = environment
         if let cwd {
             process.currentDirectoryURL = URL(fileURLWithPath: cwd, isDirectory: true)
         }

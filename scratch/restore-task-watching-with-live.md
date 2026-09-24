@@ -194,6 +194,16 @@ transport expansion is in scope.
 
 ## Evidence ledger
 
+- 2026-09-23 slice review: repaired shared Run-directory discovery after a real
+  unreadable-prefix CLI regression failed with exit 1. Individual enumeration
+  and metadata errors now become Task discovery gaps or existing reader warnings,
+  preserving healthy Runs. The rebuilt synthetic proof retained eight output
+  records and both Watch/shared-reader Runs beside the bad prefix; restoration
+  cleared gaps. Fresh output discovery and two shared scanner/Session tests passed.
+  Fresh configured reads from `/tmp` returned 3 Watch Runs with the truthful
+  older-Home position gap and 197 historical output records from 3 sources without
+  gaps. See `review-slice.md`; the full UI/capture/polling/demo requirements remain.
+
 - 2026-09-23 reader repairs and snapshot integration: Claude/Codex calls and
   results now share their native conversation item ID while source record IDs
   remain distinct. Missing call IDs report an explicit identity gap. The
@@ -380,3 +390,44 @@ and unfinished parts plus the Task's per-Run cursor map can still hit the finite
 cursor bound; exceeding it must fail explicitly rather than return a continuation
 that the next request cannot consume. These remain full-design requirements,
 alongside complete capture, Watch, and its configured demonstration.
+
+
+### Watch snapshot implementation — 2026-09-23
+
+- Added `lf task watch ISSUE --json`, the Rust TaskWatchSnapshot projection, and
+  RegistryQuery.taskWatch with required-field Swift models and a shared fixture.
+  Plans, labels, ancestry, attempts, Iterate/retry edges, and settlement come from
+  retained facts. The active position and Task events share a SQLite read
+  transaction; manifest attribution includes auxiliary Runs and missing Run gaps.
+- Review retained blocked attempts when a retry binds, avoided inventing completion
+  on replacement, and made a settlement with no attempt explicitly incomplete.
+  Watch and output now share the same read-only Task lookup. No provider control,
+  transcript writer, schema migration, current-YAML reconstruction, or Swift
+  lifecycle reducer was added. The source-availability reader remains task output.
+- Focused Rust proof passed: `--lib
+  flow_history_preserves_repeated_skills_iterate_retries_and_completion` (1),
+  `--lib flow_history_retains_restarted_plans_without_accepting_stale_writes` (1),
+  `--lib watch_settlement_without_attempt` (1), and `--test dto_fixtures task_watch`
+  (1), all with `--no-fail-fast` and inherited LF_RUN_ID unset. The store proof
+  reads live readiness and auxiliary attribution, then retained attempts/edges
+  after completion and database reopen; deleting the plan receipt proves gaps
+  without reconstructing history. Replacement does not turn its bound attempt
+  into a completed attempt.
+- `swift test --package-path swift --filter DTOFixtureTests/taskWatchFixture`
+  passed (1). Branch CLI build, `cargo fmt --all -- --check`,
+  `cargo clippy --all-targets -- -D warnings`, and `git diff --check` passed.
+- Configured branch CLI from `/tmp`: `lf task watch LOO-293 --json` returned the
+  exact Task ID, 3 attributed Runs, 0 retained invocations, no active-stage proof,
+  and one `position_unavailable` gap in 2.267 seconds, with no stderr. The Home
+  predates Task flow-position storage. Its absence stays explicit and does not
+  trigger migration or imply completion. This is configured read-path proof;
+  it is not a live diagram, stage transition, or complete Watch demonstration.
+- Concurrent lifecycle activity committed drafts and changed reader discovery
+  during this implementation. Those changes were preserved. The receipts above
+  are focused command results on the shared working tree, not a passed gate for
+  a frozen combined head. The externally added reader fixes retain their own
+  proof requirements; this pass does not claim their tests as its own.
+- Remaining: bounded history/discovery before polling, independent output
+  history/live continuation, complete configured capture, the Mac Watch surface,
+  filtering/Follow live, and the full configured human demo. No publication,
+  landing, or Task completion was performed by this implementation pass.

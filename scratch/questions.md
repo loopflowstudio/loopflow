@@ -4,9 +4,9 @@
   build 19.1 GiB / 12 GiB); documented recovery could not remove it. Architecture,
   Swift boundary, formatting, and whitespace checks passed, but product suites
   and Clippy remain unrun for this gate. Concurrent snapshot edits require a
-  settled-tree rerun. Directory enumeration still aborts healthy Task reads
-  before manifest-gap handling; fix and prove partial-directory recovery.
-  See `restore-task-watching-with-live-review.md` for the handoff and full blockers.
+  settled-tree rerun. The subsequent slice review repaired partial-directory
+  discovery and proved healthy output/Watch/shared Run reads plus recovery.
+  See `review-slice.md` for that evidence and the remaining full-Task boundary.
 
 - Product / Desktop ownership is resolved by the Task directive; no PM mutation
   is needed. This remains one PR, with the pinned human and settlement gates.

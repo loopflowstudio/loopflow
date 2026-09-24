@@ -2,6 +2,7 @@
 
 import json
 import os
+from datetime import UTC, datetime
 from pathlib import Path
 import subprocess
 import tempfile
@@ -24,7 +25,7 @@ def _main() -> None:
             directory.mkdir(parents=True)
             manifest = dict(
                 schema_version=1, run_id=run_id, parent_run_id=None,
-                created_at="2026-09-23T00:00:00Z", harness=provider, model=None,
+                created_at=datetime.now(UTC).isoformat(), harness=provider, model=None,
                 surface="tui", cwd=temporary, repo=None, worktree=None, skill=None,
                 subjects=[dict(selector="task:LOO-293", source="declared")],
                 launch=None, context=None, runtime_path=None, runtime_digest=None,
@@ -91,6 +92,43 @@ def _main() -> None:
         assert any(gap["code"] == "discovery_incomplete" for gap in snapshot["gaps"])
         print(json.dumps(dict(watch_runs=len(snapshot["runs"]),
                               watch_gap_codes=[gap["code"] for gap in snapshot["gaps"]])))
+
+        (unrelated / "manifest.json").unlink()
+        blocked = unrelated.parent
+        blocked.chmod(0)
+        try:
+            try:
+                list(blocked.iterdir())
+            except PermissionError:
+                pass
+            else:
+                raise AssertionError("This proof requires enforced directory permissions")
+            result = read()
+            print(json.dumps(dict(unreadable_prefix_returncode=result.returncode)))
+            result.check_returncode()
+            page = json.loads(result.stdout)
+            assert sum(len(source["records"]) for source in page["sources"]) == 8
+            assert page["gaps"][0]["code"] == "discovery_incomplete"
+            watch = subprocess.run([str(binary), "task", "watch", "LOO-293", "--json"],
+                                   env=env, cwd="/tmp", capture_output=True, text=True, timeout=30)
+            watch.check_returncode()
+            snapshot = json.loads(watch.stdout)
+            assert len(snapshot["runs"]) >= 2
+            assert any(gap["code"] == "discovery_incomplete" for gap in snapshot["gaps"])
+            runs = subprocess.run([str(binary), "runs", "--json", "--task", "LOO-293"],
+                                  env=env, cwd="/tmp", capture_output=True, text=True, timeout=30)
+            runs.check_returncode()
+            assert len(json.loads(runs.stdout)) == 2
+            print(json.dumps(dict(shared_run_reader_records=2)))
+        finally:
+            blocked.chmod(0o700)
+        unrelated.rmdir()
+        result = read()
+        result.check_returncode()
+        recovered = json.loads(result.stdout)
+        assert not recovered["gaps"]
+        assert sum(len(source["records"]) for source in recovered["sources"]) == 8
+        print(json.dumps(dict(directory_recovery_records=8, discovery_gaps=0)))
 
 
 if __name__ == "__main__":

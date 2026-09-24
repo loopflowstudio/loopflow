@@ -429,7 +429,7 @@ impl RunRecorder {
 /// record cannot make unrelated execution history unavailable. Partial JSONL
 /// evidence remains visible through `evidence_gaps` on the owning Run.
 pub fn scan_runs_since(lf_home: &Path, since: i64) -> std::io::Result<Vec<RunSnapshot>> {
-    let records = record_dirs(lf_home)?;
+    let records = record_dirs(lf_home, warn_record_directory_error)?;
     let mut runs = Vec::new();
     for record in records {
         match read_run_snapshot(&record) {
@@ -456,7 +456,7 @@ pub(crate) fn scan_unresolved_provider_runs(
     lf_home: &Path,
 ) -> std::io::Result<Vec<(PathBuf, RunManifest)>> {
     let mut runs = Vec::new();
-    for dir in record_dirs(lf_home)? {
+    for dir in record_dirs(lf_home, warn_record_directory_error)? {
         let manifest = match read_manifest(&dir).and_then(|manifest| {
             validate_manifest_path(&dir, &manifest)?;
             Ok(manifest)
@@ -507,7 +507,14 @@ pub(crate) fn scan_unresolved_provider_runs(
     Ok(runs)
 }
 
-fn record_dirs(lf_home: &Path) -> std::io::Result<Vec<PathBuf>> {
+fn warn_record_directory_error(path: &Path, error: std::io::Error) {
+    tracing::warn!(%error, record = %path.display(), "Run record directory unavailable");
+}
+
+fn record_dirs(
+    lf_home: &Path,
+    mut on_error: impl FnMut(&Path, std::io::Error),
+) -> std::io::Result<Vec<PathBuf>> {
     let root = lf_home.join("runs");
     let prefixes = match fs::read_dir(&root) {
         Ok(entries) => entries,
@@ -516,16 +523,43 @@ fn record_dirs(lf_home: &Path) -> std::io::Result<Vec<PathBuf>> {
     };
     let mut records = Vec::new();
     for prefix in prefixes {
-        let prefix = prefix?;
-        if !prefix.file_type()?.is_dir() {
-            continue;
-        }
-        for record in fs::read_dir(prefix.path())? {
-            let record = record?;
-            if !record.file_name().to_string_lossy().starts_with('.')
-                && record.file_type()?.is_dir()
-            {
-                records.push(record.path());
+        let prefix = match prefix {
+            Ok(prefix) => prefix,
+            Err(error) => {
+                on_error(&root, error);
+                continue;
+            }
+        };
+        let path = prefix.path();
+        let entries = match prefix.file_type().and_then(|kind| {
+            if kind.is_dir() {
+                fs::read_dir(&path).map(Some)
+            } else {
+                Ok(None)
+            }
+        }) {
+            Ok(Some(entries)) => entries,
+            Ok(None) => continue,
+            Err(error) => {
+                on_error(&path, error);
+                continue;
+            }
+        };
+        for record in entries {
+            let record = match record {
+                Ok(record) => record,
+                Err(error) => {
+                    on_error(&path, error);
+                    continue;
+                }
+            };
+            if record.file_name().to_string_lossy().starts_with('.') {
+                continue;
+            }
+            match record.file_type() {
+                Ok(kind) if kind.is_dir() => records.push(record.path()),
+                Ok(_) => {}
+                Err(error) => on_error(&record.path(), error),
             }
         }
     }
@@ -543,7 +577,7 @@ pub(crate) fn resolve_manifest(
             "Run id cannot be empty",
         ));
     }
-    let mut matches = record_dirs(lf_home)?
+    let mut matches = record_dirs(lf_home, warn_record_directory_error)?
         .into_iter()
         .filter(|dir| {
             let id = dir.file_name().and_then(|name| name.to_str()).unwrap_or("");
@@ -587,7 +621,16 @@ pub(crate) fn task_run_manifests(
     ];
     let mut runs = Vec::new();
     let mut gaps = Vec::new();
-    for dir in record_dirs(home)? {
+    let directories = record_dirs(home, |path, error| {
+        gaps.push(output::gap(
+            "discovery_incomplete",
+            format!(
+                "Cannot enumerate Run records at {}: {error}",
+                path.display()
+            ),
+        ));
+    })?;
+    for dir in directories {
         let manifest = match read_manifest(&dir).and_then(|manifest| {
             validate_manifest_path(&dir, &manifest)?;
             Ok(manifest)

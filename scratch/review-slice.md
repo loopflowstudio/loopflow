@@ -1,111 +1,85 @@
-# Narrow checkpoint review — 2026-09-23
+# Reader repairs and Watch snapshot review — 2026-09-23
 
-Disposition: pass the provenance/capture-contract checkpoint at `335bb8fa4`.
-No production-code correction was needed. This foundation advances the accepted
-Task design; it does not establish complete capture or a working Watch surface.
-The later reader, CLI, and Swift changes remain outside this reviewed checkpoint.
-This review did not modify them.
+Disposition: pass the current reader-repair/snapshot slice after the bounded
+correction below; refresh the in-progress PR. This is not approval to land the
+full Task. UI, complete capture, bounded polling, and the configured human demo
+remain required in this same PR.
 
-## Scope and evidence
+Reviewed the accepted LOO-293 directive, the complete branch change through
+`e25e31f42` (including the earlier provenance/native-reader reviews), the current
+`This slice`, and the subsequent implementation receipts. The only executable
+correction in this review is in the existing Run-directory scanner. No new
+storage, migration, execution controller, or compatibility reader was introduced.
 
-The branch advanced externally during review to `fb04290e5` (`lf pr open:
-prepare branch`), which committed the previously dirty reader/CLI/Swift work.
-This report and its isolated tests assess `335bb8fa4`, not that newer combined
-head. No publication status is inferred from its commit subject.
-
-Reviewed the complete committed diff from `88cf10641` through `335bb8fa4`, the
-Task directive, current design, and narrow-checkpoint report. The current slice
-retains exact flow facts and resolves the passive native read contract. Full
-acceptance still includes live output, the connected diagram, all Task entry
-points, filtering, Follow live, completed history, and configured demonstration.
-
-The closest production-like proof for this slice uses the real SQLite store and
-its owning transactions against disposable databases. No production Task was
-advanced to manufacture history. The configured Watch demo is explicitly outside
-this checkpoint, and no Watch surface exists in the committed code.
+## Evidence matrix
 
 | Claim | Planned behavior | Implemented behavior | Proof | Result |
 |---|---|---|---|---|
-| Immutable expanded plan | Retain the actual selected plan; reject same-ID mutation | InvocationSelected retains QueuedInvocation; changed same-ID plans roll back | Isolated store tests plus record_flow_position_in | pass |
-| Exact stages and attempts | Repeated skills remain distinct; retries preserve Run identity | Stage index, invocation ID, iteration, and claim-owned Run bindings | Repeated-skills/Iterate/retry test and worker-fencing tests | pass |
-| Human Iterate | Retain the actual return edge and new attempt | Human settlement records Iterated from/to stages in its transaction | Test returns from step 2, iteration 0 to step 1, iteration 1 | pass |
-| Ready and blocked facts | Retain human readiness and provider failure beside stage identity | Position writer records StageReady; failure transaction records StageBlocked | Writer inspection; store scenario exercises both, but does not separately assert both history payloads | pass by source inspection |
-| Restart and completion | Keep plans and bindings after active position deletion | Replacement and terminal settlement precede deletion in the same transaction | Restart/stale-worker test; human completion followed by database reopen; autonomous finish test | pass |
-| Other position removal | Direct replacement and Work reopening preserve settlement | record_flow_position_in and reopen_work_in retain Replaced/Reopened | All active-position DELETE paths inspected; no focused reopen-history test in this pass | pass by source inspection |
-| Atomicity and authority | Rejected claims or failed history writes cannot change history or cursor | Exact version/claim matching; shared SQLite transactions | Stale-write, immutable-plan rollback, injected event-insert failure, and concurrent claim tests | pass |
-| Parent silence | Inspection facts never wake Project/Wave | Flow excluded from observation outbox and notification predicates | Actual outbox query in the repeated-skills test; both writer and nudge paths inspected | pass |
-| Resumable failures | Releasing a claim creates no spurious failure/history | Existing release behavior retained; assertions compare history before/after | Both affected controller regressions pass in isolation | pass |
-| Passive native contract | Exact recorded Session/account or launch-owned location; observation never controls clients | Design defines Claude/Codex JSONL and read-only OpenCode parts, revisions, resets, and explicit gaps | Task-local contract review | pass for contract only |
-| Complete native/autonomous capture | Live prose, tools, results, and failures across supported sources | Preserved later implementation has known capture/proof gaps | Earlier dated evidence only; no fresh capture proof here | gap, later slice |
-| Complete Watch experience | Diagram, all/new Runs, independent history/live paging, filters, Follow live, retained history | Snapshot and UI remain unfinished | Current checkpoint and retained design | gap, later slice |
-| Shared output fixtures and configured demonstration | Rust/Swift agree; real autonomous/native arrival, transitions, auxiliary Run, Iterate, reopen | Prior output fixture receipts exist; full Watch demonstration remains absent | Prior receipts are not upgraded by this review | gap for full acceptance |
+| Exact retained flow | Actual plans, separate retries, Iterate targets, replacement and completed history | Transactional facts folded by Rust; position/events read in one transaction | Prior 9 durable-store tests, final missing-attempt test, source inspection | pass |
+| Shared snapshot | Typed CLI/Swift plans, ancestry, attempts, transitions, active stage and all Runs | One Rust projection; Swift decodes; missing plans/Runs remain explicit | Prior 2 Rust and 2 Swift output/watch fixture tests; source comparison | pass |
+| Native call correlation | Reverse-order results match concurrent calls | Native call ID in conversation items; distinct source record IDs | Fresh rebuilt CLI regression for Claude/Codex; prior cross-page unit test | pass |
+| Partial discovery | Healthy sources survive missing/corrupt evidence | Manifest and directory failures produce discovery gaps | CLI failure before directory repair; successful output/Watch plus recovery afterward | pass after correction |
+| Older shared readers | Damage elsewhere does not hide readable Runs/Sessions | Same scanner continues and warns for existing callers | Fresh `lf runs` returns both healthy synthetic Runs; two focused scanner/Session tests | pass |
+| Configured passive read | No worker/worktree/client takeover needed | Read-only Home/manifest/native reads from `/tmp` | Fresh Watch: 3 Runs, no fabricated plan, `position_unavailable`; output: 197 records, 3 sources, no gaps | pass for configured reads |
+| Old Home evidence | Missing position storage is unknown, never completed | Explicit gap; no legacy reader or migration | Prior missing-table/no-migration test; fresh configured read | pass |
+| Full Watch experience | Connected diagram, filters, Follow live, all entry points, retained UI history | UI absent; discovery unbounded and history/live cursor separation incomplete | Source inspection and design | gap, subsequent slices |
+| Complete capture/demo | All supported autonomous/native output before completion and full human demo | Summary journals and provider-specific proof remain incomplete | Dated implementation ledger only; fresh reads are historical | gap, subsequent slices |
 
-## Ownership review
+## Bounded correction and proof
 
-FlowPosition and its versioned claim remain execution authority. TaskFlowEvent is
-inspection evidence in the existing task_events table. The checkpoint adds no
-migration, second transcript, watcher cache, launch route, or execution controller.
+`record_dirs` still propagated subtree enumeration/metadata failures before Task
+manifest-gap handling. The regression made one disposable prefix unreadable
+beside two healthy native sources. The original CLI exited 1. The repaired
+scanner continues at the existing directory owner, routing errors to Task gaps
+or the existing Run readers' warnings. Root-level inability to enumerate any
+Run storage remains an explicit read failure; individual subtree damage no
+longer aborts healthy evidence.
 
-Traced set_flow_position, worker claim/bind/block/settle/finish, human settlement,
-restart, and Work reopening through their SQLite transactions. The history writer
-accepts committed positions and exact Run bindings; it never chooses the next
-stage, matches by skill name, or reloads current YAML. Automatic retry through
-claim_task_worker also retains the retry edge. Stale finish attempts roll back
-the tentative settlement receipt with the failed mutation.
+`uv run python scratch/review-output-proof.py` passed after the branch CLI was
+rebuilt. Both providers returned four correctly correlated records. A corrupt
+manifest and then an unreadable prefix retained eight healthy records and an
+explicit discovery gap; Watch retained both Runs. `lf runs --json --task LOO-293`
+also returned both synthetic Runs beside the unreadable prefix. Restoring the
+prefix cleared discovery gaps and retained all eight records. The permission
+proof explicitly fails if the host does not enforce directory permissions; it
+never silently passes under a privileged process.
 
-Checked both observation mechanisms: insert_task_event_in gates the durable
-outbox on is_project_observable, and the shared-store nudge uses the same
-predicate. Flow is excluded, including root-Wave delivery. The chat match arm is
-a presentation exhaustiveness case, not a new delivery path. Ordinary lifecycle
-failures retain their existing observation behavior.
+The synthetic proof writes only a temporary Run tree and reads the existing Task
+registry. Separate configured reads use the actual Home from `/tmp`; both exit
+0 without stderr. Watch returns three Runs, zero retained invocations, null
+active stage, and `position_unavailable`; output returns 197 historical records
+from three sources with no source/discovery gaps. No provider was started,
+resumed, attached, replaced, or interrupted. No production Task state or native
+transcript was changed to manufacture evidence. This is not fresh live arrival
+or a configured Watch UI demonstration.
 
-Reviewed the passive contract as a contract, not fresh provider evidence. Native
-source provenance remains beside provider Session identity; Rust reads provider
-history and Swift consumes projections. Account selection, provider launch,
-resume, attachment, replacement, and interruption are forbidden for observation.
-No changes to the preserved native/output implementation were made in this pass.
+Fresh focused Rust proof after the scanner change: the old/new auxiliary-Run
+output discovery test passed, as did `unresolved_provider_scan` and
+`scanner_reduces` from the freshly compiled test executable. Earlier snapshot,
+native normalization, and DTO passes are explicitly prior receipts; their
+unchanged behavior was not retested merely because a review began.
+Final `cargo fmt --all -- --check`, `git diff --check`, and
+`cargo clippy --all-targets -- -D warnings` passed.
 
-## Fresh verification
+## Architectural review
 
-Exported exactly `335bb8fa4` with git archive into a temporary directory, excluding
-all uncommitted and untracked later work. Reused the existing Cargo target cache;
-Cargo recompiled the exported loopflow source. Ran with LF_RUN_ID unset and
-LOOPFLOW_BUILD_PROVENANCE=development:
+Traced CLI dispatch through the shared read-only Task lookup, atomic history
+read, manifest scan, source resolution, and normalizers. No provider-control or
+credential-selection path is reachable. SQLite provider reads use read-only
+flags; source-provenance writes remain launch/callback-owned. Swift uses typed
+CLI reads, with no provider database reader or lifecycle reducer. The grouped
+source contract has one record representation and no old-wrapper adapter.
 
-- `cargo test -p loopflow --lib durable_store_tests --no-fail-fast`: 8 passed.
-- `cargo test -p loopflow --lib failure_releases --no-fail-fast`: 3 passed,
-  including the two affected Task controller tests and one matching harness test.
-- `git diff --check 88cf10641 HEAD`: passed while HEAD was `335bb8fa4`.
+All position-removal paths retain settlement in their owning transactions.
+Flow facts remain excluded from both durable outbox and parent notifications.
+The snapshot never reloads current YAML, joins by skill name, infers process
+liveness, or completes a replaced attempt. It advances the full design without
+creating a competing authority.
 
-The first archive run omitted the explicit development provenance. Without .git,
-build.rs defaults to release provenance, which excludes the development draft
-schema from disposable-store initialization. All eight tests then failed during
-fixture creation with `projects has no column named iteration`, before reaching
-provenance assertions. The existing build setting corrected the test environment;
-no migration or repository code was changed. This failed attempt is not evidence
-of a provenance regression or a verified release-package build.
-
-Formatting and Clippy passes in narrow-checkpoint.md remain prior working-tree
-receipts. No fresh lint or broad suite was needed for this report-only review.
-The isolated focused passes now establish that the committed checkpoint does not
-depend on the preserved later implementation.
-
-## Remaining work and publication boundary
-
-1. Complete passive capture and configured Claude/OpenCode live proof, summary-only
-   autonomous tool results, and faithful provider attribution across attempts.
-2. Finish bounded discovery/state and separate history/live continuation, including
-   explicit behavior for OpenCode backdated/equal-count history rewrites. Cursor
-   file/stdin transport is already repaired in the preserved later implementation; the
-   old argv-overflow finding is no longer an outstanding transport defect.
-3. Implement the shared Watch snapshot and Mac surface, all Task entry points,
-   stale evidence, filtering, Follow live, and inspectable completed history.
-4. Prove the full configured path, then enter the pinned human demo gate.
-
-The narrow checkpoint's stop boundary applied to this historical review only.
-The active design now advances the shared Watch snapshot and retains the full
-end-to-end acceptance. This review attempted no publication, landing, or Task
-completion; passing it does not authorize an autonomous-only release.
+The separate affected-suite gate was blocked by the active main checkout's
+resource envelope before product tests ran. This review does not upgrade that
+receipt to a broad gate pass. Publication is an in-progress refresh under the
+review-slice skill; final landing and Task settlement remain with the pinned flow.
 
 ---
 

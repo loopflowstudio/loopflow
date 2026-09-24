@@ -19,14 +19,52 @@
 
 ## Before and after
 
+### Iteration 2 — mounted-workspace proof
+
+Reviewed HEAD `2108eaba5`. No further coherent reduction was established; this
+pass changes only this report. The effective model above is unchanged. No API,
+DTO, route, field, type, persistence path or configuration key was removed.
+
+Re-read WorkspaceProjection/Navigation, PodiumModel, SessionsView/Store and its
+workspace registry, MultiplexerStore's notification boundary, RegistryQuery's
+Session operations, and the native focus/rendering seams. Compared the shared
+Rust/Swift SessionRecord and RoadmapProject/Task fields and inspected their DTO
+fixture coverage. Searches still find one desktop caller for each inventory read,
+one root window registry, and none of the removed navigation/scope types.
+
+The new `workspaceRetainsNativeSplit` fixture introduces no production owner or
+test-only production API. Its query closure isolates registry side effects; its
+native surfaces exercise the existing workspace. It complements rather than
+replaces `hiddenTerminalPreservesDraft`: the latter covers search focus through
+resize and manually focused Task terminals, while the former covers mounted
+navigation, repository return, companion splits and actual viewport retention.
+Combining them would obscure those distinct failure boundaries.
+
+The layout/focus/zoom snapshots remain a notification-to-SwiftUI rendering bridge;
+all mutations still belong to MultiplexerStore. Removing that bridge requires a
+complete observation change across its consumers. The new fixture does not cover
+close/undo, zoom or resolution timing, so it does not justify that wider change.
+Planning/runtime identity, last-good/prepared state, and pane/native focus retain
+the distinct lifetimes explained below. LOO-284's absent shared action contract
+still prevents deleting the existing Session policy coherently.
+
+Inspected the existing final receipt at
+`/tmp/loo291-mounted-navigation-final.log`: one mounted-workspace test passed.
+No executable content changed and no tests were rerun in this compression pass.
+The fixture now proves native split and terminal-scroll retention; configured
+provider interaction/resolution, navigator scroll, visual quality and timings
+remain open. Full LOO-291 scope and publication disposition are unchanged.
+
+### Earlier native-focus compression
+
 Earlier compression removed duplicate selected Work, SessionScope and its
 filter/resolution methods, pane-tree scope props, unused SessionItem aliases,
 and the unreachable inspector sheet/Task-terminal observation. The root switch,
 PodiumConsole, Sessions-only hierarchy read and independent polling remain absent.
 
-The latest implement pass already made the native reduction: deleting the
+The preceding native-restoration pass already made the native reduction: deleting the
 SwiftUI focus Coordinator and moving its one request into the retained native
-view. This pass found no further coherent structural reduction. It corrects one
+view. That compression pass found no further coherent structural reduction. It corrected one
 behavior lost by that reduction: an enabled Task terminal has no selected-pane
 binding (`isFocused` defaults false), but must keep focus acquired by clicking.
 Previously every resize cleared that focus. The native update now receives
@@ -74,7 +112,7 @@ Coordinator remain absent.
   has no legal-action/display-path fields; moving the local policy to another
   helper would preserve the duplication rather than remove it.
 
-## Verification and remaining work
+## Earlier native-focus verification
 
 Extended the existing real-PTY fixture with the Task terminal's manual-focus
 case. Before the correction it failed after resize: first responder became

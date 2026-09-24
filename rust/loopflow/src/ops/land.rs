@@ -133,8 +133,9 @@ fn prepare_pr(
                 }
             }
         }
-        let cleared_task_request =
-            crate::ops::task::clear_task_pr_merge_before_head_mutation(&repo_root, true)?;
+        let cleared_task_request = crate::ops::task::clear_task_pr_merge_before_head_mutation(
+            &repo_root, true, inherit_pr,
+        )?;
         if !options.local && !cleared_task_request {
             // Wave and other non-Task PRs have no durable Task request to
             // revoke, but GitHub may still have this branch in its merge queue.
@@ -251,7 +252,7 @@ fn prepare_pr(
         Some(pr) => Some(pr),
         None => crate::ops::pr::current_pr(&repo_root)?,
     };
-    crate::ops::task::attach_task_github_pr(&repo_root, pr.as_ref())?;
+    crate::ops::task::attach_task_github_pr(&repo_root, pr.as_ref(), inherit_pr)?;
     crate::ops::task::request_task_pr_merge(
         &repo_root,
         match finalize {
@@ -265,6 +266,7 @@ fn prepare_pr(
             crate::work::task::AfterMerge::ContinueTask
         },
         options.next_slug.as_deref(),
+        inherit_pr,
     )?;
     if let Err(finalize_error) = finalize_remote(
         &repo_root,
@@ -282,7 +284,7 @@ fn prepare_pr(
         // command did not complete. A failed revocation leaves the durable
         // request intact and reports both failures rather than guessing.
         if let Err(clear_error) =
-            crate::ops::task::clear_task_pr_merge_before_head_mutation(&repo_root, true)
+            crate::ops::task::clear_task_pr_merge_before_head_mutation(&repo_root, true, inherit_pr)
         {
             return Err(OpsError::Message(format!(
                 "{finalize_error}; failed to reconcile the durable merge request: {clear_error}"

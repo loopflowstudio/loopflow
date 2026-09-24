@@ -1415,12 +1415,13 @@ pub(crate) fn matching_task_pr_merge_request(
 pub(crate) fn clear_task_pr_merge_before_head_mutation(
     repo: &Path,
     mutation_is_unconditional: bool,
+    inherit_pr: &impl Fn(&mut Command),
 ) -> OpsResult<bool> {
     block_on_task(async move {
         let ManagedTask::Managed { store, task } = resolve_managed_task(repo).await? else {
             return Ok(false);
         };
-        clear_task_pr_merge(&store, &task, repo, mutation_is_unconditional).await
+        clear_task_pr_merge(&store, &task, repo, mutation_is_unconditional, inherit_pr).await
     })
 }
 
@@ -1453,6 +1454,7 @@ async fn clear_task_pr_merge(
     task: &Task,
     repo: &Path,
     mutation_is_unconditional: bool,
+    inherit_pr: &impl Fn(&mut Command),
 ) -> OpsResult<bool> {
     let mut pr = store
         .active_task_pr(&task.id)
@@ -1478,7 +1480,7 @@ async fn clear_task_pr_merge(
             .github()
             .expect("merge request validation requires GitHub PR")
             .number;
-        crate::ops::pr::disable_auto_merge(repo, number, &|_| {})?;
+        crate::ops::pr::disable_auto_merge(repo, number, inherit_pr)?;
     }
     pr.publication
         .as_mut()
@@ -1500,6 +1502,7 @@ pub(crate) fn request_task_pr_merge(
     head_sha: Option<&str>,
     after_merge: AfterMerge,
     next_slug: Option<&str>,
+    inherit_pr: &impl Fn(&mut Command),
 ) -> OpsResult<bool> {
     let head_sha = head_sha.map(str::to_string);
     let next_slug = next_slug.map(parse_pr_slug).transpose()?;
@@ -1560,7 +1563,7 @@ pub(crate) fn request_task_pr_merge(
                 .as_ref()
                 .expect("merge request validation requires GitHub PR")
                 .number;
-            crate::ops::pr::disable_auto_merge(repo, number, &|_| {})?;
+            crate::ops::pr::disable_auto_merge(repo, number, inherit_pr)?;
         }
         let now = time::OffsetDateTime::now_utc();
         let requested_at = publication
@@ -1980,6 +1983,7 @@ async fn require_task_pr_range_nonempty_mode(
 pub(crate) fn attach_task_github_pr(
     repo: &Path,
     github_pr: Option<&crate::ops::pr::PrInfo>,
+    inherit_pr: &impl Fn(&mut Command),
 ) -> OpsResult<bool> {
     block_on_task(async move {
         let ManagedTask::Managed { store, task } = resolve_managed_task(repo).await? else {
@@ -2018,7 +2022,7 @@ pub(crate) fn attach_task_github_pr(
                 task.plan.identifier
             ))
         })?;
-        invalidate_stale_merge_request(repo, publication, github_pr)?;
+        invalidate_stale_merge_request(repo, publication, github_pr, inherit_pr)?;
         publication.github = Some(GithubPr {
             number,
             url: url.clone(),
@@ -2055,6 +2059,7 @@ fn invalidate_stale_merge_request(
     repo: &Path,
     publication: &mut PrPublication,
     github_pr: &crate::ops::pr::PrInfo,
+    inherit_pr: &impl Fn(&mut Command),
 ) -> OpsResult<()> {
     let Some(request) = publication.merge.as_ref() else {
         return Ok(());
@@ -2075,7 +2080,7 @@ fn invalidate_stale_merge_request(
                 github_pr.number
             ))
         })?;
-        crate::ops::pr::disable_auto_merge(repo, number, &|_| {})?;
+        crate::ops::pr::disable_auto_merge(repo, number, inherit_pr)?;
     }
     publication.merge = None;
     Ok(())
@@ -2654,7 +2659,7 @@ async fn reconcile_task_pr_observation(
         github: None,
         merge: None,
     });
-    invalidate_stale_merge_request(&task.worktree, publication, &github_pr)?;
+    invalidate_stale_merge_request(&task.worktree, publication, &github_pr, &|_| {})?;
     publication.github = Some(GithubPr {
         number,
         url: url.clone(),
@@ -4631,7 +4636,7 @@ pub(crate) async fn resume_task_async(
     }
     {
         let _mutation = lock_task_pr_mutation(&task.worktree)?;
-        clear_task_pr_merge(&store, &task, &task.worktree, true).await?;
+        clear_task_pr_merge(&store, &task, &task.worktree, true, &|_| {}).await?;
     }
     // Reconcile may settle an active PR that merged out of band, moving the
     // worktree into a between-PR state; refuse a dirty between-PR before the

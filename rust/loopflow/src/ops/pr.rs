@@ -187,7 +187,7 @@ pub fn create_or_update_pr(
         };
         (PrResult { url, created: true }, info)
     };
-    crate::ops::task::attach_task_github_pr(repo, pr.as_ref())?;
+    crate::ops::task::attach_task_github_pr(repo, pr.as_ref(), &|_| {})?;
     Ok(result)
 }
 

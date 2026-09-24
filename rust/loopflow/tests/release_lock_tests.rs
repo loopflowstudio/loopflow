@@ -9,8 +9,13 @@ use std::process::{Child, Command, Stdio};
 use std::thread;
 use std::time::{Duration, Instant};
 
-use loopflow::engine::git::worktree_remove;
-use loopflow::ops::{release_publish, release_tag, OpsError};
+use loopflow::engine::git::{current_branch, worktree_remove};
+use loopflow::ops::{
+    commit_workflow, release_publish, release_tag, CommitOptions, NullProgress, OpsError,
+};
+use loopflow::work::task::{
+    AfterMerge, GithubPr, PrMergeMode, PrMergeRequest, PrPresentation, PrPublication,
+};
 use loopflow_test_support::TestRepo;
 use serde_json::{json, Value};
 use sha2::{Digest, Sha256};
@@ -1488,4 +1493,228 @@ exit 1
     assert_eq!(fs::read(repo.path().join(".git/index")).unwrap(), index);
     worktree_remove(repo.path(), &checkout).unwrap();
     assert_eq!(git(&["rev-parse", &branch]), hook_head.trim());
+}
+
+#[test]
+fn surviving_task_revocation_retains_release_ownership_and_settlement_intent() {
+    for kill_controller in [true, false] {
+        let state = tempfile::tempdir().unwrap();
+        let mutation = blocking_mutation(
+            state.path(),
+            &format!("printf disabled > '{}/remote-auto'", state.path().display()),
+        );
+        let blocked = if kill_controller {
+            mutation
+        } else {
+            format!(
+                "(\n{mutation}) > '{}/descendant.log' 2>&1 &\nexit 1",
+                state.path().display()
+            )
+        };
+        let gh = format!(
+            r#"#!/bin/sh
+case "$1 $2" in
+'--version ') exit 0;;
+'run list'|'pr list') echo '[]'; exit 0;;
+'release view') exit 1;;
+'api graphql')
+  if [ "$(cat '{state}/remote-auto')" = armed ]; then echo true; else echo false; fi
+  exit 0;;
+'pr merge')
+  [ "$3 $4" = '912 --disable-auto' ] || exit 92
+  {blocked}
+  ;;
+esac
+exit 91
+"#,
+            state = state.path().display()
+        );
+        let notes = format!(
+            r#"#!/bin/sh
+pwd > '{state}/checkout'
+: > '{state}/ready'
+while [ ! -f '{state}/registered' ]; do
+  [ -d '{state}' ] || exit 1
+  sleep 0.02
+done
+cat > RELEASE_NOTES.md <<'NOTES'
+# v0.9.1
+
+<!-- loopflow:release-notes=narrative;gate=safe -->
+
+Fixture release.
+NOTES
+"#,
+            state = state.path().display()
+        );
+        let _env = EnvGuard::new(&[("gh", &gh), ("lf", &notes)]);
+        let repo = TestRepo::new();
+        repo.create_file("local.txt", "unpublished\n");
+        repo.stage_all();
+        repo.commit("caller local work");
+        repo.create_file("staged.txt", "staged\n");
+        repo.stage_all();
+        repo.create_file("staged.txt", "working\n");
+        repo.create_file("untracked.txt", "untracked\n");
+        let caller_head = repo.head_sha();
+        let caller_branch = current_branch(repo.path()).unwrap();
+        let caller_index = fs::read(repo.path().join(".git/index")).unwrap();
+        let mut parent = start(&repo, state.path(), &["release", "run", "0.9.1"]);
+        let checkout = PathBuf::from(
+            fs::read_to_string(state.path().join("checkout"))
+                .unwrap()
+                .trim(),
+        );
+        let git_read = |args: &[&str]| {
+            let output = Command::new("git")
+                .arg("-C")
+                .arg(&checkout)
+                .args(args)
+                .output()
+                .unwrap();
+            assert!(output.status.success(), "{output:?}");
+            String::from_utf8(output.stdout).unwrap().trim().to_string()
+        };
+        let head = git_read(&["rev-parse", "HEAD"]);
+        let branch = git_read(&["branch", "--show-current"]);
+        // Register the actual generated branch, not the caller's ambient Task.
+        let home = PathBuf::from(std::env::var_os("LF_HOME").unwrap());
+        let task = support::register_task(&home, &checkout, &branch, &head);
+        let now = time::OffsetDateTime::now_utc();
+        let mut pr = task.pr.clone();
+        pr.publication = Some(PrPublication {
+            requested_at: now,
+            presentation: Some(PrPresentation {
+                title: "Task proof".to_string(),
+                body: "Retain settlement intent".to_string(),
+                head_sha: head.clone(),
+            }),
+            github: Some(GithubPr {
+                number: 912,
+                url: "https://example.com/pr/912".to_string(),
+                head_sha: Some(head.clone()),
+            }),
+            merge: Some(PrMergeRequest {
+                mode: PrMergeMode::Auto,
+                requested_at: now,
+                head_sha: head.clone(),
+                after_merge: AfterMerge::CompleteTask,
+                next_slug: None,
+            }),
+        });
+        let runtime = tokio::runtime::Runtime::new().unwrap();
+        runtime.block_on(task.store.update_task_pr(&pr)).unwrap();
+        let pr = runtime
+            .block_on(task.store.active_task_pr(&task.task.id))
+            .unwrap()
+            .unwrap();
+        fs::write(state.path().join("remote-auto"), "armed").unwrap();
+        fs::remove_file(state.path().join("ready")).unwrap();
+        fs::write(state.path().join("registered"), "").unwrap();
+        let deadline = Instant::now() + Duration::from_secs(20);
+        while !state.path().join("ready").exists() {
+            assert!(
+                parent.child.try_wait().unwrap().is_none() && Instant::now() < deadline,
+                "revocation not reached: {}",
+                fs::read_to_string(state.path().join("controller.log")).unwrap()
+            );
+            thread::sleep(Duration::from_millis(10));
+        }
+        if kill_controller {
+            parent.child.kill().unwrap();
+        } else {
+            let deadline = Instant::now() + Duration::from_secs(20);
+            while parent.child.try_wait().unwrap().is_none() {
+                assert!(Instant::now() < deadline, "controller did not exit");
+                thread::sleep(Duration::from_millis(10));
+            }
+        }
+        assert!(!parent.child.wait().unwrap().success());
+        let contender = release_tag(repo.path(), "0.9.2", None);
+        let removal = worktree_remove(repo.path(), &checkout);
+        let persisted = runtime
+            .block_on(task.store.active_task_pr(&task.task.id))
+            .unwrap()
+            .unwrap();
+        assert_eq!(persisted.merge_request(), pr.merge_request());
+        assert_eq!(
+            fs::read_to_string(state.path().join("remote-auto")).unwrap(),
+            "armed"
+        );
+        let remote = Command::new("git")
+            .arg("--git-dir")
+            .arg(repo.bare_path())
+            .args(["show-ref", "--verify", &format!("refs/heads/{branch}")])
+            .output()
+            .unwrap();
+        assert!(
+            !remote.status.success(),
+            "pushed before revocation completed"
+        );
+        fs::write(state.path().join("allow"), "").unwrap();
+        assert!(
+            matches!(contender, Err(OpsError::ReleaseDeferred { .. })),
+            "{contender:?}"
+        );
+        assert!(removal.is_err(), "removed surviving revocation checkout");
+        assert!(checkout.join("RELEASE_NOTES.md").exists());
+        wait_for(&state.path().join("completed"));
+        assert_eq!(
+            fs::read_to_string(state.path().join("remote-auto")).unwrap(),
+            "disabled"
+        );
+        assert_eq!(repo.head_sha(), caller_head);
+        assert_eq!(current_branch(repo.path()).unwrap(), caller_branch);
+        assert_eq!(
+            fs::read(repo.path().join(".git/index")).unwrap(),
+            caller_index
+        );
+        assert_eq!(
+            fs::read_to_string(repo.path().join("staged.txt")).unwrap(),
+            "working\n"
+        );
+        assert_eq!(
+            fs::read_to_string(repo.path().join("untracked.txt")).unwrap(),
+            "untracked\n"
+        );
+        wait_until_released(|| release_tag(repo.path(), "0.9.2", None).map(|_| ()));
+        // Replay observes remote revocation before clearing durable intent and pushing.
+        let persisted = runtime
+            .block_on(task.store.active_task_pr(&task.task.id))
+            .unwrap()
+            .unwrap();
+        assert_eq!(persisted.merge_request(), pr.merge_request());
+        commit_workflow(
+            &checkout,
+            &CommitOptions {
+                add: false,
+                push: true,
+                create_draft_pr: false,
+                task: "commit".to_string(),
+                flow_parents: Vec::new(),
+                message: Some("retry prepared Task head".to_string()),
+                agent: None,
+            },
+            &NullProgress,
+            &|_| {},
+        )
+        .unwrap();
+        let persisted = runtime
+            .block_on(task.store.active_task_pr(&task.task.id))
+            .unwrap()
+            .unwrap();
+        assert!(persisted.merge_request().is_none());
+        let remote = Command::new("git")
+            .arg("--git-dir")
+            .arg(repo.bare_path())
+            .args(["rev-parse", &branch])
+            .output()
+            .unwrap();
+        assert!(remote.status.success());
+        assert_eq!(
+            String::from_utf8(remote.stdout).unwrap().trim(),
+            git_read(&["rev-parse", "HEAD"])
+        );
+        worktree_remove(repo.path(), &checkout).unwrap();
+    }
 }

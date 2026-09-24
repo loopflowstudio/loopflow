@@ -528,25 +528,22 @@ half-contracts.
 
 ## This slice
 
-Carry the existing release target lock and exact checkout lease through source
-fetching, named checkout creation, rebuild reset, removal and branch cleanup.
-Extend shared Git/worktree operations with explicit inheritance; retain their
-classification and ordinary caller behavior. Remove the named-checkout helper's
-background upstream publication: release preparation already commits/pushes
-explicitly, and verification/publisher source checkouts need no remote branch.
-Ordinary placement keeps its existing upstream synchronization.
+Carry the existing command inheritance through Task merge-intent revocation,
+replacement and stale-head compensation reached by shared commit and PR
+finalization. Keep Task resolution, exact-head checks, remote revocation before
+local clearing, and failure retention under their existing owners. Ordinary
+Task observation/restart/rebase callers supply no release capability.
 
-Prove controller death and failed-launcher descendants through the built CLI,
-real Git and OS locks. Assert target exclusion, exact checkout protection where
-held, actual resulting Git state and unchanged caller HEAD/branch/index/bytes.
-Keep cleanup's independent lease reacquisition before removal so it cannot bypass
-a surviving child's protection. Creation cannot authorize later cleanup of a
-partially materialized live checkout.
+Prove the reachable release-to-Task push fence with the built CLI, a disposable
+registered Task, real Git and OS locks. Exercise controller death and a failed
+launcher leaving a revocation descendant; assert target exclusion, checkout
+protection, retained durable merge intent until revocation returns, and no new
+remote head before revocation. Preserve caller HEAD/branch/index/working bytes.
+Use existing Task tests for ordinary revocation and finalization behavior.
 
-Task compensation, historical telemetry linkage/recovery, dated repair ownership,
-closed obligations and configured acceptance remain in this serial Task.
-Settlement/prerequisite policy and the two automatic-settlement requirement are
-unchanged. Preserve the scorecard blocker and required UI/public proof.
+Historical telemetry association/recovery, dated repair ownership, closed
+obligations and configured acceptance remain in this serial Task. Preserve the
+scorecard blocker, required UI/public proof and two automatic settlements.
 
 ## Slice ledger
 
@@ -855,6 +852,20 @@ the regression passed after repair (5.77s), preserving the hook commit, usable
 source, target/checkout exclusion and caller HEAD/branch/index. Task compensation,
 telemetry recovery and repair ownership, closed obligations and configured
 acceptance remain open. See [review-source.md](review-source.md).
+
+- 2026-09-24: Task merge-intent revocation, replacement and stale-head
+  compensation now carry their caller's existing release target/checkout
+  capabilities. The built-CLI regression reproduced competing tag access while
+  a Task revocation child survived its controller. Both interruption modes and
+  ordinary replay now pass (12.33s), retaining durable intent, preventing an
+  early push, preserving caller state and checking the eventual bare-origin head.
+- Three ordinary Task revocation cases, failed-finalization compensation,
+  settlement-disposition replacement and normal release preparation passed,
+  as did formatting and all-target Clippy. Git/CLI/store/process/lock execution
+  is real; GitHub and notes are simulated. Other compensation routes were not
+  independently killed. Historical telemetry recovery and dated repair ownership,
+  closed obligations and configured acceptance remain open. See
+  [release-task-compensation.md](release-task-compensation.md).
 
 ## Measure
 

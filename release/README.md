@@ -141,6 +141,9 @@ stages, commits and pushes with both locks retained by Git children, then shared
 PR finalization creates the review surface
 with the release title and notes. Re-arming a dropped request retains the target
 lock while waiting for merge.
+Task merge-request revocation and failed-finalization compensation carry the
+same held locks. Revocation completes before a new head is pushed or durable
+settlement intent is cleared; interrupted attempts retain that intent for retry.
 
 Tag pushes, candidate-ref changes, workflow submissions, and GitHub publication
 commands retain the release target's lock in their child process. If the

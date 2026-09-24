@@ -81,7 +81,7 @@ pub(crate) fn checkpoint_task_restart(worktree: &Path, task_identifier: &str) ->
         agent: None,
     };
     commit_workflow(worktree, &options, &NullProgress, &|_| {})?;
-    crate::ops::task::clear_task_pr_merge_before_head_mutation(worktree, false)?;
+    crate::ops::task::clear_task_pr_merge_before_head_mutation(worktree, false, &|_| {})?;
     push_with_upstream_if_needed_locked(worktree, &|_| {})?;
     rev_parse(worktree, "HEAD").map_err(OpsError::Git)
 }
@@ -333,7 +333,7 @@ pub(crate) fn push_with_upstream_if_needed(
     // revokes Auto remotely) before Git can expose the new head. Same-head
     // publication remains a no-op and preserves the request.
     let _mutation = crate::ops::task::lock_task_pr_mutation(repo)?;
-    crate::ops::task::clear_task_pr_merge_before_head_mutation(repo, false)?;
+    crate::ops::task::clear_task_pr_merge_before_head_mutation(repo, false, inherit_git)?;
     push_with_upstream_if_needed_locked(repo, inherit_git)
 }
 

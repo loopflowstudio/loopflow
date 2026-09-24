@@ -50,8 +50,12 @@
   one reserved recovery through the existing job lock. A surviving child still
   excludes execution. The old receipt stays unchanged and unresolved. Historical
   receipts without start identity never gain authority from age or a missing PID.
-  The existing executor remains synchronous; bounding target duration remains
-  an interruption obligation, not proof supplied by the retry-count limit.
+  Automatic recovery now waits at most one hour for a terminal result, matching
+  the existing release-stage wait policy. The deadline defers release and leaves
+  the receipt Running; the child keeps its job lock and is not killed. No later
+  observer invents its exit result. A fresh check at a later wake can prove
+  current recovery after exclusion ends. This bounds observation, not runtime;
+  no background receipt writer or scheduler was introduced.
 - Original prerequisite associations use observed release timezone and the
   unchanged installed telemetry schedule. Dates preceding that observation or
   installation stay explicitly unknown. Retaining and reconciling previous

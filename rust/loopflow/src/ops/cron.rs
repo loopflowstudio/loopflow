@@ -8,7 +8,7 @@ use std::io::Write;
 #[cfg(unix)]
 use std::os::unix::fs::PermissionsExt;
 use std::path::{Path, PathBuf};
-use std::process::{Command, Stdio};
+use std::process::{Child, Command, ExitStatus, Stdio};
 use std::str::FromStr;
 use std::time::{Duration, Instant};
 
@@ -560,41 +560,46 @@ pub(crate) fn run_cron_recorded(
     } else {
         None
     };
-    let result = spawn_cron_target(&spec, _execution.as_ref(), &receipt);
-    receipt.finished_at = Some(Utc::now().timestamp());
-    match result {
-        Ok(status) if status.success() => {
-            receipt.outcome = CronOutcome::Succeeded;
-            receipt.exit_code = status.code();
-            write_receipt(&root, &receipt)?;
-            Ok(receipt)
-        }
-        Ok(status) => {
-            receipt.outcome = CronOutcome::Failed;
-            receipt.exit_code = status.code();
-            receipt.error = Some(format!(
-                "target exited {}; see {}",
-                status_label(&status),
-                receipt.log_path.display()
-            ));
-            write_receipt(&root, &receipt)?;
-            Err(OpsError::CommandFailed {
-                command: format!("cron {wave}/{flow}"),
-                stderr: receipt.error.clone().unwrap_or_default(),
-            })
-        }
+    let mut child = match spawn_cron_target(&spec, _execution.as_ref(), &receipt) {
+        Ok(child) => child,
         Err(error) => {
+            receipt.finished_at = Some(Utc::now().timestamp());
             receipt.outcome = CronOutcome::Failed;
             receipt.error = Some(format!(
                 "could not start target: {error}; see {}",
                 receipt.log_path.display()
             ));
             write_receipt(&root, &receipt)?;
-            Err(OpsError::CommandFailed {
+            return Err(OpsError::CommandFailed {
                 command: format!("cron {wave}/{flow}"),
                 stderr: receipt.error.clone().unwrap_or_default(),
-            })
+            });
         }
+    };
+    // A deadline or observation error is not a child exit. Keep the reserved
+    // Running receipt intact and its inherited lock effective.
+    let timeout = (source == CronSource::Recovery).then_some(Duration::from_secs(60 * 60));
+    let status = wait_for_cron_target(&mut child, &receipt, timeout)?;
+    receipt.finished_at = Some(Utc::now().timestamp());
+    receipt.exit_code = status.code();
+    if status.success() {
+        receipt.outcome = CronOutcome::Succeeded;
+    } else {
+        receipt.outcome = CronOutcome::Failed;
+        receipt.error = Some(format!(
+            "target exited {}; see {}",
+            status_label(&status),
+            receipt.log_path.display()
+        ));
+    }
+    write_receipt(&root, &receipt)?;
+    if status.success() {
+        Ok(receipt)
+    } else {
+        Err(OpsError::CommandFailed {
+            command: format!("cron {wave}/{flow}"),
+            stderr: receipt.error.clone().unwrap_or_default(),
+        })
     }
 }
 
@@ -892,7 +897,7 @@ fn spawn_cron_target(
     spec: &CronSpec,
     execution: Option<&std::fs::File>,
     receipt: &CronReceipt,
-) -> std::io::Result<std::process::ExitStatus> {
+) -> std::io::Result<Child> {
     if let Some(parent) = spec.log_path().parent() {
         fs::create_dir_all(parent)?;
     }
@@ -941,7 +946,7 @@ fn spawn_cron_target(
         use std::os::fd::AsRawFd;
         use std::os::unix::process::CommandExt;
         let fd = file.as_raw_fd();
-        // SAFETY: the parent keeps the file alive until status returns. The child
+        // SAFETY: the parent keeps the file alive until spawn returns. The child
         // only changes an fd flag with an async-signal-safe syscall before exec.
         unsafe {
             command.pre_exec(move || {
@@ -952,7 +957,46 @@ fn spawn_cron_target(
             });
         }
     }
-    command.status()
+    command.spawn()
+}
+
+fn wait_for_cron_target(
+    child: &mut Child,
+    receipt: &CronReceipt,
+    timeout: Option<Duration>,
+) -> OpsResult<ExitStatus> {
+    let continuation = || {
+        format!(
+            "inspect receipt {} at {}; retry at the next configured firing after the existing job lock is free",
+            receipt.id,
+            receipt.log_path.display()
+        )
+    };
+    let observation_error = |error| OpsError::CommandFailed {
+        command: format!("observe cron target {}", receipt.id),
+        stderr: format!("exit result is unknown: {error}; {}", continuation()),
+    };
+    let Some(timeout) = timeout else {
+        return child.wait().map_err(observation_error);
+    };
+    let deadline = Instant::now() + timeout;
+    loop {
+        if let Some(status) = child.try_wait().map_err(observation_error)? {
+            return Ok(status);
+        }
+        let remaining = deadline.saturating_duration_since(Instant::now());
+        if remaining.is_zero() {
+            return Err(OpsError::ReleaseDeferred {
+                reason: format!(
+                    "telemetry recovery {} has no terminal result after {}s; the check has not been stopped",
+                    receipt.id,
+                    timeout.as_secs()
+                ),
+                continuation: continuation(),
+            });
+        }
+        std::thread::sleep(remaining.min(Duration::from_millis(250)));
+    }
 }
 
 fn validate_installed_spec(spec: &CronSpec, wave: &str, flow: &str) -> OpsResult<()> {
@@ -1436,6 +1480,135 @@ mod tests {
         .unwrap();
         assert_eq!(receipt.outcome, CronOutcome::Succeeded);
         assert!(effect.exists());
+    }
+
+    #[test]
+    fn telemetry_deadline_preserves_unknown_receipt_and_surviving_child_exclusion() {
+        struct Target {
+            child: Child,
+            allow: PathBuf,
+        }
+        impl Drop for Target {
+            fn drop(&mut self) {
+                let _ = fs::write(&self.allow, "finish");
+                let _ = self.child.wait();
+            }
+        }
+
+        let temp = tempfile::TempDir::new().unwrap();
+        let launcher = temp.path().join("telemetry");
+        let started = temp.path().join("started");
+        let allow = temp.path().join("allow");
+        let completed = temp.path().join("completed");
+        fs::write(
+            &launcher,
+            format!(
+                "#!/bin/sh\necho start >> '{}'\nwhile [ ! -f '{}' ]; do sleep 0.01; done\necho complete >> '{}'\n",
+                started.display(), allow.display(), completed.display()
+            ),
+        )
+        .unwrap();
+        fs::set_permissions(&launcher, fs::Permissions::from_mode(0o755)).unwrap();
+        let spec = named_spec(
+            temp.path(),
+            &launcher,
+            "infra",
+            "telemetry-daily",
+            "0 0 9 * * *",
+            CronTargetKind::Flow,
+        );
+        fs::create_dir_all(&spec.working_directory).unwrap();
+        add_cron(temp.path(), &spec, &FakeLaunchctl::default()).unwrap();
+        let receipt = new_receipt(&spec, &spec.host.home_id, CronSource::Recovery);
+        let root = receipt_root(&spec.host.lf_home);
+        write_receipt(&root, &receipt).unwrap();
+        let owner = accounting::claim_execution(&spec).unwrap().unwrap();
+        let mut target = Target {
+            child: spawn_cron_target(&spec, Some(&owner), &receipt).unwrap(),
+            allow,
+        };
+
+        // Exercise the production wait with a short deadline, without adding a
+        // runtime override for the release operation's one-hour policy.
+        let before = Instant::now();
+        let error =
+            wait_for_cron_target(&mut target.child, &receipt, Some(Duration::from_millis(50)))
+                .unwrap_err();
+        assert!(before.elapsed() < Duration::from_secs(5));
+        match error {
+            OpsError::ReleaseDeferred {
+                reason,
+                continuation,
+            } => {
+                assert!(reason.contains(receipt.id.as_str()));
+                assert!(reason.contains("has not been stopped"));
+                assert!(continuation.contains(&receipt.log_path.display().to_string()));
+            }
+            other => panic!("expected deferred observation, got {other:?}"),
+        }
+        assert!(target.child.try_wait().unwrap().is_none());
+        assert!(!completed.exists());
+        drop(owner);
+        assert!(accounting::claim_execution(&spec).unwrap().is_none());
+        let contender = || {
+            run_cron(
+                temp.path(),
+                &spec.wave,
+                &spec.flow,
+                &spec.host.home_id,
+                &spec.host.home_id,
+                CronSource::Recovery,
+            )
+        };
+        assert!(matches!(contender(), Err(OpsError::ReleaseDeferred { .. })));
+        assert_eq!(
+            read_receipts(&root, &spec.wave, Some(&spec.flow))
+                .unwrap()
+                .into_iter()
+                .find(|r| r.id == receipt.id)
+                .unwrap(),
+            receipt
+        );
+
+        fs::write(&target.allow, "finish").unwrap();
+        assert!(target.child.wait().unwrap().success());
+        assert_eq!(fs::read_to_string(&started).unwrap(), "start\n");
+        assert_eq!(fs::read_to_string(&completed).unwrap(), "complete\n");
+        let recovered = contender().unwrap();
+        assert_eq!(recovered.outcome, CronOutcome::Succeeded);
+        assert_ne!(recovered.id, receipt.id);
+        let receipts = read_receipts(&root, &spec.wave, Some(&spec.flow)).unwrap();
+        assert_eq!(receipts.iter().find(|r| r.id == receipt.id), Some(&receipt));
+        assert_eq!(
+            fs::read_to_string(&completed).unwrap(),
+            "complete\ncomplete\n"
+        );
+    }
+
+    #[test]
+    #[cfg(unix)]
+    fn telemetry_exit_observation_error_is_failure_without_a_fabricated_exit() {
+        let temp = tempfile::TempDir::new().unwrap();
+        let spec = spec(temp.path(), Path::new("/usr/bin/true"));
+        fs::create_dir_all(&spec.working_directory).unwrap();
+        let receipt = new_receipt(&spec, &spec.host.home_id, CronSource::Recovery);
+        let root = receipt_root(&spec.host.lf_home);
+        write_receipt(&root, &receipt).unwrap();
+        let mut child = spawn_cron_target(&spec, None, &receipt).unwrap();
+        let mut status = 0;
+        // SAFETY: this is our own child PID and status points to a valid integer.
+        // Reap outside Child to reproduce an unavailable exit observation.
+        assert_eq!(
+            unsafe { libc::waitpid(child.id() as libc::pid_t, &mut status, 0) },
+            child.id() as libc::pid_t
+        );
+        let error = wait_for_cron_target(&mut child, &receipt, Some(Duration::from_millis(50)))
+            .unwrap_err();
+        assert!(matches!(error, OpsError::CommandFailed { .. }));
+        assert_eq!(
+            read_receipts(&root, &spec.wave, Some(&spec.flow)).unwrap(),
+            vec![receipt]
+        );
     }
 
     #[test]

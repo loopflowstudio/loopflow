@@ -528,21 +528,22 @@ half-contracts.
 
 ## This slice
 
-Recover a current telemetry prerequisite left Running after its exact cron
-runner dies. New physical receipts retain the runner's observed OS start time;
-legacy receipts without identity remain unknown. Reuse the existing process
-identity probe and cron job lock: confirmed runner death permits one reserved
-recovery attempt, while a surviving target keeps execution excluded. Preserve
-the original receipt unchanged; a fresh successful check proves current recovery,
-not the interrupted check's result. Live or unknown runners still defer.
+Bound automatic telemetry recovery observation to one hour through the existing
+cron executor. A deadline defers release with the reserved receipt and log path;
+it never fabricates a target exit, kills the check, releases the child's job lock,
+or selects another retry within the same wake. Leave the physical receipt
+Running when no terminal result was observed. A later check after job-lock release
+can prove current recovery; an unobserved late exit cannot settle the old receipt.
+Ordinary scheduled/manual target execution retains its existing waiting behavior.
 
-Prove live-runner deferral, killed-controller/surviving-child exclusion, and
-recovery after child exit through the built CLI and real OS locks in a disposable
-Home. Keep frozen coverage, one reservation per wake, history and caller bytes.
-Bounded target runtime, the real telemetry Flow's continuity boundary, previous
-obligation segments, repair ownership, closed-obligation continuation and
-configured acceptance remain in this serial Task. Retain the scorecard blocker,
-required UI/public proof and two automatic settlements.
+Prove finite observation, retained Running evidence, surviving-child exclusion,
+and a fresh successful recovery after child exit with real processes and OS
+locks. Exercise the wait boundary with a short duration, without adding a runtime
+override solely for tests; retain the built-CLI interruption proof for the joined
+path. This bounds prerequisite observation, not the child's runtime. Actual
+telemetry continuity, prior obligation segments, dated repair ownership, closed
+obligations, the scorecard blocker, UI/public proof and two automatic settlements
+remain in this serial Task.
 
 ## Slice ledger
 
@@ -923,6 +924,21 @@ remain preserved. No additional bounded defect was established; executable code
 is unchanged. Bounded runtime, actual telemetry continuity, prior segments,
 dated repair ownership, closed obligations and configured acceptance remain open.
 See [review-interrupted-telemetry.md](review-interrupted-telemetry.md).
+
+
+- 2026-09-24: automatic telemetry recovery now waits at most one hour for an
+  observed exit. Deadline expiry defers release with the exact receipt/log and
+  next due; the physical receipt remains Running and the child keeps its job
+  lock. Observation errors fail without inventing a target exit. No signal,
+  extra retry, background observer or scheduler was added.
+- Three focused deadline/observation/exclusion cases passed (0.60s), along with
+  ordinary terminal receipts (0.21s) and the built-CLI three-firing interruption
+  proof (36.96s). Formatting and all-target Clippy passed. The short deadline
+  uses the production wait function directly;
+  it is not a one-hour CLI timeout or configured automatic settlement. Actual
+  telemetry continuity, prior segments, repair ownership, closed obligations,
+  required UI/public proof and configured acceptance remain open. See
+  [release-telemetry-wait.md](release-telemetry-wait.md).
 
 
 ## Measure

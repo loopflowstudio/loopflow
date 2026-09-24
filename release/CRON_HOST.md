@@ -144,8 +144,15 @@ acquired. A surviving check keeps that lock. Historical receipts without start
 identity remain unresolved, regardless of age or PID availability. Recovery
 retains the interrupted receipt without inventing its result; a failed retry
 stops release. Recovery does not rewrite failures, supply repair ownership, or
-change `doctor`'s scheduling-continuity checks. The existing target executor
-remains synchronous; this limit bounds retry count, not target runtime.
+change `doctor`'s scheduling-continuity checks.
+
+Recovery waits up to one hour. If the check has not finished, release defers with
+its receipt id, log path and next configured release due time. The physical
+receipt stays Running with no exit result. The check continues holding its job
+lock; the deadline never kills it or authorizes overlap. After the lock is free,
+a later wake can run a fresh check. An unobserved late exit does not retroactively
+pass the original receipt. Ordinary scheduled/manual targets retain their
+existing wait behavior.
 
 A repair disposition references an existing registered Task and records local
 repair ownership. It does not start work, assign a remote issue, or erase the

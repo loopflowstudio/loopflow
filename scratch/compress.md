@@ -20,6 +20,53 @@
 
 ## Before and after
 
+### Iteration 4 — completion reconciliation
+
+Reviewed HEAD `1013225cb`. The effective model above is unchanged. No coherent
+model/API reduction was established; this pass changes only this report. No
+type, field, route, DTO, persistence path or configuration key was removed.
+
+Traced the mounted Complete action through RegistryQuery, SessionsStore removal,
+PodiumModel's repository-specific reading/generation update, pane reconciliation
+and native surface release. Read the corresponding FlowStep decision path,
+SessionsWorkspace lifetime, MultiplexerStore close/undo/reconcile behavior, and
+the new completion assertions. Compared Rust/Swift SessionRecord and roadmap
+Project/Task fields, RegistryQuery's list/open/complete/resolve contract, and the
+shared fixture assertions. Negative searches still find one Podium caller per
+inventory read, one root workspace registry, and none of the removed navigation
+or scope types.
+
+The suspected reductions need distinct treatment:
+
+- Reading removal and presentation removal are not duplicate Session authority.
+  Podium invalidates an in-flight read and updates the originating repository;
+  SessionsStore retains prepared commands and opening/error state. Combining
+  them would erase the separation between shared evidence and local presentation.
+- Surface/pane cleanup is repeated across action continuations and mounted
+  observers. Deleting one call site alone is not a coherent reduction: initial
+  mounting, external disappearance, and an action finishing after repository
+  navigation have different delivery paths. Consolidation belongs at the retained
+  workspace boundary and must cover all of them together. The current mounted
+  completion proof does not cover completion after unmounting or Close-view Undo.
+  In particular, `close` records undo and chooses the nearest pane, whereas
+  `reconcileSessions` clears undo and chooses the first surviving pane. Treating
+  these methods as interchangeable would change behavior. This pass defers that
+  larger ownership change rather than merely extracting a cleanup helper.
+- Complete and FlowStep decisions remain separate shared operations. Their short
+  success/error tails do not justify a new operation abstraction or a local
+  legality model. LOO-284's projected action/display contract is still absent.
+- The completion extension reuses the existing mounted native fixture, its
+  children and workspace. Splitting it into another harness would duplicate the
+  navigation setup; its assertions establish Task and companion survival beyond
+  the existing store-level completion checks.
+
+Inspected `/tmp/loo291-mounted-completion-proof.log`: the final focused
+`WorkspaceNavigationProofTests/workspaceRetainsNativeSplit` run passed one test.
+No executable content changed and no tests were rerun. This remains a real native
+workspace with a mocked completion response, not configured provider continuation
+or caller-release evidence. Configured interaction, visual quality, timing and
+the remaining full LOO-291 scope are unchanged.
+
 ### Iteration 3 — navigator retention
 
 Reviewed HEAD `007c48664`. No coherent code reduction was established. The model

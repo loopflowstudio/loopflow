@@ -318,6 +318,47 @@ they mean the Mac surface.
   and activation conditions live in Linear. The older Ask-only directive is
   superseded; do not file duplicate follow-ups.
 
+### Task observation and Watch (2026-09-23)
+
+- **Incomplete observation caused duplicate implementation.** Desktop launched
+  two bound `implement` helpers into LOO-293 while its original worker was still
+  producing output. `ready`, a completed launcher, and a missing `lf ps` row
+  cannot establish idle execution or resolved human work. Recover advancement
+  through idempotent Task controls; ordinary bound Runs remain intentional
+  independent contributions with attribution but no Flow claim.
+- **Use the shared execution reason in every surface.** Task status, Wave
+  conditions, roadmap, and action recommendations now project FlowPosition and
+  exact worker evidence. Running, starting, unknown, blocked, and human-waiting
+  evidence takes precedence over dirty files or a future-launch refusal.
+  Done/Abandoned Work can still retain an unresolved human boundary; preserve
+  its waiting condition without reopening the Task. Runtime `project_id` is the
+  owning Project; the unread duplicate `routing_project_id` is removed from Rust,
+  Swift, and current fixtures.
+- **Watch belongs to Product / Desktop's existing LOO-293.** A provider refresh
+  during this curation confirmed it remains open and already embeds the full
+  accepted draft, assumptions, and newer native-read contract. That supersedes
+  this branch's unresolved-placement/native-contract notes. Keep one connected
+  stage diagram and labeled all-Run feed, stage/Run filters, Follow live, and
+  completed history together. Watch includes passive native interactive output;
+  terminal attachment, final-only output, or autonomous-only coverage cannot
+  satisfy acceptance. Existing Session controls own human decisions.
+- **Preserve history at its owning transaction.** Exact invocation/stage/attempt
+  bindings must survive FlowPosition replacement and completion. Do not join by
+  skill name, infer completion from the cursor, or reconstruct an old plan from
+  current YAML. Native output requires source/item revisions beyond Run event
+  sequence numbers. UI state and polling remain presentation, never authority.
+- **Keep proof boundaries explicit.** The observation repair has source-binary
+  discovery/prune evidence and isolated status/DTO tests; it does not demonstrate
+  Watch or deployment to the older installed runtime. LOO-293 retains native
+  capture, bounded history/discovery, and configured live/human-demo obligations
+  in its current Linear directive. No duplicate follow-up or completion is
+  warranted. Historical `f56f457a0`/`c3bd1fdb3` show Wave output and stage pills,
+  not confirmation of the exact remembered Task screen.
+  Reconciliation on 2026-09-24 confirmed the PM directive still retains these
+  obligations and newer foundation evidence from other work. This branch's
+  observation repair and prompt cleanup do not validate that concurrent Watch
+  implementation or authorize settlement of LOO-293.
+
 ### Terminal ownership and input (branch evidence, 2026-09-22)
 
 - Each window owns a repository workspace registry, which retains its pane

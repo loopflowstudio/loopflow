@@ -2,7 +2,6 @@ name: with_docs
 repo: tests/parity/fixtures/with_docs
 skill: test
 surface: headless
-directions: []
 docs:
   - "*.md"
 diff_files: false

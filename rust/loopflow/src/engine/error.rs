@@ -20,14 +20,10 @@ pub enum LoadError {
     GoalNotFound(String),
     #[error("skill not found: {0}")]
     SkillNotFound(String),
-    #[error("direction not found: {0}")]
-    DirectionNotFound(String),
     #[error("invalid flow: {0}")]
     InvalidFlow(String),
     #[error("invalid skill: {0}")]
     InvalidSkill(String),
-    #[error("invalid direction: {0}")]
-    InvalidDirection(String),
     #[error("io error: {0}")]
     Io(String),
 }

@@ -1,4 +1,4 @@
-use std::collections::{HashMap, HashSet, VecDeque};
+use std::collections::{HashMap, HashSet};
 use std::fs;
 use std::path::{Path, PathBuf};
 use std::sync::atomic::{AtomicBool, Ordering};
@@ -17,8 +17,6 @@ pub struct Skill {
     pub agent: Option<String>,
     #[serde(skip_serializing_if = "Option::is_none")]
     pub default_agent: Option<String>,
-    #[serde(default, alias = "direction", skip_serializing_if = "Vec::is_empty")]
-    pub directions: Vec<String>,
     #[serde(skip_serializing_if = "Option::is_none")]
     pub action_style: Option<String>,
     #[serde(skip_serializing_if = "Option::is_none")]
@@ -31,7 +29,6 @@ impl Skill {
             name: name.to_string(),
             agent: None,
             default_agent: None,
-            directions: Vec::new(),
             action_style: None,
             content: None,
         }
@@ -129,8 +126,6 @@ pub struct XorPath {
     #[serde(default, skip_serializing_if = "Vec::is_empty")]
     pub steps: Vec<SkillStep>,
     pub description: String,
-    #[serde(default)]
-    pub direction: Vec<String>,
 }
 
 #[derive(Debug, Clone, Serialize, Deserialize, PartialEq, Eq)]
@@ -183,13 +178,6 @@ pub enum ConcreteStep {
     Skill(ConcreteSkill),
     Op(ConcreteOp),
     Xor(ConcreteXor),
-}
-
-#[derive(Debug, Clone)]
-pub struct Direction {
-    pub name: String,
-    pub content: String,
-    pub source: PathBuf,
 }
 
 pub fn load_flow(name: &str, repo: &Path) -> Result<Flow, LoadError> {
@@ -439,7 +427,6 @@ fn warn_retired_interactive(name: &str, content: &str) {
 struct SkillFrontmatter {
     agent: Option<String>,
     default_agent: Option<String>,
-    directions: Vec<String>,
     action_style: Option<String>,
 }
 
@@ -459,7 +446,6 @@ fn skill_from_content(name: &str, content: &str) -> Result<Skill, LoadError> {
         name: name.to_string(),
         agent: frontmatter.agent,
         default_agent: frontmatter.default_agent,
-        directions: frontmatter.directions,
         action_style: frontmatter.action_style,
         content: Some(body),
     })
@@ -489,97 +475,8 @@ fn parse_frontmatter_value(value: &Value) -> SkillFrontmatter {
     SkillFrontmatter {
         agent,
         default_agent,
-        directions: parse_directions_field(map),
         action_style,
     }
-}
-
-fn parse_directions_field(map: &serde_yaml_ng::Mapping) -> Vec<String> {
-    let directions = parse_string_list(map.get(key("directions")));
-    if directions.is_empty() {
-        parse_string_list(map.get(key("direction")))
-    } else {
-        directions
-    }
-}
-
-pub fn load_direction(name: &str, repo: &Path) -> Result<Direction, LoadError> {
-    let (content, source) = match find_direction_path(name, repo) {
-        Ok(direction_path) => (fs::read_to_string(&direction_path)?, direction_path),
-        Err(LoadError::DirectionNotFound(_)) => {
-            if let Some(builtin) = crate::engine::builtins::get_builtin_direction(name) {
-                (
-                    builtin.to_string(),
-                    PathBuf::from(format!("builtin:{name}")),
-                )
-            } else if let Some(content) = load_agent_skill(name, repo) {
-                (
-                    content,
-                    repo.join(format!(".agents/skills/{name}/SKILL.md")),
-                )
-            } else {
-                return Err(LoadError::DirectionNotFound(name.to_string()));
-            }
-        }
-        Err(err) => return Err(err),
-    };
-    Ok(Direction {
-        name: name.to_string(),
-        content,
-        source,
-    })
-}
-
-/// Expand direction names, resolving groups to their member directions.
-/// User groups (.lf/directions/{name}/ directory) are checked first, then builtin groups.
-/// Non-group names pass through unchanged. Deduplicates while preserving order.
-pub fn expand_direction_names(names: &[String], repo: &Path) -> Vec<String> {
-    let mut expanded = Vec::new();
-    let mut seen = HashSet::new();
-    let mut queue: VecDeque<String> = names.iter().cloned().collect();
-    while let Some(name) = queue.pop_front() {
-        if !seen.insert(name.clone()) {
-            continue;
-        }
-        match resolve_direction_group(&name, repo) {
-            Some(members) => {
-                for member in members {
-                    queue.push_back(member);
-                }
-            }
-            None => expanded.push(name),
-        }
-    }
-    expanded
-}
-
-/// Check whether `name` is a direction group (user-defined directory or builtin group).
-fn resolve_direction_group(name: &str, repo: &Path) -> Option<Vec<String>> {
-    let user_members = markdown_stems_in_dir(&repo.join(".lf/directions").join(name));
-    if !user_members.is_empty() {
-        return Some(user_members);
-    }
-
-    crate::engine::builtins::builtin_direction_group(name)
-        .map(|members| members.iter().map(|member| (*member).to_string()).collect())
-}
-
-fn markdown_stems_in_dir(dir: &Path) -> Vec<String> {
-    let Ok(entries) = fs::read_dir(dir) else {
-        return Vec::new();
-    };
-
-    let mut stems = Vec::new();
-    for entry in entries.flatten() {
-        let path = entry.path();
-        if path.extension().is_some_and(|ext| ext == "md") {
-            if let Some(stem) = path.file_stem() {
-                stems.push(stem.to_string_lossy().to_string());
-            }
-        }
-    }
-    stems.sort();
-    stems
 }
 
 fn first_existing_path(paths: impl IntoIterator<Item = PathBuf>) -> Option<PathBuf> {
@@ -746,28 +643,6 @@ fn exact_path_exists(path: &Path) -> bool {
             .filter_map(Result::ok)
             .any(|entry| entry.file_name() == file_name)
     })
-}
-
-fn find_direction_path(name: &str, repo: &Path) -> Result<PathBuf, LoadError> {
-    let path = repo.join(".lf/directions").join(format!("{name}.md"));
-    if path.exists() {
-        return Ok(path);
-    }
-
-    let directions_dir = repo.join(".lf/directions");
-    if let Ok(entries) = fs::read_dir(&directions_dir) {
-        for entry in entries.flatten() {
-            let dir_path = entry.path();
-            if dir_path.is_dir() {
-                let candidate = dir_path.join(format!("{name}.md"));
-                if candidate.exists() {
-                    return Ok(candidate);
-                }
-            }
-        }
-    }
-
-    Err(LoadError::DirectionNotFound(name.to_string()))
 }
 
 /// Load a skill from `.agents/skills/<name>/SKILL.md` if it exists.
@@ -944,8 +819,6 @@ fn parse_xor_def(map: &serde_yaml_ng::Mapping, kind: &str) -> Result<XorDef, Loa
             ))
         })?;
 
-        let direction = parse_directions_field(path_map);
-
         paths.insert(
             key_str.to_string(),
             XorPath {
@@ -953,7 +826,6 @@ fn parse_xor_def(map: &serde_yaml_ng::Mapping, kind: &str) -> Result<XorDef, Loa
                 skill,
                 steps: skills,
                 description,
-                direction,
             },
         );
     }
@@ -1099,17 +971,6 @@ fn parse_flow_ref_value(value: &Value) -> Result<Step, LoadError> {
     Ok(Step::FlowRef(name.to_string()))
 }
 
-fn parse_string_list(value: Option<&Value>) -> Vec<String> {
-    match value {
-        Some(Value::String(value)) => vec![value.to_string()],
-        Some(Value::Sequence(seq)) => seq
-            .iter()
-            .filter_map(|val| val.as_str().map(|item| item.to_string()))
-            .collect(),
-        _ => Vec::new(),
-    }
-}
-
 fn parse_optional_string(map: &serde_yaml_ng::Mapping, field: &str) -> Option<String> {
     map.get(key(field))
         .and_then(|value| value.as_str())
@@ -1130,9 +991,6 @@ fn resolve_skill_reference(skill: &Skill, repo: &Path) -> Skill {
     }
     if let Some(default_agent) = &skill.default_agent {
         resolved.default_agent = Some(default_agent.clone());
-    }
-    if !skill.directions.is_empty() {
-        resolved.directions = skill.directions.clone();
     }
     if let Some(action_style) = &skill.action_style {
         resolved.action_style = Some(action_style.clone());
@@ -1581,28 +1439,6 @@ Design the feature.
     }
 
     #[test]
-    fn load_skill_includes_frontmatter_directions() {
-        let tmp = TempDir::new().unwrap();
-        let skills_dir = tmp.path().join(".lf/skills");
-        fs::create_dir_all(&skills_dir).unwrap();
-        fs::write(
-            skills_dir.join("careful.md"),
-            r#"---
-directions:
-  - thorough
-  - tested
----
-# Careful Skill
-Be careful.
-"#,
-        )
-        .unwrap();
-
-        let skill = load_skill("careful", tmp.path()).unwrap();
-        assert_eq!(skill.directions, vec!["thorough", "tested"]);
-    }
-
-    #[test]
     fn load_skill_not_found_error_message() {
         let tmp = TempDir::new().unwrap();
 
@@ -1623,29 +1459,6 @@ Be careful.
             "builtin 'build' flow should be found: {:?}",
             result.err()
         );
-    }
-
-    #[test]
-    fn load_direction_finds_repo_direction() {
-        let tmp = TempDir::new().unwrap();
-        let directions = tmp.path().join(".lf/directions");
-        fs::create_dir_all(&directions).unwrap();
-        fs::write(directions.join("focus.md"), "Stay focused.").unwrap();
-        let result = load_direction("focus", tmp.path());
-        assert!(
-            result.is_ok(),
-            "repo direction should be found: {:?}",
-            result.err()
-        );
-    }
-
-    #[test]
-    fn load_direction_not_found_error() {
-        let tmp = TempDir::new().unwrap();
-
-        let result = load_direction("nonexistent", tmp.path());
-        assert!(result.is_err());
-        assert!(result.unwrap_err().to_string().contains("nonexistent"));
     }
 
     #[test]
@@ -1675,22 +1488,6 @@ Be careful.
             find_skill_source_path("my-tool", tmp.path()),
             Some(skill_path)
         );
-    }
-
-    #[test]
-    fn load_direction_falls_back_to_agent_skills() {
-        let tmp = TempDir::new().unwrap();
-        let skill_dir = tmp.path().join(".agents/skills/empathy");
-        fs::create_dir_all(&skill_dir).unwrap();
-        fs::write(
-            skill_dir.join("SKILL.md"),
-            "---\nname: empathy\n---\nDesign with empathy.",
-        )
-        .unwrap();
-
-        let direction = load_direction("empathy", tmp.path()).unwrap();
-        assert_eq!(direction.name, "empathy");
-        assert!(direction.content.contains("Design with empathy."));
     }
 
     #[test]
@@ -1745,26 +1542,6 @@ Be careful.
                     }
                 }
             }
-        }
-    }
-
-    #[test]
-    fn parse_skill_mapping_accepts_plural_directions_key() {
-        let yaml = r#"
-- step:
-    name: implement
-    directions: [designer, product-engineer]
-"#;
-        let value: Value = serde_yaml_ng::from_str(yaml).unwrap();
-        let items = parse_flow_items(&value).unwrap();
-        assert_eq!(items.len(), 1);
-
-        match &items[0] {
-            Step::Skill(skill) => {
-                assert_eq!(skill.skill.name, "implement");
-                assert_eq!(skill.skill.directions, vec!["designer", "product-engineer"]);
-            }
-            other => panic!("expected Skill, got {other:?}"),
         }
     }
 
@@ -1835,78 +1612,6 @@ Be careful.
     }
 
     #[test]
-    fn expand_direction_names_passes_through_non_groups() {
-        let tmp = TempDir::new().unwrap();
-        let result = expand_direction_names(&["security".to_string()], tmp.path());
-        assert_eq!(result, vec!["security"]);
-    }
-
-    #[test]
-    fn expand_direction_names_expands_user_group() {
-        let tmp = TempDir::new().unwrap();
-        let group_dir = tmp.path().join(".lf/directions/mygroup");
-        fs::create_dir_all(&group_dir).unwrap();
-        fs::write(group_dir.join("alpha.md"), "Alpha direction").unwrap();
-        fs::write(group_dir.join("beta.md"), "Beta direction").unwrap();
-
-        let result = expand_direction_names(&["mygroup".to_string()], tmp.path());
-        assert_eq!(result, vec!["alpha", "beta"]);
-    }
-
-    #[test]
-    fn expand_direction_names_accepts_retired_builtin_group_name() {
-        let tmp = TempDir::new().unwrap();
-        let group_dir = tmp.path().join(".lf/directions/craft");
-        fs::create_dir_all(&group_dir).unwrap();
-        fs::write(group_dir.join("custom.md"), "Custom craft").unwrap();
-
-        let result = expand_direction_names(&["craft".to_string()], tmp.path());
-        assert_eq!(result, vec!["custom"]);
-    }
-
-    #[test]
-    fn expand_direction_names_deduplicates() {
-        let tmp = TempDir::new().unwrap();
-        let group_dir = tmp.path().join(".lf/directions/mygroup");
-        fs::create_dir_all(&group_dir).unwrap();
-        fs::write(group_dir.join("alpha.md"), "Alpha").unwrap();
-
-        let result =
-            expand_direction_names(&["alpha".to_string(), "mygroup".to_string()], tmp.path());
-        assert_eq!(result, vec!["alpha"]);
-    }
-
-    #[test]
-    fn expand_direction_names_recursive_group() {
-        let tmp = TempDir::new().unwrap();
-        let group_dir = tmp.path().join(".lf/directions/quality");
-        let nested_group_dir = tmp.path().join(".lf/directions/craft");
-        fs::create_dir_all(&group_dir).unwrap();
-        fs::create_dir_all(&nested_group_dir).unwrap();
-        fs::write(group_dir.join("craft.md"), "Craft direction").unwrap();
-        fs::write(group_dir.join("extra.md"), "Extra direction").unwrap();
-        fs::write(nested_group_dir.join("care.md"), "Care direction").unwrap();
-        fs::write(nested_group_dir.join("clarity.md"), "Clarity direction").unwrap();
-
-        let result = expand_direction_names(&["quality".to_string()], tmp.path());
-        assert!(!result.contains(&"craft".to_string()));
-        assert!(result.contains(&"care".to_string()));
-        assert!(result.contains(&"clarity".to_string()));
-        assert!(result.contains(&"extra".to_string()));
-    }
-
-    #[test]
-    fn find_direction_path_searches_subdirectories() {
-        let tmp = TempDir::new().unwrap();
-        let sub_dir = tmp.path().join(".lf/directions/mygroup");
-        fs::create_dir_all(&sub_dir).unwrap();
-        fs::write(sub_dir.join("nested.md"), "Nested direction").unwrap();
-
-        let result = find_direction_path("nested", tmp.path());
-        assert!(result.is_ok());
-    }
-
-    #[test]
     fn parse_xor_with_flow_paths() {
         let yaml = r#"
 - qa
@@ -1963,28 +1668,6 @@ Be careful.
                 let full = &branch.paths["full"];
                 assert_eq!(full.flow.as_deref(), Some("build"));
                 assert!(full.skill.is_none());
-            }
-            other => panic!("expected Xor, got {other:?}"),
-        }
-    }
-
-    #[test]
-    fn parse_xor_with_direction_override() {
-        let yaml = r#"
-- xor:
-    paths:
-      careful:
-        flow: build
-        description: "Build carefully"
-        direction: [care, clarity]
-"#;
-        let value: Value = serde_yaml_ng::from_str(yaml).unwrap();
-        let items = parse_flow_items(&value).unwrap();
-
-        match &items[0] {
-            Step::Xor(branch) => {
-                let careful = &branch.paths["careful"];
-                assert_eq!(careful.direction, vec!["care", "clarity"]);
             }
             other => panic!("expected Xor, got {other:?}"),
         }
@@ -2103,7 +1786,6 @@ Be careful.
                                 skill: None,
                                 steps: Vec::new(),
                                 description: "Fix it".to_string(),
-                                direction: Vec::new(),
                             },
                         );
                         m
@@ -2133,7 +1815,6 @@ Be careful.
                 skill: None,
                 steps: Vec::new(),
                 description: "Last".to_string(),
-                direction: Vec::new(),
             },
         );
         paths.insert(
@@ -2143,7 +1824,6 @@ Be careful.
                 skill: None,
                 steps: Vec::new(),
                 description: "First".to_string(),
-                direction: Vec::new(),
             },
         );
 
@@ -2172,7 +1852,6 @@ Be careful.
                 skill: None,
                 steps: Vec::new(),
                 description: "Known".to_string(),
-                direction: Vec::new(),
             },
         );
         let err = read_xor_verdict(
@@ -2197,7 +1876,6 @@ Be careful.
                 skill: None,
                 steps: Vec::new(),
                 description: "Silence".to_string(),
-                direction: Vec::new(),
             },
             tmp.path(),
         )
@@ -2218,7 +1896,6 @@ Be careful.
                 skill: None,
                 steps: vec![SkillStep::named("design"), SkillStep::named("gate")],
                 description: "Inline skills".to_string(),
-                direction: Vec::new(),
             },
             tmp.path(),
         )

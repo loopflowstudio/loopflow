@@ -30,8 +30,6 @@ def main() -> None:
             cmd.extend(["--surface", case["surface"]])
         if case.get("no_loopflow"):
             cmd.append("--no-loopflow")
-        for direction in case.get("directions", []):
-            cmd.extend(["--direction", direction])
         for docs_target in case.get("docs", []):
             cmd.extend(["--docs", docs_target])
         cmd.extend(["--diff-files", "true" if case["diff_files"] or case["diff"] else "false"])

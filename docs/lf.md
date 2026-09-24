@@ -163,7 +163,7 @@ Ops skills — raw prompt logic around mechanical git, PR, and release commands:
 |------|--------------|
 | `init` | Connect the repo to Homes, accounts, Waves, and task execution |
 | `start-chapter` / `review-chapter` | Open a new planning chapter with the human / close the old chapter's evidence record |
-| `loopflow-validate` | Validate flows, skills, and directions |
+| `loopflow-validate` | Validate flows and skills |
 | `commit-message` | Generate a commit message without committing |
 | `rebase-conflicts` | Resolve conflicts after the mechanical rebase stops |
 | `pr-message` | Generate a PR title and body without publishing |
@@ -230,7 +230,6 @@ level stays there. Put `--` before literal arguments that look like flags.
 | Flag | Description |
 |------|-------------|
 | `-m, --model MODEL` | Choose model (e.g., `claude:opus`, `codex`, `opencode`) |
-| `-d, --direction DIRECTION` | Apply direction (comma-separated for multiple) |
 
 ## Output Flags
 
@@ -709,13 +708,6 @@ files the agent touches.
 
 ```bash
 lf implement: add caching -m codex
-```
-
-### Apply a direction
-
-```bash
-lf gate -d ux
-lf implement -d ux,clarity
 ```
 
 ### Disable loopflow operating guidance

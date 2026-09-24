@@ -88,13 +88,6 @@ A flow chains skills with commits between them:
 lf ship-api
 ```
 
-A direction shapes how the agent judges:
-
-```bash
-lf gate --direction ux            # optimize for user experience
-lf gate --direction ux,clarity    # stack intents
-```
-
 Built-ins cover the common ground: `debug`, `design`, `implement`, `compress`,
 `gate`, `qa`, the `build` flow, and more. Repo skills in `.lf/skills/` override
 and extend them. [Authoring](authoring.md) starts with a working skill and then
@@ -123,7 +116,6 @@ Do not take the first N commits and call that the history.
 .lf/                      # Repo config and extensions
   config.yaml             # Model, context defaults
   skills/                 # Skill prompts
-  directions/             # Judgment and intent
   flows/                  # Flow definitions
 scratch/                  # PR scratchpad (cleared on merge)
 wave/                     # Wave goals and memory (persists)

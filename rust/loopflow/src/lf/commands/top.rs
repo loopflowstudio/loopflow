@@ -257,7 +257,7 @@ fn resolve_prune_targets(processes: &ProcessSnapshot) -> (Vec<u32>, Vec<u32>) {
     let mut stale_exec_receipt_pids = processes
         .receipts
         .iter()
-        .filter(|receipt| !receipt_matches_live_lf(receipt, &process_by_pid))
+        .filter(|receipt| !receipt_matches_live_process(receipt, &process_by_pid))
         .map(|receipt| receipt.pid)
         .collect::<Vec<_>>();
     stale_exec_receipt_pids.sort_unstable();
@@ -315,7 +315,7 @@ fn load_snapshot() -> Result<ActivitySnapshot> {
     let live_execs = processes
         .receipts
         .iter()
-        .filter(|receipt| receipt_matches_live_lf(receipt, &process_by_pid))
+        .filter(|receipt| receipt_matches_live_process(receipt, &process_by_pid))
         .cloned()
         .collect::<Vec<_>>();
     let data = read_activity_data(&path, &live_execs)?;
@@ -615,20 +615,20 @@ fn receipt_evidence(
     else {
         return ReceiptEvidence::Missing;
     };
-    if receipt_matches_live_lf(receipt, process_by_pid) {
+    if receipt_matches_live_process(receipt, process_by_pid) {
         ReceiptEvidence::Present(receipt.pid)
     } else {
         ReceiptEvidence::Absent
     }
 }
 
-fn receipt_matches_live_lf(
+fn receipt_matches_live_process(
     receipt: &ExecProcessReceipt,
     process_by_pid: &HashMap<u32, &OsProcess>,
 ) -> bool {
     process_by_pid.get(&receipt.pid).is_some_and(|process| {
-        process.kind == Some(ProcessKind::Lf)
-            && (process.started_at - receipt.started_at).abs() <= PROCESS_START_TOLERANCE_SECONDS
+        // The receipt establishes ownership; pinned binaries need not be named `lf`.
+        (process.started_at - receipt.started_at).abs() <= PROCESS_START_TOLERANCE_SECONDS
     })
 }
 
@@ -1069,7 +1069,7 @@ mod tests {
             processes: vec![
                 process(10, 1, 1_000, "lf 5whys"),
                 process(11, 10, 1_001, "codex app-server"),
-                process(20, 10, 2_000, "lf implement"),
+                process(20, 10, 2_000, "/home/.lf/bin/lf-deadbeef implement"),
                 working_provider,
                 process(40, 1, 9_000, "codex app-server"),
             ],
@@ -1164,14 +1164,15 @@ mod tests {
     fn prune_targets_only_dead_receipts_and_registered_orphan_groups() {
         let snapshot = ProcessSnapshot {
             processes: vec![
-                process(10, 1, 1_000, "lf wave core"),
+                process(10, 1, 1_000, "/home/.lf/bin/lf-deadbeef wave core"),
+                process(88, 1, 9_000, "/home/.lf/bin/lf-deadbeef task run"),
                 process(99, 1, 2_000, "opencode serve --port 1234"),
                 process(100, 1, 2_000, "codex app-server"),
             ],
             receipts: vec![receipt("live", 10, 1_000), receipt("dead", 88, 1_000)],
             opencode_servers: vec![OpenCodeServerEntry {
                 opencode_pid: 99,
-                owner_loopflow_pid: 88,
+                owner_loopflow_pid: 77,
             }],
         };
 

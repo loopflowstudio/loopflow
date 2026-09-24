@@ -55,6 +55,30 @@ research were not all accepted commitments. Current Task directives govern scope
   health claims. LOO-288/289/290 own capture, population, and usable reconstruction;
   retain observations while the serial implementation slot advances.
 
+## Prompt assembly reduction (branch evidence, 2026-09-24)
+
+- **Prompt directions are removed at the human's request.** The `task-viewer`
+  branch removes CLI switches, config/Skill/Flow fields, directory and fallback
+  loaders, discovery/build generation, injection, and current authoring guidance.
+  Do not restore an implicit skill fallback or compatibility selector. Ordinary
+  Work Steer and Session Iterate advice retain their separate semantics;
+  `DirectionSnapshot` projects Steer, not the removed prompt feature.
+- **Historical trace categories remain readable.** Keep persisted
+  `ContextAssetKind::Direction` for old records; current assembly emits none.
+  Historical release notes and chapter evidence are not active feature paths.
+- **Gather and render the actual values.** The path is now
+  `GatherContextOpts -> PromptComponents -> String`. `GatheredContext` and
+  `RenderedPrompt` had public tuple constructors and unchecked mutable access,
+  so their names supplied no validation or phase guarantee. `PreparedLaunchPrompt`
+  still carries separately consumed agent configuration, deduplication evidence,
+  components, and rendered channels. Preserve those facts for capture work.
+- **Separate removal proof from representation proof.** Direction removal
+  deliberately changes prompt fixtures; the later wrapper reduction preserves
+  those fixtures byte-for-byte. Recorded context/golden/launch tests (34) and
+  Clippy pass for the reduction. These establish source behavior, not installed
+  promotion or the Trace & Context population/reconstruction KRs. LOO-288/289/290
+  remain open; this reduction introduces no migration or new evidence store.
+
 ## Lessons from the retired SQLite ledger
 
 The [pre-chapter memory](../../.lf/chapters/20260923T000959Z-502f011b/sources/wave/intelligence/MEMORY.md)

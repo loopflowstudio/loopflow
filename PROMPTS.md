@@ -11,10 +11,9 @@ How to write prompts for loopflow. Prompts are instructions for LLM sessions—h
 
 This is the canonical long-form guide for two authors:
 
-- **Loopflow maintainers** writing builtin skills, goals, directions, operating
+- **Loopflow maintainers** writing builtin skills, goals, operating
   guidance, and prompt assembly.
-- **Loopflow customers** writing repo-local `.lf/skills/*.md`,
-  `.lf/directions/*.md`, and `wave/<name>/GOAL.md` files.
+- **Loopflow customers** writing repo-local `.lf/skills/*.md` and `wave/<name>/GOAL.md` files.
 
 Agents executing ordinary work do not need this whole document. `PROMPTS.md` is
 not auto-injected into normal runs and should not be added to repo-wide
@@ -344,57 +343,6 @@ Action goals can include light process for system navigation. Perspective goals 
 **Product-specific details should be abstracted:** Don't write "use `.monospacedDigit()` for numbers"—write "ensure numeric data is readable." Don't write "44pt tap targets"—write "touch targets big enough for humans on mobile, LLMs using browser tools, or any other user type."
 
 The goal should work for any codebase using loopflow, not just the one where it was written.
-
-### Orthogonality
-
-Directions are orthogonal to steps and areas. A direction applies to any task in any scope.
-
-```
-Step = what you're doing (implement, review, design)
-Area = where you're working (src/api/, swift/Loopflow/)
-Direction = which users you're trying to serve
-```
-
-**Don't couple to steps.** "When reviewing code, ask..." ties the direction to `review`. The same concerns apply whether you're reviewing, implementing, or designing.
-
-**Don't couple to areas.** "When working on Loopflow..." ties the direction to a specific codebase. User patterns like conductor/improviser/listener exist in any product with parallel work.
-
-### How directions apply
-
-Directions are not roleplay. A direction is intent—what you're optimizing for while doing your work.
-
-Directions can be:
-- **User patterns**: conductor, improviser, listener—make this kind of user thrive
-- **Perspectives**: ux, infra, craft, ceo—think with these concerns
-- **Metrics**: performance, security, accessibility—optimize for this quality
-- **Values**: simplicity, craft—hold this standard
-
-The questions in a direction help you check if your work serves the intent.
-
-```bash
-lf implement --direction conductor --area src/api/
-```
-
-You're implementing in src/api/. The conductor direction means you're building with the intent that conductors thrive. The questions ("can I see what needs attention without drilling in?") verify your implementation serves that intent.
-
-```bash
-lf review --direction security --area src/auth/
-```
-
-You're reviewing src/auth/. The security direction means you're optimizing for security. The questions surface vulnerabilities you might otherwise miss.
-
-```markdown
-# Bad: coupled to step and area
-When reviewing Loopflow code, ask:
-- Can I tell what needs attention?
-
-# Good: intent + questions
-Managing multiple parallel workstreams. Checking in, not diving deep.
-
-- Can I see what needs attention without drilling in?
-- Is urgency visually obvious?
-- How many clicks from "I see a problem" to "I'm acting on it"?
-```
 
 ### Voice
 

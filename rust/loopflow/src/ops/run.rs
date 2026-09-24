@@ -20,6 +20,7 @@ pub struct WorkBinding {
     pub work: WorkRef,
     pub wave_id: WaveId,
     pub wave_name: String,
+    pub subjects: Vec<String>,
     pub cwd: PathBuf,
     pub context: String,
     pub agent: Option<String>,
@@ -225,6 +226,11 @@ pub async fn resolve_work_selection(
             task.worktree.clone()
         };
         return Ok(WorkBinding {
+            subjects: vec![
+                format!("wave:{}", wave.name()),
+                format!("project:{}", project.plan.slug),
+                format!("task:{}", task.plan.identifier),
+            ],
             work,
             wave_id: task.wave_id,
             wave_name: wave.name().to_string(),
@@ -278,6 +284,10 @@ pub async fn resolve_work_selection(
             .collect::<Vec<_>>();
         let context = render_project_context(&project, wave.name(), &observations, &metric_context);
         return Ok(WorkBinding {
+            subjects: vec![
+                format!("wave:{}", wave.name()),
+                format!("project:{}", project.plan.slug),
+            ],
             work,
             wave_id: project.wave_id,
             wave_name: wave.name().to_string(),
@@ -305,6 +315,7 @@ pub async fn resolve_work_selection(
         let cwd = PathBuf::from(wave.repo());
         let context = render_wave_context(&cwd, &cwd, wave.name(), &metric_context);
         return Ok(WorkBinding {
+            subjects: vec![format!("wave:{}", wave.name())],
             work: WorkRef::Wave(wave.id().clone()),
             wave_id: wave.id().clone(),
             wave_name: wave.name().to_string(),
@@ -594,10 +605,96 @@ mod tests {
         let runtime = runtime.unwrap();
         let prompts = prompts.unwrap();
         assert_eq!(runtime.cwd, worktree);
+        assert_eq!(
+            runtime.subjects,
+            ["wave:runtime", "project:loopflow-api", "task:LOO-267"]
+        );
         assert_eq!(prompts.work, WorkRef::Task(task.id.clone()));
         assert!(!runtime.context.contains("ADVANCER ONLY"));
         assert!(!prompts.context.contains("ADVANCER ONLY"));
         assert_eq!(store.task_steers(&task.id).await.unwrap().len(), 1);
+    }
+
+    #[tokio::test]
+    async fn task_run_drill_includes_named_workers_and_opaque_helpers() {
+        let (directory, store) = test_store().await;
+        let wave = Wave::new(
+            WaveId::new(),
+            "runtime".into(),
+            directory.path().display().to_string(),
+        );
+        store.create_wave(&wave).await.unwrap();
+        let mut project = project(&wave, "desktop", "project-desktop");
+        store.create_project(&project).await.unwrap();
+        let task = task(&store, &wave, &project, directory.path().join("workspace")).await;
+        // Historical Run labels remain unchanged when the Project is renamed.
+        project.plan.slug = "desktop-renamed".into();
+        store.update_project(&project).await.unwrap();
+        let catalog = crate::lf::commands::work_catalog::WorkCatalog::load_at(
+            &directory.path().join("registry.db"),
+        )
+        .unwrap();
+        let home = tempfile::tempdir().unwrap();
+        for subject in [
+            format!("task:{}", task.plan.identifier),
+            format!("task:{}", task.id),
+            "task:LOO-999".into(),
+        ] {
+            let mut subjects = vec![crate::run_record::SubjectAttribution::declared(
+                subject.clone(),
+            )];
+            if subject == format!("task:{}", task.plan.identifier) {
+                subjects.extend(["wave:runtime", "project:desktop"].map(|selector| {
+                    crate::run_record::SubjectAttribution::declared(selector.into())
+                }));
+            }
+            let capture = crate::run_record::CaptureHandle::begin_at(
+                home.path(),
+                crate::run_record::RunSpec {
+                    harness: "codex".into(),
+                    model: None,
+                    surface: "headless".into(),
+                    cwd: directory.path().to_path_buf(),
+                    repo: None,
+                    worktree: None,
+                    skill: Some("implement".into()),
+                    subjects,
+                },
+            )
+            .unwrap();
+            capture.finish("completed").unwrap();
+        }
+        for selector in [
+            task.plan.identifier.as_str(),
+            task.id.as_str(),
+            task.plan.id.as_str(),
+        ] {
+            let runs = crate::lf::commands::runs::collect_runs_started_since_at(
+                home.path(),
+                crate::lf::commands::WorkFilter {
+                    task: Some(selector),
+                    project: Some(project.id.as_str()),
+                    wave: Some(wave.name()),
+                },
+                0,
+                &catalog,
+            )
+            .unwrap();
+            assert_eq!(runs.len(), 2);
+            for run in &runs {
+                assert_eq!(
+                    catalog.resolve_run(run).unwrap().work,
+                    WorkRef::Task(task.id.clone())
+                );
+                assert!(!catalog.matches_run(
+                    run,
+                    crate::lf::commands::WorkFilter {
+                        project: Some("other"),
+                        ..Default::default()
+                    }
+                ));
+            }
+        }
     }
 
     #[tokio::test]

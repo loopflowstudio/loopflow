@@ -404,12 +404,9 @@ fn _read_executable_references(
     references
 }
 
-fn _validate_executable_skill(skill: &crate::engine::Skill, catalog_root: &Path) -> Result<()> {
+fn _validate_executable_skill(skill: &crate::engine::Skill) -> Result<()> {
     if skill.content.is_none() {
         return Err(anyhow!("skill not found: {}", skill.name));
-    }
-    for direction in &skill.directions {
-        crate::engine::load_direction(direction, catalog_root)?;
     }
     Ok(())
 }
@@ -421,18 +418,15 @@ fn _validate_executable_steps(
     for step in steps {
         match step {
             crate::engine::ConcreteStep::Skill(skill) => {
-                _validate_executable_skill(&skill.skill, catalog_root)?;
+                _validate_executable_skill(&skill.skill)?;
             }
             crate::engine::ConcreteStep::Op(_) => {}
             crate::engine::ConcreteStep::Xor(branch) => {
                 if let Some(router) = &branch.router {
                     let router = crate::engine::load_skill(router, catalog_root)?;
-                    _validate_executable_skill(&router, catalog_root)?;
+                    _validate_executable_skill(&router)?;
                 }
                 for path in branch.paths.values() {
-                    for direction in &path.direction {
-                        crate::engine::load_direction(direction, catalog_root)?;
-                    }
                     let path_steps = crate::engine::flow::load_xor_path_items(path, catalog_root)?;
                     _validate_executable_steps(&path_steps, catalog_root)?;
                 }

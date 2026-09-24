@@ -4,6 +4,7 @@ use std::time::Duration;
 
 use rusqlite::{params, Connection, OptionalExtension, ToSql, TransactionBehavior};
 
+use crate::durable::{ProjectId, TaskId, WorkRef};
 use crate::id::WaveId;
 use crate::profile::{
     AccessProfile, AccountAccessProfile, EmailAddress, ProfileId, ProviderRoute, RouteScope,
@@ -33,6 +34,16 @@ pub(crate) const SQLITE_WRITE_BUSY_TIMEOUT: Duration = Duration::from_secs(15);
 #[derive(Debug, Clone)]
 pub struct SqliteStore {
     conn: Arc<Mutex<Connection>>,
+}
+
+/// Stable identity fields for observation, independent of execution schema.
+#[derive(Debug)]
+pub(crate) struct WorkIdentity {
+    pub work: WorkRef,
+    pub parent: Option<WorkRef>,
+    pub subject: String,
+    pub external_id: Option<String>,
+    pub created_at: Option<i64>,
 }
 
 pub(crate) fn read_nonterminal_task_worktrees(path: &Path) -> StoreResult<Vec<PathBuf>> {
@@ -483,6 +494,43 @@ impl SqliteStore {
         Ok(Self {
             conn: Arc::new(Mutex::new(conn)),
         })
+    }
+
+    pub(crate) fn work_identities(&self) -> StoreResult<Vec<WorkIdentity>> {
+        let conn = self.conn.lock().expect("store mutex poisoned");
+        let mut statement = conn.prepare(
+            "SELECT 0 AS kind, id, NULL AS parent, name, NULL AS external_id, created_at FROM waves
+             UNION ALL
+             SELECT 1, id, wave_id, project_slug, external_project_id, created_at FROM projects
+             UNION ALL
+             SELECT 2, id, project_id, issue_identifier, external_issue_id, created_at FROM tasks
+             ORDER BY kind",
+        )?;
+        let rows = statement.query_map([], |row| {
+            let id: String = row.get(1)?;
+            let (work, parent) = match row.get::<_, u8>(0)? {
+                0 => (WorkRef::Wave(row.get(1)?), None),
+                1 => (
+                    WorkRef::Project(ProjectId::from_raw(id)),
+                    Some(WorkRef::Wave(row.get(2)?)),
+                ),
+                2 => (
+                    WorkRef::Task(TaskId::from_raw(id)),
+                    Some(WorkRef::Project(ProjectId::from_raw(
+                        row.get::<_, String>(2)?,
+                    ))),
+                ),
+                _ => unreachable!("identity query selects only Wave, Project, and Task"),
+            };
+            Ok(WorkIdentity {
+                work,
+                parent,
+                subject: row.get(3)?,
+                external_id: row.get(4)?,
+                created_at: row.get(5)?,
+            })
+        })?;
+        rows.map(|row| row.map_err(StoreError::from)).collect()
     }
 
     /// Run several ledger queries against one SQLite read snapshot.
@@ -1831,6 +1879,29 @@ mod frontier_tests {
     use crate::store::FrontierAdvance::{self, Authorized, Forbidden};
     use crate::work::wave::Wave;
     use std::path::{Path, PathBuf};
+
+    #[test]
+    fn observation_reads_identity_without_execution_schema() {
+        let conn = rusqlite::Connection::open_in_memory().unwrap();
+        conn.execute_batch(
+            "CREATE TABLE waves (id TEXT, name TEXT, created_at INTEGER);
+             CREATE TABLE projects (id TEXT, wave_id TEXT, project_slug TEXT, external_project_id TEXT, created_at INTEGER);
+             CREATE TABLE tasks (id TEXT, project_id TEXT, issue_identifier TEXT, external_issue_id TEXT, created_at INTEGER);
+             INSERT INTO waves VALUES ('00000000-0000-0000-0000-000000000001', 'product', 1);
+             INSERT INTO projects VALUES ('proj_desktop', '00000000-0000-0000-0000-000000000001', 'desktop', 'linear-project', 2);
+             INSERT INTO tasks VALUES ('task_watcher', 'proj_desktop', 'LOO-293', 'linear-issue', 3);
+             PRAGMA query_only = ON;",
+        ).unwrap();
+        let store = SqliteStore {
+            conn: std::sync::Arc::new(std::sync::Mutex::new(conn)),
+        };
+        let identities = store.work_identities().unwrap();
+        assert_eq!(identities.len(), 3);
+        assert_eq!(identities[2].subject, "LOO-293");
+        assert_eq!(identities[2].external_id.as_deref(), Some("linear-issue"));
+        assert_eq!(identities[2].parent.as_ref(), Some(&identities[1].work));
+        assert_eq!(identities[1].parent.as_ref(), Some(&identities[0].work));
+    }
 
     /// The machine home whose `.lf/loopflow.db` `may_apply_migrations` treats as
     /// the shared release store. The regressions inject it so they never touch a

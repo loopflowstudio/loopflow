@@ -63,6 +63,7 @@ pub enum ContextAssetKind {
     ProviderInstructions,
     RepoInstructions,
     SkillInstructions,
+    /// Historical persisted context assets; no longer emitted by prompt assembly.
     Direction,
     Goal,
     Memory,

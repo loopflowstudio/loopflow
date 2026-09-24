@@ -232,9 +232,37 @@ Keep `workflow_run.workflows: ["CI"]` in sync with `.github/workflows/ci.yml`. R
 
 ## Rust Tests
 
-Session-command fixtures must work without an installed `lf`. Follow
-[the isolated executable guidance](.lf/directions/testing.md) when testing
-binary resolution or repairing an executable-dependent CI failure.
+When changing Wave chat operations, include the parent module's HTTP and SSE
+tests. Selecting only `runner::tests` or steering-named tests misses them.
+
+```bash
+cargo nextest run -p loopflow --lib -E 'test(controller::wave::)' --no-fail-fast
+```
+
+Retired operations must be rejected without journaling, while ordinary messages
+and bare interrupts retain their behavior.
+
+When changing Task controls, include the GitHub-cache integration tests as well
+as controller tests. Bare interrupts prove local control during GitHub outages;
+steering publishes to Linear and belongs with the mocked Linear boundary tests.
+
+```bash
+cargo nextest run -p loopflow --test task_github_cache_tests --no-fail-fast
+```
+
+When changing Linear response shapes, run the client tests and PM-operation
+consumers together. Team migration also reads issue comments; its fixtures must
+include the requested pagination metadata.
+
+```bash
+cargo nextest run -p loopflow --lib -E 'test(pm::linear::) | test(ops::pm::) | test(ops::linear_observe::)' --no-fail-fast
+```
+
+Session-command fixtures must work without an installed `lf`. Supply an `LF_BIN`
+fixture, restore it afterward, and serialize environment changes with
+`test_env_lock`. Reuse `TestLfBinGuard` in Task controller tests; keep Session
+spawning mocked. Reproduce executable-resolution failures with the compiled test
+binary, `LF_BIN` and `CARGO_BIN_EXE_lf` unset, and a PATH containing Git but no `lf`.
 
 For worktree creation or checkout-refresh changes, build the current CLI before
 running its Python behavior tests:

@@ -171,7 +171,7 @@ each `.md` URL, use the curated
 | [Waves](docs/waves.md) | The planning model, goals, memory, KRs, Linear, crons |
 | [The Agent API](docs/agent-api.md) | How agents launch, steer, and prove control of other agents |
 | [Conducting](docs/conducting.md) | Monitoring and steering many agents; the Mac podium |
-| [Authoring](docs/authoring.md) | Writing skills, flows, directions, and goals |
+| [Authoring](docs/authoring.md) | Writing skills, flows, and goals |
 | [Security](docs/security.md) | Execution boundaries, permissions, credentials, and account authority |
 | [`lf` reference](docs/lf.md) | Every command, PR/planning/release operations, the builtin catalog |
 | [Configuration](docs/config.md) · [Troubleshooting](docs/troubleshooting.md) | Reference |

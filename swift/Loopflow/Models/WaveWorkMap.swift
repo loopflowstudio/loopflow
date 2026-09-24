@@ -108,7 +108,6 @@ public struct ProjectRuntimeSnapshot: Decodable, Sendable, Hashable {
 public struct TaskRuntimeSnapshot: Decodable, Sendable, Hashable {
     public let workId: String
     public let projectId: String
-    public let routingProjectId: String?
     public let status: WorkStatus
     public let reason: String
     public let updatedAt: String
@@ -118,7 +117,6 @@ public struct TaskRuntimeSnapshot: Decodable, Sendable, Hashable {
         case status, reason, provider
         case workId = "work_id"
         case projectId = "project_id"
-        case routingProjectId = "routing_project_id"
         case updatedAt = "updated_at"
     }
 }

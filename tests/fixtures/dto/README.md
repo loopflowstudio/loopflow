@@ -10,6 +10,10 @@ listener↔resident wire (`POST /resident/deltas`, `POST /resident/attach`,
 the same `lf` binary, so only the Rust fixture tests pin them. Swift does not
 consume this wire.
 
+`task_execution.json` pins the execution evidence in `lf task status --json`.
+This CLI-only contract is tested in Rust. The Mac app receives its derived
+condition, reason, and actions through the existing Wave Task row.
+
 `session.json` pins `lf session open --json`: one unresolved Task FlowStep
 session, its explicit readiness state, and its exact Home-local attach route.
 

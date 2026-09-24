@@ -193,6 +193,67 @@ split every historical remainder into a new Task or silently widen their KRs.
 Research runs twice exhausted their turns without artifacts: write evidence
 incrementally and preserve it outside the provider transcript.
 
+## Observation must not manufacture idle work (2026-09-23)
+
+The `task-viewer` repair (`7a41fc0b2`, `d7e221fda`, `aabc03966`) followed two
+duplicate helper implementations of LOO-293. Separate readers had reconstructed
+identity and liveness from display conventions, and a supervisor treated missing
+observations as absence. This branch repairs those readers; it neither adds a
+launch lock nor establishes a deployed execution cutover.
+
+- **One catalog resolves Work for Runs, Usage, and Activity.** Read stable
+  identity/ancestry columns through a read-only query, not full Project records:
+  the latter failed on the installed store's missing `iteration` column. Keep
+  the minimal-schema regression. Public issue identifiers, internal Work IDs,
+  and external IDs select the same Work. Resolve an unambiguous most-specific
+  Work before checking historical ancestor labels; use ancestry to disambiguate
+  shared names. Current user filters still apply to today's hierarchy. Preserve
+  original manifests and record full ancestry on future bound Runs.
+  The catalog is an ephemeral index, not a second durable owner; its selector
+  aliases preserve historical Run discovery and are not obsolete compatibility.
+- **Receipt ownership survives executable renaming.** Pinned `lf-<hash>` workers
+  are legitimate. Visibility and prune share PID/start-identity matching, without
+  a basename precondition. Retain reused-PID rejection and keep that fixture's
+  PID distinct from the absent OpenCode owner. A completed native launcher says
+  nothing definitive about the remaining client or unresolved Session.
+- **Sample execution and lifecycle once per Task detail.** TaskExecutionSnapshot
+  projects the existing FlowPosition/claim/process evidence for status,
+  conditions, actions, and roadmap. Current non-idle evidence wins over dirty
+  progress and next-launch configuration failure. An unresolved human boundary
+  still yields a waiting condition on terminal Work. Keep lifecycle, worker
+  evidence, and UI condition distinct; remove parallel derived Session booleans.
+  Run attribution does not acquire advancement or process-control authority.
+- **Source proof and promotion are separate.** The incident read found all
+  three Runs via public/internal selectors and Usage; source `ps` saw 20 live
+  nodes versus installed 0.12.19's two, and dry-run prune excluded all ten live
+  Exec PIDs. Nothing was reaped or migrated. Current-schema status has isolated
+  test evidence only. Installed projection/cutover proof remains in LOO-286's
+  existing obligations; this does not settle it or LOO-293.
+  The 2026-09-24 read repeated the three-Run result and excluded all six live
+  Execs from dry-run prune (12 live nodes at that sample). Source builds default
+  to a development Home: an empty result there says nothing about installed
+  history. Select the intended Home explicitly for read-only incident checks;
+  clear `LF_CONTROL_HOME`, `LF_CONTROL_DB_PATH`, `LF_HOME`, and `LF_DB_PATH` for
+  isolated tests. Neither sample proves the older installed Flow schema works.
+- **Isolate launch tests from ambient authority.** A research fixture inherited
+  the live control database, and a Session fixture failed to publish its fake
+  client during the initial broad suite. Isolated reruns passed after clearing
+  execution authority. Fixture cleanup may stop
+  only its identified fake provider child. A passing DTO round-trip alone cannot
+  prove execution precedence.
+
+## Prompt reduction boundary (2026-09-24)
+
+The `task-viewer` branch removes the unused prompt-direction feature end to end
+and collapses unchecked gather/render wrappers to `PromptComponents` and `String`.
+The context-specific contract is in [Intelligence memory](../intelligence/MEMORY.md#prompt-assembly-reduction-branch-evidence-2026-09-24).
+Keep reductions tied to actual ownership: `WorkCatalog` preserves historical
+identity lookup, `TaskExecutionSnapshot` distinguishes current execution from
+durable Work disposition, and `PreparedLaunchPrompt` carries consumed evidence.
+None is interchangeable with the deleted wrappers. LOO-287 still owns the broader
+architecture pass and its real weekly observations; local deletion and passing
+checks do not complete that Task or establish its KR.
+
 ## Shipped
 
 - **Install syncs skills** — the repo refresh and local `--use` paths run `lf sync-skills --yes` after installing `lf`, so `~/.claude/skills` and `~/.agents/skills` track the freshly installed binary. Sync failure warns but never fails the install; the binary is already in place. First increment of "one command keeps local fresh."

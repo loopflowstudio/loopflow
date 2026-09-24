@@ -36,7 +36,7 @@ provider route --> credential lease --> harness subprocess
 | --- | --- | --- | --- |
 | Dispatch | argv, environment, cwd | selected command and launch flags | [`lf/mod.rs`](../../rust/loopflow/src/lf/mod.rs) |
 | Discover | Skill or Flow name | one concrete source | [`lf/discovery.rs`](../../rust/loopflow/src/lf/discovery.rs) |
-| Prepare | agent docs, Skill, directions, preassembled context, explicit docs/diff/message | system and task prompts | [`engine/prompt.rs`](../../rust/loopflow/src/engine/prompt.rs) |
+| Prepare | agent docs, Skill, preassembled context, explicit docs/diff/message | system and task prompts | [`engine/prompt.rs`](../../rust/loopflow/src/engine/prompt.rs) |
 | Route | profile, account health, model request | harness, account, model, credential | [`provider_account.rs`](../../rust/loopflow/src/provider_account.rs) and [`provider_account/lease.rs`](../../rust/loopflow/src/provider_account/lease.rs) |
 | Spawn | prompt, route, environment | provider process and normalized stream | [`harness/`](../../rust/loopflow/src/harness/) |
 | Record | launch facts and normalized events | immutable record plus disposable read model | [`run_record.rs`](../../rust/loopflow/src/run_record.rs) |
@@ -62,7 +62,7 @@ The prompt engine assembles only declared or explicit context:
 
 - system and surface instructions;
 - `AGENTS.md` or `CLAUDE.md` and the Loopflow operating contract;
-- the Skill and requested directions;
+- the Skill;
 - Wave goal, memory, and selected Work context when available;
 - explicit documents, changed-file bodies, diff, clipboard, and user message.
 

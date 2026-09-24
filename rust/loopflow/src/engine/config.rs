@@ -226,10 +226,6 @@ pub struct Config {
     #[serde(default)]
     pub paste: bool,
 
-    /// Default directions for all tasks
-    #[serde(default)]
-    pub direction: Option<Vec<String>>,
-
     /// Summaries to include
     #[serde(default)]
     pub summaries: Vec<SummaryConfig>,
@@ -279,7 +275,6 @@ impl Default for Config {
             diff: false,
             diff_files: false,
             paste: false,
-            direction: None,
             summaries: Vec::new(),
             summary_tokens: default_summary_tokens(),
             autoprune: AutopruneConfig::default(),
@@ -513,7 +508,6 @@ linear:
         assert!(config.context.is_empty());
         assert!(config.exclude.is_empty());
         assert_eq!(config.session.launch, LaunchTarget::Tui);
-        assert!(config.direction.is_none());
         assert!(config.release.targets.is_empty());
     }
 
@@ -600,20 +594,6 @@ exclude:
 "#;
         let config: Config = serde_yaml_ng::from_str(yaml).expect("parse config");
         assert_eq!(config.exclude, vec!["*.log", "build/", "node_modules/"]);
-    }
-
-    #[test]
-    fn config_from_yaml_direction_as_list() {
-        let yaml = r#"
-direction:
-  - architect
-  - concise
-"#;
-        let config: Config = serde_yaml_ng::from_str(yaml).expect("parse config");
-        assert_eq!(
-            config.direction,
-            Some(vec!["architect".to_string(), "concise".to_string()])
-        );
     }
 
     #[test]

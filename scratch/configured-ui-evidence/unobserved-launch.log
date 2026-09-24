@@ -1,0 +1,9 @@
+Owned PID 16685
+Probe executable /tmp/loo291-configured-retention.swift AX trusted true
+AXWindows 0 count 1
+Owned onscreen windows 1 active true hidden false
+PASS This exact probe host has Accessibility permission
+TIMING launch_to_observed_task_ms 21224.17345829308
+PASS Ambient Wave does not block planning
+FAIL Failure(message: "Real Task list loaded (0 rows)")
+Owned termination requested true

@@ -1,0 +1,47 @@
+Owned PID 26803
+Probe executable /tmp/loo291-configured-provider.swift AX trusted true
+AXWindows 0 count 1
+Owned onscreen windows 1 active true hidden false
+PASS This exact probe host has Accessibility permission
+TIMING launch_to_observed_task_ms 4148.913333425298
+PASS Ambient Wave does not block planning
+PASS Real Task list loaded (17 rows)
+PASS Open Task for owned Session
+PASS Press <lf:wave name="product">
+PASS Move only test-owned provider client here
+TIMING move_to_inspection_ms 12047.858708305284 fixed wait, not readiness
+AX AXApplication  Loopflow Review  
+AX AXWindow SwiftUI.ModifiedContent<SwiftUI._ConditionalContent<SwiftUI.ModifiedContent<SwiftUI._ConditionalContent<SwiftUI.ModifiedContent<SwiftUI.ModifiedContent<SwiftUI.(unknown context at $1d0863774).SceneBridgeReader<SwiftUI.SubscriptionView<Combine.PassthroughSubject<Any, Swift.Never>, SwiftUI.ModifiedContent<SwiftUI.ModifiedContent<SwiftUI.ModifiedContent<LoopflowMac.PodiumView, SwiftUI._EnvironmentKeyWritingModifier<Swift.Optional<SwiftUI.Color>>>, SwiftUI._PreferenceWritingModifier<SwiftUI.PreferredColorSchemeKey>>, SwiftUI._EnvironmentKeyWritingModifier<Loopflow.LoopflowPalette>>>>, SwiftUI._FrameLayout>, SwiftUI._FlexFrameLayout>, SwiftUI.(unknown context at $1d0863774).SceneBridgeReader<SwiftUI.SubscriptionView<Combine.PassthroughSubject<Any, Swift.Never>, SwiftUI.ModifiedContent<SwiftUI.ModifiedContent<SwiftUI.ModifiedContent<LoopflowMac.PodiumView, SwiftUI._EnvironmentKeyWritingModifier<Swift.Optional<SwiftUI.Color>>>, SwiftUI._PreferenceWritingModifier<SwiftUI.PreferredColorSchemeKey>>, SwiftUI._EnvironmentKeyWritingModifier<Loopflow.LoopflowPalette>>>>>, SwiftUI._TaskModifier>, SwiftUI._ConditionalContent<SwiftUI.ModifiedContent<SwiftUI.ModifiedContent<SwiftUI.(unknown context at $1d0863774).SceneBridgeReader<SwiftUI.SubscriptionView<Combine.PassthroughSubject<Any, Swift.Never>, SwiftUI.ModifiedContent<SwiftUI.ModifiedContent<SwiftUI.ModifiedContent<LoopflowMac.PodiumView, SwiftUI._EnvironmentKeyWritingModifier<Swift.Optional<SwiftUI.Color>>>, SwiftUI._PreferenceWritingModifier<SwiftUI.PreferredColorSchemeKey>>, SwiftUI._EnvironmentKeyWritingModifier<Loopflow.LoopflowPalette>>>>, SwiftUI._FrameLayout>, SwiftUI._FlexFrameLayout>, SwiftUI.(unknown context at $1d0863774).SceneBridgeReader<SwiftUI.SubscriptionView<Combine.PassthroughSubject<Any, Swift.Never>, SwiftUI.ModifiedContent<SwiftUI.ModifiedContent<SwiftUI.ModifiedContent<LoopflowMac.PodiumView, SwiftUI._EnvironmentKeyWritingModifier<Swift.Optional<SwiftUI.Color>>>, SwiftUI._PreferenceWritingModifier<SwiftUI.PreferredColorSchemeKey>>, SwiftUI._EnvironmentKeyWritingModifier<Loopflow.LoopflowPalette>>>>>>, SwiftUI._TaskModifier>-1-AppWindow-1 Loopflow  
+AX AXGroup    
+AX AXGroup podium  The Podium 
+AX AXGroup podium-bar   
+AX AXMenuButton podium-repo-scope  Repository: loopflow 
+AX AXMenuButton podium-repo-scope  Repository: loopflow 
+AX AXMenuButton podium-repo-scope  Repository: loopflow 
+AX AXStaticText podium-wave-summary   5
+AX AXStaticText podium-wave-summary   Waves
+AX AXButton podium-sessions  Sessions 5 Sessions
+AX AXUnknown podium-process-activity  Provider process activity 
+AX AXButton sessions-surface  All work 
+AX AXButton sessions-surface  Show work list 
+AX AXButton sessions-surface  Work details 
+AX AXStaticText sessions-surface   Planning read: 2026-09-24T01:21:34.131849Z
+AX AXButton sessions-surface  New shell 
+AX AXGroup sessions-surface  Read product wave memory | loopflow.main-view-task, active 
+AX AXStaticText    Read product wave memory | loopflow.main-view-task
+AX AXButton pane-split-right  Split right 
+AX AXButton pane-split-down  Split down 
+AX AXButton pane-close  Close view 
+AX AXButton pane-zoom  Zoom pane 
+AX AXButton session-action-complete  Complete session 
+AX AXButton    
+AX AXButton    
+AX AXGroup    
+AX AXGroup    
+AX AXButton    
+AX AXStaticText    Loopflow
+AX AXMenuBar    
+Input target PID 26803 activation true
+Posted continuation request to owned app only; delivery and reply require provider evidence
+Configured provider inspection finished
+Owned termination requested true

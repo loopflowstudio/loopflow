@@ -51,6 +51,8 @@ and **Return to terminals** restores the retained pane layout. List visibility,
 search, list scroll position, group expansion, and Work selection survive
 repository switches for this window. Searching temporarily reveals matching groups without changing
 saved expansion. Navigation never starts a provider or resolves a Session.
+Launching the app from a Wave's terminal does not restrict the workspace to that
+Wave; the app uses its selected repository and explicit Work targets.
 
 Each pane owns one native libghostty surface. Session badges distinguish
 **VIEWING**, **RUNNING**, **ELSEWHERE**, **OPENING**, and **RETRY**. Sessions

@@ -594,6 +594,23 @@ impl Store {
         .await
     }
 
+    /// The file lock moves into the blocking write, surviving caller cancellation.
+    pub(crate) async fn replace_provider_token(
+        &self,
+        expected: &ProviderToken,
+        replacement: &ProviderToken,
+        lock: std::fs::File,
+        deadline: std::time::Instant,
+    ) -> StoreResult<ProviderTokenReplacement> {
+        let expected = expected.clone();
+        let replacement = replacement.clone();
+        run_sqlite(&self.sqlite, move |store| {
+            let _lock = lock;
+            store.replace_provider_token(&expected, &replacement, deadline)
+        })
+        .await
+    }
+
     pub async fn delete_provider_token(&self, provider: &str) -> StoreResult<()> {
         let provider = provider.to_string();
         run_sqlite(&self.sqlite, move |store| {
@@ -870,6 +887,13 @@ impl std::fmt::Display for CredentialType {
     fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
         f.write_str(self.as_str())
     }
+}
+
+#[derive(Debug)]
+pub(crate) enum ProviderTokenReplacement {
+    Replaced,
+    Changed(ProviderToken),
+    Missing,
 }
 
 #[derive(Debug, Clone, PartialEq, Eq)]

@@ -516,20 +516,30 @@ pub(crate) mod test_server {
         pub status: StatusCode,
         pub headers: Vec<(String, String)>,
         pub body: String,
+        pub gate: Option<(Arc<tokio::sync::Barrier>, Arc<tokio::sync::Barrier>)>,
     }
 
     #[derive(Clone)]
     struct ServerState {
         requests: Arc<Mutex<Vec<CapturedRequest>>>,
         responses: Arc<Mutex<VecDeque<QueuedResponse>>>,
+        authorization: Option<String>,
     }
 
     pub async fn spawn(
         responses: Vec<QueuedResponse>,
     ) -> (String, Arc<Mutex<Vec<CapturedRequest>>>) {
+        spawn_authorized(responses, None).await
+    }
+
+    pub async fn spawn_authorized(
+        responses: Vec<QueuedResponse>,
+        authorization: Option<String>,
+    ) -> (String, Arc<Mutex<Vec<CapturedRequest>>>) {
         let state = ServerState {
             requests: Arc::new(Mutex::new(Vec::new())),
             responses: Arc::new(Mutex::new(VecDeque::from(responses))),
+            authorization,
         };
         let requests = state.requests.clone();
         let app = Router::new()
@@ -564,6 +574,18 @@ pub(crate) mod test_server {
             body: String::from_utf8(body.to_vec()).expect("utf8 body"),
         });
 
+        if state.authorization.as_deref().is_some_and(|expected| {
+            headers
+                .get(reqwest::header::AUTHORIZATION)
+                .and_then(|value| value.to_str().ok())
+                != Some(expected)
+        }) {
+            return Response::builder()
+                .status(StatusCode::UNAUTHORIZED)
+                .body("unauthorized".into())
+                .expect("build rejection");
+        }
+
         let response = state.responses.lock().await.pop_front().unwrap_or_else(|| {
             json_response(
                 StatusCode::INTERNAL_SERVER_ERROR,
@@ -571,6 +593,10 @@ pub(crate) mod test_server {
             )
         });
 
+        if let Some((entered, release)) = response.gate {
+            entered.wait().await;
+            release.wait().await;
+        }
         let mut builder = Response::builder().status(response.status);
         for (name, value) in response.headers {
             builder = builder.header(name, value);
@@ -593,6 +619,7 @@ pub(crate) mod test_server {
     ) -> QueuedResponse {
         QueuedResponse {
             status,
+            gate: None,
             headers: headers
                 .into_iter()
                 .map(|(name, value)| (name.to_string(), value.to_string()))

@@ -13,8 +13,8 @@ use crate::store::rows::{map_wave_row, now_unix};
 use crate::store::token_crypto;
 use crate::store::{
     AccountLimitRow, CredentialState, PmSnapshotRow, ProviderAccount, ProviderAccountId,
-    ProviderAccountSelection, RoutingState, RunEventRow, StoreError, StoreResult,
-    WaveLocatorUpdate,
+    ProviderAccountSelection, ProviderTokenReplacement, RoutingState, RunEventRow, StoreError,
+    StoreResult, WaveLocatorUpdate,
 };
 use crate::work::wave::{Wave, WaveLocator};
 
@@ -708,6 +708,61 @@ impl SqliteStore {
             ],
         )?;
         Ok(())
+    }
+
+    pub(crate) fn replace_provider_token(
+        &self,
+        expected: &super::ProviderToken,
+        replacement: &super::ProviderToken,
+        deadline: std::time::Instant,
+    ) -> StoreResult<super::ProviderTokenReplacement> {
+        let expired = || StoreError::InvalidData("credential replacement deadline elapsed".into());
+        let access = token_crypto::encrypt_token(&replacement.access_token)
+            .map_err(|_| StoreError::InvalidData("credential encryption failed".into()))?;
+        let refresh = token_crypto::encrypt_optional(replacement.refresh_token.as_deref())
+            .map_err(|_| StoreError::InvalidData("credential encryption failed".into()))?;
+        let mut conn = self.conn.lock().expect("store mutex poisoned");
+        let previous: u32 = conn.pragma_query_value(None, "busy_timeout", |row| row.get(0))?;
+        let remaining = deadline
+            .checked_duration_since(std::time::Instant::now())
+            .ok_or_else(expired)?;
+        conn.busy_timeout(remaining)?;
+        let result = (|| {
+            let tx = conn.transaction_with_behavior(TransactionBehavior::Immediate)?;
+            if std::time::Instant::now() >= deadline {
+                return Err(expired());
+            }
+            let row = tx.query_row(
+                "SELECT provider, access_token, refresh_token, oauth_client_id, expires_at, login, updated_at, credential_type, encrypted
+                 FROM provider_tokens WHERE provider = ?1",
+                params![expected.provider], read_token_row,
+            ).optional()?.map(decrypt_token_row).transpose()?;
+            let Some(current) = row else {
+                return Ok(ProviderTokenReplacement::Missing);
+            };
+            if current != *expected {
+                return Ok(ProviderTokenReplacement::Changed(current));
+            }
+            if replacement
+                .expires_at
+                .is_some_and(|expiry| expiry <= now_unix())
+            {
+                return Err(StoreError::InvalidData(
+                    "refreshed credential expired before persistence".into(),
+                ));
+            }
+            tx.execute(
+                "UPDATE provider_tokens SET access_token=?2, refresh_token=?3, oauth_client_id=?4,
+                 expires_at=?5, login=?6, updated_at=?7, credential_type=?8, encrypted=1 WHERE provider=?1",
+                params![expected.provider, access, refresh, replacement.oauth_client_id,
+                    replacement.expires_at, replacement.login, replacement.updated_at,
+                    replacement.credential_type.as_str()],
+            )?;
+            tx.commit()?;
+            Ok(ProviderTokenReplacement::Replaced)
+        })();
+        conn.busy_timeout(Duration::from_millis(u64::from(previous)))?;
+        result
     }
 
     pub fn delete_provider_token(&self, provider: &str) -> StoreResult<()> {
@@ -2078,5 +2133,91 @@ mod frontier_tests {
             frontier(&private).as_deref(),
             Some(latest_known_version().as_str())
         );
+    }
+}
+
+#[cfg(test)]
+mod linear_oauth_tests {
+    use std::sync::Arc;
+    use std::time::{Duration, Instant};
+
+    use super::{SqliteStore, SQLITE_WRITE_BUSY_TIMEOUT};
+    use crate::store::{CredentialType, ProviderToken, ProviderTokenReplacement, Store};
+
+    #[tokio::test]
+    async fn linear_oauth_cancelled_commit_retains_lock_until_blocking_work_settles() {
+        let directory = tempfile::tempdir().unwrap();
+        let sqlite = SqliteStore::open_ephemeral(&directory.path().join("registry.db")).unwrap();
+        let store = Arc::new(Store::from_sqlite_for_test(sqlite.clone()));
+        let original = ProviderToken {
+            provider: "linear".into(),
+            access_token: "A1".into(),
+            refresh_token: Some("R1".into()),
+            oauth_client_id: Some("client".into()),
+            expires_at: Some(1),
+            login: None,
+            updated_at: 1,
+            credential_type: CredentialType::OAuth,
+        };
+        let replacement = ProviderToken {
+            access_token: "A2".into(),
+            refresh_token: Some("R2".into()),
+            expires_at: Some(time::OffsetDateTime::now_utc().unix_timestamp() + 86400),
+            ..original.clone()
+        };
+        store.upsert_provider_token(&original).await.unwrap();
+        let lock_path = directory.path().join("refresh.lock");
+        let lock = std::fs::File::create(&lock_path).unwrap();
+        fs2::FileExt::try_lock_exclusive(&lock).unwrap();
+        let observer = std::fs::OpenOptions::new()
+            .read(true)
+            .write(true)
+            .open(&lock_path)
+            .unwrap();
+        // Hold the real connection mutex on a separate thread, across cancellation.
+        let (held_tx, held_rx) = tokio::sync::oneshot::channel();
+        let (release_tx, release_rx) = std::sync::mpsc::channel();
+        let held_sqlite = sqlite.clone();
+        let holder = std::thread::spawn(move || {
+            let _connection = held_sqlite.conn.lock().unwrap();
+            held_tx.send(()).unwrap();
+            release_rx.recv().unwrap();
+        });
+        held_rx.await.unwrap();
+        let deadline = Instant::now() + Duration::from_millis(50);
+        let write = store.replace_provider_token(&original, &replacement, lock, deadline);
+        assert!(tokio::time::timeout(Duration::from_millis(75), write)
+            .await
+            .is_err());
+        assert!(fs2::FileExt::try_lock_exclusive(&observer).is_err());
+        release_tx.send(()).unwrap();
+        holder.join().unwrap();
+        tokio::time::timeout(Duration::from_secs(2), async {
+            while fs2::FileExt::try_lock_exclusive(&observer).is_err() {
+                tokio::task::yield_now().await;
+            }
+        })
+        .await
+        .unwrap();
+        // The expired queued closure declined to write, and restored normal SQLite policy.
+        assert!(store.get_provider_token("linear").await.unwrap().as_ref() == Some(&original));
+        let busy: u32 = sqlite
+            .conn
+            .lock()
+            .unwrap()
+            .pragma_query_value(None, "busy_timeout", |r| r.get(0))
+            .unwrap();
+        assert_eq!(u128::from(busy), SQLITE_WRITE_BUSY_TIMEOUT.as_millis());
+        let outcome = store
+            .replace_provider_token(
+                &original,
+                &replacement,
+                observer,
+                Instant::now() + Duration::from_secs(2),
+            )
+            .await
+            .unwrap();
+        assert!(matches!(outcome, ProviderTokenReplacement::Replaced));
+        assert!(store.get_provider_token("linear").await.unwrap().as_ref() == Some(&replacement));
     }
 }

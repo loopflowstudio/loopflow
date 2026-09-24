@@ -491,7 +491,18 @@ fn resolve_doppler_secret(name: &str) -> anyhow::Result<String> {
 /// PM/Linear access token from the local store credential store. Absent when no
 /// store exists or no Linear credential is stored.
 async fn resolve_pm_token() -> Option<String> {
-    _resolve_stored_provider_token(PmProviderKind::Linear.as_str()).await
+    match crate::ops::pm::resolve_local_pm_token(PmProviderKind::Linear).await {
+        Ok(token) => token,
+        Err(error) => {
+            tracing::warn!(%error, "local Linear credential unavailable; forwarding no PM token");
+            None
+        }
+    }
+}
+
+#[cfg(test)]
+pub(crate) async fn resolve_pm_token_for_test() -> Option<String> {
+    resolve_pm_token().await
 }
 
 async fn _resolve_opencode_token(home: &std::path::Path) -> Option<String> {

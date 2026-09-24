@@ -79,8 +79,42 @@ def _read_events(path: Path) -> tuple[list[dict], list[str]]:
 def _summarize(events: list[dict]) -> dict:
     plans = [event for event in events if event["event"] == "plan"]
     plan = plans[0] if len(plans) == 1 else None
-    starts = {event["id"]: event for event in events if event["event"] == "begin"}
-    ends = {event["id"]: event for event in events if event["event"] == "end"}
+    errors = [] if plan else ["Expected exactly one observation plan."]
+    planned = (
+        {
+            (population, scenario, attempt)
+            for population in plan["populations"]
+            for scenario in plan["scenarios"]
+            for attempt in range(plan["samples"])
+        }
+        if plan
+        else set()
+    )
+    starts: dict[str, dict] = {}
+    ends: dict[str, dict] = {}
+    observed = set()
+    subject_fields = ["metric", "scenario", "population", "attempt", "state"]
+    for event in events:
+        kind = event["event"]
+        if kind not in {"begin", "end"}:
+            continue
+        identity = event["id"]
+        records = starts if kind == "begin" else ends
+        if identity in records:
+            errors.append(f"Duplicate {kind} for {identity}.")
+        records[identity] = event
+        if kind == "begin":
+            subject = tuple(event[field] for field in ["population", "scenario", "attempt"])
+            if subject not in planned or subject in observed:
+                errors.append(f"Unplanned or repeated observation: {identity}.")
+            observed.add(subject)
+            state = "first_interaction" if event["attempt"] == 0 else "warm"
+            if event["state"] != state:
+                errors.append(f"Incorrect sampling state for {identity}.")
+        elif identity not in starts or any(
+            event[field] != starts[identity][field] for field in subject_fields
+        ):
+            errors.append(f"Result has no matching preceding observation: {identity}.")
     attempts = []
     for identity, start in starts.items():
         attempts.append(
@@ -105,13 +139,13 @@ def _summarize(events: list[dict]) -> dict:
                 else None,
             }
         )
-    expected = len(plan["populations"]) * len(plan["scenarios"]) * plan["samples"] if plan else None
     return {
         "plan": plan,
         "attempts": attempts,
         "groups": summaries,
-        "expected_attempts": expected,
-        "not_started": max(0, expected - len(attempts)) if expected else None,
+        "expected_attempts": len(planned) if plan else None,
+        "not_started": len(planned - observed) if plan else None,
+        "journal_errors": errors,
         "journey_errors": [
             event for event in events if event["event"] in {"setup", "setup_or_journey"}
         ],
@@ -158,6 +192,7 @@ def _report(output: Path, baseline: Path | None) -> dict:
     metadata = json.loads((output / "run.json").read_text())
     events, errors = _read_events(output / "attempts.jsonl")
     summary = _summarize(events)
+    errors.extend(summary["journal_errors"])
     complete = (
         metadata.get("exit_code") == 0
         and metadata.get("source_before") == metadata.get("source_after")
@@ -223,6 +258,7 @@ def _report(output: Path, baseline: Path | None) -> dict:
             "See run.json, attempts.jsonl and native.log for failed, interrupted "
             "or unavailable observations.",
         ]
+        lines.extend(f"- {error}" for error in errors)
     (output / "report.md").write_text("\n".join(lines) + "\n", encoding="utf-8")
     return summary
 

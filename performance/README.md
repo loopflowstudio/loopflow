@@ -27,11 +27,12 @@ production phase attribution and configured registry/provider costs remain
 unmeasured. No rendering budget is scored from this endpoint.
 
 Each output directory retains `attempts.jsonl`, `native.log`, `run.json` and
-JSON/Markdown reports. Begin records preserve interrupted attempts; failures,
-timeouts and unstarted scenarios remain in the denominator. Source drift marks
-the run incomplete. Comparisons require matching host, population, endpoint and
-build mode and unchanged measurement/fixture source. p95 needs twenty successful
-samples in the same scenario/state.
+JSON/Markdown reports. Begin records preserve interrupted attempts. Failure rates
+include failed, timed-out and interrupted attempts; planned observations that
+never started are counted separately. Missing, repeated or mismatched observations
+and source drift mark the run incomplete. Comparisons require matching host,
+population, endpoint and build mode and unchanged measurement/fixture source.
+p95 needs twenty successful samples in the same scenario/state.
 Recover a report after interruption with:
 
 ```bash

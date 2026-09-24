@@ -1,5 +1,11 @@
 # Unified navigation slice review — 2026-09-23
 
+Latest review: [desktop capture/input measurements](review-desktop-performance.md),
+2026-09-24. Fixed journal reconstruction accepting missing planned observations
+and inconsistent results as complete. Eight report tests and 22 fresh native
+observations pass. Rendering/hitch, bounded discovery and configured/human
+acceptance remain open; publication is pending.
+
 Latest review: [Wave-only integration](review-wave-integration.md), 2026-09-24.
 Fixed delayed chapter history replacing newer navigation and stale selected
 Task evidence during transfer. Nineteen focused tests pass, including the mounted

@@ -1,0 +1,19 @@
+[0/1] Planning build
+Building for debugging...
+[0/4] Write swift-version--58304C5D6DBC2206.txt
+Build complete! (0.57s)
+Test Suite 'Selected tests' started at 2026-09-24 15:58:22.790.
+Test Suite 'LoopflowSwiftPackageTests.xctest' started at 2026-09-24 15:58:22.791.
+Test Suite 'LoopflowSwiftPackageTests.xctest' passed at 2026-09-24 15:58:22.791.
+	 Executed 0 tests, with 0 failures (0 unexpected) in 0.000 (0.000) seconds
+Test Suite 'Selected tests' passed at 2026-09-24 15:58:22.791.
+	 Executed 0 tests, with 0 failures (0 unexpected) in 0.000 (0.001) seconds
+◇ Test run started.
+↳ Testing Library Version: 1501
+↳ Target Platform: arm64e-apple-macos14.0
+◇ Suite "Desktop experience measurements" started.
+◇ Test measureExperiences() started.
+[GhosttyManager] CoreVideo display link unavailable (-6661); using timer rendering
+✔ Test measureExperiences() passed after 8.478 seconds.
+✔ Suite "Desktop experience measurements" passed after 8.478 seconds.
+✔ Test run with 1 test in 1 suite passed after 8.478 seconds.

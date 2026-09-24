@@ -55,6 +55,56 @@
 
 ## Before and after
 
+### Iteration 21 — measurement ownership review (2026-09-24)
+
+No further coherent model/API reduction was established. This pass changes only
+this report. The native benchmark and the preceding routing-field deletion remain
+their existing contributions; no executable API, field, writer or path changed.
+
+Traced `DesktopPerformanceTests` through the actual outline controls, Podium,
+SessionsView, retained workspace registry, multiplexer and Ghostty surfaces, then
+through its attempt journal into `scripts/desktop_performance.py` and its report
+tests. Compared Rust/Swift SessionRecord, SessionAction, ActiveRunsSnapshot,
+ActiveRun, LiveProviderProcess, ChapterSummary and TaskRuntimeSnapshot fields;
+inspected the shared fixture assertions and active ownership reader. Searches
+retain one Podium caller per inventory, one root workspace registry and one
+production capture-binding writer. Removed routing and Session policy/scope
+aliases remain absent from source and current fixtures.
+
+Candidates retained deliberately:
+
+- The benchmark's captured text and timestamp describe one test-owned bitmap.
+  They do not replace product identity, selection or input ownership. Exact pane
+  and surface assertions, pixel checks and PTY replies prove different outcomes.
+- The native journal owns attempted observations; Python derives reports from it.
+  Begin records preserve interruption, the plan preserves never-started work,
+  and host/source metadata establishes comparability. Collapsing these into only
+  successful timing rows would discard failure evidence. Extracting the repeated
+  scenario names into another helper would not remove an authority or model.
+- Session boundary, Run, planning Task and pane IDs have distinct lifetimes.
+  Saved PaneState prevents restoring a reused pane's different Session; selected
+  Task evidence preserves the latest observation across a chapter-transfer gap.
+- Capture intervals and native receipts establish different ownership lifetimes.
+  Replacing native discovery with the new binding directory would again omit old
+  live clients. Bounded discovery and automatic refresh require implementation,
+  not a behavior-preserving deletion. Current Monitor reads remain explicit.
+- Historical chapter source IDs and Session Wave ancestry preserve references
+  outside the current plan. The sibling objective/target correction must arrive
+  as its complete writer/read/history change, not a partial local field removal.
+
+Validated the existing [measurement receipt](desktop-performance-receipt.json):
+all three source-file hashes, all five artifact hashes and the complete measured
+source fingerprint still match. Its journal contains 462 passing end records;
+the report is complete at its declared capture/OCR/PTY endpoint. The earlier
+baseline comparison remains unavailable because measurement source differs.
+This is inspection of prior evidence, not a new benchmark or test run. No
+executable changes justified rerunning the native collection or branch suites.
+
+Compositor presentation, hitches, production phase timing, scrolling during
+refresh, configured discovery/provider costs, budgets and human acceptance remain
+open. The recorded five-pane clipping limitation is unchanged. No optimization,
+publication, installation, PM mutation or Task completion occurred.
+
 ### Iteration 21 — remove duplicate Task routing identity (2026-09-24)
 
 Before, TaskRuntimeSnapshot exposed both required `project_id` and optional

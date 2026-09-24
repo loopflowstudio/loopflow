@@ -3,6 +3,8 @@ from __future__ import annotations
 import json
 from pathlib import Path
 
+import pytest
+
 from scripts import desktop_performance as performance
 
 
@@ -88,3 +90,32 @@ def test_comparison_rejects_source_drift_or_different_endpoints(tmp_path: Path) 
         "available": False,
         "reason": "Different endpoint",
     }
+
+
+@pytest.mark.parametrize("replacement", ["unplanned", "duplicate"])
+def test_completion_requires_each_planned_observation(tmp_path: Path, replacement: str) -> None:
+    events = _events(2)
+    for event in events[-2:]:
+        if replacement == "unplanned":
+            event["scenario"] = "unplanned"
+        else:
+            event["attempt"] = 0
+            event["state"] = "first_interaction"
+    result = _report(tmp_path, events)
+    assert result["status"] == "incomplete"
+    assert result["not_started"] == 1
+    assert result["journal_errors"]
+
+
+@pytest.mark.parametrize("defect", ["duplicate_end", "orphan_end", "changed_subject"])
+def test_ambiguous_results_cannot_complete_a_run(tmp_path: Path, defect: str) -> None:
+    events = _events(1)
+    if defect == "duplicate_end":
+        events.append({**events[-1], "outcome": "failed"})
+    elif defect == "orphan_end":
+        events.append({**events[-1], "id": "orphan"})
+    else:
+        events[-1]["population"] = "different"
+    result = _report(tmp_path, events)
+    assert result["status"] == "incomplete"
+    assert result["journal_errors"]

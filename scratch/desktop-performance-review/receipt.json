@@ -1,0 +1,46 @@
+{
+  "review_date": "2026-09-24",
+  "head": "909adff3e0852c4512ff673a5ebefb75a8e18fc0",
+  "sources": {
+    "scripts/desktop_performance.py": "74eb9ffad62b0cdd4dbbd3d48b19864bcb5621cee0c83389235d0c0770c2ec27",
+    "python/tests/test_desktop_performance.py": "4c379dece2787ad8dcd388f854f46af3a1e05ae91592b081e35cac770c847517",
+    "swift/LoopflowTests/DesktopPerformanceTests.swift": "dbb071226dc9a63a95de3fcfb64acf8f89b380641abe1ea22a803c8be6a67d7e"
+  },
+  "artifacts": {
+    "scratch/desktop-performance-review/attempts.jsonl": "2b28039664d84f7efc4fa1a235bae34576ec3ac66aacef51586067170cc280bb",
+    "scratch/desktop-performance-review/native.log": "78eb69062f5879959484c76bbac742dcb3984deaec413b52ec1f92ef556bac85",
+    "scratch/desktop-performance-review/report.json": "74cdaa1b597b3a19e678d5cc4644dea53b3e4c164571efa48f35423e34c7c62b",
+    "scratch/desktop-performance-review/report.md": "0ad9bd12c557ede9870460752d17da5595a7e2ad913a87eb5412089699d6f958",
+    "scratch/desktop-performance-review/reports-after.log": "0bfd04353a9ad3bfd3a7b224657b14b7bc6687dd89de8ffaaf2a2ffb6cc24af0",
+    "scratch/desktop-performance-review/reports-before.log": "dabea52321ddd7bd95d3bfd96f58bb2e17f34cec1385b9b24861e23491d86eec",
+    "scratch/desktop-performance-review/run.json": "1b4ec1882bc7f897bf9d377d746a4e93edb6dea4f2d92a5e856d10f2e862394b"
+  },
+  "native": {
+    "status": "complete",
+    "attempts": 22,
+    "not_started": 0,
+    "journal_errors": [],
+    "source_before": "9c2faa9673ad867f1f102693f74842d568359af378c99ab1e4158499c5e8e9b8",
+    "source_after": "9c2faa9673ad867f1f102693f74842d568359af378c99ab1e4158499c5e8e9b8"
+  },
+  "counterexample": {
+    "change": "Copy durable baseline journal; rename scenario/id of large combined_restore attempt 20 to unplanned/large-unplanned-20 in both begin and end. Original journal remains unchanged.",
+    "before_exit_code": 0,
+    "after_exit_code": 1,
+    "after_status": "incomplete",
+    "after_not_started": 1,
+    "after_errors": [
+      "Unplanned or repeated observation: large-unplanned-20."
+    ]
+  },
+  "baseline_reconstruction": {
+    "status": "complete",
+    "attempts": 462,
+    "identical_groups": true
+  },
+  "limits": [
+    "Native capture/OCR and owned cat PTYs; synthetic planning and active Runs.",
+    "No compositor, hitch, configured provider, discovery-cost or human acceptance claim.",
+    "Concurrent documentation edits after the native run are outside its source fingerprint; no claim that all current checkout bytes equal the measured tree."
+  ]
+}

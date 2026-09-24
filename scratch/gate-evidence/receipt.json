@@ -1,0 +1,49 @@
+{
+  "head": "909adff3e0852c4512ff673a5ebefb75a8e18fc0",
+  "baseline_artifact_integrity": {
+    "report.json": true,
+    "report.md": true,
+    "native.log": true,
+    "run.json": true,
+    "attempts.jsonl": true
+  },
+  "baseline_recorded_attempts": 462,
+  "baseline_is_fresh_run": false,
+  "golden_operating_fragments_match_source": [
+    "tests/goldens/basic.md",
+    "tests/goldens/builtin_debug.md",
+    "tests/goldens/builtin_implement.md",
+    "tests/goldens/builtin_review_slice.md",
+    "tests/goldens/with_direction.md",
+    "tests/goldens/with_docs.md"
+  ],
+  "other_golden_content_unchanged": true,
+  "golden_engine_test_run": false,
+  "affected_suites": "not_run: resource preflight",
+  "rendering_host": "not available in this run",
+  "fresh_before_after": "not run",
+  "concurrent_measurement_receipt_integrity": {
+    "scripts/desktop_performance.py": true,
+    "python/tests/test_desktop_performance.py": true,
+    "swift/LoopflowTests/DesktopPerformanceTests.swift": true,
+    "scratch/desktop-performance-review/attempts.jsonl": true,
+    "scratch/desktop-performance-review/native.log": true,
+    "scratch/desktop-performance-review/report.json": true,
+    "scratch/desktop-performance-review/report.md": true,
+    "scratch/desktop-performance-review/reports-after.log": true,
+    "scratch/desktop-performance-review/reports-before.log": true,
+    "scratch/desktop-performance-review/run.json": true
+  },
+  "gate_edited_source_sha256": {
+    "docs/architecture-reference.md": "549c17760f3d553f1c98d2abb9d2474993cb545c089f16b4925e2f68e8b17897",
+    "docs/architecture.html": "65891ed2c41329334a4238a3a39835e76f441fef27203b469de5da79759ae423",
+    "swift/README.md": "a0b6c979f21e9901145447fca1090a4933a535bb1a38686459f390d110e3ed4f",
+    "rust/loopflow/src/engine/builtins/LOOPFLOW.md": "5dbd4a1c0e12be3bcdacf79fcacdd179194caca097bb972fc0bb8214c6d8f661",
+    "tests/goldens/basic.md": "9f9c7f3416b3e1799f9d78e34ad986da5b48fba97b20c7ff027e3f13d583efbb",
+    "tests/goldens/builtin_debug.md": "7bfab48ced3cf09ebddce9dc6c9ecc04df345d8e617dac20f8467e10d237bffc",
+    "tests/goldens/builtin_implement.md": "5a9501db318b6f4324c3ae829af53f890859de58f5ce118daabd53aa549c9a28",
+    "tests/goldens/builtin_review_slice.md": "e8544051096d64dbbbb428569063be5ab5b2ed5a2f4c33d597aa94412ba07e17",
+    "tests/goldens/with_direction.md": "565f2725d7b8b14151881840dd4f4884a9ce7f74bfa392dda3fdd290b5aa5ddf",
+    "tests/goldens/with_docs.md": "ce689bcf6d54f72b95966402f846ed2f1a3b1ff8254346df0e3e4a35f744b4e4"
+  }
+}

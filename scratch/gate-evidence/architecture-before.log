@@ -1,0 +1,14 @@
+warning: `VIRTUAL_ENV=/Users/jack/src/loopflow.agent/.venv` does not match the project environment path `.venv` and will be ignored; use `--active` to target the active environment instead
+Architecture map coverage
+  PASS  public API: 45/45
+  PASS  process boundary: 8/8
+  FAIL  SQLite owner/mirror: 29/31
+  PASS  read projection: 6/6
+  PASS  HTTP route: 19/19
+  PASS  provider edge: 6/6
+  FAIL  subprocess edge: 25/27
+  PASS  compatibility seam: 5/5
+
+Unexplained architecture drift:
+- SQLite owner/mirror missing from map: observation_outbox, project_events
+- subprocess edge missing from map: exec:sh, exec:tmux

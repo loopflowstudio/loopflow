@@ -102,7 +102,7 @@ Rust `SessionRecord` projection; it owns no parallel queue.
 Every record carries a required `runId` for Run lookup, including unopened Ask
 and FlowStep Sessions. The Session ID targets human actions; `runId` targets the
 Run. A prepared Run alone does not establish live provider activity.
-Use **New conversation** to talk about the selected repo, Wave, Project, or Task
+Use **New conversation** to talk about the selected repo, Wave, or Task
 in the configured app or terminal. It opens an interactive prompt without
 creating a Task or running an autonomous operating pass. **New terminal** opens
 an ordinary shell in the active checkout. A conversation launched here returns
@@ -128,7 +128,7 @@ Planning and Sessions share the Podium readings; there is no separate
 Sessions-only roadmap query. A failed read keeps its last useful evidence and
 exposes the error. Inspection shows the planning snapshot's generation time,
 which does not establish a fresh provider sync, and an explicit no-Session state
-only after a successful Session read. Compact retains an empty Wave or Project
+only after a successful Session read. Compact retains an empty Wave
 as an inspectable leaf; it compresses structural levels only when descendants
 can take their place.
 
@@ -157,8 +157,8 @@ create a parallel local thread. Prior backing epochs remain selectable and
 read-only, and backing delivery trouble stays visible above the transcript.
 Commands, tools, file edits, and loop bookkeeping stay in the journal;
 decisions, deliveries, and actionable failures remain visible. The detail pane
-reads Projects, Tasks, decisions, PR delivery, and Task conditions from `lf
-status --json`.
+reads the current chapter plan, Tasks, decisions, PR delivery, and Task conditions
+from `lf status <wave> --json`.
 
 Start, resume, attach, or interrupt a Task from the roadmap. Open its worktree
 in Warp, or attach to the running Task agent in the workspace sheet beside its
@@ -174,11 +174,11 @@ codebase tree, and registry health.
 
 - **Wave Chat** owns the conversation, the active Wave turn, and
   Send and bare Interrupt controls.
-- **Projects and Tasks** appear in the Wave work map. Linear owns their planning
-  identity; Loopflow's registry owns their runtime state.
-- **Tasks** own implementation worktrees and PR delivery. Every Task
-  reports through its Project Work; the Wave retains root inspection and
-  override. Waves and Projects remain control-plane processes in main.
+- **Waves and Tasks** appear in the work map. Linear owns authored planning;
+  Loopflow's registry owns runtime state and the current chapter binding.
+- **Tasks** own implementation worktrees and PR delivery and report directly
+  to their Wave. The internal Project retains chapter planning and history;
+  it has no separate operator.
 - **Task workspace presentation** reads `lf task changes/diff/file --json`.
   Lifecycle mutations remain `lf task run/resume/interrupt`; review nodes use
   the Task's persisted flow position and provider Run identity.
@@ -193,7 +193,7 @@ codebase tree, and registry health.
 
 ## Code map
 
-- `LoopflowMac/Views/PodiumView.swift` — primary Wave scope, Work, and live process signal
+- `LoopflowMac/Views/PodiumView.swift` — one repository/Wave/Task/Session outline and retained workspace
 - `LoopflowMac/Views/SessionsView.swift` — every Session in a native split multiplexer
 - `Loopflow/Models/MultiplexerLayout.swift` — immutable pane split tree
 - `Loopflow/Models/MultiplexerStore.swift` — reference-owned layout, focus, color, and undo
@@ -201,7 +201,7 @@ codebase tree, and registry health.
 - `LoopflowMac/PodiumModel.swift` — shared readings, stable selection, and local scope
 - `LoopflowMac/Views/WavesView.swift` — previous Wave workspace during migration
 - `LoopflowMac/Views/RoadmapView.swift` — all-Wave roadmap and lifecycle controls
-- `LoopflowMac/Views/WaveDetailPane.swift` — Wave Chat plus Project/Task work
+- `LoopflowMac/Views/WaveDetailPane.swift` — Wave Chat, current chapter plan, and Tasks
 - `LoopflowMac/Views/TaskWorkspaceView.swift` — Task diff, file, Ghostty, and Warp surface
 - `LoopflowMac/PortfolioRepoState.swift` — one repository's Wave projection
 - `Loopflow/Services/RegistryQuery.swift` — typed `lf --json` reads

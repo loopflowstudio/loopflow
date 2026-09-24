@@ -695,6 +695,17 @@ remain open. Full matrix and next direction:
   children, telemetry recovery, closed obligations and configured acceptance
   remain open. Details: [publisher-checkout-preservation.md](publisher-checkout-preservation.md).
 
+- Publisher checkout review remains **iterate**. The controller-death proof
+  passed again, then an added launcher-failure case reproduced controller cleanup
+  deleting the checkout under a surviving descendant. Cleanup now relinquishes
+  its lease and reacquires through ordinary removal; it preserves the checkout
+  and branch when the descendant still owns protection. All four preparation/
+  publication and controller-exit scenarios passed after repair (14.68s), along
+  with six Python ownership cases, normal candidate completion (12.73s), Rust
+  formatting and all-target Clippy. Remaining shared mutation children,
+  telemetry recovery, closed obligations and configured acceptance stay open.
+  See [review-publisher-checkout.md](review-publisher-checkout.md).
+
 ## Measure
 
 Use the Reliability KR's actual due population, not successful process counts.

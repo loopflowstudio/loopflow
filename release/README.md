@@ -115,6 +115,8 @@ Preparation, publication, and public verification retain the publisher checkout
 lease in their child processes. If the controller dies, ordinary checkout
 removal remains blocked until those children exit; unrelated checkouts remain
 independent.
+If a publisher launcher exits while a descendant survives, controller cleanup
+also preserves the checkout and reports its path for later cleanup.
 
 Tag pushes, candidate-ref changes, workflow submissions, and GitHub publication
 commands retain the release target's lock in their child process. If the

@@ -1200,7 +1200,7 @@ fn verify_source(
             previous,
             "verification",
         );
-        cleanup_release_worktree(repo, &wt.path, &wt.branch, Some(&lease), progress);
+        cleanup_release_worktree(repo, &wt.path, &wt.branch, Some(lease), progress);
         result?;
     }
     persist_verification(
@@ -1387,7 +1387,7 @@ fn verify_release_outcome(
         command: e.command_line(),
         stderr: e.stderr,
     });
-    cleanup_release_worktree(repo, &wt.path, &wt.branch, Some(&lease), progress);
+    cleanup_release_worktree(repo, &wt.path, &wt.branch, Some(lease), progress);
     checked?;
     let proof_path = repo
         .join(".lf/logs")
@@ -1735,7 +1735,7 @@ fn prepare_publisher(
             stderr: err.stderr,
         })
     };
-    cleanup_release_worktree(repo, &wt.path, &wt.branch, Some(&lease), progress);
+    cleanup_release_worktree(repo, &wt.path, &wt.branch, Some(lease), progress);
     prepare_result?;
 
     if !artifact_dir.join("candidate.json").is_file() {
@@ -1810,7 +1810,7 @@ fn run_publisher(
             stderr: err.stderr,
         })
     };
-    cleanup_release_worktree(repo, &wt.path, &wt.branch, Some(&lease), progress);
+    cleanup_release_worktree(repo, &wt.path, &wt.branch, Some(lease), progress);
     publish_result?;
 
     if github_release_state(repo, tag)? != GitHubReleaseState::Published {
@@ -2592,18 +2592,18 @@ fn cleanup_release_worktree(
     main_repo: &Path,
     wt_path: &Path,
     branch: &str,
-    lease: Option<&WorktreeLease>,
+    lease: Option<WorktreeLease>,
     progress: &impl Progress,
 ) {
-    let result = match lease {
-        Some(lease) => worktree_remove_owned(main_repo, wt_path, lease),
-        None => worktree_remove(main_repo, wt_path),
-    };
-    if let Err(err) = result {
+    // A descendant can retain our open file description after its launcher exits.
+    // Reacquire independently so cleanup cannot bypass that surviving ownership.
+    drop(lease);
+    if let Err(err) = worktree_remove(main_repo, wt_path) {
         progress.error(&format!(
             "Warning: could not remove release worktree {}: {err}",
             wt_path.display()
         ));
+        return;
     }
     let _ = delete_local_branch(main_repo, branch);
 }

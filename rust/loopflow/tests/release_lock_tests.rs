@@ -233,8 +233,13 @@ fn wait_until_released(mut operation: impl FnMut() -> Result<(), OpsError>) {
 }
 
 #[test]
-fn surviving_publisher_keeps_its_checkout_after_controller_death() {
-    for stage in ["prepare", "publish"] {
+fn surviving_publisher_keeps_its_checkout_after_controller_exit() {
+    for (stage, kill_controller) in [
+        ("prepare", true),
+        ("publish", true),
+        ("prepare", false),
+        ("publish", false),
+    ] {
         let state = tempfile::tempdir().unwrap();
         let gh = "#!/bin/sh\ncase \"$1 $2\" in\n'--version ') exit 0;;\n'run list') printf '[{\"databaseId\":42,\"headBranch\":\"v0.9.1\",\"headSha\":\"%s\",\"status\":\"completed\",\"conclusion\":\"success\"}]' \"$(git rev-parse v0.9.1)\";;\n'run download') exit 0;;\n'release view') exit 1;;\n*) exit 91;;\nesac\n";
         let _env = EnvGuard::new(&[("gh", gh)]);
@@ -249,8 +254,10 @@ fn surviving_publisher_keeps_its_checkout_after_controller_death() {
             format!(
                 r#"#!/bin/sh
 if [ "$1" = '{stage}' ]; then
+  {child_start}
   pwd > '{state}/checkout'
   {barrier}
+  {child_end}
 fi
 case "$1" in
   check) exit 0;;
@@ -268,6 +275,15 @@ esac
 exit 92
 "#,
                 state = state.path().display(),
+                child_start = if kill_controller { "" } else { "(" },
+                child_end = if kill_controller {
+                    String::new()
+                } else {
+                    format!(
+                        ") > '{}/descendant.log' 2>&1 &\n  exit 1",
+                        state.path().display()
+                    )
+                },
                 barrier = blocking_mutation(
                     state.path(),
                     &format!(
@@ -314,9 +330,24 @@ exit 92
                 .unwrap()
                 .trim(),
         );
-        let bytes = fs::read(checkout.join("publisher.sh")).unwrap();
-        parent.child.kill().unwrap();
+        let bytes = fs::read(repo.path().join("publisher.sh")).unwrap();
+        if kill_controller {
+            parent.child.kill().unwrap();
+        } else {
+            let deadline = Instant::now() + Duration::from_secs(20);
+            while parent.child.try_wait().unwrap().is_none() {
+                assert!(
+                    Instant::now() < deadline,
+                    "controller did not finish cleanup"
+                );
+                thread::sleep(Duration::from_millis(10));
+            }
+        }
         assert!(!parent.child.wait().unwrap().success());
+        assert!(
+            checkout.exists(),
+            "controller cleanup removed surviving {stage} descendant's checkout"
+        );
         let removal = worktree_remove(repo.path(), &checkout);
         worktree_remove(repo.path(), &independent).unwrap();
         let contender = release_tag(repo.path(), "0.9.2", None);

@@ -12,6 +12,7 @@ use crate::store::rows::now_unix;
 use crate::store::{StoreError, StoreResult};
 use crate::work::project::{Project, ProjectEventKind};
 use crate::work::task::{Task, TaskEventKind};
+use crate::work::task::flow_history::{TaskFlowEvent, TaskFlowSettlement, TaskFlowStage, TaskFlowTransition};
 
 use super::SqliteStore;
 
@@ -137,7 +138,7 @@ impl SqliteStore {
     ) -> StoreResult<FlowPosition> {
         let mut conn = self.conn.lock().expect("store mutex poisoned");
         let tx = conn.transaction_with_behavior(TransactionBehavior::Immediate)?;
-        let stored = set_flow_position_in(&tx, task_id, position)?;
+        let stored = set_flow_position_in(&tx, task_id, position, TaskFlowTransition::Advanced)?;
         tx.commit()?;
         Ok(stored)
     }
@@ -292,6 +293,11 @@ impl SqliteStore {
         {
             return Err(stale_task_worker(task_id));
         }
+        let position = flow_position_in(&tx, task_id)?.ok_or(StoreError::NotFound)?;
+        super::children::insert_task_flow_event_in(&tx, task_id, TaskFlowEvent::RunBound {
+            stage: TaskFlowStage::from(&position),
+            run_id: worker_run_id.clone(),
+        })?;
         tx.commit()?;
         Ok(bound)
     }
@@ -868,6 +874,7 @@ fn require_task_worker_eligible(conn: &Connection, work: &WorkRef) -> StoreResul
 
 pub(crate) fn reopen_work_in(conn: &Connection, work: &WorkRef) -> StoreResult<()> {
     if let WorkRef::Task(task_id) = work {
+        record_flow_settlement_in(conn, task_id, TaskFlowSettlement::Reopened)?;
         conn.execute(
             "DELETE FROM task_flow_positions WHERE task_id=?1",
             [task_id.as_str()],
@@ -955,6 +962,7 @@ pub(super) fn set_flow_position_in(
     conn: &Connection,
     task_id: &TaskId,
     position: &FlowPosition,
+    reason: TaskFlowTransition,
 ) -> StoreResult<FlowPosition> {
     require_ready_work(conn, &WorkRef::Task(task_id.clone()))?;
     validate_flow_position(task_id, position)?;
@@ -963,6 +971,7 @@ pub(super) fn set_flow_position_in(
             "set_flow_position cannot write an advancement claim".to_string(),
         ));
     }
+    let previous = flow_position_in(conn, task_id)?;
     let failure_json = position
         .failure
         .as_ref()
@@ -1025,6 +1034,7 @@ pub(super) fn set_flow_position_in(
             "Flow position for Task {task_id} changed or is actively claimed"
         )));
     }
+    record_flow_position_in(conn, task_id, previous.as_ref(), position, reason)?;
     flow_position_in(conn, task_id)?.ok_or(StoreError::NotFound)
 }
 
@@ -1052,7 +1062,12 @@ pub(super) fn block_task_flow_in(
     {
         return Err(stale_task_worker(task_id));
     }
-    flow_position_in(conn, task_id)?.ok_or(StoreError::NotFound)
+    let position = flow_position_in(conn, task_id)?.ok_or(StoreError::NotFound)?;
+    super::children::insert_task_flow_event_in(conn, task_id, TaskFlowEvent::StageBlocked {
+        stage: TaskFlowStage::from(&position),
+        failure: failure.clone(),
+    })?;
+    Ok(position)
 }
 
 pub(super) fn release_task_worker_in(
@@ -1095,6 +1110,7 @@ pub(super) fn settle_task_worker_in(
         return Err(stale_task_worker(task_id));
     }
     require_ready_work(conn, &WorkRef::Task(task_id.clone()))?;
+    let previous = flow_position_in(conn, task_id)?.ok_or(StoreError::NotFound)?;
     let expected_json = serde_json::to_string(expected)?;
     let step = next.current();
     if conn.execute(
@@ -1124,6 +1140,7 @@ pub(super) fn settle_task_worker_in(
     {
         return Err(stale_task_worker(task_id));
     }
+    record_flow_position_in(conn, task_id, Some(&previous), next, TaskFlowTransition::Advanced)?;
     flow_position_in(conn, task_id)?.ok_or(StoreError::NotFound)
 }
 
@@ -1138,6 +1155,7 @@ pub(super) fn finish_task_flow_in(
         ));
     }
     require_ready_work(conn, &WorkRef::Task(task_id.clone()))?;
+    record_flow_settlement_in(conn, task_id, TaskFlowSettlement::Completed)?;
     let expected_json = serde_json::to_string(expected)?;
     if conn.execute(
         "DELETE FROM task_flow_positions

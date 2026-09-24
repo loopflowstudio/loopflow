@@ -3,6 +3,8 @@
 //! A Task owns one durable worktree, serial PR chain, and Flow progression.
 //! Runs are transient executors of that state.
 
+pub mod flow_history;
+
 use std::path::PathBuf;
 use std::str::FromStr;
 
@@ -652,6 +654,10 @@ impl Task {
 #[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
 #[serde(tag = "kind", rename_all = "snake_case")]
 pub enum TaskEventKind {
+    /// Task-local inspection history; never wakes a parent controller.
+    Flow {
+        event: Box<flow_history::TaskFlowEvent>,
+    },
     WorktreeInitializing {
         pr_id: TaskPrId,
         sequence: u32,
@@ -710,7 +716,8 @@ impl TaskEventKind {
     pub fn is_project_observable(&self) -> bool {
         !matches!(
             self,
-            Self::WorktreeInitializing { .. }
+            Self::Flow { .. }
+                | Self::WorktreeInitializing { .. }
                 | Self::Started
                 | Self::Progress { .. }
                 | Self::Steer { .. }

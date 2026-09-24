@@ -270,6 +270,9 @@ struct ActivityFields {
 
 fn task_activity_fields(event: &TaskEventKind) -> ActivityFields {
     match event {
+        TaskEventKind::Flow { .. } => {
+            activity(ChildActivityKind::StateChanged, "Task flow updated", "")
+        }
         TaskEventKind::WorktreeInitializing { path, branch, .. } => activity(
             ChildActivityKind::StateChanged,
             "Task worktree initializing",

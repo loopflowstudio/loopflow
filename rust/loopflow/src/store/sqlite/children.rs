@@ -2278,6 +2278,16 @@ fn child_columns(source: &ChildRef) -> (&'static str, String) {
     }
 }
 
+pub(super) fn insert_task_flow_event_in(
+    conn: &Connection,
+    task_id: &TaskId,
+    event: crate::work::task::flow_history::TaskFlowEvent,
+) -> StoreResult<()> {
+    let task = conn.query_row(TASK_SELECT, params![task_id.as_str()], map_task_row)?;
+    insert_task_event_in(conn, &task, &TaskEventKind::Flow { event: Box::new(event) })?;
+    Ok(())
+}
+
 pub(super) fn insert_task_event_in(
     conn: &Connection,
     task: &Task,

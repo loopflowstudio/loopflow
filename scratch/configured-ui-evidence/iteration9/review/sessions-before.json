@@ -1,0 +1,53 @@
+[
+  {
+    "cwd": "/Users/jack/src/loopflow.restore-task-watching-with-live",
+    "detail": "codex",
+    "id": "run_32238dfb9f2c4782a9d9fcf7eba1c542",
+    "kind": "interactive",
+    "open_argv": [
+      "/Users/jack/.local/bin/lf",
+      "session",
+      "open",
+      "run_32238dfb9f2c4782a9d9fcf7eba1c542"
+    ],
+    "ready_summary": null,
+    "state": "active",
+    "terminal_ids": [],
+    "title": "Scratch design artifacts and working notes.",
+    "work": null
+  },
+  {
+    "cwd": "/Users/jack/src/loopflow.restore-task-watching-with-live",
+    "detail": "codex",
+    "id": "run_c2a56c3b168d44b4ab2447a36696f5cd",
+    "kind": "interactive",
+    "open_argv": [
+      "/Users/jack/.local/bin/lf",
+      "session",
+      "open",
+      "run_c2a56c3b168d44b4ab2447a36696f5cd"
+    ],
+    "ready_summary": null,
+    "state": "closed",
+    "terminal_ids": [],
+    "title": "Scratch design artifacts and working notes.",
+    "work": null
+  },
+  {
+    "cwd": "/Users/jack/src/loopflow.agent",
+    "detail": "codex",
+    "id": "run_f8b3df345dc94aeab0ae3e2338893def",
+    "kind": "interactive",
+    "open_argv": [
+      "/Users/jack/.local/bin/lf",
+      "session",
+      "open",
+      "run_f8b3df345dc94aeab0ae3e2338893def"
+    ],
+    "ready_summary": null,
+    "state": "active",
+    "terminal_ids": [],
+    "title": "loopflow \u00b7 loopflow.agent",
+    "work": null
+  }
+]

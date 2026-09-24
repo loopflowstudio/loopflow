@@ -26,6 +26,57 @@
 
 ## Before and after
 
+### Iteration 9 — configured viewport retention
+
+Reviewed HEAD `560783243` and the existing working completion correction.
+The effective model above is unchanged before and after this pass. No coherent
+model/API reduction was established; only this report changes. No type, field,
+DTO, command, persistence path or configuration key was removed.
+
+Traced RegistryQuery → PodiumModel → WorkspaceProjection/Navigation →
+SessionsView/Store → retained checkout registry, outer WorktreeLayout and inner
+MultiplexerStore → native surface ownership. Inspected scoped conversation
+launch, shell attachment, completion, hidden Undo and repository return.
+Compared Rust/Swift SessionRecord and RoadmapProject/Task fields, both shared
+Session fixtures and their Swift round-trip assertions, and the CLI
+list/open/complete/FlowStep contracts. Followed terminal attachment from the
+verified provider-client PTY through Rust's projection to the window-local pool.
+Negative searches retain one Podium caller per inventory read, one production
+root registry, and none of the removed navigation/scope types.
+
+The suspected reductions still remove necessary distinctions:
+
+- Planning identity exists before runtime Work. Work attribution, checkout cwd
+  and actual terminal attachment cannot substitute for one another.
+- Outer checkout slots and inner terminal panes have different close behavior.
+  Per-repository `knownPaths` retains hidden and shell-only groups; neither the
+  window-wide registry keys nor Session cwd inventory supplies that membership.
+- Last-good readings, prepared launches and rejected completion errors have
+  independent lifetimes. A completion rejection must coexist with the live
+  terminal and survive polling; combining it with opening failure restores the
+  reproduced defect.
+- Mounted inventory observers and asynchronous action continuations cover
+  external resolution and completion after unmounting. Removing one delivery
+  path without consolidating all retained-workspace cleanup would lose behavior.
+- Selected pane, native focus request and AppKit first responder remain distinct.
+  The configured wheel proof uses Ghostty's existing scroll path and retained
+  view; it introduces no second viewport controller to remove.
+- LOO-284's shared legal actions/display path remain absent. Relocating Swift's
+  existing policy would not reduce its authority or satisfy that contract.
+
+Inspected the iteration 8 focused receipt: two tests/four cases pass. Current
+production/test hashes still match `adaae303…257fc8d` and
+`63042239…286db1`. No executable content changed, so no tests were rerun.
+`git diff --check` passes.
+
+The subsequent configured provider proof and iteration 9 viewport receipt retain
+their stated scope in [configured-ui-proof.md](configured-ui-proof.md) and
+[iteration9-proof.md](iteration9-proof.md). This pass launched no app or provider
+and replayed no retired proof Session. Session-row return, nested checkout
+interaction, other destinations and full Task trials/budgets remain open. The
+latest recorded input boundary is Warp owning AX focus, not missing permission
+or a locked desktop. No publication or Task completion is established.
+
 ### Iteration 8 — completion errors and retained terminals
 
 Reviewed HEAD `560783243` plus the working completion correction. Before and

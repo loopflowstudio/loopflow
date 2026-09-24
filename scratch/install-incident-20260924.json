@@ -1,0 +1,69 @@
+{
+  "time": "2026-09-24T19:42:43.459293+00:00",
+  "published_tag": "v0.12.19",
+  "published_revision": "bca3f35ac7d4ad24ebed2a30481d0b7ba3a86bde",
+  "active_revision": "561eadccefa6bbf1d67cd832cbe7b5df728d6c8e",
+  "archive_sha256": "cae0611d57c4fa07d0f0dcaf24da4dcbbabe70bb61f625390d082d2dfdad2ae2",
+  "cli_sha256": "fc4146210854db9a32187d8c39b6f38669979d5c1ff30f17ab24ece0f3e6cc6a",
+  "matches_retained_fallback": true,
+  "runs": [
+    {
+      "environment": "inherited",
+      "args": [
+        "install",
+        "preflight",
+        "--json"
+      ],
+      "exit_code": 1,
+      "stdout": "",
+      "stderr": "Error: inactive retained install artifact /private/var/folders/m6/r3tllnrs1yq7yfbwm680tss40000gn/T/loo292-candidate-opb7x85w/lf cannot start as Cli\n"
+    },
+    {
+      "environment": "inherited",
+      "args": [
+        "install",
+        "promote",
+        "--preview",
+        "--cli-target",
+        "/Users/jack/.local/bin/lf",
+        "--daemon-source",
+        "/var/folders/m6/r3tllnrs1yq7yfbwm680tss40000gn/T/loo292-candidate-opb7x85w/lfd",
+        "--daemon-target",
+        "/Users/jack/.local/bin/lfd"
+      ],
+      "exit_code": 1,
+      "stdout": "",
+      "stderr": "Error: binary /private/var/folders/m6/r3tllnrs1yq7yfbwm680tss40000gn/T/loo292-candidate-opb7x85w/lf did not return a promotion preflight: Error: inactive retained install artifact /private/var/folders/m6/r3tllnrs1yq7yfbwm680tss40000gn/T/loo292-candidate-opb7x85w/lf cannot start as Cli\n\nCaused by:\n    EOF while parsing a value at line 1 column 0\n"
+    },
+    {
+      "environment": "scrubbed_lf_context",
+      "args": [
+        "install",
+        "preflight",
+        "--json"
+      ],
+      "exit_code": 1,
+      "stdout": "",
+      "stderr": "Error: inactive retained install artifact /private/var/folders/m6/r3tllnrs1yq7yfbwm680tss40000gn/T/loo292-candidate-opb7x85w/lf cannot start as Cli\n"
+    },
+    {
+      "environment": "scrubbed_lf_context",
+      "args": [
+        "install",
+        "promote",
+        "--preview",
+        "--cli-target",
+        "/Users/jack/.local/bin/lf",
+        "--daemon-source",
+        "/var/folders/m6/r3tllnrs1yq7yfbwm680tss40000gn/T/loo292-candidate-opb7x85w/lfd",
+        "--daemon-target",
+        "/Users/jack/.local/bin/lfd"
+      ],
+      "exit_code": 1,
+      "stdout": "",
+      "stderr": "Error: binary /private/var/folders/m6/r3tllnrs1yq7yfbwm680tss40000gn/T/loo292-candidate-opb7x85w/lf did not return a promotion preflight: Error: inactive retained install artifact /private/var/folders/m6/r3tllnrs1yq7yfbwm680tss40000gn/T/loo292-candidate-opb7x85w/lf cannot start as Cli\n\nCaused by:\n    EOF while parsing a value at line 1 column 0\n"
+    }
+  ],
+  "active_receipt_unchanged": true,
+  "switch_absent": true
+}

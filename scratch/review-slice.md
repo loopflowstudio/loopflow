@@ -6,7 +6,9 @@ Advances the accepted design; **not yet approved for publication**. The compact
 navigator and shared identity join have focused behavioral evidence. Mounted
 native navigation now preserves splits, draft, focus and terminal viewport in
 the integration fixture. Navigator scroll also has a native regression covering
-repository return. Configured provider interaction/resolution and before/after
+repository return. Local completion now also proves that Undo cannot restore the
+completed pane while the selected Task and companion remain usable. Configured
+provider interaction/resolution and before/after
 timing comparisons remain unproven. No PR
 publication, landing, Task completion, PM mutation or external-product trial was
 performed by this review.
@@ -16,6 +18,71 @@ LOO-291 directive. Bounded conversations, Task-directive editing, LOO-284 shared
 actions/display path, lf-new's nested workspaces, external trials and measured
 budgets remain explicitly outstanding. No new kickoff or alternative design is
 needed.
+
+## Iteration 4 review — 2026-09-23
+
+Reviewed HEAD `442eea4ef` plus the bounded correction below. Recovered the complete
+Task patch with `lf task diff LOO-291 --json`: `truncated: false`, 5,455 lines.
+Receipts: `/tmp/loo291-review-iteration4.json` and `.patch`. Compared every file
+section with iteration 3: 28 are byte-identical; five changed sections contain
+the completion test and design, proof, compression and preceding review notes.
+Read the delta and traced the current reading, projection, opening, completion,
+pane and surface owners. The earlier claim matrix remains applicable with these
+updated observations:
+
+| Claim | Planned behavior | Implemented behavior | Proof | Result |
+|---|---|---|---|---|
+| Completion reconciliation | Remove resolved Session without completing Task or ending companion | Reading, pane and surface disappear; selected incomplete Task and original companion remain | Extended `workspaceRetainsNativeSplit`; mocked CLI response, real native surfaces/children | pass, native fixture |
+| Completed pane stays removed | Undo restores hidden views, not completed Sessions | Complete now uses existing Session reconciliation rather than undoable pane close | Regression failed before correction and passed after; same companion remains focused and responds | pass, native fixture |
+| Navigation continuity | A/D, Work inspection and repository return preserve useful context | Existing surfaces, split, draft and terminal viewport retained before completion | Same focused test; prior separate navigator-scroll receipt | pass, native fixture |
+| Current shared evidence | Read real planning and human boundaries with exact identity | Product, two Projects, nine incomplete Tasks and three Sessions; none associated with a planned Task | Fresh read-only CLI receipts below | pass, CLI; configured Task-to-Session population gap |
+| Configured interaction | Operate real controls and continue/resolve a provider | Latest normal LaunchServices probe could not reach workspace controls through AX | Implement's `/tmp/loo291-configured-probe.log`; no new external interaction in this review | gap |
+| Paint/readiness comparison | Measure before/after on the same population | No measured user-path comparison | Fixture duration and capture delay are not latency measurements | gap |
+| Shared authority | One inventory reader and retained workspace owner | Removed paths stay absent; bounded correction reuses MultiplexerStore | Negative searches, Rust/Swift contracts and main/lf-new SessionRecord hashes | pass, source; LOO-284 integration remains |
+
+The prior compression report identified different close/reconcile semantics but
+did not prove their consequence. Extending the mounted completion test with Undo
+reproduced a concrete failure: the completed Session's pane reappeared, the split
+returned, and focus left the companion. Complete called `close`, which stored an
+undo snapshot; subsequent reconciliation saw no stale visible pane and returned
+without clearing that snapshot. The correction calls the existing
+`reconcileSessions` with the remaining Session identities. It removes resolved
+panes without creating an undo entry and retains the existing surface release.
+Close view and its Undo behavior are unchanged. No new owner, API or lifecycle
+policy was introduced. Completion after unmounting remains a separate coverage
+gap; this correction does not claim to consolidate every cleanup path.
+
+Focused command:
+
+```sh
+swift test --package-path swift -Xswiftc -gnone --jobs 4 \
+  --filter WorkspaceNavigationProofTests/workspaceRetainsNativeSplit
+```
+
+Before correction: exit 1, four assertions failed in
+`/tmp/loo291-review-completion-undo-before.log`. After correction: one test passed,
+exit 0, `/tmp/loo291-review-completion-undo-after.log`. This supersedes the prior
+mounted-completion receipt for current source. No Swift edits followed; no broad
+gate ran. Existing navigator/model/window-isolation receipts retain their stated
+proof levels. The completion response is mocked; backend resolution, provider
+continuation and blocked-caller release remain unproven.
+
+Fresh `lf roadmap --json` generated at `2026-09-24T00:53:22.142909Z` (23 September
+locally); `lf session list --json` exposes two active unbound interactive Sessions
+and one ready Task FlowStep whose Work is absent from the plan. Receipts:
+`/tmp/loo291-review-iteration4-{roadmap,sessions}.json`. No live Session was opened,
+moved or resolved. The existing AX probe was inspected, not repeated: changing
+the pane completion method cannot establish accessibility or configured proof.
+
+Negative searches confirm one Podium inventory caller per shared read, one root
+workspace registry, and no removed scope/navigation types. Current main, lf-new
+and this checkout still share the SessionRecord hash recorded below, with no
+shared legal-action/display-path fields. No schema, planning writer, launch path
+or fallback inventory changed. The slice advances the accepted design; it does
+not complete the broader Task. Next proof remains configured navigation and
+provider resolution plus same-population timing comparisons. Publication remains
+withheld under review-slice's requirement, "When all applicable `Done when`
+claims hold"; those claims still have gaps.
 
 ## Iteration 3 review — 2026-09-23
 

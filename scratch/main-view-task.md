@@ -252,3 +252,11 @@ release are not established. Normal LaunchServices launch of the current app
 also failed to expose workspace controls through AX. No production correction
 was needed; configured interaction and timing proof remain open. Exact command,
 receipt and boundary are in `navigation-proof.md`.
+
+Iteration 4 review correction, 2026-09-23: extending the native completion proof
+with Undo exposed the completed pane returning and taking companion focus.
+Complete now uses the existing non-undoable Session reconciliation path instead
+of Close view. The focused test passes after reproducing the failure; Task,
+companion, draft and navigation assertions remain intact. `review-slice.md`
+records the before/after receipts. Configured proof and full Task scope remain
+unchanged; no publication or completion is claimed.

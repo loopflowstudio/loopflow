@@ -915,6 +915,15 @@ and configured acceptance remain open. See [review-telemetry.md](review-telemetr
   remain open. No installed cutover or qualifying automatic pair is claimed.
   Details: [release-interrupted-telemetry.md](release-interrupted-telemetry.md).
 
+Interrupted telemetry review remains **iterate**. The built-CLI demonstration
+passed its three firing boundaries again (18.22s): live-runner deferral,
+surviving-child exclusion after controller death, then recovery after child exit.
+Original receipt, frozen coverage, current verification subject and caller bytes
+remain preserved. No additional bounded defect was established; executable code
+is unchanged. Bounded runtime, actual telemetry continuity, prior segments,
+dated repair ownership, closed obligations and configured acceptance remain open.
+See [review-interrupted-telemetry.md](review-interrupted-telemetry.md).
+
 
 ## Measure
 

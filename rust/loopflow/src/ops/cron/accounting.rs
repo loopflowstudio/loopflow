@@ -227,10 +227,13 @@ pub enum ScheduledReleaseOutcome {
         cause: String,
     },
     Published {
-        evidence: PublicationEvidence,
+        tag: String,
+        commit: String,
+        workflow_run_id: u64,
     },
     NoChange {
-        evidence: NoChangeEvidence,
+        previous_tag: String,
+        origin_commit: String,
     },
 }
 
@@ -241,21 +244,6 @@ pub struct VerificationEvidence {
     pub passed: bool,
     pub evidence_path: PathBuf,
     pub sha256: String,
-}
-
-#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
-pub struct PublicationEvidence {
-    pub tag: String,
-    pub commit: String,
-    pub workflow_run_id: u64,
-    pub verification: Vec<VerificationEvidence>,
-}
-
-#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
-pub struct NoChangeEvidence {
-    pub previous_tag: String,
-    pub origin_commit: String,
-    pub verification: Vec<VerificationEvidence>,
 }
 
 impl ScheduledReleaseOutcome {
@@ -855,11 +843,12 @@ fn rejected_settlement(
     home: &Path,
     receipt_id: &str,
     outcome: &ScheduledReleaseOutcome,
+    verification: &[VerificationEvidence],
     now: i64,
     cause: &str,
 ) -> OpsResult<()> {
     let diagnostic = serde_json::json!({"receipt_id": receipt_id, "proposed_outcome": outcome,
-        "observed_at": now, "cause": cause});
+        "verification": verification, "observed_at": now, "cause": cause});
     let dir = home.join("cron/rejected-settlements");
     fs::create_dir_all(&dir)?;
     let path = dir.join(format!("{}.json", fingerprint(&diagnostic)?));
@@ -878,6 +867,7 @@ pub(crate) fn settle(
     home: &Path,
     receipt_id: &str,
     outcome: ScheduledReleaseOutcome,
+    verification: &[VerificationEvidence],
     now: i64,
 ) -> OpsResult<()> {
     let _lock = lock(home)?;
@@ -894,6 +884,7 @@ pub(crate) fn settle(
                 home,
                 receipt_id,
                 &outcome,
+                verification,
                 now,
                 "release opportunity was collapsed into a newer execution",
             );
@@ -907,24 +898,27 @@ pub(crate) fn settle(
                 home,
                 receipt_id,
                 &outcome,
+                verification,
                 now,
                 "release attempt was superseded; retaining the current outcome",
             );
         }
         if attempt.outcome.settled() {
-            return if attempt.outcome == outcome {
+            return if attempt.outcome == outcome && attempt.verification == verification {
                 Ok(())
             } else {
                 rejected_settlement(
                     home,
                     receipt_id,
                     &outcome,
+                    verification,
                     now,
                     "conflicting release settlement; retaining accepted evidence",
                 )
             };
         }
         attempt.outcome = outcome;
+        attempt.verification = verification.to_vec();
         attempt.finished_at = Some(now);
         save(home, &record)?;
         return Ok(());
@@ -1015,31 +1009,6 @@ pub(crate) fn record_intervention(
         }
     }
     Ok(())
-}
-
-pub(crate) fn record_verification(
-    home: &Path,
-    receipt_id: &str,
-    verification: &[VerificationEvidence],
-) -> OpsResult<()> {
-    let _lock = lock(home)?;
-    for mut record in read(home)? {
-        let attempt = record
-            .opportunities
-            .iter_mut()
-            .filter(|o| o.coalesced_into.is_none())
-            .filter_map(|o| o.attempts.last_mut())
-            .find(|a| a.receipt_id.as_str() == receipt_id);
-        if let Some(attempt) = attempt {
-            if attempt.outcome.settled() && attempt.verification != verification {
-                return Err(failure("cannot replace settled verification"));
-            }
-            attempt.verification = verification.to_vec();
-            save(home, &record)?;
-            return Ok(());
-        }
-    }
-    Err(failure("verification belongs to a superseded execution"))
 }
 
 pub(crate) fn select(home: &Path, receipt_id: &str, selection: ReleaseSelection) -> OpsResult<()> {
@@ -1217,6 +1186,7 @@ mod tests {
             ScheduledReleaseOutcome::Failed {
                 cause: "verification".into(),
             },
+            &[],
             first.started_at + 1,
         )
         .unwrap();
@@ -1241,6 +1211,7 @@ mod tests {
             &spec.host.lf_home,
             first.id.as_str(),
             ScheduledReleaseOutcome::Running,
+            &[],
             second.started_at
         )
         .is_err());
@@ -1282,28 +1253,73 @@ mod tests {
         let mut wake = receipt(&spec, 36000);
         begin(&spec.host.lf_home, &id, &wake).unwrap();
         let outcome = ScheduledReleaseOutcome::NoChange {
-            evidence: super::NoChangeEvidence {
-                previous_tag: "v1.2.3".into(),
-                origin_commit: "abc".into(),
-                verification: vec![],
-            },
+            previous_tag: "v1.2.3".into(),
+            origin_commit: "abc".into(),
         };
-        settle(&spec.host.lf_home, wake.id.as_str(), outcome.clone(), 36001).unwrap();
-        settle(&spec.host.lf_home, wake.id.as_str(), outcome.clone(), 36002).unwrap();
+        let verification = vec![super::VerificationEvidence {
+            name: "repository-verification".into(),
+            subject: "abc".into(),
+            passed: true,
+            evidence_path: "checks/abc.json".into(),
+            sha256: "retained-check-digest".into(),
+        }];
+        settle(
+            &spec.host.lf_home,
+            wake.id.as_str(),
+            outcome.clone(),
+            &verification,
+            36001,
+        )
+        .unwrap();
+        settle(
+            &spec.host.lf_home,
+            wake.id.as_str(),
+            outcome.clone(),
+            &verification,
+            36002,
+        )
+        .unwrap();
         assert!(settle(
             &spec.host.lf_home,
             wake.id.as_str(),
             ScheduledReleaseOutcome::Failed {
                 cause: "late result".into()
             },
+            &verification,
             36003
         )
         .is_err());
+        let accepted = read(&spec.host.lf_home).unwrap();
+        let mut conflicting = verification.clone();
+        conflicting[0].passed = false;
+        assert!(settle(
+            &spec.host.lf_home,
+            wake.id.as_str(),
+            outcome.clone(),
+            &conflicting,
+            36003,
+        )
+        .is_err());
+        assert_eq!(read(&spec.host.lf_home).unwrap(), accepted);
+        let diagnostics: Vec<serde_json::Value> =
+            std::fs::read_dir(spec.host.lf_home.join("cron/rejected-settlements"))
+                .unwrap()
+                .map(|entry| {
+                    serde_json::from_slice(&std::fs::read(entry.unwrap().path()).unwrap()).unwrap()
+                })
+                .collect();
+        assert!(diagnostics
+            .iter()
+            .any(|d| d["verification"] == serde_json::to_value(&conflicting).unwrap()));
         wake.finished_at = Some(36004);
         wake.outcome = CronOutcome::Failed;
         finish_process(&spec.host.lf_home, &wake).unwrap();
         let record = read(&spec.host.lf_home).unwrap().remove(0);
         assert_eq!(record.opportunities[0].attempts[0].outcome, outcome);
+        assert_eq!(
+            record.opportunities[0].attempts[0].verification,
+            verification
+        );
         assert_eq!(record.opportunities[0].attempts[0].finished_at, Some(36001));
         let repeat = receipt(&spec, 36005);
         assert_eq!(begin(&spec.host.lf_home, &id, &repeat).unwrap(), None);
@@ -1322,6 +1338,7 @@ mod tests {
             ScheduledReleaseOutcome::Failed {
                 cause: "missing check".into(),
             },
+            &[],
             36001,
         )
         .unwrap();

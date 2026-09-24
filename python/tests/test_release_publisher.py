@@ -230,7 +230,7 @@ def test_public_proof_recovers_after_publisher_dies_before_final_receipt(
     monkeypatch.delenv("LF_RELEASE_LOCK_FD", raising=False)
     monkeypatch.setattr(publish_release.platform, "system", lambda: "Darwin")
     monkeypatch.setattr(publish_release.platform, "machine", lambda: "arm64")
-    candidate = publish_release.CandidateReceipt(
+    candidate = publish_release.ArtifactReceipt(
         "v1.2.3", "exact-commit", "42", hashes, publish_release.CANDIDATE_STAGES
     )
     publish_release._write_receipt(candidate, ".candidate")
@@ -277,7 +277,7 @@ def test_public_proof_recovers_after_publisher_dies_before_final_receipt(
 
     # Historic preparation without the required host gate cannot gain a pass
     # simply because assets are already public.
-    candidate = publish_release.CandidateReceipt(
+    candidate = publish_release.ArtifactReceipt(
         "v1.2.3",
         "exact-commit",
         "42",

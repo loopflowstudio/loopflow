@@ -58,7 +58,7 @@ class ReleaseArtifacts:
 
 
 @dataclass(frozen=True)
-class PublishReceipt:
+class ArtifactReceipt:
     tag: str
     source_commit: str
     workflow_run_id: str | None
@@ -67,21 +67,12 @@ class PublishReceipt:
 
 
 @dataclass(frozen=True)
-class PublicReleaseReceipt(PublishReceipt):
+class PublicReleaseReceipt(ArtifactReceipt):
     verified_at: int
     asset_urls: dict[str, str]
     platform: str
     smoke_versions: dict[str, str]
     versioned_dmg_url: str
-
-
-@dataclass(frozen=True)
-class CandidateReceipt:
-    tag: str
-    source_commit: str
-    workflow_run_id: str | None
-    artifact_sha256: dict[str, str]
-    completed_stages: tuple[str, ...]
 
 
 def _run(
@@ -264,7 +255,7 @@ def _upload_dmg(dmg: Path, key: str, cache_control: str) -> None:
     )
 
 
-def _write_receipt(receipt: PublishReceipt | CandidateReceipt, suffix: str = "") -> None:
+def _write_receipt(receipt: ArtifactReceipt, suffix: str = "") -> None:
     main_repo = Path(os.environ.get("LF_RELEASE_MAIN_REPO", ROOT))
     log_dir = main_repo / ".lf" / "logs"
     log_dir.mkdir(parents=True, exist_ok=True)
@@ -281,10 +272,10 @@ def _candidate_receipt_path(artifact_dir: Path) -> Path:
     return artifact_dir / "candidate.json"
 
 
-def _read_candidate_receipt(artifact_dir: Path) -> CandidateReceipt:
+def _read_candidate_receipt(artifact_dir: Path) -> ArtifactReceipt:
     try:
         value = json.loads(_candidate_receipt_path(artifact_dir).read_text())
-        return CandidateReceipt(
+        return ArtifactReceipt(
             tag=value["tag"],
             source_commit=value["source_commit"],
             workflow_run_id=value["workflow_run_id"],
@@ -296,7 +287,7 @@ def _read_candidate_receipt(artifact_dir: Path) -> CandidateReceipt:
 
 
 def _verify_candidate_receipt(
-    receipt: CandidateReceipt,
+    receipt: ArtifactReceipt,
     artifact_dir: Path,
     tag: str,
     source_commit: str,
@@ -357,7 +348,7 @@ def _verify_ui_host(tag: str, source_commit: str) -> None:
     result.check_returncode()
 
 
-def prepare_release(tag: str, artifact_dir: Path, output_dir: Path) -> CandidateReceipt:
+def prepare_release(tag: str, artifact_dir: Path, output_dir: Path) -> ArtifactReceipt:
     check_release_host()
     source_commit = _run(["git", "rev-parse", "HEAD"], capture=True).stdout.strip()
 
@@ -418,7 +409,7 @@ def prepare_release(tag: str, artifact_dir: Path, output_dir: Path) -> Candidate
         checksums = prepared / "SHA256SUMS"
         _write_checksums(paths, checksums)
         paths = (*paths, checksums)
-        receipt = CandidateReceipt(
+        receipt = ArtifactReceipt(
             tag=tag,
             source_commit=source_commit,
             workflow_run_id=os.environ.get("LF_RELEASE_WORKFLOW_RUN_ID"),
@@ -435,7 +426,7 @@ def prepare_release(tag: str, artifact_dir: Path, output_dir: Path) -> Candidate
     return receipt
 
 
-def publish_release(tag: str, artifact_dir: Path) -> PublishReceipt:
+def publish_release(tag: str, artifact_dir: Path) -> ArtifactReceipt:
     check_release_host()
     if tag not in _run(["git", "tag", "--points-at", "HEAD"], capture=True).stdout.splitlines():
         raise RuntimeError(f"publisher checkout is not tagged {tag}")
@@ -477,7 +468,7 @@ def publish_release(tag: str, artifact_dir: Path) -> PublishReceipt:
     stages.append("github_release_published")
 
     paths = (*archives, dmg, installer, checksums)
-    receipt = PublishReceipt(
+    receipt = ArtifactReceipt(
         tag=tag,
         source_commit=source_commit,
         workflow_run_id=os.environ.get("LF_RELEASE_WORKFLOW_RUN_ID"),
@@ -520,7 +511,7 @@ def verify_release(tag: str) -> PublicReleaseReceipt:
         retained = logs / f"release.{tag.replace('/', '-')}.candidate.json"
     try:
         value = json.loads(retained.read_text())
-        proof = PublishReceipt(**value)
+        proof = ArtifactReceipt(**value)
     except (OSError, TypeError, json.JSONDecodeError) as error:
         raise RuntimeError(
             f"missing retained exact artifact proof for {tag}: {retained}"

@@ -532,7 +532,8 @@ Slices 1–4 have a first implementation in this checkout: retained daily
 obligations, atomic opportunity/coalescing updates, explicit cron execution
 context, mechanical release flow, shared mutation locking, exact candidate
 recovery, verification and public read-back, failure disposition, and history.
-Focused behavioral validation is in progress. The complete contract above still
+Focused implementation validation passed; model reduction and its focused proof
+are recorded in [compression.md](compression.md). The complete contract above still
 governs review; this is not a configured publication or a completed Task.
 
 Slice 5 remains open. The observed scorecard schema failure still blocks current
@@ -608,6 +609,12 @@ repair handoff has occurred. The pinned lifecycle retains landing authority.
   opportunity coverage. `flow show release-run` resolved to the mechanical op.
   Stale ambient Wave/journal-lock warnings are retained in `research.md`; no
   runtime repair or configured acceptance is inferred from these read probes.
+
+- Compression: verification now belongs solely to the attempt and is persisted
+  atomically with its outcome. Removed the duplicate success-proof payloads and
+  separate verification writer across producers, history, and the JSON fixture.
+  Publisher preparation/publication use one artifact receipt type; stage evidence
+  and public observations remain distinct. See [compression.md](compression.md).
 
 ## Measure
 

@@ -238,8 +238,8 @@ fn summarize(
             if counted_owners.insert(&owner.id) {
                 if let Some(attempt) = owner.attempts.last() {
                     match &attempt.outcome {
-                        ScheduledReleaseOutcome::Published { evidence } => {
-                            if published.insert((&evidence.tag, &evidence.commit)) {
+                        ScheduledReleaseOutcome::Published { tag, commit, .. } => {
+                            if published.insert((tag, commit)) {
                                 summary.published += 1;
                             }
                         }
@@ -274,7 +274,7 @@ fn summarize(
             if let (Some(a), Some(b)) = (qualifying(left), qualifying(right)) {
                 let one_publication = matches!(a, ScheduledReleaseOutcome::Published { .. })
                     || matches!(b, ScheduledReleaseOutcome::Published { .. });
-                let duplicate = matches!((a, b), (ScheduledReleaseOutcome::Published { evidence: a }, ScheduledReleaseOutcome::Published { evidence: b }) if a.tag == b.tag && a.commit == b.commit);
+                let duplicate = matches!((a, b), (ScheduledReleaseOutcome::Published { tag: a_tag, commit: a_commit, .. }, ScheduledReleaseOutcome::Published { tag: b_tag, commit: b_commit, .. }) if a_tag == b_tag && a_commit == b_commit);
                 if one_publication && !duplicate {
                     summary
                         .qualifying_pairs
@@ -322,13 +322,8 @@ fn qualifying(opportunity: &ReleaseOpportunity) -> Option<&ScheduledReleaseOutco
         return None;
     }
     match &attempt.outcome {
-        ScheduledReleaseOutcome::Published { evidence }
-            if complete_verification(&evidence.verification) =>
-        {
-            Some(&attempt.outcome)
-        }
-        ScheduledReleaseOutcome::NoChange { evidence }
-            if complete_verification(&evidence.verification) =>
+        ScheduledReleaseOutcome::Published { .. } | ScheduledReleaseOutcome::NoChange { .. }
+            if complete_verification(&attempt.verification) =>
         {
             Some(&attempt.outcome)
         }
@@ -399,21 +394,14 @@ mod tests {
 
     #[test]
     fn collapsed_manual_unknown_or_unverified_rows_cannot_manufacture_a_pair() {
-        for alteration in 0..5 {
+        for alteration in 0..7 {
             let mut report = fixture();
             let opportunity = &mut report.obligations[0].opportunities[1];
             match alteration {
                 0 => opportunity.coalesced_into = Some("opportunity_0".into()),
                 1 => opportunity.attempts[0].source = CronSource::Triggered,
                 2 => opportunity.historical_timezone_unknown = true,
-                3 => {
-                    if let crate::ops::cron::accounting::ScheduledReleaseOutcome::NoChange {
-                        evidence,
-                    } = &mut opportunity.attempts[0].outcome
-                    {
-                        evidence.verification.clear();
-                    }
-                }
+                3 => opportunity.attempts[0].verification.clear(),
                 4 => opportunity.interventions.push(
                     crate::ops::cron::accounting::ReleaseIntervention {
                         recorded_at: 120000,
@@ -421,6 +409,20 @@ mod tests {
                         operation: "manual publication repair".into(),
                     },
                 ),
+                5 => opportunity.attempts[0].verification[0].passed = false,
+                6 => {
+                    // A previous attempt's checks cannot qualify its unverified retry.
+                    let mut retry = opportunity.attempts[0].clone();
+                    retry.receipt_id = crate::durable::CronReceiptId::new();
+                    retry.started_at += 60;
+                    retry.finished_at = retry.finished_at.map(|finished| finished + 60);
+                    retry.verification.clear();
+                    opportunity.attempts[0].outcome =
+                        crate::ops::cron::accounting::ScheduledReleaseOutcome::Failed {
+                            cause: "failed after checks completed".into(),
+                        };
+                    opportunity.attempts.push(retry);
+                }
                 _ => unreachable!(),
             }
             let summary = summarize(

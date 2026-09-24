@@ -69,41 +69,9 @@
               ],
               "outcome": {
                 "status": "published",
-                "evidence": {
-                  "tag": "v1.2.3",
-                  "commit": "abc",
-                  "workflow_run_id": 42,
-                  "verification": [
-                    {
-                      "name": "scheduled-telemetry",
-                      "subject": "abc",
-                      "passed": true,
-                      "evidence_path": "/proof/scheduled-telemetry.json",
-                      "sha256": "aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa"
-                    },
-                    {
-                      "name": "repository-verification",
-                      "subject": "abc",
-                      "passed": true,
-                      "evidence_path": "/proof/repository-verification.json",
-                      "sha256": "aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa"
-                    },
-                    {
-                      "name": "public-release",
-                      "subject": "abc",
-                      "passed": true,
-                      "evidence_path": "/proof/public-release.json",
-                      "sha256": "aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa"
-                    },
-                    {
-                      "name": "hosted-workflow",
-                      "subject": "abc",
-                      "passed": true,
-                      "evidence_path": "/proof/hosted-workflow.json",
-                      "sha256": "aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa"
-                    }
-                  ]
-                }
+                "tag": "v1.2.3",
+                "commit": "abc",
+                "workflow_run_id": 42
               },
               "target": "default"
             }
@@ -161,40 +129,8 @@
               ],
               "outcome": {
                 "status": "no_change",
-                "evidence": {
-                  "previous_tag": "v1.2.3",
-                  "origin_commit": "abc",
-                  "verification": [
-                    {
-                      "name": "scheduled-telemetry",
-                      "subject": "abc",
-                      "passed": true,
-                      "evidence_path": "/proof/scheduled-telemetry.json",
-                      "sha256": "aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa"
-                    },
-                    {
-                      "name": "repository-verification",
-                      "subject": "abc",
-                      "passed": true,
-                      "evidence_path": "/proof/repository-verification.json",
-                      "sha256": "aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa"
-                    },
-                    {
-                      "name": "public-release",
-                      "subject": "abc",
-                      "passed": true,
-                      "evidence_path": "/proof/public-release.json",
-                      "sha256": "aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa"
-                    },
-                    {
-                      "name": "hosted-workflow",
-                      "subject": "abc",
-                      "passed": true,
-                      "evidence_path": "/proof/hosted-workflow.json",
-                      "sha256": "aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa"
-                    }
-                  ]
-                }
+                "previous_tag": "v1.2.3",
+                "origin_commit": "abc"
               },
               "target": "default"
             }

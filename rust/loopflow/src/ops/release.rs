@@ -7,9 +7,7 @@ use std::process::{Command, Output};
 use std::thread;
 use std::time::{Duration, Instant};
 
-use crate::ops::cron::accounting::{
-    self, NoChangeEvidence, PublicationEvidence, ScheduledReleaseOutcome, VerificationEvidence,
-};
+use crate::ops::cron::accounting::{self, ScheduledReleaseOutcome, VerificationEvidence};
 use crate::ops::release_lock::ReleaseLock;
 use regex::Regex;
 use serde::{Deserialize, Serialize};
@@ -732,8 +730,13 @@ pub(crate) fn release_run_with_cron(
                 progress,
                 &lock,
             )?;
-            accounting::record_verification(&home, id, &verification)?;
-            accounting::settle(&home, id, outcome, chrono::Utc::now().timestamp())?;
+            accounting::settle(
+                &home,
+                id,
+                outcome,
+                &verification,
+                chrono::Utc::now().timestamp(),
+            )?;
         }
         Ok(result)
     })();
@@ -747,7 +750,6 @@ pub(crate) fn release_run_with_cron(
         )?;
         failure.passed = false;
         verification.push(failure);
-        accounting::record_verification(&home, id, &verification)?;
         let outcome = match error {
             OpsError::ReleaseDeferred {
                 reason,
@@ -760,7 +762,13 @@ pub(crate) fn release_run_with_cron(
                 cause: error.to_string(),
             },
         };
-        accounting::settle(&home, id, outcome, chrono::Utc::now().timestamp())?;
+        accounting::settle(
+            &home,
+            id,
+            outcome,
+            &verification,
+            chrono::Utc::now().timestamp(),
+        )?;
     }
     result
 }
@@ -1397,20 +1405,14 @@ fn verify_release_outcome(
                 ));
             }
             Ok(ScheduledReleaseOutcome::NoChange {
-                evidence: NoChangeEvidence {
-                    previous_tag: tag,
-                    origin_commit: origin_commit.clone(),
-                    verification: verification.clone(),
-                },
+                previous_tag: tag,
+                origin_commit: origin_commit.clone(),
             })
         }
         _ => Ok(ScheduledReleaseOutcome::Published {
-            evidence: PublicationEvidence {
-                tag,
-                commit,
-                workflow_run_id: workflow_id,
-                verification: verification.clone(),
-            },
+            tag,
+            commit,
+            workflow_run_id: workflow_id,
         }),
     }
 }

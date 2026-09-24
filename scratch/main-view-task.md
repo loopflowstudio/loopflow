@@ -130,7 +130,7 @@ Replace the root switch and parallel navigation with the unified tree, including
 Additive series. The keystone is an indivisible navigation replacement shipping as one PR; its internal slices are:
 
 1. Join shared Work/Session readings into the compact unified list and A/D workspace presentations; keep autonomous and upcoming Tasks visible, integrate existing detail/Session access, preserve live terminals, and prove the behavior. Reconcile current main with `lf-new` and LOO-284 before selecting shared API changes; do not build parallel ownership or lifecycle logic.
-2. **This slice:** integrate the committed lf-new scope-aware conversation and nested worktree workspace implementation while retaining newer navigation, completion, native-title and appearance fixes. Prove the reconciled behavior. Optional bounded conversation lifecycle remains follow-up design through shared APIs; preserve every existing human boundary.
+2. **This slice:** finish configured Session-row return and nested worktree proof for the committed lf-new scope-aware entry and workspace. Integrated completion/rejection, configured Task conversation, and configured terminal viewport retention have receipts; retain navigation, native-title and appearance fixes. Optional bounded conversation lifecycle remains follow-up design through shared APIs; preserve every existing human boundary.
 3. Remove superseded navigation, integrate remaining inspectors, and prove configured behavior. No runtime/cardinality or terminal-ownership shortcuts count as completion.
 
 Follow-up: Task-directive editing through the existing PM API, preserving unsaved text on rejected writes and displaying authoritative refreshed text after success. This remains part of LOO-291's requested outcome; shipping the keystone alone does not complete that Task. External-work trials and long-lived-registry performance measurement remain its full proof obligations. Do not create follow-up Tasks during design.
@@ -352,3 +352,37 @@ lifecycle, directive editing, human-selected external-product trials, and
 published paint/readiness budgets with the required long-lived-registry trials.
 The prior configured provider receipts remain attributed to their preceding
 binary. No Task completion or publication follows from this integration.
+
+Review correction after integration, 2026-09-23: shell-attached Sessions now expose
+the existing Complete action without changing terminal identity or closing the
+shell. The regression reproduced missing controls, then passed success/rejection,
+multiple attached records and continuing shell input; direct Session completion
+also still passes. A fresh configured shell trial proves real Task details,
+visible launch scope and exact input through navigation on the integrated build.
+It does not prove New conversation startup or provider completion. The aggregate
+verification attempt stopped at main's active build-cache resource limit. See the
+current review in `review-slice.md`; publication and full Task completion remain
+unapproved. No installed app or user-owned Session was changed.
+
+Iteration 8 — rejected completion: inventory reconciliation treated a rejected
+Complete as a failed open and replaced it with live state, clearing the error.
+SessionItem now keeps the completion error independently of its opening state;
+retry clears it and successful completion removes the item. No wire type or
+lifecycle policy changes. The existing native shell proof now reconciles the
+inventory after rejection and requires both the visible error and live terminal;
+it failed before and passes after. Direct completion and repository return
+also pass (two tests, four cases). Configured New conversation proof is recorded
+separately in `iteration8-proof.md`; the full target and external trials remain.
+
+Iteration 9 — configured terminal viewport: the signed integration proof app
+rendered rows 168–200 and the bottom marker, then a positioned wheel event
+scrolled to rows 1–33. The same viewport survived Show work list → Work details
+→ All work → Return to terminals → Hide work list. Inspected screenshots and
+executed probe are in `configured-ui-evidence/iteration9/`; this closes that
+bounded configured scroll gap without a source change. Session-row/nested-layout
+attempts stopped before provider launch. The last runner reported AX trusted,
+but AX's focused application was Warp PID 33576 rather than owned app PID 72044;
+cached activation signals disagreed. All nine owned app processes exited, no
+Session was created or changed, and LOO-291 remains incomplete. See
+`iteration9-proof.md` for failed attempts and remaining scope. No timing budget,
+external-work trial, gate, publication or Task completion is established.

@@ -91,6 +91,7 @@ struct SessionItem: Identifiable, Equatable {
 
     var record: SessionRecord
     var state: State
+    var completionError: String?
 
     var id: String { record.id }
 
@@ -269,7 +270,8 @@ final class SessionsStore: ObservableObject {
     }
 
     func complete(_ id: String) async -> Bool {
-        guard _index(id) != nil else { return false }
+        guard let index = _index(id) else { return false }
+        sessions[index].completionError = nil
         do {
             try await query.completeSession(id: id, cwd: repoPath)
             sessions.removeAll { $0.id == id }
@@ -277,7 +279,7 @@ final class SessionsStore: ObservableObject {
             return true
         } catch {
             guard let latest = _index(id) else { return false }
-            sessions[latest].state = .failed(error.localizedDescription)
+            sessions[latest].completionError = error.localizedDescription
             return false
         }
     }
@@ -1096,52 +1098,69 @@ private struct SessionPaneView: View {
         .accessibilityIdentifier(id)
     }
 
-    @ViewBuilder
-    private var completionAction: some View {
-        // Only over a live terminal: a placeholder pane (elsewhere, opening,
-        // failed) leads with its own single action instead.
-        if let item, item.record.kind != .flow, item.surface != nil {
-            Button {
-                isCompleting = true
-                Task { @MainActor in
-                    let completed = await sessions.complete(item.id)
-                    guard completed else {
-                        isCompleting = false
-                        return
-                    }
-                    store.reconcileSessions(Set(sessions.sessions.map(\.id)))
-                    sessions.releaseSurface(item.id)
-                }
-            } label: {
-                HStack(spacing: Spacing.sm) {
-                    if isCompleting {
-                        ProgressView()
-                            .controlSize(.small)
-                            .tint(.white)
-                    } else {
-                        Image(systemName: "checkmark")
-                            .font(.system(size: 14, weight: .bold))
-                    }
-                    Text("Complete")
-                        .font(Typography.body(13).weight(.bold))
-                }
-                .foregroundStyle(.white)
-                .padding(.horizontal, Spacing.xl)
-                .frame(height: 46)
-                .background(Color.statusSuccess, in: Capsule())
-                .overlay {
-                    Capsule().strokeBorder(Color.white.opacity(0.18), lineWidth: 1)
-                }
-                .shadow(color: .black.opacity(0.35), radius: 12, y: 4)
+    private var completionItems: [SessionItem] {
+        if case .shell = pane.content {
+            return sessions.sessions.filter {
+                $0.record.kind == .interactive
+                    && sessions.localTerminal(for: $0.record) == .shell(pane.id)
             }
-            .buttonStyle(.plain)
-            .disabled(isCompleting || (item.record.kind == .ask && item.record.state != .ready))
-            .help(_completionHelp(item))
-            .accessibilityLabel("Complete session")
-            .accessibilityHint(_completionHelp(item))
-            .accessibilityIdentifier("session-action-complete")
-            .padding(Spacing.xxl)
         }
+        // Placeholder panes lead with their opening or recovery action.
+        guard let item, item.record.kind != .flow, item.surface != nil else { return [] }
+        return [item]
+    }
+
+    private var completionAction: some View {
+        VStack(alignment: .trailing, spacing: Spacing.sm) {
+            ForEach(completionItems) { item in
+                if let error = item.completionError {
+                    Text(error)
+                        .font(Typography.caption(11))
+                        .foregroundStyle(Color.statusWarning)
+                }
+                completionButton(item)
+            }
+        }
+    }
+
+    private func completionButton(_ item: SessionItem) -> some View {
+        Button {
+            isCompleting = true
+            Task { @MainActor in
+                defer { isCompleting = false }
+                guard await sessions.complete(item.id) else { return }
+                store.reconcileSessions(Set(sessions.sessions.map(\.id)))
+                sessions.releaseSurface(item.id)
+            }
+        } label: {
+            HStack(spacing: Spacing.sm) {
+                if isCompleting {
+                    ProgressView()
+                        .controlSize(.small)
+                        .tint(.white)
+                } else {
+                    Image(systemName: "checkmark")
+                        .font(.system(size: 14, weight: .bold))
+                }
+                Text(completionItems.count > 1 ? "Complete · \(item.record.title)" : "Complete")
+                    .font(Typography.body(13).weight(.bold))
+            }
+            .foregroundStyle(.white)
+            .padding(.horizontal, Spacing.xl)
+            .frame(height: 46)
+            .background(Color.statusSuccess, in: Capsule())
+            .overlay {
+                Capsule().strokeBorder(Color.white.opacity(0.18), lineWidth: 1)
+            }
+            .shadow(color: .black.opacity(0.35), radius: 12, y: 4)
+        }
+        .buttonStyle(.plain)
+        .disabled(isCompleting || (item.record.kind == .ask && item.record.state != .ready))
+        .help(_completionHelp(item))
+        .accessibilityLabel(completionItems.count > 1 ? "Complete session: \(item.record.title)" : "Complete session")
+        .accessibilityHint(_completionHelp(item))
+        .accessibilityIdentifier("session-action-complete")
+        .padding(Spacing.xxl)
     }
 
     private func _completionHelp(_ item: SessionItem) -> String {

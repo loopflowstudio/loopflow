@@ -1,0 +1,12 @@
+Owned app PID 61330
+AX trust true active true
+AXWindows 0 count 1
+PASS Exact runner trusted
+Activation requested true
+Raise owned window -25205
+Active after request true
+PASS Press All work
+PASS Press New terminal
+Foreground identity 33576 owned 61330 cached active true
+FAIL Failure(message: "Owned app foreground for input")
+Owned app termination requested true

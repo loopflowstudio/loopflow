@@ -64,7 +64,9 @@ resumes the Session in that pane. Unsent text typed in the other client is
 lost, and the pane says so before you commit.
 
 The green **Complete** action stops an interactive provider client and removes
-its Session from the queue while retaining provider-native history. Undo does
+its Session from the queue while retaining provider-native history. If completion
+is rejected, its error stays visible through refresh and the terminal remains usable;
+retry Complete after addressing the error. Undo does
 not restore a completed Session's pane, even if you hid it before completion. Closing a
 pane only hides the view: the terminal and its provider client keep running
 (the row shows RUNNING) and reopen exactly as left. An Ask agent
@@ -89,7 +91,9 @@ retains its processes. Closing a shell ends that shell. Changing a shell's
 directory does not move it into another workspace.
 
 Manually launched agents in these shells register against their actual terminal.
-Selecting their Session focuses the existing shell. External clients still read
+Selecting their Session focuses the existing shell. **Complete** ends the attached
+Session while keeping that shell available; rejected completion stays visible.
+External clients still read
 ELSEWHERE and require explicit Move here. Terminals and their command titles survive Work list and detail
 navigation and repository switches within a window. Native surfaces belong to
 that window and are never mounted twice.

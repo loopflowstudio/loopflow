@@ -1,5 +1,22 @@
 # Configured UI proof — 2026-09-23
 
+Iteration 9 closes the bounded **configured terminal viewport retention** gap:
+inspected screenshots show history rows 1–33 before and after list/details/
+overview navigation, distinct from the initial bottom rows 168–200. See
+[iteration 9 proof](iteration9-proof.md). Explicit Session-row return, nested
+checkout switching, other scopes/destinations, and full Task budgets/trials
+remain open. Its latest input boundary is exact AX focus on Warp, not missing
+Accessibility permission or a locked desktop. Later sections retain historical
+observations; their terminal-scroll gap is superseded by this bounded result.
+
+Iteration 8 review now proves integrated New conversation, exact draft through
+navigation, UI completion and original-shell survival against the signed current
+proof build. See [review](review-slice.md) and
+[receipt](configured-ui-evidence/iteration8/review/provider.log). Its completed
+Session must not be replayed. The historical locked-desktop boundary no longer
+blocks that trial; remaining configured scopes, external destination, nested
+switching, terminal scroll and full Task budgets/trials remain open.
+
 Configured exact provider continuation and completion now pass, and a fixed-population
 before/after Session-count measurement is recorded below. Repository/list retention
 also has configured evidence. Configured terminal scrolling, reliable launch/input

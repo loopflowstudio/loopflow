@@ -1,0 +1,8 @@
+{
+  "source_sha256": {
+    "swift/LoopflowMac/Views/SessionsView.swift": "adaae30350e7309a73e6d35e38898b201a849c36d01a31a8af37ac415257fc8d",
+    "swift/LoopflowTests/WorkspaceNavigationProofTests.swift": "630422390f41896c3dea0d37f4e2902791a6446b009811c4599352c377286db1"
+  },
+  "observation": "Concurrent correction inspected after own proof. Existing author receipt passes two tests/four cases. No independent rerun.",
+  "prior_configured_binary_unchanged": true
+}

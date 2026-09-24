@@ -101,6 +101,86 @@ struct WorkspaceNavigationProofTests {
     }
 
 #if canImport(GhosttyKit)
+    @Test("Shell-attached Sessions can complete without closing their terminal", .serialized,
+          arguments: [false, true])
+    func shellSessionCompletion(rejected: Bool) async throws {
+        _ = NSApplication.shared
+        GhosttyManager.shared.initialize()
+        let registry = SessionsWorkspaceRegistry()
+        let workspace = registry.workspace(for: "/tmp")
+        workspace.multiplexer.newShell()
+        let pane = workspace.multiplexer.focusedPaneId
+        let terminal = registry.surfaces.view(for: .shell(pane))
+        terminal.frame = CGRect(x: 0, y: 0, width: 800, height: 500)
+        terminal.workingDirectory = "/tmp"
+        terminal.command = buildWorkspaceShellCommand(id: pane, argv: ["/bin/cat"], env: [:])
+        terminal.createSurface(manager: GhosttyManager.shared)
+        defer { registry.surfaces.release(.shell(pane)) }
+        let surface = try #require(terminal.surface)
+        let records = try String(decoding: JSONSerialization.data(withJSONObject: ["shell-conversation", "second-conversation"].map { id in
+            ["id": id, "kind": "interactive", "work": NSNull(),
+             "title": id, "detail": "Local PTY", "cwd": "/tmp",
+             "state": "active", "ready_summary": NSNull(), "terminal_ids": [pane],
+             "open_argv": ["unused"]] as [String: Any]
+        }), as: UTF8.self)
+        let query = RegistryQuery { args, _ in
+            switch args.first {
+            case "roadmap": return #"{"generated_at":1,"waves":[]}"#
+            case "ls": return "[]"
+            case "session" where args.dropFirst().first == "list": return records
+            case "session" where args.dropFirst().first == "complete":
+                if rejected { throw RegistryQueryError("Completion rejected") }
+                return "Session completed"
+            case "activity": return #"{"generated_at":1,"since":0,"limit":50,"truncated":false,"items":[]}"#
+            default: throw RegistryQueryError("Unexpected operation in shell completion proof")
+            }
+        }
+        let model = PodiumModel(query: query, repoPath: "/tmp")
+        await model.refreshSessions()
+        model.navigation.content = .terminals
+        let view = SessionsView(model: model, repoPath: "/tmp", workspaces: registry, query: query)
+        let window = NSWindow(contentRect: CGRect(x: 0, y: 0, width: 1100, height: 700),
+                              styleMask: [.titled], backing: .buffered, defer: false)
+        let host = NSHostingView(rootView: view)
+        window.contentView = host
+        host.frame = window.contentLayoutRect
+        defer { window.contentView = nil }
+        try await settle(window)
+        try view.inspect().find(viewWithAccessibilityIdentifier: "session-action-complete").button().tap()
+        try await settle(window)
+        if rejected {
+            // An ordinary inventory refresh must not erase a rejected action.
+            let store = workspace.sessionStore(repoPath: "/tmp", query: query)
+            store.reconcile(try await query.sessions(cwd: "/tmp"))
+            #expect(store.sessions.first?.state == .live)
+            #expect(store.sessions.first?.completionError == "Completion rejected")
+            try await settle(window)
+            #expect(model.sessions.value?.map(\.id) == ["shell-conversation", "second-conversation"])
+            #expect(throws: Never.self) { try view.inspect().find(text: "Completion rejected") }
+            #expect(try !view.inspect().find(viewWithAccessibilityIdentifier: "session-action-complete").button().isDisabled())
+        } else {
+            #expect(model.sessions.value?.map(\.id) == ["second-conversation"])
+            #expect(try !view.inspect().find(viewWithAccessibilityIdentifier: "session-action-complete").button().isDisabled())
+            try view.inspect().find(viewWithAccessibilityIdentifier: "session-action-complete").button().tap()
+            try await settle(window)
+            #expect(model.sessions.value?.isEmpty == true)
+            // A later conversation in the same retained shell must still be completable.
+            await model.refreshSessions()
+            try await settle(window)
+            #expect(try !view.inspect().find(viewWithAccessibilityIdentifier: "session-action-complete").button().isDisabled())
+        }
+        #expect(terminal.surface == surface)
+        #expect(workspace.multiplexer.layout.pane(for: pane)?.content == .shell)
+        let reply = "shell-after-completion"
+        let input = reply + "\n"
+        input.withCString { ghostty_surface_text(surface, $0, UInt(input.utf8.count)) }
+        let deadline = ContinuousClock.now + .seconds(3)
+        while _terminalText(surface).components(separatedBy: reply).count < 3, ContinuousClock.now < deadline {
+            try await Task.sleep(for: .milliseconds(20))
+        }
+        #expect(_terminalText(surface).components(separatedBy: reply).count == 3)
+    }
+
     @Test("A hidden retained terminal relinquishes focus and keeps its unfinished PTY input")
     func hiddenTerminalPreservesDraft() async throws {
         _ = NSApplication.shared

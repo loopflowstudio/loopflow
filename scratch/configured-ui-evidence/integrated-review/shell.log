@@ -1,0 +1,24 @@
+Owned PID 12966
+Probe executable scratch/configured-ui-evidence/integrated-review/shell-probe.swift AX trusted true
+AXWindows 0 count 1
+Owned onscreen windows 1 active true hidden false
+PASS This exact probe host has Accessibility permission
+TIMING launch_observation_end_ms 3322.347208391875
+PASS Ambient Wave does not block planning
+PASS Real Task list loaded (19 rows)
+PASS Open exact LOO-291 Task
+PASS Task has explicit no-Session state
+PASS Authoritative directive visible
+PASS Owned application is active before input
+BUTTONS ["podium-sessions Sessions", "sessions-surface All work", "sessions-surface Show work list", "sessions-surface New conversation · LOO-291", "sessions-surface New terminal", " Resume", " Worktree", " ", " ", " ", " ", " Show all Activity", " ", " ", " "]
+PASS Conversation affordance names selected Task
+PASS Press New terminal
+NO_NAVIGATION_BYTES "Reply with only the continuity word from my first message.\n"
+PASS Press Show work list
+PASS Press Work details
+PASS Press All work
+PASS Press Return to terminals
+AFTER_NAVIGATION_BYTES "Reply with only the continuity word from my first message.\nReply with only the continuity word from my first message.\n"
+PASS Exact bulk input reaches shell before navigation
+PASS Exact shell draft survives A/D and details/overview
+Owned termination requested true

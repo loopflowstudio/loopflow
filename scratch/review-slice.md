@@ -1,5 +1,224 @@
 # Unified navigation slice review — 2026-09-23
 
+## Iteration 8 review — integrated provider path passes
+
+The slice advances the accepted design. **Integrated New conversation, exact
+draft retention, UI completion and return to the original shell now pass through
+the configured provider path.** Publication remains withheld for the narrower
+remaining proof gaps below; the locked-desktop observation is superseded for
+this trial. No production or test source changed in this review.
+
+Recovered the complete Task diff with `lf task diff LOO-291 --json`:
+`/tmp/loo291-review8-diff.json`, `truncated: false`, 822,231 patch characters.
+Compared every section with the preceding independent review: 121 unchanged,
+37 changed/new, none removed. The executable delta is shell completion and its
+rejection-state correction; remaining changes are guidance and evidence. Read
+the delta against the accepted design, traced shared reads, scoped launch,
+attachment, completion, reconciliation and retained workspace ownership. The
+broader target still includes directive editing, shared LOO-284 actions/display
+path, conversation design and the human-selected external trials/budgets.
+
+| Claim | Planned behavior | Implemented behavior | Proof | Result |
+|---|---|---|---|---|
+| Scoped configured launch | Displayed Task supplies context and checkout without forced destination | UI New conversation publishes an interactive LOO-291 Session in its owned checkout; provider orients to that directive | Fresh AX trial, exact Session and provider history | pass, configured Task/terminal path |
+| Local attachment | Embedded provider remains attached to its original shell | Shared terminal ID matches live provider receipt; provider descends from the owned app | Exact Run, PTY attachment and PID/birth receipts | pass; explicit row re-selection not exercised |
+| Navigation and draft | A/D and details preserve conversation and unfinished text | Same client survives list/details/overview/return; exact submitted text and reply recorded | Provider history and unchanged client receipt | pass, configured |
+| Completion | Resolve Session, retain usable shell and incomplete Task | UI Complete removes shared row, ends provider, shell accepts command; Task shows no Session and stays incomplete | Fresh AX/CLI trial and shell file receipt | pass, configured |
+| Rejection | Error survives polling with live terminal and retry | Completion error has independent lifetime in retained SessionItem | Existing before/after native regression; matching source hashes | pass, fixture CLI/real PTY |
+| One authority | Shared identity/readings, window-local views | One Podium inventory reader per query and one root registry; no removed navigation types returned | Fresh searches and Rust/Swift comparison | pass, source; LOO-284 remains outstanding |
+| Remaining configured behavior | Both destinations/scopes, nested switching and terminal viewport retention | Local proofs remain; this trial covers one Task and one terminal destination | Prior receipts retain their stated limits | gap |
+| Timings and full Task | Published budgets, required sample sizes, external work and edit round trip | Two new scoped observations, no qualifying external trial or edit | Monotonic AX/provider observations below | gap |
+
+### Configured receipt
+
+The read-only console check at `2026-09-24T03:41:14Z` reported no locked-screen
+flag, login complete and AX trust true. The same runner then launched the
+signed disposable `/tmp/loo291-iteration8/Loopflow Proof.app`, SHA-256
+`75fdef9e4d35fed6deeb01c3995bddcd5c7e0c6e5b7f88ce733aff01c4ae1abe`.
+AXWindows succeeded with one window and the owned app was active. The installed
+development CLI/Home stayed explicitly aligned; no fixture or capture mode,
+installed-app replacement, permission change or desktop unlock was performed.
+
+Owned app PID 44677 launched Session `run_a02a714cede94a0e84466dbbf175122e`,
+provider conversation `01a0d181-4875-70c2-9cea-4c4d6b17543b`, client PID 48366
+with birth `2026-09-24T03:41:45.901289Z`. Its shell attachment is
+`F431A536-D21D-455A-A74F-0D3586C3FDDF`. The provider made no tool calls.
+After navigation its exact final user text was
+`Do not use tools or edit files. Reply only LOO291_ITER8_CONFIRMED.` and its
+answer was `LOO291_ITER8_CONFIRMED`. Complete resolved only this owned Session;
+both owned processes were absent afterward and fresh CLI evidence kept LOO-291
+incomplete. The completed identity and single-use probe must not be replayed.
+
+[Executed probe](configured-ui-evidence/iteration8/review/provider-probe.swift),
+[interaction receipt](configured-ui-evidence/iteration8/review/provider.log),
+[final state and provider messages](configured-ui-evidence/iteration8/review/final-state.json).
+Launch to accessible Task was 4,279.2 ms; pressing New conversation to observing
+the initial provider response was 10,139.4 ms. These include probe traversal,
+polling and setup waits. They are neither pixel-paint measurements nor published
+p95 budgets or a controlled before/after series.
+
+### Verification and next slice
+
+Reused the unchanged iteration 8 native proof: two tests/four cases pass for
+shell rejection/success and direct completion before/after repository navigation.
+Production/test hashes still match `adaae303…257fc8d` and `63042239…286db1`.
+No test rerun or broad gate was warranted by a source change. The earlier
+resource-preflight failure remains the latest aggregate-gate receipt; it was
+not retried or relabeled as current resource-state evidence.
+
+Negative searches still find one desktop `query.sessions` and `query.roadmap`
+caller, one root SessionsWorkspaceRegistry, and no SessionScope, SessionContext,
+SessionGroup, SessionRowItem, PodiumConsole, PodiumSurface or `_loadHierarchy`.
+Current main still lacks projected Session actions/display path. The existing
+Complete operation is reused; no new lifecycle matrix or writer was introduced.
+
+Next configured proof should target explicit Session-row return into its existing
+shell, two checkout groups with independent inner splits, and a demonstrably
+scrolled terminal viewport. Cover the configured external destination and other
+visible scopes separately. Preserve this successful provider receipt instead of
+repeating it as a substitute. Resolve the verification resource envelope before
+the fallback compilation gate. External work remains human-selected; do not count
+this Loopflow trial toward it. Under review-slice's “When all applicable `Done
+when` claims hold” condition, these remaining gaps preclude publication. No PR
+publication, landing, Task completion or PM write occurred.
+
+## Integrated workspace review — 2026-09-23
+
+**Advances the accepted design; publication remains unapproved.** The integrated
+navigation, scope-aware entry, nested checkout layouts and appearance correction
+are coherent. This review fixed a newly reachable completion gap. Configured
+New conversation launch/attachment and external destination handoff still need
+proof against this integrated build; earlier provider receipts belong to their
+recorded binaries. This review does not complete LOO-291.
+
+**Final concurrent-source check:** another writer extended `shellSessionCompletion`
+after this review's final run. Their new inventory-refresh assertion reproduced
+the completion error disappearing at the next poll. They preserved the live
+Session state and added a per-item `completionError`, cleared on retry; the
+existing completion control renders it. This separates action failure from
+opening failure without adding a durable authority. Their [before](configured-ui-evidence/integrated-review/concurrent-rejection-before.log)
+and [after](configured-ui-evidence/integrated-review/concurrent-rejection-after.log)
+receipts show the failure and two tests/four cases passing after correction.
+I inspected that bounded change and preserved it without a competing build.
+The native receipt and configured shell binary recorded below precede this
+concurrent correction; they are not relabeled as testing its source. The newer
+receipt supplies focused native proof, not configured-provider or gate evidence.
+
+Recovered the complete Task diff with `lf task diff LOO-291 --json`:
+`/tmp/loo291-review-integrated.json`, `truncated: false`, 690,279 patch characters.
+Reviewed the integrated source, incoming Rust attachment/current-Wave/forget
+changes, Swift workspace and reading owners, fixtures, and prior proof artifacts.
+The starting HEAD was b12beba8b plus the supplied integration corrections; those
+were checkpointed locally through lf before this review's source edits.
+
+| Claim | Planned behavior | Implemented behavior | Proof | Result |
+|---|---|---|---|---|
+| One Work inventory | Upcoming, autonomous and human Tasks share typed planning rows | Podium owns reads; derived projection preserves unmatched human boundaries | Complete diff, source trace and negative searches; configured Task selection | pass at stated levels |
+| Integrated navigation | Actual directive, no-Session state, A/D and retained input | Configured current app preserves exact shell input through details/overview | [Configured shell trial](configured-ui-evidence/integrated-review/shell.log) | pass, live app and registry |
+| Shell Session completion | Same shared action remains available after local attachment | Completion now targets the attached Session while retaining its shell; rejection stays visible | [Regression before](configured-ui-evidence/integrated-review/completion-before.log), [after](configured-ui-evidence/integrated-review/completion-after.log) | pass, native fixture with mocked CLI |
+| Direct Session completion | Complete cannot create undoable dead panes or disrupt repository return | Existing direct Session behavior survives the correction | Same final focused command, both repository timings | pass, native fixture |
+| Scope and destination | New conversation uses displayed subject and configured destination | Task affordance names LOO-291; shared launch path receives scope without TUI/IDE override | Configured affordance, launch source and existing scope tests | gap: actual new provider/app launch not exercised |
+| Nested layouts and attachment | Checkout groups retain independent inner layouts; live PTY establishes local attachment | One window pool; outer slots retain inner stores; Rust verifies terminal marker against stdin PTY | Incoming focused receipts, source and shell trial | local proof; configured two-checkout/provider path remains a gap |
+| Appearance | Text and controls remain readable in both appearances | Window resolves native scheme and custom palette together | Inspected both integration light/dark live-data captures and source hashes | pass, prior integration rendering binary |
+| Verification gate | Both native and fallback configurations compile | Focused SwiftPM proof passes; aggregate runner did not start suites | [Gate](configured-ui-evidence/integrated-review/gate.log), [recovery](configured-ui-evidence/integrated-review/resource-recovery.log) | gap: active main build exceeds resource budget |
+| Full Task | Shared LOO-284 contract, directive editing, external trials and published budgets | Still explicitly outstanding | Current main SessionRecord lacks actions/display path; no authorized external workflow selected | gap; not waived by slice proof |
+
+### Bounded correction
+
+New conversation creates a shell pane. Selecting its shared Session correctly
+focused that shell, but SessionPaneView's completion action accepted only
+`.session` panes. The new native regression reached the real shell surface and
+failed because no Complete control existed, for both success and rejection cases.
+
+Completion candidates now include every interactive Session attached to that
+shell through the existing local-terminal lookup. Multiple candidates retain
+separate titled actions; no arbitrary first record becomes the shell's identity.
+All buttons reuse the existing shared completion operation and non-undoable
+reconciliation. Only a direct Session surface is released; the shell stays alive.
+Rejected completion displays its error and leaves the action available. Completion
+busy state resets on success as well as failure, since a shell survives and may
+host another conversation. No new lifecycle matrix, DTO, storage or process owner.
+
+Final focused command:
+
+```sh
+swift test --package-path swift -Xswiftc -gnone --jobs 4 --filter 'WorkspaceNavigationProofTests/shellSessionCompletion|WorkspaceNavigationProofTests/workspaceRetainsNativeSplit'
+```
+
+Two tests/four cases passed, exit 0. The shell test covers separately completing
+two records attached to one terminal, rejected completion, subsequent actions,
+retained pane/surface identity and actual child replies. The direct-Session test
+covers completion while viewing and after repository navigation, plus existing
+Undo, Task, companion, title, draft and viewport assertions. Completion responses
+and Session records are fixtures; these do not establish backend provider stop
+or promoted-Ask caller release. No Swift edits by this review followed this proof; the concurrent extension is
+recorded above.
+
+### Configured result and remaining boundary
+
+Updated only `/tmp/loo291-integration/Loopflow Integration.app` with the current
+SwiftPM executable; the installed app was left closed and unchanged. Executable
+SHA-256 `99b8b2b9d1964a7c24ea335be5dddc1027ecd938d9b2b7eb1f270a2c250f2d36`.
+[Receipt](configured-ui-evidence/integrated-review/receipt.json) preserves source
+hashes; [probe](configured-ui-evidence/integrated-review/shell-probe.swift) records
+the explicit installed development Home and actual repository.
+
+The exact runner was AX trusted, with one accessible, onscreen, active owned
+window. It observed the Task at 3,322.3 ms, inspected its directive and explicit
+no-Session state, confirmed New conversation names LOO-291, then used New terminal.
+The shell child's output file contains the exact sentence both before and after
+Show work list → Work details → All work → Return to terminals. Owned app PID
+12966 was terminated and subsequently absent. No provider was launched, moved or
+completed, and no user-owned client was touched. This one launch observation is
+not a paint/readiness budget, before/after comparison or external-work trial.
+
+The first attempt stopped before terminal creation: SwiftUI inherited the parent
+`sessions-surface` identifier on the button. Its visible label was correct. The
+[initial receipt](configured-ui-evidence/integrated-review/initial-shell.log) and
+probe are retained; the final probe uses the actual label. This was a probe lookup
+error, not a new permission or launch failure.
+
+Fresh shared reads at 2026-09-24T02:59:37.187253Z show the canonical repository's
+Infrastructure, Intelligence and Product Waves, 19 incomplete Tasks, one scoped
+Session, and LOO-291 incomplete. The all-repository roadmap contains 50 Waves;
+that count is not this repository's scope. [Population summary](configured-ui-evidence/integrated-review/population.json).
+
+Negative searches find exactly one desktop `query.roadmap` caller and one
+`query.sessions` caller, both in PodiumModel, and one root registry construction.
+SessionScope, SessionContext, SessionGroup, SessionRowItem, PodiumConsole,
+PodiumSurface and `_loadHierarchy` remain absent. Rust owns current-Wave filtering
+and attachment; Swift uses no cwd/title attachment inference. Shared Session
+actions/display path remain absent from current main; this correction reuses the
+existing action, not a replacement authority.
+
+The requested `scripts/test.py --loopflow` stopped at resource preflight, before
+any product suite. Supported recovery preserves main's active 19.1 GiB cache
+(limit 12 GiB); it remains blocked. No direct invocation bypassed that guard.
+The prior Xcode success predates this correction and is not a fresh gate pass.
+
+Next implementation should prove New conversation through its actual configured
+terminal and app destinations, including shared Session publication, clicking
+the row back into its originating shell, Complete returning to that same shell,
+and nested checkout switching. Keep configured terminal viewport retention and
+launch/input variability as unresolved observations. Use proof-owned clients;
+never substitute a user Session. Resolve the resource envelope before the fallback
+build. Do not restart design or repeat unchanged model proofs as substitutes.
+
+Under review-slice's condition, “When all applicable `Done when` claims hold,”
+these configured-launch and verification gaps preclude publication. Full LOO-291
+still requires LOO-284 integration, directive editing, bounded conversation design,
+human-selected external trials and the declared measured budgets/sample sizes.
+
+
+## Iteration 7 independent verification
+
+See [the integrated review](review-slice-iteration7-independent.md): fresh
+configured planning and exact shell-input retention pass; the combined native
+completion run fails the visible rejection assertion in one of four cases,
+after a concurrent writer's earlier pass. Preserve both receipts. Publication
+remains unapproved; the integrated configured provider path and required
+paint/readiness measurements still need proof.
+
 ## Iteration 6 disposition
 
 The slice advances the accepted design. **Publication remains unapproved:**

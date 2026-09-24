@@ -1,0 +1,21 @@
+Owned PID 5463
+Probe executable /tmp/loo291-review6-input.swift AX trusted true
+AXWindows 0 count 1
+Owned onscreen windows 1 active true hidden false
+PASS This exact probe host has Accessibility permission
+TIMING launch_observation_end_ms 2889.693666715175
+PASS Ambient Wave does not block planning
+PASS Real Task list loaded (18 rows)
+PASS Open exact LOO-291 Task
+PASS Task has explicit no-Session state
+PASS Authoritative directive visible
+PASS Press New shell
+NO_NAVIGATION_BYTES "Reply with only the continuity word from my first message.\n"
+PASS Press Show work list
+PASS Press Work details
+PASS Press All work
+PASS Press Return to terminals
+AFTER_NAVIGATION_BYTES "Reply with only the continuity word from my first message.\nReply with only the continuity word from my first message.\n"
+PASS Exact bulk input reaches shell before navigation
+PASS Exact shell draft survives A/D and details/overview
+Owned termination requested true

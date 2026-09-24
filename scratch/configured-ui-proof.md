@@ -5,6 +5,31 @@ fidelity, configured repository/scroll retention, visual quality, and a controll
 before/after timing comparison remain open. Do not repeat a generic AX-blocked
 review or count these Loopflow trials as external-product evidence.
 
+## Iteration 6 review addendum
+
+The review rebuilt current HEAD `62f7266bd` and refreshed the disposable bundle;
+its new executable SHA-256 is
+`959097703d7a0759c9d25959c4aa0b4b46ae527829c1d8269cedf97c6de87e3e`.
+The build and provider receipts below still identify the preceding binary.
+
+A fresh [configured shell trial](configured-ui-evidence/shell-input.log) reports
+AX trusted, AXWindows success/count one, one owned onscreen window, and active
+true. Launch to observed Task was 2,889.7 ms. Actual directive/no-Session controls
+and A/D/details/overview worked. The same bulk-input method delivered the exact
+sentence before navigation and preserved it across navigation, verified from
+the shell child's output file. This closes that configured shell proof only;
+the earlier provider character loss remains unexplained.
+
+A new proof-owned provider answered READY but exposed no corresponding Session
+or Task Run through the configured CLI while running. The installed `lf` changed
+between the original proof and this review and now emits `terminal_ids`;
+causation is unestablished. The exact owned launcher/client were stopped through
+their PTY, exit 0, and were absent afterward. No UI transfer occurred. See the
+[launch receipt](configured-ui-evidence/provider-launch-gap.json) and
+[current review](review-slice.md) for the identity and command context. Restore
+an observable exact owned Session before another provider-navigation trial;
+do not substitute a matching title or change user-owned clients.
+
 ## Build and host
 
 Review app: `/tmp/loo291-review/Loopflow Review.app`, bundle identifier

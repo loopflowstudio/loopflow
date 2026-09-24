@@ -1,12 +1,114 @@
 # Unified navigation slice review — 2026-09-23
 
-Implementation update after this review: iteration 6 now has real configured
-AX navigation, provider-native continuation and UI completion evidence. The
-[configured proof](configured-ui-proof.md) records exact host permissions,
-scoped timings, a failed launch observation and an unresolved exact-draft gap.
-The review below predates that evidence; no new publication approval is implied.
+## Iteration 6 disposition
 
-## Disposition
+The slice advances the accepted design. **Publication remains unapproved:**
+exact provider draft fidelity, configured repository/scroll/visual retention,
+and controlled before/after timings still lack the required evidence. The former
+generic AX blocker is superseded. Real configured planning, native continuation,
+UI completion and companion survival now have receipts. Full LOO-291 scope is
+unchanged; this review neither lands nor completes the Task.
+
+Reviewed HEAD `62f7266bd` and recovered the complete Task diff:
+`/tmp/loo291-review-iteration6.{json,patch}`, `truncated: false`, 6,719 lines.
+Compared every section with the prior review: 26 unchanged, 19 changed, none
+removed. Changes include the previous review's hidden-Undo fix, configured
+receipts, ambient-Wave correction, opening-state reduction and their notes.
+Read the changed paths and traced shared reads, identity joins, selection,
+opening, native input, completion and retained workspace ownership.
+
+| Claim | Planned behavior | Implemented behavior | Proof | Result |
+|---|---|---|---|---|
+| Configured planning | Explicit repository scope; directive/KRs and truthful Session absence | Actual Task details and A/D work with unrelated inherited Wave | Prior navigation receipt plus this review's configured shell trial | pass, configured UI |
+| Native continuation and resolution | Exact conversation; explicit transfer; completion preserves Task and companion | Prior owned conversation answered its remembered word; UI completion removed its pane | Archived provider history, retention/completion and final CLI receipts | pass, prior configured binary |
+| Exact draft | Preserve every character through navigation | Earlier provider message lost `e `; new shell trial retains exact bytes | Provider-history counterexample and `shell-input.log` | gap for provider; pass for configured shell |
+| Current provider launch | New owned conversation becomes an exact selectable Session | Provider replied READY, but current CLI exposed no corresponding Session or Task Run | `provider-launch-gap.json`; stopped only the owned client | gap, cause unestablished |
+| Native state retention | Keep split, focus, viewport and repository context | Local native regressions pass; configured shell proves A/D and details/overview retention | Existing native receipts; fresh external AX interaction | pass at stated levels; configured repository/scroll/visual gap |
+| Timings | Comparable paint/readiness endpoints on fixed population | Accessible Task observed at 2,889.7 ms in this review; earlier timeout retained | Fresh monotonic AX receipt and earlier scoped series | gap for controlled comparison/budget |
+| One authority | Shared inventories and existing workspace/action owners | No removed reader/navigation types returned; opening publishes only per-Session state | Negative searches, shared DTO/source comparison, focused compression receipt | pass; shared integration remains |
+
+### Fresh configured observations
+
+Built current SwiftPM `LoopflowMac` successfully, then refreshed only the
+disposable review bundle. Current executable SHA-256:
+`959097703d7a0759c9d25959c4aa0b4b46ae527829c1d8269cedf97c6de87e3e`.
+Build receipt: `/tmp/loo291-review6-app-build.log`. Earlier provider receipts
+remain attributed to their preceding binary; they were not relabeled.
+
+The exact `xcrun swift` probe reports AX trusted, AXWindows success/count one,
+one owned onscreen window, and active true. It selected LOO-291 and observed
+its authoritative directive and explicit no-Session state, then opened its own
+shell. Using the same bulk CGEvent text and 0.2-second pause as the provider
+trial, it sent the prefix and suffix first without navigation, then across
+Show work list → Work details → All work → Return to terminals. The shell's
+`cat` output contains the exact full sentence twice. This is byte-level
+configured input/retention proof, not PTY echo or a fixture. No Session was
+opened or transferred. Its owned app and child exited afterward.
+[Script](configured-ui-evidence/shell-input-probe.swift),
+[receipt](configured-ui-evidence/shell-input.log).
+
+This counterexample rules out a consistent truncation of that input event in
+the shell path. It does **not** identify why the earlier provider draft lost two
+characters. Native key handling forwards printable event text to Ghostty within
+the C-string lifetime; inspection established no bounded source fix. Do not
+classify the earlier loss as an automation defect without further evidence.
+
+One new disposable conversation was launched with the same explicit Task/TUI
+flags as the earlier proof. Provider `01a0d10f-4512-79a3-8fc3-ecaab404d709`
+replied `LOO291_REVIEW6_READY` at `2026-09-24T01:37:19.052Z`, with no tool calls.
+While it ran, `lf session list --json` returned five records, none for LOO-291;
+`lf runs --task LOO-291 --json` returned only the ongoing implementation Run.
+The client therefore had no observed exact Session to select. No UI transfer
+was attempted. Two Ctrl-C inputs through its own PTY ended it with exit 0;
+launcher PID 25047 and provider PID 26842 were absent afterward.
+[Bounded receipt](configured-ui-evidence/provider-launch-gap.json).
+
+The installed CLI symlink changed at 18:34 local time and this launch executed
+`lf-f1f15f84852857b6c56505aafea27ebe070ab2e11e783fcbdad4867a005ef0c4`.
+Its Session JSON now includes `terminal_ids`. This is changed configured-runtime
+evidence, not proof that the installation change caused the missing record.
+No registry, installed binary, provider history or user client was repaired to
+manufacture a selectable Session. Next provider proof must first establish the
+owned launch's exact shared Session/Run identity on this configured runtime.
+
+### Source reconciliation and next proof
+
+Main and this checkout still share the earlier SessionRecord hash and lack
+LOO-284's legal actions/display path. **lf-new no longer matches**: its read-only
+comparison now adds required `terminalIds` / `terminal_ids` (hash
+`efefe57f889b7f58f905d879a34e87c834a6a4169be2420336c2a2d640646713`).
+Do not infer that its complete workspace design shipped or copy its field alone;
+reconcile the complete attachment contract when integrating that work. The live
+CLI's extra field does not establish local embedded attachment in this slice.
+
+Negative searches still find one Podium caller per inventory read, one root
+workspace registry, and none of SessionScope, SessionContext, SessionGroup,
+SessionRowItem, PodiumConsole, PodiumSurface or `_loadHierarchy`. No new writer,
+wire contract, action policy, fallback inventory or workspace owner was added.
+The opening reduction is coherent: all former optional-return callers discarded
+the result, and its request ID never guarded publication or pane selection.
+Its existing four-test/five-case receipt passes against unchanged Swift source;
+no additional fixture or broad gate was run in this review.
+
+The live machine roadmap at `2026-09-24T01:36:47.976274Z` contains Infrastructure,
+Intelligence and Product for the canonical repository (5, 3 and 10 incomplete
+Tasks respectively). LOO-291 remains incomplete. This population differs from
+the earlier Wave-narrowed observations and cannot supply a controlled timing
+comparison. AX traversal counts are not inventory counts.
+
+Next useful proof: resolve or explain the configured owned-launch publication
+boundary; verify exact provider text before/after navigation; cover repository
+return, both scroll positions and visual quality; then compare defined endpoints
+on a fixed population. Keep the earlier failed launch and lost characters as
+failures. Optional conversations, directive editing, shared LOO-284/lf-new
+integration, human-selected external trials and measured budgets remain the
+full Task obligations. No new kickoff or generic permission retry is warranted.
+
+`git diff --check` passes. No production or test source changed in this review.
+Under review-slice's condition, "When all applicable `Done when` claims hold",
+the remaining configured and timing gaps preclude publication.
+
+## Earlier disposition (before iteration 6)
 
 Advances the accepted design; **not yet approved for publication**. The compact
 navigator and shared identity join have focused behavioral evidence. Mounted

@@ -755,6 +755,13 @@ continuation and configured acceptance remain open. See
   compensation paths, telemetry recovery, closed obligations and configured
   acceptance remain open. See [release-pr-mutation-ownership.md](release-pr-mutation-ownership.md).
 
+PR mutation review remains **iterate**. The built-CLI demonstration passed all
+eight survival scenarios again (60.85s); no additional bounded defect was
+established and no executable code changed. Task compensation and other shared
+mutation children, historical telemetry linkage/retry and repair ownership,
+closed-obligation continuation and configured acceptance remain open. See
+[review-pr-mutations.md](review-pr-mutations.md).
+
 ## Measure
 
 Use the Reliability KR's actual due population, not successful process counts.

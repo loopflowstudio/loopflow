@@ -21,6 +21,24 @@ This is the kickoff artifact at source base
 operational proof; neither has been completed by this kickoff. No schedule,
 release, installation, PM state, or Task disposition was changed.
 
+## Human review: collapse missed opportunities
+
+The human accepted catch-up and explicitly allowed “exactly 1 run” that
+automatically collapses misses. Use that simpler policy: one release execution
+per scheduled wake, covering the outstanding due times captured at entry.
+Keep every original due time and link collapsed entries to the one execution;
+do not replay one release decision per missed day. New due times arising during
+execution wait for the next configured wake.
+
+This changes execution cardinality, not evidence cardinality: one execution
+can prove only one publication/no-change settlement. Collapsed entries are
+accounted for but do not manufacture additional qualifying settlements. The
+two-settlement commitment still needs two distinct automatic executions for
+adjacent original due opportunities, with at least one publication.
+
+Telemetry repair ownership remains a proposed Intelligence dependency; this
+catch-up decision does not constitute an accepted handoff or waive verification.
+
 ## The demo
 
 After two real configured firings, run
@@ -28,7 +46,8 @@ After two real configured firings, run
 It shows consecutive original due times, exact cron and release attempts,
 verification evidence, one published exact tag with downloadable verified
 artifacts, and the next publication or verified empty release range. A delayed
-wake retains the missed due times; an overlap shows a reason and continuation
+wake retains the missed due times, collapsed into one release execution rather
+than replayed individually; an overlap shows a reason and continuation
 instead of a second publisher. The same history view retains failed scheduled
 verification and its repair disposition even when `lf doctor --json` reports
 healthy scheduling continuity.
@@ -86,6 +105,11 @@ attempt count, selected tag, and process PID.
 
 - Obligation key and original due interval; discovery time and coverage origin
   (`observed` or explicitly incomplete historical reconstruction).
+- Optional `coalesced_into` opportunity reference. The owning opportunity
+  retains the execution and settlement; collapsed entries refer to it without
+  copying attempts, verification, or product outcomes. Preserve any earlier
+  failed attempts on a collapsed entry. A link alone is not successful catch-up:
+  history also shows the owning execution's pending/deferred/failed result.
 - Append-only attempt entries: attempt id, physical cron receipt id, optional
   attributed Run id, start/end, launch source, explicit intervention records,
   target, frozen selection evidence, current stage and typed outcome.
@@ -136,7 +160,9 @@ success. New wire DTOs have required or optional fields and fixture coverage.
    Failed preflight accounts for a due opportunity with its cause; it never
    authorizes execution on the wrong Home. If persistence itself fails, return
    nonzero with the failed path. Readers must still expose the missing entry.
-3. Execute due work oldest first through the existing mechanical flow. Carry
+3. Freeze the outstanding due set at wake entry and persist its coalescing
+   decision before release mutation. Execute once through the existing
+   mechanical flow, carrying the owning opportunity and covered due keys. Carry
    the physical receipt reference explicitly in the flow execution context and
    typed release entry point; do not infer process role from an ambient env
    variable or parse agent stdout. Validate that reference against the installed
@@ -156,11 +182,12 @@ success. New wire DTOs have required or optional fields and fixture coverage.
    before proceeding to the next consequential operation. Replace opportunity
    records under a short file lock and fence updates by exact attempt id.
    An old attempt cannot overwrite a retry or a terminal settlement.
-6. After each attempt, rescan due opportunities that accumulated while it ran.
-   Drain the discovered backlog serially until no due work remains or the
-   existing bounded stage wait returns a deferred/failed result. On a stop,
-   retain all remaining opportunities as deferred to the exact continuation and
-   next configured firing. Do not busy-loop or add another timer.
+6. After the attempt, account for due opportunities that accumulated while it
+   ran, but do not start another release execution or expand the frozen covered
+   set. Retain those opportunities as deferred to the next configured firing.
+   If the attempt deferred or failed, all covered entries expose that result
+   and its exact continuation. The existing stage waits remain bounded. Do not
+   drain the backlog in a loop or add another timer.
 
 Use a short per-job accounting lock for materialization and record updates;
 never hold it across a network call or whole release. The longer target lock
@@ -172,13 +199,24 @@ with a live publisher child: an unlocked parent PID or six-hour age is not
 permission to publish concurrently. This is a release lock, not a new process
 liveness registry. Never kill a process to make progress.
 
-One wake may catch up multiple opportunities, but each requires its own
-selection/verification decision. After the oldest publishes, the next can
-settle no-change against the now-published tag. Do not copy one publication
-receipt across all missed days and call them separate successes. If two
-opportunities resume the same incomplete release, only the opportunity that
-owns that release attempt receives that publication settlement; the later one
-then makes its own decision.
+One wake makes one selection/verification decision for its frozen due set.
+When a due opportunity already owns an incomplete candidate/tag, preserve that
+owner and resume it; link the other covered due times to that opportunity.
+Otherwise, the newest outstanding due opportunity owns the catch-up execution
+and earlier misses link to it. Retrying preserves the original owner and failed
+attempts. A previously settled opportunity cannot absorb new misses.
+
+Persist the owner and complete covered-key set before writing the reciprocal
+links. Reconciliation repairs missing links from that saved set after a crash;
+partial linking never authorizes another publisher. Coalescing only applies
+within the same repository, target, and Home execution context; historical
+placement blockers retain their existing treatment.
+
+Only the owning opportunity receives the product settlement. A collapsed entry
+reports its original due time and linked catch-up result, never a separate
+publication or synthetic no-change. Collapsed entries cannot supply the second
+success in the consecutive-settlement proof. This preserves every missed date
+without doing redundant release work for each date.
 
 Timing is orthogonal to product outcome. Retain `due_at`, first attempt time,
 settled time, and delay seconds. For presentation, `on_time` means the first
@@ -212,11 +250,13 @@ checks such as the scheduled telemetry target cannot reuse yesterday's pass.
 Preserve and identify separately:
 
 1. Scheduled telemetry (`doctor` and `__telemetry-scorecard`) for the applicable
-   daily obligation. A delayed release links the telemetry obligation preceding
-   its original due time and any current prerequisite checks, not whichever
-   old green receipt is convenient. Missing or failed verification blocks a
-   qualifying settlement. Recovery is a new linked attempt of that verification;
-   it does not erase the failed target.
+   daily obligation. Retain the telemetry obligation preceding each covered
+   original due time, including its missing/failed evidence. The one catch-up
+   execution must pass current prerequisites and link any recovery checks to
+   that execution and the original failure. It does not rerun telemetry once
+   per collapsed day or label historical failures as passes. Missing or failed
+   required verification for this execution blocks a qualifying settlement;
+   historical failures retain their separate owning repair dispositions.
 2. Repository `release.targets.default.verify`, currently the migration check.
 3. Required release-PR checks, hosted release acceptance, all four native
    packages, and their exact-version CLI/daemon smoke checks on the candidate.
@@ -236,8 +276,10 @@ capability is an explicit blocker, never an exemption invented here. This
 kickoff did not run UI automation or prove a current permission gap.
 
 For a missing/failed prerequisite, the release wake may make one bounded retry
-through the existing cron target executor, carrying the original telemetry due
-identity and recording an automatic catch-up attempt. It then observes the
+through the existing cron target executor, carrying the applicable telemetry due
+identity and frozen catch-up coverage, and recording an automatic catch-up
+attempt. A present-day check proves current recovery, not a historical pass.
+It then observes the
 result before release mutation. This permits recovery after a repaired check
 without requiring an operator to manufacture a new receipt. It adds no timer
 or independent worker. Limit prerequisite retry to once per prerequisite per
@@ -356,8 +398,9 @@ publication. No independent current artifact-publication failure was reproduced.
 - Historical UI capability notes are not a fresh diagnosis. Missing current
   required evidence blocks the claim; a real probe must establish the cause.
 - Wild success: a wake after a long sleep shows every missed day, finishes the
-  existing candidate, and leaves a verifiable publication followed by a true
-  no-change with no operator archaeology.
+  existing candidate in one execution, and links all collapsed misses to its
+  verifiable publication. A later scheduled execution can independently prove
+  no-change, with no operator archaeology.
 - Wild failure: a green accounting screen masks red verification, every retry
   invents a new release, or a stale process deletes another attempt's artifacts.
   The proof matrix below specifically rejects those outcomes.
@@ -386,7 +429,8 @@ external services. Assert durable outcomes and preserved bytes, not mock calls.
 | Counterexample | Required observation |
 | --- | --- |
 | One on-time firing, unchanged sync, repeated same-minute firing | One due key, preserved activation, one accepted terminal settlement |
-| Wake after three due times; release lasts across another due time | All original due times remain; independent decisions, ordered attempts, no duplicate publication |
+| Wake after three due times; release lasts across another due time | Three original due times link to one execution and at most one settlement; the fourth waits for the next wake |
+| Crash while recording collapsed misses; retry resumes an incomplete tag | Saved covered keys repair missing links; original candidate owner survives; no second publisher or duplicated settlement |
 | Manual run or `cron trigger` near a natural firing | Manual/intervention provenance retained; no fabricated opportunity or qualifying autonomous pair |
 | Overlapping scheduled/manual release selection | One target mutation owner; loser is deferred to a real continuation |
 | Parent dies while publisher child remains active | No second publisher or cleanup of the active stage |
@@ -425,7 +469,9 @@ a successful compiler/static check as configured operational proof.
    Preserve the 09:00/10:00 cadence. Record actual installed flow resolution.
 3. Observe two adjacent real due opportunities. Do not manually trigger them,
    alter their dates, or select two nonadjacent green rows. Delayed automatic
-   catch-up is eligible when it retains original consecutive due identities.
+   catch-up is eligible when it retains original consecutive due identities
+   and two distinct executions. Collapsed entries are accounted for but cannot
+   count as additional settlements or make nonadjacent due times consecutive.
 4. Retain exact attempts, verification records, release workflow/check URLs,
    tag/commit, publisher manifest, asset download hashes, isolated exact-version
    smoke results, and intervention provenance. At least one opportunity must
@@ -434,6 +480,7 @@ a successful compiler/static check as configured operational proof.
    every due opportunity is present or explicitly missing/uncertain, all
    deferred work names its continuation, and failures name an owner within one
    day. A late disposition must remain visibly late.
+   Show collapsed due count separately from execution and settlement counts.
 
 If verification remains blocked, complete the code proof but keep operational
 acceptance open with the named blocker. Do not mark the Task/KR complete on a
@@ -448,6 +495,8 @@ and final Task disposition; this kickoff does not invoke it manually.
 - Failed telemetry disappearing because scheduling continuity is green.
 - A new tag used to escape a resumable incomplete tag or missing proof.
 - One publication counted repeatedly across due opportunities.
+- Collapsed misses fabricated as independent no-change settlements, or due
+  times arriving during execution silently absorbed into its frozen coverage.
 - Manual trigger/repair counted as unattended success.
 - Missing verification treated as pass, or required UI/host checks silently
   dropped to obtain a publication receipt.
@@ -467,7 +516,8 @@ half-contracts.
 1. Extract calendar calculation; add retained obligation/opportunity records,
    migration of historical evidence, atomic persistence, and identity tests.
 2. Replace scheduled agent wrapping with the mechanical flow; carry explicit
-   receipt context, preserve trigger provenance, and account for wake/backlog.
+   receipt context, preserve trigger provenance, and collapse missed due times
+   into one release execution per wake.
 3. Converge manual/scheduled release paths on operation locking, typed outcomes,
    exact-stage recovery, caller-preserving selection, and single settlement.
 4. Bind required checks and publisher read-back; add the release-history view,
@@ -478,8 +528,10 @@ half-contracts.
 
 ## This slice
 
-Kickoff: map current authorities, reproduce the leading verification blocker,
-capture baseline facts, and specify the joined outcome/preservation proof.
+Human design review: catch-up accepted, using the explicitly allowed one-run
+collapse of misses. Telemetry repair handoff remains unresolved. The kickoff
+mapped authorities, reproduced the leading verification blocker, captured
+baseline facts, and specified the joined outcome/preservation proof.
 Next executable implementation cut is slice 1, carried through slices 2–4
 before claiming the feature works. Slice 5 is required operational acceptance.
 
@@ -508,6 +560,8 @@ before claiming the feature works. Slice 5 is required operational acceptance.
 Use the Reliability KR's actual due population, not successful process counts.
 Report configured due count, accounted count, unresolved/unknown count,
 on-time/caught-up attempts, product outcomes, maximum failure-disposition age,
-and consecutive qualifying settlements. Always retain the original due times
-and intervention flags. Baseline is 70 physical receipts with no authoritative
+collapsed due count, distinct execution count, and consecutive qualifying
+settlements. Collapsed entries contribute to accounted count, never to product
+settlement count; their owner's unresolved result remains visible. Always retain
+the original due times and intervention flags. Baseline is 70 physical receipts with no authoritative
 opportunity join; it cannot supply a truthful historical settlement percentage.

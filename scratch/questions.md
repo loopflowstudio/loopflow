@@ -1,8 +1,15 @@
 # Material decisions and unresolved evidence
 
-- This Run is the pinned kickoff contribution. The supplied steer authorizes
-  designing LOO-285 here; it does not require starting sibling work, changing
-  the accepted serial Reliability allocation, or launching a release now.
+- This Run is the writable human design review for LOO-285. It does not start
+  sibling work, change the accepted serial Reliability allocation, or launch
+  a release. Human approval/iteration remains on the existing session surface.
+- The human accepted catch-up and explicitly allowed “exactly 1 run” that
+  automatically collapses misses. Use one release execution per wake for the
+  due set frozen at entry. Preserve every due time, link collapsed entries to
+  the owning execution, and leave newly due work for the next wake. One shared
+  result counts once toward the two-settlement proof. The implementation detail
+  is to retain an existing candidate's owner; otherwise the newest outstanding
+  due opportunity owns the execution. This needs no per-day replay loop.
 - Keep installed daily 09:00 telemetry and 10:00 release schedules. Proposed
   `on_time` display means start during the scheduled calendar minute, with
   exact delay always retained; later automatic starts are caught up.

@@ -1,0 +1,33 @@
+{
+  "observed_at": "2026-09-24T04:21:47.929496+00:00",
+  "head": "31d34f272cd06e5f13b77cec0019b95e2ee60670",
+  "hashes": {
+    "swift/LoopflowMac/Views/SessionsView.swift": "adaae30350e7309a73e6d35e38898b201a849c36d01a31a8af37ac415257fc8d",
+    "swift/LoopflowTests/WorkspaceNavigationProofTests.swift": "34bfb5240c4a4b0fb4e06c0fea22d694d9dd092f7279fba0acc90d6de28e2325",
+    "/tmp/loo291-iteration8/Loopflow Proof.app/Contents/MacOS/Loopflow": "75fdef9e4d35fed6deeb01c3995bddcd5c7e0c6e5b7f88ce733aff01c4ae1abe"
+  },
+  "owned_pid": 12244,
+  "owned_app_absent": true,
+  "session_ids_before": [
+    "run_32238dfb9f2c4782a9d9fcf7eba1c542",
+    "run_c2a56c3b168d44b4ab2447a36696f5cd",
+    "run_f8b3df345dc94aeab0ae3e2338893def"
+  ],
+  "session_ids_after": [
+    "run_32238dfb9f2c4782a9d9fcf7eba1c542",
+    "run_c2a56c3b168d44b4ab2447a36696f5cd",
+    "run_f8b3df345dc94aeab0ae3e2338893def"
+  ],
+  "task": [
+    {
+      "id": "ee671927-255f-41e6-8429-b830d59cc1de",
+      "identifier": "LOO-291",
+      "completed": false
+    }
+  ],
+  "provider_launched": false,
+  "ui_actions_reached": false,
+  "ax_trusted": true,
+  "ax_focused_pid": 33576,
+  "console_locked_flag": "absent"
+}

@@ -1,0 +1,5 @@
+Owned app PID 73081
+AX trust false active false
+AXWindows -25211 count -1
+FAIL Failure(message: "Exact runner trusted")
+Owned app termination requested true

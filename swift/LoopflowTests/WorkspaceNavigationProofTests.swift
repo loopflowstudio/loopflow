@@ -101,6 +101,105 @@ struct WorkspaceNavigationProofTests {
     }
 
 #if canImport(GhosttyKit)
+    @Test("Session rows restore their shell and companion layout across worktree slots")
+    func sessionRowRestoresWorktree() async throws {
+        _ = NSApplication.shared
+        GhosttyManager.shared.initialize()
+        let repo = "/src/loopflow"
+        let paths = [repo, "/src/loopflow.task"]
+        let registry = SessionsWorkspaceRegistry()
+        let outer = registry.layout(for: repo)
+        var terminals: [GhosttyMetalView] = []
+        var records: [[String: Any]] = []
+        for (index, path) in paths.enumerated() {
+            let workspace = registry.workspace(for: path)
+            for _ in 0..<2 {
+                workspace.multiplexer.newShell()
+                let pane = workspace.multiplexer.focusedPaneId
+                let terminal = registry.surfaces.view(for: .shell(pane))
+                terminal.frame = CGRect(x: 0, y: 0, width: 500, height: 350)
+                terminal.workingDirectory = NSTemporaryDirectory()
+                terminal.command = buildWorkspaceShellCommand(id: pane, argv: ["/bin/cat"], env: [:])
+                terminal.createSurface(manager: GhosttyManager.shared)
+                terminals.append(terminal)
+            }
+            let shell = workspace.multiplexer.layout.firstPane.id
+            workspace.multiplexer.setFocusedPane(shell)
+            records.append([
+                "id": "row-\(index)", "kind": "interactive", "work": NSNull(),
+                "title": "Conversation \(index)", "detail": "Local shell", "cwd": path,
+                "state": "active", "ready_summary": NSNull(), "terminal_ids": [shell],
+                "open_argv": ["must-not-launch"],
+            ])
+        }
+        defer { for terminal in terminals { registry.surfaces.release(terminal.terminal) } }
+        let surfaces = try terminals.map { try #require($0.surface) }
+        let layouts = paths.map { registry.workspace(for: $0).multiplexer.layout }
+        let sessionJSON = String(decoding: try JSONSerialization.data(withJSONObject: records), as: UTF8.self)
+        let query = RegistryQuery { args, _ in
+            switch args.first {
+            case "roadmap": return #"{"generated_at":1,"waves":[]}"#
+            case "ls": return "[]"
+            case "session" where args.dropFirst().first == "list": return sessionJSON
+            default: throw RegistryQueryError("Local row must focus its existing shell")
+            }
+        }
+        let model = PodiumModel(query: query, repoPath: repo)
+        await model.refreshSessions()
+        model.navigation.content = .terminals
+        model.navigation.showsList = true
+        let view = SessionsView(model: model, repoPath: repo, workspaces: registry, query: query)
+        let window = NSWindow(contentRect: CGRect(x: 0, y: 0, width: 1400, height: 700),
+                              styleMask: [.titled], backing: .buffered, defer: false)
+        window.contentView = NSHostingView(rootView: view)
+        defer { window.contentView = nil }
+        try await settle(window)
+        let draft = "retained-row-draft"
+        draft.withCString { ghostty_surface_text(surfaces[0], $0, UInt(draft.utf8.count)) }
+
+        for index in [1, 0] {
+            try view.inspect().find(viewWithAccessibilityIdentifier: "session-row-row-\(index)").button().tap()
+            try await settle(window)
+            #expect(outer.focusedPath == paths[index])
+            #expect(window.firstResponder === terminals[index * 2])
+            #expect(terminals[index * 2].window === window)
+            #expect(terminals[(1 - index) * 2].window == nil)
+            #expect(paths.map { registry.workspace(for: $0).multiplexer.layout } == layouts)
+        }
+
+        let firstSlot = outer.focusedSlotId
+        try view.inspect().find(viewWithAccessibilityLabel: "Split worktrees right").button().tap()
+        outer.select(paths[1])
+        try await settle(window)
+        #expect(terminals.allSatisfy { $0.window === window })
+        #expect(paths.map { registry.workspace(for: $0).multiplexer.layout } == layouts)
+        try view.inspect().find(viewWithAccessibilityIdentifier: "session-row-row-0").button().tap()
+        try await settle(window)
+        #expect(outer.layout.slots.count == 2)
+        #expect(outer.focusedSlotId == firstSlot)
+        #expect(window.firstResponder === terminals[0])
+        outer.close(firstSlot)
+        try await settle(window)
+        try view.inspect().find(viewWithAccessibilityIdentifier: "session-row-row-0").button().tap()
+        try await settle(window)
+        #expect(window.firstResponder === terminals[0])
+        #expect(paths.map { registry.workspace(for: $0).multiplexer.layout } == layouts)
+
+        let store = registry.workspace(for: repo).sessionStore(repoPath: repo, query: query)
+        #expect(store.sessions.allSatisfy { $0.state == .live })
+        for (index, surface) in surfaces.enumerated() {
+            #expect(terminals[index].surface == surface)
+            let reply = index == 0 ? draft : "companion-\(index)-responds"
+            let input = index == 0 ? "\n" : reply + "\n"
+            input.withCString { ghostty_surface_text(surface, $0, UInt(input.utf8.count)) }
+            let deadline = ContinuousClock.now + .seconds(3)
+            while _terminalText(surface).components(separatedBy: reply).count < 3, ContinuousClock.now < deadline {
+                try await Task.sleep(for: .milliseconds(20))
+            }
+            #expect(_terminalText(surface).components(separatedBy: reply).count == 3)
+        }
+    }
+
     @Test("Shell-attached Sessions can complete without closing their terminal", .serialized,
           arguments: [false, true])
     func shellSessionCompletion(rejected: Bool) async throws {

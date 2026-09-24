@@ -1,5 +1,89 @@
 # Unified navigation slice review — 2026-09-23
 
+Latest: [iteration 10 integrated review](review-slice-iteration10.md). Session-row
+return and nested checkout retention now have a passing mounted real-PTY proof.
+The fresh configured attempt stopped before interaction at this runner's
+Accessibility permission boundary. Publication remains withheld; earlier
+configured launch/completion and viewport receipts retain their stated scope.
+
+## Iteration 9 review — viewport proof confirmed; exact focus unavailable
+
+The slice advances the accepted design. Inspected all three configured viewport
+captures: bottom rows 168–200 change to rows 1–33, and rows 1–33 remain after
+list/details/overview/terminal return. This closes the bounded scroll claim.
+The fresh Session-row/nested-layout attempt stopped before any UI action because
+AX focus belonged to Warp. No production correction was established by that
+observation; publication remains withheld for the remaining configured claims.
+
+Read the Task, current slice and integration amendment. Recovered the complete
+Task diff at HEAD `31d34f272` in `/tmp/loo291-review9-diff.json`: `truncated:
+false`, 987,846 patch characters, 188 sections. Compared with iteration 8:
+153 unchanged, 35 changed/new, none removed; all changed sections were evidence
+or guidance. A concurrent native-test addition followed that snapshot, described
+below. The later CLI diff hit its size limit; `/tmp/loo291-review9-tracked.patch`
+contains the unrestricted tracked diff, with this review's new probe/receipts
+under `configured-ui-evidence/iteration9/review/` inspected separately.
+
+| Claim | Planned behavior | Implemented behavior | Proof | Result |
+|---|---|---|---|---|
+| Terminal viewport | Navigation preserves a genuinely scrolled terminal | Same history rows return after list/details/overview | Inspected iteration 9 bottom/scrolled/returned screenshots and executed wheel receipt | pass, bounded configured path |
+| Task conversation and completion | Fresh scoped launch, retained exact draft, usable original shell after Complete | Existing integrated provider receipt establishes these behaviors | Iteration 8 exact provider text/client and completion receipts; unchanged production | pass at recorded scope |
+| Session-row return | Focus the existing attached shell without replacement | Source resolves terminal attachment before selecting its checkout and pane | Fresh configured attempt stopped at exact foreground check | gap, no row interaction reached |
+| Nested checkout layouts | Independent inner layouts and processes survive switching/hiding | Existing separate layout owners preserve local state | Prior local proofs; concurrent native test remains under development | gap for configured interaction |
+| One authority | Shared reads/identity and window-local surfaces | One Podium caller per inventory read, one root registry; removed types absent | Negative searches, attachment/selection/completion source trace | pass; LOO-284 contract still absent |
+| Remaining scope and budgets | Other scopes/destinations, editing, shared actions, external trials and measured budgets | Not established by this viewport trial | Current shared contract and explicit design obligations | gap |
+
+### Fresh configured boundary
+
+Verified the disposable bundle signature and executable hash
+`75fdef9e4d35fed6deeb01c3995bddcd5c7e0c6e5b7f88ce733aff01c4ae1abe`.
+The fresh single-use probe selected the same installed development CLI/Home and
+actual repository, without fixture/capture mode or installed-app replacement.
+AX trust was true; AXWindows succeeded with one window. Owned app PID 12244
+reported active before and after its activation request, but system-wide AX
+reported focused PID 33576, confirmed as `/Applications/Warp.app/Contents/MacOS/stable`.
+The console had no locked-screen flag and login was complete. Window raise
+returned -25205. These observations do not establish the cause of the activation
+disagreement or justify another permission request.
+
+The strengthened precondition stopped before terminal creation, Task selection
+or provider launch. No input was sent, and no repeated activation trial followed.
+Owned app 12244 exited. Before/after shared reads retain the identical three
+Session IDs; LOO-291 remains incomplete at `2026-09-24T04:21:47Z`. This population
+differs from the preceding iteration's one-Session receipt and is not a controlled
+timing series. [Probe](configured-ui-evidence/iteration9/review/provider-probe.swift),
+[log](configured-ui-evidence/iteration9/review/provider.log),
+[final receipt](configured-ui-evidence/iteration9/review/receipt.json).
+
+### Source and verification disposition
+
+Traced native wheel input to Ghostty's existing scroll API and retained view;
+Session selection to verified shell attachment, checkout selection and native
+focus; and completion to shared actions and non-undoable pane reconciliation.
+No second viewport, inventory, writer or terminal owner appeared. Negative
+searches retain one desktop `query.sessions`/`query.roadmap` caller and one root
+registry, with all previously removed navigation/scope types absent. Current
+main's SessionRecord still lacks LOO-284 legal actions/display path.
+
+Another writer added `sessionRowRestoresWorktree` during this review. Its source
+uses real native surfaces with fixture Sessions and ViewInspector actions. It
+is not configured-provider evidence, and no passing result is claimed here.
+Preserved it without edits or a competing build. The production completion hash
+still matches `adaae303…257fc8d`; the test file now differs from the iteration 8
+receipt. That earlier two-test/four-case receipt applies to its recorded source,
+not the concurrent extension. No new unit test or aggregate gate ran in this
+review. The historical resource-gate failure was not retried.
+
+Next proof requires an owned Loopflow window with **exact system AX focus** before
+launch or keyboard input. Use the signed disposable build, allocate fresh
+receipts, then exercise the exact newly created Session row and two checkout
+groups; verify all original children respond after return. Do not substitute a
+user-owned Session or replay a completed identity. Preserve the successful scroll
+and provider receipts. Other destinations/scopes and full-Task trials remain
+separate obligations. No PR publication, landing, Task completion or PM write
+occurred: the skill's “When all applicable `Done when` claims hold” condition is
+not met by the outstanding configured row/nested-layout proof.
+
 ## Iteration 8 review — integrated provider path passes
 
 The slice advances the accepted design. **Integrated New conversation, exact

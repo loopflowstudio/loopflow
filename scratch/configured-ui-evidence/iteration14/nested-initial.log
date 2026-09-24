@@ -1,0 +1,8 @@
+observed_at 2026-09-24T14:15:35Z
+Owned app PID 36402
+AX trust true active false
+PASS Exact runner trusted
+PASS One owned accessible window
+PASS Press All work
+FAIL Failure(message: "Missing sessions-new-shell")
+Owned app termination requested true

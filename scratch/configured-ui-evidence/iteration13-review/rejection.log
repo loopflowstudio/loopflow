@@ -1,0 +1,30 @@
+observed_at 2026-09-24T14:07:44Z
+Owned app PID 55642
+AX trust true active false
+AXWindows 0 count 1
+PASS Exact runner trusted
+Focused application status -25204
+System focused PID (diagnostic only) -1 owned 55642
+PASS One owned accessible window
+TIMING launch_to_task_ax_ms 3869.720666669309
+PASS Select exact Task
+PASS Press Edit directive
+TIMING edit_to_editor_ax_ms 1059.9062498658895
+Editor role AXTextArea
+PASS Editor loads exact authoritative directive
+PASS Set owned local editor draft
+PASS Exact draft visible before Cancel
+PASS Press Save directive
+PASS Visible transport rejection
+PASS Exact draft retained after rejection
+PASS Exact draft survives polling interval
+PASS Press Save directive
+PASS Retry preserves exact rejected draft
+PASS Shared directive unchanged after rejected saves
+PASS Press Cancel
+PASS Cancel dismisses editor
+PASS Press Edit directive
+PASS Reopening discards cancelled draft
+PASS Press Cancel
+PASS Shared directive unchanged after Cancel
+Owned app termination requested true

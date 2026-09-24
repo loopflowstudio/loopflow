@@ -1,5 +1,51 @@
 # One workspace for work and Sessions
 
+## Latest human direction — 2026-09-24
+
+The human finds the current app confusing and wants to strip the interface back,
+then design elements together one by one. This is not a customizable widget
+canvas. They requested performance testing and one first-pass optimization Task
+per relevant area, preceded by reviewing the previous Product chapter's KRs and
+planned work. [Canvas chapter review](canvas-chapter-review.md) records that review,
+the selected hierarchy and its implementation boundary. This direction
+supersedes continuing the current full-interface demo as the next design step;
+it does not erase the implementation, evidence, or historical KR verdicts below.
+
+The human then selected the first element: **one repo → Wave → Project → Task →
+Session hierarchy**, appearing in one place and able to compress away unnecessary
+levels, including a flat list of Sessions and singleton Project levels. This
+supersedes the earlier ban on Session children and the competing Work/Session
+navigation presentations. The linked canvas design records the compression
+rules and remaining interaction choices. Shared identity and terminal ownership
+remain unchanged by presentation compression.
+
+The later **Launch decision — LOO-291** in that document now governs the next
+slice: implement the native outline, Task Monitor in the existing multiplexer,
+and both repeatable performance measurements together here. Compact first, one
+presentation menu, and initial Task Monitor content are implementation defaults;
+they do not require another design approval. Earlier A/D, cardinality and study-only
+next-step proposals below are historical where they conflict with that decision.
+
+Within a selected Task, the human wants two content views: **Sessions** restores
+the existing embedded Ghostty workspace; **Monitor** initially shows only that
+Task's current active Runs. Run history, throughput and richer monitoring follow
+later. Session leaves open Sessions at their exact identity. Both views share
+the same Task selection and preserve terminals when switching. Reconcile later
+Watch features with LOO-293 rather than adding another competing Task destination.
+
+Further clarification: Sessions and Monitor belong in the **same existing
+multiplexer**, and may be visible together. A switch is acceptable initially
+but must select/reveal retained pane content, not establish independent workspace
+layouts. Extend the existing pane-content representation for a Task-bound Monitor
+and retain the existing split/focus/zoom and native surface owners.
+
+Define performance measurement up front for two high-level experiences:
+**hierarchy navigation** and **Task workspace opening/switching**. Implement
+repeatable scenarios and rendered/usable endpoints alongside the first native
+increment, retain baselines and regression reports, and plan one simple
+first-pass optimization Task for each. The canvas design contains the measurement
+contract; instrumentation and baseline results are not yet established.
+
 Task handoff — 2026-09-23. The human requested attaching this design to existing LOO-291 and advancing the Task. The agreed direction is compact Wave/Project grouping, both A/D presentations, and optional bounded conversations. Implementation choices called provisional below may be resolved within that direction; the external proving workflow remains human-selected.
 
 ## What to build
@@ -130,7 +176,7 @@ Replace the root switch and parallel navigation with the unified tree, including
 Additive series. The keystone is an indivisible navigation replacement shipping as one PR; its internal slices are:
 
 1. Join shared Work/Session readings into the compact unified list and A/D workspace presentations; keep autonomous and upcoming Tasks visible, integrate existing detail/Session access, preserve live terminals, and prove the behavior. Reconcile current main with `lf-new` and LOO-284 before selecting shared API changes; do not build parallel ownership or lifecycle logic.
-2. **This slice:** finish configured Session-row return and nested worktree proof for the committed lf-new scope-aware entry and workspace. Integrated completion/rejection, configured Task conversation, and configured terminal viewport retention have receipts; retain navigation, native-title and appearance fixes. Optional bounded conversation lifecycle remains follow-up design through shared APIs; preserve every existing human boundary.
+2. **This slice:** implement the [canvas launch decision](canvas-chapter-review.md): one native compressible outline, exact Task-active-Run Monitor content in the existing multiplexer, and the two repeatable native experience measurements. The [outline study](hierarchy-study.html) is design evidence only. Replace the competing navigation controls while preserving contextual details/actions and retained terminals. Establish shared Run attribution/liveness and small/large measurement populations before optimization. Keep the external edit/trials, configured human actions/input, published budgets and final human demo as explicit acceptance obligations. Do not launch a second worker or file the deferred optimization Tasks.
 3. Remove superseded navigation, integrate remaining inspectors, and prove configured behavior. No runtime/cardinality or terminal-ownership shortcuts count as completion.
 
 Follow-up: Task-directive editing through the existing PM API, preserving unsaved text on rejected writes and displaying authoritative refreshed text after success. This remains part of LOO-291's requested outcome; shipping the keystone alone does not complete that Task. External-work trials and long-lived-registry performance measurement remain its full proof obligations. Do not create follow-up Tasks during design.
@@ -386,3 +432,141 @@ cached activation signals disagreed. All nine owned app processes exited, no
 Session was created or changed, and LOO-291 remains incomplete. See
 `iteration9-proof.md` for failed attempts and remaining scope. No timing budget,
 external-work trial, gate, publication or Task completion is established.
+
+Iteration 10 — Session-row and nested workspace proof: the preceding review's
+mounted test passes with two fixture Sessions, four real PTYs, both split levels,
+hidden-slot return, exact draft and responding children. Current source matches
+that receipt. A fresh configured trial launched an exact proof-owned Task Session
+with verified local attachment, then stopped at the probe's already-visible-list
+assumption before row selection. The corrected fresh attempt stopped before UI
+actions at exact AX focus despite granted Accessibility. The first disposable
+Session was completed through the CLI; both apps and its provider exited. No
+production/test edits or reruns were warranted. The configured row/nested gap,
+manual procedure and scoped observations are in `iteration10-implement.md`;
+full Task proof obligations remain unchanged.
+
+Iteration 11 — Active evidence correction: preserved the human's explicit
+checkout-activity membership and replaced the Task row's ambiguous Running label
+with Provider in checkout. One planning-completeness check now governs Wave
+visibility, count certainty and confirmed Active emptiness. The regression fails
+before correction and passes both with and without recorded out-of-plan Work;
+it clicks the retained Wave heading and reads its stranded Task in details.
+Three focused tests/four cases pass. No configured app was launched or changed;
+the human demo and full Task obligations remain open. See `iteration11-implement.md`.
+
+## Slice ledger — directive editor, 2026-09-24
+
+Added Edit directive to the existing Task inspector, using the shared PM update
+operation and Podium's authoritative roadmap refresh. A captured target keeps
+the edit on its original Task; a read generation prevents pre-save polling from
+restoring old planning. Failed saves retain the editor draft; accepted writes
+with failed reads stay explicit. Three focused tests (four cases) pass for the
+operation, refreshed rendering and polling race. Mounted editor interaction is
+not established by those tests. See [iteration12-proof.md](iteration12-proof.md).
+
+The fresh configured row/nested trial stopped before input at a locked desktop
+with system AX focus on loginwindow. No provider was launched or human Session
+changed. The editor's signed review build is separate from the ongoing demo.
+The authorized external edit round trip, other configured proofs, LOO-284 and
+full Task budget/trial obligations remain open. Nothing was published or completed.
+
+## Slice ledger — configured editor, 2026-09-24
+
+Iteration 13 closes the configured Cancel path: targeted Accessibility actions
+select LOO-291, open its editor, read the exact shared directive, enter a local
+draft, cancel, and reopen the original text. Shared planning stays unchanged.
+No production change, PM write or provider action was needed. The probe now
+traverses AXSheets and waits for asynchronous presentation. This path does not
+require global keyboard focus and does not prove provider input. Exact receipts,
+failed probe assumptions, owned-app cleanup and scoped observations are in
+[iteration13-proof.md](iteration13-proof.md). Save/rejection interaction, the
+authorized external edit, shared LOO-284 integration, configured nested workspace
+proof and full Task trials/budgets remain open. Nothing was published or completed.
+
+## Slice ledger — configured Session picker and nested workspace, 2026-09-24
+
+Iteration 14 adds stable Session accessibility IDs to the existing multiple-Session
+picker actions. A fresh signed configured trial selects only its owned provider,
+restores its existing pane from the other checkout, retains both two-pane groups
+and their four PTY children through details navigation, then completes the Session
+through UI while preserving the panes. The provider PID/birth receipt stays equal
+through navigation. Existing human Sessions remain untouched.
+
+[Iteration 14 evidence](iteration14-proof.md) records the exact identities, failed
+probe assumptions, build/source hashes and cleanup. Pane selection and retained
+PTY children do not prove keyboard focus, draft fidelity or shell responses.
+The editor's injected rejection proof from review 13 is also now recorded; a real
+authorized external edit is still open. Shared LOO-284 integration, external-work
+trials and published/measured budgets remain required. No publication or Task
+completion occurred.
+
+
+### Iteration 15 — shared Session actions and Work path (2026-09-24)
+
+Implemented the missing shared contract on this existing branch after comparing
+local main and LOO-284's unstarted snapshot. Rust projects action labels/help,
+unavailable reasons and stable Work ancestry; CLI and Swift consume them.
+Deleted Swift legality/replacement inference and its duplicate resolution-label
+enum. Ready is enforced before FlowStep client stop and again at settlement;
+Iterate's predecessor requirement uses the existing flow lookup. Local surface
+presence and prepared/error state remain separate.
+
+Four configured records agree through Rust output and production Swift DTOs;
+four-PTY nested selection and direct Session completion proofs pass. The fresh
+read-only app launch had a trusted runner and one window but did not expose the
+expected count control during its bounded observation. Keep that UI result
+unproven. Exact tests, review and limits are in
+[iteration15-shared-sessions.md](iteration15-shared-sessions.md). No provider or
+human Session was touched. Configured action/nested-input proof, external edit
+and trials, and measured budgets remain open; no publication or completion.
+
+### Iteration 16 — configured host diagnosis and live contract comparison (2026-09-24)
+
+A current disposable signed build reproduces the missing controls. The element
+returned in AXWindows is AXApplication equal to the root, so the earlier count
+of one does not establish an accessible window. Delaying inspection until after
+the launch callback does not correct it. A bounded direct host observation then
+establishes a locked console and system AX focus owned by loginwindow; the
+runner remains Accessibility trusted. No provider or Session was touched. Stop
+configured interaction until unlock; do not add production workarounds from this
+host result or infer the cause of older observations retrospectively.
+
+Fresh shared reads compare five Projects, 145 Tasks and four Sessions against
+production Swift values, including seven KRs and the exact Task-attributed
+Session join. All 154 records pass the documented field comparisons. This is
+one read-only population, not configured UI trials, an external edit, an all-kind
+Session action matrix, or a timing budget. A rerunnable read-only probe now exits
+before launch on the observed locked-host boundary. The current signed review
+build and exact resume command are in [iteration16-proof.md](iteration16-proof.md).
+No production edits, publication, landing or Task completion occurred. Configured
+controls/nested input, human-selected external trials/edit and budgets remain open.
+
+### Iteration 17 — one hierarchy interaction study (2026-09-24)
+
+The newer canvas amendment supplies the missing usability direction: one
+compressible repository → Wave → Project → Task → Session outline. It also
+specifies Task Sessions/Monitor content in the existing multiplexer and two
+performance measurement experiences. These supersede the preceding configured
+retention trial as the next design step; previous behavioral evidence remains.
+
+[Interactive study](hierarchy-study.html) uses one sample hierarchy and one
+presentation menu. Full structure, compact singleton Projects and flat Sessions
+share exact selection and mounted simulated drafts. Compact Project names remain
+accessible in their Wave row. Six Sessions cover two repositories, repeated names,
+repo/Wave conversations and unavailable ancestry; upcoming Tasks remain in the
+hierarchy. The content area is a simulation for checking selection, not a proposal
+for replacing Ghostty or the Task multiplexer.
+
+Browser interaction checks pass for all three presentations, separate same-name
+Session drafts, compressed Project access, folding, upcoming Tasks and unavailable
+ancestry. Compact and flat screenshots were visually inspected. Receipt and
+screenshots: `/tmp/loo291-hierarchy-study/`. No native or timing result follows.
+
+Review: the actual app still routes Task selection through Podium details and
+presents separate All work/list/terminal controls. The study removes those from
+its composition only. Native replacement must reshape these existing owners;
+shipping the HTML does not remove any app path. The presentation menu, default
+compression, and selected-content placement remain proposals for human review.
+The next native increment must include the canvas measurement contract and retain
+the existing terminal/multiplexer ownership. No production source, user client,
+PM Task, installed app, publication or Task completion changed in this pass.

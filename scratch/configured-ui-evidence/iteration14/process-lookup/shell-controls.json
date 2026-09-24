@@ -1,0 +1,224 @@
+[
+  {
+    "id" : "",
+    "label" : "",
+    "role" : "AXApplication",
+    "title" : "Loopflow Editor"
+  },
+  {
+    "id" : "SwiftUI.ModifiedContent<SwiftUI._ConditionalContent<SwiftUI.ModifiedContent<SwiftUI._ConditionalContent<SwiftUI.ModifiedContent<SwiftUI.ModifiedContent<SwiftUI.(unknown context at $1d0863774).SceneBridgeReader<SwiftUI.SubscriptionView<Combine.PassthroughSubject<Any, Swift.Never>, SwiftUI.ModifiedContent<SwiftUI.ModifiedContent<LoopflowMac.PodiumView, SwiftUI._EnvironmentKeyWritingModifier<Swift.Optional<SwiftUI.Color>>>, LoopflowMac.AppAppearance>>>, SwiftUI._FrameLayout>, SwiftUI._FlexFrameLayout>, SwiftUI.(unknown context at $1d0863774).SceneBridgeReader<SwiftUI.SubscriptionView<Combine.PassthroughSubject<Any, Swift.Never>, SwiftUI.ModifiedContent<SwiftUI.ModifiedContent<LoopflowMac.PodiumView, SwiftUI._EnvironmentKeyWritingModifier<Swift.Optional<SwiftUI.Color>>>, LoopflowMac.AppAppearance>>>>, SwiftUI._TaskModifier>, SwiftUI._ConditionalContent<SwiftUI.ModifiedContent<SwiftUI.ModifiedContent<SwiftUI.(unknown context at $1d0863774).SceneBridgeReader<SwiftUI.SubscriptionView<Combine.PassthroughSubject<Any, Swift.Never>, SwiftUI.ModifiedContent<SwiftUI.ModifiedContent<LoopflowMac.PodiumView, SwiftUI._EnvironmentKeyWritingModifier<Swift.Optional<SwiftUI.Color>>>, LoopflowMac.AppAppearance>>>, SwiftUI._FrameLayout>, SwiftUI._FlexFrameLayout>, SwiftUI.(unknown context at $1d0863774).SceneBridgeReader<SwiftUI.SubscriptionView<Combine.PassthroughSubject<Any, Swift.Never>, SwiftUI.ModifiedContent<SwiftUI.ModifiedContent<LoopflowMac.PodiumView, SwiftUI._EnvironmentKeyWritingModifier<Swift.Optional<SwiftUI.Color>>>, LoopflowMac.AppAppearance>>>>>, SwiftUI._TaskModifier>-1-AppWindow-1",
+    "label" : "",
+    "role" : "AXWindow",
+    "title" : "Loopflow Active"
+  },
+  {
+    "id" : "",
+    "label" : "",
+    "role" : "AXGroup",
+    "title" : ""
+  },
+  {
+    "id" : "podium",
+    "label" : "The Podium",
+    "role" : "AXGroup",
+    "title" : ""
+  },
+  {
+    "id" : "podium-bar",
+    "label" : "",
+    "role" : "AXGroup",
+    "title" : ""
+  },
+  {
+    "id" : "podium-repo-scope",
+    "label" : "Repository: loopflow",
+    "role" : "AXMenuButton",
+    "title" : ""
+  },
+  {
+    "id" : "podium-repo-scope",
+    "label" : "Repository: loopflow",
+    "role" : "AXMenuButton",
+    "title" : ""
+  },
+  {
+    "id" : "podium-repo-scope",
+    "label" : "Repository: loopflow",
+    "role" : "AXMenuButton",
+    "title" : ""
+  },
+  {
+    "id" : "podium-wave-summary",
+    "label" : "",
+    "role" : "AXStaticText",
+    "title" : ""
+  },
+  {
+    "id" : "podium-wave-summary",
+    "label" : "",
+    "role" : "AXStaticText",
+    "title" : ""
+  },
+  {
+    "id" : "podium-sessions",
+    "label" : "Sessions",
+    "role" : "AXButton",
+    "title" : ""
+  },
+  {
+    "id" : "podium-process-activity",
+    "label" : "Provider process activity",
+    "role" : "AXUnknown",
+    "title" : ""
+  },
+  {
+    "id" : "sessions-surface",
+    "label" : "All work",
+    "role" : "AXButton",
+    "title" : ""
+  },
+  {
+    "id" : "sessions-surface",
+    "label" : "Show work list",
+    "role" : "AXButton",
+    "title" : ""
+  },
+  {
+    "id" : "sessions-surface",
+    "label" : "",
+    "role" : "AXStaticText",
+    "title" : ""
+  },
+  {
+    "id" : "sessions-surface",
+    "label" : "New conversation · loopflow",
+    "role" : "AXButton",
+    "title" : ""
+  },
+  {
+    "id" : "sessions-surface",
+    "label" : "New terminal",
+    "role" : "AXButton",
+    "title" : ""
+  },
+  {
+    "id" : "sessions-surface",
+    "label" : "Move",
+    "role" : "AXMenuButton",
+    "title" : ""
+  },
+  {
+    "id" : "sessions-surface",
+    "label" : "loopflow",
+    "role" : "AXMenuButton",
+    "title" : ""
+  },
+  {
+    "id" : "sessions-surface",
+    "label" : "New terminal in worktree",
+    "role" : "AXButton",
+    "title" : ""
+  },
+  {
+    "id" : "sessions-surface",
+    "label" : "Split worktrees right",
+    "role" : "AXButton",
+    "title" : ""
+  },
+  {
+    "id" : "sessions-surface",
+    "label" : "Split worktrees down",
+    "role" : "AXButton",
+    "title" : ""
+  },
+  {
+    "id" : "sessions-surface",
+    "label" : "Hide worktree",
+    "role" : "AXButton",
+    "title" : ""
+  },
+  {
+    "id" : "sessions-surface",
+    "label" : "~\/src\/loopflow, active",
+    "role" : "AXGroup",
+    "title" : ""
+  },
+  {
+    "id" : "",
+    "label" : "",
+    "role" : "AXStaticText",
+    "title" : ""
+  },
+  {
+    "id" : "shell-command-selection-help",
+    "label" : "Shell command selection help",
+    "role" : "AXImage",
+    "title" : ""
+  },
+  {
+    "id" : "pane-split-right",
+    "label" : "Split right",
+    "role" : "AXButton",
+    "title" : ""
+  },
+  {
+    "id" : "pane-split-down",
+    "label" : "Split down",
+    "role" : "AXButton",
+    "title" : ""
+  },
+  {
+    "id" : "pane-close",
+    "label" : "Close view",
+    "role" : "AXButton",
+    "title" : ""
+  },
+  {
+    "id" : "pane-zoom",
+    "label" : "Zoom pane",
+    "role" : "AXButton",
+    "title" : ""
+  },
+  {
+    "id" : "",
+    "label" : "",
+    "role" : "AXButton",
+    "title" : ""
+  },
+  {
+    "id" : "",
+    "label" : "",
+    "role" : "AXButton",
+    "title" : ""
+  },
+  {
+    "id" : "",
+    "label" : "",
+    "role" : "AXGroup",
+    "title" : ""
+  },
+  {
+    "id" : "",
+    "label" : "",
+    "role" : "AXGroup",
+    "title" : ""
+  },
+  {
+    "id" : "",
+    "label" : "",
+    "role" : "AXButton",
+    "title" : ""
+  },
+  {
+    "id" : "",
+    "label" : "",
+    "role" : "AXStaticText",
+    "title" : ""
+  },
+  {
+    "id" : "",
+    "label" : "",
+    "role" : "AXMenuBar",
+    "title" : ""
+  }
+]

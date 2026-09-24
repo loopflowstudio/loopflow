@@ -1,0 +1,1140 @@
+[
+  {
+    "AXRole" : "AXApplication",
+    "AXTitle" : "Loopflow Shared Sessions"
+  },
+  {
+    "AXEnabled" : "1",
+    "AXRole" : "AXMenuBar"
+  },
+  {
+    "AXEnabled" : "1",
+    "AXRole" : "AXMenuBarItem",
+    "AXTitle" : "Apple"
+  },
+  {
+    "AXEnabled" : "1",
+    "AXRole" : "AXMenu"
+  },
+  {
+    "AXEnabled" : "1",
+    "AXIdentifier" : "_aboutThisMacRequested:",
+    "AXRole" : "AXMenuItem",
+    "AXTitle" : "About This Mac"
+  },
+  {
+    "AXEnabled" : "1",
+    "AXIdentifier" : "_systemInformationRequested:",
+    "AXRole" : "AXMenuItem",
+    "AXTitle" : "System Information"
+  },
+  {
+    "AXEnabled" : "0",
+    "AXRole" : "AXMenuItem",
+    "AXTitle" : ""
+  },
+  {
+    "AXEnabled" : "1",
+    "AXIdentifier" : "_systemSettingsRequested:",
+    "AXRole" : "AXMenuItem",
+    "AXTitle" : "System Settings…"
+  },
+  {
+    "AXEnabled" : "1",
+    "AXIdentifier" : "_appStoreRequested:",
+    "AXRole" : "AXMenuItem",
+    "AXTitle" : "App Store…, 11 updates"
+  },
+  {
+    "AXEnabled" : "0",
+    "AXRole" : "AXMenuItem",
+    "AXTitle" : ""
+  },
+  {
+    "AXEnabled" : "1",
+    "AXIdentifier" : "_recentsRequested:",
+    "AXRole" : "AXMenuItem",
+    "AXTitle" : "Recent Items"
+  },
+  {
+    "AXEnabled" : "1",
+    "AXRole" : "AXMenu"
+  },
+  {
+    "AXEnabled" : "0",
+    "AXRole" : "AXMenuItem",
+    "AXTitle" : "Applications"
+  },
+  {
+    "AXEnabled" : "1",
+    "AXIdentifier" : "_recentItemRequested:",
+    "AXRole" : "AXMenuItem",
+    "AXTitle" : "Discord"
+  },
+  {
+    "AXEnabled" : "1",
+    "AXIdentifier" : "_recentItemRequested:",
+    "AXRole" : "AXMenuItem",
+    "AXTitle" : "Show “Discord” in Finder"
+  },
+  {
+    "AXEnabled" : "1",
+    "AXIdentifier" : "_recentItemRequested:",
+    "AXRole" : "AXMenuItem",
+    "AXTitle" : "Google Chrome"
+  },
+  {
+    "AXEnabled" : "1",
+    "AXIdentifier" : "_recentItemRequested:",
+    "AXRole" : "AXMenuItem",
+    "AXTitle" : "Show “Google Chrome” in Finder"
+  },
+  {
+    "AXEnabled" : "1",
+    "AXIdentifier" : "_recentItemRequested:",
+    "AXRole" : "AXMenuItem",
+    "AXTitle" : "Loopflow Active"
+  },
+  {
+    "AXEnabled" : "1",
+    "AXIdentifier" : "_recentItemRequested:",
+    "AXRole" : "AXMenuItem",
+    "AXTitle" : "Show “Loopflow Active” in Finder"
+  },
+  {
+    "AXEnabled" : "1",
+    "AXIdentifier" : "_recentItemRequested:",
+    "AXRole" : "AXMenuItem",
+    "AXTitle" : "Loopflow Editor"
+  },
+  {
+    "AXEnabled" : "1",
+    "AXIdentifier" : "_recentItemRequested:",
+    "AXRole" : "AXMenuItem",
+    "AXTitle" : "Show “Loopflow Editor” in Finder"
+  },
+  {
+    "AXEnabled" : "1",
+    "AXIdentifier" : "_recentItemRequested:",
+    "AXRole" : "AXMenuItem",
+    "AXTitle" : "Loopflow Nested"
+  },
+  {
+    "AXEnabled" : "1",
+    "AXIdentifier" : "_recentItemRequested:",
+    "AXRole" : "AXMenuItem",
+    "AXTitle" : "Show “Loopflow Nested” in Finder"
+  },
+  {
+    "AXEnabled" : "1",
+    "AXIdentifier" : "_recentItemRequested:",
+    "AXRole" : "AXMenuItem",
+    "AXTitle" : "Loopflow Proof"
+  },
+  {
+    "AXEnabled" : "1",
+    "AXIdentifier" : "_recentItemRequested:",
+    "AXRole" : "AXMenuItem",
+    "AXTitle" : "Show “Loopflow Proof” in Finder"
+  },
+  {
+    "AXEnabled" : "1",
+    "AXIdentifier" : "_recentItemRequested:",
+    "AXRole" : "AXMenuItem",
+    "AXTitle" : "Loopflow Rejection"
+  },
+  {
+    "AXEnabled" : "1",
+    "AXIdentifier" : "_recentItemRequested:",
+    "AXRole" : "AXMenuItem",
+    "AXTitle" : "Show “Loopflow Rejection” in Finder"
+  },
+  {
+    "AXEnabled" : "1",
+    "AXIdentifier" : "_recentItemRequested:",
+    "AXRole" : "AXMenuItem",
+    "AXTitle" : "Loopflow Shared Sessions"
+  },
+  {
+    "AXEnabled" : "1",
+    "AXIdentifier" : "_recentItemRequested:",
+    "AXRole" : "AXMenuItem",
+    "AXTitle" : "Show “Loopflow Shared Sessions” in Finder"
+  },
+  {
+    "AXEnabled" : "1",
+    "AXIdentifier" : "_recentItemRequested:",
+    "AXRole" : "AXMenuItem",
+    "AXTitle" : "Loopflow Trial"
+  },
+  {
+    "AXEnabled" : "1",
+    "AXIdentifier" : "_recentItemRequested:",
+    "AXRole" : "AXMenuItem",
+    "AXTitle" : "Show “Loopflow Trial” in Finder"
+  },
+  {
+    "AXEnabled" : "1",
+    "AXIdentifier" : "_recentItemRequested:",
+    "AXRole" : "AXMenuItem",
+    "AXTitle" : "Xcode"
+  },
+  {
+    "AXEnabled" : "1",
+    "AXIdentifier" : "_recentItemRequested:",
+    "AXRole" : "AXMenuItem",
+    "AXTitle" : "Show “Xcode” in Finder"
+  },
+  {
+    "AXEnabled" : "0",
+    "AXRole" : "AXMenuItem",
+    "AXTitle" : ""
+  },
+  {
+    "AXEnabled" : "0",
+    "AXRole" : "AXMenuItem",
+    "AXTitle" : "Documents"
+  },
+  {
+    "AXEnabled" : "1",
+    "AXIdentifier" : "_recentItemRequested:",
+    "AXRole" : "AXMenuItem",
+    "AXTitle" : "cube"
+  },
+  {
+    "AXEnabled" : "1",
+    "AXIdentifier" : "_recentItemRequested:",
+    "AXRole" : "AXMenuItem",
+    "AXTitle" : "Show “cube” in Finder"
+  },
+  {
+    "AXEnabled" : "1",
+    "AXIdentifier" : "_recentItemRequested:",
+    "AXRole" : "AXMenuItem",
+    "AXTitle" : "etude.search-learning-architecture"
+  },
+  {
+    "AXEnabled" : "1",
+    "AXIdentifier" : "_recentItemRequested:",
+    "AXRole" : "AXMenuItem",
+    "AXTitle" : "Show “etude.search-learning-architecture” in Finder"
+  },
+  {
+    "AXEnabled" : "1",
+    "AXIdentifier" : "_recentItemRequested:",
+    "AXRole" : "AXMenuItem",
+    "AXTitle" : "kata"
+  },
+  {
+    "AXEnabled" : "1",
+    "AXIdentifier" : "_recentItemRequested:",
+    "AXRole" : "AXMenuItem",
+    "AXTitle" : "Show “kata” in Finder"
+  },
+  {
+    "AXEnabled" : "1",
+    "AXIdentifier" : "_recentItemRequested:",
+    "AXRole" : "AXMenuItem",
+    "AXTitle" : "loopflow"
+  },
+  {
+    "AXEnabled" : "1",
+    "AXIdentifier" : "_recentItemRequested:",
+    "AXRole" : "AXMenuItem",
+    "AXTitle" : "Show “loopflow” in Finder"
+  },
+  {
+    "AXEnabled" : "1",
+    "AXIdentifier" : "_recentItemRequested:",
+    "AXRole" : "AXMenuItem",
+    "AXTitle" : "main-view-variations.html"
+  },
+  {
+    "AXEnabled" : "1",
+    "AXIdentifier" : "_recentItemRequested:",
+    "AXRole" : "AXMenuItem",
+    "AXTitle" : "Show “main-view-variations.html” in Finder"
+  },
+  {
+    "AXEnabled" : "1",
+    "AXIdentifier" : "_recentItemRequested:",
+    "AXRole" : "AXMenuItem",
+    "AXTitle" : "review-slice.md"
+  },
+  {
+    "AXEnabled" : "1",
+    "AXIdentifier" : "_recentItemRequested:",
+    "AXRole" : "AXMenuItem",
+    "AXTitle" : "Show “review-slice.md” in Finder"
+  },
+  {
+    "AXEnabled" : "1",
+    "AXIdentifier" : "_recentItemRequested:",
+    "AXRole" : "AXMenuItem",
+    "AXTitle" : "roto"
+  },
+  {
+    "AXEnabled" : "1",
+    "AXIdentifier" : "_recentItemRequested:",
+    "AXRole" : "AXMenuItem",
+    "AXTitle" : "Show “roto” in Finder"
+  },
+  {
+    "AXEnabled" : "1",
+    "AXIdentifier" : "_recentItemRequested:",
+    "AXRole" : "AXMenuItem",
+    "AXTitle" : "roto-min-package-3"
+  },
+  {
+    "AXEnabled" : "1",
+    "AXIdentifier" : "_recentItemRequested:",
+    "AXRole" : "AXMenuItem",
+    "AXTitle" : "Show “roto-min-package-3” in Finder"
+  },
+  {
+    "AXEnabled" : "1",
+    "AXIdentifier" : "_recentItemRequested:",
+    "AXRole" : "AXMenuItem",
+    "AXTitle" : "samp-roto"
+  },
+  {
+    "AXEnabled" : "1",
+    "AXIdentifier" : "_recentItemRequested:",
+    "AXRole" : "AXMenuItem",
+    "AXTitle" : "Show “samp-roto” in Finder"
+  },
+  {
+    "AXEnabled" : "1",
+    "AXIdentifier" : "_recentItemRequested:",
+    "AXRole" : "AXMenuItem",
+    "AXTitle" : "search-learning-architecture-2.log"
+  },
+  {
+    "AXEnabled" : "1",
+    "AXIdentifier" : "_recentItemRequested:",
+    "AXRole" : "AXMenuItem",
+    "AXTitle" : "Show “search-learning-architecture-2.log” in Finder"
+  },
+  {
+    "AXEnabled" : "0",
+    "AXRole" : "AXMenuItem",
+    "AXTitle" : ""
+  },
+  {
+    "AXEnabled" : "0",
+    "AXRole" : "AXMenuItem",
+    "AXTitle" : "Servers"
+  },
+  {
+    "AXEnabled" : "1",
+    "AXIdentifier" : "_recentItemRequested:",
+    "AXRole" : "AXMenuItem",
+    "AXTitle" : "OrbStack"
+  },
+  {
+    "AXEnabled" : "0",
+    "AXRole" : "AXMenuItem",
+    "AXTitle" : ""
+  },
+  {
+    "AXEnabled" : "1",
+    "AXIdentifier" : "_clearRecentItemsRequested:",
+    "AXRole" : "AXMenuItem",
+    "AXTitle" : "Clear Menu"
+  },
+  {
+    "AXEnabled" : "0",
+    "AXRole" : "AXMenuItem",
+    "AXTitle" : ""
+  },
+  {
+    "AXEnabled" : "1",
+    "AXIdentifier" : "_forceQuitPanelRequested:",
+    "AXRole" : "AXMenuItem",
+    "AXTitle" : "Force Quit…"
+  },
+  {
+    "AXEnabled" : "1",
+    "AXIdentifier" : "_forceQuitRequested:",
+    "AXRole" : "AXMenuItem",
+    "AXTitle" : "Force Quit Loopflow Shared Sessions"
+  },
+  {
+    "AXEnabled" : "0",
+    "AXRole" : "AXMenuItem",
+    "AXTitle" : ""
+  },
+  {
+    "AXEnabled" : "1",
+    "AXIdentifier" : "_sleepRequested:",
+    "AXRole" : "AXMenuItem",
+    "AXTitle" : "Sleep"
+  },
+  {
+    "AXEnabled" : "1",
+    "AXIdentifier" : "_restartRequested:",
+    "AXRole" : "AXMenuItem",
+    "AXTitle" : "Restart…"
+  },
+  {
+    "AXEnabled" : "1",
+    "AXIdentifier" : "_restartNowRequested:",
+    "AXRole" : "AXMenuItem",
+    "AXTitle" : "Restart"
+  },
+  {
+    "AXEnabled" : "1",
+    "AXIdentifier" : "_shutDownRequested:",
+    "AXRole" : "AXMenuItem",
+    "AXTitle" : "Shut Down…"
+  },
+  {
+    "AXEnabled" : "1",
+    "AXIdentifier" : "_shutDownNowRequested:",
+    "AXRole" : "AXMenuItem",
+    "AXTitle" : "Shut Down"
+  },
+  {
+    "AXEnabled" : "0",
+    "AXRole" : "AXMenuItem",
+    "AXTitle" : ""
+  },
+  {
+    "AXEnabled" : "1",
+    "AXIdentifier" : "_lockScreenRequested:",
+    "AXRole" : "AXMenuItem",
+    "AXTitle" : "Lock Screen"
+  },
+  {
+    "AXEnabled" : "1",
+    "AXIdentifier" : "_logOutRequested:",
+    "AXRole" : "AXMenuItem",
+    "AXTitle" : "Log Out Jack Heart…"
+  },
+  {
+    "AXEnabled" : "1",
+    "AXIdentifier" : "_logOutNowRequested:",
+    "AXRole" : "AXMenuItem",
+    "AXTitle" : "Log Out Jack Heart"
+  },
+  {
+    "AXEnabled" : "0",
+    "AXRole" : "AXMenuItem",
+    "AXTitle" : ""
+  },
+  {
+    "AXEnabled" : "1",
+    "AXRole" : "AXMenuBarItem",
+    "AXTitle" : "Loopflow Shared Sessions"
+  },
+  {
+    "AXEnabled" : "1",
+    "AXRole" : "AXMenu"
+  },
+  {
+    "AXEnabled" : "1",
+    "AXIdentifier" : "orderFrontStandardAboutPanel:",
+    "AXRole" : "AXMenuItem",
+    "AXTitle" : "About Loopflow Active"
+  },
+  {
+    "AXEnabled" : "0",
+    "AXRole" : "AXMenuItem",
+    "AXTitle" : ""
+  },
+  {
+    "AXEnabled" : "0",
+    "AXRole" : "AXMenuItem",
+    "AXTitle" : "Appearance"
+  },
+  {
+    "AXEnabled" : "0",
+    "AXRole" : "AXMenuItem"
+  },
+  {
+    "AXEnabled" : "1",
+    "AXIdentifier" : "menuAction:",
+    "AXRole" : "AXMenuItem",
+    "AXTitle" : "System"
+  },
+  {
+    "AXEnabled" : "1",
+    "AXIdentifier" : "menuAction:",
+    "AXRole" : "AXMenuItem",
+    "AXTitle" : "Light"
+  },
+  {
+    "AXEnabled" : "1",
+    "AXIdentifier" : "menuAction:",
+    "AXRole" : "AXMenuItem",
+    "AXTitle" : "Dark"
+  },
+  {
+    "AXEnabled" : "0",
+    "AXRole" : "AXMenuItem",
+    "AXTitle" : ""
+  },
+  {
+    "AXEnabled" : "1",
+    "AXRole" : "AXMenuItem",
+    "AXTitle" : "Services"
+  },
+  {
+    "AXEnabled" : "1",
+    "AXRole" : "AXMenu"
+  },
+  {
+    "AXEnabled" : "1",
+    "AXIdentifier" : "_processRequest:",
+    "AXRole" : "AXMenuItem",
+    "AXTitle" : "Activity Monitor"
+  },
+  {
+    "AXEnabled" : "1",
+    "AXIdentifier" : "_processRequest:",
+    "AXRole" : "AXMenuItem",
+    "AXTitle" : "Allocations & Leaks"
+  },
+  {
+    "AXEnabled" : "1",
+    "AXIdentifier" : "_processRequest:",
+    "AXRole" : "AXMenuItem",
+    "AXTitle" : "File Activity"
+  },
+  {
+    "AXEnabled" : "1",
+    "AXIdentifier" : "_processRequest:",
+    "AXRole" : "AXMenuItem",
+    "AXTitle" : "System Trace"
+  },
+  {
+    "AXEnabled" : "1",
+    "AXIdentifier" : "_processRequest:",
+    "AXRole" : "AXMenuItem",
+    "AXTitle" : "Time Profile Active Application"
+  },
+  {
+    "AXEnabled" : "1",
+    "AXIdentifier" : "_processRequest:",
+    "AXRole" : "AXMenuItem",
+    "AXTitle" : "Time Profile App Under Mouse"
+  },
+  {
+    "AXEnabled" : "1",
+    "AXIdentifier" : "_processRequest:",
+    "AXRole" : "AXMenuItem",
+    "AXTitle" : "Time Profile Entire System"
+  },
+  {
+    "AXEnabled" : "1",
+    "AXIdentifier" : "_processRequest:",
+    "AXRole" : "AXMenuItem",
+    "AXTitle" : "Toggle Instruments Recording"
+  },
+  {
+    "AXEnabled" : "1",
+    "AXIdentifier" : "_configureServicesMenu:",
+    "AXRole" : "AXMenuItem",
+    "AXTitle" : "Services Settings…"
+  },
+  {
+    "AXEnabled" : "0",
+    "AXRole" : "AXMenuItem",
+    "AXTitle" : ""
+  },
+  {
+    "AXEnabled" : "1",
+    "AXIdentifier" : "hide:",
+    "AXRole" : "AXMenuItem",
+    "AXTitle" : "Hide Loopflow Active"
+  },
+  {
+    "AXEnabled" : "1",
+    "AXIdentifier" : "hideOtherApplications:",
+    "AXRole" : "AXMenuItem",
+    "AXTitle" : "Hide Others"
+  },
+  {
+    "AXEnabled" : "0",
+    "AXIdentifier" : "unhideAllApplications:",
+    "AXRole" : "AXMenuItem",
+    "AXTitle" : "Show All"
+  },
+  {
+    "AXEnabled" : "0",
+    "AXRole" : "AXMenuItem",
+    "AXTitle" : ""
+  },
+  {
+    "AXEnabled" : "1",
+    "AXIdentifier" : "terminate:",
+    "AXRole" : "AXMenuItem",
+    "AXTitle" : "Quit Loopflow Active"
+  },
+  {
+    "AXEnabled" : "1",
+    "AXIdentifier" : "NSAlternateQuitMenuItem",
+    "AXRole" : "AXMenuItem",
+    "AXTitle" : "Quit and Keep Windows"
+  },
+  {
+    "AXEnabled" : "1",
+    "AXRole" : "AXMenuBarItem",
+    "AXTitle" : "File"
+  },
+  {
+    "AXEnabled" : "1",
+    "AXRole" : "AXMenu"
+  },
+  {
+    "AXEnabled" : "1",
+    "AXIdentifier" : "menuAction:",
+    "AXRole" : "AXMenuItem",
+    "AXTitle" : "New Window"
+  },
+  {
+    "AXEnabled" : "0",
+    "AXRole" : "AXMenuItem",
+    "AXTitle" : ""
+  },
+  {
+    "AXEnabled" : "0",
+    "AXRole" : "AXMenuItem",
+    "AXTitle" : ""
+  },
+  {
+    "AXEnabled" : "0",
+    "AXIdentifier" : "performClose:",
+    "AXRole" : "AXMenuItem",
+    "AXTitle" : "Close"
+  },
+  {
+    "AXEnabled" : "1",
+    "AXIdentifier" : "closeAll:",
+    "AXRole" : "AXMenuItem",
+    "AXTitle" : "Close All"
+  },
+  {
+    "AXEnabled" : "1",
+    "AXRole" : "AXMenuBarItem",
+    "AXTitle" : "Edit"
+  },
+  {
+    "AXEnabled" : "1",
+    "AXRole" : "AXMenu"
+  },
+  {
+    "AXEnabled" : "0",
+    "AXIdentifier" : "undo:",
+    "AXRole" : "AXMenuItem",
+    "AXTitle" : "Undo"
+  },
+  {
+    "AXEnabled" : "0",
+    "AXIdentifier" : "redo:",
+    "AXRole" : "AXMenuItem",
+    "AXTitle" : "Redo"
+  },
+  {
+    "AXEnabled" : "0",
+    "AXRole" : "AXMenuItem",
+    "AXTitle" : ""
+  },
+  {
+    "AXEnabled" : "0",
+    "AXIdentifier" : "cut:",
+    "AXRole" : "AXMenuItem",
+    "AXTitle" : "Cut"
+  },
+  {
+    "AXEnabled" : "0",
+    "AXIdentifier" : "copy:",
+    "AXRole" : "AXMenuItem",
+    "AXTitle" : "Copy"
+  },
+  {
+    "AXEnabled" : "0",
+    "AXIdentifier" : "paste:",
+    "AXRole" : "AXMenuItem",
+    "AXTitle" : "Paste"
+  },
+  {
+    "AXEnabled" : "0",
+    "AXIdentifier" : "delete:",
+    "AXRole" : "AXMenuItem",
+    "AXTitle" : "Delete"
+  },
+  {
+    "AXEnabled" : "0",
+    "AXIdentifier" : "selectAll:",
+    "AXRole" : "AXMenuItem",
+    "AXTitle" : "Select All"
+  },
+  {
+    "AXEnabled" : "0",
+    "AXRole" : "AXMenuItem",
+    "AXTitle" : ""
+  },
+  {
+    "AXEnabled" : "1",
+    "AXIdentifier" : "__NSTextViewContextSubmenuIdentifierWritingTools",
+    "AXRole" : "AXMenuItem",
+    "AXTitle" : "Writing Tools"
+  },
+  {
+    "AXEnabled" : "1",
+    "AXRole" : "AXMenu"
+  },
+  {
+    "AXEnabled" : "0",
+    "AXIdentifier" : "showWritingTools:",
+    "AXRole" : "AXMenuItem",
+    "AXTitle" : "Show Writing Tools"
+  },
+  {
+    "AXEnabled" : "0",
+    "AXRole" : "AXMenuItem",
+    "AXTitle" : ""
+  },
+  {
+    "AXEnabled" : "0",
+    "AXIdentifier" : "showWritingTools:",
+    "AXRole" : "AXMenuItem",
+    "AXTitle" : "Proofread"
+  },
+  {
+    "AXEnabled" : "0",
+    "AXIdentifier" : "showWritingTools:",
+    "AXRole" : "AXMenuItem",
+    "AXTitle" : "Rewrite"
+  },
+  {
+    "AXEnabled" : "0",
+    "AXRole" : "AXMenuItem",
+    "AXTitle" : ""
+  },
+  {
+    "AXEnabled" : "0",
+    "AXIdentifier" : "showWritingTools:",
+    "AXRole" : "AXMenuItem",
+    "AXTitle" : "Make Friendly"
+  },
+  {
+    "AXEnabled" : "0",
+    "AXIdentifier" : "showWritingTools:",
+    "AXRole" : "AXMenuItem",
+    "AXTitle" : "Make Professional"
+  },
+  {
+    "AXEnabled" : "0",
+    "AXIdentifier" : "showWritingTools:",
+    "AXRole" : "AXMenuItem",
+    "AXTitle" : "Make Concise"
+  },
+  {
+    "AXEnabled" : "0",
+    "AXRole" : "AXMenuItem",
+    "AXTitle" : ""
+  },
+  {
+    "AXEnabled" : "0",
+    "AXIdentifier" : "showWritingTools:",
+    "AXRole" : "AXMenuItem",
+    "AXTitle" : "Summarize"
+  },
+  {
+    "AXEnabled" : "0",
+    "AXIdentifier" : "showWritingTools:",
+    "AXRole" : "AXMenuItem",
+    "AXTitle" : "Create Key Points"
+  },
+  {
+    "AXEnabled" : "0",
+    "AXIdentifier" : "showWritingTools:",
+    "AXRole" : "AXMenuItem",
+    "AXTitle" : "Make List"
+  },
+  {
+    "AXEnabled" : "0",
+    "AXIdentifier" : "showWritingTools:",
+    "AXRole" : "AXMenuItem",
+    "AXTitle" : "Make Table"
+  },
+  {
+    "AXEnabled" : "0",
+    "AXRole" : "AXMenuItem",
+    "AXTitle" : ""
+  },
+  {
+    "AXEnabled" : "0",
+    "AXIdentifier" : "showWritingTools:",
+    "AXRole" : "AXMenuItem",
+    "AXTitle" : "Compose…"
+  },
+  {
+    "AXEnabled" : "1",
+    "AXIdentifier" : "_NSMenuItemAutoFillIdentifier",
+    "AXRole" : "AXMenuItem",
+    "AXTitle" : "AutoFill"
+  },
+  {
+    "AXEnabled" : "1",
+    "AXRole" : "AXMenu"
+  },
+  {
+    "AXEnabled" : "0",
+    "AXIdentifier" : "_handleInsertFromContactsCommand:",
+    "AXRole" : "AXMenuItem",
+    "AXTitle" : "Contact…"
+  },
+  {
+    "AXEnabled" : "0",
+    "AXIdentifier" : "_handleInsertFromPasswordsCommand:",
+    "AXRole" : "AXMenuItem",
+    "AXTitle" : "Passwords…"
+  },
+  {
+    "AXEnabled" : "0",
+    "AXIdentifier" : "_handleInsertFromCreditCardsCommand:",
+    "AXRole" : "AXMenuItem",
+    "AXTitle" : "Credit Card…"
+  },
+  {
+    "AXEnabled" : "0",
+    "AXIdentifier" : "startDictation:",
+    "AXRole" : "AXMenuItem",
+    "AXTitle" : "Start Dictation"
+  },
+  {
+    "AXEnabled" : "1",
+    "AXIdentifier" : "orderFrontCharacterPalette:",
+    "AXRole" : "AXMenuItem",
+    "AXTitle" : "Emoji & Symbols"
+  },
+  {
+    "AXEnabled" : "1",
+    "AXRole" : "AXMenuBarItem",
+    "AXTitle" : "View"
+  },
+  {
+    "AXEnabled" : "1",
+    "AXRole" : "AXMenu"
+  },
+  {
+    "AXEnabled" : "0",
+    "AXIdentifier" : "toggleFullScreen:",
+    "AXRole" : "AXMenuItem",
+    "AXTitle" : "Enter Full Screen"
+  },
+  {
+    "AXEnabled" : "1",
+    "AXRole" : "AXMenuBarItem",
+    "AXTitle" : "Go"
+  },
+  {
+    "AXEnabled" : "1",
+    "AXRole" : "AXMenu"
+  },
+  {
+    "AXEnabled" : "1",
+    "AXIdentifier" : "menuAction:",
+    "AXRole" : "AXMenuItem",
+    "AXTitle" : "Portfolio"
+  },
+  {
+    "AXEnabled" : "1",
+    "AXIdentifier" : "menuAction:",
+    "AXRole" : "AXMenuItem",
+    "AXTitle" : "Telemetry"
+  },
+  {
+    "AXEnabled" : "1",
+    "AXIdentifier" : "menuAction:",
+    "AXRole" : "AXMenuItem",
+    "AXTitle" : "Open Repo…"
+  },
+  {
+    "AXEnabled" : "1",
+    "AXRole" : "AXMenuBarItem",
+    "AXTitle" : "Window"
+  },
+  {
+    "AXEnabled" : "1",
+    "AXRole" : "AXMenu"
+  },
+  {
+    "AXEnabled" : "0",
+    "AXIdentifier" : "performMiniaturize:",
+    "AXRole" : "AXMenuItem",
+    "AXTitle" : "Minimize"
+  },
+  {
+    "AXEnabled" : "1",
+    "AXIdentifier" : "miniaturizeAll:",
+    "AXRole" : "AXMenuItem",
+    "AXTitle" : "Minimize All"
+  },
+  {
+    "AXEnabled" : "0",
+    "AXIdentifier" : "performZoom:",
+    "AXRole" : "AXMenuItem",
+    "AXTitle" : "Zoom"
+  },
+  {
+    "AXEnabled" : "1",
+    "AXIdentifier" : "zoomAll:",
+    "AXRole" : "AXMenuItem",
+    "AXTitle" : "Zoom All"
+  },
+  {
+    "AXEnabled" : "0",
+    "AXIdentifier" : "_zoomFill:",
+    "AXRole" : "AXMenuItem",
+    "AXTitle" : "Fill"
+  },
+  {
+    "AXEnabled" : "0",
+    "AXIdentifier" : "_zoomCenter:",
+    "AXRole" : "AXMenuItem",
+    "AXTitle" : "Center"
+  },
+  {
+    "AXEnabled" : "0",
+    "AXRole" : "AXMenuItem",
+    "AXTitle" : ""
+  },
+  {
+    "AXEnabled" : "1",
+    "AXRole" : "AXMenuItem",
+    "AXTitle" : "Move & Resize"
+  },
+  {
+    "AXEnabled" : "1",
+    "AXRole" : "AXMenu"
+  },
+  {
+    "AXEnabled" : "0",
+    "AXRole" : "AXMenuItem",
+    "AXTitle" : "Halves"
+  },
+  {
+    "AXEnabled" : "0",
+    "AXIdentifier" : "_zoomLeft:",
+    "AXRole" : "AXMenuItem",
+    "AXTitle" : "Left"
+  },
+  {
+    "AXEnabled" : "0",
+    "AXIdentifier" : "_zoomRight:",
+    "AXRole" : "AXMenuItem",
+    "AXTitle" : "Right"
+  },
+  {
+    "AXEnabled" : "0",
+    "AXIdentifier" : "_zoomTop:",
+    "AXRole" : "AXMenuItem",
+    "AXTitle" : "Top"
+  },
+  {
+    "AXEnabled" : "0",
+    "AXIdentifier" : "_zoomBottom:",
+    "AXRole" : "AXMenuItem",
+    "AXTitle" : "Bottom"
+  },
+  {
+    "AXEnabled" : "0",
+    "AXRole" : "AXMenuItem",
+    "AXTitle" : ""
+  },
+  {
+    "AXEnabled" : "0",
+    "AXRole" : "AXMenuItem",
+    "AXTitle" : "Quarters"
+  },
+  {
+    "AXEnabled" : "0",
+    "AXIdentifier" : "_zoomTopLeft:",
+    "AXRole" : "AXMenuItem",
+    "AXTitle" : "Top Left"
+  },
+  {
+    "AXEnabled" : "0",
+    "AXIdentifier" : "_zoomTopRight:",
+    "AXRole" : "AXMenuItem",
+    "AXTitle" : "Top Right"
+  },
+  {
+    "AXEnabled" : "0",
+    "AXIdentifier" : "_zoomBottomLeft:",
+    "AXRole" : "AXMenuItem",
+    "AXTitle" : "Bottom Left"
+  },
+  {
+    "AXEnabled" : "0",
+    "AXIdentifier" : "_zoomBottomRight:",
+    "AXRole" : "AXMenuItem",
+    "AXTitle" : "Bottom Right"
+  },
+  {
+    "AXEnabled" : "0",
+    "AXRole" : "AXMenuItem",
+    "AXTitle" : ""
+  },
+  {
+    "AXEnabled" : "0",
+    "AXRole" : "AXMenuItem",
+    "AXTitle" : "Arrange"
+  },
+  {
+    "AXEnabled" : "0",
+    "AXIdentifier" : "_zoomLeftAndRight:",
+    "AXRole" : "AXMenuItem",
+    "AXTitle" : "Left & Right"
+  },
+  {
+    "AXEnabled" : "0",
+    "AXIdentifier" : "_zoomLeftThreeUp:",
+    "AXRole" : "AXMenuItem",
+    "AXTitle" : "Left & Quarters"
+  },
+  {
+    "AXEnabled" : "0",
+    "AXIdentifier" : "_zoomRightAndLeft:",
+    "AXRole" : "AXMenuItem",
+    "AXTitle" : "Right & Left"
+  },
+  {
+    "AXEnabled" : "0",
+    "AXIdentifier" : "_zoomRightThreeUp:",
+    "AXRole" : "AXMenuItem",
+    "AXTitle" : "Right & Quarters"
+  },
+  {
+    "AXEnabled" : "0",
+    "AXIdentifier" : "_zoomTopAndBottom:",
+    "AXRole" : "AXMenuItem",
+    "AXTitle" : "Top & Bottom"
+  },
+  {
+    "AXEnabled" : "0",
+    "AXIdentifier" : "_zoomTopThreeUp:",
+    "AXRole" : "AXMenuItem",
+    "AXTitle" : "Top & Quarters"
+  },
+  {
+    "AXEnabled" : "0",
+    "AXIdentifier" : "_zoomBottomAndTop:",
+    "AXRole" : "AXMenuItem",
+    "AXTitle" : "Bottom & Top"
+  },
+  {
+    "AXEnabled" : "0",
+    "AXIdentifier" : "_zoomBottomThreeUp:",
+    "AXRole" : "AXMenuItem",
+    "AXTitle" : "Bottom & Quarters"
+  },
+  {
+    "AXEnabled" : "0",
+    "AXIdentifier" : "_zoomQuarters:",
+    "AXRole" : "AXMenuItem",
+    "AXTitle" : "Quarters"
+  },
+  {
+    "AXEnabled" : "0",
+    "AXRole" : "AXMenuItem",
+    "AXTitle" : ""
+  },
+  {
+    "AXEnabled" : "0",
+    "AXIdentifier" : "_zoomUntile:",
+    "AXRole" : "AXMenuItem",
+    "AXTitle" : "Return to Previous Size"
+  },
+  {
+    "AXEnabled" : "0",
+    "AXRole" : "AXMenuItem",
+    "AXTitle" : "Full Screen Tile"
+  },
+  {
+    "AXEnabled" : "0",
+    "AXRole" : "AXMenuItem",
+    "AXTitle" : ""
+  },
+  {
+    "AXEnabled" : "0",
+    "AXIdentifier" : "_removeWindowFromStageManagerSet:",
+    "AXRole" : "AXMenuItem",
+    "AXTitle" : "Remove Window from Set"
+  },
+  {
+    "AXEnabled" : "0",
+    "AXRole" : "AXMenuItem",
+    "AXTitle" : ""
+  },
+  {
+    "AXEnabled" : "1",
+    "AXIdentifier" : "menuAction:",
+    "AXRole" : "AXMenuItem",
+    "AXTitle" : "Portfolio"
+  },
+  {
+    "AXEnabled" : "1",
+    "AXIdentifier" : "menuAction:",
+    "AXRole" : "AXMenuItem",
+    "AXTitle" : "Telemetry"
+  },
+  {
+    "AXEnabled" : "0",
+    "AXRole" : "AXMenuItem",
+    "AXTitle" : ""
+  },
+  {
+    "AXEnabled" : "1",
+    "AXIdentifier" : "arrangeInFront:",
+    "AXRole" : "AXMenuItem",
+    "AXTitle" : "Bring All to Front"
+  },
+  {
+    "AXEnabled" : "1",
+    "AXIdentifier" : "alternateArrangeInFront:",
+    "AXRole" : "AXMenuItem",
+    "AXTitle" : "Arrange in Front"
+  },
+  {
+    "AXEnabled" : "0",
+    "AXRole" : "AXMenuItem",
+    "AXTitle" : ""
+  },
+  {
+    "AXEnabled" : "1",
+    "AXIdentifier" : "makeKeyAndOrderFront:",
+    "AXRole" : "AXMenuItem",
+    "AXTitle" : "Loopflow Active"
+  },
+  {
+    "AXEnabled" : "1",
+    "AXRole" : "AXMenuBarItem",
+    "AXTitle" : "Help"
+  },
+  {
+    "AXEnabled" : "1",
+    "AXRole" : "AXMenu"
+  },
+  {
+    "AXEnabled" : "1",
+    "AXIdentifier" : "_openFeedbackAssistant:",
+    "AXRole" : "AXMenuItem",
+    "AXTitle" : "Send Loopflow Shared Sessions Feedback to Apple"
+  },
+  {
+    "AXEnabled" : "0",
+    "AXRole" : "AXMenuItem",
+    "AXTitle" : ""
+  },
+  {
+    "AXEnabled" : "1",
+    "AXIdentifier" : "showHelp:",
+    "AXRole" : "AXMenuItem",
+    "AXTitle" : "Loopflow Active Help"
+  }
+]

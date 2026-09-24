@@ -1,0 +1,32 @@
+Owned app PID 15245
+AX trust true active false
+AXWindows 0 count 1
+PASS Exact runner trusted
+Activation requested true
+Raise owned window -25205
+Active after request false
+PASS Owned app focused before workspace trial
+PASS Press All work
+PASS Press New terminal
+Input foreground com.mitchellh.ghostty
+Input activation true
+Foreground identity 36514 owned 15245 cached active false AX focus 15245
+PASS Owned app foreground for input
+PASS Press Show work list
+TIMING launch_to_task_ax_ms 7001.221958547831
+PASS Select exact Task
+Launch foreground com.mitchellh.ghostty
+Launch activation true
+Foreground identity 15245 owned 15245 cached active true AX focus 15245
+PASS Owned app foreground before launch
+PASS Press New conversation · LOO-291
+Owned Session run_eb31ad60301e4b0cb2c006224dd38b70 terminal_ids (
+    "DA2DAE6C-7556-4BBE-95EF-508E7AD1311E"
+)
+PASS Shared projection records shell attachment
+PASS Provider descends from this owned app
+PASS Configured provider produced initial response
+TIMING new_conversation_to_initial_response_ms 8329.300499986857
+Buttons: ["Sessions", "All work", "Hide work list", "Work details", "New conversation · LOO-291", "New terminal", "Toggle infrastructure", "infrastructure", "Toggle Reliability", "Reliability", "Clean up owned tmux terminals when Sessions complete and preserve unfinished work across Desktop re…, LOO-294, Blocked", "Account for scheduled release opportunities and settle actual release outcomes, LOO-285, Blocked", "Make laptop refresh and lf rebase on main reliably catch up, LOO-292, Blocked", "Toggle Architecture Minimalism", "Architecture Minimalism", "Reduce competing concepts and align the reviewed architecture, LOO-287, Waiting", "Finish Task-owned Flow execution with one authority and lossless cutover, LOO-286, Waiting", "Base new Task worktrees on current canonical main, LOO-257, Waiting", "Toggle intelligence", "intelligence", "Toggle Trace & Context", "Trace & Context", "Account for attempted operations and their observed outcomes, LOO-289, Waiting", "Make reconstruction usable through the supported inspection path, LOO-290, Waiting", "Capture required context and causal evidence at the actual launch boundary, LOO-288, Waiting", "Toggle product", "product", "Toggle Desktop", "Desktop", "Restore Task watching with live session output and flow diagrams, LOO-293, Blocked", "Join current Project/KR/Task planning to native Sessions, LOO-291, Blocked", "Open Session: codex", "Evaluate shared Warp and Loopflow viewing without terminal regressions, LOO-283, Waiting", "Show the recorded location of an active Session client, LOO-282, Waiting", "Project Session actions and Work labels from the shared API, LOO-284, Waiting", "Build one Ghostty-enabled Mac terminal product, LOO-280, Waiting", "Prove shell blocks through the real shell, geometry, and long-output paths, LOO-281, Waiting", "Finish the native Sessions multiplexer and promoted Ask handoff, LOO-251, Waiting", "Explain blocked Task recovery through the shared API in Desktop, LOO-148, Waiting", "Toggle Company Dogfood", "Company Dogfood", "Provision Discord channels for a human-selected external workflow, LOO-185, Waiting", "", "", "", "", "New terminal in worktree", "Split worktrees right", "Split worktrees down", "Hide worktree", "Split right", "Split down", "Close view", "Zoom pane", "Complete session", "", "", ""]
+FAIL Failure(message: "Missing button Show work list")
+Owned app termination requested true

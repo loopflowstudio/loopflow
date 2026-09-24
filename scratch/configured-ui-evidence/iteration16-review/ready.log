@@ -1,0 +1,7 @@
+Observed at 2026-09-24T19:38:17Z
+Runner scratch/configured-ui-evidence/iteration16/ready-probe.swift AX trusted true
+Owned app PID 3056
+AX window roles ["AXWindow"] active false
+Count observed true expected 6 Sessions elapsed_ms 1804.9914583098143
+PASS: configured scoped count observed; no Session interaction
+Owned app termination requested true

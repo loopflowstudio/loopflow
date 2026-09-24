@@ -1,10 +1,14 @@
 # Unified navigation slice review — 2026-09-23
 
-Latest: [iteration 10 integrated review](review-slice-iteration10.md). Session-row
-return and nested checkout retention now have a passing mounted real-PTY proof.
-The fresh configured attempt stopped before interaction at this runner's
-Accessibility permission boundary. Publication remains withheld; earlier
-configured launch/completion and viewport receipts retain their stated scope.
+Latest review: [iteration 17](review-slice-iteration17.md). Fresh browser checks
+pass for the hierarchy study's selection, simulated drafts and six Session leaves.
+The executable diff is unchanged since review 16. The new launch decision changes
+the acceptance target: the native compressible outline, mixed Monitor/terminal
+panes, exact live Task-Run projection and repeatable experience measurements remain
+unimplemented. Return to implementation under that decision; another study or old
+app count trial cannot close those gaps. Earlier bounded receipts remain evidence
+at their original scope. Full external trials/edit, budgets and human acceptance
+remain open. No publication, landing or Task completion.
 
 ## Iteration 9 review — viewport proof confirmed; exact focus unavailable
 

@@ -1,0 +1,22 @@
+{
+  "cwd" : "\/Users\/jack\/src\/loopflow.main-view-task",
+  "detail" : "codex",
+  "id" : "run_84ceb7e9dac14fb1b3a22c25d722a8a5",
+  "kind" : "interactive",
+  "open_argv" : [
+    "\/Users\/jack\/src\/loopflow.main-view-task\/target\/debug\/lf",
+    "session",
+    "open",
+    "run_84ceb7e9dac14fb1b3a22c25d722a8a5"
+  ],
+  "ready_summary" : null,
+  "state" : "active",
+  "terminal_ids" : [
+    "C6E4411E-E2E0-4165-A3E1-1A5D37CE76A5"
+  ],
+  "title" : "codex",
+  "work" : {
+    "id" : "task_2aa71a7e36fe416d8a721e2b2f7c54e7",
+    "kind" : "task"
+  }
+}

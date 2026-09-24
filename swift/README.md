@@ -34,11 +34,22 @@ excluded by the pinned Ghostty build.
 If macOS cannot provide Ghostty's display link, terminals use timer rendering.
 The app logs the CoreVideo error code; the user's Ghostty configuration is unchanged.
 
-Open a repository to see one compact Work list, grouped by collapsible Wave
-and Project headings. Incomplete Tasks remain visible whether they are upcoming,
-running autonomously, or have human Sessions. Select a Task to inspect its
+Open a repository to see **Active** Tasks: those with an existing local worktree,
+an open Session, or an owned live provider in their Task checkout. Tasks stay
+visible between Runs while their worktree exists. **Provider in checkout** describes
+that local activity; it does not establish Task execution or success. Switch to **All tasks** to include
+queued work. Both views filter the same in-memory reading and retain compact
+Wave/Project context; changing views does not fetch data or restart terminals. Select a Task to inspect its
 directive, recorded condition, Project definition and KR proof, Activity, PR,
 and worktree references. A Task with no open Sessions says so explicitly.
+Choose **Edit directive** to update the selected Task, then **Save directive**
+to write through the shared PM API and display refreshed planning. Failed saves
+keep your text and show the error. If the write succeeds but planning cannot be
+read back, the editor says so and retains the draft.
+Select a Wave heading to inspect Work records outside its current plan. Those
+diagnostics live in Wave details; failed or partial planning reads remain visible
+in the Task list. Active keeps these Wave headings reachable and withholds an
+empty-state claim while planning cannot account for their Work.
 
 Open a Session from its subject's terminal button. Sessions absent from the
 planning read remain reachable under **Other open Sessions**; existing multiple
@@ -57,6 +68,8 @@ Wave; the app uses its selected repository and explicit Work targets.
 Each pane owns one native libghostty surface. Session badges distinguish
 **VIEWING**, **RUNNING**, **ELSEWHERE**, **OPENING**, and **RETRY**. Sessions
 include interactive provider Runs, Task human FlowSteps, and ad-hoc Asks.
+Runs resumed interactively also appear, including those originally launched
+headlessly. Closing their client preserves the Session until Complete.
 
 Selecting an ELSEWHERE row opens a pane that explains the situation; nothing is
 stopped until its explicit **Move here**, which stops the other client and
@@ -71,8 +84,11 @@ not restore a completed Session's pane, even if you hid it before completion. Cl
 pane only hides the view: the terminal and its provider client keep running
 (the row shows RUNNING) and reopen exactly as left. An Ask agent
 can mark itself ready, but the row and terminal remain until the user completes
-the conversation. Task FlowSteps instead expose Approve and Iterate. Closing
-or detaching either review boundary never resolves it.
+the conversation. Task reviews expose Complete after their agent marks Ready.
+Rejected completion preserves the terminal and keeps its error visible through refresh.
+The shared Session projection supplies action labels, unavailable reasons and Work
+paths to both CLI and Mac; local terminal presence only determines which pane to show.
+Closing or detaching a review never resolves it.
 
 Task FlowSteps run ordinary `lf --tui --as task:<id> <skill>` provider Runs.
 Ad-hoc Asks run in the originating Run's exact checkout so the session can edit

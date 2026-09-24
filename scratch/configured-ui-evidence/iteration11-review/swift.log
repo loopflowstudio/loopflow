@@ -1,0 +1,33 @@
+[0/1] Planning build
+Building for debugging...
+[0/4] Write swift-version--58304C5D6DBC2206.txt
+[2/4] Emitting module LoopflowTests
+[2/4] Write Objects.LinkFileList
+[3/4] Linking LoopflowSwiftPackageTests
+Build complete! (1.63s)
+Test Suite 'Selected tests' started at 2026-09-23 21:52:18.264.
+Test Suite 'LoopflowSwiftPackageTests.xctest' started at 2026-09-23 21:52:18.265.
+Test Suite 'LoopflowSwiftPackageTests.xctest' passed at 2026-09-23 21:52:18.265.
+	 Executed 0 tests, with 0 failures (0 unexpected) in 0.000 (0.000) seconds
+Test Suite 'Selected tests' passed at 2026-09-23 21:52:18.265.
+	 Executed 0 tests, with 0 failures (0 unexpected) in 0.000 (0.001) seconds
+◇ Test run started.
+↳ Testing Library Version: 1501
+↳ Target Platform: arm64e-apple-macos14.0
+◇ Suite "Unified Work and Session navigation" started.
+◇ Suite "DTO Fixtures" started.
+◇ Test "Active keeps out-of-plan Work reachable instead of claiming healthy emptiness" started.
+◇ Test "An existing Task checkout remains Active across provider gaps, including completed planning work" started.
+◇ Test "Autonomous, upcoming and human work share stable ranked planning rows" started.
+◇ Test "Activity fixture preserves exact OS-live process state" started.
+◇ Test case passing 1 argument hasUnplannedWork → false to "Active keeps out-of-plan Work reachable instead of claiming healthy emptiness" started.
+◇ Test case passing 1 argument hasUnplannedWork → true to "Active keeps out-of-plan Work reachable instead of claiming healthy emptiness" started.
+◇ Test "roadmap fixture preserves sections and durable Task references" started.
+✔ Test "Activity fixture preserves exact OS-live process state" passed after 0.001 seconds.
+✔ Test "roadmap fixture preserves sections and durable Task references" passed after 0.002 seconds.
+✔ Suite "DTO Fixtures" passed after 0.002 seconds.
+✔ Test "An existing Task checkout remains Active across provider gaps, including completed planning work" passed after 0.078 seconds.
+✔ Test "Autonomous, upcoming and human work share stable ranked planning rows" passed after 0.078 seconds.
+✔ Test "Active keeps out-of-plan Work reachable instead of claiming healthy emptiness" with 2 test cases passed after 0.144 seconds.
+✔ Suite "Unified Work and Session navigation" passed after 0.144 seconds.
+✔ Test run with 5 tests in 2 suites passed after 0.144 seconds.

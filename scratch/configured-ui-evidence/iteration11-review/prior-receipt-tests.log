@@ -1,0 +1,14 @@
+   Compiling loopflow v0.12.19 (/Users/jack/src/loopflow.main-view-task/rust/loopflow)
+    Finished `test` profile [unoptimized + debuginfo] target(s) in 28.50s
+     Running unittests src/lib.rs (target/debug/deps/loopflow-19093d58746e5e6d)
+
+running 6 tests
+test lf::commands::top::tests::process_parser_rejects_opencode_helpers_that_are_not_servers ... ok
+test lf::commands::top::tests::activity_fixture_preserves_provider_worktrees ... ok
+test lf::commands::top::tests::prune_targets_only_dead_receipts_and_registered_orphan_groups ... ok
+test lf::commands::top::tests::dead_and_unknown_calls_are_absent_while_registered_orphans_remain_visible ... ok
+test lf::commands::top::tests::live_receipts_survive_versioned_binaries_and_app_paths ... ok
+test lf::commands::top::tests::call_tree_uses_only_live_receipts_and_os_processes ... ok
+
+test result: ok. 6 passed; 0 failed; 0 ignored; 0 measured; 1556 filtered out; finished in 0.01s
+

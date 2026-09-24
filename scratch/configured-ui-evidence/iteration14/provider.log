@@ -1,0 +1,13 @@
+observed_at 2026-09-24T14:13:08Z
+Owned app PID 44959
+AX trust true active true
+AXWindows 0 count 1
+PASS Exact runner trusted
+Activation requested true
+Raise owned window -25205
+Active after request true
+System focused PID 44959 owned 44959
+Frontmost bundle com.google.Chrome
+Focused application status -25212
+FAIL Failure(message: "Owned app focused before workspace trial")
+Owned app termination requested true

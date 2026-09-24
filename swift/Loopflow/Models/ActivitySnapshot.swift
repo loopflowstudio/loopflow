@@ -2,7 +2,6 @@ import Foundation
 
 public enum ActivityNodeKind: String, Codable, Sendable, Hashable {
     case exec
-    case providerLaunch = "provider_launch"
     case providerProcess = "provider_process"
 }
 
@@ -18,13 +17,14 @@ public struct ActivityNode: Codable, Sendable, Hashable, Identifiable {
     public let kind: ActivityNodeKind
     public let label: String
     public let repo: String?
+    public let worktree: String?
     public let wave: String?
     public let pid: UInt32?
     public let startedAt: Int64
     public let state: ActivityState
 
     enum CodingKeys: String, CodingKey {
-        case id, kind, label, repo, wave, pid, state
+        case id, kind, label, repo, worktree, wave, pid, state
         case parentId = "parent_id"
         case startedAt = "started_at"
     }

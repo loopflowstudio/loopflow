@@ -1,0 +1,15 @@
+Observed at 2026-09-24T19:40:09Z
+Runner scratch/configured-ui-evidence/iteration16-review/planning-probe.swift AX trusted true
+Owned app PID 57107
+AX window roles ["AXWindow"] active false
+Count observed true expected 8 Sessions elapsed_ms 1916.3969582878053
+PASS Select exact LOO-291 planning row
+PASS Visible directive equals configured planning text
+selection_to_directive_ax_ms 642.510375007987
+PASS Visible Project definition equals configured planning text
+PASS Visible KR text and verdict equal configured planning
+PASS Visible KR text and verdict equal configured planning
+PASS One exact Session association for selected Task
+FAIL configured planning observation ProofFailure(message: "Missing control: session-row-run_643d86d70d5b4109a460e80a87a97533")
+FAIL: configured scoped count not established
+Owned app termination requested true

@@ -649,7 +649,7 @@ lf runs run_ab12 --final         # print the last durable provider conclusion
 lf runs run_ab12 --events        # print its event stream verbatim
 lf usage --project parser        # direct Run usage for one Project
 lf usage --task INF-123 --json   # direct Run evidence for one Task
-lf session list                  # interactive, Ask, and FlowStep sessions
+lf session list                  # Sessions, Work paths, actions and unavailable reasons
 lf session open run_ab12         # continue a closed native provider session
 lf session open run_ab12 --try   # let the provider arbitrate an active session
 lf session open run_ab12 --replace # stop Loopflow's client, then continue here

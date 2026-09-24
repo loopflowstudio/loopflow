@@ -1,0 +1,922 @@
+[
+  {
+    "AXDescription" : "",
+    "AXHelp" : "",
+    "AXIdentifier" : "",
+    "AXRole" : "AXApplication",
+    "AXTitle" : "Loopflow Proof",
+    "AXValue" : ""
+  },
+  {
+    "AXDescription" : "",
+    "AXHelp" : "",
+    "AXIdentifier" : "SwiftUI.ModifiedContent<SwiftUI._ConditionalContent<SwiftUI.ModifiedContent<SwiftUI._ConditionalContent<SwiftUI.ModifiedContent<SwiftUI.ModifiedContent<SwiftUI.(unknown context at $1d0863774).SceneBridgeReader<SwiftUI.SubscriptionView<Combine.PassthroughSubject<Any, Swift.Never>, SwiftUI.ModifiedContent<SwiftUI.ModifiedContent<LoopflowMac.PodiumView, SwiftUI._EnvironmentKeyWritingModifier<Swift.Optional<SwiftUI.Color>>>, LoopflowMac.AppAppearance>>>, SwiftUI._FrameLayout>, SwiftUI._FlexFrameLayout>, SwiftUI.(unknown context at $1d0863774).SceneBridgeReader<SwiftUI.SubscriptionView<Combine.PassthroughSubject<Any, Swift.Never>, SwiftUI.ModifiedContent<SwiftUI.ModifiedContent<LoopflowMac.PodiumView, SwiftUI._EnvironmentKeyWritingModifier<Swift.Optional<SwiftUI.Color>>>, LoopflowMac.AppAppearance>>>>, SwiftUI._TaskModifier>, SwiftUI._ConditionalContent<SwiftUI.ModifiedContent<SwiftUI.ModifiedContent<SwiftUI.(unknown context at $1d0863774).SceneBridgeReader<SwiftUI.SubscriptionView<Combine.PassthroughSubject<Any, Swift.Never>, SwiftUI.ModifiedContent<SwiftUI.ModifiedContent<LoopflowMac.PodiumView, SwiftUI._EnvironmentKeyWritingModifier<Swift.Optional<SwiftUI.Color>>>, LoopflowMac.AppAppearance>>>, SwiftUI._FrameLayout>, SwiftUI._FlexFrameLayout>, SwiftUI.(unknown context at $1d0863774).SceneBridgeReader<SwiftUI.SubscriptionView<Combine.PassthroughSubject<Any, Swift.Never>, SwiftUI.ModifiedContent<SwiftUI.ModifiedContent<LoopflowMac.PodiumView, SwiftUI._EnvironmentKeyWritingModifier<Swift.Optional<SwiftUI.Color>>>, LoopflowMac.AppAppearance>>>>>, SwiftUI._TaskModifier>-1-AppWindow-1",
+    "AXRole" : "AXWindow",
+    "AXTitle" : "Loopflow Proof",
+    "AXValue" : ""
+  },
+  {
+    "AXDescription" : "",
+    "AXHelp" : "",
+    "AXIdentifier" : "",
+    "AXRole" : "AXGroup",
+    "AXTitle" : "",
+    "AXValue" : ""
+  },
+  {
+    "AXDescription" : "The Podium",
+    "AXHelp" : "",
+    "AXIdentifier" : "podium",
+    "AXRole" : "AXGroup",
+    "AXTitle" : "",
+    "AXValue" : ""
+  },
+  {
+    "AXDescription" : "",
+    "AXHelp" : "",
+    "AXIdentifier" : "podium-bar",
+    "AXRole" : "AXGroup",
+    "AXTitle" : "",
+    "AXValue" : ""
+  },
+  {
+    "AXDescription" : "Repository: loopflow",
+    "AXHelp" : "",
+    "AXIdentifier" : "podium-repo-scope",
+    "AXRole" : "AXMenuButton",
+    "AXTitle" : "",
+    "AXValue" : ""
+  },
+  {
+    "AXDescription" : "Repository: loopflow",
+    "AXHelp" : "",
+    "AXIdentifier" : "podium-repo-scope",
+    "AXRole" : "AXMenuButton",
+    "AXTitle" : "",
+    "AXValue" : ""
+  },
+  {
+    "AXDescription" : "Repository: loopflow",
+    "AXHelp" : "",
+    "AXIdentifier" : "podium-repo-scope",
+    "AXRole" : "AXMenuButton",
+    "AXTitle" : "",
+    "AXValue" : ""
+  },
+  {
+    "AXDescription" : "",
+    "AXHelp" : "",
+    "AXIdentifier" : "podium-wave-summary",
+    "AXRole" : "AXStaticText",
+    "AXTitle" : "",
+    "AXValue" : "3"
+  },
+  {
+    "AXDescription" : "",
+    "AXHelp" : "",
+    "AXIdentifier" : "podium-wave-summary",
+    "AXRole" : "AXStaticText",
+    "AXTitle" : "",
+    "AXValue" : "Waves"
+  },
+  {
+    "AXDescription" : "Sessions",
+    "AXHelp" : "8 Sessions",
+    "AXIdentifier" : "podium-sessions",
+    "AXRole" : "AXButton",
+    "AXTitle" : "",
+    "AXValue" : "8 Sessions"
+  },
+  {
+    "AXDescription" : "Provider process activity",
+    "AXHelp" : "",
+    "AXIdentifier" : "podium-process-activity",
+    "AXRole" : "AXUnknown",
+    "AXTitle" : "",
+    "AXValue" : ""
+  },
+  {
+    "AXDescription" : "All work",
+    "AXHelp" : "",
+    "AXIdentifier" : "sessions-surface",
+    "AXRole" : "AXButton",
+    "AXTitle" : "",
+    "AXValue" : ""
+  },
+  {
+    "AXDescription" : "Show work list",
+    "AXHelp" : "",
+    "AXIdentifier" : "sessions-surface",
+    "AXRole" : "AXButton",
+    "AXTitle" : "",
+    "AXValue" : ""
+  },
+  {
+    "AXDescription" : "",
+    "AXHelp" : "Snapshot generation time; source sync freshness is not supplied by this read.",
+    "AXIdentifier" : "sessions-surface",
+    "AXRole" : "AXStaticText",
+    "AXTitle" : "",
+    "AXValue" : "Planning read: 2026-09-24T19:41:55.630594Z"
+  },
+  {
+    "AXDescription" : "New conversation · LOO-291",
+    "AXHelp" : "Start a conversation about LOO-291 using your configured app or terminal",
+    "AXIdentifier" : "sessions-surface",
+    "AXRole" : "AXButton",
+    "AXTitle" : "",
+    "AXValue" : ""
+  },
+  {
+    "AXDescription" : "New terminal",
+    "AXHelp" : "",
+    "AXIdentifier" : "sessions-surface",
+    "AXRole" : "AXButton",
+    "AXTitle" : "",
+    "AXValue" : ""
+  },
+  {
+    "AXDescription" : "implement · loopflow.main-view-task",
+    "AXHelp" : "",
+    "AXIdentifier" : "sessions-surface",
+    "AXRole" : "AXButton",
+    "AXTitle" : "",
+    "AXValue" : ""
+  },
+  {
+    "AXDescription" : "",
+    "AXHelp" : "",
+    "AXIdentifier" : "",
+    "AXRole" : "AXSplitGroup",
+    "AXTitle" : "",
+    "AXValue" : ""
+  },
+  {
+    "AXDescription" : "",
+    "AXHelp" : "",
+    "AXIdentifier" : "",
+    "AXRole" : "AXGroup",
+    "AXTitle" : "",
+    "AXValue" : ""
+  },
+  {
+    "AXDescription" : "",
+    "AXHelp" : "",
+    "AXIdentifier" : "podium-detail-task",
+    "AXRole" : "AXScrollArea",
+    "AXTitle" : "",
+    "AXValue" : ""
+  },
+  {
+    "AXDescription" : "",
+    "AXHelp" : "",
+    "AXIdentifier" : "",
+    "AXRole" : "AXStaticText",
+    "AXTitle" : "",
+    "AXValue" : "PRODUCT · DESKTOP"
+  },
+  {
+    "AXDescription" : "LOO-291",
+    "AXHelp" : "",
+    "AXIdentifier" : "",
+    "AXRole" : "AXLink",
+    "AXTitle" : "",
+    "AXValue" : ""
+  },
+  {
+    "AXDescription" : "",
+    "AXHelp" : "",
+    "AXIdentifier" : "",
+    "AXRole" : "AXStaticText",
+    "AXTitle" : "",
+    "AXValue" : "Join current Project\/KR\/Task planning to native Sessions"
+  },
+  {
+    "AXDescription" : "",
+    "AXHelp" : "",
+    "AXIdentifier" : "",
+    "AXRole" : "AXStaticText",
+    "AXTitle" : "",
+    "AXValue" : "Waiting"
+  },
+  {
+    "AXDescription" : "",
+    "AXHelp" : "",
+    "AXIdentifier" : "",
+    "AXRole" : "AXStaticText",
+    "AXTitle" : "",
+    "AXValue" : "LOO-291, Join current Project\/KR\/Task planning to native Sessions. blocked. Task has uncommitted work. Next owner: project."
+  },
+  {
+    "AXDescription" : "",
+    "AXHelp" : "",
+    "AXIdentifier" : "",
+    "AXRole" : "AXStaticText",
+    "AXTitle" : "",
+    "AXValue" : "Condition"
+  },
+  {
+    "AXDescription" : "",
+    "AXHelp" : "",
+    "AXIdentifier" : "",
+    "AXRole" : "AXStaticText",
+    "AXTitle" : "",
+    "AXValue" : "blocked"
+  },
+  {
+    "AXDescription" : "",
+    "AXHelp" : "",
+    "AXIdentifier" : "",
+    "AXRole" : "AXStaticText",
+    "AXTitle" : "",
+    "AXValue" : "PM"
+  },
+  {
+    "AXDescription" : "",
+    "AXHelp" : "",
+    "AXIdentifier" : "",
+    "AXRole" : "AXStaticText",
+    "AXTitle" : "",
+    "AXValue" : "open"
+  },
+  {
+    "AXDescription" : "",
+    "AXHelp" : "",
+    "AXIdentifier" : "",
+    "AXRole" : "AXStaticText",
+    "AXTitle" : "",
+    "AXValue" : "Status"
+  },
+  {
+    "AXDescription" : "",
+    "AXHelp" : "",
+    "AXIdentifier" : "",
+    "AXRole" : "AXStaticText",
+    "AXTitle" : "",
+    "AXValue" : "ready"
+  },
+  {
+    "AXDescription" : "Resume",
+    "AXHelp" : "",
+    "AXIdentifier" : "",
+    "AXRole" : "AXButton",
+    "AXTitle" : "",
+    "AXValue" : ""
+  },
+  {
+    "AXDescription" : "Worktree",
+    "AXHelp" : "",
+    "AXIdentifier" : "",
+    "AXRole" : "AXButton",
+    "AXTitle" : "",
+    "AXValue" : ""
+  },
+  {
+    "AXDescription" : "",
+    "AXHelp" : "",
+    "AXIdentifier" : "",
+    "AXRole" : "AXStaticText",
+    "AXTitle" : "",
+    "AXValue" : "Task directive"
+  },
+  {
+    "AXDescription" : "Edit directive",
+    "AXHelp" : "",
+    "AXIdentifier" : "workspace-edit-directive",
+    "AXRole" : "AXButton",
+    "AXTitle" : "",
+    "AXValue" : ""
+  },
+  {
+    "AXDescription" : "",
+    "AXHelp" : "",
+    "AXIdentifier" : "workspace-task-directive",
+    "AXRole" : "AXStaticText",
+    "AXTitle" : "",
+    "AXValue" : "# LOO-291 integration handoff — 2026-09-23\n\nThe human asked: “lets get this into the task flow and then advance the task.”\nThe existing Product \/ Desktop Task LOO-291 already explicitly includes lf-new's\nworktree grouping and launch UX. Reuse it; do not create another planning Task.\nThe human also authorized installing this build to perform remaining live proof\nand remove the abandoned `list` and `engbot` Wave registrations.\n\n## Concrete contribution\n\n`jack-heart\/lf-new` at `561eadccefa6bbf1d67cd832cbe7b5df728d6c8e` includes the\ncommitted `main-view-task` UI through `cf4f24209`, plus:\n\n* Scope-aware New conversation (repo\/Wave\/Project\/Task) using configured app or\n  terminal, and separate ordinary New terminal.\n* Outer worktree slots, inner terminal splits, retained companion shells.\n* Actual PTY-backed shell\/client attachment; external clients remain elsewhere.\n* Shared current-Wave filtering, roadmap --all ignoring inherited Wave scope,\n  and exact empty-abandoned-registration cleanup.\n\nFull design and evidence are in that branch's scratch\/lf-new.md and\nscratch\/implementation-evidence.md. The contribution's implementation is\ncommitted; it is not an unimplemented design anymore.\n\n## Updated product intent\n\nThe human reconsidered mandatory Task\/worktree creation and proposed that zoom\nlevel chooses the default conversation. This slice starts a fresh scoped human\nconversation without creating a Task, forcing a destination, running an\noperating pass, replacing another provider, or enforcing one-current-Session\ncardinality. Preserve every existing Session. Explicit Task creation\/adoption\nand bounded conversation lifecycle remain open follow-ups; reconcile with the\nfull LOO-291 design rather than silently enforcing its earlier proposal.\n\n## Integration and next step\n\nKeep LOO-291's owned checkout and branch. Preserve its ongoing edits, including\nits commits after cf4f24209. Integrate jack-heart\/lf-new using lf's rebase workflow\ninside the Task checkout after checkpointing its coherent current work. Resolve\nany conflicts in favor of one unified navigator, retained Session store, and\nworktree workspace registry; do not restore the former Sessions-only sidebar.\nDo not mutate or adopt the source branch as a second active Task branch.\n\nThen run the narrow proof for reconciled behavior and advance the Task's normal\nflow. Preserve original directive-editing, shared Session API integration, and\nexternal-work\/performance proof obligations. Do not claim those complete from\nthis contribution. The provided local native tests and fixture capture do not\nprove real configured provider\/app launch or the user's interaction approval.\n\n## Existing proof\n\nGhostty checks passed for two local shell clients versus another window, and\nfor an initial launch command exiting into a usable shell. Sixteen integrated\nworkspace\/navigation\/launch tests passed. Rust proofs cover PTY identity,\nroadmap reads from \/ with inherited Wave IDs, and guarded deletion\/dry-run.\nBoth Xcode build-for-testing and cargo clippy --all-targets -- -D warnings passed.\n\nInstallation\/live cleanup outcomes will be appended before advancing the Task.\n\n---\n\n## Preserved Task directive and prior handoff\n\n## Human design handoff — 2026-09-23\n\nThe human explicitly requested advancing this work and then asked to attach the design to this existing Task instead of creating a duplicate. Proceed with one implementation slice using the design below; do not repeat a blank kickoff or treat historical chapter queue timing as a new permission gate. The external proving workflow is still unselected: implementation and local proof can advance, but do not invent external-work evidence, claim full Task completion, or close the Task from the mockups.\n\nAccepted product direction:\n\n* One annotated list of open and upcoming work across Waves\/Projects. Wave and Project layers are minimal, collapsible headings. Autonomous and human-session Tasks have equal visibility.\n* Support both A (full-width selected workspace) and D (work list alongside selected workspace), with a show\/hide-list control preserving current work. First-open defaults can be chosen conservatively from the mockup; avoid another design loop for routine choices.\n* Each repo, Wave, Project, and Task offers an optional, bounded conversation, at most one current conversation per subject. Encourage fresh starts. Start conversation, Continue, Finish conversation, and Start fresh distinguish lifecycle; finishing a conversation does not complete the Task or end companion shells. Preserve history and required Ask\/FlowStep decisions.\n* Integrate the lf-new design: restore the entire checkout workspace including conversation and companion shells; outer worktree slots and inner terminal splits have separate ownership. New implementation work is proposed to create a tracked Task, prepare its checkout, then launch bound design using the configured destination. Existing unbound work and manually launched agents must remain reachable. Do not copy the false ELSEWHERE behavior or use cwd as client ownership.\n\nExecution boundary: the first slice is the unified list, A\/D navigation, and existing detail\/Session access with retained live state. The full target also includes shared optional per-subject conversation lifecycle; do not declare the Task complete at the first navigation slice. Reconcile actual current-main contracts and related LOO-251\/LOO-284 work. lf-new is design evidence, not an implemented dependency; consume shared implementations when present and avoid duplicate registries\/lifecycle authority. Keep Task-directive editing and the original configured external-work\/performance proof obligations in this Task's remaining scope.\n\nThe Task checkout carries the full design and interactive mockups in scratch, plus a snapshot of the relevant lf-new design and registration counterexample. The following embedded design survives scratch cleanup.\n\n# One workspace for work and Sessions\n\nTask handoff — 2026-09-23. The human requested attaching this design to existing LOO-291 and advancing the Task. The agreed direction is compact Wave\/Project grouping, both A\/D presentations, and optional bounded conversations. Implementation choices called provisional below may be resolved within that direction; the external proving workflow remains human-selected.\n\n## What to build\n\nMake one workspace show open and upcoming Tasks across Waves and Projects, with optional short-lived conversations at repo\/Wave\/Project\/Task scope and full-width or list-plus-work presentations.\n\nUser anchors:\n\n> “a working-enough sessions view that i can use to manage my Loopflow”\n>\n> “see all my open \/ upcomoing work (across waves and projects)”\n>\n> “tasks that are running autonomously and those with open sessions are on the same footing”\n\n> “Expandable Wave → Project → Task tree”\n\n> “But the wave\/project layers should be pretty minimal\/collapsible so that its relaly just one annotated well organized list”\n\n> “make lots of differetn mock ups and ask me what i like”\n\n> “to be clear the option to have a conversation. i think we want to start them over mostly and encourage not just keeping one forever”\n\n## Visual exploration — current work\n\n[Interactive mockups](<main-view-variations.html>) · [Comparison sheet](<main-view-comparison.png>).\n\nEight alternatives share sample Tasks and compact Wave\/Project grouping. They vary navigation rather than colors:\n\n| Version | Opening a Task | Returning to the list |\n| -- | -- | -- |\n| A · List → focus | Uses the full content area | Back to retained list position |\n| B · Unfold in place | Expands within its row | Collapse the workspace |\n| C · Pull-up workspace | Opens over the lower list | Dismiss the drawer |\n| D · Split on demand | Temporarily narrows the list alongside work | Close the task to restore full list width |\n| E · Task sheet | Floats above the overview | Dismiss the sheet |\n| F · Overview + tabs | Retains a workspace tab per visited Task | Select All work |\n| G · Summon the list | Makes selected work primary | Open a temporary list overlay |\n| H · Zoom into a group | Opens inline, compressing other Wave groups | Expand another group or return to overview |\n\nAll are disposable interaction studies with simulated terminal content, not native-app or live-Session proof. A session-bearing Task opens its sample Session; autonomous\/upcoming Tasks open work details. This direct-entry behavior is another proposal to evaluate. The mockups predate the one-current-Session-per-subject direction. Per-level Session entry, real split panes, unavailable evidence, and the final distinction between details and Session selection need the next round.\n\nThe human's first-round feedback: “I like A and D the best,” followed by “I think yeah it should probably be possibel to get both views.” The direction is to make both presentations available for the same Task. [Round two](<main-view-round-two.html>) compares A and D with I: explicitly show\/hide the work list without leaving that Task. The mockup starts full-width; that default is provisional. The toggle choice remains while switching Tasks during the visit. Ask which presentation should open first; neither this preference nor its persistence across app launches has been selected.\n\n## Placement\n\nProduct → Desktop → [LOO-291](https:\/\/linear.app\/loopflow\/issue\/LOO-291\/join-current-projectkrtask-planning-to-native-sessions).\n\nThe local roadmap identifies this existing Task. Its planning-to-Session navigation requirement fits; this draft makes unified work visibility explicit. No Linear records have been changed. LOO-251 owns remaining native Sessions proof; LOO-284 owns shared Session actions and Work labels. Consume that shared contract rather than duplicate it.\n\n## Integration with `loopflow.lf-new`\n\nRead on 2026-09-23: [worktree-workspace design](<..\/..\/loopflow.lf-new\/scratch\/lf-new.md>), [registration counterexample](<..\/..\/loopflow.lf-new\/scratch\/session-registration.md>), and [two-level layout mockup](<..\/..\/loopflow.lf-new\/scratch\/worktree-layout.html>). These are uncommitted design artifacts, not shipped behavior; the written design is newer than the mockup's worktree-only New work wording.\n\n* The work navigator selects a subject; opening its workspace restores the checkout's conversation **and companion shells**, including layout, processes, output, and focus. A\/D controls navigator visibility around that workspace, not around an isolated terminal. Both presentations can contain the two layout levels from `lf-new`: outer worktree slots and inner terminal splits. Hiding the navigator changes neither tree.\n* `lf-new` owns the proposed per-worktree grouping, nested splits, free-shell behavior, configured launch destination, and live terminal attachment. Integrate those surfaces here rather than preserve the current repository-wide multiplexer as the target or build competing workspace state. Focus an already-visible checkout instead of mounting a native surface twice.\n* Its latest creation proposal is New task → create a tracked Task under an existing Project → prepare the owned checkout → launch bound design using configured app\/terminal. That avoids making arbitrary repo-session adoption the default creation path. No autonomous controller starts merely because design opens. Project choice at repository scope is still unresolved.\n* Repo\/Wave\/Project conversations remain useful independently of creating implementation Tasks. One current conversation per subject does not prohibit companion shells, servers, or commands. Several subjects may share the main checkout; checkout identity alone must not collapse their distinct conversations.\n* Existing arbitrary shell-launched agents and unbound checkouts must remain reachable. How additional such agents relate to one *current* conversation per subject needs explicit reconciliation; do not enforce the new model by hiding clients or stopping them.\n* A supplied screenshot in `lf-new` shows embedded agents labeled ELSEWHERE because the app knows a shell surface but cannot associate its subsequently launched Session. Group by checkout, but identify the live client\/terminal independently. Selecting that Session must focus its existing shell, never use Move here to stop the client already in front of the human.\n\nThe next mockup should combine compact Work navigation, per-level Session actions, and checkout workspaces with companion shells. Current A\/D mockups establish navigation only; they do not yet demonstrate this integrated workspace.\n\n## The demo\n\nOpen Loopflow on the human's repository. In one navigator, see an autonomous Task, a Task with an open human Session, and an upcoming Task with no runtime. Each has its title, Wave\/Project context, and recorded condition. None requires switching between Work and Sessions.\n\nSelect the human Session and continue in its retained terminal. Inspect the autonomous Task's directive, Activity and PR without creating a Session. Inspect the upcoming Task's directive and Project definition\/KRs. Return to the original Session with its pane, draft, and split layout intact. Completing that Session updates its Task row; it does not complete or remove the Task.\n\nLoopflow is the requested initial example. The existing Task's external-work proof still needs a human-selected workflow; self-hosting evidence does not satisfy it.\n\n## Interactions\n\nThe work list is the overview. An opened Task supports both full-width workspace (A) and list-plus-workspace (D), with an explicit show\/hide work list control. Showing the list is optional. Switching presentations preserves selected Work, Session, checkout workspace, both split levels, companion shells, terminal state, draft, and each view's scroll position. The control works identically for autonomous and upcoming Task details. It never opens or closes a provider client. Preserve native Session continuation and explicit Move here. The first-open default and whether the preference survives app relaunch remain open.\n\nThe main navigator is one organized task list across the selected repository, grouped by Wave and Project. Those parent layers are compact collapsible headings, not prominent navigation rows or cards. Use restrained typography, tight spacing, and minimal indentation so Task titles share a readable alignment. Show Wave\/Project context once per group rather than repeating breadcrumbs on every Task. Default membership is every incomplete Task, including those with no Work record or Session. Preserve Project rank within each Project and stable parent ordering. Do not move rows merely because execution starts or a Session opens.\n\nDisclosure on a group heading expands or collapses it; its label can open Wave or Project details. Task selection opens Task details; their placement remains open. Neither action launches a provider or destroys retained terminal state. Keep expansion and selection per window\/repository across refreshes and repository switches. Start with Wave\/Project groups expanded, so Tasks dominate the list. Each heading or Task row has a compact action for its own Session; Sessions do not add a fourth nested list. Collapsed headings retain a compact Task count and Session indicator; expanded headings avoid extra metrics and controls. Unavailable evidence is never counted as zero. Search reveals matching Tasks under their compact group headings and restores prior expansion when cleared.\n\nEach subject has one stable row or heading and at most one current user Session. Show execution evidence and Session presence separately: an open Session does not prove autonomous progress. A completed Task with a current Session remains reachable with completion explicit. Missing planning stays visible and does not discard the Session.\n\nWave and Project context opens their definitions and KRs. A Task opens its directive, condition\/reason, Activity, PR\/worktree references, and Sessions; zero Sessions is explicit. Preserve existing lifecycle actions through shared APIs. New bulk controls, automatic prioritization and shared-PTY work are outside this change.\n\n## Data structures and key functions\n\n### Optional conversations, one current at a time\n\nUser direction:\n\n> “open a session with either the repo, wave, or proejct, but much like wiht a task you really only have 1 such session at a time, you only have the \"one\" session per level”\n\nEach individual repo, Wave, Project, and Task offers an optional conversation, with at most one current user conversation at a time. Encourage bounded conversations and fresh starts. The durable subject persists independently of its conversations. The repo is a Session scope, not a new durable Work kind.\n\n* Put Start conversation on the repo header, compact Wave\/Project headings, and Task rows when no conversation is current. It starts fresh rather than automatically resuming the last historical conversation. Merely selecting a subject does not start a conversation.\n* While a conversation is current, offer Continue and an explicit Start fresh. Continue returns to that exact conversation; Start fresh ends the prior ordinary conversation and begins a new one with fresh conversational context. Preserve prior history for deliberate access. Do not automatically replay old transcripts into fresh conversations.\n* Finish conversation leaves the subject with no current conversation. It does not complete the Task, stop its autonomous work, remove its checkout, or close companion shells. A later Start conversation begins anew. Labels must distinguish conversation completion from Task completion.\n* Repeated Continue actions across views\/windows converge on the same Session identity. Starting fresh is an explicit lifecycle change, never a side effect of navigating. Client ownership still uses explicit Move here.\n* The chosen Session can use A or D. Changing layout, hiding its view, or collapsing its parent does not finish it. Historical conversations are history rather than sibling current-session rows.\n* Autonomous Runs remain independent execution evidence. Their presence does not consume or replace the subject's human Session.\n* Repository-level exploration has a home before a Task exists. A repo Session can concern work in a checkout without that path becoming a Task or another hierarchy level. Do not infer Task ownership from cwd.\n\nThis supersedes the proposed standalone-Session\/worktree inventory as the primary navigator. Do not add an “unfiled” queue or multiple current Session children under each subject. Worktrees own terminal grouping as designed in `lf-new`; they are not a fourth planning kind. Prefer that design's Task-first creation path for new implementation work. Existing unbound work still needs access and a non-destructive path into tracked work; do not silently create a second current repo conversation.\n\nExisting Rust\/Swift Session records already carry optional typed Work attribution, cwd, and stable Session identity; they do not yet establish this cardinality or a repo-session association. Shared start\/continue\/finish operations must own that relationship, not a Swift-only filter that hides extra live Sessions. Before implementation, reconcile existing multiple Sessions and Ask\/FlowStep human boundaries: preserve pending decisions and history without silently closing, replacing, or hiding them. Optional conversation controls must not silently approve, iterate, or release a mandatory human boundary. Exact replacement\/recovery semantics remain to be designed. No migration or API support is claimed by this sketch.\n\nNext mockup: a repo Session, a Wave Session, a Project Session, and Task-owned autonomous\/human work, all opened through their corresponding header\/row. The separate Sessions-only window may become unnecessary once these paths have equivalent reachability.\n\n### Existing shared values\n\nRetain `RoadmapSnapshot`, `RoadmapTask`, `SessionRecord`, `WorkReference`, and `PodiumReading` as source values. `WorkspaceProjection` preserves Wave\/Project nesting and each subject's optional current Session; a view-only `WorkspaceTask` carries one planning Task and its optional current Session. Its key uses repository plus planning Task id, so starting runtime does not change identity. Session identity remains stable independently of view placement. Expansion is a view-local set of typed node keys, separate from terminal layout and Work selection.\n\nProposed Swift seams:\n\n* `projectWorkspace(roadmap: RoadmapSnapshot, sessions: [SessionRecord]) -> WorkspaceProjection`: associate by typed identity; retain unmatched Sessions explicitly.\n* `selectWork(_ selection: WorkReference?)`: inspect without opening a provider.\n* Proposed `startConversation(for: SessionTarget)`, `continueConversation(id:)`, and `finishConversation(id:)`: explicit shared lifecycle by repository or typed Work identity. Fresh replacement is a deliberate transition; exact backend API and recovery remain to be designed.\n* Existing `SessionsStore.select(_:)`: open\/focus the returned Session through its shared preparation path.\n\nPlanning Task ids and durable `runtime.workId` differ. Use the explicit shared relationship, never titles, branch names, or cwd guesses. Session identity remains its own id. Rust owns legal actions; Swift owns selection, filters, pane focus, and opening errors.\n\n## Current system and integration\n\n`PodiumView` switches between `.sessions` and `.work`. `WorkSurfaceView` uses `nowSections`, which omits clear conditions. `SessionsView` lists Sessions and separately reads the roadmap to enrich labels. `PodiumModel` already reads planning and Sessions. `SessionsWorkspaceRegistry` retains per-window\/per-repository multiplexer and surfaces.\n\nReplace the root switch and parallel navigation with the unified tree, including the competing cascading hierarchy in `PodiumConsole`. Reuse work inspectors and Activity. Integrate `lf-new`'s per-window\/per-worktree surface ownership and outer worktree layout; do not retain repository-wide grouping as the target or implement a second workspace registry here. Consolidate shared reading ownership; delete the Sessions-only hierarchy lookup and obsolete Work\/Sessions return buttons. Scope changes cannot reconcile panes against another repository's Session list. Failed reads retain last-good evidence with visible freshness\/errors; unavailable Sessions must never appear as confirmed zero Sessions. Session interaction must not wait for a slow planning query.\n\n## Scope and internal slices\n\nAdditive series. The keystone is an indivisible navigation replacement shipping as one PR; its internal slices are:\n\n1. **This slice:** join shared Work\/Session readings into the compact unified list and A\/D workspace presentations; keep autonomous and upcoming Tasks visible, integrate existing detail\/Session access, preserve live terminals, and prove the behavior. Reconcile current main with `lf-new` and LOO-284 before selecting shared API changes; do not build parallel ownership or lifecycle logic.\n2. Complete optional per-subject conversation lifecycle and required workspace integration through shared APIs, preserving existing Session\/human-boundary evidence. Keep the complete target in view while implementing internal cuts.\n3. Remove superseded navigation, integrate remaining inspectors, and prove configured behavior. No runtime\/cardinality or terminal-ownership shortcuts count as completion.\n\nFollow-up: Task-directive editing through the existing PM API, preserving unsaved text on rejected writes and displaying authoritative refreshed text after success. This remains part of LOO-291's requested outcome; shipping the keystone alone does not complete that Task. External-work trials and long-lived-registry performance measurement remain its full proof obligations. Do not create follow-up Tasks during design.\n\n## Done when \/ forbidden outcomes\n\nFocused fixtures prove stable identity and visibility for autonomous, interactive, upcoming, repo\/Wave\/Project Sessions, repeated-open identity, completed-with-open-Session, and unavailable-source cases. Configured UI proof demonstrates the demo, expansion surviving refresh\/scope switches, and retained split\/focus\/draft behavior while navigating the tree. Capture paint and Session-readiness timings before and after on the same population; do not invent thresholds.\n\nNo separate authorities for Work\/Sessions inventories, oversized parent cards, cascading navigation columns, deep Task indentation, duplicate Task rows, session-required visibility, Task-required Session visibility, forced taskification, implicit provider launch on Task selection, inferred lifecycle legality, terminal reset during inspection, or healthy-empty rendering after failed reads. A separate Sessions-only window may be removed only once standalone, top-level, and pre-Task work remain reachable through the unified workspace. Showing a selected Session in its own content view is compatible with one unified work inventory; simultaneous list\/terminal visibility is not required by the accepted direction.\n\n## Evidence ledger\n\n* 2026-09-23: local `lf roadmap --json` found LOO-291 and Desktop's definition\/KRs; this was a cached planning read, not a fresh Linear sync.\n* Source inspection confirms separate root surfaces, clear-condition omission in Now, and retained per-window\/repository Sessions workspaces. No UI behavior or performance has been tested in this design pass.\n* 2026-09-23: the human selected Wave → Project → Task hierarchy, then clarified that Wave\/Project layers must be minimal and collapsible so the result reads as one annotated, organized list. Initial expansion, collapsed counts, and search behavior above are proposed details.\n* 2026-09-23: the human questioned “beside your terminals.” Persistent side-by-side list\/terminal placement is an unaccepted assistant assumption, now removed from the requirements.\n* 2026-09-23: built eight interactive HTML studies and visually checked the comparison capture through `lf screenshot`. These are layout\/interaction evidence only, not proof of native terminal retention or current Work state.\n* 2026-09-23: the human favored A and D and then indicated both views should be available. Added a focused second round with both originals and a show\/hide-list hybrid. Default presentation remains undecided.\n* 2026-09-23: the human raised worktrees\/Sessions before taskification and top-level agent Sessions. The Task-only sample population is insufficient. Shared Session types already allow absent or non-Task attribution; new-worktree membership, taskification\/adoption, and external vendor-session discovery remain unproven.\n* 2026-09-23: the human proposed one current Session per repo\/Wave\/Project\/Task. This replaces the separate standalone\/worktree-list proposal. Shared identity\/cardinality and reconciliation with existing human boundaries remain design work.\n* 2026-09-23: inspected `loopflow.lf-new` at the human's request. Incorporated its Task-first creation proposal, nested workspace\/terminal layouts, and shell-launched Session registration counterexample. No files in that checkout were changed; no implementation or live proof is inferred from its draft\/mockup.\n* 2026-09-23: the human clarified conversations are optional and fresh starts should be encouraged. One-current-at-a-time is a cardinality constraint, not a permanent conversation per subject. Start\/Continue\/Finish\/Start fresh above are proposed controls for that intent.\n* 2026-09-23: the human requested advancing the Task, then clarified that the pre-identified Task should receive this design. Reuse LOO-291 rather than create a duplicate. Earlier queue timing does not block this explicit advance; external-work proof remains unselected and must not be fabricated.\n* Open: per-subject Session lifecycle, checkout choice\/taskification, first-open presentation, repository breadth, external proving workflow, and the directive-editing follow-up.\n\n---\n\n## Preserved original Task requirements and chapter allocation\n\nIn the existing desktop workspace, show the selected repository's current Project definition and KR proof plus Task directive and condition from shared planning reads. Navigate between a Task and its existing open Sessions using stable shared identity; show an explicit no-Session state when none exists. Preserve retained panes, selection, and explicit Move here. Let the human edit the selected Task directive through the existing PM API and show the refreshed authoritative result. Identify planning freshness, unavailable reads, and rejected writes. Use the shared Session actions and display path from LOO-284; do not recreate a Session legality matrix or a labels-only roadmap query. Prove ten configured planning-to-Session trials on human-selected external work, including one authorized edit round trip, and publish scoped paint\/interaction budgets with twenty long-lived-registry trials. Do not restore general fleet controls or infer priorities, execution success, or portfolio momentum.\n\n## Accepted chapter allocation — 2026-09-23\n\nChapter 20260923T000959Z-502f011b; review 2026-10-21T00:09:59.226362+00:00. Queued after LOO-251 and LOO-284 in the same serial Desktop slot. Activation also requires a named human-selected external proving workflow; do not infer one. LOO-280 is conditional only on the real configured LOO-251 proof being blocked by Xcode\/Ghostty. No execution launch or publication occurs as part of creating this planning record."
+  },
+  {
+    "AXDescription" : "",
+    "AXHelp" : "",
+    "AXIdentifier" : "",
+    "AXRole" : "AXStaticText",
+    "AXTitle" : "",
+    "AXValue" : "\/Users\/jack\/src\/loopflow.main-view-task"
+  },
+  {
+    "AXDescription" : "",
+    "AXHelp" : "",
+    "AXIdentifier" : "",
+    "AXRole" : "AXStaticText",
+    "AXTitle" : "",
+    "AXValue" : "Desktop"
+  },
+  {
+    "AXDescription" : "",
+    "AXHelp" : "",
+    "AXIdentifier" : "",
+    "AXRole" : "AXStaticText",
+    "AXTitle" : "",
+    "AXValue" : "Make the Mac desktop a dependable workspace for understanding human-selected Project\/KR\/Task intent and organizing the open Sessions that advance it. Build on provider-native continuation, retained panes, and explicit client transfer. Shared Loopflow APIs own planning, Work identity, legal actions, and human resolution; Desktop presents their evidence and preserves useful view state. Prove the promoted Ask handoff and truthful, responsive opening on the configured app, then join planning to Sessions for selected external work. Missing or stale evidence stays visible. Desktop owns user presentation, not a second transcript, evidence authority, runtime, or priority engine."
+  },
+  {
+    "AXDescription" : "",
+    "AXHelp" : "",
+    "AXIdentifier" : "workspace-project-proof",
+    "AXRole" : "AXStaticText",
+    "AXTitle" : "",
+    "AXValue" : "Key results"
+  },
+  {
+    "AXDescription" : "",
+    "AXHelp" : "",
+    "AXIdentifier" : "workspace-project-proof",
+    "AXRole" : "AXStaticText",
+    "AXTitle" : "",
+    "AXValue" : "Not established: Across ten recorded trials on human-selected work from Cube, Etude, Kata, or Hootro, one native workspace exposes current Project definitions, KR proof, and Task directives; round-trips at least one authorized Task-directive edit through the existing PM API; navigates between a Task and its exact open Sessions or an explicit no-Session state; and preserves useful panes and Work context. Shared Rust\/Swift fixtures and twenty live Project, Task, and Session comparisons agree on identity, planning evidence, descriptive conditions, legal actions, and reasons. One real promoted Ask completes provider-native continuation, Ready, Complete, pane reconciliation, and blocked-caller release through the permissioned UI path. Desktop creates no second planning or Session authority."
+  },
+  {
+    "AXDescription" : "",
+    "AXHelp" : "",
+    "AXIdentifier" : "workspace-project-proof",
+    "AXRole" : "AXStaticText",
+    "AXTitle" : "",
+    "AXValue" : "Not established: Across fourteen consecutive days of real use, at least twenty repository opens show the correctly scoped Sessions list and true count within a published p95 budget, without an empty-then-populate flash or manual repair, and at least twenty Session selections reach verified interactive embedded terminals within a published p95 budget, with serial-open position retained. Twenty cold-launch and planning-navigation trials on the long-lived registry meet published paint and interaction budgets. Missing or stale evidence never appears as healthy emptiness; delayed or failed selections stay explicit, and terminated clients never remain displayed as live."
+  },
+  {
+    "AXDescription" : "",
+    "AXHelp" : "",
+    "AXIdentifier" : "",
+    "AXRole" : "AXScrollBar",
+    "AXTitle" : "",
+    "AXValue" : ""
+  },
+  {
+    "AXDescription" : "",
+    "AXHelp" : "",
+    "AXIdentifier" : "",
+    "AXRole" : "AXValueIndicator",
+    "AXTitle" : "",
+    "AXValue" : ""
+  },
+  {
+    "AXDescription" : "",
+    "AXHelp" : "",
+    "AXIdentifier" : "",
+    "AXRole" : "AXButton",
+    "AXTitle" : "",
+    "AXValue" : ""
+  },
+  {
+    "AXDescription" : "",
+    "AXHelp" : "",
+    "AXIdentifier" : "",
+    "AXRole" : "AXButton",
+    "AXTitle" : "",
+    "AXValue" : ""
+  },
+  {
+    "AXDescription" : "",
+    "AXHelp" : "",
+    "AXIdentifier" : "",
+    "AXRole" : "AXButton",
+    "AXTitle" : "",
+    "AXValue" : ""
+  },
+  {
+    "AXDescription" : "",
+    "AXHelp" : "",
+    "AXIdentifier" : "",
+    "AXRole" : "AXButton",
+    "AXTitle" : "",
+    "AXValue" : ""
+  },
+  {
+    "AXDescription" : "",
+    "AXHelp" : "",
+    "AXIdentifier" : "",
+    "AXRole" : "AXSplitter",
+    "AXTitle" : "",
+    "AXValue" : ""
+  },
+  {
+    "AXDescription" : "",
+    "AXHelp" : "",
+    "AXIdentifier" : "",
+    "AXRole" : "AXGroup",
+    "AXTitle" : "",
+    "AXValue" : ""
+  },
+  {
+    "AXDescription" : "",
+    "AXHelp" : "",
+    "AXIdentifier" : "podium-activity",
+    "AXRole" : "AXGroup",
+    "AXTitle" : "",
+    "AXValue" : ""
+  },
+  {
+    "AXDescription" : "",
+    "AXHelp" : "",
+    "AXIdentifier" : "",
+    "AXRole" : "AXStaticText",
+    "AXTitle" : "",
+    "AXValue" : "Activity"
+  },
+  {
+    "AXDescription" : "",
+    "AXHelp" : "",
+    "AXIdentifier" : "podium-activity-scope",
+    "AXRole" : "AXStaticText",
+    "AXTitle" : "",
+    "AXValue" : "Task · LOO-291"
+  },
+  {
+    "AXDescription" : "Show all Activity",
+    "AXHelp" : "Show all Activity",
+    "AXIdentifier" : "",
+    "AXRole" : "AXButton",
+    "AXTitle" : "",
+    "AXValue" : ""
+  },
+  {
+    "AXDescription" : "",
+    "AXHelp" : "",
+    "AXIdentifier" : "podium-selection-summary",
+    "AXRole" : "AXStaticText",
+    "AXTitle" : "",
+    "AXValue" : "Task has uncommitted work"
+  },
+  {
+    "AXDescription" : "",
+    "AXHelp" : "",
+    "AXIdentifier" : "podium-activity-list",
+    "AXRole" : "AXScrollArea",
+    "AXTitle" : "",
+    "AXValue" : ""
+  },
+  {
+    "AXDescription" : "",
+    "AXHelp" : "",
+    "AXIdentifier" : "",
+    "AXRole" : "AXOpaqueProviderGroup",
+    "AXTitle" : "",
+    "AXValue" : ""
+  },
+  {
+    "AXDescription" : "LOO-291, review-slice finished completed, Sep 23, 2026 at 8:03 PM",
+    "AXHelp" : "",
+    "AXIdentifier" : "podium-activity-run:run_4a6890abfb5a49b88035b734d5a7bf17:finished",
+    "AXRole" : "AXGroup",
+    "AXTitle" : "",
+    "AXValue" : ""
+  },
+  {
+    "AXDescription" : "Selected",
+    "AXHelp" : "",
+    "AXIdentifier" : "checkmark",
+    "AXRole" : "AXImage",
+    "AXTitle" : "",
+    "AXValue" : ""
+  },
+  {
+    "AXDescription" : "",
+    "AXHelp" : "",
+    "AXIdentifier" : "",
+    "AXRole" : "AXStaticText",
+    "AXTitle" : "",
+    "AXValue" : "TASK · LOO-291"
+  },
+  {
+    "AXDescription" : "",
+    "AXHelp" : "Sep 23, 2026 at 8:03 PM",
+    "AXIdentifier" : "",
+    "AXRole" : "AXStaticText",
+    "AXTitle" : "",
+    "AXValue" : "17 hours ago"
+  },
+  {
+    "AXDescription" : "",
+    "AXHelp" : "",
+    "AXIdentifier" : "",
+    "AXRole" : "AXStaticText",
+    "AXTitle" : "",
+    "AXValue" : "review-slice finished completed"
+  },
+  {
+    "AXDescription" : "LOO-291, review-slice started, Sep 23, 2026 at 7:52 PM",
+    "AXHelp" : "",
+    "AXIdentifier" : "podium-activity-run:run_4a6890abfb5a49b88035b734d5a7bf17:started",
+    "AXRole" : "AXGroup",
+    "AXTitle" : "",
+    "AXValue" : ""
+  },
+  {
+    "AXDescription" : "Play",
+    "AXHelp" : "",
+    "AXIdentifier" : "play.fill",
+    "AXRole" : "AXImage",
+    "AXTitle" : "",
+    "AXValue" : ""
+  },
+  {
+    "AXDescription" : "",
+    "AXHelp" : "",
+    "AXIdentifier" : "",
+    "AXRole" : "AXStaticText",
+    "AXTitle" : "",
+    "AXValue" : "TASK · LOO-291"
+  },
+  {
+    "AXDescription" : "",
+    "AXHelp" : "Sep 23, 2026 at 7:52 PM",
+    "AXIdentifier" : "",
+    "AXRole" : "AXStaticText",
+    "AXTitle" : "",
+    "AXValue" : "17 hours ago"
+  },
+  {
+    "AXDescription" : "",
+    "AXHelp" : "",
+    "AXIdentifier" : "",
+    "AXRole" : "AXStaticText",
+    "AXTitle" : "",
+    "AXValue" : "review-slice started"
+  },
+  {
+    "AXDescription" : "LOO-291, compress finished completed, Sep 23, 2026 at 7:52 PM",
+    "AXHelp" : "",
+    "AXIdentifier" : "podium-activity-run:run_d5a839618672440a9dab49a376f4ec06:finished",
+    "AXRole" : "AXGroup",
+    "AXTitle" : "",
+    "AXValue" : ""
+  },
+  {
+    "AXDescription" : "Selected",
+    "AXHelp" : "",
+    "AXIdentifier" : "checkmark",
+    "AXRole" : "AXImage",
+    "AXTitle" : "",
+    "AXValue" : ""
+  },
+  {
+    "AXDescription" : "",
+    "AXHelp" : "",
+    "AXIdentifier" : "",
+    "AXRole" : "AXStaticText",
+    "AXTitle" : "",
+    "AXValue" : "TASK · LOO-291"
+  },
+  {
+    "AXDescription" : "",
+    "AXHelp" : "Sep 23, 2026 at 7:52 PM",
+    "AXIdentifier" : "",
+    "AXRole" : "AXStaticText",
+    "AXTitle" : "",
+    "AXValue" : "17 hours ago"
+  },
+  {
+    "AXDescription" : "",
+    "AXHelp" : "",
+    "AXIdentifier" : "",
+    "AXRole" : "AXStaticText",
+    "AXTitle" : "",
+    "AXValue" : "compress finished completed"
+  },
+  {
+    "AXDescription" : "LOO-291, compress started, Sep 23, 2026 at 7:51 PM",
+    "AXHelp" : "",
+    "AXIdentifier" : "podium-activity-run:run_d5a839618672440a9dab49a376f4ec06:started",
+    "AXRole" : "AXGroup",
+    "AXTitle" : "",
+    "AXValue" : ""
+  },
+  {
+    "AXDescription" : "Play",
+    "AXHelp" : "",
+    "AXIdentifier" : "play.fill",
+    "AXRole" : "AXImage",
+    "AXTitle" : "",
+    "AXValue" : ""
+  },
+  {
+    "AXDescription" : "",
+    "AXHelp" : "",
+    "AXIdentifier" : "",
+    "AXRole" : "AXStaticText",
+    "AXTitle" : "",
+    "AXValue" : "TASK · LOO-291"
+  },
+  {
+    "AXDescription" : "",
+    "AXHelp" : "Sep 23, 2026 at 7:51 PM",
+    "AXIdentifier" : "",
+    "AXRole" : "AXStaticText",
+    "AXTitle" : "",
+    "AXValue" : "17 hours ago"
+  },
+  {
+    "AXDescription" : "",
+    "AXHelp" : "",
+    "AXIdentifier" : "",
+    "AXRole" : "AXStaticText",
+    "AXTitle" : "",
+    "AXValue" : "compress started"
+  },
+  {
+    "AXDescription" : "LOO-291, implement finished completed, Sep 23, 2026 at 7:50 PM",
+    "AXHelp" : "",
+    "AXIdentifier" : "podium-activity-run:run_643d86d70d5b4109a460e80a87a97533:finished",
+    "AXRole" : "AXGroup",
+    "AXTitle" : "",
+    "AXValue" : ""
+  },
+  {
+    "AXDescription" : "Selected",
+    "AXHelp" : "",
+    "AXIdentifier" : "checkmark",
+    "AXRole" : "AXImage",
+    "AXTitle" : "",
+    "AXValue" : ""
+  },
+  {
+    "AXDescription" : "",
+    "AXHelp" : "",
+    "AXIdentifier" : "",
+    "AXRole" : "AXStaticText",
+    "AXTitle" : "",
+    "AXValue" : "TASK · LOO-291"
+  },
+  {
+    "AXDescription" : "",
+    "AXHelp" : "Sep 23, 2026 at 7:50 PM",
+    "AXIdentifier" : "",
+    "AXRole" : "AXStaticText",
+    "AXTitle" : "",
+    "AXValue" : "17 hours ago"
+  },
+  {
+    "AXDescription" : "",
+    "AXHelp" : "",
+    "AXIdentifier" : "",
+    "AXRole" : "AXStaticText",
+    "AXTitle" : "",
+    "AXValue" : "implement finished completed"
+  },
+  {
+    "AXDescription" : "LOO-291, Steered: Additional installed-path counterexample: read scratch\/lf-new-implementation\/installed-proof.md and installed-live-workspace.png. The installed build correctly shows 3 Waves and a populated planning read, but some heading\/title\/toolbar text is nearly white on its light background. Repair the actual foreground\/appearance mismatch during this integration slice and check both appearances; do not call the live demo passed. This host has UI automation disabled, so the user confirmation request remains pending. Task run --flow slice was accepted after resume reported no active Flow; keep this existing Task\/checkout and continue from the supplied committed implementation., Sep 23, 2026 at 7:43 PM",
+    "AXHelp" : "",
+    "AXIdentifier" : "podium-activity-steer:task:task_2aa71a7e36fe416d8a721e2b2f7c54e7:65123",
+    "AXRole" : "AXGroup",
+    "AXTitle" : "",
+    "AXValue" : ""
+  },
+  {
+    "AXDescription" : "arrow.turn.down.right",
+    "AXHelp" : "",
+    "AXIdentifier" : "arrow.turn.down.right",
+    "AXRole" : "AXImage",
+    "AXTitle" : "",
+    "AXValue" : ""
+  },
+  {
+    "AXDescription" : "",
+    "AXHelp" : "",
+    "AXIdentifier" : "",
+    "AXRole" : "AXStaticText",
+    "AXTitle" : "",
+    "AXValue" : "TASK · LOO-291"
+  },
+  {
+    "AXDescription" : "",
+    "AXHelp" : "Sep 23, 2026 at 7:43 PM",
+    "AXIdentifier" : "",
+    "AXRole" : "AXStaticText",
+    "AXTitle" : "",
+    "AXValue" : "17 hours ago"
+  },
+  {
+    "AXDescription" : "",
+    "AXHelp" : "",
+    "AXIdentifier" : "",
+    "AXRole" : "AXStaticText",
+    "AXTitle" : "",
+    "AXValue" : "Steered: Additional installed-path counterexample: read scratch\/lf-new-implementation\/installed-proof.md and installed-live-workspace.png. The installed build correctly shows 3 Waves and a populated planning read, but some heading\/title\/toolbar text is nearly white on its light background. Repair the actual foreground\/appearance mismatch during this integration slice and check both appearances; do not call the live demo passed. This host has UI automation disabled, so the user confirmation request remains pending. Task run --flow slice was accepted after resume reported no active Flow; keep this existing Task\/checkout and continue from the supplied committed implementation."
+  },
+  {
+    "AXDescription" : "LOO-291, implement started, Sep 23, 2026 at 7:42 PM",
+    "AXHelp" : "",
+    "AXIdentifier" : "podium-activity-run:run_643d86d70d5b4109a460e80a87a97533:started",
+    "AXRole" : "AXGroup",
+    "AXTitle" : "",
+    "AXValue" : ""
+  },
+  {
+    "AXDescription" : "Play",
+    "AXHelp" : "",
+    "AXIdentifier" : "play.fill",
+    "AXRole" : "AXImage",
+    "AXTitle" : "",
+    "AXValue" : ""
+  },
+  {
+    "AXDescription" : "",
+    "AXHelp" : "",
+    "AXIdentifier" : "",
+    "AXRole" : "AXStaticText",
+    "AXTitle" : "",
+    "AXValue" : "TASK · LOO-291"
+  },
+  {
+    "AXDescription" : "",
+    "AXHelp" : "Sep 23, 2026 at 7:42 PM",
+    "AXIdentifier" : "",
+    "AXRole" : "AXStaticText",
+    "AXTitle" : "",
+    "AXValue" : "17 hours ago"
+  },
+  {
+    "AXDescription" : "",
+    "AXHelp" : "",
+    "AXIdentifier" : "",
+    "AXRole" : "AXStaticText",
+    "AXTitle" : "",
+    "AXValue" : "implement started"
+  },
+  {
+    "AXDescription" : "LOO-291, Steered: The human explicitly requested getting the lf-new implementation into the Task flow and advancing it. LOO-291 already owns this integration; its Linear directive has been updated, preserving the original requirements. Read scratch\/lf-new-implementation\/{handoff,design,evidence}.md. The source contribution is committed on jack-heart\/lf-new (implementation 561eadcce, subsequent handoff docs); it includes your committed navigation through cf4f24209. Preserve all your ongoing edits and newer commits. Integrate that branch into this owned Task checkout through lf after checkpointing the coherent current work; do not replace its newer fixes or return to the old Sessions sidebar. Then run the narrow reconciliation proof and continue the Task flow. Latest user direction uses a scope-aware New conversation and separate New terminal; unconditional Task\/worktree creation is reopened, not required for this slice. The supported local install succeeded with candidate 0.12.19+561eadcce; current repo Waves are infrastructure, intelligence, product. engbot was forgotten through lf; list has abandoned LOO-276 history, is excluded from current navigation, and should not be hard-deleted. Installed app is open. AX access is disabled for this automation host, and the human was asked to click New conversation to verify configured destination\/scope. Do not claim that demo confirmed or repeat fixture-only cycles as substitute. Preserve the original full Task's directive editing, shared API, and external-work\/performance obligations., Sep 23, 2026 at 7:41 PM",
+    "AXHelp" : "",
+    "AXIdentifier" : "podium-activity-steer:task:task_2aa71a7e36fe416d8a721e2b2f7c54e7:65122",
+    "AXRole" : "AXGroup",
+    "AXTitle" : "",
+    "AXValue" : ""
+  },
+  {
+    "AXDescription" : "arrow.turn.down.right",
+    "AXHelp" : "",
+    "AXIdentifier" : "arrow.turn.down.right",
+    "AXRole" : "AXImage",
+    "AXTitle" : "",
+    "AXValue" : ""
+  },
+  {
+    "AXDescription" : "",
+    "AXHelp" : "",
+    "AXIdentifier" : "",
+    "AXRole" : "AXStaticText",
+    "AXTitle" : "",
+    "AXValue" : "TASK · LOO-291"
+  },
+  {
+    "AXDescription" : "",
+    "AXHelp" : "Sep 23, 2026 at 7:41 PM",
+    "AXIdentifier" : "",
+    "AXRole" : "AXStaticText",
+    "AXTitle" : "",
+    "AXValue" : "17 hours ago"
+  },
+  {
+    "AXDescription" : "",
+    "AXHelp" : "",
+    "AXIdentifier" : "",
+    "AXRole" : "AXStaticText",
+    "AXTitle" : "",
+    "AXValue" : "Steered: The human explicitly requested getting the lf-new implementation into the Task flow and advancing it. LOO-291 already owns this integration; its Linear directive has been updated, preserving the original requirements. Read scratch\/lf-new-implementation\/{handoff,design,evidence}.md. The source contribution is committed on jack-heart\/lf-new (implementation 561eadcce, subsequent handoff docs); it includes your committed navigation through cf4f24209. Preserve all your ongoing edits and newer commits. Integrate that branch into this owned Task checkout through lf after checkpointing the coherent current work; do not replace its newer fixes or return to the old Sessions sidebar. Then run the narrow reconciliation proof and continue the Task flow. Latest user direction uses a scope-aware New conversation and separate New terminal; unconditional Task\/worktree creation is reopened, not required for this slice. The supported local install succeeded with candidate 0.12.19+561eadcce; current repo Waves are infrastructure, intelligence, product. engbot was forgotten through lf; list has abandoned LOO-276 history, is excluded from current navigation, and should not be hard-deleted. Installed app is open. AX access is disabled for this automation host, and the human was asked to click New conversation to verify configured destination\/scope. Do not claim that demo confirmed or repeat fixture-only cycles as substitute. Preserve the original full Task's directive editing, shared API, and external-work\/performance obligations."
+  },
+  {
+    "AXDescription" : "LOO-291, Steered: The human says continue. Prioritize closing the first-slice configured UI\/provider\/timing proof blocker now; iterations 2-5 repeatedly carried the same AX gap while useful local edge-case fixes accumulated. New bounded evidence from the control conversation: \/tmp\/loo291-foreground-probe.swift launched its own disposable \/tmp\/loo291-review\/Loopflow Review.app with createsNewApplicationInstance=true and activates=true, using the actual repository. Log \/tmp\/loo291-foreground-probe.log: AXIsProcessTrusted=false, AXWindows=-25211, while WindowServer reports an on-screen owned window. The owned probe app was then terminated; no user Session was opened, moved, or resolved. Compare this with \/tmp\/loo291-configured-probe.log, which reported AX trusted=true but only application\/menu nodes. Do not generalize trust across different probe\/runner contexts or treat missing AX children as proof that no window exists. In your exact configured proof host, distinguish permission, window creation\/activation, and accessible controls with one bounded check. Continue the accepted implementation, preserve completed useful fixes, and produce configured proof plus scoped timing evidence where possible. If an OS permission or human-only interaction is the actual boundary, report the exact required app\/permission and a concrete reviewable build\/procedure; do not bypass permissions or keep cycling identical reviews\/fixture-only proofs. Keep original external-work trials as pending full-Task obligations, not fabricated evidence. Record new observations separately from hypotheses. The assigned checkout and native Sessions remain yours; do not replace a user-owned provider client merely for proof., Sep 23, 2026 at 6:14 PM",
+    "AXHelp" : "",
+    "AXIdentifier" : "podium-activity-steer:task:task_2aa71a7e36fe416d8a721e2b2f7c54e7:65111",
+    "AXRole" : "AXGroup",
+    "AXTitle" : "",
+    "AXValue" : ""
+  },
+  {
+    "AXDescription" : "arrow.turn.down.right",
+    "AXHelp" : "",
+    "AXIdentifier" : "arrow.turn.down.right",
+    "AXRole" : "AXImage",
+    "AXTitle" : "",
+    "AXValue" : ""
+  },
+  {
+    "AXDescription" : "",
+    "AXHelp" : "",
+    "AXIdentifier" : "",
+    "AXRole" : "AXStaticText",
+    "AXTitle" : "",
+    "AXValue" : "TASK · LOO-291"
+  },
+  {
+    "AXDescription" : "",
+    "AXHelp" : "Sep 23, 2026 at 6:14 PM",
+    "AXIdentifier" : "",
+    "AXRole" : "AXStaticText",
+    "AXTitle" : "",
+    "AXValue" : "18 hours ago"
+  },
+  {
+    "AXDescription" : "",
+    "AXHelp" : "",
+    "AXIdentifier" : "",
+    "AXRole" : "AXStaticText",
+    "AXTitle" : "",
+    "AXValue" : "Steered: The human says continue. Prioritize closing the first-slice configured UI\/provider\/timing proof blocker now; iterations 2-5 repeatedly carried the same AX gap while useful local edge-case fixes accumulated. New bounded evidence from the control conversation: \/tmp\/loo291-foreground-probe.swift launched its own disposable \/tmp\/loo291-review\/Loopflow Review.app with createsNewApplicationInstance=true and activates=true, using the actual repository. Log \/tmp\/loo291-foreground-probe.log: AXIsProcessTrusted=false, AXWindows=-25211, while WindowServer reports an on-screen owned window. The owned probe app was then terminated; no user Session was opened, moved, or resolved. Compare this with \/tmp\/loo291-configured-probe.log, which reported AX trusted=true but only application\/menu nodes. Do not generalize trust across different probe\/runner contexts or treat missing AX children as proof that no window exists. In your exact configured proof host, distinguish permission, window creation\/activation, and accessible controls with one bounded check. Continue the accepted implementation, preserve completed useful fixes, and produce configured proof plus scoped timing evidence where possible. If an OS permission or human-only interaction is the actual boundary, report the exact required app\/permission and a concrete reviewable build\/procedure; do not bypass permissions or keep cycling identical reviews\/fixture-only proofs. Keep original external-work trials as pending full-Task obligations, not fabricated evidence. Record new observations separately from hypotheses. The assigned checkout and native Sessions remain yours; do not replace a user-owned provider client merely for proof."
+  },
+  {
+    "AXDescription" : "",
+    "AXHelp" : "",
+    "AXIdentifier" : "",
+    "AXRole" : "AXScrollBar",
+    "AXTitle" : "",
+    "AXValue" : ""
+  },
+  {
+    "AXDescription" : "",
+    "AXHelp" : "",
+    "AXIdentifier" : "",
+    "AXRole" : "AXValueIndicator",
+    "AXTitle" : "",
+    "AXValue" : ""
+  },
+  {
+    "AXDescription" : "",
+    "AXHelp" : "",
+    "AXIdentifier" : "",
+    "AXRole" : "AXButton",
+    "AXTitle" : "",
+    "AXValue" : ""
+  },
+  {
+    "AXDescription" : "",
+    "AXHelp" : "",
+    "AXIdentifier" : "",
+    "AXRole" : "AXButton",
+    "AXTitle" : "",
+    "AXValue" : ""
+  },
+  {
+    "AXDescription" : "",
+    "AXHelp" : "",
+    "AXIdentifier" : "",
+    "AXRole" : "AXButton",
+    "AXTitle" : "",
+    "AXValue" : ""
+  },
+  {
+    "AXDescription" : "",
+    "AXHelp" : "",
+    "AXIdentifier" : "",
+    "AXRole" : "AXButton",
+    "AXTitle" : "",
+    "AXValue" : ""
+  },
+  {
+    "AXDescription" : "",
+    "AXHelp" : "",
+    "AXIdentifier" : "",
+    "AXRole" : "AXButton",
+    "AXTitle" : "",
+    "AXValue" : ""
+  },
+  {
+    "AXDescription" : "",
+    "AXHelp" : "this button also has an action to zoom the window",
+    "AXIdentifier" : "",
+    "AXRole" : "AXButton",
+    "AXTitle" : "",
+    "AXValue" : ""
+  },
+  {
+    "AXDescription" : "",
+    "AXHelp" : "",
+    "AXIdentifier" : "",
+    "AXRole" : "AXGroup",
+    "AXTitle" : "",
+    "AXValue" : ""
+  },
+  {
+    "AXDescription" : "",
+    "AXHelp" : "",
+    "AXIdentifier" : "",
+    "AXRole" : "AXGroup",
+    "AXTitle" : "",
+    "AXValue" : ""
+  },
+  {
+    "AXDescription" : "",
+    "AXHelp" : "",
+    "AXIdentifier" : "",
+    "AXRole" : "AXButton",
+    "AXTitle" : "",
+    "AXValue" : ""
+  },
+  {
+    "AXDescription" : "",
+    "AXHelp" : "",
+    "AXIdentifier" : "",
+    "AXRole" : "AXStaticText",
+    "AXTitle" : "",
+    "AXValue" : "Loopflow Proof"
+  }
+]

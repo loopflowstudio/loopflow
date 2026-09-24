@@ -1,0 +1,34 @@
+[0/1] Planning build
+Building for debugging...
+[0/5] Write sources
+[1/5] Write swift-version--58304C5D6DBC2206.txt
+[3/5] Emitting module LoopflowTests
+[4/5] Compiling LoopflowTests WorkspaceNavigationProofTests.swift
+[4/6] Write Objects.LinkFileList
+[5/6] Linking LoopflowSwiftPackageTests
+Build complete! (3.05s)
+Test Suite 'Selected tests' started at 2026-09-24 08:10:27.526.
+Test Suite 'LoopflowSwiftPackageTests.xctest' started at 2026-09-24 08:10:27.527.
+Test Suite 'LoopflowSwiftPackageTests.xctest' passed at 2026-09-24 08:10:27.527.
+	 Executed 0 tests, with 0 failures (0 unexpected) in 0.000 (0.000) seconds
+Test Suite 'Selected tests' passed at 2026-09-24 08:10:27.527.
+	 Executed 0 tests, with 0 failures (0 unexpected) in 0.000 (0.001) seconds
+◇ Test run started.
+↳ Testing Library Version: 1501
+↳ Target Platform: arm64e-apple-macos14.0
+◇ Suite "Unified workspace navigation proof" started.
+◇ Test "Rejected Flow decisions retain their terminal and remain visible after polling" started.
+◇ Test case passing 1 argument approving → true to "Rejected Flow decisions retain their terminal and remain visible after polling" started.
+[GhosttyManager] CoreVideo display link unavailable (-6661); using timer rendering
+✘ Test "Rejected Flow decisions retain their terminal and remain visible after polling" recorded an issue with 1 argument approving → true at WorkspaceNavigationProofTests.swift:325:13: Expectation failed: (store.sessions.first?.state → .failed("Decision rejected")) == .live
+✘ Test "Rejected Flow decisions retain their terminal and remain visible after polling" recorded an issue with 1 argument approving → true at WorkspaceNavigationProofTests.swift:329:13: Expectation failed: an error was thrown when none was expected: "Search did not find a match. Possible blockers: SessionsShortcutMonitor, AccessibilityImageLabel, AccessibilityImageLabel, AccessibilityImageLabel, AccessibilityImageLabel, AccessibilityImageLabel, AccessibilityImageLabel, AccessibilityImageLabel, AccessibilityImageLabel, AccessibilityImageLabel, AccessibilityImageLabel, AccessibilityImageLabel, AccessibilityImageLabel, AccessibilityImageLabel, GhosttyTerminalRepresentable, AccessibilityImageLabel, AccessibilityImageLabel, AccessibilityImageLabel, AccessibilityImageLabel, AccessibilityImageLabel, AccessibilityImageLabel" of type InspectionError
+✘ Test "Rejected Flow decisions retain their terminal and remain visible after polling" recorded an issue with 1 argument approving → true at WorkspaceNavigationProofTests.swift:325:13: Expectation failed: (store.sessions.first?.state → .failed("Decision rejected")) == .live
+✘ Test "Rejected Flow decisions retain their terminal and remain visible after polling" recorded an issue with 1 argument approving → true at WorkspaceNavigationProofTests.swift:329:13: Expectation failed: an error was thrown when none was expected: "Search did not find a match. Possible blockers: SessionsShortcutMonitor, AccessibilityImageLabel, AccessibilityImageLabel, AccessibilityImageLabel, AccessibilityImageLabel, AccessibilityImageLabel, AccessibilityImageLabel, AccessibilityImageLabel, AccessibilityImageLabel, AccessibilityImageLabel, AccessibilityImageLabel, AccessibilityImageLabel, AccessibilityImageLabel, AccessibilityImageLabel, GhosttyTerminalRepresentable, AccessibilityImageLabel, AccessibilityImageLabel, AccessibilityImageLabel, AccessibilityImageLabel, AccessibilityImageLabel, AccessibilityImageLabel" of type InspectionError
+◇ Test case passing 1 argument approving → false to "Rejected Flow decisions retain their terminal and remain visible after polling" started.
+✘ Test "Rejected Flow decisions retain their terminal and remain visible after polling" recorded an issue with 1 argument approving → false at WorkspaceNavigationProofTests.swift:325:13: Expectation failed: (store.sessions.first?.state → .failed("Decision rejected")) == .live
+✘ Test "Rejected Flow decisions retain their terminal and remain visible after polling" recorded an issue with 1 argument approving → false at WorkspaceNavigationProofTests.swift:329:13: Expectation failed: an error was thrown when none was expected: "Search did not find a match. Possible blockers: SessionsShortcutMonitor, AccessibilityImageLabel, AccessibilityImageLabel, AccessibilityImageLabel, AccessibilityImageLabel, AccessibilityImageLabel, AccessibilityImageLabel, AccessibilityImageLabel, AccessibilityImageLabel, AccessibilityImageLabel, AccessibilityImageLabel, AccessibilityImageLabel, AccessibilityImageLabel, AccessibilityImageLabel, GhosttyTerminalRepresentable, AccessibilityImageLabel, AccessibilityImageLabel, AccessibilityImageLabel, AccessibilityImageLabel, AccessibilityImageLabel, AccessibilityImageLabel" of type InspectionError
+✘ Test "Rejected Flow decisions retain their terminal and remain visible after polling" recorded an issue with 1 argument approving → false at WorkspaceNavigationProofTests.swift:325:13: Expectation failed: (store.sessions.first?.state → .failed("Decision rejected")) == .live
+✘ Test "Rejected Flow decisions retain their terminal and remain visible after polling" recorded an issue with 1 argument approving → false at WorkspaceNavigationProofTests.swift:329:13: Expectation failed: an error was thrown when none was expected: "Search did not find a match. Possible blockers: SessionsShortcutMonitor, AccessibilityImageLabel, AccessibilityImageLabel, AccessibilityImageLabel, AccessibilityImageLabel, AccessibilityImageLabel, AccessibilityImageLabel, AccessibilityImageLabel, AccessibilityImageLabel, AccessibilityImageLabel, AccessibilityImageLabel, AccessibilityImageLabel, AccessibilityImageLabel, AccessibilityImageLabel, GhosttyTerminalRepresentable, AccessibilityImageLabel, AccessibilityImageLabel, AccessibilityImageLabel, AccessibilityImageLabel, AccessibilityImageLabel, AccessibilityImageLabel" of type InspectionError
+✘ Test "Rejected Flow decisions retain their terminal and remain visible after polling" with 2 test cases failed after 1.952 seconds with 8 issues.
+✘ Suite "Unified workspace navigation proof" failed after 1.952 seconds with 8 issues.
+✘ Test run with 1 test in 1 suite failed after 1.952 seconds with 8 issues.

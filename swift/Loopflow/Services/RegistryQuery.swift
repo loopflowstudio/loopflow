@@ -174,6 +174,12 @@ public struct RegistryQuery: Sendable {
         return try Self.decode(TaskChangesSnapshot.self, from: stdout)
     }
 
+    public func updateTaskDirective(id: String, wave: String, text: String, cwd: String) async throws {
+        _ = try await run([
+            "pm", "task", "update", "--id", id, "--wave", wave, "--notes=\(text)",
+        ], cwd)
+    }
+
     /// One Task's complete patch, or the patch for a selected changed file.
     public func taskDiff(
         issue: String,

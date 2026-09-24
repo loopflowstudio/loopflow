@@ -239,6 +239,8 @@ pub struct TaskWorkspaceSnapshot {
     /// Task settles. `None` is explicit for legacy Tasks with no PR record.
     pub branch: Option<String>,
     pub worktree: String,
+    /// Existence on the reading Home; unknown when the filesystem check fails.
+    pub local_exists: Option<bool>,
 }
 
 #[derive(Debug, Clone, Serialize, Deserialize)]
@@ -1411,6 +1413,7 @@ fn task_reference(
             slug: task.workspace_slug.clone(),
             branch,
             worktree: task.worktree.display().to_string(),
+            local_exists: task.worktree.try_exists().ok(),
         }
     });
     TaskReferenceSnapshot {

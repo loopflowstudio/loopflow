@@ -7,7 +7,7 @@ import Testing
 @Suite("Sessions store")
 @MainActor
 struct SessionsStoreTests {
-    @Test("reconcile adopts liveness and removes Tasks that advanced")
+    @Test("Shared activity never creates a local terminal; reconciliation removes resolved Sessions")
     func reconcileTracksTheTaskPlayhead() throws {
         let store = SessionsStore(repoPath: "/tmp/repo")
         store.reconcile(try records([
@@ -16,12 +16,12 @@ struct SessionsStoreTests {
         ]))
 
         #expect(item(store, "a")?.state == .pending)
-        #expect(item(store, "b")?.surface != nil)
+        #expect(item(store, "b")?.surface == nil)
 
         store.reconcile(try records([session(id: "a", state: "active")]))
 
         #expect(store.sessions.map(\.id) == ["a"])
-        #expect(item(store, "a")?.surface?.id == "a")
+        #expect(item(store, "a")?.state == .pending)
     }
 
     @Test("selecting one waiting Task recovers only that terminal")
@@ -288,6 +288,8 @@ private func session(id: String, state: String, kind: String = "flow", replacing
       "cwd": "/tmp/repo.\(id)",
       "state": "\(state)",
       "ready_summary": \(state == "ready" ? "\"Ready for review\"" : "null"),
+      "work_path": "product / Desktop / LOO-291",
+      "actions": \(sessionActionFixtureJSON(kind: kind, state: state)),
       "terminal_ids": [],
       "open_argv": ["lf", "session", "open", "\(id)"\(replacing ? ", \"--replace\"" : "")]
     }

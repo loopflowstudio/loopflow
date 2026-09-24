@@ -55,7 +55,11 @@ final class PodiumModel {
     }
 
     var workspace: WorkspaceProjection {
-        WorkspaceProjection(roadmaps: visibleRoadmaps, sessions: sessions.value ?? [])
+        WorkspaceProjection(
+            roadmaps: visibleRoadmaps, sessions: sessions.value ?? [],
+            activeWorktrees: Set((processActivity.value?.nodes ?? [])
+                .filter { $0.kind == .providerProcess }.compactMap(\.worktree))
+        )
     }
     private(set) var roadmap: PodiumReading<RoadmapSnapshot> = .loading
     private(set) var waves: PodiumReading<[Wave]> = .loading
@@ -78,6 +82,7 @@ final class PodiumModel {
     private let query: RegistryQuery
     private var usesFixedFixture = false
     private var sessionsGeneration = 0
+    private var roadmapGeneration = 0
     private var processActivityRefreshInFlight = false
     private var workActivityGeneration = 0
 
@@ -156,6 +161,7 @@ final class PodiumModel {
         defer { isRefreshing = false }
 
         let previousRoadmap = roadmap.value
+        let generation = roadmapGeneration
         let previousWaves = waves.value
         if previousRoadmap == nil { roadmap = .loading }
         if previousWaves == nil { waves = .loading }
@@ -165,7 +171,10 @@ final class PodiumModel {
         async let sessionRefresh: Void = refreshSessions()
         waves = reading(from: await wavesResult, lastGood: previousWaves)
         await sessionRefresh
-        roadmap = reading(from: await roadmapResult, lastGood: previousRoadmap)
+        let result = await roadmapResult
+        if generation == roadmapGeneration {
+            roadmap = reading(from: result, lastGood: previousRoadmap)
+        }
         selectRequestedWaveIfNeeded()
         if visibleRoadmaps.allSatisfy({ wave in
             guard case .available(_, false) = wave.projects else { return false }
@@ -238,6 +247,29 @@ final class PodiumModel {
             cwd: target.repo
         )
         await refresh()
+    }
+
+    func updateTaskDirective(task: RoadmapTask, wave: WaveSnapshot, text: String) async throws {
+        try await query.updateTaskDirective(id: task.id, wave: wave.name, text: text, cwd: wave.repo)
+        // Polls started before this write must not restore the old directive.
+        roadmapGeneration &+= 1
+        let generation = roadmapGeneration
+        let result = await readRoadmap()
+        if generation == roadmapGeneration {
+            roadmap = reading(from: result, lastGood: roadmap.value)
+        }
+        switch result {
+        case .success(let snapshot):
+            guard snapshot.waves.contains(where: { row in
+                row.wave.id == wave.id && row.projects.items.contains(where: {
+                    $0.tasks.contains(where: { $0.id == task.id })
+                })
+            }) else {
+                throw RegistryQueryError("Update accepted, but the Task is absent from refreshed planning. Your draft is retained.")
+            }
+        case .failure(let error):
+            throw RegistryQueryError("Update accepted, but planning refresh failed: \(error.localizedDescription)")
+        }
     }
 
     func select(_ selection: WorkReference?) {

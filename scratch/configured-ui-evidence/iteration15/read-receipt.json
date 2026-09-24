@@ -1,0 +1,18 @@
+{
+  "observed_at": "2026-09-24T14:55:33.202743+00:00",
+  "home": "/Users/jack/.lf-dev/installed/local-be852452823d43d7b7fde663651a7590",
+  "cli_sha256": "61e3ed3c17a53faca8a4de4a8c6b5d00b79812e6b272347e672bf4bb01b7e7b8",
+  "commands": [
+    [
+      "session",
+      "list",
+      "--json"
+    ],
+    [
+      "session",
+      "list"
+    ]
+  ],
+  "sessions": 4,
+  "mutation": false
+}

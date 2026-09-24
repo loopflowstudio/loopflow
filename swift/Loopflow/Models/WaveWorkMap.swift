@@ -104,6 +104,12 @@ public struct TaskWorkspaceSnapshot: Decodable, Sendable, Hashable {
     public let slug: String
     public let branch: String?
     public let worktree: String
+    public let localExists: Bool?
+
+    enum CodingKeys: String, CodingKey {
+        case slug, branch, worktree
+        case localExists = "local_exists"
+    }
 }
 
 public enum RoadmapSection: String, Decodable, Sendable, Hashable {

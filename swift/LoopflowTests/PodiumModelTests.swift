@@ -514,6 +514,7 @@ struct PodiumOutputSignalTests {
             kind: .providerProcess,
             label: "codex",
             repo: "/src/loopflow",
+            worktree: nil,
             wave: "product",
             pid: 1,
             startedAt: 1,

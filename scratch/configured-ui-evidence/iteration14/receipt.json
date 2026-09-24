@@ -1,0 +1,60 @@
+{
+  "configured_pass": true,
+  "probe_exit": 0,
+  "owned_app_pid": 20745,
+  "owned_session": "run_522857d1d4b1446fbdd7939a9931e2c4",
+  "app_bundle": "/tmp/loo291-iteration14/Loopflow Nested.app",
+  "home": "/Users/jack/.lf-dev/installed/local-be852452823d43d7b7fde663651a7590",
+  "hashes": {
+    "swift/LoopflowMac/Views/WorkspaceNavigator.swift": "faa9f6c42b7b3a3b18d847f9e832b67ddc32b2dedc6c88b271b5882af5e72322",
+    "swift/LoopflowMac/Views/SessionsView.swift": "adaae30350e7309a73e6d35e38898b201a849c36d01a31a8af37ac415257fc8d",
+    "swift/LoopflowMac/WorkspaceProjection.swift": "6aa6e425e009ab94855b76aa764d17477c924d0df33737bfa8e826cf9cfc4598",
+    "swift/LoopflowMac/PodiumModel.swift": "e6069ff63254f5ee76c1fb93a231204e7b9d49be24ffca776381f41bf03386e1",
+    "swift/Loopflow/Services/RegistryQuery.swift": "1a5582cc2a040dd353b21163fdc5ab11e560d360d4ed5631a5e18437298dde67",
+    "swift/.build/debug/LoopflowMac": "0f74d7e341afaee9fe87ee6786d7de15b2411c18333744808f064eed3225f4a6",
+    "/tmp/loo291-iteration14/Loopflow Nested.app/Contents/MacOS/Loopflow": "d76093c6665cd838f0faa2c5413b9de9af393dfd7adbd88c42874c1394051538",
+    "target/debug/lf": "a15444b8d5b1f7ada42404b69f46be1ac3892aa79acdbbc51f4645144ce72389"
+  },
+  "retired_owned_sessions": [
+    "run_70cd803e56a4470caf6be235bba3241e",
+    "run_84ceb7e9dac14fb1b3a22c25d722a8a5",
+    "run_8892c18d10834d578b0819ff2ec27d7f",
+    "run_45ae04e2137841ad8197c62535c446c6",
+    "run_b5289ca061c44ecb82bbd6cd30461c77",
+    "run_522857d1d4b1446fbdd7939a9931e2c4"
+  ],
+  "verified_absent_processes": [
+    3379,
+    20745,
+    24143,
+    25302,
+    25582,
+    29257,
+    32207,
+    35994,
+    36402,
+    37365,
+    42349,
+    44959,
+    53441,
+    62502,
+    66676,
+    78136,
+    84461,
+    93423,
+    95996,
+    96318
+  ],
+  "final_task": {
+    "id": "ee671927-255f-41e6-8429-b830d59cc1de",
+    "identifier": "LOO-291",
+    "completed": false
+  },
+  "existing_human_session_present": true,
+  "passing_session_inventory_unchanged": true,
+  "limits": [
+    "No keyboard input or draft proof",
+    "PTY receipts identify direct /usr/bin/login children, not shell responses",
+    "No external-work trial, actual PM edit, paint/readiness budget, or shared LOO-284 integration"
+  ]
+}

@@ -49,6 +49,7 @@ struct WorkspaceNavigationProofTests {
             }
         }
         let model = PodiumModel(query: query, repoPath: "/src/loopflow")
+        model.navigation.taskQuery = .all
         await model.refresh()
         let registry = SessionsWorkspaceRegistry()
         let view = SessionsView(model: model, repoPath: "/src/loopflow", workspaces: registry, query: query)
@@ -128,7 +129,7 @@ struct WorkspaceNavigationProofTests {
             records.append([
                 "id": "row-\(index)", "kind": "interactive", "work": NSNull(),
                 "title": "Conversation \(index)", "detail": "Local shell", "cwd": path,
-                "state": "active", "ready_summary": NSNull(), "terminal_ids": [shell],
+                "state": "active", "ready_summary": NSNull(), "work_path": NSNull(), "actions": sessionActionFixture(kind: "interactive", state: "active"), "terminal_ids": [shell],
                 "open_argv": ["must-not-launch"],
             ])
         }
@@ -219,7 +220,7 @@ struct WorkspaceNavigationProofTests {
         let records = try String(decoding: JSONSerialization.data(withJSONObject: ["shell-conversation", "second-conversation"].map { id in
             ["id": id, "kind": "interactive", "work": NSNull(),
              "title": id, "detail": "Local PTY", "cwd": "/tmp",
-             "state": "active", "ready_summary": NSNull(), "terminal_ids": [pane],
+             "state": "active", "ready_summary": NSNull(), "work_path": NSNull(), "actions": sessionActionFixture(kind: "interactive", state: "active"), "terminal_ids": [pane],
              "open_argv": ["unused"]] as [String: Any]
         }), as: UTF8.self)
         let query = RegistryQuery { args, _ in
@@ -252,7 +253,7 @@ struct WorkspaceNavigationProofTests {
             let store = workspace.sessionStore(repoPath: "/tmp", query: query)
             store.reconcile(try await query.sessions(cwd: "/tmp"))
             #expect(store.sessions.first?.state == .live)
-            #expect(store.sessions.first?.completionError == "Completion rejected")
+            #expect(store.sessions.first?.resolutionError == "Completion rejected")
             try await settle(window)
             #expect(model.sessions.value?.map(\.id) == ["shell-conversation", "second-conversation"])
             #expect(throws: Never.self) { try view.inspect().find(text: "Completion rejected") }
@@ -278,6 +279,68 @@ struct WorkspaceNavigationProofTests {
             try await Task.sleep(for: .milliseconds(20))
         }
         #expect(_terminalText(surface).components(separatedBy: reply).count == 3)
+    }
+
+    @Test("Rejected Flow decisions retain their terminal and remain visible after polling",
+          .serialized, arguments: [true, false])
+    func rejectedFlowDecisionRetainsTerminal(approving: Bool) async throws {
+        _ = NSApplication.shared
+        GhosttyManager.shared.initialize()
+        let registry = SessionsWorkspaceRegistry()
+        let workspace = registry.workspace(for: "/tmp")
+        workspace.multiplexer.load(sessionId: "review-decision")
+        let terminal = registry.surfaces.view(for: .session("review-decision"))
+        terminal.frame = CGRect(x: 0, y: 0, width: 800, height: 500)
+        terminal.workingDirectory = "/tmp"
+        terminal.command = buildGhosttyShellCommand(argv: ["/bin/cat"], env: [:])
+        terminal.createSurface(manager: GhosttyManager.shared)
+        defer { registry.surfaces.release(.session("review-decision")) }
+        let surface = try #require(terminal.surface)
+        let records = """
+        [{"id":"review-decision","kind":"flow","work":null,"work_path":null,
+          "title":"Review decision","detail":"Human review","cwd":"/tmp",
+          "state":"ready","ready_summary":"Ready for review","terminal_ids":[],
+          "actions":\(sessionActionFixtureJSON(kind: "flow", state: "ready")),"open_argv":["/bin/cat"]}]
+        """
+        let query = RegistryQuery { args, _ in
+            switch args.first {
+            case "session" where args.dropFirst().first == "list": return records
+            case "session": throw RegistryQueryError("Decision rejected")
+            default: throw RegistryQueryError("Unexpected read in decision proof")
+            }
+        }
+        let model = PodiumModel(query: query, repoPath: "/tmp")
+        await model.refreshSessions()
+        model.navigation.content = .terminals
+        let view = SessionsView(model: model, repoPath: "/tmp", workspaces: registry, query: query)
+        let window = NSWindow(contentRect: CGRect(x: 0, y: 0, width: 1100, height: 700),
+                              styleMask: [.titled], backing: .buffered, defer: false)
+        window.contentView = NSHostingView(rootView: view)
+        defer { window.contentView = nil }
+        try await settle(window)
+        let store = workspace.sessionStore(repoPath: "/tmp", query: query)
+        for _ in 0..<2 {
+            let accepted = await store.decideFlow("review-decision", approving: approving, text: "Reviewed")
+            #expect(!accepted)
+            #expect(store.sessions.first?.state == .live)
+            store.reconcile(try await query.sessions(cwd: "/tmp"))
+            try await settle(window)
+            #expect(store.sessions.first?.state == .live)
+            #expect(throws: Never.self) { try view.inspect().find(text: "Decision rejected") }
+            for id in ["session-action-approve", "session-action-iterate"] {
+                #expect(try !view.inspect().find(viewWithAccessibilityIdentifier: id).button().isDisabled())
+            }
+            #expect(model.sessions.value?.map(\.id) == ["review-decision"])
+            #expect(terminal.surface == surface)
+        }
+        let input = "review-still-responds\n"
+        input.withCString { ghostty_surface_text(surface, $0, UInt(input.utf8.count)) }
+        let deadline = ContinuousClock.now + .seconds(3)
+        while _terminalText(surface).components(separatedBy: "review-still-responds").count < 3,
+              ContinuousClock.now < deadline {
+            try await Task.sleep(for: .milliseconds(20))
+        }
+        #expect(_terminalText(surface).components(separatedBy: "review-still-responds").count == 3)
     }
 
     @Test("A hidden retained terminal relinquishes focus and keeps its unfinished PTY input")
@@ -377,12 +440,12 @@ struct WorkspaceNavigationProofTests {
         [{"id":"navigation-split","kind":"interactive",
           "work":{"kind":"task","id":"ts_review00000000000000000000000000"},
           "title":"Navigation proof","detail":"Local cat PTY","cwd":"/tmp",
-          "state":"active","ready_summary":null,"terminal_ids":[],"open_argv":["/bin/cat"]}]
+          "state":"active","ready_summary":null,"work_path":null,"actions":\(sessionActionFixtureJSON(kind: "interactive", state: "active")),"terminal_ids":[],"open_argv":["/bin/cat"]}]
         """
         let otherRecords = """
         [{"id":"context-session","kind":"interactive","work":null,
           "title":"Other repository conversation","detail":"Existing external client","cwd":"/src/context",
-          "state":"active","ready_summary":null,"terminal_ids":[],"open_argv":["lf","session","open","context-session"]}]
+          "state":"active","ready_summary":null,"work_path":null,"actions":\(sessionActionFixtureJSON(kind: "interactive", state: "active")),"terminal_ids":[],"open_argv":["lf","session","open","context-session"]}]
         """
         let (completionResponses, completionResponse) = AsyncStream<Void>.makeStream()
         defer { completionResponse.finish() }

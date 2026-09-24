@@ -1,0 +1,396 @@
+{
+  "schema_version": 1,
+  "observed_at": 1790225494,
+  "nodes": [
+    {
+      "id": "exec:3121a1bd-7e3f-43e8-92d2-913491180bfa",
+      "parent_id": null,
+      "kind": "exec",
+      "label": "lf __work",
+      "repo": "/Users/jack/src/loopflow",
+      "worktree": "/Users/jack/src/loopflow.account-for-scheduled-release-opportunities",
+      "wave": "infrastructure",
+      "pid": 38136,
+      "started_at": 1790212117,
+      "state": "waiting"
+    },
+    {
+      "id": "exec:4a71bca1-2985-4323-9278-acb63564b407",
+      "parent_id": null,
+      "kind": "exec",
+      "label": "lf",
+      "repo": "/Users/jack/src/loopflow",
+      "worktree": "/Users/jack/src/loopflow.restore-end-to-end-project",
+      "wave": null,
+      "pid": 16698,
+      "started_at": 1788381071,
+      "state": "waiting"
+    },
+    {
+      "id": "exec:70ee78a0-df48-4a39-987d-824e11ec0567",
+      "parent_id": null,
+      "kind": "exec",
+      "label": "lf",
+      "repo": "/Users/jack/src/loopflow",
+      "worktree": "/Users/jack/src/loopflow.install-unpublished-local-builds-through",
+      "wave": null,
+      "pid": 49477,
+      "started_at": 1787349378,
+      "state": "waiting"
+    },
+    {
+      "id": "exec:8bb644e9-56de-47f2-b915-7b9ab329d700",
+      "parent_id": null,
+      "kind": "exec",
+      "label": "lf __work",
+      "repo": "/Users/jack/src/loopflow",
+      "worktree": "/Users/jack/src/loopflow.main-view-task",
+      "wave": "product",
+      "pid": 89019,
+      "started_at": 1790202993,
+      "state": "waiting"
+    },
+    {
+      "id": "exec:b4a17fa5-10d3-4281-a6f0-2447d6812a24",
+      "parent_id": null,
+      "kind": "exec",
+      "label": "lf __work",
+      "repo": "/Users/jack/src/loopflow",
+      "worktree": "/Users/jack/src/loopflow.restore-task-watching-with-live",
+      "wave": "product",
+      "pid": 71512,
+      "started_at": 1790213030,
+      "state": "waiting"
+    },
+    {
+      "id": "exec:c87ea53f-314f-449f-9008-b286385dcbde",
+      "parent_id": null,
+      "kind": "exec",
+      "label": "lf",
+      "repo": "/Users/jack/src/loopflow",
+      "worktree": "/Users/jack/src/loopflow.restore-end-to-end-project",
+      "wave": null,
+      "pid": 48450,
+      "started_at": 1788413687,
+      "state": "waiting"
+    },
+    {
+      "id": "exec:fc5e19f6-0388-4449-85e9-581103600a65",
+      "parent_id": null,
+      "kind": "exec",
+      "label": "lf",
+      "repo": "/Users/jack/src/loopflow",
+      "worktree": "/Users/jack/src/loopflow.make-linear-oauth-recovery-survive",
+      "wave": null,
+      "pid": 35153,
+      "started_at": 1790208196,
+      "state": "waiting"
+    },
+    {
+      "id": "provider:16760",
+      "parent_id": "exec:4a71bca1-2985-4323-9278-acb63564b407",
+      "kind": "provider_process",
+      "label": "codex 16760",
+      "repo": "/Users/jack/src/loopflow",
+      "worktree": "/Users/jack/src/loopflow.restore-end-to-end-project",
+      "wave": null,
+      "pid": 16760,
+      "started_at": 1788381072,
+      "state": "waiting"
+    },
+    {
+      "id": "provider:39275",
+      "parent_id": "exec:fc5e19f6-0388-4449-85e9-581103600a65",
+      "kind": "provider_process",
+      "label": "codex 39275",
+      "repo": "/Users/jack/src/loopflow",
+      "worktree": "/Users/jack/src/loopflow.make-linear-oauth-recovery-survive",
+      "wave": null,
+      "pid": 39275,
+      "started_at": 1790208199,
+      "state": "waiting"
+    },
+    {
+      "id": "provider:41807",
+      "parent_id": "exec:3121a1bd-7e3f-43e8-92d2-913491180bfa",
+      "kind": "provider_process",
+      "label": "codex 41807",
+      "repo": "/Users/jack/src/loopflow",
+      "worktree": "/Users/jack/src/loopflow.account-for-scheduled-release-opportunities",
+      "wave": "infrastructure",
+      "pid": 41807,
+      "started_at": 1790212118,
+      "state": "waiting"
+    },
+    {
+      "id": "provider:49012",
+      "parent_id": "exec:c87ea53f-314f-449f-9008-b286385dcbde",
+      "kind": "provider_process",
+      "label": "codex 49012",
+      "repo": "/Users/jack/src/loopflow",
+      "worktree": "/Users/jack/src/loopflow.restore-end-to-end-project",
+      "wave": null,
+      "pid": 49012,
+      "started_at": 1788413689,
+      "state": "waiting"
+    },
+    {
+      "id": "provider:49707",
+      "parent_id": "exec:70ee78a0-df48-4a39-987d-824e11ec0567",
+      "kind": "provider_process",
+      "label": "codex 49707",
+      "repo": "/Users/jack/src/loopflow",
+      "worktree": "/Users/jack/src/loopflow.install-unpublished-local-builds-through",
+      "wave": null,
+      "pid": 49707,
+      "started_at": 1787349379,
+      "state": "waiting"
+    },
+    {
+      "id": "provider:73327",
+      "parent_id": "exec:b4a17fa5-10d3-4281-a6f0-2447d6812a24",
+      "kind": "provider_process",
+      "label": "codex 73327",
+      "repo": "/Users/jack/src/loopflow",
+      "worktree": "/Users/jack/src/loopflow.restore-task-watching-with-live",
+      "wave": "product",
+      "pid": 73327,
+      "started_at": 1790213031,
+      "state": "waiting"
+    },
+    {
+      "id": "provider:91339",
+      "parent_id": "exec:8bb644e9-56de-47f2-b915-7b9ab329d700",
+      "kind": "provider_process",
+      "label": "codex 91339",
+      "repo": "/Users/jack/src/loopflow",
+      "worktree": "/Users/jack/src/loopflow.main-view-task",
+      "wave": "product",
+      "pid": 91339,
+      "started_at": 1790202994,
+      "state": "waiting"
+    }
+  ],
+  "provider_processes": [
+    {
+      "pid": 4548,
+      "ppid": 4483,
+      "process_group": 64539,
+      "started_at": 1787935793,
+      "kernel_state": "S+",
+      "provider": "codex",
+      "command": "codex",
+      "claim": "unclaimed"
+    },
+    {
+      "pid": 8421,
+      "ppid": 24708,
+      "process_group": 8421,
+      "started_at": 1790225467,
+      "kernel_state": "S",
+      "provider": "codex",
+      "command": "codex",
+      "claim": "unclaimed"
+    },
+    {
+      "pid": 15151,
+      "ppid": 15136,
+      "process_group": 15151,
+      "started_at": 1787965124,
+      "kernel_state": "SNs",
+      "provider": "claude",
+      "command": "claude",
+      "claim": "unclaimed"
+    },
+    {
+      "pid": 15152,
+      "ppid": 15136,
+      "process_group": 15152,
+      "started_at": 1787965124,
+      "kernel_state": "SNs",
+      "provider": "claude",
+      "command": "claude",
+      "claim": "unclaimed"
+    },
+    {
+      "pid": 17424,
+      "ppid": 17423,
+      "process_group": 60200,
+      "started_at": 1787874808,
+      "kernel_state": "S+",
+      "provider": "codex",
+      "command": "codex",
+      "claim": "unclaimed"
+    },
+    {
+      "pid": 27514,
+      "ppid": 27502,
+      "process_group": 91822,
+      "started_at": 1787935840,
+      "kernel_state": "S+",
+      "provider": "codex",
+      "command": "codex",
+      "claim": "unclaimed"
+    },
+    {
+      "pid": 37189,
+      "ppid": 36571,
+      "process_group": 36565,
+      "started_at": 1790223431,
+      "kernel_state": "S+",
+      "provider": "codex",
+      "command": "codex",
+      "claim": "unclaimed"
+    },
+    {
+      "pid": 41205,
+      "ppid": 41194,
+      "process_group": 63478,
+      "started_at": 1787331922,
+      "kernel_state": "S+",
+      "provider": "codex",
+      "command": "codex",
+      "claim": "unclaimed"
+    },
+    {
+      "pid": 41371,
+      "ppid": 41314,
+      "process_group": 63034,
+      "started_at": 1787331922,
+      "kernel_state": "S+",
+      "provider": "codex",
+      "command": "codex",
+      "claim": "unclaimed"
+    },
+    {
+      "pid": 47485,
+      "ppid": 47484,
+      "process_group": 63677,
+      "started_at": 1787332116,
+      "kernel_state": "S+",
+      "provider": "codex",
+      "command": "codex",
+      "claim": "unclaimed"
+    },
+    {
+      "pid": 48167,
+      "ppid": 48166,
+      "process_group": 48067,
+      "started_at": 1788204477,
+      "kernel_state": "S+",
+      "provider": "codex",
+      "command": "codex",
+      "claim": "unclaimed"
+    },
+    {
+      "pid": 49104,
+      "ppid": 49103,
+      "process_group": 47637,
+      "started_at": 1787261406,
+      "kernel_state": "S+",
+      "provider": "codex",
+      "command": "codex",
+      "claim": "unclaimed"
+    },
+    {
+      "pid": 58463,
+      "ppid": 58455,
+      "process_group": 58455,
+      "started_at": 1786913973,
+      "kernel_state": "S+",
+      "provider": "codex",
+      "command": "codex",
+      "claim": "unclaimed"
+    },
+    {
+      "pid": 58761,
+      "ppid": 58619,
+      "process_group": 58619,
+      "started_at": 1786913973,
+      "kernel_state": "S+",
+      "provider": "codex",
+      "command": "codex",
+      "claim": "unclaimed"
+    },
+    {
+      "pid": 75084,
+      "ppid": 75075,
+      "process_group": 74439,
+      "started_at": 1787187313,
+      "kernel_state": "S+",
+      "provider": "codex",
+      "command": "codex",
+      "claim": "unclaimed"
+    },
+    {
+      "pid": 79407,
+      "ppid": 79399,
+      "process_group": 79399,
+      "started_at": 1786914233,
+      "kernel_state": "S+",
+      "provider": "codex",
+      "command": "codex",
+      "claim": "unclaimed"
+    },
+    {
+      "pid": 80019,
+      "ppid": 80018,
+      "process_group": 36622,
+      "started_at": 1787331995,
+      "kernel_state": "S+",
+      "provider": "codex",
+      "command": "codex",
+      "claim": "unclaimed"
+    },
+    {
+      "pid": 84364,
+      "ppid": 84273,
+      "process_group": 84364,
+      "started_at": 1789494305,
+      "kernel_state": "SNs",
+      "provider": "claude",
+      "command": "claude",
+      "claim": "unclaimed"
+    },
+    {
+      "pid": 84365,
+      "ppid": 84273,
+      "process_group": 84365,
+      "started_at": 1789494305,
+      "kernel_state": "SNs",
+      "provider": "claude",
+      "command": "claude",
+      "claim": "unclaimed"
+    },
+    {
+      "pid": 95075,
+      "ppid": 94642,
+      "process_group": 94642,
+      "started_at": 1790223591,
+      "kernel_state": "S+",
+      "provider": "codex",
+      "command": "codex",
+      "claim": "unclaimed"
+    },
+    {
+      "pid": 97008,
+      "ppid": 97007,
+      "process_group": 73764,
+      "started_at": 1787891855,
+      "kernel_state": "S+",
+      "provider": "codex",
+      "command": "codex",
+      "claim": "unclaimed"
+    },
+    {
+      "pid": 98620,
+      "ppid": 98619,
+      "process_group": 63635,
+      "started_at": 1787332028,
+      "kernel_state": "S+",
+      "provider": "codex",
+      "command": "codex",
+      "claim": "unclaimed"
+    }
+  ]
+}

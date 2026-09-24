@@ -467,7 +467,7 @@ pub(crate) fn scan_unresolved_provider_runs(
                 continue;
             }
         };
-        if manifest.surface != "tui" {
+        if !has_interactive_history(&dir, &manifest)? {
             continue;
         }
         let unresolved = match provider_session_is_resolved(&dir) {
@@ -920,6 +920,12 @@ pub(crate) fn remove_provider_client_stop(dir: &Path, pid: u32) -> std::io::Resu
         Err(error) if error.kind() == std::io::ErrorKind::NotFound => Ok(()),
         Err(error) => Err(error),
     }
+}
+
+/// The client directory survives its last client: it records that an initially
+/// headless Run was opened interactively. Client files alone describe liveness.
+pub(crate) fn has_interactive_history(dir: &Path, manifest: &RunManifest) -> std::io::Result<bool> {
+    Ok(manifest.surface == "tui" || dir.join("provider-clients").try_exists()?)
 }
 
 pub(crate) fn remove_provider_client(dir: &Path, pid: u32) -> std::io::Result<()> {
@@ -2402,7 +2408,7 @@ mod tests {
     }
 
     #[test]
-    fn unresolved_provider_scan_keeps_only_open_tui_runs() {
+    fn unresolved_provider_scan_keeps_interactive_resumes_until_resolution() {
         let home = tempfile::tempdir().unwrap();
 
         let mut open_spec = spec(home.path());
@@ -2422,6 +2428,22 @@ mod tests {
         let runs = scan_unresolved_provider_runs(home.path()).unwrap();
         assert_eq!(runs.len(), 1);
         assert_eq!(runs[0].1.run_id, open.run_id());
+
+        let dir = headless.artifact_dir();
+        write_provider_client(&dir, 101).unwrap();
+        let resumed = scan_unresolved_provider_runs(home.path()).unwrap();
+        assert!(resumed
+            .iter()
+            .any(|(_, manifest)| manifest.run_id == headless.run_id()));
+        remove_provider_client(&dir, 101).unwrap();
+        let closed = scan_unresolved_provider_runs(home.path()).unwrap();
+        assert!(closed
+            .iter()
+            .any(|(_, manifest)| manifest.run_id == headless.run_id()));
+        resolve_provider_session(&dir).unwrap();
+        let resolved = scan_unresolved_provider_runs(home.path()).unwrap();
+        assert_eq!(resolved.len(), 1);
+        assert_eq!(resolved[0].1.run_id, open.run_id());
     }
 
     #[test]

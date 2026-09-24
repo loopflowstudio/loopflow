@@ -91,7 +91,7 @@ struct SessionItem: Identifiable, Equatable {
 
     var record: SessionRecord
     var state: State
-    var completionError: String?
+    var resolutionError: String?
 
     var id: String { record.id }
 
@@ -149,46 +149,25 @@ final class SessionsStore: ObservableObject {
         sessions.removeAll { !incoming.contains($0.id) }
 
         for record in records {
-            let interactiveState: SessionItem.State = localTerminal(for: record) != nil ? .live : record.state == .active ? .elsewhere : .pending
+            let observedState: SessionItem.State = localTerminal(for: record) != nil
+                ? .live : record.action(.moveHere) != nil ? .elsewhere : .pending
             if let index = _index(record.id) {
-                // Polling returns ordinary open argv. Keep the prepared launch
-                // (including explicit --replace) until its surface is created.
-                if record.kind == .interactive, case .prepared = sessions[index].state {
-                    continue
-                }
+                // Keep a prepared command until the retained native view consumes it.
+                if case .prepared = sessions[index].state { continue }
                 sessions[index].record = record
-                if record.kind == .interactive {
-                    if case .opening = sessions[index].state {
-                        continue
-                    }
-                    // Keep a failure visible until it is retried or a truthier
-                    // state (live here, or active elsewhere) supersedes it.
-                    if case .failed = sessions[index].state, interactiveState == .pending {
-                        continue
-                    }
-                    sessions[index].state = interactiveState
-                } else {
-                    if record.state != .waiting {
-                        sessions[index].state = .live
-                    } else if case .live = sessions[index].state {
-                        sessions[index].state = .pending
-                    }
-                }
+                if case .opening = sessions[index].state { continue }
+                if case .failed = sessions[index].state, observedState == .pending { continue }
+                sessions[index].state = observedState
             } else {
-                sessions.append(
-                    SessionItem(
-                        record: record,
-                        state: record.kind == .interactive
-                            ? interactiveState
-                            : record.state == .waiting ? .pending : .live
-                    )
-                )
+                sessions.append(SessionItem(record: record, state: observedState))
             }
         }
     }
 
     private func recover(_ id: String, replacing: Bool = false) async {
-        guard let index = _index(id) else { return }
+        guard let index = _index(id),
+              let action = sessions[index].record.action(replacing ? .moveHere : .open),
+              action.unavailableReason == nil else { return }
         switch sessions[index].state {
         case .pending, .failed:
             sessions[index].state = .opening
@@ -216,15 +195,13 @@ final class SessionsStore: ObservableObject {
 
     func select(_ id: String) async {
         guard let index = _index(id) else { return }
-        if sessions[index].record.kind == .interactive {
-            if localTerminal(for: sessions[index].record) != nil {
-                sessions[index].state = .live
-                return
-            }
-            if case .live = sessions[index].state {
-                sessions[index].state = sessions[index].record.state == .active
-                    ? .elsewhere : .pending
-            }
+        if localTerminal(for: sessions[index].record) != nil {
+            sessions[index].state = .live
+            return
+        }
+        if case .live = sessions[index].state {
+            sessions[index].state = sessions[index].record.action(.moveHere) != nil
+                ? .elsewhere : .pending
         }
         await recover(id)
     }
@@ -252,7 +229,7 @@ final class SessionsStore: ObservableObject {
 
     func complete(_ id: String) async -> Bool {
         guard let index = _index(id) else { return false }
-        sessions[index].completionError = nil
+        sessions[index].resolutionError = nil
         do {
             try await query.completeSession(id: id, cwd: repoPath)
             sessions.removeAll { $0.id == id }
@@ -260,7 +237,7 @@ final class SessionsStore: ObservableObject {
             return true
         } catch {
             guard let latest = _index(id) else { return false }
-            sessions[latest].completionError = error.localizedDescription
+            sessions[latest].resolutionError = error.localizedDescription
             return false
         }
     }
@@ -283,7 +260,7 @@ final class SessionsStore: ObservableObject {
         else { return }
         switch sessions[index].state {
         case .prepared, .live:
-            sessions[index].state = sessions[index].record.state == .active
+            sessions[index].state = sessions[index].record.action(.moveHere) != nil
                 ? .elsewhere : .pending
         case .pending, .elsewhere, .opening, .failed:
             break
@@ -891,7 +868,7 @@ private struct SessionPaneView: View {
                 .strokeBorder(isFocused ? paneColor : Color.clear, lineWidth: 2)
         }
         .overlay(alignment: .bottomTrailing) {
-            completionAction
+            resolutionControls
         }
         .accessibilityElement(children: .contain)
         .accessibilityLabel("\(_title), \(isFocused ? "active" : "open")")
@@ -1009,32 +986,40 @@ private struct SessionPaneView: View {
         .accessibilityIdentifier(id)
     }
 
-    private var completionItems: [SessionItem] {
+    private var paneSessions: [SessionItem] {
         if case .shell = pane.content {
             return sessions.sessions.filter {
-                $0.record.kind == .interactive
-                    && sessions.localTerminal(for: $0.record) == .shell(pane.id)
+                sessions.localTerminal(for: $0.record) == .shell(pane.id)
             }
         }
-        // Placeholder panes lead with their opening or recovery action.
-        guard let item, item.surface != nil else { return [] }
-        return [item]
+        return item.map { [$0] } ?? []
     }
 
-    private var completionAction: some View {
+    private var completionItems: [SessionItem] {
+        // Placeholder panes lead with their opening or recovery action.
+        paneSessions.filter { $0.record.action(.complete) != nil && $0.surface != nil }
+    }
+
+    private var resolutionControls: some View {
         VStack(alignment: .trailing, spacing: Spacing.sm) {
-            ForEach(completionItems) { item in
-                if let error = item.completionError {
+            ForEach(paneSessions) { item in
+                if let error = item.resolutionError {
                     Text(error)
                         .font(Typography.caption(11))
                         .foregroundStyle(Color.statusWarning)
+                        .padding(Spacing.sm)
+                        .background(LoopflowPalette.dark.background)
                 }
-                completionButton(item)
+            }
+            ForEach(completionItems) { item in
+                if let action = item.record.action(.complete) {
+                    completionButton(item, action: action)
+                }
             }
         }
     }
 
-    private func completionButton(_ item: SessionItem) -> some View {
+    private func completionButton(_ item: SessionItem, action: SessionAction) -> some View {
         Button {
             isCompleting = true
             Task { @MainActor in
@@ -1053,7 +1038,7 @@ private struct SessionPaneView: View {
                     Image(systemName: "checkmark")
                         .font(.system(size: 14, weight: .bold))
                 }
-                Text(completionItems.count > 1 ? "Complete · \(item.record.title)" : "Complete")
+                Text(completionItems.count > 1 ? "\(action.label) · \(item.record.title)" : action.label)
                     .font(Typography.body(13).weight(.bold))
             }
             .foregroundStyle(.white)
@@ -1066,25 +1051,12 @@ private struct SessionPaneView: View {
             .shadow(color: .black.opacity(0.35), radius: 12, y: 4)
         }
         .buttonStyle(.plain)
-        .disabled(isCompleting || (item.record.kind != .interactive && item.record.state != .ready))
-        .help(_completionHelp(item))
+        .disabled(isCompleting || action.unavailableReason != nil)
+        .help(action.unavailableReason ?? action.help)
         .accessibilityLabel(completionItems.count > 1 ? "Complete session: \(item.record.title)" : "Complete session")
-        .accessibilityHint(_completionHelp(item))
+        .accessibilityHint(action.unavailableReason ?? action.help)
         .accessibilityIdentifier("session-action-complete")
         .padding(Spacing.xxl)
-    }
-
-    private func _completionHelp(_ item: SessionItem) -> String {
-        switch item.record.kind {
-        case .ask where item.record.state != .ready, .flow where item.record.state != .ready:
-            "The session agent has not marked this ready"
-        case .ask:
-            "Complete the conversation and resume its blocked caller"
-        case .interactive:
-            "Stop the provider and remove this Session; native history remains resumable"
-        case .flow:
-            "Complete the review and return feedback to the next Flow step"
-        }
     }
 
     @ViewBuilder
@@ -1148,13 +1120,7 @@ private struct SessionPaneView: View {
             } description: {
                 Text(message)
             } actions: {
-                Button("Try again") {
-                    sessions.beginPaneLoad(item.id)
-                    Task { @MainActor in await sessions.select(item.id) }
-                }
-                .buttonStyle(.borderedProminent)
-                .tint(Color.loopflowBurgundy)
-                .accessibilityIdentifier("session-retry-\(item.id)")
+                openButton(item, retrying: true)
             }
         case .pending, .live:
             ContentUnavailableView {
@@ -1162,14 +1128,26 @@ private struct SessionPaneView: View {
             } description: {
                 Text("This Session has no live terminal in this pane yet.")
             } actions: {
-                Button("Open here") {
-                    sessions.beginPaneLoad(item.id)
-                    Task { @MainActor in await sessions.select(item.id) }
-                }
-                .buttonStyle(.borderedProminent)
-                .tint(Color.loopflowBurgundy)
-                .accessibilityIdentifier("session-open-here-\(item.id)")
+                openButton(item, retrying: false)
             }
+        }
+    }
+
+    @ViewBuilder
+    private func openButton(_ item: SessionItem, retrying: Bool) -> some View {
+        if let action = item.record.action(.moveHere) ?? item.record.action(.open) {
+            Button(action.kind == .open && retrying ? "Try again" : action.label) {
+                sessions.beginPaneLoad(item.id)
+                Task { @MainActor in
+                    if action.kind == .moveHere { await sessions.moveHere(item.id) }
+                    else { await sessions.select(item.id) }
+                }
+            }
+            .buttonStyle(.borderedProminent)
+            .tint(Color.loopflowBurgundy)
+            .disabled(action.unavailableReason != nil)
+            .help(action.unavailableReason ?? action.help)
+            .accessibilityIdentifier(retrying ? "session-retry-\(item.id)" : "session-open-here-\(item.id)")
         }
     }
 
@@ -1188,22 +1166,25 @@ private struct SessionPaneView: View {
                 """
             )
         } actions: {
-            VStack(spacing: Spacing.sm) {
-                Button {
-                    sessions.beginPaneLoad(item.id)
-                    Task { @MainActor in await sessions.moveHere(item.id) }
-                } label: {
-                    Label("Move here", systemImage: "arrow.down.forward.square")
+            if let action = item.record.action(.moveHere) {
+                VStack(spacing: Spacing.sm) {
+                    Button {
+                        sessions.beginPaneLoad(item.id)
+                        Task { @MainActor in await sessions.moveHere(item.id) }
+                    } label: {
+                        Label(action.label, systemImage: "arrow.down.forward.square")
+                    }
+                    .buttonStyle(.borderedProminent)
+                    .tint(Color.loopflowBurgundy)
+                    .disabled(action.unavailableReason != nil)
+                    .help(action.unavailableReason ?? action.help)
+                    .accessibilityLabel("Move session here")
+                    .accessibilityHint("Stops the other client; unsent text typed there is lost")
+                    .accessibilityIdentifier("session-move-here-\(item.id)")
+                    Text("Moving stops the other client. Unsent text typed there is lost.")
+                        .font(Typography.caption(9))
+                        .foregroundStyle(.white.opacity(0.55))
                 }
-                .buttonStyle(.borderedProminent)
-                .tint(Color.loopflowBurgundy)
-                .help("Stop the other terminal's provider client and resume this Session here")
-                .accessibilityLabel("Move session here")
-                .accessibilityHint("Stops the other client; unsent text typed there is lost")
-                .accessibilityIdentifier("session-move-here-\(item.id)")
-                Text("Moving stops the other client. Unsent text typed there is lost.")
-                    .font(Typography.caption(9))
-                    .foregroundStyle(.white.opacity(0.55))
             }
         }
         .accessibilityElement(children: .contain)

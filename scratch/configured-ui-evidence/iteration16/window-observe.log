@@ -1,0 +1,74 @@
+could not create image from window
+Owned app PID 44369 AX trust true
+Console session Optional({
+    CGSSessionScreenIsLocked = 1;
+    CGSSessionScreenLockedTime = 1790260446;
+    CGSSessionUniqueSessionUUID = "0DFBC2C5-CB4A-4D7B-8660-7EA8B5C7BA08";
+    kCGSSessionAuditIDKey = 100022;
+    kCGSSessionGroupIDKey = 20;
+    kCGSSessionLoginwindowSafeLogin = 0;
+    kCGSSessionOnConsoleKey = 1;
+    kCGSSessionSecureInputPID = 395;
+    kCGSSessionSystemSafeBoot = 0;
+    kCGSSessionUserIDKey = 501;
+    kCGSSessionUserNameKey = jack;
+    kCGSessionLoginDoneKey = 1;
+    kCGSessionLongUserNameKey = "Jack Heart";
+    kSCSecuritySessionID = 100022;
+})
+Owned AX windows 1 active false
+Window 0 PID 44369 equals root true attributes status 0 names Optional(<__NSArrayM 0xc8b2889c0>(
+AXFunctionRowTopLevelElements,
+AXFrame,
+AXChildren,
+AXFocusedUIElement,
+AXFrontmost,
+AXRole,
+AXExtrasMenuBar,
+AXMainWindow,
+AXFocusedWindow,
+AXTitle,
+AXChildrenInNavigationOrder,
+AXEnhancedUserInterface,
+AXPreferredLanguage,
+AXRoleDescription,
+AXHidden,
+AXMenuBar,
+AXWindows,
+AXSize,
+AXPosition
+)
+)
+window attribute AXRole status 0 value Optional(AXApplication)
+window attribute AXTitle status 0 value Optional(Loopflow Proof)
+window attribute AXChildren status 0 value Optional(<__NSArrayM 0xc8b2884b0>(
+<AXUIElement Application 0xc8f5ff960> {pid=44369},
+<AXUIElement 0xc8f5fda10> {pid=44369}
+)
+)
+window attribute AXVisible status -25205 value nil
+window attribute AXMinimized status -25205 value nil
+window attribute AXPosition status -25205 value nil
+window attribute AXSize status -25205 value nil
+Window descendants 203
+AX nodes 203
+Owned WindowServer windows [["kCGWindowMemoryUsage": 2368, "kCGWindowLayer": 0, "kCGWindowNumber": 80238, "kCGWindowName": , "kCGWindowOwnerPID": 44369, "kCGWindowBounds": {
+    Height = 500;
+    Width = 500;
+    X = 0;
+    Y = 617;
+}, "kCGWindowAlpha": 1, "kCGWindowSharingState": 1, "kCGWindowStoreType": 1, "kCGWindowOwnerName": Loopflow Proof], ["kCGWindowNumber": 80240, "kCGWindowBounds": {
+    Height = 237;
+    Width = 312;
+    X = 230;
+    Y = 420;
+}, "kCGWindowName": , "kCGWindowAlpha": 1, "kCGWindowOwnerPID": 44369, "kCGWindowOwnerName": Loopflow Proof, "kCGWindowLayer": 101, "kCGWindowMemoryUsage": 2368, "kCGWindowSharingState": 1, "kCGWindowStoreType": 1], ["kCGWindowIsOnscreen": 1, "kCGWindowStoreType": 1, "kCGWindowOwnerName": Loopflow Proof, "kCGWindowAlpha": 1, "kCGWindowLayer": 0, "kCGWindowNumber": 80237, "kCGWindowBounds": {
+    Height = 721;
+    Width = 1152;
+    X = 288;
+    Y = 214;
+}, "kCGWindowSharingState": 1, "kCGWindowMemoryUsage": 2368, "kCGWindowName": Loopflow Proof, "kCGWindowOwnerPID": 44369]]
+Owned screenshot status 1
+System AX focus status 0 PID 395
+FAIL configured shared Session count 
+Owned app termination requested true

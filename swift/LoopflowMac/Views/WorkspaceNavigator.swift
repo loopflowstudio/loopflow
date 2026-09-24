@@ -17,13 +17,23 @@ struct WorkspaceNavigator: View {
     }
 
     private var projection: WorkspaceProjection { model.workspace }
+    private var taskQuery: TaskQuery { model.navigation.taskQuery }
+    private var hasUnknownWorktrees: Bool {
+        projection.waves.contains { wave in
+            wave.projects.contains { project in
+                project.project.tasks.contains { task in
+                    task.reference.workspace.map { $0.localExists == nil } ?? false
+                }
+            }
+        }
+    }
     private var search: String { model.navigation.search.trimmingCharacters(in: .whitespacesAndNewlines) }
 
     var body: some View {
         @Bindable var navigation = model.navigation
         VStack(spacing: 0) {
             HStack {
-                Text("Work").font(Typography.sectionTitle(20))
+                Text("Tasks").font(Typography.sectionTitle(20))
                 Spacer()
                 if let error = model.roadmap.errorMessage {
                     Image(systemName: "exclamationmark.triangle").help(error)
@@ -31,6 +41,15 @@ struct WorkspaceNavigator: View {
             }
             .padding(.horizontal, Spacing.md)
             .padding(.top, Spacing.md)
+            Picker("Task view", selection: $navigation.taskQuery) {
+                ForEach(TaskQuery.allCases, id: \.self) { query in
+                    Text(query.rawValue).tag(query)
+                }
+            }
+            .pickerStyle(.segmented)
+            .padding(.horizontal, Spacing.md)
+            .padding(.top, Spacing.sm)
+            .accessibilityIdentifier("workspace-task-view")
             TextField("Find work or Sessions", text: $navigation.search,
                       prompt: Text("Find work or Sessions").foregroundStyle(palette.textSecondary))
                 .textFieldStyle(.plain)
@@ -52,8 +71,27 @@ struct WorkspaceNavigator: View {
                     if model.sessions.isLoading, model.repoPath != nil {
                         Text("Reading Sessions…").foregroundStyle(palette.textSecondary)
                     }
-                    ForEach(projection.waves.filter(matches)) { wave in
+                    ForEach(projection.waves.filter { includes($0) && matches($0) }) { wave in
                         waveGroup(wave)
+                    }
+                    if taskQuery == .active {
+                        if hasUnknownWorktrees {
+                            warning("Some local worktrees could not be checked; Active may be incomplete.")
+                        }
+                        if model.processActivity.isLoading {
+                            Text("Reading activity…").foregroundStyle(palette.textSecondary)
+                        }
+                        if let error = model.processActivity.errorMessage {
+                            warning("Activity unavailable: \(error)")
+                        }
+                        if !model.roadmap.isLoading, !model.sessions.isLoading,
+                           !model.processActivity.isLoading, model.roadmap.errorMessage == nil,
+                           model.sessions.errorMessage == nil, model.processActivity.errorMessage == nil,
+                           !hasUnknownWorktrees, projection.waves.allSatisfy(planningIsComplete),
+                           !projection.waves.contains(where: { $0.projects.contains(where: { $0.tasks.contains(where: taskQuery.matches) }) }) {
+                            Text("No active Tasks in this repository.")
+                                .foregroundStyle(palette.textSecondary)
+                        }
                     }
                     if !projection.unmatchedSessions.isEmpty {
                         Text("Other open Sessions")
@@ -66,7 +104,12 @@ struct WorkspaceNavigator: View {
                         ForEach(projection.unmatchedSessions.filter { matches($0.title) || matches($0.detail) }) { session in
                             Button { onOpenSession(session) } label: {
                                 HStack {
-                                    Label(session.title, systemImage: "terminal")
+                                    VStack(alignment: .leading, spacing: Spacing.xs) {
+                                        Label(session.title, systemImage: "terminal")
+                                        if let path = session.workPath {
+                                            Text(path).font(Typography.caption(9)).foregroundStyle(palette.textSecondary)
+                                        }
+                                    }
                                     Spacer()
                                     Text(sessionStatus(session)).font(Typography.caption(8))
                                 }
@@ -106,10 +149,7 @@ struct WorkspaceNavigator: View {
                 if case .available(_, let truncated) = wave.roadmap.projects, truncated {
                     warning("Planning is partial; more Projects exist.")
                 }
-                ForEach(wave.roadmap.unavailableProjects, id: \.workId) { project in
-                    warning("\(project.projectSlug): \(project.reason)")
-                }
-                ForEach(wave.projects.filter { matches(wave.roadmap.wave.name) || matches($0) }) { project in
+                ForEach(wave.projects.filter { includes($0) && (matches(wave.roadmap.wave.name) || matches($0)) }) { project in
                     projectGroup(project, waveMatches: matches(wave.roadmap.wave.name))
                 }
             }
@@ -119,17 +159,19 @@ struct WorkspaceNavigator: View {
 
     private func projectGroup(_ project: WorkspaceProject, waveMatches: Bool) -> some View {
         VStack(alignment: .leading, spacing: Spacing.xs) {
-            heading(project.project.project.name, key: project.id, count: project.tasks.count,
+            heading(project.project.project.name, key: project.id, count: project.tasks.filter(taskQuery.matches).count,
                     sessions: project.sessions,
                     containedSessions: project.sessions + project.tasks.flatMap(\.sessions))
             if model.navigation.isExpanded(project.id) {
-                ForEach(project.tasks.filter { waveMatches || matches(project.project.project.name) || matches($0) }) { task in
+                ForEach(project.tasks.filter { taskQuery.matches($0) && (waveMatches || matches(project.project.project.name) || matches($0)) }) { task in
                     HStack(spacing: Spacing.sm) {
                         Button { select(task.id) } label: {
                             VStack(alignment: .leading, spacing: Spacing.xxs) {
                                 Text(task.task.task.name).lineLimit(2)
                                 HStack(spacing: Spacing.sm) {
                                     Text(task.task.task.identifier)
+                                    if task.hasProviderInCheckout { Text("Provider in checkout") }
+                                    else if task.task.reference.workspace?.localExists == true { Text("Local worktree") }
                                     Text(task.task.task.completed ? "Completed" : task.task.condition.state.rawValue.capitalized)
                                 }
                                 .font(Typography.caption(9))
@@ -183,13 +225,14 @@ struct WorkspaceNavigator: View {
                 Label(sessionStatus(session), systemImage: "terminal")
                     .font(Typography.caption(8))
             }
-                .help("Open \(session.title)")
+                .help([session.workPath, session.title].compactMap { $0 }.joined(separator: " · "))
                 .accessibilityLabel("Open Session: \(session.title)")
                 .accessibilityIdentifier("session-row-\(session.id)")
         } else if !sessions.isEmpty {
             Menu {
                 ForEach(sessions) { session in
                     Button("\(session.title) · \(sessionStatus(session))") { onOpenSession(session) }
+                        .accessibilityIdentifier("session-row-\(session.id)")
                 }
             } label: { Label("\(sessions.count)", systemImage: "terminal") }
             .menuStyle(.borderlessButton)
@@ -198,14 +241,27 @@ struct WorkspaceNavigator: View {
     }
 
     private func taskCount(_ wave: WorkspaceWave) -> Int? {
-        guard case .available(_, false) = wave.roadmap.projects,
-              wave.roadmap.unavailableProjects.isEmpty else { return nil }
-        return wave.projects.reduce(0) { $0 + $1.tasks.count }
+        guard planningIsComplete(wave) else { return nil }
+        return wave.projects.reduce(0) { $0 + $1.tasks.filter(taskQuery.matches).count }
     }
 
     private func select(_ key: WorkspaceNodeKey) {
         if model.repoPath == nil { model.setRepoPath(key.repo) }
         model.select(key.work)
+    }
+
+    private func includes(_ project: WorkspaceProject) -> Bool {
+        taskQuery == .all || !project.sessions.isEmpty || project.tasks.contains(where: taskQuery.matches)
+    }
+
+    private func includes(_ wave: WorkspaceWave) -> Bool {
+        taskQuery == .all || !wave.sessions.isEmpty || wave.projects.contains(where: includes)
+            || !planningIsComplete(wave)
+    }
+
+    private func planningIsComplete(_ wave: WorkspaceWave) -> Bool {
+        guard case .available(_, false) = wave.roadmap.projects else { return false }
+        return wave.roadmap.unavailableProjects.isEmpty
     }
 
     private func matches(_ value: String) -> Bool { search.isEmpty || value.localizedCaseInsensitiveContains(search) }

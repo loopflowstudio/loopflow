@@ -10,5 +10,9 @@
   attachment. A matching cwd does not establish either relationship.
 - Session actions must remain reachable for both direct Session panes and
   shell-attached clients. Complete the shared Session without closing its shell.
+- A Run resumed interactively is a Session even when its original launch was
+  headless. Keep launch provenance; the retained provider-client namespace records
+  interactive history and its client receipts establish liveness. Resolve declared
+  issue/slug subjects through shared Work binding before projecting Session links.
 - SwiftPM tests exercise Ghostty. Also compile the Xcode app/test targets,
   whose terminal fallback does not import Ghostty-only types.

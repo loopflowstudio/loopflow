@@ -18,6 +18,27 @@
       "task_00000000000000000000000000000001:task-design:review_kickoff:0"
     ],
     "wave_id": "wave_00000000000000000000000000000001",
-    "terminal_ids": []
+    "terminal_ids": [],
+    "work_path": "product / Desktop / LOO-291",
+    "actions": [
+      {
+        "kind": "open",
+        "label": "Open here",
+        "help": "Open this Session in a terminal",
+        "unavailable_reason": null
+      },
+      {
+        "kind": "approve",
+        "label": "Approve and continue",
+        "help": "Approve and continue the Task",
+        "unavailable_reason": "The session agent has not marked this ready"
+      },
+      {
+        "kind": "iterate",
+        "label": "Iterate",
+        "help": "Return to autonomous Task work with your direction",
+        "unavailable_reason": "The session agent has not marked this ready"
+      }
+    ]
   }
 ]

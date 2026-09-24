@@ -116,6 +116,24 @@ fn status_and_roadmap_require_the_shared_metric_portfolio() {
         None
     );
     assert_eq!(
+        items[0].tasks[0]
+            .reference
+            .workspace
+            .as_ref()
+            .unwrap()
+            .local_exists,
+        Some(false)
+    );
+    assert_eq!(
+        detail.projects[0].tasks[0]
+            .reference
+            .workspace
+            .as_ref()
+            .unwrap()
+            .local_exists,
+        Some(true)
+    );
+    assert_eq!(
         roadmap.waves[0].metric_portfolio.metrics[0]
             .identity
             .metric_id,

@@ -1,0 +1,452 @@
+[
+  {
+    "id" : "",
+    "label" : "",
+    "role" : "AXApplication",
+    "title" : "Loopflow Editor"
+  },
+  {
+    "id" : "SwiftUI.ModifiedContent<SwiftUI._ConditionalContent<SwiftUI.ModifiedContent<SwiftUI._ConditionalContent<SwiftUI.ModifiedContent<SwiftUI.ModifiedContent<SwiftUI.(unknown context at $1d0863774).SceneBridgeReader<SwiftUI.SubscriptionView<Combine.PassthroughSubject<Any, Swift.Never>, SwiftUI.ModifiedContent<SwiftUI.ModifiedContent<LoopflowMac.PodiumView, SwiftUI._EnvironmentKeyWritingModifier<Swift.Optional<SwiftUI.Color>>>, LoopflowMac.AppAppearance>>>, SwiftUI._FrameLayout>, SwiftUI._FlexFrameLayout>, SwiftUI.(unknown context at $1d0863774).SceneBridgeReader<SwiftUI.SubscriptionView<Combine.PassthroughSubject<Any, Swift.Never>, SwiftUI.ModifiedContent<SwiftUI.ModifiedContent<LoopflowMac.PodiumView, SwiftUI._EnvironmentKeyWritingModifier<Swift.Optional<SwiftUI.Color>>>, LoopflowMac.AppAppearance>>>>, SwiftUI._TaskModifier>, SwiftUI._ConditionalContent<SwiftUI.ModifiedContent<SwiftUI.ModifiedContent<SwiftUI.(unknown context at $1d0863774).SceneBridgeReader<SwiftUI.SubscriptionView<Combine.PassthroughSubject<Any, Swift.Never>, SwiftUI.ModifiedContent<SwiftUI.ModifiedContent<LoopflowMac.PodiumView, SwiftUI._EnvironmentKeyWritingModifier<Swift.Optional<SwiftUI.Color>>>, LoopflowMac.AppAppearance>>>, SwiftUI._FrameLayout>, SwiftUI._FlexFrameLayout>, SwiftUI.(unknown context at $1d0863774).SceneBridgeReader<SwiftUI.SubscriptionView<Combine.PassthroughSubject<Any, Swift.Never>, SwiftUI.ModifiedContent<SwiftUI.ModifiedContent<LoopflowMac.PodiumView, SwiftUI._EnvironmentKeyWritingModifier<Swift.Optional<SwiftUI.Color>>>, LoopflowMac.AppAppearance>>>>>, SwiftUI._TaskModifier>-1-AppWindow-1",
+    "label" : "",
+    "role" : "AXWindow",
+    "title" : "Loopflow Active"
+  },
+  {
+    "id" : "",
+    "label" : "",
+    "role" : "AXGroup",
+    "title" : ""
+  },
+  {
+    "id" : "podium",
+    "label" : "The Podium",
+    "role" : "AXGroup",
+    "title" : ""
+  },
+  {
+    "id" : "podium-bar",
+    "label" : "",
+    "role" : "AXGroup",
+    "title" : ""
+  },
+  {
+    "id" : "podium-repo-scope",
+    "label" : "Repository: loopflow",
+    "role" : "AXMenuButton",
+    "title" : ""
+  },
+  {
+    "id" : "podium-repo-scope",
+    "label" : "Repository: loopflow",
+    "role" : "AXMenuButton",
+    "title" : ""
+  },
+  {
+    "id" : "podium-repo-scope",
+    "label" : "Repository: loopflow",
+    "role" : "AXMenuButton",
+    "title" : ""
+  },
+  {
+    "id" : "podium-wave-summary",
+    "label" : "",
+    "role" : "AXStaticText",
+    "title" : ""
+  },
+  {
+    "id" : "podium-wave-summary",
+    "label" : "",
+    "role" : "AXStaticText",
+    "title" : ""
+  },
+  {
+    "id" : "podium-sessions",
+    "label" : "Sessions",
+    "role" : "AXButton",
+    "title" : ""
+  },
+  {
+    "id" : "podium-process-activity",
+    "label" : "Provider process activity",
+    "role" : "AXUnknown",
+    "title" : ""
+  },
+  {
+    "id" : "sessions-surface",
+    "label" : "All work",
+    "role" : "AXButton",
+    "title" : ""
+  },
+  {
+    "id" : "sessions-surface",
+    "label" : "Hide work list",
+    "role" : "AXButton",
+    "title" : ""
+  },
+  {
+    "id" : "sessions-surface",
+    "label" : "Work details",
+    "role" : "AXButton",
+    "title" : ""
+  },
+  {
+    "id" : "sessions-surface",
+    "label" : "",
+    "role" : "AXStaticText",
+    "title" : ""
+  },
+  {
+    "id" : "sessions-surface",
+    "label" : "New conversation · LOO-291",
+    "role" : "AXButton",
+    "title" : ""
+  },
+  {
+    "id" : "sessions-surface",
+    "label" : "New terminal",
+    "role" : "AXButton",
+    "title" : ""
+  },
+  {
+    "id" : "sessions-surface",
+    "label" : "",
+    "role" : "AXStaticText",
+    "title" : ""
+  },
+  {
+    "id" : "workspace-navigator",
+    "label" : "",
+    "role" : "AXStaticText",
+    "title" : ""
+  },
+  {
+    "id" : "sessions-surface",
+    "label" : "",
+    "role" : "AXRadioGroup",
+    "title" : ""
+  },
+  {
+    "id" : "",
+    "label" : "Active",
+    "role" : "AXRadioButton",
+    "title" : ""
+  },
+  {
+    "id" : "",
+    "label" : "All tasks",
+    "role" : "AXRadioButton",
+    "title" : ""
+  },
+  {
+    "id" : "sessions-surface",
+    "label" : "",
+    "role" : "AXTextField",
+    "title" : ""
+  },
+  {
+    "id" : "sessions-surface",
+    "label" : "",
+    "role" : "AXScrollArea",
+    "title" : ""
+  },
+  {
+    "id" : "",
+    "label" : "",
+    "role" : "AXOpaqueProviderGroup",
+    "title" : ""
+  },
+  {
+    "id" : "workspace-disclose-wave-6155f18a-1b7f-418c-9af3-8d6fa5ce4989",
+    "label" : "Toggle infrastructure",
+    "role" : "AXButton",
+    "title" : ""
+  },
+  {
+    "id" : "workspace-wave-6155f18a-1b7f-418c-9af3-8d6fa5ce4989",
+    "label" : "infrastructure",
+    "role" : "AXButton",
+    "title" : ""
+  },
+  {
+    "id" : "workspace-disclose-project-03c59a52-dbd4-4e11-a6ac-f6d6359c8e08",
+    "label" : "Toggle Reliability",
+    "role" : "AXButton",
+    "title" : ""
+  },
+  {
+    "id" : "workspace-project-03c59a52-dbd4-4e11-a6ac-f6d6359c8e08",
+    "label" : "Reliability",
+    "role" : "AXButton",
+    "title" : ""
+  },
+  {
+    "id" : "workspace-task-a494d11f-1966-48c0-b40a-a56860cba1e6",
+    "label" : "Clean up owned tmux terminals when Sessions complete and preserve unfinished work across Desktop re…, LOO-294, Local worktree, Blocked",
+    "role" : "AXButton",
+    "title" : ""
+  },
+  {
+    "id" : "workspace-task-049348f6-de52-4ac9-a94c-5c0804435668",
+    "label" : "Account for scheduled release opportunities and settle actual release outcomes, LOO-285, Local worktree, Blocked",
+    "role" : "AXButton",
+    "title" : ""
+  },
+  {
+    "id" : "workspace-task-564d1271-efde-471a-a137-f28ecd0de070",
+    "label" : "Make laptop refresh and lf rebase on main reliably catch up, LOO-292, Local worktree, Blocked",
+    "role" : "AXButton",
+    "title" : ""
+  },
+  {
+    "id" : "workspace-task-15172e70-1ec8-4cb0-a15c-f84d49361381",
+    "label" : "Make Linear OAuth recovery survive unattended Project runs, LOO-279, Local worktree, Completed",
+    "role" : "AXButton",
+    "title" : ""
+  },
+  {
+    "id" : "workspace-disclose-wave-5081a624-c095-4218-9a54-6d1a6711f282",
+    "label" : "Toggle product",
+    "role" : "AXButton",
+    "title" : ""
+  },
+  {
+    "id" : "workspace-wave-5081a624-c095-4218-9a54-6d1a6711f282",
+    "label" : "product",
+    "role" : "AXButton",
+    "title" : ""
+  },
+  {
+    "id" : "workspace-disclose-project-57fee17f-7231-46f3-afd8-031d866a1779",
+    "label" : "Toggle Desktop",
+    "role" : "AXButton",
+    "title" : ""
+  },
+  {
+    "id" : "workspace-project-57fee17f-7231-46f3-afd8-031d866a1779",
+    "label" : "Desktop",
+    "role" : "AXButton",
+    "title" : ""
+  },
+  {
+    "id" : "workspace-task-25a9a61a-d602-4e8b-8c41-a8d362b5fd4e",
+    "label" : "Restore Task watching with live session output and flow diagrams, LOO-293, Provider in checkout, Blocked",
+    "role" : "AXButton",
+    "title" : ""
+  },
+  {
+    "id" : "workspace-task-ee671927-255f-41e6-8429-b830d59cc1de",
+    "label" : "Join current Project\/KR\/Task planning to native Sessions, LOO-291, Provider in checkout, Blocked",
+    "role" : "AXButton",
+    "title" : ""
+  },
+  {
+    "id" : "",
+    "label" : "",
+    "role" : "AXMenuButton",
+    "title" : "2"
+  },
+  {
+    "id" : "workspace-disclose-project-d19956b2-9955-437d-aea6-d91766231c77",
+    "label" : "Toggle Company Dogfood",
+    "role" : "AXButton",
+    "title" : ""
+  },
+  {
+    "id" : "workspace-project-d19956b2-9955-437d-aea6-d91766231c77",
+    "label" : "Company Dogfood",
+    "role" : "AXButton",
+    "title" : ""
+  },
+  {
+    "id" : "workspace-task-eef88fa6-ddcf-4570-a779-8110c7a161c6",
+    "label" : "Add chapter reviews and interactive plan resets, LOO-278, Local worktree, Completed",
+    "role" : "AXButton",
+    "title" : ""
+  },
+  {
+    "id" : "",
+    "label" : "",
+    "role" : "AXStaticText",
+    "title" : ""
+  },
+  {
+    "id" : "",
+    "label" : "",
+    "role" : "AXStaticText",
+    "title" : ""
+  },
+  {
+    "id" : "session-row-run_32238dfb9f2c4782a9d9fcf7eba1c542",
+    "label" : "Scratch design artifacts and working notes., ELSEWHERE",
+    "role" : "AXButton",
+    "title" : ""
+  },
+  {
+    "id" : "session-row-run_c2a56c3b168d44b4ab2447a36696f5cd",
+    "label" : "Scratch design artifacts and working notes., CLOSED",
+    "role" : "AXButton",
+    "title" : ""
+  },
+  {
+    "id" : "session-row-run_53d33a43bf804f4e9ff72258ddea3316",
+    "label" : "review-slice · loopflow.task-viewer, ELSEWHERE",
+    "role" : "AXButton",
+    "title" : ""
+  },
+  {
+    "id" : "",
+    "label" : "",
+    "role" : "AXScrollBar",
+    "title" : ""
+  },
+  {
+    "id" : "",
+    "label" : "",
+    "role" : "AXValueIndicator",
+    "title" : ""
+  },
+  {
+    "id" : "",
+    "label" : "",
+    "role" : "AXButton",
+    "title" : ""
+  },
+  {
+    "id" : "",
+    "label" : "",
+    "role" : "AXButton",
+    "title" : ""
+  },
+  {
+    "id" : "",
+    "label" : "",
+    "role" : "AXButton",
+    "title" : ""
+  },
+  {
+    "id" : "",
+    "label" : "",
+    "role" : "AXButton",
+    "title" : ""
+  },
+  {
+    "id" : "sessions-surface",
+    "label" : "Move",
+    "role" : "AXMenuButton",
+    "title" : ""
+  },
+  {
+    "id" : "sessions-surface",
+    "label" : "loopflow.main-view-task",
+    "role" : "AXMenuButton",
+    "title" : ""
+  },
+  {
+    "id" : "sessions-surface",
+    "label" : "New terminal in worktree",
+    "role" : "AXButton",
+    "title" : ""
+  },
+  {
+    "id" : "sessions-surface",
+    "label" : "Split worktrees right",
+    "role" : "AXButton",
+    "title" : ""
+  },
+  {
+    "id" : "sessions-surface",
+    "label" : "Split worktrees down",
+    "role" : "AXButton",
+    "title" : ""
+  },
+  {
+    "id" : "sessions-surface",
+    "label" : "Hide worktree",
+    "role" : "AXButton",
+    "title" : ""
+  },
+  {
+    "id" : "sessions-surface",
+    "label" : "Review loopflow operating rules | loopflow.main-view-task, active",
+    "role" : "AXGroup",
+    "title" : ""
+  },
+  {
+    "id" : "",
+    "label" : "",
+    "role" : "AXStaticText",
+    "title" : ""
+  },
+  {
+    "id" : "shell-command-selection-help",
+    "label" : "Shell command selection help",
+    "role" : "AXImage",
+    "title" : ""
+  },
+  {
+    "id" : "pane-split-right",
+    "label" : "Split right",
+    "role" : "AXButton",
+    "title" : ""
+  },
+  {
+    "id" : "pane-split-down",
+    "label" : "Split down",
+    "role" : "AXButton",
+    "title" : ""
+  },
+  {
+    "id" : "pane-close",
+    "label" : "Close view",
+    "role" : "AXButton",
+    "title" : ""
+  },
+  {
+    "id" : "pane-zoom",
+    "label" : "Zoom pane",
+    "role" : "AXButton",
+    "title" : ""
+  },
+  {
+    "id" : "session-action-complete",
+    "label" : "Complete session",
+    "role" : "AXButton",
+    "title" : ""
+  },
+  {
+    "id" : "",
+    "label" : "",
+    "role" : "AXButton",
+    "title" : ""
+  },
+  {
+    "id" : "",
+    "label" : "",
+    "role" : "AXButton",
+    "title" : ""
+  },
+  {
+    "id" : "",
+    "label" : "",
+    "role" : "AXGroup",
+    "title" : ""
+  },
+  {
+    "id" : "",
+    "label" : "",
+    "role" : "AXButton",
+    "title" : ""
+  },
+  {
+    "id" : "",
+    "label" : "",
+    "role" : "AXStaticText",
+    "title" : ""
+  },
+  {
+    "id" : "",
+    "label" : "",
+    "role" : "AXMenuBar",
+    "title" : ""
+  }
+]

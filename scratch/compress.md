@@ -2,14 +2,27 @@
 
 ## Effective model
 
-- Shared Rust/Swift `RoadmapSnapshot` and `SessionRecord` supply planning and
-  human-work evidence through RegistryQuery. Their shared fields remain intact.
+- Shared Rust/Swift `RoadmapSnapshot`, `SessionRecord` and `ActivitySnapshot`
+  supply planning, human-work and live-process evidence through RegistryQuery.
+  Activity has Exec and ProviderProcess nodes; checkout location is separate
+  from Work attribution and native terminal attachment.
+- Rust projects Session action descriptors and Work display paths from the
+  existing boundary and stored ancestry. CLI text and Swift controls consume
+  those values. Flow settlement checks the same policy against its current
+  playhead; Swift owns only local presentation and dispatch.
 - GUI process preparation clears inherited execution and terminal markers while
   preserving Home/account selection. CLI queries supply explicit scope;
   ConversationLaunch captures the visible subject and honors lf's destination.
 - PodiumModel owns readings, last-good evidence and read generations.
   WorkspaceProjection derives typed planning-to-Session associations, preserving
-  upcoming Tasks and every unmatched human boundary. It stores nothing.
+  upcoming Tasks and every unmatched human boundary. TaskQuery selects Active
+  or All tasks over that projection; Active includes an existing local worktree,
+  open Sessions or owned provider activity in the recorded Task checkout. It
+  stores nothing. Unknown filesystem evidence remains explicit.
+- TaskDirectiveEditor owns an unsaved draft and its captured Task/Wave target.
+  RegistryQuery sends the existing PM update; Podium refreshes authoritative
+  planning and invalidates older polling results. The sheet owns submission
+  feedback, not a second planning record.
 - WorkspaceNavigation owns selected Work, presentation, search, expansion and
   list scroll offset per repository/window. PodiumModel forwards selection to
   that owner; SwiftUI controls the mounted navigator's scrolling.
@@ -17,7 +30,7 @@
   WorktreeLayoutStores inside one window, sharing that window's surface pool.
   Outer slots select checkouts; each checkout's MultiplexerStore owns terminals.
   The repository's retained SessionsStore owns opening/prepared presentation and
-  completion errors, and calls shared actions. Rust projects actual client
+  resolution errors, and calls shared actions. Rust projects actual client
   terminal attachment.
 - GhosttyMetalView owns its surface, latest title and focus request across attachment and
   visibility changes. AppKit owns actual first responder. GhosttyManager owns
@@ -25,6 +38,367 @@
   capability adaptation.
 
 ## Before and after
+
+### Iteration 17 — hierarchy study and retained ownership (2026-09-24)
+
+No coherent model/API reduction was established. Only this report changes.
+The latest slice adds a simulated hierarchy study and design amendments; it
+does not replace the native navigator or introduce another production owner.
+
+Compared Rust/Swift `SessionRecord`, `SessionAction`, `RoadmapProject`,
+`RoadmapTask`, `TaskWorkspaceSnapshot`, and Activity fields. Followed shared
+action checks and their Flow-settlement caller, RegistryQuery's inventory
+methods, PodiumModel's readers, WorkspaceProjection, SessionsStore, the
+window workspace registry, MultiplexerStore reconciliation and WorktreeLayout.
+Inspected Session/Activity fixture assertions and the study's indexing,
+selection, compression and retained conversation panels. Searches retain one
+Podium caller per inventory read and one production root workspace registry;
+SessionScope, FlowResolutionAction and requestedSessionId remain absent.
+
+Candidates retained:
+
+- The study's generic tree is sample presentation data. Replacing typed planning
+  and runtime references with it would discard upcoming Work identity and exact
+  Session attribution. Native visual compression must preserve those facts.
+- Current navigation controls still serve reachable behavior. Removing them
+  before implementing the agreed outline would change capabilities. Adding
+  unused Monitor content or a second split tree would add scaffolding, not
+  simplify the existing multiplexer.
+- Outer checkout slots retain complete inner layouts; closing a slot hides its
+  terminals, while closing an inner shell ends it. `knownPaths` retains hidden
+  and shell-only membership that current Session inventory cannot reconstruct.
+- Prepared opening commands must survive polling, while rejected resolution
+  coexists with a live terminal. Combining these states would restore the
+  earlier error-loss defect. Complete and Flow decisions also have different
+  commands and inputs; their shared error tail does not justify a new wrapper.
+
+All 15 source/fixture hashes selected from the iteration 16 review receipt still
+match. This verifies unchanged content, not fresh behavioral evidence. No
+executable edits or test reruns were needed; `git diff --check` passes. The
+study does not establish native terminal retention, Monitor behavior, rendering
+performance or human acceptance. Those obligations remain with implementation
+and demonstration; this pass performed no app interaction or publication.
+
+### Iteration 16 — live contract comparison and resolution errors (2026-09-24)
+
+No coherent model/API reduction was established. Only this report changes;
+the effective ownership model remains unchanged. The preceding review generalized
+`completionError` to `resolutionError` so rejected Flow decisions preserve a live
+terminal. That correction belongs to review 15, not this compression pass.
+
+Inspected Rust Session projection, action checks and Task Flow settlement through
+CLI Session commands, RegistryQuery, Podium's inventory reads, WorkspaceProjection,
+and retained SessionsStore/pane controls. Compared Rust/Swift SessionRecord,
+SessionAction, RoadmapProject/Task, TaskWorkspaceSnapshot and Activity fields.
+Read Session fixture assertions, the rejected-decision native test and the live
+comparison procedure. Searches retain one Podium caller per inventory read and
+one production root workspace registry; the removed Session scope/navigation
+types and FlowResolutionAction remain absent.
+
+Candidates retained:
+
+- Opening failure and resolution rejection can coexist with different terminal
+  states. Combining them would restore the reviewed defect. Prepared commands
+  also cannot be overwritten by polling; last-good readings serve another lifetime.
+- Complete and Flow decisions use different commands and inputs. Their short
+  shared error/removal tails do not justify another operation abstraction.
+  Direct panes and shell-attached Sessions reuse the same resolution errors,
+  while preserving every attached Session's identity.
+- Planning identity, runtime Work, checkout existence and terminal attachment
+  remain independent shared facts. Outer layout membership retains hidden and
+  shell-only groups that Session inventory cannot reconstruct.
+- Shared action availability does not replace local surface ownership.
+  FlowDecision's restricted domain and validation before client stopping versus
+  after playhead reload still protect distinct boundaries.
+
+All 11 hashes in iteration 16's receipt and all 12 in review 15's receipt match.
+Inspected the existing 154-record comparison and passing 13-test resolution/store
+receipt. These are prior results, not fresh tests; the comparison covers one
+cached population and supplies no UI-trial or timing credit. No executable edits
+were made and no tests rerun. `git diff --check` passes.
+
+The locked-host finding and prepared read-only procedure remain in
+[iteration16-proof.md](iteration16-proof.md). This pass performed no app/provider
+interaction. Configured contract controls, nested input, human-selected external
+trials/edit and measured budgets remain open; no publication or Task completion.
+
+### Iteration 15 — shared Session actions and Work paths (2026-09-24)
+
+No further coherent model/API reduction was established. Before and after this
+compression pass, Rust owns Session legality and display paths, Podium owns
+readings, and retained window workspaces own terminal presentation. Only this
+report changes. The preceding implementation removed Swift's action matrix,
+replacement inference and `FlowResolutionAction`; those are implementation
+changes, not new reductions made by this pass.
+
+Traced `human_session` projection and operation checks → Task Flow settlement →
+CLI list/open/complete/decisions → RegistryQuery → Podium → WorkspaceProjection
+and navigator → SessionsStore and pane controls. Compared every Rust/Swift
+SessionRecord and SessionAction field, their enums, shared Session fixtures,
+twelve-case action fixture and fixture assertions. Followed typed ancestry into
+the display path and local terminal attachment into the retained workspace.
+Searches retain one Podium caller per inventory read, one production root
+workspace registry, and no removed Session scope types, label-query helper or
+FlowResolutionAction.
+
+Candidates retained:
+
+- `FlowDecision` accepts only Approve/Iterate at settlement. Replacing it with
+  the five-case presentation action enum would admit Open/Move here/Complete
+  into a boundary that cannot execute them, requiring new rejection branches.
+- Generic Session actions and Flow actions share the same projection. The
+  latter adds the real preceding-autonomous-step constraint. Checks before
+  stopping a client and after reloading the playhead protect different moments;
+  consolidating them by deletion would lose one boundary.
+- Typed Work and its display path serve identity and readable ancestry. Shared
+  Session state describes the boundary; action reasons describe availability.
+  None replaces window-local attachment, opening/prepared state or errors.
+  Label, help and unavailable reason serve distinct control presentations; an
+  added enabled flag would merely duplicate the reason's absence.
+- The remaining two opening-button presentations dispatch the same shared
+  descriptors. Extracting their styling would remove neither policy nor an
+  owner. Prepared commands, retained terminals, completion errors and last-good
+  reads still have independent lifetimes. Outer checkout membership also retains
+  hidden and shell-only groups that Session inventory cannot reconstruct.
+
+All nine recorded source/fixture hashes in iteration 15's `hashes.json` still
+match. Inspected its passing receipts: 14 focused Swift tests, the separate
+native retention test with two cases, ten Rust projection tests, premature
+decision rejection, and Ready approval/iteration. These are existing receipts,
+not new tests. No executable content changed, so no tests were rerun;
+`git diff --check` passes.
+
+The configured four-record decode comparison and failed app count observation
+retain their limits in [iteration15-shared-sessions.md](iteration15-shared-sessions.md).
+This pass performed no app/provider interaction. Configured contract controls,
+nested input, human-selected external trials/edit and measured budgets remain
+open. No publication, landing or Task completion occurred.
+
+### Iteration 14 — exact Session picker and nested workspaces (2026-09-24)
+
+No coherent model/API reduction was established. Before and after this pass,
+shared planning and Session records supply identity, Podium owns reads, navigation
+owns selection, and retained window workspaces own terminal presentation. Only
+this report changes; no API, DTO, type, field or persistence path was removed.
+
+Traced RegistryQuery → PodiumModel → WorkspaceProjection → WorkspaceNavigator's
+single/multiple Session actions → SessionsView.openSession → retained registry,
+WorktreeLayoutStore, MultiplexerStore and SessionsStore. Compared Rust/Swift
+SessionRecord, RoadmapProject/Task, TaskWorkspaceSnapshot and Activity fields;
+inspected Session fixtures and Swift fixture assertions. Searches still find one
+Podium caller per inventory read, one production root registry, and none of the
+previously removed scope/navigation types or obsolete activity kind.
+
+Candidates retained:
+
+- The picker carries the existing Session ID into the existing open action.
+  Extracting its two button presentations would remove no identity or policy.
+- Outer checkout slots can hide retained inner terminals. `knownPaths` retains
+  repository membership for hidden and shell-only groups; window-wide registry
+  keys and Session cwd cannot replace it. Inner Close records Undo, while Session
+  reconciliation clears stale Undo. These are different operations.
+- Work attribution, checkout location and actual terminal attachment remain
+  independent shared facts. Pane selection also cannot replace native focus:
+  the configured receipt explicitly proves only the former.
+- Prepared commands, completion errors and last-good readings retain different
+  lifetimes. Mounted inventory reconciliation and asynchronous completion cover
+  different delivery times; deleting either alone would not consolidate cleanup.
+- SessionRecord still lacks shared legal actions/display path. Moving Swift's
+  policy into a helper would preserve its authority, not complete LOO-284.
+
+Inspected the [configured receipt](configured-ui-evidence/iteration14/receipt.json)
+and passing log. All five recorded Swift source hashes still match. That prior
+trial proves exact picker selection, two checkout groups, four retained PTY
+children and UI completion; it does not prove keyboard focus, nested drafts or
+shell responses. No executable content changed, so no tests were rerun.
+`git diff --check` passes. Shared Session integration, the human-selected external
+edit/trials and measured budgets remain open. No app/provider interaction,
+publication, landing or Task completion occurred in this compression pass.
+
+### Iteration 13 — configured editor Cancel path (2026-09-24)
+
+No coherent model/API reduction was established. The effective model above is
+unchanged before and after this pass; only this report changes. No API, DTO,
+field, type, persistence path or configuration key was removed.
+
+Traced TaskDirectiveEditor → PodiumModel → RegistryQuery → `pm task update`
+→ Rust ownership resolution, provider update and snapshot refresh → shared
+roadmap → WorkspaceProjection. Compared Rust/Swift SessionRecord,
+RoadmapProject/Task, TaskWorkspaceSnapshot and Activity fields. Inspected the
+retained workspace/Session state boundaries and the current directive-test and
+configured editor receipts. Searches still find one Podium caller per inventory
+read, one root workspace registry, and none of the previously removed navigation
+types or obsolete activity kind.
+
+The suspected reductions would discard distinct facts:
+
+- Initial provider text, the unsaved draft and authoritative readback can differ.
+  The configured Cancel/reopen result now exercises that distinction. Captured
+  Task/Wave targeting prevents navigation from redirecting Save; it is not a
+  second planning record.
+- Submission feedback belongs to the sheet, transport to RegistryQuery, and
+  read publication to Podium. Busy state cannot invalidate an already-running
+  poll; the generation is still necessary. An operation wrapper would relocate
+  these responsibilities without removing an owner.
+- Work attribution, local checkout existence and actual terminal attachment
+  remain independent evidence. Derived Active membership does not replace any
+  shared field. Outer checkout placement, retained inner terminals and prepared
+  Session commands likewise retain different lifetimes and close behavior.
+- SessionRecord still lacks LOO-284's shared legal actions/display path. Moving
+  the existing Swift policy into a helper would preserve its authority.
+
+The four editor source/test hashes match both recorded editor receipts. Inspected
+the existing three-test pass and iteration 13's configured exact-text entry,
+Cancel/reopen and unchanged-planning pass. Those are prior receipts, not new
+tests in this compression pass. No executable content changed, so no tests were
+rerun; `git diff --check` passes.
+
+The configured receipt does not prove Save/rejection interaction, keyboard focus
+or an authorized external edit. This pass performed no app/provider interaction.
+Shared Session integration, configured nested-workspace proof, human-selected
+external trials and performance budgets remain open. No publication, landing or
+Task completion occurred.
+
+### Iteration 12 — directive editing and shared evidence
+
+No coherent model/API reduction was established. Before and after this pass,
+the implementation has the same owners; only this report changes. No API, DTO,
+field, type, persistence path or configuration key was removed.
+
+Traced TaskDirectiveEditor → PodiumModel → RegistryQuery → `pm task update`
+→ Rust PM ownership resolution, provider update and snapshot refresh → shared
+roadmap → WorkSurfaceView/WorkspaceProjection. Compared Rust/Swift SessionRecord,
+RoadmapProject, RoadmapTask, TaskWorkspaceSnapshot and Activity fields, including
+`local_exists`, checkout location and terminal attachment. Inspected their fixture
+assertions, directive tests, Active membership and Session discovery. Searches
+retain one Podium query caller per inventory and one root workspace registry;
+the previously removed navigation types and obsolete activity kind remain absent.
+
+Suspected reductions retain distinct facts:
+
+- The sheet's draft can differ from both the captured initial directive and
+  refreshed provider text. Deriving it from planning would discard unsaved input;
+  publishing it into planning would invent an optimistic authority. The captured
+  Task/Wave also prevents navigation from redirecting the write. It reuses the
+  existing selection wrapper rather than introducing another target model.
+- Busy state and read generation answer different questions. The existing
+  refresh flag cannot invalidate a poll already awaiting a response when Save
+  succeeds. The generation protects the authoritative read; removing it restores
+  the tested stale-poll failure. Transport, refresh publication and sheet feedback
+  already sit at their owning boundaries. Moving them into a new operation
+  wrapper would add vocabulary without removing an owner.
+- Local worktree existence, owned provider activity and unresolved Sessions are
+  independent Active-membership evidence. A stored checkout path does not prove
+  its existence, attribute a provider to Work, or identify its terminal. Likewise,
+  interactive history must survive client exit; the retained client namespace
+  cannot be replaced with a current-liveness check. Resolving declared issue
+  selectors uses the existing Work resolver, not a title/cwd association.
+- Session opening/prepared state, completion errors and retained pane placement
+  remain independent of planning edits. The editor supplies no shared Session
+  legality or display-path contract; LOO-284 remains outstanding.
+
+Inspected the iteration 12 receipt: three tests pass, covering rejected writes,
+unavailable readback, captured targeting, authoritative text and stale-poll
+suppression. SHA-256 values of RegistryQuery, PodiumModel, WorkSurfaceView and
+TaskDirectiveEditorTests still match `editor-hashes.json`. No executable content
+changed and no tests were rerun. `git diff --check` passes.
+
+The receipt does not prove mounted editor draft retention or a real PM edit.
+This pass performed no app/provider interaction and leaves the ongoing human demo
+untouched. Configured editor/nested-workspace proof, shared Session integration,
+human-selected external trials and performance budgets remain open. No publication,
+landing or Task completion occurred.
+
+### Iteration 11 — remove the obsolete activity node kind
+
+Rust's `ActivityNodeKind` contains Exec and ProviderProcess, including at the
+active PR base. Swift additionally accepted ProviderLaunch. Its only caller
+was a compatibility test with an inline installed-Home payload; no current
+producer, UI behavior or shared fixture used it. Removed the Swift enum case
+and that test. The mirrors now expose the same two node kinds. This removes
+one obsolete wire value, not a command, storage record, migration or launch
+capability. Unsupported activity payloads surface through the existing read
+error path instead of being silently accepted as another kind.
+
+Traced Rust event/receipt → ActivitySnapshot → RegistryQuery → PodiumModel →
+WorkspaceProjection/TaskQuery → navigator and Wave details. Compared every
+ActivitySnapshot, ActivityNode, ProviderProcess and SessionRecord field across
+Rust/Swift, alongside RoadmapProject/Task and unavailable-Work evidence. Inspected
+the activity fixture/round-trip, query contract and Active tests. Followed the
+existing Session opening/completion state and window-local checkout registry.
+Searches retain one Podium reader per inventory and one root registry; the
+obsolete activity kind and previously removed navigation types are absent.
+
+Further suspected reductions would erase independent facts: a live provider's
+checkout does not supply Work attribution or native attachment; the derived
+Task boolean is consumed by both filtering and its explicit location label.
+TaskQuery names two actual views, not another inventory or persistent query
+language. Planning completeness is now shared by count, visibility and emptiness
+within the navigator. Last-good readings, prepared commands and completion errors
+retain separate lifetimes; outer checkout slots and inner terminal panes retain
+different close behavior. No broader ownership rewrite is justified by this
+contract correction. LOO-284's shared actions/display path remain outstanding.
+
+Focused verification: `RegistryQueryTests/activityDecodes` and
+`WorkspaceNavigationTests/workDoesNotRequireSessions` pass (two tests,
+`/tmp/loo291-compress11-activity.log`). The initial filter misspelled the DTO test
+name and did not run it; the corrected `DTOFixtureTests/activityFixtureRoundTrips`
+passes separately (one test, `/tmp/loo291-compress11-fixture.log`). Both commands
+use `swift test --package-path swift -Xswiftc -gnone --jobs 4 --filter …`.
+No executable edits followed; `git diff --check` passes. No broad gate or
+configured trial ran. Other working changes, including the Rust receipt-path
+correction, are preserved and are not claimed as this pass's work. The ongoing
+human demo and remaining full-Task proof obligations are unchanged.
+
+### Iteration 10 — Session-row return and planning diagnostics
+
+Reviewed HEAD `9b3264efd` and the working Wave-detail diagnostic. The effective
+model above is unchanged. No coherent structural reduction was established;
+this pass changes only this report. No API, DTO, field, type, persistence path
+or configuration key was removed. Existing working changes remain intact.
+
+Traced RegistryQuery → PodiumModel → WorkspaceProjection/Navigation →
+WorkspaceNavigator/WorkSurfaceView → SessionsStore and the retained checkout
+registry → WorktreeLayoutStore/MultiplexerStore → native surface ownership.
+Read scoped ConversationLaunch and the Rust provider-client attachment path.
+Compared Rust/Swift SessionRecord, WaveRoadmap, RoadmapProject/Task and
+UnavailableProject/TaskEvidence fields, both shared Session fixtures and their
+Swift contract coverage. Searches retain one Podium caller per inventory read,
+one production root registry, and none of the previously removed scope types.
+
+Suspected reductions retain necessary distinctions:
+
+- Work outside a readable plan and failed/partial planning reads are different
+  evidence. Moving the former into Wave details uses the existing shared DTO;
+  collapsing it into a read error or a new local projection would lose meaning
+  or add another representation. Recorded stranded Tasks remain visible.
+- Planning identity, runtime Work identity and actual terminal attachment have
+  different owners. Upcoming Tasks cannot derive identity from a Session;
+  matching cwd cannot identify its native surface.
+- Outer checkout slots and inner terminal panes have different close behavior.
+  Per-repository known paths preserve hidden and shell-only groups that Session
+  inventory and window-wide registry keys cannot reconstruct.
+- Last-good reads, prepared launches and completion errors have independent
+  lifetimes. A rejected Complete must coexist with a responding terminal.
+  Mounted inventory observers and asynchronous action continuations still cover
+  different cleanup delivery times; removing one is not ownership consolidation.
+- LOO-284's shared legal actions/display path remain absent. Moving Swift policy
+  into another helper would not reduce its authority. The new Task-view query
+  proposal is unresolved design, not an implemented model to collapse toward.
+
+Inspected the existing iteration 10 native receipt: one Session-row/nested-layout
+test passes with four real PTYs and fixture records. Its SessionsView and test
+hashes still match `adaae303…257fc8d` and `4025c72d…457f60a4`. Also inspected the
+other writer's `/tmp/loo291-planning-detail-proof.log`: diagnostic relocation
+and failed-read retention both pass. Neither receipt is a new test run here.
+No executable content changed in this pass; no tests were rerun.
+`git diff --check` passes.
+
+The configured launch and foreground limits remain in
+[iteration10-implement.md](iteration10-implement.md). This pass did not interact
+with the ongoing human demo or replay a retired Session. Configured row/nested
+interaction and full Task obligations remain open; no publication or completion
+is established.
 
 ### Iteration 9 — configured viewport retention
 
@@ -447,9 +821,10 @@ Coordinator remain absent.
   into SwiftUI. A complete Observation conversion could remove that bridge, but
   changes multiplexer update timing beyond the two newly proven native fixtures.
   No partial prop cleanup is justified before configured split/scroll proof.
-- Session action policy still awaits LOO-284's shared contract. The current DTO
-  has no legal-action/display-path fields; moving the local policy to another
-  helper would preserve the duplication rather than remove it.
+- Session action policy now comes from the shared contract. The DTO's action
+  descriptors and Work display path replace Swift's legality and label inference;
+  local surface ownership and prepared commands remain presentation facts.
+  Historical reviews above describe the contract before iteration 15.
 
 ## Earlier native-focus verification
 

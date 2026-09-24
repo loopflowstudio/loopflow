@@ -1,0 +1,9 @@
+Owned app PID 45385
+AX trust true active true
+AXWindows 0 count 1
+PASS Exact runner trusted
+Activation requested true
+Raise owned window -25205
+Active after request true
+FAIL Failure(message: "Owned app focused before workspace trial")
+Owned app termination requested true

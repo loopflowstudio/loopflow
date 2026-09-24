@@ -40,6 +40,8 @@ struct DTOFixtureTests {
             == [.working, .stalled])
         #expect(snapshot.nodes.filter { $0.kind == .providerProcess }.map(\.wave)
             == ["product", "product"])
+        #expect(snapshot.nodes.filter { $0.kind == .providerProcess }.map(\.worktree)
+            == ["/src/loopflow.task", "/src/loopflow.task"])
         #expect(snapshot.providerProcesses[0].claim == .orphaned)
 
         let encoded = try JSONEncoder().encode(snapshot)
@@ -235,6 +237,8 @@ struct DTOFixtureTests {
         #expect(session.title == "Simplify cross-Work questions")
         #expect(session.detail == "review-design")
         #expect(session.state == .active)
+        #expect(session.workPath == "product / Desktop / LOO-291")
+        #expect(session.action(.approve)?.unavailableReason == "The session agent has not marked this ready")
 
         let encoded = try JSONEncoder().encode(sessions)
         let decoded = try JSONDecoder().decode([SessionRecord].self, from: encoded)
@@ -249,6 +253,8 @@ struct DTOFixtureTests {
         )
 
         #expect(session.state == .ready)
+        #expect(session.actions.map(\.kind) == [.open, .complete])
+        #expect(session.actions.allSatisfy { $0.unavailableReason == nil })
         #expect(session.readySummary == "The design now reflects Jack's requested changes.")
         #expect(session.openArgv.suffix(3) == [
             "session", "open", "task_00000000000000000000000000000001:task-design:review_kickoff:0"

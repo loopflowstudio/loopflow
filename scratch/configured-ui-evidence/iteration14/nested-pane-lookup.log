@@ -1,0 +1,9 @@
+observed_at 2026-09-24T14:16:17Z
+Owned app PID 62502
+AX trust true active false
+PASS Exact runner trusted
+PASS One owned accessible window
+PASS Press All work
+PASS Press New terminal
+FAIL Failure(message: "One main checkout pane")
+Owned app termination requested true

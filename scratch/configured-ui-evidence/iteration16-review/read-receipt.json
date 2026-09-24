@@ -1,0 +1,25 @@
+{
+  "observed_at": "2026-09-24T19:39:05.449995+00:00",
+  "home": "/Users/jack/.lf-dev/installed/local-be852452823d43d7b7fde663651a7590",
+  "cli_sha256": "61e3ed3c17a53faca8a4de4a8c6b5d00b79812e6b272347e672bf4bb01b7e7b8",
+  "commands": [
+    {
+      "argv": [
+        "/Users/jack/src/loopflow.main-view-task/target/debug/lf",
+        "roadmap",
+        "--all",
+        "--json"
+      ],
+      "sha256": "4140bcd07b5bf8464987ee855ab295fc08cda94dc38220bfabbdd9132474c782"
+    },
+    {
+      "argv": [
+        "/Users/jack/src/loopflow.main-view-task/target/debug/lf",
+        "session",
+        "list",
+        "--json"
+      ],
+      "sha256": "b5dbabcef66c1846b8968a207eba148113a37d796b871421acabddb52517cd3f"
+    }
+  ]
+}

@@ -59,6 +59,7 @@ pub struct ActivityNode {
     pub kind: ActivityNodeKind,
     pub label: String,
     pub repo: Option<String>,
+    pub worktree: Option<String>,
     pub wave: Option<String>,
     pub pid: Option<u32>,
     pub started_at: i64,
@@ -164,6 +165,7 @@ struct ExecRecord {
     parent_id: Option<String>,
     label: String,
     repo: Option<String>,
+    worktree: Option<String>,
     wave: Option<String>,
     started_at: i64,
 }
@@ -492,6 +494,7 @@ fn collect_activity(
             kind: ActivityNodeKind::Exec,
             label: exec.label,
             repo: exec.repo,
+            worktree: exec.worktree,
             wave: exec.wave,
             pid: match evidence {
                 ReceiptEvidence::Present(pid) => Some(pid),
@@ -508,14 +511,19 @@ fn collect_activity(
     }
     let exec_context = nodes
         .iter()
-        .map(|node| (node.id.clone(), (node.repo.clone(), node.wave.clone())))
+        .map(|node| {
+            (
+                node.id.clone(),
+                (node.repo.clone(), node.worktree.clone(), node.wave.clone()),
+            )
+        })
         .collect::<HashMap<_, _>>();
     for owned in owned_providers {
         let parent_id = exec_node_id(&owned.exec_id);
-        let (repo, wave) = exec_context
+        let (repo, worktree, wave) = exec_context
             .get(&parent_id)
             .cloned()
-            .unwrap_or((None, None));
+            .unwrap_or((None, None, None));
         let process = owned.process;
         let provider = process
             .kind
@@ -527,6 +535,7 @@ fn collect_activity(
             kind: ActivityNodeKind::ProviderProcess,
             label: format!("{provider} {}", process.pid),
             repo,
+            worktree,
             wave,
             pid: Some(process.pid),
             started_at: process.started_at,
@@ -555,12 +564,16 @@ fn collect_execs(events: &[RunEventRow]) -> HashMap<String, ExecRecord> {
                 parent_id: event.parent_process_id.clone(),
                 label: command_label(event.command.as_deref()),
                 repo: event.repo.clone(),
+                worktree: event.worktree.clone(),
                 wave: event.wave.clone(),
                 started_at: event.ts,
             });
         entry.started_at = entry.started_at.min(event.ts);
         if entry.repo.is_none() {
             entry.repo.clone_from(&event.repo);
+        }
+        if entry.worktree.is_none() {
+            entry.worktree.clone_from(&event.worktree);
         }
         if entry.wave.is_none() {
             entry.wave.clone_from(&event.wave);
@@ -1048,6 +1061,43 @@ mod tests {
     }
 
     #[test]
+    fn activity_fixture_preserves_provider_worktrees() {
+        let snapshot: ActivitySnapshot = serde_json::from_str(include_str!(
+            "../../../../../tests/fixtures/dto/activity_snapshot.json"
+        ))
+        .unwrap();
+        let paths: Vec<_> = snapshot
+            .nodes
+            .iter()
+            .filter(|node| node.kind == ActivityNodeKind::ProviderProcess)
+            .map(|node| node.worktree.as_deref())
+            .collect();
+        assert_eq!(
+            paths,
+            vec![Some("/src/loopflow.task"), Some("/src/loopflow.task")]
+        );
+    }
+
+    #[test]
+    fn live_receipts_survive_versioned_binaries_and_app_paths() {
+        for command in [
+            "/Users/jack/.lf/bin/lf-4bacf9e4ad62b05f6b1f3a7fae56111401c387f336ef8048000a01aab1a0446c implement",
+            "/Users/jack/Applications/Loopflow Dev.app/Contents/MacOS/lf implement",
+        ] {
+            let snapshot = collect_activity(
+                ActivityData { events: vec![run_event("trace", "worker", None, 1_000, "started", "implement")] },
+                ProcessSnapshot {
+                    processes: vec![process(10, 1, 1_000, command), process(11, 10, 1_001, "codex app-server")],
+                    receipts: vec![receipt("worker", 10, 1_000)],
+                    opencode_servers: Vec::new(),
+                }, 2_000,
+            ).unwrap();
+            assert_eq!(snapshot.nodes.iter().filter(|node| node.kind == ActivityNodeKind::ProviderProcess).count(), 1);
+            assert!(snapshot.provider_processes.is_empty());
+        }
+    }
+
+    #[test]
     fn call_tree_uses_only_live_receipts_and_os_processes() {
         let now = 10_000;
         let data = ActivityData {
@@ -1096,6 +1146,7 @@ mod tests {
             .unwrap();
         assert_eq!(provider.parent_id.as_deref(), Some("exec:exec-implement"));
         assert_eq!(provider.kind, ActivityNodeKind::ProviderProcess);
+        assert_eq!(provider.worktree.as_deref(), Some("/src/loopflow"));
         assert_eq!(provider.state, ActivityState::Working);
         assert_eq!(snapshot.provider_processes.len(), 1);
         assert_eq!(snapshot.provider_processes[0].pid, 40);

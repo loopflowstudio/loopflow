@@ -1,0 +1,20 @@
+observed_at 2026-09-24T04:53:27Z
+ax_trusted true
+app 38209 active false windows 1
+nodes 4000
+app 41489 active true windows 1
+control podium-sessions value 6 Sessions
+control workspace-task-a494d11f-1966-48c0-b40a-a56860cba1e6 value 
+control workspace-task-049348f6-de52-4ac9-a94c-5c0804435668 value 
+control workspace-task-564d1271-efde-471a-a137-f28ecd0de070 value 
+control workspace-task-15172e70-1ec8-4cb0-a15c-f84d49361381 value 
+control workspace-task-25a9a61a-d602-4e8b-8c41-a8d362b5fd4e value 
+control workspace-task-ee671927-255f-41e6-8429-b830d59cc1de value 
+control session-row-run_643d86d70d5b4109a460e80a87a97533 value 
+control workspace-task-eef88fa6-ddcf-4570-a779-8110c7a161c6 value 
+control session-row-run_32238dfb9f2c4782a9d9fcf7eba1c542 value 
+control session-row-run_c2a56c3b168d44b4ab2447a36696f5cd value 
+control session-row-run_6d68330afdc044fdaee22c0c69987221 value 
+control session-row-run_8583e499219840a09e09a2fae5669df3 value 
+control session-row-run_f8b3df345dc94aeab0ae3e2338893def value 
+nodes 60

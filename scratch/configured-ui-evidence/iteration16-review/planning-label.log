@@ -1,0 +1,20 @@
+Observed at 2026-09-24T19:42:40Z
+Runner scratch/configured-ui-evidence/iteration16-review/planning-label-probe.swift AX trusted true
+Owned app PID 37731
+AX window roles ["AXWindow"] active false
+Count observed true expected 8 Sessions elapsed_ms 1942.171874921769
+PASS Select exact LOO-291 planning row
+PASS Visible directive equals configured planning text
+selection_to_directive_ax_ms 452.9457916505635
+PASS Visible Project definition equals configured planning text
+PASS Visible KR text and verdict equal configured planning
+PASS Visible KR text and verdict equal configured planning
+PASS One exact Session association for selected Task
+PASS Show work list alongside selected Task
+PASS Session row help contains shared Work display path
+PASS Exact Session list access is present; no Session button was pressed
+PASS Planning read timestamp is visible
+PASS Select Project without opening a provider
+PASS Explicit no-Session state for selected Project
+PASS: configured planning, exact Session access and shared Work path observed; no Session interaction
+Owned app termination requested true

@@ -1,0 +1,11 @@
+observed_at 2026-09-24T13:54:38Z
+Owned app PID 66438
+AX trust true active false
+AXWindows 0 count 1
+PASS Exact runner trusted
+Activation requested true
+Focused application status -25212
+System focused PID -1 owned 66438
+Focused application status -25212
+FAIL Failure(message: "Owned app focused before editor trial")
+Owned app termination requested true

@@ -24,6 +24,36 @@ struct WorkspaceNavigationTests {
         #expect(after[0].sessions.map(\.id) == ["human"])
         #expect(joined.sessions(for: .task(id: "issue-available")).isEmpty)
         #expect(joined.subject(for: "human") == .task(id: "issue-review"))
+        #expect(before.filter(TaskQuery.active.matches).isEmpty)
+        #expect(after.filter(TaskQuery.active.matches).map(\.task.id) == ["issue-review"])
+        let running = WorkspaceProjection(
+            roadmaps: roadmap.waves, sessions: [interactive],
+            activeWorktrees: ["/src/loopflow.make-lf-work-the-machine"]
+        ).waves[0].projects[0].tasks
+        #expect(running.filter(TaskQuery.active.matches).map(\.task.id) == ["issue-review", "issue-now"])
+        #expect(running.filter(TaskQuery.all.matches).map(\.id) == before.map(\.id))
+        #expect(WorkspaceNavigation().taskQuery == .active)
+        let closed = try session("closed", work: interactive.work, state: .closed)
+        let stopped = WorkspaceProjection(roadmaps: roadmap.waves, sessions: [closed])
+        #expect(stopped.waves[0].projects[0].tasks.filter(TaskQuery.active.matches).isEmpty)
+    }
+
+    @Test("An existing Task checkout remains Active across provider gaps, including completed planning work")
+    func worktreeRetainsActiveTask() throws {
+        let json = try roadmapJSON().replacingOccurrences(of: "\"local_exists\": false", with: "\"local_exists\": true")
+        let roadmap = try JSONDecoder().decode(RoadmapSnapshot.self, from: Data(json.utf8))
+        let running = WorkspaceProjection(roadmaps: roadmap.waves, sessions: [],
+                                          activeWorktrees: ["/src/loopflow.now-available-research"])
+        let paused = WorkspaceProjection(roadmaps: roadmap.waves, sessions: [])
+        let before = running.waves[0].projects[0].tasks.filter(TaskQuery.active.matches)
+        let after = paused.waves[0].projects[0].tasks.filter(TaskQuery.active.matches)
+        #expect(before.map(\.id) == after.map(\.id))
+        let completed = try #require(after.first(where: { $0.task.task.completed }))
+        #expect(completed.task.id == "issue-later")
+        #expect(!completed.hasProviderInCheckout)
+        #expect(!after.contains(where: { $0.task.id == "issue-available" }))
+        let removed = WorkspaceProjection(roadmaps: try self.roadmap().waves, sessions: [])
+        #expect(removed.waves[0].projects[0].tasks.filter(TaskQuery.active.matches).isEmpty)
     }
 
     @Test("Typed durable joins preserve top-level, multiple, completed and unmatched Sessions")
@@ -177,6 +207,62 @@ struct WorkspaceNavigationTests {
         #expect(throws: Never.self) { try view.inspect().find(text: task.project.project.krs[0].text) }
     }
 
+    @Test("Work outside the plan is explained in Wave details without crowding the Task list")
+    func unavailableProjectLivesInWaveDetails() async throws {
+        let model = try model()
+        await model.refresh()
+        let wave = try #require(model.workspace.waves.first)
+        let project = try #require(wave.roadmap.unavailableProjects.first)
+        let navigator = WorkspaceNavigator(model: model, onOpenSession: { _ in })
+        #expect(throws: (any Error).self) {
+            try navigator.inspect().find(text: "\(project.projectSlug): \(project.reason)")
+        }
+        #expect(throws: Never.self) {
+            try navigator.inspect().find(text: wave.projects[0].tasks[0].task.task.name)
+        }
+        model.select(wave.id.work)
+        let details = WorkSurfaceView(model: model)
+        #expect(throws: Never.self) { try details.inspect().find(text: project.projectSlug) }
+        #expect(throws: Never.self) { try details.inspect().find(text: project.reason) }
+        let task = try #require(project.tasks.first)
+        #expect(throws: Never.self) {
+            try details.inspect().find(text: "\(task.taskIdentifier) · \(task.status.label)")
+        }
+    }
+
+    @Test("Active keeps out-of-plan Work reachable instead of claiming healthy emptiness", arguments: [false, true])
+    func activeEmptyRequiresCompletePlanning(hasUnplannedWork: Bool) async throws {
+        var snapshot = try #require(JSONSerialization.jsonObject(with: Data(roadmapJSON().utf8)) as? [String: Any])
+        var wave = try #require((snapshot["waves"] as? [[String: Any]])?.first)
+        wave["projects"] = ["state": "ok", "items": [], "truncated": false]
+        if !hasUnplannedWork { wave["unavailable_projects"] = [] }
+        snapshot["waves"] = [wave]
+        let planning = String(decoding: try JSONSerialization.data(withJSONObject: snapshot), as: UTF8.self)
+        let model = PodiumModel(query: RegistryQuery { args, _ in
+            switch args.first {
+            case "roadmap": return planning
+            case "session", "ls": return "[]"
+            case "ps": return #"{"schema_version":1,"observed_at":1,"nodes":[],"provider_processes":[]}"#
+            default: return #"{"generated_at":1,"since":0,"limit":50,"truncated":false,"items":[]}"#
+            }
+        }, repoPath: "/src/loopflow")
+        await model.refresh()
+        await model.refreshProcessActivity()
+        #expect(model.processActivity.errorMessage == nil)
+        let navigator = WorkspaceNavigator(model: model, onOpenSession: { _ in })
+        let empty = try? navigator.inspect().find(text: "No active Tasks in this repository.")
+        #expect((empty == nil) == hasUnplannedWork)
+        if hasUnplannedWork {
+            let projected = try #require(model.workspace.waves.first)
+            try navigator.inspect().find(button: projected.roadmap.wave.name).tap()
+            #expect(model.selection == projected.id.work)
+            let task = try #require(projected.roadmap.unavailableProjects.first?.tasks.first)
+            #expect(throws: Never.self) {
+                try WorkSurfaceView(model: model).inspect().find(text: "\(task.taskIdentifier) · \(task.status.label)")
+            }
+        }
+    }
+
     @Test("Slow planning does not gate Session reading or navigation")
     func sessionsArriveBeforePlanning() async throws {
         let snapshot = try roadmapJSON()
@@ -250,12 +336,13 @@ struct WorkspaceNavigationTests {
         let records = [try session("human", work: .task(id: "ts_review00000000000000000000000000"))]
         return String(decoding: try JSONEncoder().encode(records), as: UTF8.self)
     }
-    private func session(_ id: String, work: WorkReference?) throws -> SessionRecord {
+    private func session(_ id: String, work: WorkReference?, state: SessionState = .active) throws -> SessionRecord {
         let workData = try JSONEncoder().encode(work)
         let workJSON = String(decoding: workData, as: UTF8.self)
         return try JSONDecoder().decode(SessionRecord.self, from: Data("""
         {"id":"\(id)","kind":"interactive","work":\(workJSON),"title":"\(id)",
-         "detail":"codex","cwd":"/src/loopflow","state":"active",
+         "detail":"codex","cwd":"/src/loopflow","state":"\(state.rawValue)",
+         "work_path":null,"actions":\(sessionActionFixtureJSON(kind: "interactive", state: state.rawValue)),
          "ready_summary":null,"terminal_ids":[],"open_argv":["lf","session","open","\(id)"]}
         """.utf8))
     }

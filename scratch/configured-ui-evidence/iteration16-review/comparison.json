@@ -1,0 +1,1122 @@
+{
+  "conditions" : [
+    "blocked",
+    "waiting"
+  ],
+  "configured_ui_trials" : 0,
+  "krs" : 7,
+  "records" : 158,
+  "rows" : [
+    {
+      "id" : "03c59a52-dbd4-4e11-a6ac-f6d6359c8e08",
+      "kind" : "project",
+      "krs" : 2,
+      "name" : "Reliability",
+      "result" : "pass"
+    },
+    {
+      "condition" : "blocked",
+      "id" : "a494d11f-1966-48c0-b40a-a56860cba1e6",
+      "identifier" : "LOO-294",
+      "kind" : "task",
+      "result" : "pass"
+    },
+    {
+      "condition" : "blocked",
+      "id" : "049348f6-de52-4ac9-a94c-5c0804435668",
+      "identifier" : "LOO-285",
+      "kind" : "task",
+      "result" : "pass"
+    },
+    {
+      "condition" : "blocked",
+      "id" : "564d1271-efde-471a-a137-f28ecd0de070",
+      "identifier" : "LOO-292",
+      "kind" : "task",
+      "result" : "pass"
+    },
+    {
+      "condition" : "waiting",
+      "id" : "15172e70-1ec8-4cb0-a15c-f84d49361381",
+      "identifier" : "LOO-279",
+      "kind" : "task",
+      "result" : "pass"
+    },
+    {
+      "condition" : "waiting",
+      "id" : "7d5302d8-c861-41f0-8996-5b52312cc2f2",
+      "identifier" : "LOO-277",
+      "kind" : "task",
+      "result" : "pass"
+    },
+    {
+      "condition" : "waiting",
+      "id" : "38644d0a-7a30-4127-8caf-2d76c13db015",
+      "identifier" : "LOO-273",
+      "kind" : "task",
+      "result" : "pass"
+    },
+    {
+      "condition" : "waiting",
+      "id" : "bb8c6014-279a-4028-be3d-e01ea38ceb78",
+      "identifier" : "LOO-266",
+      "kind" : "task",
+      "result" : "pass"
+    },
+    {
+      "condition" : "blocked",
+      "id" : "52c7cbaf-0139-4a0e-b1e3-d277f63295ba",
+      "identifier" : "LOO-262",
+      "kind" : "task",
+      "result" : "pass"
+    },
+    {
+      "condition" : "waiting",
+      "id" : "c7288e7e-ba26-4a40-81a4-ab9cf4296456",
+      "identifier" : "LOO-263",
+      "kind" : "task",
+      "result" : "pass"
+    },
+    {
+      "condition" : "blocked",
+      "id" : "9a805e26-0dcf-4f69-bad4-d2eeba141df6",
+      "identifier" : "LOO-265",
+      "kind" : "task",
+      "result" : "pass"
+    },
+    {
+      "condition" : "waiting",
+      "id" : "3e92e091-4e2b-4b9e-848c-28b741bfcab8",
+      "identifier" : "LOO-264",
+      "kind" : "task",
+      "result" : "pass"
+    },
+    {
+      "condition" : "waiting",
+      "id" : "2e903b54-a62e-4e3b-b747-3d1c8e95f7a5",
+      "identifier" : "LOO-261",
+      "kind" : "task",
+      "result" : "pass"
+    },
+    {
+      "condition" : "waiting",
+      "id" : "52591bd3-0d34-4125-902c-c58ed786386b",
+      "identifier" : "LOO-255",
+      "kind" : "task",
+      "result" : "pass"
+    },
+    {
+      "condition" : "waiting",
+      "id" : "1d6723a8-2fe5-465d-b7f5-04586033dbff",
+      "identifier" : "LOO-243",
+      "kind" : "task",
+      "result" : "pass"
+    },
+    {
+      "condition" : "blocked",
+      "id" : "815e7193-54b5-4ff3-8d58-020923795e86",
+      "identifier" : "LOO-240",
+      "kind" : "task",
+      "result" : "pass"
+    },
+    {
+      "condition" : "blocked",
+      "id" : "3a72d757-b396-4af1-83d6-d5b6a8ecda6b",
+      "identifier" : "LOO-241",
+      "kind" : "task",
+      "result" : "pass"
+    },
+    {
+      "condition" : "blocked",
+      "id" : "9500cecb-4e4a-4c0d-88b1-0186c5ddeb69",
+      "identifier" : "LOO-226",
+      "kind" : "task",
+      "result" : "pass"
+    },
+    {
+      "condition" : "blocked",
+      "id" : "5f974026-f793-47c1-b499-89f68517a445",
+      "identifier" : "LOO-224",
+      "kind" : "task",
+      "result" : "pass"
+    },
+    {
+      "condition" : "blocked",
+      "id" : "17edc7a0-5e01-444a-8c6b-ccaf2ead7250",
+      "identifier" : "LOO-228",
+      "kind" : "task",
+      "result" : "pass"
+    },
+    {
+      "condition" : "blocked",
+      "id" : "cf5f19cd-731b-4f5d-81c4-989eaaa00a20",
+      "identifier" : "LOO-229",
+      "kind" : "task",
+      "result" : "pass"
+    },
+    {
+      "condition" : "blocked",
+      "id" : "db77bbf0-2ea0-4c47-9512-3fda3a963f34",
+      "identifier" : "LOO-227",
+      "kind" : "task",
+      "result" : "pass"
+    },
+    {
+      "condition" : "blocked",
+      "id" : "aad2d373-8f99-41e5-9ddf-79996266fceb",
+      "identifier" : "LOO-219",
+      "kind" : "task",
+      "result" : "pass"
+    },
+    {
+      "condition" : "waiting",
+      "id" : "776e020e-c2e6-4b3c-b320-802494c59ce1",
+      "identifier" : "LOO-17",
+      "kind" : "task",
+      "result" : "pass"
+    },
+    {
+      "condition" : "blocked",
+      "id" : "c794339e-4e49-48d1-ab82-7322d78c9f6d",
+      "identifier" : "LOO-214",
+      "kind" : "task",
+      "result" : "pass"
+    },
+    {
+      "condition" : "waiting",
+      "id" : "ae4775c7-a2a6-4a91-a3f3-65153dae363a",
+      "identifier" : "LOO-29",
+      "kind" : "task",
+      "result" : "pass"
+    },
+    {
+      "condition" : "waiting",
+      "id" : "9ddb3775-2ea0-40c1-b88c-c7ac623c6dd5",
+      "identifier" : "LOO-32",
+      "kind" : "task",
+      "result" : "pass"
+    },
+    {
+      "condition" : "blocked",
+      "id" : "7572c986-583a-4876-878d-6c3d491980fb",
+      "identifier" : "LOO-212",
+      "kind" : "task",
+      "result" : "pass"
+    },
+    {
+      "condition" : "blocked",
+      "id" : "7150136b-c614-4ea4-8a0d-f89d45a8ffd6",
+      "identifier" : "LOO-37",
+      "kind" : "task",
+      "result" : "pass"
+    },
+    {
+      "condition" : "waiting",
+      "id" : "998ea80e-790c-4039-b7b8-5555af56159c",
+      "identifier" : "LOO-39",
+      "kind" : "task",
+      "result" : "pass"
+    },
+    {
+      "condition" : "blocked",
+      "id" : "910993d2-0c1e-4b34-b8cd-2343d9109854",
+      "identifier" : "LOO-55",
+      "kind" : "task",
+      "result" : "pass"
+    },
+    {
+      "condition" : "blocked",
+      "id" : "5efbfd37-8d3a-417d-8e20-d8f2fc59e3df",
+      "identifier" : "LOO-57",
+      "kind" : "task",
+      "result" : "pass"
+    },
+    {
+      "condition" : "waiting",
+      "id" : "9e3c71ba-78aa-4da2-986a-bef5c0130409",
+      "identifier" : "LOO-62",
+      "kind" : "task",
+      "result" : "pass"
+    },
+    {
+      "condition" : "blocked",
+      "id" : "fe0b2e61-7a11-4ddc-a627-bbed371bc921",
+      "identifier" : "LOO-102",
+      "kind" : "task",
+      "result" : "pass"
+    },
+    {
+      "condition" : "waiting",
+      "id" : "3cc1493f-a29f-4f9d-80b8-fb378340ba9d",
+      "identifier" : "LOO-104",
+      "kind" : "task",
+      "result" : "pass"
+    },
+    {
+      "condition" : "waiting",
+      "id" : "761827cc-cee7-4a77-9e93-3bfef6825535",
+      "identifier" : "LOO-105",
+      "kind" : "task",
+      "result" : "pass"
+    },
+    {
+      "id" : "62b73cde-5057-4959-8ad8-fca96b9e80b5",
+      "kind" : "project",
+      "krs" : 1,
+      "name" : "Architecture Minimalism",
+      "result" : "pass"
+    },
+    {
+      "condition" : "waiting",
+      "id" : "e3f42e6a-885e-4d15-b7b5-bdccf68e00bd",
+      "identifier" : "LOO-287",
+      "kind" : "task",
+      "result" : "pass"
+    },
+    {
+      "condition" : "waiting",
+      "id" : "a30ea5c3-028c-41a6-93eb-5a8a285f4c01",
+      "identifier" : "LOO-286",
+      "kind" : "task",
+      "result" : "pass"
+    },
+    {
+      "condition" : "waiting",
+      "id" : "2ada2b81-ffe1-40cb-9544-8c7bcb613c66",
+      "identifier" : "LOO-257",
+      "kind" : "task",
+      "result" : "pass"
+    },
+    {
+      "condition" : "waiting",
+      "id" : "d4af661c-669f-4fc7-88d9-dea5005f275f",
+      "identifier" : "LOO-270",
+      "kind" : "task",
+      "result" : "pass"
+    },
+    {
+      "condition" : "blocked",
+      "id" : "15ea26b7-0b66-4c79-94c1-a846bef80b1a",
+      "identifier" : "LOO-253",
+      "kind" : "task",
+      "result" : "pass"
+    },
+    {
+      "condition" : "waiting",
+      "id" : "cd07e2e2-65c0-43f3-ae59-859c634e7859",
+      "identifier" : "LOO-254",
+      "kind" : "task",
+      "result" : "pass"
+    },
+    {
+      "condition" : "blocked",
+      "id" : "28836de1-0ac0-46da-981e-5961efe225ed",
+      "identifier" : "LOO-73",
+      "kind" : "task",
+      "result" : "pass"
+    },
+    {
+      "condition" : "blocked",
+      "id" : "0194b0da-1465-471a-9fed-a0c470f89851",
+      "identifier" : "LOO-208",
+      "kind" : "task",
+      "result" : "pass"
+    },
+    {
+      "condition" : "blocked",
+      "id" : "52beae61-e799-455c-b8dc-25548d259457",
+      "identifier" : "LOO-127",
+      "kind" : "task",
+      "result" : "pass"
+    },
+    {
+      "id" : "2f8390f7-6614-426c-84a8-fa5291358691",
+      "kind" : "project",
+      "krs" : 1,
+      "name" : "Trace & Context",
+      "result" : "pass"
+    },
+    {
+      "condition" : "waiting",
+      "id" : "5cb72e9c-a920-4441-900c-51d227b51669",
+      "identifier" : "LOO-289",
+      "kind" : "task",
+      "result" : "pass"
+    },
+    {
+      "condition" : "waiting",
+      "id" : "6e89912a-36e5-46fa-960a-fa48a7be5142",
+      "identifier" : "LOO-290",
+      "kind" : "task",
+      "result" : "pass"
+    },
+    {
+      "condition" : "waiting",
+      "id" : "fb2f2d99-6019-4b09-a738-7c95a655a048",
+      "identifier" : "LOO-288",
+      "kind" : "task",
+      "result" : "pass"
+    },
+    {
+      "condition" : "waiting",
+      "id" : "13634748-ddb3-4340-a7bc-4874e7661b0a",
+      "identifier" : "LOO-272",
+      "kind" : "task",
+      "result" : "pass"
+    },
+    {
+      "condition" : "waiting",
+      "id" : "18bf0002-e796-40a2-898f-0066aa9706b4",
+      "identifier" : "LOO-271",
+      "kind" : "task",
+      "result" : "pass"
+    },
+    {
+      "condition" : "blocked",
+      "id" : "c21ffbb3-9574-4a0b-b96a-729f96e5252e",
+      "identifier" : "LOO-246",
+      "kind" : "task",
+      "result" : "pass"
+    },
+    {
+      "condition" : "waiting",
+      "id" : "c6a6b5c3-eb4e-4b1e-a3ba-ecc3c9ada0af",
+      "identifier" : "LOO-245",
+      "kind" : "task",
+      "result" : "pass"
+    },
+    {
+      "condition" : "blocked",
+      "id" : "3806fada-74a8-4e9d-a254-b4a66fd4af08",
+      "identifier" : "LOO-128",
+      "kind" : "task",
+      "result" : "pass"
+    },
+    {
+      "condition" : "waiting",
+      "id" : "0153a8e7-b9b7-4f16-817f-9697edd3204a",
+      "identifier" : "LOO-129",
+      "kind" : "task",
+      "result" : "pass"
+    },
+    {
+      "condition" : "waiting",
+      "id" : "9191217f-aa6f-4bb0-8846-a475c6f3f1ac",
+      "identifier" : "LOO-130",
+      "kind" : "task",
+      "result" : "pass"
+    },
+    {
+      "condition" : "waiting",
+      "id" : "238dcd30-c7a9-4233-a09e-d65f50033910",
+      "identifier" : "LOO-131",
+      "kind" : "task",
+      "result" : "pass"
+    },
+    {
+      "condition" : "waiting",
+      "id" : "9057cbea-2ce2-4542-a92a-c72b36f19857",
+      "identifier" : "LOO-132",
+      "kind" : "task",
+      "result" : "pass"
+    },
+    {
+      "condition" : "waiting",
+      "id" : "85307c79-3d59-42e1-ace9-a1c127299cc9",
+      "identifier" : "LOO-133",
+      "kind" : "task",
+      "result" : "pass"
+    },
+    {
+      "condition" : "waiting",
+      "id" : "16c3d2dd-63c7-428a-aab8-f9d4717fb8c4",
+      "identifier" : "LOO-134",
+      "kind" : "task",
+      "result" : "pass"
+    },
+    {
+      "condition" : "waiting",
+      "id" : "af1171f7-dee7-432f-83d6-a12f234319c8",
+      "identifier" : "LOO-135",
+      "kind" : "task",
+      "result" : "pass"
+    },
+    {
+      "condition" : "waiting",
+      "id" : "ddce61c9-e7f0-4e36-8351-e8dca94e3bc3",
+      "identifier" : "LOO-136",
+      "kind" : "task",
+      "result" : "pass"
+    },
+    {
+      "condition" : "waiting",
+      "id" : "99d2d2b9-fb84-423a-8a08-a572b8033635",
+      "identifier" : "LOO-137",
+      "kind" : "task",
+      "result" : "pass"
+    },
+    {
+      "condition" : "waiting",
+      "id" : "d1114898-ec64-4506-aa2a-ebedb238883e",
+      "identifier" : "LOO-138",
+      "kind" : "task",
+      "result" : "pass"
+    },
+    {
+      "condition" : "waiting",
+      "id" : "6e5105ec-6056-41ad-86c6-7d02dbe28d9e",
+      "identifier" : "LOO-139",
+      "kind" : "task",
+      "result" : "pass"
+    },
+    {
+      "condition" : "waiting",
+      "id" : "bca80f9f-dfae-4db4-9fb7-8cd7b013b7a5",
+      "identifier" : "LOO-140",
+      "kind" : "task",
+      "result" : "pass"
+    },
+    {
+      "condition" : "waiting",
+      "id" : "300df2d1-f1e5-4e14-b7fa-8d7c23ffbeee",
+      "identifier" : "LOO-141",
+      "kind" : "task",
+      "result" : "pass"
+    },
+    {
+      "id" : "57fee17f-7231-46f3-afd8-031d866a1779",
+      "kind" : "project",
+      "krs" : 2,
+      "name" : "Desktop",
+      "result" : "pass"
+    },
+    {
+      "condition" : "blocked",
+      "id" : "25a9a61a-d602-4e8b-8c41-a8d362b5fd4e",
+      "identifier" : "LOO-293",
+      "kind" : "task",
+      "result" : "pass"
+    },
+    {
+      "condition" : "blocked",
+      "id" : "ee671927-255f-41e6-8429-b830d59cc1de",
+      "identifier" : "LOO-291",
+      "kind" : "task",
+      "result" : "pass"
+    },
+    {
+      "condition" : "waiting",
+      "id" : "9ed54c17-2b89-4bf9-b20d-0a95a1a65d44",
+      "identifier" : "LOO-283",
+      "kind" : "task",
+      "result" : "pass"
+    },
+    {
+      "condition" : "waiting",
+      "id" : "f7d1f6d9-0ed9-4ace-8d49-ed967dc875c9",
+      "identifier" : "LOO-282",
+      "kind" : "task",
+      "result" : "pass"
+    },
+    {
+      "condition" : "waiting",
+      "id" : "656ca5c8-fe92-41c1-848a-b69b8b10f633",
+      "identifier" : "LOO-284",
+      "kind" : "task",
+      "result" : "pass"
+    },
+    {
+      "condition" : "waiting",
+      "id" : "40872684-3ee0-4507-b038-f1d379f49df6",
+      "identifier" : "LOO-280",
+      "kind" : "task",
+      "result" : "pass"
+    },
+    {
+      "condition" : "waiting",
+      "id" : "01a33274-2895-4b44-b599-7e298f9b7656",
+      "identifier" : "LOO-281",
+      "kind" : "task",
+      "result" : "pass"
+    },
+    {
+      "condition" : "waiting",
+      "id" : "3aef0d2f-630c-49ba-9535-01a7591b7d18",
+      "identifier" : "LOO-251",
+      "kind" : "task",
+      "result" : "pass"
+    },
+    {
+      "condition" : "waiting",
+      "id" : "daeb8f50-8a6a-4168-9c65-adbee99e2d96",
+      "identifier" : "LOO-148",
+      "kind" : "task",
+      "result" : "pass"
+    },
+    {
+      "condition" : "waiting",
+      "id" : "56cfdb24-cc73-4153-9ea8-1f2dab2af71a",
+      "identifier" : "LOO-274",
+      "kind" : "task",
+      "result" : "pass"
+    },
+    {
+      "condition" : "blocked",
+      "id" : "a80fc7e3-4da0-4b4e-9423-a81c2bddbd07",
+      "identifier" : "LOO-221",
+      "kind" : "task",
+      "result" : "pass"
+    },
+    {
+      "condition" : "blocked",
+      "id" : "73f0dbcf-9bd1-48ee-947d-5ec370f0312d",
+      "identifier" : "LOO-149",
+      "kind" : "task",
+      "result" : "pass"
+    },
+    {
+      "condition" : "blocked",
+      "id" : "4baaafc6-4905-4477-ae22-36f974b50f00",
+      "identifier" : "LOO-150",
+      "kind" : "task",
+      "result" : "pass"
+    },
+    {
+      "condition" : "blocked",
+      "id" : "b5690fb1-3ee4-4d44-998e-08faa46d57d3",
+      "identifier" : "LOO-151",
+      "kind" : "task",
+      "result" : "pass"
+    },
+    {
+      "condition" : "blocked",
+      "id" : "c957123f-7cd9-4e7b-acc4-4921b8a02af6",
+      "identifier" : "LOO-152",
+      "kind" : "task",
+      "result" : "pass"
+    },
+    {
+      "condition" : "blocked",
+      "id" : "b429bab9-9313-44c0-a4fd-4ccb889be96c",
+      "identifier" : "LOO-153",
+      "kind" : "task",
+      "result" : "pass"
+    },
+    {
+      "condition" : "blocked",
+      "id" : "f63ca30f-0311-4145-a517-dfea9e28debf",
+      "identifier" : "LOO-154",
+      "kind" : "task",
+      "result" : "pass"
+    },
+    {
+      "condition" : "waiting",
+      "id" : "0f57c2d5-5967-4db5-86c2-f1fc09aa0ffd",
+      "identifier" : "LOO-155",
+      "kind" : "task",
+      "result" : "pass"
+    },
+    {
+      "condition" : "waiting",
+      "id" : "d01abde6-bf28-496d-8753-83f15ebaf00b",
+      "identifier" : "LOO-156",
+      "kind" : "task",
+      "result" : "pass"
+    },
+    {
+      "condition" : "waiting",
+      "id" : "65b606aa-b6a1-4d2d-a91a-255f94b39360",
+      "identifier" : "LOO-157",
+      "kind" : "task",
+      "result" : "pass"
+    },
+    {
+      "condition" : "waiting",
+      "id" : "5d580b7c-a8ad-4ca0-9249-646ddc75101a",
+      "identifier" : "LOO-158",
+      "kind" : "task",
+      "result" : "pass"
+    },
+    {
+      "condition" : "waiting",
+      "id" : "1e1da818-54b0-4ce5-a4d8-abcf3a9f38a4",
+      "identifier" : "LOO-159",
+      "kind" : "task",
+      "result" : "pass"
+    },
+    {
+      "condition" : "waiting",
+      "id" : "45a4d4fe-b233-4fc6-94d1-54b7caabf99f",
+      "identifier" : "LOO-160",
+      "kind" : "task",
+      "result" : "pass"
+    },
+    {
+      "condition" : "waiting",
+      "id" : "ed244473-7f2b-47e7-8f8e-61b77f3a81e6",
+      "identifier" : "LOO-161",
+      "kind" : "task",
+      "result" : "pass"
+    },
+    {
+      "condition" : "blocked",
+      "id" : "e17ceffb-eb49-42aa-8f73-16d9cc1d7c23",
+      "identifier" : "W2-86",
+      "kind" : "task",
+      "result" : "pass"
+    },
+    {
+      "id" : "d19956b2-9955-437d-aea6-d91766231c77",
+      "kind" : "project",
+      "krs" : 1,
+      "name" : "Company Dogfood",
+      "result" : "pass"
+    },
+    {
+      "condition" : "waiting",
+      "id" : "2c3d04d1-91b9-45ab-9ee5-2488f97d8aad",
+      "identifier" : "LOO-185",
+      "kind" : "task",
+      "result" : "pass"
+    },
+    {
+      "condition" : "blocked",
+      "id" : "eef88fa6-ddcf-4570-a779-8110c7a161c6",
+      "identifier" : "LOO-278",
+      "kind" : "task",
+      "result" : "pass"
+    },
+    {
+      "condition" : "waiting",
+      "id" : "9478fcdf-3771-4a39-9aeb-cf9c2f3f97b8",
+      "identifier" : "LOO-269",
+      "kind" : "task",
+      "result" : "pass"
+    },
+    {
+      "condition" : "waiting",
+      "id" : "c484b752-05d5-4fea-af77-42ef66ce2569",
+      "identifier" : "LOO-260",
+      "kind" : "task",
+      "result" : "pass"
+    },
+    {
+      "condition" : "waiting",
+      "id" : "ca54414e-7181-400c-98b3-89cc1c826805",
+      "identifier" : "LOO-256",
+      "kind" : "task",
+      "result" : "pass"
+    },
+    {
+      "condition" : "blocked",
+      "id" : "2862d909-fb20-4a15-a7d1-54b5b242ec58",
+      "identifier" : "LOO-252",
+      "kind" : "task",
+      "result" : "pass"
+    },
+    {
+      "condition" : "blocked",
+      "id" : "fdb61a1a-1fe8-49d0-ac7f-27889ae22dda",
+      "identifier" : "LOO-250",
+      "kind" : "task",
+      "result" : "pass"
+    },
+    {
+      "condition" : "blocked",
+      "id" : "477ab9fb-9de9-4604-bda8-5a1aca854bc0",
+      "identifier" : "LOO-249",
+      "kind" : "task",
+      "result" : "pass"
+    },
+    {
+      "condition" : "blocked",
+      "id" : "1700ca4d-7fbd-4e9f-bb76-895ccd9dcdd6",
+      "identifier" : "LOO-248",
+      "kind" : "task",
+      "result" : "pass"
+    },
+    {
+      "condition" : "blocked",
+      "id" : "3a1d0c34-911a-42e7-8328-9683b62fa357",
+      "identifier" : "LOO-247",
+      "kind" : "task",
+      "result" : "pass"
+    },
+    {
+      "condition" : "waiting",
+      "id" : "8161e183-5109-4a76-b35e-520fa0e2158e",
+      "identifier" : "LOO-244",
+      "kind" : "task",
+      "result" : "pass"
+    },
+    {
+      "condition" : "blocked",
+      "id" : "692952c0-a99f-4e0e-a7e2-23adf9f962ed",
+      "identifier" : "LOO-235",
+      "kind" : "task",
+      "result" : "pass"
+    },
+    {
+      "condition" : "blocked",
+      "id" : "3f20e6ce-a9a8-4f8f-8b40-6e83a292774b",
+      "identifier" : "LOO-238",
+      "kind" : "task",
+      "result" : "pass"
+    },
+    {
+      "condition" : "waiting",
+      "id" : "342cf819-23a9-44e4-939d-cbe8f432d786",
+      "identifier" : "LOO-236",
+      "kind" : "task",
+      "result" : "pass"
+    },
+    {
+      "condition" : "blocked",
+      "id" : "dc74191c-4f87-4364-8d79-5fa5227c7cf9",
+      "identifier" : "LOO-237",
+      "kind" : "task",
+      "result" : "pass"
+    },
+    {
+      "condition" : "blocked",
+      "id" : "61abef00-43fc-41bc-a4b3-3e91a7fcbbd3",
+      "identifier" : "LOO-230",
+      "kind" : "task",
+      "result" : "pass"
+    },
+    {
+      "condition" : "blocked",
+      "id" : "06f8790a-33a1-48d3-8d7e-684693c79b36",
+      "identifier" : "LOO-223",
+      "kind" : "task",
+      "result" : "pass"
+    },
+    {
+      "condition" : "blocked",
+      "id" : "90a0f387-7ba4-4b96-a50f-b7724218e170",
+      "identifier" : "LOO-222",
+      "kind" : "task",
+      "result" : "pass"
+    },
+    {
+      "condition" : "blocked",
+      "id" : "c2c91762-3d29-4018-b962-e2eb709daeb6",
+      "identifier" : "LOO-225",
+      "kind" : "task",
+      "result" : "pass"
+    },
+    {
+      "condition" : "blocked",
+      "id" : "ae8c7122-991a-4c1f-920e-5225b9f03055",
+      "identifier" : "LOO-220",
+      "kind" : "task",
+      "result" : "pass"
+    },
+    {
+      "condition" : "blocked",
+      "id" : "ec89bd9f-aac9-4305-9e9b-a1aec0c0612d",
+      "identifier" : "LOO-162",
+      "kind" : "task",
+      "result" : "pass"
+    },
+    {
+      "condition" : "blocked",
+      "id" : "e59a1581-699c-4d55-a1bd-6fe5d6ca5372",
+      "identifier" : "LOO-163",
+      "kind" : "task",
+      "result" : "pass"
+    },
+    {
+      "condition" : "blocked",
+      "id" : "5e6a2e23-fb95-43fb-9b9e-7ef964f3684d",
+      "identifier" : "LOO-207",
+      "kind" : "task",
+      "result" : "pass"
+    },
+    {
+      "condition" : "blocked",
+      "id" : "69d0fc85-a698-4d8d-a9c8-12c540dc5a71",
+      "identifier" : "LOO-164",
+      "kind" : "task",
+      "result" : "pass"
+    },
+    {
+      "condition" : "blocked",
+      "id" : "abde656d-06c9-4572-a2df-499c009c8749",
+      "identifier" : "LOO-165",
+      "kind" : "task",
+      "result" : "pass"
+    },
+    {
+      "condition" : "blocked",
+      "id" : "4194aa8d-29f7-43dd-85f4-62c2e7ce0753",
+      "identifier" : "LOO-166",
+      "kind" : "task",
+      "result" : "pass"
+    },
+    {
+      "condition" : "blocked",
+      "id" : "cd90421b-c587-4492-b55f-8e6a90ae111c",
+      "identifier" : "LOO-167",
+      "kind" : "task",
+      "result" : "pass"
+    },
+    {
+      "condition" : "blocked",
+      "id" : "fa4b5b80-49b7-48af-ae40-e253c5a75fef",
+      "identifier" : "LOO-168",
+      "kind" : "task",
+      "result" : "pass"
+    },
+    {
+      "condition" : "waiting",
+      "id" : "ee037012-eaf5-4c1e-8663-4ac89c498f8c",
+      "identifier" : "LOO-169",
+      "kind" : "task",
+      "result" : "pass"
+    },
+    {
+      "condition" : "blocked",
+      "id" : "83fcc4fc-428e-4942-8290-f0129d85621a",
+      "identifier" : "LOO-170",
+      "kind" : "task",
+      "result" : "pass"
+    },
+    {
+      "condition" : "blocked",
+      "id" : "69a78b36-9d2c-4b72-96ad-8b09985e0b58",
+      "identifier" : "LOO-171",
+      "kind" : "task",
+      "result" : "pass"
+    },
+    {
+      "condition" : "blocked",
+      "id" : "d2ae21dc-3394-48df-8762-276431dc8c20",
+      "identifier" : "LOO-172",
+      "kind" : "task",
+      "result" : "pass"
+    },
+    {
+      "condition" : "waiting",
+      "id" : "be89f28d-a6be-4431-99c6-d8e61de25f26",
+      "identifier" : "LOO-173",
+      "kind" : "task",
+      "result" : "pass"
+    },
+    {
+      "condition" : "waiting",
+      "id" : "7cd11fa8-a825-4b6f-a68c-448c00bdea29",
+      "identifier" : "LOO-174",
+      "kind" : "task",
+      "result" : "pass"
+    },
+    {
+      "condition" : "blocked",
+      "id" : "6f362006-6b35-4bbf-abee-7cc868490161",
+      "identifier" : "LOO-175",
+      "kind" : "task",
+      "result" : "pass"
+    },
+    {
+      "condition" : "waiting",
+      "id" : "d4a4eb7c-bfd1-4bd5-a124-d64e92661bec",
+      "identifier" : "LOO-176",
+      "kind" : "task",
+      "result" : "pass"
+    },
+    {
+      "condition" : "waiting",
+      "id" : "ffeac343-6815-4ae9-9ae9-ff44d88ea59f",
+      "identifier" : "LOO-177",
+      "kind" : "task",
+      "result" : "pass"
+    },
+    {
+      "condition" : "blocked",
+      "id" : "295a9330-558c-49f6-8402-4de577551097",
+      "identifier" : "LOO-178",
+      "kind" : "task",
+      "result" : "pass"
+    },
+    {
+      "condition" : "blocked",
+      "id" : "243bfd4a-7c60-40fe-8e72-ab57dd66d18b",
+      "identifier" : "LOO-179",
+      "kind" : "task",
+      "result" : "pass"
+    },
+    {
+      "condition" : "waiting",
+      "id" : "8e77a60f-71e7-4e73-8471-2a1d9c2deb58",
+      "identifier" : "LOO-180",
+      "kind" : "task",
+      "result" : "pass"
+    },
+    {
+      "condition" : "waiting",
+      "id" : "5bb2acde-4682-48d6-a868-ce85bf3c847b",
+      "identifier" : "LOO-181",
+      "kind" : "task",
+      "result" : "pass"
+    },
+    {
+      "condition" : "waiting",
+      "id" : "b1ef4c76-8bbf-4a11-b210-d89132be8564",
+      "identifier" : "LOO-182",
+      "kind" : "task",
+      "result" : "pass"
+    },
+    {
+      "condition" : "waiting",
+      "id" : "cc84a449-3b12-486c-bf6d-ab9ccde93230",
+      "identifier" : "LOO-183",
+      "kind" : "task",
+      "result" : "pass"
+    },
+    {
+      "condition" : "blocked",
+      "id" : "e229f364-09a6-4a16-a241-7f901cfca14f",
+      "identifier" : "LOO-184",
+      "kind" : "task",
+      "result" : "pass"
+    },
+    {
+      "condition" : "waiting",
+      "id" : "923cdfdb-aecd-4752-98bc-77091455f880",
+      "identifier" : "LOO-186",
+      "kind" : "task",
+      "result" : "pass"
+    },
+    {
+      "condition" : "waiting",
+      "id" : "63b06501-60e3-45ec-b594-1586a9f5c1de",
+      "identifier" : "LOO-187",
+      "kind" : "task",
+      "result" : "pass"
+    },
+    {
+      "condition" : "waiting",
+      "id" : "48c08025-959d-4983-898b-a402888611d4",
+      "identifier" : "LOO-188",
+      "kind" : "task",
+      "result" : "pass"
+    },
+    {
+      "condition" : "waiting",
+      "id" : "f31fbcb6-2e4f-47a0-a093-9887b12efc10",
+      "identifier" : "LOO-189",
+      "kind" : "task",
+      "result" : "pass"
+    },
+    {
+      "condition" : "blocked",
+      "id" : "3c42d477-ac56-4f6e-8aa3-953766566b8b",
+      "identifier" : "LOO-190",
+      "kind" : "task",
+      "result" : "pass"
+    },
+    {
+      "condition" : "waiting",
+      "id" : "9ca0428d-bb19-446f-b7ef-ff3f7d7c5336",
+      "identifier" : "LOO-191",
+      "kind" : "task",
+      "result" : "pass"
+    },
+    {
+      "condition" : "blocked",
+      "id" : "c2295698-9083-4b92-8f93-5a7b9c7fe612",
+      "identifier" : "LOO-192",
+      "kind" : "task",
+      "result" : "pass"
+    },
+    {
+      "condition" : "blocked",
+      "id" : "0cc9440c-5d15-4d10-8ec1-f9b3577248b1",
+      "identifier" : "LOO-193",
+      "kind" : "task",
+      "result" : "pass"
+    },
+    {
+      "condition" : "blocked",
+      "id" : "921fafdf-25a2-433f-adc0-9b1ca3aaa9ff",
+      "identifier" : "LOO-194",
+      "kind" : "task",
+      "result" : "pass"
+    },
+    {
+      "condition" : "blocked",
+      "id" : "caa6efc5-d7ca-4912-9e67-89918f4e82fe",
+      "identifier" : "LOO-195",
+      "kind" : "task",
+      "result" : "pass"
+    },
+    {
+      "condition" : "blocked",
+      "id" : "22d37a5a-5900-4a14-b520-68b909e2d6ab",
+      "identifier" : "LOO-196",
+      "kind" : "task",
+      "result" : "pass"
+    },
+    {
+      "association" : "unmatched; preserved",
+      "id" : "run_7bacfe379eea403884b464c63f23be2c",
+      "kind" : "session",
+      "result" : "pass",
+      "state" : "active"
+    },
+    {
+      "association" : "unmatched; preserved",
+      "id" : "run_32238dfb9f2c4782a9d9fcf7eba1c542",
+      "kind" : "session",
+      "result" : "pass",
+      "state" : "active"
+    },
+    {
+      "association" : "unmatched; preserved",
+      "id" : "run_44294c0bbd314e2bbe5920a57eefb9b3",
+      "kind" : "session",
+      "result" : "pass",
+      "state" : "active"
+    },
+    {
+      "association" : "unmatched; preserved",
+      "id" : "run_c2a56c3b168d44b4ab2447a36696f5cd",
+      "kind" : "session",
+      "result" : "pass",
+      "state" : "closed"
+    },
+    {
+      "association" : "unmatched; preserved",
+      "id" : "run_8255b1de6daf4238a62bc0bbefd4f4df",
+      "kind" : "session",
+      "result" : "pass",
+      "state" : "active"
+    },
+    {
+      "id" : "run_643d86d70d5b4109a460e80a87a97533",
+      "kind" : "session",
+      "result" : "pass",
+      "state" : "active",
+      "task_id" : "ee671927-255f-41e6-8429-b830d59cc1de",
+      "work_path" : "product \/ Desktop \/ LOO-291"
+    },
+    {
+      "association" : "unmatched; preserved",
+      "id" : "run_f8b3df345dc94aeab0ae3e2338893def",
+      "kind" : "session",
+      "result" : "pass",
+      "state" : "closed"
+    },
+    {
+      "association" : "unmatched; preserved",
+      "id" : "run_53d33a43bf804f4e9ff72258ddea3316",
+      "kind" : "session",
+      "result" : "pass",
+      "state" : "active"
+    }
+  ],
+  "session_kinds" : [
+    "interactive"
+  ],
+  "sessions_joined_to_task" : 1
+}

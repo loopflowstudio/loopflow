@@ -11,6 +11,7 @@ struct WorkSurfaceView: View {
     @Environment(\.palette) private var palette
     @State private var controlError: String?
     @State private var activeControlId: String?
+    @State private var editingTask: WorkTaskSelection?
 
     private var snapshot: RoadmapSnapshot? { model.roadmap.value }
     private var queryError: String? { model.roadmap.errorMessage }
@@ -32,7 +33,9 @@ struct WorkSurfaceView: View {
             content
         }
         .background(palette.background)
-
+        .sheet(item: $editingTask) { selection in
+            TaskDirectiveEditor(model: model, task: selection.task, wave: selection.wave)
+        }
     }
 
     // MARK: - Content routing
@@ -253,7 +256,14 @@ struct WorkSurfaceView: View {
                     RoundedRectangle(cornerRadius: CornerRadius.lg)
                         .stroke(palette.border, lineWidth: 1)
                 }
-                Text("Task directive").font(Typography.sectionTitle(16))
+                HStack {
+                    Text("Task directive").font(Typography.sectionTitle(16))
+                    Spacer()
+                    Button("Edit directive") {
+                        editingTask = WorkTaskSelection(wave: found.wave.wave, task: task)
+                    }
+                    .accessibilityIdentifier("workspace-edit-directive")
+                }
                 Text(task.task.description.isEmpty ? "No directive recorded." : task.task.description)
                     .font(Typography.body(13))
                     .textSelection(.enabled)
@@ -352,9 +362,11 @@ struct WorkSurfaceView: View {
 
     // MARK: - Controls
 
-    private struct WorkTaskSelection {
+    private struct WorkTaskSelection: Identifiable {
         let wave: WaveSnapshot
         let task: RoadmapTask
+
+        var id: String { "\(wave.id):\(task.id)" }
     }
 
     private enum TaskControl {
@@ -412,6 +424,73 @@ struct WorkSurfaceView: View {
             return
         }
         controlError = nil
+    }
+}
+
+struct TaskDirectiveEditor: View {
+    let model: PodiumModel
+    let task: RoadmapTask
+    let wave: WaveSnapshot
+
+    @Environment(\.dismiss) private var dismiss
+    @Environment(\.palette) private var palette
+    @State private var draft: String
+    @State private var isSaving = false
+    @State private var saveError: String?
+
+    init(model: PodiumModel, task: RoadmapTask, wave: WaveSnapshot) {
+        self.model = model
+        self.task = task
+        self.wave = wave
+        _draft = State(initialValue: task.task.description)
+    }
+
+    var body: some View {
+        VStack(alignment: .leading, spacing: Spacing.md) {
+            Text("Edit directive · \(task.task.identifier)")
+                .font(Typography.sectionTitle(18))
+            TextEditor(text: $draft)
+                .font(Typography.body(13))
+                .scrollContentBackground(.hidden)
+                .padding(Spacing.sm)
+                .background(palette.surfaceMuted)
+                .accessibilityIdentifier("task-directive-draft")
+                .disabled(isSaving)
+            if let saveError {
+                Text(saveError)
+                    .font(Typography.body(12))
+                    .foregroundStyle(Color.statusWarning)
+                    .textSelection(.enabled)
+                    .accessibilityIdentifier("task-directive-error")
+            }
+            HStack {
+                Button("Cancel") { dismiss() }
+                    .keyboardShortcut(.cancelAction)
+                    .disabled(isSaving)
+                Spacer()
+                if isSaving { ProgressView().controlSize(.small) }
+                Button("Save directive") {
+                    isSaving = true
+                    saveError = nil
+                    Task {
+                        defer { isSaving = false }
+                        do {
+                            try await model.updateTaskDirective(task: task, wave: wave, text: draft)
+                            dismiss()
+                        } catch {
+                            saveError = error.localizedDescription
+                        }
+                    }
+                }
+                .keyboardShortcut(.defaultAction)
+                .disabled(isSaving)
+            }
+        }
+        .padding(Spacing.xl)
+        .frame(minWidth: 520, minHeight: 360)
+        .foregroundStyle(palette.text)
+        .background(palette.background)
+        .interactiveDismissDisabled(isSaving)
     }
 }
 #endif

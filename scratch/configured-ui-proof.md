@@ -1,5 +1,73 @@
 # Configured UI proof — 2026-09-23
 
+Latest [iteration 16 review](review-slice-iteration16.md): at 19:38–19:42 UTC the
+configured runner exposes a real AXWindow and matching Session count. Targeted
+Work navigation proves exact directive, definition/KR text, Session ID/shared
+path access and explicit Project no-Session state. Fresh Swift comparisons pass
+for 158 records. The earlier [locked-host proof](iteration16-proof.md) remains
+historical; it is no longer the current blocker. The app remained inactive and
+no Session interaction occurred. Configured Ask/Flow controls, nested input,
+human-selected external edit/trials and measured budgets remain open.
+
+
+Latest [iteration 15 review](review-slice-iteration15.md): corrected Flow decision
+rejection presentation with passing native PTY proof. A fresh four-record shared
+read/Swift decode agrees. One bounded configured launch still exposed no workspace
+controls despite AX trust and a reported window; its tree/log are retained without
+claiming a permission cause. Configured Ask/Flow controls and nested input remain
+open, alongside human-selected external trials/edit and measured budgets.
+
+
+Latest [iteration 15 contract proof](iteration15-shared-sessions.md): shared
+Session actions and Work paths now feed CLI and Mac. Four configured records
+agree through production Swift decoding, and focused native retention passes.
+The new read-only app launch had AX trust and one window but no observed count
+control within its deadline; configured rendering of the new contract remains
+unproven. No Session was opened, moved or resolved. External trials/edit, nested
+input and scoped budgets remain open.
+
+
+Latest [iteration 14 proof](iteration14-proof.md): the configured app passes exact
+multiple-Session selection, return across two checkout groups, four-pane/PTY-child
+retention through details, and UI completion preserving those panes. The picker
+now exposes stable Session IDs. This closes the bounded configured row/nested
+selection gap; keyboard focus, nested draft fidelity and shell responsiveness
+remain unproven. All owned trial Sessions are retired and processes cleaned up.
+The real external edit, shared Session integration and trial/budget obligations
+remain open.
+
+Latest [iteration 13 review](review-slice-iteration13.md): a disposable app using
+real reads and injected PM transport failure preserves the exact editor draft,
+visible rejection and retry controls, then cancels/reopens correctly. This closes
+the mounted failure-presentation gap; it does not prove a real provider write or
+rejection. The authorized external edit and configured row/nested proof remain.
+
+Latest [iteration 13 proof](iteration13-proof.md): targeted Accessibility actions
+in the configured app prove exact directive loading, local draft entry,
+Cancel/reopen and unchanged shared planning. Global focus remains unavailable,
+but this path sends no keyboard input. Save/rejection interaction, the authorized
+external edit and Session-row/nested-workspace proof remain open.
+
+Latest [iteration 12 review](review-slice-iteration12.md): the signed editor app
+exposed one accessible window and this runner was Accessibility trusted, but
+system AX focus lookup returned -25212. The trial stopped before any editing;
+its owned app exited and Session payloads were unchanged. This observation does
+not establish a lock or permission failure. Configured editor and row/nested
+interaction remain open.
+
+Earlier [iteration 12 receipt](iteration12-proof.md): the fresh owned trial stopped
+before input because macOS was locked and `loginwindow` owned system AX focus.
+This runner was Accessibility trusted. No provider was launched. Task-directive
+editing now has focused local proof and a separate signed review build; its
+configured interaction and the Session-row/nested-workspace trial remain open.
+
+Latest [iteration 10 implementation receipt](iteration10-implement.md): mounted
+Session-row/nested-layout proof passes; a fresh configured Task launch verifies
+local attachment. Explicit row/nested interaction remains unproven after a probe
+assumption failure and a separate foreground failure. This runner is AX trusted;
+the preceding review's permission failure does not apply to it. No retired
+proof Session may be replayed.
+
 Iteration 9 closes the bounded **configured terminal viewport retention** gap:
 inspected screenshots show history rows 1–33 before and after list/details/
 overview navigation, distinct from the initial bottom rows 168–200. See

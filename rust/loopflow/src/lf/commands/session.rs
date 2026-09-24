@@ -3,7 +3,6 @@ use std::sync::Arc;
 
 use anyhow::{bail, Context};
 
-use crate::durable::WorkRef;
 use crate::lf::SessionCommand;
 use crate::ops::human_session::{OpenMode, SessionKind, SessionRecord, SessionState};
 use crate::store::{open_store, storage_config_from_env, Store};
@@ -100,9 +99,16 @@ async fn list(store: &Arc<Store>, json: bool, all: bool) -> anyhow::Result<()> {
                     SessionState::Ready => "ready",
                     SessionState::Closed => "closed",
                 },
-                session.work.as_ref().map(WorkRef::id).unwrap_or("run"),
+                session.work_path.as_deref().unwrap_or("Repository"),
                 session.title
             );
+            for action in session.actions {
+                println!(
+                    "  {} — {}",
+                    action.label,
+                    action.unavailable_reason.as_deref().unwrap_or(&action.help)
+                );
+            }
         }
     }
     Ok(())

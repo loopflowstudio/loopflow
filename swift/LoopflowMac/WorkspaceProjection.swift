@@ -12,6 +12,17 @@ struct WorkspaceTask: Identifiable {
     let id: WorkspaceNodeKey
     let task: RoadmapTask
     let sessions: [SessionRecord]
+    let hasProviderInCheckout: Bool
+}
+
+enum TaskQuery: String, CaseIterable {
+    case active = "Active"
+    case all = "All tasks"
+
+    func matches(_ task: WorkspaceTask) -> Bool {
+        self == .all || task.task.reference.workspace?.localExists == true
+            || task.sessions.contains { $0.state != .closed } || task.hasProviderInCheckout
+    }
 }
 
 struct WorkspaceProject: Identifiable {
@@ -33,7 +44,7 @@ struct WorkspaceProjection {
     let waves: [WorkspaceWave]
     let unmatchedSessions: [SessionRecord]
 
-    init(roadmaps: [WaveRoadmap], sessions: [SessionRecord]) {
+    init(roadmaps: [WaveRoadmap], sessions: [SessionRecord], activeWorktrees: Set<String> = []) {
         var matched = Set<String>()
         func attached(to work: WorkReference?) -> [SessionRecord] {
             guard let work else { return [] }
@@ -54,11 +65,14 @@ struct WorkspaceProjection {
                         sessions: attached(to: project.runtime.map { .project(id: $0.workId) }),
                         tasks: project.tasks.sorted { $0.task.rank < $1.task.rank }.compactMap { task in
                             let records = attached(to: task.runtime.map { .task(id: $0.workId) })
-                            guard !task.task.completed || !records.isEmpty else { return nil }
+                            let providerInCheckout = task.reference.workspace.map { activeWorktrees.contains($0.worktree) } ?? false
+                            guard !task.task.completed || !records.isEmpty || providerInCheckout
+                                || task.reference.workspace?.localExists == true else { return nil }
                             return WorkspaceTask(
                                 id: WorkspaceNodeKey(repo: repo, work: .task(id: task.id)),
                                 task: task,
-                                sessions: records
+                                sessions: records,
+                                hasProviderInCheckout: providerInCheckout
                             )
                         }
                     )
@@ -105,6 +119,7 @@ final class WorkspaceNavigation {
     enum Content { case overview, details, terminals }
     var content: Content = .overview
     var showsList = false
+    var taskQuery: TaskQuery = .active
     var collapsed: Set<WorkspaceNodeKey> = []
     var search = ""
     var selection: WorkReference?

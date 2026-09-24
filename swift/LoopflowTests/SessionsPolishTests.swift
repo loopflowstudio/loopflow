@@ -99,6 +99,8 @@ struct SessionsPolishTests {
                   "cwd": "/tmp",
                   "state": "\(state)",
                   "ready_summary": null,
+                  "work_path": "product / Desktop / LOO-291",
+                  "actions": \(sessionActionFixtureJSON(kind: kind, state: state)),
                   "terminal_ids": [],
                   "open_argv": ["lf", "session", "open", "polish"]
                 }

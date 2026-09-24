@@ -1,0 +1,39 @@
+Owned app PID 8698 AX trust true
+Owned AX windows 1 active false
+Window 0 PID 8698 equals root true attributes status 0 names Optional(<__NSArrayM 0xaea8a89c0>(
+AXFunctionRowTopLevelElements,
+AXFrame,
+AXChildren,
+AXFocusedUIElement,
+AXFrontmost,
+AXRole,
+AXExtrasMenuBar,
+AXMainWindow,
+AXFocusedWindow,
+AXTitle,
+AXChildrenInNavigationOrder,
+AXEnhancedUserInterface,
+AXPreferredLanguage,
+AXRoleDescription,
+AXHidden,
+AXMenuBar,
+AXWindows,
+AXSize,
+AXPosition
+)
+)
+window attribute AXRole status 0 value Optional(AXApplication)
+window attribute AXTitle status 0 value Optional(Loopflow Proof)
+window attribute AXChildren status 0 value Optional(<__NSArrayM 0xaea8a84b0>(
+<AXUIElement Application 0xaed41c660> {pid=8698},
+<AXUIElement 0xaed41c7e0> {pid=8698}
+)
+)
+window attribute AXVisible status -25205 value nil
+window attribute AXMinimized status -25205 value nil
+window attribute AXPosition status -25205 value nil
+window attribute AXSize status -25205 value nil
+Window descendants 203
+AX nodes 203
+FAIL configured shared Session count 
+Owned app termination requested true

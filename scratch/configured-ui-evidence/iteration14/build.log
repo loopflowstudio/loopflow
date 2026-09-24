@@ -1,0 +1,9 @@
+Building for debugging...
+[0/3] Write swift-version--58304C5D6DBC2206.txt
+[1/4] Write sources
+[3/6] Compiling LoopflowMac WorkspaceNavigator.swift
+[4/6] Emitting module LoopflowMac
+[4/7] Write Objects.LinkFileList
+[5/7] Linking LoopflowMac
+[6/7] Applying LoopflowMac
+Build of product 'LoopflowMac' complete! (1.49s)

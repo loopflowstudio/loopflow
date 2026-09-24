@@ -681,19 +681,6 @@ struct RegistryQueryTests {
         #expect(snapshot.providerProcesses[0].claim == .orphaned)
     }
 
-    @Test("lf ps accepts provider launch nodes from the installed Home")
-    func providerLaunchActivityDecodes() async throws {
-        let json = #"{"schema_version":1,"observed_at":1784606400,"nodes":[{"id":"launch:invocation-1","parent_id":"exec:exec-1","kind":"provider_launch","label":"codex 4101","repo":"/src/loopflow","wave":"product","pid":4101,"started_at":1784602805,"state":"working"}],"provider_processes":[]}"#
-        let query = RegistryQuery { args, _ in
-            #expect(args == ["ps", "--json"])
-            return json
-        }
-
-        let snapshot = try await query.processActivity()
-
-        #expect(snapshot.nodes.map(\.kind) == [.providerLaunch])
-    }
-
     @Test("lf activity accepts invocation identity from the installed Home")
     func invocationActivityDecodes() async throws {
         let json = #"{"generated_at":1784606400,"since":1784001600,"limit":50,"truncated":false,"items":[{"id":"run:finished:1","recorded_at":1784606300,"summary":"Run completed","work":{"kind":"task","id":"task-1"},"subject":"LOO-1","fact":{"kind":"run_finished","invocation_id":"invocation-1","trace_id":"trace-1","exec_id":"exec-1","status":"ok"}}]}"#

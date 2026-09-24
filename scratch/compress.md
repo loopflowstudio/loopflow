@@ -4,6 +4,8 @@
 
 - Shared Rust/Swift `RoadmapSnapshot` and `SessionRecord` supply planning and
   human-work evidence through RegistryQuery. Their shared fields remain intact.
+- The existing Mac CLI process boundary supplies explicit Work targets and
+  removes ambient Wave context. General GUI PATH enrichment remains separate.
 - PodiumModel owns readings, last-good evidence and read generations.
   WorkspaceProjection derives typed planning-to-Session associations, preserving
   upcoming Tasks and every unmatched human boundary. It stores nothing.
@@ -19,6 +21,52 @@
   capability adaptation.
 
 ## Before and after
+
+### Iteration 6 — one Session-opening result path
+
+Reviewed HEAD `9cfaae907` and the configured proof. Before, `select`, `moveHere`
+and `recover` both published opening results into SessionsStore and returned
+an optional SessionRecord. Every production caller discarded that return.
+`requestedSessionId` tracked the latest request only to suppress an obsolete
+return value; it never guarded record publication or selected a pane.
+
+After, opening publishes only through the existing per-Session state. Removed
+`requestedSessionId` and the three optional returns; made `recover` private and
+consolidated its existing state guard instead of repeating it in `select`.
+Updated every UI caller and the focused tests to observe the retained prepared
+record/error. Pane selection still happens before the asynchronous open through
+MultiplexerStore. An older opening result can prepare its own Session without
+moving the selected pane, exactly as before. No DTO, CLI command, shared legal
+action, persistence path or provider launch behavior changed.
+
+Inspected LocalWaveAgentLauncher → RegistryQuery → PodiumModel →
+WorkspaceProjection/Navigation → SessionsStore → MultiplexerStore/surface pool,
+including open, explicit Move here, polling, completion and hidden Undo cleanup.
+Compared Rust/Swift SessionRecord and RoadmapProject/Task fields and their fixture
+assertions. Negative searches retain one Podium caller per inventory read, one
+root workspace registry, and none of the removed navigation/scope types.
+
+Other suspected reductions remain inappropriate: last-good readings and
+prepared/error state have different lifetimes; ambient Work removal belongs at
+the explicit CLI boundary rather than general PATH enrichment used by terminals;
+query execution preserves doctor's nonzero JSON result while checked controls
+require success. Removing those distinctions or moving absent LOO-284 policy
+between helpers would not reduce ownership. Completion cleanup still needs a
+complete retained-workspace treatment before any delivery path can be deleted.
+
+Configured provider continuation/completion now has real evidence, superseding
+the earlier generic AX gap. Exact draft fidelity, the unobserved launch,
+configured repository/scroll/visual checks and controlled timings remain open in
+`configured-ui-proof.md`. This reduction does not reinterpret those receipts or
+replay the completed proof Session.
+
+Focused command: `swift test --package-path swift -Xswiftc -gnone --jobs 4
+--filter 'SessionsStoreTests/(opensOnlyTheSelectedSession|interactiveSelectionRequiresExplicitMove|reconcilePreservesPreparedLaunch|failedOpenSurvivesPolling)'`.
+Four tests (five cases) passed, exit 0; `/tmp/loo291-compress-opening-state.log`.
+No Swift edits followed. No broader gate or configured trial was rerun. The
+review bundle/receipts still identify the preceding implementation binary;
+this pass does not relabel them as a fresh configured result.
+
 
 ### Iteration 5 — completion after repository navigation
 

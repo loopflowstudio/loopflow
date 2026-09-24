@@ -1,5 +1,7 @@
 use std::fs::{self, File, OpenOptions};
 use std::io::Write;
+use std::os::fd::AsRawFd;
+use std::os::unix::process::CommandExt;
 use std::path::{Path, PathBuf};
 use std::process::{Command, Output};
 use std::thread;
@@ -40,7 +42,25 @@ pub struct LandResult {
 #[derive(Debug)]
 pub(crate) struct WorktreeLease {
     path: PathBuf,
-    _file: File,
+    file: File,
+}
+
+impl WorktreeLease {
+    /// Keep ordinary checkout removal excluded while this child uses it.
+    pub(crate) fn inherit(&self, command: &mut Command) {
+        let fd = self.file.as_raw_fd();
+        command.env("LF_WORKTREE_LEASE_FD", fd.to_string());
+        // SAFETY: the lease outlives child launch; fcntl is async-signal-safe
+        // and changes only this owned descriptor's inheritance in the child.
+        unsafe {
+            command.pre_exec(move || {
+                if libc::fcntl(fd, libc::F_SETFD, 0) == -1 {
+                    return Err(std::io::Error::last_os_error());
+                }
+                Ok(())
+            });
+        }
+    }
 }
 
 fn run_git(repo: &Path, args: &[&str]) -> Result<Output, GitError> {
@@ -808,7 +828,7 @@ pub(crate) fn acquire_worktree_lease(
     file.flush()?;
     Ok(WorktreeLease {
         path: normalized_worktree_path(repo, path),
-        _file: file,
+        file,
     })
 }
 

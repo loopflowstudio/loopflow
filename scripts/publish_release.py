@@ -98,17 +98,22 @@ def _run(
 
 
 def _release_fds() -> tuple[int, ...]:
-    value = os.environ.get("LF_RELEASE_LOCK_FD")
-    if value is None:
-        return ()
-    fd = int(value)
-    if fd < 3:
-        raise RuntimeError("invalid inherited release lock descriptor")
-    try:
-        os.fstat(fd)
-    except OSError as error:
-        raise RuntimeError("publisher launcher dropped the inherited release lock") from error
-    return (fd,)
+    descriptors = []
+    for name in ("LF_RELEASE_LOCK_FD", "LF_WORKTREE_LEASE_FD"):
+        value = os.environ.get(name)
+        if value is None:
+            continue
+        fd = int(value)
+        if fd < 3:
+            raise RuntimeError(f"invalid inherited descriptor: {name}")
+        try:
+            os.fstat(fd)
+        except OSError as error:
+            raise RuntimeError(
+                f"publisher launcher dropped inherited descriptor: {name}"
+            ) from error
+        descriptors.append(fd)
+    return tuple(descriptors)
 
 
 def _r2_client():
@@ -722,7 +727,7 @@ def main() -> None:
         check_release_host()
         return
 
-    if not _release_fds():
+    if "LF_RELEASE_LOCK_FD" not in os.environ or not _release_fds():
         raise RuntimeError(
             "publisher stages require the owning release lock; invoke lf release run"
         )

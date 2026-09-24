@@ -38,9 +38,11 @@ def _run(
     print(f"$ {shlex.join(cmd)}", flush=True)
     return subprocess.run(
         cmd,
-        pass_fds=(int(os.environ["LF_RELEASE_LOCK_FD"]),)
-        if "LF_RELEASE_LOCK_FD" in os.environ
-        else (),
+        pass_fds=tuple(
+            int(os.environ[name])
+            for name in ("LF_RELEASE_LOCK_FD", "LF_WORKTREE_LEASE_FD")
+            if name in os.environ
+        ),
         cwd=cwd,
         check=True,
         capture_output=capture,

@@ -1,13 +1,16 @@
+import fcntl
 import io
 import json
+import runpy
 import subprocess
 import tarfile
+import time
 import urllib.error
 from pathlib import Path
 
 import pytest
 
-from scripts import publish_release
+from scripts import deploy_website, publish_release
 
 
 def _native_artifacts(directory: Path) -> None:
@@ -441,34 +444,83 @@ def test_public_proof_requires_ui_gate(
         publish_release.verify_release("v1.2.3")
 
 
-def test_publisher_child_retains_release_lock_through_uv(
-    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+@pytest.mark.parametrize("launcher", ["publisher", "website", "run", "run_capture"])
+def test_publisher_descendant_retains_both_locks_after_launcher_exits(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch, launcher: str
 ):
-    lock_path = tmp_path / "release.lock"
-    with lock_path.open("w") as lock:
+    if launcher == "publisher":
+        runner = publish_release._run
+    elif launcher == "website":
+        runner = deploy_website._run
+    else:
+        scripts = Path(publish_release.__file__).parent
+        monkeypatch.syspath_prepend(str(scripts))
+        runner = runpy.run_path(str(scripts / "release-loopflow.py"))[launcher]
+    child = tmp_path / "child.py"
+    child.write_text(
+        "import pathlib, sys, time\n"
+        "state = pathlib.Path(sys.argv[1])\n"
+        "(state / 'ready').touch()\n"
+        "deadline = time.monotonic() + 20\n"
+        "while state.exists() and not (state / 'finish').exists() "
+        "and time.monotonic() < deadline:\n"
+        "    time.sleep(0.01)\n"
+    )
+    paths = [tmp_path / "release.lock", tmp_path / "checkout.lock"]
+    with paths[0].open("w") as lock, paths[1].open("w") as lease:
+        fcntl.flock(lock, fcntl.LOCK_EX)
+        fcntl.flock(lease, fcntl.LOCK_EX)
         monkeypatch.setenv("LF_RELEASE_LOCK_FD", str(lock.fileno()))
-        # uv is the configured publisher launcher. This exercises descriptor
-        # propagation through it and a real Python subprocess, without auth.
-        result = publish_release._run(
+        monkeypatch.setenv("LF_WORKTREE_LEASE_FD", str(lease.fileno()))
+        # The helper and uv exit, leaving only their descendant to hold both
+        # capabilities after our own file handles close.
+        runner(
             [
                 "uv",
                 "run",
                 "--no-project",
                 "python",
                 "-c",
-                "import os; print(os.fstat(int(os.environ['LF_RELEASE_LOCK_FD'])).st_ino)",
+                "import os, subprocess, sys; "
+                "fds = tuple(int(os.environ[n]) "
+                "for n in ('LF_RELEASE_LOCK_FD', 'LF_WORKTREE_LEASE_FD')); "
+                "subprocess.Popen([sys.executable, sys.argv[1], sys.argv[2]], pass_fds=fds, "
+                "stdout=subprocess.DEVNULL, stderr=subprocess.DEVNULL, start_new_session=True)",
+                str(child),
+                str(tmp_path),
             ],
             cwd=tmp_path,
-            capture=True,
         )
-        assert int(result.stdout.strip()) == lock_path.stat().st_ino
+    try:
+        deadline = time.monotonic() + 10
+        while not (tmp_path / "ready").exists():
+            assert time.monotonic() < deadline, "descendant did not start"
+            time.sleep(0.01)
+        for path in paths:
+            with path.open("w") as contender:
+                with pytest.raises(BlockingIOError):
+                    fcntl.flock(contender, fcntl.LOCK_EX | fcntl.LOCK_NB)
+    finally:
+        (tmp_path / "finish").touch()
+    for path in paths:
+        with path.open("w") as contender:
+            deadline = time.monotonic() + 10
+            while True:
+                try:
+                    fcntl.flock(contender, fcntl.LOCK_EX | fcntl.LOCK_NB)
+                    break
+                except BlockingIOError:
+                    assert time.monotonic() < deadline, "descendant retained lock after exit"
+                    time.sleep(0.01)
 
 
 @pytest.mark.parametrize("stage", ["verify", "reconcile"])
 def test_direct_publisher_stage_cannot_bypass_the_owning_release_operation(
-    monkeypatch: pytest.MonkeyPatch, stage: str
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch, stage: str
 ):
     monkeypatch.delenv("LF_RELEASE_LOCK_FD", raising=False)
     monkeypatch.setattr(publish_release.sys, "argv", ["publish_release", stage, "--tag", "v1.2.3"])
-    with pytest.raises(RuntimeError, match="invoke lf release run"):
-        publish_release.main()
+    with (tmp_path / "checkout.lock").open("w") as lease:
+        monkeypatch.setenv("LF_WORKTREE_LEASE_FD", str(lease.fileno()))
+        with pytest.raises(RuntimeError, match="invoke lf release run"):
+            publish_release.main()

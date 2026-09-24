@@ -111,8 +111,10 @@ baseline and current required verification pass. Selection uses fetched origin
 without resetting caller commits, index, or working files. If a tag's hosted
 build succeeded but publishing stopped, the next run downloads that run's
 artifacts and resumes the same tag instead of cutting another patch.
-The runner holds that tag's publisher worktree lease while waiting for the
-publisher, preventing concurrent re-entry and cleanup while the runner is alive.
+Preparation, publication, and public verification retain the publisher checkout
+lease in their child processes. If the controller dies, ordinary checkout
+removal remains blocked until those children exit; unrelated checkouts remain
+independent.
 
 Tag pushes, candidate-ref changes, workflow submissions, and GitHub publication
 commands retain the release target's lock in their child process. If the

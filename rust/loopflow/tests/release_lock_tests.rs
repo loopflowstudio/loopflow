@@ -8,6 +8,7 @@ use std::process::{Child, Command, Stdio};
 use std::thread;
 use std::time::{Duration, Instant};
 
+use loopflow::engine::git::worktree_remove;
 use loopflow::ops::{release_publish, release_tag, OpsError};
 use loopflow_test_support::TestRepo;
 use serde_json::{json, Value};
@@ -228,5 +229,113 @@ fn wait_until_released(mut operation: impl FnMut() -> Result<(), OpsError>) {
             }
             result => panic!("child exited but target remained unavailable: {result:?}"),
         }
+    }
+}
+
+#[test]
+fn surviving_publisher_keeps_its_checkout_after_controller_death() {
+    for stage in ["prepare", "publish"] {
+        let state = tempfile::tempdir().unwrap();
+        let gh = "#!/bin/sh\ncase \"$1 $2\" in\n'--version ') exit 0;;\n'run list') printf '[{\"databaseId\":42,\"headBranch\":\"v0.9.1\",\"headSha\":\"%s\",\"status\":\"completed\",\"conclusion\":\"success\"}]' \"$(git rev-parse v0.9.1)\";;\n'run download') exit 0;;\n'release view') exit 1;;\n*) exit 91;;\nesac\n";
+        let _env = EnvGuard::new(&[("gh", gh)]);
+        let repo = TestRepo::new();
+        fs::create_dir_all(repo.path().join(".lf")).unwrap();
+        fs::write(
+            repo.path().join(".lf/config.yaml"),
+            "release:\n  targets:\n    default:\n      workflow: release.yml\n      publisher: [sh, '{repo}/publisher.sh']\n",
+        ).unwrap();
+        fs::write(
+            repo.path().join("publisher.sh"),
+            format!(
+                r#"#!/bin/sh
+if [ "$1" = '{stage}' ]; then
+  pwd > '{state}/checkout'
+  {barrier}
+fi
+case "$1" in
+  check) exit 0;;
+  prepare)
+    while [ "$#" -gt 0 ]; do
+      if [ "$1" = --output ]; then
+        mkdir -p "$2"
+        echo '{{}}' > "$2/candidate.json"
+        exit 0
+      fi
+      shift
+    done;;
+  publish) exit 0;;
+esac
+exit 92
+"#,
+                state = state.path().display(),
+                barrier = blocking_mutation(
+                    state.path(),
+                    &format!(
+                        "cat publisher.sh > '{}/retained-source'",
+                        state.path().display()
+                    )
+                ),
+            ),
+        )
+        .unwrap();
+        for args in [
+            vec!["add", ".lf/config.yaml", "publisher.sh"],
+            vec!["commit", "-m", "Configure publisher fixture"],
+            vec!["tag", "v0.9.1"],
+            vec!["push", "origin", "HEAD", "v0.9.1"],
+        ] {
+            let output = Command::new("git")
+                .args(args)
+                .current_dir(repo.path())
+                .output()
+                .unwrap();
+            assert!(
+                output.status.success(),
+                "{}",
+                String::from_utf8_lossy(&output.stderr)
+            );
+        }
+        let independent = state.path().join("independent-checkout");
+        let output = Command::new("git")
+            .args(["worktree", "add", "--detach"])
+            .arg(&independent)
+            .arg("HEAD")
+            .current_dir(repo.path())
+            .output()
+            .unwrap();
+        assert!(
+            output.status.success(),
+            "{}",
+            String::from_utf8_lossy(&output.stderr)
+        );
+        let mut parent = start(&repo, state.path(), &["release", "run", "0.9.1"]);
+        let checkout = PathBuf::from(
+            fs::read_to_string(state.path().join("checkout"))
+                .unwrap()
+                .trim(),
+        );
+        let bytes = fs::read(checkout.join("publisher.sh")).unwrap();
+        parent.child.kill().unwrap();
+        assert!(!parent.child.wait().unwrap().success());
+        let removal = worktree_remove(repo.path(), &checkout);
+        worktree_remove(repo.path(), &independent).unwrap();
+        let contender = release_tag(repo.path(), "0.9.2", None);
+        fs::write(state.path().join("allow"), "").unwrap();
+        wait_for(&state.path().join("completed"));
+        assert!(
+            removal.is_err(),
+            "removed surviving {stage} child's checkout"
+        );
+        assert!(
+            matches!(contender, Err(OpsError::ReleaseDeferred { .. })),
+            "{contender:?}"
+        );
+        assert_eq!(
+            fs::read(state.path().join("retained-source")).unwrap(),
+            bytes
+        );
+        wait_until_released(|| release_tag(repo.path(), "0.9.1", None).map(|_| ()));
+        worktree_remove(repo.path(), &checkout).unwrap();
+        assert!(!checkout.exists());
     }
 }

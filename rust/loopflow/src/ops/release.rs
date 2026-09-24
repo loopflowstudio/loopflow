@@ -1375,6 +1375,7 @@ fn verify_release_outcome(
     )?;
     let wt = materialize_exact_source_worktree(repo, &name, &commit, &lease)?;
     let mut command = lock.command(program);
+    lease.inherit(&mut command);
     command
         .args(args)
         .args(["reconcile", "--tag", &tag])
@@ -1713,6 +1714,7 @@ fn prepare_publisher(
     let wt = materialize_exact_source_worktree(repo, &wt_name, &candidate.commit, &lease)?;
     let prepare_result = {
         let mut cmd = lock.command(program);
+        lease.inherit(&mut cmd);
         cmd.args(args)
             .arg("prepare")
             .arg("--tag")
@@ -1789,6 +1791,7 @@ fn run_publisher(
     let wt = materialize_exact_source_worktree(repo, &wt_name, tag, &lease)?;
     let publish_result = {
         let mut cmd = lock.command(program);
+        lease.inherit(&mut cmd);
         cmd.args(args)
             .arg("publish")
             .arg("--tag")

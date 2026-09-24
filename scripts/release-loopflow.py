@@ -41,9 +41,11 @@ def run(
             check=check,
             timeout=timeout,
             env=env,
-            pass_fds=(int(os.environ["LF_RELEASE_LOCK_FD"]),)
-            if "LF_RELEASE_LOCK_FD" in os.environ
-            else (),
+            pass_fds=tuple(
+                int(os.environ[name])
+                for name in ("LF_RELEASE_LOCK_FD", "LF_WORKTREE_LEASE_FD")
+                if name in os.environ
+            ),
         )
     except subprocess.TimeoutExpired as exc:
         print(f"Timed out after {timeout}s: {' '.join(cmd)}", flush=True)
@@ -60,9 +62,11 @@ def run_capture(
     try:
         return subprocess.run(
             cmd,
-            pass_fds=(int(os.environ["LF_RELEASE_LOCK_FD"]),)
-            if "LF_RELEASE_LOCK_FD" in os.environ
-            else (),
+            pass_fds=tuple(
+                int(os.environ[name])
+                for name in ("LF_RELEASE_LOCK_FD", "LF_WORKTREE_LEASE_FD")
+                if name in os.environ
+            ),
             cwd=cwd,
             capture_output=True,
             text=True,

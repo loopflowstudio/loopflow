@@ -528,28 +528,28 @@ half-contracts.
 
 ## This slice
 
-Carry the existing release-operation lock through direct consequential children:
-version-tag creation/push, candidate-ref creation/deletion, candidate workflow
-submission, and GitHub draft/edit/upload/finalize. Both standalone commands and
-scheduled completion use the same borrowed `ReleaseLock`; command construction
-makes only that child's exact descriptor inheritable. No ambient execution role,
-process-age takeover, new lock owner, or replacement publication path is added.
+Preserve the existing publisher checkout lease through controller death. Borrow
+`WorktreeLease` into preparation, publication and public-reconciliation child
+commands alongside their existing target lock. Forward the checkout descriptor
+through the publisher's Python subprocess boundaries. The same OS lock continues
+to exclude ordinary worktree removal; no new lease, registry, process-age rule,
+or cleanup authority is introduced.
 
-Prove actual controller death while a mutation child remains blocked, then let
-that child finish. A contender must defer before mutation; another repository
-must remain independent; after the child exits, the same tag can resume. Use the
-built CLI and a real Git push to a disposable bare origin. A second case simulates
-GitHub's mutation endpoint while executing its real child-process boundary.
-These cases cannot establish production publication or configured settlements.
+Prove the boundary through the built CLI with disposable repositories and
+simulated hosted publication: pause a preparation/publication child, kill and
+reap its exact controller, and attempt ordinary checkout removal and a second
+release. Both must fail while the child survives. Its checkout bytes must remain
+usable, another checkout must remain removable, and cleanup must succeed after
+the child exits. Exercise descriptor forwarding through the real Python helpers.
+These tests establish local process/checkout preservation, not real signing,
+UI-host verification, launchd execution or qualifying configured settlements.
 
-This is a bounded part of the review's exclusion obligation. Shared PR operations,
-source/preparation hooks, notes generation, and generated-worktree subprocesses
-still need explicit inheritance or equivalent surviving stage ownership. Keep
-that remainder visible; do not claim the whole release graph is covered by a
-tag/publisher-child test. Historical telemetry linkage/recovery, closed-obligation
-continuation, and configured acceptance also remain in this serial Task. The
-scorecard schema blocker and required UI-host/public smoke are unchanged.
-Implementation and focused receipts: [mutation-child-exclusion.md](mutation-child-exclusion.md).
+Shared commit/PR operations, hooks, notes and source/worktree mutation children
+still need the review's complete exclusion proof. Historical telemetry linkage
+and bounded recovery, closed-obligation continuation, and installed acceptance
+remain in this serial Task. Preserve the scorecard schema blocker, repair
+ownership gap and mandatory public/UI evidence. This slice changes no settlement
+or prerequisite policy.
 
 ## Slice ledger
 
@@ -681,6 +681,19 @@ formatting and all-target Clippy. Shared PR/hook/worktree ownership, historical
 telemetry recovery, closed-obligation continuation and configured acceptance
 remain open. Full matrix and next direction:
 [review-mutation-children.md](review-mutation-children.md).
+
+- 2026-09-24: ordinary checkout removal reproduced deletion under a surviving
+  preparation child after its exact controller died. The existing worktree lease
+  now reaches preparation, publication and public-reconciliation children beside
+  the target lock. Python publisher/deployment/packaging helpers forward both
+  descriptors; checkout-only inheritance cannot authorize publisher entry.
+- The built-CLI parent-death proof passed preparation and publication, retained
+  source bytes, independent checkout removal, target exclusion and cleanup after
+  exit (7.66s). Normal candidate preparation/tag/publication also passed (12.38s).
+  Six Python descendant/authority cases, formatting, Ruff and all-target Clippy
+  passed. These are local simulated-service proofs; shared PR/hook/source/cleanup
+  children, telemetry recovery, closed obligations and configured acceptance
+  remain open. Details: [publisher-checkout-preservation.md](publisher-checkout-preservation.md).
 
 ## Measure
 

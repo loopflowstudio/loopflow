@@ -33,7 +33,7 @@ struct TaskWatchOutputTests {
 
         store.inspectRun("missing-run")
         #expect(store.visibleOutput.isEmpty)
-        let view = TaskWatchOutputView(store: store, onHistory: {}, onFollow: { store.followLive() }, onReload: {})
+        let view = TaskWatchOutputView(store: store, onHistory: { _ in }, onFollow: { store.followLive() }, onReload: {})
         try view.inspect().find(button: "Follow live").tap()
         #expect(store.visibleOutput.count == 3)
         #expect(store.followsOutput)

@@ -26,7 +26,7 @@ public struct TaskOutputSource: Decodable, Sendable {
     public let runId: String
     public let provider: String
     public let stage: TaskFlowStage?
-    public let records: [OutputRecord]
+    public var records: [OutputRecord]
     public let source: OutputSource
     public let available: Bool
     public let hasMore: Bool

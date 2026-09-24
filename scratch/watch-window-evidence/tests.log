@@ -1,0 +1,69 @@
+Building for debugging...
+[0/6] Write sources
+[2/6] Write swift-version--58304C5D6DBC2206.txt
+[4/9] Emitting module LoopflowMac
+[5/9] Compiling LoopflowMac TaskWatchOutputView.swift
+[6/9] Compiling LoopflowMac TaskWatchOutput.swift
+[7/14] Compiling LoopflowMac WorkspaceProjection.swift
+[8/14] Compiling LoopflowMac TaskWorkspaceView.swift
+[9/14] Compiling LoopflowMac WaveDetailPane.swift
+[10/14] Compiling LoopflowMac TaskWatchStore.swift
+[11/14] Compiling LoopflowMac RoadmapView.swift
+[11/15] Write Objects.LinkFileList
+[12/15] Linking LoopflowMac
+[13/15] Applying LoopflowMac
+[15/17] Emitting module LoopflowTests
+[16/17] Compiling LoopflowTests TaskWatchFeedTests.swift
+[16/18] Write Objects.LinkFileList
+[17/18] Linking LoopflowSwiftPackageTests
+Build complete! (4.55s)
+Test Suite 'Selected tests' started at 2026-09-24 12:47:16.999.
+Test Suite 'LoopflowSwiftPackageTests.xctest' started at 2026-09-24 12:47:17.000.
+Test Suite 'LoopflowSwiftPackageTests.xctest' passed at 2026-09-24 12:47:17.000.
+	 Executed 0 tests, with 0 failures (0 unexpected) in 0.000 (0.000) seconds
+Test Suite 'Selected tests' passed at 2026-09-24 12:47:17.000.
+	 Executed 0 tests, with 0 failures (0 unexpected) in 0.000 (0.001) seconds
+◇ Test run started.
+↳ Testing Library Version: 1501
+↳ Target Platform: arm64e-apple-macos14.0
+◇ Suite "Task Watch feed" started.
+◇ Suite "Task Watch payload window" started.
+◇ Suite "Task Watch output presentation" started.
+◇ Test "The display window spans Runs and keeps newly read history and changed revisions" started.
+◇ Test "Exact stage and Run filters survive transitions; Follow live rejoins every Run" started.
+◇ Test "Hiding output cancels its read without accepting a late page" started.
+◇ Test "Restart history recovers unloaded output without moving the live continuation" started.
+◇ Test "Source reset preserves evidence until both continuations are explicitly reloaded" started.
+◇ Test "A late tool completion updates its original block and becomes the exact follow target" started.
+◇ Test "Failure and a superseded response cannot destroy newer displayed output" started.
+◇ Test "Alternating Runs stay in observation order, including split prose and late overlapping history" started.
+◇ Test "Unread history cannot delay new output or overwrite a newer revision" started.
+◇ Test "Text before and after a command retains its source order" started.
+◇ Test "Native tool results retain their exact call name and input" started.
+◇ Test "A completed tool snapshot replaces its accumulated output without replay" started.
+◇ Test "Payload limits include tool input and invisible evidence; evicted calls stay explicit" started.
+◇ Test "Follow tracks arrivals in an earlier Run and quiet pages do not move it" started.
+◇ Test case passing 1 argument restartHistory → true to "Hiding output cancels its read without accepting a late page" started.
+◇ Test "A quiet historical page cannot hide a failed live start" started.
+◇ Test case passing 1 argument restartHistory → false to "Hiding output cancels its read without accepting a late page" started.
+◇ Test case passing 1 argument source → .codex to "Native tool results retain their exact call name and input" started.
+◇ Test case passing 1 argument source → .claude to "Native tool results retain their exact call name and input" started.
+✔ Test "Text before and after a command retains its source order" passed after 0.045 seconds.
+✔ Test "A completed tool snapshot replaces its accumulated output without replay" passed after 0.108 seconds.
+✔ Test "A quiet historical page cannot hide a failed live start" passed after 0.108 seconds.
+✔ Test "Native tool results retain their exact call name and input" with 2 test cases passed after 0.108 seconds.
+✔ Test "Exact stage and Run filters survive transitions; Follow live rejoins every Run" passed after 0.166 seconds.
+✔ Test "Follow tracks arrivals in an earlier Run and quiet pages do not move it" passed after 0.402 seconds.
+✔ Suite "Task Watch output presentation" passed after 0.402 seconds.
+✔ Test "Unread history cannot delay new output or overwrite a newer revision" passed after 0.402 seconds.
+✔ Test "Source reset preserves evidence until both continuations are explicitly reloaded" passed after 0.418 seconds.
+✔ Test "Alternating Runs stay in observation order, including split prose and late overlapping history" passed after 0.440 seconds.
+✔ Test "A late tool completion updates its original block and becomes the exact follow target" passed after 0.440 seconds.
+✔ Test "Hiding output cancels its read without accepting a late page" with 2 test cases passed after 0.440 seconds.
+✔ Test "Failure and a superseded response cannot destroy newer displayed output" passed after 0.685 seconds.
+✔ Test "Restart history recovers unloaded output without moving the live continuation" passed after 0.740 seconds.
+✔ Test "The display window spans Runs and keeps newly read history and changed revisions" passed after 0.828 seconds.
+✔ Suite "Task Watch feed" passed after 0.828 seconds.
+✔ Test "Payload limits include tool input and invisible evidence; evicted calls stay explicit" passed after 0.963 seconds.
+✔ Suite "Task Watch payload window" passed after 0.963 seconds.
+✔ Test run with 15 tests in 3 suites passed after 0.963 seconds.

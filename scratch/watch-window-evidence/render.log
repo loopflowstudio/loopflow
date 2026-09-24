@@ -1,0 +1,26 @@
+Building for debugging...
+[0/5] Write sources
+[1/5] Write swift-version--58304C5D6DBC2206.txt
+[3/7] Compiling LoopflowMac TaskWatchOutputView.swift
+[4/7] Emitting module LoopflowMac
+[4/9] Write Objects.LinkFileList
+[5/9] Linking LoopflowMac
+[6/9] Applying LoopflowMac
+[8/10] Emitting module LoopflowTests
+[8/10] Write Objects.LinkFileList
+[9/10] Linking LoopflowSwiftPackageTests
+Build complete! (2.57s)
+Test Suite 'Selected tests' started at 2026-09-24 12:48:06.689.
+Test Suite 'LoopflowSwiftPackageTests.xctest' started at 2026-09-24 12:48:06.690.
+Test Suite 'LoopflowSwiftPackageTests.xctest' passed at 2026-09-24 12:48:06.690.
+	 Executed 0 tests, with 0 failures (0 unexpected) in 0.000 (0.000) seconds
+Test Suite 'Selected tests' passed at 2026-09-24 12:48:06.690.
+	 Executed 0 tests, with 0 failures (0 unexpected) in 0.000 (0.001) seconds
+◇ Test run started.
+↳ Testing Library Version: 1501
+↳ Target Platform: arm64e-apple-macos14.0
+◇ Suite "Task Watch payload window" started.
+◇ Test "Payload limits include tool input and invisible evidence; evicted calls stay explicit" started.
+✔ Test "Payload limits include tool input and invisible evidence; evicted calls stay explicit" passed after 0.566 seconds.
+✔ Suite "Task Watch payload window" passed after 0.567 seconds.
+✔ Test run with 1 test in 1 suite passed after 0.567 seconds.

@@ -14,6 +14,8 @@ struct TaskWatchOutput: Identifiable {
         var position: TaskWatchOutputPosition
         var hasLiveRevision: Bool
         var lastLiveObservation: Int?
+        var retainedAt: Int
+        var payloadBytes: Int
     }
 
     private var records: [String: ObservedRecord] = [:]
@@ -22,10 +24,29 @@ struct TaskWatchOutput: Identifiable {
 
     var id: ID { ID(run: source.runId, source: source.source) }
 
-    init(source: TaskOutputSource) { self.source = source }
+    init(source: TaskOutputSource) {
+        self.source = source
+        self.source.records = []
+    }
+
+    var retainedRecords: [(id: String, observation: Int, bytes: Int)] {
+        records.map { id, record in
+            (id, record.retainedAt, record.payloadBytes)
+        }
+    }
+
+    mutating func removeRecords(_ ids: Set<String>) {
+        for id in ids { records.removeValue(forKey: id) }
+    }
+
+    mutating func restartHistory() {
+        records.removeAll()
+        historyHasMore = false
+    }
 
     mutating func merge(_ page: TaskOutputSource, history: Bool, observation: inout Int) {
         source = page
+        source.records = []
         if history { historyHasMore = page.hasMore } else { liveHasMore = page.hasMore }
         for record in page.records {
             let id = record.sourceItemId
@@ -33,19 +54,28 @@ struct TaskWatchOutput: Identifiable {
                 observation += 1
                 records[id] = ObservedRecord(value: record,
                     position: .init(history: history, offset: observation),
-                    hasLiveRevision: !history, lastLiveObservation: history ? nil : observation)
+                    hasLiveRevision: !history, lastLiveObservation: history ? nil : observation,
+                    retainedAt: observation, payloadBytes: record.payloadBytes)
                 continue
             }
             if history {
                 if !observed.position.history {
                     observation += 1
                     observed.position = .init(history: true, offset: observation)
+                    observed.retainedAt = observation
                 }
-                if !observed.hasLiveRevision { observed.value = record }
+                if !observed.hasLiveRevision && observed.value.revision != record.revision {
+                    observation += 1
+                    observed.retainedAt = observation
+                    observed.value = record
+                    observed.payloadBytes = record.payloadBytes
+                }
             } else {
                 if observed.value.revision != record.revision {
                     observation += 1
                     observed.lastLiveObservation = observation
+                    observed.retainedAt = observation
+                    observed.payloadBytes = record.payloadBytes
                 }
                 observed.hasLiveRevision = true
                 observed.value = record
@@ -101,6 +131,12 @@ struct TaskWatchOutput: Identifiable {
                         continue
                     }
                     if name != "tool_result" { nativeCalls[id] = (turn, item) }
+                    if name == "tool_result" {
+                        var row = TaskWatchOutputRow(position: position, turn: turn, item: item)
+                        row.title = "Tool result · \(status.rawValue) (earlier call not loaded)"
+                        put(row)
+                        continue
+                    }
                 }
                 put(TaskWatchOutputRow(position: position, turn: turn, item: item))
             case let .itemUpdated(turn, item, delta):
@@ -137,6 +173,39 @@ struct TaskWatchOutput: Identifiable {
             }
         }
         return result.filter { !$0.title.isEmpty || !$0.text.isEmpty }
+    }
+}
+
+private extension OutputRecord {
+    /// Account for payloads, including invisible evidence and tool inputs. The
+    /// separate record limit bounds per-record container overhead.
+    var payloadBytes: Int {
+        func encodedSize(_ value: some Encodable) -> Int {
+            // Decoded JSON should encode; an unencodable value cannot fit the window.
+            (try? JSONEncoder().encode(value).count) ?? Int(Int32.max)
+        }
+        let eventBytes: Int
+        switch event {
+        case let .itemStarted(turn, item), let .itemCompleted(turn, item):
+            eventBytes = turn.utf8.count + encodedSize(item)
+        case let .itemUpdated(turn, item, delta):
+            switch delta {
+            case let .output(text), let .planText(text):
+                eventBytes = turn.utf8.count + item.utf8.count + text.utf8.count
+            }
+        case let .textDelta(turn, text), let .reasoningDelta(turn, text), let .diffUpdated(turn, text):
+            eventBytes = turn.utf8.count + text.utf8.count
+        case let .turnStarted(turn): eventBytes = turn.utf8.count
+        case let .turnCompleted(turn, status): eventBytes = turn.utf8.count + status.rawValue.utf8.count
+        case let .statusChanged(status): eventBytes = status.utf8.count
+        case let .error(code, message, evidence):
+            eventBytes = code.utf8.count + message.utf8.count + encodedSize(evidence)
+        case let .usageCheckpoint(turn, usage, _):
+            eventBytes = turn.utf8.count + encodedSize(usage)
+        case let .suggestedActions(turn, actions):
+            eventBytes = turn.utf8.count + encodedSize(actions)
+        }
+        return sourceItemId.utf8.count + revision.utf8.count + eventBytes
     }
 }
 

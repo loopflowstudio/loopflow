@@ -239,7 +239,7 @@ struct TaskWatchTests {
             try png.write(to: output)
             if !inWorkspace {
                 let feed = NSHostingView(rootView: TaskWatchOutputView(
-                    store: store, onHistory: {}, onFollow: { store.followLive() }, onReload: {}
+                    store: store, onHistory: { _ in }, onFollow: { store.followLive() }, onReload: {}
                 ).frame(width: 1000, height: 720)
                     .foregroundStyle(LoopflowPalette.light.text)
                     .background(LoopflowPalette.light.background)

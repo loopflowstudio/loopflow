@@ -145,31 +145,35 @@ reviewing this continuation change, implement the output feed in the existing
 Watch view and resolve reader limits as that integration requires. A successful
 CLI read alone is not the product finish line.
 
-Render contiguous output blocks in cross-Run observation order through the
-existing TaskWatchStore and TaskWatchOutput. Keep per-source record/revision
-ownership and native tool correlation in TaskWatchOutput. Retain an ephemeral
-observation position alongside each loaded record; derive blocks from folded
-rows rather than persisting another transcript or changing the read contract.
-New prose after another Run's output must form a new block, even in the same
-provider Turn. Repeated pages must not duplicate output or change the follow
-target. Tool revisions update their existing row; Follow targets that exact row.
+Bound the loaded transcript in each retained TaskWatchStore to 4,096 records
+and 16 MiB of accounted payload across all Runs. Keep one revision map per source;
+remove page payloads from retained source metadata. Evict least recently observed
+records when new pages or revisions exceed either budget, retaining display
+positions for surviving records. Newly loaded historical pages must remain
+inspectable even after the window fills. This is a display window, not deletion
+from the Rust-owned sources or a second transcript.
 
-History is ordered separately before arrivals and labeled as loaded history.
-When history reaches an already loaded live record, keep one current revision
-and place it in its source's historical order. Historical pages never overwrite
-live revisions or count as new arrivals. Cross-Run history order describes reader
-observation, not provider timestamps. Filtering derives from the same source
-labels and must not lose auxiliary Runs. Preserve availability/capture/paging
-evidence even for sources without visible output.
+Show when output has left the window. **Restart history** clears the display only
+after the first historical page succeeds, rewinds only the historical reader,
+and preserves the live continuation so arrivals during browsing are not skipped.
+Filters and plan selection survive. A late tool result whose call is outside the
+window must label missing context; retained calls still correlate normally.
+A record larger than the payload budget cannot remain loaded and the window
+notice must say that oversized records may be omitted. No unbounded tombstone or
+call cache substitutes for the evicted records.
 
-Done when focused Swift tests prove A/B/A arrivals produce three labeled blocks,
-adjacent same-Run prose folds, late history and overlapping revisions do not
-replay output, native tool completions remain correlated, and Follow clears
-filters and targets the most recently changed row across Runs. Render and inspect
-the integrated diagram/feed with alternating Runs. Keep manual updates: bounded
-discovery, initialization, retention, automatic polling, full capture, exact
-checkpoint Session navigation and the configured human demo remain required in
-this Task/PR.
+Done when focused Swift behavior tests cross the actual record and payload
+budgets with concurrent Runs, retain newly loaded history and changed revisions,
+show truthful late-tool context, recover early history without losing later live
+arrivals, and retain last-good output on failed/cancelled restart. Exercise the
+native restart control and inspect a rendered window notice. Existing ordering,
+filtering and correlation proofs must still pass.
+
+This slice bounds retained transcript payload per Task, not total app memory.
+Source/snapshot inventories, the number of navigation-retained Tasks, incoming
+page decoding, Rust discovery/tail initialization and cursor growth remain
+separate bounds. Keep updates manual. Automatic polling, complete capture, exact
+checkpoint Session links and the configured human demo remain in this Task/PR.
 
 ## Remaining slices and full Done When
 
@@ -192,6 +196,25 @@ owned by the pinned lifecycle. No multi-Task dashboard, graph editing, or remote
 transport expansion is in scope.
 
 ## Evidence ledger
+
+- 2026-09-24 bounded transcript window: the existing per-source revision maps
+  now retain at most 4,096 records / 16 MiB of accounted payload per Task across
+  Runs. Source metadata no longer retains a duplicate page payload. Surviving
+  rows keep display positions; retention recency also preserves revised history
+  without counting it as a live arrival. Eviction is visible, including a truthful
+  missing-call label for late native tool results. Restart history clears records
+  only on successful read and leaves the live cursor, filters and plan selection
+  intact. No wire shape, Rust reader or provider authority changed.
+- Fifteen focused feed/output/window tests passed, including actual record and
+  payload budgets, eight Runs, history recovery, changed revisions, cancellation,
+  native correlation, ordering and Follow. The final empty-state wording then
+  passed the one-test window/render proof; Mac compilation/linking passed.
+  Inspected `watch-window-evidence/window.png`; full receipts and limitations
+  are in `watch-window-proof.md`. This is fixture evidence, not configured UI
+  input or provider capture. Source/snapshot inventories, retained Task count,
+  incoming decode cost and Rust discovery/initialization/cursors remain unbounded
+  by this slice. Polling stays manual; full capture, checkpoint Session links and
+  the configured human demo remain required. No publication or settlement.
 
 - 2026-09-24 observation-order slice: output now derives contiguous Run/source
   blocks from each retained record's history/arrival position. A/B/A arrivals

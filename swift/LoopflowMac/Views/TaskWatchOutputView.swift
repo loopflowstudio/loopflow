@@ -4,7 +4,7 @@ import SwiftUI
 
 struct TaskWatchOutputView: View {
     @Bindable var store: TaskWatchStore
-    let onHistory: () -> Void
+    let onHistory: (_ restart: Bool) -> Void
     let onFollow: () -> Void
     let onReload: () -> Void
     @Environment(\.palette) private var palette
@@ -19,7 +19,7 @@ struct TaskWatchOutputView: View {
                 }
                 Spacer()
                 if store.isReadingOutput { ProgressView().controlSize(.small) }
-                Button("Load history", action: onHistory)
+                Button("Load history") { onHistory(false) }
                     .disabled(store.isRefreshing || store.isReadingOutput || store.needsOutputReload)
                 Button("Follow live", systemImage: "arrow.down.to.line", action: onFollow)
                     .disabled(store.isRefreshing || store.isReadingOutput || store.needsOutputReload)
@@ -34,6 +34,15 @@ struct TaskWatchOutputView: View {
             .foregroundStyle(palette.textSecondary)
             .padding(.horizontal, Spacing.md)
             .padding(.bottom, Spacing.sm)
+            if store.outputWindowTrimmed {
+                HStack {
+                    Text("Some output is outside this display window. Records too large for it are omitted. Source history is unchanged.")
+                    Button("Restart history") { onHistory(true) }
+                        .disabled(store.isRefreshing || store.isReadingOutput || store.needsOutputReload)
+                }
+                .font(Typography.caption(11))
+                .padding(Spacing.md)
+            }
             if let error = store.outputError {
                 HStack {
                     Label("\(store.output.isEmpty ? "Output unavailable" : "Output stale"): \(error)", systemImage: "exclamationmark.triangle")
@@ -58,7 +67,7 @@ struct TaskWatchOutputView: View {
                                 .foregroundStyle(palette.textSecondary)
                         }
                         if !store.visibleOutput.isEmpty && store.outputGroups.isEmpty {
-                            Text("No output in the pages read. Expand Sources for availability, or Load history.")
+                            Text("No output is loaded in this window. Expand Sources for availability, or Load history.")
                                 .font(Typography.body(12))
                                 .foregroundStyle(palette.textSecondary)
                         }
@@ -149,7 +158,7 @@ struct TaskWatchOutputView: View {
             if !output.source.available {
                 Label("Output source unavailable", systemImage: "exclamationmark.triangle")
             } else if output.rows.isEmpty {
-                Text("No new output in the pages read. Load history to inspect earlier output.")
+                Text("No output is loaded for this source. Load history to inspect available output.")
             }
             if output.historyHasMore { Text("More history remains for this Run.") }
             if output.liveHasMore { Text("More arriving output remains; Refresh continues reading.") }

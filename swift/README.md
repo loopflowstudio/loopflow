@@ -135,6 +135,12 @@ filters and follows the most recently changed row; scrolling pauses following.
 Expand **Sources** for availability, capture warnings and unread-page details.
 Updates are currently manual while automatic polling is in development.
 
+The display keeps a limited window of output across Runs. A notice appears when
+older output leaves the window or a record is too large to display. **Restart
+history** rereads from the beginning while preserving the live continuation;
+**Load history** continues forward through it. Source history is unchanged.
+Tool results label missing context when their earlier call is no longer loaded.
+
 Failed reads retain the last evidence with a stale notice; unavailable sources
 and capture gaps stay visible. **Reload output** restarts both readers after a
 source replacement. Hiding Watch cancels its query and preserves loaded output

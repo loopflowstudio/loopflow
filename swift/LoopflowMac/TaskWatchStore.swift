@@ -23,6 +23,7 @@ final class TaskWatchStore {
     private(set) var outputError: String?
     private(set) var needsOutputReload = false
     private(set) var outputRevision = 0
+    private(set) var outputWindowTrimmed = false
     private var outputObservation = 0
     private var liveCursor: String?
     private var historyCursor: String?
@@ -101,7 +102,8 @@ final class TaskWatchStore {
     }
 
     /// Both continuations belong to this retained presentation, never to a provider.
-    func readOutput(issue: String, query: RegistryQuery, history: Bool = false, reload: Bool = false) async {
+    func readOutput(issue: String, query: RegistryQuery, history: Bool = false, reload: Bool = false,
+                    restartHistory: Bool = false) async {
         let request = UUID()
         outputRequest = request
         defer { if outputRequest == request { outputRequest = nil } }
@@ -110,6 +112,7 @@ final class TaskWatchStore {
             historyCursor = nil
             output = []
             outputObservation = 0
+            outputWindowTrimmed = false
             historyGaps = []
             liveGaps = []
             needsOutputReload = false
@@ -117,18 +120,18 @@ final class TaskWatchStore {
         guard !needsOutputReload else { return }
         do {
             // Seed first: output arriving during historical paging must remain readable.
-            if liveCursor == nil || !history {
+            if liveCursor == nil || (!history && !restartHistory) {
                 let page = try await query.taskOutput(issue: issue, cursor: liveCursor, tail: liveCursor == nil, cwd: nil)
                 try Task.checkCancellation()
                 guard outputRequest == request else { return }
                 guard accept(page, history: false) else { return }
                 liveCursor = page.nextCursor
             }
-            if historyCursor == nil || history {
-                let page = try await query.taskOutput(issue: issue, cursor: historyCursor, cwd: nil)
+            if historyCursor == nil || history || restartHistory {
+                let page = try await query.taskOutput(issue: issue, cursor: restartHistory ? nil : historyCursor, cwd: nil)
                 try Task.checkCancellation()
                 guard outputRequest == request else { return }
-                guard accept(page, history: true) else { return }
+                guard accept(page, history: true, restartHistory: restartHistory) else { return }
                 historyCursor = page.nextCursor
             }
             outputError = nil
@@ -139,11 +142,16 @@ final class TaskWatchStore {
         }
     }
 
-    private func accept(_ page: TaskOutputPage, history: Bool) -> Bool {
+    private func accept(_ page: TaskOutputPage, history: Bool, restartHistory: Bool = false) -> Bool {
         if page.sources.contains(where: \.reset) {
             needsOutputReload = true
             outputError = "An output source changed. Reload output to read the new source; the previous output is retained below."
             return false
+        }
+        if restartHistory {
+            for index in output.indices { output[index].restartHistory() }
+            outputObservation = 0
+            outputWindowTrimmed = false
         }
         if history {
             historyGaps = page.gaps
@@ -161,8 +169,36 @@ final class TaskWatchStore {
                 output.append(group)
             }
         }
+        trimOutputWindow()
         outputRevision += 1
         return true
+    }
+
+    private func trimOutputWindow() {
+        let maximumRecords = 4_096
+        let maximumBytes = 16 * 1_024 * 1_024
+        let records = output.indices.flatMap { index in
+            output[index].retainedRecords.map { (source: index, id: $0.id, observation: $0.observation, bytes: $0.bytes) }
+        }.sorted { $0.observation < $1.observation }
+        var removals: [Int: Set<String>] = [:]
+        // An oversized new record must not evict every smaller readable record.
+        let fitting = records.filter { record in
+            if record.bytes > maximumBytes {
+                removals[record.source, default: []].insert(record.id)
+                return false
+            }
+            return true
+        }
+        var count = fitting.count
+        var bytes = fitting.reduce(0) { $0 + $1.bytes }
+        for record in fitting {
+            guard count > maximumRecords || bytes > maximumBytes else { break }
+            removals[record.source, default: []].insert(record.id)
+            count -= 1
+            bytes -= record.bytes
+        }
+        for (index, ids) in removals { output[index].removeRecords(ids) }
+        if !removals.isEmpty { outputWindowTrimmed = true }
     }
 
     func refresh(issue: String, query: RegistryQuery) async {

@@ -9,14 +9,16 @@ struct TaskWatchView: View {
     @Environment(\.palette) private var palette
     @State private var refresh = 0
     @State private var loadHistory = false
+    @State private var restartHistory = false
     @State private var reloadOutput = false
 
     var body: some View {
         VSplitView {
             plan.frame(minHeight: 360, idealHeight: 440)
-            TaskWatchOutputView(store: store, onHistory: {
+            TaskWatchOutputView(store: store, onHistory: { restart in
                 store.followsOutput = false
                 loadHistory = true
+                restartHistory = restart
                 refresh += 1
             }, onFollow: {
                 store.followLive()
@@ -31,12 +33,15 @@ struct TaskWatchView: View {
         .background(palette.background)
         .task(id: refresh) {
             let history = loadHistory
+            let restart = restartHistory
             let reload = reloadOutput
             loadHistory = false
+            restartHistory = false
             reloadOutput = false
             await store.refresh(issue: issue, query: RegistryQueryLocal.shared)
             guard !Task.isCancelled else { return }
-            await store.readOutput(issue: issue, query: RegistryQueryLocal.shared, history: history, reload: reload)
+            await store.readOutput(issue: issue, query: RegistryQueryLocal.shared, history: history, reload: reload,
+                                   restartHistory: restart)
         }
     }
 

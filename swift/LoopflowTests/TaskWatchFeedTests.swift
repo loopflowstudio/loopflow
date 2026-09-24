@@ -1,6 +1,7 @@
 #if os(macOS)
 import Foundation
 import Testing
+import ViewInspector
 @testable import Loopflow
 @testable import LoopflowMac
 
@@ -134,8 +135,8 @@ struct TaskWatchFeedTests {
         #expect(output.rows.contains { $0.text.contains("echo ok") && $0.text.contains("/tmp") })
     }
 
-    @Test("Hiding output cancels its read without accepting a late page")
-    func cancelledReadRetainsEvidence() async throws {
+    @Test("Hiding output cancels its read without accepting a late page", arguments: [false, true])
+    func cancelledReadRetainsEvidence(restartHistory: Bool) async throws {
         let store = TaskWatchStore()
         let data = try page("cursor", sources: [source("run-first", records: [message("a", "Retained")])])
         await store.readOutput(issue: "LOO-293", query: RegistryQuery { _, _ in data })
@@ -146,7 +147,7 @@ struct TaskWatchFeedTests {
             var iterator = response.stream.makeAsyncIterator()
             return await iterator.next() ?? ""
         }
-        let request = Task { await store.readOutput(issue: "LOO-293", query: slow) }
+        let request = Task { await store.readOutput(issue: "LOO-293", query: slow, restartHistory: restartHistory) }
         var starts = started.stream.makeAsyncIterator()
         await starts.next()
         request.cancel()
@@ -253,6 +254,85 @@ struct TaskWatchFeedTests {
         #expect(store.latestOutputRow?.row.item == "tool")
         await store.readOutput(issue: "LOO-293", query: query)
         #expect(store.latestOutputRow?.row.item == "tool")
+    }
+
+    @Test("The display window spans Runs and keeps newly read history and changed revisions")
+    func boundedRecordWindow() async throws {
+        let store = TaskWatchStore()
+        func batch(_ number: Int) -> [[String: Any]] {
+            (0..<8).map { run in
+                source("run-\(run)", records: (0..<128).map { offset in
+                    let id = number * 128 + offset
+                    return message("\(id)", "Run \(run), record \(id)")
+                })
+            }
+        }
+        var responses = ["tail": try page("live-1", sources: []),
+                         "start": try page("history-1", sources: batch(0))]
+        for number in 1...4 {
+            responses["live-\(number)"] = try page("live-\(number + 1)", sources: batch(number))
+        }
+        responses["live-5"] = try page("live-6", sources: [source("run-0", records: [
+            message("128", "Revised oldest retained record", revision: "2")
+        ])])
+        responses["history-1"] = try page("history-2", sources: batch(5))
+        let query = reader(responses)
+        for _ in 0..<5 { await store.readOutput(issue: "LOO-293", query: query) }
+        #expect(store.output.flatMap(\.rows).count == 4_096)
+        #expect(store.output.allSatisfy { $0.rows.first?.id.item == "128" })
+        #expect(store.outputWindowTrimmed)
+        await store.readOutput(issue: "LOO-293", query: query)
+        await store.readOutput(issue: "LOO-293", query: query, history: true)
+        let rows = store.output.flatMap(\.rows)
+        #expect(rows.count == 4_096)
+        #expect(rows.contains { $0.text == "Revised oldest retained record" })
+        #expect(rows.filter { $0.position.history }.count == 1_024)
+        #expect(rows.contains { $0.text == "Run 7, record 767" })
+        #expect(store.latestOutputRow?.row.item == "128")
+        #expect(store.output.allSatisfy { $0.source.records.isEmpty })
+    }
+
+    @Test("Restart history recovers unloaded output without moving the live continuation")
+    func restartHistoryWindow() async throws {
+        let store = TaskWatchStore()
+        let query = reader([
+            "tail": try page("live-1", sources: []),
+            "start": try page("history-1", sources: [source("run", records: [message("early", "Early history")])]),
+            "history-1": try page("history-2", sources: [source("run", records:
+                (0..<4_096).map { message("old-\($0)", "History \($0)") })]),
+            "history-2": try page("history-3", sources: [source("run", records: [
+                message("old-0", "Corrected history", revision: "2"), message("extra", "More history")
+            ])]),
+            "live-1": try page("live-2", sources: [source("run", records: [message("arrival", "Arrived while browsing")])])
+        ])
+        await store.readOutput(issue: "LOO-293", query: query)
+        await store.readOutput(issue: "LOO-293", query: query, history: true)
+        #expect(!store.output.flatMap(\.rows).contains { $0.text == "Early history" })
+        await store.readOutput(issue: "LOO-293", query: query, history: true)
+        #expect(store.output.first?.rows.first?.text == "Corrected history")
+        #expect(!store.output.flatMap(\.rows).contains { $0.text == "History 1" })
+        store.inspectRun("run")
+        store.invocationId = "selected-invocation"
+        var restart = false
+        let view = TaskWatchOutputView(store: store, onHistory: { restart = $0 }, onFollow: {}, onReload: {})
+        try view.inspect().find(button: "Restart history").tap()
+        #expect(restart)
+        await store.readOutput(issue: "LOO-293", query: RegistryQuery { _, _ in throw RegistryQueryError("offline") }, restartHistory: restart)
+        #expect(store.output.flatMap(\.rows).count == 4_096)
+        #expect(store.outputWindowTrimmed)
+        #expect(store.outputError == "offline")
+        await store.readOutput(issue: "LOO-293", query: RegistryQuery { _, _ in throw CancellationError() }, restartHistory: restart)
+        #expect(store.output.flatMap(\.rows).count == 4_096)
+        await store.readOutput(issue: "LOO-293", query: query, restartHistory: restart)
+        #expect(store.output.flatMap(\.rows).map(\.text) == ["Early history"])
+        #expect(!store.outputWindowTrimmed)
+        #expect(store.runId == "run")
+        #expect(store.invocationId == "selected-invocation")
+        #expect(!store.followsOutput)
+        #expect(store.outputError == nil)
+        store.followLive()
+        await store.readOutput(issue: "LOO-293", query: query)
+        #expect(store.output.flatMap(\.rows).map(\.text) == ["Early history", "Arrived while browsing"])
     }
 
     private func reader(_ responses: [String: String]) -> RegistryQuery {

@@ -133,18 +133,33 @@ shared Task identities where available. No dependency on its landing.
 
 ## This slice
 
-Close the narrow provenance/capture-contract checkpoint requested by the human:
-retain immutable invocation plans and exact stage/iteration/Run bindings,
-transitions, readiness/failure, and settlement in the owning transactions.
-Prove repeated skills, retries, human Iterate, restart, completion, rollback,
-and parent-observation exclusion with focused Rust tests. Keep the native
-passive-read contract above and provider-specific proof gaps explicit.
+Implement the shared Watch snapshot over the committed provenance foundation.
+`lf task watch ISSUE --json` and `RegistryQuery.taskWatch` expose persisted
+invocations, expanded stage labels/ancestry, separate attempts, recorded
+transitions/settlement, the active stage, and every attributed Run. Rust folds
+history; Swift only decodes it. Read the active position and ledger in one SQLite
+read transaction. Missing plan or Run receipts remain explicit gaps. Never load
+current YAML or require a worktree, worker, or provider client.
 
-The existing output-query, native-reader implementation, and Swift output-model
-work are preserved as later-slice working-tree evidence, outside this checkpoint.
-Do not extend those paths, build Watch, run the configured demo, publish, or
-complete the Task in this pass. Full-design requirements below remain unchanged.
-See `narrow-checkpoint.md` for the checkpoint boundary and validation receipts.
+Each stage owns attempts (iteration, optional Run identity, descriptive state,
+ready summary, failure); transitions retain exact from/to stages and reasons.
+A retry preserves its blocked attempt and starts a new attempt when a new Run
+binds. Settlement never marks an interrupted/replaced attempt completed. Run
+labels remain manifest provider labels, with missing manifests explicitly unknown.
+Output availability and capture gaps remain owned by TaskOutputPage, avoiding a
+second source-health interpretation in the diagram snapshot.
+
+This first snapshot reads retained history and immutable manifests completely;
+it does not claim bounded discovery or history paging. Those remain required
+before the one-second Watch poll. No paging cursor is fabricated for an unpaged
+read. Snapshot tests prove repeated skills, human Iterate/retry, completion,
+replacement, missing evidence, and concurrent auxiliary Run attribution. A shared
+Rust/Swift fixture pins the exact shape. A passive configured CLI read from outside
+the worktree proves the real read path without changing Task/provider state.
+
+The narrow checkpoint is complete; its former stop boundary applied to that pass.
+The full Watch UI, capture proof, independent output history/live continuation,
+and configured human demo remain in the same PR's subsequent slices.
 
 ## Remaining slices and full Done When
 

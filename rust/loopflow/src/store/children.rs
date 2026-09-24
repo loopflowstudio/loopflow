@@ -506,6 +506,14 @@ impl Store {
         Ok(())
     }
 
+    pub(crate) async fn task_flow_history(
+        &self,
+        task_id: &TaskId,
+    ) -> StoreResult<(Option<FlowPosition>, Vec<TaskEvent>)> {
+        let task_id = task_id.clone();
+        run_sqlite(&self.sqlite, move |store| store.task_flow_history(&task_id)).await
+    }
+
     pub async fn task_events_after(
         &self,
         task_id: &TaskId,

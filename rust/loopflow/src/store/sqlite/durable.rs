@@ -150,6 +150,18 @@ impl SqliteStore {
         flow_position_in(&conn, task_id)
     }
 
+    pub(crate) fn task_flow_history(
+        &self,
+        task_id: &TaskId,
+    ) -> StoreResult<(Option<FlowPosition>, Vec<crate::work::task::TaskEvent>)> {
+        let mut conn = self.conn.lock().expect("store mutex poisoned");
+        let tx = conn.transaction()?;
+        let position = flow_position_in(&tx, task_id)?;
+        let events = super::children::task_events_after_in(&tx, task_id, 0)?;
+        tx.commit()?;
+        Ok((position, events))
+    }
+
     pub fn claim_task_worker(
         &self,
         task_id: &TaskId,

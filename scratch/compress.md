@@ -1,8 +1,15 @@
 # Compression review — 2026-09-23
 
-Current pass: continuation repairs. No executable changes. The earlier grouping
-reduction remains in place; this pass found no further coherent reduction to take
-without changing behavior or designing the unfinished history/live API.
+Current pass: model/API review of committed head `cc2dff810`, including the narrow
+provenance checkpoint and preserved continuation repairs. No executable changes.
+The earlier grouping reduction remains in place; this pass found no further
+coherent reduction without changing behavior or designing the unfinished
+history/live API.
+
+The checkout was clean at entry. Concurrent edits appeared during inspection in
+`ops/mod.rs`, `store/children.rs`, `store/sqlite/durable.rs`, and the Task design.
+Those edits remain untouched and uncommitted by this pass. This assessment covers
+the committed model, not the concurrent implementation or its revised design.
 
 ## Effective model, before and after
 
@@ -32,10 +39,23 @@ Compared TaskOutput.swift field-by-field with Rust and task_output.json. Read
 RegistryQuery.taskOutput, RegistryQueryLocal, both fixture tests, the large-cursor
 cleanup test, the CLI transport test, and the three focused OpenCode tests.
 Watch snapshot, filtering store, and UI remain unimplemented; none was treated as
-an existing caller to justify a reduction.
+an existing caller in the reviewed head to justify a reduction. Searched Rust,
+Swift, fixtures, and user docs for TaskOutputRecord and the surviving output
+types: the removed wrapper has no active declaration or caller. Compared the
+ConversationEvent/ItemDelta variants with their Swift decoders; their payloads
+are reused by output rather than translated through a second event model.
 
 ## Suspected reductions left intentionally
 
+- **FlowPosition versus TaskFlowEvent:** the position authorizes current work;
+  events retain plans, attempts, and settlement after that position is deleted.
+  Replacing history with the active cursor loses completed/restarted invocations.
+  StageEntered and Transition also differ: initial entry has no prior stage,
+  while a retry can retain the same stage coordinates and bind a distinct Run.
+- **TaskOutputPage envelope:** Task identity and continuation belong to the whole
+  round-robin read across sources. Returning a bare source list would lose those
+  facts or repeat them on each source. OutputRecord identity is likewise separate
+  from nested conversation item identity: journal deltas need no nested item.
 - **Watermark, ceiling, and after:** the old inclusive boundary, fixed sweep upper
   boundary, and page position differ while paging. The interleaving regression
   requires both timestamp boundaries; substituting the latest row timestamp loses
@@ -75,7 +95,9 @@ an existing caller to justify a reduction.
 
 ## Verification and remaining work
 
-No tests or lint rerun: this pass changes only this report. Prior implementation
+No tests or lint rerun: this pass changes only this report. Source inspection and
+cross-language contract comparison are review evidence, not fresh execution
+proof. Prior implementation
 receipts remain three OpenCode tests, one CLI cursor test, one Task discovery test,
 one Swift transport/cleanup test, formatting and full-target Clippy. The configured
 file/stdin proof returned 469 distinct revisions and accepted a 2,186,420-byte

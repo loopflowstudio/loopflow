@@ -1,5 +1,12 @@
 # Unified navigation slice review — 2026-09-23
 
+Latest review: [Wave-only integration](review-wave-integration.md), 2026-09-24.
+Fixed delayed chapter history replacing newer navigation and stale selected
+Task evidence during transfer. Nineteen focused tests pass, including the mounted
+Monitor/Session/companion proof. Measurement, bounded discovery and configured
+acceptance remain open; publication is pending. Older reviews below retain their
+historical scope.
+
 Latest direction and bounded correction: [Wave reconciliation](review-wave-reconciliation.md).
 Public hierarchy is now repo → Wave → Task → Session, consuming the sibling's
 flat shared contract. Fixed another Task's focused Session overwriting the selected

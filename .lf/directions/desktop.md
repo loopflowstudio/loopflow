@@ -5,6 +5,9 @@
   Read the shared chapter summary, direct Tasks and unavailable Task evidence.
   Historical Project-bound Sessions use shared Wave ancestry. Retained Task
   evidence during chapter transfer belongs to repository/window navigation.
+  Refresh that retained evidence when planning changes; selection-time data can
+  be stale by the next transfer. Cancel historical-reference lookups when the
+  human navigates elsewhere so late results cannot replace the chosen workspace.
   Task runtime exposes its current parent once through `project_id`; chapter
   transfer changes that parent, not a separate successor-routing identity.
 

@@ -69,6 +69,38 @@ Report-only mode reconstructs evidence after interruption without another UI run
 
 ## Receipts
 
-Pending full sample collection. Earlier short-run development evidence lives under
-`/tmp/loo291-desktop-perf-*`; the final command and source-stable result will be
-recorded here after verification.
+`uv run python scripts/desktop_performance.py run --output
+/tmp/loo291-desktop-performance-integrated` exits zero. **462/462 observations
+pass**, comprising 11 scenarios × 2 populations × 21 attempts. Source fingerprints
+before/after match. The one first interaction is not pooled with the twenty warm
+samples. No production change was made to improve these values.
+
+The measured source still matches at receipt creation.
+
+| Scenario | Small warm p50 / p95 ms | Large warm p50 / p95 ms |
+|---|---:|---:|
+| Full hierarchy | 261.4 / 322.3 | 261.6 / 377.9 |
+| Flat Sessions | 265.0 / 325.4 | 282.7 / 416.1 |
+| Active Monitor | 269.8 / 868.2 | 363.4 / 859.8 |
+| Retained Session return | 298.8 / 352.3 | 326.4 / 495.6 |
+| Combined pane restore | 287.7 / 361.1 | 303.5 / 419.8 |
+
+These are captured/verified-content and input durations including observer costs,
+not compositor paint budgets or a diagnosis of the Monitor tail. The baseline
+precedes optimization. An earlier 462/462 pass preceded the concurrent Podium/DTO
+correction; it remains tied to its own source. Comparison with that earlier run
+correctly reports **unavailable: different measurement source**, because the shared
+fixture contract changed. No optimized after-build or improvement is claimed.
+
+Full per-attempt records, host/build/source identity, native log and reports are
+retained in [the ignored evidence directory](../.lf/tmp/desktop-performance/integrated-baseline/).
+The [curated receipt](desktop-performance-receipt.json) pins their hashes and all
+warm results. Earlier development attempts remain under `/tmp/loo291-desktop-perf-*`;
+none contributes to this final distribution.
+
+`uv run pytest -q python/tests/test_desktop_performance.py` passes three focused
+report tests: interrupted/unstarted journeys, first/warm percentile eligibility,
+and comparison refusal across source drift or differing endpoints. Ruff and
+`git diff --check` pass. The native command compiled the measured Swift source;
+no broad gate, fallback build, configured provider interaction, publication or
+Task completion occurred.

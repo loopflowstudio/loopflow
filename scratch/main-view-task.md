@@ -218,6 +218,19 @@ No separate authorities for Work/Sessions inventories, oversized parent cards, c
 - 2026-09-23: the human requested advancing the Task, then clarified that the pre-identified Task should receive this design. Reuse LOO-291 rather than create a duplicate. Earlier queue timing does not block this explicit advance; external-work proof remains unselected and must not be fabricated.
 - Open: per-subject Session lifecycle, checkout choice/taskification, first-open presentation, repository breadth, external proving workflow, and the directive-editing follow-up.
 
+## Slice ledger — native capture/input measurements, 2026-09-24
+
+[Desktop measurement runner](desktop-performance.md) adds one opt-in native
+command for the current outline and existing Task multiplexer. Fixed 8/256-Task
+populations retain three real PTYs while exercising eleven scenarios. The final
+source-stable baseline records 462/462 passing observations; three report tests
+cover incomplete attempts, percentile eligibility and comparison boundaries.
+Per-attempt capture/verification costs, failures and source drift remain explicit.
+The capture/input endpoint is not compositor presentation; frame hitches,
+scroll/refresh, production phases, configured costs and measured budgets remain
+open. Five-column empty-state clipping remains a recorded composition limitation.
+No optimization, provider interaction, publication or Task completion is claimed.
+
 ## Slice ledger — Wave-only integration, 2026-09-24
 
 [Wave integration](wave-integration.md) brings committed chapter binding/direct-Task

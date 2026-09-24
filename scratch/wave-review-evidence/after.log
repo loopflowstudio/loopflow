@@ -1,0 +1,88 @@
+[0/1] Planning build
+Building for debugging...
+[0/5] Write sources
+[1/5] Write swift-version--58304C5D6DBC2206.txt
+[3/7] Compiling LoopflowMac PodiumModel.swift
+[4/7] Emitting module LoopflowMac
+[5/18] Compiling LoopflowMac WorkSurfaceView.swift
+[6/18] Compiling LoopflowMac WorkspaceNavigator.swift
+[7/18] Compiling LoopflowMac TaskMonitorView.swift
+[8/18] Compiling LoopflowMac WavesView.swift
+[9/18] Compiling LoopflowMac WorkActivityView.swift
+[10/18] Compiling LoopflowMac PodiumView.swift
+[11/18] Compiling LoopflowMac RoadmapView.swift
+[12/18] Compiling LoopflowMac SessionsView.swift
+[13/18] Compiling LoopflowMac ConversationLaunch.swift
+[14/18] Compiling LoopflowMac LoopflowApp.swift
+[15/18] Compiling LoopflowMac PodiumFixture.swift
+[15/20] Write Objects.LinkFileList
+[16/20] Linking LoopflowMac
+[17/20] Applying LoopflowMac
+[19/27] Emitting module LoopflowTests
+[20/27] Compiling LoopflowTests TaskMonitorTests.swift
+[21/27] Compiling LoopflowTests WorkspaceNavigationProofTests.swift
+[22/27] Compiling LoopflowTests TaskDirectiveEditorTests.swift
+[23/27] Compiling LoopflowTests TaskMonitorProofTests.swift
+[24/27] Compiling LoopflowTests DesktopPerformanceTests.swift
+[25/27] Compiling LoopflowTests PodiumModelTests.swift
+[26/28] Compiling LoopflowTests WorkspaceNavigationTests.swift
+[26/28] Write Objects.LinkFileList
+[27/28] Linking LoopflowSwiftPackageTests
+Build complete! (12.77s)
+Test Suite 'Selected tests' started at 2026-09-24 15:19:04.019.
+Test Suite 'LoopflowSwiftPackageTests.xctest' started at 2026-09-24 15:19:04.020.
+Test Suite 'LoopflowSwiftPackageTests.xctest' passed at 2026-09-24 15:19:04.020.
+	 Executed 0 tests, with 0 failures (0 unexpected) in 0.000 (0.000) seconds
+Test Suite 'Selected tests' passed at 2026-09-24 15:19:04.020.
+	 Executed 0 tests, with 0 failures (0 unexpected) in 0.000 (0.001) seconds
+◇ Test run started.
+↳ Testing Library Version: 1501
+↳ Target Platform: arm64e-apple-macos14.0
+◇ Suite "Podium model" started.
+◇ Test "Repository scope filters one shared snapshot and clears outside selection" started.
+✔ Test "Repository scope filters one shared snapshot and clears outside selection" passed after 0.090 seconds.
+◇ Test "Registry Wave paths cannot create repository choices" started.
+✔ Test "Registry Wave paths cannot create repository choices" passed after 0.001 seconds.
+◇ Test "Stable Work selection resolves against the latest snapshot" started.
+✔ Test "Stable Work selection resolves against the latest snapshot" passed after 0.001 seconds.
+◇ Test "Current chapter source references navigate directly to the Wave" started.
+✔ Test "Current chapter source references navigate directly to the Wave" passed after 0.001 seconds.
+◇ Test "Selected Task survives a chapter transfer with temporarily absent membership" started.
+✔ Test "Selected Task survives a chapter transfer with temporarily absent membership" passed after 0.001 seconds.
+◇ Test "A delayed historical reference cannot replace newer navigation" started.
+◇ Test case passing 1 argument destination → "history" to "A delayed historical reference cannot replace newer navigation" started.
+◇ Test case passing 1 argument destination → "task" to "A delayed historical reference cannot replace newer navigation" started.
+◇ Test case passing 1 argument destination → "repo" to "A delayed historical reference cannot replace newer navigation" started.
+✔ Test "A delayed historical reference cannot replace newer navigation" with 3 test cases passed after 0.002 seconds.
+◇ Test "Refresh failure preserves last-good evidence and exposes the reason" started.
+✔ Test "Refresh failure preserves last-good evidence and exposes the reason" passed after 0.001 seconds.
+◇ Test "A slow process read does not hold back fleet, Sessions, or roadmap" started.
+✔ Test "A slow process read does not hold back fleet, Sessions, or roadmap" passed after 0.001 seconds.
+◇ Test "Live refresh changes only process evidence and preserves its last good frame" started.
+✔ Test "Live refresh changes only process evidence and preserves its last good frame" passed after 0.001 seconds.
+◇ Test "Live process refreshes never overlap" started.
+✔ Test "Live process refreshes never overlap" passed after 0.001 seconds.
+◇ Test "Authored Waves remain visible without active Runs" started.
+✔ Test "Authored Waves remain visible without active Runs" passed after 1.133 seconds.
+◇ Test "A development worktree becomes one main-repository choice" started.
+✔ Test "A development worktree becomes one main-repository choice" passed after 2.647 seconds.
+◇ Test "Work selection becomes one server-side Activity filter" started.
+✔ Test "Work selection becomes one server-side Activity filter" passed after 0.003 seconds.
+◇ Test "A late Activity query cannot replace evidence for a newer selection" started.
+✔ Test "A late Activity query cannot replace evidence for a newer selection" passed after 0.002 seconds.
+◇ Test "Session refresh reads Task FlowSteps" started.
+✔ Test "Session refresh reads Task FlowSteps" passed after 0.001 seconds.
+◇ Test "Changing repository clears cached Sessions" started.
+✔ Test "Changing repository clears cached Sessions" passed after 0.100 seconds.
+◇ Test "A late Session refresh cannot cross repository scope" started.
+✔ Test "A late Session refresh cannot cross repository scope" passed after 0.001 seconds.
+✔ Suite "Podium model" passed after 3.989 seconds.
+◇ Suite "Podium process signal" started.
+◇ Test "Exact provider process state drives the signal" started.
+✔ Test "Exact provider process state drives the signal" passed after 0.001 seconds.
+✔ Suite "Podium process signal" passed after 0.001 seconds.
+◇ Suite "Task Monitor integration proof" started.
+◇ Test "Chapter transfer preserves Monitor attribution, Session draft and companion in the same split tree" started.
+✔ Test "Chapter transfer preserves Monitor attribution, Session draft and companion in the same split tree" passed after 1.406 seconds.
+✔ Suite "Task Monitor integration proof" passed after 1.406 seconds.
+✔ Test run with 19 tests in 3 suites passed after 5.397 seconds.

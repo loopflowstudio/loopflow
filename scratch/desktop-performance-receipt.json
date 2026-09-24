@@ -1,0 +1,279 @@
+{
+  "date": "2026-09-24",
+  "endpoint": "native_capture_ocr_and_pty_reply",
+  "attempts": 462,
+  "outcomes": {
+    "passed": 462
+  },
+  "source_stable_during_run": true,
+  "delivery_source_matches": true,
+  "source_sha256": "2651ca54e2a50d41724c4acf17b7b7bc92e9bf91ea4f4d9d922abfc9cbc9d894",
+  "source_files": {
+    "scripts/desktop_performance.py": "7680075f27f5761f8b6993d882732ab14d4f354a86a8a09dc8dc3c7bc53dc6d4",
+    "python/tests/test_desktop_performance.py": "85548d13287bab36047dfb0acbd4227fa3244f04ef0a9ddc065f67542cb60f4e",
+    "swift/LoopflowTests/DesktopPerformanceTests.swift": "dbb071226dc9a63a95de3fcfb64acf8f89b380641abe1ea22a803c8be6a67d7e"
+  },
+  "command": "uv run python scripts/desktop_performance.py run --output /tmp/loo291-desktop-performance-integrated",
+  "evidence_directory": "/Users/jack/src/loopflow.main-view-task/.lf/tmp/desktop-performance/integrated-baseline",
+  "artifacts": {
+    "report.json": "3340a9d583ec793a25177798f1d5c60c46bed8cc197de07687c06089df59fe4f",
+    "report.md": "6c9d2ed470c35c2f225427d99a18c62cbdadfe2689fb3d7bf66482d24f404d7d",
+    "native.log": "d0d7300579436ea3b5e781e93cd5097bd337f2000060e91b4b5e999e4c58fc9d",
+    "run.json": "2bb5238bed0914ac4d551ea06d3f91d5e6645f9309903bfa21a1a50888bdf0d2",
+    "attempts.jsonl": "902db35f9676b179ac27042d7926e8eba4cad032fffbfbac5c7d5997135d1b93"
+  },
+  "limits": [
+    "Compositor presentation and frame hitches are not measured.",
+    "Fixture transport excludes CLI, retained-registry discovery and provider readiness.",
+    "Actions use SwiftUI controls; OS event delivery latency is excluded.",
+    "Forced bitmap capture and OCR are intrusive observer costs, recorded separately."
+  ],
+  "comparison": {
+    "available": false,
+    "reason": "Different measurement_source"
+  },
+  "warm_results": [
+    {
+      "metric": "hierarchy_interaction_ms",
+      "scenario": "compact",
+      "population": "large",
+      "state": "warm",
+      "attempted": 20,
+      "passed": 20,
+      "failure_rate": 0.0,
+      "p50_ms": 263.51054150000004,
+      "p95_ms": 370.763334
+    },
+    {
+      "metric": "hierarchy_interaction_ms",
+      "scenario": "compact",
+      "population": "small",
+      "state": "warm",
+      "attempted": 20,
+      "passed": 20,
+      "failure_rate": 0.0,
+      "p50_ms": 269.730479,
+      "p95_ms": 333.545667
+    },
+    {
+      "metric": "hierarchy_interaction_ms",
+      "scenario": "expand",
+      "population": "large",
+      "state": "warm",
+      "attempted": 20,
+      "passed": 20,
+      "failure_rate": 0.0,
+      "p50_ms": 263.21577049999996,
+      "p95_ms": 371.991667
+    },
+    {
+      "metric": "hierarchy_interaction_ms",
+      "scenario": "expand",
+      "population": "small",
+      "state": "warm",
+      "attempted": 20,
+      "passed": 20,
+      "failure_rate": 0.0,
+      "p50_ms": 274.6952295,
+      "p95_ms": 327.622792
+    },
+    {
+      "metric": "hierarchy_interaction_ms",
+      "scenario": "filter",
+      "population": "large",
+      "state": "warm",
+      "attempted": 20,
+      "passed": 20,
+      "failure_rate": 0.0,
+      "p50_ms": 254.8352085,
+      "p95_ms": 357.009833
+    },
+    {
+      "metric": "hierarchy_interaction_ms",
+      "scenario": "filter",
+      "population": "small",
+      "state": "warm",
+      "attempted": 20,
+      "passed": 20,
+      "failure_rate": 0.0,
+      "p50_ms": 259.108104,
+      "p95_ms": 315.564292
+    },
+    {
+      "metric": "hierarchy_interaction_ms",
+      "scenario": "fold",
+      "population": "large",
+      "state": "warm",
+      "attempted": 20,
+      "passed": 20,
+      "failure_rate": 0.0,
+      "p50_ms": 255.17616650000002,
+      "p95_ms": 356.562875
+    },
+    {
+      "metric": "hierarchy_interaction_ms",
+      "scenario": "fold",
+      "population": "small",
+      "state": "warm",
+      "attempted": 20,
+      "passed": 20,
+      "failure_rate": 0.0,
+      "p50_ms": 265.30179150000004,
+      "p95_ms": 306.526292
+    },
+    {
+      "metric": "hierarchy_interaction_ms",
+      "scenario": "full",
+      "population": "large",
+      "state": "warm",
+      "attempted": 20,
+      "passed": 20,
+      "failure_rate": 0.0,
+      "p50_ms": 261.569292,
+      "p95_ms": 377.916916
+    },
+    {
+      "metric": "hierarchy_interaction_ms",
+      "scenario": "full",
+      "population": "small",
+      "state": "warm",
+      "attempted": 20,
+      "passed": 20,
+      "failure_rate": 0.0,
+      "p50_ms": 261.395062,
+      "p95_ms": 322.305083
+    },
+    {
+      "metric": "hierarchy_interaction_ms",
+      "scenario": "sessions",
+      "population": "large",
+      "state": "warm",
+      "attempted": 20,
+      "passed": 20,
+      "failure_rate": 0.0,
+      "p50_ms": 282.70827099999997,
+      "p95_ms": 416.121875
+    },
+    {
+      "metric": "hierarchy_interaction_ms",
+      "scenario": "sessions",
+      "population": "small",
+      "state": "warm",
+      "attempted": 20,
+      "passed": 20,
+      "failure_rate": 0.0,
+      "p50_ms": 265.043417,
+      "p95_ms": 325.406833
+    },
+    {
+      "metric": "task_workspace_ready_ms",
+      "scenario": "combined_restore",
+      "population": "large",
+      "state": "warm",
+      "attempted": 20,
+      "passed": 20,
+      "failure_rate": 0.0,
+      "p50_ms": 303.462188,
+      "p95_ms": 419.826542
+    },
+    {
+      "metric": "task_workspace_ready_ms",
+      "scenario": "combined_restore",
+      "population": "small",
+      "state": "warm",
+      "attempted": 20,
+      "passed": 20,
+      "failure_rate": 0.0,
+      "p50_ms": 287.7038755,
+      "p95_ms": 361.141125
+    },
+    {
+      "metric": "task_workspace_ready_ms",
+      "scenario": "combined_zoom",
+      "population": "large",
+      "state": "warm",
+      "attempted": 20,
+      "passed": 20,
+      "failure_rate": 0.0,
+      "p50_ms": 87.2525,
+      "p95_ms": 130.963666
+    },
+    {
+      "metric": "task_workspace_ready_ms",
+      "scenario": "combined_zoom",
+      "population": "small",
+      "state": "warm",
+      "attempted": 20,
+      "passed": 20,
+      "failure_rate": 0.0,
+      "p50_ms": 53.556625,
+      "p95_ms": 96.110791
+    },
+    {
+      "metric": "task_workspace_ready_ms",
+      "scenario": "monitor_active",
+      "population": "large",
+      "state": "warm",
+      "attempted": 20,
+      "passed": 20,
+      "failure_rate": 0.0,
+      "p50_ms": 363.399271,
+      "p95_ms": 859.761209
+    },
+    {
+      "metric": "task_workspace_ready_ms",
+      "scenario": "monitor_active",
+      "population": "small",
+      "state": "warm",
+      "attempted": 20,
+      "passed": 20,
+      "failure_rate": 0.0,
+      "p50_ms": 269.82975,
+      "p95_ms": 868.220458
+    },
+    {
+      "metric": "task_workspace_ready_ms",
+      "scenario": "monitor_empty",
+      "population": "large",
+      "state": "warm",
+      "attempted": 20,
+      "passed": 20,
+      "failure_rate": 0.0,
+      "p50_ms": 106.95670849999999,
+      "p95_ms": 157.103208
+    },
+    {
+      "metric": "task_workspace_ready_ms",
+      "scenario": "monitor_empty",
+      "population": "small",
+      "state": "warm",
+      "attempted": 20,
+      "passed": 20,
+      "failure_rate": 0.0,
+      "p50_ms": 83.1242505,
+      "p95_ms": 100.1355
+    },
+    {
+      "metric": "task_workspace_ready_ms",
+      "scenario": "session_return",
+      "population": "large",
+      "state": "warm",
+      "attempted": 20,
+      "passed": 20,
+      "failure_rate": 0.0,
+      "p50_ms": 326.4437295,
+      "p95_ms": 495.638667
+    },
+    {
+      "metric": "task_workspace_ready_ms",
+      "scenario": "session_return",
+      "population": "small",
+      "state": "warm",
+      "attempted": 20,
+      "passed": 20,
+      "failure_rate": 0.0,
+      "p50_ms": 298.836646,
+      "p95_ms": 352.333792
+    }
+  ]
+}

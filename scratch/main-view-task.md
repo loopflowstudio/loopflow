@@ -216,3 +216,10 @@ each, with exact receipts in `native-surface-diagnostic.md`. No assertion was
 weakened. Configured full navigation, split/scroll behavior, resolution, visual
 quality and timings still need proof. This restores a necessary boundary without
 changing planning, Session lifecycle, the pinned artifact, or remaining Task scope.
+
+Compression follow-up, 2026-09-23: preserved the existing Task terminal's manual
+focus when no selected-pane binding is supplied. The native view still owns one
+focus request; its update distinguishes disabling from unchanged selection.
+The extended real-PTY regression failed before the correction and passes after,
+including the previous draft/hiding/search checks. No further model/API reduction
+was justified; `compress.md` records the inspected paths and intentional boundaries.

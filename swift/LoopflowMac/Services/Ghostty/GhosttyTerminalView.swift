@@ -102,7 +102,7 @@ struct GhosttyTerminalRepresentable: NSViewRepresentable {
            size.width > 0, size.height > 0 {
             nsView.createSurface(manager: manager)
         }
-        nsView.setFocusRequested(isEnabled && isFocused)
+        nsView.updateFocus(isFocused: isFocused, isEnabled: isEnabled)
     }
 }
 
@@ -289,14 +289,15 @@ final class GhosttyMetalView: NSView, @preconcurrency NSTextInputClient {
         if focusRequested { window?.makeFirstResponder(self) }
     }
 
-    func setFocusRequested(_ requested: Bool) {
+    func updateFocus(isFocused: Bool, isEnabled: Bool) {
+        let requested = isEnabled && isFocused
         let changed = focusRequested != requested
         focusRequested = requested
         if requested && changed {
             // Attachment handles a request made before the view has a window.
             // Later polls and resizes must leave the search field's focus alone.
             window?.makeFirstResponder(self)
-        } else if !requested, window?.firstResponder === self {
+        } else if !isEnabled || changed, window?.firstResponder === self {
             window?.makeFirstResponder(nil)
         }
     }

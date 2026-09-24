@@ -1,113 +1,96 @@
-# Navigation model reduction — 2026-09-23
+# Compression review — 2026-09-23
 
-## Model and ownership
+## Effective model
 
-Shared `RoadmapSnapshot` and `SessionRecord` remain the planning and human-work
-contracts. `PodiumModel` owns their readings, including unavailable/last-good
-state. `WorkspaceProjection` derives the typed association and preserves
-unmatched Sessions. `WorkspaceNavigation` owns each window/repository's selected
-Work, presentation, search and expansion. `SessionsWorkspaceRegistry` retains
-that window's existing layouts, native surfaces and Session presentation store.
-`SessionsStore` owns opening/error presentation and delegates actions to `lf`.
+- Shared Rust/Swift `RoadmapSnapshot` and `SessionRecord` supply planning and
+  human-work evidence through RegistryQuery. Their shared fields remain intact.
+- PodiumModel owns readings, last-good evidence and read generations.
+  WorkspaceProjection derives typed planning-to-Session associations, preserving
+  upcoming Tasks and every unmatched human boundary. It stores nothing.
+- WorkspaceNavigation owns selected Work, presentation, search and expansion per
+  repository/window. PodiumModel forwards selection to that owner.
+- SessionsWorkspaceRegistry retains each window's repository workspace.
+  MultiplexerStore owns pane layout; GhosttySurfacePool retains native views;
+  SessionsStore owns opening/prepared/error presentation and calls shared actions.
+- GhosttyMetalView owns its surface and focus request across attachment and
+  visibility changes. AppKit owns actual first responder. GhosttyManager owns
+  library initialization and configuration, including the measured CoreVideo
+  capability adaptation.
 
-Before this reduction, selected Work was stored in both PodiumModel and the
-per-repository navigation object, synchronized when changing repositories.
-Session presentation also exposed repository/Wave/Project/Task scopes, although
-all callers used repository scope and Work association already belonged to the
-unified projection. An unreachable inspector sheet retained a separate Task
-terminal dependency.
+## Before and after
 
-Afterward, PodiumModel reads selection from WorkspaceNavigation. Repository
-changes invalidate pending Activity independently of whether the saved selection
-happens to match. Session presentation takes its repository directly; panes read
-it from their existing SessionsStore. SessionScope, its filtering/resolution
-methods, scope props through the pane tree, and the unreachable inspector sheet
-and singleton observation are deleted. Unused SessionItem label/work/step
-aliases are removed; active callers already read the shared record. No route, wire DTO, migration, shared
-Session action or terminal-lifecycle behavior changes.
+Earlier compression removed duplicate selected Work, SessionScope and its
+filter/resolution methods, pane-tree scope props, unused SessionItem aliases,
+and the unreachable inspector sheet/Task-terminal observation. The root switch,
+PodiumConsole, Sessions-only hierarchy read and independent polling remain absent.
 
-## Review and intentional boundaries
+The latest implement pass already made the native reduction: deleting the
+SwiftUI focus Coordinator and moving its one request into the retained native
+view. This pass found no further coherent structural reduction. It corrects one
+behavior lost by that reduction: an enabled Task terminal has no selected-pane
+binding (`isFocused` defaults false), but must keep focus acquired by clicking.
+Previously every resize cleared that focus. The native update now receives
+enabled and selected state separately, releasing first responder on disabling
+or selection loss, not on an unchanged false selection. It retains one request
+field and adds no coordinator or state owner. No route, DTO, event, schema or
+configuration key changes.
 
-Compared the Rust/Swift SessionRecord and RoadmapTask mirrors and their shared
-fixture coverage. Their fields describe durable evidence and remain unchanged.
-The pending shared action/display-path contract must still come from LOO-284;
-this reduction does not invent it locally.
+## Paths and mirrors inspected
 
-WorkspaceProjection remains a derived value, not another mutable inventory.
-Planning row IDs cannot collapse into durable Work IDs: upcoming Tasks have no
-runtime and must retain identity when runtime appears. SessionItem's local
-opening/prepared/error state cannot collapse into shared SessionState: native
-view preparation and durable human resolution have different lifetimes.
-MultiplexerStore still owns layout; the surface pool still owns native views.
-Combining them with navigation would couple inspection to terminal lifetime.
+Read PodiumModel, WorkspaceProjection/Navigation, SessionsView/Store and its pane
+props, root registry construction, GhosttyManager, GhosttyTerminalRepresentable,
+GhosttyMetalView and pool, their native regression, and MultiplexerStore's
+notification boundary. Checked TaskWorkspaceView and Session/shell terminal
+callers. Compared SessionRecord and RoadmapProject/Task fields in Rust and Swift,
+RegistryQuery list/open/resolve/complete methods, and shared Session/roadmap
+fixture assertions. Rechecked the accepted design, wave context and native proof.
 
-The legacy inspector's unused sheet binding never received a selection; removing
-it changes no reachable action. Existing Task actions and exact native Session
-opening/Move here remain. Repository normalization stays at Session action
-construction; panes do not infer ownership from cwd.
+Negative searches still find one Podium caller for each shared inventory read
+and one root window registry. Removed navigation/scope types and the focus
+Coordinator remain absent.
 
-## Proof
+## Intentional boundaries
 
-Focused command passed: 35 tests, exit 0. This covers A/D and repository
-retention, exact typed associations, unavailable reads, explicit Move here, and
-stale Activity rejection:
-`swift test --package-path swift -Xswiftc -gnone --jobs 4 --filter
-'WorkspaceNavigationTests|SessionsStoreTests|PodiumModelTests'`.
-Log: `/tmp/main-view-task-compress-proof.log`. The final removal of three unused
-computed aliases is structure-only; final compile recorded separately below.
+- Planning identity must precede runtime Work identity; collapsing them would
+  re-key upcoming Tasks when runtime appears. Derived workspace rows are not a
+  second durable inventory.
+- Last-good readings and prepared/error presentation have different lifetimes.
+  A polling response must not overwrite a prepared replacement command.
+- Pane selection, a native focus request and first responder differ: search may
+  own keyboard input while a pane remains selected. Removing the request would
+  restore focus theft on refresh or lose pre-attachment focus.
+- The CoreVideo probe is transient and released. It configures Ghostty's existing
+  timer path only on failure. It cannot merge with the view's CADisplayLink,
+  which drives native draw/command-block refresh callbacks; deleting either based
+  on the shared name would change rendering behavior without visual proof.
+- Optional surface pools still serve two real callers: retained Session/shell
+  panes and the existing Task terminal. Requiring a pool everywhere would expand
+  ownership scope rather than remove a compatibility alias.
+- Layout/focus/zoom snapshots still bridge the single MultiplexerStore notifier
+  into SwiftUI. A complete Observation conversion could remove that bridge, but
+  changes multiplexer update timing beyond the two newly proven native fixtures.
+  No partial prop cleanup is justified before configured split/scroll proof.
+- Session action policy still awaits LOO-284's shared contract. The current DTO
+  has no legal-action/display-path fields; moving the local policy to another
+  helper would preserve the duplication rather than remove it.
 
-The existing native surface-creation failure remains recorded in
-`navigation-proof.md`. No configured native proof, external-product trial,
-measured budget, Task completion, or publication is established here.
+## Verification and remaining work
 
-Final compile passed (exit 0):
-`swift build --package-path swift --target LoopflowMac -Xswiftc -gnone --jobs 4`.
-Log: `/tmp/main-view-task-compress-build.log`. No source edits followed this build.
-The implementation was checkpointed locally before reduction; compression edits
-remain in this checkout for the next lifecycle phase. Nothing was pushed.
+Extended the existing real-PTY fixture with the Task terminal's manual-focus
+case. Before the correction it failed after resize: first responder became
+NSWindow. Receipt: `/tmp/loo291-compress-manual-focus-before.log`, exit 1.
+The focused corrected result is recorded below. Earlier model/selection and
+Session-action receipts remain in `review-slice.md`; none is a new compression
+or configured-app result. The independent window-isolation pass remains in
+`native-surface-diagnostic.md` and was not rerun for this focus-only correction.
 
-## Second pass after native diagnosis — 2026-09-23
+Final command: `swift test --package-path swift -Xswiftc -gnone --jobs 4 --filter
+WorkspaceNavigationProofTests/hiddenTerminalPreservesDraft`. One test passed,
+exit 0; `/tmp/loo291-compress-manual-focus-after.log`. This includes retained
+draft, hidden focus release, search focus through resize, and manual focus with
+no selected-pane binding. No Swift edits followed the pass. `git diff --check`
+also passes. No broader test gate was run.
 
-No further production reduction. The core model is unchanged from the ownership
-map above. Inspected the Rust SessionRecord and RoadmapTask/Project definitions,
-their Swift mirrors, RegistryQuery list/open/resolve/complete methods, shared
-Session and roadmap fixture coverage, PodiumModel, WorkspaceProjection,
-WorkspaceNavigator, SessionsStore, the window registry, MultiplexerStore,
-GhosttySurfacePool, root navigation, and the README.
-
-The remaining suspected duplicates have distinct roles:
-
-- Planning row identity and runtime Work identity cannot merge: an upcoming Task
-  has a planning identity before runtime exists. Workspace rows derive their
-  associations without another writer or persistence path.
-- Podium's per-repository last-good Session reading and SessionsStore's prepared
-  command/error state cannot merge without coupling read failure to native
-  opening. A prepared replacement command must survive an ordinary poll.
-- WorkspaceNavigation owns selected Work, search and presentation; the retained
-  registry owns layouts and surfaces. Their repository keys do not duplicate
-  their lifetimes or authority. Combining them would tie inspection to terminal
-  ownership before the required worktree integration exists.
-- SessionsView's layout/focus/zoom snapshots are updated from MultiplexerStore's
-  single notification source; all layout mutations go back to that store. They
-  are a rendering bridge, not a second layout controller. Replacing this bridge
-  with Observation is a possible coherent later reduction, but would change
-  native view-update timing while that boundary is unproven. Leave the complete
-  bridge intact here rather than partially migrating its props or events.
-- The existing Swift Session action policy still awaits LOO-284's shared action
-  contract. SessionRecord has matching fields in both languages and no such
-  contract yet. Deleting the policy now would remove actions; another local
-  helper or enum would merely relocate it.
-- Small presentation wrappers such as WaveSummary do not introduce another
-  product authority. Removing only one count wrapper or uppercase-label helper
-  would not constitute the structural reduction requested by this pass.
-
-Searches confirm that SessionScope, the Sessions-only hierarchy reader, the
-root Work/Sessions switch, and PodiumConsole remain absent. Podium remains the
-desktop caller of both shared inventory reads. No API, DTO, field, route, event,
-or migration was changed in this pass.
-
-No tests rerun: executable content is unchanged. Earlier focused receipts remain
-historical evidence, not new validation. The native OutOfMemory reproducer and
-unfulfilled configured proof are recorded in `native-surface-diagnostic.md`;
-compression neither repairs nor waives that boundary. No publication or Task
-completion occurred.
+Configured navigation, split/scroll retention, visual quality and timings remain
+unproven. Full LOO-291 scope remains unchanged. Nothing was published, landed,
+or marked complete by this pass.

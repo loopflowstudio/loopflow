@@ -48,8 +48,9 @@ PTY proof failed before creating a surface; no draft-retention verdict resulted.
 The independent native writer subsequently reproduced surface-creation failure
 with the pre-existing window-isolation proof. This does not establish native
 navigation behavior. The later `native-surface-diagnostic.md` supersedes the
-host/rendering hypothesis: an isolated AppKit host reports OutOfMemory despite
-screen/Metal availability. Its cause remains unknown. See `concurrent-proof.md`
+host/rendering hypothesis: an isolated AppKit host reported OutOfMemory despite
+screen/Metal availability. Its cause was unknown at that point; the later
+CoreVideo diagnosis and passing native receipts are linked above. See `concurrent-proof.md`
 for the earlier counterexample and focus-only follow-up.
 
 After the per-repository reading fix, the combined command
@@ -82,6 +83,6 @@ later selection corrections and focused runs in `review-slice.md`. These are
 model/view fixtures, not configured provider trials.
 
 The concurrent native writer removed the additional focus-only fixture after
-its hosting failure rather than adding retries. The native draft test remains
-an explicit unfulfilled host proof. The passing navigation command does not run
-that test and must not be described as a native/whole-suite pass.
+its hosting failure rather than adding retries. The retained native draft test
+subsequently passed after the rendering/focus corrections linked above. This
+earlier navigation-only command did not run it and remains model/view evidence.

@@ -25,10 +25,12 @@ public struct SessionRecord: Codable, Sendable, Hashable, Identifiable {
     public let state: SessionState
     public let readySummary: String?
     public let openArgv: [String]
+    public let terminalIds: [String]
 
     enum CodingKeys: String, CodingKey {
         case id, kind, work, title, detail, cwd, state
         case readySummary = "ready_summary"
         case openArgv = "open_argv"
+        case terminalIds = "terminal_ids"
     }
 }

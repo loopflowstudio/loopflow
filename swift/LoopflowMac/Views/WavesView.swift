@@ -52,7 +52,7 @@ struct WavesView: View {
         let placeholders = (authoredWavesByRepo[repo.path] ?? [])
             .filter { !liveNames.contains($0) }
             .map { authoredPlaceholder(repoPath: repo.path, waveName: $0) }
-        return (live + placeholders).sorted {
+        return (live.filter { $0.api.isCurrent } + placeholders).sorted {
             $0.displayName.localizedCaseInsensitiveCompare($1.displayName) == .orderedAscending
         }
     }

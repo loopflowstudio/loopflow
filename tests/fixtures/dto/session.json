@@ -10,5 +10,6 @@
   "cwd": "/src/loopflow.task",
   "state": "ready",
   "ready_summary": "The design now matches the human's intent.",
+  "terminal_ids": [],
   "open_argv": ["lf", "session", "open", "task_00000000000000000000000000000001:task-design:review_kickoff:0"]
 }

@@ -28,6 +28,7 @@ public final class MultiplexerStore {
     public private(set) var layout: LayoutNode
     public private(set) var focusedPaneId: String
     public private(set) var zoomedPaneId: String?
+    public private(set) var shellCommands: [String: [String]] = [:]
 
     private var paneColors: [String: PaneColor] = [:]
     private var nextColorIndex = 0
@@ -149,11 +150,15 @@ public final class MultiplexerStore {
         _notify()
     }
 
-    public func newShell() {
+    public func newShell(command: [String] = []) {
         if focusedPane.content == .empty {
+            shellCommands[focusedPaneId] = command
             layout = layout.replacingContent(of: focusedPaneId, with: .shell)
         } else {
-            _ = _split(focusedPaneId, axis: .vertical, content: .shell)
+            if let pane = _split(focusedPaneId, axis: .vertical, content: .shell) {
+                shellCommands[pane.id] = command
+                _notify()
+            }
             return
         }
         closedState = nil

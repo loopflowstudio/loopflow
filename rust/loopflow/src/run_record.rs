@@ -159,6 +159,7 @@ pub(crate) struct ProviderSessionRef {
 pub(crate) struct ProviderClientRef {
     schema_version: u32,
     pub(crate) pid: u32,
+    pub(crate) terminal_id: Option<String>,
     #[serde(with = "time::serde::rfc3339")]
     pub(crate) started_at: OffsetDateTime,
 }
@@ -831,12 +832,34 @@ pub(crate) fn write_provider_client(dir: &Path, pid: u32) -> std::io::Result<()>
         &serde_json::to_vec_pretty(&ProviderClientRef {
             schema_version: SCHEMA_VERSION,
             pid,
+            terminal_id: current_terminal_id(),
             started_at: OffsetDateTime::now_utc(),
         })
         .map_err(std::io::Error::other)?,
     )?;
     fs::rename(staging, path)?;
     sync_dir(&root)
+}
+
+/// A terminal marker is valid only on the PTY where the shell installed it.
+/// Inherited environment after app, SSH, or background handoff is not attachment.
+fn current_terminal_id() -> Option<String> {
+    let id = std::env::var("LF_TERMINAL_ID")
+        .ok()
+        .filter(|id| !id.is_empty())?;
+    let expected = std::env::var("LF_TERMINAL_TTY").ok()?;
+    let mut name = [0 as libc::c_char; 1024];
+    // SAFETY: name is a writable buffer of the supplied length. ttyname_r
+    // writes a NUL-terminated name on success and retains no pointers.
+    let result = unsafe { libc::ttyname_r(libc::STDIN_FILENO, name.as_mut_ptr(), name.len()) };
+    if result != 0 {
+        return None;
+    }
+    // SAFETY: successful ttyname_r above terminated the buffer.
+    let actual = unsafe { std::ffi::CStr::from_ptr(name.as_ptr()) }
+        .to_str()
+        .ok()?;
+    (actual == expected).then_some(id)
 }
 
 pub(crate) fn read_provider_client_stop(
@@ -2007,6 +2030,85 @@ mod tests {
     use crate::chat::types::{ConversationEvent, ConversationItem, TurnUsage};
     use crate::engine::stream::{ResultSubtype, StreamEvent};
     use crate::engine::{AgentCapabilities, AgentConfig};
+
+    #[test]
+    fn terminal_attachment_probe() {
+        let Ok(expected) = std::env::var("LF_TEST_TERMINAL_ATTACHMENT") else {
+            return;
+        };
+        assert_eq!(
+            super::current_terminal_id().as_deref(),
+            (!expected.is_empty()).then_some(expected.as_str())
+        );
+    }
+
+    #[test]
+    fn terminal_attachment_requires_the_original_pty() {
+        use std::os::fd::FromRawFd;
+        use std::process::{Command, Stdio};
+
+        let mut master = -1;
+        let mut slave = -1;
+        let mut name = [0 as libc::c_char; 1024];
+        // SAFETY: all output pointers are valid; null termios/winsize use defaults.
+        assert_eq!(
+            unsafe {
+                libc::openpty(
+                    &mut master,
+                    &mut slave,
+                    name.as_mut_ptr(),
+                    std::ptr::null_mut(),
+                    std::ptr::null_mut(),
+                )
+            },
+            0
+        );
+        // SAFETY: successful openpty returns two independently owned descriptors
+        // and a NUL-terminated device name in the buffer.
+        let (_master, slave, tty) = unsafe {
+            (
+                fs::File::from_raw_fd(master),
+                fs::File::from_raw_fd(slave),
+                std::ffi::CStr::from_ptr(name.as_ptr())
+                    .to_str()
+                    .unwrap()
+                    .to_owned(),
+            )
+        };
+        for (expected_tty, attached) in [(tty.as_str(), true), ("/dev/another-terminal", false)] {
+            for _ in 0..2 {
+                let output = Command::new(std::env::current_exe().unwrap())
+                    .args([
+                        "--exact",
+                        "run_record::tests::terminal_attachment_probe",
+                        "--nocapture",
+                    ])
+                    .env("LF_TERMINAL_ID", "shell-one")
+                    .env("LF_TERMINAL_TTY", expected_tty)
+                    .env(
+                        "LF_TEST_TERMINAL_ATTACHMENT",
+                        if attached { "shell-one" } else { "" },
+                    )
+                    .stdin(Stdio::from(slave.try_clone().unwrap()))
+                    .output()
+                    .unwrap();
+                assert!(
+                    output.status.success(),
+                    "{}",
+                    String::from_utf8_lossy(&output.stdout)
+                );
+            }
+        }
+        let output = Command::new(std::env::current_exe().unwrap())
+            .args(["--exact", "run_record::tests::terminal_attachment_probe"])
+            .env("LF_TERMINAL_ID", "shell-one")
+            .env("LF_TERMINAL_TTY", &tty)
+            .env("LF_TEST_TERMINAL_ATTACHMENT", "")
+            .stdin(Stdio::null())
+            .output()
+            .unwrap();
+        assert!(output.status.success());
+    }
 
     fn spec(cwd: &std::path::Path) -> RunSpec {
         RunSpec {

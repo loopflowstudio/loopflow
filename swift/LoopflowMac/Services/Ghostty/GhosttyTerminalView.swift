@@ -59,7 +59,10 @@ struct GhosttyTerminalView: View {
     }
 
     private var shellCommand: String? {
-        buildGhosttyShellCommand(argv: argv, env: env)
+        if case .shell(let id) = terminal {
+            return buildWorkspaceShellCommand(id: id, argv: argv, env: env)
+        }
+        return buildGhosttyShellCommand(argv: argv, env: env)
     }
 }
 
@@ -1173,6 +1176,19 @@ func buildGhosttyShellCommand(argv: [String], env: [String: String]) -> String? 
     }
 
     return ["env", envPrefix, command].joined(separator: " ")
+}
+
+/// Keep a real shell after the initial conversation exits or hands off to an
+/// app. The PTY marker lets successive manual lf launches find this terminal.
+func buildWorkspaceShellCommand(id: String, argv: [String], env: [String: String]) -> String {
+    let shell = ProcessInfo.processInfo.environment["SHELL"] ?? "/bin/zsh"
+    let initial = buildGhosttyShellCommand(argv: argv, env: env).map { $0 + "\n" } ?? ""
+    let script = """
+    export LF_TERMINAL_ID=\(shellEscape(id))
+    export LF_TERMINAL_TTY="$(tty)"
+    \(initial)exec \(shellEscape(shell)) -l
+    """
+    return ["/bin/sh", "-c", script].map(shellEscape).joined(separator: " ")
 }
 
 func ghosttyShouldHandleTextAsKeyEvent(_ text: String, modifiers: NSEvent.ModifierFlags) -> Bool {

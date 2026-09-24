@@ -24,6 +24,7 @@ private enum SessionFixtureKind: String {
           "cwd": "/tmp",
           "state": "\(state)",
           "ready_summary": \(summary),
+          "terminal_ids": [],
           "open_argv": ["/usr/bin/tail", "-f", "/dev/null"]
         }
         """

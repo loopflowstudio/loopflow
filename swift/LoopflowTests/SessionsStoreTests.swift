@@ -39,9 +39,8 @@ struct SessionsStoreTests {
             session(id: "second", state: "waiting"),
         ]))
 
-        let opened = await store.select("second")
+        await store.select("second")
 
-        #expect(opened?.id == "second")
         #expect(item(store, "first")?.state == .pending)
         #expect(item(store, "second")?.surface?.openArgv.suffix(3) == ["session", "open", "second"])
     }
@@ -59,13 +58,12 @@ struct SessionsStoreTests {
             session(id: "native", state: "active", kind: "interactive"),
         ]))
 
-        let opened = await store.select("native")
-        #expect(opened == nil)
+        await store.select("native")
+        #expect(item(store, "native")?.surface == nil)
         #expect(item(store, "native")?.state == .elsewhere)
 
-        let moved = await store.moveHere("native")
+        await store.moveHere("native")
 
-        #expect(moved?.id == "native")
         #expect(item(store, "native")?.surface != nil)
     }
 
@@ -81,18 +79,19 @@ struct SessionsStoreTests {
             session(id: "native", state: replacing ? "active" : "closed", kind: "interactive"),
         ]))
 
-        let prepared = if replacing {
+        if replacing {
             await store.moveHere("native")
         } else {
             await store.select("native")
         }
-        #expect(prepared?.openArgv.contains("--replace") == replacing)
+        let prepared = try #require(item(store, "native")?.surface)
+        #expect(prepared.openArgv.contains("--replace") == replacing)
         store.reconcile(try records([
             session(id: "native", state: "active", kind: "interactive"),
         ]))
 
         #expect(item(store, "native")?.state == .prepared)
-        #expect(item(store, "native")?.surface?.openArgv == prepared?.openArgv)
+        #expect(item(store, "native")?.surface?.openArgv == prepared.openArgv)
     }
 
     @Test("An externally killed terminal reclassifies as active elsewhere")
@@ -106,7 +105,7 @@ struct SessionsStoreTests {
         store.reconcile(try records([
             session(id: "native", state: "active", kind: "interactive"),
         ]))
-        _ = await store.moveHere("native")
+        await store.moveHere("native")
         store.recordPaneLive("native")
         #expect(item(store, "native")?.state == .live)
 
@@ -133,7 +132,7 @@ struct SessionsStoreTests {
             session(id: "native", state: "closed", kind: "interactive"),
         ]))
 
-        _ = await store.select("native")
+        await store.select("native")
         #expect(item(store, "native")?.error != nil)
 
         store.reconcile(try records([

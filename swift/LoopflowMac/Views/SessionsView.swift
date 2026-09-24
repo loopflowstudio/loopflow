@@ -127,7 +127,6 @@ final class SessionsStore: ObservableObject {
     private let query: RegistryQuery
     private let metrics: SessionsLatencyMetrics
     private var hasRecordedSessionsLoad = false
-    private var requestedSessionId: String?
 
     init(
         repoPath: String,
@@ -187,17 +186,15 @@ final class SessionsStore: ObservableObject {
         }
     }
 
-    func recover(_ id: String, replacing: Bool = false) async -> SessionRecord? {
-        guard let index = _index(id) else { return nil }
+    private func recover(_ id: String, replacing: Bool = false) async {
+        guard let index = _index(id) else { return }
         switch sessions[index].state {
         case .pending, .failed:
             sessions[index].state = .opening
         case .elsewhere where replacing:
             sessions[index].state = .opening
-        case .elsewhere:
-            return nil
-        case .opening, .prepared, .live:
-            return nil
+        case .elsewhere, .opening, .prepared, .live:
+            return
         }
         do {
             let surface = try await query.openSession(
@@ -205,53 +202,34 @@ final class SessionsStore: ObservableObject {
                 replacing: replacing,
                 cwd: repoPath
             )
-            guard let latest = _index(id) else { return nil }
+            guard let latest = _index(id) else { return }
             if case .opening = sessions[latest].state {
                 sessions[latest].record = surface
                 sessions[latest].state = .prepared
             }
-            return surface
         } catch {
-            guard let latest = _index(id) else { return nil }
+            guard let latest = _index(id) else { return }
             sessions[latest].state = .failed(error.localizedDescription)
-            return nil
         }
     }
 
-    func select(_ id: String) async -> SessionRecord? {
-        guard let index = _index(id) else { return nil }
-        requestedSessionId = id
+    func select(_ id: String) async {
+        guard let index = _index(id) else { return }
         if sessions[index].record.kind == .interactive {
             if localTerminal(for: sessions[index].record) != nil {
                 sessions[index].state = .live
-                requestedSessionId = nil
-                return sessions[index].record
+                return
             }
             if case .live = sessions[index].state {
                 sessions[index].state = sessions[index].record.state == .active
                     ? .elsewhere : .pending
             }
         }
-        if let surface = sessions[index].surface {
-            requestedSessionId = nil
-            return surface
-        }
-        if case .opening = sessions[index].state { return nil }
-        if case .elsewhere = sessions[index].state { return nil }
-
-        let surface = await recover(id)
-        guard requestedSessionId == id else { return nil }
-        requestedSessionId = nil
-        return surface
+        await recover(id)
     }
 
-    func moveHere(_ id: String) async -> SessionRecord? {
-        guard _index(id) != nil else { return nil }
-        requestedSessionId = id
-        let surface = await recover(id, replacing: true)
-        guard requestedSessionId == id else { return nil }
-        requestedSessionId = nil
-        return surface
+    func moveHere(_ id: String) async {
+        await recover(id, replacing: true)
     }
 
     func beginPaneLoad(_ id: String) {
@@ -592,7 +570,7 @@ struct SessionsView: View {
             store.surfaces.focus(.session(record.id))
         }
         store.beginPaneLoad(record.id)
-        Task { @MainActor in _ = await store.select(record.id) }
+        Task { @MainActor in await store.select(record.id) }
     }
 
     private func _pane(for sessionId: String) -> PaneState? {
@@ -1242,7 +1220,7 @@ private struct SessionPaneView: View {
             } actions: {
                 Button("Try again") {
                     sessions.beginPaneLoad(item.id)
-                    Task { @MainActor in _ = await sessions.select(item.id) }
+                    Task { @MainActor in await sessions.select(item.id) }
                 }
                 .buttonStyle(.borderedProminent)
                 .tint(Color.loopflowBurgundy)
@@ -1256,7 +1234,7 @@ private struct SessionPaneView: View {
             } actions: {
                 Button("Open here") {
                     sessions.beginPaneLoad(item.id)
-                    Task { @MainActor in _ = await sessions.select(item.id) }
+                    Task { @MainActor in await sessions.select(item.id) }
                 }
                 .buttonStyle(.borderedProminent)
                 .tint(Color.loopflowBurgundy)
@@ -1283,7 +1261,7 @@ private struct SessionPaneView: View {
             VStack(spacing: Spacing.sm) {
                 Button {
                     sessions.beginPaneLoad(item.id)
-                    Task { @MainActor in _ = await sessions.moveHere(item.id) }
+                    Task { @MainActor in await sessions.moveHere(item.id) }
                 } label: {
                     Label("Move here", systemImage: "arrow.down.forward.square")
                 }

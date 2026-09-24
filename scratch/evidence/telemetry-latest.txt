@@ -1,0 +1,27 @@
+Error: command failed: cron infrastructure/telemetry-daily
+target exited with status 1; see /Users/jack/src/loopflow/.lf/logs/cron.infrastructure.telemetry-daily.log
+
+── flow telemetry-daily
+  op: doctor
+  op: __telemetry-scorecard
+
+[1/2] op: doctor
+build: release (release) · migrations published
+revision: bc80eb6c077e714b8739232491c937759f67271c
+database: /Users/jack/.lf/loopflow.db
+migrations: applied 0.12.16.001_release / known 0.12.16.001_release
+ledger: 277756 run events
+
+ok    continuity    2/2 current scheduled obligation(s) have receipts; 8 historical ledger gap-day(s) predate first cron activation 2026-08-22: 2026-08-04, 2026-08-05, 2026-08-06, 2026-08-07, 2026-08-08, 2026-08-09, 2026-08-10, 2026-08-11; 8 historical ledger gap-day(s) retained outside the current scheduled-receipt window: 2026-08-24, 2026-08-25, 2026-08-26, 2026-08-27, 2026-08-29, 2026-08-30, 2026-08-31, 2026-09-01
+ok    vocabulary    node and event values are all known
+ok    attribution   every terminal row names its work
+ok    identity      49 repo value(s), all absolute
+ok    lineage       every parent process resolves
+ok    install-selection Published installation published-e6cfdbd6b81644e6a3584f37fc05f816 selects /Users/jack/.lf/loopflow.db
+ok    install-store running store matches /Users/jack/.lf/loopflow.db
+ok    install-fallback published fallback published-82c846a7d2a5d76a576a290b0dc8632f174d239fbad1d0cd8b37cf72ac5311f3 is complete and verified
+warn  binary-freshness running lf is built from bc80eb6c0 and is 1 merged commit(s) behind origin/main, so these fixes are not running: aef8c0c98 sessions: preserve live terminals and add shell command blocks (#1269). Rebuilding is an operator action; this check installs nothing
+[2/2] op: __telemetry-scorecard
+Error: telemetry scorecard exited with exit status: 1: lifecycle-scorecard: no such table: agent_turns
+Error: command failed: cron infrastructure/telemetry-daily
+target exited with status 1; see /Users/jack/src/loopflow/.lf/logs/cron.infrastructure.telemetry-daily.log

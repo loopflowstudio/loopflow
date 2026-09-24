@@ -1,0 +1,26 @@
+{
+  "artifact_sha256": {
+    "Loopflow.dmg": "2c5affc59d1e510ec5c3679d74be47f1da677ad155cb49f1bef1ed9035f5a042",
+    "SHA256SUMS": "181cbcd9c2d72a424e24e17ddaf94a7aac8d24e15db60d5cfbe8674a3154cf50",
+    "install.sh": "874e83dfcef30d739d61a1b10ed78a3e61381be70f4f7f6ad66a42fcd5c9b55d",
+    "lf-aarch64-apple-darwin.tar.gz": "cae0611d57c4fa07d0f0dcaf24da4dcbbabe70bb61f625390d082d2dfdad2ae2",
+    "lf-aarch64-unknown-linux-gnu.tar.gz": "ce4e38387f1e0e5759b7e96064eca28e05a87b8c70e3b0b8a6afc75ed7a46e79",
+    "lf-x86_64-apple-darwin.tar.gz": "04c58530d506fea08318bc960160746521a342cf7e7a4f6003810cd35bcbd9f1",
+    "lf-x86_64-unknown-linux-gnu.tar.gz": "1cca62acaa4b4973eaea535b4579a32d24bee369360d433afae36e5132c0a8b9"
+  },
+  "completed_stages": [
+    "artifacts_verified",
+    "installer_verified",
+    "dmg_notarized",
+    "website_candidate_verified",
+    "github_draft_staged",
+    "crate_published",
+    "versioned_dmg_uploaded",
+    "website_deployed",
+    "latest_dmg_uploaded",
+    "github_release_published"
+  ],
+  "source_commit": "bca3f35ac7d4ad24ebed2a30481d0b7ba3a86bde",
+  "tag": "v0.12.19",
+  "workflow_run_id": "35894647999"
+}

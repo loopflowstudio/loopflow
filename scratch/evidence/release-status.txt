@@ -1,0 +1,6 @@
+Target: default
+Latest tag: v0.12.19
+Workflow: completed / success
+Workflow URL: https://github.com/loopflowstudio/loopflow/actions/runs/35894647999
+Release notes: narrative / gate safe
+GitHub Release: yes

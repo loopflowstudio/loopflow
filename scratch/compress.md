@@ -7,8 +7,9 @@
 - PodiumModel owns readings, last-good evidence and read generations.
   WorkspaceProjection derives typed planning-to-Session associations, preserving
   upcoming Tasks and every unmatched human boundary. It stores nothing.
-- WorkspaceNavigation owns selected Work, presentation, search and expansion per
-  repository/window. PodiumModel forwards selection to that owner.
+- WorkspaceNavigation owns selected Work, presentation, search, expansion and
+  list scroll offset per repository/window. PodiumModel forwards selection to
+  that owner; SwiftUI controls the mounted navigator's scrolling.
 - SessionsWorkspaceRegistry retains each window's repository workspace.
   MultiplexerStore owns pane layout; GhosttySurfacePool retains native views;
   SessionsStore owns opening/prepared/error presentation and calls shared actions.
@@ -18,6 +19,45 @@
   capability adaptation.
 
 ## Before and after
+
+### Iteration 3 — navigator retention
+
+Reviewed HEAD `007c48664`. No coherent code reduction was established. The model
+above remains unchanged by this pass; no API, DTO, field, type, route, persistence
+path or configuration key was removed. Only this report changes.
+
+Traced `listScrollOffset` from WorkspaceNavigation through PodiumModel's retained
+repository navigation to WorkspaceNavigator's initializer and geometry callback.
+Read the mounted `navigatorRetainsScroll` regression, SessionsView's repository
+workspace and pane observation, MultiplexerStore's notification boundary, and
+RegistryQuery's Session operations. Compared Rust/Swift SessionRecord and
+RoadmapProject/Task fields and their shared fixture coverage. Searches still find
+one desktop caller per inventory read, one root workspace registry, and none of
+the removed scope/navigation types.
+
+The retained scalar and mounted ScrollPosition are not interchangeable: the
+scalar records observed geometry for a later mount; ScrollPosition supplies the
+current view's scroll request. Its SDK contract includes optional point/edge
+values and user-positioned state, not an always-present viewport offset. Moving
+that binding into navigation would not establish equivalent restoration and
+would carry framework control state across view lifetimes. The geometry callback
+captures its render's navigation owner. No second scroll controller or row-ID
+inventory is needed.
+
+The new native-scroll fixture complements the retained-terminal proofs: it
+exercises a long planning list and independent repository offsets without
+requiring Ghostty. Combining these tests would couple distinct failure boundaries.
+The existing layout/focus/zoom observation bridge still needs a complete
+multiplexer observation change to remove coherently. Planning/runtime identity
+and last-good/prepared state retain their separate meanings. Session policy still
+awaits the absent shared LOO-284 action/display contract; relocating it would not
+reduce its authority.
+
+Inspected `/tmp/loo291-navigator-scroll-final.log`: the focused navigator test
+passed once against this source. No executable changes or test reruns in this
+pass. Local navigator retention is now covered; configured provider interaction,
+resolution, visual quality and timing comparisons remain unproven. Full LOO-291
+scope and publication disposition are unchanged.
 
 ### Iteration 2 — mounted-workspace proof
 

@@ -34,6 +34,10 @@
 - Native active-Run discovery uses existing per-Run client receipts, including
   clients launched before a new CLI build. Capture interval bindings establish
   generic Exec-to-Run identity; they are not a prerequisite for native discovery.
+  An OS environment locator is optional evidence: macOS omitted LF_RUN_DIR for
+  an owned live client in the discovery proof. A transient discovery cache needs
+  a reader that survives observations; caching inside each one-shot CLI request
+  still repeats cold discovery. Prove notification-loss recovery before polling.
 - A Run resumed interactively is a Session even when its original launch was
   headless. Keep launch provenance; the retained provider-client namespace records
   interactive history and its client receipts establish liveness. Resolve declared

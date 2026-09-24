@@ -205,6 +205,13 @@ No separate authorities for Work/Sessions inventories, oversized parent cards, c
 
 ## Evidence ledger
 
+- 2026-09-24: [Bounded-discovery candidate rejected](active-run-refresh.md).
+  The OS environment locator omitted legitimate live clients in two existing
+  Rust proofs. Removed the candidate and dependent automatic Monitor refresh;
+  receipt discovery remains authoritative. The next bounded-reader design must
+  preserve old clients while making cold enumeration and incremental observation
+  costs explicit. No production change or performance improvement is claimed.
+
 - 2026-09-23: local `lf roadmap --json` found LOO-291 and Desktop's definition/KRs; this was a cached planning read, not a fresh Linear sync.
 - Source inspection confirms separate root surfaces, clear-condition omission in Now, and retained per-window/repository Sessions workspaces. No UI behavior or performance has been tested in this design pass.
 - 2026-09-23: the human selected Wave → Project → Task hierarchy, then clarified that Wave/Project layers must be minimal and collapsible so the result reads as one annotated, organized list. Initial expansion, collapsed counts, and search behavior above are proposed details.
@@ -217,6 +224,20 @@ No separate authorities for Work/Sessions inventories, oversized parent cards, c
 - 2026-09-23: the human clarified conversations are optional and fresh starts should be encouraged. One-current-at-a-time is a cardinality constraint, not a permanent conversation per subject. Start/Continue/Finish/Start fresh above are proposed controls for that intent.
 - 2026-09-23: the human requested advancing the Task, then clarified that the pre-identified Task should receive this design. Reuse LOO-291 rather than create a duplicate. Earlier queue timing does not block this explicit advance; external-work proof remains unselected and must not be fabricated.
 - Open: per-subject Session lifecycle, checkout choice/taskification, first-open presentation, repository breadth, external proving workflow, and the directive-editing follow-up.
+
+## Slice ledger — scroll during shared planning refresh, 2026-09-24
+
+[Scroll/refresh measurement](desktop-scroll-refresh.md) extends the existing
+native runner with a held fixture response through Podium's real planning reader.
+Both unchanged populations scroll in a 300-point viewport. Captured original and
+refreshed final Task labels, exact identity, settled offsets and unchanged Session
+records prove the transition; subsequent workspace cases retain the original PTYs
+and input. All 504 observations pass with unchanged measured source, including
+42 scroll/refresh attempts. The probe now distinguishes lazy content-height
+correction from viewport movement across refresh. The old baseline is explicitly
+non-comparable. Continuous gestures, compositor/hitches, production phases,
+configured costs, budgets and human acceptance remain open. No production owner,
+optimization, publication or Task completion was added.
 
 ## Slice ledger — native capture/input measurements, 2026-09-24
 

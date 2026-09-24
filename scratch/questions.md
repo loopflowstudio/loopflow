@@ -4,6 +4,7 @@
 - Integrated `loopflow.projects` at committed snapshot `48622b569`. Its subsequent objective/metric-target ownership correction was uncommitted and is excluded; reconcile the complete change when committed, including DTOs and historical targets.
 - No live chapter migration was applied. Existing portfolios need the deterministic read-only preview and human acceptance before moving or abandoning planning work. Code integration is not migration approval.
 - Bounded active discovery/shared refresh, the two measured UI experiences, fallback compilation and the human canvas demo remain core proof. The concurrent performance contribution is preserved; its writer owns its endpoint and baseline claims.
+- Environment-only active discovery was rejected: macOS omitted the Run locator for an owned live cat client while exposing it for Python. Keep receipt discovery authoritative; the next design should investigate one transient long-lived reader with filesystem change notifications and explicit cold/rescan cost. See [the counterexample](active-run-refresh.md). Automatic refresh was not enabled.
 - No human-selected external proving workflow or exact directive edit has been supplied. Preserve those full-Task obligations without inventing a PM mutation.
 - LOO-293 and its worktree remain open. Integrating shared Monitor primitives does not establish completion of its remaining behavior.
 

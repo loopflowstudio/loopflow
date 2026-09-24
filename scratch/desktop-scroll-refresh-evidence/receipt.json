@@ -1,0 +1,39 @@
+{
+  "command": "uv run python scripts/desktop_performance.py run --output /tmp/loo291-scroll-refresh-baseline --samples 21 --baseline .lf/evidence/desktop-performance/20260924-capture-input",
+  "status": "complete",
+  "expected_attempts": 504,
+  "passed": 504,
+  "source_before": "c2e1a9d854b04fd531ea0e3ac139a35847910a63edab601ac059742bb073666d",
+  "source_after": "c2e1a9d854b04fd531ea0e3ac139a35847910a63edab601ac059742bb073666d",
+  "comparison": {
+    "available": false,
+    "reason": "Different measurement_source"
+  },
+  "sources": {
+    "swift/LoopflowTests/DesktopPerformanceTests.swift": "be09618334cd50ef25a8ff2812cc9f51aa411dd2b7379be72cc92d88586c3c1e",
+    "scripts/desktop_performance.py": "74eb9ffad62b0cdd4dbbd3d48b19864bcb5621cee0c83389235d0c0770c2ec27",
+    "performance/README.md": "d8baa22661fe4c125ac98cf93a0a33a7242eb5419abfbfd695dc56dec87670b2"
+  },
+  "artifacts": {
+    "attempts.jsonl": "2bba9a4790db2427c703462c5c41735d30c00da99470d05415a50860b5a09f51",
+    "native.log": "1191e9ae535c5aae1bbf452a7b29953387d40bcd2d5092831067840fd75be86b",
+    "offset-counterexample/attempts.jsonl": "743624f98647de80d8ceca0ceb9b3bbf48c7a304966e9f36540d553e27c54310",
+    "offset-counterexample/native.log": "d981e6c0c856fa5ff37e9ef115c189c1c8b81029eafdb9051bcc8f5f80e171a0",
+    "offset-counterexample/report.json": "4a404998a0cf79a271feb2804d1ca2f3f7f422e06da986dcd8b3e9364714e4b4",
+    "offset-counterexample/report.md": "9cc9117acf5216130e958e1f390eae255af1680973276237a90d5d19c90968a2",
+    "offset-counterexample/run.json": "d54cb961b2e788c63b596e6d32f5ef690730424c26fd4bcfcec05435c93a4a98",
+    "report.json": "09b3eca5dd6569a2c06b7035a9ca9349fd7cffa7cf51890905827e8db4f70c39",
+    "report.md": "dde0049b4d69bd978c5a30f1720e726af902bd9f063f8f01500d9dd30560d307",
+    "run.json": "a726fb241dc20b040d090f08665b31da32180b445795442c2a763c6df3b03011",
+    "short/attempts.jsonl": "1c6b5d791eab4f53e3cb2b348a1e06215b23b704945eaceb3a301a01053f3026",
+    "short/native.log": "f0e0a74eea40ecd5f141812b2c8e56898960306a99d1be6e161b7bef3505bb8c",
+    "short/report.json": "e41df74dfb933cbceda030203b72b1fcbcacd885fea1f4a6363029ce677adf88",
+    "short/report.md": "7b0ca480b600958637582a318e2559b45c807040ff1cf633cb7b82e611d3542a",
+    "short/run.json": "1cf49c45fc325abb647108f467e6c1d1681e1fd5dcc63d995ce019cdf77b84b9"
+  },
+  "limits": [
+    "Capture/OCR endpoint with observer overhead; no compositor or frame-hitch evidence.",
+    "Synthetic shared DTO transport and owned cat PTYs; no configured-provider or human acceptance.",
+    "Offset counterexample and short run precede final source; full baseline proves final source."
+  ]
+}

@@ -1,0 +1,24 @@
+[0/1] Planning build
+Building for debugging...
+[0/5] Write sources
+[1/5] Write swift-version--58304C5D6DBC2206.txt
+[3/5] Compiling LoopflowTests DesktopPerformanceTests.swift
+[4/5] Emitting module LoopflowTests
+[4/6] Write Objects.LinkFileList
+[5/6] Linking LoopflowSwiftPackageTests
+Build complete! (2.38s)
+Test Suite 'Selected tests' started at 2026-09-24 16:19:57.115.
+Test Suite 'LoopflowSwiftPackageTests.xctest' started at 2026-09-24 16:19:57.116.
+Test Suite 'LoopflowSwiftPackageTests.xctest' passed at 2026-09-24 16:19:57.116.
+	 Executed 0 tests, with 0 failures (0 unexpected) in 0.000 (0.000) seconds
+Test Suite 'Selected tests' passed at 2026-09-24 16:19:57.116.
+	 Executed 0 tests, with 0 failures (0 unexpected) in 0.000 (0.001) seconds
+◇ Test run started.
+↳ Testing Library Version: 1501
+↳ Target Platform: arm64e-apple-macos14.0
+◇ Suite "Desktop experience measurements" started.
+◇ Test measureExperiences() started.
+[GhosttyManager] CoreVideo display link unavailable (-6661); using timer rendering
+✔ Test measureExperiences() passed after 165.311 seconds.
+✔ Suite "Desktop experience measurements" passed after 165.311 seconds.
+✔ Test run with 1 test in 1 suite passed after 165.311 seconds.

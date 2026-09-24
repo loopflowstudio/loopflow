@@ -1,5 +1,12 @@
 # Unified navigation slice review — 2026-09-23
 
+Latest review: [scroll refresh and discovery](review-scroll-discovery.md),
+2026-09-24. Fresh short native command passes 24/24 observations; restored native
+receipt discovery passes all five ownership tests. The environment-only candidate
+is absent. The next design must resolve a reader lifetime across one-shot CLI
+requests before a transient cache can avoid repeated cold scans. Full canvas
+acceptance remains open; this review performs no publication.
+
 Latest review: [desktop capture/input measurements](review-desktop-performance.md),
 2026-09-24. Fixed journal reconstruction accepting missing planned observations
 and inconsistent results as complete. Eight report tests and 22 fresh native

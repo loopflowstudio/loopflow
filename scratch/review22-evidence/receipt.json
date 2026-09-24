@@ -1,0 +1,38 @@
+{
+  "native_command": "uv run python scripts/desktop_performance.py run --output /tmp/loo291-review22-native --samples 1",
+  "native_status": "complete",
+  "native_attempts": 24,
+  "active_command": "cargo test -p loopflow --lib run_record::active::tests",
+  "active_tests_passed": 5,
+  "restored_files_match_510a48b44": {
+    "rust/loopflow/src/lf/commands/top.rs": true,
+    "rust/loopflow/src/run_record.rs": true,
+    "rust/loopflow/src/run_record/active.rs": true,
+    "swift/LoopflowMac/PodiumModel.swift": true,
+    "swift/LoopflowMac/Views/PodiumView.swift": true,
+    "swift/LoopflowMac/Views/TaskMonitorView.swift": true,
+    "swift/LoopflowTests/TaskMonitorTests.swift": true
+  },
+  "measured_source_matches_current": true,
+  "sources": {
+    "rust/loopflow/src/lf/commands/top.rs": "c608fb4cfc7fc50929d3ca9017c7e5dcde6a220caabc3f195e9dafb4208a68eb",
+    "rust/loopflow/src/run_record.rs": "39f44ee297dc3a5ad1508935fedf38948c184a996c075e7e4275c30cb3acfb3d",
+    "rust/loopflow/src/run_record/active.rs": "db765baf77f9fd991a4fc0aefad160baeb22539bc6f160d2c2f9bdf161f03dd8",
+    "swift/LoopflowMac/PodiumModel.swift": "dead64a525866125b6a65325e49018ef1e793150e5504bb2a55dd026a589061e",
+    "swift/LoopflowMac/Views/PodiumView.swift": "9e58c09d5981f29de16f9f2272c6c952d6bc0709333084c8a477b27e093995b1",
+    "swift/LoopflowMac/Views/TaskMonitorView.swift": "4b257784eade9ff15827653dbbee8495f9bd733a3f055f9896bb4446e2f6b7b4",
+    "swift/LoopflowTests/TaskMonitorTests.swift": "982a739d41b8d505a5ef82f1196749892c4d1cc71f70358d9051120194c36fef",
+    "swift/LoopflowTests/DesktopPerformanceTests.swift": "be09618334cd50ef25a8ff2812cc9f51aa411dd2b7379be72cc92d88586c3c1e",
+    "scripts/desktop_performance.py": "74eb9ffad62b0cdd4dbbd3d48b19864bcb5621cee0c83389235d0c0770c2ec27",
+    "swift/Loopflow/Services/RegistryQuery.swift": "8a1c2a8192603b2fdc2fbe790bfdb69f5c7d535c899f184bd052c1e685c62fda",
+    "swift/LoopflowMac/Services/RegistryQueryLocal.swift": "616610e8c995e7fb6a74cf67f0ef0e6153c53986a4f2342c175afdb2a2d8aab4"
+  },
+  "artifacts": {
+    "report.json": "446566539a7f2e6b4cca067dc1172dc608a24a178e3827a441c67de3bf395054",
+    "active.log": "dcd2c58dd00436fd5b52cb25b8856b7c6ce947f74c1ca29e32d41e3626c8197d",
+    "report.md": "e05b959dc1bc077a46f1a6a63f69c191eefd1e9f9fb26a46285087cb5e4c8644",
+    "native.log": "938a13e40d34970e352b51e694cf75b2a5b6045c0568ca2de75a03bf8ff6033f",
+    "run.json": "208925c933a5cfaba9ee324cece33999cb54dff5cff12ee49ad0e56a8b138443",
+    "attempts.jsonl": "82e5146febda1a27070ab8fef3033b08e788cf6766a531e9358c0f813c7aeac2"
+  }
+}

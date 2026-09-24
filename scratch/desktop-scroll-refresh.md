@@ -30,10 +30,27 @@ capture/OCR. The short corrected trial passed all 24 observations.
 
 ## Evidence and remaining work
 
-Full collection is pending. The existing journal retains every attempted outcome,
-including failures and timeouts. The earlier eleven-scenario baseline is not
-comparable because this measurement source and scenario plan changed. This work
-introduces no product optimization or performance budget.
+The final command passed **504/504 observations**, including 42 scroll/refresh
+attempts, with identical measured source before and after:
+
+```sh
+uv run python scripts/desktop_performance.py run \
+  --output /tmp/loo291-scroll-refresh-baseline --samples 21 \
+  --baseline .lf/evidence/desktop-performance/20260924-capture-input
+```
+
+[Report](desktop-scroll-refresh-evidence/report.md),
+[attempt journal](desktop-scroll-refresh-evidence/attempts.jsonl) and
+[source/artifact receipt](desktop-scroll-refresh-evidence/receipt.json) retain the
+result. The earlier offset counterexample and short pass are included under their
+own source fingerprints. `git diff --check` passes. No broader suite was rerun.
+
+For the twenty warm scroll/refresh attempts per population, total capture/OCR
+journey p50/p95 was 318.80/359.18 ms (small) and 357.22/647.27 ms (large).
+These include the intermediate capture and both text verifications; they are not
+rendering budgets. The comparison correctly reports unavailable because the earlier
+baseline used different measurement source. This work introduces no product
+optimization or performance budget.
 
 This proves a discrete native scroll during a held fixture refresh at the existing
 capture/OCR endpoint. It does not measure wheel-event delivery, continuous gesture

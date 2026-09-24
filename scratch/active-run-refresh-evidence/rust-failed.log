@@ -1,0 +1,34 @@
+   Compiling loopflow v0.12.20 (/Users/jack/src/loopflow.main-view-task/rust/loopflow)
+    Finished `test` profile [unoptimized + debuginfo] target(s) in 27.64s
+     Running unittests src/lib.rs (target/debug/deps/loopflow-78d151dc187ea4a1)
+
+running 5 tests
+test run_record::active::tests::capture_intervals_do_not_keep_prior_runs_alive_in_a_reused_exec ... ok
+test run_record::active::tests::dead_missing_reused_and_ambiguous_owners_never_claim_a_live_run ... ok
+test run_record::active::tests::exact_owners_deduplicate_one_run_and_keep_other_runs_separate ... ok
+test run_record::active::tests::native_client_receipts_do_not_require_a_new_capture_binding ... FAILED
+test run_record::active::tests::old_waiting_runs_are_task_exact_in_one_checkout_and_dead_clients_disappear ... FAILED
+
+failures:
+
+---- run_record::active::tests::native_client_receipts_do_not_require_a_new_capture_binding stdout ----
+
+thread 'run_record::active::tests::native_client_receipts_do_not_require_a_new_capture_binding' (518743438) panicked at rust/loopflow/src/run_record/active.rs:326:9:
+assertion `left == right` failed
+  left: []
+ right: [RunId("run_9ee0944dabff46b4882ecb2ae2142e09")]
+note: run with `RUST_BACKTRACE=1` environment variable to display a backtrace
+
+---- run_record::active::tests::old_waiting_runs_are_task_exact_in_one_checkout_and_dead_clients_disappear stdout ----
+
+thread 'run_record::active::tests::old_waiting_runs_are_task_exact_in_one_checkout_and_dead_clients_disappear' (518744225) panicked at rust/loopflow/src/run_record/active.rs:402:9:
+["Run run_4f54cc009c2f42cda570761e51209944: capture has no Exec or native-client ownership evidence", "Run run_cb4b800e5e1a4828a223364a04846b5e: capture has no Exec or native-client ownership evidence"]
+
+
+failures:
+    run_record::active::tests::native_client_receipts_do_not_require_a_new_capture_binding
+    run_record::active::tests::old_waiting_runs_are_task_exact_in_one_checkout_and_dead_clients_disappear
+
+test result: FAILED. 3 passed; 2 failed; 0 ignored; 0 measured; 1579 filtered out; finished in 3.47s
+
+error: test failed, to rerun pass `-p loopflow --lib`

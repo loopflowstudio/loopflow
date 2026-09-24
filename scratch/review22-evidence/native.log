@@ -1,0 +1,45 @@
+[0/1] Planning build
+Building for debugging...
+[0/6] Write sources
+[2/6] Write swift-version--58304C5D6DBC2206.txt
+[4/10] Emitting module LoopflowMac
+[5/10] Compiling LoopflowMac PodiumView.swift
+[6/10] Compiling LoopflowMac TaskMonitorView.swift
+[7/10] Compiling LoopflowMac PodiumModel.swift
+[8/19] Compiling LoopflowMac WorkSurfaceView.swift
+[9/19] Compiling LoopflowMac WorkspaceNavigator.swift
+[10/19] Compiling LoopflowMac WavesView.swift
+[11/19] Compiling LoopflowMac WorkActivityView.swift
+[12/19] Compiling LoopflowMac ConversationLaunch.swift
+[13/19] Compiling LoopflowMac LoopflowApp.swift
+[14/19] Compiling LoopflowMac PodiumFixture.swift
+[15/19] Compiling LoopflowMac RoadmapView.swift
+[16/19] Compiling LoopflowMac SessionsView.swift
+[16/21] Write Objects.LinkFileList
+[17/21] Linking LoopflowMac
+[18/21] Applying LoopflowMac
+[20/28] Compiling LoopflowTests TaskMonitorTests.swift
+[21/28] Compiling LoopflowTests WorkspaceNavigationProofTests.swift
+[22/28] Compiling LoopflowTests DesktopPerformanceTests.swift
+[23/28] Compiling LoopflowTests PodiumModelTests.swift
+[24/28] Emitting module LoopflowTests
+[25/28] Compiling LoopflowTests TaskDirectiveEditorTests.swift
+[26/28] Compiling LoopflowTests TaskMonitorProofTests.swift
+[27/29] Compiling LoopflowTests WorkspaceNavigationTests.swift
+[27/29] Write Objects.LinkFileList
+[28/29] Linking LoopflowSwiftPackageTests
+Build complete! (14.23s)
+Test Suite 'Selected tests' started at 2026-09-24 16:39:16.314.
+Test Suite 'LoopflowSwiftPackageTests.xctest' started at 2026-09-24 16:39:16.315.
+Test Suite 'LoopflowSwiftPackageTests.xctest' passed at 2026-09-24 16:39:16.315.
+	 Executed 0 tests, with 0 failures (0 unexpected) in 0.000 (0.000) seconds
+Test Suite 'Selected tests' passed at 2026-09-24 16:39:16.316.
+	 Executed 0 tests, with 0 failures (0 unexpected) in 0.000 (0.001) seconds
+◇ Test run started.
+↳ Testing Library Version: 1501
+↳ Target Platform: arm64e-apple-macos14.0
+◇ Suite "Desktop experience measurements" started.
+◇ Test measureExperiences() started.
+✔ Test measureExperiences() passed after 8.858 seconds.
+✔ Suite "Desktop experience measurements" passed after 8.858 seconds.
+✔ Test run with 1 test in 1 suite passed after 8.858 seconds.

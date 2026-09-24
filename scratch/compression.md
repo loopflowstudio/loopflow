@@ -396,3 +396,51 @@ dated repair ownership, closed-obligation continuation and configured acceptance
 stay open. The observed scorecard blocker, required UI/public proof and two
 adjacent automatic settlements remain unresolved. No publication, landing or
 Task completion follows from this compression review.
+
+## Git ownership compression review at `fa0c6bbbb9`
+
+No executable reduction selected. Before and after this pass: an obligation
+retains original due opportunities; each execution owner retains attempts with
+selection, verification and product outcome. Collapsed opportunities reference
+that owner. `settle` writes outcome and verification atomically. Physical receipts
+retain wrapper results; publisher receipts retain artifact stages and public
+observations. Cron attribution, target exclusion and checkout protection remain
+separate capabilities. Git inheritance extends their lifetimes without another
+execution object or writer.
+
+Inspected accounting types and `begin`, `finish_process`, `select`, `settle`,
+receipt validation and history qualification; followed release preparation into
+`commit_workflow`, stage/commit, upstream selection, ordinary and force-with-lease
+pushes, and the preceding Task settlement fence. Checked the target/checkout
+owners and adjacent PR finalization/compensation paths. The complete Task patch
+was available without truncation (689,825 characters); this review concentrated
+on those model paths and the latest Git inheritance cut.
+
+Mirrors checked: CLI/Flow cron context, release-history text/JSON and disposition,
+the history fixture and round-trip test, ordinary CLI/Flow/PM/Task/PR commit
+callers, Python artifact/public receipt types and descriptor forwarding, the Git
+survival fixture, release README, cron host guide and release-evidence direction.
+Search found no Swift consumer of `ReleaseHistory`, `ReleaseOpportunity` or
+`PublicReleaseReceipt`.
+
+| Candidate | Why retained |
+|---|---|
+| Git output helpers with and without inheritance | They share one command implementation and one stdout/error conversion. Removing the private convenience entry points would spread no-op callbacks into unrelated reads; it removes no domain concept or competing implementation. No public legacy alias was introduced. |
+| `inherit_git` and `inherit_pr` | These name actual, incomplete launch coverage in different operations. A combined execution context would add vocabulary and obscure the uncovered Task revocation/notes/tool paths. |
+| Upstream establishment and ordinary push | One creates tracking for an explicit remote/branch; the other uses existing tracking and permits the existing force-with-lease fallback. A mode envelope would re-express those choices without deleting behavior. |
+| Public push fence and private already-locked push | Task restart already holds the mutation guard. Collapsing the entry points would require reacquisition or weaken the fence before exposing a changed head. |
+| Clean-worktree and committed-worktree push branches | Both use the same push owner. Flattening their control flow is local syntax cleanup, not a model/API reduction; a dirty worktree with nothing staged intentionally returns without pushing. |
+| Target lock, checkout lease and cron descriptor | Their scopes remain target mutation, exact checkout removal and scheduled attribution. Merging them changes independent-scope behavior and authority. |
+| Selection/outcome, process/product and stage/public evidence | Each pair records distinct facts at different boundaries. Removing selection loses pre-success recovery; combining process and product truth or stage and public proof overstates success. |
+| Frozen coverage and current collapse links | Historical timing/provenance uses saved execution coverage; current links identify the owning result. Neither reconstructs the other after retries. |
+
+Searches found no restored duplicate success-proof wrappers, separate
+`record_verification` writer or Python candidate/publish receipt classes.
+Historical schema-1 physical receipts remain required evidence. No API, DTO,
+field, storage format or executable code changed; only this report changed.
+No tests or static checks were rerun. The preceding focused passes remain the
+evidence recorded in [release-git-ownership.md](release-git-ownership.md).
+Task compensation, notes/tools/worktree child ownership, historical telemetry
+linkage and bounded retry, dated repair ownership, closed obligations and
+configured acceptance remain open. This compression review does not approve the
+branch or establish either required automatic settlement.

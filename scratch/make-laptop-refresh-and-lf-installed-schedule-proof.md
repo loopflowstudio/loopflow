@@ -221,6 +221,48 @@ the narrow repair. Production restoration cannot yet be claimed: latest
 published v0.12.19 contains neither the refresh surface nor the repair.
 Do not start or retry release to remove that dependency.
 
+## Review handoff — 2026-09-24
+
+The supplied human steers already settle the command split, preservation
+requirements, published-only restoration, and working-demo acceptance gate.
+This review carries those decisions forward; it records no new human approval.
+The current human Session is a design handoff, not evidence of restoration or
+permission to publish a release.
+
+Source inspection confirms the missing `Preflight` startup exception and the
+existing early install dispatcher. The repair stays at that boundary. No
+checkout, package, scheduler, or machine-authorization redesign is needed.
+`read_binary_preflight` already includes child stderr when JSON parsing fails;
+diagnostic cleanup is secondary and must retain valid rejection responses.
+
+Tighten the executable proof in slice 1:
+
+- Standard `preflight` inspects `production_database_path()`; it does not
+  inspect the active development store. Seed those as distinct stores in the
+  isolated account and verify the returned database path. Preserve both stores,
+  the active receipt, and the absence of a new switch receipt after each probe.
+- Assert candidate identity and the expected verdict/reason, not merely JSON
+  syntax. A development build can legitimately reject because of its build
+  authority or migration drafts. Such a rejection proves startup reachability,
+  but cannot stand in for the intended incompatible-store rejection or a
+  successful published install. Use the existing release-equivalent build
+  mechanism where the fixture needs published candidate semantics.
+- Exercise direct preflight and the child preflight reached by promotion
+  preview. Prove the pre-fix executable fails this same scenario. Keep ordinary
+  retained-binary execution rejected, including bare install and schedule;
+  `--help` alone does not exercise runtime authorization.
+- Integrate the process fixture into automated verification with a disposable
+  OS account/container. An unavailable local isolation runner is an explicit
+  proof gap, not permission to alter the laptop account's install authority or
+  replace the executable test with a stub. Choose the runner during
+  implementation; no new production configuration is needed.
+
+The published destination and active installation recorded above are dated
+kickoff observations, not fresh release checks by this review. Recheck the
+published destination before the configured demo. Successful candidate
+inspection may still expose a legitimate compatibility refusal; preserve and
+investigate that verdict before any promotion.
+
 ## Slice ledger
 
 - #1273 / `c56340a14`: shared preserving checkout refresh and full install/

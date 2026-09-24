@@ -1,0 +1,17 @@
+{
+  "observed_at": "2026-09-24T15:01:27.141157+00:00",
+  "binary": "/Users/jack/src/loopflow.restore-task-watching-with-live/target/debug/lf",
+  "binary_sha256": "4896c836658b14ec99c8cbb1b75a7a80a8f5b13ea2b5107c6fd06701f10dcde1",
+  "elapsed_seconds": 0.471,
+  "exit_code": 0,
+  "stderr": "",
+  "task_id": "task_97e04da37e5e4231bde30f4d1d93a5fa",
+  "invocations": 0,
+  "runs": 3,
+  "gaps": [
+    {
+      "code": "position_unavailable",
+      "message": "This Home has no Task flow position storage; the active stage is unknown"
+    }
+  ]
+}

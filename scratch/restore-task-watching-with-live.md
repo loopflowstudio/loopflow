@@ -145,43 +145,37 @@ reviewing this continuation change, implement the output feed in the existing
 Watch view and resolve reader limits as that integration requires. A successful
 CLI read alone is not the product finish line.
 
-Connect the existing output read to the retained desktop Watch store and view.
-Seed an independent live cursor before reading the first historical page; Refresh
-advances live output, and Load history advances history without moving the live
-cursor. Keep the UI explicit that updates are manual while discovery and cursor
-state remain inventory-dependent. Automatic polling is still a required later
-slice in this PR, not silently enabled by the Follow live control.
+Replace the stage list with a connected diagram of the existing immutable plan.
+Group adjacent stages by their retained ancestry. Keep stage selection, attempt
+inspection and output filtering in TaskWatchStore; the diagram derives geometry
+from its native stage buttons and introduces no flow model or read operation.
+Dashed connectors denote plan order; solid connectors denote recorded transitions.
+Draw Iterate and retry paths to their exact recorded coordinates, including a
+retry on the same stage. Never infer completion from a connector or a missing
+active stage. Historical invocations and repeated names remain distinct.
 
-Retain output only as window-local presentation. Merge by Run, source and source
-record identity; preserve each reader's order, deduplicate overlaps, and prefer
-live revisions over overlapping historical revisions. Fold normalized item
-snapshots and deltas for display. Show source availability, paging and gaps beside
-the attributed output. A reset freezes the last display with a reload notice;
-explicit Reload output discards both continuations before reading fresh evidence,
-so independent cursors cannot combine different source generations.
+Use native focusable buttons, arrow-key selection and explicit transition links;
+keep text and icons alongside color. Selection scrolls into view without animation,
+including when reduced motion is enabled. Empty historical plans stay explicitly
+empty. Preserve the existing output feed and manual refresh until the reader's
+bounded-discovery and retained-state requirements are resolved.
 
-Stage selection filters all attempts at the exact invocation/step; Run selection
-narrows further. Follow live clears both filters and rejoins the active invocation
-and the displayed tail. Scrolling suspends following. Keep the plan and output in
-the same workspace, retaining inspection through Task/repository navigation and
-cancelling reads when hidden. No new command, DTO, provider control or persistence.
-
-Done when focused Swift tests prove independent live/history progress, overlap
-and revision merging, exact filters across transitions and auxiliary Runs, failed
-and superseded reads, reset/reload, and visible output alongside the plan. Render
-and inspect the integrated view. This is local desktop proof; automatic polling,
-bounded discovery/state, complete capture, connected diagram, exact human Session
-links and the full configured human demonstration remain required in this PR.
+Done when a focused Swift proof selects repeated-name custom stages through the
+rendered controls, follows an exact Iterate target, retains retry attempts, and
+inspects completed and missing-plan invocations. Render and inspect the complete
+diagram and its placement beside attempts above the output feed. This slice does
+not establish automatic polling, complete capture, cross-Run observation ordering,
+exact checkpoint Session navigation, or the configured human demonstration.
 
 ## Remaining slices and full Done When
 
-1. Connect the existing output read to the desktop Watch inspector: feed,
-   history/live merging, filters and Follow live. Keep plan and output in the
-   existing Task workspace; prove the visible behavior with Swift tests.
-2. Resolve bounded discovery/initialization/state for visible polling, complete
-   capture and provider-specific configured proof, and exact human Session links.
-3. Finish the connected diagram and configured desktop demonstration, including
-   transitions, auxiliary Runs, Iterate and completed history; enter the human gate.
+1. Bound discovery, initialization and retained state before enabling visible
+   polling. Preserve contiguous cross-Run observation order in the existing feed.
+2. Finish complete capture, provider-specific configured proof and exact human
+   Session links through the shared Session navigation.
+3. Demonstrate the connected diagram and feed through the configured desktop,
+   including transitions, auxiliary Runs, Iterate and completed history; enter
+   the human gate. The local diagram/feed proofs do not satisfy that gate.
 
 The configured demo must show autonomous text/tool output before completion, a
 stage transition without reopening, inspection of the earlier stage and Follow
@@ -194,6 +188,25 @@ owned by the pinned lifecycle. No multi-Task dashboard, graph editing, or remote
 transport expansion is in scope.
 
 ## Evidence ledger
+
+- 2026-09-24 connected diagram slice: replaced the stage List with native
+  selectable nodes grouped by retained ancestry. Measured node anchors draw
+  dashed plan-order connectors and solid recorded transitions, including exact
+  Iterate returns and same-stage retries. Native stage/transition controls use
+  the retained Store's existing selection and filtering; arrow commands select
+  adjacent expanded stages. No reader, DTO, durable model or provider control
+  changed. Empty historical plans stay explicit; settlement never manufactures
+  stage completion. The diagram identity resets its geometry on invocation
+  changes while inspection stays in the navigation-owned Store.
+- Three focused tests pass (the rendering test has two cases), including
+  repeated-name navigation, arrow command callbacks, exact Iterate/retry targets,
+  separate attempts, completed history and missing plans. The Mac product links.
+  Inspected both the full diagram and integrated workspace PNGs; the plan now
+  has enough minimum height to expose the recorded return path beside attempts
+  while preserving the output pane. See `watch-diagram-proof.md`. These are
+  local rendered-fixture/control proofs, not configured keyboard/scroll input
+  or the full human demo. Bounded discovery/state, polling, contiguous cross-Run
+  grouping, complete capture and exact checkpoint Session navigation remain open.
 
 - 2026-09-24 desktop feed review fixed native tool-result folding: Codex results
   previously erased command/input, while Claude results in another message left

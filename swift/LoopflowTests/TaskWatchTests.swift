@@ -10,6 +10,46 @@ import ViewInspector
 @MainActor
 @Suite("Task Watch")
 struct TaskWatchTests {
+    @Test("Diagram selects exact custom stages and recorded return targets without inferring completion")
+    func diagramNavigation() async throws {
+        var data = try #require(JSONSerialization.jsonObject(with: fixture()) as? [String: Any])
+        var invocations = try #require(data["invocations"] as? [[String: Any]])
+        var stages = try #require(invocations[0]["stages"] as? [[String: Any]])
+        stages[1]["name"] = "implement"
+        invocations[0]["stages"] = stages
+        data["invocations"] = invocations
+        let store = TaskWatchStore()
+        await store.refresh(issue: "LOO-293", query: query(try JSONSerialization.data(withJSONObject: data)))
+        let diagram = TaskWatchDiagram(store: store)
+        _ = try diagram.inspect().find(text: "custom › slice")
+        _ = try diagram.inspect().find(text: "Human checkpoint · iterated · 1 attempt")
+        _ = try diagram.inspect().find(text: "op · Not entered · 0 attempts")
+        try diagram.inspect().find(button: "2. implement").tap()
+        #expect(store.stepIndex == 1)
+        #expect(store.stage?.attempts.first?.runId == "run-review")
+        #expect(store.filtersStage && !store.followsOutput)
+        try diagram.inspect().find(button: "2. implement").callOnMoveCommand(.down)
+        #expect(store.stepIndex == 2)
+        try diagram.inspect().find(button: "3. pr publish").callOnMoveCommand(.up)
+        #expect(store.stepIndex == 1)
+        try diagram.inspect().find(button: "Iterated → stage 1 · iteration 1").tap()
+        #expect(store.stepIndex == 0)
+        #expect(store.stage?.attempts.map(\.runId) == ["run-first", "run-failed", "run-retry"])
+        try diagram.inspect().find(button: "Retried → stage 1 · iteration 1").tap()
+        #expect(store.stage?.attempts.count == 3)
+
+        data["active_stage"] = NSNull()
+        invocations[0]["settlement"] = "completed"
+        data["invocations"] = invocations
+        await store.refresh(issue: "LOO-293", query: query(try JSONSerialization.data(withJSONObject: data)))
+        #expect(store.invocation?.settlement == .completed)
+        _ = try diagram.inspect().find(text: "op · Not entered · 0 attempts")
+        try diagram.inspect().find(button: "3. pr publish").tap()
+        #expect(store.stage?.attempts.isEmpty == true)
+        store.selectInvocation("old-flow")
+        _ = try diagram.inspect().find(text: "No retained stages")
+    }
+
     @Test("Inspection survives transitions, repeated names, completion, and failed refreshes")
     func selectionAndStaleEvidence() async throws {
         let store = TaskWatchStore()
@@ -186,6 +226,19 @@ struct TaskWatchTests {
                 ? destination.deletingPathExtension().appendingPathExtension("workspace.png")
                 : destination
             try png.write(to: output)
+            if !inWorkspace {
+                let diagram = NSHostingView(rootView: TaskWatchDiagram(store: store)
+                    .frame(width: 360, height: 540)
+                    .environment(\.palette, LoopflowPalette.light))
+                window.setContentSize(NSSize(width: 360, height: 540))
+                window.contentView = diagram
+                diagram.layoutSubtreeIfNeeded()
+                window.displayIfNeeded()
+                let diagramBitmap = try #require(diagram.bitmapImageRepForCachingDisplay(in: diagram.bounds))
+                diagram.cacheDisplay(in: diagram.bounds, to: diagramBitmap)
+                let diagramPNG = try #require(diagramBitmap.representation(using: .png, properties: [:]))
+                try diagramPNG.write(to: destination.deletingPathExtension().appendingPathExtension("plan.png"))
+            }
         }
     }
 

@@ -111,8 +111,11 @@ registry visibility. Authored `wave/<name>/GOAL.md` files still appear before
 their first registration.
 
 Select a Task in Work, Roadmap, or Wave detail, then choose **Watch**. Inspect
-its retained invocation plan, select stages with the keyboard or pointer, and
-follow recorded Iterate links to their return stages. Attempts retain their
+its retained invocation diagram, grouped by flow ancestry. Dashed lines show
+plan order; solid arrows show recorded transitions, including Iterate returns
+and same-stage retries. Select a stage with the keyboard or pointer to filter
+its output; arrow keys move between stages. Follow Iterate links to their exact
+return stages. Attempts retain their
 Run IDs, provider labels, readiness summaries, and failures. The invocation
 picker includes earlier flows; **All Task Runs** includes unassigned Runs.
 Watch works without a worker or worktree. Changes and Terminal still need the

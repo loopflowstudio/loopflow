@@ -1,0 +1,34 @@
+Building for debugging...
+[0/6] Write sources
+[2/6] Write swift-version--58304C5D6DBC2206.txt
+[4/9] Compiling LoopflowMac TaskWatchDiagram.swift
+[5/9] Emitting module LoopflowMac
+[6/9] Compiling LoopflowMac TaskWatchView.swift
+[6/11] Write Objects.LinkFileList
+[7/11] Linking LoopflowMac
+[8/11] Applying LoopflowMac
+[10/13] Emitting module LoopflowTests
+[11/13] Compiling LoopflowTests TaskWatchTests.swift
+[11/13] Write Objects.LinkFileList
+[12/13] Linking LoopflowSwiftPackageTests
+Build complete! (3.17s)
+Test Suite 'Selected tests' started at 2026-09-24 07:52:16.104.
+Test Suite 'LoopflowSwiftPackageTests.xctest' started at 2026-09-24 07:52:16.105.
+Test Suite 'LoopflowSwiftPackageTests.xctest' passed at 2026-09-24 07:52:16.105.
+	 Executed 0 tests, with 0 failures (0 unexpected) in 0.000 (0.000) seconds
+Test Suite 'Selected tests' passed at 2026-09-24 07:52:16.105.
+	 Executed 0 tests, with 0 failures (0 unexpected) in 0.000 (0.001) seconds
+◇ Test run started.
+↳ Testing Library Version: 1501
+↳ Target Platform: arm64e-apple-macos14.0
+◇ Suite "Task Watch" started.
+◇ Test "Diagram selects exact custom stages and recorded return targets without inferring completion" started.
+◇ Test "Inspection survives transitions, repeated names, completion, and failed refreshes" started.
+◇ Test "Watch renders retained attempts alone and inside the Work workspace" started.
+◇ Test case passing 1 argument inWorkspace → false to "Watch renders retained attempts alone and inside the Work workspace" started.
+◇ Test case passing 1 argument inWorkspace → true to "Watch renders retained attempts alone and inside the Work workspace" started.
+✔ Test "Diagram selects exact custom stages and recorded return targets without inferring completion" passed after 0.203 seconds.
+✔ Test "Inspection survives transitions, repeated names, completion, and failed refreshes" passed after 0.246 seconds.
+✔ Test "Watch renders retained attempts alone and inside the Work workspace" with 2 test cases passed after 0.835 seconds.
+✔ Suite "Task Watch" passed after 0.835 seconds.
+✔ Test run with 3 tests in 1 suite passed after 0.835 seconds.

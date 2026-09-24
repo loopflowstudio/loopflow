@@ -13,7 +13,7 @@ struct TaskWatchView: View {
 
     var body: some View {
         VSplitView {
-            plan.frame(minHeight: 180, idealHeight: 310)
+            plan.frame(minHeight: 360, idealHeight: 440)
             TaskWatchOutputView(store: store, onHistory: {
                 store.followsOutput = false
                 loadHistory = true
@@ -25,7 +25,7 @@ struct TaskWatchView: View {
                 reloadOutput = true
                 refresh += 1
             })
-            .frame(minHeight: 180, idealHeight: 350)
+            .frame(minHeight: 180, idealHeight: 280)
         }
         .foregroundStyle(palette.text)
         .background(palette.background)
@@ -94,7 +94,8 @@ struct TaskWatchView: View {
                     .padding(.bottom, Spacing.sm)
                     Divider()
                     HSplitView {
-                        stages.frame(minWidth: 260, idealWidth: 310, maxWidth: 390)
+                        TaskWatchDiagram(store: store)
+                            .frame(minWidth: 280, idealWidth: 330, maxWidth: 420)
                         stageDetail.frame(minWidth: 350, maxWidth: .infinity, maxHeight: .infinity)
                     }
                 }
@@ -132,39 +133,6 @@ struct TaskWatchView: View {
                 Spacer()
             }
         }
-    }
-
-    private var stages: some View {
-        List(selection: Binding(get: { store.stepIndex }, set: { store.inspectStage($0) })) {
-            if let invocation = store.invocation {
-                ForEach(Array(invocation.stages.enumerated()), id: \.element.stepIndex) { index, stage in
-                    VStack(alignment: .leading, spacing: Spacing.xs) {
-                        if index > 0 {
-                            Image(systemName: "arrow.down")
-                                .foregroundStyle(palette.textSecondary)
-                                .accessibilityHidden(true)
-                        }
-                        Label("\(stage.stepIndex + 1). \(stage.name)", systemImage: icon(stage))
-                            .font(Typography.body(12).weight(.semibold))
-                        Text("\(stage.human ? "Human checkpoint" : stage.kind.rawValue) · \(stage.attempts.count) \(stage.attempts.count == 1 ? "attempt" : "attempts")")
-                            .font(Typography.caption(10))
-                        HStack {
-                            if isActive(stage) {
-                                Label("Current stage", systemImage: "location.fill")
-                            }
-                            Text(stage.attempts.last?.state.rawValue ?? "Not entered")
-                        }
-                        .font(Typography.caption(10))
-                        .foregroundStyle(palette.textSecondary)
-                    }
-                    .padding(.vertical, Spacing.xs)
-                    .tag(stage.stepIndex)
-                    .accessibilityElement(children: .combine)
-                }
-            }
-        }
-        .listStyle(.sidebar)
-        .accessibilityLabel("Recorded stages")
     }
 
     @ViewBuilder
@@ -226,11 +194,6 @@ struct TaskWatchView: View {
         } else {
             ContentUnavailableView("Select a recorded stage", systemImage: "list.bullet")
         }
-    }
-
-    private func isActive(_ stage: TaskWatchStage) -> Bool {
-        store.snapshot?.activeStage?.invocationId == store.invocationId
-            && store.snapshot?.activeStage?.stepIndex == stage.stepIndex
     }
 
     private func icon(_ stage: TaskWatchStage) -> String {

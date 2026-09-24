@@ -1235,6 +1235,7 @@ mod planning_tests {
             .await
             .unwrap();
         let mut harness = UnusedHarness::default();
+        let history = store.task_events_after(&task.id, 0).await.unwrap();
 
         let error = super::finish_claimed_failure(
             &store,
@@ -1249,11 +1250,7 @@ mod planning_tests {
         .unwrap_err();
 
         assert!(error.to_string().contains("provider stream ended"));
-        assert!(store
-            .task_events_after(&task.id, 0)
-            .await
-            .unwrap()
-            .is_empty());
+        assert_eq!(store.task_events_after(&task.id, 0).await.unwrap(), history);
         assert!(harness.stopped);
         let position = store.flow_position(&task.id).await.unwrap().unwrap();
         assert!(position.claim.is_none());
@@ -1340,6 +1337,7 @@ mod planning_tests {
             outcome => panic!("unexpected claim outcome: {outcome:?}"),
         };
 
+        let history = store.task_events_after(&task.id, 0).await.unwrap();
         super::record_claimed_failure(
             &store,
             &task.id,
@@ -1348,11 +1346,7 @@ mod planning_tests {
         )
         .await;
 
-        assert!(store
-            .recent_task_events(&task.id, 10)
-            .await
-            .unwrap()
-            .is_empty());
+        assert_eq!(store.task_events_after(&task.id, 0).await.unwrap(), history);
         let position = store.flow_position(&task.id).await.unwrap().unwrap();
         assert!(position.claim.is_none());
         assert!(position.failure.is_none());

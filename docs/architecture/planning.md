@@ -66,7 +66,12 @@ A Flow is an ordered graph of:
 Flow YAML is the authored definition. An active Task Flow persists its expanded
 invocation and exact cursor in `FlowPosition`. A Task worker executes that saved
 position directly and settles through its versioned claim. Completion removes
-the invocation; interruption retains the cursor. Wave's in-memory Playhead,
+the active position; interruption retains the cursor. Task-local events preserve
+the selected expanded plan, exact stage/Run bindings, human decisions, and flow
+settlement in the same transactions. That history survives completion and restart
+without becoming execution authority or waking parent controllers. Stages use
+invocation ID and step index, with iteration and Run ID distinguishing attempts;
+repeated skill names never establish identity. Wave's in-memory Playhead,
 continuation queue, and body events do not participate in Task execution.
 
 Direct TTY flows can use the current conversation for a human node. Headless

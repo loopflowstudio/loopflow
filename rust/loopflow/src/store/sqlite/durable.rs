@@ -11,8 +11,10 @@ use crate::id::WaveId;
 use crate::store::rows::now_unix;
 use crate::store::{StoreError, StoreResult};
 use crate::work::project::{Project, ProjectEventKind};
+use crate::work::task::flow_history::{
+    TaskFlowEvent, TaskFlowSettlement, TaskFlowStage, TaskFlowTransition,
+};
 use crate::work::task::{Task, TaskEventKind};
-use crate::work::task::flow_history::{TaskFlowEvent, TaskFlowSettlement, TaskFlowStage, TaskFlowTransition};
 
 use super::SqliteStore;
 
@@ -206,6 +208,18 @@ impl SqliteStore {
                 },
             });
         }
+        if position.failure.is_some() {
+            let stage = TaskFlowStage::from(&position);
+            super::children::insert_task_flow_event_in(
+                &tx,
+                task_id,
+                TaskFlowEvent::Transition {
+                    from: stage.clone(),
+                    to: stage,
+                    reason: TaskFlowTransition::Retried,
+                },
+            )?;
+        }
         tx.commit()?;
         Ok(TaskWorkerClaimOutcome::Claimed(claim))
     }
@@ -294,10 +308,14 @@ impl SqliteStore {
             return Err(stale_task_worker(task_id));
         }
         let position = flow_position_in(&tx, task_id)?.ok_or(StoreError::NotFound)?;
-        super::children::insert_task_flow_event_in(&tx, task_id, TaskFlowEvent::RunBound {
-            stage: TaskFlowStage::from(&position),
-            run_id: worker_run_id.clone(),
-        })?;
+        super::children::insert_task_flow_event_in(
+            &tx,
+            task_id,
+            TaskFlowEvent::RunBound {
+                stage: TaskFlowStage::from(&position),
+                run_id: worker_run_id.clone(),
+            },
+        )?;
         tx.commit()?;
         Ok(bound)
     }
@@ -1063,10 +1081,14 @@ pub(super) fn block_task_flow_in(
         return Err(stale_task_worker(task_id));
     }
     let position = flow_position_in(conn, task_id)?.ok_or(StoreError::NotFound)?;
-    super::children::insert_task_flow_event_in(conn, task_id, TaskFlowEvent::StageBlocked {
-        stage: TaskFlowStage::from(&position),
-        failure: failure.clone(),
-    })?;
+    super::children::insert_task_flow_event_in(
+        conn,
+        task_id,
+        TaskFlowEvent::StageBlocked {
+            stage: TaskFlowStage::from(&position),
+            failure: failure.clone(),
+        },
+    )?;
     Ok(position)
 }
 
@@ -1140,7 +1162,13 @@ pub(super) fn settle_task_worker_in(
     {
         return Err(stale_task_worker(task_id));
     }
-    record_flow_position_in(conn, task_id, Some(&previous), next, TaskFlowTransition::Advanced)?;
+    record_flow_position_in(
+        conn,
+        task_id,
+        Some(&previous),
+        next,
+        TaskFlowTransition::Advanced,
+    )?;
     flow_position_in(conn, task_id)?.ok_or(StoreError::NotFound)
 }
 
@@ -1168,6 +1196,91 @@ pub(super) fn finish_task_flow_in(
     )? != 1
     {
         return Err(stale_task_worker(task_id));
+    }
+    Ok(())
+}
+
+pub(super) fn record_flow_settlement_in(
+    conn: &Connection,
+    task_id: &TaskId,
+    outcome: TaskFlowSettlement,
+) -> StoreResult<()> {
+    if let Some(position) = flow_position_in(conn, task_id)? {
+        super::children::insert_task_flow_event_in(
+            conn,
+            task_id,
+            TaskFlowEvent::InvocationSettled {
+                stage: TaskFlowStage::from(&position),
+                outcome,
+            },
+        )?;
+    }
+    Ok(())
+}
+
+fn record_flow_position_in(
+    conn: &Connection,
+    task_id: &TaskId,
+    previous: Option<&FlowPosition>,
+    next: &FlowPosition,
+    reason: TaskFlowTransition,
+) -> StoreResult<()> {
+    let append = |event| super::children::insert_task_flow_event_in(conn, task_id, event);
+    let same_invocation = previous.is_some_and(|old| old.invocation.id == next.invocation.id);
+    if !same_invocation {
+        if let Some(old) = previous {
+            append(TaskFlowEvent::InvocationSettled {
+                stage: TaskFlowStage::from(old),
+                outcome: TaskFlowSettlement::Replaced,
+            })?;
+        }
+        append(TaskFlowEvent::InvocationSelected {
+            invocation: next.invocation.clone(),
+        })?;
+    } else if previous.is_some_and(|old| old.invocation != next.invocation) {
+        return Err(StoreError::InvalidData(
+            "a selected Flow plan is immutable; select a new invocation".to_string(),
+        ));
+    }
+    let stage = TaskFlowStage::from(next);
+    let moved = previous.is_none_or(|old| TaskFlowStage::from(old) != stage);
+    if let Some(old) = previous.filter(|_| same_invocation) {
+        if moved || reason != TaskFlowTransition::Advanced {
+            append(TaskFlowEvent::Transition {
+                from: TaskFlowStage::from(old),
+                to: stage.clone(),
+                reason,
+            })?;
+        }
+    }
+    if moved {
+        append(TaskFlowEvent::StageEntered {
+            stage: stage.clone(),
+        })?;
+    }
+    if let Some(run_id) = &next.session_run_id {
+        if moved || previous.is_none_or(|old| old.session_run_id.as_ref() != Some(run_id)) {
+            append(TaskFlowEvent::RunBound {
+                stage: stage.clone(),
+                run_id: run_id.clone(),
+            })?;
+        }
+    }
+    if let Some(summary) = &next.ready_summary {
+        if moved || previous.is_none_or(|old| old.ready_summary.as_ref() != Some(summary)) {
+            append(TaskFlowEvent::StageReady {
+                stage: stage.clone(),
+                summary: summary.clone(),
+            })?;
+        }
+    }
+    if let Some(failure) = &next.failure {
+        if moved || previous.is_none_or(|old| old.failure.as_ref() != Some(failure)) {
+            append(TaskFlowEvent::StageBlocked {
+                stage,
+                failure: failure.clone(),
+            })?;
+        }
     }
     Ok(())
 }
@@ -1428,13 +1541,16 @@ mod durable_store_tests {
     use std::thread;
 
     use crate::durable::{
-        FlowPosition, ProjectId, RunId, TaskFlowBlocker, TaskId, TaskWorkerClaimOutcome,
-        TaskWorkerOwner,
+        Author, FlowPosition, ProjectId, RunId, TaskFlowBlocker, TaskId, TaskWorkerClaim,
+        TaskWorkerClaimOutcome, TaskWorkerOwner,
     };
     use crate::id::{ExecId, TraceId, WaveId};
     use crate::planning::{LinearIssueId, LinearProjectId, ProjectPlan, TaskPlan};
     use crate::store::sqlite::SqliteStore;
     use crate::work::project::Project;
+    use crate::work::task::flow_history::{
+        TaskFlowEvent, TaskFlowSettlement, TaskFlowStage, TaskFlowTransition,
+    };
     use crate::work::task::{PmWritebackState, Task, TaskEventKind, TaskPr, TaskPrId};
 
     fn store_with_task() -> (tempfile::TempDir, SqliteStore, TaskId) {
@@ -1547,6 +1663,226 @@ mod durable_store_tests {
             pid,
             started_at: 1_700_000_000,
         }
+    }
+
+    fn flow_history(store: &SqliteStore, task_id: &TaskId) -> Vec<TaskFlowEvent> {
+        store
+            .task_events_after(task_id, 0)
+            .unwrap()
+            .into_iter()
+            .filter_map(|event| match event.kind {
+                TaskEventKind::Flow { event } => Some(*event),
+                _ => None,
+            })
+            .collect()
+    }
+
+    fn bind_worker(
+        store: &SqliteStore,
+        position: &FlowPosition,
+        run_id: &RunId,
+    ) -> TaskWorkerClaim {
+        let worker = owner(300);
+        let TaskWorkerClaimOutcome::Claimed(claim) = store
+            .claim_task_worker(
+                &position.task_id,
+                position.version,
+                &worker,
+                time::OffsetDateTime::now_utc(),
+            )
+            .unwrap()
+        else {
+            panic!("test position must be available");
+        };
+        store
+            .bind_task_worker_run(&position.task_id, &claim, run_id, &worker)
+            .unwrap()
+    }
+
+    #[test]
+    fn flow_history_preserves_repeated_skills_iterate_retries_and_completion() {
+        let (dir, store, task_id) = store_with_task();
+        let task = store.task(&task_id).unwrap().unwrap();
+        let mut initial = autonomous_position(&task_id);
+        let mut human = initial.invocation.steps[0].clone();
+        let crate::engine::ConcreteStep::Skill(ref mut skill) = human else {
+            unreachable!()
+        };
+        skill.skill = crate::engine::Skill::named("review");
+        skill.policy.human = true;
+        skill.policy.id = Some("review".into());
+        initial
+            .invocation
+            .steps
+            .push(initial.invocation.steps[0].clone());
+        initial.invocation.steps.push(human);
+        let plan = initial.invocation.clone();
+        let mut position = store.set_flow_position(&task_id, &initial).unwrap();
+        let first = RunId::new();
+        let second = RunId::new();
+        for run_id in [&first, &second] {
+            let bound = bind_worker(&store, &position, run_id);
+            position.step_index += 1;
+            position = store
+                .settle_task_worker(&task, &bound, &position, None)
+                .unwrap();
+        }
+        let review = RunId::new();
+        position.session_run_id = Some(review.clone());
+        position.ready_summary = Some("Inspect repeated steps".into());
+        position = store.set_flow_position(&task_id, &position).unwrap();
+        let mut next = position.clone();
+        next.step_index = 1;
+        next.iteration = 1;
+        next.session_run_id = None;
+        next.ready_summary = None;
+        position = store
+            .iterate_human_task_boundary(&task, &position, &next, &Author::User, "Fix it")
+            .unwrap();
+        let failed_run = RunId::new();
+        let bound = bind_worker(&store, &position, &failed_run);
+        position = store
+            .block_task_flow(
+                &task_id,
+                &bound,
+                &TaskFlowBlocker {
+                    reason: "provider disconnected".into(),
+                    restart_required: false,
+                    observed_at: time::OffsetDateTime::now_utc(),
+                },
+            )
+            .unwrap();
+        position = store
+            .retry_task_flow(&task_id, &position, &Author::User, "Retry")
+            .unwrap();
+        let retry = RunId::new();
+        let bound = bind_worker(&store, &position, &retry);
+        position.step_index = 2;
+        position = store
+            .settle_task_worker(&task, &bound, &position, None)
+            .unwrap();
+        position.session_run_id = Some(RunId::new());
+        position.ready_summary = Some("Ready again".into());
+        position = store.set_flow_position(&task_id, &position).unwrap();
+        store
+            .finish_human_task_boundary(&task, &position, "Approved")
+            .unwrap();
+        assert!(store.flow_position(&task_id).unwrap().is_none());
+
+        // Reopening the store must retain the exact expansion after cursor deletion.
+        drop(store);
+        let store = SqliteStore::new(&dir.path().join("loopflow.db")).unwrap();
+        let history = flow_history(&store, &task_id);
+        assert_eq!(
+            history[0],
+            TaskFlowEvent::InvocationSelected {
+                invocation: plan.clone()
+            }
+        );
+        let bindings = history
+            .iter()
+            .filter_map(|event| match event {
+                TaskFlowEvent::RunBound { stage, run_id } => {
+                    Some((stage.step_index, stage.iteration, run_id.clone()))
+                }
+                _ => None,
+            })
+            .collect::<Vec<_>>();
+        assert_eq!(
+            &bindings[..5],
+            &[
+                (0, 0, first),
+                (1, 0, second),
+                (2, 0, review),
+                (1, 1, failed_run),
+                (1, 1, retry),
+            ]
+        );
+        assert!(history.contains(&TaskFlowEvent::Transition {
+            from: TaskFlowStage {
+                invocation_id: plan.id.clone(),
+                step_index: 2,
+                iteration: 0
+            },
+            to: TaskFlowStage {
+                invocation_id: plan.id.clone(),
+                step_index: 1,
+                iteration: 1
+            },
+            reason: TaskFlowTransition::Iterated,
+        }));
+        assert!(history.iter().any(|event| matches!(event, TaskFlowEvent::Transition { from, to, reason: TaskFlowTransition::Retried } if from == to)));
+        assert_eq!(
+            history.last(),
+            Some(&TaskFlowEvent::InvocationSettled {
+                stage: TaskFlowStage::from(&position),
+                outcome: TaskFlowSettlement::Approved,
+            })
+        );
+        let conn = rusqlite::Connection::open(dir.path().join("loopflow.db")).unwrap();
+        let parent_flow_facts: i64 = conn
+            .query_row(
+                "SELECT COUNT(*) FROM observation_outbox o JOIN task_events e
+             ON o.source_kind='task' AND o.source_id=e.task_id AND o.event_id=e.id
+             WHERE e.task_id=?1 AND json_extract(e.kind_json, '$.kind')='flow'",
+                [task_id.as_str()],
+                |row| row.get(0),
+            )
+            .unwrap();
+        assert_eq!(parent_flow_facts, 0);
+    }
+
+    #[test]
+    fn flow_history_retains_restarted_plans_without_accepting_stale_writes() {
+        let (_dir, store, task_id) = store_with_task();
+        let task = store.task(&task_id).unwrap().unwrap();
+        let old = store
+            .set_flow_position(&task_id, &autonomous_position(&task_id))
+            .unwrap();
+        let bound = bind_worker(&store, &old, &RunId::new());
+        store
+            .restart_task_flow(&task, &Author::User, "Start again", "checkpoint")
+            .unwrap();
+        let new = store
+            .set_flow_position(&task_id, &autonomous_position(&task_id))
+            .unwrap();
+        let history = flow_history(&store, &task_id);
+        assert_ne!(old.invocation.id, new.invocation.id);
+        assert!(history.contains(&TaskFlowEvent::InvocationSettled {
+            stage: TaskFlowStage::from(&old),
+            outcome: TaskFlowSettlement::Replaced,
+        }));
+        assert!(history.contains(&TaskFlowEvent::InvocationSelected {
+            invocation: new.invocation.clone()
+        }));
+        assert!(store.finish_task_flow(&task, &bound, None).is_err());
+        assert_eq!(flow_history(&store, &task_id), history);
+        assert_eq!(store.flow_position(&task_id).unwrap(), Some(new));
+    }
+
+    #[test]
+    fn flow_history_and_position_roll_back_together() {
+        let (dir, store, task_id) = store_with_task();
+        let position = store
+            .set_flow_position(&task_id, &autonomous_position(&task_id))
+            .unwrap();
+        let history = flow_history(&store, &task_id);
+        let mut altered = position.clone();
+        altered.invocation.flow = "mutated plan".into();
+        assert!(store.set_flow_position(&task_id, &altered).is_err());
+        assert_eq!(
+            store.flow_position(&task_id).unwrap(),
+            Some(position.clone())
+        );
+        assert_eq!(flow_history(&store, &task_id), history);
+
+        let conn = rusqlite::Connection::open(dir.path().join("loopflow.db")).unwrap();
+        conn.execute_batch("CREATE TRIGGER reject_history BEFORE INSERT ON task_events BEGIN SELECT RAISE(ABORT, 'history unavailable'); END;").unwrap();
+        let mut next = position.clone();
+        next.iteration += 1;
+        assert!(store.set_flow_position(&task_id, &next).is_err());
+        assert_eq!(store.flow_position(&task_id).unwrap(), Some(position));
+        assert_eq!(flow_history(&store, &task_id), history);
     }
 
     #[test]
@@ -1672,7 +2008,12 @@ mod durable_store_tests {
         assert!(store
             .settle_task_worker(&task, &bound, &next, Some("advanced"))
             .is_err());
-        let events = store.task_events_after(&work, 0).unwrap();
+        let events = store
+            .task_events_after(&work, 0)
+            .unwrap()
+            .into_iter()
+            .filter(|event| !matches!(event.kind, TaskEventKind::Flow { .. }))
+            .collect::<Vec<_>>();
         assert_eq!(events.len(), 1);
         assert!(matches!(
             &events[0].kind,
@@ -1706,6 +2047,7 @@ mod durable_store_tests {
         assert!(store
             .finish_task_flow(&task, &claim, Some("finished"))
             .is_err());
+        let before_finish = flow_history(&store, &work);
         store
             .finish_task_flow(&task, &bound, Some("finished"))
             .unwrap();
@@ -1713,7 +2055,21 @@ mod durable_store_tests {
         assert!(store
             .finish_task_flow(&task, &bound, Some("finished"))
             .is_err());
-        let events = store.task_events_after(&work, 0).unwrap();
+        let history = flow_history(&store, &work);
+        assert_eq!(history.len(), before_finish.len() + 1);
+        assert_eq!(
+            history.last(),
+            Some(&TaskFlowEvent::InvocationSettled {
+                stage: TaskFlowStage::from(&position),
+                outcome: TaskFlowSettlement::Completed,
+            })
+        );
+        let events = store
+            .task_events_after(&work, 0)
+            .unwrap()
+            .into_iter()
+            .filter(|event| !matches!(event.kind, TaskEventKind::Flow { .. }))
+            .collect::<Vec<_>>();
         assert_eq!(events.len(), 1);
         assert!(matches!(
             &events[0].kind,
@@ -1760,7 +2116,12 @@ mod durable_store_tests {
         assert!(failed.claim.is_none());
         assert_eq!(failed.failure.as_ref(), Some(&failure));
         assert!(store.block_task_flow(&work, &first, &failure).is_err());
-        let events = store.task_events_after(&work, 0).unwrap();
+        let events = store
+            .task_events_after(&work, 0)
+            .unwrap()
+            .into_iter()
+            .filter(|event| !matches!(event.kind, TaskEventKind::Flow { .. }))
+            .collect::<Vec<_>>();
         assert_eq!(events.len(), 1);
         assert!(matches!(
             &events[0].kind,
@@ -1780,6 +2141,14 @@ mod durable_store_tests {
             outcome => panic!("unexpected claim outcome: {outcome:?}"),
         };
         assert_eq!(retried.generation, 3);
+        assert_eq!(
+            flow_history(&store, &work).last(),
+            Some(&TaskFlowEvent::Transition {
+                from: TaskFlowStage::from(&position),
+                to: TaskFlowStage::from(&position),
+                reason: TaskFlowTransition::Retried,
+            })
+        );
         assert!(store
             .flow_position(&work)
             .unwrap()

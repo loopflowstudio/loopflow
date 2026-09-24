@@ -24,6 +24,7 @@ impl From<&FlowPosition> for TaskFlowStage {
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize)]
 #[serde(rename_all = "snake_case")]
+#[non_exhaustive]
 pub enum TaskFlowTransition {
     Advanced,
     Approved,
@@ -33,6 +34,7 @@ pub enum TaskFlowTransition {
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize)]
 #[serde(rename_all = "snake_case")]
+#[non_exhaustive]
 pub enum TaskFlowSettlement {
     Completed,
     Approved,
@@ -42,6 +44,7 @@ pub enum TaskFlowSettlement {
 
 #[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
 #[serde(tag = "kind", rename_all = "snake_case")]
+#[non_exhaustive]
 pub enum TaskFlowEvent {
     InvocationSelected {
         invocation: QueuedInvocation,

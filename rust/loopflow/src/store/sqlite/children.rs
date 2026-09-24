@@ -21,6 +21,7 @@ use crate::store::{StoreError, StoreResult};
 use crate::work::project::{
     ChildEventPayload, ObservationOutboxRow, Project, ProjectEvent, ProjectEventKind, ProjectId,
 };
+use crate::work::task::flow_history::{TaskFlowSettlement, TaskFlowTransition};
 use crate::work::task::{
     AfterMerge, CiObservation, GithubObservation, GithubPr, LinearObservationApply,
     LinearObservationOutcome, PrMergeRequest, PrPhase, PrPresentation, PrPublication, Task,
@@ -250,6 +251,11 @@ impl SqliteStore {
             ));
         }
         validate_task_project(&transaction, task)?;
+        super::durable::record_flow_settlement_in(
+            &transaction,
+            &task.id,
+            TaskFlowSettlement::Approved,
+        )?;
         if transaction.execute(
             "DELETE FROM task_flow_positions WHERE task_id=?1 AND position_version=?2",
             params![
@@ -319,7 +325,12 @@ impl SqliteStore {
                 "Task failure changed before retry".to_string(),
             ));
         }
-        let position = super::durable::set_flow_position_in(&transaction, task_id, &next)?;
+        let position = super::durable::set_flow_position_in(
+            &transaction,
+            task_id,
+            &next,
+            TaskFlowTransition::Retried,
+        )?;
         Self::append_steer_in(&transaction, &work, author, reason)?;
         transaction.commit()?;
         Ok(position)
@@ -360,7 +371,12 @@ impl SqliteStore {
         }
         validate_task_project(&transaction, task)?;
         update_task_timestamp_in(&transaction, task)?;
-        let position = super::durable::set_flow_position_in(&transaction, &task.id, next)?;
+        let reason = if steer.is_some() {
+            TaskFlowTransition::Iterated
+        } else {
+            TaskFlowTransition::Approved
+        };
+        let position = super::durable::set_flow_position_in(&transaction, &task.id, next, reason)?;
         if let Some(summary) = progress {
             insert_task_event_in(
                 &transaction,
@@ -398,6 +414,11 @@ impl SqliteStore {
             .optional()?
             .ok_or(StoreError::NotFound)?;
         let work = work_for_child_in(&transaction, &ChildRef::Task(task.id.clone()))?;
+        super::durable::record_flow_settlement_in(
+            &transaction,
+            &task.id,
+            TaskFlowSettlement::Replaced,
+        )?;
         transaction.execute(
             "DELETE FROM task_flow_positions WHERE task_id=?1",
             [task.id.as_str()],
@@ -2284,7 +2305,13 @@ pub(super) fn insert_task_flow_event_in(
     event: crate::work::task::flow_history::TaskFlowEvent,
 ) -> StoreResult<()> {
     let task = conn.query_row(TASK_SELECT, params![task_id.as_str()], map_task_row)?;
-    insert_task_event_in(conn, &task, &TaskEventKind::Flow { event: Box::new(event) })?;
+    insert_task_event_in(
+        conn,
+        &task,
+        &TaskEventKind::Flow {
+            event: Box::new(event),
+        },
+    )?;
     Ok(())
 }
 

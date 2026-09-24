@@ -346,3 +346,53 @@ Historical telemetry association/recovery and repair ownership, closed-obligatio
 continuation and configured acceptance remain open. The scorecard blocker,
 required UI/public proof and two automatic settlements are not resolved by this
 review. No publication, landing or Task completion was performed.
+
+## PR mutation ownership compression review at `95ffe75aab`
+
+No executable reduction selected. The model before and after this pass remains:
+an obligation owns original due opportunities; an execution owner retains
+attempts with selection, verification and outcome. Collapsed opportunities
+reference that owner. `settle` atomically writes product evidence. Physical cron
+receipts retain process results; publisher receipts retain artifact stages and
+public observations. Cron attribution, target exclusion and checkout removal
+protection remain distinct capabilities.
+
+Inspected the accounting types, `begin`, `finish_process`, `settle`, receipt
+validation and history qualification, then followed release preparation through
+commit, `finish_arm_after_rebase`, `ensure_pr`, shared creation, retargeting,
+metadata editing, readiness and auto-merge. Inspected target/checkout inheritance
+and the adjacent Task compensation calls. The complete Task patch was available
+without truncation (642,657 characters); this pass concentrated on those model
+paths and the latest PR mutation change.
+
+Mirrors checked: explicit cron context through CLI/Flow dispatch, release-history
+and disposition output, the history JSON fixture and its round-trip test, Python
+artifact/public receipt types, the PR mutation survival fixture, release README,
+cron host guide, release-evidence direction and current design/report. Repository
+search found no Swift consumer of `ReleaseHistory`, `ReleaseOpportunity` or
+`PublicReleaseReceipt`.
+
+| Candidate | Why retained |
+|---|---|
+| Commit draft creation and shared PR creation | The implementation already removed their overlap in release preparation: commit/push supplies no draft; finalization creates the PR. Ordinary CLI and Flow commit callers still request drafts. Deleting that option would remove their behavior. |
+| PR edit/readiness helpers in `land` and `pr` | Finalization edits the current branch's PR without changing its base; ordinary publication edits an observed PR number including its base. Readiness likewise has branch and numbered targeting. Combining these short helpers would require optional targeting/update modes or change behavior, without removing a domain owner. |
+| `create_pr_from_pushed_branch` and private `create_pr` | Both use one creation command. The former returns the PR identity and local head needed by finalization without repeating Git publication. Inlining it would move that interpretation into its caller, not remove competing creation authority. |
+| Inheritance callback and lock command constructor | The callback carries already-held capabilities into shared PR commands; the constructor serves direct release commands. A generic command runner would add an abstraction without completing the remaining child paths. |
+| Target lock, checkout lease and cron execution descriptor | They protect different scopes. Combining them would conflate mutation exclusion, exact checkout removal and scheduled attribution. |
+| Selection/outcome, process/product, stage/public evidence | Selection exists before success; wrapper exit can disagree with settlement; public read-back establishes more than completed publisher stages. Removing these distinctions would discard recovery or proof. |
+| Frozen covered keys and current collapse links | Historical timing uses saved execution coverage; current links identify catch-up ownership. Neither reconstructs the other across retries. |
+
+Searches found no restored duplicate success-proof wrappers, separate
+`record_verification` writer or Python candidate/publish receipt classes.
+Historical schema-1 process receipts remain required evidence. Task compensation
+still uses ordinary revocation calls; this review does not extend the inheritance
+claim to those paths or to shared Git, notes, tools and worktree subprocesses.
+
+Only this report changed. No API, DTO, field, persisted format or executable
+code changed; no tests or static checks were rerun. Prior focused validation
+remains recorded in [release-pr-mutation-ownership.md](release-pr-mutation-ownership.md).
+Remaining child ownership, historical telemetry linkage and bounded retry,
+dated repair ownership, closed-obligation continuation and configured acceptance
+stay open. The observed scorecard blocker, required UI/public proof and two
+adjacent automatic settlements remain unresolved. No publication, landing or
+Task completion follows from this compression review.

@@ -82,3 +82,11 @@ The probe returns 1 for nil surface, 2 for library initialization failure,
 It opens no visible window and reads/writes no planning or Session records.
 Its `/bin/cat` child is freed with its surface. Earlier nil-surface receipts in
 `navigation-proof.md` remain historical evidence, superseded by these results.
+
+Compression follow-up: checking the existing Task terminal caller exposed one
+lost distinction between disabled and merely unselected views. The extended
+native fixture reproduced manual focus being cleared on resize; the native
+focus update now receives both inputs and preserves manual focus while enabled.
+That same fixture passes after correction. `compress.md` records the exact
+before/after commands; these supersede the earlier focus receipt for current
+source. No rendering configuration or ownership change accompanied this fix.

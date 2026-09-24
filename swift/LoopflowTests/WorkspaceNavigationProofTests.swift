@@ -79,6 +79,20 @@ struct WorkspaceNavigationProofTests {
             try await Task.sleep(for: .milliseconds(20))
         }
         #expect(_terminalText(surface).components(separatedBy: draft).count == 3)
+
+        // Task terminals have no selected-pane binding. Manual focus must
+        // survive a resize while the view remains enabled.
+        host.rootView = GhosttyTerminalView(
+            workingDirectory: NSTemporaryDirectory(), argv: ["/bin/cat"],
+            terminal: identity, surfacePool: pool, isFocused: false
+        ).disabled(false)
+        window.layoutIfNeeded()
+        try await Task.sleep(for: .milliseconds(50))
+        #expect(window.makeFirstResponder(terminal))
+        window.setContentSize(CGSize(width: 540, height: 300))
+        window.layoutIfNeeded()
+        try await Task.sleep(for: .milliseconds(50))
+        #expect(window.firstResponder === terminal)
     }
 
     private func _terminalText(_ surface: ghostty_surface_t) -> String {

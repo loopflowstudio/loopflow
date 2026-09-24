@@ -1250,7 +1250,7 @@ fn submit_does_not_rotate_worktree() {
     let _env = EnvGuard::new(&[("gh", script.as_str()), ("open", noop_open_script())]);
 
     let worktree =
-        create_named_worktree(repo.path(), "sub", None, false, &|_| {}).expect("create worktree");
+        create_named_worktree(repo.path(), "sub", None, &|_| {}).expect("create worktree");
     fs::write(worktree.path.join("feature.txt"), "feature").expect("write feature file");
     let status = Command::new("git")
         .args(["add", "."])

@@ -1011,16 +1011,10 @@ fn release_run_inner(
             &worktree_path(&main_repo, &wt_name),
             "release PR preparation",
         )?;
-        let wt = create_named_worktree(
-            &main_repo,
-            &wt_name,
-            Some(&source_commit),
-            false,
-            &|command| {
-                lock.inherit(command);
-                lease.inherit(command);
-            },
-        )?;
+        let wt = create_named_worktree(&main_repo, &wt_name, Some(&source_commit), &|command| {
+            lock.inherit(command);
+            lease.inherit(command);
+        })?;
         let wt_path = wt.path;
         let wt_branch = wt.branch;
 
@@ -1604,7 +1598,7 @@ fn materialize_exact_source_worktree(
         fs::remove_dir(&path)?;
     }
 
-    let worktree = create_named_worktree(repo, worktree_name, Some(revision), false, &inherit)?;
+    let worktree = create_named_worktree(repo, worktree_name, Some(revision), &inherit)?;
     let observed_head = rev_parse(&worktree.path, "HEAD^{commit}")?;
     if observed_head != expected_commit {
         let _ = worktree_remove_owned(repo, &worktree.path, lease, &inherit);

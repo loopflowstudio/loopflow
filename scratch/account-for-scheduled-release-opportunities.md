@@ -837,6 +837,16 @@ ownership, closed obligations and configured acceptance remain open. See
   and configured acceptance remain open. See
   [release-source-ownership.md](release-source-ownership.md).
 
+- Source ownership compression removed `create_named_worktree`'s obsolete
+  main-sync mode: both production callers already disabled it, and only a test
+  kept the resetting branch alive. Source selection now has one caller-owned
+  path; named creation cannot synchronize/reset main. Updated every direct
+  caller and replaced the old reset test with exact-source/local-source creation
+  plus caller HEAD/branch/index/working-byte preservation (passed, 0.62s).
+  Formatting and all-target Clippy passed. Existing survival proofs were not
+  rerun; Task compensation, telemetry recovery, closed obligations and configured
+  acceptance remain open. See [compression.md](compression.md).
+
 ## Measure
 
 Use the Reliability KR's actual due population, not successful process counts.

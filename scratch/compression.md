@@ -545,3 +545,70 @@ dated repair ownership, closed-obligation continuation and configured acceptance
 remain open. The scorecard blocker, required UI/public proof and two adjacent
 automatic settlements remain unresolved. This review does not approve the branch
 or complete the Task.
+
+## Source ownership compression review at `f8380883e2`
+
+Removed the named-worktree API's obsolete main-sync mode. Before this pass,
+`create_named_worktree` could both materialize a selected source and reset the
+caller's default branch through `sync_main`. Both production call sites passed
+`false`; only a test enabled the mode. After this pass, the helper only creates
+the local checkout. Its caller owns source fetching/selection and explicit branch
+publication. Ordinary placement retains its separate existing synchronization.
+This removes an alternate source-mutation owner, rather than keeping preservation
+dependent on every future caller remembering a boolean.
+
+Deleted `sync_default_base`, its best-effort `sync_main` branch and import, and
+migrated both production callers and all direct test callers. Replaced the test
+that expected main to reset with a real-Git preservation case: origin advances,
+the caller has an unpublished commit and staged/unstaged/untracked work, and
+explicit-source and default-local-source creation both preserve caller HEAD,
+branch, raw index and working bytes. The helper's documentation now describes
+source ownership instead of calling it a compatibility helper. No compatibility
+overload remains. No CLI command, DTO, persisted field or receipt format changed.
+
+The release model remains an obligation containing original due opportunities;
+each execution owner retains attempts with selection, verification and outcome.
+Collapsed opportunities reference that owner. Atomic `settle` owns product
+evidence; physical receipts describe process results; publisher receipts retain
+artifact stages and fresh public observations. Cron attribution, target mutation
+exclusion and exact checkout removal remain distinct capabilities.
+
+Inspected the accounting types and settlement/receipt validation, history
+qualification, release preparation and exact-source materialization, cleanup,
+shared Git creation/removal and ordinary placement. The complete Task patch was
+available without truncation (800,847 characters). Checked CLI/Flow cron context,
+history and disposition output, the history JSON fixture, Python artifact/public
+receipts and descriptor forwarding, direct helper callers, source survival tests,
+release README, cron host guide and release-evidence direction. Searches found no
+Swift consumer of the release-history/opportunity/public-receipt types.
+
+| Candidate | Disposition |
+|---|---|
+| Named creation's main-sync mode | Removed across implementation and callers. Production already selected/fetched source explicitly; the only enabling caller was the obsolete reset test. |
+| Ordinary Git entry points and inheriting variants | Retained. They delegate to one implementation; one offers ordinary public use, the other supplies already-held capabilities. Removing the wrappers would spread callback plumbing without reducing a domain owner. |
+| Ordinary and owned removal | Retained. Independent acquisition protects against surviving children; borrowed removal uses an exact lease already acquired by its caller. The unchecked alternate implementation was already removed by the preceding slice. |
+| Named source creation and ordinary placement | Retained. Release owns exact source and explicit publication; ordinary placement owns its existing branch synchronization. Unifying them would reintroduce implicit publication or mode switches. |
+| Target lock, checkout lease and cron descriptor | Retained for their separate mutation, removal and attribution scopes. Combining them would change authority and independent-scope behavior. |
+| Selection/outcome, process/product and stage/public proof | Retained because selection survives before success, wrapper exit may disagree with settlement, and public observations prove more than completed publisher stages. |
+| Frozen coverage and current collapse links | Retained. Historical timing and intervention evidence cannot be reconstructed from current ownership after retries. |
+
+The simulated review checked that the reduction removes the helper's reset
+branch entirely, while keeping explicit release fetches, the exact-source
+classifier, child inheritance and independent cleanup acquisition. It adds no
+new guard, executor or ownership record. Searches found no restored duplicate
+success-proof wrappers, separate verification writer or Python candidate/publish
+receipt classes. Historical schema-1 physical receipts remain required evidence.
+
+Validation: the focused `worktree_tests`
+`create_named_worktree_preserves_caller_and_uses_selected_source` case passed
+(0.62s execution). `cargo fmt --check` and
+`cargo clippy --all-targets -- -D warnings` passed; Clippy took 26.36s including
+build-lock wait. `git diff --check` passed.
+The preceding twelve source-survival cases remain historical evidence; their
+inheritance paths did not change and were not rerun for this API reduction.
+
+Task compensation, original telemetry linkage and bounded recovery, dated repair
+ownership, closed-obligation continuation and configured acceptance remain open.
+The scorecard blocker, required UI/public proof and two adjacent automatic
+settlements remain unresolved. No installation, cron trigger, production release,
+PM handoff, PR publication, landing or Task completion is part of this pass.

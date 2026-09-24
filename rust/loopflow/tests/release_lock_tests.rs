@@ -370,3 +370,126 @@ exit 92
         assert!(!checkout.exists());
     }
 }
+
+#[test]
+fn surviving_release_hook_retains_target_and_checkout_ownership() {
+    for (phase, kill_controller) in [
+        ("verify", true),
+        ("prepare", true),
+        ("verify", false),
+        ("prepare", false),
+    ] {
+        let state = tempfile::tempdir().unwrap();
+        let gh = "#!/bin/sh\ncase \"$1 $2\" in\n'--version ') exit 0;;\n'run list'|'pr list') echo '[]';;\n'release view') exit 1;;\n*) exit 91;;\nesac\n";
+        let _env = EnvGuard::new(&[("gh", gh)]);
+        let repo = TestRepo::new();
+        fs::create_dir_all(repo.path().join(".lf")).unwrap();
+        fs::write(
+            repo.path().join(".lf/config.yaml"),
+            format!("release:\n  targets:\n    default:\n      completion: tag\n      {phase}: [sh hook.sh]\n"),
+        ).unwrap();
+        let barrier = blocking_mutation(
+            state.path(),
+            &format!("cat hook.sh > '{}/retained-source'", state.path().display()),
+        );
+        let script = format!("pwd > '{}/checkout'\n{barrier}", state.path().display());
+        fs::write(
+            repo.path().join("hook.sh"),
+            if kill_controller {
+                script
+            } else {
+                format!(
+                    "(\n{script}\n) > '{}/descendant.log' 2>&1 &\nexit 1\n",
+                    state.path().display()
+                )
+            },
+        )
+        .unwrap();
+        for args in [
+            vec!["add", ".lf/config.yaml", "hook.sh"],
+            vec!["commit", "-m", "Configure release hook fixture"],
+            vec!["push", "origin", "HEAD"],
+        ] {
+            let output = Command::new("git")
+                .args(args)
+                .current_dir(repo.path())
+                .output()
+                .unwrap();
+            assert!(
+                output.status.success(),
+                "{}",
+                String::from_utf8_lossy(&output.stderr)
+            );
+        }
+        let bytes = fs::read(repo.path().join("hook.sh")).unwrap();
+        let git = |args: &[&str]| {
+            let output = Command::new("git")
+                .args(args)
+                .current_dir(repo.path())
+                .output()
+                .unwrap();
+            assert!(output.status.success(), "{output:?}");
+            output.stdout
+        };
+        fs::write(repo.path().join("local.txt"), "unpublished commit\n").unwrap();
+        git(&["add", "local.txt"]);
+        git(&["commit", "-m", "Keep caller work local"]);
+        fs::write(repo.path().join("local.txt"), "staged caller work\n").unwrap();
+        git(&["add", "local.txt"]);
+        fs::write(repo.path().join("local.txt"), "unstaged caller work\n").unwrap();
+        fs::write(repo.path().join("untracked.txt"), "untracked caller work\n").unwrap();
+        let head = git(&["rev-parse", "HEAD"]);
+        let branch = git(&["branch", "--show-current"]);
+        let index = fs::read(repo.path().join(".git/index")).unwrap();
+        let mut parent = start(&repo, state.path(), &["release", "run", "0.9.1"]);
+        let checkout = PathBuf::from(
+            fs::read_to_string(state.path().join("checkout"))
+                .unwrap()
+                .trim(),
+        );
+        if kill_controller {
+            parent.child.kill().unwrap();
+        } else {
+            let deadline = Instant::now() + Duration::from_secs(20);
+            while parent.child.try_wait().unwrap().is_none() {
+                assert!(Instant::now() < deadline, "hook controller did not exit");
+                thread::sleep(Duration::from_millis(10));
+            }
+        }
+        assert!(!parent.child.wait().unwrap().success());
+        assert_eq!(git(&["rev-parse", "HEAD"]), head);
+        assert_eq!(git(&["branch", "--show-current"]), branch);
+        assert_eq!(fs::read(repo.path().join(".git/index")).unwrap(), index);
+        assert_eq!(
+            fs::read_to_string(repo.path().join("local.txt")).unwrap(),
+            "unstaged caller work\n"
+        );
+        assert_eq!(
+            fs::read_to_string(repo.path().join("untracked.txt")).unwrap(),
+            "untracked caller work\n"
+        );
+        assert!(
+            checkout.exists(),
+            "cleanup removed surviving {phase} hook's checkout"
+        );
+        let contender = release_tag(repo.path(), "0.9.2", None);
+        let removal = worktree_remove(repo.path(), &checkout);
+        fs::write(state.path().join("allow"), "").unwrap();
+        wait_for(&state.path().join("completed"));
+        assert!(
+            matches!(contender, Err(OpsError::ReleaseDeferred { .. })),
+            "{phase}: {contender:?}"
+        );
+        assert!(
+            removal.is_err(),
+            "removed surviving {phase} hook's checkout"
+        );
+        assert_eq!(
+            fs::read(state.path().join("retained-source")).unwrap(),
+            bytes
+        );
+        wait_until_released(|| release_tag(repo.path(), "0.9.1", None).map(|_| ()));
+        worktree_remove(repo.path(), &checkout).unwrap();
+        assert!(!checkout.exists());
+    }
+}

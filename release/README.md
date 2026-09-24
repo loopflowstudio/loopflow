@@ -117,6 +117,9 @@ removal remains blocked until those children exit; unrelated checkouts remain
 independent.
 If a publisher launcher exits while a descendant survives, controller cleanup
 also preserves the checkout and reports its path for later cleanup.
+Configured repository verification and preparation hooks retain both the target
+lock and their checkout lease, including preparation during PR rebuild. A
+surviving hook keeps cleanup and another release blocked until it exits.
 
 Tag pushes, candidate-ref changes, workflow submissions, and GitHub publication
 commands retain the release target's lock in their child process. If the

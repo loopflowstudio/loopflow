@@ -528,28 +528,31 @@ half-contracts.
 
 ## This slice
 
-Preserve the existing publisher checkout lease through controller death. Borrow
-`WorktreeLease` into preparation, publication and public-reconciliation child
-commands alongside their existing target lock. Forward the checkout descriptor
-through the publisher's Python subprocess boundaries. The same OS lock continues
-to exclude ordinary worktree removal; no new lease, registry, process-age rule,
-or cleanup authority is introduced.
+Carry the existing target lock and exact checkout lease into every configured
+repository verification/preparation hook shell. Source verification already owns
+its checkout lease; release-PR preparation and rebuild must acquire the same
+existing lease before creating or using their checkout and transfer it to
+cleanup. Borrow both capabilities explicitly into `run_release_hooks`; do not
+infer ownership from environment or introduce a second hook runner.
 
-Prove the boundary through the built CLI with disposable repositories and
-simulated hosted publication: pause a preparation/publication child, kill and
-reap its exact controller, and attempt ordinary checkout removal and a second
-release. Both must fail while the child survives. Its checkout bytes must remain
-usable, another checkout must remain removable, and cleanup must succeed after
-the child exits. Exercise descriptor forwarding through the real Python helpers.
-These tests establish local process/checkout preservation, not real signing,
-UI-host verification, launchd execution or qualifying configured settlements.
+Preparation's worktree helper must not synchronize/reset the caller. Create
+from the selected origin commit; during PR rebuild refresh origin explicitly
+before resetting only the owned checkout. The counterexample found that the
+helper's implicit sync could replace the held target lock file while stashing
+caller state. This repairs the existing design's preservation contract.
 
-Shared commit/PR operations, hooks, notes and source/worktree mutation children
-still need the review's complete exclusion proof. Historical telemetry linkage
-and bounded recovery, closed-obligation continuation, and installed acceptance
-remain in this serial Task. Preserve the scorecard schema blocker, repair
-ownership gap and mandatory public/UI evidence. This slice changes no settlement
-or prerequisite policy.
+Prove through the built CLI that a blocked verification/preparation hook retains
+target exclusion and source bytes after controller death, and that a surviving
+hook descendant also prevents controller cleanup after its launcher fails.
+Ordinary cleanup must work after the child exits. Retain normal hook expansion,
+failure propagation, release preparation behavior, and exact caller HEAD,
+branch, index and staged/unstaged/untracked bytes. These are disposable
+repository/process proofs, not hosted, UI-host or configured settlement evidence.
+
+Shared commit/PR/re-arm commands, notes agents, source/worktree mutation children,
+historical telemetry linkage/recovery, closed obligations and configured
+acceptance remain in this serial Task. This slice changes neither settlement
+nor prerequisite policy and retains the observed scorecard blocker.
 
 ## Slice ledger
 
@@ -705,6 +708,19 @@ remain open. Full matrix and next direction:
   formatting and all-target Clippy. Remaining shared mutation children,
   telemetry recovery, closed obligations and configured acceptance stay open.
   See [review-publisher-checkout.md](review-publisher-checkout.md).
+
+- 2026-09-24: configured verification/preparation hooks now inherit the existing
+  target lock and checkout lease. The CLI counterexample first reproduced a
+  second tag while verification survived its controller. Preparation then exposed
+  an indirect `sync_main` in worktree creation that could replace the held lock
+  file and reset caller state. Both creation paths now disable sync; rebuild
+  refreshes origin explicitly and resets only its owned checkout. Earlier source
+  claims that sync was unreachable missed this helper path.
+- Four hook stage/exit cases passed with exact caller HEAD/branch/index and
+  staged/unstaged/untracked preservation (14.01s); PR rebuild with advancing main,
+  hook expansion/failure, and migration preparation checks passed. Remaining
+  shared mutation children, telemetry recovery, closed obligations and configured
+  acceptance stay open. Details: [release-hook-ownership.md](release-hook-ownership.md).
 
 ## Measure
 

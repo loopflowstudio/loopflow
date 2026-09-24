@@ -799,6 +799,7 @@ fn release_run_inner(
         &verify_version,
         latest_tag.as_deref(),
         progress,
+        lock,
     )?);
     let mut failed_latest_build = None;
 
@@ -983,7 +984,6 @@ fn release_run_inner(
                 finish_release_pr(
                     &main_repo,
                     &wt_name,
-                    &branch,
                     PreparedRelease {
                         pr_number: pr.number,
                         head_sha: head_sha.to_string(),
@@ -991,6 +991,7 @@ fn release_run_inner(
                     &target,
                     &version,
                     progress,
+                    lock,
                 )?
             }
             _ => {
@@ -1002,25 +1003,24 @@ fn release_run_inner(
         }
     } else {
         progress.status(&format!("Creating release worktree {wt_name}..."));
-        let wt = create_named_worktree(&main_repo, &wt_name, Some(&source_commit), true)?;
+        let lease = acquire_worktree_lease(
+            &main_repo,
+            &worktree_path(&main_repo, &wt_name),
+            "release PR preparation",
+        )?;
+        let wt = create_named_worktree(&main_repo, &wt_name, Some(&source_commit), false)?;
         let wt_path = wt.path;
         let wt_branch = wt.branch;
 
         let prepared = prepare_release_in_worktree(
-            &wt_path,
-            &version,
-            changes.previous_tag.as_deref(),
-            &changes.commits,
-            &changes.merged_prs,
-            &target,
-            progress,
+            &wt_path, &version, &changes, &target, progress, lock, &lease,
         );
-        cleanup_release_worktree(&main_repo, &wt_path, &wt_branch, None, progress);
+        cleanup_release_worktree(&main_repo, &wt_path, &wt_branch, lease, progress);
         let prepared = prepared?;
 
         progress.status("Waiting for release PR to merge...");
         finish_release_pr(
-            &main_repo, &wt_name, &branch, prepared, &target, &version, progress,
+            &main_repo, &wt_name, prepared, &target, &version, progress, lock,
         )?
     };
 
@@ -1097,6 +1097,7 @@ fn finish_candidate(
         &version_from_tag(&candidate.tag, target)?,
         None,
         progress,
+        lock,
     )?);
     let workflow = if tagged.is_some() {
         wait_for_release_workflow(repo, candidate, target, progress, false)?
@@ -1183,6 +1184,7 @@ fn verify_source(
     version: &str,
     previous: Option<&str>,
     progress: &impl Progress,
+    lock: &ReleaseLock,
 ) -> OpsResult<VerificationEvidence> {
     if !target.verify.is_empty() {
         let name = format!("verify-{}-{source}", sanitize_ref_segment(&target.name));
@@ -1199,8 +1201,10 @@ fn verify_source(
             Some(version),
             previous,
             "verification",
+            lock,
+            &lease,
         );
-        cleanup_release_worktree(repo, &wt.path, &wt.branch, Some(lease), progress);
+        cleanup_release_worktree(repo, &wt.path, &wt.branch, lease, progress);
         result?;
     }
     persist_verification(
@@ -1387,7 +1391,7 @@ fn verify_release_outcome(
         command: e.command_line(),
         stderr: e.stderr,
     });
-    cleanup_release_worktree(repo, &wt.path, &wt.branch, Some(lease), progress);
+    cleanup_release_worktree(repo, &wt.path, &wt.branch, lease, progress);
     checked?;
     let proof_path = repo
         .join(".lf/logs")
@@ -1735,7 +1739,7 @@ fn prepare_publisher(
             stderr: err.stderr,
         })
     };
-    cleanup_release_worktree(repo, &wt.path, &wt.branch, Some(lease), progress);
+    cleanup_release_worktree(repo, &wt.path, &wt.branch, lease, progress);
     prepare_result?;
 
     if !artifact_dir.join("candidate.json").is_file() {
@@ -1810,7 +1814,7 @@ fn run_publisher(
             stderr: err.stderr,
         })
     };
-    cleanup_release_worktree(repo, &wt.path, &wt.branch, Some(lease), progress);
+    cleanup_release_worktree(repo, &wt.path, &wt.branch, lease, progress);
     publish_result?;
 
     if github_release_state(repo, tag)? != GitHubReleaseState::Published {
@@ -1838,11 +1842,11 @@ struct PreparedRelease {
 fn prepare_release_in_worktree(
     wt_path: &Path,
     version: &str,
-    prev_tag: Option<&str>,
-    commits: &[ReleaseCommit],
-    merged_prs: &[MergedPr],
+    changes: &ReleaseChangeSet,
     target: &ReleaseTarget,
     progress: &impl Progress,
+    lock: &ReleaseLock,
+    lease: &WorktreeLease,
 ) -> OpsResult<PreparedRelease> {
     // Release preparation owns its branch independently of whichever Work
     // launched the controller. Provider/account authority remains available.
@@ -1860,8 +1864,10 @@ fn prepare_release_in_worktree(
             &target.prepare,
             target,
             Some(version),
-            prev_tag,
+            changes.previous_tag.as_deref(),
             "preparation",
+            lock,
+            lease,
         )?;
     }
 
@@ -1870,7 +1876,13 @@ fn prepare_release_in_worktree(
         target_tag(target, version)
     ));
     run_release_notes_stage(
-        wt_path, version, prev_tag, commits, merged_prs, target, progress,
+        wt_path,
+        version,
+        changes.previous_tag.as_deref(),
+        &changes.commits,
+        &changes.merged_prs,
+        target,
+        progress,
     )?;
 
     progress.status("Committing release changes...");
@@ -1919,12 +1931,13 @@ fn prepare_release_in_worktree(
 fn finish_release_pr(
     main_repo: &Path,
     worktree_name: &str,
-    release_branch: &str,
     mut prepared: PreparedRelease,
     target: &ReleaseTarget,
     version: &str,
     progress: &impl Progress,
+    lock: &ReleaseLock,
 ) -> OpsResult<String> {
+    let release_branch = release_branch_name(main_repo, worktree_name)?;
     loop {
         match wait_for_pr_merge(main_repo, prepared.pr_number, &prepared.head_sha, progress)? {
             ReleasePrWait::Merged(commit) => return Ok(commit),
@@ -1933,17 +1946,42 @@ fn finish_release_pr(
                     "Release PR #{} is {state}; rebuilding on current main...",
                     prepared.pr_number
                 ));
-                fetch_release_branch(main_repo, release_branch, &prepared.head_sha)?;
-                let wt = create_named_worktree(main_repo, worktree_name, None, true)?;
-                let refreshed = rebuild_release_pr(
+                fetch_release_branch(main_repo, &release_branch, &prepared.head_sha)?;
+                let default_branch = get_default_branch(main_repo)?;
+                let main_ref = format!("origin/{default_branch}");
+                run_locked_stdout(
+                    lock,
                     main_repo,
-                    &wt.path,
-                    &prepared.head_sha,
-                    target,
-                    version,
-                    progress,
-                );
-                cleanup_release_worktree(main_repo, &wt.path, &wt.branch, None, progress);
+                    "git",
+                    &[
+                        "fetch",
+                        "origin",
+                        &format!(
+                            "+refs/heads/{default_branch}:refs/remotes/origin/{default_branch}"
+                        ),
+                    ],
+                )?;
+                let lease = acquire_worktree_lease(
+                    main_repo,
+                    &worktree_path(main_repo, worktree_name),
+                    "release PR rebuild",
+                )?;
+                let wt = create_named_worktree(main_repo, worktree_name, None, false)?;
+                let refreshed = (|| {
+                    let current_head = rev_parse(&wt.path, "HEAD")?;
+                    if current_head != prepared.head_sha {
+                        return Err(OpsError::Message(format!(
+                            "release PR head changed while recovery was materializing it: expected {}, found {current_head}",
+                            prepared.head_sha
+                        )));
+                    }
+                    run_stdout(&wt.path, "git", &["reset", "--hard", &main_ref])?;
+                    let changes = collect_release_changes(main_repo, target)?;
+                    prepare_release_in_worktree(
+                        &wt.path, version, &changes, target, progress, lock, &lease,
+                    )
+                })();
+                cleanup_release_worktree(main_repo, &wt.path, &wt.branch, lease, progress);
                 prepared = refreshed?;
             }
         }
@@ -1961,36 +1999,6 @@ fn fetch_release_branch(repo: &Path, branch: &str, expected_head: &str) -> OpsRe
         )));
     }
     Ok(())
-}
-
-fn rebuild_release_pr(
-    main_repo: &Path,
-    worktree: &Path,
-    expected_head: &str,
-    target: &ReleaseTarget,
-    version: &str,
-    progress: &impl Progress,
-) -> OpsResult<PreparedRelease> {
-    let current_head = crate::engine::git::rev_parse(worktree, "HEAD")?;
-    if current_head != expected_head {
-        return Err(OpsError::Message(format!(
-            "release PR head changed while recovery was materializing it: expected {expected_head}, found {current_head}"
-        )));
-    }
-
-    let main_branch = get_default_branch(main_repo)?;
-    let main_ref = format!("origin/{main_branch}");
-    run_stdout(worktree, "git", &["reset", "--hard", &main_ref])?;
-    let changes = collect_release_changes(main_repo, target)?;
-    prepare_release_in_worktree(
-        worktree,
-        version,
-        changes.previous_tag.as_deref(),
-        &changes.commits,
-        &changes.merged_prs,
-        target,
-        progress,
-    )
 }
 
 #[derive(Debug, Serialize)]
@@ -2592,7 +2600,7 @@ fn cleanup_release_worktree(
     main_repo: &Path,
     wt_path: &Path,
     branch: &str,
-    lease: Option<WorktreeLease>,
+    lease: WorktreeLease,
     progress: &impl Progress,
 ) {
     // A descendant can retain our open file description after its launcher exits.
@@ -4144,6 +4152,7 @@ fn github_release_state(repo: &Path, tag: &str) -> OpsResult<GitHubReleaseState>
     })
 }
 
+#[allow(clippy::too_many_arguments)] // Hook expansion and the two independent ownership scopes.
 fn run_release_hooks(
     repo: &Path,
     hooks: &[String],
@@ -4151,13 +4160,16 @@ fn run_release_hooks(
     version: Option<&str>,
     previous_tag: Option<&str>,
     phase: &str,
+    lock: &ReleaseLock,
+    lease: &WorktreeLease,
 ) -> OpsResult<()> {
     for hook in hooks {
         let command = hook
             .replace("{target}", &target.name)
             .replace("{version}", version.unwrap_or(""))
             .replace("{previous_tag}", previous_tag.unwrap_or(""));
-        let mut cmd = Command::new("sh");
+        let mut cmd = lock.command("sh");
+        lease.inherit(&mut cmd);
         cmd.args(["-c", &command]).current_dir(repo);
         run_command(&mut cmd).map_err(|err| OpsError::CommandFailed {
             command: format!("release {phase}: {command}"),
@@ -4310,14 +4322,22 @@ mod tests {
             completion: ReleaseCompletion::Tag,
             publisher: Vec::new(),
         };
+        run_or_panic(Command::new("git").args(["init"]).current_dir(root));
+        let lock = ReleaseLock::acquire(root, "default").unwrap();
+        let lease = acquire_worktree_lease(root, root, "test preparation").unwrap();
+        let changes = ReleaseChangeSet {
+            previous_tag: Some("v0.11.3".into()),
+            commits: Vec::new(),
+            merged_prs: Vec::new(),
+        };
         let result = prepare_release_in_worktree(
             root,
             "0.11.4",
-            Some("v0.11.3"),
-            &[],
-            &[],
+            &changes,
             &target,
             &crate::ops::progress::NullProgress,
+            &lock,
+            &lease,
         );
         assert!(
             result.is_err(),
@@ -4849,6 +4869,9 @@ version = "2.0.0"
     fn release_hooks_are_repo_owned_and_expand_release_context() {
         let repo = tempfile::tempdir().unwrap();
         let target = default_release_target(repo.path());
+        run_or_panic(Command::new("git").args(["init"]).current_dir(repo.path()));
+        let lock = ReleaseLock::acquire(repo.path(), "default").unwrap();
+        let lease = acquire_worktree_lease(repo.path(), repo.path(), "test hook").unwrap();
         run_release_hooks(
             repo.path(),
             &["printf '%s %s %s' '{target}' '{version}' '{previous_tag}' > hook.txt".to_string()],
@@ -4856,6 +4879,8 @@ version = "2.0.0"
             Some("1.2.3"),
             Some("v1.2.2"),
             "preparation",
+            &lock,
+            &lease,
         )
         .unwrap();
 
@@ -4869,6 +4894,9 @@ version = "2.0.0"
     fn failing_release_hook_stops_the_release() {
         let repo = tempfile::tempdir().unwrap();
         let target = default_release_target(repo.path());
+        run_or_panic(Command::new("git").args(["init"]).current_dir(repo.path()));
+        let lock = ReleaseLock::acquire(repo.path(), "default").unwrap();
+        let lease = acquire_worktree_lease(repo.path(), repo.path(), "test hook").unwrap();
         let error = run_release_hooks(
             repo.path(),
             &["echo 'repository rejected release' >&2; exit 1".to_string()],
@@ -4876,6 +4904,8 @@ version = "2.0.0"
             None,
             None,
             "verification",
+            &lock,
+            &lease,
         )
         .unwrap_err()
         .to_string();

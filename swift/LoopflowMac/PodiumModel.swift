@@ -205,7 +205,8 @@ final class PodiumModel {
         if repoPath == nil, let initialRepoPath {
             repoPath = PortfolioDiscovery.resolveLaunchRepo(initialRepoPath)
         }
-        clearSelectionIfOutsideScope()
+        // Repository discovery cannot establish that selected Work was removed.
+        // Planning refresh owns that reconciliation once its evidence is complete.
     }
 
     func setRepoPath(_ path: String?) {

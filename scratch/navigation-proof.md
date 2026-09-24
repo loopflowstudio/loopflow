@@ -37,9 +37,11 @@ remain the existing path. The separate lf-new checkout was not edited.
 The first combined focused run passed 32 model/view/store tests. Its new native
 PTY proof failed before creating a surface; no draft-retention verdict resulted.
 The independent native writer subsequently reproduced surface-creation failure
-with the pre-existing window-isolation proof. This does not establish native navigation behavior. A host/rendering limitation
-is the current hypothesis; the precise initialization cause is not isolated. See `concurrent-proof.md` for that exact
-counterexample and the focus-only follow-up.
+with the pre-existing window-isolation proof. This does not establish native
+navigation behavior. The later `native-surface-diagnostic.md` supersedes the
+host/rendering hypothesis: an isolated AppKit host reports OutOfMemory despite
+screen/Metal availability. Its cause remains unknown. See `concurrent-proof.md`
+for the earlier counterexample and focus-only follow-up.
 
 After the per-repository reading fix, the combined command
 `swift test --package-path swift -Xswiftc -gnone --jobs 4 --filter
@@ -66,8 +68,9 @@ Log: `/tmp/main-view-task-navigation-proof.log`. This final run includes stable
 ranked Task identity, exact typed Session attribution, completed/unmatched
 Sessions, A/D and repository state retention, search expansion, last-good reads,
 slow planning, completion independent of Task completion, Task directive/KR
-rendering, and unavailable-association presentation. No source edits followed
-that passing run. These are model/view fixtures, not configured provider trials.
+rendering, and unavailable-association presentation. This receipt predates the
+later selection corrections and focused runs in `review-slice.md`. These are
+model/view fixtures, not configured provider trials.
 
 The concurrent native writer removed the additional focus-only fixture after
 its hosting failure rather than adding retries. The native draft test remains

@@ -426,6 +426,10 @@ struct SessionsView: View {
                     .opacity(navigation.content == .details ? 1 : 0)
                     .allowsHitTesting(navigation.content == .details)
                     .accessibilityHidden(navigation.content != .details)
+                    if navigation.content == .watch {
+                        selectedTaskWatch
+                            .background(palette.background)
+                    }
                 }
                 .frame(maxWidth: navigation.content == .overview ? nil : .infinity)
                 .frame(width: navigation.content == .overview ? 0 : nil)
@@ -486,9 +490,16 @@ struct SessionsView: View {
                 }
                 .accessibilityIdentifier("workspace-toggle-list")
             }
-            if model.selection != nil, terminalsVisible {
+            if model.selection != nil, terminalsVisible || navigation.content == .watch {
                 Button("Work details") { navigation.content = .details }
                     .accessibilityIdentifier("workspace-work-details")
+            }
+            if model.selection?.kind == .task, navigation.content != .overview,
+               navigation.content != .watch {
+                Button("Watch", systemImage: "point.3.connected.trianglepath.dotted") {
+                    navigation.content = .watch
+                }
+                .accessibilityIdentifier("workspace-watch")
             }
             if !terminalsVisible, worktreeLayout.knownPaths.contains(where: { path in
                 workspaces.workspace(for: path).multiplexer.layout.allPanes.contains { $0.content != .empty }
@@ -544,6 +555,29 @@ struct SessionsView: View {
         }
         .font(Typography.caption(11))
         .padding(Spacing.md)
+    }
+
+    @ViewBuilder
+    private var selectedTaskWatch: some View {
+        if let selection = model.selection, selection.kind == .task,
+           let selected = model.task(id: selection.id) {
+            VStack(spacing: 0) {
+                Text("\(selected.task.task.identifier) · \(selected.task.task.name)")
+                    .font(Typography.sectionTitle(15))
+                    .frame(maxWidth: .infinity, alignment: .leading)
+                    .padding(Spacing.md)
+                TaskWatchView(
+                    issue: selected.task.task.identifier,
+                    store: navigation.watch(for: selected.task.id)
+                )
+                .id(selected.task.id)
+            }
+        } else {
+            ContentUnavailableView(
+                "Task evidence unavailable", systemImage: "exclamationmark.triangle",
+                description: Text("The selected Task is absent from the latest planning read.")
+            )
+        }
     }
 
     private var selectedSubjectIsAvailable: Bool {

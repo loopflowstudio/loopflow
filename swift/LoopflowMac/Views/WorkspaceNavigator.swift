@@ -38,6 +38,11 @@ struct WorkspaceNavigator: View {
                 .background(palette.surfaceMuted, in: RoundedRectangle(cornerRadius: 5))
                 .padding(Spacing.md)
                 .accessibilityIdentifier("workspace-search")
+            Toggle("Show completed Tasks", isOn: $navigation.showsCompletedTasks)
+                .toggleStyle(.checkbox)
+                .font(Typography.caption(11))
+                .padding(.horizontal, Spacing.md)
+                .accessibilityIdentifier("workspace-show-completed")
             ScrollView {
                 LazyVStack(alignment: .leading, spacing: Spacing.xs) {
                     if model.roadmap.isLoading {
@@ -123,7 +128,10 @@ struct WorkspaceNavigator: View {
                     sessions: project.sessions,
                     containedSessions: project.sessions + project.tasks.flatMap(\.sessions))
             if model.navigation.isExpanded(project.id) {
-                ForEach(project.tasks.filter { waveMatches || matches(project.project.project.name) || matches($0) }) { task in
+                ForEach(project.tasks.filter {
+                    model.navigation.includes($0)
+                        && (waveMatches || matches(project.project.project.name) || matches($0))
+                }) { task in
                     HStack(spacing: Spacing.sm) {
                         Button { select(task.id) } label: {
                             VStack(alignment: .leading, spacing: Spacing.xxs) {

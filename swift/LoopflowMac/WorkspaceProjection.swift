@@ -52,9 +52,8 @@ struct WorkspaceProjection {
                         id: WorkspaceNodeKey(repo: repo, work: .project(id: project.id)),
                         project: project,
                         sessions: attached(to: project.runtime.map { .project(id: $0.workId) }),
-                        tasks: project.tasks.sorted { $0.task.rank < $1.task.rank }.compactMap { task in
+                        tasks: project.tasks.sorted { $0.task.rank < $1.task.rank }.map { task in
                             let records = attached(to: task.runtime.map { .task(id: $0.workId) })
-                            guard !task.task.completed || !records.isEmpty else { return nil }
                             return WorkspaceTask(
                                 id: WorkspaceNodeKey(repo: repo, work: .task(id: task.id)),
                                 task: task,
@@ -102,13 +101,29 @@ struct WorkspaceProjection {
 @MainActor
 @Observable
 final class WorkspaceNavigation {
-    enum Content { case overview, details, terminals }
+    enum Content { case overview, details, watch, terminals }
     var content: Content = .overview
     var showsList = false
     var collapsed: Set<WorkspaceNodeKey> = []
     var search = ""
     var selection: WorkReference?
     var listScrollOffset: CGFloat = 0
+    var showsCompletedTasks = false
+    @ObservationIgnored private var watches: [String: TaskWatchStore] = [:]
+
+    /// Retained presentation state for visited Tasks, scoped to this window/repo.
+    func watch(for taskId: String) -> TaskWatchStore {
+        if let watch = watches[taskId] { return watch }
+        let watch = TaskWatchStore()
+        watches[taskId] = watch
+        return watch
+    }
+
+    func includes(_ task: WorkspaceTask) -> Bool {
+        !task.task.task.completed || !task.sessions.isEmpty || showsCompletedTasks
+            || !search.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty
+            || selection == task.id.work
+    }
 
     func isExpanded(_ key: WorkspaceNodeKey) -> Bool {
         !search.isEmpty || !collapsed.contains(key)

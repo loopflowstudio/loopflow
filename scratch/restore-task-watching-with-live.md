@@ -133,32 +133,36 @@ shared Task identities where available. No dependency on its landing.
 
 ## This slice
 
-Make the completed shared snapshot inspectable in Mac Watch. Add Watch beside
-Changes and Terminal, and a Watch action in Work, Roadmap, and Wave Task detail.
-Only Changes and Terminal require runtime/workspace evidence. Watch reads the
-Task by identifier even after its worker/worktree is gone.
+Integrate Watch with the rebased main-view-task navigation. The primary workspace
+now owns selected Work, details and retained terminals together. Add Watch as
+selected Task content in that owner; remove WorkSurfaceView's restored modal
+workspace and terminal-store observation. Retain the same TaskWatchView for the
+legacy Roadmap/Wave sheets. This adapts presentation placement without changing
+the accepted passive-read, exact-history or full-feed contract.
 
-Render the selected persisted invocation as connected, selectable stages with
-kind, ancestry, recorded state, attempt count, and exact Iterate return links.
-Selecting a stage shows its distinct attempts, readiness/failure evidence and
-Run/provider labels. Earlier invocations and unassigned auxiliary Runs remain
-inspectable. Keyboard selection uses native controls; avoid motion entirely.
-Swift holds only the snapshot, selection and request state, never reconstructs
-flow history or infers execution authority.
+Retain each visited Task's inspection selection in its existing per-window,
+per-repository navigation state. Mount the Watch reader only while Watch is the
+visible content; terminal surfaces remain mounted under their current owner.
+Switching Task, repository, details, terminals or overview cancels Watch's query.
+Return to Watch with the same Task selection/snapshot; never open or replace a
+provider just to inspect it. Continue manual refresh until discovery is bounded.
 
-Read once on opening and on explicit Refresh. Keep the last good snapshot with
-an explicit stale message after a failed refresh, preserve the selected historical
-stage across transitions, and cancel reads when hidden. Do not install the
-one-second poll before bounded discovery is implemented. Do not label snapshot
-inspection as live output or add a fake Follow live action.
+Keep completed Tasks in the shared presentation projection. The navigator offers
+Show completed Tasks, also finds completed history through search, and never
+hides a selected Task or an open Session merely because it completed. No second
+history inventory, Task registry or completed-task query is introduced. Tasks
+absent from the supplied roadmap remain an explicit limit of this entry point.
 
-Done when focused Swift tests prove exact stage identity despite repeated names,
-selection retention across transition/completion, separate attempts/Iterate
-links, stale evidence/recovery, and Watch access without runtime/workspace. Build
-the Mac target and inspect a rendered fixture of the real Watch view. The full
-output feed, independent cursors/bounded discovery, Session decision navigation,
-automatic following, and configured end-to-end human demo remain subsequent
-slices in this same PR.
+Done when focused navigation/Watch tests prove completed Tasks without Sessions
+are reachable, switching content/repositories retains independent Watch selections
+and existing terminal layout, the primary Watch action changes unified content,
+and hidden content has no mounted Watch reader. Build the Mac target and retain
+existing Watch stale-state/cancellation proofs. Human Session links still need
+exact shared association evidence: Flow Session IDs are not their provider Run
+IDs, so never join them by step name or fabricate a Session ID in Swift.
+
+The live feed, bounded discovery/state, independent history/live cursors, human
+Session navigation and full configured demonstration remain in this same PR.
 
 ## Remaining slices and full Done When
 

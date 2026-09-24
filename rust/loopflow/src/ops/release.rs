@@ -1601,10 +1601,8 @@ fn materialize_exact_source_worktree(
     let worktree = create_named_worktree(repo, worktree_name, Some(revision), &inherit)?;
     let observed_head = rev_parse(&worktree.path, "HEAD^{commit}")?;
     if observed_head != expected_commit {
-        let _ = worktree_remove_owned(repo, &worktree.path, lease, &inherit);
-        let _ = delete_local_branch_inheriting(repo, &worktree.branch, &inherit);
         return Err(OpsError::Message(format!(
-            "publisher worktree {} materialized branch {branch} at {observed_head}, expected {expected_commit}; cleanup was attempted",
+            "publisher worktree {} materialized branch {branch} at {observed_head}, expected {expected_commit}; checkout and branch retained for inspection before retry",
             path.display()
         )));
     }

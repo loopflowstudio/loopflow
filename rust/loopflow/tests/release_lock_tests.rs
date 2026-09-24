@@ -1396,3 +1396,96 @@ esac
         }
     }
 }
+
+#[test]
+fn source_creation_mismatch_preserves_surviving_hook_and_its_work() {
+    let state = tempfile::tempdir().unwrap();
+    let _env = EnvGuard::new(&[(
+        "gh",
+        "#!/bin/sh\ncase \"$1 $2\" in\n'--version ') exit 0;;\n'run list'|'pr list') echo '[]';;\n'release view') exit 1;;\n*) exit 91;;\nesac\n",
+    )]);
+    let repo = TestRepo::new();
+    let git = |args: &[&str]| {
+        let output = Command::new("git")
+            .args(args)
+            .current_dir(repo.path())
+            .output()
+            .unwrap();
+        assert!(output.status.success(), "{output:?}");
+        String::from_utf8(output.stdout).unwrap().trim().to_string()
+    };
+    fs::create_dir_all(repo.path().join(".lf")).unwrap();
+    fs::write(
+        repo.path().join(".lf/config.yaml"),
+        "release:\n  targets:\n    default:\n      verify:\n      - sh -c 'exit 71'\n",
+    )
+    .unwrap();
+    git(&["add", "."]);
+    git(&["commit", "-m", "Configure source proof"]);
+    git(&["push", "origin", "HEAD"]);
+    let source = git(&["rev-parse", "HEAD"]);
+    let caller_branch = git(&["branch", "--show-current"]);
+    let index = fs::read(repo.path().join(".git/index")).unwrap();
+    let name = format!("verify-default-{source}");
+    let checkout = loopflow::engine::worktrees::worktree_path(repo.path(), &name);
+    let branch = format!("jack/{name}");
+    let mutation = blocking_mutation(
+        state.path(),
+        &format!(
+            "cat repair.txt > '{}/retained-work' || exit $?",
+            state.path().display()
+        ),
+    );
+    let hook = repo.path().join(".git/hooks/post-checkout");
+    fs::write(
+        &hook,
+        format!(
+            r#"#!/bin/sh
+unset GIT_DIR GIT_WORK_TREE GIT_INDEX_FILE
+printf 'hook-owned work\n' > repair.txt
+git add repair.txt || exit $?
+git -c core.hooksPath=/dev/null commit -m 'Retain hook work' || exit $?
+git rev-parse HEAD > '{state}/hook-head'
+(
+{mutation}
+) > '{state}/hook.log' 2>&1 &
+exit 1
+"#,
+            state = state.path().display()
+        ),
+    )
+    .unwrap();
+    fs::set_permissions(&hook, fs::Permissions::from_mode(0o755)).unwrap();
+    let mut parent = start(&repo, state.path(), &["release", "run", "0.9.1"]);
+    let deadline = Instant::now() + Duration::from_secs(20);
+    while parent.child.try_wait().unwrap().is_none() {
+        assert!(Instant::now() < deadline, "controller did not exit");
+        thread::sleep(Duration::from_millis(10));
+    }
+    assert!(!parent.child.wait().unwrap().success());
+    let log = fs::read_to_string(state.path().join("controller.log")).unwrap();
+    assert!(log.contains("expected"), "{log}");
+    assert!(
+        checkout.exists(),
+        "mismatch cleanup removed live hook checkout: {log}"
+    );
+    let hook_head = fs::read_to_string(state.path().join("hook-head")).unwrap();
+    assert_eq!(git(&["rev-parse", &branch]), hook_head.trim());
+    assert!(matches!(
+        release_tag(repo.path(), "0.9.2", None),
+        Err(OpsError::ReleaseDeferred { .. })
+    ));
+    assert!(worktree_remove(repo.path(), &checkout).is_err());
+    fs::write(state.path().join("allow"), "").unwrap();
+    wait_for(&state.path().join("completed"));
+    assert_eq!(
+        fs::read_to_string(state.path().join("retained-work")).unwrap(),
+        "hook-owned work\n"
+    );
+    wait_until_released(|| release_tag(repo.path(), "0.9.2", None).map(|_| ()));
+    assert_eq!(git(&["rev-parse", "HEAD"]), source);
+    assert_eq!(git(&["branch", "--show-current"]), caller_branch);
+    assert_eq!(fs::read(repo.path().join(".git/index")).unwrap(), index);
+    worktree_remove(repo.path(), &checkout).unwrap();
+    assert_eq!(git(&["rev-parse", &branch]), hook_head.trim());
+}

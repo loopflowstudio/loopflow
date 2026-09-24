@@ -847,6 +847,15 @@ ownership, closed obligations and configured acceptance remain open. See
   rerun; Task compensation, telemetry recovery, closed obligations and configured
   acceptance remain open. See [compression.md](compression.md).
 
+Source ownership review remains **iterate**. The built-CLI demonstration passed
+all twelve survival scenarios again (46.98s). A new real post-checkout hook case
+reproduced mismatch cleanup deleting the checkout under a live descendant.
+Materialization now retains the unexpected checkout and branch for inspection;
+the regression passed after repair (5.77s), preserving the hook commit, usable
+source, target/checkout exclusion and caller HEAD/branch/index. Task compensation,
+telemetry recovery and repair ownership, closed obligations and configured
+acceptance remain open. See [review-source.md](review-source.md).
+
 ## Measure
 
 Use the Reliability KR's actual due population, not successful process counts.

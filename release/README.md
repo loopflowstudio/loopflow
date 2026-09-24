@@ -128,6 +128,8 @@ Its exact JSON input remains in `.lf/prompts/` under a unique name, so a survivi
 provider can finish after launcher failure without losing its checkout or input.
 PR rebuild uses the same exact-source recovery checks as candidate preparation:
 divergent local branches and dirty existing checkouts remain intact for repair.
+If creation returns an unexpected HEAD, retain its checkout and branch for
+inspection before retry; a creation hook may still own work there.
 Source fetches, checkout creation, rebuild resets and cleanup retain their held
 locks through surviving Git children. Source checkout creation stays local;
 it never synchronizes or resets the caller's main checkout. Release preparation

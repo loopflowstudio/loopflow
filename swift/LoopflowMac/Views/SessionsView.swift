@@ -851,7 +851,7 @@ private struct SessionPaneView: View {
                         isCompleting = false
                         return
                     }
-                    store.close(pane.id)
+                    store.reconcileSessions(Set(sessions.sessions.map(\.id)))
                     sessions.releaseSurface(item.id)
                 }
             } label: {

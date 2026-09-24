@@ -324,6 +324,12 @@ struct WorkspaceNavigationProofTests {
         #expect(terminals[1].surface == shellSurface)
         #expect(workspace.multiplexer.layout.allPanes.map(\.id) == [shellPane])
         #expect(workspace.multiplexer.focusedPaneId == shellPane)
+        // Completing a Session is not an undoable Close view operation.
+        workspace.multiplexer.undoClose()
+        try await settle(window)
+        #expect(workspace.multiplexer.pane(forSessionId: "navigation-split") == nil)
+        #expect(workspace.multiplexer.layout.allPanes.map(\.id) == [shellPane])
+        #expect(workspace.multiplexer.focusedPaneId == shellPane)
         #expect(model.selection == .task(id: "issue-review"))
         #expect(model.task(id: "issue-review")?.task.task.completed == false)
         try view.inspect().find(viewWithAccessibilityIdentifier: "workspace-work-details").button().tap()

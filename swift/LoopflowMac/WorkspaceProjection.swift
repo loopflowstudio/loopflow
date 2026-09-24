@@ -108,6 +108,7 @@ final class WorkspaceNavigation {
     var collapsed: Set<WorkspaceNodeKey> = []
     var search = ""
     var selection: WorkReference?
+    var listScrollOffset: CGFloat = 0
 
     func isExpanded(_ key: WorkspaceNodeKey) -> Bool {
         !search.isEmpty || !collapsed.contains(key)

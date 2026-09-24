@@ -233,3 +233,12 @@ change was needed. `navigation-proof.md` records its exact command and limits.
 Configured provider continuation/resolution, navigator scroll, visual quality
 and timing proof remain open; the integration fixture is not that human-path
 trial and does not change full LOO-291 scope or publication disposition.
+
+Iteration 3 navigator retention, 2026-09-23: the mounted work-list proof exposed
+repository return resetting its native scroll offset from 1,200 points to zero.
+A/D and planning refresh already preserved it. WorkspaceNavigation now retains
+one per-repository/window list offset; WorkspaceNavigator records scroll geometry
+and initializes SwiftUI's scroll-position binding from that value when remounted.
+No planning, Session or terminal authority changed. The focused proof and its
+limits are recorded in `navigation-proof.md`; configured provider interaction,
+visual quality and timing obligations remain open.

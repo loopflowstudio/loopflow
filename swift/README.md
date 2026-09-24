@@ -48,8 +48,8 @@ shared durable Work relationship, never titles or checkout guesses.
 Work opens full-width. **Show work list** adds the compact navigator alongside
 it; **Hide work list** restores full width. **All work** returns to the overview,
 and **Return to terminals** restores the retained pane layout. List visibility,
-search, group expansion, and Work selection survive repository switches for
-this window. Searching temporarily reveals matching groups without changing
+search, list scroll position, group expansion, and Work selection survive
+repository switches for this window. Searching temporarily reveals matching groups without changing
 saved expansion. Navigation never starts a provider or resolves a Session.
 
 Each pane owns one native libghostty surface. Session badges distinguish

@@ -4,23 +4,92 @@
 
 - Shared Rust/Swift `RoadmapSnapshot` and `SessionRecord` supply planning and
   human-work evidence through RegistryQuery. Their shared fields remain intact.
-- The existing Mac CLI process boundary supplies explicit Work targets and
-  removes ambient Wave context. General GUI PATH enrichment remains separate.
+- GUI process preparation clears inherited execution and terminal markers while
+  preserving Home/account selection. CLI queries supply explicit scope;
+  ConversationLaunch captures the visible subject and honors lf's destination.
 - PodiumModel owns readings, last-good evidence and read generations.
   WorkspaceProjection derives typed planning-to-Session associations, preserving
   upcoming Tasks and every unmatched human boundary. It stores nothing.
 - WorkspaceNavigation owns selected Work, presentation, search, expansion and
   list scroll offset per repository/window. PodiumModel forwards selection to
   that owner; SwiftUI controls the mounted navigator's scrolling.
-- SessionsWorkspaceRegistry retains each window's repository workspace.
-  MultiplexerStore owns pane layout; GhosttySurfacePool retains native views;
-  SessionsStore owns opening/prepared/error presentation and calls shared actions.
-- GhosttyMetalView owns its surface and focus request across attachment and
+- SessionsWorkspaceRegistry retains checkout workspaces and repository-level
+  WorktreeLayoutStores inside one window, sharing that window's surface pool.
+  Outer slots select checkouts; each checkout's MultiplexerStore owns terminals.
+  The repository's retained SessionsStore owns opening/prepared/error presentation
+  and calls shared actions. Rust projects actual client terminal attachment.
+- GhosttyMetalView owns its surface, latest title and focus request across attachment and
   visibility changes. AppKit owns actual first responder. GhosttyManager owns
   library initialization and configuration, including the measured CoreVideo
   capability adaptation.
 
 ## Before and after
+
+### Iteration 7 — integrated checkout and terminal ownership
+
+Reviewed HEAD `b12beba8b` and the working integration, including the concurrent
+appearance, fixture and completion corrections. No coherent model/API reduction
+was established. This pass changes only this report: no fields, types, routes,
+DTOs, persistence paths or configuration keys were removed. Other working-tree
+changes remain their existing writer's work.
+
+Traced RegistryQuery → PodiumModel → WorkspaceProjection/Navigation →
+ConversationLaunch and SessionsView → retained registry, outer WorktreeLayout,
+inner MultiplexerStore and native surface pool. Followed direct Session opening,
+shell attachment, repository return, hidden groups, completion and Undo. Compared
+every SessionRecord and RoadmapProject/Task field between Rust and Swift; read
+the shared Session fixtures and Swift round-trip assertions, query contract,
+provider-client receipt writer and actual-PTY check. Read the workspace/scope
+tests and the native shell-attachment assertions. Also traced the integrated
+current-Wave predicate through ls/roadmap and forget through its transactional
+storage boundary. Negative searches still find one Podium caller per inventory
+read, one production root registry, and none of the removed navigation/scope
+types listed in earlier reviews.
+
+Suspected reductions retained deliberately:
+
+- Work identity, `cwd` and `terminal_ids` are independent facts: attribution,
+  checkout grouping and active client attachment. A shell may change directory
+  or launch successive providers; another window cannot acquire its surface by
+  matching Work or cwd. The terminal marker and verified PTY are both necessary
+  to reject inherited markers after an external handoff. No DTO field is merely
+  an alias for another in this path.
+- Outer and inner split trees have different leaves and close semantics. Hiding
+  a checkout retains its terminals; closing a shell ends it. `knownPaths` also
+  retains hidden membership within one repository, whereas registry keys span
+  the whole window and Session cwd values omit shell-only groups. Deriving all
+  three from one inventory would lose that distinction.
+- ConversationScope includes repository entry and captures launch arguments;
+  navigation uses planning identity before runtime Work exists. Replacing either
+  with Session attribution would lose upcoming Tasks or repository conversations.
+  The small launch wrapper does not introduce another lifecycle or authority;
+  moving its functions alone would not simplify the model.
+- Last-good readings, prepared commands and opening errors have different
+  lifetimes. Likewise, native title retention survives remount while the pane's
+  title state triggers rendering. Removing the latter requires a complete native
+  observation change, not deletion of the retained metadata. Multiplexer revision
+  notifications still bridge its existing owner into SwiftUI.
+- Mounted inventory observers and asynchronous action continuations deliver
+  cleanup at different times. The concurrent Complete correction uses
+  reconciliation rather than undoable close. Deleting one delivery path would
+  not consolidate ownership across repository unmount, hidden checkout groups,
+  external disappearance and FlowStep decisions. No partial cleanup extraction
+  was made on top of that correction.
+- Current-Wave filtering already has one shared predicate. Forget is a separate
+  exact-registration mutation: filesystem/live checks and transactional stored
+  history checks protect different facts. A navigation filter cannot substitute
+  for deletion eligibility. No storage fossil or migration reduction was found.
+- Shared Session legal actions/display path remain absent from this DTO. Moving
+  Swift's existing policy into another helper would preserve its authority,
+  not accomplish LOO-284 integration.
+
+No tests were run because this pass changes no executable content. Inspected the
+concurrent `lf-new-implementation/reconciliation-after.log`: two tests/four cases
+pass for mounted completion and hidden Undo. That is the other writer's focused
+native/model receipt, not a new compression gate or configured-provider proof.
+Iteration 7's configured provider, repository and timing receipts retain their
+recorded pre-integration binary identities; they do not validate this integrated
+working tree. Full Task proof and publication disposition are unchanged.
 
 ### Iteration 6 — one Session-opening result path
 

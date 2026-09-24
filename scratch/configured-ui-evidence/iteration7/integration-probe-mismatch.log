@@ -1,0 +1,14 @@
+Owned PID 5116
+Probe executable /tmp/loo291-iteration7-palette.swift AX trusted true
+AXWindows 0 count 1
+Owned onscreen windows 1 active true hidden false
+PASS This exact probe host has Accessibility permission
+TIMING launch_observation_end_ms 3129.3833332601935
+PASS Ambient Wave does not block planning
+PASS Real Task list loaded (19 rows)
+PASS Open exact LOO-291 Task
+PASS Task has explicit no-Session state
+PASS Authoritative directive visible
+Buttons: ["Sessions", "All work", "Show work list", "New conversation · LOO-291", "New terminal", "Resume", "Worktree", "", "", "", "", "Show all Activity", "", "", ""]
+FAIL Failure(message: "Missing button New shell") terminated false active true
+Owned termination requested true

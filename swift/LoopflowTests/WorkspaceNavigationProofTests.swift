@@ -198,12 +198,12 @@ struct WorkspaceNavigationProofTests {
         [{"id":"navigation-split","kind":"interactive",
           "work":{"kind":"task","id":"ts_review00000000000000000000000000"},
           "title":"Navigation proof","detail":"Local cat PTY","cwd":"/tmp",
-          "state":"active","ready_summary":null,"open_argv":["/bin/cat"]}]
+          "state":"active","ready_summary":null,"terminal_ids":[],"open_argv":["/bin/cat"]}]
         """
         let otherRecords = """
         [{"id":"context-session","kind":"interactive","work":null,
           "title":"Other repository conversation","detail":"Existing external client","cwd":"/src/context",
-          "state":"active","ready_summary":null,"open_argv":["lf","session","open","context-session"]}]
+          "state":"active","ready_summary":null,"terminal_ids":[],"open_argv":["lf","session","open","context-session"]}]
         """
         let (completionResponses, completionResponse) = AsyncStream<Void>.makeStream()
         defer { completionResponse.finish() }

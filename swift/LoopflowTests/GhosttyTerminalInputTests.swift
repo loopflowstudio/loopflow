@@ -44,13 +44,15 @@ struct GhosttyTerminalInputTests {
         store.reconcile(records)
         for record in records {
             #expect(store.sessions.first { $0.id == record.id }?.state == .live)
-            #expect(await store.select(record.id) == record)
+            await store.select(record.id)
+            #expect(store.sessions.first { $0.id == record.id }?.surface == record)
             #expect(store.localTerminal(for: record) == .shell(record.terminalIds[0]))
         }
         let otherWindow = SessionsStore(repoPath: NSTemporaryDirectory())
         otherWindow.reconcile(records)
         #expect(otherWindow.sessions.allSatisfy { $0.state == .elsewhere })
-        #expect(await otherWindow.select("one") == nil)
+        await otherWindow.select("one")
+        #expect(otherWindow.sessions.first { $0.id == "one" }?.state == .elsewhere)
         #expect(registry.surfaces.hasSurface(.shell(records[0].terminalIds[0])))
     }
 

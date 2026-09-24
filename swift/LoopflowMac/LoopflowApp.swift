@@ -13,7 +13,6 @@ private func enrichProcessPathForGUILaunch() {
 struct LoopflowApp: App {
     @State private var portfolioService = PortfolioService()
     @Environment(\.openWindow) private var openWindow
-    @Environment(\.colorScheme) private var systemScheme
     @State private var snapshotError: String?
     @State private var showSnapshotError = false
     @State private var didOpenCaptureView = false
@@ -32,10 +31,6 @@ struct LoopflowApp: App {
         let resolvedAppearance = AppTestMode.forcesLightAppearance
             ? AppearanceMode.light.rawValue
             : appearanceMode
-        let theme = AppearanceMode.resolvedTheme(
-            rawValue: resolvedAppearance,
-            systemScheme: systemScheme
-        )
         let launchRepoURL = LaunchArguments.repoURL()
         let registryQuery = SessionFixture.query ?? RegistryQueryLocal.shared
 
@@ -46,8 +41,7 @@ struct LoopflowApp: App {
                 query: registryQuery
             )
             .tint(.loopflowBurgundy)
-            .preferredColorScheme(theme.preferredScheme)
-            .environment(\.palette, theme.palette)
+            .modifier(AppAppearance(mode: resolvedAppearance))
             .onOpenURL { handleDeepLink($0) }
             .uiTestWindowWidth()
             .uiTestSnapshot()
@@ -112,8 +106,7 @@ struct LoopflowApp: App {
                 initialRepoPath: repoURL?.path
             )
             .tint(.loopflowBurgundy)
-            .preferredColorScheme(theme.preferredScheme)
-            .environment(\.palette, theme.palette)
+            .modifier(AppAppearance(mode: resolvedAppearance))
         }
         .windowStyle(.automatic)
         .defaultSize(width: 1080, height: 760)
@@ -121,16 +114,14 @@ struct LoopflowApp: App {
         Window("Portfolio", id: "portfolio") {
             WavesView(portfolioService: portfolioService)
                 .tint(.loopflowBurgundy)
-                .preferredColorScheme(theme.preferredScheme)
-                .environment(\.palette, theme.palette)
+                .modifier(AppAppearance(mode: resolvedAppearance))
         }
         .defaultSize(width: 1080, height: 760)
 
         Window("Telemetry", id: "telemetry") {
             TelemetryDashboardView()
                 .tint(.loopflowBurgundy)
-                .preferredColorScheme(theme.preferredScheme)
-                .environment(\.palette, theme.palette)
+                .modifier(AppAppearance(mode: resolvedAppearance))
         }
         .defaultSize(width: 1180, height: 860)
 
@@ -195,6 +186,21 @@ struct LoopflowApp: App {
             return
         }
         openWindow(id: "repo", value: mainRepo)
+    }
+}
+
+/// Resolve system appearance inside the window, where SwiftUI supplies its
+/// effective color scheme. An App-level environment read cannot supply it.
+struct AppAppearance: ViewModifier {
+    let mode: String
+    @Environment(\.colorScheme) private var systemScheme
+
+    func body(content: Content) -> some View {
+        let theme = AppearanceMode.resolvedTheme(rawValue: mode, systemScheme: systemScheme)
+        content
+            .preferredColorScheme(theme.preferredScheme)
+            .environment(\.colorScheme, theme.preferredScheme ?? systemScheme)
+            .environment(\.palette, theme.palette)
     }
 }
 

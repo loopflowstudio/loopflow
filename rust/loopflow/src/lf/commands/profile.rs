@@ -1,5 +1,4 @@
 use std::collections::HashMap;
-use std::path::Path;
 
 use anyhow::{anyhow, Context, Result};
 use time::OffsetDateTime;
@@ -15,14 +14,14 @@ use crate::provider_auth::Provider;
 use crate::repository::RepoId;
 use crate::store::{ProviderAccount, SharedStore};
 
-pub fn run(cmd: &ProfileCommand, _repo_root: &Path) -> Result<()> {
+pub fn run(cmd: &ProfileCommand) -> Result<()> {
     let runtime = tokio::runtime::Runtime::new().context("failed to create async runtime")?;
     runtime.block_on(run_async(cmd))
 }
 
-pub fn run_route(cmd: &RouteCommand, repo_root: &Path) -> Result<()> {
+pub fn run_route(cmd: &RouteCommand) -> Result<()> {
     let runtime = tokio::runtime::Runtime::new().context("failed to create async runtime")?;
-    runtime.block_on(run_route_async(cmd, repo_root))
+    runtime.block_on(run_route_async(cmd))
 }
 
 async fn run_async(cmd: &ProfileCommand) -> Result<()> {
@@ -37,7 +36,7 @@ async fn run_async(cmd: &ProfileCommand) -> Result<()> {
     }
 }
 
-async fn run_route_async(cmd: &RouteCommand, repo_root: &Path) -> Result<()> {
+async fn run_route_async(cmd: &RouteCommand) -> Result<()> {
     let store = open_account_store().await?;
     match cmd {
         RouteCommand::Set {
@@ -45,7 +44,9 @@ async fn run_route_async(cmd: &RouteCommand, repo_root: &Path) -> Result<()> {
             accounts,
             repo,
         } => {
-            let repo_id = resolve_repo_id(repo_root, repo.as_deref())?;
+            let repo_id = resolve_repo_id(repo.as_deref())?.ok_or_else(|| anyhow!(
+                "Run lf route set from a repository with an origin remote, or pass --repo owner/name. Use lf route default set to change the default."
+            ))?;
             set_route(&store, RouteScope::Repo(repo_id), provider, accounts).await
         }
         RouteCommand::Default { cmd } => match cmd {
@@ -54,7 +55,8 @@ async fn run_route_async(cmd: &RouteCommand, repo_root: &Path) -> Result<()> {
             }
         },
         RouteCommand::Show { repo } => {
-            show_routes(&store, repo_root, repo.as_deref()).await?;
+            let repo_id = resolve_repo_id(repo.as_deref())?;
+            show_routes(&store, repo_id.as_ref()).await?;
             if crate::provider_account::lease::account_lease_active() {
                 show_forwarded_routes()?;
             }
@@ -212,8 +214,7 @@ async fn set_route(
     Ok(())
 }
 
-async fn show_routes(store: &SharedStore, repo_root: &Path, raw_repo: Option<&str>) -> Result<()> {
-    let repo_id = resolve_repo_id(repo_root, raw_repo)?;
+async fn show_routes(store: &SharedStore, repo_id: Option<&RepoId>) -> Result<()> {
     let accounts = store
         .list_provider_accounts(None)
         .await?
@@ -228,8 +229,15 @@ async fn show_routes(store: &SharedStore, repo_root: &Path, raw_repo: Option<&st
     let limits = store.provider_account_limits(None).await?;
     let now = now_unix();
     for provider in [Provider::Claude, Provider::Codex] {
-        let repo_scope = RouteScope::Repo(repo_id.clone());
-        let (route, fallback) = match store.provider_route(&repo_scope, provider).await? {
+        let repo_route = match repo_id {
+            Some(repo_id) => {
+                store
+                    .provider_route(&RouteScope::Repo(repo_id.clone()), provider)
+                    .await?
+            }
+            None => None,
+        };
+        let (route, fallback) = match repo_route {
             Some(route) => (Some(route), false),
             None => (
                 store.provider_route(&RouteScope::Default, provider).await?,
@@ -241,8 +249,8 @@ async fn show_routes(store: &SharedStore, repo_root: &Path, raw_repo: Option<&st
             continue;
         };
         if fallback {
-            println!("{provider}  (default route — this repo has no route)");
-        } else {
+            println!("{provider}  (default route)");
+        } else if let Some(repo_id) = repo_id {
             println!("{provider}  ({repo_id})");
         }
         for (position, account_id) in route.accounts.iter().enumerate() {
@@ -310,10 +318,29 @@ pub(crate) fn parse_managed_provider(raw: &str) -> Result<Provider> {
     }
 }
 
-fn resolve_repo_id(repo_root: &Path, raw_repo: Option<&str>) -> Result<RepoId> {
+fn resolve_repo_id(raw_repo: Option<&str>) -> Result<Option<RepoId>> {
     match raw_repo {
-        Some(repo) => RepoId::parse(repo).map_err(|error| anyhow!(error)),
-        None => RepoId::discover(repo_root).map_err(|error| anyhow!(error)),
+        Some(repo) => Ok(Some(RepoId::parse(repo).map_err(|error| anyhow!(error))?)),
+        None => {
+            let Some(root) = crate::repo::discover_repo_root(&std::env::current_dir()?)? else {
+                return Ok(None);
+            };
+            // A local-only repository has no provider route identity yet.
+            let origin = std::process::Command::new("git")
+                .args(["config", "--get", "remote.origin.url"])
+                .current_dir(&root)
+                .output()?;
+            if origin.status.code() == Some(1) {
+                return Ok(None);
+            }
+            if !origin.status.success() {
+                return Err(anyhow!(
+                    "cannot read repository origin: {}",
+                    String::from_utf8_lossy(&origin.stderr).trim()
+                ));
+            }
+            Ok(Some(RepoId::discover(&root)?))
+        }
     }
 }
 

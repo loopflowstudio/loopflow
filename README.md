@@ -22,6 +22,14 @@ Home.
 
 ## More install options
 
+```bash
+lf install                  # update to the latest published release, from any directory
+lf install schedule         # check at login and weekly (macOS)
+lf install schedule daily   # also accepts weekly, hourly, 5min
+```
+
+Use `lf rebase` inside a repository to update its checkout.
+
 Requires macOS or Linux and one of
 [Claude Code](https://docs.anthropic.com/en/docs/claude-code),
 [Codex](https://github.com/openai/codex), or
@@ -179,11 +187,11 @@ each `.md` URL, use the curated
 ## Developing loopflow
 
 ```bash
-lf install                                   # refresh main, required packages, and the published release
-lf install schedule                          # keep this laptop current at login and hourly (macOS)
+lf install                                   # install the latest published Loopflow from anywhere
+lf install schedule                          # update Loopflow at login and weekly (macOS)
 lf rebase                                    # refresh main and integrate it into this worktree
 uv run python scripts/install.py local --use  # build and pin this checkout against a disposable Home
-uv run python scripts/install.py refresh      # return to the latest published release and reliable Home
+lf install                                   # return to the latest published release and reliable Home
 uv run python scripts/install.py local        # build only under local-bin/
 ```
 

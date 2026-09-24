@@ -4,7 +4,7 @@ use crate::engine::{
     LaunchPromptInput, LaunchTarget, ProcessConfig, PromptComponents, Skill, SkillSyncOptions,
     StreamFormat, Surface,
 };
-use crate::lf::commands::util::{find_repo_root, launch_session_with_env};
+use crate::lf::commands::util::launch_session_with_env;
 use crate::lf::output::{format_context_header, format_reproducible_command, Colors};
 use crate::lf::Cli;
 use anyhow::{anyhow, Result};
@@ -179,7 +179,7 @@ fn prepare_runner_turn_at(
 
 fn build_prompt(skill: Option<&str>, message: Option<&str>, cli: &Cli) -> Result<PromptBuild> {
     let start = Instant::now();
-    let repo_root = find_repo_root()?;
+    let repo_root = crate::repo::working_directory()?;
     debug!(elapsed_ms = start.elapsed().as_millis(), "found repo root");
     build_prompt_at(skill, message, cli, repo_root, true, None, (None, None))
 }

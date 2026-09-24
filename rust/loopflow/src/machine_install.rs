@@ -373,9 +373,9 @@ impl ActivationTargets {
 pub struct SwitchReceipt {
     pub schema_version: u32,
     pub id: String,
-    pub prior: InstallSelection,
+    pub prior: Option<InstallSelection>,
     pub target: InstallSelection,
-    pub published_fallback: ArtifactSet,
+    pub published_fallback: Option<ArtifactSet>,
     pub target_published_fallback: Option<ArtifactSet>,
     pub phase: SwitchPhase,
     pub recovery_owner: RecoveryOwner,
@@ -395,12 +395,31 @@ impl SwitchReceipt {
         if self.id.is_empty() {
             return Err(anyhow!("install switch id is empty"));
         }
-        self.prior.validate()?;
-        self.target.validate()?;
-        if self.published_fallback.source != InstallSource::Published {
-            return Err(anyhow!("install switch fallback is not published"));
+        if let Some(prior) = &self.prior {
+            prior.validate()?;
         }
-        self.published_fallback.validate_structure()?;
+        self.target.validate()?;
+        if let Some(fallback) = &self.published_fallback {
+            if fallback.source != InstallSource::Published {
+                return Err(anyhow!("install switch fallback is not published"));
+            }
+            fallback.validate_structure()?;
+        } else if self.prior.is_some() || self.target.source != InstallSource::Published {
+            return Err(anyhow!(
+                "an existing installation requires a published fallback"
+            ));
+        }
+        if self.prior.is_none() && self.target.source != InstallSource::Published {
+            return Err(anyhow!("first installation must be published"));
+        }
+        if self.prior.is_none()
+            && self.published_fallback.is_some()
+            && self.phase != SwitchPhase::Settled
+        {
+            return Err(anyhow!(
+                "first installation has no prior published fallback"
+            ));
+        }
         match (&self.target.source, &self.target_published_fallback) {
             (InstallSource::Published, Some(fallback)) => {
                 if fallback.source != InstallSource::Published {
@@ -434,19 +453,19 @@ impl SwitchReceipt {
             }
             (InstallSource::Development, None) => {}
         }
-        let prior_cli = self
-            .prior
-            .artifact_set
-            .artifact(&ArtifactRole::Cli)
-            .ok_or_else(|| anyhow!("install switch {} prior set has no CLI", self.id))?;
         let target_cli = self
             .target
             .artifact_set
             .artifact(&ArtifactRole::Cli)
             .ok_or_else(|| anyhow!("install switch {} target set has no CLI", self.id))?;
-        let candidate_owned_bootstrap =
-            self.target.source == InstallSource::Development && self.coordinator == *target_cli;
-        if self.coordinator != *prior_cli && !candidate_owned_bootstrap {
+        let prior_cli = self
+            .prior
+            .as_ref()
+            .and_then(|prior| prior.artifact_set.artifact(&ArtifactRole::Cli));
+        let candidate_owned_bootstrap = (self.prior.is_none()
+            || self.target.source == InstallSource::Development)
+            && self.coordinator == *target_cli;
+        if prior_cli != Some(&self.coordinator) && !candidate_owned_bootstrap {
             return Err(anyhow!(
                 "install switch {} coordinator matches neither the prior CLI nor its candidate-owned bootstrap",
                 self.id
@@ -461,7 +480,10 @@ impl SwitchReceipt {
         self.activation.validate()?;
         if self.disposable_store_owned
             && (self.target.source != InstallSource::Development
-                || self.target.store == self.prior.store)
+                || self
+                    .prior
+                    .as_ref()
+                    .is_some_and(|prior| self.target.store == prior.store))
         {
             return Err(anyhow!(
                 "install switch {} claims a disposable store it did not create",
@@ -553,7 +575,7 @@ impl SwitchReceipt {
         if self.published_fallback != prior.published_fallback
             && !(self.phase == SwitchPhase::Settled
                 && self.target.source == InstallSource::Published
-                && self.target_published_fallback.as_ref() == Some(&self.published_fallback))
+                && self.target_published_fallback == self.published_fallback)
         {
             return Err(anyhow!(
                 "install switch {} changed its published fallback before settlement",
@@ -772,7 +794,7 @@ pub fn dispatch_entry_gate(role: &ArtifactRole) -> Result<()> {
         // A switch this process is not driving (typically one that failed or was
         // abandoned mid-flight) must not brick ordinary startup: dispatch through
         // the last good install instead of refusing.
-        MachineInstallState::Switching(receipt) => startup_selection_during_switch(&receipt),
+        MachineInstallState::Switching(receipt) => startup_selection_during_switch(&receipt)?,
         MachineInstallState::Settled(active) => active.selection,
     };
     let artifact = selection
@@ -842,24 +864,36 @@ pub fn read_state(root: &Path) -> Result<MachineInstallState> {
 /// including a switch that failed or was abandoned mid-flight — falls back to
 /// the prior settled selection. This keeps ordinary `lf` running the last good
 /// install instead of refusing every command until the switch is recovered: a
-/// failed promotion must never brick the CLI.
-fn startup_selection_during_switch(receipt: &SwitchReceipt) -> InstallSelection {
+/// failed promotion must never brick an existing CLI. First installation has
+/// no prior selection: ordinary startup waits for candidate-owned recovery.
+fn startup_selection_during_switch(receipt: &SwitchReceipt) -> Result<InstallSelection> {
     if receipt.active_selection_committed {
-        receipt.target.clone()
+        Ok(receipt.target.clone())
     } else {
-        receipt.prior.clone()
+        receipt.prior.clone().ok_or_else(|| {
+            anyhow!(
+                "first installation is unfinished; run {} install recover-switch --switch {}",
+                receipt.candidate.path.display(),
+                receipt.id
+            )
+        })
     }
 }
 
 /// The same fallback expressed as an `ActiveInstall`, for the authorization
 /// paths that resolve the running executable against a full install.
-fn startup_active_during_switch(receipt: &SwitchReceipt) -> ActiveInstall {
-    ActiveInstall {
+fn startup_active_during_switch(receipt: &SwitchReceipt) -> Result<ActiveInstall> {
+    let selection = startup_selection_during_switch(receipt)?;
+    let fallback = receipt
+        .published_fallback
+        .clone()
+        .context("settled installation has no published fallback")?;
+    Ok(ActiveInstall {
         schema_version: receipt.schema_version,
-        selection: startup_selection_during_switch(receipt),
-        published_fallback: receipt.published_fallback.clone(),
-        retained_published_sets: vec![receipt.published_fallback.clone()],
-    }
+        selection,
+        published_fallback: fallback.clone(),
+        retained_published_sets: vec![fallback],
+    })
 }
 
 pub fn write_switch(root: &Path, receipt: &SwitchReceipt) -> Result<()> {
@@ -1018,7 +1052,7 @@ fn authorize_for_switch(
             }
             // Not the switch this process drives: authorize against the last good
             // install so a failed or in-flight switch cannot brick ordinary startup.
-            startup_active_during_switch(&receipt)
+            startup_active_during_switch(&receipt)?
         }
         MachineInstallState::Settled(active) => *active,
     };
@@ -1102,7 +1136,7 @@ pub fn selection_for_executable(
         MachineInstallState::Legacy => return Ok(None),
         // A failed or in-flight switch resolves through the last good install so
         // ordinary startup keeps working instead of refusing every command.
-        MachineInstallState::Switching(receipt) => startup_active_during_switch(&receipt),
+        MachineInstallState::Switching(receipt) => startup_active_during_switch(&receipt)?,
         MachineInstallState::Settled(active) => *active,
     };
     let actual = fs::canonicalize(executable)
@@ -1392,9 +1426,9 @@ mod tests {
         SwitchReceipt {
             schema_version: SCHEMA_VERSION,
             id: "switch-test".to_string(),
-            prior: prior.clone(),
+            prior: Some(prior.clone()),
             target: target.clone(),
-            published_fallback,
+            published_fallback: Some(published_fallback),
             target_published_fallback: (target.source == InstallSource::Published)
                 .then(|| target.artifact_set.clone()),
             phase: SwitchPhase::Planned,
@@ -1430,6 +1464,67 @@ mod tests {
             root_for_home(account_home),
             Path::new("/Users/example/.lf-machine/install")
         );
+    }
+
+    #[test]
+    fn first_installation_can_cancel_without_inventing_a_prior_install() {
+        let directory = tempfile::tempdir().unwrap();
+        let root = directory.path().join("machine");
+        let target = selection(directory.path(), "published", InstallSource::Published);
+        let mut receipt = switch(target.clone(), target.clone(), target.artifact_set.clone());
+        receipt.prior = None;
+        receipt.published_fallback = None;
+        write_switch(&root, &receipt).unwrap();
+        let error = authorize(&root, &receipt.candidate.path, &ArtifactRole::Cli).unwrap_err();
+        assert!(error
+            .to_string()
+            .contains("first installation is unfinished"));
+        assert!(error.to_string().contains("recover-switch"));
+        assert!(!root.join(ACTIVE_FILE).exists());
+        clear_switch(&root, &receipt.id).unwrap();
+        assert!(matches!(
+            read_state(&root).unwrap(),
+            MachineInstallState::Legacy
+        ));
+        assert!(!target.store.exists());
+    }
+
+    #[test]
+    fn first_installation_handoff_requires_candidate_recovery_until_settlement() {
+        let directory = tempfile::tempdir().unwrap();
+        let root = directory.path().join("machine");
+        let target = selection(directory.path(), "published", InstallSource::Published);
+        let mut receipt = switch(target.clone(), target.clone(), target.artifact_set.clone());
+        receipt.prior = None;
+        receipt.published_fallback = None;
+        receipt.phase = SwitchPhase::Advancing;
+        receipt.recovery_owner = RecoveryOwner::Candidate;
+        receipt.target_store_advance_started = true;
+        write_switch(&root, &receipt).unwrap();
+        assert!(clear_switch(&root, &receipt.id).is_err());
+        assert_eq!(
+            authorize_for_switch(
+                &root,
+                &receipt.candidate.path,
+                &ArtifactRole::Cli,
+                Some(&receipt.id)
+            )
+            .unwrap(),
+            Some(target.clone())
+        );
+        assert!(authorize(&root, &receipt.candidate.path, &ArtifactRole::Cli).is_err());
+        receipt.target_store_advanced = true;
+        receipt.phase = SwitchPhase::Settled;
+        receipt.active_selection_committed = true;
+        receipt.published_fallback = Some(target.artifact_set.clone());
+        write_switch(&root, &receipt).unwrap();
+        let active = active(target.clone(), target.artifact_set.clone());
+        settle_switch(&root, &receipt, &active).unwrap();
+        assert_eq!(
+            authorize(&root, &receipt.candidate.path, &ArtifactRole::Cli).unwrap(),
+            Some(target)
+        );
+        assert!(!root.join(SWITCH_FILE).exists());
     }
 
     #[test]
@@ -1823,7 +1918,11 @@ mod tests {
             published.artifact_set.clone(),
         );
         write_switch(&root, &first).unwrap();
-        let mut second = switch(published, development, first.published_fallback.clone());
+        let mut second = switch(
+            published,
+            development,
+            first.published_fallback.clone().unwrap(),
+        );
         second.id = "switch-other".to_string();
 
         assert!(write_switch(&root, &second)

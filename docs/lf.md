@@ -931,25 +931,43 @@ Plain `lf rebase` never adopts or aborts an existing Git operation.
 ## lf install
 
 ```bash
-lf install             # update main, required tools, Python environment and published lf
-lf install schedule    # install a macOS login/hourly refresh job
+lf install             # install the latest published Loopflow from any directory
+lf install schedule    # update Loopflow at login and weekly (macOS)
+lf install schedule daily  # weekly, daily, hourly, or 5min
 ```
 
-Runs from any worktree and shares main's preserving update with `lf rebase`.
-Homebrew installs/upgrades the required tools in the doctor inventory; `uv sync
---locked` converges the canonical checkout's environment. Published release
-installation uses the existing verified promotion path. An already-installed
-release skips asset downloads when the control binaries and, on macOS, the
-application are current and complete; missing or stale app bundles are repaired
-through the published installer. No source build runs. `lf rebase` only updates
-checkouts and does not install packages or binaries.
+Updates the installed CLI, daemon, and macOS application through verified
+release downloads and the existing promotion transaction. Requires no Git
+repository, source checkout, Python, uv, or Homebrew. An already-current,
+complete release skips asset downloads; missing or stale artifacts are repaired.
+Use `lf rebase` for checkout updates and your project's own tools for dependency
+setup.
 
-The laptop job invokes `lf install` through the installed command, with stable
-tool paths and logs at `~/Library/Logs/Loopflow/refresh.log`. It runs at login
-and on the hour; launchd coalesces sleeping calendar intervals into one run at
-wake. Failed network/package requests retry on a later run or an explicit
-`lf install`; failures remain nonzero. Linux
-checks required tools and reports missing-tool installation instructions.
+For an older `lf` whose install command requires a source checkout, upgrade once
+with the external installer, then use `lf install` for subsequent updates:
+
+```bash
+curl -fsSL https://github.com/loopflowstudio/loopflow/releases/latest/download/install.sh | sh
+```
+
+The external installer verifies release assets and enters the same promotion
+transaction. The old `scripts/install.py refresh` and `pull-local-bin.sh` entrypoints
+have been removed.
+
+The scheduled job invokes the installed `lf install`, with stable tool paths and
+logs at `~/Library/Logs/Loopflow/refresh.log`. It runs at login and on the selected
+cadence: weekly on Monday at 09:00 (the default), daily at 09:00, hourly on the
+hour, or every five minutes on clock multiples of five. All times are local;
+launchd coalesces sleeping calendar intervals into one run at wake. Rerun
+`lf install schedule` to update an existing job and remove its old source-checkout
+dependency. Failed downloads or promotion remain nonzero and can be retried.
+Linux supports `lf install`; automatic scheduling currently requires macOS.
+
+`lf list`, authentication, profiles, Home identity, and machine inspection also
+work outside repositories. `lf route show` displays defaults there;
+`lf route set --repo owner/name` selects a repository explicitly. Inside a
+repository, catalog and listing commands use its context. Outside, `lf ls`,
+`lf roadmap`, and `lf session list` show machine-wide records.
 
 ## lf wt
 

@@ -487,17 +487,17 @@ pub struct RoadmapTask {
 /// Keep only Waves whose repository matches the current working directory,
 /// collapsing worktrees to their main checkout. `all` (or a cwd outside any git
 /// repo, where there is nothing to scope to) returns every Wave unchanged.
-fn scope_waves_to_repo(waves: Vec<Wave>, all: bool) -> Vec<Wave> {
+fn scope_waves_to_repo(waves: Vec<Wave>, all: bool) -> Result<Vec<Wave>> {
     if all {
-        return waves;
+        return Ok(waves);
     }
-    let Some(scope) = crate::repository::CanonicalRepo::current() else {
-        return waves;
+    let Some(scope) = crate::repository::CanonicalRepo::current()? else {
+        return Ok(waves);
     };
-    waves
+    Ok(waves
         .into_iter()
         .filter(|wave| scope.contains(Path::new(wave.repo())))
-        .collect()
+        .collect())
 }
 
 pub fn ls(json: bool, all: bool) -> Result<()> {
@@ -510,7 +510,7 @@ pub fn ls(json: bool, all: bool) -> Result<()> {
             .list_waves(None)
             .await
             .map_err(|err| anyhow!("failed to read wave registry: {err}"))?;
-        let waves = scope_waves_to_repo(waves, all);
+        let waves = scope_waves_to_repo(waves, all)?;
         let mut snapshots = Vec::with_capacity(waves.len());
         for wave in waves {
             snapshots.push(snapshot_wave(&store, &wave).await?);
@@ -631,7 +631,7 @@ pub fn roadmap(wave: Option<&str>, json: bool, all: bool) -> Result<()> {
                     .list_waves(None)
                     .await
                     .map_err(|err| anyhow!("failed to read wave registry: {err}"))?;
-                scope_waves_to_repo(waves, all)
+                scope_waves_to_repo(waves, all)?
             }
             Err(other) => return Err(anyhow!(other)),
         };

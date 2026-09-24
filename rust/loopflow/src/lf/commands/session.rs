@@ -87,7 +87,7 @@ async fn run_async(command: &SessionCommand) -> anyhow::Result<()> {
 
 async fn list(store: &Arc<Store>, json: bool, all: bool) -> anyhow::Result<()> {
     let mut sessions = crate::ops::human_session::list(store).await?;
-    sessions = scope_to_repo(sessions, all);
+    sessions = scope_to_repo(sessions, all)?;
     if json {
         println!("{}", serde_json::to_string_pretty(&sessions)?);
     } else if sessions.is_empty() {
@@ -160,17 +160,17 @@ async fn decide_flow(
     Ok(())
 }
 
-fn scope_to_repo(sessions: Vec<SessionRecord>, all: bool) -> Vec<SessionRecord> {
+fn scope_to_repo(sessions: Vec<SessionRecord>, all: bool) -> anyhow::Result<Vec<SessionRecord>> {
     if all {
-        return sessions;
+        return Ok(sessions);
     }
-    let Some(scope) = crate::repository::CanonicalRepo::current() else {
-        return sessions;
+    let Some(scope) = crate::repository::CanonicalRepo::current()? else {
+        return Ok(sessions);
     };
-    sessions
+    Ok(sessions
         .into_iter()
         .filter(|session| scope.contains(Path::new(&session.cwd)))
-        .collect()
+        .collect())
 }
 
 fn required_text(args: &[String], label: &str) -> anyhow::Result<String> {
@@ -196,6 +196,6 @@ mod tests {
 
     #[test]
     fn an_empty_session_list_stays_empty() {
-        assert!(scope_to_repo(Vec::new(), true).is_empty());
+        assert!(scope_to_repo(Vec::new(), true).unwrap().is_empty());
     }
 }

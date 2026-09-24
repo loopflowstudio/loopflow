@@ -13,7 +13,6 @@ pub mod install;
 pub mod list;
 pub mod ops;
 pub mod profile;
-pub mod refresh;
 pub mod replay;
 pub mod reply;
 pub mod run;

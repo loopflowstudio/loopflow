@@ -296,3 +296,53 @@ telemetry association/recovery and repair ownership, closed-obligation
 continuation, remaining mutation children and configured acceptance remain open.
 The scorecard blocker and required UI/public proof are retained; no PR approval,
 publication or two-settlement claim follows from this compression review.
+
+## Auto-merge ownership compression review at `e041f8b45b`
+
+No executable reduction selected. The model before and after this pass is an
+obligation containing original due opportunities; an execution owner retains
+attempts with selection, verification and outcome. Collapsed opportunities
+reference their owner. `settle` atomically writes product evidence; physical
+receipts retain process results, and publisher receipts retain artifact stages
+and public observations. Cron attribution, target exclusion and checkout removal
+protection remain distinct capabilities. Auto-merge inheritance extends their
+existing lifetimes without creating another executor or durable state object.
+
+Inspected accounting types and execution validation, `begin`, `finish_process`,
+`settle` and receipt context; history qualification and failure dispositions;
+release preparation/waiting, shared PR enable/disable, land finalization and
+ordinary CLI/Task callers; target-lock acquisition/inheritance and checkout
+leases. The complete Task patch was available without truncation (611,209
+characters). This pass concentrated on those model paths and the new auto-merge
+cut, rather than treating historical reports as fresh verification.
+
+Mirrors checked: hidden cron receipt/descriptor arguments and Flow dispatch,
+history DTO and JSON fixture, Python artifact/public receipt types and descriptor
+forwarding, auto-merge survival fixture, release README, cron host guide,
+release-evidence direction and full design. Searches found no Swift consumer of
+`ReleaseHistory`, `ReleaseOpportunity` or `PublicReleaseReceipt`.
+
+| Candidate | Why retained |
+|---|---|
+| Inheritance callback and `ReleaseLock::command` | The callback configures existing shared PR commands with capabilities held by their caller. The constructor serves direct release children. Unifying them into an executor introduces machinery without removing a domain owner. |
+| Separate target and checkout inheritance | Waiting owns target exclusion; preparation also owns a checkout. Combining these capabilities changes removal scope and would force waiting to invent checkout ownership. |
+| Ordinary callers' no-op callbacks | They explicitly supply no release capability. A default wrapper or ambient lookup would add an entry point or conceal ownership, not reduce the model. |
+| `arm` and `finish_arm_after_rebase` | Required versus completed integration is real behavior. Both use one preparation implementation; collapsing them would either repeat integration or expose its mode publicly. |
+| Enable and disable auto-merge | Exact-head arming and idempotent revocation are distinct operations. Replacement composes the existing functions; a mode enum would merely rename their branching. |
+| PR number/head arguments in finalization | Passing a borrowed `PrInfo` could group two arguments, but removes no concept or competing representation. That local signature cleanup alone does not meet this pass's structural bar. |
+| Selection, outcome, physical receipt and publisher proof | They preserve recovery identity, product settlement, wrapper exit and public observations at different boundaries. Combining them would discard evidence or overstate completion. |
+| Frozen coverage and current collapse links | Historical timing/provenance consumes the former; current ownership uses the latter. Neither reconstructs the other across retries. |
+
+Searches found no restored duplicate success-proof types, separate verification
+writer or Python candidate/publish receipt classes. The explicit callback covers
+auto-merge commands only. Commit/push, PR creation/editing/readiness, notes,
+lockfile tools and source/cleanup mutation children remain implementation gaps;
+a generic wrapper would not establish their ownership contract.
+
+No APIs, DTOs, fields, storage formats or executable code changed. No tests or
+static checks were rerun for this documentation-only review. Prior focused
+results remain recorded in [release-auto-merge-ownership.md](release-auto-merge-ownership.md).
+Historical telemetry association/recovery and repair ownership, closed-obligation
+continuation and configured acceptance remain open. The scorecard blocker,
+required UI/public proof and two automatic settlements are not resolved by this
+review. No publication, landing or Task completion was performed.

@@ -50,6 +50,7 @@ pub struct TaskWatchStage {
 /// stage has never been observed; a bound Run need not still be running.
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize)]
 #[serde(rename_all = "snake_case")]
+#[non_exhaustive]
 pub enum TaskWatchAttemptState {
     Entered,
     Bound,
@@ -124,7 +125,9 @@ pub async fn read_task_watch(
         }
     }
     let mut seen = BTreeSet::new();
-    for (_, manifest) in crate::run_record::task_run_manifests(home, task)? {
+    let discovery = crate::run_record::task_run_manifests(home, task)?;
+    snapshot.gaps.extend(discovery.gaps);
+    for (_, manifest) in discovery.runs {
         let run_id = manifest.run_id.to_string();
         seen.insert(run_id.clone());
         snapshot.runs.push(TaskWatchRun {

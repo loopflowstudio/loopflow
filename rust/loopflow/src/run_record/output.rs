@@ -323,6 +323,81 @@ mod tests {
     }
 
     #[test]
+    fn native_tools_preserve_call_identity_across_pages_and_reversed_results() {
+        use crate::chat::types::{ConversationItem, Lifecycle};
+        use serde_json::json;
+
+        for source in [OutputSource::Claude, OutputSource::Codex] {
+            let dir = tempfile::tempdir().unwrap();
+            let path = dir.path().join("native.jsonl");
+            let mut file = std::fs::File::create(&path).unwrap();
+            if source == OutputSource::Codex {
+                writeln!(
+                    file,
+                    "{}",
+                    json!({"type":"session_meta","payload":{"id":"session"}})
+                )
+                .unwrap();
+            }
+            for (index, call) in ["call-one", "call-two"].iter().enumerate() {
+                let value = if source == OutputSource::Claude {
+                    json!({"type":"assistant","sessionId":"session","uuid":format!("call-{index}"),"message":{"content":[{"type":"tool_use","id":call,"name":"shell","input":{"command":call}}]}})
+                } else {
+                    json!({"type":"response_item","payload":{"type":"function_call","call_id":call,"name":"shell","arguments":call}})
+                };
+                writeln!(file, "{value}").unwrap();
+            }
+            let calls = read_source(&path, source, Some("session"), None).unwrap();
+            assert!(calls.gaps.is_empty());
+            assert_eq!(calls.records.len(), 2);
+            for (index, call) in ["call-two", "call-one"].iter().enumerate() {
+                let value = if source == OutputSource::Claude {
+                    json!({"type":"user","sessionId":"session","uuid":format!("result-{index}"),"message":{"content":[{"type":"tool_result","tool_use_id":call,"content":call}]}})
+                } else {
+                    json!({"type":"response_item","payload":{"type":"function_call_output","call_id":call,"output":call}})
+                };
+                writeln!(file, "{value}").unwrap();
+            }
+            let results = read_source(&path, source, Some("session"), Some(&calls.cursor)).unwrap();
+            assert!(results.gaps.is_empty());
+            assert_eq!(results.records.len(), 2);
+            for (call, result) in calls.records.iter().zip(results.records.iter().rev()) {
+                let ConversationEvent::ItemCompleted {
+                    item: ConversationItem::Tool { id, status, .. },
+                    ..
+                } = &call.event
+                else {
+                    panic!("expected tool call")
+                };
+                let ConversationEvent::ItemCompleted {
+                    item:
+                        ConversationItem::Tool {
+                            id: result_id,
+                            output,
+                            status: result_status,
+                            ..
+                        },
+                    ..
+                } = &result.event
+                else {
+                    panic!("expected tool result")
+                };
+                assert_eq!(id, result_id);
+                assert_eq!(output.as_ref(), Some(id));
+                assert_eq!(*status, Lifecycle::Running);
+                assert_eq!(*result_status, Lifecycle::Completed);
+                assert_ne!(call.source_item_id, result.source_item_id);
+            }
+            assert!(
+                read_source(&path, source, Some("session"), Some(&results.cursor))
+                    .unwrap()
+                    .records
+                    .is_empty()
+            );
+        }
+    }
+
+    #[test]
     fn oversized_record_reports_a_gap_without_stalling_later_output() {
         let dir = tempfile::tempdir().unwrap();
         let path = dir.path().join("session.jsonl");

@@ -571,18 +571,38 @@ pub(crate) fn resolve_manifest(
     }
 }
 
+#[derive(Debug)]
+pub(crate) struct TaskRunManifests {
+    pub runs: Vec<(PathBuf, RunManifest)>,
+    pub gaps: Vec<output::OutputGap>,
+}
+
 pub(crate) fn task_run_manifests(
     home: &Path,
     task: &crate::work::task::Task,
-) -> std::io::Result<Vec<(PathBuf, RunManifest)>> {
+) -> std::io::Result<TaskRunManifests> {
     let selectors = [
         format!("task:{}", task.id),
         format!("task:{}", task.plan.identifier),
     ];
     let mut runs = Vec::new();
+    let mut gaps = Vec::new();
     for dir in record_dirs(home)? {
-        let manifest = read_manifest(&dir)?;
-        validate_manifest_path(&dir, &manifest)?;
+        let manifest = match read_manifest(&dir).and_then(|manifest| {
+            validate_manifest_path(&dir, &manifest)?;
+            Ok(manifest)
+        }) {
+            Ok(manifest) => manifest,
+            Err(error) => {
+                // Attribution is unknown until the manifest can be read. Keep
+                // healthy output, but never report discovery as complete.
+                gaps.push(output::gap(
+                    "discovery_incomplete",
+                    format!("Cannot attribute Run record {}: {error}", dir.display()),
+                ));
+                continue;
+            }
+        };
         if manifest
             .subjects
             .iter()
@@ -596,7 +616,7 @@ pub(crate) fn task_run_manifests(
             .cmp(&right.created_at)
             .then_with(|| left.run_id.as_str().cmp(right.run_id.as_str()))
     });
-    Ok(runs)
+    Ok(TaskRunManifests { runs, gaps })
 }
 
 pub(crate) fn read_run_snapshot(dir: &Path) -> std::io::Result<RunSnapshot> {

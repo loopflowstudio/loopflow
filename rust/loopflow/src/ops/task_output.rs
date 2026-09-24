@@ -36,6 +36,7 @@ pub struct TaskOutputSource {
 pub struct TaskOutputPage {
     pub task_id: String,
     pub sources: Vec<TaskOutputSource>,
+    pub gaps: Vec<OutputGap>,
     pub next_cursor: String,
 }
 
@@ -87,10 +88,12 @@ pub async fn read_task_output(
             _ => None,
         })
         .collect::<BTreeMap<_, _>>();
-    let runs = crate::run_record::task_run_manifests(home, task)?;
+    let discovery = crate::run_record::task_run_manifests(home, task)?;
+    let runs = discovery.runs;
     let mut page = TaskOutputPage {
         task_id: task.id.to_string(),
         sources: Vec::new(),
+        gaps: discovery.gaps,
         next_cursor: String::new(),
     };
     let total = runs.len();
@@ -305,11 +308,19 @@ mod tests {
             cursor = Some(page.next_cursor);
         }
         assert_eq!(seen.len(), 51);
+        let unrelated_manifest = unrelated.artifact_dir().join("manifest.json");
+        let original = std::fs::read(&unrelated_manifest).unwrap();
+        std::fs::write(&unrelated_manifest, "{broken").unwrap();
         let new = launch(format!("task:{}", task.id));
         for _ in 0..7 {
             let page = read_task_output(&store, &task, home.path(), cursor.as_deref())
                 .await
                 .unwrap();
+            assert_eq!(page.gaps.len(), 1);
+            assert_eq!(page.gaps[0].code, "discovery_incomplete");
+            assert!(page.gaps[0]
+                .message
+                .contains(unrelated.artifact_dir().to_str().unwrap()));
             for source in page
                 .sources
                 .into_iter()
@@ -321,6 +332,24 @@ mod tests {
             cursor = Some(page.next_cursor);
         }
         assert_eq!(seen.len(), 52);
+        // A Run directory can appear before its atomic manifest install, or
+        // disappear during discovery. Neither hides healthy Task output.
+        std::fs::remove_file(&unrelated_manifest).unwrap();
+        let missing = read_task_output(&store, &task, home.path(), cursor.as_deref())
+            .await
+            .unwrap();
+        assert_eq!(missing.gaps.len(), 1);
+        assert_eq!(missing.gaps[0].code, "discovery_incomplete");
+        assert!(missing.sources.iter().all(|source| source.available));
+        std::fs::write(&unrelated_manifest, original).unwrap();
+        let recovered = read_task_output(&store, &task, home.path(), Some(&missing.next_cursor))
+            .await
+            .unwrap();
+        assert!(recovered.gaps.is_empty());
+        assert!(recovered
+            .sources
+            .iter()
+            .all(|source| source.records.is_empty()));
         task.id = crate::durable::TaskId::new();
         assert!(
             read_task_output(&store, &task, home.path(), cursor.as_deref())

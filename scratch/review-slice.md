@@ -102,11 +102,10 @@ depend on the preserved later implementation.
    stale evidence, filtering, Follow live, and inspectable completed history.
 4. Prove the full configured path, then enter the pinned human demo gate.
 
-The current design explicitly says: “Do not extend those paths, build Watch, run
-the configured demo, publish, or complete the Task in this pass.” That narrower
-checkpoint boundary controls this review. This review attempted no publication, landing, or Task
-completion. Passing this checkpoint does not narrow the accepted
-end-to-end Task or authorize an autonomous-only release.
+The narrow checkpoint's stop boundary applied to this historical review only.
+The active design now advances the shared Watch snapshot and retains the full
+end-to-end acceptance. This review attempted no publication, landing, or Task
+completion; passing it does not authorize an autonomous-only release.
 
 ---
 

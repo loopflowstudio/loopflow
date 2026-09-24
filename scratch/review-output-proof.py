@@ -63,6 +63,9 @@ def _main() -> None:
         for source in json.loads(result.stdout)["sources"]:
             items = [record["event"]["item"] for record in source["records"]]
             calls = [item for item in items if item["status"] == "running"]
+            results = [item for item in items if item["status"] == "completed"]
+            assert [item["id"] for item in calls] == ["call-one", "call-two"]
+            assert [item["id"] for item in results] == ["call-two", "call-one"]
             print(json.dumps(dict(provider=source["provider"], synthetic_records=len(items),
                                   call_ids_preserved=all(any(call in json.dumps(item) for item in calls)
                                                          for call in ["call-one", "call-two"]),
@@ -72,8 +75,13 @@ def _main() -> None:
         unrelated.mkdir(parents=True)
         (unrelated / "manifest.json").write_text("{broken")
         result = read()
+        result.check_returncode()
+        page = json.loads(result.stdout)
+        assert page["gaps"][0]["code"] == "discovery_incomplete"
+        assert sum(len(source["records"]) for source in page["sources"]) == 8
         print(json.dumps(dict(unrelated_corrupt_manifest_returncode=result.returncode,
                               healthy_output_returned=bool(result.stdout.strip()),
+                              gap_codes=[gap["code"] for gap in page["gaps"]],
                               error=result.stderr.strip())))
 
 

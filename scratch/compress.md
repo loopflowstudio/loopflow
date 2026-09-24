@@ -1,111 +1,27 @@
-# Compression review — 2026-09-23
+# Compression validation — 2026-09-23
 
-Current pass: model/API review of committed head `cc2dff810`, including the narrow
-provenance checkpoint and preserved continuation repairs. No executable changes.
-The earlier grouping reduction remains in place; this pass found no further
-coherent reduction without changing behavior or designing the unfinished
-history/live API.
+Review of committed model at `cc2dff810`; no executable changes or fresh test
+runs. Durable ownership and continuation findings now live in
+[Product memory](../wave/product/MEMORY.md#passive-task-watch-loo-293-branch-evidence-2026-09-23).
+Concurrent snapshot work was outside that review.
 
-The checkout was clean at entry. Concurrent edits appeared during inspection in
-`ops/mod.rs`, `store/children.rs`, `store/sqlite/durable.rs`, and the Task design.
-Those edits remain untouched and uncommitted by this pass. This assessment covers
-the committed model, not the concurrent implementation or its revised design.
+## Checks for subsequent changes
 
-## Effective model, before and after
-
-Unchanged: FlowPosition and claims authorize execution; Task events retain exact
-plan/stage/Run facts. Run journals and provider-native history own output, with
-native locations recorded beside provider Session identity at launch or callback.
-The passive reader returns ordered sources with their labels, records, and gaps.
-An opaque cursor holds reader progress only. The CLI accepts that value through a
-file or stdin; Swift creates and removes a private file for each continued query.
-
-The previous compression removed TaskOutputRecord, its per-record labels, and the
-parallel top-level records array. TaskOutputSource now owns labels and records;
-OutputRecord carries item identity, revision, and ConversationEvent. Rust, CLI,
-Swift, and the shared fixture still use that one shape. No old wrapper or decoder
-was found. This pass removes no additional APIs, DTOs, types, or fields.
-
-## Model and API path inspected
-
-Read flow_history.rs and TaskEventKind's observation exclusion; ProviderSessionRef
-and its source-preserving writer; native_source.rs resolution and launch/callback
-call sites; OutputCursor, JSONL continuation and journal normalization;
-PartCursor/read_parts_in and the new boundary-retention logic; task_run_manifests,
-read_task_output and read-only Task dispatch; CLI cursor-file/stdin input and its
-shared size bound. Checked README and architecture/planning.md against that path.
-
-Compared TaskOutput.swift field-by-field with Rust and task_output.json. Read
-RegistryQuery.taskOutput, RegistryQueryLocal, both fixture tests, the large-cursor
-cleanup test, the CLI transport test, and the three focused OpenCode tests.
-Watch snapshot, filtering store, and UI remain unimplemented; none was treated as
-an existing caller in the reviewed head to justify a reduction. Searched Rust,
-Swift, fixtures, and user docs for TaskOutputRecord and the surviving output
-types: the removed wrapper has no active declaration or caller. Compared the
-ConversationEvent/ItemDelta variants with their Swift decoders; their payloads
-are reused by output rather than translated through a second event model.
-
-## Suspected reductions left intentionally
-
-- **FlowPosition versus TaskFlowEvent:** the position authorizes current work;
-  events retain plans, attempts, and settlement after that position is deleted.
-  Replacing history with the active cursor loses completed/restarted invocations.
-  StageEntered and Transition also differ: initial entry has no prior stage,
-  while a retry can retain the same stage coordinates and bind a distinct Run.
-- **TaskOutputPage envelope:** Task identity and continuation belong to the whole
-  round-robin read across sources. Returning a bare source list would lose those
-  facts or repeat them on each source. OutputRecord identity is likewise separate
-  from nested conversation item identity: journal deltas need no nested item.
-- **Watermark, ceiling, and after:** the old inclusive boundary, fixed sweep upper
-  boundary, and page position differ while paging. The interleaving regression
-  requires both timestamp boundaries; substituting the latest row timestamp loses
-  edits, and pruning the old boundary early replays records.
-- **Part revisions and wire revisions:** the private hash compares provider JSON;
-  the wire revision identifies normalized output. Updated timestamps govern
-  retention independently of content, and unfinished parts need continued reads.
-  Collapsing these would change normalization or revisit behavior.
-- **Source location, file identity, Session identity, and verification:** location
-  resolves storage, file identity detects replacement, Session identity prevents
-  borrowing another conversation, and verification survives JSONL pages whose
-  identity header was already read. None replaces the others.
-- **Byte state versus part state:** OutputCursor mixes protocol-specific fields.
-  A tagged private continuation could eliminate invalid combinations, but doing
-  that alone adds variants/structs without removing an owner or public concept.
-  Leave the whole cursor-shape change for independent history/live continuation,
-  where it must also resolve retained-state growth and discovery. Do not add
-  accessors or adapters solely to hide the current fields.
-- **NativeSource versus OutputSource:** launch-owned storage provenance and
-  observer normalization protocol differ; journals have no native receipt.
-  Combining them would push reader state into the receipt or paths into the feed.
-- **Provider versus source:** a journal's normalization source does not identify
-  its provider. Removing provider loses attribution; the existing manifest label
-  still does not establish faithful per-attempt failover attribution.
-- **SourcePage versus TaskOutputSource:** a successful low-level read owns its
-  continuation, while the Task projection adds attribution and unavailable-source
-  evidence. Folding them would make provider readers own Task presentation.
-- **Availability, reset, has_more, and gaps:** quiet, unreadable, reset, paginated,
-  and partially malformed output are distinct observations. A single status enum
-  or an empty-record check would lose combinations the current contract exposes.
-- **Transport files and bounded input:** the private Swift file exists because
-  the runner accepts argv, and cursor values exceed argv capacity. Moving cursor
-  state into a persistent cache creates another owner; changing every query runner
-  to accept stdin is a larger transport change, not a local model reduction.
-  The CLI read bound, operation input bound, and returned-cursor bound protect
-  different boundaries and use one constant.
-
-## Verification and remaining work
-
-No tests or lint rerun: this pass changes only this report. Source inspection and
-cross-language contract comparison are review evidence, not fresh execution
-proof. Prior implementation
-receipts remain three OpenCode tests, one CLI cursor test, one Task discovery test,
-one Swift transport/cleanup test, formatting and full-target Clippy. The configured
-file/stdin proof returned 469 distinct revisions and accepted a 2,186,420-byte
-padded cursor; it proved transport, not live arrival or a large real Task state.
-
-Independent history/live continuation, bounded discovery/state, complete capture,
-Watch and its configured human demonstration remain required in this same PR.
-This no-op compression review does not approve those unfinished requirements.
+- Keep one grouped Rust/Swift output contract: TaskOutputSource owns labels,
+  records, and source evidence; OutputRecord owns item identity, revision, and
+  ConversationEvent. Compare both decoders with `tests/fixtures/dto/task_output.json`.
+- For continuation changes, run the focused OpenCode interleaving tests. Verify
+  same-timestamp edits survive newer writes between pages, timestamp-only edits
+  do not replay, and 1,000 completed parts do not accumulate historical hashes.
+  Measure same-timestamp/unfinished sets and per-Run state separately.
+- For transport changes, prove file and stdin input near the shared cursor bound
+  plus Swift cleanup after success/failure. Prior configured reads returned 469
+  distinct revisions and accepted a 2,186,420-byte padded cursor; padding proves
+  transport only, not realistic retained state or live arrival.
+- Independent history/live continuation, bounded discovery/state, complete
+  capture, and the configured Watch demonstration remain acceptance checks in
+  the active Task design. A source review or quiet readable page cannot replace
+  them. Do not infer provider attribution from a journal source discriminator.
 
 ---
 

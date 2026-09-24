@@ -39,6 +39,20 @@ fn message(id: String, body: String, phase: Option<String>) -> ConversationItem 
     }
 }
 
+fn tool_id(value: &Value, key: &str, page: &mut SourcePage) -> Option<String> {
+    let id = value
+        .get(key)
+        .and_then(Value::as_str)
+        .filter(|id| !id.is_empty());
+    if id.is_none() {
+        page.gaps.push(gap(
+            "missing_item_identity",
+            format!("Native tool record has no {key}"),
+        ));
+    }
+    id.map(str::to_owned)
+}
+
 fn tool(
     id: String,
     name: String,
@@ -116,19 +130,26 @@ pub(super) fn normalize_jsonl(
             } else if let Some(blocks) = message["content"].as_array() {
                 for (index, block) in blocks.iter().enumerate() {
                     let id = format!("{uuid}:{index}");
-                    let item = match text(block, "type").as_str() {
+                    let block_kind = text(block, "type");
+                    let item_id = match block_kind.as_str() {
+                        "tool_use" => tool_id(block, "id", page),
+                        "tool_result" => tool_id(block, "tool_use_id", page),
+                        _ => Some(id.clone()),
+                    };
+                    let Some(item_id) = item_id else { continue };
+                    let item = match block_kind.as_str() {
                         "text" => {
                             self::message(id.clone(), text(block, "text"), Some(kind.clone()))
                         }
                         "tool_use" => tool(
-                            id.clone(),
+                            item_id,
                             text(block, "name"),
                             block.get("input").cloned(),
                             None,
                             Lifecycle::Running,
                         ),
                         "tool_result" => tool(
-                            id.clone(),
+                            item_id,
                             "tool_result".into(),
                             Some(serde_json::json!({"tool_use_id": block["tool_use_id"]})),
                             block.get("content").map(content),
@@ -171,7 +192,18 @@ pub(super) fn normalize_jsonl(
                 .and_then(Value::as_str)
                 .map(str::to_owned)
                 .unwrap_or_else(|| format!("byte:{offset}"));
-            let item = match text(payload, "type").as_str() {
+            let item_kind = text(payload, "type");
+            let item_id = match item_kind.as_str() {
+                "function_call"
+                | "custom_tool_call"
+                | "function_call_output"
+                | "custom_tool_call_output" => tool_id(payload, "call_id", page),
+                _ => Some(id.clone()),
+            };
+            let Some(item_id) = item_id else {
+                return Ok(());
+            };
+            let item = match item_kind.as_str() {
                 "message" if matches!(payload["role"].as_str(), Some("assistant" | "user")) => {
                     message(
                         id.clone(),
@@ -184,7 +216,7 @@ pub(super) fn normalize_jsonl(
                     )
                 }
                 "function_call" | "custom_tool_call" => tool(
-                    id.clone(),
+                    item_id,
                     text(payload, "name"),
                     payload
                         .get("arguments")
@@ -194,7 +226,7 @@ pub(super) fn normalize_jsonl(
                     Lifecycle::Running,
                 ),
                 "function_call_output" | "custom_tool_call_output" => tool(
-                    id.clone(),
+                    item_id,
                     "tool_result".into(),
                     Some(serde_json::json!({"call_id": payload["call_id"]})),
                     payload.get("output").map(content),

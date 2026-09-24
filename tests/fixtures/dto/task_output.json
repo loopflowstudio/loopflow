@@ -1,5 +1,6 @@
 {
   "task_id": "task_00000000000000000000000000000001",
+  "gaps": [{"code": "discovery_incomplete", "message": "One Run manifest could not be attributed"}],
   "sources": [
     {
       "run_id": "run_00000000000000000000000000000001",

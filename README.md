@@ -84,10 +84,15 @@ lf task interrupt INF-123                             # end this turn so fresh d
 lf --task INF-123 research "write scratch/runtime.md"    # one independent Task-bound Run
 lf task restart INF-123 "reconcile all scratch first" # checkpoint and begin a new kickoff
 lf task status INF-123 --json                         # inspect durable state
+lf task watch INF-123 --json                          # inspect retained stages, attempts, and Runs
+lf task watch INF-123 --json                          # inspect saved flow plans, attempts, and Runs
 lf task output INF-123 --json                         # read passive output; continue with --cursor
 lf pr arm -c                                          # request exact-head auto-merge and return
 lf pr land -c                                         # watch, repair CI, merge, then complete the Task
 ```
+
+`task watch` reads saved flow history even after completion or worktree removal.
+Attempts and return edges describe recorded progress; missing evidence stays explicit.
 
 `task output` returns bounded pages grouped by source. Each source carries its
 Run/provider/stage labels, ordered `records`, and explicit gaps. Records retain
@@ -95,6 +100,13 @@ item identities and revisions. Save `next_cursor` in a file and pass its path as
 `--cursor FILE`, or pipe the value with `--cursor -`, to continue and discover new
 Runs. Cursor contents travel outside command arguments so long continuations can
 be read. Reading native history leaves the existing provider client running.
+Page-level `gaps` identify incomplete Run discovery while healthy sources remain
+readable. Native tool calls and results share their conversation item ID; their
+source record IDs stay distinct.
+
+`task watch` reads the recorded plan, attempt history, transitions, and attributed
+Runs even after completion or worktree removal. Missing historical evidence is
+reported in `gaps`; the snapshot does not imply a provider is still running.
 
 Turn a reviewed design into work without another planning subsystem:
 

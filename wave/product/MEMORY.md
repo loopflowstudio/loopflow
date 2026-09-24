@@ -318,6 +318,86 @@ they mean the Mac surface.
   and activation conditions live in Linear. The older Ask-only directive is
   superseded; do not file duplicate follow-ups.
 
+### Passive Task Watch (LOO-293, branch evidence 2026-09-23)
+
+- **One Task, one complete Watch experience.** Product / Desktop owns
+  [LOO-293](https://linear.app/loopflow/issue/LOO-293). Watch must work without a
+  worker or surviving worktree, combining the actual expanded flow and all
+  Task-attributed output, including auxiliary Runs and native human Sessions.
+  Earlier stages, attempts, invocations, and output remain inspectable; Follow
+  live clears filters across new stages/Runs. This is separate from shared PTY
+  viewing and from LOO-291's planning integration. Incomplete capture belongs in
+  this Task, not a follow-up that silently narrows its one-PR acceptance.
+- **History records execution without authorizing it.** FlowPosition and its
+  versioned claim still own execution. Task events retain immutable expanded
+  plans, exact stage/Run bindings, readiness, failure, transitions, and settlement
+  in the owning SQLite transaction, without notifying Project/Wave. Stage
+  identity is invocation plus step index; iteration and Run distinguish attempts
+  even when skill names or retry coordinates repeat. Preserve Iterate's actual
+  return target and settlement before deleting a completed/replaced position.
+  Missing historical evidence stays missing; never reconstruct it from YAML.
+- **Observation must not control a provider.** Read Claude/Codex JSONL and
+  OpenCode Session parts through Rust using recorded Session identity and the
+  exact account or launch/hook-owned native location in ProviderSessionRef.
+  Managed homes do not share operator history. Never select/refresh credentials,
+  borrow the observer's home/data root, launch, resume, attach, replace, or
+  interrupt a client to watch it. Swift consumes shared projections and owns
+  only selection, folding, and scroll state. Passive CLI reads need direct
+  read-only store dispatch; the ordinary runtime wrapper hit the development
+  schema guard during the configured proof.
+- **Native output identity includes source, item, and revision.** A journal
+  sequence alone cannot represent mutable provider parts. The grouped output
+  contract puts Run/provider/stage labels, ordered records, availability, and
+  gaps on TaskOutputSource; OutputRecord reuses ConversationEvent. Keep source
+  order within a Run and observation order across Runs. Do not duplicate native
+  response items with event mirrors, or expose internal instructions/reasoning.
+  Provider labels from manifests do not prove per-attempt failover attribution.
+- **Preserve correlation and partial discovery evidence.** The concurrent
+  foundation review reproduced two defects with synthetic sources through the
+  configured CLI: Claude/Codex calls lost native correlation IDs, preventing
+  reliable pairing with out-of-order results; an unrelated corrupt manifest
+  aborted all healthy Task output. Keep native call/result identity in the
+  shared shape and surface discovery uncertainty alongside healthy output.
+  Cover reversed results plus malformed/disappearing manifests. Repairs are
+  underway in the shared checkout; these reproductions are not fresh proof of
+  their correction or configured provider capture.
+- **Continuation boundaries have different jobs.** OpenCode needs an inclusive
+  old watermark, a frozen sweep ceiling, and page position. Retain both boundary
+  hashes plus unfinished parts until paging completes; timestamp-only edits must
+  not replay unchanged content. Discard interior completed hashes. Source
+  location, file identity, Session identity, and verification are distinct facts.
+  Replacement/deletion resets and malformed-record gaps cannot be inferred from
+  an empty page. Backdated/equal-count rewrites of completed history remain an
+  unproved limitation; quiet readable output is not evidence of capture health.
+- **Page limits do not establish bounded watching.** The committed reader scans
+  all manifests and Task flow facts per request and holds per-Run continuation.
+  Independent history/live cursors and bounded discovery/state remain required
+  before one-second polling. Equal-timestamp and unfinished-part sets can still
+  hit the explicit 4 MiB cursor cap. Use `--cursor FILE` or stdin (`-`), not argv
+  content: a 2 MiB argument failed locally. Swift removes its private temporary
+  cursor directory after success or failure; this is not another durable cache.
+  Large Codex compaction/tool records motivated an 8 MiB JSONL page bound;
+  oversize complete records report gaps and skip without stalling forever.
+- **Prior proof is narrow and dated.** The configured Codex read on
+  `run_033f7ed7985145ee8ca727ececb7f7cd` saw one new prose item and five tool
+  records with the exact owned client unchanged. A quiet 45-second read proved
+  no arrival. Claude/OpenCode configured live proof remains outstanding.
+  File/stdin CLI reads returned 469 distinct revisions and accepted a
+  2,186,420-byte whitespace-padded cursor: transport proof, not realistic retained
+  state or new live output. Three focused OpenCode tests cover interleaving,
+  timestamp-only changes, and 1,000 completed parts with a cursor below 2 KiB;
+  the earlier 63-test filter also included unrelated harness/auth tests.
+- **No complete Watch or release proof yet.** At committed head `06ba29d57`,
+  flow history, source receipts, passive readers, cursor transport, and the
+  Rust/Swift output fixture exist. Snapshot implementation is progressing in the
+  shared checkout and is not covered by those receipts. Summary-only journals
+  explicitly report `limited_capture` for missing full tool results; that does
+  not satisfy autonomous/auxiliary capture. Finish capture, continuation, Watch
+  navigation/filtering/stale evidence, then prove live output before completion,
+  stage changes, an auxiliary Run, human Iterate, and reopen after completion
+  through the configured app and pinned human gate. No Task closure or Project
+  KR claim follows from foundation tests. The GOAL and Project bets are unchanged.
+
 ### Terminal ownership and input (branch evidence, 2026-09-22)
 
 - Each window owns a repository workspace registry, which retains its pane

@@ -1715,6 +1715,40 @@ mod durable_store_tests {
     fn flow_history_preserves_repeated_skills_iterate_retries_and_completion() {
         let (dir, store, task_id) = store_with_task();
         let task = store.task(&task_id).unwrap().unwrap();
+        let runtime = tokio::runtime::Runtime::new().unwrap();
+        let watch = || {
+            let read_store = std::sync::Arc::new(crate::store::Store {
+                sqlite: SqliteStore::open_run_ledger_read_only(&dir.path().join("loopflow.db"))
+                    .unwrap(),
+            });
+            runtime
+                .block_on(crate::ops::task_watch::read_task_watch(
+                    &read_store,
+                    &task,
+                    dir.path(),
+                ))
+                .unwrap()
+        };
+        let launch = || {
+            crate::run_record::CaptureHandle::begin_at(
+                dir.path(),
+                crate::run_record::RunSpec {
+                    harness: "codex".into(),
+                    model: None,
+                    surface: "headless".into(),
+                    cwd: dir.path().to_path_buf(),
+                    repo: None,
+                    worktree: None,
+                    skill: None,
+                    subjects: vec![crate::run_record::SubjectAttribution::declared(format!(
+                        "task:{task_id}"
+                    ))],
+                },
+            )
+            .unwrap()
+        };
+        let first_capture = launch();
+        let auxiliary = launch();
         let mut initial = autonomous_position(&task_id);
         let mut human = initial.invocation.steps[0].clone();
         let crate::engine::ConcreteStep::Skill(ref mut skill) = human else {
@@ -1730,7 +1764,7 @@ mod durable_store_tests {
         initial.invocation.steps.push(human);
         let plan = initial.invocation.clone();
         let mut position = store.set_flow_position(&task_id, &initial).unwrap();
-        let first = RunId::new();
+        let first = first_capture.run_id();
         let second = RunId::new();
         for run_id in [&first, &second] {
             let bound = bind_worker(&store, &position, run_id);
@@ -1743,6 +1777,37 @@ mod durable_store_tests {
         position.session_run_id = Some(review.clone());
         position.ready_summary = Some("Inspect repeated steps".into());
         position = store.set_flow_position(&task_id, &position).unwrap();
+        let watching = watch();
+        assert_eq!(watching.active_stage, Some(TaskFlowStage::from(&position)));
+        assert_eq!(
+            watching.invocations[0].stages[2].attempts[0].state,
+            crate::ops::task_watch::TaskWatchAttemptState::Ready
+        );
+        assert_eq!(
+            watching
+                .runs
+                .iter()
+                .find(|run| run.run_id == auxiliary.run_id().as_str())
+                .unwrap()
+                .stage,
+            None
+        );
+        assert_eq!(
+            watching
+                .runs
+                .iter()
+                .find(|run| run.run_id == first.as_str())
+                .unwrap()
+                .stage
+                .as_ref()
+                .unwrap()
+                .step_index,
+            0
+        );
+        assert_eq!(
+            watching.invocations[0].stages[0].name,
+            watching.invocations[0].stages[1].name
+        );
         let mut next = position.clone();
         next.step_index = 1;
         next.iteration = 1;
@@ -1842,6 +1907,59 @@ mod durable_store_tests {
             )
             .unwrap();
         assert_eq!(parent_flow_facts, 0);
+
+        let watching = watch();
+        assert!(watching.active_stage.is_none());
+        let invocation = &watching.invocations[0];
+        assert_eq!(invocation.settlement, Some(TaskFlowSettlement::Approved));
+        assert_eq!(invocation.stages[1].attempts.len(), 3);
+        let attempts = &invocation.stages[1].attempts;
+        assert_eq!(attempts[1].iteration, 1);
+        assert_eq!(attempts[2].iteration, 1);
+        assert_eq!(
+            attempts[1].state,
+            crate::ops::task_watch::TaskWatchAttemptState::Blocked
+        );
+        assert_eq!(
+            attempts[1].failure.as_ref().unwrap().reason,
+            "provider disconnected"
+        );
+        assert_eq!(
+            attempts[2].state,
+            crate::ops::task_watch::TaskWatchAttemptState::Completed
+        );
+        assert_ne!(attempts[1].run_id, attempts[2].run_id);
+        assert_eq!(
+            invocation.stages[2].attempts[0].state,
+            crate::ops::task_watch::TaskWatchAttemptState::Iterated
+        );
+        assert_eq!(
+            invocation.stages[2].attempts[0].ready_summary.as_deref(),
+            Some("Inspect repeated steps")
+        );
+        assert_eq!(
+            invocation.stages[2].attempts[1].state,
+            crate::ops::task_watch::TaskWatchAttemptState::Completed
+        );
+        let edge = invocation
+            .transitions
+            .iter()
+            .find(|edge| edge.reason == TaskFlowTransition::Iterated)
+            .unwrap();
+        assert_eq!(edge.from.step_index, 2);
+        assert_eq!(edge.to.step_index, 1);
+        assert_eq!(edge.to.iteration, 1);
+        assert_eq!(watching.gaps.len(), 5); // Five bound Runs deliberately have no manifests.
+        assert!(watching.gaps.iter().all(|gap| gap.code == "missing_run"));
+        assert!(!task.worktree.exists());
+
+        // Pre-instrumentation history stays explicitly missing. The current
+        // definition is not a substitute for the absent invocation receipt.
+        conn.execute("DELETE FROM task_events WHERE task_id=?1 AND json_extract(kind_json, '$.event.kind')='invocation_selected'", [task_id.as_str()]).unwrap();
+        let missing = watch();
+        assert!(missing.invocations.is_empty());
+        assert!(missing.gaps.iter().any(|gap| gap.code == "missing_plan"));
+        assert_eq!(missing.runs.len(), watching.runs.len());
     }
 
     #[test]
@@ -1869,7 +1987,27 @@ mod durable_store_tests {
         }));
         assert!(store.finish_task_flow(&task, &bound, None).is_err());
         assert_eq!(flow_history(&store, &task_id), history);
-        assert_eq!(store.flow_position(&task_id).unwrap(), Some(new));
+        assert_eq!(store.flow_position(&task_id).unwrap(), Some(new.clone()));
+        let store = std::sync::Arc::new(crate::store::Store { sqlite: store });
+        let snapshot = tokio::runtime::Runtime::new()
+            .unwrap()
+            .block_on(crate::ops::task_watch::read_task_watch(
+                &store,
+                &task,
+                _dir.path(),
+            ))
+            .unwrap();
+        assert_eq!(snapshot.active_stage, Some(TaskFlowStage::from(&new)));
+        assert_eq!(snapshot.invocations.len(), 2);
+        assert_eq!(
+            snapshot.invocations[0].settlement,
+            Some(TaskFlowSettlement::Replaced)
+        );
+        assert_eq!(
+            snapshot.invocations[0].stages[0].attempts[0].state,
+            crate::ops::task_watch::TaskWatchAttemptState::Bound
+        );
+        assert_eq!(snapshot.invocations[1].settlement, None);
     }
 
     #[test]

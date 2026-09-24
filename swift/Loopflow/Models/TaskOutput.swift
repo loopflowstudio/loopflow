@@ -54,12 +54,13 @@ public struct OutputRecord: Decodable, Sendable {
 public struct TaskOutputPage: Decodable, Sendable {
     public let taskId: String
     public let sources: [TaskOutputSource]
+    public let gaps: [OutputGap]
     public let nextCursor: String
 
     enum CodingKeys: String, CodingKey {
         case taskId = "task_id"
         case nextCursor = "next_cursor"
-        case sources
+        case sources, gaps
     }
 }
 

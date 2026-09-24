@@ -1,0 +1,164 @@
+{
+  "task_id": "task-watch",
+  "active_stage": {
+    "invocation_id": "flow-one",
+    "step_index": 0,
+    "iteration": 1
+  },
+  "invocations": [
+    {
+      "id": "flow-one",
+      "flow": "custom",
+      "stages": [
+        {
+          "step_index": 0,
+          "name": "implement",
+          "kind": "skill",
+          "node_id": null,
+          "human": false,
+          "flow_parents": [
+            "custom",
+            "slice"
+          ],
+          "attempts": [
+            {
+              "iteration": 0,
+              "run_id": "run-first",
+              "state": "completed",
+              "ready_summary": null,
+              "failure": null
+            },
+            {
+              "iteration": 1,
+              "run_id": "run-failed",
+              "state": "blocked",
+              "ready_summary": null,
+              "failure": {
+                "reason": "provider disconnected",
+                "restart_required": false,
+                "observed_at": "2026-09-23T00:00:00Z"
+              }
+            },
+            {
+              "iteration": 1,
+              "run_id": "run-retry",
+              "state": "bound",
+              "ready_summary": null,
+              "failure": null
+            }
+          ]
+        },
+        {
+          "step_index": 1,
+          "name": "review",
+          "kind": "skill",
+          "node_id": "human-review",
+          "human": true,
+          "flow_parents": [
+            "custom"
+          ],
+          "attempts": [
+            {
+              "iteration": 0,
+              "run_id": "run-review",
+              "state": "iterated",
+              "ready_summary": "Try again",
+              "failure": null
+            }
+          ]
+        },
+        {
+          "step_index": 2,
+          "name": "pr publish",
+          "kind": "op",
+          "node_id": null,
+          "human": false,
+          "flow_parents": [
+            "custom"
+          ],
+          "attempts": []
+        }
+      ],
+      "transitions": [
+        {
+          "from": {
+            "invocation_id": "flow-one",
+            "step_index": 0,
+            "iteration": 0
+          },
+          "to": {
+            "invocation_id": "flow-one",
+            "step_index": 1,
+            "iteration": 0
+          },
+          "reason": "advanced"
+        },
+        {
+          "from": {
+            "invocation_id": "flow-one",
+            "step_index": 1,
+            "iteration": 0
+          },
+          "to": {
+            "invocation_id": "flow-one",
+            "step_index": 0,
+            "iteration": 1
+          },
+          "reason": "iterated"
+        },
+        {
+          "from": {
+            "invocation_id": "flow-one",
+            "step_index": 0,
+            "iteration": 1
+          },
+          "to": {
+            "invocation_id": "flow-one",
+            "step_index": 0,
+            "iteration": 1
+          },
+          "reason": "retried"
+        }
+      ],
+      "settlement": null
+    },
+    {
+      "id": "old-flow",
+      "flow": "previous",
+      "stages": [],
+      "transitions": [],
+      "settlement": "replaced"
+    }
+  ],
+  "runs": [
+    {
+      "run_id": "run-retry",
+      "provider": "codex",
+      "stage": {
+        "invocation_id": "flow-one",
+        "step_index": 0,
+        "iteration": 1
+      }
+    },
+    {
+      "run_id": "run-aux",
+      "provider": "claude",
+      "stage": null
+    },
+    {
+      "run_id": "run-failed",
+      "provider": null,
+      "stage": {
+        "invocation_id": "flow-one",
+        "step_index": 0,
+        "iteration": 1
+      }
+    }
+  ],
+  "gaps": [
+    {
+      "code": "missing_run",
+      "message": "Stage-bound Run run-failed has no readable Task-attributed manifest"
+    }
+  ]
+}

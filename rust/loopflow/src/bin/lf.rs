@@ -964,7 +964,7 @@ fn run_project_command(repo: &Path, command: &ProjectCommand) -> anyhow::Result<
     }
 }
 
-fn run_task_watch(issue: &str, json: bool) -> Result<()> {
+fn run_task_watch(issue: &str, json: bool) -> anyhow::Result<()> {
     let snapshot = loopflow::ops::task::task_watch(issue)?;
     if json {
         println!("{}", serde_json::to_string_pretty(&snapshot)?);
@@ -1027,6 +1027,9 @@ fn run_task_output(issue: &str, cursor: Option<&str>, json: bool) -> anyhow::Res
     if json {
         println!("{}", serde_json::to_string(&page)?);
     } else {
+        for gap in page.gaps {
+            eprintln!("{}: {}", gap.code, gap.message);
+        }
         for source in page.sources {
             for record in source.records {
                 println!(

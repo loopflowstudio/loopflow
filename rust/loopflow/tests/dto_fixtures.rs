@@ -196,6 +196,10 @@ fn task_output_preserves_native_revisions_and_explicit_source_gaps() {
     let fixture: serde_json::Value =
         serde_json::from_str(include_str!("../../../tests/fixtures/dto/task_output.json")).unwrap();
     let page: TaskOutputPage = serde_json::from_value(fixture.clone()).unwrap();
+    assert_eq!(page.gaps[0].code, "discovery_incomplete");
+    let mut missing_gaps = fixture.clone();
+    missing_gaps.as_object_mut().unwrap().remove("gaps");
+    assert!(serde_json::from_value::<TaskOutputPage>(missing_gaps).is_err());
     assert_eq!(page.sources[0].source, OutputSource::OpenCode);
     assert_eq!(page.sources[0].records[0].source_item_id, "part-1");
     assert_eq!(page.sources[0].records[0].revision, "revision-2");
@@ -218,4 +222,45 @@ fn task_output_preserves_native_revisions_and_explicit_source_gaps() {
         .unwrap()
         .remove("available");
     assert!(serde_json::from_value::<TaskOutputPage>(missing).is_err());
+}
+
+#[test]
+fn task_watch_preserves_attempts_edges_and_missing_evidence() {
+    use loopflow::ops::task_watch::{TaskWatchAttemptState, TaskWatchSnapshot};
+    use loopflow::work::task::flow_history::TaskFlowTransition;
+    let json = include_str!("../../../tests/fixtures/dto/task_watch.json");
+    let snapshot: TaskWatchSnapshot = serde_json::from_str(json).unwrap();
+    assert_eq!(snapshot.active_stage.as_ref().unwrap().iteration, 1);
+    let invocation = &snapshot.invocations[0];
+    assert_eq!(invocation.stages[0].flow_parents, ["custom", "slice"]);
+    assert_eq!(invocation.stages[0].attempts.len(), 3);
+    assert_eq!(
+        invocation.stages[0].attempts[1].state,
+        TaskWatchAttemptState::Blocked
+    );
+    assert_eq!(
+        invocation.stages[0].attempts[1]
+            .failure
+            .as_ref()
+            .unwrap()
+            .reason,
+        "provider disconnected"
+    );
+    assert_eq!(
+        invocation.stages[1].node_id.as_deref(),
+        Some("human-review")
+    );
+    assert!(invocation.stages[1].human);
+    assert_eq!(
+        invocation.transitions[1].reason,
+        TaskFlowTransition::Iterated
+    );
+    assert_eq!(invocation.transitions[1].to.step_index, 0);
+    assert!(snapshot.runs[1].stage.is_none());
+    assert!(snapshot.runs[2].provider.is_none());
+    assert_eq!(snapshot.gaps[0].code, "missing_run");
+    let mut value: serde_json::Value = serde_json::from_str(json).unwrap();
+    assert_eq!(serde_json::to_value(snapshot).unwrap(), value);
+    value.as_object_mut().unwrap().remove("invocations");
+    assert!(serde_json::from_value::<TaskWatchSnapshot>(value).is_err());
 }

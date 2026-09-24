@@ -7,11 +7,39 @@ import Testing
 /// the Mac app.
 @Suite("DTO Fixtures")
 struct DTOFixtureTests {
+    @Test("Watch preserves attempts, Iterate targets, ancestry, and evidence gaps")
+    func taskWatchFixture() async throws {
+        let data = try loadFixtureData("task_watch.json")
+        let query = RegistryQuery { _, _ in String(decoding: data, as: UTF8.self) }
+        let snapshot = try await query.taskWatch(issue: "LOO-293", cwd: nil)
+        #expect(snapshot.activeStage?.iteration == 1)
+        let invocation = snapshot.invocations[0]
+        #expect(invocation.stages[0].flowParents == ["custom", "slice"])
+        #expect(invocation.stages[0].attempts.count == 3)
+        #expect(invocation.stages[0].attempts[1].state == .blocked)
+        #expect(invocation.stages[0].attempts[1].failure?.reason == "provider disconnected")
+        #expect(invocation.stages[1].human)
+        #expect(invocation.stages[1].nodeId == "human-review")
+        #expect(invocation.stages[1].attempts[0].readySummary == "Try again")
+        #expect(invocation.stages[2].kind == .op)
+        #expect(invocation.transitions[1].reason == .iterated)
+        #expect(invocation.transitions[1].to.stepIndex == 0)
+        #expect(snapshot.invocations[1].settlement == .replaced)
+        #expect(snapshot.runs[1].stage == nil)
+        #expect(snapshot.runs[2].provider == nil)
+        #expect(snapshot.gaps[0].code == "missing_run")
+        var missing = try #require(JSONSerialization.jsonObject(with: data) as? [String: Any])
+        missing.removeValue(forKey: "invocations")
+        let invalid = try JSONSerialization.data(withJSONObject: missing)
+        #expect(throws: DecodingError.self) { try JSONDecoder().decode(TaskWatchSnapshot.self, from: invalid) }
+    }
+
     @Test("Task output preserves source revisions, stage identity, and missing sources")
     func taskOutputFixture() async throws {
         let data = try loadFixtureData("task_output.json")
         let query = RegistryQuery { _, _ in String(decoding: data, as: UTF8.self) }
         let page = try await query.taskOutput(issue: "LOO-293", cursor: nil, cwd: nil)
+        #expect(page.gaps[0].code == "discovery_incomplete")
         #expect(page.sources[0].source == .openCode)
         #expect(page.sources[0].records[0].sourceItemId == "part-1")
         #expect(page.sources[0].records[0].revision == "revision-2")
@@ -24,6 +52,10 @@ struct DTOFixtureTests {
         if case let .itemCompleted(_, item) = page.sources[0].records[0].event {
             #expect(item.id == "part-1")
         } else { Issue.record("Expected a native item snapshot") }
+        var missingGaps = try #require(JSONSerialization.jsonObject(with: data) as? [String: Any])
+        missingGaps.removeValue(forKey: "gaps")
+        let invalidGaps = try JSONSerialization.data(withJSONObject: missingGaps)
+        #expect(throws: DecodingError.self) { try JSONDecoder().decode(TaskOutputPage.self, from: invalidGaps) }
         var missing = try #require(JSONSerialization.jsonObject(with: data) as? [String: Any])
         missing.removeValue(forKey: "next_cursor")
         let invalid = try JSONSerialization.data(withJSONObject: missing)

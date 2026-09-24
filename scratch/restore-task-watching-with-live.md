@@ -133,6 +133,13 @@ shared Task identities where available. No dependency on its landing.
 
 ## This slice
 
+First repair the two reader findings: preserve Claude/Codex native call IDs in
+conversation item identity while keeping source record identity distinct; return
+healthy Task output with explicit page-level discovery gaps for unreadable Run
+manifests. Use that same discovery result in the Watch snapshot. Prove reversed
+concurrent tool results and malformed/missing unrelated manifest recovery through
+the actual readers, fixtures, and CLI before finishing the snapshot below.
+
 Implement the shared Watch snapshot over the committed provenance foundation.
 `lf task watch ISSUE --json` and `RegistryQuery.taskWatch` expose persisted
 invocations, expanded stage labels/ancestry, separate attempts, recorded

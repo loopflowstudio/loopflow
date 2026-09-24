@@ -204,3 +204,15 @@ regression through portfolio refresh and repository return. All 25 focused
 navigation/model tests pass; complete planning refresh and explicit selection
 validation retain their behavior. Configured native proof remains unmet, so
 publication and Task completion remain unclaimed.
+
+Native restoration, 2026-09-23: the isolated probe traced OutOfMemory to
+CoreVideo display-link creation returning -6661. With that capability unavailable,
+GhosttyManager now selects the existing timer renderer; supported hosts retain
+their configured vsync behavior. The unchanged real-PTY fixture then exposed a
+resize/search focus bug. Focus requests now belong to the retained native view
+and are consumed on attachment/transition, removing the SwiftUI coordinator.
+The draft/focus test and the independent window-isolation test both pass, one
+each, with exact receipts in `native-surface-diagnostic.md`. No assertion was
+weakened. Configured full navigation, split/scroll behavior, resolution, visual
+quality and timings still need proof. This restores a necessary boundary without
+changing planning, Session lifecycle, the pinned artifact, or remaining Task scope.

@@ -75,12 +75,6 @@ struct GhosttyTerminalRepresentable: NSViewRepresentable {
     let size: CGSize
     @ObservedObject var manager: GhosttyManager
 
-    final class Coordinator {
-        var requestedFocus = false
-    }
-
-    func makeCoordinator() -> Coordinator { Coordinator() }
-
     func makeNSView(context: Context) -> GhosttyMetalView {
         let view: GhosttyMetalView
         if let surfacePool {
@@ -108,18 +102,7 @@ struct GhosttyTerminalRepresentable: NSViewRepresentable {
            size.width > 0, size.height > 0 {
             nsView.createSurface(manager: manager)
         }
-        let requestsFocus = isEnabled && isFocused
-        if !requestsFocus {
-            let relinquishesFocus = !isEnabled || context.coordinator.requestedFocus
-            context.coordinator.requestedFocus = false
-            if relinquishesFocus, nsView.window?.firstResponder === nsView {
-                nsView.window?.makeFirstResponder(nil)
-            }
-        } else if !context.coordinator.requestedFocus, let window = nsView.window {
-            // Polling and resizing must not steal input from the Work search
-            // field. Only a focus/visibility transition requests native focus.
-            context.coordinator.requestedFocus = window.makeFirstResponder(nsView)
-        }
+        nsView.setFocusRequested(isEnabled && isFocused)
     }
 }
 
@@ -247,6 +230,7 @@ final class GhosttyMetalView: NSView, @preconcurrency NSTextInputClient {
     private var selectedCommandBlock: (id: UInt64, text: String)?
     private var commandBlockMouseDown = false
     private var lastCommandBlockRefresh: CFTimeInterval = 0
+    private var focusRequested = false
 
     init(terminal: TerminalIdentity, frame frameRect: NSRect = .zero) {
         self.terminal = terminal
@@ -301,6 +285,19 @@ final class GhosttyMetalView: NSView, @preconcurrency NSTextInputClient {
             setupDisplayLink()
             updateContentScale()
             updateSurfaceSize()
+        }
+        if focusRequested { window?.makeFirstResponder(self) }
+    }
+
+    func setFocusRequested(_ requested: Bool) {
+        let changed = focusRequested != requested
+        focusRequested = requested
+        if requested && changed {
+            // Attachment handles a request made before the view has a window.
+            // Later polls and resizes must leave the search field's focus alone.
+            window?.makeFirstResponder(self)
+        } else if !requested, window?.firstResponder === self {
+            window?.makeFirstResponder(nil)
         }
     }
 

@@ -25,6 +25,7 @@ struct GhosttyTerminalTitle {
 
 #if GHOSTTY_ENABLED
 import GhosttyKit
+import CoreVideo
 
 enum GhosttyRuntimeResources {
     static let sourceRevision = "4c838723173da757a16a2f3afd4c94f16732ef6a"
@@ -170,7 +171,17 @@ final class GhosttyManager: ObservableObject {
             path.withCString { ghostty_config_load_file(cfg, $0) }
         }
         ghostty_config_load_default_files(cfg)
-        if let path = writeConfig(Self.embeddedConfig, named: "loopflow-ghostty-embedded") {
+        var embeddedConfig = Self.embeddedConfig
+        // Ghostty treats a failed CoreVideo display link as an allocation error
+        // and refuses every surface. Its timer renderer works without that link.
+        var displayLink: CVDisplayLink?
+        let displayLinkStatus = CVDisplayLinkCreateWithActiveCGDisplays(&displayLink)
+        if displayLinkStatus != kCVReturnSuccess || displayLink == nil {
+            embeddedConfig += "\nwindow-vsync = false\n"
+            print("[GhosttyManager] CoreVideo display link unavailable (\(displayLinkStatus)); using timer rendering")
+        }
+        displayLink = nil
+        if let path = writeConfig(embeddedConfig, named: "loopflow-ghostty-embedded") {
             path.withCString { ghostty_config_load_file(cfg, $0) }
         }
         ghostty_config_finalize(cfg)

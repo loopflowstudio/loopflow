@@ -34,6 +34,15 @@ remain the existing path. The separate lf-new checkout was not edited.
 
 ## Recorded validation
 
+**Latest implement result:** surface initialization is restored and both
+`hiddenTerminalPreservesDraft` and `releaseSurfaceIsWindowLocal` pass with the
+real Ghostty artifact and PTYs. CoreVideo rejected display-link creation;
+Ghostty mapped that error to OutOfMemory. The app now uses its timer renderer
+when that capability is unavailable. Restoring the surface exposed and enabled
+fixing the resize/search focus bug. Exact before/after commands and limits are in
+`native-surface-diagnostic.md`. The failures below are historical; configured
+full-navigation, provider, split/scroll, and external-work proof remain open.
+
 The first combined focused run passed 32 model/view/store tests. Its new native
 PTY proof failed before creating a surface; no draft-retention verdict resulted.
 The independent native writer subsequently reproduced surface-creation failure

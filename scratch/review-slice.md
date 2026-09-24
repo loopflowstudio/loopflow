@@ -3,8 +3,10 @@
 ## Disposition
 
 Advances the accepted design; **not yet approved for publication**. The compact
-navigator and shared identity join have focused behavioral evidence. Configured
-native navigation, focus, draft and scroll retention still lack proof. No PR
+navigator and shared identity join have focused behavioral evidence. Native
+draft/focus and window isolation now pass after the restoration described in
+`native-surface-diagnostic.md`; configured navigation and scroll retention still
+lack proof. No PR
 publication, landing, Task completion, PM mutation or external-product trial was
 performed by this review.
 
@@ -30,7 +32,7 @@ interaction.
 | Unavailable evidence | Failure is never healthy empty; keep useful context | Last-good readings/errors; unknown badge; partial planning warning; selected Work retained | unavailableIsNotEmpty, lastGoodSessionsSurviveRepositorySwitch, new regression | pass, model/view |
 | Responsive Session access | Planning cannot gate Session publication/opening | Session read publishes independently; pane selection precedes asynchronous preparation | sessionsArriveBeforePlanning; openSession source | pass, model; measured latency gap |
 | Human lifecycle | Exact open/Move here; resolution does not complete Task | Existing shared operations; callback removes resolved Session from reading | Existing SessionsStore focused receipt; resolutionKeepsTask | pass, fixtures; configured resolution gap |
-| Native lifetime and input | Same surfaces/processes/drafts/splits; hidden terminals relinquish input | Retained pool, disabled hidden multiplexer, transition-based focus | Native proof and unchanged isolation proof both previously failed at surface creation | gap |
+| Native lifetime and input | Same surfaces/processes/drafts/splits; hidden terminals relinquish input | Retained pool; native view consumes focus requests on attachment/transition; unavailable CoreVideo uses timer rendering | hiddenTerminalPreservesDraft and releaseSurfaceIsWindowLocal now pass; native-surface-diagnostic.md | pass, real PTY fixture; configured navigation/splits/scroll gap |
 | One authority | Remove root switch/cascade, duplicate Session polling and labels lookup | Podium reads; projection derives; one window registry retains surfaces | Negative searches and complete Swift diff review below | pass, source |
 | Source freshness | Distinguish read timestamp from provider sync freshness | Toolbar labels snapshot generation and explains unavailable sync timestamp | SessionsView toolbar, README | pass, honest limitation; full freshness integration remains |
 | External trials/budgets | Human-selected workflow, authorized edit, measured long-lived-registry trials | Not implemented/proven in this slice | No workflow selected; no timings collected | gap, remaining Task scope |
@@ -111,10 +113,10 @@ unimplemented per-worktree layout.
 
 ## Next proof, without redesign
 
-First restore Ghostty surface initialization using the isolated reproduction in
-`native-surface-diagnostic.md`. Repeating navigation tests against the same nil
-surface cannot establish the missing native behavior. The diagnostic narrows the
-failure boundary; it neither proves its cause nor waives configured proof.
+Ghostty surface initialization is restored; the previously failing native
+draft/focus and window-isolation tests now pass. See `native-surface-diagnostic.md`
+for the CoreVideo failure, timer-rendering adaptation, and focus correction.
+These focused fixtures do not waive configured proof or establish visual quality.
 
 Use the configured native app on a rendering-capable, permissioned host. In one
 repository show autonomous/upcoming/human Tasks; open the exact existing Session;

@@ -48,8 +48,16 @@ impl ReleaseLock {
                 let actual = inherited.metadata()?;
                 let expected = file.metadata()?;
                 if actual.dev() == expected.dev() && actual.ino() == expected.ino() {
-                    reused = true;
-                    inherited
+                    // An unlocked descriptor names the file but carries no
+                    // existing ownership. Acquiring it is a fresh manual action.
+                    match fs2::FileExt::try_lock_exclusive(&file) {
+                        Ok(()) => file,
+                        Err(error) if error.kind() == std::io::ErrorKind::WouldBlock => {
+                            reused = true;
+                            inherited
+                        }
+                        Err(error) => return Err(error.into()),
+                    }
                 } else {
                     file
                 }

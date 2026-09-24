@@ -111,14 +111,17 @@ baseline and current required verification pass. Selection uses fetched origin
 without resetting caller commits, index, or working files. If a tag's hosted
 build succeeded but publishing stopped, the next run downloads that run's
 artifacts and resumes the same tag instead of cutting another patch.
-The runner leases that tag's publisher worktree until the publisher exits, so
-concurrent re-entry and worktree cleanup cannot remove a checkout still in use.
+The runner holds that tag's publisher worktree lease while waiting for the
+publisher, preventing concurrent re-entry and cleanup while the runner is alive.
 
 Tag pushes, candidate-ref changes, workflow submissions, and GitHub publication
 commands retain the release target's lock in their child process. If the
 controller dies during one of these operations, another release invocation
 defers until the surviving child exits. Other repositories and targets remain
 independent.
+Manual tag and publication commands record intervention on pending scheduled
+releases. Nested publisher calls reusing the active lock preserve the owning
+execution's provenance.
 
 Preparation runs the required `scripts/test.py --ui-host` gate before tagging.
 The publisher retains candidate hashes and gate evidence before external writes.

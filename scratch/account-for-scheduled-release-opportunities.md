@@ -671,6 +671,17 @@ Implementation and focused receipts: [mutation-child-exclusion.md](mutation-chil
   open. No production mutation or PR publication occurred in this cut. Details:
   [mutation-child-exclusion.md](mutation-child-exclusion.md).
 
+Review of the direct mutation-child cut remains **iterate**. The built-CLI
+parent-death demonstration passed again. A new manual-provenance counterexample
+failed: an unlocked descriptor for the correct lock file suppressed intervention
+recording. Acquisition now treats that descriptor as fresh ownership; the CLI
+regression proves manual evidence is retained and genuine nested ownership stays
+unmarked. All three lock integration cases passed after repair, as did Rust
+formatting and all-target Clippy. Shared PR/hook/worktree ownership, historical
+telemetry recovery, closed-obligation continuation and configured acceptance
+remain open. Full matrix and next direction:
+[review-mutation-children.md](review-mutation-children.md).
+
 ## Measure
 
 Use the Reliability KR's actual due population, not successful process counts.

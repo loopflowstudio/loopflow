@@ -1,6 +1,8 @@
 mod support;
 
 use std::fs;
+use std::os::fd::AsRawFd;
+use std::os::unix::process::CommandExt;
 use std::path::{Path, PathBuf};
 use std::process::{Child, Command, Stdio};
 use std::thread;
@@ -8,7 +10,81 @@ use std::time::{Duration, Instant};
 
 use loopflow::ops::{release_publish, release_tag, OpsError};
 use loopflow_test_support::TestRepo;
+use serde_json::{json, Value};
+use sha2::{Digest, Sha256};
 use support::EnvGuard;
+
+#[test]
+fn only_an_owned_inherited_lock_suppresses_manual_intervention() {
+    for held in [false, true] {
+        let _env = EnvGuard::new(&[]);
+        let repo = TestRepo::new();
+        let home = PathBuf::from(std::env::var_os("LF_HOME").unwrap());
+        let fixture: Value = serde_json::from_str(include_str!(
+            "../../../tests/fixtures/dto/release_history.json"
+        ))
+        .unwrap();
+        let mut obligation = fixture["obligations"][0].clone();
+        obligation["repo"] = json!(repo.path().canonicalize().unwrap());
+        obligation["opportunities"]
+            .as_array_mut()
+            .unwrap()
+            .truncate(1);
+        obligation["opportunities"][0]["attempts"][0]["outcome"] =
+            json!({"status": "failed", "cause": "interrupted publication"});
+        let attempts = obligation["opportunities"][0]["attempts"].clone();
+        let records = home.join("cron/obligations");
+        fs::create_dir_all(&records).unwrap();
+        let record = records.join("fixture.json");
+        fs::write(&record, serde_json::to_vec(&obligation).unwrap()).unwrap();
+
+        let locks = repo.path().join(".lf/locks");
+        fs::create_dir_all(&locks).unwrap();
+        let file = fs::OpenOptions::new()
+            .create(true)
+            .truncate(false)
+            .read(true)
+            .write(true)
+            .open(locks.join(format!(
+                "release-{}.lock",
+                hex::encode(Sha256::digest("default"))
+            )))
+            .unwrap();
+        if held {
+            fs2::FileExt::lock_exclusive(&file).unwrap();
+        }
+        let fd = file.as_raw_fd();
+        let mut command = Command::new(env!("CARGO_BIN_EXE_lf"));
+        command
+            .args(["release", "tag", "0.9.1"])
+            .current_dir(repo.path())
+            .env("LF_RELEASE_LOCK_FD", fd.to_string());
+        // SAFETY: file stays alive until the child exits; fcntl only changes
+        // this descriptor's inheritance in the child and is async-signal-safe.
+        unsafe {
+            command.pre_exec(move || {
+                if libc::fcntl(fd, libc::F_SETFD, 0) == -1 {
+                    return Err(std::io::Error::last_os_error());
+                }
+                Ok(())
+            });
+        }
+        let output = command.output().unwrap();
+        assert!(
+            output.status.success(),
+            "{}",
+            String::from_utf8_lossy(&output.stderr)
+        );
+        let saved: Value = serde_json::from_slice(&fs::read(record).unwrap()).unwrap();
+        let opportunity = &saved["opportunities"][0];
+        assert_eq!(opportunity["attempts"], attempts);
+        assert_eq!(
+            opportunity["interventions"].as_array().unwrap().len(),
+            usize::from(!held),
+            "an unlocked descriptor must not hide manual repair"
+        );
+    }
+}
 
 // Always release the fixture's child, including when an assertion fails.
 struct MutationParent {

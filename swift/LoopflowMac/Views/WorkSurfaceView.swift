@@ -372,9 +372,11 @@ struct WorkSurfaceView: View {
 
     // MARK: - Controls
 
-    private struct WorkTaskSelection {
+    private struct WorkTaskSelection: Identifiable {
         let wave: WaveSnapshot
         let task: RoadmapTask
+
+        var id: String { "\(wave.id):\(task.id)" }
     }
 
     private enum TaskControl {

@@ -63,3 +63,19 @@ unproved. A subsequent focused Watch run passed all five tests, the Mac product
 build passed, and the window-backed PNG was visually inspected with its native
 stage list and invocation selector present. Whitespace checking passed. These
 are shared-working-tree receipts, not configured UI interaction or a broad gate.
+
+
+## Rebase onto main-view-task — 2026-09-23
+
+User-requested integration uses `jack-heart/main-view-task` at `9b3264efd`.
+`lf rebase --manual` replayed the local branch after checkpointing all prior work.
+Generic scratch-note name conflicts retain this Task's current notes followed by
+clearly labeled LOO-291 evidence. WorkSurfaceView keeps the target's unified
+inspector routing, restoring only the Watch sheet, its selection state and shared
+terminal store. No removed root navigation was reintroduced.
+
+The first post-rebase focused build caught the target's removal of
+WorkTaskSelection's Identifiable conformance. Restoring its existing Wave/Task
+identity fixes sheet presentation. The final `swift test --package-path swift
+--filter TaskWatchTests` passed all five tests and built the Mac target. This is
+local integration proof, not a configured live demo. No push was performed.

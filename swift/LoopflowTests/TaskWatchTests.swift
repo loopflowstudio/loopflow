@@ -124,16 +124,46 @@ struct TaskWatchTests {
         #expect(process.terminationReason == .uncaughtSignal)
     }
 
-    @Test("The Watch fixture renders retained attempts without a provider client")
-    func renderSnapshot() async throws {
-        let store = TaskWatchStore()
+    @Test("Watch renders retained attempts alone and inside the Work workspace", arguments: [false, true])
+    func renderSnapshot(inWorkspace: Bool) async throws {
+        let root = URL(fileURLWithPath: #filePath)
+            .deletingLastPathComponent().deletingLastPathComponent().deletingLastPathComponent()
+        let roadmap = try String(contentsOf: root.appendingPathComponent(
+            "tests/fixtures/dto/roadmap_snapshot.json"
+        ), encoding: .utf8)
+        let planning = RegistryQuery { args, _ in
+            switch args.first {
+            case "roadmap": return roadmap
+            case "session", "ls": return "[]"
+            case "activity": return #"{"generated_at":1,"since":0,"limit":50,"truncated":false,"items":[]}"#
+            default: throw RegistryQueryError("Unexpected operation in Watch rendering")
+            }
+        }
+        let model = PodiumModel(query: planning, repoPath: "/src/loopflow")
+        await model.refresh()
+        model.select(.task(id: "issue-review"))
+        model.navigation.content = .watch
+        model.navigation.showsList = true
+        let store = model.navigation.watch(for: "issue-review")
         await store.refresh(issue: "LOO-293", query: query(try fixture()))
-        let view = TaskWatchView(issue: "LOO-293", store: store)
-            .frame(width: 1000, height: 720)
+        let workspace = SessionsView(
+            model: model, repoPath: "/src/loopflow",
+            workspaces: SessionsWorkspaceRegistry(), query: planning
+        )
+        if inWorkspace {
+            let selected = try #require(model.task(id: "issue-review"))
+            _ = try workspace.inspect().find(text: "\(selected.task.task.identifier) · \(selected.task.task.name)")
+            _ = try workspace.inspect().find(button: "Work details")
+            #expect(try workspace.inspect().find(TaskWatchView.self).actualView().store === store)
+        }
+        let content = inWorkspace ? AnyView(workspace) : AnyView(TaskWatchView(issue: "LOO-293", store: store))
+        let width: CGFloat = inWorkspace ? 1200 : 1000
+        let view = content
+            .frame(width: width, height: 720)
             .environment(\.palette, LoopflowPalette.light)
         let host = NSHostingView(rootView: view)
         let window = NSWindow(
-            contentRect: NSRect(x: 0, y: 0, width: 1000, height: 720),
+            contentRect: NSRect(x: 0, y: 0, width: width, height: 720),
             styleMask: [.borderless], backing: .buffered, defer: false
         )
         window.isReleasedWhenClosed = false
@@ -147,7 +177,11 @@ struct TaskWatchTests {
         let png = try #require(bitmap.representation(using: .png, properties: [:]))
         #expect(png.count > 10_000)
         if let path = ProcessInfo.processInfo.environment["LF_WATCH_RENDER_PATH"] {
-            try png.write(to: URL(fileURLWithPath: path))
+            let destination = URL(fileURLWithPath: path)
+            let output = inWorkspace
+                ? destination.deletingPathExtension().appendingPathExtension("workspace.png")
+                : destination
+            try png.write(to: output)
         }
     }
 

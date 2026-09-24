@@ -18,12 +18,73 @@ struct WorkspaceNavigationTests {
         let after = joined.waves[0].projects[0].tasks
 
         #expect(before.map(\.id) == after.map(\.id))
-        #expect(after.map(\.task.id) == ["issue-review", "issue-now", "issue-available"])
-        #expect(after[1].task.condition.state == .clear)
-        #expect(after[2].task.runtime == nil)
-        #expect(after[0].sessions.map(\.id) == ["human"])
+        #expect(after.map(\.task.id) == ["issue-later", "issue-review", "issue-now", "issue-available"])
+        #expect(after[2].task.condition.state == .clear)
+        #expect(after[3].task.runtime == nil)
+        #expect(after[1].sessions.map(\.id) == ["human"])
         #expect(joined.sessions(for: .task(id: "issue-available")).isEmpty)
         #expect(joined.subject(for: "human") == .task(id: "issue-review"))
+    }
+
+    @Test("Completed Tasks without Sessions remain discoverable for Watch")
+    func completedHistoryIsReachable() async throws {
+        let model = try model()
+        await model.refresh()
+        let completed = try #require(model.workspace.waves[0].projects[0].tasks.first {
+            $0.task.task.completed
+        })
+        #expect(completed.sessions.isEmpty)
+        #expect(!model.navigation.includes(completed))
+        model.navigation.showsCompletedTasks = true
+        #expect(model.navigation.includes(completed))
+        let navigator = WorkspaceNavigator(model: model, onOpenSession: { _ in })
+        _ = try navigator.inspect().find(text: completed.task.task.name)
+        model.navigation.showsCompletedTasks = false
+        model.navigation.search = completed.task.task.identifier
+        #expect(model.navigation.includes(completed))
+        model.select(completed.id.work)
+        model.navigation.search = ""
+        #expect(model.navigation.includes(completed))
+        let detail = WorkSurfaceView(model: model)
+        try detail.inspect().find(button: "Watch").tap()
+        #expect(model.navigation.content == .watch)
+        #expect(model.selection == completed.id.work)
+    }
+
+    @Test("Watch uses selected Task content and unmounts its reader when hidden")
+    func watchContentAndRetention() async throws {
+        let model = try model()
+        await model.refresh()
+        model.select(.task(id: "issue-review"))
+        let watch = model.navigation.watch(for: "issue-review")
+        watch.invocationId = "earlier-invocation"
+        watch.stepIndex = 4
+        let registry = SessionsWorkspaceRegistry()
+        let workspace = registry.workspace(for: "/src/loopflow")
+        workspace.multiplexer.load(sessionId: "human")
+        let layout = workspace.multiplexer.layout
+        let view = SessionsView(model: model, repoPath: "/src/loopflow", workspaces: registry)
+        model.navigation.content = .watch
+        _ = try view.inspect().find(TaskWatchView.self)
+        for hidden in [WorkspaceNavigation.Content.details, .terminals, .overview] {
+            model.navigation.content = hidden
+            #expect(throws: (any Error).self) { try view.inspect().find(TaskWatchView.self) }
+        }
+        model.select(.task(id: "issue-now"))
+        let other = model.navigation.watch(for: "issue-now")
+        #expect(other !== watch)
+        #expect(other.invocationId == nil)
+        model.select(.task(id: "issue-review"))
+        model.navigation.content = .watch
+        model.setRepoPath("/src/context")
+        #expect(model.navigation.watch(for: "issue-review") !== watch)
+        model.setRepoPath("/src/loopflow")
+        #expect(model.navigation.content == .watch)
+        #expect(model.navigation.watch(for: "issue-review") === watch)
+        #expect(watch.invocationId == "earlier-invocation")
+        #expect(watch.stepIndex == 4)
+        #expect(registry.workspace(for: "/src/loopflow") === workspace)
+        #expect(workspace.multiplexer.layout == layout)
     }
 
     @Test("Typed durable joins preserve top-level, multiple, completed and unmatched Sessions")

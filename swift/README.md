@@ -116,10 +116,14 @@ follow recorded Iterate links to their return stages. Attempts retain their
 Run IDs, provider labels, readiness summaries, and failures. The invocation
 picker includes earlier flows; **All Task Runs** includes unassigned Runs.
 Watch works without a worker or worktree. Changes and Terminal still need the
-Task workspace.
+Task workspace. In the unified workspace, Watch replaces the selected Task's
+details in place; **Work details** and **Return to terminals** keep the same
+selection and retained terminals. Each Task's Watch selection survives switching
+Tasks or repositories. Enable **Show completed Tasks**, or search by title or
+identifier, to inspect completed Tasks present in the planning snapshot.
 
 **Refresh** reads the latest snapshot while preserving your selection. Failed
-reads leave the previous snapshot visible with a stale notice; closing Watch
+reads leave the previous snapshot visible with a stale notice; hiding Watch
 cancels its query. This surface currently inspects recorded plans and attempts;
 the live output feed and automatic following remain in development.
 

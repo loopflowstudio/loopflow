@@ -185,6 +185,43 @@ transport expansion is in scope.
 
 ## Evidence ledger
 
+- 2026-09-23 inline layout follow-through: extended the existing window-backed
+  Watch rendering proof to mount the full SessionsView with the Work navigator
+  visible. It checks the selected Task header, Work details action and retained
+  Watch store, then renders the real native controls. Both standalone and
+  integrated cases pass (`TaskWatchTests/renderSnapshot`); the integrated
+  1200×720 image was inspected for readable navigation, stage/attempt placement,
+  and clipping. Receipt: `/tmp/loo293-watch-inline-render.log`; image:
+  `/tmp/loo293-watch-inline.workspace.png`. This is fixture rendering, not a
+  configured provider or keyboard-interaction demo. The preceding 18-test
+  navigation/Watch receipt remains unchanged; no broader gate was repeated.
+  Review found no new owner, reader, persistence or provider action in this
+  integration. Full capture, bounded discovery, independent history/live
+  continuation, the feed and configured human demonstration remain required.
+
+- 2026-09-23 unified navigation integration: Watch is now selected Task content
+  in the main-view-task workspace. Removed WorkSurfaceView's separate sheet and
+  terminal-store reference. The existing navigation owner retains Watch selection
+  by Task within a window/repository; the reader is mounted only for visible
+  Watch content. The existing terminal workspace remains unchanged underneath.
+- The shared WorkspaceProjection retains completed Tasks. Show completed Tasks,
+  search, current selection and open Sessions govern navigator visibility without
+  creating another inventory. This only reaches Tasks in the roadmap snapshot;
+  it does not add archived PM discovery.
+- `swift test --package-path swift --filter
+  'WorkspaceNavigationTests|TaskWatchTests'` passed 18 tests (including a two-case
+  partial-planning test) and built/linked the Mac target. New tests exercise
+  completed Tasks without Sessions, primary Watch navigation, hidden reader
+  absence, per-Task/repository selection, and retained terminal layout. Existing
+  cancellation, stale-state, navigation and Session association tests still pass.
+  Source inspection confirms repository changes replace SessionsView by repo
+  identity and Watch has no new polling or Session inventory.
+- A concurrent run checkpointed production changes at `01148246b` while these
+  focused tests were being added. This implementation's final proof includes the
+  subsequent test changes. No publication or landing was performed by this run.
+  The full feed, bounded discovery/independent cursors, exact human Session links,
+  configured live proof and human gate remain required.
+
 - 2026-09-23 Mac snapshot inspection: Watch now opens from Work, Roadmap, and
   Wave Task detail without runtime/workspace prerequisites. It renders retained
   invocations, selectable stages, ancestry/kinds, attempts, readiness/failures,

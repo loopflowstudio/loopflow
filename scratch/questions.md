@@ -16,6 +16,13 @@
   stable selection and stale evidence. Separate history/live cursors, bounded
   snapshot/discovery, the live feed/Follow live, human Session navigation, and
   the configured demo remain. No automatic poll is installed yet.
+- The primary workspace now owns Watch alongside details and retained terminals.
+  Completed Tasks remain in its shared projection with a visibility toggle/search;
+  this does not recover Tasks absent from the roadmap read. Watch selection is
+  per Task/window/repository, and its reader unmounts while hidden.
+- Flow Session IDs are distinct from their provider Run IDs. Exact checkpoint
+  navigation needs an explicit shared association; do not match by skill name,
+  synthesize a Session ID in Swift, or add a separate Session inventory.
 - A configured Codex reader observed new prose and tools with the original owned
   client unchanged. Claude and OpenCode have local reader/source tests only;
   all-provider live coverage is not established. No replacement client was used.

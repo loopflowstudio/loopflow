@@ -490,3 +490,58 @@ telemetry linkage and bounded retry, dated repair ownership, closed-obligation
 continuation and configured acceptance remain open. The scorecard blocker,
 required UI/public proof and two adjacent automatic settlements remain unresolved.
 This compression review does not approve the branch or complete the Task.
+
+## Notes ownership compression review at `d6e4504e78`
+
+No executable reduction selected. Before and after this pass: an obligation owns
+original due opportunities; each execution owner retains attempts with selection,
+verification and outcome. Collapsed opportunities reference that owner. `settle`
+writes verification and outcome atomically. Physical receipts describe process
+results; publisher receipts retain artifact stages and public observations.
+Scheduled attribution, release-target exclusion and checkout protection remain
+separate capabilities. Notes input is a retained runtime prompt, not another
+execution record or settlement writer.
+
+Inspected accounting types, `begin`, `finish_process`, `settle`, receipt validation,
+release entry and history qualification. Followed preparation and standalone notes
+through `run_release_notes_stage`, bounded context construction, provider-error
+fallback, prior-note restoration, runtime prompt persistence, nested CLI dispatch
+and Codex harness launch. Checked target/checkout inheritance and cleanup. The
+complete Task patch was available without truncation (749,284 characters); this
+pass concentrated on these model paths and the latest notes ownership change.
+
+Mirrors checked: CLI/Flow cron context, release-history text/JSON and disposition,
+the history JSON fixture, Python artifact/public receipt types, notes input JSON,
+the builtin release-notes skill, provider survival and notes-policy fixtures,
+release README, cron host guide and release-evidence direction. Searches found no
+Swift consumer of `ReleaseHistory`, `ReleaseOpportunity`, `PublicReleaseReceipt`
+or `ReleaseNotesContext`.
+
+| Candidate | Why retained |
+|---|---|
+| `ReleaseNotesContext` and selected release changes | Context is the bounded agent input, including decisions, previous voice and explicit omissions. Selection retains exact recovery identity before success. Merging them would either lose bounded-input semantics or burden recovery with notes data. |
+| Typed context and serialized bytes | The builder measures the actual encoded size while trimming inputs; the same typed result feeds deterministic fallback. This is one value plus its encoding, with no independent writer or lifecycle. Changing the tuple to a wrapper or reserializing later removes no domain concept. |
+| Previous-note backup and previous notes in context | The backup preserves the complete original file for failure restoration. Context contains a bounded excerpt for authorship. Deriving restoration from context could destroy omitted bytes. |
+| Source limits and omissions | Limits state the enforced budget; omissions state what this invocation excluded. The skill consumes both and the tests preserve missingness. Removing either changes the agent's evidence contract. |
+| Notes context file and assembled prompt file | The prompt supplies skill instructions; its referenced context supplies exact bounded release facts. Both use the existing runtime prompt writer. Removing the context path changes the skill's input contract and cannot be treated as a storage deduplication. |
+| Unique context filename | It prevents a retry from replacing input still used by a surviving provider. It introduces no lookup service, execution identity or status. A timestamp-only filename would weaken preservation. |
+| Notes/Git/PR/tool inheritance callbacks | They configure existing commands with borrowed capabilities. A combined context or executor would add machinery while Task compensation and source/worktree children remain uncovered. |
+| Target lock, checkout lease and cron descriptor | Their scopes are release mutation, exact checkout removal and scheduled attribution. Combining them changes authority and independent-scope behavior. |
+| Selection/outcome, process/product and stage/public evidence | Each pair records different facts and timing. Collapsing them loses recovery evidence or overstates success. Frozen coverage likewise preserves history that current collapse links cannot reconstruct. |
+
+The notes slice already removed temporary-input cleanup as the input lifetime
+owner and reused runtime prompt persistence. No alternate notes writer, provider
+launcher or context store remains to collapse. Searches found no restored duplicate
+success-proof wrappers, `record_verification` writer or separate Python candidate
+and publish receipt classes. Historical schema-1 physical receipts remain required
+evidence. Direct release worktree creation still disables default-branch sync;
+this scoped inspection does not establish inheritance through every shared helper.
+
+Only this report changed. No APIs, DTOs, fields, formats or executable code changed;
+no tests or static checks were rerun. Prior focused results remain recorded in
+[release-notes-ownership.md](release-notes-ownership.md). Task compensation,
+source/worktree mutation children, original telemetry linkage and bounded recovery,
+dated repair ownership, closed-obligation continuation and configured acceptance
+remain open. The scorecard blocker, required UI/public proof and two adjacent
+automatic settlements remain unresolved. This review does not approve the branch
+or complete the Task.

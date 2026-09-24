@@ -219,7 +219,7 @@ pub fn run_rebase(
     adopt: bool,
 ) -> Result<()> {
     let progress = &CliProgress;
-    let repo_root = find_repo_root()?;
+    let repo_root = crate::repo::require_repo_root(&std::env::current_dir()?, "lf rebase")?;
     if onto.is_some() && (continue_rebase || abort) {
         return Err(anyhow!(
             "a rebase target cannot be combined with --continue or --abort"
@@ -667,7 +667,7 @@ fn abandon_current(branch: Option<&str>, force: bool, progress: &impl Progress) 
 
 pub fn run_pm(cmd: &PmCommand) -> Result<()> {
     let progress = &CliProgress;
-    let repo_root = find_repo_root()?;
+    let repo_root = crate::repo::working_directory()?;
     // The one ambient-Wave rule for every PM arm: `--wave` wins, else
     // `LF_WAVE_ID` (durable UUID or repository-scoped registered name).
     // `NoContext` stays `None` so a bare command keeps its "all waves" / "pass
@@ -2626,39 +2626,6 @@ const SYSTEM_DEPS: &[SystemDep] = &[
         fallback: "",
     },
 ];
-
-/// Converge required tools using the same inventory as doctor and Brewfile.
-pub(crate) fn refresh_required_packages() -> Result<()> {
-    if cfg!(target_os = "macos") {
-        let mut child = Command::new("brew")
-            .args(["bundle", "install", "--file=-"])
-            .stdin(std::process::Stdio::piped())
-            .spawn()
-            .map_err(|error| {
-                anyhow!("required package refresh needs Homebrew (https://brew.sh): {error}")
-            })?;
-        let mut input = child.stdin.take().expect("piped Homebrew input");
-        for dep in SYSTEM_DEPS.iter().filter(|dep| dep.required) {
-            if let Some(Brew::Formula(formula)) = dep.brew {
-                writeln!(input, "brew {formula:?}")?;
-            }
-        }
-        drop(input);
-        if !child.wait()?.success() {
-            return Err(anyhow!("required package refresh failed; fix the Homebrew error above and rerun `lf install`"));
-        }
-    }
-    for dep in SYSTEM_DEPS.iter().filter(|dep| dep.required) {
-        if !dep.is_present() {
-            return Err(anyhow!(
-                "required tool {} is missing: {}; then rerun `lf install`",
-                dep.name,
-                dep.install_hint(cfg!(target_os = "macos"))
-            ));
-        }
-    }
-    Ok(())
-}
 
 /// Render the repo-root Brewfile from the declared dependency list.
 fn brewfile_contents() -> String {

@@ -432,6 +432,14 @@ fn in_repo_runtime<T>(
     with_runtime(&repo_root, command, || run(&repo_root))
 }
 
+fn in_directory_runtime<T>(
+    command: &[String],
+    run: impl FnOnce(&Path) -> anyhow::Result<T>,
+) -> anyhow::Result<T> {
+    let directory = loopflow::repo::working_directory()?;
+    with_runtime(&directory, command, || run(&directory))
+}
+
 fn run_default_agent(cli: &Cli, command: &[String]) -> anyhow::Result<()> {
     let repo_root = loopflow::lf::commands::util::find_repo_root()?;
     let moved = loopflow::engine::worktrees::move_default_agent_to_worktree(&repo_root)?;
@@ -500,7 +508,7 @@ enum TargetKind {
 /// The explicit verbs promise a kind; a name that resolves to the other one
 /// is an error, not a silent fallback.
 fn require_target_kind(name: &str, kind: TargetKind) -> anyhow::Result<()> {
-    let repo_root = loopflow::lf::commands::util::find_repo_root()?;
+    let repo_root = loopflow::repo::working_directory()?;
     match (
         loopflow::lf::discovery::discover_target(&repo_root, name)?,
         kind,
@@ -522,7 +530,7 @@ fn run_target(
     cli: &Cli,
     command: &[String],
 ) -> anyhow::Result<()> {
-    let repo_root = loopflow::lf::commands::util::find_repo_root()?;
+    let repo_root = loopflow::repo::working_directory()?;
     run_target_in_repo(&repo_root, name, message, cli, command)
 }
 
@@ -1191,17 +1199,9 @@ fn main() -> anyhow::Result<()> {
     let args = reorder_args(normalize_ssh_args(std::env::args().collect()));
 
     let mut cli = Cli::parse_from(args.clone());
-    let bypasses_machine_startup_gate = matches!(
-        &cli.command,
-        Some(Commands::Install {
-            cmd: Some(
-                InstallCommand::RecoverSwitch { .. }
-                    | InstallCommand::AdvanceSwitch { .. }
-                    | InstallCommand::LocalPreflight { .. }
-                    | InstallCommand::Promote { .. }
-            )
-        })
-    );
+    // Installation owns its promotion/recovery authority. In particular,
+    // read-only candidate preflight must work before a first install settles.
+    let bypasses_machine_startup_gate = matches!(&cli.command, Some(Commands::Install { .. }));
     if !bypasses_machine_startup_gate {
         let switch_id = std::env::var(loopflow::machine_install::INSTALL_SWITCH_ENV)
             .ok()
@@ -1288,8 +1288,10 @@ fn main() -> anyhow::Result<()> {
     // its own preflight.
     if let Some(Commands::Install { cmd }) = &cli.command {
         return match cmd.as_ref() {
-            None => loopflow::lf::commands::refresh::run(),
-            Some(InstallCommand::Schedule) => loopflow::lf::commands::refresh::schedule(),
+            None => loopflow::lf::commands::install::latest(),
+            Some(InstallCommand::Schedule { frequency }) => {
+                loopflow::lf::commands::install::schedule(*frequency)
+            }
             Some(InstallCommand::RecoverSwitch { switch }) => {
                 loopflow::lf::commands::install::recover_switch(switch)
             }
@@ -1405,12 +1407,12 @@ fn main() -> anyhow::Result<()> {
     }
 
     let result = if cli.list {
-        in_repo_runtime(&args, |_| loopflow::lf::commands::list::show_all())
+        loopflow::lf::commands::list::show_all()
     } else {
         match &cli.command {
             Some(Commands::Inline { prompt }) => {
                 let text = prompt.join(" ");
-                in_repo_runtime(&args, |_| match direct_binding.as_ref() {
+                in_directory_runtime(&args, |_| match direct_binding.as_ref() {
                     Some(binding) => {
                         loopflow::lf::commands::run::run_bound(None, Some(&text), &cli, binding)
                     }
@@ -1436,16 +1438,20 @@ fn main() -> anyhow::Result<()> {
                 abort,
                 adopt,
                 onto,
-            }) => in_repo_runtime(&args, |_| {
-                loopflow::lf::commands::ops::run_rebase(
-                    onto.as_deref(),
-                    *plan,
-                    *manual,
-                    *continue_rebase,
-                    *abort,
-                    *adopt,
-                )
-            }),
+            }) => {
+                let repo =
+                    loopflow::repo::require_repo_root(&std::env::current_dir()?, "lf rebase")?;
+                with_runtime(&repo, &args, || {
+                    loopflow::lf::commands::ops::run_rebase(
+                        onto.as_deref(),
+                        *plan,
+                        *manual,
+                        *continue_rebase,
+                        *abort,
+                        *adopt,
+                    )
+                })
+            }
             Some(Commands::Commit {
                 message,
                 push,
@@ -1458,27 +1464,24 @@ fn main() -> anyhow::Result<()> {
                     cli.model.as_deref(),
                 )
             }),
-            Some(Commands::Auth { cmd }) => {
-                in_repo_runtime(&args, |_| loopflow::lf::commands::auth::run(cmd))
-            }
-            Some(Commands::Profile { cmd }) => in_repo_runtime(&args, |repo| {
-                loopflow::lf::commands::profile::run(cmd, repo)
-            }),
-            Some(Commands::Route { cmd }) => in_repo_runtime(&args, |repo| {
-                loopflow::lf::commands::profile::run_route(cmd, repo)
-            }),
+            Some(Commands::Auth { cmd }) => loopflow::lf::commands::auth::run(cmd),
+            Some(Commands::Profile { cmd }) => loopflow::lf::commands::profile::run(cmd),
+            Some(Commands::Route { cmd }) => loopflow::lf::commands::profile::run_route(cmd),
             Some(Commands::Release { cmd }) => {
                 in_repo_runtime(&args, |_| loopflow::lf::commands::ops::run_release(cmd))
             }
             Some(Commands::Pm { cmd }) => {
-                in_repo_runtime(&args, |_| loopflow::lf::commands::ops::run_pm(cmd))
+                in_directory_runtime(&args, |_| loopflow::lf::commands::ops::run_pm(cmd))
             }
-            Some(Commands::Home { cmd }) => {
-                in_repo_runtime(&args, |repo| loopflow::lf::commands::home::run(cmd, repo))
-            }
-            Some(Commands::SyncSkills { yes, no_prune }) => in_repo_runtime(&args, |_| {
+            Some(Commands::Home { cmd }) => loopflow::lf::commands::home::run(cmd),
+            Some(Commands::SyncSkills { yes, no_prune }) => {
                 loopflow::lf::commands::ops::run_sync_skills(*yes, *no_prune)
-            }),
+            }
+            Some(Commands::Cron {
+                cmd:
+                    cmd @ (loopflow::lf::CronCommand::List { .. }
+                    | loopflow::lf::CronCommand::Remove { .. }),
+            }) => loopflow::lf::commands::ops::cron_cmd(cmd),
             Some(Commands::Cron { cmd }) => {
                 in_repo_runtime(&args, |_| loopflow::lf::commands::ops::cron_cmd(cmd))
             }
@@ -1591,9 +1594,7 @@ fn main() -> anyhow::Result<()> {
                 loopflow::lf::commands::top::run_prune(*json, *dry_run)
             }
             Some(Commands::Doctor { json }) => loopflow::lf::commands::doctor::run(*json),
-            Some(Commands::List) => {
-                in_repo_runtime(&args, |_| loopflow::lf::commands::list::show_all())
-            }
+            Some(Commands::List) => loopflow::lf::commands::list::show_all(),
             Some(Commands::Ls { json, all }) => loopflow::lf::commands::waves::ls(*json, *all),
             Some(Commands::Status { wave, json }) => {
                 loopflow::lf::commands::waves::status(wave.as_deref(), *json)
@@ -1696,11 +1697,12 @@ fn main() -> anyhow::Result<()> {
                     if rest.len() != 1 {
                         return Err(anyhow::anyhow!("usage: lf flow {name} FLOW"));
                     }
-                    return in_repo_runtime(&args, |repo| match name.as_str() {
-                        "show" => loopflow::lf::commands::flow::show(target, repo),
-                        "validate" => loopflow::lf::commands::flow::validate(target, repo),
+                    let directory = loopflow::repo::working_directory()?;
+                    return match name.as_str() {
+                        "show" => loopflow::lf::commands::flow::show(target, &directory),
+                        "validate" => loopflow::lf::commands::flow::validate(target, &directory),
                         _ => unreachable!(),
-                    });
+                    };
                 }
                 require_target_kind(name, TargetKind::Flow)?;
                 let message = join_args(rest);

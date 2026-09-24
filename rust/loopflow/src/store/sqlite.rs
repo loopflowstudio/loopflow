@@ -424,7 +424,7 @@ impl SqliteStore {
         if !may_apply_migrations && !existing_database {
             return Err(StoreError::InvalidData(format!(
                 "shared store {} is not initialized and an ordinary lf may not create it; \
-                 install a published release with `uv run python scripts/install.py refresh`",
+                 install a published release with `lf install`",
                 path.display()
             )));
         }
@@ -462,7 +462,7 @@ impl SqliteStore {
                 return Err(StoreError::InvalidData(format!(
                     "shared store {} is at an older frontier than this lf (pending {pending}); \
                      an ordinary lf must not advance it — install a published release with \
-                     `uv run python scripts/install.py refresh`",
+                     `lf install`",
                     path.display()
                 )));
             }
@@ -2000,7 +2000,7 @@ mod frontier_tests {
         let error = open(&path, Published, &shared.home, Forbidden)
             .expect_err("an ordinary open must not initialize the shared store");
         assert!(
-            error.to_string().contains("scripts/install.py refresh"),
+            error.to_string().contains("lf install"),
             "the refusal must name the authorized boundary: {error}"
         );
         assert!(
@@ -2028,7 +2028,7 @@ mod frontier_tests {
         let error = open(&path, Published, &shared.home, Forbidden)
             .expect_err("an ordinary open ahead of the frontier must refuse");
         assert!(
-            error.to_string().contains("scripts/install.py refresh"),
+            error.to_string().contains("lf install"),
             "the refusal must name the authorized boundary: {error}"
         );
         assert!(

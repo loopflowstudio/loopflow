@@ -37,6 +37,9 @@ use uuid::Uuid;
 use crate::build_info::{self, MigrationAuthority};
 use crate::store::migrations;
 
+mod published;
+pub use published::{latest, schedule};
+
 /// Bounds re-exec depth in the local-promotion delegation chain.
 ///
 /// Local promotion hands the job between the candidate build and the machine's
@@ -71,7 +74,7 @@ fn check_promote_hop(hop: u32) -> Result<u32> {
             "local promotion did not converge after {hop} delegation hops; the machine's \
              active install coordinator and this candidate disagree on routing (usually because \
              the active dev install was built from a divergent branch). Reset to a published \
-             install with `python scripts/install.py refresh`, then promote again."
+             install with `lf install`, then promote again."
         ));
     }
     Ok(hop)
@@ -1728,7 +1731,11 @@ fn quiesce_switch_app(
     root: &Path,
     receipt: &mut crate::machine_install::SwitchReceipt,
 ) -> Result<()> {
-    let paths = app_executable_paths(&receipt.prior, receipt.activation.app.as_deref());
+    let paths = receipt
+        .prior
+        .as_ref()
+        .map(|prior| app_executable_paths(prior, receipt.activation.app.as_deref()))
+        .unwrap_or_default();
     receipt.app_was_running = !running_app_processes(&paths)?.is_empty();
     crate::machine_install::write_switch(root, receipt)?;
     quiesce_app_processes(&paths)
@@ -1747,7 +1754,7 @@ fn resume_switch_app(receipt: &crate::machine_install::SwitchReceipt) -> Result<
     let selection = if receipt.target_store_advance_started {
         &receipt.target
     } else {
-        &receipt.prior
+        receipt.prior.as_ref().context("no prior app to resume")?
     };
     verify_selected_app_bundle(app, &selection.artifact_set)?;
     let status = Command::new("/usr/bin/open")
@@ -2065,7 +2072,7 @@ fn bootstrap_published_install(
     root: &Path,
     artifacts: &PromotionArtifacts<'_>,
 ) -> Result<crate::machine_install::ActiveInstall> {
-    let repair = "run `uv run python scripts/install.py refresh`";
+    let repair = "run `lf install`";
     let store = crate::store::production_database_path();
     if !store.is_file() {
         return Err(anyhow!(
@@ -2175,10 +2182,10 @@ fn active_install_for_local_promotion(
     ])?;
     active
         .published_fallback
-        .verify(&required_machine_artifact_roles(artifacts.app_source.is_some()))
-        .with_context(|| {
-            "the complete published fallback is unavailable; run `uv run python scripts/install.py refresh`"
-    })?;
+        .verify(&required_machine_artifact_roles(
+            artifacts.app_source.is_some(),
+        ))
+        .with_context(|| "the complete published fallback is unavailable; run `lf install`")?;
     Ok(active)
 }
 
@@ -2355,7 +2362,7 @@ fn restore_before_local_advance(
         Err(anyhow!("disposable target cleanup failed"))
     };
     drop(lock);
-    let resume = resume_home_for_install_selection(paused, &receipt.prior);
+    let resume = resume_home_with_selection(paused, receipt.prior.as_ref(), None);
     let app = resume_switch_app(receipt);
     match (cleanup, clear, resume, app) {
         (Ok(()), Ok(()), Ok(()), Ok(())) => error,
@@ -2503,9 +2510,9 @@ fn promote_local_candidate(
     let mut switch = crate::machine_install::SwitchReceipt {
         schema_version: 1,
         id: switch_id,
-        prior: prior.selection.clone(),
+        prior: Some(prior.selection.clone()),
         target: target.clone(),
-        published_fallback: prior.published_fallback.clone(),
+        published_fallback: Some(prior.published_fallback.clone()),
         target_published_fallback: None,
         phase: crate::machine_install::SwitchPhase::Planned,
         recovery_owner: crate::machine_install::RecoveryOwner::Coordinator,
@@ -3076,11 +3083,16 @@ fn active_install_from_switch(
             .target_published_fallback
             .clone()
             .expect("validated published switch retains its target fallback"),
-        crate::machine_install::InstallSource::Development => receipt.published_fallback.clone(),
+        crate::machine_install::InstallSource::Development => receipt
+            .published_fallback
+            .clone()
+            .expect("validated development switch retains a published fallback"),
     };
     let mut retained = vec![published_fallback.clone()];
-    if receipt.published_fallback != published_fallback {
-        retained.push(receipt.published_fallback.clone());
+    if let Some(prior_fallback) = &receipt.published_fallback {
+        if prior_fallback != &published_fallback {
+            retained.push(prior_fallback.clone());
+        }
     }
     crate::machine_install::ActiveInstall {
         schema_version: 1,
@@ -3095,7 +3107,7 @@ fn settle_switch(
     receipt: &mut crate::machine_install::SwitchReceipt,
     active: &crate::machine_install::ActiveInstall,
 ) -> Result<()> {
-    receipt.published_fallback = active.published_fallback.clone();
+    receipt.published_fallback = Some(active.published_fallback.clone());
     receipt.phase = crate::machine_install::SwitchPhase::Settled;
     receipt.active_selection_committed = true;
     crate::machine_install::write_switch(root, receipt)?;
@@ -3153,7 +3165,9 @@ pub fn recover_switch(switch_id: &str) -> Result<()> {
         discard_unadvanced_disposable_store(&receipt)?;
         crate::machine_install::clear_switch(&root, &receipt.id)?;
         drop(lock);
-        resume_store_home(&receipt.prior, None)?;
+        if let Some(prior) = &receipt.prior {
+            resume_store_home(prior, None)?;
+        }
         resume_switch_app(&receipt)?;
         return Ok(());
     }
@@ -3190,7 +3204,11 @@ pub fn recover_switch(switch_id: &str) -> Result<()> {
             | crate::machine_install::SwitchPhase::Quiesced
             | crate::machine_install::SwitchPhase::Planned
     );
-    let mut paths = app_executable_paths(&receipt.prior, receipt.activation.app.as_deref());
+    let mut paths = receipt
+        .prior
+        .as_ref()
+        .map(|prior| app_executable_paths(prior, receipt.activation.app.as_deref()))
+        .unwrap_or_default();
     paths.extend(app_executable_paths(
         &receipt.target,
         receipt.activation.app.as_deref(),
@@ -3248,28 +3266,26 @@ fn promote_published_from_machine_install(
     let lock = crate::promotion_lock::acquire_exclusive()
         .context("acquire the exclusive promotion lock")?;
     let root = crate::machine_install::root()?;
-    let prior = match crate::machine_install::read_state(&root)? {
-        crate::machine_install::MachineInstallState::Settled(active) => *active,
+    let mut prior = match crate::machine_install::read_state(&root)? {
+        crate::machine_install::MachineInstallState::Settled(active) => Some(*active),
         crate::machine_install::MachineInstallState::Switching(receipt) => {
             return Err(anyhow!(
                 "install switch {} became active while waiting for the promotion lock; rerun promotion to recover it",
                 receipt.id
             ))
         }
-        crate::machine_install::MachineInstallState::Legacy => {
-            return Err(anyhow!(
-                "machine install authority changed while waiting for the promotion lock; rerun promotion"
-            ))
-        }
+        crate::machine_install::MachineInstallState::Legacy => None,
     };
-    prior.selection.artifact_set.verify(&[
-        crate::machine_install::ArtifactRole::Cli,
-        crate::machine_install::ArtifactRole::Daemon,
-    ])?;
-    prior.published_fallback.verify(&[
-        crate::machine_install::ArtifactRole::Cli,
-        crate::machine_install::ArtifactRole::Daemon,
-    ])?;
+    if let Some(prior) = &prior {
+        prior.selection.artifact_set.verify(&[
+            crate::machine_install::ArtifactRole::Cli,
+            crate::machine_install::ArtifactRole::Daemon,
+        ])?;
+        prior.published_fallback.verify(&[
+            crate::machine_install::ArtifactRole::Cli,
+            crate::machine_install::ArtifactRole::Daemon,
+        ])?;
+    }
     let store_path = crate::store::production_database_path();
     let preview = read_binary_preview(candidate_binary)?;
     if preview.candidate.authority != MigrationAuthority::Published {
@@ -3289,23 +3305,28 @@ fn promote_published_from_machine_install(
         return Ok(());
     }
 
-    if matches!(preview.verdict, Verdict::Promote)
-        && active_install_matches_candidate(
-            &root,
-            &prior,
-            &artifacts,
-            candidate_binary,
-            &preview.candidate,
-            &preview.verdict,
-            &store_path,
-        )?
-    {
-        println!(
-            "published {} is already installed (store {})",
-            preview.candidate.display_version(),
-            prior.selection.store.display()
-        );
-        return Ok(());
+    if prior.is_none() && store_path.exists() {
+        prior = Some(bootstrap_published_install(&root, &artifacts)?);
+    }
+    if let Some(prior) = &prior {
+        if matches!(preview.verdict, Verdict::Promote)
+            && active_install_matches_candidate(
+                &root,
+                prior,
+                &artifacts,
+                candidate_binary,
+                &preview.candidate,
+                &preview.verdict,
+                &store_path,
+            )?
+        {
+            println!(
+                "published {} is already installed (store {})",
+                preview.candidate.display_version(),
+                prior.selection.store.display()
+            );
+            return Ok(());
+        }
     }
     let switch_id = format!("switch-{}", Uuid::new_v4().simple());
     let prepared = prepare_artifacts(&artifacts, candidate_binary, &preview, &switch_id, None)?;
@@ -3327,9 +3348,9 @@ fn promote_published_from_machine_install(
     let mut switch = crate::machine_install::SwitchReceipt {
         schema_version: 1,
         id: switch_id,
-        prior: prior.selection.clone(),
+        prior: prior.as_ref().map(|prior| prior.selection.clone()),
         target: target.clone(),
-        published_fallback: prior.published_fallback.clone(),
+        published_fallback: prior.as_ref().map(|prior| prior.published_fallback.clone()),
         target_published_fallback: Some(target_published_fallback.clone()),
         phase: crate::machine_install::SwitchPhase::Planned,
         recovery_owner: crate::machine_install::RecoveryOwner::Coordinator,
@@ -3337,7 +3358,9 @@ fn promote_published_from_machine_install(
         target_store_advanced: false,
         active_selection_committed: false,
         coordinator: prior
-            .selection
+            .as_ref()
+            .map(|prior| &prior.selection)
+            .unwrap_or(&target)
             .artifact_set
             .artifact(&crate::machine_install::ArtifactRole::Cli)
             .expect("validated machine install has a CLI")
@@ -3357,7 +3380,12 @@ fn promote_published_from_machine_install(
         disposable_store_owned: false,
     };
     crate::machine_install::write_switch(&root, &switch)?;
-    let paused = match pause_home(&prior.selection.store) {
+    let paused = match pause_home(
+        prior
+            .as_ref()
+            .map(|prior| prior.selection.store.as_path())
+            .unwrap_or(&store_path),
+    ) {
         Ok(paused) => paused,
         Err(error) => {
             crate::machine_install::clear_switch(&root, &switch.id)?;
@@ -3391,7 +3419,9 @@ fn promote_published_from_machine_install(
     )?;
     switch.phase = crate::machine_install::SwitchPhase::Activated;
     crate::machine_install::write_switch(&root, &switch)?;
-    let mut retained = prior.retained_published_sets;
+    let mut retained = prior
+        .map(|prior| prior.retained_published_sets)
+        .unwrap_or_default();
     if !retained.iter().any(|set| set == &target_published_fallback) {
         retained.push(target_published_fallback.clone());
     }
@@ -3570,33 +3600,7 @@ pub fn promote(
         }
         _ => {}
     }
-    let store_path = crate::store::production_database_path();
-    let preview = build_preview(&store_path);
-    render_human(&preview);
-
-    if let Verdict::Reject { reasons } = &preview.verdict {
-        return Err(anyhow!(
-            "promotion refused; lf, lfd, and the app are unchanged:\n  - {}",
-            reasons.join("\n  - ")
-        ));
-    }
-    if preview_only {
-        println!("  (preview only: no target changed)");
-        return Ok(());
-    }
-    let lock = crate::promotion_lock::acquire_exclusive()
-        .context("acquire the exclusive promotion lock")?;
-    if !matches!(
-        crate::machine_install::read_state(&root)?,
-        crate::machine_install::MachineInstallState::Legacy
-    ) {
-        return Err(anyhow!(
-            "machine install authority changed while waiting for the promotion lock; rerun promotion"
-        ));
-    }
-    bootstrap_published_install(&root, &artifacts)?;
-    drop(lock);
-    promote_published_from_machine_install(artifacts, &current, sync_skills, false)
+    promote_published_from_machine_install(artifacts, &current, sync_skills, preview_only)
 }
 
 /// Activate retained immutable bytes only when that binary's own preflight

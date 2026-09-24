@@ -1,4 +1,3 @@
-use crate::lf::commands::util::find_repo_root;
 use crate::lf::discovery::{
     builtin_flow_infos, builtin_flows, builtin_skill_description, builtin_skills, list_all_skills,
     list_user_flows, FlowInfo, BUILTIN_FLOW_CATEGORIES, BUILTIN_SKILL_CATEGORIES,
@@ -21,7 +20,7 @@ struct CatalogEntry {
 }
 
 pub fn show_all() -> Result<()> {
-    let repo_root = find_repo_root().ok();
+    let repo_root = crate::repo::discover_repo_root(&std::env::current_dir()?)?;
     let stdout = io::stdout();
     let is_terminal = stdout.is_terminal();
     let catalog = render_all(repo_root.as_deref(), Colors::default());

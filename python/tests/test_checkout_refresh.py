@@ -1,11 +1,10 @@
-"""CLI proofs with local remotes; package/release side effects use executables in PATH."""
+"""Checkout update proofs through the CLI with disposable local remotes."""
 
 import json
 import os
 import select
 import shutil
 import subprocess
-import sys
 from pathlib import Path
 
 import pytest
@@ -68,6 +67,14 @@ def test_main_refresh_repeats_and_observes_each_new_upstream(checkout: Checkout)
         assert _run(main, "git", "rev-parse", "HEAD") == upstream
         _run(main, str(LF), "rebase", env=env)
         assert _run(main, "git", "rev-parse", "HEAD") == upstream
+
+    journals = list((main / ".lf/journal/runs").glob("*/events.jsonl"))
+    assert len(journals) == 4
+    for journal in journals:
+        events = [json.loads(line) for line in journal.read_text().splitlines()]
+        assert events[0]["command"][-1] == "rebase"
+        assert events[0]["event"] == "started"
+        assert events[-1]["event"] == "completed"
 
 
 def test_explicit_main_target_uses_one_refresh_snapshot(checkout: Checkout, tmp_path: Path) -> None:
@@ -346,49 +353,6 @@ def test_fetch_failure_preserves_state_and_later_invocation_catches_up(checkout:
     _run(main, str(LF), "rebase", env=env)
     assert _run(main, "git", "rev-parse", "HEAD") == upstream
     assert (main / "base.txt").read_text() == "caller edit\n"
-
-
-@pytest.mark.skipif(sys.platform != "darwin", reason="Homebrew refresh is macOS-only")
-def test_install_from_worktree_retries_packages_after_main_updated(
-    checkout: Checkout, tmp_path: Path
-) -> None:
-    main, author, env = checkout
-    _run(main, str(LF), "wt", "create", "installer", env=env)
-    caller = main.with_name("repo.installer")
-    upstream = _advance(author, "new-required-package.txt")
-    binaries = tmp_path / "bin"
-    binaries.mkdir()
-    state = tmp_path / "install-state"
-    state.mkdir()
-    # Executable fakes model external installation, not Loopflow's orchestration.
-    for name, source in {
-        "brew": '#!/bin/sh\ncat > "$INSTALL_STATE/required"\n'
-        'test ! -e "$INSTALL_STATE/offline" || exit 7\n'
-        'touch "$INSTALL_STATE/packages-ready"\n',
-        "uv": '#!/bin/sh\ntest -e "$INSTALL_STATE/packages-ready" || exit 8\n'
-        'case "$1" in\nsync) touch "$INSTALL_STATE/environment-ready";;\n'
-        'run) test -e "$INSTALL_STATE/environment-ready" || exit 9\n'
-        'touch "$INSTALL_STATE/release-ready";;\nesac\n',
-    }.items():
-        path = binaries / name
-        path.write_text(source)
-        path.chmod(0o755)
-    env["PATH"] = f"{binaries}:{env['PATH']}"
-    env["INSTALL_STATE"] = str(state)
-    (state / "offline").touch()
-    result = subprocess.run(
-        [str(LF), "install"], cwd=caller, env=env, capture_output=True, text=True
-    )
-    assert result.returncode != 0
-    assert "package refresh failed" in result.stderr
-    assert _run(main, "git", "rev-parse", "HEAD") == upstream
-    assert not (state / "release-ready").exists()
-    (state / "offline").unlink()
-    _run(caller, str(LF), "install", env=env)
-    assert (state / "release-ready").exists()
-    assert 'brew "uv"' in (state / "required").read_text()
-    _run(caller, str(LF), "install", env=env)
-    assert _run(main, "git", "rev-parse", "HEAD") == upstream
 
 
 def test_main_merge_conflict_restores_original_history_and_edits(checkout: Checkout) -> None:

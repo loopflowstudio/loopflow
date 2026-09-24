@@ -14,7 +14,7 @@ use crate::lf::HomeCommand;
 use crate::work::wave::context::resolve_managed_wave_sync;
 
 /// `lf home <id|observe|probe>` — inspect durable Home identity and reachability.
-pub fn run(cmd: &HomeCommand, repo: &Path) -> anyhow::Result<()> {
+pub fn run(cmd: &HomeCommand) -> anyhow::Result<()> {
     match cmd {
         HomeCommand::Id { json } => id_cmd(*json),
         HomeCommand::Observe {
@@ -22,7 +22,10 @@ pub fn run(cmd: &HomeCommand, repo: &Path) -> anyhow::Result<()> {
             route,
             json,
         } => observe_cmd(home_id, route, *json),
-        HomeCommand::Probe { wave, json } => probe_cmd(wave.as_deref(), *json, repo),
+        HomeCommand::Probe { wave, json } => {
+            let repo = crate::repo::discover_repo_root(&std::env::current_dir()?)?;
+            probe_cmd(wave.as_deref(), *json, repo.as_deref())
+        }
     }
 }
 
@@ -70,8 +73,8 @@ fn observe_cmd(home_id: &crate::durable::HomeId, route: &str, json: bool) -> any
     Ok(())
 }
 
-fn probe_cmd(wave: Option<&str>, json: bool, repo: &Path) -> anyhow::Result<()> {
-    let selected = resolve_managed_wave_sync(Some(repo), wave).map_err(|err| anyhow!("{err}"))?;
+fn probe_cmd(wave: Option<&str>, json: bool, repo: Option<&Path>) -> anyhow::Result<()> {
+    let selected = resolve_managed_wave_sync(repo, wave).map_err(|err| anyhow!("{err}"))?;
     let wave_id = selected.id().clone();
     let rt = tokio::runtime::Runtime::new()?;
     let (wave, runtime) = rt.block_on(async {

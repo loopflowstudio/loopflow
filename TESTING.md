@@ -232,6 +232,11 @@ Keep `workflow_run.workflows: ["CI"]` in sync with `.github/workflows/ci.yml`. R
 
 ## Rust Tests
 
+For shared repository discovery or CLI dispatch changes, include the PM and
+Wave consumers in the focused proof. Follow
+[repository-context-check](.lf/skills/repository-context-check.md); global-command
+tests alone do not cover cached PM reads from registered directories without Git.
+
 When changing Wave chat operations, include the parent module's HTTP and SSE
 tests. Selecting only `runner::tests` or steering-named tests misses them.
 
@@ -345,6 +350,28 @@ preservation with and without a snapshot. Its JSON receipt identifies the CLI
 digest and installation. This proves the installed Linux path against simulated
 provider responses; live Linear behavior and the operational reliability window
 remain separate evidence. No production endpoint override is needed.
+
+Exercise first installation and recovery inside a disposable Ubuntu container:
+
+```bash
+uv run --no-project --python 3.14 /fixture/install_bootstrap.py
+```
+
+Copy `tests/e2e/install_bootstrap.py`, `release/install.sh`, and a Linux candidate
+pair to `/fixture/install_bootstrap.py`, `/fixture/install.sh`, and
+`/fixture/bin/{lf,lfd}`. Build the pair in a separate disposable source snapshot
+after `canonicalize_migrations.py --materialize-for-tests`, using release
+provenance and published migration authority only in that isolated build.
+The runtime container needs curl, OpenSSL, CA certificates, Git, useradd,
+runuser, and uv; run the proof as root without host Home mounts. Optionally copy
+a checksum-verified older released pair into `/fixture/prior` to exercise the
+external-installer transition.
+
+The script creates separate OS accounts and a local HTTPS release endpoint.
+It exercises the real CLI, verified shell installer, store creation, repeat
+installation, missing-daemon repair, checkout preservation, and recovery after
+a forced activation failure. Transport is simulated; this does not replace a
+public release-channel demo. Discard the container afterward.
 
 ## Nightly Package Tests
 

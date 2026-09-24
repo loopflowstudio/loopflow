@@ -254,9 +254,112 @@ None is interchangeable with the deleted wrappers. LOO-287 still owns the broade
 architecture pass and its real weekly observations; local deletion and passing
 checks do not complete that Task or establish its KR.
 
+## Installation and command scope (branch evidence, 2026-09-24)
+
+The `global-cmds` branch separates machine installation from checkout updates.
+Infrastructure's existing release/recovery mandate owns these learnings;
+this curation does not bind the branch to a Task or change Wave identity.
+LOO-292 retains installation/rebase acceptance; LOO-287 retains command-scope
+reduction follow-ups. Both remain open. Their updated notes supersede the older
+combined laptop/package/main refresh requirements, without discarding the
+reported main-rebase failure or its preservation obligations.
+
+### Keep the ownership boundaries
+
+- `lf install` selects the latest published release and verifies its pinned
+  shell installer. The shell downloads artifacts; the existing candidate
+  promotion transaction alone creates/advances the store and activates bytes.
+  `lf rebase` owns checkout refresh/integration and keeps its journal evidence.
+  Installation must not run Git, Homebrew, uv, Python or source-tree maintenance.
+- First install has no prior selection or previous published fallback. Before
+  candidate handoff it can cancel to uninstalled; afterward the pinned candidate
+  must recover and settle. Ordinary commands cannot use an uncommitted first
+  selection. Read-only install preflight must reach its own authority checks
+  before ordinary startup authorization, or first-install recovery deadlocks
+  on the absent prior selection. Existing-store adoption still proves its
+  store/artifact authority.
+- Matching CLI/daemon versions alone do not mean current: exact-store preflight
+  must succeed without migration, and macOS must have the complete matching app.
+  Bound subprocess inspection so broken installed binaries cannot hang updates.
+- Older CLIs transition through the external installer. A retained Python
+  `refresh` alias delegating to PATH `lf install` recurses through the old CLI's
+  source updater. The alias and dependent wrapper are deleted; do not restore
+  them as a compatibility bridge.
+- Optional discovery returns a real checkout or absence, preserving genuine
+  Git failures. `CanonicalRepo::current` cannot accept an ordinary folder as
+  repository scope: doing so produces plausible empty Wave/Session listings.
+  Stored-locator discovery and folder prompt `working_directory` have different
+  contracts. Provider `RepoId` still owns origin identity and Git URL rewriting.
+- Machine commands bypass repository runtime capture; catalog/flow inspection
+  must not create journal attribution. Keep explicit target/default-route
+  resolution independent of irrelevant caller Git. Do not replace missing repo
+  identity on a route mutation with a default-route write.
+- Scheduled installation retains its existing launchd label/log destination
+  and custom `LF_INSTALL_DIR`, but no source WorkingDirectory or Python. The
+  accepted cadence is login plus weekly by default (Monday 09:00), with daily
+  09:00, hourly, or five-minute clock intervals available explicitly through
+  `lf install schedule [weekly|daily|hourly|5min]`. The human clarified that
+  cadence is positional, without `--every`. Calendar scheduling should coalesce
+  sleeping intervals. The concurrent scheduling receipt records a public-CLI
+  cadence matrix and static passes with simulated launchctl; match final proof
+  to the positional-argument bytes. It does not prove actual login/wake events.
+
+### Evidence and demo traps
+
+Review through `ac0b51aad` records 67 focused tests and static checks, plus three
+earlier checkout tests. The disposable Ubuntu 24.04 candidate demo passed fresh
+installation without Git, repeat without asset downloads, missing-daemon repair,
+dirty-checkout/ref and migration-ledger preservation, failed-activation recovery,
+and external transition from authentic checksum-verified 0.12.18 binaries.
+That older account had no populated historical Home. The candidate reported
+0.12.19 with drafts materialized only in a disposable source snapshot; local
+HTTPS release transport is not a public release. Captured logs and full audit
+remain in branch history at `1f2d2c051:scratch/` after scratch is cleared.
+
+The real published 0.12.20 demo failed clean-home promotion after preflight
+accepted the absent store. Preserve that observation; candidate success cannot
+rewrite it. Public-channel acceptance needs a released fix and repeated
+fresh-install/repair proof. Real macOS app installation and populated historical
+Home migration are still unproven. No full CI or current-tree pass is implied.
+
+- Machine installation resolves the OS account home, ignoring `HOME` overrides.
+  `HOME`/`LF_HOME` alone cannot isolate promotion. Use a disposable OS account or
+  container with no real installation mounted; remove obsolete installer tests
+  whose mocks now permit the real downloader. PATH mocks for Homebrew or uv do
+  not intercept HTTP downloads or promotion. Include failed first activation and
+  pinned-candidate recovery: fresh-install success alone misses dependencies on
+  prior startup selection. See `TESTING.md` and `tests/e2e/install_bootstrap.py`.
+- Debian bookworm could not run the downloaded release's GLIBC_2.38/2.39
+  requirements; Ubuntu 24.04 reached promotion. Distinguish platform failure
+  from repository discovery failure.
+- Wait for artifact copies before packaging/serving, then compare archive-member
+  SHA-256 with source/runtime bytes. An asynchronous copy race produced a
+  different CLI and a segfault; the daemon matched. TLS fixtures also need a
+  separate server leaf signed by their test CA. These were fixture failures.
+- Removing Git from PATH must retain unrelated runtime prerequisites such as
+  `ps`. A missing prerequisite is not evidence that the command needs Git.
+
+### Reduction and unresolved scope
+
+The shell bootstrap and installed release selector share one promotion owner.
+Artifact bytes, selected install/store, retained published fallback, and durable
+switch progress remain distinct. Advancement may finish while phase still says
+`Advancing`; phase alone loses recovery evidence. Persisted duplicate receipt
+facts need a coherent format change and interrupted existing-install proof,
+not isolated field deletion. No such redesign was selected in compression.
+
+LOO-287 retains target-first Work/PM/cron/chat/bound-invocation resolution and
+ordinary-folder execution through provider completion without an implicit Git
+checkpoint. Recheck downstream credentials/config and explicit worktree flags;
+no capability registry, skill-name allowlist, fake repo, or swallowed Git errors.
+The scope audit is source evidence, not proof that every command ran. Starting
+a new repository remains an unselected design question: separate Git creation,
+local configuration, optional provider connection and later PM setup. Today's
+`init` connects an existing repository to the distributed system.
+
 ## Shipped
 
-- **Install syncs skills** — the repo refresh and local `--use` paths run `lf sync-skills --yes` after installing `lf`, so `~/.claude/skills` and `~/.agents/skills` track the freshly installed binary. Sync failure warns but never fails the install; the binary is already in place. First increment of "one command keeps local fresh."
+- **Install syncs skills** — installation runs `lf sync-skills --yes` after installing `lf`, so `~/.claude/skills` and `~/.agents/skills` track the freshly installed binary. Sync failure warns but never fails the install; the binary is already in place. The former combined repo-refresh path is superseded by the installation contract above.
 - **Deterministic rebase & placement** (rebase-efficiency parent) — `lf rebase` classifies the branch via merge-base diff *before* touching git and picks reset / direct-rebase / rebase-onto-parent / skip-parent-onto-main / noop; only genuinely conflicting authored work escalates to the rebase agent. Disposable branches (no unique commits, generated/checkpoint-only, scratch-only) reset to base instead of burning a long rebase. `scratch/` survives via directory copy to `.lf/tmp/scratch-stash/<branch>-<ts>/`. `--plan` prints the deterministic decision without mutating git. Ops telemetry → ignored `.lf/tmp/metrics/ops.jsonl` (strategy/class/counts, no diffs or secrets). Classifier uses merge-base diffing so upstream-only drift isn't counted as local authored work. E2E: `tests/e2e/test_rebase_efficiency.sh`. This directly attacks the "avoidable long rebase" sharp edge in the daily loop.
 - **Worktree redesign, stages 1–3a** (PR #818) — fixes the #802 fallout: runaway nesting (`loopflow.jack-heart.bugs.20260705_1627.goals`), wave identity that stopped resolving, and land rotation renaming the worktree out from under a running agent.
   - **Placement (stage 1):** `lf wt create <name>` creates a low-level sibling worktree; `--plan` previews placement without writing. Task and Project Work own their higher-level worktrees. The retired `--fork`/`--main`/`--stack` and intermediate `--sibling`/`--child` flags are not part of the current CLI.

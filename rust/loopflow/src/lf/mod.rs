@@ -227,7 +227,7 @@ pub enum Commands {
         #[command(subcommand)]
         cmd: SessionCommand,
     },
-    /// Refresh main, required packages, and the installed published release
+    /// Install the latest published Loopflow release from any directory
     Install {
         #[command(subcommand)]
         cmd: Option<InstallCommand>,
@@ -1055,10 +1055,23 @@ pub enum TaskCommand {
     },
 }
 
+#[derive(Debug, Clone, Copy, clap::ValueEnum)]
+pub enum InstallFrequency {
+    Weekly,
+    Daily,
+    Hourly,
+    #[value(name = "5min")]
+    FiveMinutes,
+}
+
 #[derive(Subcommand, Debug)]
 pub enum InstallCommand {
-    /// Install an hourly laptop refresh job (macOS launchd)
-    Schedule,
+    /// Install the latest Loopflow at login and weekly by default (macOS launchd)
+    Schedule {
+        /// Weekly: Monday 09:00; daily: 09:00; otherwise on clock boundaries (local time)
+        #[arg(value_enum, default_value = "weekly")]
+        frequency: InstallFrequency,
+    },
     /// Continue one interrupted machine install switch from its pinned candidate.
     #[command(hide = true)]
     RecoverSwitch {

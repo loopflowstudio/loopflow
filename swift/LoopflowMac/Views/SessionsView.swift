@@ -68,7 +68,7 @@ final class SessionsWorkspaceRegistry {
     }
 
     func reconcileSessions(_ ids: Set<String>, in paths: Set<String>) {
-        for path in paths { workspaces[path]?.workspaces.reconcileSessions(ids, in: worktreeLayout.knownPaths) }
+        for path in paths { workspaces[path]?.multiplexer.reconcileSessions(ids) }
     }
 
     func workspace(for repoPath: String) -> SessionsWorkspace {
@@ -408,7 +408,7 @@ struct SessionsView: View {
                 ZStack {
                     WorktreeNodeView(
                         node: worktreeLayout.layout, layout: worktreeLayout,
-                        workspaces: workspaces, paths: availablePaths, sessions: store
+                        workspaces: workspaces, paths: availablePaths, isActive: terminalsVisible, sessions: store
                     )
                     .opacity(terminalsVisible ? 1 : 0)
                     .disabled(!terminalsVisible)
@@ -491,7 +491,9 @@ struct SessionsView: View {
                 Button("Work details") { navigation.content = .details }
                     .accessibilityIdentifier("workspace-work-details")
             }
-            if !terminalsVisible, !multiplexer.layout.allPanes.allSatisfy({ $0.content == .empty }) {
+            if !terminalsVisible, worktreeLayout.knownPaths.contains(where: { path in
+                workspaces.workspace(for: path).multiplexer.layout.allPanes.contains { $0.content != .empty }
+            }) {
                 Button("Return to terminals") { navigation.content = .terminals }
                     .accessibilityIdentifier("workspace-return-terminals")
             }
@@ -502,7 +504,8 @@ struct SessionsView: View {
                     .help("Snapshot generation time; source sync freshness is not supplied by this read.")
             }
             Button { startConversation() } label: {
-                Label("New conversation", systemImage: "plus.bubble")
+                Label("New conversation · \(model.conversationLabel ?? "Work")", systemImage: "plus.bubble")
+                    .lineLimit(1)
             }
             .disabled(model.conversationScope == nil)
             .help("Start a conversation about \(model.conversationLabel ?? "this work") using your configured app or terminal")
@@ -639,6 +642,7 @@ private struct WorktreeNodeView: View {
     let layout: WorktreeLayoutStore
     let workspaces: SessionsWorkspaceRegistry
     let paths: [String]
+    let isActive: Bool
     @ObservedObject var sessions: SessionsStore
 
     var body: some View { content }
@@ -688,7 +692,7 @@ private struct WorktreeNodeView: View {
                 if let path {
                     WorktreeTerminalsView(
                         workspace: workspaces.workspace(for: path), path: path,
-                        isFocused: layout.focusedSlotId == id,
+                        isFocused: isActive && layout.focusedSlotId == id,
                         sessions: sessions
                     )
                     .id(path)
@@ -707,7 +711,7 @@ private struct WorktreeNodeView: View {
     }
 
     private func child(_ node: WorktreeLayout) -> WorktreeNodeView {
-        WorktreeNodeView(node: node, layout: layout, workspaces: workspaces, paths: paths,
+        WorktreeNodeView(node: node, layout: layout, workspaces: workspaces, paths: paths, isActive: isActive,
                          sessions: sessions)
     }
 }

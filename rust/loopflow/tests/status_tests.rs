@@ -548,6 +548,10 @@ fn current_wave_reads_and_forgetting_empty_registrations_share_lifecycle() {
         String::from_utf8_lossy(&preview.stderr)
     );
     assert!(store.get_wave(abandoned.id()).unwrap().is_some());
+    store.set_work_enabled(&work, true).unwrap();
+    assert!(store.forget_wave(abandoned.id(), false).is_err());
+    assert!(store.get_wave(abandoned.id()).unwrap().is_some());
+    store.set_work_enabled(&work, false).unwrap();
     let deleted = run(&["work", "forget", "wave", abandoned.id().as_str(), "--json"]);
     assert!(
         deleted.status.success(),

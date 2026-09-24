@@ -1735,6 +1735,16 @@ impl SqliteStore {
                 "only an abandoned Wave registration can be forgotten".to_string(),
             ));
         }
+        let enabled: bool = tx.query_row(
+            "SELECT EXISTS(SELECT 1 FROM work_placements WHERE wave_id = ?1 AND enabled = 1)",
+            params![wave_id],
+            |row| row.get(0),
+        )?;
+        if enabled {
+            return Err(StoreError::InvalidData(
+                "disable the Wave before forgetting its registration".to_string(),
+            ));
+        }
         let mut blockers = Self::wave_retirement_blockers_in(&tx, wave_id)?;
         for (table, column) in [
             ("waves", "parent_wave_id"),

@@ -86,7 +86,7 @@ struct WorktreeWorkspaceTests {
 struct ConversationLaunchTests {
     @Test("Each zoom level binds its subject and keeps the configured destination")
     func scopeDefaults() {
-        let cases: [(SessionScope, [String], String)] = [
+        let cases: [(ConversationScope, [String], String)] = [
             (.repo("/repo"), [], "repository"),
             (.wave(repo: "/repo", id: "product"), ["--wave", "product"], "Wave"),
             (.project(repo: "/repo", id: "desktop"), ["--project", "desktop"], "Project"),

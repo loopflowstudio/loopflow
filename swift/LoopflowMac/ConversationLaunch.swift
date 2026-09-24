@@ -1,10 +1,25 @@
 import Foundation
 import Loopflow
 
+enum ConversationScope: Hashable, Sendable {
+    case repo(String)
+    case wave(repo: String, id: String)
+    case project(repo: String, id: String)
+    case task(repo: String, id: String)
+
+    var repoPath: String {
+        switch self {
+        case .repo(let path): path
+        case .wave(let path, _), .project(let path, _), .task(let path, _): path
+        }
+    }
+
+}
+
 /// A human conversation captures the visible scope when Start is clicked.
 /// Work binding, checkout selection, provider, and destination remain lf-owned.
 struct ConversationLaunch: Equatable {
-    let scope: SessionScope
+    let scope: ConversationScope
 
     var prompt: String {
         let purpose = switch scope {
@@ -28,9 +43,9 @@ struct ConversationLaunch: Equatable {
 }
 
 extension PodiumModel {
-    var conversationScope: SessionScope? {
+    var conversationScope: ConversationScope? {
         guard let repoPath else { return nil }
-        guard let selection else { return .repo(repoPath) }
+        guard navigation.content != .overview, let selection else { return .repo(repoPath) }
         switch selection.kind {
         case .wave:
             guard let name = wave(id: selection.id)?.wave.name
@@ -46,7 +61,7 @@ extension PodiumModel {
     }
 
     var conversationLabel: String? {
-        guard let selection else { return repoPath.map { URL(fileURLWithPath: $0).lastPathComponent } }
+        guard navigation.content != .overview, let selection else { return repoPath.map { URL(fileURLWithPath: $0).lastPathComponent } }
         switch selection.kind {
         case .wave: return wave(id: selection.id)?.wave.name ?? rosterWave(id: selection.id)?.api.name
         case .project: return project(id: selection.id)?.project.project.name

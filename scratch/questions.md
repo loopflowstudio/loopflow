@@ -10,17 +10,28 @@ The human resolved the prior execution question: open Tasks move automatically w
 
 No exact owning Wave or existing implementation Project was named. Placement remains unresolved; no live PM reads or writes are needed to settle the product model.
 
-## Proposed implementation choices
+## Implementation choices
 
 - Wave remains the persistent conversation and sole next-work decision surface.
 - `lf wave new-chapter` calls one deterministic rotation API; start/review chapter use its preview, historical snapshots, and receipts. This supersedes the initial `lf project new-chapter` spelling following the human's Wave-only UI requirement.
-- Convert the existing listener form `lf wave <name>` to `lf wave serve <name>` while retaining convenient top-level start/status/chat commands. This is a proposed grammar choice, not implemented.
+- Convert the existing listener form `lf wave <name>` to `lf wave serve <name>` while retaining convenient top-level start/status/chat commands. Implemented alongside the internal listener launchers.
 - Public Desktop selection is Wave or Task; chapter history is a view/filter. Internal Project and Run identities remain diagnostic provenance. The shared current read models, cached plan, Sessions, Activity, and metrics must all use this same scope.
 - One resumable Wave/chapter binding controls current resolution; Linear owns authored content and the Git archive preserves accepted chapter history.
 - Existing multi-Project portfolios migrate through a fresh chapter, moving started Tasks and abandoning unopened backlog.
 - New Waves receive an initial Project; empty or completed current Projects remain current until chapter rotation.
 - Durable metric instruments survive on the Wave; chapter-specific proof does not inherit old verdicts.
+- Human clarification: the objective belongs to the Wave; Tasks, KRs, and metric targets belong to the chapter Project. Present both ownership scopes through the Wave UI. This supersedes the prior blanket statement that metrics belong to the Wave.
 
-These choices support the accepted product direction but have not received separate human confirmation. See `scratch/projects.md` for the complete proposed design.
+The subsequent `$implement` instruction authorized these reversible implementation choices. See `scratch/projects.md` for the complete design.
 
-Implementation is paused following the human's request for UI research. The findings are in `scratch/research-wave-ui-collapse-5db824ef.md`; no production changes have begun. UI rendering and live portfolio migration are not yet verified.
+Implementation resumed following the subsequent `$implement` instruction. The findings are in `scratch/research-wave-ui-collapse-5db824ef.md`. Native rendering has been inspected with offline fixtures. Live portfolio migration remains unapplied; applying it requires acceptance of its concrete preview.
+
+## Ownership correction — implementation gap
+
+Observed: `ProjectContent` already owns KRs, and Tasks have a Project parent.
+`MetricContractDefinition`/`MetricContract` still own `target` in the Wave metric
+contract, including it in the contract revision hash. Project `definition`
+is also displayed as chapter-level objective prose. These parts need to be
+reconciled with the clarified design. The prior test passes do not establish
+Project-owned metric targets. Preserve measurement identity/history while
+moving target authorship and dated evaluation into the chapter plan.

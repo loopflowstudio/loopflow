@@ -15,15 +15,25 @@ active Runs come from synthetic shared DTOs; no configured Home or provider is
 used.
 
 `hierarchy_interaction_ms` covers full/compact/Session presentations, folding,
-expansion and filtering. `task_workspace_ready_ms` covers active/empty Monitor,
+expansion, filtering and scrolling during planning refresh. The scroll case uses
+a 300-point viewport for both populations. A held fixture response keeps the shared
+planning reader in flight while the native list scrolls to its final Task. Captured
+text verifies that destination before releasing the response; refreshed text must
+then appear without changing the settled viewport, selection or Session identities.
+The normal 800-point viewport is restored before the workspace scenarios.
+
+`task_workspace_ready_ms` covers active/empty Monitor,
 retained Session return and combined-pane zoom/restore. The endpoint is native
 bitmap capture with text verification; Session return additionally requires
 actual first responder, retained surfaces, draft submission and PTY replies.
 Forced capture and OCR add observer overhead. Each attempt separates the last
 successful capture time from its text-verification cost; total duration includes
-verification and any input proof. These are **not compositor paint measurements**.
-Frame hitches, scrolling during refresh,
-production phase attribution and configured registry/provider costs remain
+verification and any input proof. Scrolling includes an intermediate capture/OCR
+before refresh release; its verification cost is also recorded in the attempt's
+observation, alongside before/after labels and offsets. These are **not compositor
+paint measurements**. Scrolling uses the native scroll API, excluding wheel-event
+delivery and continuous gesture smoothness. Frame hitches, production phase
+attribution and configured registry/provider costs remain
 unmeasured. No rendering budget is scored from this endpoint.
 
 Each output directory retains `attempts.jsonl`, `native.log`, `run.json` and

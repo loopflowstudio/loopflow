@@ -22,12 +22,14 @@ struct DesktopPerformanceTests {
         let output = URL(fileURLWithPath: try #require(environment["LF_DESKTOP_PERF_OUTPUT"]))
         let samples = try #require(Int(environment["LF_DESKTOP_PERF_SAMPLES"] ?? "20"))
         let journal = try PerformanceJournal(url: output)
-        let scenarios = ["full", "fold", "expand", "compact", "sessions", "filter",
+        let scenarios = ["full", "fold", "expand", "compact", "sessions", "filter", "scroll_refresh",
                          "monitor_active", "monitor_empty", "session_return", "combined_zoom", "combined_restore"]
         try journal.write(["event": "plan", "population_version": "desktop-v1",
                            "populations": ["small": 8, "large": 256], "samples": samples,
                            "scenarios": scenarios, "endpoint": "native_capture_ocr_and_pty_reply",
                            "poll_interval_ms": 5, "frame_hitches": NSNull(),
+                           "scroll_refresh": ["window_height": 300, "destination": "end",
+                                              "refresh_release": "after_captured_scroll", "updated_title_prefix": "Updated"],
                            "gaps": ["Compositor presentation and frame hitches are not measured.",
                                     "Fixture transport excludes CLI, retained-registry discovery and provider readiness.",
                                     "Actions use SwiftUI controls; OS event delivery latency is excluded.",
@@ -63,7 +65,7 @@ struct DesktopPerformanceTests {
 
 #if canImport(GhosttyKit)
     private func measure(population: String, taskCount: Int, samples: Int, journal: PerformanceJournal) async throws {
-        let query = try populationQuery(taskCount: taskCount)
+        let (query, planning) = try populationQuery(taskCount: taskCount)
         let model = PodiumModel(query: query, repoPath: "/src/loopflow")
         await model.refresh()
         try #require(model.workspace.waves.first?.tasks.count == taskCount)
@@ -134,6 +136,54 @@ struct DesktopPerformanceTests {
             try #require(model.selection == .task(id: "perf-task-0"))
             try search.setInput("")
             try picker.select(value: WorkspacePresentation.compact)
+            // Keep the same population; a shorter viewport makes both sizes
+            // scrollable. Resize and start the held read outside the interval.
+            window.setContentSize(NSSize(width: 1400, height: 300))
+            try await wait(window, render: true) { hasRendered(window, "workspace-task-perf-task-0") }
+            let scroll = try #require(window.contentView.flatMap { scrollView(in: $0) })
+            let document = try #require(scroll.documentView)
+            let destination = document.bounds.height - scroll.contentView.bounds.height
+            try #require(destination > 0)
+            planning.holdNextRead = true
+            let refresh = Task { await model.refresh() }
+            defer { planning.release() }
+            try await wait(window) { planning.pending != nil }
+            var scrolledOffset: CGFloat = 0
+            var labelsBeforeRefresh: [String] = []
+            var initialVerificationMS: Double = 0
+            try await sample("scroll_refresh", population, attempt, journal, window, action: {
+                scroll.contentView.scroll(to: CGPoint(x: 0, y: destination))
+                scroll.reflectScrolledClipView(scroll.contentView)
+                // Lazy row measurement can correct the estimated content height.
+                // Capture the destination before judging retention across refresh.
+                try await wait(window, render: true) {
+                    hasRendered(window, "workspace-task-perf-task-\(taskCount - 1)")
+                }
+                scrolledOffset = scroll.contentView.bounds.minY
+                labelsBeforeRefresh = window.outlineText
+                initialVerificationMS = milliseconds(window.capturedAt)
+                try #require(scrolledOffset > 0 && model.isRefreshing)
+                planning.release()
+            }, ready: {
+                !model.isRefreshing && abs(scroll.contentView.bounds.minY - scrolledOffset) < 1
+                    && model.selection == .task(id: "perf-task-0")
+                    && model.sessions.value == records
+                    && model.workspace.waves.first?.tasks.last?.task.task.id == "perf-task-\(taskCount - 1)"
+                    && window.outlineText.contains { $0.contains(String(format: "Updated %03d", taskCount - 1)) }
+                    && !window.outlineText.contains { $0.contains("Updated 000") }
+            }, observation: {
+                ["offset_after_scroll": scrolledOffset, "offset_after_refresh": scroll.contentView.bounds.minY,
+                 "refresh_complete": !model.isRefreshing, "visible_labels": window.outlineText,
+                 "visible_labels_before_refresh": labelsBeforeRefresh,
+                 "initial_capture_verification_ms": initialVerificationMS,
+                 "expected_task_id": "perf-task-\(taskCount - 1)"]
+            })
+            await refresh.value
+            await model.refresh()
+            window.setContentSize(NSSize(width: 1400, height: 800))
+            scroll.contentView.scroll(to: .zero)
+            scroll.reflectScrolledClipView(scroll.contentView)
+            try await wait(window, render: true) { hasRendered(window, "workspace-task-perf-task-0") }
             navigator.onOpenSession(first)
             try await wait(window) { window.firstResponder === terminals[0] }
             let draft = "draft-\(attempt)"
@@ -213,9 +263,10 @@ struct DesktopPerformanceTests {
 
     private func sample(_ scenario: String, _ population: String, _ attempt: Int,
                         _ journal: PerformanceJournal, _ window: PerformanceWindow,
-                        action: () throws -> Void, ready: () -> Bool,
+                        action: () async throws -> Void, ready: () -> Bool,
+                        observation: () -> [String: Any] = { [:] },
                         input: () async throws -> Void = {}) async throws {
-        let metric = ["full", "fold", "expand", "compact", "sessions", "filter"].contains(scenario)
+        let metric = ["full", "fold", "expand", "compact", "sessions", "filter", "scroll_refresh"].contains(scenario)
             ? "hierarchy_interaction_ms" : "task_workspace_ready_ms"
         var record: [String: Any] = ["event": "begin", "id": "\(population)-\(scenario)-\(attempt)",
             "metric": metric, "scenario": scenario, "population": population, "attempt": attempt,
@@ -223,7 +274,7 @@ struct DesktopPerformanceTests {
         try journal.write(record)
         let start = DispatchTime.now().uptimeNanoseconds
         do {
-            try action()
+            try await action()
             try await wait(window, render: true, ready: ready)
             let captured = Double(window.capturedAt - start) / 1_000_000
             let verified = milliseconds(start)
@@ -236,11 +287,13 @@ struct DesktopPerformanceTests {
             record["reason"] = String(describing: error)
             record["event"] = "end"
             record["duration_ms"] = milliseconds(start)
+            record["observation"] = observation()
             try journal.write(record)
             throw error
         }
         record["event"] = "end"
         record["duration_ms"] = milliseconds(start)
+        record["observation"] = observation()
         try journal.write(record)
     }
 
@@ -291,7 +344,12 @@ struct DesktopPerformanceTests {
         }
     }
 
-    private func populationQuery(taskCount: Int) throws -> RegistryQuery {
+    private func scrollView(in view: NSView) -> NSScrollView? {
+        if let scroll = view as? NSScrollView { return scroll }
+        return view.subviews.lazy.compactMap { scrollView(in: $0) }.first
+    }
+
+    private func populationQuery(taskCount: Int) throws -> (RegistryQuery, PerformancePlanning) {
         let root = URL(fileURLWithPath: #filePath).deletingLastPathComponent()
             .deletingLastPathComponent().deletingLastPathComponent()
         let data = try Data(contentsOf: root.appendingPathComponent("tests/fixtures/dto/roadmap_snapshot.json"))
@@ -323,6 +381,7 @@ struct DesktopPerformanceTests {
         wave["unavailable_tasks"] = []
         snapshot["waves"] = [wave]
         let roadmap = String(decoding: try JSONSerialization.data(withJSONObject: snapshot), as: UTF8.self)
+        let planning = PerformancePlanning(roadmap: roadmap)
         let sessions = try JSONSerialization.data(withJSONObject: stride(from: 0, to: taskCount, by: 2).map { index in
             ["id": "perf-session-\(index)", "run_id": "perf-run-\(index)", "kind": "interactive",
              "work": ["kind": "task", "id": "perf-work-\(index)"],
@@ -341,9 +400,9 @@ struct DesktopPerformanceTests {
         ])
         let sessionJSON = String(decoding: sessions, as: UTF8.self)
         let activeJSON = String(decoding: active, as: UTF8.self)
-        return RegistryQuery { args, _ in
+        let query = RegistryQuery { args, _ in
             switch args.first {
-            case "roadmap": return roadmap
+            case "roadmap": return await planning.read()
             case "ls": return "[]"
             case "session" where args.dropFirst().first == "list": return sessionJSON
             case "runs": return activeJSON
@@ -351,6 +410,30 @@ struct DesktopPerformanceTests {
             default: throw RegistryQueryError("Benchmark does not launch providers or mutate planning")
             }
         }
+        return (query, planning)
+    }
+}
+
+/// Hold the fixture's transport response to exercise scrolling while the real
+/// Podium reader is refreshing. No product state is changed outside that reader.
+@MainActor
+private final class PerformancePlanning {
+    let roadmap: String
+    var holdNextRead = false
+    var pending: CheckedContinuation<Void, Never>?
+
+    init(roadmap: String) { self.roadmap = roadmap }
+
+    func read() async -> String {
+        guard holdNextRead else { return roadmap }
+        holdNextRead = false
+        await withCheckedContinuation { pending = $0 }
+        return roadmap.replacingOccurrences(of: "Task ", with: "Updated ")
+    }
+
+    func release() {
+        pending?.resume()
+        pending = nil
     }
 }
 

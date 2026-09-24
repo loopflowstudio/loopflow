@@ -789,6 +789,13 @@ configured acceptance remain open. See [review-git.md](review-git.md).
   obligations and configured acceptance remain open. See
   [release-lockfile-ownership.md](release-lockfile-ownership.md).
 
+Lockfile ownership review remains **iterate**. The built-CLI demonstration
+passed all four Cargo/uv survival scenarios again (16.17s), including real offline
+updates and exact caller-state preservation. No additional bounded defect was
+established and no executable code changed. Notes/Task/worktree child ownership,
+historical telemetry linkage/retry and dated repair ownership, closed obligations
+and configured acceptance remain open. See [review-lockfile.md](review-lockfile.md).
+
 ## Measure
 
 Use the Reliability KR's actual due population, not successful process counts.

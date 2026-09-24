@@ -1,0 +1,20 @@
+{
+  "provider_session_id": "01a0d10f-4512-79a3-8fc3-ecaab404d709",
+  "launch_pid": 25047,
+  "provider_pid": 26842,
+  "assistant_messages": [
+    {
+      "timestamp": "2026-09-24T01:37:19.052Z",
+      "text": "LOO291_REVIEW6_READY"
+    }
+  ],
+  "provider_tool_calls": [],
+  "session_count_observed_while_client_running": 5,
+  "sessions_for_task_after_client_exit": [],
+  "task_run_ids_observed": [
+    "run_11c95720c9c84345b74819c61642d17c"
+  ],
+  "installed_executable": "/Users/jack/.lf/bin/lf-f1f15f84852857b6c56505aafea27ebe070ab2e11e783fcbdad4867a005ef0c4",
+  "shutdown": "Two Ctrl-C inputs through own PTY; exit 0; both PIDs absent afterward",
+  "result": "No matching Session/Task Run observed; no UI provider trial or transfer attempted"
+}

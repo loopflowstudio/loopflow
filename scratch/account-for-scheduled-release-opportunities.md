@@ -528,26 +528,24 @@ half-contracts.
 
 ## This slice
 
-Carry the existing release target lock through shared auto-merge enable/disable
-commands, including replacement of a pre-existing remote arm and re-arming while
-waiting for a release PR. During initial PR preparation, also retain the exact
-checkout lease in these children. Pass explicit command inheritance from the
-owning release operation through the existing PR finalization functions; no
-ambient role inference, new executor, lock owner, or release-specific PR writer.
-Ordinary PR callers supply no release capability and retain existing behavior.
+Carry the existing release target lock and exact checkout lease through shared
+PR creation, base retargeting, title/body editing and readiness commands. Extend
+the existing finalization inheritance callback; ordinary callers provide no
+release capability. Release preparation will commit/push without creating a
+best-effort draft, then create the PR through the existing finalization owner.
+This removes two possible creation paths from release preparation.
 
-Prove through the built CLI that initial-arm and re-arm children surviving
-controller death or failed launchers continue to exclude a second release. Cover
-both revocation and exact-head arming, observe the resulting remote arm state,
-and show target access and preparation checkout removal become available after
-the child exits. Keep normal release preparation and ordinary PR arming working. These disposable process proofs cannot supply the
-configured two-settlement commitment.
+Prove through the built CLI that each mutation child surviving controller death
+or a failed launcher excludes a second release and preserves its checkout.
+Observe the resulting simulated remote PR state and access after child exit.
+Keep normal release preparation and ordinary PR arming working. These local
+process proofs cannot supply the configured two-settlement commitment.
 
-Shared commit/push/PR creation and editing, notes agents, lockfile tools,
-source/worktree mutation children, historical telemetry linkage/recovery, closed
+Shared Git/commit/push, notes agents, lockfile tools, source/worktree children,
+Task compensation paths, historical telemetry linkage/recovery, closed
 obligations and configured acceptance remain in this serial Task. This slice
-changes neither settlement nor prerequisite policy and retains the observed
-scorecard blocker.
+changes neither settlement nor prerequisite policy and retains the scorecard
+blocker.
 
 ## Slice ledger
 
@@ -744,6 +742,18 @@ established and no executable code changed. Shared mutation children, historical
 telemetry association/recovery and repair ownership, closed-obligation
 continuation and configured acceptance remain open. See
 [review-auto-merge.md](review-auto-merge.md).
+
+- 2026-09-24: shared PR creation, base/title/body edits and readiness commands
+  now inherit release target and preparation checkout capabilities. The CLI
+  regression first reproduced a second tag while a PR-creation child survived.
+  Release preparation now commits/pushes without a best-effort draft, then uses
+  shared finalization as its PR creation owner.
+- Eight metadata survival cases passed (60.53s), as did eight auto-merge cases
+  after explicitly representing the existing replacement PR (46.83s), normal
+  release reintegration (5.51s), ordinary arming (11.32s), formatting and all-target
+  Clippy. GitHub/notes are simulated. Shared Git/notes/tools/worktree and Task
+  compensation paths, telemetry recovery, closed obligations and configured
+  acceptance remain open. See [release-pr-mutation-ownership.md](release-pr-mutation-ownership.md).
 
 ## Measure
 

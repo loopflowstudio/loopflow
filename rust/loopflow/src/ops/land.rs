@@ -59,7 +59,7 @@ fn prepare_pr(
     finalize: Finalize,
     integration: Integration,
     progress: &impl Progress,
-    inherit_merge: &impl Fn(&mut Command),
+    inherit_pr: &impl Fn(&mut Command),
 ) -> OpsResult<Option<PrInfo>> {
     if options.complete && options.next_slug.is_some() {
         return Err(OpsError::Message(
@@ -147,7 +147,7 @@ fn prepare_pr(
                         pr.number
                     ))
                 })?;
-                crate::ops::pr::disable_auto_merge(&repo_root, number, inherit_merge)?;
+                crate::ops::pr::disable_auto_merge(&repo_root, number, inherit_pr)?;
             }
         }
     }
@@ -221,7 +221,7 @@ fn prepare_pr(
     // the recorded base and refuse an empty range before any `gh pr` side effect.
     crate::ops::task::require_task_pr_range_nonempty(&repo_root)?;
     if pr_exists {
-        crate::ops::pr::retarget_open_pr(&repo_root, &main_branch)?;
+        crate::ops::pr::retarget_open_pr(&repo_root, &main_branch, inherit_pr)?;
     }
     if options.local {
         finalize_local(&repo_root, &main_branch, &feature_branch, progress)?;
@@ -245,6 +245,7 @@ fn prepare_pr(
         &main_branch,
         pr_title.as_deref(),
         pr_body.as_deref(),
+        inherit_pr,
     )?;
     let pr = match created_pr {
         Some(pr) => Some(pr),
@@ -273,7 +274,7 @@ fn prepare_pr(
         pr.as_ref().map(|pr| pr.number),
         pr.as_ref().and_then(|pr| pr.head_sha.as_deref()),
         progress,
-        inherit_merge,
+        inherit_pr,
     ) {
         // The durable request is written before its remote executor. If any
         // later step fails, revoke a possibly-armed Auto request and clear the
@@ -309,12 +310,12 @@ pub fn arm(
 }
 
 /// Continue land after owned recovery already verified and pushed integration.
-/// `inherit_merge` applies to auto-merge mutations, not all PR preparation commands.
+/// `inherit_pr` applies to remote PR mutations, not Git integration commands.
 pub(crate) fn finish_arm_after_rebase(
     repo: &Path,
     options: &LandOptions,
     progress: &impl Progress,
-    inherit_merge: &impl Fn(&mut Command),
+    inherit_pr: &impl Fn(&mut Command),
 ) -> OpsResult<Option<PrInfo>> {
     prepare_pr(
         repo,
@@ -322,7 +323,7 @@ pub(crate) fn finish_arm_after_rebase(
         Finalize::AutoMerge,
         Integration::Completed,
         progress,
-        inherit_merge,
+        inherit_pr,
     )
 }
 
@@ -479,6 +480,7 @@ fn ensure_pr(
     base_branch: &str,
     pr_title: Option<&str>,
     pr_body: Option<&str>,
+    inherit_pr: &impl Fn(&mut Command),
 ) -> OpsResult<Option<PrInfo>> {
     if !crate::ops::pr::gh_available() {
         return Err(OpsError::Message("gh CLI not found".to_string()));
@@ -497,6 +499,7 @@ fn ensure_pr(
                 title,
                 body,
                 base_branch,
+                inherit_pr,
             )
             .map(Some);
         } else {
@@ -518,14 +521,14 @@ fn finalize_remote(
     number: Option<u64>,
     head_sha: Option<&str>,
     progress: &impl Progress,
-    inherit_merge: &impl Fn(&mut Command),
+    inherit_pr: &impl Fn(&mut Command),
 ) -> OpsResult<()> {
     if let Some(title) = pr_title {
         let body = pr_body.unwrap_or("");
         progress.status("Updating PR...");
-        update_pr_message(repo_root, title, body)?;
+        update_pr_message(repo_root, title, body, inherit_pr)?;
     }
-    mark_ready(repo_root)?;
+    mark_ready(repo_root, inherit_pr)?;
 
     match finalize {
         Finalize::AutoMerge => {
@@ -543,12 +546,7 @@ fn finalize_remote(
             })?;
             progress.status("Enabling auto-merge...");
             crate::ops::pr::enable_auto_merge(
-                repo_root,
-                number,
-                pr_title,
-                pr_body,
-                head_sha,
-                inherit_merge,
+                repo_root, number, pr_title, pr_body, head_sha, inherit_pr,
             )?;
         }
         Finalize::UserMerge => {
@@ -680,7 +678,12 @@ fn read_worktree_state(repo: &Path) -> OpsResult<String> {
     Ok(String::from_utf8_lossy(&output.stdout).to_string())
 }
 
-fn update_pr_message(repo: &Path, title: &str, body: &str) -> OpsResult<()> {
+fn update_pr_message(
+    repo: &Path,
+    title: &str,
+    body: &str,
+    inherit_pr: &impl Fn(&mut Command),
+) -> OpsResult<()> {
     let mut cmd = Command::new("gh");
     cmd.arg("pr")
         .arg("edit")
@@ -689,6 +692,7 @@ fn update_pr_message(repo: &Path, title: &str, body: &str) -> OpsResult<()> {
         .arg("--body")
         .arg(body)
         .current_dir(repo);
+    inherit_pr(&mut cmd);
     if let Err(err) = run_command(&mut cmd) {
         return Err(OpsError::CommandFailed {
             command: err.command_line(),
@@ -698,9 +702,10 @@ fn update_pr_message(repo: &Path, title: &str, body: &str) -> OpsResult<()> {
     Ok(())
 }
 
-pub fn mark_ready(repo: &Path) -> OpsResult<()> {
+pub fn mark_ready(repo: &Path, inherit_pr: &impl Fn(&mut Command)) -> OpsResult<()> {
     let mut cmd = Command::new("gh");
     cmd.arg("pr").arg("ready").current_dir(repo);
+    inherit_pr(&mut cmd);
     if let Err(err) = run_command(&mut cmd) {
         return Err(OpsError::CommandFailed {
             command: err.command_line(),

@@ -122,9 +122,12 @@ lock and their checkout lease, including preparation during PR rebuild. A
 surviving hook keeps cleanup and another release blocked until it exits.
 PR rebuild uses the same exact-source recovery checks as candidate preparation:
 divergent local branches and dirty existing checkouts remain intact for repair.
-Release PR auto-merge enable/disable commands retain the target lock, including
-re-arming a dropped request. During preparation they retain the checkout lease
-too, so a surviving merge command keeps that checkout available until it exits.
+Release PR creation, base/title/body edits, readiness and auto-merge commands
+retain the target lock. During preparation they retain the checkout lease too,
+so a surviving command keeps that checkout available until it exits. Preparation
+commits and pushes first, then shared PR finalization creates the review surface
+with the release title and notes. Re-arming a dropped request retains the target
+lock while waiting for merge.
 
 Tag pushes, candidate-ref changes, workflow submissions, and GitHub publication
 commands retain the release target's lock in their child process. If the

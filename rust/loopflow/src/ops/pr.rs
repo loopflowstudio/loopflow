@@ -166,7 +166,7 @@ pub fn create_or_update_pr(
         )
     } else {
         progress.status("Creating PR...");
-        let url = create_pr(repo, title, body, &base_branch)?;
+        let url = create_pr(repo, title, body, &base_branch, &|_| {})?;
         let visible = find_open_pr(repo)?;
         if let Some(pr) = &visible {
             if pr.is_draft {
@@ -1055,18 +1055,23 @@ fn update_pr(repo: &Path, number: u64, title: &str, body: &str, base: &str) -> O
     Ok(())
 }
 
-pub(crate) fn retarget_open_pr(repo: &Path, base: &str) -> OpsResult<()> {
+pub(crate) fn retarget_open_pr(
+    repo: &Path,
+    base: &str,
+    inherit_pr: &impl Fn(&mut Command),
+) -> OpsResult<()> {
     let Some(pr) = find_open_pr(repo)? else {
         return Ok(());
     };
-    let output = Command::new("gh")
-        .arg("pr")
+    let mut cmd = Command::new("gh");
+    cmd.arg("pr")
         .arg("edit")
         .arg(pr.number.to_string())
         .arg("--base")
         .arg(base)
-        .current_dir(repo)
-        .output()?;
+        .current_dir(repo);
+    inherit_pr(&mut cmd);
+    let output = cmd.output()?;
     if !output.status.success() {
         return Err(OpsError::CommandFailed {
             command: "gh pr edit --base".to_string(),
@@ -1092,7 +1097,13 @@ fn mark_pr_ready(repo: &Path, number: u64) -> OpsResult<()> {
     Ok(())
 }
 
-fn create_pr(repo: &Path, title: &str, body: &str, base: &str) -> OpsResult<String> {
+fn create_pr(
+    repo: &Path,
+    title: &str,
+    body: &str,
+    base: &str,
+    inherit_pr: &impl Fn(&mut Command),
+) -> OpsResult<String> {
     let mut cmd = Command::new("gh");
     cmd.arg("pr")
         .arg("create")
@@ -1102,6 +1113,7 @@ fn create_pr(repo: &Path, title: &str, body: &str, base: &str) -> OpsResult<Stri
         .arg(body)
         .arg("--base")
         .arg(base);
+    inherit_pr(&mut cmd);
     let output = cmd.current_dir(repo).output()?;
     if !output.status.success() {
         return Err(OpsError::CommandFailed {
@@ -1119,8 +1131,9 @@ pub(crate) fn create_pr_from_pushed_branch(
     title: &str,
     body: &str,
     base: &str,
+    inherit_pr: &impl Fn(&mut Command),
 ) -> OpsResult<PrInfo> {
-    let url = create_pr(repo, title, body, base)?;
+    let url = create_pr(repo, title, body, base, inherit_pr)?;
     let number = pr_number_from_url(&url).ok_or_else(|| {
         OpsError::Message(format!("could not read PR number from created URL {url}"))
     })?;

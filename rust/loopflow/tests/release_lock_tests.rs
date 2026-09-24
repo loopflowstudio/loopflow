@@ -453,7 +453,13 @@ exit 94
             state = state.path().display(),
         );
         let notes = "#!/bin/sh\ncat > RELEASE_NOTES.md <<'EOF'\n# v0.9.1\n\n<!-- loopflow:release-notes=narrative;gate=safe -->\n\nFixture release.\nEOF\n";
-        let _env = EnvGuard::new(&[("gh", &gh), ("lf", notes)]);
+        // Replacement needs a remote PR before finalization now that release
+        // commit/push no longer creates a draft as an intermediate side effect.
+        let notes = format!(
+            "{notes}\nif [ '{phase}' = disable ]; then : > '{}/created'; fi\n",
+            state.path().display()
+        );
+        let _env = EnvGuard::new(&[("gh", &gh), ("lf", &notes)]);
         let repo = TestRepo::new();
         let mut parent = start(&repo, state.path(), &["release", "run", "0.9.1"]);
         let checkout = PathBuf::from(
@@ -505,6 +511,119 @@ exit 94
         }
         wait_until_released(|| release_tag(repo.path(), "0.9.2", None).map(|_| ()));
         if preparing {
+            worktree_remove(repo.path(), &checkout).unwrap();
+        }
+    }
+}
+
+#[test]
+fn surviving_release_pr_mutation_retains_target_and_checkout() {
+    for phase in ["create", "retarget", "edit", "ready"] {
+        for kill_controller in [true, false] {
+            let state = tempfile::tempdir().unwrap();
+            let mutation = blocking_mutation(
+                state.path(),
+                &format!(
+                    "printf '%s' \"$value\" > '{}/remote-state'",
+                    state.path().display()
+                ),
+            );
+            let blocked = if kill_controller {
+                mutation
+            } else {
+                format!(
+                    "(\n{mutation}) > '{}/descendant.log' 2>&1 &\nexit 1\n",
+                    state.path().display()
+                )
+            };
+            let gh = format!(
+                r#"#!/bin/sh
+case "$1 $2" in
+  '--version ') exit 0;;
+  'run list') echo '[]'; exit 0;;
+  'release view') exit 1;;
+  'pr list')
+    if [ ! -f '{state}/created' ]; then echo '[]'; exit 0; fi
+    case " $* " in
+      *' --head '*) printf '[{{"number":1176,"state":"OPEN","mergeCommit":null,"url":"https://example.com/pr/1176","headRefOid":"%s"}}]\n' "$(git rev-parse HEAD)";;
+      *) echo '[]';;
+    esac
+    exit 0;;
+  'api graphql') echo false; exit 0;;
+  'pr create')
+    operation=create
+    value="$(git rev-parse HEAD)"
+    : > '{state}/created';;
+  'pr edit')
+    operation=retarget
+    value=''
+    while [ "$#" -gt 0 ]; do
+      case "$1" in
+        --title) operation=edit; value="$2"; break;;
+        --base) value="$2"; break;;
+      esac
+      shift
+    done;;
+  'pr ready') operation=ready; value=ready;;
+  *) exit 91;;
+esac
+if [ "$operation" = '{phase}' ]; then
+  pwd > '{state}/checkout'
+  {blocked}
+fi
+[ "$operation" != create ] || echo 'https://example.com/pr/1176'
+exit 0
+"#,
+                state = state.path().display()
+            );
+            let notes = format!("#!/bin/sh\ncat > RELEASE_NOTES.md <<'EOF'\n# v0.9.1\n\n<!-- loopflow:release-notes=narrative;gate=safe -->\n\nFixture release.\nEOF\nif [ '{phase}' = retarget ]; then : > '{}/created'; fi\n", state.path().display());
+            let _env = EnvGuard::new(&[("gh", &gh), ("lf", &notes)]);
+            let repo = TestRepo::new();
+            let mut parent = start(&repo, state.path(), &["release", "run", "0.9.1"]);
+            let checkout = PathBuf::from(
+                fs::read_to_string(state.path().join("checkout"))
+                    .unwrap()
+                    .trim(),
+            );
+            let head = Command::new("git")
+                .args(["rev-parse", "HEAD"])
+                .current_dir(&checkout)
+                .output()
+                .unwrap();
+            assert!(head.status.success());
+            if kill_controller {
+                parent.child.kill().unwrap();
+            } else {
+                let deadline = Instant::now() + Duration::from_secs(20);
+                while parent.child.try_wait().unwrap().is_none() {
+                    assert!(Instant::now() < deadline, "{phase} controller did not exit");
+                    thread::sleep(Duration::from_millis(10));
+                }
+            }
+            assert!(!parent.child.wait().unwrap().success());
+            let retained = fs::read_to_string(checkout.join("RELEASE_NOTES.md"));
+            let removal = worktree_remove(repo.path(), &checkout);
+            let contender = release_tag(repo.path(), "0.9.2", None);
+            fs::write(state.path().join("allow"), "").unwrap();
+            wait_for(&state.path().join("completed"));
+            assert!(
+                matches!(contender, Err(OpsError::ReleaseDeferred { .. })),
+                "{phase}: {contender:?}"
+            );
+            assert!(
+                removal.is_err(),
+                "removed surviving {phase} child's checkout"
+            );
+            assert!(retained.unwrap().contains("Fixture release."));
+            let remote = fs::read_to_string(state.path().join("remote-state")).unwrap();
+            match phase {
+                "create" => assert_eq!(remote, String::from_utf8(head.stdout).unwrap().trim()),
+                "retarget" => assert_eq!(remote, "main"),
+                "edit" => assert_eq!(remote, "release: v0.9.1"),
+                "ready" => assert_eq!(remote, "ready"),
+                _ => unreachable!(),
+            }
+            wait_until_released(|| release_tag(repo.path(), "0.9.2", None).map(|_| ()));
             worktree_remove(repo.path(), &checkout).unwrap();
         }
     }

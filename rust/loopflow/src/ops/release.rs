@@ -1891,7 +1891,7 @@ fn prepare_release_in_worktree(
         &CommitOptions {
             add: true,
             push: true,
-            create_draft_pr: true,
+            create_draft_pr: false,
             message: Some(release_commit_message(target, version)),
             ..CommitOptions::for_task("release")
         },
@@ -1903,7 +1903,7 @@ fn prepare_release_in_worktree(
     let options = LandOptions {
         strict: true,
         local: false,
-        create_pr: false,
+        create_pr: true,
         complete: false,
         next_slug: None,
         worktree: None,

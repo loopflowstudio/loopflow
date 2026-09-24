@@ -1,0 +1,39 @@
+Building for debugging...
+[0/6] Write sources
+[2/6] Write swift-version--58304C5D6DBC2206.txt
+[4/8] Compiling LoopflowMac TaskWatchStore.swift
+[5/8] Emitting module LoopflowMac
+[5/10] Write Objects.LinkFileList
+[6/10] Linking LoopflowMac
+[7/10] Applying LoopflowMac
+[9/12] Emitting module LoopflowTests
+[10/12] Compiling LoopflowTests TaskWatchFeedTests.swift
+[10/12] Write Objects.LinkFileList
+[11/12] Linking LoopflowSwiftPackageTests
+Build complete! (3.40s)
+Test Suite 'Selected tests' started at 2026-09-24 13:02:18.476.
+Test Suite 'LoopflowSwiftPackageTests.xctest' started at 2026-09-24 13:02:18.477.
+Test Suite 'LoopflowSwiftPackageTests.xctest' passed at 2026-09-24 13:02:18.477.
+	 Executed 0 tests, with 0 failures (0 unexpected) in 0.000 (0.000) seconds
+Test Suite 'Selected tests' passed at 2026-09-24 13:02:18.477.
+	 Executed 0 tests, with 0 failures (0 unexpected) in 0.000 (0.001) seconds
+◇ Test run started.
+↳ Testing Library Version: 1501
+↳ Target Platform: arm64e-apple-macos14.0
+◇ Suite "Watch retention CLI review" started.
+◇ Suite "Task Watch feed" started.
+◇ Test "Restart history recovers unloaded output without moving the live continuation" started.
+◇ Test retentionAndRecovery() started.
+◇ Test "Hiding output cancels its read without accepting a late page" started.
+◇ Test case passing 1 argument restartHistory → true to "Hiding output cancels its read without accepting a late page" started.
+◇ Test case passing 1 argument restartHistory → false to "Hiding output cancels its read without accepting a late page" started.
+✔ Test "Hiding output cancels its read without accepting a late page" with 2 test cases passed after 0.020 seconds.
+✔ Test "Restart history recovers unloaded output without moving the live continuation" passed after 0.362 seconds.
+✔ Suite "Task Watch feed" passed after 0.362 seconds.
+PASS real CLI/native histories: 4608 records paged across two Runs -> 4096 retained; Restart recovers 255 early records; both arrivals survive live continuation once; quiet read deduplicates; fresh Watch retains source history
+✔ Test retentionAndRecovery() passed after 8.927 seconds.
+◇ Test configuredHistory() started.
+PASS configured passive history: sources=3, rows=59, invocations=0
+✔ Test configuredHistory() passed after 1.252 seconds.
+✔ Suite "Watch retention CLI review" passed after 10.180 seconds.
+✔ Test run with 4 tests in 2 suites passed after 10.180 seconds.

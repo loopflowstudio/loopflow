@@ -197,6 +197,13 @@ transport expansion is in scope.
 
 ## Evidence ledger
 
+- 2026-09-24 retention review: real CLI/native-reader integration paged 4,608
+  disposable Claude/Codex records into the 4,096-record window, recovered early
+  history and preserved two later arrivals. Review reproduced and fixed Restart
+  clearing last-good output on an unavailable-source envelope; discovery failures
+  now preserve it too. Four focused tests pass, including cancellation cases.
+  [Review and limits](review-watch-window.md). Configured history remains readable;
+  no live provider, automatic polling or human-demo acceptance is claimed.
 - 2026-09-24 bounded transcript window: the existing per-source revision maps
   now retain at most 4,096 records / 16 MiB of accounted payload per Task across
   Runs. Source metadata no longer retains a duplicate page payload. Surviving

@@ -139,6 +139,7 @@ The display keeps a limited window of output across Runs. A notice appears when
 older output leaves the window or a record is too large to display. **Restart
 history** rereads from the beginning while preserving the live continuation;
 **Load history** continues forward through it. Source history is unchanged.
+If discovery or a source read fails during restart, the previous window stays visible.
 Tool results label missing context when their earlier call is no longer loaded.
 
 Failed reads retain the last evidence with a stale notice; unavailable sources

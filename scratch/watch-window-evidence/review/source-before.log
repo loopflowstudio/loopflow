@@ -1,0 +1,26 @@
+Building for debugging...
+[0/5] Write sources
+[1/5] Write swift-version--58304C5D6DBC2206.txt
+[3/5] Emitting module LoopflowTests
+[4/5] Compiling LoopflowTests WatchWindowCLIReview.swift
+[4/6] Write Objects.LinkFileList
+[5/6] Linking LoopflowSwiftPackageTests
+Build complete! (1.57s)
+Test Suite 'Selected tests' started at 2026-09-24 13:00:54.679.
+Test Suite 'LoopflowSwiftPackageTests.xctest' started at 2026-09-24 13:00:54.680.
+Test Suite 'LoopflowSwiftPackageTests.xctest' passed at 2026-09-24 13:00:54.680.
+	 Executed 0 tests, with 0 failures (0 unexpected) in 0.000 (0.000) seconds
+Test Suite 'Selected tests' passed at 2026-09-24 13:00:54.680.
+	 Executed 0 tests, with 0 failures (0 unexpected) in 0.000 (0.001) seconds
+◇ Test run started.
+↳ Testing Library Version: 1501
+↳ Target Platform: arm64e-apple-macos14.0
+◇ Suite "Watch retention CLI review" started.
+◇ Test retentionAndRecovery() started.
+✘ Test retentionAndRecovery() recorded an issue at WatchWindowCLIReview.swift:83:9: Expectation failed: (store.output.flatMap(\.retainedRecords).count → 127) == 4096
+✘ Test retentionAndRecovery() recorded an issue at WatchWindowCLIReview.swift:84:9: Expectation failed: (store → LoopflowMac.TaskWatchStore).outputWindowTrimmed → false
+✘ Test retentionAndRecovery() recorded an issue at WatchWindowCLIReview.swift:85:9: Expectation failed: (store.outputError → nil) != nil
+PASS real CLI/native histories: 4608 records paged across two Runs -> 4096 retained; Restart recovers 255 early records; both arrivals survive live continuation once; quiet read deduplicates; fresh Watch retains source history
+✘ Test retentionAndRecovery() failed after 8.381 seconds with 3 issues.
+✘ Suite "Watch retention CLI review" failed after 8.381 seconds with 3 issues.
+✘ Test run with 1 test in 1 suite failed after 8.382 seconds with 3 issues.

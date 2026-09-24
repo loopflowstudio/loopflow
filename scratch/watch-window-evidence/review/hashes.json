@@ -1,0 +1,14 @@
+{
+  "swift/Loopflow/Models/TaskOutput.swift": "b05115faf9ec3f37a72f336f2ee0359c7e1f38f4a6042c0b69f06ac23861c30b",
+  "swift/LoopflowMac/TaskWatchOutput.swift": "aef195ae28d32f368349fd7ba85d96717abdebddb4c262ba533fe891c40a9c53",
+  "swift/LoopflowMac/TaskWatchStore.swift": "7b089e181bb79db56bb8983bbf8faa65ede17b61cf724514c8d2353a58d1fe3c",
+  "swift/LoopflowMac/Views/TaskWatchOutputView.swift": "dbcbd91cd9253276654cdd5f5d29c200e649ee96a28fc235affe1a98aa2a99c4",
+  "swift/LoopflowMac/Views/TaskWatchView.swift": "7dd12af0c1748ee8163da6e906558dc25c5e90b25593b59ab46f7afaf7ea4085",
+  "swift/LoopflowTests/TaskWatchFeedTests.swift": "14cdaab944f8356ce7218d59f3536f9a48740d995d23597e8d848ef02c4c76b5",
+  "swift/LoopflowTests/TaskWatchOutputTests.swift": "3dcc9b869a971698f1bb58921698cec66db4cdc08834166eeccc6b0e4d1747dd",
+  "swift/LoopflowTests/TaskWatchTests.swift": "1cc282478349c33ea1a73aafd5dcf018daa70452ab5cc5d76b8e9746372bf278",
+  "swift/LoopflowTests/TaskWatchWindowTests.swift": "518e7928cc3703a30974e2655a6823a7688b12f112112ac3e955c24335a1c9f7",
+  "target/debug/lf": "4896c836658b14ec99c8cbb1b75a7a80a8f5b13ea2b5107c6fd06701f10dcde1",
+  "scratch/review-window-proof.py": "ae7d123e528360724963ef69fd9ce2ec055d23bb6b2fdd38b751cf1c5c893154",
+  "scratch/review-window-proof.swift": "23286fbaab3bc88d3647321933f77bcf667c7ada62bfbff63f34808d7406b348"
+}

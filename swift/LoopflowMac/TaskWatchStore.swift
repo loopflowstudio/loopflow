@@ -149,6 +149,14 @@ final class TaskWatchStore {
             return false
         }
         if restartHistory {
+            let failures = page.gaps.map(\.message) + page.sources.filter { !$0.available }.map { source in
+                let reason = source.gaps.map(\.message).joined(separator: "; ")
+                return "\(source.provider) · \(source.runId): \(reason.isEmpty ? "source unavailable" : reason)"
+            }
+            if !failures.isEmpty {
+                outputError = "Could not restart history; previous output is retained.\n" + failures.joined(separator: "\n")
+                return false
+            }
             for index in output.indices { output[index].restartHistory() }
             outputObservation = 0
             outputWindowTrimmed = false

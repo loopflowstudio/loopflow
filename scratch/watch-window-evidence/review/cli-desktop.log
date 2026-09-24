@@ -1,0 +1,26 @@
+Building for debugging...
+[0/5] Write sources
+[1/5] Write swift-version--58304C5D6DBC2206.txt
+[3/5] Compiling LoopflowTests WatchWindowCLIReview.swift
+[4/5] Emitting module LoopflowTests
+[4/6] Write Objects.LinkFileList
+[5/6] Linking LoopflowSwiftPackageTests
+Build complete! (1.64s)
+Test Suite 'Selected tests' started at 2026-09-24 12:59:51.151.
+Test Suite 'LoopflowSwiftPackageTests.xctest' started at 2026-09-24 12:59:51.152.
+Test Suite 'LoopflowSwiftPackageTests.xctest' passed at 2026-09-24 12:59:51.152.
+	 Executed 0 tests, with 0 failures (0 unexpected) in 0.000 (0.000) seconds
+Test Suite 'Selected tests' passed at 2026-09-24 12:59:51.152.
+	 Executed 0 tests, with 0 failures (0 unexpected) in 0.000 (0.001) seconds
+◇ Test run started.
+↳ Testing Library Version: 1501
+↳ Target Platform: arm64e-apple-macos14.0
+◇ Suite "Watch retention CLI review" started.
+◇ Test retentionAndRecovery() started.
+PASS real CLI/native histories: 4608 records paged across two Runs -> 4096 retained; Restart recovers 255 early records; both arrivals survive live continuation once; quiet read deduplicates; fresh Watch retains source history
+✔ Test retentionAndRecovery() passed after 8.053 seconds.
+◇ Test configuredHistory() started.
+PASS configured passive history: sources=3, rows=59, invocations=0
+✔ Test configuredHistory() passed after 1.131 seconds.
+✔ Suite "Watch retention CLI review" passed after 9.185 seconds.
+✔ Test run with 2 tests in 1 suite passed after 9.185 seconds.

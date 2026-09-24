@@ -317,6 +317,20 @@ struct TaskWatchFeedTests {
         let view = TaskWatchOutputView(store: store, onHistory: { restart = $0 }, onFollow: {}, onReload: {})
         try view.inspect().find(button: "Restart history").tap()
         #expect(restart)
+        var unavailable = source("run", records: [])
+        unavailable["available"] = false
+        unavailable["gaps"] = [["code": "source_unavailable", "message": "History file unreadable"]]
+        let partial = try page("partial", sources: [unavailable, source("other", records: [message("other", "Partial history")])])
+        await store.readOutput(issue: "LOO-293", query: RegistryQuery { _, _ in partial }, restartHistory: restart)
+        #expect(store.output.flatMap(\.rows).count == 4_096)
+        #expect(store.outputWindowTrimmed)
+        #expect(store.outputError?.contains("History file unreadable") == true)
+        #expect(!store.output.flatMap(\.rows).contains { $0.text == "Partial history" })
+        let discoveryFailure = try page("partial", sources: [], gaps: [["code": "discovery_unavailable", "message": "Run directory unreadable"]])
+        await store.readOutput(issue: "LOO-293", query: RegistryQuery { _, _ in discoveryFailure }, restartHistory: restart)
+        #expect(store.output.flatMap(\.rows).count == 4_096)
+        #expect(store.outputWindowTrimmed)
+        #expect(store.outputError?.contains("Run directory unreadable") == true)
         await store.readOutput(issue: "LOO-293", query: RegistryQuery { _, _ in throw RegistryQueryError("offline") }, restartHistory: restart)
         #expect(store.output.flatMap(\.rows).count == 4_096)
         #expect(store.outputWindowTrimmed)
@@ -358,9 +372,9 @@ struct TaskWatchFeedTests {
         return RegistryQuery { _, _ in data }
     }
 
-    private func page(_ cursor: String, sources: [[String: Any]]) throws -> String {
+    private func page(_ cursor: String, sources: [[String: Any]], gaps: [[String: String]] = []) throws -> String {
         String(decoding: try JSONSerialization.data(withJSONObject: [
-            "task_id": "task-watch", "sources": sources, "gaps": [], "next_cursor": cursor
+            "task_id": "task-watch", "sources": sources, "gaps": gaps, "next_cursor": cursor
         ]), as: UTF8.self)
     }
 

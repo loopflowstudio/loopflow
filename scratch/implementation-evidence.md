@@ -99,3 +99,38 @@ The forget transaction now rechecks placement enabled state before deleting.
   terminals remains available even when a checkout group is hidden.
 - Post-integration Xcode `build-for-testing` succeeded for the app and test
   targets. The installed app was not replaced. All commits remain local.
+
+## Authorized installation and Task flow — ongoing
+
+The human authorized installation, then requested entering the Task flow and
+advancing the Task. Existing LOO-291 includes this integration; task-handoff.md
+records the exact committed contribution and remaining obligations.
+
+The supported dev-app install succeeded. Its bundled validation-only CLI exposed
+a source/published-store schema mismatch (`projects.iteration` is absent).
+Preflight correctly rejected production promotion because the source build has
+pending draft migrations. No production migration was attempted. The supported
+`uv run python scripts/install.py local --use` path is building a development
+installation that preserves published data and fallback artifacts.
+
+### Installed result
+
+`uv run python scripts/install.py local --use` succeeded with candidate
+0.12.19+561eadcce. The machine-selected development store is
+~/.lf-dev/installed/local-be852452823d43d7b7fde663651a7590/loopflow.db;
+the published installation is preserved as fallback. `/Applications/Loopflow.app`
+and the stable CLI gate now use the candidate.
+
+`lf ls --current --json` in this repo returns exactly infrastructure,
+intelligence, product. The exact engbot registration was previewed and forgotten
+through `lf work forget wave`. The list deletion preview refused because it has
+an abandoned Project (task-first-control-plane), abandoned Task LOO-276, and a PM
+snapshot. The focused read-only storage diagnostic explains why status's active
+Project list was empty; it was never evidence that all history was absent.
+Keep this historical registration out of current navigation without deleting
+its Task history. No raw store write or production migration was performed.
+
+The installed app was opened. System Events reports UI elements enabled=false,
+so this automation host cannot press New conversation. Asked the human to click
+it and confirm configured destination and displayed scope. No successful
+provider launch or human confirmation is claimed yet.

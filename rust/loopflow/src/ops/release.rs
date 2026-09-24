@@ -503,7 +503,7 @@ pub fn release_tag(repo: &Path, version: &str, target_name: Option<&str>) -> Ops
         )?;
     }
     let version = normalize_version(version);
-    tag_and_push(&main_repo, &version, &target)
+    tag_and_push_ref(&main_repo, &version, &target, None, &lock)
 }
 
 /// Stage assets on a draft GitHub Release or publish that draft as latest.
@@ -551,7 +551,8 @@ pub fn release_publish(
                 "cannot publish {tag}: draft GitHub Release does not exist"
             )));
         }
-        run_stdout(
+        run_locked_stdout(
+            &lock,
             &main_repo,
             "gh",
             &["release", "edit", tag, "--draft=false", "--latest"],
@@ -597,10 +598,11 @@ pub fn release_publish(
                     .map(|asset| asset.to_string_lossy().to_string()),
             );
             let refs = args.iter().map(String::as_str).collect::<Vec<_>>();
-            run_stdout(&main_repo, "gh", &refs)?;
+            run_locked_stdout(&lock, &main_repo, "gh", &refs)?;
         }
         GitHubReleaseState::Draft | GitHubReleaseState::Published => {
-            run_stdout(
+            run_locked_stdout(
+                &lock,
                 &main_repo,
                 "gh",
                 &["release", "edit", tag, "--notes-file", &notes_arg],
@@ -618,7 +620,7 @@ pub fn release_publish(
                         .map(|asset| asset.to_string_lossy().to_string()),
                 );
                 let refs = args.iter().map(String::as_str).collect::<Vec<_>>();
-                run_stdout(&main_repo, "gh", &refs)?;
+                run_locked_stdout(&lock, &main_repo, "gh", &refs)?;
             }
         }
     }
@@ -1099,7 +1101,7 @@ fn finish_candidate(
     let workflow = if tagged.is_some() {
         wait_for_release_workflow(repo, candidate, target, progress, false)?
     } else {
-        wait_for_candidate_workflow(repo, candidate, target, progress)?
+        wait_for_candidate_workflow(repo, candidate, target, progress, lock)?
     };
     save_selection(Some(workflow.database_id))?;
     let published = github_release_exists(repo, &candidate.tag)?;
@@ -1113,7 +1115,7 @@ fn finish_candidate(
         };
         if tagged.is_none() {
             let version = version_from_tag(&candidate.tag, target)?;
-            tag_and_push_ref(repo, &version, target, Some(&candidate.commit))?;
+            tag_and_push_ref(repo, &version, target, Some(&candidate.commit), lock)?;
         }
         if let Some(artifacts) = artifacts.as_deref() {
             run_publisher(
@@ -1139,7 +1141,7 @@ fn finish_candidate(
         workflow_url: workflow.url,
         release_exists: github_release_exists(repo, &candidate.tag)?,
     };
-    delete_candidate_ref(repo, candidate);
+    delete_candidate_ref(repo, candidate, lock);
     Ok(if tagged.is_some() {
         ReleaseRunOutcome::Resumed(receipt)
     } else {
@@ -1372,8 +1374,7 @@ fn verify_release_outcome(
         "public release verification",
     )?;
     let wt = materialize_exact_source_worktree(repo, &name, &commit, &lease)?;
-    let mut command = Command::new(program);
-    lock.inherit(&mut command);
+    let mut command = lock.command(program);
     command
         .args(args)
         .args(["reconcile", "--tag", &tag])
@@ -1711,8 +1712,7 @@ fn prepare_publisher(
     progress.status(&format!("Preparing signed candidate {}...", candidate.tag));
     let wt = materialize_exact_source_worktree(repo, &wt_name, &candidate.commit, &lease)?;
     let prepare_result = {
-        let mut cmd = Command::new(program);
-        lock.inherit(&mut cmd);
+        let mut cmd = lock.command(program);
         cmd.args(args)
             .arg("prepare")
             .arg("--tag")
@@ -1788,8 +1788,7 @@ fn run_publisher(
     ));
     let wt = materialize_exact_source_worktree(repo, &wt_name, tag, &lease)?;
     let publish_result = {
-        let mut cmd = Command::new(program);
-        lock.inherit(&mut cmd);
+        let mut cmd = lock.command(program);
         cmd.args(args)
             .arg("publish")
             .arg("--tag")
@@ -2734,6 +2733,7 @@ fn wait_for_candidate_workflow(
     candidate: &ReleaseCandidate,
     target: &ReleaseTarget,
     progress: &impl Progress,
+    lock: &ReleaseLock,
 ) -> OpsResult<ReleaseWorkflowResult> {
     let Some(workflow_name) = target.workflow.as_deref() else {
         return Ok(ReleaseWorkflowResult {
@@ -2742,9 +2742,10 @@ fn wait_for_candidate_workflow(
         });
     };
 
-    ensure_candidate_ref(repo, candidate)?;
+    ensure_candidate_ref(repo, candidate, lock)?;
     if find_workflow_run(repo, candidate, target)?.is_none() {
-        run_stdout(
+        run_locked_stdout(
+            lock,
             repo,
             "gh",
             &[
@@ -3843,21 +3844,18 @@ fn join_lines_like_original(original: &str, lines: Vec<String>) -> String {
     joined
 }
 
-fn tag_and_push(repo: &Path, version: &str, target: &ReleaseTarget) -> OpsResult<String> {
-    tag_and_push_ref(repo, version, target, None)
-}
-
 fn tag_and_push_ref(
     repo: &Path,
     version: &str,
     target: &ReleaseTarget,
     target_ref: Option<&str>,
+    lock: &ReleaseLock,
 ) -> OpsResult<String> {
     let tag = target_tag(target, version);
     let ref_name = target_ref.unwrap_or("HEAD");
     let target_sha = run_stdout(repo, "git", &["rev-parse", ref_name])?;
     let target_sha = target_sha.trim().to_string();
-    ensure_commit_local(repo, &target_sha)?;
+    ensure_commit_local(repo, &target_sha, lock)?;
 
     if let Some(remote_sha) = remote_tag_sha(repo, &tag)? {
         if remote_sha == target_sha {
@@ -3877,11 +3875,15 @@ fn tag_and_push_ref(
             )));
         }
         None => {
-            run_stdout(repo, "git", &["tag", &tag, ref_name])?;
+            run_locked_stdout(lock, repo, "git", &["tag", &tag, ref_name])?;
         }
     }
 
-    let push_output = run_output(repo, "git", &["push", "origin", &tag])?;
+    let push_output = lock
+        .command("git")
+        .args(["push", "origin", &tag])
+        .current_dir(repo)
+        .output()?;
     if push_output.status.success() {
         return Ok(tag);
     }
@@ -3926,8 +3928,12 @@ fn release_candidate_for_tag(
     Ok(ReleaseCandidate::new(target, tag, &commit))
 }
 
-fn ensure_candidate_ref(repo: &Path, candidate: &ReleaseCandidate) -> OpsResult<()> {
-    ensure_commit_local(repo, &candidate.commit)?;
+fn ensure_candidate_ref(
+    repo: &Path,
+    candidate: &ReleaseCandidate,
+    lock: &ReleaseLock,
+) -> OpsResult<()> {
+    ensure_commit_local(repo, &candidate.commit, lock)?;
     if let Some(remote_sha) = remote_branch_sha(repo, &candidate.branch)? {
         if remote_sha == candidate.commit {
             return Ok(());
@@ -3939,11 +3945,11 @@ fn ensure_candidate_ref(repo: &Path, candidate: &ReleaseCandidate) -> OpsResult<
     }
 
     let refspec = format!("{}:refs/heads/{}", candidate.commit, candidate.branch);
-    run_stdout(repo, "git", &["push", "origin", &refspec])?;
+    run_locked_stdout(lock, repo, "git", &["push", "origin", &refspec])?;
     Ok(())
 }
 
-fn delete_candidate_ref(repo: &Path, candidate: &ReleaseCandidate) {
+fn delete_candidate_ref(repo: &Path, candidate: &ReleaseCandidate, lock: &ReleaseLock) {
     let Ok(Some(remote_sha)) = remote_branch_sha(repo, &candidate.branch) else {
         return;
     };
@@ -3954,11 +3960,11 @@ fn delete_candidate_ref(repo: &Path, candidate: &ReleaseCandidate) {
         );
         return;
     }
-    let output = run_output(
-        repo,
-        "git",
-        &["push", "origin", "--delete", &candidate.branch],
-    );
+    let output = lock
+        .command("git")
+        .args(["push", "origin", "--delete", &candidate.branch])
+        .current_dir(repo)
+        .output();
     if !matches!(output, Ok(output) if output.status.success()) {
         eprintln!(
             "Release completed, but candidate ref {} could not be removed",
@@ -3975,11 +3981,15 @@ fn delete_candidate_ref(repo: &Path, candidate: &ReleaseCandidate) {
 /// (a merge commit landed on origin via the merge queue), the local repo
 /// may not have fetched it yet — and `git tag <name> <sha>` then fails
 /// with `trying to write ref ... with nonexistent object`.
-fn ensure_commit_local(repo: &Path, sha: &str) -> OpsResult<()> {
+fn ensure_commit_local(repo: &Path, sha: &str, lock: &ReleaseLock) -> OpsResult<()> {
     if commit_exists_locally(repo, sha) {
         return Ok(());
     }
-    let _ = run_output(repo, "git", &["fetch", "origin"]);
+    let _ = lock
+        .command("git")
+        .args(["fetch", "origin"])
+        .current_dir(repo)
+        .output();
     if commit_exists_locally(repo, sha) {
         return Ok(());
     }
@@ -4157,7 +4167,20 @@ fn run_release_hooks(
 fn run_stdout(repo: &Path, command: &str, args: &[&str]) -> OpsResult<String> {
     let mut cmd = Command::new(command);
     cmd.args(args).current_dir(repo);
-    let output = run_command(&mut cmd).map_err(|err| OpsError::CommandFailed {
+    command_stdout(&mut cmd)
+}
+
+fn run_locked_stdout(
+    lock: &ReleaseLock,
+    repo: &Path,
+    command: &str,
+    args: &[&str],
+) -> OpsResult<String> {
+    command_stdout(lock.command(command).args(args).current_dir(repo))
+}
+
+fn command_stdout(cmd: &mut Command) -> OpsResult<String> {
+    let output = run_command(cmd).map_err(|err| OpsError::CommandFailed {
         command: err.command_line(),
         stderr: err.stderr,
     })?;
@@ -4798,7 +4821,12 @@ version = "2.0.0"
             "precondition: object should not exist locally before fetch",
         );
 
-        ensure_commit_local(repo.path(), &new_sha).expect("fetch + verify should succeed");
+        ensure_commit_local(
+            repo.path(),
+            &new_sha,
+            &ReleaseLock::acquire(repo.path(), "default").unwrap(),
+        )
+        .expect("fetch + verify should succeed");
 
         assert!(commit_exists_locally(repo.path(), &new_sha));
     }

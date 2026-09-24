@@ -528,42 +528,28 @@ half-contracts.
 
 ## This slice
 
-The current cut implements joined scheduled-path proof and post-publication
-reconciliation. The real CLI fixture exposed an additional execution blocker:
-repository `release-run` was displayed as a flow but dispatched as the built-in
-skill. Repository flows now win that collision, and declarative cron sync rejects
-a missing or malformed flow instead of selecting a skill.
+Carry the existing release-operation lock through direct consequential children:
+version-tag creation/push, candidate-ref creation/deletion, candidate workflow
+submission, and GitHub draft/edit/upload/finalize. Both standalone commands and
+scheduled completion use the same borrowed `ReleaseLock`; command construction
+makes only that child's exact descriptor inheritable. No ambient execution role,
+process-age takeover, new lock owner, or replacement publication path is added.
 
-The existing publisher now checks the latest DMG as well as immutable artifacts.
-Scheduled reconciliation repairs demonstrably missing crate/versioned-DMG stages
-and stale website/latest-DMG stages from exact retained artifacts, only while this
-tag remains GitHub's latest release. It persists completed repairs before the
-next operation and repeats public read-back and exact-version smoke. Conflicting
-immutable bytes, unavailable services, and a superseding release remain failures.
-See [implementation-followup.md](implementation-followup.md) for proof and limits.
+Prove actual controller death while a mutation child remains blocked, then let
+that child finish. A contender must defer before mutation; another repository
+must remain independent; after the child exits, the same tag can resume. Use the
+built CLI and a real Git push to a disposable bare origin. A second case simulates
+GitHub's mutation endpoint while executing its real child-process boundary.
+These cases cannot establish production publication or configured settlements.
 
-The joined disposable-Home test traverses cron execution, the real CLI flow,
-release selection, publisher reconciliation, atomic settlement, and history. Five
-scenarios cover publication, no-change, rejected telemetry, smoke failure after
-publication, and missing public-stage proof. Each preserves caller commits,
-branch, byte-identical index, staged/unstaged content, and untracked files.
-External services and publisher evidence in this Rust test are simulated; Python
-recovery cases separately execute a real temporary installer and binary smoke.
-These fixtures do not supply configured automatic settlements.
-
-The follow-up review repaired two history projections: operator provenance on
-collapsed misses now disqualifies the owning execution's unattended pair, and
-collapse preserves each due time's earliest attempt timing. Both regressions
-failed before repair and passed afterward without rewriting stored evidence.
-See [review-followup.md](review-followup.md) for the current evidence matrix.
-
-The previous review's iterate verdict remains applicable. Historical telemetry
-linkage/recovery, mutation-child exclusion outside publisher subprocesses, and
-closed-obligation continuation still need implementation. Slice 5 remains open:
-the observed scorecard schema failure blocks scheduled verification, and real
-UI-host/public smoke plus two adjacent automatic settlements remain unproved.
-No install, production cron sync/trigger, publication, PM write, repair handoff,
-or PR publication occurred. The pinned lifecycle retains landing authority.
+This is a bounded part of the review's exclusion obligation. Shared PR operations,
+source/preparation hooks, notes generation, and generated-worktree subprocesses
+still need explicit inheritance or equivalent surviving stage ownership. Keep
+that remainder visible; do not claim the whole release graph is covered by a
+tag/publisher-child test. Historical telemetry linkage/recovery, closed-obligation
+continuation, and configured acceptance also remain in this serial Task. The
+scorecard schema blocker and required UI-host/public smoke are unchanged.
+Implementation and focused receipts: [mutation-child-exclusion.md](mutation-child-exclusion.md).
 
 ## Slice ledger
 
@@ -669,6 +655,21 @@ or PR publication occurred. The pinned lifecycle retains landing authority.
   history tests, retaining product counts and the existing DTO shape. The
   verdict remains iterate; configured acceptance and retained execution gaps
   remain open in the same Task.
+
+
+- Direct mutation-child follow-up: both killed-controller regressions reproduced
+  second-writer access while the original child remained active. Tag pushes,
+  candidate refs/workflow submission, GitHub publication, and existing publisher
+  launches now carry the same borrowed target lock into their children.
+- Final parent-death proof passed both cases in 7.08 seconds. The real tag push
+  reaches a disposable bare origin; the publication endpoint remains simulated.
+  Another repository progresses independently, and same-target access returns
+  after the child exits. Candidate-preparation and missing-object-fetch focused
+  tests also passed, as did formatting and all-target Clippy.
+- Shared PR/hook/worktree subprocess exclusion, original telemetry linkage and
+  recovery, closed-obligation continuation, and configured acceptance remain
+  open. No production mutation or PR publication occurred in this cut. Details:
+  [mutation-child-exclusion.md](mutation-child-exclusion.md).
 
 ## Measure
 

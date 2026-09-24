@@ -114,6 +114,12 @@ artifacts and resumes the same tag instead of cutting another patch.
 The runner leases that tag's publisher worktree until the publisher exits, so
 concurrent re-entry and worktree cleanup cannot remove a checkout still in use.
 
+Tag pushes, candidate-ref changes, workflow submissions, and GitHub publication
+commands retain the release target's lock in their child process. If the
+controller dies during one of these operations, another release invocation
+defers until the surviving child exits. Other repositories and targets remain
+independent.
+
 Preparation runs the required `scripts/test.py --ui-host` gate before tagging.
 The publisher retains candidate hashes and gate evidence before external writes.
 Its `verify --tag <tag>` mode checks the public asset set and hashes, both versioned

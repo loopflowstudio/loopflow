@@ -1,3 +1,4 @@
+use std::ffi::OsStr;
 use std::fs::{self, File, OpenOptions};
 use std::os::fd::{AsRawFd, FromRawFd};
 use std::os::unix::fs::MetadataExt;
@@ -78,6 +79,13 @@ impl ReleaseLock {
 
     pub(crate) fn is_inherited(&self) -> bool {
         self.inherited
+    }
+
+    /// The child retains the target exclusion even if its controller dies.
+    pub(crate) fn command(&self, program: impl AsRef<OsStr>) -> Command {
+        let mut command = Command::new(program);
+        self.inherit(&mut command);
+        command
     }
 
     pub(crate) fn inherit(&self, command: &mut Command) {

@@ -208,14 +208,20 @@ struct WorkspaceNavigationProofTests {
         #expect(window.firstResponder === terminals[0])
         #expect(model.selection == .task(id: "issue-review"))
         "\n".withCString { ghostty_surface_text(sessionSurface, $0, 1) }
-        "companion-alive\n".withCString { ghostty_surface_text(shellSurface, $0, 16) }
+        let companion = "companion-alive"
+        let companionInput = companion + "\n"
+        companionInput.withCString {
+            ghostty_surface_text(shellSurface, $0, UInt(companionInput.utf8.count))
+        }
         let deadline = ContinuousClock.now + .seconds(3)
-        while _terminalText(sessionSurface).components(separatedBy: draft).count < 3,
+        // Require both PTY input echo and cat's reply from each retained child.
+        while (_terminalText(sessionSurface).components(separatedBy: draft).count < 3
+               || _terminalText(shellSurface).components(separatedBy: companion).count < 3),
               ContinuousClock.now < deadline {
             try await Task.sleep(for: .milliseconds(20))
         }
         #expect(_terminalText(sessionSurface).components(separatedBy: draft).count == 3)
-        #expect(_terminalText(shellSurface).contains("companion-alive"))
+        #expect(_terminalText(shellSurface).components(separatedBy: companion).count == 3)
     }
 
     private func settle(_ window: NSWindow) async throws {

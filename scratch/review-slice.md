@@ -3,10 +3,10 @@
 ## Disposition
 
 Advances the accepted design; **not yet approved for publication**. The compact
-navigator and shared identity join have focused behavioral evidence. Native
-draft/focus and window isolation now pass after the restoration described in
-`native-surface-diagnostic.md`; configured navigation and scroll retention still
-lack proof. No PR
+navigator and shared identity join have focused behavioral evidence. Mounted
+native navigation now preserves splits, draft, focus and terminal viewport in
+the integration fixture. Configured provider interaction/resolution, navigator
+scroll and before/after timing comparisons remain unproven. No PR
 publication, landing, Task completion, PM mutation or external-product trial was
 performed by this review.
 
@@ -16,7 +16,66 @@ actions/display path, lf-new's nested workspaces, external trials and measured
 budgets remain explicitly outstanding. No new kickoff or alternative design is
 needed.
 
-## Current review after native restoration — 2026-09-23
+## Iteration 2 review — 2026-09-23
+
+Reviewed HEAD `7105903ec` plus the bounded test correction below. Recovered the
+complete Task patch with `lf task diff LOO-291 --json`: `truncated: false`,
+5,020 lines; `/tmp/loo291-review-iteration2.json` and the extracted `.patch`.
+Compared the full change set with the previous reviewed state and read the
+intervening delta: one mounted native test and notes, no production changes.
+Rechecked the reachable navigator, detail, reading, Session-action and native
+ownership paths against the accepted design and its forbidden outcomes.
+
+| Claim | Planned behavior | Implemented behavior | Proof | Result |
+|---|---|---|---|---|
+| Native A/D and detail navigation | Preserve surfaces, split, focus, draft and scroll | Same Session and companion PTYs survive toolbar navigation and repository return | `workspaceRetainsNativeSplit`, final focused command below | pass, native integration fixture |
+| Retained children remain interactive | Input reaches both original children after navigation | Both cat replies are required in addition to PTY input echo | Strengthened final assertions | pass, local children; provider continuation remains a gap |
+| Current planning and Session evidence | Read shared planning and exact Session identity | Live CLI reads expose Product, two Projects, nine incomplete Tasks and two unbound interactive Sessions | `/tmp/loo291-review-iteration2-{roadmap,sessions}.json` | pass, read-only CLI; no live Task-to-Session association in this population |
+| Complete configured interaction | Real controls, provider continuation, resolution and pane reconciliation | No new configured interaction result; prior AX probe could not reach workspace controls | Earlier AX receipt below; fixture actions use ViewInspector | gap |
+| Navigator scroll and timings | Preserve list position and compare paint/readiness on the same population | Terminal viewport is covered; navigator scroll and timing comparison are not | Source and fixture coverage inspection | gap |
+| One shared authority | One planning/Session reader and retained workspace owner | Removed paths remain absent; LOO-284 fields remain unavailable | Negative searches and current Rust/Swift/main/lf-new comparison | pass, source; full contract integration remains Task scope |
+
+The native test originally accepted any occurrence of `companion-alive`. PTY
+input echo alone could satisfy that assertion without proving the companion
+child responded. Replaced it with the same two-occurrence requirement used for
+the Session draft, and waited for both responses within the existing deadline.
+This is a stronger behavioral assertion, not a production correction or a new
+launch path. Both children and surfaces remain test-owned.
+
+Final focused command:
+
+```sh
+swift test --package-path swift -Xswiftc -gnone --jobs 4 \
+  --filter WorkspaceNavigationProofTests/workspaceRetainsNativeSplit
+```
+
+One test passed, exit 0; `/tmp/loo291-review-mounted-child-proof.log`. No Swift
+edits followed. No affected-suite or full gate ran. Existing model/selection,
+manual-focus and window-isolation receipts remain evidence at their stated
+levels; they were not rerun. `git diff --check` passes.
+
+Live roadmap generation: `2026-09-24T00:31:44.394125Z` (23 September locally).
+The current two-Session observation supersedes the earlier three-record count;
+it does not establish why the third record disappeared. No live Session was
+opened, moved, resolved or otherwise mutated. The prior AX failure is historical
+evidence, not a fresh permission diagnosis. Repeating a launch-only capture would
+not prove the missing interaction, so this review used the corrected native
+fixture as the closest local behavioral path.
+
+Rust/Swift Session and roadmap mirrors retain the same fields. Main and lf-new
+SessionRecord files still match the hash below; shared legal actions/display
+path are absent. Searches find one Podium caller per inventory read, one root
+workspace registry, and none of the removed scope/navigation types. No second
+writer, fallback inventory, lifecycle policy or workspace owner was introduced.
+
+Next work is the configured interaction trial below, including navigator scroll
+and same-population timing observations. Optional conversations, required lf-new
+workspace integration, directive editing, LOO-284 integration, external proving
+work and measured budgets remain the full Task target. The new fixture advances
+the first slice without changing that target. Publication remains withheld under
+review-slice's requirement that all applicable Done When claims hold.
+
+## Earlier review after native restoration — 2026-09-23
 
 Reviewed HEAD `39d4c4653` using the complete Task diff (`truncated: false`,
 4,736 lines), the changes since the previous review, and the reachable owners.
@@ -91,12 +150,12 @@ interaction.
 | Exact Session association | Typed durable Work edge; never name/cwd/planning-ID guesses | Joins runtime.workId by kind; retains multiple and unmatched Sessions | everyHumanBoundaryRemainsReachable; current Rust/Swift SessionRecord comparison | pass, fixtures |
 | Completed and top-level work | Completed-with-Session, repo/Wave/Project and missing planning remain reachable | Completed rows retained when associated; unmatched records remain in Other open Sessions | everyHumanBoundaryRemainsReachable; live read has two unbound Sessions | pass, model; live continuation gap |
 | Details and no-Session | Directive, condition/reason, Project definition/KRs, Activity, PR/worktree and explicit absence | Existing inspectors/actions reused; zero only after a readable association | inspectorShowsPlanning, unavailableAssociationIsNotNoSessions; WorkSurfaceView/subjectSessions source | pass, model/view |
-| A/D presentation | Toggle list without recreating workspace or launching provider | Same retained workspace and mounted multiplexer; presentation state separate | navigationRetainsWorkspace; SessionsView source | pass, model; native/scroll gap |
-| Repository and search retention | Restore selection/expansion/search/splits/focus across navigation | Existing registry and per-repository navigation, expansion preserved during search | navigationRetainsWorkspace; new unavailable/truncated regression | pass, model; native focus gap |
+| A/D presentation | Toggle list without recreating workspace or launching provider | Same retained workspace and mounted multiplexer; presentation state separate | navigationRetainsWorkspace; workspaceRetainsNativeSplit | pass, model/native fixture; configured interaction gap |
+| Repository and search retention | Restore selection/expansion/search/splits/focus across navigation | Existing registry and per-repository navigation, expansion preserved during search | navigationRetainsWorkspace; unavailable/truncated regression; mounted native repository return | pass, model/native fixture; configured search and navigator scroll gap |
 | Unavailable evidence | Failure is never healthy empty; keep useful context | Last-good readings/errors; unknown badge; partial planning warning; selected Work retained | unavailableIsNotEmpty, lastGoodSessionsSurviveRepositorySwitch, new regression | pass, model/view |
 | Responsive Session access | Planning cannot gate Session publication/opening | Session read publishes independently; pane selection precedes asynchronous preparation | sessionsArriveBeforePlanning; openSession source | pass, model; measured latency gap |
 | Human lifecycle | Exact open/Move here; resolution does not complete Task | Existing shared operations; callback removes resolved Session from reading | Existing SessionsStore focused receipt; resolutionKeepsTask | pass, fixtures; configured resolution gap |
-| Native lifetime and input | Same surfaces/processes/drafts/splits; hidden terminals relinquish input | Retained pool; native view consumes focus requests on attachment/transition; unavailable CoreVideo uses timer rendering | hiddenTerminalPreservesDraft and releaseSurfaceIsWindowLocal now pass; native-surface-diagnostic.md | pass, real PTY fixture; configured navigation/splits/scroll gap |
+| Native lifetime and input | Same surfaces/processes/drafts/splits; hidden terminals relinquish input | Retained pool; native view consumes focus requests on attachment/transition; unavailable CoreVideo uses timer rendering | hiddenTerminalPreservesDraft, releaseSurfaceIsWindowLocal and strengthened workspaceRetainsNativeSplit | pass, real PTY fixtures; configured provider interaction gap |
 | One authority | Remove root switch/cascade, duplicate Session polling and labels lookup | Podium reads; projection derives; one window registry retains surfaces | Negative searches and complete Swift diff review below | pass, source |
 | Source freshness | Distinguish read timestamp from provider sync freshness | Toolbar labels snapshot generation and explains unavailable sync timestamp | SessionsView toolbar, README | pass, honest limitation; full freshness integration remains |
 | External trials/budgets | Human-selected workflow, authorized edit, measured long-lived-registry trials | Not implemented/proven in this slice | No workflow selected; no timings collected | gap, remaining Task scope |

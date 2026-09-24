@@ -1547,7 +1547,7 @@ fn main() -> anyhow::Result<()> {
             }
             Some(Commands::Doctor { json }) => loopflow::lf::commands::doctor::run(*json),
             Some(Commands::List) => loopflow::lf::commands::list::show_all(),
-            Some(Commands::Ls { json, all }) => loopflow::lf::commands::waves::ls(*json, *all),
+            Some(Commands::Ls { json, all, current }) => loopflow::lf::commands::waves::ls(*json, *all, *current),
             Some(Commands::Status {
                 wave,
                 chapter,

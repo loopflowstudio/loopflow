@@ -3,10 +3,10 @@ import AppKit
 import Loopflow
 
 private func enrichProcessPathForGUILaunch() {
-    let existing = ProcessInfo.processInfo.environment["PATH"]
-    let enriched = GUIProcessEnvironment.enrichedPath(from: existing)
-    guard enriched != existing else { return }
-    setenv("PATH", enriched, 1)
+    let existing = ProcessInfo.processInfo.environment
+    let enriched = GUIProcessEnvironment.enriched(existing)
+    for key in existing.keys where enriched[key] == nil { unsetenv(key) }
+    if let path = enriched["PATH"] { setenv("PATH", path, 1) }
 }
 
 @main

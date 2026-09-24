@@ -8,28 +8,6 @@ import ViewInspector
 @Suite("Podium model")
 @MainActor
 struct PodiumModelTests {
-    @Test("Abandoned and retired registry rows do not count as current Waves")
-    func historicalWavesAreAbsentFromNavigation() throws {
-        let fixture = try PodiumTestFixture.load()
-        let repo = "/src/loopflow"
-        let model = PodiumModel(query: fixture.query, repoPath: repo)
-        model.applyFixture(
-            roadmap: .available(fixture.roadmap),
-            waves: .available([
-                Wave(id: "product", name: "product", repo: repo, status: .ready, enabled: false),
-                Wave(id: "list", name: "list", repo: repo, status: .abandoned),
-                Wave(id: "engbot", name: "engbot", repo: repo, status: .abandoned),
-                Wave(id: "retired", name: "retired", repo: repo, status: .ready, retiredAt: "2026-09-23"),
-            ]),
-            processActivity: .available(fixture.processActivity),
-            workActivity: .available(fixture.workActivity),
-            repos: [PortfolioRepo(path: repo, lastOpened: .distantPast)]
-        )
-        #expect(model.visibleWaves.map(\.name) == ["product"])
-        #expect(model.waveSummary?.waves == 1)
-        #expect(model.waves.value?.count == 4)
-    }
-
     @Test("Repository scope filters one shared snapshot and clears outside selection")
     func repositoryScopeFiltersSharedSnapshot() async throws {
         let fixture = try PodiumTestFixture.load()

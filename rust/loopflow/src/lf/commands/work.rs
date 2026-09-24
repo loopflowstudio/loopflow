@@ -32,6 +32,51 @@ pub fn run(command: &WorkCommand, repo: &Path) -> anyhow::Result<()> {
 async fn run_async(command: &WorkCommand, repo: &Path) -> anyhow::Result<()> {
     let store = open_shared_store().await?;
     match command {
+        WorkCommand::Forget {
+            kind,
+            id,
+            dry_run,
+            json,
+        } => {
+            let work = parse_work(kind, id)?;
+            require_work_repository(&store, &work, repo).await?;
+            let wave_id = WaveId::parse(id)?;
+            let wave = store
+                .get_wave(&wave_id)
+                .await?
+                .ok_or_else(|| anyhow!("Wave {id} was not found"))?;
+            let snapshot = crate::lf::commands::waves::snapshot_wave(&store, &wave).await?;
+            if snapshot.live || snapshot.enabled {
+                return Err(anyhow!(
+                    "stop and disable Wave {} before forgetting it",
+                    wave.name()
+                ));
+            }
+            if Path::new(wave.repo())
+                .join("wave")
+                .join(wave.name())
+                .join("GOAL.md")
+                .exists()
+            {
+                return Err(anyhow!(
+                    "Wave {} still has an authored GOAL.md",
+                    wave.name()
+                ));
+            }
+            store.forget_wave(&wave_id, *dry_run).await?;
+            if *json {
+                println!(
+                    "{}",
+                    serde_json::json!({"wave": snapshot, "forgotten": !dry_run})
+                );
+            } else {
+                println!(
+                    "{} Wave {} ({id})",
+                    if *dry_run { "Would forget" } else { "Forgot" },
+                    wave.name()
+                );
+            }
+        }
         WorkCommand::Status { kind, id, json } => {
             let work = parse_work(kind, id)?;
             require_work_repository(&store, &work, repo).await?;

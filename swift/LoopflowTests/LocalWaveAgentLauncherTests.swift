@@ -17,10 +17,16 @@ struct LocalWaveAgentLauncherTests {
             "PATH": "/usr/bin:/bin",
             "LF_HOME": "/tmp/loopflow-development-home",
             "LF_DB_PATH": "/tmp/loopflow-development-home/loopflow.db",
+            "LF_WAVE_ID": "launching-wave",
+            "LF_RUN_ID": "launching-run",
+            "LF_WORK_ADVANCE_CLAIM": "launching-task-claim",
         ])
 
         #expect(environment["LF_HOME"] == "/tmp/loopflow-development-home")
         #expect(environment["LF_DB_PATH"] == "/tmp/loopflow-development-home/loopflow.db")
+        #expect(environment["LF_WAVE_ID"] == nil)
+        #expect(environment["LF_RUN_ID"] == nil)
+        #expect(environment["LF_WORK_ADVANCE_CLAIM"] == nil)
     }
 
     @Test("stop command uses the single-wave lifecycle verb")

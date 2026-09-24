@@ -35,10 +35,10 @@ public struct RegistryQuery: Sendable {
         self.run = run
     }
 
-    /// Every wave the registry knows across the machine. Callers that need
-    /// several repo slices should call this once and filter locally.
+    /// Current Waves across the machine, including stopped Waves. The shared
+    /// reader excludes historical registrations; callers only slice by repo.
     public func allWaves() async throws -> [Wave] {
-        let stdout = try await run(["ls", "--all", "--json"], nil)
+        let stdout = try await run(["ls", "--all", "--current", "--json"], nil)
         let snapshots = try Self.decode([WaveSnapshot].self, from: stdout)
         return snapshots.map { $0.toWave() }
     }

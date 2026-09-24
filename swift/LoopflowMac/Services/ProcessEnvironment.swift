@@ -32,6 +32,13 @@ enum GUIProcessEnvironment {
     static func enriched(_ env: [String: String]) -> [String: String] {
         var copy = env
         copy["PATH"] = enrichedPath(from: env["PATH"])
+        // The GUI is a new human control surface, not a continuation of the
+        // Work process that opened it. Preserve Home and account authority.
+        for key in ["LF_WAVE_ID", "LF_RUN_ID", "LF_RUN_DIR", "LF_PARENT_RUN_ID", "LF_TRACE_ID", "LF_PROCESS_ID",
+                    "LF_WORK_ADVANCE_CLAIM", "LOOPFLOW_DIRECTIVE_FILE",
+                    "LF_TERMINAL_ID", "LF_TERMINAL_TTY"] {
+            copy.removeValue(forKey: key)
+        }
         return copy
     }
 }

@@ -636,6 +636,7 @@ Waves sharing `main`.
 
 ```bash
 lf ls --json                    # every durable Wave and its Home/runtime evidence
+lf ls --current --json          # current Waves, including stopped ones
 lf status <wave> --json         # Work, Runs, conditions, and live metric_portfolio
 lf roadmap --json               # current plan plus that portfolio on every Wave
 lf activity                     # durable Work changes, newest first
@@ -669,7 +670,21 @@ lf doctor                       # audit continuity, identity, lineage, coverage,
 lf doctor --json                # machine-readable audit
 ```
 
-`lf ls` reads the local Wave registry. `lf status` focuses one Wave's local
+`lf ls` reads the local Wave registry. `--current` excludes abandoned and retired
+registrations. `lf roadmap --all` spans repositories without inheriting the
+launching process's Wave; an explicit `--wave` still scopes the query.
+
+```bash
+lf work forget wave <wave-id> --dry-run --json
+lf work forget wave <wave-id> --json
+```
+
+Forget an abandoned, disabled, empty registration after removing its authored
+`GOAL.md`. The command leaves repository files alone and refuses registrations
+with Projects, Tasks, child Waves, planning snapshots, or metric evidence.
+Use the installed Home's `lf`; development binaries operate on their own Home.
+
+`lf status` focuses one Wave's local
 planning and runtime projection. `lf roadmap` overlays the current
 Linear-backed plan without creating a second runtime model. `lf activity`
 orders durable Work creation, Run, Task PR, and Steer facts; it reuses

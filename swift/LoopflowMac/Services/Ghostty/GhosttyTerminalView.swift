@@ -1186,7 +1186,26 @@ func buildWorkspaceShellCommand(id: String, argv: [String], env: [String: String
     let script = """
     export LF_TERMINAL_ID=\(shellEscape(id))
     export LF_TERMINAL_TTY="$(tty)"
-    \(initial)exec \(shellEscape(shell)) -l
+    \(initial)
+    if [ -n "$GHOSTTY_RESOURCES_DIR" ]; then
+        export GHOSTTY_SHELL_FEATURES="${GHOSTTY_SHELL_FEATURES-}"
+        case \(shellEscape(URL(fileURLWithPath: shell).lastPathComponent)) in
+            zsh)
+                if [ "${ZDOTDIR+x}" = x ]; then export GHOSTTY_ZSH_ZDOTDIR="$ZDOTDIR"; fi
+                export ZDOTDIR="$GHOSTTY_RESOURCES_DIR/shell-integration/zsh"
+                ;;
+            bash)
+                export GHOSTTY_BASH_ENV="${ENV-}"
+                export GHOSTTY_BASH_INJECT=1
+                export ENV="$GHOSTTY_RESOURCES_DIR/shell-integration/bash/ghostty.bash"
+                exec \(shellEscape(shell)) --posix -l
+                ;;
+            fish)
+                exec \(shellEscape(shell)) -l -C 'source "$GHOSTTY_RESOURCES_DIR/shell-integration/fish/ghostty-shell-integration.fish"'
+                ;;
+        esac
+    fi
+    exec \(shellEscape(shell)) -l
     """
     return ["/bin/sh", "-c", script].map(shellEscape).joined(separator: " ")
 }

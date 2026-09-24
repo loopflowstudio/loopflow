@@ -88,12 +88,13 @@ final class PodiumModel {
 
     var visibleRoadmaps: [WaveRoadmap] {
         filterByRepo(roadmap.value?.waves ?? [], repo: { $0.wave.repo })
+            .filter { $0.wave.status != .abandoned && $0.wave.retiredAt == nil }
     }
 
     var visibleWaves: [WaveViewModel] {
         let registered = filterByRepo(waves.value ?? [], repo: { $0.repo })
         let registeredNames = Set(registered.map { waveIdentity(repo: $0.repo, name: $0.name) })
-        var result = registered.map { wave in
+        var result = registered.filter(\.isCurrent).map { wave in
             let objective = roadmap.value?.waves.first(where: { $0.wave.id == wave.id })?.wave.goal ?? ""
             let plan = objective.isEmpty ? nil : WavePlan(objective: objective)
             return WaveViewModel(api: wave, plan: plan)

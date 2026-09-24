@@ -289,6 +289,7 @@ private func session(id: String, state: String, kind: String = "flow", replacing
       "cwd": "/tmp/repo.\(id)",
       "state": "\(state)",
       "ready_summary": \(state == "ready" ? "\"Ready for review\"" : "null"),
+      "terminal_ids": [],
       "open_argv": ["lf", "session", "open", "\(id)"\(replacing ? ", \"--replace\"" : "")]
     }
     """

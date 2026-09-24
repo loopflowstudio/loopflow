@@ -608,11 +608,13 @@ pub fn roadmap(wave: Option<&str>, json: bool, all: bool) -> Result<()> {
             }
             return Ok(());
         };
-        // The ONE ambient-Wave rule: `--wave` wins, else `LF_WAVE_ID` (durable
-        // UUID or repository-scoped registered name). Roadmap is the one
-        // command where `NoContext` is a valid default — it lists every wave.
-        // A stale UUID is a loud error, never a silent drop to global scope.
-        let env_wave_id = std::env::var(crate::work::wave::context::WAVE_ID_ENV).ok();
+        // An explicit all-repositories query must not inherit the Wave of
+        // the process that launched the GUI. An explicit --wave still wins.
+        let env_wave_id = if all {
+            None
+        } else {
+            std::env::var(crate::work::wave::context::WAVE_ID_ENV).ok()
+        };
         let repo = crate::repo::find_repo_root().ok();
         let waves = match crate::work::wave::context::resolve_managed_wave(
             Some(&store),

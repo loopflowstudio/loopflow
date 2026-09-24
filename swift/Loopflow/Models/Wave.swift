@@ -20,6 +20,9 @@ public struct Wave: Sendable, Identifiable, Hashable {
     public let supersededByWaveId: String?
     public let retirementReason: String?
 
+    /// Historical registry rows remain available for audit, not current navigation.
+    public var isCurrent: Bool { status != .abandoned && retiredAt == nil }
+
     public init(
         id: String,
         name: String,

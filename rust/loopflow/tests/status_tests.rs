@@ -471,6 +471,39 @@ fn ambient_wave_id_resolves_the_wave_it_names() {
 }
 
 #[test]
+fn all_roadmaps_ignore_inherited_wave_from_a_gui_launch() {
+    let home = tempfile::tempdir().unwrap();
+    let first = seed(home.path(), "one");
+    let second = seed(home.path(), "two");
+    for ambient in [first.id().as_str(), "stale-wave-id"] {
+        let output = Command::new(env!("CARGO_BIN_EXE_lf"))
+            .args(["roadmap", "--all", "--json"])
+            .env("LF_HOME", home.path())
+            .env_remove("LF_DB_PATH")
+            .env_remove("LF_CONTROL_HOME")
+            .env_remove("LF_CONTROL_DB_PATH")
+            .env_remove("LF_TRACE_ID")
+            .env("LF_WAVE_ID", ambient)
+            .current_dir("/")
+            .output()
+            .unwrap();
+        assert!(
+            output.status.success(),
+            "{}",
+            String::from_utf8_lossy(&output.stderr)
+        );
+        let value: serde_json::Value = serde_json::from_slice(&output.stdout).unwrap();
+        let ids = value["waves"]
+            .as_array()
+            .unwrap()
+            .iter()
+            .map(|wave| wave["wave"]["id"].as_str().unwrap())
+            .collect::<Vec<_>>();
+        assert_eq!(ids, [first.id().as_str(), second.id().as_str()]);
+    }
+}
+
+#[test]
 fn accepted_metric_evidence_is_identical_in_status_roadmap_and_text() {
     let home = tempfile::tempdir().expect("tempdir");
     let wave = seed(home.path(), "product");

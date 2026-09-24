@@ -99,6 +99,7 @@ struct SessionsPolishTests {
                   "cwd": "/tmp",
                   "state": "\(state)",
                   "ready_summary": null,
+                  "terminal_ids": [],
                   "open_argv": ["lf", "session", "open", "polish"]
                 }
                 """.utf8

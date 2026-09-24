@@ -84,6 +84,7 @@ pub struct SessionRecord {
     pub state: SessionState,
     pub ready_summary: Option<String>,
     pub open_argv: Vec<String>,
+    pub terminal_ids: Vec<String>,
 }
 
 #[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
@@ -875,12 +876,12 @@ fn list_interactive_sessions(human_runs: &HashSet<RunId>) -> Result<Vec<SessionR
 }
 
 fn interactive_surface(dir: &Path, manifest: &RunManifest) -> Result<SessionRecord> {
-    let state =
-        if crate::lf::commands::util::active_provider_clients(dir, &manifest.harness)?.is_empty() {
-            SessionState::Closed
-        } else {
-            SessionState::Active
-        };
+    let clients = crate::lf::commands::util::active_provider_clients(dir, &manifest.harness)?;
+    let state = if clients.is_empty() {
+        SessionState::Closed
+    } else {
+        SessionState::Active
+    };
     let lf = crate::engine::process::resolve_current_home_lf_binary_checked()?;
     Ok(SessionRecord {
         id: manifest.run_id.to_string(),
@@ -895,6 +896,10 @@ fn interactive_surface(dir: &Path, manifest: &RunManifest) -> Result<SessionReco
         cwd: manifest.cwd.display().to_string(),
         state,
         ready_summary: None,
+        terminal_ids: clients
+            .into_iter()
+            .filter_map(|client| client.terminal_id)
+            .collect(),
         open_argv: vec![
             lf.display().to_string(),
             "session".to_string(),
@@ -950,12 +955,27 @@ fn session_title(dir: &Path, manifest: &RunManifest) -> String {
             text?.get(start..end)
         });
     concise_title(user_message.or(text))
-        .or_else(|| manifest.skill.clone())
+        .or_else(|| {
+            manifest.skill.as_ref().map(|skill| {
+                format!(
+                    "{} · {}",
+                    skill,
+                    manifest
+                        .cwd
+                        .file_name()
+                        .unwrap_or_default()
+                        .to_string_lossy()
+                )
+            })
+        })
         .unwrap_or_else(|| manifest.harness.clone())
 }
 
 fn concise_title(text: Option<&str>) -> Option<String> {
     let title = text?.lines().map(str::trim).find(|line| !line.is_empty())?;
+    if title.starts_with("<lf:") {
+        return None;
+    }
     let mut chars = title.chars();
     let truncated = chars.by_ref().take(80).collect::<String>();
     Some(if chars.next().is_some() {
@@ -1216,6 +1236,7 @@ async fn flow_surface(
         cwd: task.worktree.display().to_string(),
         state: runtime,
         ready_summary: position.ready_summary.clone(),
+        terminal_ids: Vec::new(),
         open_argv,
     })
 }
@@ -1236,6 +1257,7 @@ fn ask_surface(record: &AskSessionRecord) -> Result<SessionRecord> {
         cwd: record.cwd.display().to_string(),
         state: runtime,
         ready_summary: record.ready_summary.clone(),
+        terminal_ids: Vec::new(),
         open_argv,
     })
 }

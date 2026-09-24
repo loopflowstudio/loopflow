@@ -528,23 +528,25 @@ half-contracts.
 
 ## This slice
 
-Carry the existing release target lock and exact checkout lease through notes
-generation, its nested CLI and the provider launch chain. Extend the existing
-notes stage with explicit command inheritance; standalone notes callers supply
-no release capability. Preserve notes validation and provider-degradation policy.
+Carry the existing release target lock and exact checkout lease through source
+fetching, named checkout creation, rebuild reset, removal and branch cleanup.
+Extend shared Git/worktree operations with explicit inheritance; retain their
+classification and ordinary caller behavior. Remove the named-checkout helper's
+background upstream publication: release preparation already commits/pushes
+explicitly, and verification/publisher source checkouts need no remote branch.
+Ordinary placement keeps its existing upstream synchronization.
 
-Prove through the built CLI and Codex harness that a surviving provider, after
-controller death or a failed notes launcher, excludes another release and keeps
-its source and exact release context available. Read that context and write notes
-after the interruption; retain caller HEAD, branch, index and edited bytes.
-External provider behavior is simulated, while CLI, harness, Git and OS locks
-are real. Retain each exact notes input through the existing runtime prompt writer, with a
-unique name so retries cannot replace a surviving provider's input.
+Prove controller death and failed-launcher descendants through the built CLI,
+real Git and OS locks. Assert target exclusion, exact checkout protection where
+held, actual resulting Git state and unchanged caller HEAD/branch/index/bytes.
+Keep cleanup's independent lease reacquisition before removal so it cannot bypass
+a surviving child's protection. Creation cannot authorize later cleanup of a
+partially materialized live checkout.
 
-Task compensation, source/worktree children, historical telemetry linkage/recovery,
+Task compensation, historical telemetry linkage/recovery, dated repair ownership,
 closed obligations and configured acceptance remain in this serial Task.
-Settlement and prerequisite policy are unchanged. The scorecard blocker and both
-configured automatic settlements remain open.
+Settlement/prerequisite policy and the two automatic-settlement requirement are
+unchanged. Preserve the scorecard blocker and required UI/public proof.
 
 ## Slice ledger
 
@@ -819,6 +821,21 @@ bounded defect was established and no executable code changed. Task compensation
 source/worktree children, historical telemetry linkage/retry and dated repair
 ownership, closed obligations and configured acceptance remain open. See
 [review-notes.md](review-notes.md).
+
+- 2026-09-24: source fetching, checkout creation, rebuild reset, removal and
+  branch cleanup now retain their existing target/checkout capabilities in Git
+  children. The CLI regression first reproduced a competing tag during a surviving
+  initial fetch. Named source checkout creation no longer starts a background
+  branch push; preparation owns its explicit publication and ordinary placement
+  keeps its existing synchronization.
+- Twelve source mutation/exit cases passed (44.60s), including stale-ref refresh,
+  actual checkout/reset/removal/deletion results, unchanged remote branches and
+  exact caller state. Ten existing Git survival cases passed (47.57s), along with
+  normal candidate completion, advancing-main rebuild, divergent-branch
+  preservation, ordinary named creation, formatting and all-target Clippy.
+  GitHub is simulated. Task compensation, telemetry recovery, closed obligations
+  and configured acceptance remain open. See
+  [release-source-ownership.md](release-source-ownership.md).
 
 ## Measure
 

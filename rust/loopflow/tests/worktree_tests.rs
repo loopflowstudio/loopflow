@@ -51,7 +51,8 @@ fn commit_worktree_at_age(path: &std::path::Path, age: Duration) {
 #[test]
 fn worktree_add_creates_directory() {
     let repo = TestRepo::new();
-    let result = create_named_worktree(repo.path(), "feature", None, false).expect("create");
+    let result =
+        create_named_worktree(repo.path(), "feature", None, false, &|_| {}).expect("create");
     assert!(result.path.exists());
     assert!(
         result.branch.contains("feature"),
@@ -63,7 +64,8 @@ fn worktree_add_creates_directory() {
 #[test]
 fn worktree_add_is_on_correct_branch() {
     let repo = TestRepo::new();
-    let result = create_named_worktree(repo.path(), "feature", None, false).expect("create");
+    let result =
+        create_named_worktree(repo.path(), "feature", None, false, &|_| {}).expect("create");
 
     let output = Command::new("git")
         .args(["rev-parse", "--abbrev-ref", "HEAD"])
@@ -77,7 +79,8 @@ fn worktree_add_is_on_correct_branch() {
 #[test]
 fn worktree_remove_deletes_directory() {
     let repo = TestRepo::new();
-    let result = create_named_worktree(repo.path(), "feature", None, false).expect("create");
+    let result =
+        create_named_worktree(repo.path(), "feature", None, false, &|_| {}).expect("create");
     worktree_remove(repo.path(), &result.path).expect("remove");
     assert!(!result.path.exists());
 }
@@ -85,7 +88,8 @@ fn worktree_remove_deletes_directory() {
 #[test]
 fn worktree_list_includes_created() {
     let repo = TestRepo::new();
-    let result = create_named_worktree(repo.path(), "feature", None, false).expect("create");
+    let result =
+        create_named_worktree(repo.path(), "feature", None, false, &|_| {}).expect("create");
     let worktrees = list_worktrees(repo.path()).expect("list");
     assert!(worktrees
         .iter()
@@ -119,7 +123,8 @@ fn worktree_list_preserves_namespaced_upstream_branch() {
 #[test]
 fn worktree_state_detects_dirty() {
     let repo = TestRepo::new();
-    let result = create_named_worktree(repo.path(), "feature", None, false).expect("create");
+    let result =
+        create_named_worktree(repo.path(), "feature", None, false, &|_| {}).expect("create");
     std::fs::write(result.path.join("dirty.txt"), "dirty").expect("write");
     assert!(!is_clean(&result.path).expect("is_clean"));
 }
@@ -218,7 +223,8 @@ fn manual_prune_removes_recent_remote_gone_branch() {
 #[test]
 fn worktree_move_preserves_content() {
     let repo = TestRepo::new();
-    let result = create_named_worktree(repo.path(), "feature", None, false).expect("create");
+    let result =
+        create_named_worktree(repo.path(), "feature", None, false, &|_| {}).expect("create");
     let file_path = result.path.join("note.txt");
     std::fs::write(&file_path, "content").expect("write");
 
@@ -277,7 +283,7 @@ fn create_named_worktree_synced_updates_main_before_creation() {
         .expect("git push");
     assert!(status.success(), "git push should succeed");
 
-    let _ = create_named_worktree(repo.path(), "sync-check", None, true).expect("create");
+    let _ = create_named_worktree(repo.path(), "sync-check", None, true, &|_| {}).expect("create");
 
     let updated_head = git_stdout(repo.path(), &["rev-parse", "HEAD"]);
     let origin_head = git_stdout(repo.path(), &["rev-parse", "origin/main"]);
@@ -294,7 +300,7 @@ fn create_named_worktree_synced_updates_main_before_creation() {
 #[test]
 fn wt_switch_finds_worktree_by_sibling_name() {
     let repo = TestRepo::new();
-    let result = create_named_worktree(repo.path(), "docs", None, false).expect("create");
+    let result = create_named_worktree(repo.path(), "docs", None, false, &|_| {}).expect("create");
 
     let worktrees = list_worktrees(repo.path()).expect("list");
     let name = sibling_worktree_name_with_main(&result.path, repo.path()).expect("sibling name");
@@ -452,7 +458,7 @@ fn nested_worktree_not_recognized_as_wave() {
 fn branch_at_main_not_detected_as_squash_merged() {
     let repo = TestRepo::new();
     // Create a worktree whose branch points to the same commit as main.
-    let result = create_named_worktree(repo.path(), "fresh", None, false).expect("create");
+    let result = create_named_worktree(repo.path(), "fresh", None, false, &|_| {}).expect("create");
     // Make the worktree dirty (simulates lf ingest writing to scratch/).
     std::fs::write(result.path.join("scratch.txt"), "notes").expect("write");
 
@@ -475,7 +481,8 @@ fn branch_at_main_not_detected_as_squash_merged() {
 #[test]
 fn fresh_worktree_is_identified() {
     let repo = TestRepo::new();
-    let result = create_named_worktree(repo.path(), "newwave", None, false).expect("create");
+    let result =
+        create_named_worktree(repo.path(), "newwave", None, false, &|_| {}).expect("create");
 
     let (_, states) = list_worktrees_local(repo.path()).expect("list");
     let wt = states
@@ -490,7 +497,7 @@ fn fresh_worktree_is_identified() {
 #[test]
 fn fresh_dirty_worktree_is_identified() {
     let repo = TestRepo::new();
-    let result = create_named_worktree(repo.path(), "wip", None, false).expect("create");
+    let result = create_named_worktree(repo.path(), "wip", None, false, &|_| {}).expect("create");
     std::fs::write(result.path.join("work.txt"), "in progress").expect("write");
 
     let (_, states) = list_worktrees_local(repo.path()).expect("list");
@@ -506,7 +513,8 @@ fn fresh_dirty_worktree_is_identified() {
 #[test]
 fn worktree_with_commits_is_active_not_fresh() {
     let repo = TestRepo::new();
-    let result = create_named_worktree(repo.path(), "active", None, false).expect("create");
+    let result =
+        create_named_worktree(repo.path(), "active", None, false, &|_| {}).expect("create");
     std::fs::write(result.path.join("feature.txt"), "work").expect("write");
     git_stdout(&result.path, &["add", "."]);
     git_stdout(&result.path, &["commit", "-m", "feature work"]);
@@ -525,8 +533,8 @@ fn worktree_with_commits_is_active_not_fresh() {
 fn branch_from_squash_merged_parent_stays_fresh() {
     let repo = TestRepo::new();
 
-    let landed =
-        create_named_worktree(repo.path(), "rules-old", None, false).expect("create landed");
+    let landed = create_named_worktree(repo.path(), "rules-old", None, false, &|_| {})
+        .expect("create landed");
     std::fs::write(landed.path.join("rules.txt"), "rule").expect("write");
     git_stdout(&landed.path, &["add", "."]);
     git_stdout(&landed.path, &["commit", "-m", "add rule"]);
@@ -542,6 +550,7 @@ fn branch_from_squash_merged_parent_stays_fresh() {
         "rules-new",
         Some(landed.branch.as_str()),
         false,
+        &|_| {},
     )
     .expect("create fresh from landed");
 

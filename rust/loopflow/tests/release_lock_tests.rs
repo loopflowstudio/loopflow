@@ -718,9 +718,6 @@ cat > RELEASE_NOTES.md <<'EOF'
 
 Fixture release.
 EOF
-if [ '{phase}' = upstream ]; then
-  '{real_git}' branch --unset-upstream || exit $?
-fi
 if [ '{phase}' = push ] || [ '{phase}' = force ]; then
   '{real_git}' push -u origin HEAD || exit $?
 fi
@@ -1185,5 +1182,217 @@ fn surviving_release_hook_retains_target_and_checkout_ownership() {
         wait_until_released(|| release_tag(repo.path(), "0.9.1", None).map(|_| ()));
         worktree_remove(repo.path(), &checkout).unwrap();
         assert!(!checkout.exists());
+    }
+}
+
+#[test]
+fn surviving_release_source_mutation_retains_ownership_and_caller_state() {
+    let real_git = Command::new("which").arg("git").output().unwrap();
+    let real_git = String::from_utf8(real_git.stdout).unwrap();
+    let real_git = real_git.trim();
+    for stage in ["fetch", "add", "remove", "delete", "reset", "branch-fetch"] {
+        for kill_controller in [true, false] {
+            eprintln!("Source {stage}, killed controller: {kill_controller}");
+            let state = tempfile::tempdir().unwrap();
+            let rebuilding = matches!(stage, "reset" | "branch-fetch");
+            let mutation = blocking_mutation(
+                state.path(),
+                &format!(
+                    "'{real_git}' \"$@\" > '{}/git.log' 2>&1 || exit $?",
+                    state.path().display()
+                ),
+            );
+            let blocked = if kill_controller {
+                mutation
+            } else {
+                format!(
+                    "(\n{mutation}) > '{}/child.log' 2>&1 &\nexit 1\n",
+                    state.path().display()
+                )
+            };
+            let git_script = format!(
+                r#"#!/bin/sh
+operation=''
+case "$*" in
+  *'worktree add '*) operation=add;;
+  *'worktree remove '*) operation=remove;;
+  *'branch -D jack/verify-'*) operation=delete;;
+  *'reset --hard origin/'*) operation=reset;;
+  *'fetch origin +refs/heads/jack/release-'*) operation=branch-fetch;;
+  *'fetch origin +refs/heads/main:'*) operation=fetch;;
+esac
+if [ -f '{state}/armed' ] && [ "$operation" = '{stage}' ]; then
+  {blocked}
+fi
+exec '{real_git}' "$@"
+"#,
+                state = state.path().display()
+            );
+            let gh = format!(
+                r#"#!/bin/sh
+case "$1 $2" in
+  '--version ') exit 0;;
+  'run list') echo '[]';;
+  'release view') exit 1;;
+  'pr list')
+    case " $* " in
+      *' --head '*)
+        if [ '{rebuilding}' = true ]; then
+          printf '[{{"number":1176,"state":"OPEN","mergeCommit":null,"headRefOid":"%s"}}]\n' "$(cat '{state}/pr-head')"
+        else echo '[]'; fi;;
+      *) echo '[]';;
+    esac;;
+  'pr view') echo '{{"state":"OPEN","mergeStateStatus":"DIRTY","mergeCommit":null}}';;
+  *) exit 91;;
+esac
+"#,
+                state = state.path().display()
+            );
+            let _env = EnvGuard::new(&[("git", &git_script), ("gh", &gh)]);
+            let repo = TestRepo::new();
+            let git = |args: &[&str]| {
+                let out = Command::new(real_git)
+                    .args(args)
+                    .current_dir(repo.path())
+                    .output()
+                    .unwrap();
+                assert!(out.status.success(), "{out:?}");
+                out.stdout
+            };
+            fs::create_dir_all(repo.path().join(".lf")).unwrap();
+            fs::write(
+                repo.path().join(".lf/config.yaml"),
+                if rebuilding {
+                    "release:\n  targets:\n    default:\n      verify: []\n"
+                } else {
+                    "release:\n  targets:\n    default:\n      verify:\n      - sh -c 'exit 71'\n"
+                },
+            )
+            .unwrap();
+            git(&["add", "."]);
+            git(&["commit", "-m", "Configure source proof"]);
+            git(&["push", "origin", "HEAD"]);
+            let source = String::from_utf8(git(&["rev-parse", "HEAD"]))
+                .unwrap()
+                .trim()
+                .to_string();
+            let branch = if rebuilding {
+                "jack/release-default-v0-9-1".to_string()
+            } else {
+                format!("jack/verify-default-{source}")
+            };
+            if rebuilding {
+                git(&["checkout", "-b", &branch]);
+                fs::write(repo.path().join("prepared.txt"), "old preparation\n").unwrap();
+                git(&["add", "prepared.txt"]);
+                git(&["commit", "-m", "Prior preparation"]);
+                fs::write(state.path().join("pr-head"), git(&["rev-parse", "HEAD"])).unwrap();
+                git(&["push", "origin", &branch]);
+                git(&["checkout", "main"]);
+                git(&["branch", "-D", &branch]);
+            }
+            let checkout = loopflow::engine::worktrees::worktree_path(
+                repo.path(),
+                branch.strip_prefix("jack/").unwrap(),
+            );
+            fs::write(repo.path().join("local.txt"), "unpublished\n").unwrap();
+            git(&["add", "local.txt"]);
+            git(&["commit", "-m", "Keep caller local"]);
+            fs::write(repo.path().join("local.txt"), "staged\n").unwrap();
+            git(&["add", "local.txt"]);
+            fs::write(repo.path().join("local.txt"), "unstaged\n").unwrap();
+            fs::write(repo.path().join("untracked.txt"), "untracked\n").unwrap();
+            let head = git(&["rev-parse", "HEAD"]);
+            let caller_branch = git(&["branch", "--show-current"]);
+            let index = fs::read(repo.path().join(".git/index")).unwrap();
+            let remote_heads = git(&["ls-remote", "--heads", "origin"]);
+            // Prove each fetch advances an existing stale observation.
+            if stage == "fetch" {
+                git(&[
+                    "update-ref",
+                    "refs/remotes/origin/main",
+                    &format!("{source}^"),
+                ]);
+            } else if stage == "branch-fetch" {
+                git(&[
+                    "update-ref",
+                    &format!("refs/remotes/origin/{branch}"),
+                    &source,
+                ]);
+            }
+            fs::write(state.path().join("armed"), "").unwrap();
+            let mut parent = start(&repo, state.path(), &["release", "run", "0.9.1"]);
+            if kill_controller {
+                parent.child.kill().unwrap();
+            } else {
+                let deadline = Instant::now() + Duration::from_secs(20);
+                while parent.child.try_wait().unwrap().is_none() {
+                    assert!(Instant::now() < deadline, "controller did not exit");
+                    thread::sleep(Duration::from_millis(10));
+                }
+            }
+            assert!(!parent.child.wait().unwrap().success());
+            let contender = release_tag(repo.path(), "0.9.2", None);
+            let protected_checkout = matches!(stage, "add" | "remove" | "reset");
+            let removal = protected_checkout.then(|| worktree_remove(repo.path(), &checkout));
+            fs::write(state.path().join("allow"), "").unwrap();
+            assert!(
+                matches!(contender, Err(OpsError::ReleaseDeferred { .. })),
+                "{contender:?}"
+            );
+            if let Some(removal) = removal {
+                assert!(removal.is_err(), "removed active {stage} checkout");
+            }
+            wait_for(&state.path().join("completed"));
+            wait_until_released(|| release_tag(repo.path(), "0.9.2", None).map(|_| ()));
+            match stage {
+                "add" | "reset" => {
+                    let out = Command::new(real_git)
+                        .args(["rev-parse", "HEAD"])
+                        .current_dir(&checkout)
+                        .output()
+                        .unwrap();
+                    assert!(out.status.success(), "{out:?}");
+                    assert_eq!(String::from_utf8(out.stdout).unwrap().trim(), source);
+                    assert!(!checkout.join("prepared.txt").exists());
+                    worktree_remove(repo.path(), &checkout).unwrap();
+                }
+                "remove" => assert!(!checkout.exists()),
+                "delete" => assert!(!Command::new(real_git)
+                    .args(["show-ref", "--verify", &format!("refs/heads/{branch}")])
+                    .current_dir(repo.path())
+                    .output()
+                    .unwrap()
+                    .status
+                    .success()),
+                "fetch" => assert_eq!(
+                    String::from_utf8(git(&["rev-parse", "origin/main"]))
+                        .unwrap()
+                        .trim(),
+                    source
+                ),
+                "branch-fetch" => assert_eq!(
+                    git(&["rev-parse", &format!("origin/{branch}")]),
+                    fs::read(state.path().join("pr-head")).unwrap()
+                ),
+                _ => unreachable!(),
+            }
+            assert_eq!(
+                git(&["ls-remote", "--heads", "origin"]),
+                remote_heads,
+                "source checkout operations must not publish a branch"
+            );
+            assert_eq!(git(&["rev-parse", "HEAD"]), head);
+            assert_eq!(git(&["branch", "--show-current"]), caller_branch);
+            assert_eq!(fs::read(repo.path().join(".git/index")).unwrap(), index);
+            assert_eq!(
+                fs::read_to_string(repo.path().join("local.txt")).unwrap(),
+                "unstaged\n"
+            );
+            assert_eq!(
+                fs::read_to_string(repo.path().join("untracked.txt")).unwrap(),
+                "untracked\n"
+            );
+        }
     }
 }

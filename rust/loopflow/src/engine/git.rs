@@ -159,7 +159,16 @@ fn list_conflicts(repo: &Path) -> Result<Vec<PathBuf>, GitError> {
 
 /// Fetch a remote ref (e.g., "origin/main").
 pub fn fetch(repo: &Path, remote: &str, refspec: &str) -> Result<(), GitError> {
-    let output = run_git(repo, &["fetch", remote, refspec])?;
+    fetch_inheriting(repo, remote, refspec, &|_| {})
+}
+
+pub(crate) fn fetch_inheriting(
+    repo: &Path,
+    remote: &str,
+    refspec: &str,
+    inherit: &impl Fn(&mut Command),
+) -> Result<(), GitError> {
+    let output = run_git_inheriting(repo, &["fetch", remote, refspec], inherit)?;
     if !output.status.success() {
         return Err(GitError::CommandFailed {
             command: format!("git fetch {} {}", remote, refspec),
@@ -328,7 +337,15 @@ pub fn delete_remote_branch(repo: &Path, remote: &str, branch: &str) -> Result<(
 }
 
 pub fn delete_local_branch(repo: &Path, branch: &str) -> Result<(), GitError> {
-    let output = run_git(repo, &["branch", "-D", branch])?;
+    delete_local_branch_inheriting(repo, branch, &|_| {})
+}
+
+pub(crate) fn delete_local_branch_inheriting(
+    repo: &Path,
+    branch: &str,
+    inherit: &impl Fn(&mut Command),
+) -> Result<(), GitError> {
+    let output = run_git_inheriting(repo, &["branch", "-D", branch], inherit)?;
     if !output.status.success() {
         return Err(GitError::CommandFailed {
             command: format!("git branch -D {}", branch),
@@ -853,27 +870,16 @@ pub(crate) fn acquire_worktree_lease(
     })
 }
 
-fn remove_worktree_unchecked(repo: &Path, path: &Path) -> Result<(), GitError> {
-    let path_str = path.to_string_lossy();
-    let output = run_git(repo, &["worktree", "remove", "--force", path_str.as_ref()])?;
-    if !output.status.success() {
-        return Err(GitError::CommandFailed {
-            command: format!("git worktree remove --force {}", path.to_string_lossy()),
-            stderr: String::from_utf8_lossy(&output.stderr).to_string(),
-        });
-    }
-    Ok(())
-}
-
 pub fn worktree_remove(repo: &Path, path: &Path) -> Result<(), GitError> {
-    let _lease = acquire_worktree_lease(repo, path, "worktree removal")?;
-    remove_worktree_unchecked(repo, path)
+    let lease = acquire_worktree_lease(repo, path, "worktree removal")?;
+    worktree_remove_owned(repo, path, &lease, &|_| {})
 }
 
 pub(crate) fn worktree_remove_owned(
     repo: &Path,
     path: &Path,
     lease: &WorktreeLease,
+    inherit: &impl Fn(&mut Command),
 ) -> Result<(), GitError> {
     let path = normalized_worktree_path(repo, path);
     if lease.path != path {
@@ -882,7 +888,22 @@ pub(crate) fn worktree_remove_owned(
             stderr: format!("lease does not own {}", path.display()),
         });
     }
-    remove_worktree_unchecked(repo, &path)
+    let path_str = path.to_string_lossy();
+    let output = run_git_inheriting(
+        repo,
+        &["worktree", "remove", "--force", path_str.as_ref()],
+        &|command| {
+            lease.inherit(command);
+            inherit(command);
+        },
+    )?;
+    if !output.status.success() {
+        return Err(GitError::CommandFailed {
+            command: format!("git worktree remove --force {}", path.display()),
+            stderr: String::from_utf8_lossy(&output.stderr).to_string(),
+        });
+    }
+    Ok(())
 }
 
 /// Move a worktree to a new path.
@@ -920,6 +941,16 @@ pub fn worktree_add(
     branch: &str,
     mode: WorktreeBranch<'_>,
 ) -> Result<(), GitError> {
+    worktree_add_inheriting(repo, path, branch, mode, &|_| {})
+}
+
+pub(crate) fn worktree_add_inheriting(
+    repo: &Path,
+    path: &Path,
+    branch: &str,
+    mode: WorktreeBranch<'_>,
+    inherit: &impl Fn(&mut Command),
+) -> Result<(), GitError> {
     let path_str = path.to_string_lossy();
     let args: Vec<&str> = match mode {
         WorktreeBranch::New { start_point } => {
@@ -947,7 +978,7 @@ pub fn worktree_add(
             vec!["worktree", "add", path_str.as_ref(), branch]
         }
     };
-    let output = run_git(repo, &args)?;
+    let output = run_git_inheriting(repo, &args, inherit)?;
     if !output.status.success() {
         // A failing post-checkout hook causes git to exit non-zero even when
         // the worktree was created successfully. Verify before reporting failure.

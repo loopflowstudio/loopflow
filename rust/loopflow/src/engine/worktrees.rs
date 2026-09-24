@@ -2,7 +2,7 @@ use crate::engine::error::GitError;
 use crate::engine::git::{
     current_branch, delete_local_branch, fetch, get_default_branch, has_commits_beyond, has_origin,
     is_ancestor, is_clean, is_squash_merged, rev_parse, stash_including_untracked, stash_pop,
-    sync_main, worktree_add, worktree_remove, WorktreeBranch,
+    sync_main, worktree_add, worktree_add_inheriting, worktree_remove, WorktreeBranch,
 };
 use crate::engine::identity::WorktreeName;
 use crate::engine::naming::git_user;
@@ -975,7 +975,7 @@ pub fn prune_abandoned_prompt_logs(
     Ok(removed)
 }
 
-/// Create a named sibling worktree on an author-scoped branch.
+/// Create a local named sibling worktree; the caller owns publishing its branch.
 ///
 /// This is a low-level compatibility helper for release and diagnostic
 /// worktree operations. Wave and Project runtimes always use the canonical
@@ -985,6 +985,7 @@ pub fn create_named_worktree(
     name: &str,
     base: Option<&str>,
     sync_default_base: bool,
+    inherit_creation: &impl Fn(&mut Command),
 ) -> Result<CreateWorktreeResult, GitError> {
     if sync_default_base {
         if let Ok(default_branch) = get_default_branch(repo) {
@@ -1030,7 +1031,7 @@ pub fn create_named_worktree(
                 remote: &remote_branch,
             }
         };
-        worktree_add(repo, &worktree_path, &branch, mode)?;
+        worktree_add_inheriting(repo, &worktree_path, &branch, mode, inherit_creation)?;
         return Ok(CreateWorktreeResult {
             path: worktree_path,
             branch,
@@ -1055,15 +1056,15 @@ pub fn create_named_worktree(
         None
     };
 
-    worktree_add(
+    worktree_add_inheriting(
         repo,
         &worktree_path,
         &branch,
         WorktreeBranch::New {
             start_point: base_ref,
         },
+        inherit_creation,
     )?;
-    schedule_upstream_sync(worktree_path.clone(), branch.clone());
     Ok(CreateWorktreeResult {
         path: worktree_path,
         branch,

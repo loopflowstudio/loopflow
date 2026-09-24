@@ -18,8 +18,8 @@ use crate::engine::config::{
     load_config_or_default, Config, ReleaseCompletion, ReleaseTargetConfig,
 };
 use crate::engine::git::{
-    acquire_worktree_lease, current_branch, delete_local_branch, fetch, get_default_branch,
-    is_clean, ref_exists, rev_parse, worktree_remove, worktree_remove_owned, WorktreeLease,
+    acquire_worktree_lease, current_branch, delete_local_branch_inheriting, fetch_inheriting,
+    get_default_branch, is_clean, ref_exists, rev_parse, worktree_remove_owned, WorktreeLease,
 };
 use crate::engine::naming::{git_user, sanitize_for_branch};
 use crate::engine::prompt::write_prompt_log;
@@ -783,10 +783,11 @@ fn release_run_inner(
     }
     let (main_repo, target) = resolve_repo_and_target(repo, target_name)?;
     let default_branch = get_default_branch(&main_repo)?;
-    fetch(
+    fetch_inheriting(
         &main_repo,
         "origin",
         &format!("+refs/heads/{default_branch}:refs/remotes/origin/{default_branch}"),
+        &|command| lock.inherit(command),
     )?;
     let source_commit = rev_parse(&main_repo, &format!("origin/{default_branch}"))?;
 
@@ -1010,14 +1011,23 @@ fn release_run_inner(
             &worktree_path(&main_repo, &wt_name),
             "release PR preparation",
         )?;
-        let wt = create_named_worktree(&main_repo, &wt_name, Some(&source_commit), false)?;
+        let wt = create_named_worktree(
+            &main_repo,
+            &wt_name,
+            Some(&source_commit),
+            false,
+            &|command| {
+                lock.inherit(command);
+                lease.inherit(command);
+            },
+        )?;
         let wt_path = wt.path;
         let wt_branch = wt.branch;
 
         let prepared = prepare_release_in_worktree(
             &wt_path, &version, &changes, &target, progress, lock, &lease,
         );
-        cleanup_release_worktree(&main_repo, &wt_path, &wt_branch, lease, progress);
+        cleanup_release_worktree(&main_repo, &wt_path, &wt_branch, lease, progress, lock);
         let prepared = prepared?;
 
         progress.status("Waiting for release PR to merge...");
@@ -1195,7 +1205,7 @@ fn verify_source(
             &worktree_path(repo, &name),
             "release source verification",
         )?;
-        let wt = materialize_exact_source_worktree(repo, &name, source, &lease)?;
+        let wt = materialize_exact_source_worktree(repo, &name, source, &lease, lock)?;
         let result = run_release_hooks(
             &wt.path,
             &target.verify,
@@ -1206,7 +1216,7 @@ fn verify_source(
             lock,
             &lease,
         );
-        cleanup_release_worktree(repo, &wt.path, &wt.branch, lease, progress);
+        cleanup_release_worktree(repo, &wt.path, &wt.branch, lease, progress, lock);
         result?;
     }
     persist_verification(
@@ -1379,7 +1389,7 @@ fn verify_release_outcome(
         &worktree_path(repo, &name),
         "public release verification",
     )?;
-    let wt = materialize_exact_source_worktree(repo, &name, &commit, &lease)?;
+    let wt = materialize_exact_source_worktree(repo, &name, &commit, &lease, lock)?;
     let mut command = lock.command(program);
     lease.inherit(&mut command);
     command
@@ -1393,7 +1403,7 @@ fn verify_release_outcome(
         command: e.command_line(),
         stderr: e.stderr,
     });
-    cleanup_release_worktree(repo, &wt.path, &wt.branch, lease, progress);
+    cleanup_release_worktree(repo, &wt.path, &wt.branch, lease, progress, lock);
     checked?;
     let proof_path = repo
         .join(".lf/logs")
@@ -1464,7 +1474,12 @@ fn materialize_exact_source_worktree(
     worktree_name: &str,
     revision: &str,
     lease: &WorktreeLease,
+    lock: &ReleaseLock,
 ) -> OpsResult<CreateWorktreeResult> {
+    let inherit = |command: &mut Command| {
+        lock.inherit(command);
+        lease.inherit(command);
+    };
     let path = worktree_path(repo, worktree_name);
     let branch = release_branch_name(repo, worktree_name)?;
     let expected_commit = rev_parse(repo, &format!("{revision}^{{commit}}"))?;
@@ -1580,20 +1595,20 @@ fn materialize_exact_source_worktree(
     }
 
     if registered_at_path.is_some() {
-        worktree_remove_owned(repo, &path, lease)?;
+        worktree_remove_owned(repo, &path, lease, &inherit)?;
     }
     if local_head.is_some() {
-        delete_local_branch(repo, &branch)?;
+        delete_local_branch_inheriting(repo, &branch, &inherit)?;
     }
     if path.exists() {
         fs::remove_dir(&path)?;
     }
 
-    let worktree = create_named_worktree(repo, worktree_name, Some(revision), false)?;
+    let worktree = create_named_worktree(repo, worktree_name, Some(revision), false, &inherit)?;
     let observed_head = rev_parse(&worktree.path, "HEAD^{commit}")?;
     if observed_head != expected_commit {
-        let _ = worktree_remove_owned(repo, &worktree.path, lease);
-        let _ = delete_local_branch(repo, &worktree.branch);
+        let _ = worktree_remove_owned(repo, &worktree.path, lease, &inherit);
+        let _ = delete_local_branch_inheriting(repo, &worktree.branch, &inherit);
         return Err(OpsError::Message(format!(
             "publisher worktree {} materialized branch {branch} at {observed_head}, expected {expected_commit}; cleanup was attempted",
             path.display()
@@ -1717,7 +1732,7 @@ fn prepare_publisher(
         &format!("release candidate preparation for {}", candidate.tag),
     )?;
     progress.status(&format!("Preparing signed candidate {}...", candidate.tag));
-    let wt = materialize_exact_source_worktree(repo, &wt_name, &candidate.commit, &lease)?;
+    let wt = materialize_exact_source_worktree(repo, &wt_name, &candidate.commit, &lease, lock)?;
     let prepare_result = {
         let mut cmd = lock.command(program);
         lease.inherit(&mut cmd);
@@ -1741,7 +1756,7 @@ fn prepare_publisher(
             stderr: err.stderr,
         })
     };
-    cleanup_release_worktree(repo, &wt.path, &wt.branch, lease, progress);
+    cleanup_release_worktree(repo, &wt.path, &wt.branch, lease, progress, lock);
     prepare_result?;
 
     if !artifact_dir.join("candidate.json").is_file() {
@@ -1794,7 +1809,7 @@ fn run_publisher(
     progress.status(&format!(
         "Materializing tagged publisher worktree {wt_name}..."
     ));
-    let wt = materialize_exact_source_worktree(repo, &wt_name, tag, &lease)?;
+    let wt = materialize_exact_source_worktree(repo, &wt_name, tag, &lease, lock)?;
     let publish_result = {
         let mut cmd = lock.command(program);
         lease.inherit(&mut cmd);
@@ -1816,7 +1831,7 @@ fn run_publisher(
             stderr: err.stderr,
         })
     };
-    cleanup_release_worktree(repo, &wt.path, &wt.branch, lease, progress);
+    cleanup_release_worktree(repo, &wt.path, &wt.branch, lease, progress, lock);
     publish_result?;
 
     if github_release_state(repo, tag)? != GitHubReleaseState::Published {
@@ -1969,7 +1984,7 @@ fn finish_release_pr(
                     "Release PR #{} is {state}; rebuilding on current main...",
                     prepared.pr_number
                 ));
-                fetch_release_branch(main_repo, &release_branch, &prepared.head_sha)?;
+                fetch_release_branch(main_repo, &release_branch, &prepared.head_sha, lock)?;
                 let default_branch = get_default_branch(main_repo)?;
                 let main_ref = format!("origin/{default_branch}");
                 run_locked_stdout(
@@ -1994,25 +2009,36 @@ fn finish_release_pr(
                     worktree_name,
                     &prepared.head_sha,
                     &lease,
+                    lock,
                 )?;
                 let refreshed = (|| {
-                    run_stdout(&wt.path, "git", &["reset", "--hard", &main_ref])?;
+                    let mut reset = lock.command("git");
+                    reset
+                        .current_dir(&wt.path)
+                        .args(["reset", "--hard", &main_ref]);
+                    lease.inherit(&mut reset);
+                    command_stdout(&mut reset)?;
                     let changes = collect_release_changes(main_repo, target)?;
                     prepare_release_in_worktree(
                         &wt.path, version, &changes, target, progress, lock, &lease,
                     )
                 })();
-                cleanup_release_worktree(main_repo, &wt.path, &wt.branch, lease, progress);
+                cleanup_release_worktree(main_repo, &wt.path, &wt.branch, lease, progress, lock);
                 prepared = refreshed?;
             }
         }
     }
 }
 
-fn fetch_release_branch(repo: &Path, branch: &str, expected_head: &str) -> OpsResult<()> {
+fn fetch_release_branch(
+    repo: &Path,
+    branch: &str,
+    expected_head: &str,
+    lock: &ReleaseLock,
+) -> OpsResult<()> {
     let remote_ref = format!("refs/remotes/origin/{branch}");
     let refspec = format!("+refs/heads/{branch}:{remote_ref}");
-    fetch(repo, "origin", &refspec)?;
+    fetch_inheriting(repo, "origin", &refspec, &|command| lock.inherit(command))?;
     let remote_head = crate::engine::git::rev_parse(repo, &remote_ref)?;
     if remote_head != expected_head {
         return Err(OpsError::Message(format!(
@@ -2631,18 +2657,26 @@ fn cleanup_release_worktree(
     branch: &str,
     lease: WorktreeLease,
     progress: &impl Progress,
+    lock: &ReleaseLock,
 ) {
-    // A descendant can retain our open file description after its launcher exits.
-    // Reacquire independently so cleanup cannot bypass that surviving ownership.
+    // Reacquire independently: a descendant may still hold the old description.
     drop(lease);
-    if let Err(err) = worktree_remove(main_repo, wt_path) {
+    let removal = (|| {
+        let lease = acquire_worktree_lease(main_repo, wt_path, "release worktree cleanup")?;
+        let inherit = |command: &mut Command| {
+            lock.inherit(command);
+            lease.inherit(command);
+        };
+        worktree_remove_owned(main_repo, wt_path, &lease, &inherit)?;
+        let _ = delete_local_branch_inheriting(main_repo, branch, &inherit);
+        Ok::<_, crate::engine::error::GitError>(())
+    })();
+    if let Err(err) = removal {
         progress.error(&format!(
             "Warning: could not remove release worktree {}: {err}",
             wt_path.display()
         ));
-        return;
     }
-    let _ = delete_local_branch(main_repo, branch);
 }
 
 fn release_commit_message(target: &ReleaseTarget, version: &str) -> String {

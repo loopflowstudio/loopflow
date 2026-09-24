@@ -69,17 +69,17 @@ fn tool(
     }
 }
 
-fn push(page: &mut SourcePage, id: String, turn: String, item: ConversationItem) {
+fn push(page: &mut SourcePage, id: String, turn: String, item: ConversationItem) -> bool {
     let event = ConversationEvent::ItemCompleted {
         turn_id: turn,
         item,
     };
     let revision = digest(&serde_json::to_vec(&event).expect("conversation event serializes"));
-    page.records.push(OutputRecord {
+    page.push(OutputRecord {
         source_item_id: id,
         revision,
         event,
-    });
+    })
 }
 
 pub(super) fn normalize_jsonl(
@@ -88,7 +88,7 @@ pub(super) fn normalize_jsonl(
     value: &Value,
     offset: u64,
     page: &mut SourcePage,
-) -> io::Result<()> {
+) -> io::Result<bool> {
     match source {
         OutputSource::Claude => {
             if let Some(observed) = value.get("sessionId").and_then(Value::as_str) {
@@ -101,7 +101,7 @@ pub(super) fn normalize_jsonl(
             }
             let kind = text(value, "type");
             if !matches!(kind.as_str(), "assistant" | "user") {
-                return Ok(());
+                return Ok(true);
             }
             if !page.cursor.session_verified {
                 return Err(io::Error::other(
@@ -112,7 +112,7 @@ pub(super) fn normalize_jsonl(
             if uuid.is_empty() {
                 page.gaps
                     .push(gap("missing_item_identity", "Claude message has no UUID"));
-                return Ok(());
+                return Ok(true);
             }
             let message = &value["message"];
             let turn = message
@@ -121,14 +121,24 @@ pub(super) fn normalize_jsonl(
                 .unwrap_or(&uuid)
                 .to_string();
             if let Some(body) = message["content"].as_str() {
-                push(
+                return Ok(push(
                     page,
                     uuid.clone(),
                     turn,
                     self::message(uuid, body.into(), Some(kind)),
-                );
+                ));
             } else if let Some(blocks) = message["content"].as_array() {
-                for (index, block) in blocks.iter().enumerate() {
+                let first = page
+                    .cursor
+                    .pending_line
+                    .as_ref()
+                    .map_or(0, |(_, index)| *index);
+                for (index, block) in blocks.iter().enumerate().skip(first).take(PAGE_RECORDS) {
+                    page.cursor
+                        .pending_line
+                        .as_mut()
+                        .expect("JSONL line is pending")
+                        .1 = index + 1;
                     let id = format!("{uuid}:{index}");
                     let block_kind = text(block, "type");
                     let item_id = match block_kind.as_str() {
@@ -161,8 +171,16 @@ pub(super) fn normalize_jsonl(
                         ),
                         _ => continue,
                     };
-                    push(page, id, turn.clone(), item);
+                    if !push(page, id, turn.clone(), item) {
+                        page.cursor
+                            .pending_line
+                            .as_mut()
+                            .expect("JSONL line is pending")
+                            .1 = index;
+                        return Ok(false);
+                    }
                 }
+                return Ok(first.saturating_add(PAGE_RECORDS) >= blocks.len());
             }
         }
         OutputSource::Codex => {
@@ -175,12 +193,12 @@ pub(super) fn normalize_jsonl(
                     ));
                 }
                 page.cursor.session_verified = true;
-                return Ok(());
+                return Ok(true);
             }
             // Response items are canonical. event_msg prose/tool mirrors and internal
             // reasoning/context records must never become another transcript copy.
             if kind != "response_item" && !(kind == "event_msg" && payload["type"] == "error") {
-                return Ok(());
+                return Ok(true);
             }
             if !page.cursor.session_verified {
                 return Err(io::Error::other(
@@ -201,7 +219,7 @@ pub(super) fn normalize_jsonl(
                 _ => Some(id.clone()),
             };
             let Some(item_id) = item_id else {
-                return Ok(());
+                return Ok(true);
             };
             let item = match item_kind.as_str() {
                 "message" if matches!(payload["role"].as_str(), Some("assistant" | "user")) => {
@@ -233,7 +251,7 @@ pub(super) fn normalize_jsonl(
                     Lifecycle::Completed,
                 ),
                 "error" if kind == "event_msg" => {
-                    page.records.push(OutputRecord {
+                    return Ok(page.push(OutputRecord {
                         source_item_id: id,
                         revision: digest(&serde_json::to_vec(payload)?),
                         event: ConversationEvent::Error {
@@ -241,16 +259,15 @@ pub(super) fn normalize_jsonl(
                             message: text(payload, "message"),
                             evidence: None,
                         },
-                    });
-                    return Ok(());
+                    }));
                 }
-                _ => return Ok(()),
+                _ => return Ok(true),
             };
-            push(page, id, session.into(), item);
+            return Ok(push(page, id, session.into(), item));
         }
         _ => {}
     }
-    Ok(())
+    Ok(true)
 }
 
 #[derive(Debug, Clone, Serialize, Deserialize)]
@@ -444,7 +461,7 @@ fn read_parts_in(path: &Path, session: &str, page: &mut SourcePage) -> anyhow::R
         }
         count += 1;
         bytes += data.len() + message.len();
-        cursor.after = Some((updated, id.clone()));
+        let previous_after = cursor.after.replace((updated, id.clone()));
         if data.len() + message.len() > PAGE_BYTES {
             page.gaps.push(gap(
                 "record_too_large",
@@ -481,6 +498,43 @@ fn read_parts_in(path: &Path, session: &str, page: &mut SourcePage) -> anyhow::R
             ),
             _ => false,
         };
+        let item = if matches!(message["role"].as_str(), Some("assistant" | "user")) {
+            match part["type"].as_str() {
+                Some("text") => Some(self::message(
+                    id.clone(),
+                    text(&part, "text"),
+                    message["role"].as_str().map(str::to_owned),
+                )),
+                Some("tool") => {
+                    let state = &part["state"];
+                    let status = match state["status"].as_str() {
+                        Some("completed") => Lifecycle::Completed,
+                        Some("error") => Lifecycle::Failed,
+                        _ => Lifecycle::Running,
+                    };
+                    Some(tool(
+                        id.clone(),
+                        text(&part, "tool"),
+                        state.get("input").cloned(),
+                        state
+                            .get("output")
+                            .or_else(|| state.get("error"))
+                            .map(content),
+                        status,
+                    ))
+                }
+                _ => None,
+            }
+        } else {
+            None
+        };
+        if let Some(item) = item {
+            if !push(page, id.clone(), message_id, item) {
+                cursor.after = previous_after;
+                page.has_more = true;
+                break;
+            }
+        }
         cursor.seen.insert(
             id.clone(),
             PartRevision {
@@ -489,36 +543,6 @@ fn read_parts_in(path: &Path, session: &str, page: &mut SourcePage) -> anyhow::R
                 unfinished,
             },
         );
-        if !matches!(message["role"].as_str(), Some("assistant" | "user")) {
-            continue;
-        }
-        let item = match part["type"].as_str() {
-            Some("text") => self::message(
-                id.clone(),
-                text(&part, "text"),
-                message["role"].as_str().map(str::to_owned),
-            ),
-            Some("tool") => {
-                let state = &part["state"];
-                let status = match state["status"].as_str() {
-                    Some("completed") => Lifecycle::Completed,
-                    Some("error") => Lifecycle::Failed,
-                    _ => Lifecycle::Running,
-                };
-                tool(
-                    id.clone(),
-                    text(&part, "tool"),
-                    state.get("input").cloned(),
-                    state
-                        .get("output")
-                        .or_else(|| state.get("error"))
-                        .map(content),
-                    status,
-                )
-            }
-            _ => continue,
-        };
-        push(page, id, message_id, item);
     }
     if !page.has_more {
         cursor.watermark = cursor.ceiling;

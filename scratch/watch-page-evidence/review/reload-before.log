@@ -1,0 +1,70 @@
+[0/1] Planning build
+Building for debugging...
+[0/6] Write sources
+[1/6] Write swift-version--58304C5D6DBC2206.txt
+[3/39] Compiling LoopflowTests MockWaveFixtureTests.swift
+[4/39] Compiling LoopflowTests MultiplexerLayoutTests.swift
+[5/39] Compiling LoopflowTests MultiplexerStoreTests.swift
+[6/39] Compiling LoopflowTests NowProjectionTests.swift
+[7/39] Compiling LoopflowTests PodiumModelTests.swift
+[8/39] Compiling LoopflowTests PortfolioRepoStateTests.swift
+[9/39] Compiling LoopflowTests PortfolioServiceTests.swift
+[10/39] Compiling LoopflowTests ProjectFailureHistoryViewTests.swift
+[11/39] Compiling LoopflowTests ReferenceTextViewTests.swift
+[12/39] Compiling LoopflowTests RegistryQueryTests.swift
+[13/39] Compiling LoopflowTests RepoScannerTests.swift
+[14/50] Emitting module LoopflowTests
+[15/50] Compiling LoopflowTests RoadmapViewTests.swift
+[16/50] Compiling LoopflowTests SelectableAssistantTextViewTests.swift
+[17/50] Compiling LoopflowTests SessionsPolishTests.swift
+[18/50] Compiling LoopflowTests SessionsStoreTests.swift
+[19/50] Compiling LoopflowTests TaskWatchFeedTests.swift
+[20/50] Compiling LoopflowTests TaskWatchOutputTests.swift
+[21/50] Compiling LoopflowTests TaskWatchTests.swift
+[22/50] Compiling LoopflowTests TaskWatchWindowTests.swift
+[23/50] Compiling LoopflowTests TestHostTerminator.swift
+[24/50] Compiling LoopflowTests WaveChatConnectionTests.swift
+[25/50] Compiling LoopflowTests WaveChatStreamTests.swift
+[26/50] Compiling LoopflowTests AppAppearanceTests.swift
+[27/50] Compiling LoopflowTests AppBootstrapResourceTests.swift
+[28/50] Compiling LoopflowTests AttemptFailurePresentationTests.swift
+[29/50] Compiling LoopflowTests BundledDaemonPathTests.swift
+[30/50] Compiling LoopflowTests ChatReferenceTests.swift
+[31/50] Compiling LoopflowTests ContractTests.swift
+[32/50] Compiling LoopflowTests DTOFixtureTests.swift
+[33/50] Compiling LoopflowTests FaderSwitchTests.swift
+[34/50] Compiling LoopflowTests GhosttyTerminalInputTests.swift
+[35/50] Compiling LoopflowTests LocalWaveAgentLauncherTests.swift
+[36/50] Compiling LoopflowTests LoopflowStateTests.swift
+[37/50] Compiling LoopflowTests MessageRowTests.swift
+[38/50] Compiling LoopflowTests WaveChatTranscriptTests.swift
+[39/50] Compiling LoopflowTests WaveDetailReadingTests.swift
+[40/50] Compiling LoopflowTests WaveLensTests.swift
+[41/50] Compiling LoopflowTests WaveOriginTests.swift
+[42/50] Compiling LoopflowTests WavePlanParserTests.swift
+[43/50] Compiling LoopflowTests WaveRowTests.swift
+[44/50] Compiling LoopflowTests WaveSurfacePrimaryHierarchyTests.swift
+[45/50] Compiling LoopflowTests WaveTests.swift
+[46/50] Compiling LoopflowTests WorkspaceNavigationProofTests.swift
+[47/50] Compiling LoopflowTests WorkspaceNavigationTests.swift
+[48/50] Compiling LoopflowTests WorktreeWorkspaceTests.swift
+[48/50] Write Objects.LinkFileList
+[49/50] Linking LoopflowSwiftPackageTests
+Build complete! (8.43s)
+Test Suite 'Selected tests' started at 2026-09-24 13:40:52.406.
+Test Suite 'LoopflowSwiftPackageTests.xctest' started at 2026-09-24 13:40:52.408.
+Test Suite 'LoopflowSwiftPackageTests.xctest' passed at 2026-09-24 13:40:52.408.
+	 Executed 0 tests, with 0 failures (0 unexpected) in 0.000 (0.000) seconds
+Test Suite 'Selected tests' passed at 2026-09-24 13:40:52.408.
+	 Executed 0 tests, with 0 failures (0 unexpected) in 0.000 (0.002) seconds
+◇ Test run started.
+↳ Testing Library Version: 1501
+↳ Target Platform: arm64e-apple-macos14.0
+◇ Suite "Task Watch feed" started.
+◇ Test "Source reset and cursor errors preserve evidence until explicit reload" started.
+◇ Test case passing 1 argument sourceReset → true to "Source reset and cursor errors preserve evidence until explicit reload" started.
+◇ Test case passing 1 argument sourceReset → false to "Source reset and cursor errors preserve evidence until explicit reload" started.
+✘ Test "Source reset and cursor errors preserve evidence until explicit reload" recorded an issue with 1 argument sourceReset → false at TaskWatchFeedTests.swift:68:6: Caught error: Search did not find a match. Possible blockers: AccessibilityImageLabel, AccessibilityImageLabel
+✘ Test "Source reset and cursor errors preserve evidence until explicit reload" with 2 test cases failed after 0.040 seconds with 1 issue.
+✘ Suite "Task Watch feed" failed after 0.040 seconds with 1 issue.
+✘ Test run with 1 test in 1 suite failed after 0.040 seconds with 1 issue.

@@ -144,35 +144,35 @@ DTOs or service APIs unless a concrete desktop interaction requires them. Resolv
 reader and retention limits in the existing Watch view before enabling polling.
 A successful CLI read alone is not the product finish line.
 
-Bound navigation-retained Watch views to the four most recently viewed Tasks
-in each repository/window. WorkspaceNavigation remains the owner; replace its
-unbounded dictionary with one ordered collection of Task IDs and existing stores.
-Revisiting a retained Task promotes that same store. Visiting a fifth releases the
-least recently viewed store, including its snapshot, output and both cursors.
-Do not keep a second selection cache, eviction tombstones, or discarded payloads.
-The existing per-Task 4,096-record / 16 MiB payload window still applies.
+Bound normalized output pages in the existing Rust source reader to 128 output
+records and 8 MiB of serialized record payload per source. Source-line limits do
+not bound normalization: one Claude message can contain thousands of blocks and
+repeat a large message identity in each output record. Continue within that
+same complete line using its digest and next content-block index in the opaque
+reader cursor. Keep source IDs and tool correlation unchanged. A changed pending
+line resets the source; an incomplete trailing line still waits. Tail startup
+must discard historical block continuation and start after the last complete line.
 
-Opening an evicted Task creates a fresh Watch presentation and uses the existing
-mounted view's snapshot and independent tail/history reads. History remains in
-Rust/provider storage and Load history remains available. Selection/filter and
-loaded-page retention are limited to the recent four; document this behavior.
-Repository and window caches stay independent. Terminal surfaces, pane layout,
-provider processes, Work identity and durable history retain their existing owners.
+Apply the same normalized payload budget to journals, Codex and OpenCode through
+the existing SourcePage owner. A page that fills leaves its next record unread;
+a single oversized normalized record reports a gap and advances so later output
+remains reachable. Never build the whole expanded message before limiting it.
+No new command, DTO or durable state is needed. Update the private cursor version;
+an older retained continuation requires Reload output.
 
-Done when a focused Swift behavior test fills the four real stores with plans
-and output, revisits one, and proves the least recently viewed store is released.
-Recent filters/output must survive. Reopening a released Task must recover its
-plan and early output through RegistryQuery without reusing discarded cursors;
-subsequent Follow must not duplicate rows. The existing workspace proof must
-still cover repository isolation, retained terminal layout and unmounting Watch
-while hidden. Verify Mac compilation as part of these focused tests.
+Done when focused Rust tests page a multi-page Claude message without lost or
+repeated blocks, preserve cross-page tool identity, retain an independent live
+tail, and reset on an in-place pending-line replacement. Exercise serialized
+payload expansion (including an oversized normalized record) and prove the next
+read progresses. Cover OpenCode continuation under the same payload bound. Use
+the existing desktop reader/store to verify the resulting pages still merge and
+filter without duplicates; compile that focused Swift proof.
 
-This bounds cached Watch store count per repository/window, not total app memory.
-Other windows/repositories, mounted sheet views and finishing cancelled reads
-have independent lifetimes. Source/snapshot inventories, incoming page decoding,
-Rust discovery/tail initialization and cursor growth still require bounds.
-Keep updates manual. Complete capture, checkpoint Session links, the configured
-Watch demonstration and the human gate remain required in this Task/PR.
+This bounds normalized record payloads, not manifests, discovery gaps, all
+incoming allocations or process RSS. Snapshot/source inventories, discovery,
+tail initialization and cursor growth still require bounds before polling.
+Keep updates manual. Complete capture, exact checkpoint Session links and the
+configured Watch demonstration and human gate remain required in this Task/PR.
 
 ## Remaining slices and full Done When
 
@@ -196,6 +196,24 @@ transport expansion is in scope.
 
 ## Evidence ledger
 
+- 2026-09-24 paging review: fixed the missing desktop Reload action after cursor
+  rejection. Both source-reset and read-error recovery cases pass. A configured
+  read-only CLI → RegistryQuery → Watch store/control proof rejects a simulated
+  retained version-2 cursor, preserves prior output, then recovers all 59 rows
+  from three sources and follows without duplicate identities. Existing paging
+  receipts remain source-matched. [Review and remaining scope](review-watch-page.md).
+- 2026-09-24 normalized page bounds: existing source readers now return at most
+  128 normalized records / 8 MiB of serialized record payload per source page.
+  Claude messages continue by complete-line digest and content-block index;
+  changed pending lines reset. OpenCode records advance only after acceptance.
+  Individually oversized records report a gap without stalling subsequent output.
+  Fourteen focused Rust reader tests pass. A disposable native-source → branch
+  CLI → RegistryQuery → TaskWatchStore proof loads 259 blocks as 128/128/3,
+  correlates a tool across pages, retains Run filtering, and receives one later
+  live arrival without replay. Mac compilation, Rust build, formatting and
+  Clippy pass. [Proof and limitations](watch-page-proof.md). No configured live
+  provider or human UI demonstration was performed. Discovery, initialization,
+  inventories and cursor bounds still precede automatic polling.
 - 2026-09-24 navigation retention review: configured read-only CLI → RegistryQuery
   → navigation store proof releases an evicted LOO-293 presentation, then recovers
   all 59 previously loaded rows from three sources and follows without duplicates.

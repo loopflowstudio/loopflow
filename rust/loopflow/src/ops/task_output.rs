@@ -66,15 +66,15 @@ pub async fn read_task_output(
                 return Err(anyhow!("Task output cursor is too large"));
             }
             let decoded: Cursor = serde_json::from_slice(&URL_SAFE_NO_PAD.decode(encoded)?)?;
-            if decoded.version != 2 || decoded.task_id != task.id.as_str() {
+            if decoded.version != 3 || decoded.task_id != task.id.as_str() {
                 return Err(anyhow!(
-                    "Task output cursor belongs to another Task or version"
+                    "Task output cursor belongs to another Task or version; reload output"
                 ));
             }
             decoded
         }
         None => Cursor {
-            version: 2,
+            version: 3,
             task_id: task.id.to_string(),
             sources: BTreeMap::new(),
             next_run: 0,

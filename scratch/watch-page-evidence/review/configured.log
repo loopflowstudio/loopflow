@@ -1,0 +1,23 @@
+Building for debugging...
+[0/6] Write sources
+[1/6] Write swift-version--58304C5D6DBC2206.txt
+[3/6] Emitting module LoopflowTests
+[4/6] Compiling LoopflowTests WatchPageCLIReview.swift
+[4/6] Write Objects.LinkFileList
+[5/6] Linking LoopflowSwiftPackageTests
+Build complete! (1.68s)
+Test Suite 'Selected tests' started at 2026-09-24 13:42:43.740.
+Test Suite 'LoopflowSwiftPackageTests.xctest' started at 2026-09-24 13:42:43.741.
+Test Suite 'LoopflowSwiftPackageTests.xctest' passed at 2026-09-24 13:42:43.741.
+	 Executed 0 tests, with 0 failures (0 unexpected) in 0.000 (0.000) seconds
+Test Suite 'Selected tests' passed at 2026-09-24 13:42:43.741.
+	 Executed 0 tests, with 0 failures (0 unexpected) in 0.000 (0.001) seconds
+◇ Test run started.
+↳ Testing Library Version: 1501
+↳ Target Platform: arm64e-apple-macos14.0
+◇ Suite "Watch cursor recovery CLI review" started.
+◇ Test configuredOutputRecoversFromOldCursor() started.
+PASS configured read-only recovery: sources=3, priorRows=59, recoveredRows=59; old cursor rejected, Reload recovers, Follow identities unique
+✔ Test configuredOutputRecoversFromOldCursor() passed after 3.054 seconds.
+✔ Suite "Watch cursor recovery CLI review" passed after 3.055 seconds.
+✔ Test run with 1 test in 1 suite passed after 3.055 seconds.

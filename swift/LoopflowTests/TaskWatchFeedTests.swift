@@ -65,21 +65,27 @@ struct TaskWatchFeedTests {
         #expect(store.visibleOutput.count == 4)
     }
 
-    @Test("Source reset preserves evidence until both continuations are explicitly reloaded")
-    func resetAndReload() async throws {
+    @Test("Source reset and cursor errors preserve evidence until explicit reload", arguments: [true, false])
+    func resetAndReload(sourceReset: Bool) async throws {
         let store = TaskWatchStore()
         let initial = try page("cursor", sources: [source("run-first", records: [message("a", "Original evidence")])])
         await store.readOutput(issue: "LOO-293", query: RegistryQuery { _, _ in initial })
         let reset = try page("replacement", sources: [source("run-first", records: [message("a", "Replacement")], reset: true)])
-        await store.readOutput(issue: "LOO-293", query: RegistryQuery { _, _ in reset })
-        #expect(store.needsOutputReload)
-        #expect(store.outputError?.contains("source changed") == true)
+        await store.readOutput(issue: "LOO-293", query: RegistryQuery { _, _ in
+            if sourceReset { return reset }
+            throw RegistryQueryError("Task output cursor belongs to another Task or version; reload output")
+        })
+        #expect(store.needsOutputReload == sourceReset)
+        #expect(store.outputError != nil)
         #expect(store.output.first?.rows.map(\.text) == ["Original evidence"])
         let reloaded = reader([
             "tail": try page("new-live", sources: []),
             "start": try page("new-history", sources: [source("run-first", records: [message("a", "Replacement")])])
         ])
-        await store.readOutput(issue: "LOO-293", query: reloaded, reload: true)
+        var reload = false
+        let view = TaskWatchOutputView(store: store, onHistory: { _ in }, onFollow: {}, onReload: { reload = true })
+        try view.inspect().find(button: "Reload output").tap()
+        await store.readOutput(issue: "LOO-293", query: reloaded, reload: reload)
         #expect(!store.needsOutputReload)
         #expect(store.outputError == nil)
         #expect(store.output.first?.rows.map(\.text) == ["Replacement"])

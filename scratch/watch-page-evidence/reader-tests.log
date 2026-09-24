@@ -1,0 +1,22 @@
+   Compiling loopflow v0.12.19 (/Users/jack/src/loopflow.restore-task-watching-with-live/rust/loopflow)
+    Finished `test` profile [unoptimized + debuginfo] target(s) in 29.29s
+     Running unittests src/lib.rs (target/debug/deps/loopflow-19093d58746e5e6d)
+
+running 14 tests
+test run_record::output::tests::claude_message_blocks_page_without_losing_tools_or_live_arrivals ... ok
+test run_record::output::tests::journal_outputs_one_encoding_per_attempt_and_never_raw_copies ... ok
+test run_record::output::tests::journal_tail_preserves_the_latest_attempt_capture_mode ... ok
+test run_record::output::tests::native_jsonl_pages_without_rereading_or_rendering_codex_mirrors ... ok
+test run_record::output::tests::native_jsonl_waits_for_complete_lines_and_reports_gaps_and_resets ... ok
+test run_record::output::tests::native_normalized_payload_pages_and_skips_only_individually_oversized_records ... ok
+test run_record::output::tests::native_tail_receives_output_while_history_remains_unread ... ok
+test run_record::output::tests::native_tools_preserve_call_identity_across_pages_and_reversed_results ... ok
+test run_record::output::tests::opencode_completed_history_does_not_accumulate_in_continuation ... ok
+test run_record::output::tests::opencode_payload_paging_does_not_commit_an_unread_revision ... ok
+test run_record::output::tests::opencode_revisions_survive_equal_timestamps_paging_and_compaction ... ok
+test run_record::output::tests::opencode_tail_retains_old_unfinished_parts_and_boundary_revisions ... ok
+test run_record::output::tests::opencode_timestamp_only_update_does_not_replay_unchanged_content ... ok
+test run_record::output::tests::oversized_record_reports_a_gap_without_stalling_later_output ... ok
+
+test result: ok. 14 passed; 0 failed; 0 ignored; 0 measured; 1584 filtered out; finished in 3.09s
+

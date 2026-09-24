@@ -1,0 +1,10 @@
+{
+  "rust/loopflow/src/ops/task_output.rs": "b84b11d0c3559dd33771d4836d75b6972b469d4876c92ced4dc3d999d001571a",
+  "rust/loopflow/src/run_record/output.rs": "24d728f7e3c1b249c3ceea525be6790ef217e86fc8e78df9b1ac3738b75c570e",
+  "rust/loopflow/src/run_record/output/native.rs": "610e9a424810360dd09d72730299e24481305bdd55af07ac12b26527a2da1b27",
+  "swift/Loopflow/Services/RegistryQuery.swift": "d0514d614278d2803064b83ecdd20a6da50c9841d9634f699dabae8d4bd2b72a",
+  "swift/LoopflowMac/TaskWatchStore.swift": "7b089e181bb79db56bb8983bbf8faa65ede17b61cf724514c8d2353a58d1fe3c",
+  "swift/LoopflowMac/TaskWatchOutput.swift": "aef195ae28d32f368349fd7ba85d96717abdebddb4c262ba533fe891c40a9c53",
+  "scratch/watch-page-proof.swift": "11be6d475de7ce604b0f754200a2995bdea138231e820e53e22b5043537eb92e",
+  "target/debug/lf": "4d26dc30d45fed1ad64bc2fcf4a59dd2aeb25e552dbc956cdfd5f6d597cdb832"
+}

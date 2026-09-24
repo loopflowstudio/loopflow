@@ -1,0 +1,19 @@
+[0/1] Planning build
+Building for debugging...
+[0/6] Write sources
+[1/6] Write swift-version--58304C5D6DBC2206.txt
+[3/6] Emitting module LoopflowTests
+[4/6] Compiling LoopflowTests WatchPageCLIReview.swift
+macro expansion #require:1:56: error: recursive expansion of macro 'require(_:_:sourceLocation:)'
+`- /Users/jack/src/loopflow.restore-task-watching-with-live/swift/LoopflowTests/WatchPageCLIReview.swift:51:132: note: expanded code originates here
+49 |             var encoded = page.nextCursor.replacingOccurrences(of: "-", with: "+").replacingOccurrences(of: "_", with: "/")
+50 |             encoded += String(repeating: "=", count: (4 - encoded.count % 4) % 4)
+51 |             var cursor = try #require(JSONSerialization.jsonObject(with: #require(Data(base64Encoded: encoded))) as? [String: Any])
+   |                              `- note: in expansion of macro 'require' here
+   +--- macro expansion #require ---------------------------------------
+   |1 | Testing.__checkCast(JSONSerialization.jsonObject(with: #require(Data(base64Encoded: encoded))),as: ([String: Any]).self,expression: .__fromBinaryOperation(.__fromSyntaxNode("JSONSerialization.jsonObject(with: #require(Data(base64Encoded: encoded)))"),"as?",.__fromSyntaxNode("[String: Any]")),comments: [],isRequired: true,sourceLocation: Testing.SourceLocation.__here()).__required()
+   |  |                                                        `- error: recursive expansion of macro 'require(_:_:sourceLocation:)'
+   +--------------------------------------------------------------------
+52 |             cursor["version"] = 2
+53 |             envelope["next_cursor"] = try JSONSerialization.data(withJSONObject: cursor).base64EncodedString()
+error: fatalError

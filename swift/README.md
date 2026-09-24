@@ -143,6 +143,11 @@ The display keeps a limited window of output across Runs. A notice appears when
 older output leaves the window or a record is too large to display. **Restart
 history** rereads from the beginning while preserving the live continuation;
 **Load history** continues forward through it. Source history is unchanged.
+Large messages load across pages, including messages with many tool blocks;
+later pages preserve their tool names, inputs and results. An individual record
+too large for a reader page reports a source gap while later output stays readable.
+After a read error, **Reload output** starts fresh history and live reads, including
+when an updated CLI no longer accepts the retained continuation.
 If discovery or a source read fails during restart, the previous window stays visible.
 Tool results label missing context when their earlier call is no longer loaded.
 

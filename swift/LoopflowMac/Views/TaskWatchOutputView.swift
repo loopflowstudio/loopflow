@@ -46,7 +46,8 @@ struct TaskWatchOutputView: View {
             if let error = store.outputError {
                 HStack {
                     Label("\(store.output.isEmpty ? "Output unavailable" : "Output stale"): \(error)", systemImage: "exclamationmark.triangle")
-                    if store.needsOutputReload { Button("Reload output", action: onReload) }
+                    Button("Reload output", action: onReload)
+                        .disabled(store.isRefreshing || store.isReadingOutput)
                 }
                 .font(Typography.caption(11))
                 .padding(Spacing.md)

@@ -50,6 +50,7 @@ pub(crate) struct OutputCursor {
     pub session_verified: bool,
     pub discarding_record: bool,
     pub journal_conversation: Option<bool>,
+    pub pending_line: Option<(String, usize)>,
     pub parts: Option<native::PartCursor>,
 }
 
@@ -60,6 +61,30 @@ pub(crate) struct SourcePage {
     pub cursor: OutputCursor,
     pub has_more: bool,
     pub reset: bool,
+    record_bytes: usize,
+}
+
+impl SourcePage {
+    // False leaves this record for the next page. An individually oversized
+    // record is consumed with evidence so it cannot stall everything after it.
+    fn push(&mut self, record: OutputRecord) -> bool {
+        let bytes = serde_json::to_vec(&record)
+            .expect("output record serializes")
+            .len();
+        if bytes > PAGE_BYTES {
+            self.gaps.push(gap(
+                "record_too_large",
+                "A normalized output record exceeds the page payload bound and is omitted",
+            ));
+            return true;
+        }
+        if self.records.len() == PAGE_RECORDS || self.record_bytes + bytes > PAGE_BYTES {
+            return false;
+        }
+        self.record_bytes += bytes;
+        self.records.push(record);
+        true
+    }
 }
 
 pub(crate) fn digest(bytes: &[u8]) -> String {
@@ -112,6 +137,7 @@ pub(crate) fn tail_cursor(
             session_verified: true,
             discarding_record: false,
             journal_conversation: None,
+            pending_line: None,
             parts: Some(native::tail_parts(
                 path,
                 session.ok_or_else(|| io::Error::other("missing native Session identity"))?,
@@ -125,6 +151,7 @@ pub(crate) fn tail_cursor(
         ));
     }
     let mut cursor = head.cursor;
+    cursor.pending_line = None;
     let mut file = File::open(path)?;
     if file_identity(&file)? != cursor.identity
         || anchor(&mut file, cursor.offset)? != cursor.anchor
@@ -232,6 +259,7 @@ pub(crate) fn read_source(
             session_verified: false,
             discarding_record: false,
             journal_conversation: None,
+            pending_line: None,
             parts: None,
         });
     let mut page = SourcePage {
@@ -240,6 +268,7 @@ pub(crate) fn read_source(
         cursor,
         has_more: false,
         reset,
+        record_bytes: 0,
     };
     if reset {
         page.gaps.push(gap(
@@ -261,6 +290,9 @@ pub(crate) fn read_source(
     let mut consumed = 0;
     let mut complete_records = 0;
     for _ in 0..PAGE_RECORDS {
+        if page.records.len() == PAGE_RECORDS {
+            break;
+        }
         let start = page.cursor.offset;
         let mut bytes = Vec::new();
         let read = reader.read_until(b'\n', &mut bytes)?;
@@ -287,6 +319,21 @@ pub(crate) fn read_source(
         }
         complete_records += 1;
         page.cursor.offset += read as u64;
+        let revision = digest(&bytes);
+        if page
+            .cursor
+            .pending_line
+            .as_ref()
+            .is_some_and(|(hash, _)| hash != &revision)
+        {
+            let mut replacement = read_source(path, source, session, None)?;
+            replacement.reset = true;
+            replacement.gaps.push(gap(
+                "source_reset",
+                "Output changed within a partially read message; discard its previous items",
+            ));
+            return Ok(replacement);
+        }
         let value: serde_json::Value = match serde_json::from_slice(&bytes) {
             Ok(value) => value,
             Err(_) => {
@@ -297,30 +344,45 @@ pub(crate) fn read_source(
                 continue;
             }
         };
-        if source == OutputSource::Journal {
+        page.cursor
+            .pending_line
+            .get_or_insert((revision.clone(), 0));
+        let complete = if source == OutputSource::Journal {
             match serde_json::from_value::<super::EventEnvelope>(value) {
                 Ok(envelope) if envelope.schema_version == super::SCHEMA_VERSION => {
                     let event = journal_event(envelope.event, envelope.seq, &mut page.cursor);
                     if let Some(event) = event {
-                        page.records.push(OutputRecord {
+                        page.push(OutputRecord {
                             source_item_id: envelope.seq.to_string(),
-                            revision: digest(&bytes),
+                            revision,
                             event,
-                        });
+                        })
+                    } else {
+                        true
                     }
                 }
-                _ => page.gaps.push(gap(
-                    "journal_schema",
-                    format!("Unsupported Run record at byte {start}"),
-                )),
+                _ => {
+                    page.gaps.push(gap(
+                        "journal_schema",
+                        format!("Unsupported Run record at byte {start}"),
+                    ));
+                    true
+                }
             }
         } else {
-            native::normalize_jsonl(source, session.unwrap_or(""), &value, start, &mut page)?;
+            native::normalize_jsonl(source, session.unwrap_or(""), &value, start, &mut page)?
+        };
+        if !complete {
+            page.cursor.offset = start;
+            break;
         }
+        page.cursor.pending_line = None;
     }
     let mut file = reader.into_inner().into_inner();
     page.has_more = page.cursor.offset < file.metadata()?.len()
-        && (complete_records == PAGE_RECORDS
+        && (page.cursor.pending_line.is_some()
+            || page.records.len() == PAGE_RECORDS
+            || complete_records == PAGE_RECORDS
             || consumed >= PAGE_BYTES && page.cursor.offset > initial_offset);
     page.cursor.anchor = anchor(&mut file, page.cursor.offset)?;
     if source == OutputSource::Journal && page.cursor.journal_conversation == Some(false) {
@@ -427,6 +489,225 @@ mod tests {
             "{}\n",
             serde_json::json!({"type":"assistant","sessionId":"session","uuid":id,"message":{"content":[{"type":"text","text":text}]}})
         )
+    }
+
+    #[test]
+    fn claude_message_blocks_page_without_losing_tools_or_live_arrivals() {
+        let dir = tempfile::tempdir().unwrap();
+        let path = dir.path().join("native.jsonl");
+        let mut blocks = (0..PAGE_RECORDS * 2 + 3)
+            .map(|index| serde_json::json!({"type":"text","text":format!("block {index}")}))
+            .collect::<Vec<_>>();
+        blocks[PAGE_RECORDS - 1] = serde_json::json!({"type":"tool_use","id":"call","name":"bash","input":{"command":"echo proof"}});
+        blocks[PAGE_RECORDS] =
+            serde_json::json!({"type":"tool_result","tool_use_id":"call","content":"proof"});
+        let line = serde_json::json!({"type":"assistant","sessionId":"session","uuid":"message","message":{"content":blocks}});
+        std::fs::write(&path, format!("{line}\n")).unwrap();
+        let live = tail_cursor(&path, OutputSource::Claude, Some("session")).unwrap();
+        let first = read_source(&path, OutputSource::Claude, Some("session"), None).unwrap();
+        assert_eq!(first.records.len(), PAGE_RECORDS);
+        assert!(first.has_more);
+        let mut records = first.records;
+        let mut cursor = first.cursor;
+        for _ in 0..2 {
+            // Continuation survives the same serialization used by CLI reads.
+            cursor = serde_json::from_slice(&serde_json::to_vec(&cursor).unwrap()).unwrap();
+            let page =
+                read_source(&path, OutputSource::Claude, Some("session"), Some(&cursor)).unwrap();
+            assert!(page.records.len() <= PAGE_RECORDS);
+            assert!(page.gaps.is_empty());
+            records.extend(page.records);
+            cursor = page.cursor;
+        }
+        assert_eq!(records.len(), blocks.len());
+        for (index, record) in records.iter().enumerate() {
+            assert_eq!(record.source_item_id, format!("message:{index}"));
+        }
+        for index in [PAGE_RECORDS - 1, PAGE_RECORDS] {
+            assert!(
+                matches!(&records[index].event, ConversationEvent::ItemCompleted {
+                item: crate::chat::types::ConversationItem::Tool {id, ..}, ..
+            } if id == "call")
+            );
+        }
+        let mut file = std::fs::OpenOptions::new()
+            .append(true)
+            .open(&path)
+            .unwrap();
+        write!(file, "{}", claude("arrival", "live arrival")).unwrap();
+        for position in [live, cursor] {
+            let page = read_source(
+                &path,
+                OutputSource::Claude,
+                Some("session"),
+                Some(&position),
+            )
+            .unwrap();
+            assert_eq!(page.records.len(), 1);
+            assert_eq!(page.records[0].source_item_id, "arrival:0");
+            assert!(!page.has_more);
+            assert!(read_source(
+                &path,
+                OutputSource::Claude,
+                Some("session"),
+                Some(&page.cursor)
+            )
+            .unwrap()
+            .records
+            .is_empty());
+        }
+        // Rewrite the still-pending first line in place, preserving inode/length
+        // and the bytes preceding it. Its old block index is no longer valid.
+        let before = read_source(&path, OutputSource::Claude, Some("session"), None).unwrap();
+        std::fs::write(
+            &path,
+            format!("{}\n", line.to_string().replace("block", "fresh")),
+        )
+        .unwrap();
+        let reset = read_source(
+            &path,
+            OutputSource::Claude,
+            Some("session"),
+            Some(&before.cursor),
+        )
+        .unwrap();
+        assert!(reset.reset);
+        assert!(reset.gaps.iter().any(|gap| gap.code == "source_reset"));
+        assert_eq!(reset.records[0].source_item_id, "message:0");
+        assert!(
+            matches!(&reset.records[0].event, ConversationEvent::ItemCompleted {
+            item: crate::chat::types::ConversationItem::Message {text, ..}, ..
+        } if text == "fresh 0")
+        );
+    }
+
+    #[test]
+    fn native_normalized_payload_pages_and_skips_only_individually_oversized_records() {
+        for source in [OutputSource::Claude, OutputSource::Codex] {
+            let dir = tempfile::tempdir().unwrap();
+            let path = dir.path().join("native.jsonl");
+            let mut file = std::fs::File::create(&path).unwrap();
+            if source == OutputSource::Claude {
+                let blocks = (0..24)
+                    .map(|index| serde_json::json!({"type":"text","text":format!("text {index}")}))
+                    .collect::<Vec<_>>();
+                writeln!(file, "{}", serde_json::json!({"type":"assistant","sessionId":"session","uuid":"message","message":{"id":"t".repeat(PAGE_BYTES / 16),"content":blocks}})).unwrap();
+                write!(
+                    file,
+                    "{}",
+                    claude(&"x".repeat(PAGE_BYTES / 2), "oversized identity")
+                )
+                .unwrap();
+            } else {
+                writeln!(
+                    file,
+                    "{}",
+                    serde_json::json!({"type":"session_meta","payload":{"id":"session"}})
+                )
+                .unwrap();
+                for index in 0..24 {
+                    writeln!(file, "{}", serde_json::json!({"type":"response_item","payload":{"type":"message","role":"assistant","id":format!("{index:02}{}", "x".repeat(PAGE_BYTES / 32)),"content":format!("text {index}")}})).unwrap();
+                }
+                writeln!(file, "{}", serde_json::json!({"type":"response_item","payload":{"type":"message","role":"assistant","id":"x".repeat(PAGE_BYTES / 2 + 1),"content":"oversized identity"}})).unwrap();
+            }
+            let ending = if source == OutputSource::Claude {
+                claude("ending", "reachable")
+            } else {
+                format!(
+                    "{}\n",
+                    serde_json::json!({"type":"response_item","payload":{"id":"ending","type":"message","role":"assistant","content":"reachable"}})
+                )
+            };
+            write!(file, "{ending}").unwrap();
+            let mut cursor = None;
+            let mut seen = std::collections::BTreeSet::new();
+            let mut gaps = Vec::new();
+            let mut finished = false;
+            for _ in 0..10 {
+                let page = read_source(&path, source, Some("session"), cursor.as_ref()).unwrap();
+                assert!(page.records.len() <= PAGE_RECORDS);
+                assert!(
+                    page.records
+                        .iter()
+                        .map(|record| serde_json::to_vec(record).unwrap().len())
+                        .sum::<usize>()
+                        <= PAGE_BYTES
+                );
+                for record in page.records {
+                    assert!(
+                        seen.insert(record.source_item_id),
+                        "a paginated record must not replay"
+                    );
+                }
+                gaps.extend(page.gaps);
+                cursor = Some(page.cursor);
+                if !page.has_more {
+                    finished = true;
+                    break;
+                }
+            }
+            assert!(finished);
+            assert_eq!(seen.len(), 25);
+            assert_eq!(gaps.len(), 1);
+            assert_eq!(gaps[0].code, "record_too_large");
+            assert!(seen.iter().any(|id| id.starts_with("ending")));
+            assert!(read_source(&path, source, Some("session"), cursor.as_ref())
+                .unwrap()
+                .records
+                .is_empty());
+        }
+    }
+
+    #[test]
+    fn opencode_payload_paging_does_not_commit_an_unread_revision() {
+        let dir = tempfile::tempdir().unwrap();
+        let path = dir.path().join("opencode.db");
+        let writer = rusqlite::Connection::open(&path).unwrap();
+        writer.execute_batch("CREATE TABLE session(id TEXT PRIMARY KEY,time_created INTEGER); CREATE TABLE message(id TEXT PRIMARY KEY,session_id TEXT,data TEXT); CREATE TABLE part(id TEXT PRIMARY KEY,message_id TEXT,session_id TEXT,time_updated INTEGER,data TEXT); INSERT INTO session VALUES('session',1);").unwrap();
+        let message = "m".repeat(PAGE_BYTES / 4);
+        writer
+            .execute(
+                "INSERT INTO message VALUES(?1,'session','{\"role\":\"assistant\"}')",
+                [&message],
+            )
+            .unwrap();
+        for index in 0..6 {
+            writer.execute("INSERT INTO part VALUES(?1,?2,'session',1,?3)", rusqlite::params![format!("part{index}"), message, serde_json::json!({"type":"text","text":format!("text {index}"),"time":{"end":1}}).to_string()]).unwrap();
+        }
+        let first = read_source(&path, OutputSource::OpenCode, Some("session"), None).unwrap();
+        assert!(first.has_more);
+        assert_eq!(first.records.len(), 3);
+        let second = read_source(
+            &path,
+            OutputSource::OpenCode,
+            Some("session"),
+            Some(&first.cursor),
+        )
+        .unwrap();
+        assert!(!second.has_more);
+        assert_eq!(second.records.len(), 3);
+        for (index, record) in first.records.iter().chain(&second.records).enumerate() {
+            assert_eq!(record.source_item_id, format!("part{index}"));
+        }
+        for page in [&first, &second] {
+            assert!(page.gaps.is_empty());
+            assert!(
+                page.records
+                    .iter()
+                    .map(|record| serde_json::to_vec(record).unwrap().len())
+                    .sum::<usize>()
+                    <= PAGE_BYTES
+            );
+        }
+        assert!(read_source(
+            &path,
+            OutputSource::OpenCode,
+            Some("session"),
+            Some(&second.cursor)
+        )
+        .unwrap()
+        .records
+        .is_empty());
     }
 
     #[test]

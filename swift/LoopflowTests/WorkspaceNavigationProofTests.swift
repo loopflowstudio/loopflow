@@ -183,8 +183,9 @@ struct WorkspaceNavigationProofTests {
         #expect(window.firstResponder === terminal)
     }
 
-    @Test("The mounted workspace retains navigation and completes a Session without ending its Task or companion")
-    func workspaceRetainsNativeSplit() async throws {
+    @Test("The workspace retains navigation and reconciles completion in its originating repository",
+          .serialized, arguments: [false, true])
+    func workspaceRetainsNativeSplit(switchBeforeCompletion: Bool) async throws {
         _ = NSApplication.shared
         GhosttyManager.shared.initialize()
         try #require(GhosttyManager.shared.state == .ready)
@@ -199,12 +200,21 @@ struct WorkspaceNavigationProofTests {
           "title":"Navigation proof","detail":"Local cat PTY","cwd":"/tmp",
           "state":"active","ready_summary":null,"open_argv":["/bin/cat"]}]
         """
-        let query = RegistryQuery { args, _ in
+        let otherRecords = """
+        [{"id":"context-session","kind":"interactive","work":null,
+          "title":"Other repository conversation","detail":"Existing external client","cwd":"/src/context",
+          "state":"active","ready_summary":null,"open_argv":["lf","session","open","context-session"]}]
+        """
+        let (completionResponses, completionResponse) = AsyncStream<Void>.makeStream()
+        defer { completionResponse.finish() }
+        let query = RegistryQuery { args, cwd in
             switch args.first {
             case "roadmap": return roadmap
             case "ls": return "[]"
-            case "session" where args.dropFirst().first == "list": return records
+            case "session" where args.dropFirst().first == "list":
+                return cwd == "/src/context" ? otherRecords : records
             case "session" where args == ["session", "complete", "navigation-split"]:
+                for await _ in completionResponses { break }
                 return "Session completed"
             case "activity": return #"{"generated_at":1,"since":0,"limit":50,"truncated":false,"items":[]}"#
             default: throw RegistryQueryError("Unexpected operation in navigation proof")
@@ -313,12 +323,28 @@ struct WorkspaceNavigationProofTests {
         #expect(_terminalText(shellSurface).components(separatedBy: companion).count == 3)
 
         try view.inspect().find(viewWithAccessibilityIdentifier: "session-action-complete").button().tap()
+        try await settle(window)
+        #expect(terminals[0].surface == sessionSurface)
+        let otherWorkspace = registry.workspace(for: "/src/context")
+        if switchBeforeCompletion {
+            model.setRepoPath("/src/context")
+            await model.refreshSessions()
+            model.select(.wave(id: "wave-2"))
+            otherWorkspace.multiplexer.load(sessionId: "context-session")
+            host.rootView = SessionsView(model: model, repoPath: "/src/context", workspaces: registry, query: query)
+                .id("/src/context")
+            try await settle(window)
+            #expect(terminals.allSatisfy { $0.window == nil })
+        }
+        let otherLayout = otherWorkspace.multiplexer.layout
+        let otherFocus = otherWorkspace.multiplexer.focusedPaneId
+        completionResponse.yield(())
+        completionResponse.finish()
         let completionDeadline = ContinuousClock.now + .seconds(3)
         while terminals[0].surface != nil, ContinuousClock.now < completionDeadline {
             try await Task.sleep(for: .milliseconds(20))
         }
         try await settle(window)
-        #expect(model.sessions.value?.isEmpty == true)
         #expect(workspace.multiplexer.pane(forSessionId: "navigation-split") == nil)
         #expect(terminals[0].surface == nil)
         #expect(terminals[1].surface == shellSurface)
@@ -330,6 +356,18 @@ struct WorkspaceNavigationProofTests {
         #expect(workspace.multiplexer.pane(forSessionId: "navigation-split") == nil)
         #expect(workspace.multiplexer.layout.allPanes.map(\.id) == [shellPane])
         #expect(workspace.multiplexer.focusedPaneId == shellPane)
+        if switchBeforeCompletion {
+            #expect(model.repoPath == "/src/context")
+            #expect(model.selection == .wave(id: "wave-2"))
+            #expect(model.sessions.value?.map(\.id) == ["context-session"])
+            #expect(otherWorkspace.multiplexer.layout == otherLayout)
+            #expect(otherWorkspace.multiplexer.focusedPaneId == otherFocus)
+            model.setRepoPath("/src/loopflow")
+            host.rootView = SessionsView(model: model, repoPath: "/src/loopflow", workspaces: registry, query: query)
+                .id("/src/loopflow")
+            try await settle(window)
+        }
+        #expect(model.sessions.value?.isEmpty == true)
         #expect(model.selection == .task(id: "issue-review"))
         #expect(model.task(id: "issue-review")?.task.task.completed == false)
         try view.inspect().find(viewWithAccessibilityIdentifier: "workspace-work-details").button().tap()

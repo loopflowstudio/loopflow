@@ -16,14 +16,67 @@
 - SessionsWorkspaceRegistry retains checkout workspaces and repository-level
   WorktreeLayoutStores inside one window, sharing that window's surface pool.
   Outer slots select checkouts; each checkout's MultiplexerStore owns terminals.
-  The repository's retained SessionsStore owns opening/prepared/error presentation
-  and calls shared actions. Rust projects actual client terminal attachment.
+  The repository's retained SessionsStore owns opening/prepared presentation and
+  completion errors, and calls shared actions. Rust projects actual client
+  terminal attachment.
 - GhosttyMetalView owns its surface, latest title and focus request across attachment and
   visibility changes. AppKit owns actual first responder. GhosttyManager owns
   library initialization and configuration, including the measured CoreVideo
   capability adaptation.
 
 ## Before and after
+
+### Iteration 8 — completion errors and retained terminals
+
+Reviewed HEAD `560783243` plus the working completion correction. Before and
+after this compression pass, the effective model is unchanged. No coherent
+model/API reduction was established; this pass changes only this report. No
+field, type, route, DTO, persistence path or configuration key was removed.
+Existing implementation and other writers' changes remain intact.
+
+Traced RegistryQuery → PodiumModel → WorkspaceProjection/Navigation →
+SessionsView/Store → retained workspace registry and MultiplexerStore. Inspected
+direct and shell-attached completion, inventory reconciliation, repository
+unmount, surface release and hidden Undo. Compared every SessionRecord and
+RoadmapProject/Task field between Rust and Swift, read both shared Session
+fixtures and the list/open/complete/FlowStep query contracts. Negative searches
+still find one Podium caller per inventory read, one production root registry,
+and none of the removed navigation/scope types listed in earlier reviews.
+
+Suspected reductions retained deliberately:
+
+- `completionError` and opening `.failed` cannot become one mutually exclusive
+  state. Rejected completion coexists with a live terminal; attachment polling
+  updates that terminal state without resolving the rejected action. Combining
+  them restores the reproduced error-loss defect. The error is retained UI
+  state, not another shared lifecycle or wire field.
+- `isCompleting` describes an in-flight action; the retained error describes its
+  unsuccessful result. Neither derives the other. Moving the busy flag into a
+  new operation model would add vocabulary without deleting an owner.
+- A shell can carry multiple independently completable Sessions. The derived
+  `completionItems` collection preserves their identities; treating the pane
+  as one Session or choosing its first attachment loses existing capability.
+  Both direct and attached actions already use one completion operation.
+- Action continuations and mounted inventory observers cover different delivery
+  times. Consolidating cleanup requires covering external disappearance,
+  repository unmount, hidden layouts and FlowStep decisions together. Deleting
+  one call site or extracting a partial helper does not establish that ownership.
+- Work attribution, checkout grouping and terminal attachment remain separate
+  facts in the shared DTO. Shared Session legal actions/display path remain
+  absent; moving the local policy into another helper would not supply LOO-284.
+
+Inspected iteration 8's [before](configured-ui-evidence/iteration8/rejection-before.log)
+and [after](configured-ui-evidence/iteration8/rejection-after.log) receipts. The
+existing focused command selects `shellSessionCompletion` and
+`workspaceRetainsNativeSplit`: two tests/four cases pass after correction.
+Current production/test SHA-256 values still match that proof's recorded
+`adaae303…257fc8d` and `63042239…286db1`. No executable content changed and no
+tests were rerun. `git diff --check` passes. These remain native PTY proofs with
+fixture records and mocked completion, not configured-provider evidence.
+
+The locked-desktop boundary in `iteration8-proof.md` was not retried during
+compression. Full Task scope, configured proof gaps and publication disposition
+remain unchanged.
 
 ### Iteration 7 — integrated checkout and terminal ownership
 

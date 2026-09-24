@@ -1,0 +1,14 @@
+Owned PID 2578
+Probe executable scratch/configured-ui-evidence/integrated-review/shell-probe.swift AX trusted true
+AXWindows 0 count 1
+Owned onscreen windows 1 active true hidden false
+PASS This exact probe host has Accessibility permission
+TIMING launch_observation_end_ms 3327.1856249775738
+PASS Ambient Wave does not block planning
+PASS Real Task list loaded (19 rows)
+PASS Open exact LOO-291 Task
+PASS Task has explicit no-Session state
+PASS Authoritative directive visible
+PASS Owned application is active before input
+FAIL Failure(message: "Missing sessions-new-conversation")
+Owned termination requested true

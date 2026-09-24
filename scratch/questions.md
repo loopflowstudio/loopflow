@@ -54,12 +54,12 @@ moving target authorship and dated evaluation into the chapter plan.
 - Whether and how an exploratory checkout becomes a Task without replacing its files, conversation, or terminals. Actual Tasks require an existing Project.
 - Conversation lifecycle/cardinality: general subject conversations must coexist with manual agents and independent exploratory worktrees.
 - App-relaunch layout/process persistence, beyond retention within a window's lifetime.
-- Wave/Project ownership for this implementation remains unspecified.
+- Integrated ownership is Product → Desktop → LOO-291; do not create a second Task.
 
 ## Remaining live proof
 
 - Test an actual configured app launch and a terminal-configured provider launch through the new action; current native checks use harmless commands and fixture records.
-- Install the updated CLI before previewing and removing the exact `list` and `engbot` live registrations. The development CLI correctly cannot see those live IDs; do not bypass that boundary.
+- Installation and engbot cleanup are recorded in the integration handoff. Keep list historical: it owns abandoned LOO-276 and must not be hard-deleted.
 - LOO-291's separate external-workflow trial and broader acceptance criteria are not completed by integrating its committed navigation here.
 
 

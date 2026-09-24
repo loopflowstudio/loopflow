@@ -8,5 +8,7 @@
 - Conversation subject and terminal location are independent: use typed Work
   binding for context and actual provider-client terminal identity for local
   attachment. A matching cwd does not establish either relationship.
+- Session actions must remain reachable for both direct Session panes and
+  shell-attached clients. Complete the shared Session without closing its shell.
 - SwiftPM tests exercise Ghostty. Also compile the Xcode app/test targets,
   whose terminal fallback does not import Ghostty-only types.

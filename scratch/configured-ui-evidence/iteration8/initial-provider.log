@@ -1,0 +1,6 @@
+Owned app PID 28259
+AX trust true active false
+AXWindows 0 count 1
+PASS Exact runner trusted
+FAIL Failure(message: "Missing workspace-task-ee671927-255f-41e6-8429-b830d59cc1de")
+Owned app termination requested true

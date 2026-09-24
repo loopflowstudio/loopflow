@@ -1,0 +1,16 @@
+Owned app PID 2115
+AX trust true active true
+AXWindows 0 count 1
+PASS Exact runner trusted
+Activation requested true
+Raise owned window -25205
+Active after request true
+TIMING launch_to_task_ax_ms 2972.014999948442
+PASS Select exact Task
+PASS Owned app active before launch
+PASS Press All work
+PASS Press New terminal
+PASS Owned app active for input
+Wheel activation true
+FAIL Failure(message: "Owned app active before wheel")
+Owned app termination requested true

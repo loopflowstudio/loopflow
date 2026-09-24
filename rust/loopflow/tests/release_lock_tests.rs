@@ -14,7 +14,7 @@ use loopflow::ops::{release_publish, release_tag, OpsError};
 use loopflow_test_support::TestRepo;
 use serde_json::{json, Value};
 use sha2::{Digest, Sha256};
-use support::EnvGuard;
+use support::{codex_app_server_script, EnvGuard};
 
 #[test]
 fn only_an_owned_inherited_lock_suppresses_manual_intervention() {
@@ -793,6 +793,136 @@ fi
             wait_until_released(|| release_tag(repo.path(), "0.9.2", None).map(|_| ()));
             worktree_remove(repo.path(), &checkout).unwrap();
         }
+    }
+}
+
+#[test]
+fn surviving_release_notes_provider_retains_target_checkout_and_context() {
+    for kill_controller in [true, false] {
+        eprintln!("Notes provider, killed controller: {kill_controller}");
+        let state = tempfile::tempdir().unwrap();
+        let home = tempfile::tempdir().unwrap();
+        let provider = codex_app_server_script(
+            "Notes written",
+            "case \"$1\" in --version) echo 'codex fixture'; exit 0;; esac",
+        );
+        let barrier = format!(
+            "pwd > '{state}/checkout'\n: > '{state}/ready'\nwhile [ ! -f '{state}/allow' ]; do [ -d '{state}' ] || exit 1; sleep 0.02; done\ncp \"$LF_RELEASE_NOTES_CONTEXT\" '{state}/context.json' || exit 93\nprintf '# v0.9.1\\n\\nNotes from the surviving provider.\\n' > RELEASE_NOTES.md\n: > '{state}/completed'\n",
+            state = state.path().display()
+        );
+        let provider = provider.replace(
+            "read -r turn_start\n",
+            &format!(
+                "read -r turn_start\nprintf '%s' \"$turn_start\" > '{}/turn.json'\n{barrier}",
+                state.path().display()
+            ),
+        );
+        let launch = format!("'{}' \"$@\"", env!("CARGO_BIN_EXE_lf"));
+        let lf = if kill_controller {
+            format!(
+                "#!/bin/sh\necho $$ > '{}/notes.pid'\nexec {launch}\n",
+                state.path().display()
+            )
+        } else {
+            format!("#!/bin/sh\n{launch} > '{state}/notes.log' 2>&1 &\necho $! > '{state}/notes.pid'\nwhile [ ! -f '{state}/ready' ]; do [ -d '{state}' ] || exit 1; sleep 0.02; done\nexit 1\n", state=state.path().display())
+        };
+        let gh = "#!/bin/sh\ncase \"$1 $2\" in\n'--version ') exit 0;;\n'run list'|'pr list') echo '[]';;\n'release view') exit 1;;\n*) exit 91;;\nesac\n";
+        let _env = EnvGuard::with_home(
+            &[("lf", &lf), ("codex", &provider), ("gh", gh)],
+            Some(home.path()),
+        );
+        let repo = TestRepo::new();
+        fs::create_dir_all(repo.path().join(".lf")).unwrap();
+        fs::write(repo.path().join(".lf/config.yaml"), "agent: codex\n").unwrap();
+        fs::write(
+            repo.path().join("RELEASE_NOTES.md"),
+            "# v0.9.0\n\nPrevious notes.\n",
+        )
+        .unwrap();
+        let git = |args: &[&str]| {
+            let output = Command::new("git")
+                .args(args)
+                .current_dir(repo.path())
+                .output()
+                .unwrap();
+            assert!(output.status.success(), "{output:?}");
+            output.stdout
+        };
+        git(&["add", "."]);
+        git(&["commit", "-m", "Configure notes provider"]);
+        git(&["push", "origin", "HEAD"]);
+        fs::write(repo.path().join("local.txt"), "unpublished commit\n").unwrap();
+        git(&["add", "local.txt"]);
+        git(&["commit", "-m", "Keep caller work local"]);
+        fs::write(repo.path().join("local.txt"), "staged caller work\n").unwrap();
+        git(&["add", "local.txt"]);
+        fs::write(repo.path().join("local.txt"), "unstaged caller work\n").unwrap();
+        fs::write(repo.path().join("untracked.txt"), "untracked caller work\n").unwrap();
+        let head = git(&["rev-parse", "HEAD"]);
+        let branch = git(&["branch", "--show-current"]);
+        let index = fs::read(repo.path().join(".git/index")).unwrap();
+        let mut parent = start(&repo, state.path(), &["release", "run", "0.9.1"]);
+        let checkout = PathBuf::from(
+            fs::read_to_string(state.path().join("checkout"))
+                .unwrap()
+                .trim(),
+        );
+        // The provider received a real turn through the built CLI and Codex harness.
+        let turn: Value =
+            serde_json::from_slice(&fs::read(state.path().join("turn.json")).unwrap()).unwrap();
+        assert_eq!(turn["method"], "turn/start");
+        if kill_controller {
+            parent.child.kill().unwrap();
+            let pid: i32 = fs::read_to_string(state.path().join("notes.pid"))
+                .unwrap()
+                .trim()
+                .parse()
+                .unwrap();
+            // SAFETY: this PID names the fixture's nested CLI, held alive at the provider barrier.
+            assert_eq!(unsafe { libc::kill(pid, libc::SIGKILL) }, 0);
+        } else {
+            let deadline = Instant::now() + Duration::from_secs(20);
+            while parent.child.try_wait().unwrap().is_none() {
+                assert!(Instant::now() < deadline, "notes controller did not exit");
+                thread::sleep(Duration::from_millis(10));
+            }
+        }
+        assert!(!parent.child.wait().unwrap().success());
+        let contender = release_tag(repo.path(), "0.9.2", None);
+        let removal = worktree_remove(repo.path(), &checkout);
+        fs::write(state.path().join("allow"), "").unwrap();
+        assert!(
+            matches!(contender, Err(OpsError::ReleaseDeferred { .. })),
+            "{contender:?}"
+        );
+        assert!(
+            removal.is_err(),
+            "removed surviving notes provider checkout"
+        );
+        wait_for(&state.path().join("completed"));
+        let context: Value =
+            serde_json::from_slice(&fs::read(state.path().join("context.json")).unwrap()).unwrap();
+        assert_eq!(context["version"], "0.9.1");
+        wait_until_released(|| release_tag(repo.path(), "0.9.2", None).map(|_| ()));
+        assert!(fs::read_to_string(checkout.join("RELEASE_NOTES.md"))
+            .unwrap()
+            .contains("Notes from the surviving provider."));
+        assert_eq!(git(&["rev-parse", "HEAD"]), head);
+        assert_eq!(git(&["branch", "--show-current"]), branch);
+        assert_eq!(fs::read(repo.path().join(".git/index")).unwrap(), index);
+        assert_eq!(
+            fs::read_to_string(repo.path().join("local.txt")).unwrap(),
+            "unstaged caller work\n"
+        );
+        assert_eq!(
+            fs::read_to_string(repo.path().join("untracked.txt")).unwrap(),
+            "untracked caller work\n"
+        );
+        assert_eq!(
+            fs::read_to_string(repo.path().join("RELEASE_NOTES.md")).unwrap(),
+            "# v0.9.0\n\nPrevious notes.\n"
+        );
+        worktree_remove(repo.path(), &checkout).unwrap();
     }
 }
 

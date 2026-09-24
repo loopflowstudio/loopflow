@@ -528,20 +528,23 @@ half-contracts.
 
 ## This slice
 
-Carry the existing release target lock and exact checkout lease through manifest
-lockfile tools (`cargo update --workspace` and `uv lock`). Extend the existing
-manifest updater with explicit command inheritance; standalone bump callers
-supply no release capability. Preserve its version selection and error handling.
+Carry the existing release target lock and exact checkout lease through notes
+generation, its nested CLI and the provider launch chain. Extend the existing
+notes stage with explicit command inheritance; standalone notes callers supply
+no release capability. Preserve notes validation and provider-degradation policy.
 
-Prove through the built CLI that each surviving tool or failed launcher's
-descendant excludes another release and preserves its checkout. Execute real
-local dependency-free lockfile updates after the barrier, inspect their version,
-and retain caller HEAD, branch, index and edited bytes through both exit modes.
+Prove through the built CLI and Codex harness that a surviving provider, after
+controller death or a failed notes launcher, excludes another release and keeps
+its source and exact release context available. Read that context and write notes
+after the interruption; retain caller HEAD, branch, index and edited bytes.
+External provider behavior is simulated, while CLI, harness, Git and OS locks
+are real. Retain each exact notes input through the existing runtime prompt writer, with a
+unique name so retries cannot replace a surviving provider's input.
 
-Task compensation, notes agents, source/worktree children, historical telemetry
-linkage/recovery, closed obligations and configured acceptance remain in this
-serial Task. Settlement and prerequisite policy are unchanged. The scorecard
-blocker and both configured automatic settlements remain open.
+Task compensation, source/worktree children, historical telemetry linkage/recovery,
+closed obligations and configured acceptance remain in this serial Task.
+Settlement and prerequisite policy are unchanged. The scorecard blocker and both
+configured automatic settlements remain open.
 
 ## Slice ledger
 
@@ -795,6 +798,19 @@ updates and exact caller-state preservation. No additional bounded defect was
 established and no executable code changed. Notes/Task/worktree child ownership,
 historical telemetry linkage/retry and dated repair ownership, closed obligations
 and configured acceptance remain open. See [review-lockfile.md](review-lockfile.md).
+
+- 2026-09-24: notes generation now passes its existing target lock and exact
+  checkout lease through the nested CLI into the provider launch. The real-CLI/
+  Codex-harness regression reproduced competing tag access after controller death,
+  then premature context deletion after launcher failure. Exact bounded input now
+  uses the existing runtime prompt writer with a unique invocation name.
+- Both interruption cases passed (19.23s), including context read and notes write
+  after interruption, checkout protection, target exclusion and exact caller-state
+  preservation. Six existing notes-policy cases (5.34s), normal candidate completion
+  (12.59s), formatting and all-target Clippy passed. Provider/GitHub services are
+  simulated; CLI, harness, Git and OS locks are real. Task compensation,
+  source/worktree children, telemetry recovery, closed obligations and configured
+  acceptance remain open. See [release-notes-ownership.md](release-notes-ownership.md).
 
 ## Measure
 

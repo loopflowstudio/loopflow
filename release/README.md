@@ -123,6 +123,9 @@ surviving hook keeps cleanup and another release blocked until it exits.
 Manifest lockfile updates (`cargo update --workspace` and `uv lock`) retain both
 locks during preparation, so their surviving children also keep the checkout
 available and competing releases deferred.
+Notes generation passes both locks through its nested CLI to the provider.
+Its exact JSON input remains in `.lf/prompts/` under a unique name, so a surviving
+provider can finish after launcher failure without losing its checkout or input.
 PR rebuild uses the same exact-source recovery checks as candidate preparation:
 divergent local branches and dirty existing checkouts remain intact for repair.
 Release PR creation, base/title/body edits, readiness and auto-merge commands

@@ -22,6 +22,7 @@ use crate::engine::git::{
     is_clean, ref_exists, rev_parse, worktree_remove, worktree_remove_owned, WorktreeLease,
 };
 use crate::engine::naming::{git_user, sanitize_for_branch};
+use crate::engine::prompt::write_prompt_log;
 use crate::engine::worktrees::{
     branch_exists, create_named_worktree, list_porcelain, main_repo_root, worktree_path,
     CreateWorktreeResult,
@@ -468,6 +469,7 @@ pub fn release_notes(
         &prs,
         &target,
         progress,
+        &|_| {},
     )?;
 
     let notes = fs::read_to_string(main_repo.join("RELEASE_NOTES.md"))?;
@@ -1886,6 +1888,10 @@ fn prepare_release_in_worktree(
         &changes.merged_prs,
         target,
         progress,
+        &|command| {
+            lock.inherit(command);
+            lease.inherit(command);
+        },
     )?;
 
     progress.status("Committing release changes...");
@@ -2059,6 +2065,7 @@ struct ReleaseNotesOmissions {
     previous_release_notes_bytes: usize,
 }
 
+#[allow(clippy::too_many_arguments)]
 fn run_release_notes_stage(
     repo: &Path,
     version: &str,
@@ -2067,6 +2074,7 @@ fn run_release_notes_stage(
     merged_prs: &[MergedPr],
     target: &ReleaseTarget,
     progress: &impl Progress,
+    inherit_notes: &impl Fn(&mut Command),
 ) -> OpsResult<()> {
     let notes_path = repo.join("RELEASE_NOTES.md");
     let (previous_notes, previous_notes_omitted) =
@@ -2093,15 +2101,21 @@ fn run_release_notes_stage(
             previous_notes_omitted,
         )?;
 
-        let mut context_file = tempfile::NamedTempFile::new_in(repo)?;
-        context_file.write_all(&context_json)?;
-        let context_path = context_file.path().to_string_lossy().to_string();
+        // A provider can outlive its launcher. Keep its exact input with the
+        // other runtime prompts until the protected checkout is removed.
+        let context_path = write_prompt_log(
+            repo,
+            std::str::from_utf8(&context_json).expect("serialized JSON is UTF-8"),
+            &format!("release-notes-context-{}", uuid::Uuid::new_v4()),
+            None,
+        )?;
 
         let mut cmd = Command::new("lf");
         cmd.arg("--batch")
             .arg("release-notes")
             .current_dir(repo)
             .env("LF_RELEASE_NOTES_CONTEXT", &context_path);
+        inherit_notes(&mut cmd);
         let degradation = match run_command(&mut cmd) {
             Ok(_) => None,
             Err(err) => match classify_release_notes_degradation(&err) {

@@ -99,9 +99,8 @@ boundary.
 
 ## Thread
 
-`lf chat` writes only when the active epoch is local. `--steer` injects into a
-compatible active provider turn and otherwise queues the message for the next
-pass. A Discord epoch rejects authored text with a typed Open-in-Discord action;
+`lf chat` writes channel messages when the active epoch is local. Give a Wave
+operation guidance with `lf --wave <wave> wave/operate "instructions"`. A Discord epoch rejects authored text with a typed Open-in-Discord action;
 it never writes a parallel local turn. A bare interrupt remains available.
 
 `lf chat --follow` replays the latest 12 source-bearing messages and follows new

@@ -3,7 +3,7 @@
 use std::time::Duration;
 
 use crate::child::ChildRef;
-use crate::durable::{AbandonReceipt, Author, RunId, Steer, WorkRef, RUN_ID_ENV};
+use crate::durable::{AbandonReceipt, WorkRef};
 use crate::store::SharedStore;
 use crate::work::task::Task;
 
@@ -14,7 +14,7 @@ pub(crate) const CHILD_STARTUP_GRACE: Duration = Duration::from_secs(10);
 #[derive(Debug, Clone, PartialEq, Eq, serde::Serialize)]
 #[serde(tag = "kind", rename_all = "snake_case")]
 pub enum WorkControlReceipt {
-    Steer { steer: Steer },
+    Steer { comment_id: String },
     Interrupt { work: WorkRef },
     Resume { work: WorkRef },
     Abandon { receipt: AbandonReceipt },
@@ -23,7 +23,7 @@ pub enum WorkControlReceipt {
 impl WorkControlReceipt {
     pub fn label(&self) -> String {
         match self {
-            Self::Steer { steer } => steer.id.to_string(),
+            Self::Steer { comment_id } => comment_id.clone(),
             Self::Interrupt { work } => work.id().to_string(),
             Self::Resume { work } => work.id().to_string(),
             Self::Abandon { receipt } => receipt.work.id().to_string(),
@@ -32,7 +32,7 @@ impl WorkControlReceipt {
 
     pub fn action(&self) -> &'static str {
         match self {
-            Self::Steer { .. } => "steered",
+            Self::Steer { .. } => "posted to Linear",
             Self::Interrupt { .. } => "interrupted",
             Self::Resume { .. } => "resumed",
             Self::Abandon { .. } => "abandoned",
@@ -56,19 +56,6 @@ pub(crate) async fn resume_task(store: &SharedStore, mut task: Task) -> OpsResul
     Ok(work)
 }
 
-pub(crate) async fn append_steer(
-    store: &SharedStore,
-    target: ChildRef,
-    text: &str,
-) -> OpsResult<Steer> {
-    let work = store.work_for_child(&target).await.map_err(child_error)?;
-    let author = ambient_author()?;
-    store
-        .append_steer(&work, author, text)
-        .await
-        .map_err(child_error)
-}
-
 /// Inject steer comments newer than `*cursor` into the live provider turn. A
 /// comment the provider takes (`Sent`) advances the cursor; one it can't take
 /// right now (`NotSteerable` — no active turn, or a driver without live input)
@@ -76,15 +63,16 @@ pub(crate) async fn append_steer(
 /// is best-effort live and durable at the boundary, so this never fails the run.
 pub(crate) async fn inject_live_steers(
     store: &SharedStore,
-    work: &WorkRef,
+    task_id: &crate::work::task::TaskId,
     harness: &mut dyn crate::harness::Harness,
     cursor: &mut i64,
-) {
-    let steers = match store.work_steers(work).await {
+) -> Vec<crate::durable::Steer> {
+    let mut delivered = Vec::new();
+    let steers = match store.task_steers(task_id).await {
         Ok(steers) => steers,
         Err(error) => {
             tracing::warn!(%error, "failed to read steers for live injection");
-            return;
+            return delivered;
         }
     };
     for steer in &steers {
@@ -92,7 +80,10 @@ pub(crate) async fn inject_live_steers(
             continue;
         }
         match harness.send_current(&steer.text).await {
-            crate::harness::SendCurrentOutcome::Sent { .. } => *cursor = steer.id,
+            crate::harness::SendCurrentOutcome::Sent { .. } => {
+                *cursor = steer.id;
+                delivered.push(steer.clone());
+            }
             crate::harness::SendCurrentOutcome::NotSteerable => break,
             crate::harness::SendCurrentOutcome::Failed { error }
             | crate::harness::SendCurrentOutcome::Unknown { error, .. } => {
@@ -105,6 +96,7 @@ pub(crate) async fn inject_live_steers(
             }
         }
     }
+    delivered
 }
 
 /// End the current turn if an interrupt was requested after `*cursor`. The
@@ -128,40 +120,6 @@ pub(crate) async fn observe_interrupt(
     }
 }
 
-pub(crate) fn ambient_author() -> OpsResult<Author> {
-    Ok(std::env::var_os(RUN_ID_ENV)
-        .map(|value| {
-            value
-                .into_string()
-                .map_err(|_| child_error("LF_RUN_ID is not valid UTF-8"))
-                .and_then(|value| RunId::parse(&value).map_err(child_error))
-                .map(Author::Run)
-        })
-        .transpose()?
-        .unwrap_or(Author::User))
-}
-
 fn child_error(error: impl std::fmt::Display) -> OpsError {
     OpsError::Message(error.to_string())
-}
-
-#[cfg(test)]
-mod tests {
-    use super::*;
-
-    #[test]
-    fn generic_run_id_is_opaque_steer_authorship() {
-        let _lock = crate::journal::test_env_lock();
-        let previous_run_id = std::env::var_os(RUN_ID_ENV);
-        let run_id = RunId::new();
-        std::env::set_var(RUN_ID_ENV, run_id.as_str());
-
-        let author = ambient_author().unwrap();
-
-        match previous_run_id {
-            Some(value) => std::env::set_var(RUN_ID_ENV, value),
-            None => std::env::remove_var(RUN_ID_ENV),
-        }
-        assert_eq!(author, Author::Run(run_id));
-    }
 }

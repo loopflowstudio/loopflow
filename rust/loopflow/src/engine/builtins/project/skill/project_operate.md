@@ -36,8 +36,8 @@ provider or sibling Run never blocks you.
 
 Read the exact Project's Linear definition/KRs, current direction, the cache-only
 PM snapshot, filed Tasks, supervised Task state, merged PR evidence, linked
-observations, and the seeded `project-owned-metrics`. Honor every Steer in the
-seed. If the PM reader fails, report once and continue from the KR set. A Project
+observations, and the seeded `project-owned-metrics`. Apply the extra
+instructions for this operation. If the PM reader fails, report once and continue from the KR set. A Project
 is one measured bet in one Wave; it owns KRs and closure evidence — never a
 worktree, PR, memory, cadence, or child Project.
 

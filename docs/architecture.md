@@ -250,7 +250,7 @@ Task worker, piecemeal helper Runs, or another system.
 lf start product
 lf task run INF-123
 lf project run billing
-lf chat --steer "ship invoices first"
+lf --wave <wave> wave/operate "ship invoices first"
 lf status product
 ```
 

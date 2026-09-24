@@ -24,7 +24,7 @@ use serde::Deserialize;
 use sha2::Sha256;
 use time::OffsetDateTime;
 
-use crate::ops::linear_observe::{linear_follow_up_text, reconcile_linear_observation};
+use crate::ops::linear_observe::reconcile_linear_observation;
 use crate::pm::IssueObservation;
 use crate::store::{Store, StoreError};
 
@@ -87,6 +87,7 @@ pub enum WebhookEvent {
     Comment {
         issue_id: String,
         comment_id: String,
+        revision: Option<String>,
         body: String,
         author_id: Option<String>,
     },
@@ -137,7 +138,7 @@ impl RawWebhook {
                     _ => WebhookEvent::Ignored,
                 }
             }
-            ("Comment", "create") => {
+            ("Comment", "create" | "update") => {
                 match (
                     nested_str(&self.data, &["id"]),
                     nested_str(&self.data, &["issue", "id"]),
@@ -145,6 +146,7 @@ impl RawWebhook {
                     (Some(comment_id), Some(issue_id)) => WebhookEvent::Comment {
                         issue_id,
                         comment_id,
+                        revision: nested_str(&self.data, &["updatedAt"]),
                         body: nested_str(&self.data, &["body"]).unwrap_or_default(),
                         author_id: nested_str(&self.data, &["user", "id"])
                             .or_else(|| nested_str(&self.actor, &["id"])),
@@ -177,10 +179,6 @@ pub enum WebhookOutcome {
     Edit { steer_applied: bool },
     /// A human comment; `delivered` is false for a duplicate delivery.
     Comment { delivered: bool },
-}
-
-fn is_human(author_id: Option<&str>, viewer_id: &str) -> bool {
-    author_id.is_some_and(|id| id != viewer_id)
 }
 
 /// Map one verified, parsed event onto the durable Task control substrate.
@@ -226,14 +224,17 @@ pub async fn ingest_event(
         }
         WebhookEvent::Comment {
             comment_id,
+            revision,
             body,
             author_id,
             ..
         } => {
-            if !is_human(author_id.as_deref(), viewer_id) {
+            if !crate::ops::linear_observe::is_direction_comment(&body, author_id.as_deref()) {
                 return Ok(WebhookOutcome::SelfAuthored);
             }
-            let text = linear_follow_up_text(&body);
+            let text = format!("Linear comment {comment_id}:\n\n{body}");
+            let comment_id =
+                crate::ops::linear_observe::comment_revision_id(&comment_id, revision.as_deref());
             let created = store
                 .apply_linear_comment(&task.id, comment_id, text, now)
                 .await?;
@@ -382,6 +383,7 @@ mod tests {
             WebhookEvent::Comment {
                 issue_id: "issue-1".into(),
                 comment_id: "c-1".into(),
+                revision: None,
                 body: "please prioritize".into(),
                 author_id: Some("user-human".into()),
             }

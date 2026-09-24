@@ -530,6 +530,11 @@ pub async fn linear_client(repo: &Path) -> OpsResult<LinearClient> {
     Ok(resolve_repository_context(repo).await?.client)
 }
 
+/// A Task already names its linked issue; comment access needs no team discovery.
+pub(crate) async fn issue_client(repo: &Path) -> OpsResult<LinearClient> {
+    build_client(repo, resolve_provider(repo)?, None).await
+}
+
 async fn resolve_context(repo: &Path, wave: &str) -> OpsResult<PmContext> {
     let repository = resolve_repository_context(repo).await?;
     let provider = repository.provider;
@@ -769,15 +774,15 @@ async fn open_pm_store(config: &StorageConfig) -> OpsResult<Store> {
 }
 
 #[cfg(test)]
-struct PmTestContext {
-    path: std::path::PathBuf,
-    store: std::sync::Arc<Store>,
-    graphql_url: String,
+pub(crate) struct PmTestContext {
+    pub(crate) path: std::path::PathBuf,
+    pub(crate) store: std::sync::Arc<Store>,
+    pub(crate) graphql_url: String,
 }
 
 #[cfg(test)]
 tokio::task_local! {
-    static PM_TEST_CONTEXT: PmTestContext;
+    pub(crate) static PM_TEST_CONTEXT: PmTestContext;
 }
 
 #[cfg(test)]
@@ -3191,7 +3196,10 @@ mod tests {
             json!({ "data": { "issue": {
                 "updatedAt": "2026-07-20T00:00:00.000Z",
                 "title": "Task", "description": "",
-                "comments": { "nodes": nodes }
+                "comments": {
+                    "nodes": nodes,
+                    "pageInfo": { "hasNextPage": false, "endCursor": null }
+                }
             } } }),
         )
     }

@@ -249,7 +249,10 @@ When the active skill calls for a durable Wave learning, edit
 curated rather than appending a transcript. `update-wave` owns deliberate
 end-of-work memory curation; no live Wave is required.
 
-`lf chat` is the User surface. Work Steer is the live correction path.
+`lf chat` is the User conversation surface. `lf task steer` posts a Linear Task
+comment; direct Linear comments also reach the advancing worker. Steering does
+not start idle work or inject into independent `--as` Runs. Guide Projects and
+Waves through their operate skills with extra instructions.
 
 ## Secrets And Auth
 

@@ -1,6 +1,5 @@
 mod support;
 
-use loopflow::child::ChildRef;
 use loopflow::webhook::{ingest_event, WebhookEvent, WebhookOutcome};
 use loopflow_test_support::TestRepo;
 use support::{register_task, EnvGuard};
@@ -26,7 +25,6 @@ fn verified_webhooks_drive_task_control_exactly_once() {
     repo.push_new_branch(branch);
     let task = register_task(home.path(), repo.path(), branch, &base);
     let issue_id = task.task.plan.id.as_str().to_string();
-    let target = ChildRef::Task(task.task.id.clone());
     let rt = tokio::runtime::Runtime::new().expect("runtime");
     let now = OffsetDateTime::now_utc();
 
@@ -40,6 +38,7 @@ fn verified_webhooks_drive_task_control_exactly_once() {
     let comment = |id: &str, author: &str| WebhookEvent::Comment {
         issue_id: issue_id.clone(),
         comment_id: id.to_string(),
+        revision: None,
         body: "please prioritize".to_string(),
         author_id: Some(author.to_string()),
     };
@@ -94,7 +93,7 @@ fn verified_webhooks_drive_task_control_exactly_once() {
         .expect("comment redelivery");
     assert_eq!(outcome, WebhookOutcome::Comment { delivered: false });
 
-    // Loopflow's own comment never reaches the worker.
+    // A human using Loopflow's authenticated account also reaches the worker.
     let outcome = rt
         .block_on(ingest_event(
             &task.store,
@@ -103,7 +102,7 @@ fn verified_webhooks_drive_task_control_exactly_once() {
             now,
         ))
         .expect("self comment");
-    assert_eq!(outcome, WebhookOutcome::SelfAuthored);
+    assert_eq!(outcome, WebhookOutcome::Comment { delivered: true });
 
     // An issue with no Task is a no-op.
     let outcome = rt
@@ -112,6 +111,7 @@ fn verified_webhooks_drive_task_control_exactly_once() {
             WebhookEvent::Comment {
                 issue_id: "issue-unknown".to_string(),
                 comment_id: "c-x".to_string(),
+                revision: None,
                 body: "hi".to_string(),
                 author_id: Some("user-human".to_string()),
             },
@@ -121,14 +121,8 @@ fn verified_webhooks_drive_task_control_exactly_once() {
         .expect("no target");
     assert_eq!(outcome, WebhookOutcome::NoTarget);
 
-    // Exactly two ordered Steers landed.
-    let work = rt
-        .block_on(task.store.work_for_child(&target))
-        .expect("work");
-    let steers = rt
-        .block_on(task.store.work_steers(&work))
-        .expect("Work steers");
-    assert_eq!(steers.len(), 2);
+    let steers = rt.block_on(task.store.task_steers(&task.task.id)).unwrap();
+    assert_eq!(steers.len(), 3);
     assert!(steers[0].text.contains("New title"));
     assert!(steers[1].text.contains("please prioritize"));
 }

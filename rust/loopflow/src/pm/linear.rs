@@ -341,10 +341,12 @@ const ISSUE_OBSERVATION_QUERY: &str = r#"query IssueObservation($id: String!, $c
       nodes {
         id
         body
+        updatedAt
         user {
           id
         }
       }
+      pageInfo { hasNextPage endCursor }
     }
   }
 }"#;
@@ -355,6 +357,8 @@ const ISSUE_COMMENTS_QUERY: &str = r#"query IssueComments($id: String!, $comment
       nodes {
         id
         body
+        updatedAt
+        user { id }
       }
       pageInfo {
         hasNextPage
@@ -1167,20 +1171,43 @@ impl LinearClient {
         let issue = response
             .issue
             .ok_or_else(|| PmError::Message(format!("linear issue {issue_id} not found")))?;
+        let mut page = issue.comments;
+        let mut comments = Vec::new();
+        loop {
+            comments.extend(page.nodes.into_iter().map(|node| IssueComment {
+                id: node.id,
+                revision: node.updated_at,
+                body: node.body,
+                author_id: node.user.map(|user| user.id),
+            }));
+            if !page.page_info.has_next_page {
+                break;
+            }
+            let after = page.page_info.end_cursor.ok_or_else(|| {
+                PmError::Message("Linear comment page is missing its continuation cursor".into())
+            })?;
+            let response: IssueCommentsData = self
+                .graphql(
+                    ISSUE_COMMENTS_QUERY,
+                    json!({"id": issue_id, "comments": OBSERVATION_COMMENT_PAGE, "after": after}),
+                )
+                .await?;
+            page = response
+                .issue
+                .ok_or_else(|| PmError::Message(format!("linear issue {issue_id} not found")))?
+                .comments;
+        }
+        // A correction to an older comment follows the original direction.
+        comments.sort_by(|left, right| {
+            left.revision
+                .cmp(&right.revision)
+                .then(left.id.cmp(&right.id))
+        });
         Ok(IssueObservation {
             revision: issue.updated_at,
             title: issue.title,
             description: issue.description.unwrap_or_default(),
-            comments: issue
-                .comments
-                .nodes
-                .into_iter()
-                .map(|node| IssueComment {
-                    id: node.id,
-                    body: node.body,
-                    author_id: node.user.map(|user| user.id),
-                })
-                .collect(),
+            comments,
         })
     }
 }
@@ -1349,7 +1376,7 @@ struct IssueObservationNode {
     title: String,
     #[serde(default)]
     description: Option<String>,
-    comments: CommentConnection,
+    comments: PagedCommentConnection,
 }
 
 #[derive(Deserialize)]
@@ -1370,13 +1397,10 @@ struct PagedCommentConnection {
 }
 
 #[derive(Deserialize)]
-struct CommentConnection {
-    nodes: Vec<CommentNode>,
-}
-
-#[derive(Deserialize)]
 struct CommentNode {
     id: String,
+    #[serde(rename = "updatedAt")]
+    updated_at: Option<String>,
     #[serde(default)]
     body: String,
     #[serde(default)]
@@ -1902,6 +1926,7 @@ mod tests {
                         "title": "Stream Linear edits",
                         "description": "New body",
                         "comments": {
+                            "pageInfo": {"hasNextPage": false, "endCursor": null},
                             "nodes": [
                                 { "id": "c-1", "body": "please prioritize", "user": { "id": "user-human" } },
                                 { "id": "c-2", "body": "PR: https://x", "user": { "id": "user-loopflow" } },
@@ -1927,16 +1952,19 @@ mod tests {
             vec![
                 IssueComment {
                     id: "c-1".to_string(),
+                    revision: None,
                     body: "please prioritize".to_string(),
                     author_id: Some("user-human".to_string()),
                 },
                 IssueComment {
                     id: "c-2".to_string(),
+                    revision: None,
                     body: "PR: https://x".to_string(),
                     author_id: Some("user-loopflow".to_string()),
                 },
                 IssueComment {
                     id: "c-3".to_string(),
+                    revision: None,
                     body: "integration note".to_string(),
                     author_id: None,
                 },
@@ -1947,6 +1975,34 @@ mod tests {
         let body: Value = serde_json::from_str(&requests[0].body).expect("body is json");
         assert_eq!(body["variables"]["id"], "issue-1");
         assert_eq!(body["variables"]["comments"], OBSERVATION_COMMENT_PAGE);
+    }
+
+    #[tokio::test]
+    async fn observe_issue_reads_every_comment_page_in_revision_order() {
+        let comment = |id, revision| json!({"id": id, "body": "advice", "updatedAt": revision, "user": {"id": "me"}});
+        let (url, _) = test_server::spawn(vec![
+            json_response(StatusCode::OK, json!({"data": {"issue": {
+                "updatedAt": "2026-09-23T00:00:00Z", "title": "Task", "description": "",
+                "comments": {"nodes": [comment("newer", "2026-09-23T00:00:00Z")], "pageInfo": {"hasNextPage": true, "endCursor": "cursor-1"}}
+            }}})),
+            json_response(StatusCode::OK, json!({"data": {"issue": {"comments": {
+                "nodes": [comment("older", "2026-09-22T00:00:00Z")], "pageInfo": {"hasNextPage": false, "endCursor": null}
+            }}}})),
+        ]).await;
+        let client = LinearClient::with_base_url("fixture-token".into(), None, url);
+        let observed = client.observe_issue("issue-1").await.unwrap();
+        assert_eq!(
+            observed
+                .comments
+                .iter()
+                .map(|comment| comment.id.as_str())
+                .collect::<Vec<_>>(),
+            ["older", "newer"]
+        );
+        assert_eq!(
+            observed.comments[1].revision.as_deref(),
+            Some("2026-09-23T00:00:00Z")
+        );
     }
 
     #[tokio::test]

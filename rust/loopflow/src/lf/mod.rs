@@ -599,8 +599,7 @@ pub enum Commands {
         #[arg(long)]
         max_turns: Option<u32>,
     },
-    /// Converse with a served mind's thread; --follow replays it and --steer
-    /// reaches the live body.
+    /// Converse with a Wave; --follow replays its thread.
     Chat {
         /// Message text (reads stdin when omitted unless --follow or --history)
         #[arg(trailing_var_arg = true)]
@@ -608,9 +607,6 @@ pub enum Commands {
         /// Replay and follow the thread while typed lines post into it.
         #[arg(long, conflicts_with_all = ["text", "history", "json", "limit"])]
         follow: bool,
-        /// Inject into a live steer-capable turn; otherwise queue.
-        #[arg(long, conflicts_with_all = ["parent", "history", "json", "limit"])]
-        steer: bool,
         /// Read the latest durable turns without requiring a live listener.
         #[arg(long, conflicts_with = "text")]
         history: bool,
@@ -819,15 +815,6 @@ pub enum WorkCommand {
         #[arg(long)]
         json: bool,
     },
-    /// Append authored direction with User or generic Run provenance
-    Steer {
-        #[arg(value_parser = ["wave", "project", "task"])]
-        kind: String,
-        id: String,
-        message: String,
-        #[arg(long)]
-        json: bool,
-    },
     /// Refuse interruption until Work has an exact process owner
     Interrupt {
         #[arg(value_parser = ["wave", "project", "task"])]
@@ -891,8 +878,6 @@ pub enum ProjectCommand {
         /// Linear Project UUID or unique slug
         project_id: String,
         #[arg(long)]
-        directive: Option<String>,
-        #[arg(long)]
         json: bool,
     },
     /// Create a Linear Project, then run one finite operation
@@ -918,13 +903,6 @@ pub enum ProjectCommand {
     Status {
         /// Linear Project UUID, unique slug, or historical Project id
         project_id: String,
-        #[arg(long)]
-        json: bool,
-    },
-    /// Store Project direction and launch one finite operation
-    Steer {
-        project_id: String,
-        message: String,
         #[arg(long)]
         json: bool,
     },
@@ -1033,7 +1011,7 @@ pub enum TaskCommand {
         #[arg(long)]
         json: bool,
     },
-    /// Redirect the active provider turn, interrupting when live steer is unavailable
+    /// Post a Linear Task comment; its advancing worker attempts live delivery
     Steer {
         issue: String,
         message: String,
@@ -2513,29 +2491,15 @@ mod tests {
 
     #[test]
     fn project_prepare_accepts_existing_planning_identity() {
-        let cli = Cli::try_parse_from([
-            "lf",
-            "project",
-            "prepare",
-            "runtime-model",
-            "--directive",
-            "collect evidence",
-            "--json",
-        ])
-        .expect("parse project prepare");
+        let cli = Cli::try_parse_from(["lf", "project", "prepare", "runtime-model", "--json"])
+            .expect("parse project prepare");
         let Some(Commands::Project {
-            cmd:
-                ProjectCommand::Prepare {
-                    project_id,
-                    directive,
-                    json,
-                },
+            cmd: ProjectCommand::Prepare { project_id, json },
         }) = cli.command
         else {
             panic!("expected project prepare command");
         };
         assert_eq!(project_id, "runtime-model");
-        assert_eq!(directive.as_deref(), Some("collect evidence"));
         assert!(json);
     }
 
@@ -2817,29 +2781,6 @@ mod tests {
     }
 
     #[test]
-    fn project_steer_parses() {
-        let steer = Cli::try_parse_from([
-            "lf",
-            "project",
-            "steer",
-            "project-uuid",
-            "prioritize the CLI path",
-            "--json",
-        ])
-        .expect("parse project steer");
-        assert!(matches!(
-            steer.command,
-            Some(Commands::Project {
-                cmd: ProjectCommand::Steer {
-                    project_id,
-                    message,
-                    json: true,
-                },
-            }) if project_id == "project-uuid" && message == "prioritize the CLI path"
-        ));
-    }
-
-    #[test]
     fn task_resume_advances_without_provider_handoff() {
         let task = Cli::try_parse_from([
             "lf",
@@ -2916,28 +2857,10 @@ mod tests {
     }
     #[test]
     fn cli_parses_stable_work_controls() {
-        let cli = Cli::try_parse_from([
-            "lf",
-            "work",
-            "steer",
-            "task",
-            "task_1",
-            "inspect the failure",
-            "--json",
-        ])
-        .expect("parse Work steer");
-        assert!(matches!(
-            cli.command,
-            Some(Commands::Work {
-                cmd: WorkCommand::Steer {
-                    kind,
-                    id,
-                    message,
-                    json: true,
-                }
-            }) if kind == "task" && id == "task_1" && message == "inspect the failure"
-        ));
-
+        assert!(
+            Cli::try_parse_from(["lf", "work", "steer", "task", "task_1", "direction"]).is_err()
+        );
+        assert!(Cli::try_parse_from(["lf", "project", "steer", "project", "direction"]).is_err());
         assert!(Cli::try_parse_from(["lf", "work", "continue", "task", "task_1"]).is_err());
         assert!(Cli::try_parse_from(["lf", "work", "escalate", "task", "task_1"]).is_err());
 
@@ -3305,7 +3228,6 @@ mod tests {
         let Some(Commands::Chat {
             text,
             follow,
-            steer,
             target,
             ..
         }) = cli.command
@@ -3314,7 +3236,6 @@ mod tests {
         };
         assert_eq!(text, vec!["shipped", "the", "parser"]);
         assert!(!follow);
-        assert!(!steer);
         assert_eq!(target.wave, None);
         assert!(!target.parent);
 
@@ -3333,15 +3254,7 @@ mod tests {
         assert_eq!(text, vec!["hi"]);
         assert_eq!(target.wave.as_deref(), Some("goals"));
 
-        let cli =
-            Cli::try_parse_from(["lf", "chat", "--steer", "change course"]).expect("parse steer");
-        let Some(Commands::Chat { text, steer, .. }) = cli.command else {
-            panic!("expected chat command");
-        };
-        assert_eq!(text, vec!["change course"]);
-        assert!(steer);
-
-        assert!(Cli::try_parse_from(["lf", "chat", "--steer", "--parent", "x"]).is_err());
+        assert!(Cli::try_parse_from(["lf", "chat", "--steer", "change course"]).is_err());
 
         // --wave and --parent are mutually exclusive.
         assert!(Cli::try_parse_from(["lf", "chat", "--wave", "goals", "--parent", "x"]).is_err());
@@ -3351,7 +3264,6 @@ mod tests {
         let Some(Commands::Chat {
             text,
             follow,
-            steer,
             target,
             ..
         }) = cli.command
@@ -3360,7 +3272,6 @@ mod tests {
         };
         assert!(text.is_empty());
         assert!(follow);
-        assert!(!steer);
         assert_eq!(target.wave.as_deref(), Some("goals"));
 
         assert!(Cli::try_parse_from(["lf", "chat", "--follow", "hello"]).is_err());

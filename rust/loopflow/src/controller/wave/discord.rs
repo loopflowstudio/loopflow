@@ -1016,7 +1016,7 @@ fn authored_header(wave: &str, op: MessageOp) -> String {
 }
 
 fn parse_authored_content(wave: &str, content: &str) -> Option<(MessageOp, String)> {
-    for op in [MessageOp::Message, MessageOp::Steer, MessageOp::Interrupt] {
+    for op in [MessageOp::Message, MessageOp::Interrupt] {
         let header = authored_header(wave, op);
         if let Some(text) = content
             .strip_prefix(&header)
@@ -2133,7 +2133,7 @@ mod tests {
     }
 
     #[tokio::test]
-    async fn native_compose_posts_to_discord_and_reenters_as_a_steer() {
+    async fn native_compose_posts_to_discord_and_reenters_as_a_message() {
         let fixture = fixture(Vec::new());
         let (base_url, discord_server) = fixture_server(fixture.clone()).await;
         let client = DiscordClient::from_token(Some("fixture-token".into()), &base_url)
@@ -2174,7 +2174,7 @@ mod tests {
         let url = format!("http://{address}/messages");
         let body = json!({
             "id": "request-1",
-            "op": "steer",
+            "op": "message",
             "text": "favor reliability"
         });
         let response = client
@@ -2192,7 +2192,7 @@ mod tests {
         assert!(matches!(&posted.source, ChatMessageSource::Discord { .. }));
         assert_eq!(
             fixture.lock().expect("fixture").messages[0].content,
-            "**[ship · Loopflow app · steer]**\nfavor reliability"
+            "**[ship · Loopflow app]**\nfavor reliability"
         );
         let retried: crate::controller::wave::chat::PostMessageResponse = client
             .post(&url)

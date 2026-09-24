@@ -45,7 +45,7 @@ lf task resume INF-123 --reason "provider credentials repaired"
 
 `resume` starts a fresh boundary from the Task Work, Steers, worktree, and
 active PR. It refuses while another exact Task worker is live. A Task Steer
-is a durable Work comment; the active Task worker receives new comments when
+is a Linear Task comment; the active Task worker receives new comments when
 possible and the next Skill seed always reads them. `task interrupt` ends the
 active boundary so the next one re-reads direction. Neither command's receipt
 proves that the provider applied the direction.

@@ -907,13 +907,8 @@ fn print_project_control(
 
 fn run_project_command(repo: &Path, command: &ProjectCommand) -> anyhow::Result<()> {
     match command {
-        ProjectCommand::Prepare {
-            project_id,
-            directive,
-            json,
-        } => {
-            let project =
-                loopflow::ops::project::project_prepare(repo, project_id, directive.clone())?;
+        ProjectCommand::Prepare { project_id, json } => {
+            let project = loopflow::ops::project::project_prepare(repo, project_id)?;
             print_project(&project, *json)
         }
         ProjectCommand::Run {
@@ -941,14 +936,6 @@ fn run_project_command(repo: &Path, command: &ProjectCommand) -> anyhow::Result<
         ProjectCommand::Status { project_id, json } => {
             let project = loopflow::ops::project::project_status(project_id)?;
             print_project(&project, *json)
-        }
-        ProjectCommand::Steer {
-            project_id,
-            message,
-            json,
-        } => {
-            let result = loopflow::ops::project::project_steer(project_id, message.clone())?;
-            print_project_control(&result, *json)
         }
         ProjectCommand::Abandon {
             project_id,
@@ -1646,7 +1633,6 @@ fn main() -> anyhow::Result<()> {
             Some(Commands::Chat {
                 text,
                 follow,
-                steer,
                 history,
                 json,
                 limit,
@@ -1656,7 +1642,6 @@ fn main() -> anyhow::Result<()> {
                 text,
                 loopflow::lf::commands::chat::ChatOptions {
                     follow: *follow,
-                    steer: *steer,
                     history: *history,
                     json: *json,
                     limit: *limit,

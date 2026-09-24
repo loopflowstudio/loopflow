@@ -306,6 +306,7 @@ pub struct IssueObservation {
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub struct IssueComment {
     pub id: String,
+    pub revision: Option<String>,
     pub body: String,
     pub author_id: Option<String>,
 }

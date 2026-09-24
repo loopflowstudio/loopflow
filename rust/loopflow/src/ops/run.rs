@@ -62,7 +62,6 @@ pub(crate) fn render_task_context(
 pub(crate) fn render_project_context(
     project: &Project,
     wave_name: &str,
-    steers: &[Steer],
     observations: &[String],
     metric_context: &str,
 ) -> String {
@@ -73,12 +72,11 @@ pub(crate) fn render_project_context(
     };
     let progress = format!("Project Flow iteration: {}", project.iteration + 1);
     format!(
-        "Linear Project {name} ({project_id}) in wave/{wave}.\n\n{context}\n\n{metric_context}\n\nOnly metrics owned by this Project appear above. Cross-owned evidence appears only when the Wave routes it through durable direction. Metrics inform KR judgment; they never check a KR automatically.\n\n{direction}\n\nProject Work: {work_id}\n{progress}\nPM snapshot synced at: {synced_at}\nSupervised Task observations:\n{observations}",
+        "Linear Project {name} ({project_id}) in wave/{wave}.\n\n{context}\n\n{metric_context}\n\nOnly metrics owned by this Project appear above. Cross-owned evidence appears only when the Wave routes it through durable direction. Metrics inform KR judgment; they never check a KR automatically.\n\nProject Work: {work_id}\n{progress}\nPM snapshot synced at: {synced_at}\nSupervised Task observations:\n{observations}",
         name = project.plan.name,
         project_id = project.plan.id.as_str(),
         wave = wave_name,
         context = project.plan.prompt_context,
-        direction = render_steers(steers),
         work_id = project.id,
         synced_at = project.plan.pm_snapshot_synced_at,
     )
@@ -209,7 +207,7 @@ pub async fn resolve_work_selection(
             )?;
         }
         let work = WorkRef::Task(task.id.clone());
-        let steers = store.work_steers(&work).await.map_err(run_error)?;
+        let steers = Vec::new();
         let pr = store
             .active_task_pr(&task.id)
             .await
@@ -267,7 +265,6 @@ pub async fn resolve_work_selection(
             .await,
         );
         let work = WorkRef::Project(project.id.clone());
-        let steers = store.work_steers(&work).await.map_err(run_error)?;
         let project_observations = store
             .pending_project_observations(&project.id)
             .await
@@ -279,13 +276,7 @@ pub async fn resolve_work_selection(
                 ChildEventPayload::Project { .. } => None,
             })
             .collect::<Vec<_>>();
-        let context = render_project_context(
-            &project,
-            wave.name(),
-            &steers,
-            &observations,
-            &metric_context,
-        );
+        let context = render_project_context(&project, wave.name(), &observations, &metric_context);
         return Ok(WorkBinding {
             work,
             wave_id: project.wave_id,
@@ -586,13 +577,27 @@ mod tests {
         store.create_project(&project).await.unwrap();
         let task = task(&store, &wave, &project, worktree.clone()).await;
 
+        store
+            .apply_linear_comment(
+                &task.id,
+                "comment-1".into(),
+                "ADVANCER ONLY".into(),
+                time::OffsetDateTime::now_utc(),
+            )
+            .await
+            .unwrap();
         let (runtime, prompts) = tokio::join!(
             resolve_work_binding(&store, &repo, "task:LOO-267"),
             resolve_work_binding(&store, &repo, "task:LOO-267")
         );
 
-        assert_eq!(runtime.unwrap().cwd, worktree);
-        assert_eq!(prompts.unwrap().work, WorkRef::Task(task.id.clone()));
+        let runtime = runtime.unwrap();
+        let prompts = prompts.unwrap();
+        assert_eq!(runtime.cwd, worktree);
+        assert_eq!(prompts.work, WorkRef::Task(task.id.clone()));
+        assert!(!runtime.context.contains("ADVANCER ONLY"));
+        assert!(!prompts.context.contains("ADVANCER ONLY"));
+        assert_eq!(store.task_steers(&task.id).await.unwrap().len(), 1);
     }
 
     #[tokio::test]

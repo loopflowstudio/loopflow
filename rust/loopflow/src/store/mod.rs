@@ -1406,7 +1406,7 @@ mod tests {
             .await
             .unwrap();
 
-        let steers = store.work_steers(&work).await.unwrap();
+        let steers = store.task_steers(&task.id).await.unwrap();
         assert_eq!(
             steers.iter().map(|steer| steer.id).collect::<Vec<_>>(),
             [first.id, second.id]
@@ -1594,7 +1594,7 @@ mod tests {
             .await
             .unwrap();
         let mut cursor = 0;
-        crate::ops::child::inject_live_steers(&store, &work, &mut harness, &mut cursor).await;
+        crate::ops::child::inject_live_steers(&store, &task.id, &mut harness, &mut cursor).await;
         assert_eq!(
             *sent.lock().unwrap(),
             ["focus on the parser", "keep the API stable"]
@@ -1610,7 +1610,7 @@ mod tests {
             .append_steer(&work, Author::User, "add a regression test")
             .await
             .unwrap();
-        crate::ops::child::inject_live_steers(&store, &work, &mut harness, &mut cursor).await;
+        crate::ops::child::inject_live_steers(&store, &task.id, &mut harness, &mut cursor).await;
         assert_eq!(sent.lock().unwrap().len(), 3);
         assert_eq!(cursor, third.id);
 
@@ -1625,7 +1625,7 @@ mod tests {
             ..Default::default()
         };
         let before = cursor;
-        crate::ops::child::inject_live_steers(&store, &work, &mut deaf, &mut cursor).await;
+        crate::ops::child::inject_live_steers(&store, &task.id, &mut deaf, &mut cursor).await;
         assert_eq!(
             cursor, before,
             "NotSteerable defers the comment to the next boundary seed"
@@ -1680,7 +1680,7 @@ mod tests {
     }
 
     #[tokio::test]
-    async fn task_creation_records_planning_and_opaque_run_provenance_without_a_run() {
+    async fn task_creation_records_placement_without_synthetic_direction() {
         let directory = tempfile::tempdir().unwrap();
         let database_path = directory.path().join("registry.db");
         let store =
@@ -1694,15 +1694,9 @@ mod tests {
         let mut task = make_task(&wave, &project);
         task.worktree = directory.path().join("uncreated-child-worktree");
         let pr = make_task_pr(&task);
-        let source_run_id = crate::durable::RunId::new();
 
         store
-            .create_task_with_input(
-                &task,
-                &pr,
-                &Author::Run(source_run_id.clone()),
-                "a sibling completed; begin file-writing work",
-            )
+            .create_task_with_worktree(&task, &pr)
             .await
             .expect("generic Run identity is opaque provenance, not planning authority");
         let durable_child_rows = |path: &std::path::Path| {
@@ -1725,11 +1719,10 @@ mod tests {
                 )
                 .unwrap()
         };
-        assert_eq!(durable_child_rows(&database_path), (1, 1, 1));
+        assert_eq!(durable_child_rows(&database_path), (1, 0, 1));
 
-        let task_work = WorkRef::Task(task.id.clone());
-        let child_steers = store.work_steers(&task_work).await.unwrap();
-        assert_eq!(child_steers[0].author, Author::Run(source_run_id));
+        let child_steers = store.task_steers(&task.id).await.unwrap();
+        assert!(child_steers.is_empty());
         assert_eq!(
             store
                 .latest_task_event(&task.id)
@@ -1745,7 +1738,7 @@ mod tests {
                 base_commit: pr.base_commit.clone(),
             }
         );
-        assert_eq!(durable_child_rows(&database_path), (1, 1, 1));
+        assert_eq!(durable_child_rows(&database_path), (1, 0, 1));
         assert!(!task.worktree.exists());
     }
 
@@ -1778,7 +1771,6 @@ mod tests {
         );
         let historical_prs = store.task_prs(&task.id).await.unwrap();
 
-        let source_run_id = crate::durable::RunId::new();
         let mut recovered = task.clone();
         recovered.updated_at = time::OffsetDateTime::now_utc();
 
@@ -1786,12 +1778,7 @@ mod tests {
         assert!(!task.worktree.exists());
 
         store
-            .reopen_task(
-                &recovered,
-                None,
-                &Author::Run(source_run_id.clone()),
-                "the dependency is complete",
-            )
+            .reopen_task(&recovered, None)
             .await
             .expect("generic Run identity is opaque planning provenance");
         assert_eq!(store.task_prs(&task.id).await.unwrap(), historical_prs);
@@ -1802,10 +1789,8 @@ mod tests {
             crate::durable::WorkStatus::Ready
         );
         assert_eq!(store.task_prs(&task.id).await.unwrap(), historical_prs);
-        let successor_steers = store.work_steers(&task_work).await.unwrap();
-        assert_eq!(successor_steers.len(), 2);
-        assert_eq!(successor_steers[1].author, Author::Run(source_run_id));
-        assert_eq!(successor_steers[1].text, "the dependency is complete");
+        let successor_steers = store.task_steers(&task.id).await.unwrap();
+        assert_eq!(successor_steers.len(), 1);
         let steers = SqliteStore::new(&database_path)
             .unwrap()
             .steers_since(0)
@@ -1813,9 +1798,6 @@ mod tests {
         assert!(steers
             .iter()
             .any(|comment| comment.steer.text == "initial Task direction"));
-        assert!(steers
-            .iter()
-            .any(|comment| comment.steer.text == "the dependency is complete"));
         assert!(!task.worktree.exists());
     }
 
@@ -1894,7 +1876,7 @@ mod tests {
             target_status
         );
         assert_eq!(store.task_prs(&target.id).await.unwrap(), target_prs);
-        assert!(store.work_steers(&target_work).await.unwrap().is_empty());
+        assert!(store.task_steers(&target.id).await.unwrap().is_empty());
     }
 
     #[tokio::test]
@@ -2053,10 +2035,7 @@ mod tests {
             outcome => panic!("unexpected claim outcome: {outcome:?}"),
         };
 
-        store
-            .restart_task_flow(&task, &Author::User, "restart", "deadbeef")
-            .await
-            .unwrap();
+        store.restart_task_flow(&task, "deadbeef").await.unwrap();
         let replacement = store
             .set_flow_position(
                 &task.id,

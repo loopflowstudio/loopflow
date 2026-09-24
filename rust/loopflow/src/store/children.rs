@@ -1,7 +1,7 @@
 //! Durable Project and Task compatibility rows and their observation outbox.
 
 use crate::child::ObservationRecipient;
-use crate::durable::{Author, FlowPosition, TaskFlowBlocker, TaskWorkerClaim};
+use crate::durable::{FlowPosition, TaskFlowBlocker, TaskWorkerClaim};
 use crate::id::WaveId;
 use crate::work::project::{
     ObservationOutboxRow, Project, ProjectEvent, ProjectEventKind, ProjectId,
@@ -21,36 +21,20 @@ impl Store {
         run_sqlite(&self.sqlite, move |store| store.insert_task(&task, &pr)).await
     }
 
-    pub async fn create_task_with_input(
-        &self,
-        task: &Task,
-        pr: &TaskPr,
-        author: &Author,
-        text: &str,
-    ) -> StoreResult<()> {
+    pub async fn create_task_with_worktree(&self, task: &Task, pr: &TaskPr) -> StoreResult<()> {
         let task = task.clone();
         let pr = pr.clone();
-        let author = author.clone();
-        let text = text.to_string();
         run_sqlite(&self.sqlite, move |store| {
-            store.insert_task_with_input(&task, &pr, &author, &text)
+            store.insert_task_with_worktree(&task, &pr)
         })
         .await
     }
 
-    pub async fn reopen_task(
-        &self,
-        task: &Task,
-        pr: Option<&TaskPr>,
-        author: &Author,
-        text: &str,
-    ) -> StoreResult<()> {
+    pub async fn reopen_task(&self, task: &Task, pr: Option<&TaskPr>) -> StoreResult<()> {
         let task = task.clone();
         let pr = pr.cloned();
-        let author = author.clone();
-        let text = text.to_string();
         run_sqlite(&self.sqlite, move |store| {
-            store.reopen_task(&task, pr.as_ref(), &author, &text)
+            store.reopen_task(&task, pr.as_ref())
         })
         .await
     }
@@ -157,16 +141,12 @@ impl Store {
         task: &Task,
         expected: &FlowPosition,
         next: &FlowPosition,
-        author: &Author,
-        direction: &str,
     ) -> StoreResult<FlowPosition> {
         let task = task.clone();
         let expected = expected.clone();
         let next = next.clone();
-        let author = author.clone();
-        let direction = direction.to_string();
         run_sqlite(&self.sqlite, move |store| {
-            store.iterate_human_task_boundary(&task, &expected, &next, &author, &direction)
+            store.iterate_human_task_boundary(&task, &expected, &next)
         })
         .await
     }
@@ -175,15 +155,11 @@ impl Store {
         &self,
         task_id: &TaskId,
         expected: &FlowPosition,
-        author: &Author,
-        reason: &str,
     ) -> StoreResult<FlowPosition> {
         let task_id = task_id.clone();
         let expected = expected.clone();
-        let author = author.clone();
-        let reason = reason.to_string();
         run_sqlite(&self.sqlite, move |store| {
-            store.retry_task_flow(&task_id, &expected, &author, &reason)
+            store.retry_task_flow(&task_id, &expected)
         })
         .await
     }
@@ -191,16 +167,12 @@ impl Store {
     pub(crate) async fn restart_task_flow(
         &self,
         task: &Task,
-        author: &Author,
-        direction: &str,
         checkpoint_head: &str,
     ) -> StoreResult<()> {
         let task = task.clone();
-        let author = author.clone();
-        let direction = direction.to_string();
         let checkpoint_head = checkpoint_head.to_string();
         run_sqlite(&self.sqlite, move |store| {
-            store.restart_task_flow(&task, &author, &direction, &checkpoint_head)
+            store.restart_task_flow(&task, &checkpoint_head)
         })
         .await
     }
@@ -535,32 +507,9 @@ impl Store {
         run_sqlite(&self.sqlite, move |store| store.insert_project(&project)).await
     }
 
-    pub async fn create_project_with_steer(
-        &self,
-        project: &Project,
-        author: Author,
-        text: &str,
-    ) -> StoreResult<()> {
+    pub async fn reopen_project(&self, project: &Project) -> StoreResult<()> {
         let project = project.clone();
-        let text = text.to_string();
-        run_sqlite(&self.sqlite, move |store| {
-            store.insert_project_with_steer(&project, &author, &text)
-        })
-        .await
-    }
-
-    pub async fn reopen_project(
-        &self,
-        project: &Project,
-        author: Author,
-        text: &str,
-    ) -> StoreResult<()> {
-        let project = project.clone();
-        let text = text.to_string();
-        run_sqlite(&self.sqlite, move |store| {
-            store.reopen_project(&project, &author, &text)
-        })
-        .await
+        run_sqlite(&self.sqlite, move |store| store.reopen_project(&project)).await
     }
 
     pub async fn update_project(&self, project: &Project) -> StoreResult<()> {

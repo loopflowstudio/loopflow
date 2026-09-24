@@ -143,17 +143,18 @@ heads, landing generations, or OS locks.
 
 ```bash
 lf task steer INF-123 "keep the public name"
-lf work steer task task_... "show the failing fixture"
 ```
 
-A Task or Project Steer is ordered authored input addressed to stable Work.
-Task convenience commands may start a worker; an arbitrary Task-attributed Run
-can read the Steer but cannot move the Flow position. Project Steer launches a
-fresh finite operation. The receipt proves storage, not that a provider read or
-applied the correction. Wave Chat has a separate live transport.
+Task steering posts a Linear issue comment. Direct Linear comments enter the
+same path. Only the claimed Task advancer attempts live delivery; independent
+Work-bound Runs receive their ordinary context. The next advancing worker
+refreshes Linear and includes saved comments. Idle steering starts no worker.
+Local event rows and comment-id deduplication are a delivery cache; Linear owns
+the authored direction. Publication, seed inclusion, and provider transport
+acceptance are separate evidence, none proving application by the model.
 
-`Author::Run` may store an opaque Run id as provenance. The store does not need
-to resolve that Run record, and resolution would not grant mutation authority.
+Project and Wave guidance is extra input to `project/operate` or `wave/operate`.
+Wave chat sends ordinary channel messages.
 
 ## Questions and human sessions
 

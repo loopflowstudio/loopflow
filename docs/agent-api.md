@@ -22,7 +22,7 @@ second client, store, or transport.
 
 An external harness opened by a person is a Loopflow **User**, the same caller
 kind as the Mac app. It may inspect status and use `lf chat` when the person
-asks it to converse with or steer a Wave.
+asks it to converse with a Wave.
 
 A Loopflow-launched Wave, Project, or Task agent is an internal participant.
 It receives `LOOPFLOW.md`; typed Work observations carry durable coordination,
@@ -34,7 +34,7 @@ A Wave directing a task is the internal case:
 lf task prepare INF-123                              # tracked Work, no execution
 lf --task INF-123 research "write scratch/api.md"    # independent bounded Run
 lf task run INF-123                                  # start built-in Task automation
-lf task steer INF-123 "take the smaller approach"    # queue durable direction
+lf task steer INF-123 "take the smaller approach"    # post a Linear Task comment
 lf task status INF-123 --json                        # inspect durable state
 lf task wait INF-123 --until terminal                # block until it settles
 ```
@@ -83,29 +83,25 @@ merge, then replays only child-authored commits onto `main`.
 
 ## Steer
 
-Task and Project Steer appends a durable comment event to the selected Work
-before doing anything else. Task Steer ensures the selected Task Flow has one
-worker; Project Steer launches a new finite operation. The next Skill seed reads
-the complete comment stream:
-
 ```bash
-lf task steer INF-123 "support passkeys too"       # durable direction
-lf task steer INF-123 "stop; make this a smaller PR"
+lf task steer INF-123 "keep the public API"          # post a Linear Task comment
+lf --project <project> project/operate "prioritize the parser"
+lf --wave <wave> wave/operate "reassess Project priorities"
 ```
 
-The Task and Project wrappers resolve familiar Linear ids. Agents can also use
-the stable Work control surface directly:
+Comment on the Linear Task directly, or use `task steer`. Both reach only the
+worker advancing that Task. Independent Runs sharing its worktree or using
+`--task`/`--as` do not subscribe to steering. With no active worker, comments
+wait for explicit advancement; steering never starts execution.
 
-```bash
-lf work status task task_... --json
-lf work steer task task_... "show the failing fixture" --json
-lf --as project:proj_... : "Which proof matters?"    # ordinary agent perspective
-lf ask "Review this proof with me"                    # durable human session
-lf session list --json                                # unresolved human Sessions
-```
+Linear comments are the authored record. Workers refresh comments while running
+and before starting a Skill; local events cache their delivery. The command
+receipt confirms publication to Linear. Run traces distinguish input included
+in the starting prompt from input accepted by the live provider transport;
+neither proves the model followed it. Provider scheduling determines when a
+live correction is consumed.
 
-A Steer receipt proves that the direction was stored, not that a provider read
-or applied it. `lf task interrupt INF-123` appends a durable interrupt comment;
+`lf task interrupt INF-123` appends a durable interrupt comment;
 the active Task worker observes it and ends the current provider turn so the
 next boundary re-reads direction. With no live worker it remains durable input.
 Generic `lf work interrupt` refuses because it does not publish an exact process
@@ -125,8 +121,8 @@ fails closed before a commit, push, publication, merge request, rotation, or
 completion; a person retains explicit authority to inspect and remediate the
 preserved Work.
 
-`lf project run` and `lf project steer` launch fresh operations from current
-Project facts and durable input.
+Guide Project and Wave operations through extra instructions to their operate
+skills. Edit their definition or goal when the guidance should persist.
 
 ## Memory
 

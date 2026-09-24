@@ -13,7 +13,7 @@ use rusqlite::{params, Connection, OptionalExtension, ToSql, TransactionBehavior
 use time::OffsetDateTime;
 
 use crate::child::{AbandonIntent, ChildRef, ObservationRecipient};
-use crate::durable::{Author, FlowPosition, TaskFlowBlocker, TaskWorkerClaim, WorkRef};
+use crate::durable::{Author, FlowPosition, TaskFlowBlocker, TaskWorkerClaim};
 use crate::id::WaveId;
 use crate::planning::{LinearIssueId, LinearProjectId, ProjectPlan, TaskPlan};
 use crate::store::rows::now_unix;
@@ -42,18 +42,10 @@ impl SqliteStore {
         Ok(())
     }
 
-    pub fn insert_task_with_input(
-        &self,
-        task: &Task,
-        pr: &TaskPr,
-        author: &Author,
-        text: &str,
-    ) -> StoreResult<()> {
+    pub fn insert_task_with_worktree(&self, task: &Task, pr: &TaskPr) -> StoreResult<()> {
         let mut conn = self.conn.lock().expect("store mutex poisoned");
         let transaction = conn.transaction_with_behavior(TransactionBehavior::Immediate)?;
         insert_initial_task(&transaction, task, pr)?;
-        let work = work_for_child_in(&transaction, &ChildRef::Task(task.id.clone()))?;
-        Self::append_steer_in(&transaction, &work, author, text)?;
         insert_task_event_in(
             &transaction,
             task,
@@ -70,13 +62,7 @@ impl SqliteStore {
     }
 
     /// Reopen the stable Task while preserving product identity and direction.
-    pub fn reopen_task(
-        &self,
-        task: &Task,
-        pr: Option<&TaskPr>,
-        author: &Author,
-        text: &str,
-    ) -> StoreResult<()> {
+    pub fn reopen_task(&self, task: &Task, pr: Option<&TaskPr>) -> StoreResult<()> {
         validate_task(task)?;
         let mut conn = self.conn.lock().expect("store mutex poisoned");
         let transaction = conn.transaction_with_behavior(TransactionBehavior::Immediate)?;
@@ -102,8 +88,6 @@ impl SqliteStore {
             }
             insert_task_pr(&transaction, pr)?;
         }
-        Self::append_steer_in(&transaction, &work, author, text)
-            .map_err(|error| StoreError::InvalidData(format!("steer reopened Task: {error}")))?;
         transaction.commit()?;
         Ok(())
     }
@@ -221,7 +205,7 @@ impl SqliteStore {
         next: &FlowPosition,
         summary: &str,
     ) -> StoreResult<FlowPosition> {
-        self.settle_human_task_boundary(task, expected, next, Some(summary), None)
+        self.settle_human_task_boundary(task, expected, next, Some(summary))
     }
 
     pub fn finish_human_task_boundary(
@@ -279,20 +263,15 @@ impl SqliteStore {
         task: &Task,
         expected: &FlowPosition,
         next: &FlowPosition,
-        author: &Author,
-        direction: &str,
     ) -> StoreResult<FlowPosition> {
-        self.settle_human_task_boundary(task, expected, next, None, Some((author, direction)))
+        self.settle_human_task_boundary(task, expected, next, None)
     }
 
     pub fn retry_task_flow(
         &self,
         task_id: &TaskId,
         expected: &FlowPosition,
-        author: &Author,
-        reason: &str,
     ) -> StoreResult<FlowPosition> {
-        let work = WorkRef::Task(task_id.clone());
         if expected.task_id != *task_id || expected.claim.is_some() || expected.failure.is_none() {
             return Err(StoreError::InvalidAuthority(
                 "Task retry requires its exact failed Flow position".to_string(),
@@ -320,7 +299,6 @@ impl SqliteStore {
             ));
         }
         let position = super::durable::set_flow_position_in(&transaction, task_id, &next)?;
-        Self::append_steer_in(&transaction, &work, author, reason)?;
         transaction.commit()?;
         Ok(position)
     }
@@ -331,10 +309,8 @@ impl SqliteStore {
         expected: &FlowPosition,
         next: &FlowPosition,
         progress: Option<&str>,
-        steer: Option<(&Author, &str)>,
     ) -> StoreResult<FlowPosition> {
         validate_task(task)?;
-        let work = WorkRef::Task(task.id.clone());
         if expected.task_id != task.id
             || !expected.is_human()
             || expected.claim.is_some()
@@ -370,24 +346,15 @@ impl SqliteStore {
                 },
             )?;
         }
-        if let Some((author, direction)) = steer {
-            Self::append_steer_in(&transaction, &work, author, direction)?;
-        }
         transaction.commit()?;
         Ok(position)
     }
 
-    pub(crate) fn restart_task_flow(
-        &self,
-        task: &Task,
-        author: &Author,
-        direction: &str,
-        checkpoint_head: &str,
-    ) -> StoreResult<()> {
+    pub(crate) fn restart_task_flow(&self, task: &Task, checkpoint_head: &str) -> StoreResult<()> {
         validate_task(task)?;
-        if direction.trim().is_empty() || checkpoint_head.trim().is_empty() {
+        if checkpoint_head.trim().is_empty() {
             return Err(StoreError::InvalidData(
-                "Task restart requires direction and a checkpoint head".to_string(),
+                "Task restart requires a checkpoint head".to_string(),
             ));
         }
         let mut conn = self.conn.lock().expect("store mutex poisoned");
@@ -397,7 +364,6 @@ impl SqliteStore {
             .query_row(TASK_SELECT, params![task.id.as_str()], map_task_row)
             .optional()?
             .ok_or(StoreError::NotFound)?;
-        let work = work_for_child_in(&transaction, &ChildRef::Task(task.id.clone()))?;
         transaction.execute(
             "DELETE FROM task_flow_positions WHERE task_id=?1",
             [task.id.as_str()],
@@ -407,7 +373,6 @@ impl SqliteStore {
             TASK_UPDATE,
             rusqlite::params_from_iter(parameters.iter().map(|value| value.as_ref())),
         )?;
-        Self::append_steer_in(&transaction, &work, author, direction)?;
         insert_task_event_in(
             &transaction,
             &task_work,
@@ -713,17 +678,14 @@ impl SqliteStore {
     }
 
     /// Persist one Linear observation as Task direction, atomically. Exactly-once
-    /// lives here: a first observation seeds the baseline and emits nothing; a
-    /// stale (older-revision) response is dropped; a title/description edit
-    /// becomes a Steer only if the stored content still differs; and a comment
-    /// becomes a Steer only on its first entry into the ledger.
+    /// comments are imported on the first read and deduplicated by revision.
+    /// Issue revisions guard definition changes independently of comments.
     pub fn apply_linear_observation(
         &self,
         apply: &LinearObservationApply,
     ) -> StoreResult<LinearObservationOutcome> {
         let mut conn = self.conn.lock().expect("store mutex poisoned");
         let transaction = conn.transaction_with_behavior(TransactionBehavior::Immediate)?;
-        let work = work_for_child_in(&transaction, &ChildRef::Task(apply.task_id.clone()))?;
 
         let existing = transaction
             .query_row(
@@ -741,10 +703,21 @@ impl SqliteStore {
             .optional()?;
 
         let observed_at = apply.observed_at.unix_timestamp();
+        let mut follow_ups_created = Vec::new();
+        for follow_up in &apply.follow_ups {
+            if let Some(id) = ingest_linear_comment(
+                &transaction,
+                apply.task_id.as_str(),
+                &follow_up.comment_id,
+                &follow_up.text,
+                observed_at,
+            )? {
+                follow_ups_created.push(id);
+            }
+        }
 
         let Some((last_revision, last_title, last_description)) = existing else {
-            // Baseline: seed the cursor and mark every observed comment seen, so
-            // pre-existing direction is never replayed as a surprise.
+            // Baseline the definition; existing comments were imported above.
             transaction.execute(
                 "INSERT INTO task_linear_observations (
                     task_id, last_revision, last_title, last_description,
@@ -758,18 +731,11 @@ impl SqliteStore {
                     observed_at,
                 ],
             )?;
-            for follow_up in &apply.follow_ups {
-                transaction.execute(
-                    "INSERT OR IGNORE INTO task_linear_ingested_comments
-                        (task_id, comment_id, ingested_at) VALUES (?1, ?2, ?3)",
-                    params![apply.task_id.as_str(), follow_up.comment_id, observed_at],
-                )?;
-            }
             transaction.commit()?;
             return Ok(LinearObservationOutcome {
                 baselined: true,
                 content_steer_applied: false,
-                follow_ups_created: Vec::new(),
+                follow_ups_created,
             });
         };
 
@@ -780,30 +746,15 @@ impl SqliteStore {
             return Ok(LinearObservationOutcome {
                 baselined: false,
                 content_steer_applied: false,
-                follow_ups_created: Vec::new(),
+                follow_ups_created,
             });
         }
 
         let mut content_steer_applied = false;
         if let Some(text) = &apply.content_steer {
             if last_title != apply.title || last_description != apply.description {
-                Self::append_steer_in(&transaction, &work, &Author::User, text)?;
+                Self::append_task_steer_in(&transaction, &apply.task_id, &Author::User, text)?;
                 content_steer_applied = true;
-            }
-        }
-
-        // Each new human comment → one FIFO follow-up, guarded by the ledger.
-        let mut follow_ups_created = Vec::new();
-        for follow_up in &apply.follow_ups {
-            if let Some(id) = ingest_linear_comment(
-                &transaction,
-                apply.task_id.as_str(),
-                &follow_up.comment_id,
-                &work,
-                &follow_up.text,
-                observed_at,
-            )? {
-                follow_ups_created.push(id);
             }
         }
 
@@ -844,12 +795,10 @@ impl SqliteStore {
         let observed_at = observed_at.unix_timestamp();
         let mut conn = self.conn.lock().expect("store mutex poisoned");
         let transaction = conn.transaction_with_behavior(TransactionBehavior::Immediate)?;
-        let work = work_for_child_in(&transaction, &ChildRef::Task(task_id.clone()))?;
         let created = ingest_linear_comment(
             &transaction,
             task_id.as_str(),
             comment_id,
-            &work,
             text,
             observed_at,
         )?;
@@ -968,32 +917,7 @@ impl SqliteStore {
         Ok(())
     }
 
-    pub fn insert_project_with_steer(
-        &self,
-        project: &Project,
-        author: &Author,
-        text: &str,
-    ) -> StoreResult<()> {
-        let mut conn = self.conn.lock().expect("store mutex poisoned");
-        let transaction = conn.transaction_with_behavior(TransactionBehavior::Immediate)?;
-        let parameters = project_params(project);
-        transaction.execute(
-            PROJECT_INSERT,
-            rusqlite::params_from_iter(parameters.iter().map(|value| value.as_ref())),
-        )?;
-        create_project_work(&transaction, project)?;
-        let work = work_for_child_in(&transaction, &ChildRef::Project(project.id.clone()))?;
-        Self::append_steer_in(&transaction, &work, author, text)?;
-        transaction.commit()?;
-        Ok(())
-    }
-
-    pub fn reopen_project(
-        &self,
-        project: &Project,
-        author: &Author,
-        text: &str,
-    ) -> StoreResult<()> {
+    pub fn reopen_project(&self, project: &Project) -> StoreResult<()> {
         let mut conn = self.conn.lock().expect("store mutex poisoned");
         let transaction = conn.transaction_with_behavior(TransactionBehavior::Immediate)?;
         let parameters = project_params(project);
@@ -1003,7 +927,6 @@ impl SqliteStore {
         )?;
         let work = work_for_child_in(&transaction, &ChildRef::Project(project.id.clone()))?;
         reopen_work_in(&transaction, &work)?;
-        Self::append_steer_in(&transaction, &work, author, text)?;
         transaction.commit()?;
         Ok(())
     }
@@ -1568,17 +1491,31 @@ fn ingest_linear_comment(
     conn: &rusqlite::Transaction<'_>,
     task_id: &str,
     comment_id: &str,
-    work: &crate::durable::WorkRef,
     text: &str,
     observed_at: i64,
 ) -> StoreResult<Option<i64>> {
+    if let Some((id, _)) = comment_id.split_once('@') {
+        let prefix = format!("{id}@");
+        let latest: Option<String> = conn.query_row(
+            "SELECT MAX(comment_id) FROM task_linear_ingested_comments WHERE task_id=?1 AND substr(comment_id, 1, length(?2))=?2",
+            params![task_id, prefix], |row| row.get(0),
+        )?;
+        if latest.as_deref().is_some_and(|latest| latest > comment_id) {
+            return Ok(None);
+        }
+    }
     let inserted = conn.execute(
         "INSERT OR IGNORE INTO task_linear_ingested_comments
             (task_id, comment_id, ingested_at) VALUES (?1, ?2, ?3)",
         params![task_id, comment_id, observed_at],
     )?;
     if inserted == 1 {
-        let steer = SqliteStore::append_steer_in(conn, work, &Author::User, text)?;
+        let steer = SqliteStore::append_task_steer_in(
+            conn,
+            &TaskId::from_raw(task_id),
+            &Author::User,
+            text,
+        )?;
         Ok(Some(steer.id))
     } else {
         Ok(None)
@@ -2133,20 +2070,6 @@ pub(super) fn task_events_after_in(
          FROM task_events WHERE task_id=?1 AND id>?2 ORDER BY id",
     )?;
     let rows = statement.query_map(params![task_id.as_str(), cursor], map_task_event_row)?;
-    rows.collect::<Result<Vec<_>, _>>()
-        .map_err(StoreError::from)
-}
-
-pub(super) fn project_events_after_in(
-    conn: &Connection,
-    project_id: &ProjectId,
-    cursor: i64,
-) -> StoreResult<Vec<ProjectEvent>> {
-    let mut statement = conn.prepare(
-        "SELECT id, project_id, kind_json, created_at
-         FROM project_events WHERE project_id=?1 AND id>?2 ORDER BY id",
-    )?;
-    let rows = statement.query_map(params![project_id.as_str(), cursor], map_project_event_row)?;
     rows.collect::<Result<Vec<_>, _>>()
         .map_err(StoreError::from)
 }

@@ -358,8 +358,11 @@ Task worker. Each autonomous boundary starts a fresh provider Run from durable
 Task facts; no provider transcript or resident Task process is required.
 `resume` preserves the Work, selected Flow, Steers, worktree, branch, and PR
 while starting a fresh worker.
-`steer` records direction even before a Flow is selected; `task run` selects
-the Flow when execution should begin.
+`steer` posts a Linear Task comment and never starts a worker. Direct Linear
+comments enter the same delivery path. Only Task advancers consume steering;
+independent `--task` or `--as` Runs do not. `task run` selects the Flow when
+execution should begin. Project and Wave guidance is extra input to their
+operate skills.
 Wave names are repository-scoped. Relocation requires the UUID because the
 repository and name may both change; it preserves authored Wave files, journal,
 PM binding, Work state, and Home placement. Home-local Run records remain on

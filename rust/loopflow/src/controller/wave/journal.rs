@@ -1078,8 +1078,11 @@ pub fn restore_pending(
             tracing::warn!(id = %id, "requeue of an unknown message id; dropped");
             continue;
         };
-        pending.push(message.clone());
-        restored.push(id.clone());
+        // Retired Wave input remains readable, but never resumes steering.
+        if message.op == MessageOp::Message {
+            pending.push(message.clone());
+            restored.push(id.clone());
+        }
     }
     restored
 }
@@ -1157,13 +1160,7 @@ pub fn fold_thread(events: &[Event]) -> ThreadFold {
                     text: text.clone(),
                     source: None,
                 };
-                messages.insert(id.clone(), message.clone());
-                // Plain chat is observed off the channel tail; only steers and
-                // interrupts fold into pending (a later TurnSteered may consume
-                // them). Retired when steers become task comments.
-                if *op != MessageOp::Message && !consumed_messages.contains(id) {
-                    pending_messages.push(message);
-                }
+                messages.insert(id.clone(), message);
             }
             EventKind::DiscordChatAttached {
                 binding,
@@ -1210,12 +1207,7 @@ pub fn fold_thread(events: &[Event]) -> ThreadFold {
                     text: format!("[{}]\n{}", source.uri(), text),
                     source: Some(source.clone()),
                 };
-                messages.insert(id.clone(), message.clone());
-                // Observed, not queued (see UserMessage); only an authored steer
-                // folds into pending until a later TurnSteered consumes it.
-                if *op != MessageOp::Message && !consumed_messages.contains(id) {
-                    pending_messages.push(message);
-                }
+                messages.insert(id.clone(), message);
             }
             EventKind::DiscordChatCursorAdvanced {
                 binding,
@@ -1964,6 +1956,36 @@ mod tests {
             let narration = narrator.render(kind);
             assert!(!narration.line.is_empty(), "silent narration for {kind:?}");
         }
+    }
+
+    #[test]
+    fn historical_wave_steering_is_readable_without_replaying_it() {
+        let (_tmp, path) = open_tmp();
+        let (mut journal, _) = Journal::open(&path).unwrap();
+        journal.append(|_| EventKind::UserMessage {
+            id: MessageId("local-steer".into()),
+            op: MessageOp::Steer,
+            text: "old direction".into(),
+        });
+        journal.append(|_| EventKind::DiscordAuthoredMessage {
+            id: MessageId("discord-steer".into()),
+            op: MessageOp::Steer,
+            text: "old Discord direction".into(),
+            source: discord_source(),
+        });
+        journal.append(|_| EventKind::MessagesRequeued {
+            ids: vec![
+                MessageId("local-steer".into()),
+                MessageId("discord-steer".into()),
+            ],
+        });
+        drop(journal);
+        let (_, events) = Journal::open(&path).unwrap();
+        let folded = fold_thread(&events);
+        assert_eq!(folded.turns.len(), 2);
+        assert_eq!(folded.turns[0].text, "old direction");
+        assert_eq!(folded.turns[1].text, "old Discord direction");
+        assert!(folded.pending_messages.is_empty());
     }
 
     #[test]

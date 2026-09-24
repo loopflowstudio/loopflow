@@ -1107,8 +1107,6 @@ async fn snapshot_projects(
         }
         details[index].next_move = next_move_for_project(&status);
         details[index].runtime = Some(snapshot_project_runtime(store, project, status).await?);
-        details[index].direction =
-            current_direction(store, ChildRef::Project(project.id.clone())).await?;
     }
 
     for item in planning.items {
@@ -1389,7 +1387,7 @@ async fn snapshot_task_detail(
             derive_task_actions(evidence)
         });
     let direction = match task {
-        Some(task) => current_direction(store, ChildRef::Task(task.id.clone())).await?,
+        Some(task) => current_direction(store, &task.id).await?,
         None => None,
     };
     Ok(TaskDetailSnapshot {
@@ -1637,12 +1635,12 @@ fn task_pr_empty(task: &Task, pr: &TaskPr) -> Option<bool> {
 
 async fn current_direction(
     store: &SharedStore,
-    target: ChildRef,
+    task_id: &crate::work::task::TaskId,
 ) -> Result<Option<DirectionSnapshot>> {
     let steers = store
-        .work_steers_for_child(&target)
+        .task_steers(task_id)
         .await
-        .map_err(|err| anyhow!("failed to read Work steers: {err}"))?;
+        .map_err(|err| anyhow!("failed to read Task comments: {err}"))?;
     let text = crate::durable::render_steers(&steers);
     if text.is_empty() {
         return Ok(None);

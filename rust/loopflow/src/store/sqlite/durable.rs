@@ -410,15 +410,19 @@ impl SqliteStore {
         work_for_child_in(&conn, target)
     }
 
-    pub fn work_steers(&self, work: &WorkRef) -> StoreResult<Vec<Steer>> {
+    pub fn task_steers(&self, task_id: &TaskId) -> StoreResult<Vec<Steer>> {
         let conn = self.conn.lock().expect("store mutex poisoned");
-        work_steers_in(&conn, work)
-    }
-
-    pub(crate) fn work_steers_for_child(&self, target: &ChildRef) -> StoreResult<Vec<Steer>> {
-        let conn = self.conn.lock().expect("store mutex poisoned");
-        let work = work_for_child_in(&conn, target)?;
-        work_steers_in(&conn, &work)
+        Ok(super::children::task_events_after_in(&conn, task_id, 0)?
+            .into_iter()
+            .filter_map(|event| match event.kind {
+                TaskEventKind::Steer { author, text } => Some(Steer {
+                    id: event.id,
+                    author,
+                    text,
+                }),
+                _ => None,
+            })
+            .collect())
     }
 
     /// Steer comments across every Work, issued at or after `since` (unix
@@ -478,75 +482,47 @@ impl SqliteStore {
         Ok(comments)
     }
 
+    #[cfg(test)]
     pub fn append_steer(&self, work: &WorkRef, author: &Author, text: &str) -> StoreResult<Steer> {
+        let WorkRef::Task(task_id) = work else {
+            return Err(StoreError::InvalidData("only Tasks take steering".into()));
+        };
         let mut conn = self.conn.lock().expect("store mutex poisoned");
         let tx = conn.transaction_with_behavior(TransactionBehavior::Immediate)?;
-        let steer = Self::append_steer_in(&tx, work, author, text)?;
+        let steer = Self::append_task_steer_in(&tx, task_id, author, text)?;
         tx.commit()?;
         Ok(steer)
     }
 
-    /// A steer is a durable comment on its Work: `TaskEventKind::Steer` for a
-    /// Task, `ProjectEventKind::Steer` for a Project. There is no steers table —
-    /// the comment rides the Work's own event stream and is read back through it.
-    pub(crate) fn append_steer_in(
+    /// Local delivery projection. Authored input is published to Linear first.
+    pub(crate) fn append_task_steer_in(
         tx: &Transaction<'_>,
-        work: &WorkRef,
+        task_id: &TaskId,
         author: &Author,
         text: &str,
     ) -> StoreResult<Steer> {
         let text = text.trim();
         if text.is_empty() {
-            return Err(StoreError::InvalidData(
-                "Steer text cannot be empty".to_string(),
-            ));
+            return Err(StoreError::InvalidData("Steer text cannot be empty".into()));
         }
-        require_ready_work(tx, work)?;
-        match work {
-            WorkRef::Task(task_id) => {
-                let task = tx.query_row(
-                    super::children::TASK_SELECT,
-                    params![task_id.as_str()],
-                    super::children::map_task_row,
-                )?;
-                let event = super::children::insert_task_event_in(
-                    tx,
-                    &task,
-                    &TaskEventKind::Steer {
-                        author: author.clone(),
-                        text: text.to_string(),
-                    },
-                )?;
-                Ok(Steer {
-                    id: event.id,
-                    author: author.clone(),
-                    text: text.to_string(),
-                })
-            }
-            WorkRef::Project(project_id) => {
-                let project = tx.query_row(
-                    super::children::PROJECT_SELECT,
-                    params![project_id.as_str()],
-                    super::children::map_project_row,
-                )?;
-                let event = super::children::insert_project_event_in(
-                    tx,
-                    &project,
-                    &ProjectEventKind::Steer {
-                        author: author.clone(),
-                        text: text.to_string(),
-                    },
-                )?;
-                Ok(Steer {
-                    id: event.id,
-                    author: author.clone(),
-                    text: text.to_string(),
-                })
-            }
-            WorkRef::Wave(_) => Err(StoreError::InvalidData(
-                "Waves take direction through chat, not steers".to_string(),
-            )),
-        }
+        let task = tx.query_row(
+            super::children::TASK_SELECT,
+            params![task_id.as_str()],
+            super::children::map_task_row,
+        )?;
+        let event = super::children::insert_task_event_in(
+            tx,
+            &task,
+            &TaskEventKind::Steer {
+                author: author.clone(),
+                text: text.to_string(),
+            },
+        )?;
+        Ok(Steer {
+            id: event.id,
+            author: author.clone(),
+            text: text.to_string(),
+        })
     }
 
     /// Record an interrupt request as a durable comment on the Work's event
@@ -1336,36 +1312,6 @@ pub(crate) fn work_for_child_in(conn: &Connection, target: &ChildRef) -> StoreRe
             Ok(WorkRef::Task(task_id.clone()))
         }
     }
-}
-
-fn work_steers_in(conn: &Connection, work: &WorkRef) -> StoreResult<Vec<Steer>> {
-    Ok(match work {
-        WorkRef::Task(task_id) => super::children::task_events_after_in(conn, task_id, 0)?
-            .into_iter()
-            .filter_map(|event| match event.kind {
-                TaskEventKind::Steer { author, text } => Some(Steer {
-                    id: event.id,
-                    author,
-                    text,
-                }),
-                _ => None,
-            })
-            .collect(),
-        WorkRef::Project(project_id) => {
-            super::children::project_events_after_in(conn, project_id, 0)?
-                .into_iter()
-                .filter_map(|event| match event.kind {
-                    ProjectEventKind::Steer { author, text } => Some(Steer {
-                        id: event.id,
-                        author,
-                        text,
-                    }),
-                    _ => None,
-                })
-                .collect()
-        }
-        WorkRef::Wave(_) => Vec::new(),
-    })
 }
 
 fn tool_response_in(

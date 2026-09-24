@@ -491,44 +491,33 @@ public enum WaveLoopState: String, Equatable, Sendable {
 public enum WaveMessageOp: String, Equatable, Sendable {
     /// Queued; the loop's next turn answers it.
     case message
-    /// Into the live turn (server degrades to a queued message when the
-    /// harness can't steer or nothing is turning).
-    case steer
-    /// Cancel the open turn. Empty text = bare interrupt (no-op while idle);
-    /// non-empty text becomes the next turn ("interrupt & send").
+    /// Cancel the open turn with empty text; a no-op while idle.
     case interrupt
 }
 
 /// What the composer's buttons should do for a loop state + text presence.
 public enum ComposerVerb: Equatable, Sendable {
     case send            // POST op=message
-    case steer           // POST op=steer
     case interrupt       // POST op=interrupt, empty text
-    case interruptAndSend // POST op=interrupt carrying the text
 }
 
-/// The composer's action set: one primary button, an optional secondary
-/// ("Interrupt & Send" while a steer is primary). `primaryEnabled` assumes
+/// The composer's action set: one primary button, with its enabled state.
+/// `primaryEnabled` assumes
 /// the connection is live; the view also gates on liveness.
 public struct ComposerVerbs: Equatable, Sendable {
     public let primary: ComposerVerb
     public let primaryEnabled: Bool
-    public let secondary: ComposerVerb?
 }
 
-/// Verb selection: idle+text = Send; turning+text = Steer (Interrupt & Send
-/// one keypress away); turning+empty = Interrupt. While interrupting, text
-/// degrades to a queued Send and a bare re-interrupt is pointless (disabled).
+/// Messages always send to the channel. An empty composer may interrupt a running Wave.
 public func composerVerbs(state: WaveLoopState, hasText: Bool) -> ComposerVerbs {
     switch (state, hasText) {
-    case (.turning, true):
-        return ComposerVerbs(primary: .steer, primaryEnabled: true, secondary: .interruptAndSend)
     case (.turning, false):
-        return ComposerVerbs(primary: .interrupt, primaryEnabled: true, secondary: nil)
+        return ComposerVerbs(primary: .interrupt, primaryEnabled: true)
     case (.interrupting, false):
-        return ComposerVerbs(primary: .interrupt, primaryEnabled: false, secondary: nil)
+        return ComposerVerbs(primary: .interrupt, primaryEnabled: false)
     default:
-        return ComposerVerbs(primary: .send, primaryEnabled: hasText, secondary: nil)
+        return ComposerVerbs(primary: .send, primaryEnabled: hasText)
     }
 }
 
@@ -629,7 +618,7 @@ public final class WaveChatConnection {
     /// POST a message with an explicit op; a created user turn is applied
     /// immediately and also arrives over the stream (deduped by id). The
     /// assistant reply streams later. Text may be empty only for `.interrupt`
-    /// (a bare interrupt); empty message/steer sends are dropped client-side.
+    /// (a bare interrupt); empty messages are dropped client-side.
     public func send(_ text: String, op: WaveMessageOp = .message) async throws {
         let trimmed = text.trimmingCharacters(in: .whitespacesAndNewlines)
         guard !trimmed.isEmpty || op == .interrupt else { return }

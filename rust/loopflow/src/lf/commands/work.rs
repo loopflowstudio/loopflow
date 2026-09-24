@@ -3,7 +3,7 @@ use serde::Serialize;
 use std::path::Path;
 use std::sync::Arc;
 
-use crate::durable::{AbandonReceipt, Placement, ProjectId, Steer, TaskId, WorkRef, WorkStatus};
+use crate::durable::{AbandonReceipt, Placement, ProjectId, TaskId, WorkRef, WorkStatus};
 use crate::id::WaveId;
 use crate::lf::WorkCommand;
 use crate::store::{open_store, storage_config_from_env, Store};
@@ -22,7 +22,6 @@ enum WorkReceipt {
     Relocated(crate::controller::wave::relocate::WaveRelocationReceipt),
     Enabled(Placement),
     Disabled(Placement),
-    Steer(Steer),
     Abandoned(AbandonReceipt),
 }
 
@@ -87,18 +86,6 @@ async fn run_async(command: &WorkCommand, repo: &Path) -> anyhow::Result<()> {
             require_disable_repository(&store, &work, repo).await?;
             let placement = set_local_work_enabled(&store, &work, false).await?;
             print_receipt(&WorkReceipt::Disabled(placement), *json)?;
-        }
-        WorkCommand::Steer {
-            kind,
-            id,
-            message,
-            json,
-        } => {
-            let work = parse_work(kind, id)?;
-            require_work_repository(&store, &work, repo).await?;
-            let author = crate::ops::ambient_author()?;
-            let steer = store.append_steer(&work, author, message).await?;
-            print_receipt(&WorkReceipt::Steer(steer), *json)?;
         }
         WorkCommand::Interrupt { kind, id, .. } => {
             let work = parse_work(kind, id)?;
@@ -272,7 +259,6 @@ fn print_receipt(receipt: &WorkReceipt, json: bool) -> anyhow::Result<()> {
                 placement.work.id(),
                 placement.home_id
             ),
-            WorkReceipt::Steer(steer) => println!("steered {}", steer.id),
             WorkReceipt::Abandoned(receipt) => println!("abandoned {}", receipt.work.id()),
         }
     }

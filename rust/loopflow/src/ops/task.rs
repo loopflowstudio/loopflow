@@ -537,12 +537,6 @@ fn prepare_task(
     )?;
     let project_id = project.id.clone();
     let wave_id = project.wave_id.clone();
-    let directive = directive.unwrap_or_else(|| {
-        format!(
-            "Complete {}: {}\n\n{}",
-            resolved.item.identifier, resolved.item.name, resolved.item.description
-        )
-    });
 
     block_on_task(async move {
         let store = task_store().await?;
@@ -613,12 +607,15 @@ fn prepare_task(
             updated_at: now,
         };
 
-        let author = task_input_author()?;
-        match store
-            .create_task_with_input(&task, &pr, &author, &directive)
-            .await
-        {
-            Ok(()) => {}
+        match store.create_task_with_worktree(&task, &pr).await {
+            Ok(()) => {
+                if let Some(direction) = directive.as_deref() {
+                    let mut publication_task = task.clone();
+                    publication_task.worktree = main_repo.clone();
+                    super::linear_observe::publish_task_steer(&store, &publication_task, direction)
+                        .await?;
+                }
+            }
             Err(StoreError::Sqlite(_)) => {
                 if let Some(existing) =
                     store
@@ -916,18 +913,6 @@ async fn preflight_task_execution(repo: &Path, agent: &str) -> OpsResult<Provide
         ))
     })?;
     Ok(route.account_id().clone())
-}
-
-fn task_input_author() -> OpsResult<crate::durable::Author> {
-    let Some(run_id) = std::env::var_os(crate::durable::RUN_ID_ENV) else {
-        return Ok(crate::durable::Author::User);
-    };
-    let run_id = run_id
-        .into_string()
-        .map_err(|_| task_error("LF_RUN_ID is not valid UTF-8"))?;
-    Ok(crate::durable::Author::Run(
-        crate::durable::RunId::parse(&run_id).map_err(|_| task_error("LF_RUN_ID is malformed"))?,
-    ))
 }
 
 fn select_task_worker_flow(repo: &Path, issue: &str, requested: Option<&str>) -> OpsResult<String> {
@@ -4322,26 +4307,16 @@ fn git_output_owned(worktree: &Path, args: &[String]) -> OpsResult<Vec<u8>> {
 fn queue_task_steer(issue: &str, message: String) -> OpsResult<TaskControlResult> {
     block_on_task(async move {
         let store = task_store().await?;
-        let mut task = store
+        let task = store
             .get_task_by_issue(issue)
             .await
-            .map_err(|error| task_error(format!("failed to resolve task: {error}")))?
-            .ok_or_else(|| task_error(format!("no Task exists for {issue:?}")))?;
-        reconcile_task_pr(&store, &mut task).await?;
-        let steer =
-            super::child::append_steer(&store, ChildRef::Task(task.id.clone()), &message).await?;
-        let has_active_flow = store
-            .flow_position(&task.id)
-            .await
             .map_err(|error| task_error(error.to_string()))?
-            .is_some();
-        if has_active_flow && !task_worker_live(&store, &task).await? {
-            relaunch_inactive_process(&store, &mut task).await?;
-        }
+            .ok_or_else(|| task_error(format!("no Task exists for {issue:?}")))?;
+        let comment_id = super::linear_observe::publish_task_steer(&store, &task, &message).await?;
         Ok(TaskControlResult {
             issue_id: task.plan.identifier.clone(),
             task_id: task.id.to_string(),
-            receipt: super::child::WorkControlReceipt::Steer { steer },
+            receipt: super::child::WorkControlReceipt::Steer { comment_id },
             observation: task.observation.clone(),
         })
     })
@@ -4457,7 +4432,6 @@ async fn restart_task_async(issue: &str, advice: Option<String>) -> OpsResult<Ta
         .await
         .map_err(|error| task_error(format!("failed to adopt refreshed Project: {error}")))?;
 
-    let author = task_input_author()?;
     let checkpoint_worktree = task.worktree.clone();
     let checkpoint_identifier = task.plan.identifier.clone();
     let head = tokio::task::spawn_blocking(move || {
@@ -4479,31 +4453,16 @@ async fn restart_task_async(issue: &str, advice: Option<String>) -> OpsResult<Ta
     task.pm_writeback = PmWritebackState::Current;
     task.updated_at = now;
 
-    let direction = task_restart_direction(&task, advice.as_deref());
+    if let Some(advice) = advice.as_deref() {
+        super::linear_observe::publish_task_steer(&store, &task, advice).await?;
+    }
     stop_task_worker(&store, &task).await?;
     store
-        .restart_task_flow(&task, &author, &direction, &head)
+        .restart_task_flow(&task, &head)
         .await
         .map_err(|error| task_error(format!("failed to restart Task flow: {error}")))?;
     launch_task_process(&store, &mut task, Some(&selected_flow)).await?;
     Ok(task)
-}
-
-fn task_restart_direction(task: &Task, advice: Option<&str>) -> String {
-    let advice = advice
-        .map(|value| format!("\n\nRestart advice:\n{value}"))
-        .unwrap_or_default();
-    format!(
-        "<lf:task-restart issue=\"{}\">\n\
-         Begin a new Task Flow from current durable truth. Do not resume or defer to any prior \
-         provider session. Preserve the Task, worktree, branch, and PR. Existing code and scratch \
-         are evidence to reconcile, not an approved implementation basis: \
-         their prior design may be old, poor, or incompatible with the current Task definition. \
-         Read every scratch artifact and reconcile it with the selected Flow.\n\n\
-         Current Task: {}\n\n{}{}\n\
-         </lf:task-restart>",
-        task.plan.identifier, task.plan.title, task.plan.description, advice,
-    )
 }
 
 async fn _recover_abandoned_task(
@@ -4541,27 +4500,16 @@ async fn _recover_abandoned_task(
     task_recovery_adoption(store, &predecessor)
         .await
         .map_err(|error| task_error(format!("validate Task recovery: {error}")))?;
-    let steers = store
-        .work_steers_for_child(&ChildRef::Task(predecessor.id.clone()))
-        .await
-        .map_err(|error| task_error(error.to_string()))?;
-    let mut carried = crate::durable::render_steers(&steers);
-    if carried.is_empty() {
-        carried = format!(
-            "Continue {}: {}",
-            predecessor.plan.identifier, predecessor.plan.title
-        );
+    if let Some(reason) = reason.as_deref() {
+        super::linear_observe::publish_task_steer(store, &predecessor, reason).await?;
     }
     let now = time::OffsetDateTime::now_utc();
-    if let Some(reason) = reason {
-        carried.push_str(&format!("\n\nRecovery reason: {reason}"));
-    }
     let mut task = predecessor;
     task.abandon_intent = None;
     task.updated_at = now;
     task.observation = Observation::NotRequired;
     store
-        .reopen_task(&task, None, &task_input_author()?, &carried)
+        .reopen_task(&task, None)
         .await
         .map_err(|error| task_error(format!("failed to recover Task: {error}")))?;
     Ok(task)
@@ -4605,13 +4553,9 @@ pub(crate) async fn resume_task_async(
                 task.plan.identifier
             )));
         };
+        super::linear_observe::publish_task_steer(&store, &task, reason).await?;
         store
-            .retry_task_flow(
-                &task.id,
-                &position,
-                &task_input_author()?,
-                &format!("Retry Task advancement after repairing its blocker: {reason}"),
-            )
+            .retry_task_flow(&task.id, &position)
             .await
             .map_err(|error| task_error(format!("failed to retry Task advancement: {error}")))?;
     }
@@ -4710,7 +4654,7 @@ mod tests {
         select_task_worker_flow_from_project, task_event_launch_refusal, task_execution_boundary,
     };
     use crate::child::ChildRef;
-    use crate::durable::{Author, WorkRef, WorkStatus};
+    use crate::durable::{WorkRef, WorkStatus};
     use crate::engine::AgentExecutionBoundary;
     use crate::planning::{LinearIssueId, LinearProjectId, ProjectPlan, TaskPlan};
     use crate::pm::ProjectFlowPlan;
@@ -4870,10 +4814,7 @@ mod tests {
             mut task,
             ..
         } = task_fixture("TEST-HUMAN-ADVANCE").await;
-        store
-            .restart_task_flow(&task, &Author::User, "park for review", "checkpoint")
-            .await
-            .unwrap();
+        store.restart_task_flow(&task, "checkpoint").await.unwrap();
         let position = store
             .set_flow_position(
                 &task.id,
@@ -4943,13 +4884,8 @@ mod tests {
         } = task_fixture("TEST-RESTART").await;
         let prior_pr = store.active_task_pr(&task.id).await.unwrap().unwrap();
         task.plan.title = "Refreshed Task definition".to_string();
-        let advice = Some("replace the old design".to_string());
-        let direction = super::task_restart_direction(&task, advice.as_deref());
-        let restart_run_id = crate::durable::RunId::new();
-        let restart_author = crate::durable::Author::Run(restart_run_id);
-
         store
-            .restart_task_flow(&task, &restart_author, &direction, "restart-head")
+            .restart_task_flow(&task, "restart-head")
             .await
             .unwrap();
 
@@ -4961,13 +4897,7 @@ mod tests {
             store.active_task_pr(&task.id).await.unwrap().unwrap().id,
             prior_pr.id
         );
-        let steers = store.work_steers(&work).await.unwrap();
-        assert_eq!(steers.last().unwrap().author, restart_author);
-        assert!(steers
-            .last()
-            .unwrap()
-            .text
-            .contains("prior design may be old, poor"));
+        assert!(store.task_steers(&task.id).await.unwrap().is_empty());
         assert!(matches!(
             store.latest_task_event(&task.id).await.unwrap().unwrap().kind,
             TaskEventKind::Progress { summary } if summary.contains("restart-head")

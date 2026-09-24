@@ -34,6 +34,32 @@ remain the existing path. The separate lf-new checkout was not edited.
 
 ## Recorded validation
 
+**Iteration 5 completion across repository navigation, 2026-09-23:**
+The mounted native regression now runs two serialized cases: complete while
+viewing the original workspace, and complete after switching repositories. An
+AsyncStream holds the mocked completion response until the test releases it.
+In the second case, the original native views are detached before success;
+cleanup must remove the Session pane and surface before that repository returns.
+The active repository retains its own Session reading, selection, pane layout
+and focus. Undo cannot restore the completed pane. Returning to the original
+repository retains the selected incomplete Task and companion surface, shows
+no open Sessions, and receives a reply from the original companion child.
+
+No production changes or test-only production seams were needed. Both cases use
+the existing Complete button, repository identity boundary and window registry.
+The other repository's Session is explicitly unbound; it is not attributed to
+the original Task. The test isolates shared CLI side effects and uses real
+AppKit/Ghostty views and local PTYs. It does not establish backend completion,
+provider continuation, blocked-caller release or configured UI interaction.
+
+Command: `swift test --package-path swift -Xswiftc -gnone --jobs 4 --filter
+WorkspaceNavigationProofTests/workspaceRetainsNativeSplit`. Final receipt:
+`/tmp/loo291-completion-repository-proof.log`: one parameterized test passed both
+cases, exit 0. No Swift edits followed. This supersedes the iteration 4
+mounted-completion/Undo receipt for the expanded test. The independent navigator
+scroll proof is unchanged. Configured interaction and same-population timings
+remain missing; no broader gate or external-product trial was run.
+
 **Iteration 4 mounted completion, 2026-09-23:**
 Extended `workspaceRetainsNativeSplit` through the existing Complete button after
 its navigation and child-response assertions. The shared CLI completion response

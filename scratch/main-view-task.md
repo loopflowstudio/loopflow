@@ -260,3 +260,13 @@ of Close view. The focused test passes after reproducing the failure; Task,
 companion, draft and navigation assertions remain intact. `review-slice.md`
 records the before/after receipts. Configured proof and full Task scope remain
 unchanged; no publication or completion is claimed.
+
+Iteration 5 asynchronous completion proof, 2026-09-23: the mounted regression
+now covers completion after switching repositories as well as completion while
+viewing. The held shared response is released only after the original native
+views detach. Cleanup reconciles the originating workspace before return and
+leaves the active repository's Session reading, selection and pane layout intact.
+Undo remains cleared, and the original Task context and companion child survive
+return. No production change was needed. This is native fixture evidence with a
+mocked CLI response; configured provider interaction and timing obligations
+remain open. Exact receipt and limits are in `navigation-proof.md`.

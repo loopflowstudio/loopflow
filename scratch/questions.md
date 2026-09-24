@@ -21,3 +21,19 @@
 - Test an actual configured app launch and a terminal-configured provider launch through the new action; current native checks use harmless commands and fixture records.
 - Install the updated CLI before previewing and removing the exact `list` and `engbot` live registrations. The development CLI correctly cannot see those live IDs; do not bypass that boundary.
 - LOO-291's separate external-workflow trial and broader acceptance criteria are not completed by integrating its committed navigation here.
+
+
+## Integration decisions — 2026-09-23
+
+Latest human steering supersedes the older Task-first/cardinality assumptions:
+use fresh scope-aware New conversation and separate New terminal, preserving all
+existing Sessions. lf-new is now integrated code, including nested worktree
+layouts and live PTY attachment, not merely a design snapshot. Bounded lifecycle
+and explicit Task creation/adoption remain open; do not enforce one-current
+cardinality by hiding or stopping clients. See
+`lf-new-implementation/integration.md` for reconciled proof and remaining scope.
+
+The supplied installed screenshot establishes a real appearance defect. The
+integrated candidate has readable light/dark captures; the installed app has not
+been replaced by this pass. Its New conversation confirmation remains pending.
+Do not equate a static capture or fixture with that configured interaction.

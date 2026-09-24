@@ -1,9 +1,182 @@
 # Configured UI proof — 2026-09-23
 
-The configured AX/provider boundary is now usable in this runner. Exact draft
-fidelity, configured repository/scroll retention, visual quality, and a controlled
-before/after timing comparison remain open. Do not repeat a generic AX-blocked
-review or count these Loopflow trials as external-product evidence.
+Configured exact provider continuation and completion now pass, and a fixed-population
+before/after Session-count measurement is recorded below. Repository/list retention
+also has configured evidence. Configured terminal scrolling, reliable launch/input
+across runner states, full paint/readiness budgets, and the external-work trials
+remain open. Earlier failed observations remain in their dated sections.
+
+## Iteration 7 — exact provider continuation and comparable count timing
+
+The missing owned Session was located without repairing the registry or changing
+an installed binary. The installed development CLI wrote to its selected Home,
+`/Users/jack/.lf-dev/installed/local-be852452823d43d7b7fde663651a7590`, while inherited
+`LF_CONTROL_HOME=/Users/jack/.lf` directed observational reads elsewhere.
+`lf doctor --json`, the exact Run manifest, and a read with the inherited control
+Home removed establish this mismatch. The recovered Session is
+`run_9544c29c5a6747c391e31c8523d18f4e`, attributed to LOO-291, with provider
+conversation `01a0d10f-4512-79a3-8fc3-ecaab404d709`.
+[Home receipt](configured-ui-evidence/iteration7/home-resolution.json).
+The proof used the installed development CLI from lf-new. This proof pass copied
+no attachment contract or workspace implementation from that checkout; a separate
+writer subsequently integrated that work, as recorded below.
+
+The new probes explicitly align `LF_HOME`, `LF_CONTROL_HOME`, and
+`LF_CONTROL_DB_PATH` with that installed Home, keeping `LF_CONTROL_BIN` on the
+installed CLI. Removing keys from the launch configuration alone did not make
+the first app probe observe the Session. The explicit configuration did. This
+is proof-host configuration, not a production change in Home-selection policy.
+The earlier review's missing-row observation remains accurate for its read Home;
+it no longer establishes a publication failure.
+
+### Exact provider text and completion
+
+The recovered proof-owned Session was closed, so selecting it resumed its native
+history without replacing a live client. In the exact configured runner, AX trust
+was true, AXWindows succeeded with one window, one owned window was onscreen,
+and the app was active. The same conversation received exactly:
+
+`Reply with only the continuity word from my first message.`
+
+The prefix remained unfinished across A/D, Task details, overview, and adding a
+companion shell; the suffix was then submitted. Provider history records the exact
+user text at `2026-09-24T01:45:07.582Z` and the answer `saffron` at
+`01:45:11.350Z`. PID 11076 and birth `01:44:51.584971Z` remained unchanged through
+navigation. UI Complete removed the Session pane; companion PID 17273 responded
+afterward; Task details showed no Session and LOO-291 remained incomplete. Both
+owned children were absent after the owned app exited.
+[Executed probe](configured-ui-evidence/iteration7/provider-probe.swift),
+[receipt](configured-ui-evidence/iteration7/provider.log),
+[exact messages](configured-ui-evidence/iteration7/provider-messages.json).
+
+This passes exact draft fidelity for this trial. It does not explain the two
+characters lost in iteration 6, and it is not promoted-Ask caller-release proof.
+The Session is now completed; its archived single-use probe must not be rerun.
+This provider receipt uses the prior executable SHA-256 `959097703d7a0759c9d25959c4aa0b4b46ae527829c1d8269cedf97c6de87e3e`.
+
+### Same-population before/after measurement
+
+Built the active PR base `e0849bad498ff8dfb51b344eba3f7520a44d906e` from a
+`git archive` under `/tmp/loo291-base-e0849`, leaving all worktrees untouched.
+Both disposable bundles use SwiftPM development builds, the same resources,
+installed CLI and explicit Home, actual repository, and no fixture/capture mode.
+The base executable hash is
+`7f60481643c885d7a7032c69159cac6b15aaa718f02635d4cef18181e920bea6`;
+the branch executable is the prior hash above. Both ran without ambient
+`LF_WAVE_ID`, since the base predates the explicit-scope correction.
+
+Endpoint: monotonic time from LaunchServices submission until AX observes
+`podium-sessions` with the exact value `1 Sessions`. Polling (25 ms) and AX
+traversal are included. Base and branch alternated three times; each owned app
+exited before the next launch. This measures accessible scoped-count availability,
+not pixel paint, interactive provider readiness, cold-cache performance or p95.
+
+| Trial | Base, ms | Branch, ms |
+|---|---:|---:|
+| 1 | 1831.2 | 1188.3 |
+| 2 | 1951.6 | 1300.4 |
+| 3 | 1735.8 | 1210.6 |
+
+All six observations succeeded. Shared reads immediately before and after contain
+identical planning/Session payloads: three planned Waves, five Projects, 144 Task
+records (18 incomplete), and one unresolved Session. The stable payload digest
+is `320f8def4d93f7b052bbcf87f13b7e97b27580b1c986f10cf100787a24a7babb` both times.
+This roster is not the app's total Wave count or an AX traversal row count.
+[Probe](configured-ui-evidence/iteration7/timing-probe.swift),
+[all six receipts](configured-ui-evidence/iteration7/timing.log),
+[population receipt](configured-ui-evidence/iteration7/population.json).
+
+This closes a bounded comparable-count measurement gap. It does not publish or
+score the Task's paint/interaction budgets, twenty-trial series, or external-work
+trials. Prior observation timeouts remain failures outside this six-run series.
+
+### Configured repository return and source corrections
+
+A separate configured shell trial switches from Loopflow to Kata and back through
+the real repository menu. The selected Task and list scrollbar position survive;
+the shell child receives the exact draft before and after navigation. Visiting
+Kata's repository menu is navigation evidence only, not external-product progress.
+[Probe](configured-ui-evidence/iteration7/repository-probe.swift),
+[receipt](configured-ui-evidence/iteration7/repository.log).
+
+That trial exposed the shell command title resetting to `Shell` on repository
+return. The title lived only in the remounted SwiftUI pane. The native view now
+retains its latest title, with a non-creating lookup through its existing
+window-local pool. The pane restores that title and reads updates from its own
+pool, so another window's same-Session notification cannot supply its title.
+No new global registry, DTO, Session policy, or process owner was added.
+
+The existing mounted native proof now emits a real OSC title from the companion
+child and requires it before and after repository remount. It failed both cases
+before the fix and passes both after:
+
+```sh
+swift test --package-path swift -Xswiftc -gnone --jobs 4 --filter WorkspaceNavigationProofTests/workspaceRetainsNativeSplit
+```
+
+[Before](configured-ui-evidence/iteration7/title-before.log),
+[after](configured-ui-evidence/iteration7/title-after.log). Existing split, draft,
+viewport, focus, Task and completion assertions remain intact. The later palette
+change does not alter this proof's owner or behavior; no broad gate was run.
+
+Configured screenshots additionally exposed primary Work text inheriting white
+foreground on the light background. Podium's existing content boundary now applies
+its palette text color, matching its background; the terminal keeps its explicit
+dark styling. This is a presentation correction, not a new theme setting.
+
+A failed scroll probe sent Shift-PageUp into the shell as `ESC[5;2~`; its exact-byte
+assertion correctly failed. Later targeted wheel probes did not establish a
+non-bottom terminal viewport. Do not count unchanged bottom rows as scroll proof.
+Native fixtures still prove a genuinely scrolled viewport; configured terminal
+scroll remains open. One intermediate copy placed the new binary beside the
+bundle's actual `Loopflow` executable; that trial still used the old binary and
+was not counted as a failing production fix. The configured title check passed
+after refreshing the actual bundle executable.
+
+The final configured runner also exposed launch/input variability. One owned app
+ceased exposing any AX nodes before the Task deadline (21,568 ms) and was absent
+from `ps` afterward; cause unestablished. Two later runs had accessible controls
+but remained inactive, including after `activate`/AXRaise; no terminal-input pass
+is claimed for them. A subsequent static palette capture was active and succeeded.
+These are separate observations, not a generic permission failure or successful
+launch-latency samples. No permission was changed or bypassed.
+[Launch failure](configured-ui-evidence/iteration7/unobserved-launch.log),
+[inactive input](configured-ui-evidence/iteration7/inactive-input.log),
+[activation check](configured-ui-evidence/iteration7/inactive-app.log).
+
+The light-palette capture succeeds against executable SHA-256
+`78f05d0c142670ae3e8056001bbbdf29548a2f896dfbd98bc34d6aa1b11d3953`.
+Primary Work labels and toolbar controls are readable; the search placeholder
+still needed its explicit secondary palette color. That small follow-up compiled,
+but its attempted capture encountered the concurrent integration described next.
+[Before](configured-ui-evidence/iteration7/contrast-before.png),
+[primary-text correction](configured-ui-evidence/iteration7/palette.png),
+[capture receipt](configured-ui-evidence/iteration7/palette.log).
+The title-only configured pass used executable
+`a81da46121e735497326f48f3b1a0c30ea0ef95a86f4fd722e40306f60cc2d11`:
+[receipt](configured-ui-evidence/iteration7/title-configured.log).
+
+**Concurrent integration boundary:** during this proof pass, another writer
+rebased/integrated lf-new into the assigned checkout and created checkpoint
+`b12beba8b`, preserving the title correction and earlier receipts. The working
+tree then added an AppAppearance correction and required `terminal_ids` to the
+native test fixtures. Those changes are not this pass's work or tested content.
+The later bundle hash
+`bc0df9e35d0f252cd29cdd7771a63e1e4d35b6c5ece7ad6e38093e5b2ce3e892`
+exposed `New terminal` and `New conversation` controls, so the historical probe
+stopped at its missing `New shell` assertion. No input was sent in that attempt.
+[Exact mismatch](configured-ui-evidence/iteration7/integration-probe-mismatch.log).
+This pass stopped builds rather than competing with that active implementation.
+Earlier provider, timing, title and palette passes remain attributed to their
+recorded binaries; they are not validation of the integrated head. The old base
+hash in the timing comparison is the original supplied Task base, not an assertion
+about the newly rebased branch's base.
+
+Remaining full Task scope is unchanged: shared LOO-284/lf-new integration,
+bounded subject conversations, directive editing, human-selected external trials,
+and measured paint/interactive-readiness budgets. No publication, landing, Task
+completion or external-product outcome is established. The historical generic
+AX and missing-Session blockers must not be recycled as the next diagnosis.
 
 ## Iteration 6 review addendum
 

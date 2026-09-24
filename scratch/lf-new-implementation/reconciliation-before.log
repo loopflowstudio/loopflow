@@ -1,0 +1,123 @@
+Building for debugging...
+[0/6] Write sources
+[1/6] Write swift-version--58304C5D6DBC2206.txt
+[3/13] Compiling LoopflowTests BundledDaemonPathTests.swift
+[4/13] Compiling LoopflowTests ChatReferenceTests.swift
+[5/13] Compiling LoopflowTests ContractTests.swift
+[6/13] Compiling LoopflowTests AppAppearanceTests.swift
+[7/13] Compiling LoopflowTests AppBootstrapResourceTests.swift
+[8/13] Compiling LoopflowTests AttemptFailurePresentationTests.swift
+[9/13] Emitting module LoopflowTests
+[10/13] Compiling LoopflowTests DTOFixtureTests.swift
+[11/13] Compiling LoopflowTests FaderSwitchTests.swift
+[12/15] Compiling LoopflowTests GhosttyTerminalInputTests.swift
+[13/15] Compiling LoopflowTests LocalWaveAgentLauncherTests.swift
+[13/15] Write Objects.LinkFileList
+[14/15] Linking LoopflowSwiftPackageTests
+Build complete! (3.97s)
+Test Suite 'Selected tests' started at 2026-09-23 19:46:58.004.
+Test Suite 'LoopflowSwiftPackageTests.xctest' started at 2026-09-23 19:46:58.005.
+Test Suite 'LoopflowSwiftPackageTests.xctest' passed at 2026-09-23 19:46:58.005.
+	 Executed 0 tests, with 0 failures (0 unexpected) in 0.000 (0.000) seconds
+Test Suite 'Selected tests' passed at 2026-09-23 19:46:58.005.
+	 Executed 0 tests, with 0 failures (0 unexpected) in 0.000 (0.001) seconds
+◇ Test run started.
+↳ Testing Library Version: 1501
+↳ Target Platform: arm64e-apple-macos14.0
+◇ Suite "Scope-aware conversations" started.
+◇ Suite "Window appearance" started.
+◇ Suite "Embedded terminal input" started.
+◇ Test "Each zoom level binds its subject and keeps the configured destination" started.
+◇ Suite "Sessions store" started.
+◇ Suite "Worktree workspaces" started.
+◇ Suite "Unified Work and Session navigation" started.
+◇ Test "Native controls and the custom palette follow the same window appearance" started.
+◇ Suite "Unified workspace navigation proof" started.
+◇ Test "Shell-launched sessions focus their live terminal and external clients stay elsewhere" started.
+◇ Test "Exiting the initial conversation leaves a usable companion shell" started.
+◇ Test "Switching worktrees restores companion terminals, layout and focus" started.
+◇ Test "Completing an interactive Session removes it from Sessions" started.
+◇ Test "Selecting an active Session leaves its other terminal running until Move here" started.
+◇ Test "A conversation launch does not replace a live shell or another conversation" started.
+◇ Test "Both split levels are independent and closing an outer slot retains its workspace" started.
+◇ Test case passing 2 arguments mode → "system", system → .light to "Native controls and the custom palette follow the same window appearance" started.
+◇ Test "New conversation follows visible scope while All work retains its previous selection" started.
+◇ Test "Session actions use the main repository for a linked worktree" started.
+◇ Test "An externally killed terminal reclassifies as active elsewhere" started.
+◇ Test "Only a FlowStep decision removes a ready FlowStep" started.
+◇ Test "Autonomous, upcoming and human work share stable ranked planning rows" started.
+◇ Test "Slow planning does not gate Session reading or navigation" started.
+◇ Test "Selecting an already visible worktree focuses it without duplicating its surfaces" started.
+◇ Test "Returning to a repository retains its last-good Sessions when refresh fails" started.
+◇ Test "Completing a ready Ask resumes its caller" started.
+◇ Test "A hidden retained terminal relinquishes focus and keeps its unfinished PTY input" started.
+◇ Test "Presentation and repo changes preserve selection, expansion, search and terminal splits" started.
+◇ Test "Unresolved planning does not claim a selected Task has no Sessions" started.
+◇ Test "reconcile adopts liveness and removes Tasks that advanced" started.
+◇ Test "A ready FlowStep stays visible until its decision" started.
+◇ Test "selecting one waiting Task recovers only that terminal" started.
+◇ Test "Task details expose directive and Project proof from the same snapshot" started.
+◇ Test "Polling preserves the prepared interactive launch command" started.
+◇ Test "The workspace retains navigation and reconciles completion in its originating repository" started.
+◇ Test "Failed reads keep last-good work and exact Sessions with a visible error" started.
+◇ Test "Incomplete planning preserves the repository's selected Task" started.
+✔ Test "Each zoom level binds its subject and keeps the configured destination" passed after 0.001 seconds.
+◇ Test case passing 1 argument replacing → true to "Polling preserves the prepared interactive launch command" started.
+◇ Test case passing 1 argument switchBeforeCompletion → false to "The workspace retains navigation and reconciles completion in its originating repository" started.
+◇ Test case passing 1 argument truncated → true to "Incomplete planning preserves the repository's selected Task" started.
+◇ Test case passing 1 argument truncated → false to "Incomplete planning preserves the repository's selected Task" started.
+◇ Test case passing 1 argument replacing → false to "Polling preserves the prepared interactive launch command" started.
+◇ Test "Typed durable joins preserve top-level, multiple, completed and unmatched Sessions" started.
+◇ Test "The work list retains its viewport through presentations, refresh and repository return" started.
+◇ Test "Completing a Session removes its link without completing its Task" started.
+◇ Test "A failed open stays visible across polling until superseded" started.
+✔ Suite "Scope-aware conversations" passed after 0.001 seconds.
+✔ Test "Shell-launched sessions focus their live terminal and external clients stay elsewhere" passed after 0.117 seconds.
+◇ Test case passing 2 arguments mode → "system", system → .dark to "Native controls and the custom palette follow the same window appearance" started.
+◇ Test case passing 2 arguments mode → "light", system → .light to "Native controls and the custom palette follow the same window appearance" started.
+✔ Test "Exiting the initial conversation leaves a usable companion shell" passed after 0.715 seconds.
+✔ Suite "Embedded terminal input" passed after 0.715 seconds.
+✔ Test "Selecting an active Session leaves its other terminal running until Move here" passed after 0.715 seconds.
+✔ Test "selecting one waiting Task recovers only that terminal" passed after 0.715 seconds.
+✔ Test "An externally killed terminal reclassifies as active elsewhere" passed after 0.715 seconds.
+✔ Test "Polling preserves the prepared interactive launch command" with 2 test cases passed after 0.718 seconds.
+✔ Test "A failed open stays visible across polling until superseded" passed after 0.718 seconds.
+◇ Test case passing 2 arguments mode → "light", system → .dark to "Native controls and the custom palette follow the same window appearance" started.
+✔ Test "Both split levels are independent and closing an outer slot retains its workspace" passed after 0.733 seconds.
+✔ Test "Session actions use the main repository for a linked worktree" passed after 0.733 seconds.
+✔ Test "Selecting an already visible worktree focuses it without duplicating its surfaces" passed after 0.733 seconds.
+✔ Test "Completing an interactive Session removes it from Sessions" passed after 0.733 seconds.
+✔ Test "Completing a ready Ask resumes its caller" passed after 0.733 seconds.
+✔ Test "reconcile adopts liveness and removes Tasks that advanced" passed after 0.733 seconds.
+✔ Test "Only a FlowStep decision removes a ready FlowStep" passed after 0.733 seconds.
+✔ Test "Autonomous, upcoming and human work share stable ranked planning rows" passed after 0.733 seconds.
+✔ Test "A conversation launch does not replace a live shell or another conversation" passed after 0.733 seconds.
+✔ Test "Typed durable joins preserve top-level, multiple, completed and unmatched Sessions" passed after 0.733 seconds.
+✔ Test "A ready FlowStep stays visible until its decision" passed after 0.733 seconds.
+✔ Test "Switching worktrees restores companion terminals, layout and focus" passed after 0.733 seconds.
+✔ Suite "Worktree workspaces" passed after 0.734 seconds.
+✔ Suite "Sessions store" passed after 0.734 seconds.
+◇ Test case passing 2 arguments mode → "dark", system → .light to "Native controls and the custom palette follow the same window appearance" started.
+◇ Test case passing 2 arguments mode → "dark", system → .dark to "Native controls and the custom palette follow the same window appearance" started.
+✔ Test "Native controls and the custom palette follow the same window appearance" with 6 test cases passed after 0.783 seconds.
+✔ Suite "Window appearance" passed after 0.783 seconds.
+✔ Test "New conversation follows visible scope while All work retains its previous selection" passed after 0.784 seconds.
+✔ Test "Presentation and repo changes preserve selection, expansion, search and terminal splits" passed after 0.858 seconds.
+✔ Test "Task details expose directive and Project proof from the same snapshot" passed after 0.891 seconds.
+✔ Test "Completing a Session removes its link without completing its Task" passed after 1.033 seconds.
+✔ Test "Unresolved planning does not claim a selected Task has no Sessions" passed after 1.193 seconds.
+✔ Test "Returning to a repository retains its last-good Sessions when refresh fails" passed after 1.316 seconds.
+✔ Test "A hidden retained terminal relinquishes focus and keeps its unfinished PTY input" passed after 1.354 seconds.
+✔ Test "Slow planning does not gate Session reading or navigation" passed after 1.384 seconds.
+✔ Test "Failed reads keep last-good work and exact Sessions with a visible error" passed after 1.392 seconds.
+✔ Test "The work list retains its viewport through presentations, refresh and repository return" passed after 3.056 seconds.
+✔ Test "Incomplete planning preserves the repository's selected Task" with 2 test cases passed after 3.067 seconds.
+✔ Suite "Unified Work and Session navigation" passed after 3.068 seconds.
+◇ Test case passing 1 argument switchBeforeCompletion → true to "The workspace retains navigation and reconciles completion in its originating repository" started.
+✘ Test "The workspace retains navigation and reconciles completion in its originating repository" recorded an issue with 1 argument switchBeforeCompletion → true at WorkspaceNavigationProofTests.swift:358:9: Expectation failed: (workspace.multiplexer.pane(forSessionId: "navigation-split") → PaneState(id: "AE7DA9A5-DDFE-4E2C-A655-C9C41317F733", content: Loopflow.PaneContent.session(id: "navigation-split"))) == nil
+✘ Test "The workspace retains navigation and reconciles completion in its originating repository" recorded an issue with 1 argument switchBeforeCompletion → true at WorkspaceNavigationProofTests.swift:359:9: Expectation failed: (workspace.multiplexer.layout.allPanes.map(\.id) → ["AE7DA9A5-DDFE-4E2C-A655-C9C41317F733", "FAE4A1A8-AD5F-428B-82E9-0F777E9272F4"]) == ([shellPane] → ["FAE4A1A8-AD5F-428B-82E9-0F777E9272F4"])
+± inserted ["AE7DA9A5-DDFE-4E2C-A655-C9C41317F733"]
+✘ Test "The workspace retains navigation and reconciles completion in its originating repository" recorded an issue with 1 argument switchBeforeCompletion → true at WorkspaceNavigationProofTests.swift:360:9: Expectation failed: (workspace.multiplexer.focusedPaneId → "AE7DA9A5-DDFE-4E2C-A655-C9C41317F733") == (shellPane → "FAE4A1A8-AD5F-428B-82E9-0F777E9272F4")
+✘ Test "The workspace retains navigation and reconciles completion in its originating repository" with 2 test cases failed after 6.779 seconds with 3 issues.
+✘ Suite "Unified workspace navigation proof" failed after 6.779 seconds with 3 issues.
+✘ Test run with 33 tests in 7 suites failed after 6.780 seconds with 3 issues.

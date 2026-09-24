@@ -1,5 +1,15 @@
 # Unified navigation evidence
 
+## Iteration 7 update
+
+See [configured proof](configured-ui-proof.md) for exact provider text, completion,
+repository/list retention, matched-population count timings, and the title/contrast
+corrections. The missing-Session observation is explained by mismatched Home reads.
+The extended native title regression passes both existing completion cases before
+the separate lf-new integration. These receipts do not validate the integrated head. The
+configured scroll attempt did not establish a moved terminal viewport; later
+inactive-app and launch failures remain recorded, not recast as permission errors.
+
 ## Observable result
 
 One compact planning list contains autonomous, upcoming, and Session-bearing

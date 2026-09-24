@@ -1,0 +1,14 @@
+Owned PID 15528
+Probe executable /tmp/loo291-iteration7-scroll.swift AX trusted true
+AXWindows 0 count 1
+Owned onscreen windows 1 active false hidden false
+PASS This exact probe host has Accessibility permission
+TIMING launch_observation_end_ms 4417.735625058413
+PASS Ambient Wave does not block planning
+PASS Real Task list loaded (19 rows)
+PASS Open exact LOO-291 Task
+PASS Task has explicit no-Session state
+PASS Authoritative directive visible
+PASS Press New shell
+FAIL Error Domain=NSCocoaErrorDomain Code=260 "The file “loo291-review6-input-15528” couldn’t be opened because there is no such file." UserInfo={NSFilePath=/tmp/loo291-review6-input-15528, NSURL=file:///tmp/loo291-review6-input-15528, NSUnderlyingError=0xa8e2bca20 {Error Domain=NSPOSIXErrorDomain Code=2 "No such file or directory"}} terminated false active false
+Owned termination requested true

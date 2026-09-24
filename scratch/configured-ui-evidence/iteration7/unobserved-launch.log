@@ -1,0 +1,10 @@
+Owned PID 94566
+Probe executable /tmp/loo291-iteration7-scroll.swift AX trusted true
+AXWindows 0 count 1
+Owned onscreen windows 1 active true hidden false
+PASS This exact probe host has Accessibility permission
+TIMING launch_observation_end_ms 21568.29220824875
+PASS Ambient Wave does not block planning
+EMPTY   
+FAIL Failure(message: "Real Task list loaded (0 rows)")
+Owned termination requested false

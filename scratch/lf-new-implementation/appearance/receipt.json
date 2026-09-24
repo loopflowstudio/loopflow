@@ -1,0 +1,26 @@
+{
+  "date": "2026-09-23",
+  "bundle": "/tmp/loo291-integration/Loopflow Integration.app",
+  "executable_sha256": "ca5ba3b0ab832c66973dd34943f0b026ca78c15cfde9fd21daa3d5be3d110090",
+  "launch": "LaunchServices open -n -W; --repo /Users/jack/src/loopflow.main-view-task; -appearanceMode light/dark",
+  "data": "live installed CLI and its selected development Home; no fixtures",
+  "capture": "SnapshotService renders owned content view; 1500x950 points; 8 second capture delay, not latency",
+  "claims": [
+    "Readable primary workspace text in light and dark appearances",
+    "Three Waves and populated current planning visible"
+  ],
+  "limits": [
+    "No New conversation button interaction",
+    "No provider launch, transfer, completion or human confirmation",
+    "Installed /Applications/Loopflow.app was not replaced"
+  ],
+  "source_sha256": {
+    "swift/LoopflowMac/LoopflowApp.swift": "976442804d98cbe486667f70aff518e2603348ec9c3fdaec57c9debc2a4ce3fa",
+    "swift/LoopflowMac/Views/PodiumView.swift": "db24aff96ff14c399080531000a199a92c95b966ecae08fb7e6ddc1b7c602b78",
+    "swift/LoopflowMac/Views/SessionsView.swift": "22db00cd854a8e81abade2dc213ab20b493d9f3ec363e0dee79af661cdb0edab",
+    "swift/LoopflowMac/Views/WorkspaceNavigator.swift": "3be93b143e78327e96a82593c8cf8eac4df1c97e2fab2fbb6d652c98d4368b17",
+    "swift/LoopflowTests/AppAppearanceTests.swift": "39af0817447126d66e34aa7ec21329d94130babb7ca1940a42f96c14345b676b",
+    "swift/LoopflowTests/WorkspaceNavigationProofTests.swift": "ddf37a3e2d7e5c38adcd9cbf342d8cfa040d07878a907aee305677912b091cf1",
+    "swift/LoopflowTests/GhosttyTerminalInputTests.swift": "562a57219bddbd2b320a83cdfca951f440be17259eebd3ad74e23d942272c2db"
+  }
+}

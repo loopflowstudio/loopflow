@@ -129,8 +129,8 @@ Replace the root switch and parallel navigation with the unified tree, including
 
 Additive series. The keystone is an indivisible navigation replacement shipping as one PR; its internal slices are:
 
-1. **This slice:** join shared Work/Session readings into the compact unified list and A/D workspace presentations; keep autonomous and upcoming Tasks visible, integrate existing detail/Session access, preserve live terminals, and prove the behavior. Reconcile current main with `lf-new` and LOO-284 before selecting shared API changes; do not build parallel ownership or lifecycle logic.
-2. Complete optional per-subject conversation lifecycle and required workspace integration through shared APIs, preserving existing Session/human-boundary evidence. Keep the complete target in view while implementing internal cuts.
+1. Join shared Work/Session readings into the compact unified list and A/D workspace presentations; keep autonomous and upcoming Tasks visible, integrate existing detail/Session access, preserve live terminals, and prove the behavior. Reconcile current main with `lf-new` and LOO-284 before selecting shared API changes; do not build parallel ownership or lifecycle logic.
+2. **This slice:** integrate the committed lf-new scope-aware conversation and nested worktree workspace implementation while retaining newer navigation, completion, native-title and appearance fixes. Prove the reconciled behavior. Optional bounded conversation lifecycle remains follow-up design through shared APIs; preserve every existing human boundary.
 3. Remove superseded navigation, integrate remaining inspectors, and prove configured behavior. No runtime/cardinality or terminal-ownership shortcuts count as completion.
 
 Follow-up: Task-directive editing through the existing PM API, preserving unsaved text on rejected writes and displaying authoritative refreshed text after success. This remains part of LOO-291's requested outcome; shipping the keystone alone does not complete that Task. External-work trials and long-lived-registry performance measurement remain its full proof obligations. Do not create follow-up Tasks during design.
@@ -294,3 +294,61 @@ latencies, the failures and the concrete next procedure are in
 `configured-ui-proof.md`; no generic permission blocker is inferred. Configured
 scroll/repository/visual proof, controlled before/after timings and the full
 Task obligations remain open.
+
+Iteration 7 configured proof, 2026-09-23: recovered the prior proof-owned Session
+in the installed development Home; inherited control-Home reads explained its
+apparent absence. Exact provider-history text now proves retained draft and native
+continuation, followed by UI completion with companion/Task survival. A separate
+configured repository-return trial preserves selection, list scroll and shell
+input. Three alternating base/branch count-availability observations use the same
+verified planning/Session population; these are scoped measurements, not the
+required budgets or twenty-trial series. Configured inspection exposed lost
+command titles on remount and unreadable primary text in the light palette. The
+native view now retains its title, and the workspace explicitly uses its palette
+for primary text/search prompt. The title regression fails before and passes both
+cases after; configured title and visual receipts are in `configured-ui-proof.md`.
+Configured terminal scrolling and runner launch/input reliability remain open;
+external trials and the full LOO-291 scope remain unchanged. No publication or
+Task completion is claimed.
+
+Iteration 7 handoff boundary: another writer subsequently integrated lf-new and
+checkpointed the preceding source/evidence as `b12beba8b`. The final historical
+configured probe encountered the new `New terminal` surface and stopped before
+input; all preceding receipts retain their exact binary attribution. Builds and
+fixture runs from this pass stopped while the other writer changes appearance
+and terminal-id fixtures. Their integrated result needs its own configured proof;
+this pass neither overwrites that work nor claims to validate it.
+
+
+## Integration amendment — 2026-09-23
+
+The latest human direction supersedes the earlier mandatory Task-first and
+one-current-conversation proposals above. **New conversation** starts a fresh
+conversation at the visible repo/Wave/Project/Task scope and honors the configured
+destination. **New terminal** starts an ordinary shell. Neither creates a Task,
+enforces cardinality, replaces another provider, or runs an autonomous operating
+pass. Bounded conversation lifecycle and explicit creation/adoption remain open
+design, not requirements to silently enforce in Swift.
+
+Integrated the committed lf-new contribution through `lf rebase` in this Task's
+owned checkout after checkpointing its newer code and configured receipts. The
+registry now retains per-checkout terminal layouts under repository worktree
+slots, sharing one native surface pool per window. The newer opening-state
+reduction, title retention and native focus fixes remain. Required terminal IDs
+are consumed with their full PTY attachment contract. No new Session policy or
+labels-only planning query was added. Main still lacks LOO-284's shared actions
+and display path; that integration remains outstanding.
+
+Focused reconciliation exposed and corrected completion reverting to undoable
+pane close after repository navigation. Restored non-undoable reconciliation;
+both native cases pass. Window-local appearance resolution now keeps the custom
+palette and native control scheme aligned, and live-data light/dark captures
+confirm readable Work/Task/search/toolbar text. These captures do not establish
+the pending installed New conversation demo. Exact commands, source hashes,
+review findings and limits are in `lf-new-implementation/integration.md`.
+
+Remaining LOO-291 scope: shared LOO-284 actions/display path, bounded conversation
+lifecycle, directive editing, human-selected external-product trials, and
+published paint/readiness budgets with the required long-lived-registry trials.
+The prior configured provider receipts remain attributed to their preceding
+binary. No Task completion or publication follows from this integration.

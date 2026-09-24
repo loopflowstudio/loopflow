@@ -31,7 +31,8 @@ struct WorkspaceNavigator: View {
             }
             .padding(.horizontal, Spacing.md)
             .padding(.top, Spacing.md)
-            TextField("Find work or Sessions", text: $navigation.search)
+            TextField("Find work or Sessions", text: $navigation.search,
+                      prompt: Text("Find work or Sessions").foregroundStyle(palette.textSecondary))
                 .textFieldStyle(.plain)
                 .padding(Spacing.sm)
                 .background(palette.surfaceMuted, in: RoundedRectangle(cornerRadius: 5))

@@ -125,7 +125,8 @@ divergent local branches and dirty existing checkouts remain intact for repair.
 Release PR creation, base/title/body edits, readiness and auto-merge commands
 retain the target lock. During preparation they retain the checkout lease too,
 so a surviving command keeps that checkout available until it exits. Preparation
-commits and pushes first, then shared PR finalization creates the review surface
+stages, commits and pushes with both locks retained by Git children, then shared
+PR finalization creates the review surface
 with the release title and notes. Re-arming a dropped request retains the target
 lock while waiting for merge.
 

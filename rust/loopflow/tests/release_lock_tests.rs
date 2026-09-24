@@ -2,6 +2,7 @@ mod support;
 
 use std::fs;
 use std::os::fd::AsRawFd;
+use std::os::unix::fs::PermissionsExt;
 use std::os::unix::process::CommandExt;
 use std::path::{Path, PathBuf};
 use std::process::{Child, Command, Stdio};
@@ -622,6 +623,172 @@ exit 0
                 "edit" => assert_eq!(remote, "release: v0.9.1"),
                 "ready" => assert_eq!(remote, "ready"),
                 _ => unreachable!(),
+            }
+            wait_until_released(|| release_tag(repo.path(), "0.9.2", None).map(|_| ()));
+            worktree_remove(repo.path(), &checkout).unwrap();
+        }
+    }
+}
+
+#[test]
+fn surviving_release_git_mutation_retains_target_and_checkout() {
+    let real_git = Command::new("which").arg("git").output().unwrap();
+    let real_git = String::from_utf8(real_git.stdout).unwrap();
+    let real_git = real_git.trim();
+    for phase in ["add", "commit", "upstream", "push", "force"] {
+        for kill_controller in [true, false] {
+            eprintln!("Git mutation {phase}, killed controller: {kill_controller}");
+            let state = tempfile::tempdir().unwrap();
+            let mutation = blocking_mutation(
+                state.path(),
+                &format!(
+                    "'{real_git}' \"$@\" > '{}/git.log' 2>&1 || exit $?",
+                    state.path().display()
+                ),
+            );
+            let blocked = if kill_controller {
+                mutation
+            } else {
+                format!(
+                    "(\n{mutation}) > '{}/descendant.log' 2>&1 &\nexit 1\n",
+                    state.path().display()
+                )
+            };
+            // Commit runs real Git and a real pre-commit hook while its caller exits.
+            let hooks = state.path().join("hooks");
+            fs::create_dir(&hooks).unwrap();
+            let barrier = blocking_mutation(state.path(), "")
+                .replace(&format!(": > '{}/completed'\n", state.path().display()), "");
+            for (name, body) in [
+                ("pre-commit", format!("#!/bin/sh\n{barrier}")),
+                (
+                    "post-commit",
+                    format!("#!/bin/sh\n: > '{}/completed'\n", state.path().display()),
+                ),
+            ] {
+                let path = hooks.join(name);
+                fs::write(&path, body).unwrap();
+                fs::set_permissions(&path, fs::Permissions::from_mode(0o755)).unwrap();
+            }
+            let commit_command = format!(
+                "exec '{real_git}' -c core.hooksPath='{}' \"$@\"",
+                hooks.display()
+            );
+            let commit_child = if kill_controller {
+                commit_command
+            } else {
+                format!(
+                    "({commit_command}) > '{}/descendant.log' 2>&1 &\nexit 1",
+                    state.path().display()
+                )
+            };
+            let git = format!(
+                r#"#!/bin/sh
+if [ "$1" = -C ] && [ -f '{state}/notes-written' ]; then
+  operation=''
+  case " $* " in
+    *' add -A '*) operation=add;;
+    *' commit -m '*) operation=commit;;
+    *' push -u '*) operation=upstream;;
+    *' push --force-with-lease '*) operation=force;;
+    *' push '*) operation=push;;
+  esac
+  if [ "$operation" = push ] && [ '{phase}' = force ]; then exit 1; fi
+  if [ "$operation" = '{phase}' ]; then
+    [ ! -f '{state}/launched' ] || exit 1
+    : > '{state}/launched'
+    '{real_git}' -C "$2" rev-parse --show-toplevel > '{state}/checkout'
+    if [ "$operation" = commit ]; then
+      {commit_child}
+    fi
+    {blocked}
+  fi
+fi
+exec '{real_git}' "$@"
+"#,
+                state = state.path().display()
+            );
+            let gh = "#!/bin/sh\ncase \"$1 $2\" in\n'--version ') exit 0;;\n'run list'|'pr list') echo '[]';;\n'release view') exit 1;;\n*) exit 91;;\nesac\n";
+            let notes = format!(
+                r#"#!/bin/sh
+cat > RELEASE_NOTES.md <<'EOF'
+# v0.9.1
+
+<!-- loopflow:release-notes=narrative;gate=safe -->
+
+Fixture release.
+EOF
+if [ '{phase}' = upstream ]; then
+  '{real_git}' branch --unset-upstream || exit $?
+fi
+if [ '{phase}' = push ] || [ '{phase}' = force ]; then
+  '{real_git}' push -u origin HEAD || exit $?
+fi
+: > '{state}/notes-written'
+"#,
+                state = state.path().display()
+            );
+            let _env = EnvGuard::new(&[("git", &git), ("gh", gh), ("lf", &notes)]);
+            let repo = TestRepo::new();
+            let mut parent = start(&repo, state.path(), &["release", "run", "0.9.1"]);
+            let checkout = PathBuf::from(
+                fs::read_to_string(state.path().join("checkout"))
+                    .unwrap()
+                    .trim(),
+            );
+            if kill_controller {
+                parent.child.kill().unwrap();
+            } else {
+                let deadline = Instant::now() + Duration::from_secs(20);
+                while parent.child.try_wait().unwrap().is_none() {
+                    assert!(Instant::now() < deadline, "{phase} controller did not exit");
+                    thread::sleep(Duration::from_millis(10));
+                }
+            }
+            assert!(!parent.child.wait().unwrap().success());
+            let retained = fs::read_to_string(checkout.join("RELEASE_NOTES.md"));
+            let removal = worktree_remove(repo.path(), &checkout);
+            let contender = release_tag(repo.path(), "0.9.2", None);
+            fs::write(state.path().join("allow"), "").unwrap();
+            assert!(
+                matches!(contender, Err(OpsError::ReleaseDeferred { .. })),
+                "{phase}: {contender:?}"
+            );
+            assert!(
+                removal.is_err(),
+                "removed surviving {phase} child's checkout"
+            );
+            assert!(retained.unwrap().contains("Fixture release."));
+            wait_for(&state.path().join("completed"));
+            let git_read = |args: &[&str]| {
+                let output = Command::new(real_git)
+                    .arg("-C")
+                    .arg(&checkout)
+                    .args(args)
+                    .output()
+                    .unwrap();
+                assert!(output.status.success(), "{output:?}");
+                String::from_utf8(output.stdout).unwrap()
+            };
+            let subject = if phase == "add" {
+                ":RELEASE_NOTES.md"
+            } else {
+                "HEAD:RELEASE_NOTES.md"
+            };
+            assert!(git_read(&["show", subject]).contains("Fixture release."));
+            if matches!(phase, "upstream" | "push" | "force") {
+                let branch = git_read(&["branch", "--show-current"]);
+                let remote = Command::new(real_git)
+                    .arg("--git-dir")
+                    .arg(repo.bare_path())
+                    .args(["rev-parse", branch.trim()])
+                    .output()
+                    .unwrap();
+                assert!(remote.status.success());
+                assert_eq!(
+                    String::from_utf8(remote.stdout).unwrap(),
+                    git_read(&["rev-parse", "HEAD"])
+                );
             }
             wait_until_released(|| release_tag(repo.path(), "0.9.2", None).map(|_| ()));
             worktree_remove(repo.path(), &checkout).unwrap();

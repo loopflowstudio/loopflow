@@ -1896,6 +1896,10 @@ fn prepare_release_in_worktree(
             ..CommitOptions::for_task("release")
         },
         progress,
+        &|command| {
+            lock.inherit(command);
+            lease.inherit(command);
+        },
     )?;
 
     progress.status("Enqueuing release PR for merge...");

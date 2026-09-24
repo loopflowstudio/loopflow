@@ -418,7 +418,7 @@ fn prepare_land(
             agent: options.agent.clone(),
             ..CommitOptions::for_task("land")
         };
-        let _ = commit_workflow(repo_root, &commit_options, progress)?;
+        let _ = commit_workflow(repo_root, &commit_options, progress, &|_| {})?;
     }
 
     Ok(())
@@ -646,9 +646,9 @@ fn clear_scratch(repo: &Path, progress: &impl Progress) -> OpsResult<()> {
     }
 
     progress.status("Clearing scratch/...");
-    crate::engine::git::stage_all(repo)?;
+    crate::engine::git::stage_all(repo, &|_| {})?;
     if has_staged_changes(repo)? {
-        crate::engine::git::commit(repo, "lf land: clear scratch/")?;
+        crate::engine::git::commit(repo, "lf land: clear scratch/", &|_| {})?;
     }
 
     Ok(())

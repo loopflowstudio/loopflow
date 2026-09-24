@@ -30,7 +30,7 @@ fn commit_stages_and_commits() {
 
     let options = commit_options("test commit");
 
-    let committed = commit_workflow(repo.path(), &options, &NullProgress).expect("commit");
+    let committed = commit_workflow(repo.path(), &options, &NullProgress, &|_| {}).expect("commit");
     assert!(committed);
     assert_eq!(last_commit_message(&repo), "test commit");
 }
@@ -46,7 +46,7 @@ fn commit_with_push() {
         ..commit_options("push commit")
     };
 
-    let committed = commit_workflow(repo.path(), &options, &NullProgress).expect("commit");
+    let committed = commit_workflow(repo.path(), &options, &NullProgress, &|_| {}).expect("commit");
     assert!(committed);
     assert_eq!(repo.head_sha(), repo.bare_head_sha());
 }
@@ -58,7 +58,7 @@ fn commit_skips_empty() {
 
     let options = commit_options("skip");
 
-    let committed = commit_workflow(repo.path(), &options, &NullProgress).expect("commit");
+    let committed = commit_workflow(repo.path(), &options, &NullProgress, &|_| {}).expect("commit");
     assert!(!committed);
     assert_eq!(before, repo.head_sha());
 }
@@ -70,7 +70,7 @@ fn commit_with_message_override() {
 
     let options = commit_options("override message");
 
-    let committed = commit_workflow(repo.path(), &options, &NullProgress).expect("commit");
+    let committed = commit_workflow(repo.path(), &options, &NullProgress, &|_| {}).expect("commit");
     assert!(committed);
     assert_eq!(last_commit_message(&repo), "override message");
 }
@@ -86,7 +86,7 @@ fn commit_generates_message_when_none() {
     };
 
     // Without an agent available, generation fails and falls back to prefix-only.
-    let committed = commit_workflow(repo.path(), &options, &NullProgress).expect("commit");
+    let committed = commit_workflow(repo.path(), &options, &NullProgress, &|_| {}).expect("commit");
     assert!(committed);
     let message = last_commit_message(&repo);
     assert!(

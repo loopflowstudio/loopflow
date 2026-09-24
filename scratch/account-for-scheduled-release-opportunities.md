@@ -529,23 +529,21 @@ half-contracts.
 ## This slice
 
 Carry the existing release target lock and exact checkout lease through shared
-PR creation, base retargeting, title/body editing and readiness commands. Extend
-the existing finalization inheritance callback; ordinary callers provide no
-release capability. Release preparation will commit/push without creating a
-best-effort draft, then create the PR through the existing finalization owner.
-This removes two possible creation paths from release preparation.
+Git staging, commit and branch push commands, including upstream establishment
+and the force-with-lease fallback. Extend the existing owners with explicit
+command inheritance; ordinary callers supply no release capability. Preserve
+one commit and push implementation and its Task settlement fence.
 
-Prove through the built CLI that each mutation child surviving controller death
-or a failed launcher excludes a second release and preserves its checkout.
-Observe the resulting simulated remote PR state and access after child exit.
-Keep normal release preparation and ordinary PR arming working. These local
-process proofs cannot supply the configured two-settlement commitment.
+Prove through the built CLI that a surviving Git child or failed launcher's
+descendant excludes another release and preserves its checkout. Observe the
+actual staged/committed bytes and bare-origin branch after the child completes,
+and retain normal release preparation and ordinary commit behavior.
 
-Shared Git/commit/push, notes agents, lockfile tools, source/worktree children,
-Task compensation paths, historical telemetry linkage/recovery, closed
-obligations and configured acceptance remain in this serial Task. This slice
-changes neither settlement nor prerequisite policy and retains the scorecard
-blocker.
+Task compensation, notes agents, lockfile tools, source/worktree children,
+historical telemetry linkage/recovery, closed obligations and configured
+acceptance remain in this serial Task. This slice changes neither settlement nor
+prerequisite policy and retains the scorecard blocker. Local process proofs do
+not supply either configured automatic settlement.
 
 ## Slice ledger
 
@@ -761,6 +759,19 @@ established and no executable code changed. Task compensation and other shared
 mutation children, historical telemetry linkage/retry and repair ownership,
 closed-obligation continuation and configured acceptance remain open. See
 [review-pr-mutations.md](review-pr-mutations.md).
+
+- 2026-09-24: shared staging, commit and branch pushes now inherit the release
+  target lock and checkout lease, including upstream establishment and the
+  force-with-lease fallback. The built-CLI regression first reproduced a second
+  tag while staging survived its killed controller. Ten survival cases passed
+  after repair (43.90s), with real Git hooks for commit and actual index/commit/
+  bare-origin results. Ordinary commit/push, Task revocation before push,
+  advancing-main preparation and missing-identity commit checks also passed,
+  along with formatting and all-target Clippy. GitHub/notes are simulated.
+- Task compensation, notes/tools/worktree children, historical telemetry recovery,
+  dated repair ownership, closed obligations and configured acceptance remain
+  open. See [release-git-ownership.md](release-git-ownership.md). No publication,
+  installation or Task completion occurred in this cut.
 
 ## Measure
 

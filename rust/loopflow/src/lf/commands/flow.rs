@@ -460,7 +460,7 @@ pub(crate) fn commit_skill_work(repo: &Path, skill_name: &str) -> Result<bool> {
         message: Some(format!("lf commit: {skill_name}")),
         ..CommitOptions::for_task(skill_name)
     };
-    commit_workflow(repo, &options, &NullProgress).map_err(Into::into)
+    commit_workflow(repo, &options, &NullProgress, &|_| {}).map_err(Into::into)
 }
 fn write_temp_skill(repo: &Path, name: &str, prompt: &str) -> Result<TempSkillGuard> {
     let tmp_skill_dir = repo.join(".lf/skills");

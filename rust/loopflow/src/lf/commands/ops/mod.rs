@@ -723,6 +723,7 @@ pub fn run_commit(
             ..CommitOptions::for_task("commit")
         },
         &CliProgress,
+        &|_| {},
     )?;
     Ok(())
 }

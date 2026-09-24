@@ -91,7 +91,7 @@ fn commit_creates_commit_with_staged_changes() {
         .output()
         .expect("git add");
 
-    commit(repo.path(), "add new file").unwrap();
+    commit(repo.path(), "add new file", &|_| {}).unwrap();
 
     assert!(is_clean(repo.path()).unwrap());
 }

@@ -114,13 +114,13 @@ pub fn create_or_update_pr(
         agent: options.agent.clone(),
         ..CommitOptions::for_task("commit")
     };
-    commit_workflow(repo, &commit_options, progress)?;
+    commit_workflow(repo, &commit_options, progress, &|_| {})?;
     crate::ops::task::require_task_pr_range_nonempty_without_healing(repo)?;
     require_non_task_pr_range_nonempty(repo, stack.is_some(), &base_branch)?;
     let branch =
         current_branch(repo)?.ok_or_else(|| OpsError::Message("not on a branch".to_string()))?;
     let published_head = rev_parse(repo, "HEAD")?;
-    crate::ops::commit::push_with_upstream_if_needed(repo)?;
+    crate::ops::commit::push_with_upstream_if_needed(repo, &|_| {})?;
 
     let copy = normalize_task_pr_copy(
         resolve_pr_copy(repo, options, cached_copy, progress)?,

@@ -64,15 +64,30 @@ impl WorktreeLease {
 }
 
 fn run_git(repo: &Path, args: &[&str]) -> Result<Output, GitError> {
-    Ok(Command::new("git")
-        .arg("-C")
-        .arg(repo)
-        .args(args)
-        .output()?)
+    run_git_inheriting(repo, args, &|_| {})
+}
+
+fn run_git_inheriting(
+    repo: &Path,
+    args: &[&str],
+    inherit: &impl Fn(&mut Command),
+) -> Result<Output, GitError> {
+    let mut command = Command::new("git");
+    command.arg("-C").arg(repo).args(args);
+    inherit(&mut command);
+    Ok(command.output()?)
 }
 
 fn git_stdout(repo: &Path, args: &[&str]) -> Result<String, GitError> {
-    let output = run_git(repo, args)?;
+    git_stdout_inheriting(repo, args, &|_| {})
+}
+
+fn git_stdout_inheriting(
+    repo: &Path,
+    args: &[&str],
+    inherit: &impl Fn(&mut Command),
+) -> Result<String, GitError> {
+    let output = run_git_inheriting(repo, args, inherit)?;
     if !output.status.success() {
         return Err(GitError::CommandFailed {
             command: format!("git {}", args.join(" ")),
@@ -285,8 +300,13 @@ pub fn ref_exists(repo: &Path, ref_name: &str) -> Result<bool, GitError> {
 }
 
 /// Push and set upstream tracking.
-pub fn push_with_upstream(repo: &Path, remote: &str, branch: &str) -> Result<(), GitError> {
-    let output = run_git(repo, &["push", "-u", remote, branch])?;
+pub fn push_with_upstream(
+    repo: &Path,
+    remote: &str,
+    branch: &str,
+    inherit: &impl Fn(&mut Command),
+) -> Result<(), GitError> {
+    let output = run_git_inheriting(repo, &["push", "-u", remote, branch], inherit)?;
     if !output.status.success() {
         return Err(GitError::CommandFailed {
             command: format!("git push -u {} {}", remote, branch),
@@ -525,8 +545,8 @@ fn worktree_state_for_pathspec(repo: &Path, pathspec: &[&str]) -> Result<String,
 }
 
 /// Stage all changes.
-pub fn stage_all(repo: &Path) -> Result<(), GitError> {
-    git_stdout(repo, &["add", "-A"])?;
+pub fn stage_all(repo: &Path, inherit: &impl Fn(&mut Command)) -> Result<(), GitError> {
+    git_stdout_inheriting(repo, &["add", "-A"], inherit)?;
     Ok(())
 }
 
@@ -559,11 +579,11 @@ fn has_git_identity(repo: &Path) -> bool {
 /// committer via `-c user.name/-c user.email` so headless commits (e.g. the
 /// release version bump on a CI runner) succeed. A configured identity is
 /// never overridden.
-pub fn commit(repo: &Path, message: &str) -> Result<(), GitError> {
+pub fn commit(repo: &Path, message: &str, inherit: &impl Fn(&mut Command)) -> Result<(), GitError> {
     if has_git_identity(repo) {
-        git_stdout(repo, &["commit", "-m", message])?;
+        git_stdout_inheriting(repo, &["commit", "-m", message], inherit)?;
     } else {
-        git_stdout(
+        git_stdout_inheriting(
             repo,
             &[
                 "-c",
@@ -574,6 +594,7 @@ pub fn commit(repo: &Path, message: &str) -> Result<(), GitError> {
                 "-m",
                 message,
             ],
+            inherit,
         )?;
     }
     Ok(())
@@ -1232,12 +1253,16 @@ pub fn create_branch(worktree: &Path, name: &str) -> Result<BranchInfo, GitError
     })
 }
 
-pub fn push(worktree: &Path, force_with_lease: bool) -> Result<(), GitError> {
+pub fn push(
+    worktree: &Path,
+    force_with_lease: bool,
+    inherit: &impl Fn(&mut Command),
+) -> Result<(), GitError> {
     let mut args = vec!["push"];
     if force_with_lease {
         args.push("--force-with-lease");
     }
-    git_stdout(worktree, &args)?;
+    git_stdout_inheriting(worktree, &args, inherit)?;
     Ok(())
 }
 
@@ -1382,8 +1407,8 @@ mod tests {
         );
 
         fs::write(dir.path().join("README.md"), "hello").expect("write file");
-        stage_all(dir.path()).expect("stage");
-        commit(dir.path(), "add readme")
+        stage_all(dir.path(), &|_| {}).expect("stage");
+        commit(dir.path(), "add readme", &|_| {})
             .expect("commit should succeed without configured identity");
 
         let email =
@@ -1474,11 +1499,11 @@ mod tests {
         .expect("add remote");
 
         // Initial push to set upstream
-        push_with_upstream(repo.path(), "origin", "main").expect("initial push");
+        push_with_upstream(repo.path(), "origin", "main", &|_| {}).expect("initial push");
 
         // Now test force-with-lease push
         commit_file(repo.path(), "second.txt", "second commit");
-        push(repo.path(), true).expect("push force-with-lease");
+        push(repo.path(), true, &|_| {}).expect("push force-with-lease");
     }
 
     #[test]
@@ -1593,8 +1618,8 @@ mod tests {
         let dirty = worktree_state(repo.path()).expect("dirty state");
         assert_ne!(dirty, initial);
 
-        stage_all(repo.path()).expect("stage all");
-        commit(repo.path(), "update readme").expect("commit");
+        stage_all(repo.path(), &|_| {}).expect("stage all");
+        commit(repo.path(), "update readme", &|_| {}).expect("commit");
         let committed = worktree_state(repo.path()).expect("committed state");
         assert_ne!(committed, initial);
         assert_ne!(committed, dirty);
@@ -1643,8 +1668,8 @@ mod tests {
         let path = repo.path().join("stage.txt");
         fs::write(&path, "staged").expect("write file");
 
-        stage_all(repo.path()).expect("stage all");
-        commit(repo.path(), "add staged").expect("commit");
+        stage_all(repo.path(), &|_| {}).expect("stage all");
+        commit(repo.path(), "add staged", &|_| {}).expect("commit");
         assert!(is_clean(repo.path()).expect("clean after commit"));
     }
 
@@ -1668,7 +1693,7 @@ mod tests {
 
         checkout_new_branch(repo.path(), "feature").expect("create feature");
         commit_file(repo.path(), "feature.txt", "feature");
-        push_with_upstream(repo.path(), "origin", "feature").expect("push with upstream");
+        push_with_upstream(repo.path(), "origin", "feature", &|_| {}).expect("push with upstream");
 
         // Verify upstream is set
         let tracking = git_stdout(

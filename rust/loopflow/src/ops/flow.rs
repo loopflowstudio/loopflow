@@ -78,6 +78,7 @@ pub(crate) fn execute_flow_ops_with_cron(
                     ..CommitOptions::for_task("commit")
                 },
                 progress,
+                &|_| {},
             )?;
             Ok(())
         }

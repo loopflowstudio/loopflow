@@ -1106,6 +1106,7 @@ fn pushed_task_commit_revokes_auto_before_exposing_the_new_head() {
             agent: None,
         },
         &NullProgress,
+        &|_| {},
     )
     .expect("commit and push new head");
 

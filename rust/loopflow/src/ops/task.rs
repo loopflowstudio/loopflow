@@ -3345,7 +3345,7 @@ async fn ensure_working_pr_with_options(
     let base_commit = fork_point(&task.worktree, &base_ref, &branch)?;
 
     let _mutation = lock_task_pr_mutation(&task.worktree)?;
-    push_with_upstream(&task.worktree, "origin", &branch)
+    push_with_upstream(&task.worktree, "origin", &branch, &|_| {})
         .map_err(|error| task_error(format!("failed to push next PR branch: {error}")))?;
 
     let now = time::OffsetDateTime::now_utc();

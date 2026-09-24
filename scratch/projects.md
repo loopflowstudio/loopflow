@@ -180,3 +180,12 @@ Inspection confirms Tasks and KRs are already Project-owned; targets remain in
 Wave metric contracts and their revision hash. Revised the full design, current
 slice, doctrine, and focused proof requirement. This is a remaining implementation
 gap; earlier passing checks do not establish the clarified target ownership.
+
+2026-09-24, slice review: the clarified ownership remains unimplemented; do not
+approve the full design yet. Removed an unused independent Project creation
+API and restored read-only historical Project Work inspection. Nine chapter
+checks, the focused historical CLI check, formatting, and all-target Clippy
+passed. Fresh native fixture captures show Wave → Task in both workspaces;
+live controls remain unproven. The evidence matrix, source-review limits, and
+next ownership slice are in `scratch/review-slice.md`. Recorded the human's
+Wave hierarchy direction as future scope while preserving existing ancestry.

@@ -1966,15 +1966,13 @@ fn finish_release_pr(
                     &worktree_path(main_repo, worktree_name),
                     "release PR rebuild",
                 )?;
-                let wt = create_named_worktree(main_repo, worktree_name, None, false)?;
+                let wt = materialize_exact_source_worktree(
+                    main_repo,
+                    worktree_name,
+                    &prepared.head_sha,
+                    &lease,
+                )?;
                 let refreshed = (|| {
-                    let current_head = rev_parse(&wt.path, "HEAD")?;
-                    if current_head != prepared.head_sha {
-                        return Err(OpsError::Message(format!(
-                            "release PR head changed while recovery was materializing it: expected {}, found {current_head}",
-                            prepared.head_sha
-                        )));
-                    }
                     run_stdout(&wt.path, "git", &["reset", "--hard", &main_ref])?;
                     let changes = collect_release_changes(main_repo, target)?;
                     prepare_release_in_worktree(

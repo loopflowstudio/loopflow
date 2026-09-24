@@ -1209,6 +1209,54 @@ fn release_run_rearms_a_dropped_auto_merge_for_the_exact_head() {
 }
 
 #[test]
+fn release_pr_rebuild_preserves_divergent_local_branch() {
+    let repo = TestRepo::new();
+    let state = tempfile::tempdir().unwrap();
+    let main_branch = git_output(&repo, &["branch", "--show-current"]);
+    let release_branch = "jack/release-default-v0-9-2";
+    git(&repo, &["tag", "v0.9.1"]);
+    git(&repo, &["push", "origin", "v0.9.1"]);
+    fs::write(repo.path().join("feature.txt"), "release me\n").unwrap();
+    git(&repo, &["add", "feature.txt"]);
+    git(&repo, &["commit", "-m", "Add release change"]);
+    git(&repo, &["push", "origin", "HEAD"]);
+    git(&repo, &["checkout", "-b", release_branch]);
+    git(&repo, &["push", "origin", release_branch]);
+    fs::write(repo.path().join("operator.txt"), "unpublished repair\n").unwrap();
+    git(&repo, &["add", "operator.txt"]);
+    git(&repo, &["commit", "-m", "Keep unpublished release repair"]);
+    let local_head = git_output(&repo, &["rev-parse", "HEAD"]);
+    git(&repo, &["checkout", &main_branch]);
+    let caller_head = git_output(&repo, &["rev-parse", "HEAD"]);
+    let index = fs::read(repo.path().join(".git/index")).unwrap();
+    let script = write_gh_dirty_release_script(
+        &state.path().join("gh.log").to_string_lossy(),
+        release_branch,
+        &main_branch,
+    );
+    let _env = EnvGuard::new(&[("gh", &script)]);
+
+    let error = release_run(repo.path(), "patch", None, &NullProgress)
+        .expect_err("divergent local release work must survive recovery");
+
+    assert!(error.to_string().contains(&local_head), "{error}");
+    assert_eq!(
+        git_output(&repo, &["rev-parse", release_branch]),
+        local_head
+    );
+    assert_eq!(
+        git_output(&repo, &["show", &format!("{release_branch}:operator.txt")]),
+        "unpublished repair"
+    );
+    assert_eq!(git_output(&repo, &["rev-parse", "HEAD"]), caller_head);
+    assert_eq!(
+        git_output(&repo, &["branch", "--show-current"]),
+        main_branch
+    );
+    assert_eq!(fs::read(repo.path().join(".git/index")).unwrap(), index);
+}
+
+#[test]
 fn release_run_reintegrates_a_dirty_existing_pr() {
     let repo = TestRepo::new();
     let main_branch = git_output(&repo, &["branch", "--show-current"]);

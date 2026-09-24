@@ -120,6 +120,8 @@ also preserves the checkout and reports its path for later cleanup.
 Configured repository verification and preparation hooks retain both the target
 lock and their checkout lease, including preparation during PR rebuild. A
 surviving hook keeps cleanup and another release blocked until it exits.
+PR rebuild uses the same exact-source recovery checks as candidate preparation:
+divergent local branches and dirty existing checkouts remain intact for repair.
 
 Tag pushes, candidate-ref changes, workflow submissions, and GitHub publication
 commands retain the release target's lock in their child process. If the

@@ -722,6 +722,15 @@ remain open. Full matrix and next direction:
   shared mutation children, telemetry recovery, closed obligations and configured
   acceptance stay open. Details: [release-hook-ownership.md](release-hook-ownership.md).
 
+Hook review remains **iterate**. The four-case built-CLI demonstration passed
+again (14.64s). A new rebuild counterexample reproduced cleanup deleting a
+divergent local release branch after rejecting its HEAD. Rebuild now uses the
+existing exact-source recovery classifier before mutation/cleanup; unpublished
+repair commits and caller state survive (2.32s), and normal reintegration with
+advancing main still passes (6.86s). Shared mutation children, telemetry
+association/recovery, closed obligations and configured acceptance remain open.
+See [review-release-hooks.md](review-release-hooks.md).
+
 ## Measure
 
 Use the Reliability KR's actual due population, not successful process counts.

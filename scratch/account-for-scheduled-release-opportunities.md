@@ -812,6 +812,14 @@ and configured acceptance remain open. See [review-lockfile.md](review-lockfile.
   source/worktree children, telemetry recovery, closed obligations and configured
   acceptance remain open. See [release-notes-ownership.md](release-notes-ownership.md).
 
+Notes ownership review remains **iterate**. The built-CLI/Codex-harness
+demonstration passed both interruption scenarios again (18.23s), retaining exact
+input, completed notes, target/checkout protection and caller state. No additional
+bounded defect was established and no executable code changed. Task compensation,
+source/worktree children, historical telemetry linkage/retry and dated repair
+ownership, closed obligations and configured acceptance remain open. See
+[review-notes.md](review-notes.md).
+
 ## Measure
 
 Use the Reliability KR's actual due population, not successful process counts.

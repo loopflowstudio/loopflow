@@ -1,0 +1,38 @@
+Owned PID 7881
+Probe executable /tmp/loo291-iteration7-retention.swift AX trusted true
+AXWindows 0 count 1
+Owned onscreen windows 1 active true hidden false
+PASS This exact probe host has Accessibility permission
+TIMING launch_observation_end_ms 2680.5207498837262
+PASS Ambient Wave does not block planning
+PASS Real Task list loaded (18 rows)
+PASS Open Task for owned Session
+PASS Press codex
+PASS Activate owned proof window
+PASS Exactly one test-owned provider client
+Provider client before navigation {
+  "schema_version": 1,
+  "pid": 11076,
+  "terminal_id": null,
+  "started_at": "2026-09-24T01:44:51.584971Z"
+}
+PASS Press Show work list
+PASS Press Work details
+PASS Press All work
+PASS Return to exact Task
+PASS Press codex
+PASS Press New shell
+Companion PID 17273
+PASS Press Work details
+PASS Press codex
+PASS Exactly one test-owned provider client
+PASS Navigation and companion split retain exact provider PID/birth
+PASS Provider replied after navigation
+PASS Exact unfinished draft survives navigation
+PASS Press Complete session
+PASS Resolved Session pane removed
+PASS Same companion process responds after Session completion
+PASS Press Work details
+PASS Task survives completion with explicit no-Session state
+Configured retained draft, companion and completion proof passed
+Owned termination requested true

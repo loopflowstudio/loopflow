@@ -935,7 +935,7 @@ private struct SessionPaneView: View {
         .onReceive(NotificationCenter.default.publisher(for: .ghosttyTerminalTitle)) { notification in
             guard let update = notification.object as? GhosttyTerminalTitle,
                   update.terminal == _terminalIdentity else { return }
-            terminalTitle = update.title
+            terminalTitle = sessions.surfaces.title(for: update.terminal)
         }
         .onChange(of: isFocused) { _, focused in
             if focused { bellRinging = false }
@@ -1297,7 +1297,8 @@ private struct SessionPaneView: View {
     }
 
     private var _title: String {
-        if let terminalTitle, !terminalTitle.isEmpty { return terminalTitle }
+        let title = terminalTitle ?? _terminalIdentity.flatMap { sessions.surfaces.title(for: $0) }
+        if let title, !title.isEmpty { return title }
         return switch pane.content {
         case .empty: "Workspace"
         case .session: item?.record.detail ?? "Workspace"

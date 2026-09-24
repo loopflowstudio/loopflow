@@ -241,7 +241,7 @@ struct WorkspaceNavigationProofTests {
             // Emit history from the child, without PTY input echo interleaving
             // with cat's output. Both children then retain ordinary input.
             let argv = index == 0 ? ["/bin/cat"] : [
-                "/bin/sh", "-c", "printf '%s\\n' \(history); exec /bin/cat",
+                "/bin/sh", "-c", "printf '\\033]2;Retained companion\\007'; printf '%s\\n' \(history); exec /bin/cat",
             ]
             terminal.command = buildGhosttyShellCommand(argv: argv, env: [:])
             terminal.createSurface(manager: GhosttyManager.shared)
@@ -265,6 +265,7 @@ struct WorkspaceNavigationProofTests {
             try await Task.sleep(for: .milliseconds(20))
         }
         try #require(_terminalText(shellSurface).contains("history-119"))
+        #expect(throws: Never.self) { try view.inspect().find(text: "Retained companion") }
         let scroll = "scroll_to_top"
         #expect(scroll.withCString { ghostty_surface_binding_action(shellSurface, $0, UInt(scroll.utf8.count)) })
         let scrollDeadline = ContinuousClock.now + .seconds(3)
@@ -306,6 +307,7 @@ struct WorkspaceNavigationProofTests {
         #expect(workspace.multiplexer.focusedPaneId == sessionPane)
         #expect(window.firstResponder === terminals[0])
         #expect(model.selection == .task(id: "issue-review"))
+        #expect(throws: Never.self) { try view.inspect().find(text: "Retained companion") }
         "\n".withCString { ghostty_surface_text(sessionSurface, $0, 1) }
         let companion = "companion-alive"
         let companionInput = companion + "\n"

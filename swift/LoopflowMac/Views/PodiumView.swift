@@ -56,6 +56,7 @@ struct PodiumView: View {
                 }
             }
             .frame(maxWidth: .infinity, maxHeight: .infinity, alignment: .topLeading)
+            .foregroundStyle(palette.text)
         }
         .frame(maxWidth: .infinity, maxHeight: .infinity, alignment: .topLeading)
         .background(palette.background)

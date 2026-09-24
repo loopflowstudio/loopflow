@@ -125,6 +125,10 @@ final class GhosttySurfacePool {
         return view
     }
 
+    func title(for id: TerminalIdentity) -> String? {
+        views[id]?.terminalTitle
+    }
+
     /// True only while the surface's child is still running. A provider killed
     /// from another client (Move here in Warp or a second window) leaves the
     /// surface displaying an exit banner; that must not read as live, and the
@@ -217,6 +221,7 @@ final class GhosttyMetalView: NSView, @preconcurrency NSTextInputClient {
     /// Set when the surface's child ended; blocks implicit relaunch — reopening
     /// a Session or shell is an explicit action that mints a fresh view.
     private(set) var childExited = false
+    var terminalTitle: String?
     nonisolated(unsafe) var surface: ghostty_surface_t?
 
     private nonisolated(unsafe) var displayLink: CADisplayLink?
@@ -1098,6 +1103,7 @@ func terminalPasteText(from pasteboard: NSPasteboard) -> String? {
 @MainActor
 final class GhosttySurfacePool {
     func hasSurface(_ id: TerminalIdentity) -> Bool { false }
+    func title(for id: TerminalIdentity) -> String? { nil }
     func release(_ id: TerminalIdentity) {}
     func focus(_ id: TerminalIdentity) {}
 }

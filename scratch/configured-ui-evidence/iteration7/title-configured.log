@@ -1,0 +1,51 @@
+Owned PID 55887
+Probe executable /tmp/loo291-iteration7-scroll.swift AX trusted true
+AXWindows 0 count 1
+Owned onscreen windows 1 active true hidden false
+PASS This exact probe host has Accessibility permission
+TIMING launch_observation_end_ms 4380.492916563526
+PASS Ambient Wave does not block planning
+PASS Real Task list loaded (19 rows)
+PASS Open exact LOO-291 Task
+PASS Task has explicit no-Session state
+PASS Authoritative directive visible
+PASS Press New shell
+NO_NAVIGATION_BYTES "Reply with only the continuity word from my first message.\n"
+PASS Press Show work list
+SCROLLBARS 1 ["Optional(0)"]
+SET_SCROLL 0
+TERMINAL_CONTROL AXGroup LOO291 retained shell, active sessions-surface
+TERMINAL_CONTROL AXStaticText  
+PASS Read terminal position
+PASS Read terminal size
+PASS Command title visible before navigation
+SCROLL_BEFORE ["Optional(1)"]
+SCREENSHOT_STATUS 0
+MENU_ACTIONS Optional(<__NSArrayM 0x9866d8b40>(
+AXShowMenu
+)
+)
+MENU_ACTIONS Optional(<__NSArrayM 0x9866d8b40>(
+AXShowMenu
+)
+)
+MENU_ACTIONS Optional(<__NSArrayM 0x9866d8b40>(
+AXShowMenu
+)
+)
+PASS Open repository menu
+MENU ["AXMenuButton::Repository: loopflow", "AXMenuButton::Repository: loopflow", "AXMenuButton::Repository: loopflow", "AXMenu::", "AXMenuItem:All repositories:", "AXMenuItem::", "AXMenuItem:cube:", "AXMenuItem:etude:", "AXMenuItem:hootro:", "AXMenuItem:kata:", "AXMenuItem:loopflow:", "AXMenuItem:silencio:", "AXMenuItem:studio:", "AXMenuBar::"]
+PASS Select repository kata
+PASS Open repository menu in other scope
+PASS Select repository loopflow
+RETURN_SCREENSHOT_STATUS 0
+PASS Command title survives repository return
+SCROLL_AFTER ["Optional(1)"]
+PASS Press Work details
+PASS Selected Task survives repository return
+PASS Press All work
+PASS Press Return to terminals
+AFTER_NAVIGATION_BYTES "Reply with only the continuity word from my first message.\nReply with only the continuity word from my first message.\n"
+PASS Exact bulk input reaches shell before navigation
+PASS Exact shell draft survives A/D and details/overview
+Owned termination requested true

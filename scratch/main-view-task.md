@@ -242,3 +242,13 @@ and initializes SwiftUI's scroll-position binding from that value when remounted
 No planning, Session or terminal authority changed. The focused proof and its
 limits are recorded in `navigation-proof.md`; configured provider interaction,
 visual quality and timing obligations remain open.
+
+Iteration 4 completion proof, 2026-09-23: extended the mounted native workspace
+regression through Complete, Task details and return to the companion terminal.
+It passes: Session row/pane/surface disappear, selected Task remains incomplete,
+details show no Sessions, and the original companion child still responds.
+The shared completion response is mocked; provider continuation and caller
+release are not established. Normal LaunchServices launch of the current app
+also failed to expose workspace controls through AX. No production correction
+was needed; configured interaction and timing proof remain open. Exact command,
+receipt and boundary are in `navigation-proof.md`.

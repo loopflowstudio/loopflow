@@ -34,6 +34,40 @@ remain the existing path. The separate lf-new checkout was not edited.
 
 ## Recorded validation
 
+**Iteration 4 mounted completion, 2026-09-23:**
+Extended `workspaceRetainsNativeSplit` through the existing Complete button after
+its navigation and child-response assertions. The shared CLI completion response
+is mocked; the mounted SwiftUI actions, AppKit window, Ghostty surfaces and cat
+children are real. Completion removes the Session reading and pane, releases its
+surface, retains the selected incomplete Task, and leaves exactly the companion
+pane focused. Task details show the explicit no-Session state. Returning to
+terminals focuses the same companion surface, and its original child replies to
+new input. No production API or test-only production seam was added.
+
+Final command:
+
+```sh
+swift test --package-path swift -Xswiftc -gnone --jobs 4 \
+  --filter WorkspaceNavigationProofTests/workspaceRetainsNativeSplit
+```
+
+One test passed, exit 0; `/tmp/loo291-mounted-completion-proof.log`. No Swift
+edits followed. This supersedes the earlier mounted-workspace receipt for current
+test source. No broad gate ran. It proves local completion reconciliation, not
+backend completion, provider continuation or blocked-caller release.
+
+Before using this local proof, retried external accessibility through normal
+LaunchServices rather than direct executable launch. The temporary review bundle
+used the current SwiftPM binary and existing development `lf` configuration, with
+no fixture or capture mode. NSWorkspace returned the exact owned process (59815).
+The AX probe reported trust but exposed only application/menu elements after ten
+seconds; it could not reach workspace controls. `terminate()` returned true and a
+subsequent process check confirmed exit. Probe and receipt:
+`/tmp/loo291-configured-probe.swift` and `/tmp/loo291-configured-probe.log`.
+No user process or Session was changed. This rules out a fix from merely changing
+that launch method; it does not establish the underlying accessibility cause.
+Configured interaction, visual quality and timing evidence remain required.
+
 **Iteration 3 navigator scroll, 2026-09-23:**
 `WorkspaceNavigationProofTests.navigatorRetainsScroll` mounts SessionsView with
 80 fixture Tasks, scrolls its real NSScrollView to 1,200 points, opens Task details,

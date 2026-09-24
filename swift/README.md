@@ -31,6 +31,9 @@ command blocks.
 Automatic integration depends on the configured shell; macOS `/bin/bash` is
 excluded by the pinned Ghostty build.
 
+If macOS cannot provide Ghostty's display link, terminals use timer rendering.
+The app logs the CoreVideo error code; the user's Ghostty configuration is unchanged.
+
 Open a repository to see one compact Work list, grouped by collapsible Wave
 and Project headings. Incomplete Tasks remain visible whether they are upcoming,
 running autonomously, or have human Sessions. Select a Task to inspect its

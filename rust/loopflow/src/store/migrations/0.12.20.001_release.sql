@@ -1,7 +1,4 @@
--- name: task_worker_claim
--- id: 1b4ed58b17917dcbecc35d4e5869b8c8
--- depends_on: 
-
+-- draft: task_worker_claim
 -- Existing Task positions did not persist the Flow definition they claimed to
 -- run, so they cannot resume automatically. Preserve their exact visible
 -- boundary and Session evidence behind a restart-only blocker. Project
@@ -72,3 +69,28 @@ FROM prior_work_flow_positions
 WHERE work_kind = 'task';
 
 DROP TABLE prior_work_flow_positions;
+
+-- draft: work_domain_state
+ALTER TABLE projects ADD COLUMN iteration INTEGER NOT NULL DEFAULT 0
+    CHECK (iteration >= 0);
+ALTER TABLE projects ADD COLUMN last_state_fingerprint TEXT;
+
+UPDATE projects
+SET iteration = (
+        SELECT iteration FROM project_controller_state
+        WHERE project_controller_state.project_id = projects.id
+    ),
+    last_state_fingerprint = (
+        SELECT last_state_fingerprint FROM project_controller_state
+        WHERE project_controller_state.project_id = projects.id
+    )
+WHERE EXISTS (
+    SELECT 1 FROM project_controller_state
+    WHERE project_controller_state.project_id = projects.id
+);
+
+DROP TABLE task_controller_state;
+DROP TABLE project_controller_state;
+
+-- draft: drop_project_fingerprint
+ALTER TABLE projects DROP COLUMN last_state_fingerprint;

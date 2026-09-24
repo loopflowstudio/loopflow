@@ -896,6 +896,14 @@ See [review-task-compensation.md](review-task-compensation.md).
   installed cutover or qualifying automatic pair is claimed. Details:
   [release-telemetry-recovery.md](release-telemetry-recovery.md).
 
+Telemetry recovery review remains **iterate**. The joined built-CLI demonstration
+passed all eight scenarios again (92.40s), preserving original failures, frozen
+coverage, one automatic retry and exact caller state. No additional bounded
+defect was established and no executable code changed. Bounded target waiting
+and recovery from retained Running receipts, the real telemetry Flow's continuity
+boundary, prior obligation segments, dated repair ownership, closed obligations
+and configured acceptance remain open. See [review-telemetry.md](review-telemetry.md).
+
 ## Measure
 
 Use the Reliability KR's actual due population, not successful process counts.

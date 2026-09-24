@@ -1,5 +1,12 @@
 # Output foundation review — 2026-09-23
 
+Follow-up implementation: both reproduced reader findings are repaired. Native
+call/result item IDs now retain their correlation identity; unreadable manifests
+produce explicit discovery gaps while healthy output remains available. The
+rebuilt CLI reproducer passes with reversed results for both providers and eight
+healthy records despite the corrupt unrelated manifest. This preserves the dated
+review below; current implementation receipts belong in the design's slice ledger.
+
 Disposition: return the combined output foundation to implementation. The narrow
 provenance checkpoint remains passed; that verdict does not approve native
 capture, continuation, or the complete Watch experience.

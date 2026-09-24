@@ -6,6 +6,7 @@ use crate::id::WaveId;
 use crate::work::project::{
     ObservationOutboxRow, Project, ProjectEvent, ProjectEventKind, ProjectId,
 };
+use crate::work::task::flow_history::TaskFlowHistory;
 use crate::work::task::{
     LinearObservationApply, LinearObservationOutcome, Task, TaskEvent, TaskEventKind, TaskId,
     TaskLinearObservation, TaskPr, TaskPrId,
@@ -506,10 +507,7 @@ impl Store {
         Ok(())
     }
 
-    pub(crate) async fn task_flow_history(
-        &self,
-        task_id: &TaskId,
-    ) -> StoreResult<(Option<FlowPosition>, Vec<TaskEvent>)> {
+    pub(crate) async fn task_flow_history(&self, task_id: &TaskId) -> StoreResult<TaskFlowHistory> {
         let task_id = task_id.clone();
         run_sqlite(&self.sqlite, move |store| store.task_flow_history(&task_id)).await
     }

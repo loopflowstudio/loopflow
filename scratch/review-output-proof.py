@@ -83,6 +83,14 @@ def _main() -> None:
                               healthy_output_returned=bool(result.stdout.strip()),
                               gap_codes=[gap["code"] for gap in page["gaps"]],
                               error=result.stderr.strip())))
+        watch = subprocess.run([str(binary), "task", "watch", "LOO-293", "--json"],
+                               env=env, cwd="/tmp", capture_output=True, text=True, timeout=30)
+        watch.check_returncode()
+        snapshot = json.loads(watch.stdout)
+        assert len(snapshot["runs"]) >= 2
+        assert any(gap["code"] == "discovery_incomplete" for gap in snapshot["gaps"])
+        print(json.dumps(dict(watch_runs=len(snapshot["runs"]),
+                              watch_gap_codes=[gap["code"] for gap in snapshot["gaps"]])))
 
 
 if __name__ == "__main__":

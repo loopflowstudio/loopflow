@@ -91,16 +91,22 @@ pub async fn read_task_watch(
     task: &Task,
     home: &Path,
 ) -> Result<TaskWatchSnapshot> {
-    let (position, events) = store.task_flow_history(&task.id).await?;
+    let history = store.task_flow_history(&task.id).await?;
     let mut snapshot = TaskWatchSnapshot {
         task_id: task.id.to_string(),
-        active_stage: position.as_ref().map(TaskFlowStage::from),
+        active_stage: history.position.as_ref().map(TaskFlowStage::from),
         invocations: Vec::new(),
         runs: Vec::new(),
         gaps: Vec::new(),
     };
+    if !history.position_available {
+        snapshot.gaps.push(gap(
+            "position_unavailable",
+            "This Home has no Task flow position storage; the active stage is unknown",
+        ));
+    }
     let mut bindings = BTreeMap::new();
-    for event in events {
+    for event in history.events {
         if let TaskEventKind::Flow { event } = event.kind {
             if let TaskFlowEvent::RunBound { stage, run_id } = event.as_ref() {
                 if let Some(old) = bindings.insert(run_id.to_string(), stage.clone()) {
@@ -280,27 +286,23 @@ impl TaskWatchSnapshot {
                     .iter_mut()
                     .rev()
                     .find(|attempt| attempt.iteration == iteration);
+                if attempt.is_none() {
+                    self.gaps.push(gap(
+                        "missing_attempt",
+                        format!("Invocation {} step {} iteration {} has a fact without a stage entry or Run", stage.invocation_id, stage.step_index, iteration),
+                    ));
+                }
                 match event {
                     TaskFlowEvent::StageReady { summary, .. } => {
                         if let Some(attempt) = attempt {
                             attempt.state = TaskWatchAttemptState::Ready;
                             attempt.ready_summary = Some(summary);
-                        } else {
-                            self.gaps.push(gap(
-                                "missing_attempt",
-                                "Readiness has no recorded stage entry or Run",
-                            ));
                         }
                     }
                     TaskFlowEvent::StageBlocked { failure, .. } => {
                         if let Some(attempt) = attempt {
                             attempt.state = TaskWatchAttemptState::Blocked;
                             attempt.failure = Some(failure);
-                        } else {
-                            self.gaps.push(gap(
-                                "missing_attempt",
-                                "Failure has no recorded stage entry or Run",
-                            ));
                         }
                     }
                     TaskFlowEvent::Transition { from, to, reason } => {
@@ -332,5 +334,49 @@ impl TaskWatchSnapshot {
                 }
             }
         }
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::TaskWatchSnapshot;
+    use crate::controller::wave::playhead::QueuedInvocation;
+    use crate::engine::{ConcreteSkill, ConcreteStep, OccurrencePolicy, Skill};
+    use crate::work::task::flow_history::{TaskFlowEvent, TaskFlowSettlement, TaskFlowStage};
+
+    #[test]
+    fn watch_settlement_without_attempt_does_not_invent_completed_work() {
+        let plan = QueuedInvocation::new(
+            "custom",
+            vec![ConcreteStep::Skill(ConcreteSkill {
+                skill: Skill::named("review"),
+                policy: OccurrencePolicy::default(),
+                flow_parents: vec!["custom".into()],
+            })],
+        )
+        .unwrap();
+        let stage = TaskFlowStage {
+            invocation_id: plan.id.clone(),
+            step_index: 0,
+            iteration: 0,
+        };
+        let mut snapshot = TaskWatchSnapshot {
+            task_id: "task".into(),
+            active_stage: None,
+            invocations: Vec::new(),
+            runs: Vec::new(),
+            gaps: Vec::new(),
+        };
+        snapshot.record(TaskFlowEvent::InvocationSelected { invocation: plan });
+        snapshot.record(TaskFlowEvent::InvocationSettled {
+            stage,
+            outcome: TaskFlowSettlement::Completed,
+        });
+        assert_eq!(
+            snapshot.invocations[0].settlement,
+            Some(TaskFlowSettlement::Completed)
+        );
+        assert!(snapshot.invocations[0].stages[0].attempts.is_empty());
+        assert_eq!(snapshot.gaps[0].code, "missing_attempt");
     }
 }

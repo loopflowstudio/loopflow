@@ -975,11 +975,18 @@ fn run_task_watch(issue: &str, json: bool) -> anyhow::Result<()> {
         snapshot.invocations.len(),
         snapshot.runs.len()
     );
-    for invocation in snapshot.invocations {
+    if let Some(stage) = &snapshot.active_stage {
         println!(
-            "{} · {} · {:?}",
-            invocation.id, invocation.flow, invocation.settlement
+            "Active stage: {} · step {} · iteration {}",
+            stage.invocation_id, stage.step_index, stage.iteration
         );
+    }
+    for invocation in snapshot.invocations {
+        if let Some(outcome) = invocation.settlement {
+            println!("{} · {} · {outcome:?}", invocation.id, invocation.flow);
+        } else {
+            println!("{} · {}", invocation.id, invocation.flow);
+        }
         for stage in invocation.stages {
             println!(
                 "  {}  {}{} · {} attempts",

@@ -12,7 +12,7 @@ use crate::store::rows::now_unix;
 use crate::store::{StoreError, StoreResult};
 use crate::work::project::{Project, ProjectEventKind};
 use crate::work::task::flow_history::{
-    TaskFlowEvent, TaskFlowSettlement, TaskFlowStage, TaskFlowTransition,
+    TaskFlowEvent, TaskFlowHistory, TaskFlowSettlement, TaskFlowStage, TaskFlowTransition,
 };
 use crate::work::task::{Task, TaskEventKind};
 
@@ -150,16 +150,26 @@ impl SqliteStore {
         flow_position_in(&conn, task_id)
     }
 
-    pub(crate) fn task_flow_history(
-        &self,
-        task_id: &TaskId,
-    ) -> StoreResult<(Option<FlowPosition>, Vec<crate::work::task::TaskEvent>)> {
+    pub(crate) fn task_flow_history(&self, task_id: &TaskId) -> StoreResult<TaskFlowHistory> {
         let mut conn = self.conn.lock().expect("store mutex poisoned");
         let tx = conn.transaction()?;
-        let position = flow_position_in(&tx, task_id)?;
+        let position_available = tx.query_row(
+            "SELECT EXISTS(SELECT 1 FROM sqlite_master WHERE type='table' AND name='task_flow_positions')",
+            [],
+            |row| row.get::<_, bool>(0),
+        )?;
+        let position = if position_available {
+            flow_position_in(&tx, task_id)?
+        } else {
+            None
+        };
         let events = super::children::task_events_after_in(&tx, task_id, 0)?;
         tx.commit()?;
-        Ok((position, events))
+        Ok(TaskFlowHistory {
+            position,
+            position_available,
+            events,
+        })
     }
 
     pub fn claim_task_worker(
@@ -2008,6 +2018,42 @@ mod durable_store_tests {
             crate::ops::task_watch::TaskWatchAttemptState::Bound
         );
         assert_eq!(snapshot.invocations[1].settlement, None);
+    }
+
+    #[test]
+    fn task_watch_reports_unavailable_position_storage_without_losing_history() {
+        let (dir, store, task_id) = store_with_task();
+        let task = store.task(&task_id).unwrap().unwrap();
+        let position = store
+            .set_flow_position(&task_id, &autonomous_position(&task_id))
+            .unwrap();
+        let conn = rusqlite::Connection::open(dir.path().join("loopflow.db")).unwrap();
+        conn.execute("DROP TABLE task_flow_positions", []).unwrap();
+        let read_store = Arc::new(crate::store::Store {
+            sqlite: SqliteStore::open_run_ledger_read_only(&dir.path().join("loopflow.db"))
+                .unwrap(),
+        });
+        let snapshot = tokio::runtime::Runtime::new()
+            .unwrap()
+            .block_on(crate::ops::task_watch::read_task_watch(
+                &read_store,
+                &task,
+                dir.path(),
+            ))
+            .unwrap();
+        assert!(snapshot.active_stage.is_none());
+        assert_eq!(snapshot.invocations[0].id, position.invocation.id);
+        assert!(snapshot.invocations[0].settlement.is_none());
+        assert_eq!(snapshot.gaps.len(), 1);
+        assert_eq!(snapshot.gaps[0].code, "position_unavailable");
+        let exists: bool = conn
+            .query_row(
+                "SELECT EXISTS(SELECT 1 FROM sqlite_master WHERE name='task_flow_positions')",
+                [],
+                |row| row.get(0),
+            )
+            .unwrap();
+        assert!(!exists, "Watch must not migrate the configured database");
     }
 
     #[test]

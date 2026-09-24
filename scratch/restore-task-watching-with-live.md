@@ -148,6 +148,11 @@ history; Swift only decodes it. Read the active position and ledger in one SQLit
 read transaction. Missing plan or Run receipts remain explicit gaps. Never load
 current YAML or require a worktree, worker, or provider client.
 
+The configured Home predates Task flow-position storage. When that table is
+absent, keep reading retained events and manifests and report
+`position_unavailable`; never interpret its absence as proven completion or
+migrate the database from a Watch read. No legacy position reader is added.
+
 Each stage owns attempts (iteration, optional Run identity, descriptive state,
 ready summary, failure); transitions retain exact from/to stages and reasons.
 A retry preserves its blocked attempt and starts a new attempt when a new Run
@@ -188,6 +193,32 @@ owned by the pinned lifecycle. No multi-Task dashboard, graph editing, or remote
 transport expansion is in scope.
 
 ## Evidence ledger
+
+- 2026-09-23 reader repairs and snapshot integration: Claude/Codex calls and
+  results now share their native conversation item ID while source record IDs
+  remain distinct. Missing call IDs report an explicit identity gap. The
+  cross-page reversed-results regression passed for both providers; the two
+  existing JSONL identity/paging regressions also passed.
+- Task manifest discovery now returns readable attributed Runs plus explicit
+  discovery gaps. TaskOutputPage has required page-level `gaps`, mirrored in
+  Swift and the fixture; TaskWatchSnapshot consumes the same discovery result.
+  The 51-old/new-auxiliary-Run test passed with corrupt, missing, and recovered
+  unrelated manifests. The rebuilt synthetic CLI proof retained both providers'
+  call IDs and returned eight healthy records plus `discovery_incomplete` for a
+  corrupt unrelated manifest, with exit 0 and no stderr.
+- The snapshot CLI and Swift query now project retained plans, ancestry, attempts,
+  transitions, settlement, active stage, and attributed Runs. Read position and
+  events in one SQLite transaction; missing evidence remains explicit. Reuse
+  Swift's existing step-kind type. Nine focused durable-store tests passed,
+  including snapshot checks for repeated skills, Iterate/retry, separate attempts,
+  completion/reopen, replacement, missing plans/Run receipts, and auxiliary Runs.
+  Rust output/watch fixture tests passed (2); Swift output/watch fixture tests
+  passed (2), including required-field rejection.
+- The first configured Watch CLI attempt found the existing Home lacks
+  `task_flow_positions`. The reader now reports `position_unavailable` while
+  retaining available history and Runs, without migrating the database. The
+  focused read-only missing-table regression passed and verified no table was
+  recreated. This is explicit unavailable evidence, not a legacy position reader.
 
 - 2026-09-23: transactional flow facts implemented. Final focused command
   `cargo test -p loopflow --lib durable_store_tests --no-fail-fast`: 8 passed,

@@ -1,5 +1,13 @@
 # Assumptions and remaining proof
 
+- Gate 2026-09-23: affected suites stopped at resource preflight (active main
+  build 19.1 GiB / 12 GiB); documented recovery could not remove it. Architecture,
+  Swift boundary, formatting, and whitespace checks passed, but product suites
+  and Clippy remain unrun for this gate. Concurrent snapshot edits require a
+  settled-tree rerun. Directory enumeration still aborts healthy Task reads
+  before manifest-gap handling; fix and prove partial-directory recovery.
+  See `restore-task-watching-with-live-review.md` for the handoff and full blockers.
+
 - Product / Desktop ownership is resolved by the Task directive; no PM mutation
   is needed. This remains one PR, with the pinned human and settlement gates.
 - Flow facts, launch-owned native source receipts, passive readers, incremental

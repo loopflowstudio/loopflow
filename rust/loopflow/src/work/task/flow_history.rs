@@ -4,6 +4,14 @@ use serde::{Deserialize, Serialize};
 
 use crate::controller::wave::playhead::QueuedInvocation;
 use crate::durable::{FlowPosition, RunId, TaskFlowBlocker};
+use crate::work::task::TaskEvent;
+
+#[derive(Debug)]
+pub(crate) struct TaskFlowHistory {
+    pub position: Option<FlowPosition>,
+    pub position_available: bool,
+    pub events: Vec<TaskEvent>,
+}
 
 #[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
 pub struct TaskFlowStage {

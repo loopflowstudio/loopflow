@@ -4027,19 +4027,24 @@ pub fn task_snapshot(task: &Task) -> OpsResult<TaskSnapshot> {
     })
 }
 
+async fn read_task_for_inspection(issue: &str) -> OpsResult<(SharedStore, Task)> {
+    let store = Arc::new(Store {
+        sqlite: crate::store::sqlite::SqliteStore::open_run_ledger_read_only(
+            &crate::store::observability_database_path()?,
+        )
+        .map_err(|error| task_error(error.to_string()))?,
+    });
+    let task = store
+        .get_task_by_issue(issue)
+        .await
+        .map_err(|error| task_error(error.to_string()))?
+        .ok_or_else(|| task_error(format!("no Task exists for {issue:?}")))?;
+    Ok((store, task))
+}
+
 pub fn task_watch(issue: &str) -> OpsResult<crate::ops::task_watch::TaskWatchSnapshot> {
     block_on_task(async {
-        let store = Arc::new(Store {
-            sqlite: crate::store::sqlite::SqliteStore::open_run_ledger_read_only(
-                &crate::store::observability_database_path()?,
-            )
-            .map_err(|error| task_error(error.to_string()))?,
-        });
-        let task = store
-            .get_task_by_issue(issue)
-            .await
-            .map_err(|error| task_error(error.to_string()))?
-            .ok_or_else(|| task_error(format!("no Task exists for {issue:?}")))?;
+        let (store, task) = read_task_for_inspection(issue).await?;
         crate::ops::task_watch::read_task_watch(
             &store,
             &task,
@@ -4055,17 +4060,7 @@ pub fn task_output(
     cursor: Option<&str>,
 ) -> OpsResult<crate::ops::task_output::TaskOutputPage> {
     block_on_task(async {
-        let store = Arc::new(Store {
-            sqlite: crate::store::sqlite::SqliteStore::open_run_ledger_read_only(
-                &crate::store::observability_database_path()?,
-            )
-            .map_err(|error| task_error(error.to_string()))?,
-        });
-        let task = store
-            .get_task_by_issue(issue)
-            .await
-            .map_err(|error| task_error(error.to_string()))?
-            .ok_or_else(|| task_error(format!("no Task exists for {issue:?}")))?;
+        let (store, task) = read_task_for_inspection(issue).await?;
         crate::ops::task_output::read_task_output(
             &store,
             &task,

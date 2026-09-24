@@ -296,6 +296,28 @@ tests/e2e/test_full_cycle.sh
 tests/e2e/test_rebase_conflict.sh
 ```
 
+Exercise Linear expiry and rejection through an installed development CLI:
+
+```bash
+# Inside a disposable Linux container, after candidate promotion:
+uv run tests/e2e/linear_oauth.py --lf /root/.local/bin/lf
+```
+
+Give the container `--add-host api.linear.app:127.0.0.1`, Python, Git, and
+`uv`. Install the published CLI/daemon fallback and promote the candidate with
+`lf install promote --from-build ...` first. That Home needs a registered
+repository and `tmux` so promotion can verify its daemon. Never mount a real
+Home or credentials into this container: the fixture replaces its Linear row
+and seeds planning data in the selected development store.
+
+The fixture serves synthetic Linear HTTPS on port 443 with a temporary CA
+trusted only by its CLI children. It enters through the installed launcher and
+asserts fresh planning, encrypted rotation, bounded replay, and rejected-refresh
+preservation with and without a snapshot. Its JSON receipt identifies the CLI
+digest and installation. This proves the installed Linux path against simulated
+provider responses; live Linear behavior and the operational reliability window
+remain separate evidence. No production endpoint override is needed.
+
 ## Nightly Package Tests
 
 `.github/workflows/nightly-packages.yml` builds the same native `lf` tarballs as the release workflow. Each runner extracts its tarball and runs:

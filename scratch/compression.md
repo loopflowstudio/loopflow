@@ -140,3 +140,53 @@ new validation. The review's iterate verdict and the follow-up's telemetry
 linkage/retry, mutation-child exclusion, closed-obligation continuation, and
 configured acceptance obligations remain open. This review does not establish
 two automatic settlements or resolve the observed scorecard schema blocker.
+
+## Mutation-child compression review at `43e762b077`
+
+No executable reduction selected. Before and after this review, the model is:
+an installed obligation owns original due opportunities; an opportunity owns
+attempts, and an attempt owns selection, verification, and product outcome.
+Collapsed opportunities reference their execution owner. Atomic `settle` writes
+product evidence; physical cron receipts retain process evidence. Publisher
+receipts retain preparation/publication stages and fresh public observations.
+Cron attribution, release-target exclusion, and worktree protection have
+separate capabilities. Child inheritance extends the existing release lock's
+lifetime without creating another executor or durable state object.
+
+Inspected the model path from `CronExecution` validation and obligation/attempt
+types through settlement and history qualification, then through release
+run/tag/publish entry points, candidate completion, `ReleaseLock` acquisition
+and child command construction. Checked the worktree lease owner and removal
+path as the adjacent authority. The complete Task diff was available without
+truncation (496,432 characters); this review concentrated on those owners and
+the latest mutation-child change.
+
+Mirrors checked: hidden CLI receipt/descriptor arguments, mechanical flow
+dispatch, release history/disposition commands, the release-history JSON
+fixture, Python artifact/public receipts and descriptor propagation in publisher,
+website deployment, and release scripts. Reviewed the new parent-death fixture
+and the release README, cron host guide, release-evidence direction, full design,
+and preceding review receipts. Searches found no Swift consumer of the release
+history or publisher receipt types.
+
+| Suspected reduction | Why it is not a meaningful reduction here |
+| --- | --- |
+| `ReleaseLock` and `WorktreeLease` | One excludes a repository/target's release mutations; the other protects a particular checkout, including ordinary removal. Unifying them would alter scope and would not solve surviving stage ownership. |
+| `CronExecution` and the release descriptor | The receipt plus job descriptor authenticates scheduled attribution. The target descriptor excludes publication mutations for manual and scheduled callers. A shared capability would conflate those authorities. |
+| `ReleaseLock.inherited` | This records validated descriptor reuse and suppresses a false manual intervention for nested publisher calls. Removing it or deriving it from an environment value changes provenance. |
+| `command`, `inherit`, and locked/unlocked output helpers | These are private construction/output mechanics, with one OS lock owner and one output/error conversion. Inlining a helper is a small syntax cleanup; introducing an optional lock everywhere or a generic executor adds machinery without reducing the model. |
+| Descriptor forwarding in three Python scripts | Each forwards the same OS capability across a real process boundary. Extracting a shared launcher utility only relocates a few lines and couples independently invoked scripts; it removes no domain concept or writer. |
+| Frozen `covered` keys and current `coalesced_into` links | Attempts retain historical coverage; links describe current catch-up ownership. The timing and intervention regressions consume both. Deriving historical coverage from current links would lose evidence. |
+| Opportunity wait and deferred attempt | A due time can wait without an execution attempt. A deferred attempt records an execution's actual stop. Collapsing them would require synthetic attempts or discard continuation evidence. |
+
+The earlier selection/outcome, process/product, and stage/public-proof distinctions
+still hold. Negative searches found no restored `PublicationEvidence`,
+`NoChangeEvidence`, `record_verification`, separate Python candidate/publish
+receipt classes, or release-selection `sync_main` path. Historical schema-1
+receipts remain explicitly required compatibility, not a removable fallback.
+
+No API, route, DTO, field, persisted format, or executable code changed. No tests
+or static checks were rerun for this documentation-only review. The prior focused
+passes remain their recorded evidence. Shared PR/hook/worktree child exclusion,
+telemetry linkage/recovery, closed-obligation continuation, and configured
+acceptance remain open; this compression review does not approve the branch.

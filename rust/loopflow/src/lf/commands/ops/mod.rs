@@ -567,7 +567,7 @@ pub(crate) fn land_repo(
     // The wave home stays put on land — no rotation, no cd.
     let pr = with_rebase_retry(repo_root, "land", progress, |repo, integrated| {
         if integrated {
-            finish_arm_after_rebase(repo, options, progress)
+            finish_arm_after_rebase(repo, options, progress, &|_| {})
         } else {
             arm(repo, options, progress)
         }
@@ -582,7 +582,7 @@ fn arm_current(options: &LandOptions, progress: &impl Progress) -> Result<()> {
     let repo_root = find_repo_root()?;
     with_rebase_retry(&repo_root, "arm", progress, |repo, integrated| {
         if integrated {
-            finish_arm_after_rebase(repo, options, progress)
+            finish_arm_after_rebase(repo, options, progress, &|_| {})
         } else {
             arm(repo, options, progress)
         }

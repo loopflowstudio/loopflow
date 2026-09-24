@@ -528,31 +528,26 @@ half-contracts.
 
 ## This slice
 
-Carry the existing target lock and exact checkout lease into every configured
-repository verification/preparation hook shell. Source verification already owns
-its checkout lease; release-PR preparation and rebuild must acquire the same
-existing lease before creating or using their checkout and transfer it to
-cleanup. Borrow both capabilities explicitly into `run_release_hooks`; do not
-infer ownership from environment or introduce a second hook runner.
+Carry the existing release target lock through shared auto-merge enable/disable
+commands, including replacement of a pre-existing remote arm and re-arming while
+waiting for a release PR. During initial PR preparation, also retain the exact
+checkout lease in these children. Pass explicit command inheritance from the
+owning release operation through the existing PR finalization functions; no
+ambient role inference, new executor, lock owner, or release-specific PR writer.
+Ordinary PR callers supply no release capability and retain existing behavior.
 
-Preparation's worktree helper must not synchronize/reset the caller. Create
-from the selected origin commit; during PR rebuild refresh origin explicitly
-before resetting only the owned checkout. The counterexample found that the
-helper's implicit sync could replace the held target lock file while stashing
-caller state. This repairs the existing design's preservation contract.
+Prove through the built CLI that initial-arm and re-arm children surviving
+controller death or failed launchers continue to exclude a second release. Cover
+both revocation and exact-head arming, observe the resulting remote arm state,
+and show target access and preparation checkout removal become available after
+the child exits. Keep normal release preparation and ordinary PR arming working. These disposable process proofs cannot supply the
+configured two-settlement commitment.
 
-Prove through the built CLI that a blocked verification/preparation hook retains
-target exclusion and source bytes after controller death, and that a surviving
-hook descendant also prevents controller cleanup after its launcher fails.
-Ordinary cleanup must work after the child exits. Retain normal hook expansion,
-failure propagation, release preparation behavior, and exact caller HEAD,
-branch, index and staged/unstaged/untracked bytes. These are disposable
-repository/process proofs, not hosted, UI-host or configured settlement evidence.
-
-Shared commit/PR/re-arm commands, notes agents, source/worktree mutation children,
-historical telemetry linkage/recovery, closed obligations and configured
-acceptance remain in this serial Task. This slice changes neither settlement
-nor prerequisite policy and retains the observed scorecard blocker.
+Shared commit/push/PR creation and editing, notes agents, lockfile tools,
+source/worktree mutation children, historical telemetry linkage/recovery, closed
+obligations and configured acceptance remain in this serial Task. This slice
+changes neither settlement nor prerequisite policy and retains the observed
+scorecard blocker.
 
 ## Slice ledger
 
@@ -730,6 +725,18 @@ repair commits and caller state survive (2.32s), and normal reintegration with
 advancing main still passes (6.86s). Shared mutation children, telemetry
 association/recovery, closed obligations and configured acceptance remain open.
 See [review-release-hooks.md](review-release-hooks.md).
+
+- 2026-09-24: shared auto-merge enable/disable commands now inherit the release
+  target lock during initial arming and re-arming; preparation also supplies its
+  checkout lease. The CLI regression first reproduced a second tag while the
+  original merge child survived. All eight initial/re-arm, enable/disable and
+  killed-controller/failed-launcher cases passed after repair (47.72s), retaining
+  simulated remote head/revocation state and preparation checkout protection.
+- Normal dropped-arm recovery (11.58s), advancing-main preparation (4.67s) and
+  ordinary PR arming (10.86s) passed, as did formatting and all-target Clippy.
+  Git/process/lock execution is real; GitHub and notes are simulated. Other
+  mutation children, historical telemetry recovery, closed obligations and
+  configured acceptance remain open. See [release-auto-merge-ownership.md](release-auto-merge-ownership.md).
 
 ## Measure
 

@@ -372,6 +372,145 @@ exit 92
 }
 
 #[test]
+fn surviving_release_auto_merge_child_excludes_another_release() {
+    for (phase, kill_controller, preparing) in [
+        ("enable", true, false),
+        ("disable", true, false),
+        ("enable", false, false),
+        ("disable", false, false),
+        ("enable", true, true),
+        ("disable", true, true),
+        ("enable", false, true),
+        ("disable", false, true),
+    ] {
+        let state = tempfile::tempdir().unwrap();
+        fs::write(state.path().join("armed-head"), "prior remote arm").unwrap();
+        let mutation = blocking_mutation(
+            state.path(),
+            &format!(
+                r#"[ "$3" = 1176 ] || exit 95
+case " $* " in
+  *' --disable-auto '*) rm '{state}/armed-head';;
+  *)
+    while [ "$#" -gt 0 ]; do
+      if [ "$1" = --match-head-commit ]; then
+        printf '%s' "$2" > '{state}/armed-head'
+        break
+      fi
+      shift
+    done;;
+esac"#,
+                state = state.path().display()
+            ),
+        );
+        let blocked = if kill_controller {
+            mutation
+        } else {
+            format!(
+                "(\n{mutation}) > '{}/descendant.log' 2>&1 &\nexit 1\n",
+                state.path().display()
+            )
+        };
+        let gh = format!(
+            r#"#!/bin/sh
+case "$1 $2" in
+  '--version ') exit 0;;
+  'run list') echo '[]'; exit 0;;
+  'release view') exit 1;;
+  'pr create') : > '{state}/created'; echo 'https://example.com/pr/1176'; exit 0;;
+  'pr edit'|'pr ready') exit 0;;
+  'pr list')
+    if [ '{preparing}' = true ] && [ ! -f '{state}/created' ]; then echo '[]'; exit 0; fi
+    case " $* " in
+      *' --head '*)
+        head="$(git rev-parse HEAD)"
+        printf '[{{"number":1176,"state":"OPEN","mergeCommit":null,"url":"https://example.com/pr/1176","headRefOid":"%s"}}]\n' "$head";;
+      *) echo '[]';;
+    esac
+    exit 0;;
+  'pr view')
+    echo '{{"state":"OPEN","mergeStateStatus":"CLEAN","mergeCommit":null}}'
+    exit 0;;
+  'api graphql')
+    if [ '{phase}' = disable ] && [ -f '{state}/queried' ]; then
+      echo true
+    else
+      echo false
+    fi
+    : > '{state}/queried'
+    exit 0;;
+  'pr merge')
+    case " $* " in
+      *' --disable-auto '*) [ '{phase}' = disable ] || exit 92;;
+      *) [ '{phase}' = enable ] || exit 93;;
+    esac
+    pwd > '{state}/checkout'
+    {blocked}
+    ;;
+esac
+exit 94
+"#,
+            state = state.path().display(),
+        );
+        let notes = "#!/bin/sh\ncat > RELEASE_NOTES.md <<'EOF'\n# v0.9.1\n\n<!-- loopflow:release-notes=narrative;gate=safe -->\n\nFixture release.\nEOF\n";
+        let _env = EnvGuard::new(&[("gh", &gh), ("lf", notes)]);
+        let repo = TestRepo::new();
+        let mut parent = start(&repo, state.path(), &["release", "run", "0.9.1"]);
+        let checkout = PathBuf::from(
+            fs::read_to_string(state.path().join("checkout"))
+                .unwrap()
+                .trim(),
+        );
+        let head = Command::new("git")
+            .args(["rev-parse", "HEAD"])
+            .current_dir(&checkout)
+            .output()
+            .unwrap();
+        assert!(head.status.success());
+        let head = String::from_utf8(head.stdout).unwrap();
+        if kill_controller {
+            parent.child.kill().unwrap();
+        } else {
+            let deadline = Instant::now() + Duration::from_secs(20);
+            while parent.child.try_wait().unwrap().is_none() {
+                assert!(Instant::now() < deadline, "re-arm controller did not exit");
+                thread::sleep(Duration::from_millis(10));
+            }
+        }
+        assert!(!parent.child.wait().unwrap().success());
+        if preparing {
+            assert!(
+                checkout.exists(),
+                "controller removed auto-merge child's checkout"
+            );
+            assert!(worktree_remove(repo.path(), &checkout).is_err());
+            assert!(fs::read_to_string(checkout.join("RELEASE_NOTES.md"))
+                .unwrap()
+                .contains("Fixture release."));
+        }
+        let contender = release_tag(repo.path(), "0.9.2", None);
+        fs::write(state.path().join("allow"), "").unwrap();
+        wait_for(&state.path().join("completed"));
+        assert!(
+            matches!(contender, Err(OpsError::ReleaseDeferred { .. })),
+            "{phase}: {contender:?}"
+        );
+        if phase == "enable" {
+            assert_eq!(
+                fs::read_to_string(state.path().join("armed-head")).unwrap(),
+                head.trim()
+            );
+        } else {
+            assert!(!state.path().join("armed-head").exists());
+        }
+        wait_until_released(|| release_tag(repo.path(), "0.9.2", None).map(|_| ()));
+        if preparing {
+            worktree_remove(repo.path(), &checkout).unwrap();
+        }
+    }
+}
+
+#[test]
 fn surviving_release_hook_retains_target_and_checkout_ownership() {
     for (phase, kill_controller) in [
         ("verify", true),

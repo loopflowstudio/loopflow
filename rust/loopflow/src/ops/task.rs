@@ -1478,7 +1478,7 @@ async fn clear_task_pr_merge(
             .github()
             .expect("merge request validation requires GitHub PR")
             .number;
-        crate::ops::pr::disable_auto_merge(repo, number)?;
+        crate::ops::pr::disable_auto_merge(repo, number, &|_| {})?;
     }
     pr.publication
         .as_mut()
@@ -1560,7 +1560,7 @@ pub(crate) fn request_task_pr_merge(
                 .as_ref()
                 .expect("merge request validation requires GitHub PR")
                 .number;
-            crate::ops::pr::disable_auto_merge(repo, number)?;
+            crate::ops::pr::disable_auto_merge(repo, number, &|_| {})?;
         }
         let now = time::OffsetDateTime::now_utc();
         let requested_at = publication
@@ -2075,7 +2075,7 @@ fn invalidate_stale_merge_request(
                 github_pr.number
             ))
         })?;
-        crate::ops::pr::disable_auto_merge(repo, number)?;
+        crate::ops::pr::disable_auto_merge(repo, number, &|_| {})?;
     }
     publication.merge = None;
     Ok(())

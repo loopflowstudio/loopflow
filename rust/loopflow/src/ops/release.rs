@@ -1912,7 +1912,11 @@ fn prepare_release_in_worktree(
         pr_body: Some(pr_copy.body),
         agent: None,
     };
-    let pr = finish_arm_after_rebase(wt_path, &options, progress)?.ok_or_else(|| {
+    let pr = finish_arm_after_rebase(wt_path, &options, progress, &|command| {
+        lock.inherit(command);
+        lease.inherit(command);
+    })?
+    .ok_or_else(|| {
         OpsError::Message("release land completed without a pull request".to_string())
     })?;
     let head_sha = pr.head_sha.ok_or_else(|| {
@@ -1939,7 +1943,13 @@ fn finish_release_pr(
 ) -> OpsResult<String> {
     let release_branch = release_branch_name(main_repo, worktree_name)?;
     loop {
-        match wait_for_pr_merge(main_repo, prepared.pr_number, &prepared.head_sha, progress)? {
+        match wait_for_pr_merge(
+            main_repo,
+            prepared.pr_number,
+            &prepared.head_sha,
+            progress,
+            lock,
+        )? {
             ReleasePrWait::Merged(commit) => return Ok(commit),
             ReleasePrWait::NeedsIntegration(state) => {
                 progress.status(&format!(
@@ -2666,6 +2676,7 @@ fn wait_for_pr_merge(
     pr_number: u64,
     head_sha: &str,
     progress: &impl Progress,
+    lock: &ReleaseLock,
 ) -> OpsResult<ReleasePrWait> {
     let started = Instant::now();
     let timeout = Duration::from_secs(60 * 60);
@@ -2723,7 +2734,9 @@ fn wait_for_pr_merge(
             progress.status(&format!(
                 "Re-arming release PR #{pr_number} for exact-head auto-merge..."
             ));
-            crate::ops::pr::enable_auto_merge(repo, pr_number, None, None, head_sha)?;
+            crate::ops::pr::enable_auto_merge(repo, pr_number, None, None, head_sha, &|command| {
+                lock.inherit(command);
+            })?;
         }
 
         if attempt.is_multiple_of(6) {

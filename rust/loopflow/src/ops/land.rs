@@ -59,6 +59,7 @@ fn prepare_pr(
     finalize: Finalize,
     integration: Integration,
     progress: &impl Progress,
+    inherit_merge: &impl Fn(&mut Command),
 ) -> OpsResult<Option<PrInfo>> {
     if options.complete && options.next_slug.is_some() {
         return Err(OpsError::Message(
@@ -146,7 +147,7 @@ fn prepare_pr(
                         pr.number
                     ))
                 })?;
-                crate::ops::pr::disable_auto_merge(&repo_root, number)?;
+                crate::ops::pr::disable_auto_merge(&repo_root, number, inherit_merge)?;
             }
         }
     }
@@ -272,6 +273,7 @@ fn prepare_pr(
         pr.as_ref().map(|pr| pr.number),
         pr.as_ref().and_then(|pr| pr.head_sha.as_deref()),
         progress,
+        inherit_merge,
     ) {
         // The durable request is written before its remote executor. If any
         // later step fails, revoke a possibly-armed Auto request and clear the
@@ -302,14 +304,17 @@ pub fn arm(
         Finalize::AutoMerge,
         Integration::Required,
         progress,
+        &|_| {},
     )
 }
 
 /// Continue land after owned recovery already verified and pushed integration.
+/// `inherit_merge` applies to auto-merge mutations, not all PR preparation commands.
 pub(crate) fn finish_arm_after_rebase(
     repo: &Path,
     options: &LandOptions,
     progress: &impl Progress,
+    inherit_merge: &impl Fn(&mut Command),
 ) -> OpsResult<Option<PrInfo>> {
     prepare_pr(
         repo,
@@ -317,6 +322,7 @@ pub(crate) fn finish_arm_after_rebase(
         Finalize::AutoMerge,
         Integration::Completed,
         progress,
+        inherit_merge,
     )
 }
 
@@ -335,6 +341,7 @@ pub fn submit(
         Finalize::UserMerge,
         Integration::Required,
         progress,
+        &|_| {},
     )
 }
 
@@ -349,6 +356,7 @@ pub(crate) fn finish_submit_after_rebase(
         Finalize::UserMerge,
         Integration::Completed,
         progress,
+        &|_| {},
     )
 }
 
@@ -501,6 +509,7 @@ fn ensure_pr(
     Ok(None)
 }
 
+#[allow(clippy::too_many_arguments)] // Remote PR facts and explicit child capability inheritance.
 fn finalize_remote(
     repo_root: &Path,
     pr_title: Option<&str>,
@@ -509,6 +518,7 @@ fn finalize_remote(
     number: Option<u64>,
     head_sha: Option<&str>,
     progress: &impl Progress,
+    inherit_merge: &impl Fn(&mut Command),
 ) -> OpsResult<()> {
     if let Some(title) = pr_title {
         let body = pr_body.unwrap_or("");
@@ -532,7 +542,14 @@ fn finalize_remote(
                 )
             })?;
             progress.status("Enabling auto-merge...");
-            crate::ops::pr::enable_auto_merge(repo_root, number, pr_title, pr_body, head_sha)?;
+            crate::ops::pr::enable_auto_merge(
+                repo_root,
+                number,
+                pr_title,
+                pr_body,
+                head_sha,
+                inherit_merge,
+            )?;
         }
         Finalize::UserMerge => {
             progress.status("Assigning PR for you to merge...");

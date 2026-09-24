@@ -591,11 +591,18 @@ pub(crate) fn auto_merge_enabled(repo: &Path, number: u64) -> OpsResult<bool> {
 
 /// Revoke GitHub auto-merge for one PR before a stored request can be cleared.
 /// The read makes replay idempotent after a prior disable succeeded.
-pub(crate) fn disable_auto_merge(repo: &Path, number: u32) -> OpsResult<()> {
+/// The caller supplies inheritance for capabilities held across the mutation.
+pub(crate) fn disable_auto_merge(
+    repo: &Path,
+    number: u32,
+    inherit: &impl Fn(&mut Command),
+) -> OpsResult<()> {
     if !auto_merge_enabled(repo, u64::from(number))? {
         return Ok(());
     }
-    let output = Command::new("gh")
+    let mut command = Command::new("gh");
+    inherit(&mut command);
+    let output = command
         .args(["pr", "merge", &number.to_string(), "--disable-auto"])
         .current_dir(repo)
         .output()?;
@@ -608,12 +615,14 @@ pub(crate) fn disable_auto_merge(repo: &Path, number: u32) -> OpsResult<()> {
     })
 }
 
+/// Inherit the caller's capabilities in both replacement and arming children.
 pub(crate) fn enable_auto_merge(
     repo: &Path,
     number: u64,
     title: Option<&str>,
     body: Option<&str>,
     head_sha: &str,
+    inherit: &impl Fn(&mut Command),
 ) -> OpsResult<()> {
     if auto_merge_enabled(repo, number)? {
         let number = u32::try_from(number).map_err(|_| {
@@ -622,11 +631,12 @@ pub(crate) fn enable_auto_merge(
         // A pre-existing remote arm carries no durable Loopflow head binding.
         // Replace it so every accepted Auto request crosses our exact-head
         // command boundary, even when GitHub already reports auto-merge.
-        disable_auto_merge(repo, number)?;
+        disable_auto_merge(repo, number, inherit)?;
     }
 
     let number_arg = number.to_string();
     let mut command = Command::new("gh");
+    inherit(&mut command);
     command
         .arg("pr")
         .arg("merge")

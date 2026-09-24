@@ -528,22 +528,26 @@ half-contracts.
 
 ## This slice
 
-Carry the existing command inheritance through Task merge-intent revocation,
-replacement and stale-head compensation reached by shared commit and PR
-finalization. Keep Task resolution, exact-head checks, remote revocation before
-local clearing, and failure retention under their existing owners. Ordinary
-Task observation/restart/rebase callers supply no release capability.
+Retain each frozen covered due time's telemetry prerequisite observation and
+original receipt references on its release attempt. Preserve explicit uncertainty
+where historical schedule/timezone authority is missing. Replace the two-day
+lookup with retained receipt reads, and keep referenced failures in history even
+outside the display window.
 
-Prove the reachable release-to-Task push fence with the built CLI, a disposable
-registered Task, real Git and OS locks. Exercise controller death and a failed
-launcher leaving a revocation descendant; assert target exclusion, checkout
-protection, retained durable merge intent until revocation returns, and no new
-remote head before revocation. Preserve caller HEAD/branch/index/working bytes.
-Use existing Task tests for ordinary revocation and finalization behavior.
+A missing/failed current prerequisite gets one automatic retry through the
+existing installed cron executor. Reserve its physical receipt before launch;
+re-entry cannot replace the reservation or retry once per collapsed day. Keep
+current recovery separate from original failures and from manual/natural wake
+provenance. Preserve placement checks, existing doctor semantics, release
+selection/publication gates and caller bytes.
 
-Historical telemetry association/recovery, dated repair ownership, closed
-obligations and configured acceptance remain in this serial Task. Preserve the
-scorecard blocker, required UI/public proof and two automatic settlements.
+Prove recovery success/failure/missing evidence through the real release CLI,
+frozen coverage, historical linkage and stale-reservation fencing in disposable
+Homes. Telemetry checks and public services in this proof remain simulated.
+Previous telemetry obligation segments, dated repair ownership, bounded target
+runtime/controller recovery, closed-obligation continuation and configured
+acceptance remain in this serial Task. Preserve the scorecard blocker, required
+UI/public proof and two automatic settlements.
 
 ## Slice ledger
 
@@ -874,6 +878,23 @@ head. No additional bounded defect was established and no executable code change
 Historical telemetry linkage/retry and dated repair ownership, closed-obligation
 continuation, remaining interruption proof and configured acceptance remain open.
 See [review-task-compensation.md](review-task-compensation.md).
+
+- 2026-09-24: release attempts now retain frozen telemetry prerequisite
+  observations, original receipt references and one reserved automatic recovery
+  receipt. The installed executor performs at most one retry per wake; earlier
+  failures remain unchanged and linked receipts remain visible outside the
+  history window. Missing historical schedule/timezone authority stays unknown.
+- Eight joined CLI scenarios passed (267.10s), including recovered/missing/failed
+  telemetry, older linked failure, same-second ambiguity, product failure and
+  exact caller preservation. Nine focused library tests and four history tests
+  passed, as did formatting and all-target Clippy. Verification and public
+  services remain simulated; Git, CLI, store and OS locks are real.
+- Prior telemetry obligation segments, dated repair ownership, bounded target
+  runtime/controller recovery, closed obligations and configured acceptance
+  remain open. Doctor semantics are unchanged: a missing natural scheduled
+  receipt can still fail real telemetry recovery. No continuity exemption,
+  installed cutover or qualifying automatic pair is claimed. Details:
+  [release-telemetry-recovery.md](release-telemetry-recovery.md).
 
 ## Measure
 

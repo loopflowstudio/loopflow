@@ -37,6 +37,27 @@
                 "commit": "abc",
                 "workflow_run_id": 42
               },
+              "telemetry": {
+                "schedule": "0 0 9 * * *",
+                "timezone": "UTC",
+                "activated_at": 0,
+                "observed_at": 36000,
+                "original": [
+                  {
+                    "opportunity_id": "opportunity_0",
+                    "due_at": 32400,
+                    "uncertainty": null,
+                    "receipts": [
+                      "cron_33333333333333333333333333333333"
+                    ]
+                  }
+                ],
+                "current_due_at": 32400,
+                "current_receipts": [
+                  "cron_33333333333333333333333333333333"
+                ],
+                "recovery_receipt": "cron_55555555555555555555555555555555"
+              },
               "verification": [
                 {
                   "name": "scheduled-telemetry",
@@ -97,6 +118,7 @@
                 "opportunity_1"
               ],
               "selection": null,
+              "telemetry": null,
               "verification": [
                 {
                   "name": "scheduled-telemetry",
@@ -162,6 +184,25 @@
       "outcome": "failed",
       "exit_code": 1,
       "error": "missing agent_turns"
+    },
+    {
+      "schema_version": 1,
+      "id": "cron_55555555555555555555555555555555",
+      "runner_pid": 1,
+      "home_id": "home_11111111111111111111111111111111",
+      "wave": "infrastructure",
+      "flow": "telemetry-daily",
+      "target_kind": "flow",
+      "source": "recovery",
+      "schedule": "0 0 9 * * *",
+      "repo": "/repo",
+      "lf_path": "/bin/lf",
+      "log_path": "/log/telemetry",
+      "started_at": 36001,
+      "finished_at": 36002,
+      "outcome": "succeeded",
+      "exit_code": 0,
+      "error": null
     }
   ],
   "dispositions": [

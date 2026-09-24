@@ -1,6 +1,7 @@
 mod support;
 
 use std::fs;
+use std::os::unix::fs::PermissionsExt;
 use std::path::{Path, PathBuf};
 use std::process::Command;
 
@@ -35,6 +36,9 @@ fn scheduled_release_flow_settles_product_results_and_preserves_failures() {
         "published",
         "no-change",
         "telemetry-failure",
+        "telemetry-recovered",
+        "telemetry-missing",
+        "telemetry-history",
         "smoke-failure",
         "missing-stage",
     ] {
@@ -186,6 +190,23 @@ esac
             scheduled.hour()
         ))
         .unwrap();
+        let telemetry_runner = state.path().join("telemetry.sh");
+        let telemetry_calls = state.path().join("telemetry-calls");
+        fs::write(
+            &telemetry_runner,
+            format!(
+                r#"#!/bin/sh
+printf 'attempt\n' >> '{}'
+[ '{scenario}' != telemetry-failure ] || exit 71
+if [ '{scenario}' = telemetry-recovered ] && [ "$(wc -l < '{}')" -eq 1 ]; then exit 72; fi
+exit 0
+"#,
+                telemetry_calls.display(),
+                telemetry_calls.display()
+            ),
+        )
+        .unwrap();
+        fs::set_permissions(&telemetry_runner, fs::Permissions::from_mode(0o755)).unwrap();
         let telemetry = CronSpec {
             wave: "infrastructure".into(),
             flow: "telemetry-daily".into(),
@@ -193,23 +214,48 @@ esac
             schedule: schedule.clone(),
             working_directory: repo_path.clone(),
             // Only the external verification is simulated. The release uses the real CLI.
-            lf_path: PathBuf::from(if scenario == "telemetry-failure" {
-                "/usr/bin/false"
-            } else {
-                "/usr/bin/true"
-            }),
+            lf_path: telemetry_runner,
             host: host.clone(),
         };
         add_cron(&agents, &telemetry, &SystemLaunchctl).unwrap();
-        let telemetry_result = run_cron(
-            &agents,
-            &telemetry.wave,
-            &telemetry.flow,
-            &host.home_id,
-            &host.home_id,
-            CronSource::Scheduled,
-        );
-        assert_eq!(telemetry_result.is_err(), scenario == "telemetry-failure");
+        if scenario != "telemetry-missing" {
+            let telemetry_result = run_cron(
+                &agents,
+                &telemetry.wave,
+                &telemetry.flow,
+                &host.home_id,
+                &host.home_id,
+                CronSource::Scheduled,
+            );
+            assert_eq!(
+                telemetry_result.is_err(),
+                matches!(scenario, "telemetry-failure" | "telemetry-recovered")
+            );
+        }
+        let mut original_receipts = loopflow::ops::list_cron_receipts(
+            &loopflow::ops::receipt_root(&lf_home),
+            "infrastructure",
+            Some("telemetry-daily"),
+            5,
+        )
+        .unwrap();
+
+        if scenario == "telemetry-recovered" {
+            // A same-second pass with a lexically later UUID cannot establish
+            // that the failed check was subsequently repaired.
+            let mut tied = original_receipts[0].clone();
+            tied.id =
+                loopflow::durable::CronReceiptId::parse("cron_ffffffffffffffffffffffffffffffff")
+                    .unwrap();
+            tied.outcome = loopflow::ops::CronOutcome::Succeeded;
+            tied.exit_code = Some(0);
+            tied.error = None;
+            let path = loopflow::ops::receipt_root(&lf_home)
+                .join("infrastructure/telemetry-daily")
+                .join(format!("{}-{}.json", tied.started_at, tied.id));
+            fs::write(path, serde_json::to_vec_pretty(&tied).unwrap()).unwrap();
+            original_receipts.push(tied);
+        }
 
         // Model an already-installed daily obligation in a disposable Home. No
         // production schedule or clock is changed; these are synthetic due dates.
@@ -235,6 +281,44 @@ esac
         fs::rename(installed.path, &path).unwrap();
         fs::write(path, plist).unwrap();
         release.flow = "release-run".into();
+        if scenario == "telemetry-history" {
+            // Seed a previously observed, unchanged schedule and one retained
+            // failed prerequisite older than the history presentation window.
+            let activation = Utc::now().timestamp() - 3 * 86400;
+            let telemetry_path = loopflow::ops::list_crons(&agents, &SystemLaunchctl)
+                .unwrap()
+                .into_iter()
+                .find(|job| job.flow == "telemetry-daily")
+                .unwrap();
+            let plist = fs::read_to_string(&telemetry_path.path).unwrap().replace(
+                &format!("<string>{}</string>", telemetry_path.activated_at),
+                &format!("<string>{activation}</string>"),
+            );
+            fs::write(telemetry_path.path, plist).unwrap();
+            add_cron(&agents, &release, &SystemLaunchctl).unwrap();
+            let record_path = fs::read_dir(lf_home.join("cron/obligations"))
+                .unwrap()
+                .map(|e| e.unwrap().path())
+                .find(|p| p.extension().is_some_and(|e| e == "json"))
+                .unwrap();
+            let mut record: serde_json::Value =
+                serde_json::from_slice(&fs::read(&record_path).unwrap()).unwrap();
+            record["observed_at"] = activation.into();
+            fs::write(record_path, serde_json::to_vec_pretty(&record).unwrap()).unwrap();
+            let mut old = original_receipts[0].clone();
+            old.id = loopflow::durable::CronReceiptId::new();
+            old.started_at -= 2 * 86400;
+            old.finished_at = Some(old.started_at + 1);
+            old.outcome = loopflow::ops::CronOutcome::Failed;
+            old.exit_code = Some(72);
+            old.error = Some("historical scorecard failure".into());
+            let path = loopflow::ops::receipt_root(&lf_home)
+                .join("infrastructure/telemetry-daily")
+                .join(format!("{}-{}.json", old.started_at, old.id));
+            fs::write(path, serde_json::to_vec_pretty(&old).unwrap()).unwrap();
+            original_receipts.push(old);
+        }
+
         let result = run_cron(
             &agents,
             &release.wave,
@@ -250,7 +334,11 @@ esac
             &lf_home,
             &repo_path,
             &release.wave,
-            5,
+            if scenario == "telemetry-history" {
+                1
+            } else {
+                5
+            },
             Utc::now().timestamp(),
         )
         .unwrap();
@@ -268,9 +356,13 @@ esac
             "synthetic historical coverage cannot qualify"
         );
         match scenario {
-            "published" | "no-change" => {
+            "published"
+            | "no-change"
+            | "telemetry-recovered"
+            | "telemetry-missing"
+            | "telemetry-history" => {
                 assert!(result.is_ok(), "{scenario}: {result:?}\n{log}");
-                if scenario == "published" {
+                if scenario != "no-change" {
                     assert!(
                         matches!(attempt.outcome, ScheduledReleaseOutcome::Published { .. }),
                         "{attempt:?}"
@@ -304,12 +396,79 @@ esac
                     "publication survives post-publication failure"
                 );
                 if scenario == "telemetry-failure" {
-                    assert_eq!(history.summary.failed_verifications, 1);
+                    assert_eq!(history.summary.failed_verifications, 2);
                     assert!(attempt.selection.is_none());
                 } else {
                     assert_eq!(attempt.selection.as_ref().unwrap().tag, "v0.9.1");
                 }
             }
+        }
+        let prerequisite = attempt
+            .telemetry
+            .as_ref()
+            .expect("retained prerequisite before mutation");
+        assert_eq!(
+            prerequisite
+                .original
+                .iter()
+                .map(|p| &p.opportunity_id)
+                .collect::<Vec<_>>(),
+            attempt.covered.iter().collect::<Vec<_>>()
+        );
+        if scenario == "telemetry-history" {
+            assert!(prerequisite
+                .original
+                .iter()
+                .all(|p| p.due_at.is_some() && p.uncertainty.is_none()));
+            assert!(prerequisite
+                .original
+                .iter()
+                .any(|p| p.receipts.contains(&original_receipts[1].id)));
+            assert_eq!(history.summary.failed_verifications, 1);
+        } else {
+            assert!(
+                prerequisite
+                    .original
+                    .iter()
+                    .all(|p| p.due_at.is_none() && p.uncertainty.is_some()),
+                "pre-observation schedule/timezone must remain unknown"
+            );
+        }
+        for original in &original_receipts {
+            assert_eq!(
+                history.receipts.iter().find(|r| r.id == original.id),
+                Some(original),
+                "retry must not rewrite historical failure"
+            );
+        }
+        let recovered = matches!(
+            scenario,
+            "telemetry-failure" | "telemetry-recovered" | "telemetry-missing"
+        );
+        assert_eq!(prerequisite.recovery_receipt.is_some(), recovered);
+        let calls = fs::read_to_string(&telemetry_calls)
+            .unwrap()
+            .lines()
+            .count();
+        assert_eq!(
+            calls,
+            if recovered && scenario != "telemetry-missing" {
+                2
+            } else {
+                1
+            },
+            "one prerequisite retry per wake, not per collapsed due"
+        );
+        if let Some(id) = &prerequisite.recovery_receipt {
+            let receipt = history.receipts.iter().find(|r| &r.id == id).unwrap();
+            assert_eq!(receipt.source, CronSource::Recovery);
+        }
+        if scenario == "telemetry-recovered" {
+            assert_eq!(history.summary.failed_verifications, 1);
+            assert!(history
+                .summary
+                .undispositioned_failures
+                .contains(&original_receipts[0].id.to_string()));
         }
         assert_eq!(caller_state(), before, "{scenario}: caller work changed");
     }

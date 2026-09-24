@@ -193,8 +193,30 @@ pub struct ReleaseAttempt {
     pub covered: Vec<String>,
     pub selection: Option<ReleaseSelection>,
     pub target: Option<String>,
+    pub telemetry: Option<TelemetryPrerequisite>,
     pub verification: Vec<VerificationEvidence>,
     pub outcome: ScheduledReleaseOutcome,
+}
+
+/// Frozen prerequisite observations for one release execution, before any retry.
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
+pub struct TelemetryPrerequisite {
+    pub schedule: String,
+    pub timezone: String,
+    pub activated_at: i64,
+    pub observed_at: i64,
+    pub original: Vec<TelemetryDue>,
+    pub current_due_at: i64,
+    pub current_receipts: Vec<CronReceiptId>,
+    pub recovery_receipt: Option<CronReceiptId>,
+}
+
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
+pub struct TelemetryDue {
+    pub opportunity_id: String,
+    pub due_at: Option<i64>,
+    pub uncertainty: Option<String>,
+    pub receipts: Vec<CronReceiptId>,
 }
 
 #[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
@@ -324,6 +346,7 @@ pub(crate) fn record_overlap(
             covered: vec![latest.id.clone()],
             selection: None,
             target: None,
+            telemetry: None,
             verification: Vec::new(),
             outcome: ScheduledReleaseOutcome::Deferred {
                 reason: format!(
@@ -372,6 +395,7 @@ pub(crate) fn preflight_failure(
                 covered: vec![due.id.clone()],
                 selection: due.attempts.last().and_then(|a| a.selection.clone()),
                 target: due.attempts.last().and_then(|a| a.target.clone()),
+                telemetry: None,
                 verification: Vec::new(),
                 outcome: ScheduledReleaseOutcome::Failed {
                     cause: receipt
@@ -772,6 +796,7 @@ pub(crate) fn begin(
         covered,
         selection,
         target,
+        telemetry: None,
         verification: Vec::new(),
         outcome: ScheduledReleaseOutcome::Running,
     });
@@ -978,6 +1003,56 @@ pub(crate) fn record_target(home: &Path, receipt_id: &str, target: &str) -> OpsR
     Err(failure("scheduled attempt no longer owns its opportunity"))
 }
 
+/// Reserve recovery with the original observations in the same atomic write.
+pub(crate) fn record_telemetry(
+    home: &Path,
+    receipt_id: &str,
+    telemetry: &TelemetryPrerequisite,
+) -> OpsResult<()> {
+    let _lock = lock(home)?;
+    for mut record in read(home)? {
+        if record.closed_at.is_some() {
+            continue;
+        }
+        let Some(attempt) = record
+            .opportunities
+            .iter_mut()
+            .filter(|o| o.coalesced_into.is_none())
+            .filter_map(|o| o.attempts.last_mut())
+            .find(|a| a.receipt_id.as_str() == receipt_id)
+        else {
+            continue;
+        };
+        if !matches!(attempt.outcome, ScheduledReleaseOutcome::Running) {
+            return Err(failure(
+                "cannot attach telemetry to a finished release attempt",
+            ));
+        }
+        if let Some(prior) = &attempt.telemetry {
+            if prior == telemetry {
+                return Ok(());
+            }
+            return Err(failure(
+                "cannot replace a release attempt's telemetry or retry reservation",
+            ));
+        }
+        if telemetry
+            .original
+            .iter()
+            .map(|due| &due.opportunity_id)
+            .collect::<Vec<_>>()
+            != attempt.covered.iter().collect::<Vec<_>>()
+        {
+            return Err(failure(
+                "telemetry observations do not match frozen release coverage",
+            ));
+        }
+        attempt.telemetry = Some(telemetry.clone());
+        return save(home, &record);
+    }
+    Err(failure("scheduled attempt no longer owns its opportunity"))
+}
+
 pub(crate) fn record_intervention(
     home: &Path,
     repo: &Path,
@@ -1095,6 +1170,48 @@ mod tests {
             exit_code: None,
             error: None,
         }
+    }
+
+    #[test]
+    fn telemetry_reservation_survives_retry_and_rejects_replacement_or_late_writer() {
+        let temp = tempfile::tempdir().unwrap();
+        let spec = spec(temp.path());
+        let id = observe(&spec, 0, 0, "UTC").unwrap();
+        let wake = receipt(&spec, 36001);
+        let owner = begin(&spec.host.lf_home, &id, &wake).unwrap().unwrap();
+        let prerequisite = super::TelemetryPrerequisite {
+            schedule: "0 0 9 * * *".into(),
+            timezone: "UTC".into(),
+            activated_at: 0,
+            observed_at: 36001,
+            original: vec![super::TelemetryDue {
+                opportunity_id: owner,
+                due_at: Some(32400),
+                uncertainty: None,
+                receipts: vec![CronReceiptId::new()],
+            }],
+            current_due_at: 32400,
+            current_receipts: Vec::new(),
+            recovery_receipt: Some(CronReceiptId::new()),
+        };
+        super::record_telemetry(&spec.host.lf_home, wake.id.as_str(), &prerequisite).unwrap();
+        super::record_telemetry(&spec.host.lf_home, wake.id.as_str(), &prerequisite).unwrap();
+        let mut replacement = prerequisite.clone();
+        replacement.recovery_receipt = Some(CronReceiptId::new());
+        assert!(
+            super::record_telemetry(&spec.host.lf_home, wake.id.as_str(), &replacement).is_err()
+        );
+        let next = receipt(&spec, 36002);
+        begin(&spec.host.lf_home, &id, &next).unwrap();
+        let before = read(&spec.host.lf_home).unwrap();
+        assert!(
+            super::record_telemetry(&spec.host.lf_home, wake.id.as_str(), &prerequisite).is_err()
+        );
+        let after = read(&spec.host.lf_home).unwrap();
+        assert_eq!(after, before);
+        let attempts = &after[0].opportunities[0].attempts;
+        assert_eq!(attempts[0].telemetry.as_ref(), Some(&prerequisite));
+        assert!(attempts[1].telemetry.is_none());
     }
 
     #[test]

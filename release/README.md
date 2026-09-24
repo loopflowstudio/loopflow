@@ -97,7 +97,10 @@ image and leaves the release incomplete. Publishing the non-draft GitHub
 Release records an external effect. Scheduled settlement follows public artifact
 read-back and exact-version installer smoke, with every required check retained.
 In history JSON, `attempts[].verification` holds those checks once; each attempt
-saves its checks and product outcome together.
+saves its checks and product outcome together. `attempts[].telemetry` retains
+original prerequisite associations and the current execution's automatic retry,
+if needed. Successful recovery leaves the earlier failure and its repair
+disposition visible.
 
 The publisher controller runs from current main while its source path is the
 leased exact-tag worktree. This lets an incomplete immutable tag resume with a

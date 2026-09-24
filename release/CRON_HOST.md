@@ -129,6 +129,19 @@ smoke. No-change requires an empty fetched source range, a fully verified
 published baseline, and current scheduled telemetry. Deferred work retains its
 reason and continuation; failed attempts survive later recovery.
 
+Each release attempt freezes `telemetry` observations for its covered due times.
+Original prerequisite intervals retain their receipt ids; an unobserved schedule
+or timezone remains explicitly unknown. Linked receipts stay in the history
+response even when older than its requested window.
+
+Missing or failed current telemetry gets at most one automatic retry through the
+installed cron executor before release selection. Its receipt has source
+`recovery` and is reserved on the attempt before launch. Catch-up does not retry
+once per missed day. A running prerequisite defers release; a failed retry stops
+it. Recovery does not rewrite failures, supply repair ownership, or change
+`doctor`'s scheduling-continuity checks. The existing target executor remains
+synchronous; this limit bounds retry count, not target runtime.
+
 A repair disposition references an existing registered Task and records local
 repair ownership. It does not start work, assign a remote issue, or erase the
 failure. The earliest disposition timestamp determines whether ownership was

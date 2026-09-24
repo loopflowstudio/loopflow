@@ -41,9 +41,22 @@
   This is the same accounting owner with a smaller crash surface than separate
   per-opportunity files. Keep the private Home file store and schema-1 cron
   history; no database migration or scheduler replacement is introduced.
-- Current telemetry is checked before selection. Missing telemetry defers to the
-  next configured firing; failed telemetry remains failure. This draft does not
-  launch extra prerequisite jobs. Daily telemetry remains its existing executor.
+- Current telemetry is checked before selection. The accepted design supersedes
+  the earlier no-retry draft: a missing/failed current prerequisite now receives
+  at most one automatic retry per release wake through the installed executor.
+  The attempt reserves that receipt before launch and retains original failures.
+  Running prerequisites defer. The existing executor is synchronous; bounding
+  target duration and recovery after its controller dies remain interruption
+  obligations, not proof supplied by the retry-count limit.
+- Original prerequisite associations use observed release timezone and the
+  unchanged installed telemetry schedule. Dates preceding that observation or
+  installation stay explicitly unknown. Retaining and reconciling previous
+  telemetry schedule/Home segments is still required; current installation
+  cannot reconstruct their authority.
+- `doctor` still judges scheduled firings, not recovery process success. A missing
+  scheduled receipt can therefore remain a continuity failure inside the real
+  telemetry retry. The simulated verifier proves retry mechanics, not that the
+  actual telemetry flow will pass. No continuity exemption is introduced.
 - Disposition writes require an existing local Task Work id plus explicit reason
   and Wave. They record repair ownership without claiming a remote handoff.
 - Legacy artifact receipts missing required UI proof invoke the exact-source UI

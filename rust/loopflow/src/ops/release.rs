@@ -681,7 +681,13 @@ pub(crate) fn release_run_with_cron(
         }
         let telemetry = context
             .as_ref()
-            .map(|context| verify_scheduled_telemetry(&home, context))
+            .map(|context| {
+                verify_scheduled_telemetry(
+                    &home,
+                    context,
+                    cron_receipt.expect("scheduled context has receipt"),
+                )
+            })
             .transpose()?;
         if let Some(proof) = telemetry {
             verification.push(proof);
@@ -1227,11 +1233,18 @@ fn verify_source(
 fn verify_scheduled_telemetry(
     home: &Path,
     context: &accounting::ReleaseObligation,
+    receipt_id: &str,
 ) -> OpsResult<VerificationEvidence> {
-    let jobs = crate::ops::list_crons(
-        &crate::ops::default_launch_agents_dir()?,
-        &crate::ops::SystemLaunchctl,
-    )?;
+    use crate::ops::cron::{calendar, read_receipts, run_cron_recorded};
+    use crate::ops::{CronOutcome, CronSource, CronTargetKind};
+    let attempt = context
+        .opportunities
+        .iter()
+        .flat_map(|o| &o.attempts)
+        .find(|a| a.receipt_id.as_str() == receipt_id)
+        .ok_or_else(|| OpsError::Message("scheduled attempt missing".into()))?;
+    let launch_agents = crate::ops::default_launch_agents_dir()?;
+    let jobs = crate::ops::list_crons(&launch_agents, &crate::ops::SystemLaunchctl)?;
     let telemetry = jobs
         .iter()
         .find(|job| {
@@ -1245,7 +1258,7 @@ fn verify_scheduled_telemetry(
                 "required telemetry-daily cron is not installed on the release Home".into(),
             )
         })?;
-    if telemetry.target_kind != crate::ops::CronTargetKind::Flow {
+    if telemetry.target_kind != CronTargetKind::Flow {
         return Err(OpsError::Message(
             "required telemetry must execute its mechanical verification flow".into(),
         ));
@@ -1256,58 +1269,164 @@ fn verify_scheduled_telemetry(
         .parse()
         .map_err(|e| OpsError::Parse(format!("timezone: {e}")))?;
     let now = chrono::Utc::now().timestamp();
-    let due = crate::ops::cron::calendar::at_or_before(&zone, now, hour, minute)
+    let due = calendar::at_or_before(&zone, now, hour, minute)
         .ok_or_else(|| OpsError::Message("cannot identify required telemetry due time".into()))?;
-    let receipts = crate::ops::list_cron_receipts(
-        &crate::ops::receipt_root(home),
-        &context.wave,
-        Some("telemetry-daily"),
-        2,
-    )?;
-    let receipt = receipts
+    let root = crate::ops::receipt_root(home);
+    let mut receipts = read_receipts(&root, &context.wave, Some("telemetry-daily"))?;
+    receipts.retain(|r| {
+        r.home_id == context.home_id
+            && r.repo == context.repo
+            && r.schedule == telemetry.schedule
+            && r.target_kind == CronTargetKind::Flow
+            && r.source == CronSource::Scheduled
+            && r.started_at <= now
+    });
+    // Receipts have second precision. A UUID cannot prove that a pass followed
+    // a failure in the same second; prefer unresolved/failed evidence on ties.
+    let outcome_order = |outcome| match outcome {
+        CronOutcome::Succeeded => 0,
+        CronOutcome::Failed => 1,
+        CronOutcome::Running => 2,
+    };
+    receipts.sort_by(|a, b| {
+        a.started_at
+            .cmp(&b.started_at)
+            .then_with(|| outcome_order(a.outcome).cmp(&outcome_order(b.outcome)))
+            .then_with(|| a.id.as_str().cmp(b.id.as_str()))
+    });
+    let in_interval = |start: i64, end: i64| {
+        receipts
+            .iter()
+            .filter(|r| r.started_at >= start && r.started_at < end)
+            .map(|r| r.id.clone())
+            .collect::<Vec<_>>()
+    };
+    let mut observation = if let Some(saved) = &attempt.telemetry {
+        saved.clone()
+    } else {
+        let mut original = Vec::new();
+        for key in &attempt.covered {
+            let opportunity = context
+                .opportunities
+                .iter()
+                .find(|o| &o.id == key)
+                .ok_or_else(|| OpsError::Message("covered release opportunity missing".into()))?;
+            let preceding = calendar::at_or_before(&zone, opportunity.due_at, hour, minute)
+                .ok_or_else(|| {
+                    OpsError::Message("cannot identify original telemetry interval".into())
+                })?;
+            // Installation alone cannot prove an unobserved historical timezone.
+            let known = preceding >= telemetry.activated_at && preceding >= context.observed_at;
+            let end = calendar::after(&zone, preceding, hour, minute).ok_or_else(|| {
+                OpsError::Message("cannot identify telemetry interval end".into())
+            })?;
+            original.push(accounting::TelemetryDue {
+                opportunity_id: key.clone(),
+                due_at: known.then_some(preceding),
+                uncertainty: (!known).then(|| {
+                    "telemetry schedule or timezone was not observed for this original due time"
+                        .into()
+                }),
+                receipts: if known {
+                    in_interval(preceding, end)
+                } else {
+                    Vec::new()
+                },
+            });
+        }
+        accounting::TelemetryPrerequisite {
+            schedule: telemetry.schedule.clone(),
+            timezone: context.timezone.clone(),
+            activated_at: telemetry.activated_at,
+            observed_at: now,
+            original,
+            current_due_at: due,
+            current_receipts: in_interval(due, now.saturating_add(1)),
+            recovery_receipt: None,
+        }
+    };
+    let next_due = context
+        .opportunities
         .iter()
-        .find(|r| {
-            r.home_id == context.home_id
-                && r.repo == context.repo
-                && r.schedule == telemetry.schedule
-                && r.started_at >= due
-                && r.started_at <= now
-                && r.target_kind == crate::ops::CronTargetKind::Flow
-                && r.source == crate::ops::CronSource::Scheduled
-        })
-        .ok_or_else(|| OpsError::ReleaseDeferred {
-            reason: format!("no scheduled telemetry verification for due time {due}"),
-            continuation: "next configured release firing after telemetry-daily passes".into(),
+        .map(|o| o.next_due_at)
+        .max()
+        .unwrap_or(now);
+    let current = observation
+        .current_receipts
+        .last()
+        .and_then(|id| receipts.iter().find(|r| &r.id == id));
+    if attempt.telemetry.is_none() && current.is_none_or(|r| r.outcome == CronOutcome::Failed) {
+        // The physical receipt is reserved in this attempt before the common
+        // executor launches anything. Re-entry observes it; it cannot retry twice.
+        let result = run_cron_recorded(
+            &launch_agents,
+            &context.wave,
+            "telemetry-daily",
+            &context.home_id,
+            &context.home_id,
+            CronSource::Recovery,
+            &mut |receipt| {
+                if receipt.repo != context.repo
+                    || receipt.home_id != context.home_id
+                    || receipt.schedule != observation.schedule
+                    || receipt.target_kind != CronTargetKind::Flow
+                    || receipt.lf_path != telemetry.lf_path
+                {
+                    return Err(OpsError::Message("telemetry installation changed before recovery; inspect and retry at the next configured release firing".into()));
+                }
+                observation.recovery_receipt = Some(receipt.id.clone());
+                accounting::record_telemetry(home, receipt_id, &observation)
+            },
+        );
+        result.map_err(|error| match error {
+            OpsError::ReleaseDeferred { reason, continuation } => OpsError::ReleaseDeferred {
+                reason,
+                continuation: format!("{continuation}; next configured release due {next_due}"),
+            },
+            error => OpsError::Message(format!(
+                "{error}; prerequisite retry exhausted for release receipt {receipt_id}; assign the failed telemetry receipt a repair disposition; next configured release due {next_due}"
+            )),
         })?;
-    if receipt.outcome == crate::ops::CronOutcome::Running {
+    } else if attempt.telemetry.is_none() {
+        accounting::record_telemetry(home, receipt_id, &observation)?;
+    }
+    let all_receipts = read_receipts(&root, &context.wave, Some("telemetry-daily"))?;
+    let selected = observation
+        .recovery_receipt
+        .as_ref()
+        .or_else(|| observation.current_receipts.last());
+    let selected = selected.and_then(|id| all_receipts.iter().find(|r| &r.id == id));
+    let receipt = selected.ok_or_else(|| OpsError::ReleaseDeferred {
+        reason: "reserved telemetry receipt has no retained result; no second retry in this wake"
+            .into(),
+        continuation: format!(
+            "inspect release receipt {receipt_id}; next configured release due {next_due}"
+        ),
+    })?;
+    if receipt.outcome == CronOutcome::Running {
         return Err(OpsError::ReleaseDeferred {
             reason: format!(
                 "required telemetry {} has no terminal result yet",
                 receipt.id
             ),
             continuation: format!(
-                "observe {} at the next configured release firing; log {}",
+                "observe {} at {}; next configured release due {next_due}",
                 receipt.id,
                 receipt.log_path.display()
             ),
         });
     }
-    if receipt.outcome != crate::ops::CronOutcome::Succeeded {
+    if receipt.outcome != CronOutcome::Succeeded {
         return Err(OpsError::Message(format!(
-            "required telemetry {} did not pass: {}; inspect {} and assign its repair disposition",
-            receipt.id,
-            receipt
-                .error
-                .as_deref()
-                .unwrap_or("verification remains running"),
-            receipt.log_path.display()
+            "required telemetry {} did not pass: {}; inspect {} and assign its repair disposition; next configured release due {next_due}",
+            receipt.id, receipt.error.as_deref().unwrap_or("verification failed"), receipt.log_path.display()
         )));
     }
     persist_verification(
         &context.repo,
         "scheduled-telemetry",
         receipt.id.as_str(),
-        receipt,
+        &serde_json::json!({"prerequisite": observation, "receipt": receipt}),
     )
 }
 

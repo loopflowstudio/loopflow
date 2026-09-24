@@ -1765,6 +1765,7 @@ fn cron_source_name(source: CronSource) -> &'static str {
     match source {
         CronSource::Scheduled => "scheduled",
         CronSource::Triggered => "triggered",
+        CronSource::Recovery => "recovery",
         CronSource::Manual => "manual",
     }
 }

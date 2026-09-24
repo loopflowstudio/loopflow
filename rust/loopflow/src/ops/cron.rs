@@ -107,6 +107,7 @@ impl FromStr for CronTargetKind {
 pub enum CronSource {
     Scheduled,
     Triggered,
+    Recovery,
     Manual,
 }
 
@@ -432,6 +433,26 @@ pub fn run_cron(
     placed_home: &HomeId,
     source: CronSource,
 ) -> OpsResult<CronReceipt> {
+    run_cron_recorded(
+        launch_agents_dir,
+        wave,
+        flow,
+        current_home,
+        placed_home,
+        source,
+        &mut |_| Ok(()),
+    )
+}
+
+pub(crate) fn run_cron_recorded(
+    launch_agents_dir: &Path,
+    wave: &str,
+    flow: &str,
+    current_home: &HomeId,
+    placed_home: &HomeId,
+    source: CronSource,
+    record: &mut dyn FnMut(&CronReceipt) -> OpsResult<()>,
+) -> OpsResult<CronReceipt> {
     let path = plist_path(launch_agents_dir, wave, flow);
     let spec = read_cron_spec(&path)?;
     validate_installed_spec(&spec, wave, flow)?;
@@ -441,6 +462,15 @@ pub fn run_cron(
         receipt.source = CronSource::Triggered;
     }
     write_receipt(&root, &receipt)?;
+    if let Err(error) = record(&receipt) {
+        receipt.finished_at = Some(Utc::now().timestamp());
+        receipt.outcome = CronOutcome::Failed;
+        receipt.error = Some(format!(
+            "prerequisite reservation failed before launch: {error}"
+        ));
+        write_receipt(&root, &receipt)?;
+        return Err(error);
+    }
 
     let release_obligation = if flow == "release-run" {
         let zone = iana_time_zone::get_timezone().map_err(|e| OpsError::Message(e.to_string()))?;
@@ -480,29 +510,41 @@ pub fn run_cron(
         )));
     }
 
-    let _execution = if let Some(id) = &release_obligation {
+    let _execution = if release_obligation.is_some() || flow == "telemetry-daily" {
         let lease = accounting::claim_execution(&spec)?;
         if lease.is_none() {
             receipt.finished_at = Some(Utc::now().timestamp());
             receipt.outcome = CronOutcome::Failed;
             receipt.error = Some(
-                "release execution already active; continuation is the next configured firing"
-                    .into(),
+                "cron execution already active; continuation is the next configured firing".into(),
             );
             write_receipt(&root, &receipt)?;
-            accounting::record_overlap(&spec.host.lf_home, id, &receipt)?;
+            if let Some(id) = &release_obligation {
+                accounting::record_overlap(&spec.host.lf_home, id, &receipt)?;
+            }
+            if source == CronSource::Recovery {
+                return Err(OpsError::ReleaseDeferred {
+                    reason: receipt.error.clone().expect("overlap cause set"),
+                    continuation: format!(
+                        "observe the active prerequisite at {}",
+                        receipt.log_path.display()
+                    ),
+                });
+            }
             return Err(OpsError::Message(
                 receipt.error.clone().expect("overlap cause set"),
             ));
         }
-        if source == CronSource::Scheduled
-            && accounting::begin(&spec.host.lf_home, id, &receipt)?.is_none()
-        {
-            receipt.finished_at = Some(Utc::now().timestamp());
-            receipt.outcome = CronOutcome::Succeeded;
-            receipt.exit_code = Some(0);
-            write_receipt(&root, &receipt)?;
-            return Ok(receipt);
+        if let Some(id) = &release_obligation {
+            if source == CronSource::Scheduled
+                && accounting::begin(&spec.host.lf_home, id, &receipt)?.is_none()
+            {
+                receipt.finished_at = Some(Utc::now().timestamp());
+                receipt.outcome = CronOutcome::Succeeded;
+                receipt.exit_code = Some(0);
+                write_receipt(&root, &receipt)?;
+                return Ok(receipt);
+            }
         }
         lease
     } else {
@@ -850,7 +892,9 @@ fn spawn_cron_target(
         .open(spec.log_path())?;
     let stderr = stdout.try_clone()?;
     let mut command = Command::new(&spec.lf_path);
-    if let Some(file) = execution.filter(|_| receipt.source != CronSource::Manual) {
+    if let Some(file) =
+        execution.filter(|_| receipt.flow == "release-run" && receipt.source != CronSource::Manual)
+    {
         use std::os::fd::AsRawFd;
         command.args([
             "--__cron-receipt",
@@ -933,7 +977,11 @@ fn new_receipt(spec: &CronSpec, home_id: &HomeId, source: CronSource) -> CronRec
     }
 }
 
-fn read_receipts(root: &Path, wave: &str, flow: Option<&str>) -> OpsResult<Vec<CronReceipt>> {
+pub(crate) fn read_receipts(
+    root: &Path,
+    wave: &str,
+    flow: Option<&str>,
+) -> OpsResult<Vec<CronReceipt>> {
     let wave_root = root.join(safe_component(wave));
     if !wave_root.is_dir() {
         return Ok(Vec::new());
@@ -1296,6 +1344,53 @@ mod tests {
             lf_path: lf_path.to_path_buf(),
             host: host(root),
         }
+    }
+
+    #[test]
+    fn telemetry_recovery_defers_while_the_existing_executor_owns_the_job() {
+        let temp = tempfile::TempDir::new().unwrap();
+        let launcher = temp.path().join("telemetry");
+        let effect = temp.path().join("launched");
+        fs::write(
+            &launcher,
+            format!("#!/bin/sh\ntouch '{}'\n", effect.display()),
+        )
+        .unwrap();
+        fs::set_permissions(&launcher, fs::Permissions::from_mode(0o755)).unwrap();
+        let spec = named_spec(
+            temp.path(),
+            &launcher,
+            "infra",
+            "telemetry-daily",
+            "0 0 9 * * *",
+            CronTargetKind::Flow,
+        );
+        fs::create_dir_all(&spec.working_directory).unwrap();
+        add_cron(temp.path(), &spec, &FakeLaunchctl::default()).unwrap();
+        let owner = accounting::claim_execution(&spec).unwrap().unwrap();
+        let error = run_cron(
+            temp.path(),
+            &spec.wave,
+            &spec.flow,
+            &spec.host.home_id,
+            &spec.host.home_id,
+            CronSource::Recovery,
+        )
+        .unwrap_err();
+        assert!(matches!(error, OpsError::ReleaseDeferred { .. }));
+        assert!(!effect.exists());
+        drop(owner);
+        let receipt = run_cron(
+            temp.path(),
+            &spec.wave,
+            &spec.flow,
+            &spec.host.home_id,
+            &spec.host.home_id,
+            CronSource::Recovery,
+        )
+        .unwrap();
+        assert_eq!(receipt.outcome, CronOutcome::Succeeded);
+        assert!(effect.exists());
     }
 
     #[test]

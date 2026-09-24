@@ -1,4 +1,5 @@
 //! Release settlement and scheduled verification are independent of process exit status.
+use std::collections::HashSet;
 use std::fs::{self, File};
 use std::path::{Path, PathBuf};
 
@@ -148,10 +149,24 @@ pub fn release_history(
     let obligations = accounting::history(home, repo, wave, now)?;
     let window_start = now.saturating_sub(i64::from(days) * 86400);
     let repo = repo.canonicalize()?;
+    let linked: HashSet<_> = obligations
+        .iter()
+        .flat_map(|o| &o.opportunities)
+        .flat_map(|o| &o.attempts)
+        .filter_map(|a| a.telemetry.as_ref())
+        .flat_map(|t| {
+            t.original
+                .iter()
+                .flat_map(|d| &d.receipts)
+                .chain(&t.current_receipts)
+                .chain(t.recovery_receipt.iter())
+        })
+        .collect();
     let receipts: Vec<_> = read_receipts(&receipt_root(home), wave, None)?
         .into_iter()
         .filter(|r| {
-            r.repo.canonicalize().ok().as_ref() == Some(&repo) && r.started_at >= window_start
+            r.repo.canonicalize().ok().as_ref() == Some(&repo)
+                && (r.started_at >= window_start || linked.contains(&r.id))
         })
         .collect();
     let dispositions = read_dispositions(home)?;

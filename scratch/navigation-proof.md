@@ -34,6 +34,40 @@ remain the existing path. The separate lf-new checkout was not edited.
 
 ## Recorded validation
 
+**Iteration 3 navigator scroll, 2026-09-23:**
+`WorkspaceNavigationProofTests.navigatorRetainsScroll` mounts SessionsView with
+80 fixture Tasks, scrolls its real NSScrollView to 1,200 points, opens Task details,
+shows the list beside details, refreshes planning, returns to the overview, then
+switches repositories and returns. It reads the native clip-view bounds rather
+than asserting only on saved model state. A different repository starts at zero.
+
+Before the fix, only repository return failed: the native offset was zero, a
+1,200-point difference (`/tmp/loo291-navigator-scroll-before.log`, exit 1).
+WorkspaceNavigation now owns the retained offset alongside selection/search;
+the view's SwiftUI ScrollPosition is its mounted scroll control, initialized
+from the retained offset. Geometry updates capture that render's navigation
+owner, so they do not look up a different repository at callback time. No wire
+field, disk persistence, launch path or second workspace store was added.
+
+Review checked the ownership boundary: SwiftUI still owns scrolling and clamps
+positions when content changes. Retention lasts for the window visit, matching
+the other navigation state. No row-ID hierarchy or parallel scroll controller
+is introduced. This proof uses native programmatic scrolling and ViewInspector
+toolbar actions with fixture planning; it is not external mouse/AX interaction,
+configured provider continuation, a live-registry budget or an external trial.
+
+Final command:
+
+```sh
+swift test --package-path swift -Xswiftc -gnone --jobs 4 \
+  --filter WorkspaceNavigationProofTests/navigatorRetainsScroll
+```
+
+One test passed, exit 0; `/tmp/loo291-navigator-scroll-final.log`. No Swift source
+or test edits followed. `git diff --check` passes. No broader test gate ran.
+The design's configured interaction and before/after timing checks remain open;
+this result closes the local navigator retention gap only.
+
 **Iteration 2 mounted-workspace proof, 2026-09-23:**
 `WorkspaceNavigationProofTests.workspaceRetainsNativeSplit` now hosts the real
 `SessionsView` in an AppKit window with two retained Ghostty surfaces. It invokes

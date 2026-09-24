@@ -4,8 +4,17 @@ import SwiftUI
 struct WorkspaceNavigator: View {
     @Bindable var model: PodiumModel
     let onOpenSession: (SessionRecord) -> Void
-    var sessionStatus: (SessionRecord) -> String = { $0.state.rawValue.uppercased() }
+    let sessionStatus: (SessionRecord) -> String
     @Environment(\.palette) private var palette
+    @State private var scrollPosition: ScrollPosition
+
+    init(model: PodiumModel, onOpenSession: @escaping (SessionRecord) -> Void,
+         sessionStatus: @escaping (SessionRecord) -> String = { $0.state.rawValue.uppercased() }) {
+        self.model = model
+        self.onOpenSession = onOpenSession
+        self.sessionStatus = sessionStatus
+        _scrollPosition = State(initialValue: ScrollPosition(y: model.navigation.listScrollOffset))
+    }
 
     private var projection: WorkspaceProjection { model.workspace }
     private var search: String { model.navigation.search.trimmingCharacters(in: .whitespacesAndNewlines) }
@@ -73,6 +82,12 @@ struct WorkspaceNavigator: View {
                 .font(Typography.body(12))
                 .buttonStyle(.plain)
                 .padding(Spacing.md)
+            }
+            .scrollPosition($scrollPosition)
+            .onScrollGeometryChange(for: CGFloat.self) { geometry in
+                max(0, geometry.contentOffset.y + geometry.contentInsets.top)
+            } action: { _, offset in
+                navigation.listScrollOffset = offset
             }
         }
         .background(palette.surface)

@@ -669,3 +669,63 @@ dated repair ownership, closed-obligation continuation, remaining interruption
 proof and configured acceptance stay open. The missing `agent_turns` scorecard
 blocker, required UI/public proof and two adjacent automatic settlements remain
 unresolved. This pass neither approves the branch nor completes the Task.
+
+## Telemetry recovery compression review at `8a228a214d`
+
+No executable reduction selected. The model before and after this pass is an
+obligation containing original due opportunities; an execution owner retains
+attempts with frozen coverage, selection, prerequisite observations, verification
+and outcome. Collapsed opportunities reference that owner. The prerequisite
+observation reserves at most one recovery receipt before launch. Physical cron
+receipts retain process results; `settle` atomically writes product outcome and
+verification. Original failure, current recovery and product settlement remain
+different facts even when one execution succeeds.
+
+Inspected the latest implementation and its direct model path:
+`ReleaseAttempt`/`TelemetryPrerequisite`/`TelemetryDue`, `record_telemetry`,
+`begin`, `finish_process`, `receipt_context` and `settle`; release entry,
+`verify_scheduled_telemetry` and content-addressed verification persistence;
+the shared installed cron executor, receipt reader and child launch; history's
+linked-receipt selection, qualification and dated failure dispositions; and
+doctor's scheduled-only continuity reader. This is scoped source review, not
+an exhaustive fresh review of every earlier mutation-child change.
+
+Mirrors checked: explicit cron context through CLI/Flow dispatch, cron source
+text and JSON, release-history DTO and fixture, reservation/overlap tests and
+the joined scheduled-release scenarios; Python artifact/public receipt types;
+release README, cron host guide, release-evidence direction, current design,
+questions and telemetry implementation report. Searches found no Swift or
+Python mirror of the cron/history/telemetry types. The repository release Flow
+still selects one mechanical release operation.
+
+| Candidate | Why retained |
+|---|---|
+| Original and current receipt lists | They answer which prerequisite belonged to each original due and which current evidence was available at entry. Delayed coverage can span several days; the lists need not coincide. |
+| Recovery receipt beside current receipts | The former reserves a future physical execution before launch; the latter freezes prior observations. Deriving recovery from the latest receipt would lose the once-per-wake fence and provenance. |
+| Schedule, timezone, activation and observation snapshot | These explain how original associations were calculated and where knowledge ends. Reading today's installation cannot reproduce that evidence after reconfiguration. This snapshot does not supply the missing historical segments. |
+| Original opportunity ids beside `covered` | These make the prerequisite-to-due mapping explicit and permit the writer to reject mismatched coverage. Replacing them with positional association would conceal that contract without removing an owner. |
+| Optional due time and uncertainty | Both unknown and known intervals must survive transport. An enum could constrain combinations, but would replace the representation without removing a lifecycle, writer or concept. No such schema change was selected here. |
+| Prerequisite snapshot repeated in the verification artifact | This is denormalized evidence: the artifact binds the frozen inputs to the selected terminal receipt under a digest. The attempt owns the prelaunch reservation; the artifact has no alternate reservation or settlement writer. Removing only its copy is not a coherent model reduction. |
+| `run_cron` and `run_cron_recorded` | One ordinary entry delegates to the same executor with a no-op callback; recovery reserves evidence before launch. There is no second target launcher to merge. Folding reservation into terminal settlement would move it after the protected side effect. |
+| Recovery versus Scheduled/Triggered/Manual | Automatic prerequisite recovery is neither a natural firing nor operator intervention. Collapsing sources would change continuity or unattended qualification. |
+| Physical outcome, attempt outcome and verification | Process success cannot prove publication; prerequisite failure must survive later recovery. Their separate owners preserve these disagreements. |
+
+The simulated review checked reservation-before-launch, immutable reservation
+comparison, exact-attempt fencing, retention of linked old failures and the
+unchanged product-settlement boundary. The initial receipt read freezes evidence;
+the later read observes the reserved result. Combining those reads would accept
+stale Running evidence after a retry. Searches of the inspected production paths
+found no restored duplicate success-proof wrappers, `record_verification`, or
+separate Python candidate/publish receipt classes. Schema-1 physical receipts
+remain explicitly required historical compatibility.
+
+Only this report changed. No API, DTO, persisted field, migration or executable
+code changed; no behavioral tests or static checks were rerun. The focused
+results in [release-telemetry-recovery.md](release-telemetry-recovery.md) remain
+historical implementation evidence. Prior telemetry segments, dated repair
+ownership, bounded executor runtime/controller recovery, closed-obligation
+continuation and configured acceptance remain open. Doctor still requires
+natural scheduled evidence; the simulated recovery does not prove that the real
+telemetry Flow passes. The scorecard blocker, required UI/public proof and two
+adjacent automatic settlements remain unresolved. No publication, installation,
+PM handoff, landing or Task completion was performed.

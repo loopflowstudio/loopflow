@@ -20,7 +20,7 @@ struct GhosttyTerminalInputTests {
         manager.initialize()
         let registry = SessionsWorkspaceRegistry()
         let workspace = registry.workspace(for: NSTemporaryDirectory())
-        let store = SessionsStore(scope: .repo(NSTemporaryDirectory()), surfaces: registry.surfaces)
+        let store = SessionsStore(repoPath: NSTemporaryDirectory(), surfaces: registry.surfaces)
         var views: [GhosttyMetalView] = []
         defer { for view in views { view.handleSurfaceClose() } }
         var records: [SessionRecord] = []
@@ -47,11 +47,32 @@ struct GhosttyTerminalInputTests {
             #expect(await store.select(record.id) == record)
             #expect(store.localTerminal(for: record) == .shell(record.terminalIds[0]))
         }
-        let otherWindow = SessionsStore(scope: .repo(NSTemporaryDirectory()))
+        let otherWindow = SessionsStore(repoPath: NSTemporaryDirectory())
         otherWindow.reconcile(records)
         #expect(otherWindow.sessions.allSatisfy { $0.state == .elsewhere })
         #expect(await otherWindow.select("one") == nil)
         #expect(registry.surfaces.hasSurface(.shell(records[0].terminalIds[0])))
+    }
+
+    @Test("Exiting the initial conversation leaves a usable companion shell")
+    @MainActor
+    func conversationReturnsToShell() async throws {
+        _ = NSApplication.shared
+        let manager = GhosttyManager.shared
+        manager.initialize()
+        let view = GhosttyMetalView(terminal: .shell("return-proof"), frame: CGRect(x: 0, y: 0, width: 800, height: 500))
+        view.workingDirectory = NSTemporaryDirectory()
+        view.command = buildWorkspaceShellCommand(id: "return-proof", argv: ["/bin/true"], env: [:])
+        view.createSurface(manager: manager)
+        defer { view.handleSurfaceClose() }
+        let surface = try #require(view.surface)
+        let command = "printf '%s:%s\\n' companion \"$LF_TERMINAL_ID\"\r"
+        command.withCString { ghostty_surface_text(surface, $0, UInt(command.utf8.count)) }
+        let deadline = ContinuousClock.now + .seconds(5)
+        while !terminalText(view).contains("companion:return-proof"), ContinuousClock.now < deadline {
+            try await Task.sleep(for: .milliseconds(20))
+        }
+        #expect(terminalText(view).contains("companion:return-proof"))
     }
 
     @Test("block clicks copy command and output, then the live prompt clears selection")

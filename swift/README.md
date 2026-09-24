@@ -104,11 +104,10 @@ abandoned and retired registrations; unfiltered `lf ls` retains historical
 registry visibility. Authored `wave/<name>/GOAL.md` files still appear before
 their first registration.
 
-
 The compact Podium bar reads live process evidence from `lf ps --json`. Its
 lamp reflects OS-live state: black is off, green is working, blue is stalled,
 and amber is waiting or unknown. Wave count, active Runs, and
-Run-without-listener warnings come from `lf ls --json`.
+Run-without-listener warnings come from `lf ls --all --current --json`.
 Its Sessions badge uses the same repo-scoped `lf session list --json` reading
 and reveals the work list.
 Repository scope filters the Work and Wave snapshots locally; live process

@@ -21,7 +21,6 @@ public struct Wave: Sendable, Identifiable, Hashable {
     public let supersededByWaveId: String?
     public let retirementReason: String?
 
-
     public init(
         id: String,
         name: String,

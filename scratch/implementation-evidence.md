@@ -66,9 +66,36 @@ forget them, then verify the live registry contains the three intended Waves.
 
 Read both the original `loopflow.main-view` design checkout and the current
 `loopflow.main-view-task` implementation that matches the newer screenshot.
-That branch owns unified navigation and uses SessionsView(model:repoPath:…).
-This branch keeps its existing navigation while changing workspace ownership.
-Integration must replace that branch's repository multiplexer with WorktreeNodeView
-and the worktree registry, retain its unified navigator, and put scoped conversation
-and ordinary terminal actions in its toolbar. Do not copy back this branch's old
-Sessions-only sidebar. No files in either sibling checkout were edited.
+That branch's committed unified navigation is now integrated through a local
+Loopflow rebase. The unified navigator remains mounted across presentation
+changes; its toolbar now launches scoped conversations and ordinary terminals.
+WorktreeNodeView and the retained registry own terminal grouping. No files in
+either sibling checkout were edited, and its uncommitted launcher/docs work was
+not imported.
+
+Review found and corrected two integration issues: newly imported Session JSON
+fixtures needed the required terminal_ids field; All work needed repository
+launch context despite retaining the previous Task selection. Native focus is
+also disabled while the terminal surface is hidden by list/details navigation.
+The forget transaction now rechecks placement enabled state before deleting.
+
+## Integrated proof and review
+
+- Swift integration: initial run passed 82 of 93 tests; all 11 failures were
+  imported navigation fixtures missing the newly required terminal_ids field.
+  Updated the wire fixtures, then all 16 workspace/navigation/launch tests passed,
+  including the new visible-scope regression.
+- Real Ghostty checks passed for local shell attachment and for a launch command
+  exiting into a usable shell whose terminal marker survives.
+- Empty-registration deletion proof passed again after adding the transactional
+  enabled-state check. `cargo clippy --all-targets -- -D warnings` passed.
+- Captured and inspected `ux-reference-images/integrated-workspace.png` from the
+  compiled native app in fixture mode. It shows the unified toolbar with both
+  actions and visible launch scope. Its fixture ELSEWHERE row has no local
+  terminal and is expected; it is not evidence about the user's live clients.
+- Review: shared CLI remains the only current-Wave filter; window surfaces have
+  one owner; outer close retains the inner store; replaying a closed launch pane
+  cannot rerun the provider; hidden terminals cannot claim focus; returning to
+  terminals remains available even when a checkout group is hidden.
+- Post-integration Xcode `build-for-testing` succeeded for the app and test
+  targets. The installed app was not replaced. All commits remain local.

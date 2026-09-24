@@ -216,6 +216,24 @@ struct WorkspaceNavigationTests {
         }
     }
 
+    @Test("New conversation follows visible scope while All work retains its previous selection")
+    func conversationFollowsZoom() async throws {
+        let model = try model()
+        await model.refresh()
+        #expect(model.conversationScope == .repo("/src/loopflow"))
+        model.select(.wave(id: "wave-1"))
+        guard case .wave = model.conversationScope else { Issue.record("Expected Wave context"); return }
+        model.select(.task(id: "issue-review"))
+        guard case .task(_, let issue) = model.conversationScope else { Issue.record("Expected Task context"); return }
+        #expect(issue == model.task(id: "issue-review")?.task.task.identifier)
+        model.navigation.content = .overview
+        #expect(model.selection == .task(id: "issue-review"))
+        #expect(model.conversationScope == .repo("/src/loopflow"))
+        #expect(model.conversationLabel == "loopflow")
+        model.navigation.content = .terminals
+        guard case .task = model.conversationScope else { Issue.record("Expected restored Task context"); return }
+    }
+
     private func model() throws -> PodiumModel {
         let source = try ReadingSource(roadmap: roadmapJSON(), sessions: sessionsJSON())
         return PodiumModel(query: RegistryQuery { args, _ in try await source.read(args) }, repoPath: "/src/loopflow")
@@ -238,7 +256,7 @@ struct WorkspaceNavigationTests {
         return try JSONDecoder().decode(SessionRecord.self, from: Data("""
         {"id":"\(id)","kind":"interactive","work":\(workJSON),"title":"\(id)",
          "detail":"codex","cwd":"/src/loopflow","state":"active",
-         "ready_summary":null,"open_argv":["lf","session","open","\(id)"]}
+         "ready_summary":null,"terminal_ids":[],"open_argv":["lf","session","open","\(id)"]}
         """.utf8))
     }
 }

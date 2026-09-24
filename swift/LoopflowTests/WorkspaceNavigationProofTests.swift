@@ -183,7 +183,7 @@ struct WorkspaceNavigationProofTests {
         #expect(window.firstResponder === terminal)
     }
 
-    @Test("The mounted workspace retains a Session and companion split through Work navigation")
+    @Test("The mounted workspace retains navigation and completes a Session without ending its Task or companion")
     func workspaceRetainsNativeSplit() async throws {
         _ = NSApplication.shared
         GhosttyManager.shared.initialize()
@@ -204,6 +204,8 @@ struct WorkspaceNavigationProofTests {
             case "roadmap": return roadmap
             case "ls": return "[]"
             case "session" where args.dropFirst().first == "list": return records
+            case "session" where args == ["session", "complete", "navigation-split"]:
+                return "Session completed"
             case "activity": return #"{"generated_at":1,"since":0,"limit":50,"truncated":false,"items":[]}"#
             default: throw RegistryQueryError("Unexpected operation in navigation proof")
             }
@@ -309,6 +311,39 @@ struct WorkspaceNavigationProofTests {
         }
         #expect(_terminalText(sessionSurface).components(separatedBy: draft).count == 3)
         #expect(_terminalText(shellSurface).components(separatedBy: companion).count == 3)
+
+        try view.inspect().find(viewWithAccessibilityIdentifier: "session-action-complete").button().tap()
+        let completionDeadline = ContinuousClock.now + .seconds(3)
+        while terminals[0].surface != nil, ContinuousClock.now < completionDeadline {
+            try await Task.sleep(for: .milliseconds(20))
+        }
+        try await settle(window)
+        #expect(model.sessions.value?.isEmpty == true)
+        #expect(workspace.multiplexer.pane(forSessionId: "navigation-split") == nil)
+        #expect(terminals[0].surface == nil)
+        #expect(terminals[1].surface == shellSurface)
+        #expect(workspace.multiplexer.layout.allPanes.map(\.id) == [shellPane])
+        #expect(workspace.multiplexer.focusedPaneId == shellPane)
+        #expect(model.selection == .task(id: "issue-review"))
+        #expect(model.task(id: "issue-review")?.task.task.completed == false)
+        try view.inspect().find(viewWithAccessibilityIdentifier: "workspace-work-details").button().tap()
+        try await settle(window)
+        #expect(throws: Never.self) {
+            try view.inspect().find(text: "No open Sessions for this Work")
+        }
+        try view.inspect().find(viewWithAccessibilityIdentifier: "workspace-return-terminals").button().tap()
+        try await settle(window)
+        #expect(window.firstResponder === terminals[1])
+        try #require(terminals[1].surface == shellSurface)
+        let afterCompletion = "companion-after-completion"
+        let input = afterCompletion + "\n"
+        input.withCString { ghostty_surface_text(shellSurface, $0, UInt(input.utf8.count)) }
+        let replyDeadline = ContinuousClock.now + .seconds(3)
+        while _terminalText(shellSurface).components(separatedBy: afterCompletion).count < 3,
+              ContinuousClock.now < replyDeadline {
+            try await Task.sleep(for: .milliseconds(20))
+        }
+        #expect(_terminalText(shellSurface).components(separatedBy: afterCompletion).count == 3)
     }
 
     private func _terminalText(_ surface: ghostty_surface_t, viewport: Bool = false) -> String {

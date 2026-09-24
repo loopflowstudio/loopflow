@@ -11,11 +11,20 @@ use crate::ops::error::{OpsError, OpsResult};
 use crate::ops::progress::Progress;
 use crate::ops::{
     abandon_branch, arm, commit_workflow, create_or_update_pr, rebase_with_recovery, release_bump,
-    release_check, release_notes, release_publish, release_run, release_status, release_tag,
-    submit, AbandonOptions, CommitOptions, LandOptions, PrOptions, RebaseOptions,
+    release_check, release_notes, release_publish, release_status, release_tag, submit,
+    AbandonOptions, CommitOptions, LandOptions, PrOptions, RebaseOptions,
 };
 
 pub fn execute_flow_ops(repo: &Path, item: &Op, progress: &impl Progress) -> OpsResult<()> {
+    execute_flow_ops_with_cron(repo, item, progress, None)
+}
+
+pub(crate) fn execute_flow_ops_with_cron(
+    repo: &Path,
+    item: &Op,
+    progress: &impl Progress,
+    cron_receipt: Option<&crate::ops::cron::accounting::CronExecution>,
+) -> OpsResult<()> {
     let mut argv = vec!["lf".to_string(), item.command.clone()];
     argv.extend(item.args.iter().cloned());
 
@@ -72,7 +81,7 @@ pub fn execute_flow_ops(repo: &Path, item: &Op, progress: &impl Progress) -> Ops
             )?;
             Ok(())
         }
-        Some(Commands::Release { cmd }) => execute_release(repo, cmd, progress),
+        Some(Commands::Release { cmd }) => execute_release(repo, cmd, progress, cron_receipt),
         Some(Commands::Doctor { json }) => crate::lf::commands::doctor::run(json)
             .map_err(|error| OpsError::Message(error.to_string())),
         Some(Commands::TelemetryScorecard { json }) => run_telemetry_scorecard(repo, json),
@@ -289,14 +298,23 @@ fn execute_pr(repo: &Path, cmd: PrCommand, progress: &impl Progress) -> OpsResul
     }
 }
 
-fn execute_release(repo: &Path, cmd: ReleaseCommand, progress: &impl Progress) -> OpsResult<()> {
+fn execute_release(
+    repo: &Path,
+    cmd: ReleaseCommand,
+    progress: &impl Progress,
+    cron_receipt: Option<&crate::ops::cron::accounting::CronExecution>,
+) -> OpsResult<()> {
     match cmd {
+        ReleaseCommand::History { .. } => Err(OpsError::Message(
+            "release history is a read-only CLI operation".into(),
+        )),
         ReleaseCommand::Run { version, target } => {
-            release_run(
+            crate::ops::release::release_run_with_cron(
                 repo,
                 version.as_deref().unwrap_or("patch"),
                 target.as_deref(),
                 progress,
+                cron_receipt,
             )?;
             Ok(())
         }

@@ -31,3 +31,27 @@
 - The source's `sync_main` can leave edits in a stash. The design removes that
   call from release selection rather than reopening historical LOO-266 or
   changing the shared helper's unrelated callers.
+
+## Implementation decisions
+
+- The active Run is now the implementation step. Human review's one-execution
+  catch-up decision is retained; the opening review-only note describes the
+  preceding session.
+- Store each obligation and all coalescing links in one atomic JSON replacement.
+  This is the same accounting owner with a smaller crash surface than separate
+  per-opportunity files. Keep the private Home file store and schema-1 cron
+  history; no database migration or scheduler replacement is introduced.
+- Current telemetry is checked before selection. Missing telemetry defers to the
+  next configured firing; failed telemetry remains failure. This draft does not
+  launch extra prerequisite jobs. Daily telemetry remains its existing executor.
+- Disposition writes require an existing local Task Work id plus explicit reason
+  and Wave. They record repair ownership without claiming a remote handoff.
+- Legacy artifact receipts missing required UI proof invoke the exact-source UI
+  gate before read-back can qualify; no historical capability gap is assumed.
+- No configured two-opportunity proof or deployment is claimed. Preserve the
+  observed scorecard blocker and unresolved Intelligence handoff through review.
+- Built-CLI read probes reported stale ambient Wave identity, and one concurrent
+  journal initialization reported SQLite locked. Requested file-backed history
+  still returned all 70 retained receipts. This is separate runtime evidence;
+  no registry/auth repair was attempted and no production-journal health is
+  claimed.

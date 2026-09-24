@@ -19,6 +19,7 @@ mod progress;
 pub mod project;
 mod rebase;
 mod release;
+mod release_lock;
 mod run;
 pub mod task;
 pub mod task_actions;
@@ -42,6 +43,7 @@ pub use cron::{
 pub(crate) use cron::{cron_receipt_ids, list_cron_obligations, CronObligation};
 pub use error::{OpsError, OpsResult};
 pub use flow::execute_flow_ops;
+pub(crate) use flow::execute_flow_ops_with_cron;
 pub use land::{arm, mark_ready, submit, LandOptions};
 pub(crate) use land::{finish_arm_after_rebase, finish_submit_after_rebase};
 pub use pr::{create_or_update_pr, current_pr, PrInfo, PrOptions, PrResult};

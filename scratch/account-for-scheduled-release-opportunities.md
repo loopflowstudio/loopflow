@@ -528,12 +528,17 @@ half-contracts.
 
 ## This slice
 
-Human design review: catch-up accepted, using the explicitly allowed one-run
-collapse of misses. Telemetry repair handoff remains unresolved. The kickoff
-mapped authorities, reproduced the leading verification blocker, captured
-baseline facts, and specified the joined outcome/preservation proof.
-Next executable implementation cut is slice 1, carried through slices 2–4
-before claiming the feature works. Slice 5 is required operational acceptance.
+Slices 1–4 have a first implementation in this checkout: retained daily
+obligations, atomic opportunity/coalescing updates, explicit cron execution
+context, mechanical release flow, shared mutation locking, exact candidate
+recovery, verification and public read-back, failure disposition, and history.
+Focused behavioral validation is in progress. The complete contract above still
+governs review; this is not a configured publication or a completed Task.
+
+Slice 5 remains open. The observed scorecard schema failure still blocks current
+scheduled verification, and the required host UI gate has not been run by this
+implementation session. No install, cron sync/trigger, publication, PM write, or
+repair handoff has occurred. The pinned lifecycle retains landing authority.
 
 ## Slice ledger
 
@@ -554,6 +559,55 @@ before claiming the feature works. Slice 5 is required operational acceptance.
   cases; distinguish a real published tag from a qualifying KR settlement;
   remove the proposed doctor health gate that would create a telemetry/release
   dependency cycle.
+
+- Implementation uses one atomically replaced obligation document containing its
+  opportunities and links, rather than separately committing reciprocal link
+  files. This removes the partial-link crash window without another writer.
+- A file descriptor carried alongside the exact cron receipt fences attribution;
+  a receipt id alone cannot attach a manual invocation to scheduled evidence.
+  Scheduled and manual release mutations also share the target OS lock.
+- Source selection reads fetched origin and verifies in an owned exact-source
+  checkout. Focused preservation test passes for local commits, staged/unstaged
+  bytes, untracked files, unchanged HEAD/branch, and byte-identical index on
+  both no-change and verification failure.
+- Five accounting tests passed for frozen delayed coverage, candidate retry,
+  stale settlement, failed unselected catch-up, schedule replacement, and
+  corrupt-record preservation. New history fixture tests reject collapsed,
+  triggered, unknown, and unverified rows as a consecutive pair while retaining
+  failed telemetry and late repair ownership.
+- A real shell cron target confirms three missed due times link to one execution;
+  its zero exit remains unverified. The OS-lock test keeps exclusion after the
+  parent drops its descriptor while a child survives. Neither is a live
+  scheduled release or a killed production publisher.
+- Nine publisher tests passed, including mocked public-service recovery with a
+  real temporary installer and binary smoke, changed/missing artifact rejection,
+  missing required host verification, and actual descriptor propagation through
+  `uv run python`. Public networking, signing, UI automation, and publication
+  remain unexercised in this session.
+- Cutover finding: target kind is execution provenance, not daily obligation
+  identity. Changing the installed target from skill to flow preserves activation
+  and scheduling continuity; old process receipts still do not gain settlements.
+
+- Final focused proof at this implementation checkpoint: 14 Rust boundary tests,
+  three release integration cases (caller preservation, candidate preparation,
+  same-tag recovery), and ten Python publisher cases passed. The history fixture
+  tests also passed after the count-window adjustment. `cargo fmt --check`,
+  `cargo clippy --all-targets -- -D warnings`, Python Ruff, and the `lf` binary
+  build passed. These are focused implementation checks, not the lifecycle gate
+  or full CI matrix.
+- Manual release/tag/publication interventions now survive automatic retries and
+  collapsed coverage. They disqualify the corresponding unattended pair. Direct
+  publisher stages require the owning inherited release descriptor.
+- A durable successor link closes the predecessor obligation even if the old
+  snapshot rewrite is interrupted. A focused test preserves this boundary and
+  distinct identities across same-second reconfiguration.
+- Due times arriving during an execution receive a recorded wait reason and
+  exact next configured firing, without extending the original covered set.
+- Built-CLI read-back returned the same 70 physical receipts, 36 failed telemetry
+  targets, 37 undispositioned failures, no qualifying pair, and unknown pre-cutover
+  opportunity coverage. `flow show release-run` resolved to the mechanical op.
+  Stale ambient Wave/journal-lock warnings are retained in `research.md`; no
+  runtime repair or configured acceptance is inferred from these read probes.
 
 ## Measure
 

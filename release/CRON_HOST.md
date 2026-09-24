@@ -93,3 +93,50 @@ does not claim that elapsed evidence in advance.
 
 Loopflow remains the concrete deployment. Mirror this shape into Cadenza only
 when its release needs it; do not extract a generic deployment platform.
+
+## Scheduled release settlements
+
+```bash
+lf release history --wave infrastructure --days 35 --json
+lf cron disposition <failed-receipt-or-opportunity-id> \
+  --wave infrastructure --owner <registered-task-work-id> \
+  --reason "Repair the failed check; retry through the next configured firing"
+```
+
+Infrastructure resolves `release-run` to the repository's mechanical flow.
+Each scheduled wake captures all outstanding original due times and executes
+one release operation. Earlier misses point to that execution; they cannot
+supply extra publication or no-change settlements. Due times arriving while
+it runs wait for the next wake. An incomplete candidate keeps its original
+owner, tag, and commit through recovery.
+
+`release history` joins retained obligations, execution attempts, verification,
+product outcomes, and physical cron receipts. It also reports failed telemetry
+and late or missing repair dispositions. `observation_frontier: null` means
+opportunity observation has not begun; historical process success never fills
+that gap. Due times reconstructed before observation retain uncertain timezone
+provenance. The report keeps older owner records when current rows refer to them.
+
+The scheduler's exit status and the release outcome are separate facts. A zero
+exit without product proof remains unverified. Published settlement requires
+exact artifact hashes, required checks, and a public exact-version installer
+smoke. No-change requires an empty fetched source range, a fully verified
+published baseline, and current scheduled telemetry. Deferred work retains its
+reason and continuation; failed attempts survive later recovery.
+
+A repair disposition references an existing registered Task and records local
+repair ownership. It does not start work, assign a remote issue, or erase the
+failure. The earliest disposition timestamp determines whether ownership was
+recorded within a day. Pending external handoffs remain pending.
+
+Ordinary `cron trigger` records intervention before asking launchd to kickstart;
+it does not terminate an active job. A firing that may have resulted from that
+request is marked `triggered`. Triggered executions cannot qualify as unattended
+settlements. Two adjacent original due opportunities need two distinct automatic
+executions, with at least one publication; collapsed rows cannot form that pair.
+
+The publisher launcher must preserve the inherited `LF_RELEASE_LOCK_FD`
+descriptor and its environment reference through `exec`. It is an OS lock
+capability, not a permission flag. The Python publisher retains it through its
+subprocesses, so a surviving publication child still excludes another release
+when its parent exits. A launcher that closes it fails with a named diagnostic.

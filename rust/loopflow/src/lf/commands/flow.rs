@@ -337,7 +337,23 @@ impl SkillExecutor for CliFlowExecutor<'_> {
         } else {
             eprintln!("op: {}", ops.item.display_name());
         }
-        crate::ops::execute_flow_ops(&self.repo, &ops.item, &NullProgress)?;
+        let cron = self
+            .cli
+            .cron_receipt
+            .as_ref()
+            .zip(self.cli.cron_lock_fd)
+            .map(
+                |(receipt_id, lock_fd)| crate::ops::cron::accounting::CronExecution {
+                    receipt_id: receipt_id.clone(),
+                    lock_fd,
+                },
+            );
+        crate::ops::execute_flow_ops_with_cron(
+            &self.repo,
+            &ops.item,
+            &NullProgress,
+            cron.as_ref(),
+        )?;
         Ok(())
     }
 

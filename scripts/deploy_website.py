@@ -38,6 +38,9 @@ def _run(
     print(f"$ {shlex.join(cmd)}", flush=True)
     return subprocess.run(
         cmd,
+        pass_fds=(int(os.environ["LF_RELEASE_LOCK_FD"]),)
+        if "LF_RELEASE_LOCK_FD" in os.environ
+        else (),
         cwd=cwd,
         check=True,
         capture_output=capture,

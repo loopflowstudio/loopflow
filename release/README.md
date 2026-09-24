@@ -10,6 +10,7 @@ find release -maxdepth 2 -type f | sort
 ```bash
 scripts/bootstrap-cron-host.sh infrastructure  # preflight, sync, and configured-path receipts
 lf cron history --wave infrastructure --days 35
+lf release history --wave infrastructure --days 35 --json
 ```
 
 ```bash
@@ -93,7 +94,8 @@ credentialed boundary: DMG signing/notarization, crates.io, R2, Fly deployment,
 and the GitHub Release. It deploys the website from the exact tag and requires
 `/healthz` to report that tag. If the proof fails it restores the previous Fly
 image and leaves the release incomplete. Publishing the non-draft GitHub
-Release is the final completion marker.
+Release records an external effect. Scheduled settlement follows public artifact
+read-back and exact-version installer smoke, with every required check retained.
 
 The publisher controller runs from current main while its source path is the
 leased exact-tag worktree. This lets an incomplete immutable tag resume with a
@@ -102,11 +104,21 @@ An ambiguous Fly command result is accepted only when `/healthz` and the root
 page prove the exact tag; rollback starts only after that production proof
 fails.
 
-The daily run is idempotent. No merged changes is success. If a tag's hosted
+The daily run is idempotent. No merged changes settles only after the published
+baseline and current required verification pass. Selection uses fetched origin
+without resetting caller commits, index, or working files. If a tag's hosted
 build succeeded but publishing stopped, the next run downloads that run's
 artifacts and resumes the same tag instead of cutting another patch.
 The runner leases that tag's publisher worktree until the publisher exits, so
 concurrent re-entry and worktree cleanup cannot remove a checkout still in use.
+
+Preparation runs the required `scripts/test.py --ui-host` gate before tagging.
+The publisher retains candidate hashes and gate evidence before external writes.
+Its `verify --tag <tag>` mode checks the public asset set and hashes, versioned
+DMG, website release identity, crate version, and installed `lf`/`lfd` versions in
+an isolated Home. A crash after publication resumes this read-back for the same
+candidate. A missing historical host-gate result must be executed against that
+exact source; published assets cannot substitute for the check.
 
 Append to `release/unreleased/DECISIONS.md` only when the change captures durable intent: policy choices, scope calls, paths not taken, or decisions a contributor would cite months later. Skip bug-fix churn and mechanical edits.
 

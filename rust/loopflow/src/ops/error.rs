@@ -20,6 +20,11 @@ pub enum OpsError {
     Parse(String),
     #[error("{0}")]
     Message(String),
+    #[error("release deferred: {reason}; continuation: {continuation}")]
+    ReleaseDeferred {
+        reason: String,
+        continuation: String,
+    },
     #[error("rebase onto {onto} failed ({detail})")]
     RebaseConflict {
         onto: String,

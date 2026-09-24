@@ -80,3 +80,26 @@ publisher receipt are the positive evidence retained here.
 6. Making retrospective release health change doctor's exit creates a cycle:
    release awaits telemetry, which runs doctor. Keep that history in the release
    view while preserving existing doctor's scheduling checks.
+
+## Implementation read-back
+
+The built candidate's `flow show release-run` prints `op: release run patch`.
+Its `release history --wave infrastructure --days 35 --json` retained all 70
+physical receipts, including 36 failed telemetry targets and one failed release
+target. It reports no qualifying pair and `observation_frontier: null` because
+this implementation has not been installed or synced. Captured JSON is
+`evidence/implementation-history.json`. Zero due rows in that observation are
+unknown accounting coverage, not proof of zero configured obligations.
+
+Both read commands emitted an ambient Wave identity warning: inherited
+`LF_WAVE_ID` was absent from the selected registry. The concurrent history read
+also reported the journal unavailable because SQLite was locked. Both commands
+returned their requested output successfully. No registry repair, placement
+change, or lifecycle command followed these warnings; the source-level CLI
+projection does not establish production journal health.
+
+The public-download field was checked against the primary
+[GitHub CLI release exporter](https://github.com/cli/cli/blob/trunk/pkg/cmd/release/shared/fetch.go):
+`assets[].url` exports the browser download URL. The implementation uses that
+public URL without forwarding publisher credentials. This source check is not
+a live asset download.

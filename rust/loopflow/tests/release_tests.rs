@@ -804,6 +804,7 @@ fn release_run_is_a_green_noop_without_merged_changes() {
         ReleaseRunOutcome::NoChanges {
             target: "default".to_string(),
             latest_tag: Some("v0.9.1".to_string()),
+            origin_commit: git_output(&repo, &["rev-parse", "HEAD"]),
         }
     );
 }
@@ -844,6 +845,7 @@ fn release_run_checks_the_host_local_publisher_role() {
         ReleaseRunOutcome::NoChanges {
             target: "default".to_string(),
             latest_tag: Some("v0.9.1".to_string()),
+            origin_commit: git_output(&repo, &["rev-parse", "HEAD"]),
         }
     );
 }
@@ -2203,4 +2205,59 @@ fn release_tag_fails_if_remote_tag_points_to_different_commit() {
     let message = err.to_string();
     assert!(message.contains("already exists on origin"));
     assert!(message.contains("expected"));
+}
+
+#[test]
+fn release_nochange_and_failed_verification_preserve_caller_branch_index_and_bytes() {
+    let gh_script = write_gh_script("[]");
+    let _env = EnvGuard::new(&[("gh", gh_script.as_str())]);
+    for verify in ["true", "exit 19"] {
+        let repo = TestRepo::new();
+        fs::create_dir_all(repo.path().join(".lf")).unwrap();
+        fs::write(
+            repo.path().join(".lf/config.yaml"),
+            format!("release:\n  targets:\n    default:\n      verify: ['{verify}']\n"),
+        )
+        .unwrap();
+        fs::write(repo.path().join("tracked.txt"), "published\n").unwrap();
+        git(&repo, &["add", ".lf/config.yaml", "tracked.txt"]);
+        git(&repo, &["commit", "-m", "published baseline"]);
+        git(&repo, &["push", "origin", "HEAD"]);
+        let origin = git_output(&repo, &["rev-parse", "HEAD"]);
+        git(&repo, &["tag", "v0.9.1"]);
+        // Local commits and both index/worktree edits must survive source selection.
+        fs::write(repo.path().join("local.txt"), "local commit\n").unwrap();
+        git(&repo, &["add", "local.txt"]);
+        git(&repo, &["commit", "-m", "caller only"]);
+        fs::write(repo.path().join("tracked.txt"), "staged\n").unwrap();
+        git(&repo, &["add", "tracked.txt"]);
+        fs::write(repo.path().join("tracked.txt"), "unstaged\n").unwrap();
+        fs::write(repo.path().join("untracked.txt"), "untracked\n").unwrap();
+        let head = git_output(&repo, &["rev-parse", "HEAD"]);
+        let branch = git_output(&repo, &["symbolic-ref", "HEAD"]);
+        let index = fs::read(repo.path().join(".git/index")).unwrap();
+        let result = release_run(repo.path(), "patch", None, &NullProgress);
+        if verify == "true" {
+            assert!(
+                matches!(result.unwrap(), ReleaseRunOutcome::NoChanges { origin_commit, .. } if origin_commit == origin)
+            );
+        } else {
+            assert!(result.unwrap_err().to_string().contains("verification"));
+        }
+        assert_eq!(git_output(&repo, &["rev-parse", "HEAD"]), head);
+        assert_eq!(git_output(&repo, &["symbolic-ref", "HEAD"]), branch);
+        assert_eq!(fs::read(repo.path().join(".git/index")).unwrap(), index);
+        assert_eq!(
+            fs::read_to_string(repo.path().join("tracked.txt")).unwrap(),
+            "unstaged\n"
+        );
+        assert_eq!(
+            fs::read_to_string(repo.path().join("untracked.txt")).unwrap(),
+            "untracked\n"
+        );
+        assert_eq!(
+            fs::read_to_string(repo.path().join("local.txt")).unwrap(),
+            "local commit\n"
+        );
+    }
 }

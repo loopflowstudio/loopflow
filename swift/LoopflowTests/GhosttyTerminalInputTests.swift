@@ -6,11 +6,54 @@ import Testing
 import GhosttyKit
 #endif
 @testable import LoopflowMac
+@testable import Loopflow
 
 @Suite("Embedded terminal input")
 struct GhosttyTerminalInputTests {
     // SwiftPM links GhosttyKit; the Xcode compile-check target builds the fallback.
 #if canImport(GhosttyKit)
+    @Test("Shell-launched sessions focus their live terminal and external clients stay elsewhere")
+    @MainActor
+    func shellSessionAttachment() async throws {
+        _ = NSApplication.shared
+        let manager = GhosttyManager.shared
+        manager.initialize()
+        let registry = SessionsWorkspaceRegistry()
+        let workspace = registry.workspace(for: NSTemporaryDirectory())
+        let store = SessionsStore(scope: .repo(NSTemporaryDirectory()), surfaces: registry.surfaces)
+        var views: [GhosttyMetalView] = []
+        defer { for view in views { view.handleSurfaceClose() } }
+        var records: [SessionRecord] = []
+        for id in ["one", "two"] {
+            workspace.multiplexer.newShell()
+            let pane = workspace.multiplexer.focusedPaneId
+            let view = registry.surfaces.view(for: .shell(pane))
+            view.frame = CGRect(x: 0, y: 0, width: 600, height: 300)
+            view.workingDirectory = NSTemporaryDirectory()
+            view.command = buildWorkspaceShellCommand(id: pane, argv: ["/bin/sh", "-c", "printf 'attachment-ready\\n'; exec /bin/cat"], env: [:])
+            view.createSurface(manager: manager)
+            views.append(view)
+            _ = try #require(view.surface)
+            let data = try JSONSerialization.data(withJSONObject: [
+                "id": id, "kind": "interactive", "work": NSNull(), "title": id,
+                "detail": "test", "cwd": NSTemporaryDirectory(), "state": "active",
+                "ready_summary": NSNull(), "terminal_ids": [pane], "open_argv": ["unused"],
+            ])
+            records.append(try JSONDecoder().decode(SessionRecord.self, from: data))
+        }
+        store.reconcile(records)
+        for record in records {
+            #expect(store.sessions.first { $0.id == record.id }?.state == .live)
+            #expect(await store.select(record.id) == record)
+            #expect(store.localTerminal(for: record) == .shell(record.terminalIds[0]))
+        }
+        let otherWindow = SessionsStore(scope: .repo(NSTemporaryDirectory()))
+        otherWindow.reconcile(records)
+        #expect(otherWindow.sessions.allSatisfy { $0.state == .elsewhere })
+        #expect(await otherWindow.select("one") == nil)
+        #expect(registry.surfaces.hasSurface(.shell(records[0].terminalIds[0])))
+    }
+
     @Test("block clicks copy command and output, then the live prompt clears selection")
     @MainActor
     func commandBlockClickAndCopy() async throws {

@@ -1618,6 +1618,47 @@ impl SqliteStore {
         Ok(())
     }
 
+    pub fn forget_wave(&self, wave_id: &WaveId, dry_run: bool) -> StoreResult<()> {
+        let mut conn = self.conn.lock().expect("store mutex poisoned");
+        let tx = conn.transaction_with_behavior(TransactionBehavior::Immediate)?;
+        let state: String = tx.query_row(
+            "SELECT work_state FROM waves WHERE id = ?1",
+            params![wave_id],
+            |row| row.get(0),
+        )?;
+        if state != "abandoned" {
+            return Err(StoreError::InvalidData(
+                "only an abandoned Wave registration can be forgotten".to_string(),
+            ));
+        }
+        let mut blockers = Self::wave_retirement_blockers_in(&tx, wave_id)?;
+        for (table, column) in [
+            ("waves", "parent_wave_id"),
+            ("metric_instruments", "wave_id"),
+            ("metric_observations", "wave_id"),
+        ] {
+            let count: i64 = tx.query_row(
+                &format!("SELECT COUNT(*) FROM {table} WHERE {column} = ?1"),
+                params![wave_id],
+                |row| row.get(0),
+            )?;
+            if count > 0 {
+                blockers.push(format!("{count} {table} records"));
+            }
+        }
+        if !blockers.is_empty() {
+            return Err(StoreError::InvalidData(format!(
+                "cannot forget Wave {wave_id}: {}",
+                blockers.join(", ")
+            )));
+        }
+        if !dry_run {
+            tx.execute("DELETE FROM waves WHERE id = ?1", params![wave_id])?;
+        }
+        tx.commit()?;
+        Ok(())
+    }
+
     // Exec ledger (`run_events`): the machine-grain, append-only record of
     // every process written directly by `lf`.
 

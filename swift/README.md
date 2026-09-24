@@ -74,17 +74,23 @@ Task FlowSteps run ordinary `lf --tui --as task:<id> <skill>` provider Runs.
 Ad-hoc Asks run in the originating Run's exact checkout so the session can edit
 files before the caller resumes. The app lists, opens, and acts on the shared
 Rust `SessionRecord` projection; it owns no parallel queue.
-Selecting another session replaces the focused pane's view. Use the split
-controls first when both sessions should remain visible; closing the final pane
-clears it without ending the durable session.
-Completing the selected Session returns the main pane to its empty workspace.
-Use **New shell** for a bare terminal and **All work** to inspect the plan. A shell pane closes when its process exits;
-closing a shell pane ends its shell. A Session whose provider client is
-stopped elsewhere reclassifies to ELSEWHERE instead of showing a dead
-terminal as live. Terminals survive Sessions ↔ Work navigation and
-repository switches within a window. Each window owns its panes and surfaces;
-the same Session shown from another window is simply another client and reads
-ELSEWHERE there.
+Use **New conversation** to talk about the selected repo, Wave, Project, or Task
+in the configured app or terminal. It opens an interactive prompt without
+creating a Task or running an autonomous operating pass. **New terminal** opens
+an ordinary shell in the active checkout. A conversation launched here returns
+to a shell when it exits or hands off to an external app.
+
+Selecting a Session in another checkout restores that worktree's conversation,
+companion terminals, split layout, and focus. Worktree headers split entire
+workspaces; terminal headers split within one workspace. Hiding a worktree
+retains its processes. Closing a shell ends that shell. Changing a shell's
+directory does not move it into another workspace.
+
+Manually launched agents in these shells register against their actual terminal.
+Selecting their Session focuses the existing shell. External clients still read
+ELSEWHERE and require explicit Move here. Terminals survive Work list and detail
+navigation and repository switches within a window. Native surfaces belong to
+that window and are never mounted twice.
 Session reads and preparation run in the opened repository rather than a
 machine-wide aggregate.
 
@@ -92,6 +98,12 @@ Planning and Sessions share the Podium readings; there is no separate
 Sessions-only roadmap query. The displayed planning timestamp is snapshot
 generation time, not evidence of a fresh provider sync. A failed read keeps its
 last useful evidence and exposes the error. Unknown Session counts show **?**.
+
+Current Wave navigation reads `lf ls --all --current --json`. The CLI excludes
+abandoned and retired registrations; unfiltered `lf ls` retains historical
+registry visibility. Authored `wave/<name>/GOAL.md` files still appear before
+their first registration.
+
 
 The compact Podium bar reads live process evidence from `lf ps --json`. Its
 lamp reflects OS-live state: black is off, green is working, blue is stalled,

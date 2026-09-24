@@ -508,7 +508,7 @@ fn scope_waves_to_repo(waves: Vec<Wave>, all: bool) -> Vec<Wave> {
         .collect()
 }
 
-pub fn ls(json: bool, all: bool) -> Result<()> {
+pub fn ls(json: bool, all: bool, current: bool) -> Result<()> {
     let rt = tokio::runtime::Runtime::new()?;
     rt.block_on(async {
         let Some(store) = open_existing_store().await.map(std::sync::Arc::new) else {
@@ -521,7 +521,10 @@ pub fn ls(json: bool, all: bool) -> Result<()> {
         let waves = scope_waves_to_repo(waves, all);
         let mut snapshots = Vec::with_capacity(waves.len());
         for wave in waves {
-            snapshots.push(snapshot_wave(&store, &wave).await?);
+            let snapshot = snapshot_wave(&store, &wave).await?;
+            if !current || current_wave(&snapshot) {
+                snapshots.push(snapshot);
+            }
         }
         snapshots.sort_by(|a, b| a.repo.cmp(&b.repo).then(a.name.cmp(&b.name)));
         if json {
@@ -531,6 +534,10 @@ pub fn ls(json: bool, all: bool) -> Result<()> {
         }
         Ok(())
     })
+}
+
+fn current_wave(wave: &WaveSnapshot) -> bool {
+    wave.status != WorkStatus::Abandoned && wave.retired_at.is_none()
 }
 
 /// `lf status [wave]` — one Wave's Work hierarchy, Runs, and loop.
@@ -603,6 +610,7 @@ pub fn status(wave: Option<&str>, json: bool) -> Result<()> {
 /// answers "is it healthy"; this answers "what is being worked on and what
 /// could be".
 pub fn roadmap(wave: Option<&str>, json: bool, all: bool) -> Result<()> {
+    let include_history = wave.is_some();
     let rt = tokio::runtime::Runtime::new()?;
     rt.block_on(async {
         let evaluation_time = now();
@@ -658,6 +666,9 @@ pub fn roadmap(wave: Option<&str>, json: bool, all: bool) -> Result<()> {
         let mut roadmaps = Vec::with_capacity(waves.len());
         for wave in &waves {
             let snapshot = snapshot_wave(&store, wave).await?;
+            if !include_history && !current_wave(&snapshot) {
+                continue;
+            }
             let project_snapshots = wave_roadmap_projects(&store, wave, evaluation_time).await?;
             roadmaps.push(WaveRoadmap {
                 wave: snapshot,

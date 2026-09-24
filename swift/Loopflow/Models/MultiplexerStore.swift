@@ -103,6 +103,9 @@ public final class MultiplexerStore {
             paneColors: paneColors,
             nextColorIndex: nextColorIndex
         )
+        // Undo may restore a shell pane, but must never replay a completed or
+        // interrupted conversation's initial launch command.
+        shellCommands.removeValue(forKey: paneId)
         if layout.allPanes.count == 1 {
             layout = layout.replacingContent(of: paneId, with: .empty)
             zoomedPaneId = nil

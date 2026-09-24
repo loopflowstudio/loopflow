@@ -98,7 +98,7 @@ struct PortfolioRepoStateTests {
         }]
         """
         let query = RegistryQuery { args, _ in
-            #expect(args == ["ls", "--all", "--json"])
+            #expect(args == ["ls", "--all", "--current", "--json"])
             return json
         }
         let state = PortfolioRepoState(repo: repo, registryQuery: query)

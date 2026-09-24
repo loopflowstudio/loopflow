@@ -1591,7 +1591,9 @@ fn main() -> anyhow::Result<()> {
             Some(Commands::List) => {
                 in_repo_runtime(&args, |_| loopflow::lf::commands::list::show_all())
             }
-            Some(Commands::Ls { json, all }) => loopflow::lf::commands::waves::ls(*json, *all),
+            Some(Commands::Ls { json, all, current }) => {
+                loopflow::lf::commands::waves::ls(*json, *all, *current)
+            }
             Some(Commands::Status { wave, json }) => {
                 loopflow::lf::commands::waves::status(wave.as_deref(), *json)
             }

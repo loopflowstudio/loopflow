@@ -491,6 +491,9 @@ pub enum Commands {
         /// current repository (worktrees collapse to their main checkout).
         #[arg(long)]
         all: bool,
+        /// Exclude abandoned and retired registrations from current navigation.
+        #[arg(long)]
+        current: bool,
     },
     /// Show one Wave's Project/Task hierarchy, Runs, and live loop
     /// state from the registry. Defaults to the ambient wave (`LF_WAVE_ID`).
@@ -774,6 +777,16 @@ pub enum SessionCommand {
 
 #[derive(Subcommand, Debug)]
 pub enum WorkCommand {
+    /// Forget an abandoned, empty Wave registration without touching repository files
+    Forget {
+        #[arg(value_parser = ["wave"])]
+        kind: String,
+        id: String,
+        #[arg(long)]
+        dry_run: bool,
+        #[arg(long)]
+        json: bool,
+    },
     /// Show current Work state and placement
     Status {
         #[arg(value_parser = ["wave", "project", "task"])]
@@ -1949,7 +1962,8 @@ mod tests {
             waves.command,
             Some(Commands::Ls {
                 json: true,
-                all: false
+                all: false,
+                current: false
             })
         ));
     }

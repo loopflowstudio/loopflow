@@ -76,6 +76,9 @@ struct WorktreeWorkspaceTests {
         #expect(store.layout.pane(for: shell)?.content == .shell)
         #expect(store.shellCommands[shell] == [])
         #expect(store.shellCommands[store.focusedPaneId]?.last == "hello")
+        store.close(store.focusedPaneId)
+        store.undoClose()
+        #expect(store.shellCommands[store.focusedPaneId] == nil)
     }
 }
 

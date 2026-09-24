@@ -16,7 +16,7 @@ struct RegistryQueryTests {
         ]
         """
         let query = RegistryQuery { args, _ in
-            #expect(args == ["ls", "--all", "--json"])
+            #expect(args == ["ls", "--all", "--current", "--json"])
             return json
         }
 
@@ -39,7 +39,7 @@ struct RegistryQueryTests {
         let counter = CallCounter()
         let query = RegistryQuery { args, _ in
             await counter.increment()
-            #expect(args == ["ls", "--all", "--json"])
+            #expect(args == ["ls", "--all", "--current", "--json"])
             return json
         }
 

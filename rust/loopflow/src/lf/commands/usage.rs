@@ -2,10 +2,11 @@
 
 use std::path::Path;
 
-use anyhow::{anyhow, Result};
+use anyhow::Result;
 use time::OffsetDateTime;
 
 use crate::controller::wave::journal::short_id;
+use crate::lf::commands::work_catalog::WorkCatalog;
 use crate::lf::commands::WorkFilter;
 use crate::lf::output::{format_cost, format_int, truncate, Colors};
 use crate::run_record::RunSnapshot;
@@ -34,6 +35,7 @@ pub fn run(
             project,
             task,
         },
+        &WorkCatalog::load()?,
     )?;
     if json {
         println!("{}", serde_json::to_string(&runs)?);
@@ -51,20 +53,13 @@ fn since_days(days: u32) -> i64 {
     }
 }
 
-fn collect_since_at(home: &Path, since: i64, filter: WorkFilter<'_>) -> Result<Vec<RunSnapshot>> {
-    crate::run_record::scan_runs_since(home, since)
-        .map_err(|error| anyhow!("Run records unavailable: {error}"))
-        .map(|runs| {
-            runs.into_iter()
-                .filter(|run| {
-                    filter.matches(
-                        run.subject("wave"),
-                        run.subject("project"),
-                        run.subject("task"),
-                    )
-                })
-                .collect()
-        })
+fn collect_since_at(
+    home: &Path,
+    since: i64,
+    filter: WorkFilter<'_>,
+    catalog: &WorkCatalog,
+) -> Result<Vec<RunSnapshot>> {
+    crate::lf::commands::runs::collect_runs_started_since_at(home, filter, since, catalog)
 }
 
 fn print_report(runs: &[RunSnapshot], days: u32) {
@@ -189,6 +184,7 @@ mod tests {
                 project: None,
                 task: Some("LOO-265"),
             },
+            &super::WorkCatalog::default(),
         )
         .unwrap();
         assert_eq!(runs.len(), 1);
@@ -207,6 +203,7 @@ mod tests {
                 project: None,
                 task: Some("LOO-999"),
             },
+            &super::WorkCatalog::default(),
         )
         .unwrap();
         assert!(excluded.is_empty());

@@ -27,6 +27,7 @@ use crate::durable::{Home, WorkRef, WorkStatus};
 use crate::engine::wave_home::{HomeActionDto, HomeRuntimeDto, HomeState};
 use crate::lf::commands::runs::{format_tokens, RunSnapshot};
 use crate::lf::output::Colors;
+use crate::ops::task_execution::TaskExecutionState;
 use crate::pm::{PmItem, PmKr, PmPortfolioValidator, PmProject, PmSnapshot, ProjectFlowPlan};
 use crate::store::{open_existing_store, SharedStore};
 use crate::work::project::Project;
@@ -191,10 +192,6 @@ pub struct ProjectRuntimeSnapshot {
 pub struct TaskRuntimeSnapshot {
     pub work_id: String,
     pub project_id: String,
-    /// The live Project this Task routes to (successor when the
-    /// historical owner is terminal). `None` when the chain is broken. The app
-    /// derives "routed to a successor" by comparing this to `project_id`.
-    pub routing_project_id: Option<String>,
     pub status: WorkStatus,
     pub reason: String,
     pub updated_at: String,
@@ -236,11 +233,6 @@ pub struct LocalProgressEvidence {
     pub authored_commits: Option<bool>,
     pub recovery_required: Option<bool>,
     pub reason: Option<String>,
-}
-
-struct TaskConditionEvidence {
-    local_progress: LocalProgressEvidence,
-    human_session: bool,
 }
 
 /// A Task's shared condition and the evidence that proves it.
@@ -957,23 +949,25 @@ pub(crate) async fn snapshot_wave(store: &SharedStore, wave: &Wave) -> Result<Wa
     })
 }
 
-async fn snapshot_task_runtime(
-    _store: &SharedStore,
+fn snapshot_task_runtime(
+    execution: &crate::ops::task_execution::TaskExecutionSnapshot,
     task: &Task,
     status: WorkStatus,
-) -> Result<TaskRuntimeSnapshot> {
-    let routing_project_id = Some(task.project_id.to_string());
+) -> TaskRuntimeSnapshot {
     let config = crate::engine::config::load_config_or_default(Some(&task.worktree));
     let (provider, _) = crate::engine::config::parse_agent(config.agent());
-    Ok(TaskRuntimeSnapshot {
+    TaskRuntimeSnapshot {
         work_id: task.id.to_string(),
         project_id: task.project_id.to_string(),
-        routing_project_id,
-        reason: status.reason().to_string(),
+        reason: if work_status_is_terminal(&status) {
+            status.reason().to_string()
+        } else {
+            execution.reason.clone()
+        },
         status,
         updated_at: format_time(task.updated_at).unwrap_or_default(),
         provider,
-    })
+    }
 }
 
 async fn snapshot_project_runtime(
@@ -1274,12 +1268,16 @@ async fn snapshot_task_detail(
     let latest = prs.last();
     let active = prs.iter().find(|pr| pr.is_active());
     let observed_at = now();
-    let runtime = match task {
+    let (runtime, execution) = match task {
         Some(task) => {
+            let execution = crate::ops::task_execution::task_execution(store, &task.id).await?;
             let status = child_work_status(store, &ChildRef::Task(task.id.clone())).await?;
-            Some(snapshot_task_runtime(store, task, status).await?)
+            (
+                Some(snapshot_task_runtime(&execution, task, status)),
+                Some(execution),
+            )
         }
-        None => None,
+        None => (None, None),
     };
     let reference = task_reference(&item, task, active, &prs);
     let worktree_blocker = match task {
@@ -1291,6 +1289,23 @@ async fn snapshot_task_detail(
         (Some(_), Some(_)) | (None, _) => None,
     };
     let next_move = task.map(|_| {
+        if let Some(execution) = execution.as_ref().filter(|execution| {
+            execution.state != TaskExecutionState::Idle
+                && runtime
+                    .as_ref()
+                    .is_some_and(|runtime| !work_status_is_terminal(&runtime.status))
+        }) {
+            return NextMove {
+                owner: match execution.state {
+                    TaskExecutionState::Human => NextMoveOwner::User,
+                    TaskExecutionState::Blocked | TaskExecutionState::Unknown => {
+                        NextMoveOwner::Project
+                    }
+                    _ => NextMoveOwner::Task,
+                },
+                reason: execution.reason.clone(),
+            };
+        }
         next_move_for_task(
             &runtime
                 .as_ref()
@@ -1334,50 +1349,37 @@ async fn snapshot_task_detail(
                 crate::ops::task::no_active_pr_resume_refusal(&task.plan.identifier, active, latest)
             })
         });
-    let (action_evidence, human_session) = match task {
-        Some(task) => {
+    let action_evidence = match (task, runtime.as_ref()) {
+        (Some(task), Some(runtime)) => {
             let predecessor_phase = match active.and_then(|pr| pr.parent_pr_id.as_ref()) {
                 Some(parent_id) => store.get_task_pr(parent_id).await?.map(|pr| pr.phase()),
                 None => None,
             };
-            let work = store
-                .work_for_child(&ChildRef::Task(task.id.clone()))
-                .await?;
-            let human_session = store
-                .flow_position(&task.id)
-                .await?
-                .is_some_and(|position| position.is_human());
-            let work_status = store.work_status(&work).await?;
-            (
-                Some(TaskActionEvidence {
-                    status: work_status,
-                    latest_pr_phase: latest.map(TaskPr::phase),
-                    latest_pr_after_merge: latest
-                        .filter(|pr| pr.phase() == PrPhase::Merged)
-                        .map(TaskPr::after_merge),
-                    latest_pr_merge_request: latest.and_then(TaskPr::merge_request),
-                    latest_pr_presentation_current: latest
-                        .filter(|pr| pr.phase() == PrPhase::Open)
-                        .map(|pr| pr.presentation().is_some()),
-                    completion_refusal: completion_refusal.as_deref(),
-                    resume_refusal: resume_refusal.as_deref(),
-                    ci: active.and_then(|pr| pr.fresh_ci()),
-                    predecessor_phase,
-                    abandon_intent: task.abandon_intent.is_some(),
-                    launch_refusal: launch_refusal.as_deref(),
-                }),
-                human_session,
-            )
+            Some(TaskActionEvidence {
+                status: runtime.status.clone(),
+                execution: execution.as_ref(),
+                latest_pr_phase: latest.map(TaskPr::phase),
+                latest_pr_after_merge: latest
+                    .filter(|pr| pr.phase() == PrPhase::Merged)
+                    .map(TaskPr::after_merge),
+                latest_pr_merge_request: latest.and_then(TaskPr::merge_request),
+                latest_pr_presentation_current: latest
+                    .filter(|pr| pr.phase() == PrPhase::Open)
+                    .map(|pr| pr.presentation().is_some()),
+                completion_refusal: completion_refusal.as_deref(),
+                resume_refusal: resume_refusal.as_deref(),
+                ci: active.and_then(|pr| pr.fresh_ci()),
+                predecessor_phase,
+                abandon_intent: task.abandon_intent.is_some(),
+                launch_refusal: launch_refusal.as_deref(),
+            })
         }
-        None => (None, false),
+        _ => None,
     };
     let condition = derive_task_condition(
         runtime.as_ref(),
         &next_move,
-        TaskConditionEvidence {
-            local_progress,
-            human_session,
-        },
+        local_progress,
         action_evidence.as_ref(),
         observed_at,
     );
@@ -1529,14 +1531,10 @@ fn inspect_task_local_progress(
 fn derive_task_condition(
     runtime: Option<&TaskRuntimeSnapshot>,
     next_move: &NextMove,
-    evidence: TaskConditionEvidence,
+    local_progress: LocalProgressEvidence,
     action_evidence: Option<&TaskActionEvidence>,
     observed_at: time::OffsetDateTime,
 ) -> TaskConditionSnapshot {
-    let TaskConditionEvidence {
-        local_progress,
-        human_session,
-    } = evidence;
     let active_pr_phase = action_evidence
         .and_then(|e| e.latest_pr_phase)
         .filter(|phase| phase.is_active());
@@ -1545,7 +1543,20 @@ fn derive_task_condition(
         && local_progress.recovery_required == Some(false)
         && local_progress.authored_commits == Some(true)
         && matches!(active_pr_phase, Some(PrPhase::Open | PrPhase::Publishing));
-    let (state, reason) = if human_session {
+    let execution = action_evidence.and_then(|evidence| evidence.execution);
+    let (state, reason) = if let Some(execution) = execution
+        .filter(|execution| execution.state != TaskExecutionState::Idle)
+        .filter(|_| runtime.is_none_or(|runtime| !work_status_is_terminal(&runtime.status)))
+    {
+        let state = match execution.state {
+            TaskExecutionState::Starting | TaskExecutionState::Running => TaskConditionState::Clear,
+            TaskExecutionState::Human => TaskConditionState::Waiting,
+            TaskExecutionState::Blocked => TaskConditionState::Blocked,
+            TaskExecutionState::Unknown => TaskConditionState::Unknown,
+            TaskExecutionState::Idle => unreachable!("idle execution uses local progress"),
+        };
+        (state, execution.reason.clone())
+    } else if execution.is_some_and(|execution| execution.state == TaskExecutionState::Human) {
         (
             TaskConditionState::Waiting,
             "Waiting for your review".to_string(),
@@ -2560,8 +2571,8 @@ mod tests {
     use super::{
         derive_task_condition, historical_failure_line, metric_portfolio_text, next_move_for_task,
         snapshot_project_runtime, truncate_start, LocalProgressEvidence,
-        LocalProgressEvidenceState, NextMove, NextMoveOwner, TaskConditionEvidence,
-        TaskConditionState, TaskRuntimeSnapshot,
+        LocalProgressEvidenceState, NextMove, NextMoveOwner, TaskConditionState,
+        TaskRuntimeSnapshot,
     };
     use crate::controller::wave::metrics::{
         MetricEvidenceDto, MetricFreshnessDto, MetricIdentity, MetricPortfolioDto,
@@ -2569,6 +2580,7 @@ mod tests {
     };
     use crate::durable::WorkStatus;
     use crate::ops::task_actions::TaskActionEvidence;
+    use crate::ops::task_execution::{TaskExecutionSnapshot, TaskExecutionState};
     use crate::planning::{LinearProjectId, ProjectPlan};
     use crate::store::sqlite::SqliteStore;
     use crate::store::Store;
@@ -2740,7 +2752,6 @@ mod tests {
         let runtime = TaskRuntimeSnapshot {
             work_id: "task-1".to_string(),
             project_id: "project-1".to_string(),
-            routing_project_id: Some("project-1".to_string()),
             status: WorkStatus::Ready,
             reason: "ready".to_string(),
             updated_at: "2026-07-21T00:00:00Z".to_string(),
@@ -2750,36 +2761,23 @@ mod tests {
             owner: NextMoveOwner::Task,
             reason: "Task is ready".to_string(),
         };
-        let evidence = |human_session| TaskConditionEvidence {
-            local_progress: LocalProgressEvidence {
-                state: LocalProgressEvidenceState::Observed,
-                unsettled: Some(false),
-                dirty: Some(false),
-                authored_commits: Some(false),
-                recovery_required: Some(false),
-                reason: None,
-            },
-            human_session,
+        let evidence = || LocalProgressEvidence {
+            state: LocalProgressEvidenceState::Observed,
+            unsettled: Some(false),
+            dirty: Some(false),
+            authored_commits: Some(false),
+            recovery_required: Some(false),
+            reason: None,
         };
 
         let advisory = derive_task_condition(
             Some(&runtime),
             &next_move,
-            evidence(false),
+            evidence(),
             None,
             OffsetDateTime::now_utc(),
         );
-        let human = derive_task_condition(
-            Some(&runtime),
-            &next_move,
-            evidence(true),
-            None,
-            OffsetDateTime::now_utc(),
-        );
-
         assert_eq!(advisory.state, TaskConditionState::Clear);
-        assert_eq!(human.state, TaskConditionState::Waiting);
-        assert_eq!(human.reason, "Waiting for your review");
 
         let delegated = derive_task_condition(
             Some(&runtime),
@@ -2787,7 +2785,7 @@ mod tests {
                 owner: NextMoveOwner::Project,
                 reason: "Waiting for Project selection".to_string(),
             },
-            evidence(false),
+            evidence(),
             None,
             OffsetDateTime::now_utc(),
         );
@@ -2800,11 +2798,89 @@ mod tests {
                 owner: NextMoveOwner::User,
                 reason: "Merge the pull request".to_string(),
             },
-            evidence(false),
+            evidence(),
             None,
             OffsetDateTime::now_utc(),
         );
         assert_eq!(user_handoff.state, TaskConditionState::Waiting);
+    }
+
+    #[test]
+    fn task_condition_uses_execution_evidence_before_dirty_work() {
+        for (state, expected) in [
+            (TaskExecutionState::Starting, TaskConditionState::Clear),
+            (TaskExecutionState::Running, TaskConditionState::Clear),
+            (TaskExecutionState::Human, TaskConditionState::Waiting),
+            (TaskExecutionState::Blocked, TaskConditionState::Blocked),
+            (TaskExecutionState::Unknown, TaskConditionState::Unknown),
+        ] {
+            let execution = TaskExecutionSnapshot {
+                state,
+                reason: "worker evidence".into(),
+                step: None,
+                run_id: None,
+            };
+            let actions = TaskActionEvidence {
+                status: WorkStatus::Ready,
+                execution: Some(&execution),
+                latest_pr_phase: None,
+                latest_pr_after_merge: None,
+                latest_pr_merge_request: None,
+                latest_pr_presentation_current: None,
+                completion_refusal: None,
+                resume_refusal: None,
+                ci: None,
+                predecessor_phase: None,
+                abandon_intent: false,
+                launch_refusal: Some("next launch configuration is invalid"),
+            };
+            let condition = derive_task_condition(
+                None,
+                &NextMove {
+                    owner: NextMoveOwner::Task,
+                    reason: "ready".into(),
+                },
+                LocalProgressEvidence {
+                    state: LocalProgressEvidenceState::Observed,
+                    unsettled: Some(true),
+                    dirty: Some(true),
+                    authored_commits: Some(false),
+                    recovery_required: Some(false),
+                    reason: None,
+                },
+                Some(&actions),
+                OffsetDateTime::now_utc(),
+            );
+            assert_eq!(condition.state, expected);
+            assert_eq!(condition.reason, execution.reason);
+            if state == TaskExecutionState::Human {
+                for status in [WorkStatus::Done, WorkStatus::Abandoned] {
+                    let runtime = TaskRuntimeSnapshot {
+                        work_id: "task-1".into(),
+                        project_id: "project-1".into(),
+                        status,
+                        reason: "terminal".into(),
+                        updated_at: "2026-07-21T00:00:00Z".into(),
+                        provider: "codex".into(),
+                    };
+                    let terminal = derive_task_condition(
+                        Some(&runtime),
+                        &NextMove {
+                            owner: NextMoveOwner::Project,
+                            reason: "Task is terminal".into(),
+                        },
+                        condition.local_progress.clone(),
+                        Some(&TaskActionEvidence {
+                            status: runtime.status.clone(),
+                            ..actions
+                        }),
+                        OffsetDateTime::now_utc(),
+                    );
+                    assert_eq!(terminal.state, TaskConditionState::Waiting);
+                    assert_eq!(terminal.reason, "Waiting for your review");
+                }
+            }
+        }
     }
 
     #[test]
@@ -2819,6 +2895,7 @@ mod tests {
         };
         let action_evidence = TaskActionEvidence {
             status: WorkStatus::Ready,
+            execution: None,
             latest_pr_phase: Some(PrPhase::Open),
             latest_pr_after_merge: None,
             latest_pr_merge_request: None,
@@ -2836,10 +2913,7 @@ mod tests {
                 owner: NextMoveOwner::User,
                 reason: "Merge the pull request".to_string(),
             },
-            TaskConditionEvidence {
-                local_progress,
-                human_session: false,
-            },
+            local_progress,
             Some(&action_evidence),
             OffsetDateTime::now_utc(),
         );

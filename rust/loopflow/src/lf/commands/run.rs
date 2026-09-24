@@ -24,7 +24,7 @@ use tracing::{debug, info, instrument, trace, warn};
 #[instrument(skip(cli), fields(skill = ?skill, has_message = message.is_some()))]
 pub fn run(skill: Option<&str>, message: Option<&str>, cli: &Cli) -> Result<()> {
     let mut built = build_prompt(skill, message, cli)?;
-    built.subject = cli.work_subject_selector();
+    built.subjects = cli.work_subject_selector().into_iter().collect();
 
     print_context_header(&built, cli);
     launch_prompt(&built, cli)
@@ -62,7 +62,7 @@ pub fn run_bound(
         crate::work::wave::context::WAVE_ID_ENV.to_string(),
         binding.wave_id.to_string(),
     );
-    built.subject = Some(format!("{}:{}", binding.work.kind(), binding.work.id()));
+    built.subjects = binding.subjects.clone();
 
     print_context_header(&built, cli);
     launch_prompt(&built, cli)
@@ -81,7 +81,7 @@ struct PromptBuild {
     model: Option<String>,
     skill_name: Option<String>,
     log_name: String,
-    subject: Option<String>,
+    subjects: Vec<String>,
 }
 
 /// A skill turn ready for a runner-owned provider surface.
@@ -277,7 +277,6 @@ fn build_prompt_at(
             skill: skill.map(|value| value.to_string()),
             resolved_skill: discovered_skill.clone(),
             surface,
-            directions: cli.direction.clone(),
             docs: cli.docs.clone(),
             wave,
             wave_memory,
@@ -287,7 +286,6 @@ fn build_prompt_at(
             cwd: Some(repo_root.clone()),
             max_turns: cli.max_turns,
             yolo_mode: cli.yolo || config.yolo,
-            include_config_directions: !cli.no_direction,
             source_overrides: ContextSourceOverrides {
                 diff_files: cli.diff_files_setting(),
                 diff: cli.diff_setting(),
@@ -387,7 +385,7 @@ fn build_prompt_at(
         model,
         skill_name,
         log_name,
-        subject: None,
+        subjects: Vec::new(),
     })
 }
 
@@ -457,12 +455,6 @@ fn skill_launch_seed(
 fn print_context_header(built: &PromptBuild, cli: &Cli) {
     let colors = Colors::new();
     let header = format_context_header(&built.context, &built.components);
-    let direction_names: Vec<String> = built
-        .components
-        .directions
-        .iter()
-        .map(|d| d.name.clone())
-        .collect();
     let cli_model = if cli.model.is_some() {
         built.agent_config.agent.as_deref()
     } else {
@@ -470,7 +462,6 @@ fn print_context_header(built: &PromptBuild, cli: &Cli) {
     };
     let command = format_reproducible_command(
         built.skill_name.as_deref(),
-        &direction_names,
         built.components.wave.as_deref(),
         &cli.docs,
         cli.clipboard,
@@ -673,10 +664,10 @@ fn begin_run_capture(
         .clone()
         .unwrap_or_else(|| built.repo_root.clone());
     let subjects = built
-        .subject
-        .clone()
+        .subjects
+        .iter()
+        .cloned()
         .map(crate::run_record::SubjectAttribution::declared)
-        .into_iter()
         .collect::<Vec<_>>();
     let spec = crate::run_record::RunSpec {
         harness: built.harness.clone(),
@@ -785,19 +776,6 @@ pub(crate) fn attributed_context(
         None,
         "surface",
     );
-    for direction in &components.directions {
-        push(
-            &direction.content,
-            Kind::Direction,
-            Scope::Task,
-            direction.name.clone(),
-            direction
-                .source
-                .is_file()
-                .then(|| direction.source.to_string_lossy().to_string()),
-            "direction",
-        );
-    }
     if let Some(wave) = &components.wave {
         let open = format!("<lf:wave name=\"{wave}\">");
         let goal = tagged_block(task_prompt, &open, "</lf:wave>").unwrap_or(open.as_str());
@@ -1145,7 +1123,7 @@ printf '%s\n' '{"type":"result","subtype":"success","usage":{"input_tokens":7,"o
             model: None,
             skill_name: Some("implement".to_string()),
             log_name: "generic-run-proof".to_string(),
-            subject: Some("task:LOO-265".to_string()),
+            subjects: vec!["task:LOO-265".to_string()],
         };
         let capture = begin_run_capture(&built, "headless", &built.agent_config).unwrap();
         let run_id = capture.run_id();
@@ -1254,7 +1232,7 @@ printf '%s\n' '{"type":"result","subtype":"success","usage":{"input_tokens":7,"o
                 model: None,
                 skill_name: Some("research".to_string()),
                 log_name: log_name.to_string(),
-                subject: Some("task:LOO-267".to_string()),
+                subjects: vec!["task:LOO-267".to_string()],
             }
         }
 
@@ -1557,7 +1535,6 @@ printf '%s\n' '{"type":"result","subtype":"success","usage":{"input_tokens":7,"o
             name: "proof".to_string(),
             agent: None,
             default_agent: None,
-            directions: Vec::new(),
             action_style: None,
             content: Some(
                 "# Persisted\n\nThese are the instructions captured at Flow start.".to_string(),

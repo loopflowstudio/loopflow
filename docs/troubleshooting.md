@@ -26,8 +26,25 @@ Read its durable state before restarting anything:
 
 ```bash
 lf task status INF-123 --json
+lf runs --task INF-123 --json
 lf session list
 ```
+
+`ready` means the Task is nonterminal. Status reports `execution` separately:
+starting, running, waiting for human review, blocked, idle, or unknown. Read its
+reason and worker Run before recovery. Wave status and roadmap use that same
+execution evidence for their recommendations. Dirty files under a live worker
+are ongoing progress.
+
+Task Run history includes independent helpers, whether recorded with the public
+issue identifier or internal Task ID. An idle Task Flow does not prove those
+helpers are idle; a completed launcher does not prove its interactive Session
+is closed. Inspect Sessions separately. Recover advancement through Task
+controls; reserve bound helper Runs for distinct contributions.
+
+Task status and `lf runs` show up to 50 Runs started in the last seven days.
+Inspect an exact Run ID for older evidence; an empty recent list does not prove
+that no worker or Session remains active.
 
 Answer an exact pending question, send unsolicited durable direction through
 Steer, or resume a stopped process through the same Task Work:

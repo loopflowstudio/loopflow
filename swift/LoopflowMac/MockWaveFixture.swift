@@ -204,7 +204,6 @@ enum MockWaveFixture {
               "runtime": {
                 "work_id": "ts_22222222222222222222222222222222",
                 "project_id": "ps_11111111111111111111111111111111",
-                "routing_project_id": "ps_11111111111111111111111111111111",
                 "status": "ready",
                 "reason": "ready",
                 "updated_at": "2026-07-13T19:00:00Z",

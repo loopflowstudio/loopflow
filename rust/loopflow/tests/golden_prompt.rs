@@ -12,7 +12,6 @@ struct GoldenCase {
     repo: String,
     skill: Option<String>,
     surface: Option<Surface>,
-    directions: Vec<String>,
     docs: Vec<String>,
     diff_files: bool,
     diff: bool,
@@ -72,7 +71,6 @@ fn golden_prompts_match_python() {
             message: None,
             operate: !case.no_loopflow,
             surface: case.surface.unwrap_or_default(),
-            directions: case.directions.clone(),
             docs: case.docs.clone(),
             files: Vec::new(),
             include_diff: case.diff,
@@ -83,8 +81,8 @@ fn golden_prompts_match_python() {
             related_repos: Vec::new(),
         };
 
-        let gathered = gather_context(&opts).expect("gather context");
-        let prompt = format_prompt(PromptFormatMode::Full, gathered.components()).into_string();
+        let components = gather_context(&opts).expect("gather context");
+        let prompt = format_prompt(PromptFormatMode::Full, &components);
         let actual = normalize_prompt(&prompt, &repo);
 
         let expected_path = case_path.with_extension("md");

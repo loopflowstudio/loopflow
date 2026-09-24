@@ -1,7 +1,7 @@
 # Authoring
 
-The prompt library lives in your repo and is reviewed like code: skills,
-flows, and directions under `.lf/`, goals under `wave/`. This page is how to
+The prompt library lives in your repo and is reviewed like code: skills
+and flows under `.lf/`, goals under `wave/`. This page is how to
 write each one well. Where they resolve and what ships builtin is reference —
 see [`lf` → Skills](lf.md#skills).
 
@@ -114,30 +114,6 @@ with no `flow:` or `skill:` (like `silence`) is a clean no-op exit. With no
 
 Keep flows bounded. A flow is one pass — repetition belongs to Wave,
 Project, and Task runtimes, not to loops inside a flow.
-
-## Directions
-
-A direction shapes judgment — what "good" means for this run:
-
-```markdown
-# .lf/directions/ux.md
-
-Optimize for user experience quality: visibility, feedback, consistency.
-
-## Success
-
-A design doc in scratch/ that another engineer could implement from.
-```
-
-```bash
-lf gate -d ux
-lf gate -d ux,clarity     # directions compose; stack intents
-```
-
-Write a direction as values plus a success condition, not a task list. A
-`ux` direction sets user-facing intent; a `clarity` direction adds
-code-model rigor; stacking gets both. Builtin groups: `infra`, `ux`,
-`craft`, `creativity`, `ceo`.
 
 ## Goals
 
@@ -260,7 +236,7 @@ agents edit the same reviewed file through the ordinary repository workflow;
 ## Adaptation
 
 When an agent learns something repo-specific, the durable home for that
-learning is `.lf/`: adapt the skill, add a direction, or set config — and
+learning is `.lf/`: adapt the skill or set config — and
 commit it with the work so the change stays reviewable. Prompts that live in
 the repo improve the way code does: by diff.
 

@@ -8,6 +8,7 @@ use std::{
 use anyhow::{anyhow, Result};
 
 use crate::controller::wave::journal::short_id;
+use crate::lf::commands::work_catalog::WorkCatalog;
 use crate::lf::commands::WorkFilter;
 use crate::lf::output::{format_cost, truncate, Colors};
 pub use crate::run_record::{AttributionSource, RunSnapshot, RunUsage, SubjectAttribution};
@@ -39,25 +40,25 @@ fn collect_child_runs_at(lf_home: &Path, parent: &str) -> Result<Vec<RunSnapshot
 }
 
 fn collect_runs_started_since(filter: WorkFilter, since: i64) -> Result<Vec<RunSnapshot>> {
-    collect_runs_started_since_at(&crate::store::observability_home_dir(), filter, since)
+    collect_runs_started_since_at(
+        &crate::store::observability_home_dir(),
+        filter,
+        since,
+        &WorkCatalog::load()?,
+    )
 }
 
-fn collect_runs_started_since_at(
+pub(crate) fn collect_runs_started_since_at(
     lf_home: &Path,
     filter: WorkFilter,
     since: i64,
+    catalog: &WorkCatalog,
 ) -> Result<Vec<RunSnapshot>> {
     crate::run_record::scan_runs_since(lf_home, since)
         .map_err(|err| anyhow!("Run records unavailable: {err}"))
         .map(|runs| {
             runs.into_iter()
-                .filter(|run| {
-                    filter.matches(
-                        run.subject("wave"),
-                        run.subject("project"),
-                        run.subject("task"),
-                    )
-                })
+                .filter(|run| catalog.matches_run(run, filter))
                 .collect()
         })
 }
@@ -68,8 +69,10 @@ fn collect_runs_started_since_at(
 pub(crate) fn collect_run_activity_since(
     filter: WorkFilter,
     since: i64,
+    catalog: &WorkCatalog,
 ) -> Result<Vec<RunSnapshot>> {
-    let mut runs = collect_runs_started_since(filter, 0)?;
+    let mut runs =
+        collect_runs_started_since_at(&crate::store::observability_home_dir(), filter, 0, catalog)?;
     runs.retain(|run| run.started >= since || run.ended.is_some_and(|end| end >= since));
     Ok(runs)
 }
@@ -355,6 +358,7 @@ mod tests {
                 task: Some("LOO-265"),
             },
             0,
+            &super::WorkCatalog::default(),
         )
         .unwrap();
 

@@ -90,7 +90,6 @@ fn flow_parsing_parity() {
 - implement
 - step:
     name: review
-    direction: [ux, security]
 "#,
     );
 
@@ -104,7 +103,6 @@ fn flow_parsing_parity() {
                 name: "implement".to_string(),
                 agent: None,
                 default_agent: None,
-                directions: vec![],
                 action_style: None,
                 content: None,
             },
@@ -118,7 +116,6 @@ fn flow_parsing_parity() {
                 name: "review".to_string(),
                 agent: None,
                 default_agent: None,
-                directions: vec!["ux".to_string(), "security".to_string()],
                 action_style: None,
                 content: None,
             },

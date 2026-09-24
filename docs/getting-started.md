@@ -93,7 +93,7 @@ lf task wait <issue-id> --until terminal
 
 | Skill | What it does |
 |------|--------------|
-| `prompt` | Author or audit a skill, direction, Wave goal, or inline prompt |
+| `prompt` | Author or audit a skill, Wave goal, or inline prompt |
 | `design` | Explore the problem, write spec to `scratch/<branch>.md` |
 | `implement` | Read spec, build it |
 | `compress` | Simplify the implementation without changing behavior |
@@ -145,7 +145,7 @@ lf audit    # runs your custom skill
 ```
 
 The [Authoring guide](authoring.md) covers prompt contracts, evidence loops,
-Wave goals, and directions.
+and Wave goals.
 
 ### Shipping
 

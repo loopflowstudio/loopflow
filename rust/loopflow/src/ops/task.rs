@@ -73,7 +73,7 @@ pub struct TaskControlResult {
     pub observation: Observation,
 }
 
-#[derive(Debug, Clone, PartialEq, Eq, serde::Serialize)]
+#[derive(Debug, Clone, PartialEq, serde::Serialize)]
 pub struct TaskSnapshot {
     pub issue_id: String,
     pub issue_identifier: String,
@@ -85,6 +85,9 @@ pub struct TaskSnapshot {
     pub wave: String,
     pub project_id: String,
     pub status: WorkStatus,
+    pub execution: crate::ops::task_execution::TaskExecutionSnapshot,
+    pub runs: Vec<crate::run_record::RunSnapshot>,
+    pub runs_truncated: bool,
     pub worktree: String,
     pub workspace_slug: String,
     pub agent: String,
@@ -3966,8 +3969,18 @@ pub fn task_snapshot(task: &Task) -> OpsResult<TaskSnapshot> {
             task_configuration_refusal(&task)
                 .or_else(|| task_event_launch_refusal(latest_event.as_ref()).map(str::to_string))
         };
+        let execution = crate::ops::task_execution::task_execution(&store, &task.id)
+            .await
+            .map_err(|error| task_error(error.to_string()))?;
+        let (runs, runs_truncated) =
+            crate::lf::commands::runs::collect_runs(crate::lf::commands::WorkFilter {
+                task: Some(task.id.as_str()),
+                ..Default::default()
+            })
+            .map_err(|error| task_error(error.to_string()))?;
         let action_evidence = TaskActionEvidence {
             status: work_status.clone(),
+            execution: Some(&execution),
             latest_pr_phase: latest.map(|pr| pr.phase()),
             latest_pr_after_merge: latest
                 .filter(|pr| pr.phase() == PrPhase::Merged)
@@ -3997,6 +4010,9 @@ pub fn task_snapshot(task: &Task) -> OpsResult<TaskSnapshot> {
             wave: wave.name().to_string(),
             project_id: task.project_id.to_string(),
             status: work_status,
+            execution,
+            runs,
+            runs_truncated,
             worktree: task.worktree.display().to_string(),
             workspace_slug: task.workspace_slug,
             agent,

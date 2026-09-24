@@ -568,7 +568,6 @@ mod tests {
                                 skill: None,
                                 steps: Vec::new(),
                                 description: "Adjust the chord".to_string(),
-                                direction: Vec::new(),
                             },
                         ),
                         (
@@ -578,7 +577,6 @@ mod tests {
                                 skill: None,
                                 steps: Vec::new(),
                                 description: "No-op".to_string(),
-                                direction: Vec::new(),
                             },
                         ),
                     ]

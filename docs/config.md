@@ -29,7 +29,6 @@ config files.
 | Include clipboard | `-c, --clipboard` | — |
 | Disable Loopflow guidance | `--no-loopflow` | — |
 | Context files | — | `context: [FILE]` |
-| Direction (judgment/intent) | `--direction NAME` | `direction: NAME` |
 | Chrome automation | `--chrome` | `chrome: true` |
 | Yolo mode (skip permissions) | — | `yolo: true` |
 | Claude/Codex/OpenCode launch surface | `--tui` / `--ide` | `session.launch: tui` |
@@ -72,7 +71,6 @@ For most settings, repo overrides global. For additive settings (`docs`, `contex
 ```yaml
 # ~/.lf/config.yaml (global)
 agent: claude:opus
-direction: clarity
 session:
   terminal: Ghostty       # presents human FlowStep sessions on this Home
 
@@ -89,8 +87,6 @@ agent: claude:opus
 
 session:
   launch: tui
-
-direction: clarity
 
 context:
   - src/schema.py
@@ -314,19 +310,6 @@ frontmatter never changes scheduling.
 
 Flows declare a required User gate on the exact skill occurrence with a stable
 `id` and `human: true`; see [Authoring](authoring.md#flows).
-
-### Direction
-
-Directions shape judgment and intent—how the coding agent approaches work.
-
-| | |
-|---|---|
-| **CLI** | `--direction ux` or `--direction ux,clarity` |
-| **Config** | `direction: clarity` or `direction: [ux, clarity]` |
-
-Direction files live in `.lf/directions/` as markdown. Built-in direction groups:
-`infra`, `ux`, `craft`, `creativity`, `ceo`. Group members are also
-available directly (for example `security`, `feedback`, `clarity`, `alive`).
 
 ### Chrome
 

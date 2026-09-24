@@ -26,7 +26,6 @@ pub struct LaunchPromptInput {
     pub skill: Option<String>,
     pub resolved_skill: Option<Skill>,
     pub surface: Surface,
-    pub directions: Vec<String>,
     pub docs: Vec<String>,
     pub wave: Option<String>,
     /// Wave memory already resolved by the Work layer.
@@ -37,7 +36,6 @@ pub struct LaunchPromptInput {
     pub cwd: Option<PathBuf>,
     pub max_turns: Option<u32>,
     pub yolo_mode: bool,
-    pub include_config_directions: bool,
     pub source_overrides: ContextSourceOverrides,
     pub summary: Option<String>,
     pub client_context: ClientContext,
@@ -54,16 +52,6 @@ pub struct PreparedLaunchPrompt {
     pub prompt: String,
 }
 
-fn merge_directions(base: &[String], extra: &[String]) -> Vec<String> {
-    let mut combined = base.to_vec();
-    for direction in extra {
-        if !combined.contains(direction) {
-            combined.push(direction.clone());
-        }
-    }
-    combined
-}
-
 /// Build context + launch config from canonical launch-prep input.
 pub fn prepare_launch_prompt(
     config: &Config,
@@ -74,7 +62,6 @@ pub fn prepare_launch_prompt(
         skill,
         resolved_skill,
         surface,
-        directions: mut requested_directions,
         docs: requested_docs,
         wave,
         wave_memory,
@@ -84,23 +71,11 @@ pub fn prepare_launch_prompt(
         cwd,
         max_turns,
         yolo_mode,
-        include_config_directions,
         source_overrides,
         summary,
         client_context,
         related_repos,
     } = input;
-
-    if let Some(skill) = resolved_skill.as_ref() {
-        requested_directions = merge_directions(&skill.directions, &requested_directions);
-    }
-
-    let config_directions: &[String] = if include_config_directions {
-        config.direction.as_deref().unwrap_or_default()
-    } else {
-        &[]
-    };
-    let directions = merge_directions(config_directions, &requested_directions);
 
     let mut docs = config.docs.clone();
     docs.extend(requested_docs);
@@ -118,7 +93,6 @@ pub fn prepare_launch_prompt(
         message,
         operate: !no_loopflow,
         surface,
-        directions,
         docs,
         files: Vec::new(),
         wave,
@@ -129,32 +103,32 @@ pub fn prepare_launch_prompt(
         related_repos,
     };
 
-    let mut gathered = gather_context(&opts)?;
+    let mut components = gather_context(&opts)?;
     if let Some(skill) = resolved_skill {
-        gathered.components_mut().skill = Some(skill);
+        components.skill = Some(skill);
     }
-    let deduplicated_docs = drop_native_instruction_docs(gathered.components_mut(), &repo_root);
+    let deduplicated_docs = drop_native_instruction_docs(&mut components, &repo_root);
 
     if let Some(summary) = summary {
-        gathered.components_mut().summaries.push(Document {
+        components.summaries.push(Document {
             path: "wave-summary".to_string(),
             content: summary,
             source: DocumentSource::Summary,
         });
     }
 
-    let prompt = format_prompt(PromptFormatMode::Full, gathered.components()).into_string();
+    let prompt = format_prompt(PromptFormatMode::Full, &components);
 
     let agent = agent
         .or_else(|| {
-            gathered
+            components
                 .skill
                 .as_ref()
                 .and_then(|skill| skill.agent.clone())
         })
         .or_else(|| config.agent.clone())
         .or_else(|| {
-            gathered
+            components
                 .skill
                 .as_ref()
                 .and_then(|skill| skill.default_agent.clone())
@@ -162,12 +136,11 @@ pub fn prepare_launch_prompt(
         .unwrap_or_else(|| default_agent().to_string());
     validate_agent_policy(&agent)?;
 
-    // Keep only system-safe sections (operate/surface/directions) in
+    // Keep only system-safe sections (operate/surface) in
     // the system prompt. Repo content (docs, diffs, wave, clipboard) goes in the
     // task prompt to avoid triggering third-party app classifiers.
-    let system_prompt = format_claude_system_prompt(gathered.components());
-    let task_prompt = format_claude_task_prompt(gathered.components());
-    let components = gathered.into_components();
+    let system_prompt = format_claude_system_prompt(&components);
+    let task_prompt = format_claude_task_prompt(&components);
     let action_style = components
         .skill
         .as_ref()
@@ -247,28 +220,16 @@ mod tests {
     fn create_repo_fixture() -> tempfile::TempDir {
         let tmp = tempdir().expect("tempdir");
         fs::create_dir_all(tmp.path().join(".lf/skills")).expect("skills dir");
-        fs::create_dir_all(tmp.path().join(".lf/directions")).expect("directions dir");
         fs::write(
             tmp.path().join(".lf/skills/test.md"),
             r#"---
 agent: codex:o3
-directions: [thorough]
 action_style: procedural
 ---
 Test skill body.
 "#,
         )
         .expect("write skill");
-        fs::write(
-            tmp.path().join(".lf/directions/thorough.md"),
-            "Be thorough.",
-        )
-        .expect("write direction");
-        fs::write(
-            tmp.path().join(".lf/directions/config.md"),
-            "Config direction.",
-        )
-        .expect("write config direction");
         tmp
     }
 
@@ -455,64 +416,6 @@ Test skill body.
     }
 
     #[test]
-    fn prepare_launch_prompt_merges_config_directions_when_enabled() {
-        let tmp = create_repo_fixture();
-        let config = Config {
-            direction: Some(vec!["config".to_string()]),
-            ..default_test_config()
-        };
-
-        let prepared = prepare_launch_prompt(
-            &config,
-            LaunchPromptInput {
-                repo_root: tmp.path().to_path_buf(),
-                surface: Surface::Headless,
-                directions: vec!["thorough".to_string()],
-                include_config_directions: true,
-                ..LaunchPromptInput::default()
-            },
-        )
-        .expect("prepare launch prompt");
-
-        let names: Vec<String> = prepared
-            .components
-            .directions
-            .iter()
-            .map(|direction| direction.name.clone())
-            .collect();
-        assert_eq!(names, vec!["config".to_string(), "thorough".to_string()]);
-    }
-
-    #[test]
-    fn prepare_launch_prompt_omits_config_directions_when_disabled() {
-        let tmp = create_repo_fixture();
-        let config = Config {
-            direction: Some(vec!["config".to_string()]),
-            ..default_test_config()
-        };
-
-        let prepared = prepare_launch_prompt(
-            &config,
-            LaunchPromptInput {
-                repo_root: tmp.path().to_path_buf(),
-                surface: Surface::Headless,
-                directions: vec!["thorough".to_string()],
-                include_config_directions: false,
-                ..LaunchPromptInput::default()
-            },
-        )
-        .expect("prepare launch prompt");
-
-        let names: Vec<String> = prepared
-            .components
-            .directions
-            .iter()
-            .map(|direction| direction.name.clone())
-            .collect();
-        assert_eq!(names, vec!["thorough".to_string()]);
-    }
-
-    #[test]
     fn prepare_launch_prompt_uses_config_docs() {
         let tmp = create_repo_fixture();
         fs::create_dir_all(tmp.path().join("docs")).expect("docs dir");
@@ -588,7 +491,6 @@ Test skill body.
                     name: "npx/skill-creator".to_string(),
                     agent: Some("codex:o3".to_string()),
                     default_agent: None,
-                    directions: vec!["thorough".to_string()],
                     action_style: Some("procedural".to_string()),
                     content: Some("Skill body".to_string()),
                 }),
@@ -607,11 +509,6 @@ Test skill body.
             Some("npx/skill-creator")
         );
         assert_eq!(prepared.config.agent.as_deref(), Some("codex:o3"));
-        assert!(prepared
-            .components
-            .directions
-            .iter()
-            .any(|direction| direction.name == "thorough"));
     }
 
     #[test]

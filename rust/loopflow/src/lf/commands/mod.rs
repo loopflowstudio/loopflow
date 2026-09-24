@@ -29,6 +29,7 @@ pub mod util;
 pub mod wave_intent;
 pub mod waves;
 pub mod work;
+pub(crate) mod work_catalog;
 
 /// One drill over the Wave → Project → Task Work hierarchy.
 #[derive(Debug, Clone, Copy, Default)]

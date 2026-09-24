@@ -804,6 +804,22 @@ fn print_task(task: &loopflow::work::task::Task, json: bool) -> anyhow::Result<(
             pm_writeback,
             snapshot.status,
         );
+        println!("  execution: {}", snapshot.execution.reason);
+        if let Some(run) = &snapshot.execution.run_id {
+            println!("  worker Run: {run}");
+        }
+        for run in &snapshot.runs {
+            println!(
+                "  Run: {}  {}  {}  {}",
+                run.id,
+                run.label(),
+                run.surface,
+                run.status()
+            );
+        }
+        if snapshot.runs_truncated {
+            println!("  Run history truncated; inspect exact Run IDs for older evidence");
+        }
         println!("  project: {}", task.project_id);
         for pr in &snapshot.prs {
             println!("{}", format_task_pr_line(pr));
@@ -1860,9 +1876,6 @@ mod tests {
             assert!(tables.commands.contains_key(command), "command {command}");
         }
         for flag in [
-            "-d",
-            "-D",
-            "--direction",
             "--docs",
             "-m",
             "-M",
@@ -1882,7 +1895,6 @@ mod tests {
             "-c",
             "-C",
             "--clipboard",
-            "--no-direction",
             "--yolo",
             "-i",
             "-I",
@@ -2212,17 +2224,6 @@ mod tests {
         ];
         let result = reorder_args(args);
         assert_eq!(result, vec!["lf", "-i", "-c", "-m", "claude", "implement"]);
-    }
-
-    #[test]
-    fn reorder_args_no_direction_flag_after_skill() {
-        let args = vec![
-            "lf".to_string(),
-            "implement".to_string(),
-            "--no-direction".to_string(),
-        ];
-        let result = reorder_args(args);
-        assert_eq!(result, vec!["lf", "--no-direction", "implement"]);
     }
 
     #[test]

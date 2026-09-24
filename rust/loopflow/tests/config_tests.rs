@@ -159,48 +159,6 @@ exclude:
 }
 
 // =============================================================================
-// Directions
-// =============================================================================
-
-#[test]
-fn config_direction_as_list() {
-    let temp = TempDir::new().unwrap();
-    write_config(
-        temp.path(),
-        r#"
-direction:
-  - concise
-  - security
-"#,
-    );
-
-    let config = with_clean_home(|| load_config(Some(temp.path())))
-        .unwrap()
-        .unwrap();
-    assert_eq!(
-        config.direction,
-        Some(vec!["concise".to_string(), "security".to_string()])
-    );
-}
-
-#[test]
-fn config_direction_single_item_list() {
-    let temp = TempDir::new().unwrap();
-    write_config(
-        temp.path(),
-        r#"
-direction:
-  - architect
-"#,
-    );
-
-    let config = with_clean_home(|| load_config(Some(temp.path())))
-        .unwrap()
-        .unwrap();
-    assert_eq!(config.direction, Some(vec!["architect".to_string()]));
-}
-
-// =============================================================================
 // Session launch
 // =============================================================================
 

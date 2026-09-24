@@ -28,6 +28,12 @@ provider or sibling Run never blocks you.
   Task Flow's next boundary has one worker. A Task Run crashed mid-work? Inspect
   it with `lf runs`, then run the Task again; helper Runs may work in its
   worktree but do not move its Flow position.
+- **Read execution separately.** `ready` is the Task's lifecycle, not proof
+  that it is parked. Inspect `lf task status <issue> --json`, its execution
+  reason and Runs, and `lf session list` before recovery. Missing or
+  contradictory process evidence is uncertainty, not permission to repeat
+  implementation through `lf --task ... implement`. Recover advancement with
+  Task controls; give intentional helpers distinct, bounded contributions.
 - **Capture stays** — work is a Task node under this Project; only the
   requirement that the ancestry be healthy first is gone. Report a broken
   reader/run once; never narrate a bypass as an accomplishment.

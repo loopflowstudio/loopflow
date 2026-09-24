@@ -232,9 +232,11 @@ Keep `workflow_run.workflows: ["CI"]` in sync with `.github/workflows/ci.yml`. R
 
 ## Rust Tests
 
-Session-command fixtures must work without an installed `lf`. Follow
-[the isolated executable guidance](.lf/directions/testing.md) when testing
-binary resolution or repairing an executable-dependent CI failure.
+Session-command fixtures must work without an installed `lf`. Supply an `LF_BIN`
+fixture, restore it afterward, and serialize environment changes with
+`test_env_lock`. Reuse `TestLfBinGuard` in Task controller tests; keep Session
+spawning mocked. Reproduce executable-resolution failures with the compiled test
+binary, `LF_BIN` and `CARGO_BIN_EXE_lf` unset, and a PATH containing Git but no `lf`.
 
 For worktree creation or checkout-refresh changes, build the current CLI before
 running its Python behavior tests:

@@ -3,6 +3,7 @@
 use serde::{Deserialize, Serialize};
 
 use crate::durable::WorkStatus;
+use crate::ops::task_execution::{TaskExecutionSnapshot, TaskExecutionState};
 use crate::work::task::{AfterMerge, CiObservation, CiState, PrMergeMode, PrMergeRequest, PrPhase};
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize)]
@@ -43,8 +44,10 @@ impl TaskActionModel {
     }
 }
 
+#[derive(Debug)]
 pub struct TaskActionEvidence<'a> {
     pub status: WorkStatus,
+    pub execution: Option<&'a TaskExecutionSnapshot>,
     pub latest_pr_phase: Option<PrPhase>,
     pub latest_pr_after_merge: Option<AfterMerge>,
     pub latest_pr_merge_request: Option<&'a PrMergeRequest>,
@@ -61,6 +64,12 @@ pub fn derive_task_actions(evidence: &TaskActionEvidence) -> TaskActionModel {
     if !matches!(evidence.status, WorkStatus::Done | WorkStatus::Abandoned)
         && !evidence.abandon_intent
     {
+        if let Some(execution) = evidence
+            .execution
+            .filter(|execution| execution.state != TaskExecutionState::Idle)
+        {
+            return action(TaskAction::NoAction, &execution.reason);
+        }
         if let Some(refusal) = evidence.launch_refusal {
             return action(TaskAction::NoAction, refusal);
         }
@@ -145,7 +154,7 @@ fn body_action(evidence: &TaskActionEvidence) -> TaskActionModel {
     if matches!(evidence.status, WorkStatus::Done | WorkStatus::Abandoned) {
         action(TaskAction::NoAction, "Task is terminal")
     } else {
-        action(TaskAction::Resume, "resume the parked Task")
+        action(TaskAction::Resume, "ensure the next Task Flow worker with `lf task run`; inspect independent Runs before starting additional work")
     }
 }
 
@@ -204,6 +213,7 @@ mod tests {
 
     use super::{derive_task_actions, TaskAction, TaskActionEvidence};
     use crate::durable::WorkStatus;
+    use crate::ops::task_execution::{TaskExecutionSnapshot, TaskExecutionState};
     use crate::work::task::{
         AfterMerge, CiObservation, CiState, PrMergeMode, PrMergeRequest, PrPhase,
     };
@@ -215,6 +225,7 @@ mod tests {
     ) -> TaskActionEvidence<'a> {
         TaskActionEvidence {
             status: WorkStatus::Ready,
+            execution: None,
             latest_pr_phase: Some(phase),
             latest_pr_after_merge: after_merge,
             latest_pr_merge_request: None,
@@ -225,6 +236,32 @@ mod tests {
             predecessor_phase: None,
             abandon_intent: false,
             launch_refusal: None,
+        }
+    }
+
+    #[test]
+    fn active_or_uncertain_execution_never_recommends_another_implementation() {
+        for state in [
+            TaskExecutionState::Starting,
+            TaskExecutionState::Running,
+            TaskExecutionState::Unknown,
+            TaskExecutionState::Human,
+            TaskExecutionState::Blocked,
+        ] {
+            let execution = TaskExecutionSnapshot {
+                state,
+                reason: "Inspect the existing worker".into(),
+                step: None,
+                run_id: None,
+            };
+            let mut evidence = evidence(PrPhase::Open, None, None);
+            evidence.execution = Some(&execution);
+            evidence.launch_refusal = Some("next launch configuration is invalid");
+            evidence.latest_pr_presentation_current = Some(false);
+            evidence.predecessor_phase = Some(PrPhase::Abandoned);
+            let model = derive_task_actions(&evidence);
+            assert_eq!(model.recommended, Some(TaskAction::NoAction));
+            assert_eq!(model.reason, execution.reason);
         }
     }
 

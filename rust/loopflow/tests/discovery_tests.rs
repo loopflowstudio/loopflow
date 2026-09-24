@@ -9,7 +9,7 @@ use loopflow::engine::builtins::{builtin_flow_names, builtin_skill_names};
 use loopflow::engine::load_flow;
 use loopflow::lf::discovery::{
     builtin_skill_description, builtin_skills, discover_skill, discover_target, list_all_skills,
-    list_directions, list_user_flows, Target, BUILTIN_FLOW_CATEGORIES, BUILTIN_SKILL_CATEGORIES,
+    list_user_flows, Target, BUILTIN_FLOW_CATEGORIES, BUILTIN_SKILL_CATEGORIES,
 };
 use tempfile::TempDir;
 
@@ -198,23 +198,6 @@ fn repo_skill_shadows_builtin() {
     let (user_skills, _global, builtin_only, _skills) = list_all_skills(Some(repo.path()));
     assert!(user_skills.contains(&"review".to_string()));
     assert!(!builtin_only.contains(&"review".to_string()));
-}
-
-#[test]
-fn discover_directions() {
-    let _home = HomeGuard::new();
-    let repo = TempDir::new().expect("repo");
-    let dir = repo.path().join(".lf/directions");
-    std::fs::create_dir_all(&dir).expect("create directions dir");
-    std::fs::write(dir.join("focus.md"), "Be focused.").expect("write direction");
-    let group_dir = dir.join("mygroup");
-    std::fs::create_dir_all(&group_dir).expect("create group dir");
-    std::fs::write(group_dir.join("alpha.md"), "Alpha").expect("write group direction");
-
-    let directions = list_directions(Some(repo.path()));
-    assert!(directions.contains(&"focus".to_string()));
-    assert!(directions.contains(&"mygroup".to_string()));
-    assert!(directions.contains(&"alpha".to_string()));
 }
 
 #[test]

@@ -64,7 +64,7 @@ struct RegistryQueryTests {
             "tasks":[{
               "task":{"id":"issue-1","identifier":"INF-123","name":"Wire it","description":"","rank":1,"completed":false,"assignee":null},
               "reference":{"issue_url":"https://linear.app/loopflow/issue/INF-123/wire-it","workspace":{"slug":"wire-it","branch":"jack/inf-123","worktree":"/task-wt"}},
-              "runtime":{"work_id":"issue-1","project_id":"project-1","routing_project_id":"project-1","status":"ready","reason":"ready","updated_at":"2026-07-06T00:00:00Z","provider":"codex"},
+              "runtime":{"work_id":"issue-1","project_id":"project-1","status":"ready","reason":"ready","updated_at":"2026-07-06T00:00:00Z","provider":"codex"},
               "directive":null,
               "next_move":{"owner":"task","reason":"ready"},
               "condition":{"state":"clear","reason":"ready","observed_at":"2026-07-06T00:01:00Z","evidence_age_secs":60,"local_progress":{"state":"observed","unsettled":false,"dirty":false,"authored_commits":false,"recovery_required":false,"reason":null}},

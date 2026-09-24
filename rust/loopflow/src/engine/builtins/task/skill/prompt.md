@@ -1,7 +1,7 @@
 ---
-description: Author or audit a Loopflow skill, Wave goal, direction, or inline prompt.
+description: Author or audit a Loopflow skill, Wave goal, or inline prompt.
 requires: a prompt idea or existing prompt asset
-produces: .lf/skills/*.md | .lf/directions/*.md | wave/<name>/GOAL.md | reviewed prompt text
+produces: .lf/skills/*.md | wave/<name>/GOAL.md | reviewed prompt text
 default_agent: claude
 action_style: exploratory
 ---
@@ -33,7 +33,6 @@ Put each instruction at the narrowest layer that exercises it:
 | --- | --- | --- |
 | Skill | A repeatable task and its output contract | Repo-wide conventions or Wave portfolio policy |
 | Wave `GOAL.md` | Durable identity, bounds, cadence, and selection judgment | Project KRs, live metric contracts, task lists, implementation steps |
-| Direction | A composable quality or user intent | A workflow tied to one skill or code area |
 | Inline prompt | One concrete request | Reusable doctrine that deserves a skill |
 | Repo agent doc | Conventions every task in this repository must follow | One feature's design or temporary context |
 
@@ -122,22 +121,6 @@ Frontmatter carries machine policy such as `agent`, `crons`, `pm`, and `home`.
 Keep Project definitions and proof-shaped KRs in the Project system. Keep
 concrete implementation in Tasks. A Wave chooses among measured bets; it does
 not contain a roadmap disguised as a prompt.
-
-## Direction contract
-
-A direction changes judgment without prescribing steps:
-
-```markdown
-Make operational failure obvious before it becomes expensive.
-
-- Can an operator see the failing boundary without opening raw logs?
-- Does the signal identify the next owner and safe next action?
-- Will retries preserve the evidence needed to explain the first failure?
-```
-
-Keep directions orthogonal to skills and code areas. “When reviewing this API”
-is a coupled workflow; “make operational failure obvious” composes with design,
-implementation, review, and any area.
 
 ## Parallel search
 

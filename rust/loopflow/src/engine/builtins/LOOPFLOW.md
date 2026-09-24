@@ -292,6 +292,5 @@ such as dropping tables or deleting branches.
 ## Adaptation
 
 When you learn something repo-specific, write it into `.lf/`: adapt a skill
-(`.lf/skills/<name>.md`), a direction (`.lf/directions/<name>.md`), or config
-(`.lf/config.yaml`). Commit `.lf/` changes alongside
+(`.lf/skills/<name>.md`) or config (`.lf/config.yaml`). Commit `.lf/` changes alongside
 the work so they stay transparent and reviewable.

@@ -227,7 +227,7 @@ DOCS_AREAS = (
         "extend",
         "Turn your own operating knowledge into reusable Skills and agent workflows.",
         (
-            DocPage("Authoring", "authoring", "Write Skills, Flows, directions, and goals"),
+            DocPage("Authoring", "authoring", "Write Skills, Flows, and goals"),
             DocPage(
                 "The Agent API",
                 "agent-api",

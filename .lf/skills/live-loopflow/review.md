@@ -10,3 +10,7 @@ Tell the human that this is a staged writing exercise with real Codex Runs,
 saved Flow transitions, and a real Ask. It proves transport and authority, not
 the quality of an autonomous implementation judgment. Mark ready once the
 scope is understood. Approval means start this exercise only, never merge.
+
+For live startup evidence, inspect the native Session receipt and its owned
+client. `lf auth status` reports stored credentials and does not prove the TUI
+can authenticate; `launch: null` is normal for a TUI Run manifest.

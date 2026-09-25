@@ -82,3 +82,53 @@ Next implementation pass:
    a credential-routing fix; do not copy secrets or install to bypass it.
 3. Reopen this retained invocation and complete the live sequence with Jack.
    Hermetic tests remain useful but cannot satisfy this live proof.
+
+### Retry repair
+
+Jack requested another attempt. The exact saved Session still failed with
+native history unavailable. `flow_session::open` now recovers an unpublished
+Run under the existing Session launch lock: only when its manifest is readable,
+no native session was published, and no owned provider client is alive, clear
+the boundary's transient Run binding and readiness. Retain the Run artifacts,
+boundary identity, cursor, and approval. Published native identities remain
+resumable; an active startup is left alone. A completed boundary rejects recovery.
+
+Two focused tests pass, nextest `79523ef0-c0c3-4811-a016-142f56e5fc92`:
+failed-launch/live-client/published-native recovery and existing nested exact
+approval. Formatting and all-target Clippy pass. These are local regression
+checks; successful live reopening remains pending.
+
+### Credential discriminator
+
+The repaired opener retried this boundary as Run
+`run_ddcb801aca45475a93bdc3ac9c5ac345`. With inherited Home/account context
+cleared, it still showed sign-in. A bare native `codex login status` executed
+through Ghostty succeeded, ruling out a universally broken Ghostty login.
+
+A temporary executable shim under `/tmp/lf-demo-auth-probe/` recorded only
+variable presence, ran native login status, then executed the same real Codex
+binary with only `CODEX_ACCESS_TOKEN` removed. The two probes were:
+- Without the injected variable: `Logged in using ChatGPT`.
+- With the injected variable: `Error checking login status: agent identity JWT
+  payload is not valid JSON`.
+
+The actual review with that variable removed published a native Session and
+became ready as `run_ccf77d7dfc964b38b6b7440cf665dfb9`, on the same invocation
+and boundary. This diagnostic shim is not normal-path acceptance. No secret
+values were read, printed, or copied. `launch: null` is normal for TUI manifests;
+native receipt and owned client are the publication evidence.
+
+The stored Codex OAuth mapping now returns no process environment variable;
+native Codex owns its ChatGPT login. This avoids misrepresenting a ChatGPT token
+as the CLI's agent-identity credential. Existing API-key and managed native-Home
+routes remain intact. The separate forwarded-account lease path also exports
+CODEX_ACCESS_TOKEN and needs its own supported-auth audit; it is not exercised
+by this local, no-managed-account demo.
+
+The three focused credential/real-launch-adapter regressions pass (nextest
+`e7935a81-c1cd-4525-bde2-bec5262548ca`), as do formatting, all-target Clippy,
+and the rebuilt development CLI. The temporary `codex` shim was renamed to
+`codex.used`, removing it from executable resolution while retaining diagnostic
+evidence. Subsequent providers use the ordinary native executable and repaired
+stored-token mapping. The existing authenticated review remains ready; human
+Advance and subsequent worker startup are still pending.

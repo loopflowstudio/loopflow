@@ -1,7 +1,7 @@
 # Remaining integration questions and boundaries
 
 - Public navigation is repo → Wave → Task → Session. One current chapter Project is internal. The human resolved this direction; do not restore a Project tier or ask again.
-- Integrated `loopflow.projects` at committed snapshot `48622b569`. Its subsequent objective/metric-target ownership correction was uncommitted and is excluded; reconcile the complete change when committed, including DTOs and historical targets.
+- Rebased onto post-#1281 main `236086c94`; the complete chapter ownership/metric-target correction is integrated. [Integration and pending demo](post1281-integration.md) records passing focused proofs and the configured Home/schema/first-chapter boundary.
 - No live chapter migration was applied. Existing portfolios need the deterministic read-only preview and human acceptance before moving or abandoning planning work. Code integration is not migration approval.
 - Configured active discovery/shared refresh, the two complete measured UI experiences and the human canvas demo remain core proof. Local stream and both compilation paths now pass. The concurrent performance contribution is preserved; its writer owns its endpoint and baseline claims.
 - Environment-only active discovery was rejected: macOS omitted the Run locator for an owned live cat client while exposing it for Python. The [next discovery design](main-view-task-discovery.md) selects one foreground Rust reader retained by Podium, existing receipts, macOS filesystem notifications and explicit cold/rescan cost. See [the counterexample](active-run-refresh.md). The [Rust reader/CLI slice](discovery-implementation.md) now passes ownership,

@@ -1,0 +1,28 @@
+{
+  "target_main": "236086c946dfef0c9c44c090aea7821da7102aa2",
+  "rebased_head": "a9342cec26d3da4ab09b1335e89c8fec5b2dbabb",
+  "correction_head": "c64ef87f483ad2ecaf84c30c0b317a428bc23131",
+  "sources": {
+    "rust/loopflow/src/bin/lf.rs": "c01226cb39f30dc389242dbeddec8403158189ef748556767cf442ed944beacf",
+    "rust/loopflow/src/lf/commands/top.rs": "7adbd1eb62e1570be870f5f365abb85c8d9c9d8961e2dcf2683c619bc8811b29",
+    "rust/loopflow/tests/flow_tests.rs": "a2dd0ecec85081691e9da98d002c76a018aece111c884c937f626355235142bf",
+    "swift/LoopflowTests/TaskMonitorProofTests.swift": "a66c2f1f5aaec2c0aaa0110d6872bfb2aa94e38f5060376c4ec7b93df0f57d0f",
+    "swift/LoopflowTests/WorkspaceNavigationTests.swift": "02cfe3ded9b52b7f1c043f99cb3580278644db675edf8f7fbc9a424570305a0d",
+    "swift/LoopflowMac/Views/WorkSurfaceView.swift": "1f7ac4025e5a7b2d4026271f8c971c373c8836d2eb47e255476a889219f6ead5"
+  },
+  "artifacts": {
+    "swift-before.log": "d11d62003aa2a1a0ca8f62b39d3003d209804639b46f227c276dcaef05ea7417",
+    "swift-final.log": "b42c3e63e8a7bf9c28cc25cf9cb4ef3d5adaa788bc7a41f19c59a2085f25a8e3",
+    "rust-before.log": "461d1da8f773799dcef3ab16790ae79d42fba68793206e02c0bd430b15bbb3b5",
+    "rust-dto-and-flow.log": "45e45e6fb423713f49138c11526f1f0b48c59c05afe4a3a11bef47057548c095",
+    "bound-flow-final.log": "0d6aaae611d7093882924f8b35a0e519c53edba42b94c27f3ba0cbaf29fe329e",
+    "goldens.log": "007359df8d79c401eec6c8b085715332144dcbd61f595603ec4ec1064e097631",
+    "clippy.log": "219667dd4dd749cb6c276c994732ab3e3cb17b9eb66516350f5c691969c62563",
+    "selected-doctor.json": "bb27619185cd4f068e598737c32d943ec502f8e640156defac608512f1c20c42",
+    "launch.log": "5d24c5702c27682f19dc155c7591a8e434b5720568f07fd84e0bfe8939eaa76f",
+    "inspection.log": "4c27bc5fea875db56f096d6b05806139892d4ffa367c77a4c0cc5fabc0611783",
+    "launch.swift": "42a0078a968ed7d26ea369bd5423c636aad366104d631d3f3382aa0aac475c76"
+  },
+  "app_binary": "f546e098581e8f716e5cf365cd2fe13fbbee89e95327726ef4fe36003cba1e7b",
+  "cli_binary": "caf69a36c0b7bcb090989390f588a3708c00eea1db095f2b05f823b0b33024b0"
+}

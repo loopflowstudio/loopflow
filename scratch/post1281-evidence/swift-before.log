@@ -1,0 +1,295 @@
+Building for debugging...
+[0/7] Write sources
+[3/7] Write swift-version--58304C5D6DBC2206.txt
+[5/17] Compiling Loopflow ActiveRunsSnapshot.swift
+[6/17] Compiling Loopflow ActivitySnapshot.swift
+[7/17] Compiling Loopflow ChapterHistory.swift
+[8/20] Compiling Loopflow MetricPortfolio.swift
+[9/20] Compiling Loopflow MultiplexerLayout.swift
+[10/20] Compiling Loopflow MultiplexerStore.swift
+[11/21] Compiling Loopflow SessionRecord.swift
+[12/21] Compiling Loopflow Wave.swift
+[13/21] Compiling Loopflow WaveWorkMap.swift
+[14/21] Emitting module Loopflow
+[15/23] Compiling Loopflow NowProjection.swift
+[16/24] Compiling Loopflow WavePlan.swift
+[17/24] Compiling Loopflow WaveLens.swift
+[18/24] Compiling Loopflow WaveViewModel.swift
+[19/25] Compiling Loopflow WorktreeLayout.swift
+[20/25] Compiling Loopflow ActiveRunsObservation.swift
+[21/25] Compiling Loopflow RegistryQuery.swift
+[22/25] Compiling Loopflow WorkActivity.swift
+[23/62] Compiling LoopflowMac ScriptCommands.swift
+/Users/jack/src/loopflow.main-view-task/swift/LoopflowMac/Services/Ghostty/GhosttyManager.swift:178:33: warning: 'CVDisplayLinkCreateWithActiveCGDisplays' was deprecated in macOS 15.0: use NSView.displayLink(target:selector:), NSWindow.displayLink(target:selector:), or NSScreen.displayLink(target:selector:)  [#DeprecatedDeclaration]
+176 |         // and refuses every surface. Its timer renderer works without that link.
+177 |         var displayLink: CVDisplayLink?
+178 |         let displayLinkStatus = CVDisplayLinkCreateWithActiveCGDisplays(&displayLink)
+    |                                 `- warning: 'CVDisplayLinkCreateWithActiveCGDisplays' was deprecated in macOS 15.0: use NSView.displayLink(target:selector:), NSWindow.displayLink(target:selector:), or NSScreen.displayLink(target:selector:)  [#DeprecatedDeclaration]
+179 |         if displayLinkStatus != kCVReturnSuccess || displayLink == nil {
+180 |             embeddedConfig += "\nwindow-vsync = false\n"
+
+[#DeprecatedDeclaration]: <https://docs.swift.org/compiler/documentation/diagnostics/deprecated-declaration>
+[24/62] Compiling LoopflowMac GhosttyManager.swift
+/Users/jack/src/loopflow.main-view-task/swift/LoopflowMac/Services/Ghostty/GhosttyManager.swift:178:33: warning: 'CVDisplayLinkCreateWithActiveCGDisplays' was deprecated in macOS 15.0: use NSView.displayLink(target:selector:), NSWindow.displayLink(target:selector:), or NSScreen.displayLink(target:selector:)  [#DeprecatedDeclaration]
+176 |         // and refuses every surface. Its timer renderer works without that link.
+177 |         var displayLink: CVDisplayLink?
+178 |         let displayLinkStatus = CVDisplayLinkCreateWithActiveCGDisplays(&displayLink)
+    |                                 `- warning: 'CVDisplayLinkCreateWithActiveCGDisplays' was deprecated in macOS 15.0: use NSView.displayLink(target:selector:), NSWindow.displayLink(target:selector:), or NSScreen.displayLink(target:selector:)  [#DeprecatedDeclaration]
+179 |         if displayLinkStatus != kCVReturnSuccess || displayLink == nil {
+180 |             embeddedConfig += "\nwindow-vsync = false\n"
+
+[#DeprecatedDeclaration]: <https://docs.swift.org/compiler/documentation/diagnostics/deprecated-declaration>
+[25/62] Compiling LoopflowMac GhosttyTerminalView.swift
+/Users/jack/src/loopflow.main-view-task/swift/LoopflowMac/Services/Ghostty/GhosttyManager.swift:178:33: warning: 'CVDisplayLinkCreateWithActiveCGDisplays' was deprecated in macOS 15.0: use NSView.displayLink(target:selector:), NSWindow.displayLink(target:selector:), or NSScreen.displayLink(target:selector:)  [#DeprecatedDeclaration]
+176 |         // and refuses every surface. Its timer renderer works without that link.
+177 |         var displayLink: CVDisplayLink?
+178 |         let displayLinkStatus = CVDisplayLinkCreateWithActiveCGDisplays(&displayLink)
+    |                                 `- warning: 'CVDisplayLinkCreateWithActiveCGDisplays' was deprecated in macOS 15.0: use NSView.displayLink(target:selector:), NSWindow.displayLink(target:selector:), or NSScreen.displayLink(target:selector:)  [#DeprecatedDeclaration]
+179 |         if displayLinkStatus != kCVReturnSuccess || displayLink == nil {
+180 |             embeddedConfig += "\nwindow-vsync = false\n"
+
+[#DeprecatedDeclaration]: <https://docs.swift.org/compiler/documentation/diagnostics/deprecated-declaration>
+[26/62] Compiling LoopflowMac LocalActiveRunsObservation.swift
+/Users/jack/src/loopflow.main-view-task/swift/LoopflowMac/Services/Ghostty/GhosttyManager.swift:178:33: warning: 'CVDisplayLinkCreateWithActiveCGDisplays' was deprecated in macOS 15.0: use NSView.displayLink(target:selector:), NSWindow.displayLink(target:selector:), or NSScreen.displayLink(target:selector:)  [#DeprecatedDeclaration]
+176 |         // and refuses every surface. Its timer renderer works without that link.
+177 |         var displayLink: CVDisplayLink?
+178 |         let displayLinkStatus = CVDisplayLinkCreateWithActiveCGDisplays(&displayLink)
+    |                                 `- warning: 'CVDisplayLinkCreateWithActiveCGDisplays' was deprecated in macOS 15.0: use NSView.displayLink(target:selector:), NSWindow.displayLink(target:selector:), or NSScreen.displayLink(target:selector:)  [#DeprecatedDeclaration]
+179 |         if displayLinkStatus != kCVReturnSuccess || displayLink == nil {
+180 |             embeddedConfig += "\nwindow-vsync = false\n"
+
+[#DeprecatedDeclaration]: <https://docs.swift.org/compiler/documentation/diagnostics/deprecated-declaration>
+[27/62] Compiling LoopflowMac PortfolioService.swift
+/Users/jack/src/loopflow.main-view-task/swift/LoopflowMac/Services/Ghostty/GhosttyManager.swift:178:33: warning: 'CVDisplayLinkCreateWithActiveCGDisplays' was deprecated in macOS 15.0: use NSView.displayLink(target:selector:), NSWindow.displayLink(target:selector:), or NSScreen.displayLink(target:selector:)  [#DeprecatedDeclaration]
+176 |         // and refuses every surface. Its timer renderer works without that link.
+177 |         var displayLink: CVDisplayLink?
+178 |         let displayLinkStatus = CVDisplayLinkCreateWithActiveCGDisplays(&displayLink)
+    |                                 `- warning: 'CVDisplayLinkCreateWithActiveCGDisplays' was deprecated in macOS 15.0: use NSView.displayLink(target:selector:), NSWindow.displayLink(target:selector:), or NSScreen.displayLink(target:selector:)  [#DeprecatedDeclaration]
+179 |         if displayLinkStatus != kCVReturnSuccess || displayLink == nil {
+180 |             embeddedConfig += "\nwindow-vsync = false\n"
+
+[#DeprecatedDeclaration]: <https://docs.swift.org/compiler/documentation/diagnostics/deprecated-declaration>
+[28/62] Compiling LoopflowMac ProcessEnvironment.swift
+/Users/jack/src/loopflow.main-view-task/swift/LoopflowMac/Services/Ghostty/GhosttyManager.swift:178:33: warning: 'CVDisplayLinkCreateWithActiveCGDisplays' was deprecated in macOS 15.0: use NSView.displayLink(target:selector:), NSWindow.displayLink(target:selector:), or NSScreen.displayLink(target:selector:)  [#DeprecatedDeclaration]
+176 |         // and refuses every surface. Its timer renderer works without that link.
+177 |         var displayLink: CVDisplayLink?
+178 |         let displayLinkStatus = CVDisplayLinkCreateWithActiveCGDisplays(&displayLink)
+    |                                 `- warning: 'CVDisplayLinkCreateWithActiveCGDisplays' was deprecated in macOS 15.0: use NSView.displayLink(target:selector:), NSWindow.displayLink(target:selector:), or NSScreen.displayLink(target:selector:)  [#DeprecatedDeclaration]
+179 |         if displayLinkStatus != kCVReturnSuccess || displayLink == nil {
+180 |             embeddedConfig += "\nwindow-vsync = false\n"
+
+[#DeprecatedDeclaration]: <https://docs.swift.org/compiler/documentation/diagnostics/deprecated-declaration>
+[29/62] Compiling LoopflowMac RegistryQueryLocal.swift
+/Users/jack/src/loopflow.main-view-task/swift/LoopflowMac/Services/Ghostty/GhosttyManager.swift:178:33: warning: 'CVDisplayLinkCreateWithActiveCGDisplays' was deprecated in macOS 15.0: use NSView.displayLink(target:selector:), NSWindow.displayLink(target:selector:), or NSScreen.displayLink(target:selector:)  [#DeprecatedDeclaration]
+176 |         // and refuses every surface. Its timer renderer works without that link.
+177 |         var displayLink: CVDisplayLink?
+178 |         let displayLinkStatus = CVDisplayLinkCreateWithActiveCGDisplays(&displayLink)
+    |                                 `- warning: 'CVDisplayLinkCreateWithActiveCGDisplays' was deprecated in macOS 15.0: use NSView.displayLink(target:selector:), NSWindow.displayLink(target:selector:), or NSScreen.displayLink(target:selector:)  [#DeprecatedDeclaration]
+179 |         if displayLinkStatus != kCVReturnSuccess || displayLink == nil {
+180 |             embeddedConfig += "\nwindow-vsync = false\n"
+
+[#DeprecatedDeclaration]: <https://docs.swift.org/compiler/documentation/diagnostics/deprecated-declaration>
+[30/62] Compiling LoopflowMac RepoScanner.swift
+/Users/jack/src/loopflow.main-view-task/swift/LoopflowMac/Services/Ghostty/GhosttyManager.swift:178:33: warning: 'CVDisplayLinkCreateWithActiveCGDisplays' was deprecated in macOS 15.0: use NSView.displayLink(target:selector:), NSWindow.displayLink(target:selector:), or NSScreen.displayLink(target:selector:)  [#DeprecatedDeclaration]
+176 |         // and refuses every surface. Its timer renderer works without that link.
+177 |         var displayLink: CVDisplayLink?
+178 |         let displayLinkStatus = CVDisplayLinkCreateWithActiveCGDisplays(&displayLink)
+    |                                 `- warning: 'CVDisplayLinkCreateWithActiveCGDisplays' was deprecated in macOS 15.0: use NSView.displayLink(target:selector:), NSWindow.displayLink(target:selector:), or NSScreen.displayLink(target:selector:)  [#DeprecatedDeclaration]
+179 |         if displayLinkStatus != kCVReturnSuccess || displayLink == nil {
+180 |             embeddedConfig += "\nwindow-vsync = false\n"
+
+[#DeprecatedDeclaration]: <https://docs.swift.org/compiler/documentation/diagnostics/deprecated-declaration>
+[31/62] Compiling LoopflowMac SnapshotService.swift
+/Users/jack/src/loopflow.main-view-task/swift/LoopflowMac/Services/Ghostty/GhosttyManager.swift:178:33: warning: 'CVDisplayLinkCreateWithActiveCGDisplays' was deprecated in macOS 15.0: use NSView.displayLink(target:selector:), NSWindow.displayLink(target:selector:), or NSScreen.displayLink(target:selector:)  [#DeprecatedDeclaration]
+176 |         // and refuses every surface. Its timer renderer works without that link.
+177 |         var displayLink: CVDisplayLink?
+178 |         let displayLinkStatus = CVDisplayLinkCreateWithActiveCGDisplays(&displayLink)
+    |                                 `- warning: 'CVDisplayLinkCreateWithActiveCGDisplays' was deprecated in macOS 15.0: use NSView.displayLink(target:selector:), NSWindow.displayLink(target:selector:), or NSScreen.displayLink(target:selector:)  [#DeprecatedDeclaration]
+179 |         if displayLinkStatus != kCVReturnSuccess || displayLink == nil {
+180 |             embeddedConfig += "\nwindow-vsync = false\n"
+
+[#DeprecatedDeclaration]: <https://docs.swift.org/compiler/documentation/diagnostics/deprecated-declaration>
+[32/62] Compiling LoopflowMac TmuxSession.swift
+/Users/jack/src/loopflow.main-view-task/swift/LoopflowMac/Services/Ghostty/GhosttyManager.swift:178:33: warning: 'CVDisplayLinkCreateWithActiveCGDisplays' was deprecated in macOS 15.0: use NSView.displayLink(target:selector:), NSWindow.displayLink(target:selector:), or NSScreen.displayLink(target:selector:)  [#DeprecatedDeclaration]
+176 |         // and refuses every surface. Its timer renderer works without that link.
+177 |         var displayLink: CVDisplayLink?
+178 |         let displayLinkStatus = CVDisplayLinkCreateWithActiveCGDisplays(&displayLink)
+    |                                 `- warning: 'CVDisplayLinkCreateWithActiveCGDisplays' was deprecated in macOS 15.0: use NSView.displayLink(target:selector:), NSWindow.displayLink(target:selector:), or NSScreen.displayLink(target:selector:)  [#DeprecatedDeclaration]
+179 |         if displayLinkStatus != kCVReturnSuccess || displayLink == nil {
+180 |             embeddedConfig += "\nwindow-vsync = false\n"
+
+[#DeprecatedDeclaration]: <https://docs.swift.org/compiler/documentation/diagnostics/deprecated-declaration>
+[33/62] Compiling LoopflowMac TmuxSessionRegistry.swift
+/Users/jack/src/loopflow.main-view-task/swift/LoopflowMac/Services/Ghostty/GhosttyManager.swift:178:33: warning: 'CVDisplayLinkCreateWithActiveCGDisplays' was deprecated in macOS 15.0: use NSView.displayLink(target:selector:), NSWindow.displayLink(target:selector:), or NSScreen.displayLink(target:selector:)  [#DeprecatedDeclaration]
+176 |         // and refuses every surface. Its timer renderer works without that link.
+177 |         var displayLink: CVDisplayLink?
+178 |         let displayLinkStatus = CVDisplayLinkCreateWithActiveCGDisplays(&displayLink)
+    |                                 `- warning: 'CVDisplayLinkCreateWithActiveCGDisplays' was deprecated in macOS 15.0: use NSView.displayLink(target:selector:), NSWindow.displayLink(target:selector:), or NSScreen.displayLink(target:selector:)  [#DeprecatedDeclaration]
+179 |         if displayLinkStatus != kCVReturnSuccess || displayLink == nil {
+180 |             embeddedConfig += "\nwindow-vsync = false\n"
+
+[#DeprecatedDeclaration]: <https://docs.swift.org/compiler/documentation/diagnostics/deprecated-declaration>
+[34/73] Compiling LoopflowMac AppTestMode.swift
+[35/73] Compiling LoopflowMac ConversationLaunch.swift
+[36/73] Compiling LoopflowMac BrandColors+macOS.swift
+[37/73] Compiling LoopflowMac LoopflowApp.swift
+[38/73] Compiling LoopflowMac MacLocalWaveAgentLauncher.swift
+[39/73] Compiling LoopflowMac MockWaveFixture.swift
+[40/73] Compiling LoopflowMac PlatformHelpers.swift
+[41/73] Compiling LoopflowMac PodiumFixture.swift
+[42/73] Compiling LoopflowMac PodiumModel.swift
+[43/73] Compiling LoopflowMac PortfolioDiscovery.swift
+[44/73] Compiling LoopflowMac PortfolioRepo.swift
+[45/73] Compiling LoopflowMac PortfolioRepoState.swift
+[46/73] Emitting module LoopflowMac
+[47/73] Compiling LoopflowMac SessionFixture.swift
+[48/73] Compiling LoopflowMac ChapterHistoryView.swift
+[49/73] Compiling LoopflowMac FaderSwitch.swift
+[50/73] Compiling LoopflowMac MessageRow.swift
+[51/73] Compiling LoopflowMac PodiumView.swift
+[52/73] Compiling LoopflowMac ReferenceTextView.swift
+[53/73] Compiling LoopflowMac RoadmapView.swift
+[54/73] Compiling LoopflowMac SessionsView.swift
+[55/73] Compiling LoopflowMac TaskMonitorView.swift
+[56/73] Compiling LoopflowMac TaskWorkspaceView.swift
+[57/73] Compiling LoopflowMac TelemetryDashboardView.swift
+[58/73] Compiling LoopflowMac WaveChatRendering.swift
+[59/73] Compiling LoopflowMac WaveChatView.swift
+[60/73] Compiling LoopflowMac WaveDetailPane.swift
+[61/73] Compiling LoopflowMac WaveLensView.swift
+[62/73] Compiling LoopflowMac WaveRow.swift
+[63/73] Compiling LoopflowMac WavesView.swift
+[64/73] Compiling LoopflowMac WorkActivityView.swift
+[65/73] Compiling LoopflowMac WorkSurfaceView.swift
+[66/73] Compiling LoopflowMac WorkspaceNavigator.swift
+[67/73] Compiling LoopflowMac WorkspaceProjection.swift
+[68/73] Compiling LoopflowMac resource_bundle_accessor.swift
+[68/73] Write Objects.LinkFileList
+[69/73] Linking LoopflowMac
+[70/73] Applying LoopflowMac
+[72/110] Compiling LoopflowTests GhosttyTerminalInputTests.swift
+[73/110] Compiling LoopflowTests LocalWaveAgentLauncherTests.swift
+[74/110] Compiling LoopflowTests LoopflowStateTests.swift
+[75/110] Compiling LoopflowTests MessageRowTests.swift
+[76/110] Compiling LoopflowTests MockWaveFixtureTests.swift
+[77/110] Compiling LoopflowTests MultiplexerLayoutTests.swift
+[78/110] Compiling LoopflowTests MultiplexerStoreTests.swift
+[79/110] Compiling LoopflowTests NowProjectionTests.swift
+[80/110] Compiling LoopflowTests PodiumModelTests.swift
+[81/110] Compiling LoopflowTests PortfolioRepoStateTests.swift
+[82/110] Compiling LoopflowTests PortfolioServiceTests.swift
+[83/110] Compiling LoopflowTests ReferenceTextViewTests.swift
+[84/121] Compiling LoopflowTests RegistryQueryTests.swift
+[85/121] Compiling LoopflowTests RepoScannerTests.swift
+[86/121] Compiling LoopflowTests RoadmapViewTests.swift
+[87/121] Compiling LoopflowTests SessionActionFixtures.swift
+[88/121] Compiling LoopflowTests SessionsPolishTests.swift
+[89/121] Compiling LoopflowTests SessionsStoreTests.swift
+[90/121] Compiling LoopflowTests TaskDirectiveEditorTests.swift
+[91/121] Compiling LoopflowTests TaskMonitorProofTests.swift
+[92/121] Compiling LoopflowTests TaskMonitorTests.swift
+[93/121] Compiling LoopflowTests TestHostTerminator.swift
+[94/121] Compiling LoopflowTests WaveChatConnectionTests.swift
+[95/121] Compiling LoopflowTests WaveChatStreamTests.swift
+[96/121] Compiling LoopflowTests ActiveRunsLifetimeTests.swift
+[97/121] Compiling LoopflowTests ActiveRunsObservationTests.swift
+[98/121] Compiling LoopflowTests ActiveRunsTestFeed.swift
+[99/121] Compiling LoopflowTests AppAppearanceTests.swift
+[100/121] Compiling LoopflowTests AppBootstrapResourceTests.swift
+[101/121] Compiling LoopflowTests AttemptFailurePresentationTests.swift
+[102/121] Compiling LoopflowTests BundledDaemonPathTests.swift
+[103/121] Compiling LoopflowTests ChatReferenceTests.swift
+[104/121] Compiling LoopflowTests ContractTests.swift
+[105/121] Compiling LoopflowTests DTOFixtureTests.swift
+[106/121] Compiling LoopflowTests DesktopPerformanceTests.swift
+[107/121] Compiling LoopflowTests FaderSwitchTests.swift
+[108/121] Emitting module LoopflowTests
+[109/121] Compiling LoopflowTests WaveChatTranscriptTests.swift
+/Users/jack/src/loopflow.main-view-task/swift/LoopflowTests/WorkspaceNavigationTests.swift:309:88: error: value of type 'ChapterSummary' has no member 'definition'
+307 |         let view = WorkSurfaceView(model: model)
+308 |         #expect(throws: Never.self) { try view.inspect().find(text: task.task.task.description) }
+309 |         #expect(throws: Never.self) { try view.inspect().find(text: task.wave.chapter!.definition) }
+    |                                                                                        `- error: value of type 'ChapterSummary' has no member 'definition'
+310 |         #expect(throws: Never.self) { try view.inspect().find(text: task.wave.chapter!.krs[0].text) }
+311 |     }
+[110/121] Compiling LoopflowTests WaveDetailReadingTests.swift
+/Users/jack/src/loopflow.main-view-task/swift/LoopflowTests/WorkspaceNavigationTests.swift:309:88: error: value of type 'ChapterSummary' has no member 'definition'
+307 |         let view = WorkSurfaceView(model: model)
+308 |         #expect(throws: Never.self) { try view.inspect().find(text: task.task.task.description) }
+309 |         #expect(throws: Never.self) { try view.inspect().find(text: task.wave.chapter!.definition) }
+    |                                                                                        `- error: value of type 'ChapterSummary' has no member 'definition'
+310 |         #expect(throws: Never.self) { try view.inspect().find(text: task.wave.chapter!.krs[0].text) }
+311 |     }
+[111/121] Compiling LoopflowTests WaveLensTests.swift
+/Users/jack/src/loopflow.main-view-task/swift/LoopflowTests/WorkspaceNavigationTests.swift:309:88: error: value of type 'ChapterSummary' has no member 'definition'
+307 |         let view = WorkSurfaceView(model: model)
+308 |         #expect(throws: Never.self) { try view.inspect().find(text: task.task.task.description) }
+309 |         #expect(throws: Never.self) { try view.inspect().find(text: task.wave.chapter!.definition) }
+    |                                                                                        `- error: value of type 'ChapterSummary' has no member 'definition'
+310 |         #expect(throws: Never.self) { try view.inspect().find(text: task.wave.chapter!.krs[0].text) }
+311 |     }
+[112/121] Compiling LoopflowTests WaveOriginTests.swift
+/Users/jack/src/loopflow.main-view-task/swift/LoopflowTests/WorkspaceNavigationTests.swift:309:88: error: value of type 'ChapterSummary' has no member 'definition'
+307 |         let view = WorkSurfaceView(model: model)
+308 |         #expect(throws: Never.self) { try view.inspect().find(text: task.task.task.description) }
+309 |         #expect(throws: Never.self) { try view.inspect().find(text: task.wave.chapter!.definition) }
+    |                                                                                        `- error: value of type 'ChapterSummary' has no member 'definition'
+310 |         #expect(throws: Never.self) { try view.inspect().find(text: task.wave.chapter!.krs[0].text) }
+311 |     }
+[113/121] Compiling LoopflowTests WavePlanParserTests.swift
+/Users/jack/src/loopflow.main-view-task/swift/LoopflowTests/WorkspaceNavigationTests.swift:309:88: error: value of type 'ChapterSummary' has no member 'definition'
+307 |         let view = WorkSurfaceView(model: model)
+308 |         #expect(throws: Never.self) { try view.inspect().find(text: task.task.task.description) }
+309 |         #expect(throws: Never.self) { try view.inspect().find(text: task.wave.chapter!.definition) }
+    |                                                                                        `- error: value of type 'ChapterSummary' has no member 'definition'
+310 |         #expect(throws: Never.self) { try view.inspect().find(text: task.wave.chapter!.krs[0].text) }
+311 |     }
+[114/121] Compiling LoopflowTests WaveRowTests.swift
+/Users/jack/src/loopflow.main-view-task/swift/LoopflowTests/WorkspaceNavigationTests.swift:309:88: error: value of type 'ChapterSummary' has no member 'definition'
+307 |         let view = WorkSurfaceView(model: model)
+308 |         #expect(throws: Never.self) { try view.inspect().find(text: task.task.task.description) }
+309 |         #expect(throws: Never.self) { try view.inspect().find(text: task.wave.chapter!.definition) }
+    |                                                                                        `- error: value of type 'ChapterSummary' has no member 'definition'
+310 |         #expect(throws: Never.self) { try view.inspect().find(text: task.wave.chapter!.krs[0].text) }
+311 |     }
+[115/121] Compiling LoopflowTests WaveSurfacePrimaryHierarchyTests.swift
+/Users/jack/src/loopflow.main-view-task/swift/LoopflowTests/WorkspaceNavigationTests.swift:309:88: error: value of type 'ChapterSummary' has no member 'definition'
+307 |         let view = WorkSurfaceView(model: model)
+308 |         #expect(throws: Never.self) { try view.inspect().find(text: task.task.task.description) }
+309 |         #expect(throws: Never.self) { try view.inspect().find(text: task.wave.chapter!.definition) }
+    |                                                                                        `- error: value of type 'ChapterSummary' has no member 'definition'
+310 |         #expect(throws: Never.self) { try view.inspect().find(text: task.wave.chapter!.krs[0].text) }
+311 |     }
+[116/121] Compiling LoopflowTests WaveTests.swift
+/Users/jack/src/loopflow.main-view-task/swift/LoopflowTests/WorkspaceNavigationTests.swift:309:88: error: value of type 'ChapterSummary' has no member 'definition'
+307 |         let view = WorkSurfaceView(model: model)
+308 |         #expect(throws: Never.self) { try view.inspect().find(text: task.task.task.description) }
+309 |         #expect(throws: Never.self) { try view.inspect().find(text: task.wave.chapter!.definition) }
+    |                                                                                        `- error: value of type 'ChapterSummary' has no member 'definition'
+310 |         #expect(throws: Never.self) { try view.inspect().find(text: task.wave.chapter!.krs[0].text) }
+311 |     }
+[117/121] Compiling LoopflowTests WorkspaceNavigationProofTests.swift
+/Users/jack/src/loopflow.main-view-task/swift/LoopflowTests/WorkspaceNavigationTests.swift:309:88: error: value of type 'ChapterSummary' has no member 'definition'
+307 |         let view = WorkSurfaceView(model: model)
+308 |         #expect(throws: Never.self) { try view.inspect().find(text: task.task.task.description) }
+309 |         #expect(throws: Never.self) { try view.inspect().find(text: task.wave.chapter!.definition) }
+    |                                                                                        `- error: value of type 'ChapterSummary' has no member 'definition'
+310 |         #expect(throws: Never.self) { try view.inspect().find(text: task.wave.chapter!.krs[0].text) }
+311 |     }
+[118/121] Compiling LoopflowTests WorkspaceNavigationTests.swift
+/Users/jack/src/loopflow.main-view-task/swift/LoopflowTests/WorkspaceNavigationTests.swift:309:88: error: value of type 'ChapterSummary' has no member 'definition'
+307 |         let view = WorkSurfaceView(model: model)
+308 |         #expect(throws: Never.self) { try view.inspect().find(text: task.task.task.description) }
+309 |         #expect(throws: Never.self) { try view.inspect().find(text: task.wave.chapter!.definition) }
+    |                                                                                        `- error: value of type 'ChapterSummary' has no member 'definition'
+310 |         #expect(throws: Never.self) { try view.inspect().find(text: task.wave.chapter!.krs[0].text) }
+311 |     }
+[119/121] Compiling LoopflowTests WorktreeWorkspaceTests.swift
+/Users/jack/src/loopflow.main-view-task/swift/LoopflowTests/WorkspaceNavigationTests.swift:309:88: error: value of type 'ChapterSummary' has no member 'definition'
+307 |         let view = WorkSurfaceView(model: model)
+308 |         #expect(throws: Never.self) { try view.inspect().find(text: task.task.task.description) }
+309 |         #expect(throws: Never.self) { try view.inspect().find(text: task.wave.chapter!.definition) }
+    |                                                                                        `- error: value of type 'ChapterSummary' has no member 'definition'
+310 |         #expect(throws: Never.self) { try view.inspect().find(text: task.wave.chapter!.krs[0].text) }
+311 |     }
+error: fatalError

@@ -29,3 +29,18 @@ the same Ask with CODEX_HOME cleared in the executed command, window
 `tab-group-abc1b90e0`. No record or native identity was replaced. This is an
 additional handoff limit: an unpinned ambient provider Home can select the wrong
 native history even though the Loopflow Session identity is correct.
+
+## Ask completion and return
+
+Jack said “i think im done?” in the control conversation after answering the
+Ask. Current Session state was ready with his actual feedback; Complete released
+that exact Ask. The same decision Run
+`run_5586692baf53486e96c6176d2f3f7d5d` received the saved summary through its
+waiting Blocked command, reassessed, recorded Advance, and completed.
+
+The Session list then exposed final human boundary
+`d30ace0f-01e9-4cfe-9d4f-85dc976f25e3` in the same invocation. Open requested in
+Ghostty window `tab-group-abcd3cdc0`, with native/default Home context matched.
+The original feedback remains: Jack was confused about the demo's purpose and
+did not report that the handoff itself was worse. Returning that feedback is
+live transport proof; it is not a positive clarity finding or final acceptance.

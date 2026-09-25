@@ -15,7 +15,7 @@ private enum SessionFixtureKind: String {
             ? #"{"kind":"task","id":"task_00000000000000000000000000000001"}"#
             : "null"
         let membership = self == .flow
-            ? #"{"kind":"step","flow":"task-design","invocation_id":"fixture","step":"review-design","step_index":1,"iteration":0,"current":true}"#
+            ? #"{"kind":"step","flow":"task-design","invocation_id":"fixture","step":"review-design","step_index":1,"iteration":0,"occurrence":"current"}"#
             : #"{"kind":"independent"}"#
         let actions: String
         switch self {

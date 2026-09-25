@@ -42,6 +42,6 @@
     "step": "review-design",
     "step_index": 1,
     "iteration": 0,
-    "current": true
+    "occurrence": "current"
   }
 }

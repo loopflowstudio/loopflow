@@ -83,13 +83,25 @@ impl RunFlowStep {
         })
     }
 
-    /// Whether this occurrence is the Task's current Flow position.
-    pub(crate) fn is_current(&self, position: Option<&crate::durable::FlowPosition>) -> bool {
-        position.is_some_and(|position| {
-            Some(&position.task_id) == self.task_id.as_ref()
-                && position.invocation.id == self.invocation_id
-                && position.cursor.boundary_key() == self.boundary_key
-        })
+    /// Where this occurrence sits relative to the Task's current Flow position.
+    pub(crate) fn occurrence(
+        &self,
+        position: Option<&crate::durable::FlowPosition>,
+    ) -> crate::ops::human_session::SessionFlowOccurrence {
+        use crate::ops::human_session::SessionFlowOccurrence;
+        match position {
+            Some(position)
+                if Some(&position.task_id) == self.task_id.as_ref()
+                    && position.invocation.id == self.invocation_id =>
+            {
+                if position.cursor.boundary_key() == self.boundary_key {
+                    SessionFlowOccurrence::Current
+                } else {
+                    SessionFlowOccurrence::Earlier
+                }
+            }
+            _ => SessionFlowOccurrence::Past,
+        }
     }
 }
 

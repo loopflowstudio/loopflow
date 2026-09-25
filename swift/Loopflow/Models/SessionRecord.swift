@@ -32,15 +32,15 @@ public enum SessionTitleSource: String, Codable, Sendable, Hashable {
 /// this from the Flow position or the Run's recorded capture; Swift never
 /// infers it from Task, checkout, provider, or skill.
 public enum SessionFlowMembership: Codable, Sendable, Hashable {
-    /// `current` is false once the Flow has moved past this occurrence.
-    case step(flow: String, invocationId: String, step: String, stepIndex: Int, iteration: Int, current: Bool)
+    case step(flow: String, invocationId: String, step: String, stepIndex: Int, iteration: Int,
+              occurrence: SessionFlowOccurrence)
     case independent
     case unknown(reason: String)
 
     private enum Kind: String, Codable { case step, independent, unknown }
 
     enum CodingKeys: String, CodingKey {
-        case kind, flow, step, iteration, current, reason
+        case kind, flow, step, iteration, occurrence, reason
         case invocationId = "invocation_id"
         case stepIndex = "step_index"
     }
@@ -55,7 +55,7 @@ public enum SessionFlowMembership: Codable, Sendable, Hashable {
                 step: try container.decode(String.self, forKey: .step),
                 stepIndex: try container.decode(Int.self, forKey: .stepIndex),
                 iteration: try container.decode(Int.self, forKey: .iteration),
-                current: try container.decode(Bool.self, forKey: .current)
+                occurrence: try container.decode(SessionFlowOccurrence.self, forKey: .occurrence)
             )
         case .independent:
             self = .independent
@@ -67,14 +67,14 @@ public enum SessionFlowMembership: Codable, Sendable, Hashable {
     public func encode(to encoder: Encoder) throws {
         var container = encoder.container(keyedBy: CodingKeys.self)
         switch self {
-        case let .step(flow, invocationId, step, stepIndex, iteration, current):
+        case let .step(flow, invocationId, step, stepIndex, iteration, occurrence):
             try container.encode(Kind.step, forKey: .kind)
             try container.encode(flow, forKey: .flow)
             try container.encode(invocationId, forKey: .invocationId)
             try container.encode(step, forKey: .step)
             try container.encode(stepIndex, forKey: .stepIndex)
             try container.encode(iteration, forKey: .iteration)
-            try container.encode(current, forKey: .current)
+            try container.encode(occurrence, forKey: .occurrence)
         case .independent:
             try container.encode(Kind.independent, forKey: .kind)
         case .unknown(let reason):
@@ -86,15 +86,29 @@ public enum SessionFlowMembership: Codable, Sendable, Hashable {
     /// Short human label: "feature / implement · iteration 3", "Independent".
     public var label: String {
         switch self {
-        case let .step(flow, _, step, _, iteration, current):
-            let occurrence = iteration > 0 ? "\(flow) / \(step) · iteration \(iteration)" : "\(flow) / \(step)"
-            return current ? occurrence : "\(occurrence) · earlier"
+        case let .step(flow, _, step, _, iteration, occurrence):
+            let label = iteration > 0 ? "\(flow) / \(step) · iteration \(iteration)" : "\(flow) / \(step)"
+            switch occurrence {
+            case .current: return label
+            case .earlier: return "\(label) · earlier"
+            case .past: return "\(label) · past run"
+            }
         case .independent:
             return "Independent"
         case .unknown:
             return "Flow membership unknown"
         }
     }
+}
+
+/// Where a Flow occurrence sits relative to its Flow's current position.
+public enum SessionFlowOccurrence: String, Codable, Sendable, Hashable {
+    /// The invocation's current position.
+    case current
+    /// An earlier position of the invocation that is still active.
+    case earlier
+    /// An invocation that has finished or been replaced by a restart.
+    case past
 }
 
 public struct SessionAction: Codable, Sendable, Hashable {

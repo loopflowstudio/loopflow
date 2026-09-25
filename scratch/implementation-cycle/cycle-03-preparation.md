@@ -45,3 +45,21 @@ presentation increment plus the minimum shared evidence it actually consumes.
 Keep the complete remaining Flow/comments/control obligations explicit. Preserve
 native Session breadcrumbs/rename and all retained surfaces. No simulated data,
 blank fake count, placeholder-success control or a second navigation owner.
+
+## Parent-discovered read/write counterexample
+
+`ops/run.rs::resolve_work_selection` currently calls `begin_chapter_task` while
+resolving Task context. The same resolver is called by read-only
+`run_record::attributed_work` for issue selectors and `runs::list_active` for a
+Task filter. Source therefore establishes a read path that inserts Started,
+plus preparation of a future launch that can do so before capture starts. Do
+not expose this as proof that work executed. Parent will reproduce and separate
+the existing Started write from read-only identity resolution after cycle-2
+review settles, before the next presentation contribution. Keep the one existing
+Task event owner and chapter race boundary; do not create another start registry.
+
+The governing design now resolves its stale sequence sentence: the user's latest
+“keep building and once you're done we can do the UI discussion for 2x loops”
+means continue the native implementation, then discuss the final composition.
+Use the accepted visual language and real two-edge topology in the subsequent
+Flow slice; do not impose a new prototype approval gate on implementation.

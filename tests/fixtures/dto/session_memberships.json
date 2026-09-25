@@ -43,7 +43,7 @@
       "step": "review-design",
       "step_index": 1,
       "iteration": 0,
-      "current": true
+      "occurrence": "current"
     }
   },
   {
@@ -90,7 +90,7 @@
       "step": "implement",
       "step_index": 2,
       "iteration": 3,
-      "current": false
+      "occurrence": "earlier"
     }
   },
   {
@@ -183,6 +183,53 @@
     }
   },
   {
+    "id": "run_00000000000000000000000000000006",
+    "kind": "interactive",
+    "work": {
+      "kind": "task",
+      "id": "task_00000000000000000000000000000001"
+    },
+    "title": "Before restart",
+    "title_source": "generated",
+    "detail": "claude",
+    "cwd": "/src/loopflow.task",
+    "state": "closed",
+    "ready_summary": null,
+    "open_argv": [
+      "lf",
+      "session",
+      "open",
+      "run_00000000000000000000000000000006"
+    ],
+    "wave_id": "00000000-0000-0000-0000-000000000001",
+    "terminal_ids": [],
+    "work_path": "product / LOO-291",
+    "actions": [
+      {
+        "kind": "open",
+        "label": "Open here",
+        "help": "Open this Session in a terminal",
+        "unavailable_reason": null
+      },
+      {
+        "kind": "complete",
+        "label": "Complete",
+        "help": "Stop the provider and remove this Session; native history remains resumable",
+        "unavailable_reason": null
+      }
+    ],
+    "run_id": "run_00000000000000000000000000000006",
+    "flow_membership": {
+      "kind": "step",
+      "flow": "feature",
+      "invocation_id": "00000000-0000-0000-0000-0000000000f1",
+      "step": "implement",
+      "step_index": 2,
+      "iteration": 3,
+      "occurrence": "past"
+    }
+  },
+  {
     "id": "task_00000000000000000000000000000001:feature:demo:0",
     "kind": "flow",
     "work": {
@@ -228,7 +275,7 @@
       "step": "demo",
       "step_index": 7,
       "iteration": 0,
-      "current": true
+      "occurrence": "current"
     }
   }
 ]

@@ -74,13 +74,23 @@ pub(crate) fn worktree(token: &StepToken) -> Result<PathBuf> {
 }
 
 pub(crate) fn list() -> Result<Vec<SessionRecord>> {
+    let mut sessions = reviews()?
+        .iter()
+        .map(|(run, token)| session_surface(run, token))
+        .collect::<Result<Vec<_>>>()?;
+    sessions.sort_by(|left, right| left.id.cmp(&right.id));
+    Ok(sessions)
+}
+
+/// Every saved Flow waiting at a human review, with the token naming it.
+pub(crate) fn reviews() -> Result<Vec<(FlowRun, StepToken)>> {
     let directory = crate::store::current_home_lf_home_dir().join("flows");
     let entries = match fs::read_dir(directory) {
         Ok(entries) => entries,
         Err(error) if error.kind() == std::io::ErrorKind::NotFound => return Ok(Vec::new()),
         Err(error) => return Err(error).context("list saved Flow Sessions"),
     };
-    let mut sessions = Vec::new();
+    let mut reviews = Vec::new();
     for entry in entries {
         let entry = entry?;
         let id = entry.file_name().to_string_lossy().into_owned();
@@ -95,20 +105,18 @@ pub(crate) fn list() -> Result<Vec<SessionRecord>> {
                 continue;
             }
         };
-        if let Some(boundary) = &run.active {
-            if !run.finished && !boundary.completed && run.is_human()? {
-                sessions.push(session_surface(
-                    &run,
-                    &StepToken {
-                        invocation: id,
-                        boundary: boundary.id.clone(),
-                    },
-                )?);
-            }
+        let Some(boundary) = &run.active else {
+            continue;
+        };
+        if !run.finished && !boundary.completed && run.is_human()? {
+            let token = StepToken {
+                invocation: id,
+                boundary: boundary.id.clone(),
+            };
+            reviews.push((run, token));
         }
     }
-    sessions.sort_by(|left, right| left.id.cmp(&right.id));
-    Ok(sessions)
+    Ok(reviews)
 }
 
 pub(crate) fn surface(token: &StepToken) -> Result<SessionRecord> {
@@ -189,7 +197,7 @@ fn session_surface(run: &FlowRun, token: &StepToken) -> Result<SessionRecord> {
             step: current_skill(run)?.skill.name.clone(),
             step_index: run.cursor.leaf().index as u32,
             iteration: run.cursor.iteration,
-            current: true,
+            occurrence: human_session::SessionFlowOccurrence::Current,
         },
         detail: current_skill(run)?.skill.name.clone(),
         cwd: run.cwd.display().to_string(),

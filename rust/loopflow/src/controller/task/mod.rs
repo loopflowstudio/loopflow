@@ -2471,7 +2471,7 @@ mod planning_tests {
                 step: step.clone(),
                 step_index: flow.cursor.leaf().index as u32,
                 iteration: flow.cursor.iteration,
-                current: true,
+                occurrence: human_session::SessionFlowOccurrence::Current,
             }
         );
 
@@ -2527,17 +2527,40 @@ mod planning_tests {
             r#"{"schema_version":1,"provider_session_id":"ses_flow-proof","account_id":null}"#,
         )
         .unwrap();
-        let mut next = super::start_task_flow(&task, "task-design").unwrap();
-        next.cursor.index = 0;
-        next.cursor.iteration = flow.cursor.iteration + 1;
-        next.version = flow.version;
-        store.set_flow_position(&task.id, next).await.unwrap();
-        let historical = listed(human_session::list(&store).await.unwrap());
-        assert_eq!(historical.kind, SessionKind::Interactive);
-        assert_eq!(historical.title, "Launch design");
+        // A later position in the same invocation is "earlier", not a past run.
+        let mut moved = store.flow_position(&task.id).await.unwrap().unwrap();
+        moved.cursor.index = 0;
+        moved.session_run_id = None;
+        store.set_flow_position(&task.id, moved).await.unwrap();
+        let earlier = listed(human_session::list(&store).await.unwrap());
+        assert_eq!(earlier.kind, SessionKind::Interactive);
+        assert_eq!(earlier.title, "Launch design");
         assert!(matches!(
-            historical.flow_membership,
-            SessionFlowMembership::Step { current: false, step: ref recorded, .. } if *recorded == step
+            earlier.flow_membership,
+            SessionFlowMembership::Step {
+                occurrence: human_session::SessionFlowOccurrence::Earlier,
+                ref invocation_id,
+                step: ref recorded,
+                ..
+            } if *recorded == step && *invocation_id == flow.invocation.id
+        ));
+
+        // Restarting replaces the invocation: the same Run is a past run.
+        let current = store.flow_position(&task.id).await.unwrap().unwrap();
+        let mut next = super::start_task_flow(&task, "task-design").unwrap();
+        assert_ne!(next.invocation.id, flow.invocation.id);
+        next.cursor.index = 0;
+        next.version = current.version;
+        store.set_flow_position(&task.id, next).await.unwrap();
+        let past = listed(human_session::list(&store).await.unwrap());
+        assert_eq!(past.title, "Launch design");
+        assert!(matches!(
+            past.flow_membership,
+            SessionFlowMembership::Step {
+                occurrence: human_session::SessionFlowOccurrence::Past,
+                step: ref recorded,
+                ..
+            } if *recorded == step
         ));
     }
 

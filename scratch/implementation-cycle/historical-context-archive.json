@@ -1,0 +1,17 @@
+{
+  "scratch/compress.md": {
+    "archive": "scratch/compress-archive.txt",
+    "bytes": 78331,
+    "sha256": "0eb1f3596ec31cdd7b87514492673fdd6742f7f20f5c35f15ae8bf9b4e551f3f"
+  },
+  "scratch/review-slice.md": {
+    "archive": "scratch/review-slice-archive.txt",
+    "bytes": 71980,
+    "sha256": "1b479e69870856c243c8aa1387e97e143c74b57a613d95c37bad10f7ccad7b3c"
+  },
+  "scratch/main-view-task-history.md": {
+    "archive": "scratch/main-view-task-history-archive.txt",
+    "bytes": 69147,
+    "sha256": "361f5e4c6b4ecd220623d00bd4d984ec30473882a1a2b2356948e3c0dec874fd"
+  }
+}

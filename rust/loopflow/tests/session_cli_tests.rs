@@ -582,4 +582,29 @@ fn boundary_names_follow_run_ids_and_replacement_runs() {
         serde_json::from_slice(&run(home.path(), &["session", "list", "--all", "--json"]).stdout)
             .unwrap();
     assert_eq!(all.len(), 1, "{all:?}");
+
+    // Completing by that Run ID acts on the Ask boundary, never on the Run's
+    // provider history as if it were an interactive Session.
+    let early = run(home.path(), &["session", "complete", &replacement]);
+    assert!(!early.status.success(), "{early:?}");
+    assert!(
+        String::from_utf8_lossy(&early.stderr).contains("not marked this ready"),
+        "{early:?}"
+    );
+    assert_eq!(
+        listed(home.path(), id)["ready_summary"],
+        serde_json::Value::Null
+    );
+    let path = sessions.join(format!("{id}.json"));
+    let mut saved: serde_json::Value =
+        serde_json::from_slice(&std::fs::read(&path).unwrap()).unwrap();
+    saved["ready_summary"] = serde_json::json!("Ship to staging");
+    std::fs::write(&path, saved.to_string()).unwrap();
+    let completed = run(home.path(), &["session", "complete", &replacement]);
+    assert!(completed.status.success(), "{completed:?}");
+    let saved: serde_json::Value = serde_json::from_slice(&std::fs::read(&path).unwrap()).unwrap();
+    assert_eq!(
+        saved["status"],
+        serde_json::json!({"completed": {"summary": "Ship to staging"}})
+    );
 }

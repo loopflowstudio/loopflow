@@ -128,8 +128,12 @@ struct WorkspaceBreadcrumbBar: View {
 
     private func membershipHelp(_ membership: SessionFlowMembership) -> String {
         switch membership {
-        case .step(_, _, _, _, _, let current):
-            current ? "This conversation is the Flow's current step." : "This conversation belonged to an earlier Flow step."
+        case .step(_, _, _, _, _, .current):
+            "This conversation is the Flow's current step."
+        case .step(_, _, _, _, _, .earlier):
+            "This conversation belonged to an earlier step of the Flow's current run."
+        case .step(_, _, _, _, _, .past):
+            "This conversation belonged to a Flow run that has since finished or restarted."
         case .independent:
             "This conversation is not part of the Task's managed Flow."
         case .unknown(let reason):

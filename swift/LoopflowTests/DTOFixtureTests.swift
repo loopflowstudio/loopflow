@@ -269,16 +269,19 @@ struct DTOFixtureTests {
         let sessions = try JSONDecoder().decode([SessionRecord].self, from: data)
         #expect(sessions.map(\.flowMembership) == [
             .step(flow: "task-design", invocationId: "00000000-0000-0000-0000-00000000f10w",
-                  step: "review-design", stepIndex: 1, iteration: 0, current: true),
+                  step: "review-design", stepIndex: 1, iteration: 0, occurrence: .current),
             .step(flow: "feature", invocationId: "00000000-0000-0000-0000-0000000000f2",
-                  step: "implement", stepIndex: 2, iteration: 3, current: false),
+                  step: "implement", stepIndex: 2, iteration: 3, occurrence: .earlier),
             .independent,
             .unknown(reason: "Run run_00000000000000000000000000000004 predates recorded Flow membership"),
+            .step(flow: "feature", invocationId: "00000000-0000-0000-0000-0000000000f1",
+                  step: "implement", stepIndex: 2, iteration: 3, occurrence: .past),
             .step(flow: "feature", invocationId: "00000000-0000-0000-0000-0000000000f2",
-                  step: "demo", stepIndex: 7, iteration: 0, current: true),
+                  step: "demo", stepIndex: 7, iteration: 0, occurrence: .current),
         ])
         #expect(sessions.last?.titleSource == .unavailable)
         #expect(sessions[1].flowMembership.label == "feature / implement · iteration 3 · earlier")
+        #expect(sessions[4].flowMembership.label == "feature / implement · iteration 3 · past run")
         let objects = try #require(JSONSerialization.jsonObject(with: data) as? [[String: Any]])
         for var value in objects {
             value.removeValue(forKey: "flow_membership")

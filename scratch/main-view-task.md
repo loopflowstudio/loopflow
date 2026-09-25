@@ -92,11 +92,11 @@ The action honors the configured destination and reports failures on the Task.
 Feature is one continuous path rendered from its actual authored/pinned
 definition. Human clarification on 2026-09-25 accepts the continuation branch's
 second decision loop after demo. This supersedes the earlier single-loop
-prototype topology. The human then requested revisiting the UI: the two-edge
-execution shape is accepted, but its visual composition needs another prototype
-review before native Flow-diagram implementation. Session work can proceed:
-The subsequent instruction is to keep building and have that UI discussion once
-the working build is ready. The human confirmed the delivery tail: final
+prototype topology. The two-edge execution shape is accepted. The human's latest
+instruction is to keep building and have the UI discussion once the working
+build is ready. Render the actual topology with the accepted visual language;
+the final two-loop composition remains subject to that discussion, not a new
+implementation gate. The human confirmed the delivery tail: final
 **Advance → queue → land**, while final **Iterate → implement**. Include this
 tail in the revised diagram and bind it to the real delivery operations/state;
 do not label queue admission as a completed merge. This design direction does

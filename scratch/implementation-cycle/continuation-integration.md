@@ -157,3 +157,28 @@ only Claude automatic launches: an anonymous private file supplies stdin; both
 existing output runners retain it. Interactive and other-provider argv behavior
 is preserved. Final focused timeout checks and clippy precede the configured
 retry through this checkout's `scripts/dev-lf`; no installation is needed.
+
+## Successful delegated continuation
+
+The local helper retry could not resolve Task Work: its selected development
+store at `~/.lf-dev/worktrees/loopflow-main-view-task-6787ccf6a153/loopflow.db`
+rejects the changed canonical migration frontier before `0.12.20.001_release`.
+No fresh promotion, database reset, production override, or installation occurred.
+
+After a local checkpoint through `lf commit`, parent preserved three fully
+superseded chronology documents as byte-identical adjacent `*-archive.txt` files
+and replaced their original Markdown paths with short indexes. Every old link
+still reaches an index, all source text and evidence remain available, and the
+current design/receipts stay in the automatic Markdown snapshot. Hash receipt:
+[historical-context-archive.json](historical-context-archive.json). Total archived
+text: 219,458 bytes. This is explicit context curation after the transport
+counterexamples, not an omitted observation or discarded design requirement.
+
+The installed `lf --task LOO-291 -b -m claude --no-diff --no-diff-files compress`
+now launches successfully with 196,653 assembled tokens and emits real model
+inspection output. Log: `/tmp/loo291-parent-cycle02-compress-final-output.log`.
+This final contribution uses installed lf, superseding the brief's earlier
+local-helper retry statement. The local stdin correction retains its three
+passing stand-in/timeout checks and clean clippy, but no configured vendor use
+of that uninstalled correction is claimed. Parent continues with independent
+review after this compress Run exits.

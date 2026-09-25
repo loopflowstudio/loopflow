@@ -102,8 +102,9 @@
   stays outside the loops. Preserve per-edge traversal evidence; repeated skill
   names do not identify an occurrence. The earlier single-loop prototype is
   visual inspiration, not the current topology contract.
-  The two-loop visual composition needs a renewed prototype review before
-  native Flow-diagram implementation; named Session work can proceed.
+  Build the native Flow diagram from that topology using the accepted visual
+  language; discuss the final two-loop composition once the working build is
+  ready, as the human requested. Do not introduce a new approval gate.
   Final Advance leads to queue → land; final Iterate returns to implement.
   Distinguish queue admission, waiting/check failures and authoritative merge.
 - Before presenting a configured demo, align its CLI, app and selected Home

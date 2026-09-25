@@ -1,7 +1,4 @@
--- name: wave_chapters
--- id: 34ae9954950dea7dda43fbffd4e50bdd
--- depends_on: 
-
+-- draft: wave_chapters
 CREATE TABLE wave_chapters (
     wave_id TEXT NOT NULL REFERENCES waves(id) ON DELETE RESTRICT,
     chapter_id TEXT NOT NULL,

@@ -1,3 +1,4 @@
+import AppKit
 import Foundation
 import Loopflow
 import SwiftUI
@@ -55,6 +56,10 @@ struct PodiumView: View {
         .accessibilityElement(children: .contain)
         .accessibilityLabel("The Podium")
         .accessibilityIdentifier("podium")
+        .task { await model.activeRunsLifetime() }
+        .onReceive(NSWorkspace.shared.notificationCenter.publisher(for: NSWorkspace.didWakeNotification)) { _ in
+            Task { await model.rescanActiveRuns() }
+        }
         .task {
             await model.refreshPortfolio(
                 initialRepoPath: initialRepoPath,

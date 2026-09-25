@@ -1,11 +1,8 @@
-// RegistryQuery — discovery and history as `lf` queries over the machine
-// registry store, not a streaming center.
+// RegistryQuery — typed `lf` reads over the machine registry.
 //
-// The wave model has no telemetry hub (see `scratch/eventing.md`): durable
-// facts — which waves exist (running and stopped) and their work
-// — are QUERIES against the shared SQLite ledger, served by the daemonless `lf`
-// CLI. The Podium re-queries the bounded process snapshot for live output;
-// Wave conversation motion remains a per-wave SSE stream (`WaveChatConnection`).
+// Planning and history are one-shot queries. Active Runs use one foreground
+// observation per window so native receipt discovery survives between samples.
+// Wave conversations retain their per-wave SSE stream (`WaveChatConnection`).
 //
 // This runs `lf ls/status/roadmap/ps/activity --json` as a subprocess and decodes the wire
 // snapshots (mirrors of the Rust types in `lf/commands/waves.rs` and
@@ -30,9 +27,16 @@ public typealias RegistryRunner = @Sendable (_ lfArgs: [String], _ cwd: String?)
 
 public struct RegistryQuery: Sendable {
     private let run: RegistryRunner
+    private let observe: @Sendable () async throws -> ActiveRunsObservation
 
-    public init(run: @escaping RegistryRunner) {
+    public init(
+        watchActiveRuns: @escaping @Sendable () async throws -> ActiveRunsObservation = {
+            throw RegistryQueryError("Active Run observation is unavailable on this transport")
+        },
+        run: @escaping RegistryRunner
+    ) {
         self.run = run
+        self.observe = watchActiveRuns
     }
 
     /// Current Waves across the machine, including stopped Waves. The shared
@@ -130,10 +134,8 @@ public struct RegistryQuery: Sendable {
         return try Self.decode(String?.self, from: stdout)
     }
 
-    public func activeRuns(task: String? = nil) async throws -> ActiveRunsSnapshot {
-        var args = ["runs", "--active", "--json"]
-        if let task { args += ["--task", task] }
-        return try Self.decode(ActiveRunsSnapshot.self, from: await run(args, nil))
+    public func watchActiveRuns() async throws -> ActiveRunsObservation {
+        try await observe()
     }
 
     /// Durable Work facts across creation, Runs, PR lifecycle, and Steers.

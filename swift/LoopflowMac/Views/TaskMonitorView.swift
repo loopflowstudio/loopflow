@@ -12,12 +12,11 @@ struct TaskMonitorView: View {
                 Text(model.task(id: taskId)?.task.task.name ?? "Task unavailable")
                     .font(.headline)
                 Spacer()
-                Button("Refresh") { Task { await model.refreshActiveRuns() } }
-                    .disabled(model.isRefreshingActiveRuns)
+                Button(model.activeRunsNeedsRetry ? "Retry" : "Refresh") { Task { await model.refreshActiveRuns() } }
                     .accessibilityIdentifier("monitor-refresh-\(taskId)")
             }
             if let snapshot = model.activeRuns.value {
-                Text("Observed \(Date(timeIntervalSince1970: TimeInterval(snapshot.observedAt)).formatted(date: .omitted, time: .standard)) · Refresh for current activity")
+                Text("Observed \(Date(timeIntervalSince1970: TimeInterval(snapshot.observedAt)).formatted(date: .omitted, time: .standard)) · \(model.activeRunsNeedsRetry ? "Updates paused" : "Updates automatically")")
                     .font(.caption).foregroundStyle(.secondary)
             }
             if model.isRefreshingActiveRuns || model.activeRuns.isLoading {
@@ -34,6 +33,10 @@ struct TaskMonitorView: View {
                 Text("Task planning unavailable — \(error)").foregroundStyle(Color.statusWarning)
             }
             if let snapshot = model.activeRuns.value {
+                if snapshot.discovery != .ready {
+                    Text(snapshot.discovery == .scanning ? "Discovering active Runs…" : "Active Run discovery unavailable")
+                        .foregroundStyle(Color.statusWarning)
+                }
                 if !snapshot.gaps.isEmpty {
                     DisclosureGroup("Some activity unavailable") {
                         ForEach(snapshot.gaps, id: \.self) { Text($0).font(.caption) }
@@ -44,7 +47,7 @@ struct TaskMonitorView: View {
                     let work = task.runtime.map { WorkReference.task(id: $0.workId) }
                     let runs = snapshot.runs.filter { work != nil && $0.work == work }
                     if runs.isEmpty {
-                        if snapshot.gaps.isEmpty && model.activeRuns.errorMessage == nil
+                        if snapshot.discovery == .ready && snapshot.gaps.isEmpty && model.activeRuns.errorMessage == nil
                             && model.roadmap.errorMessage == nil {
                             Text("No active Runs in this observation")
                                 .accessibilityIdentifier("monitor-empty-\(taskId)")

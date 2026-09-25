@@ -1,6 +1,6 @@
 ---
 crons:
-- flow: wave
+- flow: wave/operate
   schedule: 0 0 8 * * * *
 chat:
   provider: discord

@@ -1,5 +1,12 @@
 # Unified navigation slice review — 2026-09-23
 
+Latest review: [shared automatic Run observation](review-active-runs-stream.md),
+2026-09-24. Reproduced reader exit hiding the CLI diagnostic and corrected both
+stdout-closure and process-exit handling. Seventeen focused tests pass, including
+real CLI automatic publication/exit/rescan and mounted native input retention.
+The report records compilation evidence and remaining configured/full-canvas
+acceptance. No publication or Task completion.
+
 Latest review: [scroll refresh and discovery](review-scroll-discovery.md),
 2026-09-24. Fresh short native command passes 24/24 observations; restored native
 receipt discovery passes all five ownership tests. The environment-only candidate

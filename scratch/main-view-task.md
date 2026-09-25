@@ -1,5 +1,19 @@
 # One workspace for work and Sessions
 
+## Next discovery slice — 2026-09-24
+
+[Active Run discovery across observations](main-view-task-discovery.md) is the
+implementation design requested after the scroll/discovery review. It selects a
+foreground Rust reader retained by Podium, existing receipt authority, macOS
+filesystem notifications, explicit cold/recovery scans and a measured warm-cost
+contract. Shared automatic refresh follows its ownership/recovery proof. This
+resolves an engineering boundary within the accepted canvas; it introduces no
+new UX approval gate. The Rust reader, notification recovery and streaming CLI
+are now [implemented and verified](discovery-implementation.md), including the
+100/10,000/100,000-Run matrix. The retained reader is now [connected to Podium](active-runs-stream.md);
+Monitor updates automatically through one window-owned observation. Configured
+vendor-provider and human acceptance remain next.
+
 ## Latest human direction — 2026-09-24
 
 **Latest amendment: one Wave, one current chapter Project.** The human directed
@@ -192,7 +206,7 @@ Replace the root switch and parallel navigation with the unified tree, including
 Additive series. The keystone is an indivisible navigation replacement shipping as one PR; its internal slices are:
 
 1. Join shared Work/Session readings into the compact unified list and A/D workspace presentations; keep autonomous and upcoming Tasks visible, integrate existing detail/Session access, preserve live terminals, and prove the behavior. Reconcile current main with `lf-new` and LOO-284 before selecting shared API changes; do not build parallel ownership or lifecycle logic.
-2. **This slice:** extend the existing native measurement runner with scrolling during a held shared planning refresh. Use the same 8/256-Task populations and retained PTYs, a 300-point viewport so both populations scroll, and the actual native scroll view. Release the fixture transport after scrolling; require the refreshed final Task label in captured pixels, stable viewport/selection and unchanged Session identities. Restore the normal viewport before exercising retained draft/input and combined panes. Record all attempts through the existing journal and report command. This adds one capture/verification scenario; compositor presentation, hitches, correlated production phases, configured discovery/provider costs, budgets and human acceptance remain the full measurement contract. Keep bounded active discovery/shared refresh and complete chapter ownership integration in this core.
+2. **This slice:** connect [discovery across observations](main-view-task-discovery.md) to one cancellable RegistryQuery transport and one Podium subscription. The Rust reader and cold/warm cost proof are established. Automatic updates, recovery, exact attribution, native input retention and reader teardown now have [focused proof](active-runs-stream.md); configured vendor-provider demonstration remains next. The scroll/refresh capture scenario is recorded in its completed slice ledger below; compositor presentation, hitches, correlated phases, configured costs, budgets, complete chapter ownership integration and human acceptance remain core obligations.
 3. Remove superseded navigation, integrate remaining inspectors, and prove configured behavior. No runtime/cardinality or terminal-ownership shortcuts count as completion.
 
 Follow-up: Task-directive editing through the existing PM API, preserving unsaved text on rejected writes and displaying authoritative refreshed text after success. This remains part of LOO-291's requested outcome; shipping the keystone alone does not complete that Task. External-work trials and long-lived-registry performance measurement remain its full proof obligations. Do not create follow-up Tasks during design.
@@ -708,3 +722,22 @@ which currently requires walking retained Run directories. Bounded discovery is
 still core work before frequent Monitor polling. Monitor panes, retained Task
 pane choice, both native performance journeys, external trials and the final
 human demo remain open. This slice establishes no publication or Task completion.
+
+## Slice ledger — shared automatic Run observation, 2026-09-24
+
+[Swift stream implementation](active-runs-stream.md) replaces Monitor's one-shot
+transport with one foreground reader retained by Podium after first demand.
+Navigation and pane closure preserve it; window teardown cancels and reaps it.
+Wake requests rescan, configuration replacement clears old evidence and awaits
+old-reader exit, and transport/discovery failures preserve last-good evidence
+until explicit Retry. Pipe decoding is off the main actor with bounded frames
+and latest-only pending delivery. No new process ownership or pane layout exists.
+
+Sixteen focused tests pass, including real CLI publication/exit/rescan with owned
+cat clients, malformed/stalled/oversized pipes, Home replacement, deallocation,
+and mounted native draft/companion retention during automatic delivery/recovery.
+Both SwiftPM and Xcode fallback targets compile. These are local process/native
+proofs, not configured vendor interaction or human composition acceptance. Prior
+performance baselines retain their original source attribution. Full rendering,
+configured costs/budgets, external trials/edit and chapter ownership integration
+remain open. No installation, publication, PM mutation or Task completion.

@@ -1,0 +1,41 @@
+   Compiling loopflow v0.12.20 (/Users/jack/src/loopflow.main-view-task/rust/loopflow)
+warning: methods `invalidate` and `scanning` are never used
+  --> rust/loopflow/src/run_record/active/reader.rs:95:19
+   |
+69 | impl ActiveRunReader {
+   | -------------------- methods in this implementation
+...
+95 |     pub(crate) fn invalidate(&mut self) {
+   |                   ^^^^^^^^^^
+...
+99 |     pub(crate) fn scanning(&self) -> bool {
+   |                   ^^^^^^^^
+   |
+   = note: `#[warn(dead_code)]` (part of `#[warn(unused)]`) on by default
+
+warning: `loopflow` (lib test) generated 1 warning
+    Finished `test` profile [unoptimized + debuginfo] target(s) in 29.19s
+     Running unittests src/lib.rs (target/debug/deps/loopflow-78d151dc187ea4a1)
+
+running 5 tests
+test run_record::active::tests::dead_missing_reused_and_ambiguous_owners_never_claim_a_live_run ... ok
+test run_record::active::tests::exact_owners_deduplicate_one_run_and_keep_other_runs_separate ... ok
+test run_record::active::tests::capture_intervals_do_not_keep_prior_runs_alive_in_a_reused_exec ... ok
+test run_record::active::tests::native_client_receipts_do_not_require_a_new_capture_binding ... ok
+test run_record::active::tests::old_waiting_runs_are_task_exact_in_one_checkout_and_dead_clients_disappear ... FAILED
+
+failures:
+
+---- run_record::active::tests::old_waiting_runs_are_task_exact_in_one_checkout_and_dead_clients_disappear stdout ----
+
+thread 'run_record::active::tests::old_waiting_runs_are_task_exact_in_one_checkout_and_dead_clients_disappear' (519963339) panicked at rust/loopflow/src/run_record/active.rs:403:9:
+assertion failed: snapshot.gaps.is_empty()
+note: run with `RUST_BACKTRACE=1` environment variable to display a backtrace
+
+
+failures:
+    run_record::active::tests::old_waiting_runs_are_task_exact_in_one_checkout_and_dead_clients_disappear
+
+test result: FAILED. 4 passed; 1 failed; 0 ignored; 0 measured; 1581 filtered out; finished in 4.43s
+
+error: test failed, to rerun pass `-p loopflow --lib`

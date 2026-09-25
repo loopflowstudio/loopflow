@@ -472,7 +472,7 @@ struct SessionsView: View {
                 store.surfaces.focus(.session(id))
             }
             if case .monitor = multiplexer.focusedPane.content {
-                Task { await model.refreshActiveRuns() }
+                model.observeActiveRuns()
             }
         } else {
             showMonitor(work.id)
@@ -492,7 +492,7 @@ struct SessionsView: View {
         navigation.content = .terminals
         multiplexer.showMonitor(taskId: taskId)
         rememberTaskPane()
-        Task { await model.refreshActiveRuns() }
+        model.observeActiveRuns()
     }
 
     private func rememberTaskPane() {

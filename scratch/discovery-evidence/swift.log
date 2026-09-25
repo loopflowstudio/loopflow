@@ -1,0 +1,220 @@
+[0/1] Planning build
+Building for debugging...
+[0/7] Write sources
+[3/7] Write swift-version--58304C5D6DBC2206.txt
+[5/9] Compiling Loopflow ActiveRunsSnapshot.swift
+[6/9] Emitting module Loopflow
+[7/10] Compiling Loopflow RegistryQuery.swift
+[8/46] Compiling LoopflowMac SessionFixture.swift
+[9/46] Compiling LoopflowMac ChapterHistoryView.swift
+[10/46] Compiling LoopflowMac FaderSwitch.swift
+[11/46] Compiling LoopflowMac MessageRow.swift
+[12/46] Compiling LoopflowMac PodiumView.swift
+[13/46] Compiling LoopflowMac ReferenceTextView.swift
+[14/46] Compiling LoopflowMac RoadmapView.swift
+[15/46] Compiling LoopflowMac SessionsView.swift
+[16/46] Compiling LoopflowMac TaskMonitorView.swift
+[17/46] Compiling LoopflowMac TaskWorkspaceView.swift
+[18/46] Compiling LoopflowMac TelemetryDashboardView.swift
+[19/46] Emitting module LoopflowMac
+[20/46] Compiling LoopflowMac PortfolioRepoState.swift
+/Users/jack/src/loopflow.main-view-task/swift/LoopflowMac/Services/Ghostty/GhosttyManager.swift:178:33: warning: 'CVDisplayLinkCreateWithActiveCGDisplays' was deprecated in macOS 15.0: use NSView.displayLink(target:selector:), NSWindow.displayLink(target:selector:), or NSScreen.displayLink(target:selector:)  [#DeprecatedDeclaration]
+176 |         // and refuses every surface. Its timer renderer works without that link.
+177 |         var displayLink: CVDisplayLink?
+178 |         let displayLinkStatus = CVDisplayLinkCreateWithActiveCGDisplays(&displayLink)
+    |                                 `- warning: 'CVDisplayLinkCreateWithActiveCGDisplays' was deprecated in macOS 15.0: use NSView.displayLink(target:selector:), NSWindow.displayLink(target:selector:), or NSScreen.displayLink(target:selector:)  [#DeprecatedDeclaration]
+179 |         if displayLinkStatus != kCVReturnSuccess || displayLink == nil {
+180 |             embeddedConfig += "\nwindow-vsync = false\n"
+
+[#DeprecatedDeclaration]: <https://docs.swift.org/compiler/documentation/diagnostics/deprecated-declaration>
+[21/46] Compiling LoopflowMac ScriptCommands.swift
+/Users/jack/src/loopflow.main-view-task/swift/LoopflowMac/Services/Ghostty/GhosttyManager.swift:178:33: warning: 'CVDisplayLinkCreateWithActiveCGDisplays' was deprecated in macOS 15.0: use NSView.displayLink(target:selector:), NSWindow.displayLink(target:selector:), or NSScreen.displayLink(target:selector:)  [#DeprecatedDeclaration]
+176 |         // and refuses every surface. Its timer renderer works without that link.
+177 |         var displayLink: CVDisplayLink?
+178 |         let displayLinkStatus = CVDisplayLinkCreateWithActiveCGDisplays(&displayLink)
+    |                                 `- warning: 'CVDisplayLinkCreateWithActiveCGDisplays' was deprecated in macOS 15.0: use NSView.displayLink(target:selector:), NSWindow.displayLink(target:selector:), or NSScreen.displayLink(target:selector:)  [#DeprecatedDeclaration]
+179 |         if displayLinkStatus != kCVReturnSuccess || displayLink == nil {
+180 |             embeddedConfig += "\nwindow-vsync = false\n"
+
+[#DeprecatedDeclaration]: <https://docs.swift.org/compiler/documentation/diagnostics/deprecated-declaration>
+[22/46] Compiling LoopflowMac GhosttyManager.swift
+/Users/jack/src/loopflow.main-view-task/swift/LoopflowMac/Services/Ghostty/GhosttyManager.swift:178:33: warning: 'CVDisplayLinkCreateWithActiveCGDisplays' was deprecated in macOS 15.0: use NSView.displayLink(target:selector:), NSWindow.displayLink(target:selector:), or NSScreen.displayLink(target:selector:)  [#DeprecatedDeclaration]
+176 |         // and refuses every surface. Its timer renderer works without that link.
+177 |         var displayLink: CVDisplayLink?
+178 |         let displayLinkStatus = CVDisplayLinkCreateWithActiveCGDisplays(&displayLink)
+    |                                 `- warning: 'CVDisplayLinkCreateWithActiveCGDisplays' was deprecated in macOS 15.0: use NSView.displayLink(target:selector:), NSWindow.displayLink(target:selector:), or NSScreen.displayLink(target:selector:)  [#DeprecatedDeclaration]
+179 |         if displayLinkStatus != kCVReturnSuccess || displayLink == nil {
+180 |             embeddedConfig += "\nwindow-vsync = false\n"
+
+[#DeprecatedDeclaration]: <https://docs.swift.org/compiler/documentation/diagnostics/deprecated-declaration>
+[23/46] Compiling LoopflowMac GhosttyTerminalView.swift
+/Users/jack/src/loopflow.main-view-task/swift/LoopflowMac/Services/Ghostty/GhosttyManager.swift:178:33: warning: 'CVDisplayLinkCreateWithActiveCGDisplays' was deprecated in macOS 15.0: use NSView.displayLink(target:selector:), NSWindow.displayLink(target:selector:), or NSScreen.displayLink(target:selector:)  [#DeprecatedDeclaration]
+176 |         // and refuses every surface. Its timer renderer works without that link.
+177 |         var displayLink: CVDisplayLink?
+178 |         let displayLinkStatus = CVDisplayLinkCreateWithActiveCGDisplays(&displayLink)
+    |                                 `- warning: 'CVDisplayLinkCreateWithActiveCGDisplays' was deprecated in macOS 15.0: use NSView.displayLink(target:selector:), NSWindow.displayLink(target:selector:), or NSScreen.displayLink(target:selector:)  [#DeprecatedDeclaration]
+179 |         if displayLinkStatus != kCVReturnSuccess || displayLink == nil {
+180 |             embeddedConfig += "\nwindow-vsync = false\n"
+
+[#DeprecatedDeclaration]: <https://docs.swift.org/compiler/documentation/diagnostics/deprecated-declaration>
+[24/46] Compiling LoopflowMac PortfolioService.swift
+/Users/jack/src/loopflow.main-view-task/swift/LoopflowMac/Services/Ghostty/GhosttyManager.swift:178:33: warning: 'CVDisplayLinkCreateWithActiveCGDisplays' was deprecated in macOS 15.0: use NSView.displayLink(target:selector:), NSWindow.displayLink(target:selector:), or NSScreen.displayLink(target:selector:)  [#DeprecatedDeclaration]
+176 |         // and refuses every surface. Its timer renderer works without that link.
+177 |         var displayLink: CVDisplayLink?
+178 |         let displayLinkStatus = CVDisplayLinkCreateWithActiveCGDisplays(&displayLink)
+    |                                 `- warning: 'CVDisplayLinkCreateWithActiveCGDisplays' was deprecated in macOS 15.0: use NSView.displayLink(target:selector:), NSWindow.displayLink(target:selector:), or NSScreen.displayLink(target:selector:)  [#DeprecatedDeclaration]
+179 |         if displayLinkStatus != kCVReturnSuccess || displayLink == nil {
+180 |             embeddedConfig += "\nwindow-vsync = false\n"
+
+[#DeprecatedDeclaration]: <https://docs.swift.org/compiler/documentation/diagnostics/deprecated-declaration>
+[25/46] Compiling LoopflowMac ProcessEnvironment.swift
+/Users/jack/src/loopflow.main-view-task/swift/LoopflowMac/Services/Ghostty/GhosttyManager.swift:178:33: warning: 'CVDisplayLinkCreateWithActiveCGDisplays' was deprecated in macOS 15.0: use NSView.displayLink(target:selector:), NSWindow.displayLink(target:selector:), or NSScreen.displayLink(target:selector:)  [#DeprecatedDeclaration]
+176 |         // and refuses every surface. Its timer renderer works without that link.
+177 |         var displayLink: CVDisplayLink?
+178 |         let displayLinkStatus = CVDisplayLinkCreateWithActiveCGDisplays(&displayLink)
+    |                                 `- warning: 'CVDisplayLinkCreateWithActiveCGDisplays' was deprecated in macOS 15.0: use NSView.displayLink(target:selector:), NSWindow.displayLink(target:selector:), or NSScreen.displayLink(target:selector:)  [#DeprecatedDeclaration]
+179 |         if displayLinkStatus != kCVReturnSuccess || displayLink == nil {
+180 |             embeddedConfig += "\nwindow-vsync = false\n"
+
+[#DeprecatedDeclaration]: <https://docs.swift.org/compiler/documentation/diagnostics/deprecated-declaration>
+[26/46] Compiling LoopflowMac RegistryQueryLocal.swift
+/Users/jack/src/loopflow.main-view-task/swift/LoopflowMac/Services/Ghostty/GhosttyManager.swift:178:33: warning: 'CVDisplayLinkCreateWithActiveCGDisplays' was deprecated in macOS 15.0: use NSView.displayLink(target:selector:), NSWindow.displayLink(target:selector:), or NSScreen.displayLink(target:selector:)  [#DeprecatedDeclaration]
+176 |         // and refuses every surface. Its timer renderer works without that link.
+177 |         var displayLink: CVDisplayLink?
+178 |         let displayLinkStatus = CVDisplayLinkCreateWithActiveCGDisplays(&displayLink)
+    |                                 `- warning: 'CVDisplayLinkCreateWithActiveCGDisplays' was deprecated in macOS 15.0: use NSView.displayLink(target:selector:), NSWindow.displayLink(target:selector:), or NSScreen.displayLink(target:selector:)  [#DeprecatedDeclaration]
+179 |         if displayLinkStatus != kCVReturnSuccess || displayLink == nil {
+180 |             embeddedConfig += "\nwindow-vsync = false\n"
+
+[#DeprecatedDeclaration]: <https://docs.swift.org/compiler/documentation/diagnostics/deprecated-declaration>
+[27/46] Compiling LoopflowMac RepoScanner.swift
+/Users/jack/src/loopflow.main-view-task/swift/LoopflowMac/Services/Ghostty/GhosttyManager.swift:178:33: warning: 'CVDisplayLinkCreateWithActiveCGDisplays' was deprecated in macOS 15.0: use NSView.displayLink(target:selector:), NSWindow.displayLink(target:selector:), or NSScreen.displayLink(target:selector:)  [#DeprecatedDeclaration]
+176 |         // and refuses every surface. Its timer renderer works without that link.
+177 |         var displayLink: CVDisplayLink?
+178 |         let displayLinkStatus = CVDisplayLinkCreateWithActiveCGDisplays(&displayLink)
+    |                                 `- warning: 'CVDisplayLinkCreateWithActiveCGDisplays' was deprecated in macOS 15.0: use NSView.displayLink(target:selector:), NSWindow.displayLink(target:selector:), or NSScreen.displayLink(target:selector:)  [#DeprecatedDeclaration]
+179 |         if displayLinkStatus != kCVReturnSuccess || displayLink == nil {
+180 |             embeddedConfig += "\nwindow-vsync = false\n"
+
+[#DeprecatedDeclaration]: <https://docs.swift.org/compiler/documentation/diagnostics/deprecated-declaration>
+[28/46] Compiling LoopflowMac SnapshotService.swift
+/Users/jack/src/loopflow.main-view-task/swift/LoopflowMac/Services/Ghostty/GhosttyManager.swift:178:33: warning: 'CVDisplayLinkCreateWithActiveCGDisplays' was deprecated in macOS 15.0: use NSView.displayLink(target:selector:), NSWindow.displayLink(target:selector:), or NSScreen.displayLink(target:selector:)  [#DeprecatedDeclaration]
+176 |         // and refuses every surface. Its timer renderer works without that link.
+177 |         var displayLink: CVDisplayLink?
+178 |         let displayLinkStatus = CVDisplayLinkCreateWithActiveCGDisplays(&displayLink)
+    |                                 `- warning: 'CVDisplayLinkCreateWithActiveCGDisplays' was deprecated in macOS 15.0: use NSView.displayLink(target:selector:), NSWindow.displayLink(target:selector:), or NSScreen.displayLink(target:selector:)  [#DeprecatedDeclaration]
+179 |         if displayLinkStatus != kCVReturnSuccess || displayLink == nil {
+180 |             embeddedConfig += "\nwindow-vsync = false\n"
+
+[#DeprecatedDeclaration]: <https://docs.swift.org/compiler/documentation/diagnostics/deprecated-declaration>
+[29/46] Compiling LoopflowMac TmuxSession.swift
+/Users/jack/src/loopflow.main-view-task/swift/LoopflowMac/Services/Ghostty/GhosttyManager.swift:178:33: warning: 'CVDisplayLinkCreateWithActiveCGDisplays' was deprecated in macOS 15.0: use NSView.displayLink(target:selector:), NSWindow.displayLink(target:selector:), or NSScreen.displayLink(target:selector:)  [#DeprecatedDeclaration]
+176 |         // and refuses every surface. Its timer renderer works without that link.
+177 |         var displayLink: CVDisplayLink?
+178 |         let displayLinkStatus = CVDisplayLinkCreateWithActiveCGDisplays(&displayLink)
+    |                                 `- warning: 'CVDisplayLinkCreateWithActiveCGDisplays' was deprecated in macOS 15.0: use NSView.displayLink(target:selector:), NSWindow.displayLink(target:selector:), or NSScreen.displayLink(target:selector:)  [#DeprecatedDeclaration]
+179 |         if displayLinkStatus != kCVReturnSuccess || displayLink == nil {
+180 |             embeddedConfig += "\nwindow-vsync = false\n"
+
+[#DeprecatedDeclaration]: <https://docs.swift.org/compiler/documentation/diagnostics/deprecated-declaration>
+[30/46] Compiling LoopflowMac TmuxSessionRegistry.swift
+/Users/jack/src/loopflow.main-view-task/swift/LoopflowMac/Services/Ghostty/GhosttyManager.swift:178:33: warning: 'CVDisplayLinkCreateWithActiveCGDisplays' was deprecated in macOS 15.0: use NSView.displayLink(target:selector:), NSWindow.displayLink(target:selector:), or NSScreen.displayLink(target:selector:)  [#DeprecatedDeclaration]
+176 |         // and refuses every surface. Its timer renderer works without that link.
+177 |         var displayLink: CVDisplayLink?
+178 |         let displayLinkStatus = CVDisplayLinkCreateWithActiveCGDisplays(&displayLink)
+    |                                 `- warning: 'CVDisplayLinkCreateWithActiveCGDisplays' was deprecated in macOS 15.0: use NSView.displayLink(target:selector:), NSWindow.displayLink(target:selector:), or NSScreen.displayLink(target:selector:)  [#DeprecatedDeclaration]
+179 |         if displayLinkStatus != kCVReturnSuccess || displayLink == nil {
+180 |             embeddedConfig += "\nwindow-vsync = false\n"
+
+[#DeprecatedDeclaration]: <https://docs.swift.org/compiler/documentation/diagnostics/deprecated-declaration>
+[31/46] Compiling LoopflowMac AppTestMode.swift
+[32/46] Compiling LoopflowMac ConversationLaunch.swift
+[33/46] Compiling LoopflowMac BrandColors+macOS.swift
+[34/46] Compiling LoopflowMac LoopflowApp.swift
+[35/46] Compiling LoopflowMac MacLocalWaveAgentLauncher.swift
+[36/46] Compiling LoopflowMac MockWaveFixture.swift
+[37/46] Compiling LoopflowMac PlatformHelpers.swift
+[38/46] Compiling LoopflowMac PodiumFixture.swift
+[39/46] Compiling LoopflowMac PodiumModel.swift
+[40/46] Compiling LoopflowMac PortfolioDiscovery.swift
+[41/46] Compiling LoopflowMac PortfolioRepo.swift
+[42/57] Compiling LoopflowMac WaveChatRendering.swift
+[43/57] Compiling LoopflowMac WaveChatView.swift
+[44/57] Compiling LoopflowMac WaveDetailPane.swift
+[45/57] Compiling LoopflowMac WaveLensView.swift
+[46/57] Compiling LoopflowMac WaveRow.swift
+[47/57] Compiling LoopflowMac WavesView.swift
+[48/57] Compiling LoopflowMac WorkActivityView.swift
+[49/57] Compiling LoopflowMac WorkSurfaceView.swift
+[50/57] Compiling LoopflowMac WorkspaceNavigator.swift
+[51/57] Compiling LoopflowMac WorkspaceProjection.swift
+[52/57] Compiling LoopflowMac resource_bundle_accessor.swift
+[52/57] Write Objects.LinkFileList
+[53/57] Linking LoopflowMac
+[54/57] Applying LoopflowMac
+[56/91] Compiling LoopflowTests LoopflowStateTests.swift
+[57/91] Compiling LoopflowTests MessageRowTests.swift
+[58/91] Compiling LoopflowTests MockWaveFixtureTests.swift
+[59/91] Compiling LoopflowTests MultiplexerLayoutTests.swift
+[60/91] Compiling LoopflowTests MultiplexerStoreTests.swift
+[61/91] Compiling LoopflowTests NowProjectionTests.swift
+[62/91] Compiling LoopflowTests PodiumModelTests.swift
+[63/91] Compiling LoopflowTests PortfolioRepoStateTests.swift
+[64/91] Compiling LoopflowTests PortfolioServiceTests.swift
+[65/91] Compiling LoopflowTests ReferenceTextViewTests.swift
+[66/91] Compiling LoopflowTests RegistryQueryTests.swift
+[67/91] Compiling LoopflowTests RepoScannerTests.swift
+[68/91] Compiling LoopflowTests RoadmapViewTests.swift
+[69/91] Compiling LoopflowTests SessionActionFixtures.swift
+[70/91] Compiling LoopflowTests SessionsPolishTests.swift
+[71/91] Compiling LoopflowTests SessionsStoreTests.swift
+[72/91] Compiling LoopflowTests TaskDirectiveEditorTests.swift
+[73/91] Compiling LoopflowTests TaskMonitorProofTests.swift
+[74/91] Compiling LoopflowTests TaskMonitorTests.swift
+[75/91] Compiling LoopflowTests TestHostTerminator.swift
+[76/91] Compiling LoopflowTests WaveChatConnectionTests.swift
+[77/91] Compiling LoopflowTests WaveChatStreamTests.swift
+[78/91] Compiling LoopflowTests AppAppearanceTests.swift
+[79/91] Compiling LoopflowTests AppBootstrapResourceTests.swift
+[80/91] Compiling LoopflowTests AttemptFailurePresentationTests.swift
+[81/91] Compiling LoopflowTests BundledDaemonPathTests.swift
+[82/91] Compiling LoopflowTests ChatReferenceTests.swift
+[83/91] Compiling LoopflowTests ContractTests.swift
+[84/91] Compiling LoopflowTests DTOFixtureTests.swift
+[85/91] Compiling LoopflowTests DesktopPerformanceTests.swift
+[86/91] Compiling LoopflowTests FaderSwitchTests.swift
+[87/91] Compiling LoopflowTests GhosttyTerminalInputTests.swift
+[88/91] Compiling LoopflowTests LocalWaveAgentLauncherTests.swift
+[89/91] Emitting module LoopflowTests
+[90/102] Compiling LoopflowTests WaveChatTranscriptTests.swift
+[91/102] Compiling LoopflowTests WaveDetailReadingTests.swift
+[92/102] Compiling LoopflowTests WaveLensTests.swift
+[93/102] Compiling LoopflowTests WaveOriginTests.swift
+[94/102] Compiling LoopflowTests WavePlanParserTests.swift
+[95/102] Compiling LoopflowTests WaveRowTests.swift
+[96/102] Compiling LoopflowTests WaveSurfacePrimaryHierarchyTests.swift
+[97/102] Compiling LoopflowTests WaveTests.swift
+[98/102] Compiling LoopflowTests WorkspaceNavigationProofTests.swift
+[99/102] Compiling LoopflowTests WorkspaceNavigationTests.swift
+[100/102] Compiling LoopflowTests WorktreeWorkspaceTests.swift
+[100/102] Write Objects.LinkFileList
+[101/102] Linking LoopflowSwiftPackageTests
+Build complete! (33.11s)
+Test Suite 'Selected tests' started at 2026-09-24 17:10:51.082.
+Test Suite 'LoopflowSwiftPackageTests.xctest' started at 2026-09-24 17:10:51.083.
+Test Suite 'LoopflowSwiftPackageTests.xctest' passed at 2026-09-24 17:10:51.083.
+	 Executed 0 tests, with 0 failures (0 unexpected) in 0.000 (0.000) seconds
+Test Suite 'Selected tests' passed at 2026-09-24 17:10:51.083.
+	 Executed 0 tests, with 0 failures (0 unexpected) in 0.000 (0.001) seconds
+◇ Test run started.
+↳ Testing Library Version: 1501
+↳ Target Platform: arm64e-apple-macos14.0
+◇ Suite "DTO Fixtures" started.
+◇ Suite "Task Monitor" started.
+◇ Test "Active Runs preserve exact attribution, waiting clients, and evidence gaps" started.
+◇ Test "Monitor isolates Task identity and distinguishes stale, incomplete and empty observations" started.
+✔ Test "Active Runs preserve exact attribution, waiting clients, and evidence gaps" passed after 0.002 seconds.
+✔ Suite "DTO Fixtures" passed after 0.002 seconds.
+✔ Test "Monitor isolates Task identity and distinguishes stale, incomplete and empty observations" passed after 0.128 seconds.
+✔ Suite "Task Monitor" passed after 0.128 seconds.
+✔ Test run with 2 tests in 2 suites passed after 0.128 seconds.

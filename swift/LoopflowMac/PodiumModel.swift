@@ -79,6 +79,11 @@ final class PodiumModel {
     private(set) var processActivity: PodiumReading<ActivitySnapshot> = .loading
     private(set) var activeRuns: PodiumReading<ActiveRunsSnapshot> = .loading
     private(set) var isRefreshingActiveRuns = false
+    private(set) var activeRunsNeedsRetry = false
+    @ObservationIgnored private var activeRunsObservation: ActiveRunsObservation?
+    @ObservationIgnored private var activeRunsTask: Task<Void, Never>?
+    private var activeRunsGeneration = 0
+    private var activeRunsDemanded = false
     private var sessionReadings: [String: PodiumReading<[SessionRecord]>] = [:]
     private(set) var sessions: PodiumReading<[SessionRecord]> {
         get { sessionReadings[repoPath ?? ""] ?? .loading }
@@ -208,17 +213,121 @@ final class PodiumModel {
         )
     }
 
-    /// One Home reading serves every retained Monitor, independent of selection.
-    /// Refresh is explicit until discovery cost is bounded for continuous polling.
+    /// First demand starts a window-owned reader; navigation never restarts it.
+    func observeActiveRuns() {
+        guard !activeRunsDemanded else { return }
+        activeRunsDemanded = true
+        startActiveRuns()
+    }
+
     func refreshActiveRuns() async {
-        guard !isRefreshingActiveRuns else { return }
+        activeRunsDemanded = true
+        if activeRunsNeedsRetry || activeRunsTask == nil {
+            await stopActiveRuns()
+            startActiveRuns()
+        } else {
+            await activeRunsObservation?.request(.refresh)
+        }
+    }
+
+    func rescanActiveRuns() async {
+        guard let observation = activeRunsObservation, !activeRunsNeedsRetry else { return }
+        activeRuns = .unavailable(lastGood: activeRuns.value, reason: "Rediscovering active Runs after wake")
         isRefreshingActiveRuns = true
-        defer { isRefreshingActiveRuns = false }
-        let previous = activeRuns.value
+        await observation.request(.rescan)
+    }
+
+    /// Attached once to the window root, independently of repository or pane visibility.
+    func activeRunsLifetime() async {
         do {
-            activeRuns = .available(try await query.activeRuns())
-        } catch {
-            activeRuns = .unavailable(lastGood: previous, reason: error.localizedDescription)
+            while !Task.isCancelled { try await Task.sleep(for: .seconds(3600)) }
+        } catch { }
+        await stopActiveRuns()
+        activeRunsDemanded = false
+    }
+
+    func stopActiveRuns() async {
+        activeRunsGeneration += 1
+        let generation = activeRunsGeneration
+        let task = activeRunsTask
+        task?.cancel()
+        await task?.value
+        guard activeRunsGeneration == generation else { return }
+        activeRunsTask = nil
+        activeRunsObservation = nil
+        isRefreshingActiveRuns = false
+    }
+
+    deinit { activeRunsTask?.cancel() }
+
+    private func startActiveRuns() {
+        guard activeRunsTask == nil else { return }
+        activeRunsGeneration += 1
+        let generation = activeRunsGeneration
+        isRefreshingActiveRuns = true
+        activeRunsNeedsRetry = false
+        let query = query
+        activeRunsTask = Task { [weak self] in
+            // Only configuration replacement retries automatically. Transport failures
+            // retain evidence and wait for the explicit Retry action.
+            while !Task.isCancelled {
+                var observation: ActiveRunsObservation?
+                var replace = false
+                var discoveryFailed = false
+                do {
+                    let opened = try await query.watchActiveRuns()
+                    observation = opened
+                    guard !Task.isCancelled, self?.activeRunsGeneration == generation else {
+                        await opened.cancel()
+                        return
+                    }
+                    self?.activeRunsObservation = opened
+                    for try await snapshot in opened.snapshots {
+                        guard !Task.isCancelled, self?.activeRunsGeneration == generation else { break }
+                        self?.receiveActiveRuns(snapshot)
+                        if snapshot.discovery == .unavailable {
+                            discoveryFailed = true
+                            break
+                        }
+                    }
+                    if !Task.isCancelled && !discoveryFailed {
+                        throw RegistryQueryError("Active Run observation ended")
+                    }
+                } catch ActiveRunsObservationError.configurationChanged {
+                    replace = true
+                    if self?.activeRunsGeneration == generation {
+                        self?.activeRuns = .loading
+                    }
+                } catch {
+                    if !Task.isCancelled, let self, self.activeRunsGeneration == generation {
+                        self.activeRuns = .unavailable(lastGood: self.activeRuns.value, reason: error.localizedDescription)
+                        self.activeRunsNeedsRetry = true
+                    }
+                }
+                await observation?.cancel()
+                guard !Task.isCancelled, let self, self.activeRunsGeneration == generation else { return }
+                self.activeRunsObservation = nil
+                if replace {
+                    self.activeRuns = .loading
+                    self.isRefreshingActiveRuns = true
+                    continue
+                }
+                self.activeRunsTask = nil
+                self.isRefreshingActiveRuns = false
+                return
+            }
+        }
+    }
+
+    private func receiveActiveRuns(_ snapshot: ActiveRunsSnapshot) {
+        isRefreshingActiveRuns = snapshot.discovery == .scanning
+        activeRunsNeedsRetry = snapshot.discovery == .unavailable
+        switch snapshot.discovery {
+        case .ready:
+            activeRuns = .available(snapshot)
+        case .scanning, .unavailable:
+            let reason = snapshot.discovery == .scanning ? "Discovering active Runs…" : "Active Run discovery unavailable"
+            activeRuns = .unavailable(lastGood: activeRuns.value, reason: ([reason] + snapshot.gaps).joined(separator: "; "))
         }
     }
 

@@ -1,0 +1,64 @@
+--- a/swift/LoopflowMac/Services/LocalActiveRunsObservation.swift
++++ b/swift/LoopflowMac/Services/LocalActiveRunsObservation.swift
+@@ -113,7 +113,7 @@
+             if count == 0 {
+                 if isOutput {
+                     outputSource?.cancel()
+-                    if stoppingAt == nil { fail(RegistryQueryError("Active Run reader closed its output")) }
++                    if stoppingAt == nil { readerEnded("Active Run reader closed its output") }
+                 } else { errorSource?.cancel() }
+                 return
+             }
+@@ -214,8 +214,7 @@
+ 
+     private func didExit() {
+         if stoppingAt == nil {
+-            let detail = String(decoding: stderr, as: UTF8.self).trimmingCharacters(in: .whitespacesAndNewlines)
+-            fail(RegistryQueryError(detail.isEmpty ? "Active Run reader exited (\(process.terminationStatus))" : detail))
++            readerEnded("Active Run reader exited (\(process.terminationStatus))")
+         }
+         exited = true
+         outputSource?.cancel()
+@@ -228,5 +227,14 @@
+         for waiter in waiters { waiter.resume() }
+         waiters.removeAll()
+     }
++
++    private func readerEnded(_ fallback: String) {
++        // stdout EOF and process exit can arrive before stderr's read callback.
++        if let errorSource, !errorSource.isCancelled {
++            drain(diagnostics.fileHandleForReading, isOutput: false)
++        }
++        let detail = String(decoding: stderr, as: UTF8.self).trimmingCharacters(in: .whitespacesAndNewlines)
++        fail(RegistryQueryError(detail.isEmpty ? fallback : detail))
++    }
+ }
+ #endif
+--- a/swift/LoopflowTests/ActiveRunsObservationTests.swift
++++ b/swift/LoopflowTests/ActiveRunsObservationTests.swift
+@@ -7,6 +7,25 @@
+ 
+ @Suite("Active Run transport", .serialized)
+ struct ActiveRunsObservationTests {
++    @Test("Reader startup failure preserves the CLI diagnostic", arguments: [false, true])
++    func startupFailure(closesOutputFirst: Bool) async throws {
++        let diagnosis = "Selected Home has an incompatible migration frontier"
++        let shutdown = closesOutputFirst ? "exec 1>&-; IFS= read -r request; exit 23" : "exit 23"
++        let process = shell("printf '%s\\n' '\(diagnosis)' >&2; \(shutdown)")
++        let reader = try LocalActiveRunsObservation.start(process: process, configurationChanged: { false })
++        do {
++            for try await _ in reader.snapshots {
++                Issue.record("Failed reader supplied an observation")
++            }
++            Issue.record("Failed reader finished successfully")
++        } catch {
++            #expect(error.localizedDescription.contains(diagnosis))
++        }
++        await reader.cancel()
++        #expect(!process.isRunning)
++        #expect(process.terminationStatus == 23)
++    }
++
+     @Test("A slow consumer receives the latest complete snapshot without an output backlog")
+     func latestDelivery() async throws {
+         let directory = try directory()

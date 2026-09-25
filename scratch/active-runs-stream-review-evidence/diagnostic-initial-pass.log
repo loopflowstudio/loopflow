@@ -1,0 +1,22 @@
+Building for debugging...
+[0/5] Write sources
+[1/5] Write swift-version--58304C5D6DBC2206.txt
+[3/5] Compiling LoopflowTests ActiveRunsObservationTests.swift
+[4/5] Emitting module LoopflowTests
+[4/6] Write Objects.LinkFileList
+[5/6] Linking LoopflowSwiftPackageTests
+Build complete! (3.22s)
+Test Suite 'Selected tests' started at 2026-09-24 18:50:48.789.
+Test Suite 'LoopflowSwiftPackageTests.xctest' started at 2026-09-24 18:50:48.790.
+Test Suite 'LoopflowSwiftPackageTests.xctest' passed at 2026-09-24 18:50:48.790.
+	 Executed 0 tests, with 0 failures (0 unexpected) in 0.000 (0.000) seconds
+Test Suite 'Selected tests' passed at 2026-09-24 18:50:48.790.
+	 Executed 0 tests, with 0 failures (0 unexpected) in 0.000 (0.001) seconds
+◇ Test run started.
+↳ Testing Library Version: 1501
+↳ Target Platform: arm64e-apple-macos14.0
+◇ Suite "Active Run transport" started.
+◇ Test "Reader startup failure preserves the CLI diagnostic" started.
+✔ Test "Reader startup failure preserves the CLI diagnostic" passed after 0.007 seconds.
+✔ Suite "Active Run transport" passed after 0.007 seconds.
+✔ Test run with 1 test in 1 suite passed after 0.007 seconds.

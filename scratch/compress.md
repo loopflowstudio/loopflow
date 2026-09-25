@@ -12,9 +12,14 @@
   Wave ancestry keeps historical Project-bound Sessions reachable.
 - `ActiveRunsSnapshot` joins current capture intervals and native client receipts
   to one verified process observation. Run records own the Work resolver shared
-  with Sessions. Podium owns one demand-refreshed Home observation shared by all
-  Task Monitor panes. Native discovery still traverses retained Run directories;
-  bounded discovery and automatic refresh remain unfinished.
+  with Sessions. One Rust reader supplies cold one-shot reads and the foreground
+  macOS stream. FSEvents invalidates its transient live/unresolved candidates;
+  cold/recovery scans enumerate history, unchanged warm reads do not. Required
+  discovery state distinguishes coverage from individual observation gaps.
+  Podium retains one foreground observation after first Monitor demand, shared
+  by every Task pane in the window. RegistryQueryLocal owns pipe transport and
+  reader cleanup; Podium owns freshness, Retry and replacement generations.
+  Navigation never restarts discovery; window teardown awaits reader exit.
 - Rust projects Session action descriptors and Work display paths from the
   existing boundary and stored ancestry. CLI text and Swift controls consume
   those values. Flow settlement checks the same policy against its current
@@ -54,6 +59,113 @@
   focus cannot route ordinary input to a retained terminal.
 
 ## Before and after
+
+### Shared stream ownership review (2026-09-24)
+
+No coherent model/API reduction was established. Before and after this pass,
+Rust owns receipt discovery and Run attribution, local transport owns its child,
+Podium owns observations, and the existing multiplexer owns panes. Only this
+report changes. The preceding stream implementation already removed Mac's
+one-shot active-Run method; that deletion is not this pass's contribution.
+
+Traced `RunBindingGuard` and native receipts through `ActiveRunReader`, FSEvents,
+process matching, projection, one-shot/streaming CLI, `ActiveRunsObservation`,
+`LocalActiveRunsObservation`, RegistryQueryLocal, Podium and TaskMonitorView.
+Compared every Rust/Swift field in ActiveRunsSnapshot, ActiveRun,
+LiveProviderProcess and SessionRecord, and inspected the required-discovery
+fixture assertions. Followed window teardown/wake and retained workspace access.
+Searches retain one production capture-binding writer, one Podium stream caller
+and one root workspace registry; no Mac `query.activeRuns` caller remains.
+
+Candidates retained deliberately:
+
+- The observation handle includes snapshots, refresh/rescan and awaited cleanup.
+  Returning only its stream would lose request and reader-exit semantics. The
+  local process class implements that transport; it is not another Run registry.
+- Discovery coverage, attribution gaps and transport failure remain independent.
+  A ready frame can contain gaps; scanning must preserve the prior observation
+  and timestamp. Session state and terminal attachment cannot supply Run liveness.
+- First-demand retention and Retry differ: a failed reader must not restart on
+  navigation. Task cancellation and generation checks protect asynchronous launch
+  and late delivery, while the transport's exited state releases cancellation
+  waiters. Replacing these with an enum alone removes no owner or public concept.
+- Launch configuration pins helper/environment and replacement metadata; the
+  frame's Home identifies the resolved reading authority. Neither substitutes
+  for the other. Configuration replacement needs a different outcome from an
+  ordinary error because it clears old evidence and drains before restarting.
+- Frame-search offset prevents repeated scans of incomplete input. Pending
+  requests, the latest decoded snapshot and Rust's pending serialized frame
+  bound different queues. Removing a bound or adding a shared queue wrapper
+  would not simplify ownership while preserving backpressure behavior.
+
+Verified all 19 source hashes and seven artifact hashes in the
+[stream receipt](active-runs-stream-evidence/receipt.json). Inspected its existing
+16-test pass, real CLI publication/exit/rescan assertions, held replacement and
+deallocation proofs, native input assertions, and fallback compilation receipt.
+These are prior results, not fresh test runs. The discovery review's nine
+artifact hashes also match; four of its Swift source hashes have been superseded
+by the matching stream receipt. No benchmark or suite was rerun.
+
+No executable changes; `git diff --check` passes. Configured vendor activity,
+human composition acceptance, remaining rendering measurements and budgets,
+chapter ownership integration and external trials/edit retain their open status.
+Other writers' dirty source and evidence were preserved without staging or a
+blanket checkpoint. No publication, installation or Task completion occurred.
+
+### Retained discovery ownership review (2026-09-24)
+
+No coherent model/API reduction was established. Before and after this pass,
+existing receipts establish ownership, the Rust reader owns transient discovery,
+and Podium owns Monitor readings. Only this report changes. No API, DTO field,
+type, writer, persistence path or capability was removed. The preceding manifest
+diagnostic correction and concurrent Work-bound flow changes remain their
+existing contributions.
+
+Traced capture publication and native receipts through `ActiveRunReader`, its
+FSEvents subscription, `ProcessSnapshot`, shared ownership/Work projection,
+one-shot and streaming CLI, RegistryQuery, Podium and TaskMonitorView. Compared
+every Rust/Swift field in ActiveRunsSnapshot, ActiveRun, LiveProviderProcess and
+SessionRecord, including the required discovery/Run references; read the shared
+fixture assertions, CLI help/docs and native-feed/lifetime regressions. Searches
+retain one production capture-binding writer, one Podium active-Run caller and
+one root workspace registry. Both CLI modes use the same reader/projector.
+
+Candidates retained deliberately:
+
+- Discovery coverage, per-observation gaps and transport failure are independent.
+  A ready snapshot can have incomplete attribution; a successful JSON response
+  can report scanning. Collapsing them would lose the Monitor's empty-state
+  distinction. The envelope also preserves Home, scope and observation time.
+- Capture intervals, native client receipts and Exec receipts have different
+  lifetimes and ownership meanings. Session boundary IDs, required Run IDs and
+  terminal attachments likewise cannot replace one another. Declared subjects,
+  resolved Work and launch metadata are not aliases for observed providers.
+- The ownerless capture's cached native-namespace presence is a dependency, not
+  redundant liveness. Its removal already produced a false healthy empty; reading
+  dead native history every tick would violate the bounded warm-cost contract.
+  Receipt/traversal errors require retained recovery evidence, while manifest
+  failures now belong only to the current live-client observation.
+- The callback queue, pending changes and reader rescan flag cover delivery,
+  carried-over invalidations and scan execution respectively. CLI request flags,
+  busy state and its single pending frame belong to transport scheduling. Merely
+  wrapping these in another state type removes no owner or public concept.
+- Removing RegistryQuery's one-shot method requires the complete cancellable
+  streaming transport and Podium lifetime change. That is the next authorized
+  implementation slice, not a behavior-preserving deletion. Renaming or extracting
+  receipt-path predicates alone would also leave the model unchanged.
+
+Verified all 19 source hashes and nine artifact hashes in the
+[discovery review receipt](discovery-review-evidence/receipt.json). Inspected its
+existing ten-test reader pass (large cost matrix explicitly ignored) and actual
+CLI lifetime pass. These are unchanged prior receipts, not new test runs. The
+cost matrix retains its separately recorded pre-correction executable attribution.
+No executable edit warrants rerunning those tests or the benchmark;
+`git diff --check` passes.
+
+Automatic Mac integration, configured positive activity/native retention through
+stream recovery, fallback compilation and the broader canvas acceptance remain
+open. No publication, installation, PM mutation, provider action, Task completion
+or checkpoint of another writer's work occurred.
 
 ### Iteration 21 — measurement ownership review (2026-09-24)
 

@@ -1,0 +1,32 @@
+{
+  "result": "Rust discovery and foreground CLI slice verified; automatic Monitor transport remains next",
+  "checks": {
+    "reader_tests": 9,
+    "cli_tests": 1,
+    "frame_limit_tests": 1,
+    "rust_dto_tests": 1,
+    "swift_tests": 2,
+    "cost_matrix_tests": 1,
+    "warm_observations": 60,
+    "clippy": "pass",
+    "format": "pass",
+    "diff_check": "pass"
+  },
+  "measurement_binary_sha256": "94a4a59d569ce3761a22504b037df4b076c8e88423784e036338a4fcaaf24ca2",
+  "sources_unchanged_during_final_collection": true,
+  "artifacts": {
+    "ownership-feed-final.log": "c6b13d567cc22611ea419ca3c5b92d57475992570f1f6630c177357c26d9569c",
+    "native-history-before.log": "4418fe40e9f04be2d1f8197185a07e86eca1c757074f8fdb6c5db691f3e26f01",
+    "cli-final.log": "deb836e69b074910611020f10d7a8f5b32270aee306eb440f2c78ae1f760d593",
+    "clippy-final.log": "79b1281ccd95781896f5b2879710ec7de9b958b0e3f2b721c7cb36b68f1e1307",
+    "frame-limit.log": "5684f60abf25dd3413303de3872c8a767dcbbdde5508c576697d07d064d6a212",
+    "dto.log": "3d589912b16e113352a0b3870478b6dc581f31699cabcc2ba93db721d72b169e",
+    "swift.log": "2817a4fda243263ec8fc268916363d9aa86b87b3d9ee5e64ad572c8755b1942f",
+    "cost-final.log": "8a175d6070282049e32f222f1b74e844b235aaddfd57bb0b841a09dc2d78a83e",
+    "cost-summary.json": "d1e23410c415dc93cfea84ba90ecf3602264fd6ae3d71b9eee2659631b2e42f0",
+    "report.md": "4ec817119be5111a0eb0920c765950f3fecf1b49d447fad2d54c7b660f75ceb8",
+    "measurement-command.json": "c4cac4cc8010aba22a087e3fbca65a30185ab7d96f781955377bc21a7c9eaf24",
+    "sources-before.json": "03aa705fb1d4b75410a7de1039e84423bf64a1a81fb893adaec2e322756385f0",
+    "sources-after.json": "03aa705fb1d4b75410a7de1039e84423bf64a1a81fb893adaec2e322756385f0"
+  }
+}

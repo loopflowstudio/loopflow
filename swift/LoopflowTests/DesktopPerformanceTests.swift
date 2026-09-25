@@ -391,7 +391,7 @@ struct DesktopPerformanceTests {
              "terminal_ids": [], "open_argv": ["must-not-launch"]] as [String: Any]
         })
         let active = try JSONSerialization.data(withJSONObject: [
-            "home": "benchmark-fixture", "observed_at": 1790270400, "task": NSNull(), "gaps": [],
+            "discovery": "ready", "home": "benchmark-fixture", "observed_at": 1790270400, "task": NSNull(), "gaps": [],
             "runs": [0, 2].map { index in
                 ["id": "perf-run-\(index)", "work": ["kind": "task", "id": "perf-work-\(index)"],
                  "subjects": [], "label": "Fixture Run \(index)", "harness": "fixture", "model": NSNull(),
@@ -400,12 +400,12 @@ struct DesktopPerformanceTests {
         ])
         let sessionJSON = String(decoding: sessions, as: UTF8.self)
         let activeJSON = String(decoding: active, as: UTF8.self)
-        let query = RegistryQuery { args, _ in
+        let feed = ActiveRunsTestFeed()
+        let query = RegistryQuery(watchActiveRuns: { try await feed.open(initial: activeJSON) }) { args, _ in
             switch args.first {
             case "roadmap": return await planning.read()
             case "ls": return "[]"
             case "session" where args.dropFirst().first == "list": return sessionJSON
-            case "runs": return activeJSON
             case "activity": return #"{"generated_at":1,"since":0,"limit":50,"truncated":false,"items":[]}"#
             default: throw RegistryQueryError("Benchmark does not launch providers or mutate planning")
             }

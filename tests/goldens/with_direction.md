@@ -155,10 +155,11 @@ lf ssh <home-id> status <wave> --json           # inspect it on that Home
 lf ssh <home-id> start <wave>                   # start it on that Home
 ```
 
-Use `--as task:...` or `--as wave:...` with one named
-Skill or `: "question"` for an inline prompt. In a plain terminal it starts a fresh Run at that
+Use `--as task:...` or `--as wave:...` with a named
+skill, flow or `: "question"` for an inline prompt. In a plain terminal it executes at that
 Work's placement. Inside a Run it is an exact identity assertion; a mismatch
-fails. It never binds a multi-step flow.
+fails. A direct flow creates a fresh Run for each skill and leaves the managed
+Work Flow position unchanged.
 
 `lf ssh` runs only the target machine's `lf`; the inner `lf` and `--` separator
 are implicit. Foreground commands can choose from origin-forwarded and
@@ -168,10 +169,12 @@ on their machine.
 
 ## Work Directly On Behalf Of Existing Work
 
-Run one bounded skill with an existing Task or Wave as its subject:
+Run a bounded skill or flow with an existing Task or Wave as its subject:
 
 ```bash
 lf task prepare LOO-267
+lf --task LOO-267 design "Revise the discovery design"
+lf --task LOO-267 code "Implement the accepted slice"
 lf --task LOO-267 research \
   "Research the runtime model; write scratch/research-runtime-model.md"
 lf --task LOO-267 research \
@@ -182,7 +185,7 @@ lf --wave context wave/operate \
 
 `lf task prepare` ensures tracked Task Work, its one worktree, and serial PR
 identity without starting Task execution. `--task`
-and `--wave` start one supervised skill Run about the most specific
+and `--wave` run the requested skill or flow about the most specific
 selected Work. A Task implies its Wave and resolves the current chapter internally.
 Broader selectors may be supplied as qualifiers and must match. These commands
 never bind or advance the Work's Flow, resume a provider session,
@@ -190,19 +193,22 @@ or grant exclusive ownership. Task binding supplies the Task seed and uses its
 existing worktree as cwd. Wave binding uses the owning Wave
 repository; repository changes still belong in a Task. Zero, one, or many generic Runs may concern the same Work. Each has
 its own Run id; Work attribution is provenance, never a reservation or mutation
-lease.
+lease. Direct flows preserve their authored order and human review boundaries;
+explicit operations execute as authored. `lf task run --flow NAME` binds the
+managed Task workflow instead. Bare names prefer skills; use `lf flow NAME`
+when a flow shares a skill's name.
 
 The worktree is shared durable context. Every Run assembled from a Task
 worktree receives the recursive UTF-8 Markdown tree under `scratch/` as a
 launch-time snapshot. Give parallel contributions distinct paths. A direct
-bound skill leaves its edits uncommitted and must never stage or claim unrelated
+bound skill or flow leaves its edits uncommitted and must never stage or claim unrelated
 dirty files merely because it finished first. After the bounded Runs finish,
 inspect the shared tree. When the complete set is one coherent checkpoint, use
 the ordinary `lf commit`/PR workflow to share it.
 
 Use Task or Wave pursuit commands when Loopflow should choose and run
 subsequent work. Use `--task` or `--wave`
-with a skill when a human or parent already knows the one bounded contribution
+with a skill or flow when a human or parent already knows the bounded contribution
 to make.
 
 A parent follows the same path without becoming the Task worker:

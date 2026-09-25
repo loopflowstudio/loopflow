@@ -1,4 +1,5 @@
 {
+  "discovery": "ready",
   "home": "/fixture/home",
   "observed_at": 1790270400,
   "task": {"kind": "task", "id": "task_00000000000000000000000000000001"},

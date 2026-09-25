@@ -6,8 +6,11 @@ use std::fs;
 use std::path::{Path, PathBuf};
 
 use serde::{Deserialize, Serialize};
-use time::OffsetDateTime;
 use uuid::Uuid;
+
+mod events;
+mod reader;
+pub(crate) use reader::ActiveRunReader;
 
 use crate::durable::{RunId, TaskWorkerOwner, WorkRef};
 use crate::lf::commands::top::{live_exec_providers, LiveExecProviders, LiveProviderProcess};
@@ -77,8 +80,18 @@ pub struct ActiveRun {
     pub processes: Vec<LiveProviderProcess>,
 }
 
+#[derive(Debug, Clone, Copy, Serialize, Deserialize, PartialEq, Eq)]
+#[serde(rename_all = "snake_case")]
+#[non_exhaustive]
+pub enum DiscoveryState {
+    Scanning,
+    Ready,
+    Unavailable,
+}
+
 #[derive(Debug, Clone, Serialize, Deserialize, PartialEq)]
 pub struct ActiveRunsSnapshot {
+    pub discovery: DiscoveryState,
     pub home: PathBuf,
     pub observed_at: i64,
     pub task: Option<WorkRef>,
@@ -86,6 +99,7 @@ pub struct ActiveRunsSnapshot {
     pub gaps: Vec<String>,
 }
 
+#[cfg(test)]
 fn read_bindings(home: &Path) -> std::io::Result<BTreeMap<PathBuf, RunBinding>> {
     let entries = match fs::read_dir(home.join("run-bindings")) {
         Ok(entries) => entries,
@@ -153,64 +167,46 @@ pub async fn snapshot(
     store: &SharedStore,
     task: Option<WorkRef>,
 ) -> ActiveRunsSnapshot {
-    let now = OffsetDateTime::now_utc().unix_timestamp();
-    let mut snapshot = ActiveRunsSnapshot {
-        home: home.to_owned(),
-        observed_at: now,
-        task,
-        runs: Vec::new(),
-        gaps: Vec::new(),
-    };
-    let observed = (|| -> anyhow::Result<_> {
-        let before = read_bindings(home)?;
-        let mut clients = Vec::new();
-        // Native clients already carry exact Run ownership in their receipts,
-        // including clients launched before capture-interval discovery existed.
-        // Discover those receipts independently; do not read historical events
-        // or require another publication from their still-running launcher.
-        for dir in crate::run_record::record_dirs(home)? {
-            let native = crate::run_record::read_provider_clients(&dir)?;
-            if native.is_empty() {
-                continue;
-            }
-            let manifest = read_manifest(&dir)?;
-            clients.extend(
-                native
-                    .into_iter()
-                    .map(|client| (manifest.run_id.clone(), client, manifest.harness.clone())),
-            );
-        }
-        let owners = before
-            .values()
-            .filter_map(|binding| binding.owner.clone())
-            .collect::<Vec<_>>();
-        let execs = live_exec_providers(home, now, &owners, &clients)?;
-        let after = read_bindings(home)?;
-        if before != after {
-            anyhow::bail!("Run ownership changed during observation; read again");
-        }
-        let unowned = before
-            .values()
-            .filter(|binding| {
-                binding.owner.is_none() && !clients.iter().any(|(id, _, _)| id == &binding.run_id)
-            })
-            .map(|binding| binding.run_id.to_string())
-            .collect::<BTreeSet<_>>();
-        Ok((before, execs, unowned))
-    })();
-    let (bindings, execs, unowned) = match observed {
-        Ok(observed) => observed,
-        Err(error) => {
-            snapshot.gaps.push(error.to_string());
-            return snapshot;
-        }
-    };
+    match ActiveRunReader::start(home, false, tokio_util::sync::CancellationToken::new()) {
+        Ok(mut reader) => reader.observe(store, task).await,
+        Err(error) => ActiveRunsSnapshot {
+            home: home.to_owned(),
+            observed_at: time::OffsetDateTime::now_utc().unix_timestamp(),
+            task,
+            discovery: DiscoveryState::Unavailable,
+            runs: Vec::new(),
+            gaps: vec![error.to_string()],
+        },
+    }
+}
+
+async fn project(
+    home: &Path,
+    store: &SharedStore,
+    bindings: &BTreeMap<PathBuf, RunBinding>,
+    processes: &crate::lf::commands::top::ProcessSnapshot,
+    clients: &[(RunId, crate::run_record::ProviderClientRef, String)],
+    snapshot: &mut ActiveRunsSnapshot,
+    cost: &mut reader::DiscoveryCost,
+) {
+    let owners = bindings
+        .values()
+        .filter_map(|binding| binding.owner.clone())
+        .collect::<Vec<_>>();
+    let execs = live_exec_providers(processes, &owners, clients);
+    let unowned = bindings
+        .values()
+        .filter(|binding| {
+            binding.owner.is_none() && !clients.iter().any(|(id, _, _)| id == &binding.run_id)
+        })
+        .map(|binding| binding.run_id.to_string())
+        .collect::<BTreeSet<_>>();
     for id in unowned {
         snapshot.gaps.push(format!(
             "Run {id}: capture has no Exec or native-client ownership evidence"
         ));
     }
-    let mut runs = join_bindings(&bindings, &execs.execs, &mut snapshot.gaps);
+    let mut runs = join_bindings(bindings, &execs.execs, &mut snapshot.gaps);
     snapshot.gaps.extend(execs.gaps);
     for (id, process) in execs.clients {
         runs.entry(id.to_string()).or_default().push(process);
@@ -222,7 +218,7 @@ pub async fn snapshot(
             .ok()
             .and_then(|id| record_dir(home, &id))
             .ok_or_else(|| std::io::Error::other("invalid Run ID"))
-            .and_then(|dir| read_manifest(&dir));
+            .and_then(|dir| cost.manifest(&dir));
         let manifest = match manifest {
             Ok(manifest) => manifest,
             Err(error) => {
@@ -245,7 +241,6 @@ pub async fn snapshot(
         }
         snapshot.runs.push(active_run(manifest, work, processes));
     }
-    snapshot
 }
 
 fn active_run(

@@ -1,0 +1,28 @@
+Building for debugging...
+[0/5] Write sources
+[1/5] Write swift-version--58304C5D6DBC2206.txt
+[3/5] Compiling LoopflowTests ActiveRunsObservationTests.swift
+[4/5] Emitting module LoopflowTests
+[4/6] Write Objects.LinkFileList
+[5/6] Linking LoopflowSwiftPackageTests
+Build complete! (2.02s)
+Test Suite 'Selected tests' started at 2026-09-24 18:40:19.372.
+Test Suite 'LoopflowSwiftPackageTests.xctest' started at 2026-09-24 18:40:19.373.
+Test Suite 'LoopflowSwiftPackageTests.xctest' passed at 2026-09-24 18:40:19.373.
+	 Executed 0 tests, with 0 failures (0 unexpected) in 0.000 (0.000) seconds
+Test Suite 'Selected tests' passed at 2026-09-24 18:40:19.373.
+	 Executed 0 tests, with 0 failures (0 unexpected) in 0.000 (0.001) seconds
+◇ Test run started.
+↳ Testing Library Version: 1501
+↳ Target Platform: arm64e-apple-macos14.0
+◇ Suite "Podium active Run lifetime" started.
+◇ Test "Home replacement drains the old generation and rejects its late evidence" started.
+✔ Test "Home replacement drains the old generation and rejects its late evidence" passed after 0.037 seconds.
+◇ Test "Window teardown releases the subscription even while its Monitor is hidden" started.
+✔ Test "Window teardown releases the subscription even while its Monitor is hidden" passed after 0.099 seconds.
+✔ Suite "Podium active Run lifetime" passed after 0.136 seconds.
+◇ Suite "Active Run transport" started.
+◇ Test "The real foreground CLI delivers automatic observations and rescan through Swift" started.
+✔ Test "The real foreground CLI delivers automatic observations and rescan through Swift" passed after 9.464 seconds.
+✔ Suite "Active Run transport" passed after 9.464 seconds.
+✔ Test run with 3 tests in 2 suites passed after 9.601 seconds.

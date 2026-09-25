@@ -54,11 +54,11 @@ start a provider or resolve a Session.
 
 **Monitor** opens beside retained Sessions and shells in the same multiplexer.
 Split, resize, zoom, close and Undo work for all pane content. Monitor shows the
-selected Task's active Runs at the displayed observation time. Choose **Refresh**
-for a new shared reading; this first version refreshes on opening and on request.
-Read failures retain the last successful observation with an error; incomplete
-ownership evidence is visible and cannot report confirmed emptiness. Closing a
-Monitor closes observation only. **Sessions** selects an exact conversation and
+selected Task's active Runs and updates automatically. **Refresh** requests an
+observation from the same reader. Recovery and read failures retain the last
+observation with a visible reason; **Retry** restarts a failed reader. Incomplete
+ownership evidence cannot report confirmed emptiness. Closing a Monitor preserves
+the window's shared reader and terminals. **Sessions** selects an exact conversation and
 returns keyboard focus to its terminal with unfinished input retained.
 
 Wave details show the objective, current chapter plan/KRs, all Tasks and chapter
@@ -288,8 +288,14 @@ xcodebuild -quiet \
 
 The repository-wide gate is `uv run python scripts/test.py --all`.
 
-Task Monitor's shared reader is `RegistryQuery.activeRuns(task:)`, backed by
-`lf runs --active --json`. Its typed Work references and verified live processes
-are separate from Session rows and historical Run outcomes. Keep `gaps` visible:
-an empty Run array with gaps is unavailable evidence. One Home observation can
-feed multiple Task panes.
+Task Monitor's shared reader is `RegistryQuery.watchActiveRuns()`, backed by
+`lf runs --active --watch --json`. Its typed Work references and verified live processes
+are separate from Session rows and historical Run outcomes. Confirm emptiness
+only when `discovery` is `ready` and `gaps` is empty. Keep scanning, unavailable,
+and incomplete evidence visible. Podium starts one reader on first demand and
+retains it across pane and repository navigation until window teardown. Wake
+requests a rescan. Helper/Home configuration replacement drains the old reader
+and clears its evidence before starting the new one. Pipes drain off the main
+actor, frames are limited to 16 MiB, and pending delivery retains only the latest
+snapshot. Ten seconds without a frame pauses updates until Retry. Cancellation
+closes stdin, then terminates and reaps only the owned reader if necessary.

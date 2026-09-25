@@ -38,9 +38,30 @@
   an owned live client in the discovery proof. A transient discovery cache needs
   a reader that survives observations; caching inside each one-shot CLI request
   still repeats cold discovery. Prove notification-loss recovery before polling.
+  An ownerless capture can outlive its native client: retained native receipts
+  resolve that ownership even when the client is dead. Dropping dead candidates
+  must not turn that capture into a new missing-ownership warning. Keep the
+  ownerless capture's namespace dependency in the bounded unresolved set: loss
+  of its last native receipt must restore the warning. Cache that presence between
+  ownership events instead of rereading dead native history on each tick.
+  Manifest failures belong to the current live-client observation; do not retain
+  them in the receipt-discovery cache after the client disappears.
 - A Run resumed interactively is a Session even when its original launch was
   headless. Keep launch provenance; the retained provider-client namespace records
   interactive history and its client receipts establish liveness. Resolve declared
   issue/slug subjects through shared Work binding before projecting Session links.
 - SwiftPM tests exercise Ghostty. Also compile the Xcode app/test targets,
   whose terminal fallback does not import Ghostty-only types.
+
+- RegistryQuery's active observation is window-owned after first Monitor demand.
+  Navigation never restarts it; configuration replacement drains the old reader
+  and clears its evidence. Keep pipe decoding off the main actor and bound both
+  frames and pending delivery. Recovery retains last-good rows; a fatal discovery
+  frame ends the subscription with its original reason, rather than waiting for
+  a transport timeout to overwrite that reason.
+  On reader exit or stdout closure, drain pending stderr before reporting the
+  failure: pipe callbacks can arrive out of order and hide the CLI's diagnosis.
+- `scripts/test.py --loopflow` forces the fallback build in addition to affected
+  suites. For an implementation-only compile, the existing runner can execute
+  only `build_plan([], False, {"loopflow"})`'s enabled plans through `run_plans`;
+  this keeps resource preflight and command supervision without broad tests.

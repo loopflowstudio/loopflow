@@ -40,6 +40,8 @@ lf npx/vercel-labs/deep-research  # fetch a skill from the npx skills catalog
 lf : "fix the typo"               # inline prompt
 lf debug -c                       # paste clipboard, fix the bug
 lf task prepare DES-123           # tracked Work + worktree, no execution
+lf --task DES-123 design "Revise the discovery design"
+lf --task DES-123 code "Implement the accepted slice"
 lf --task DES-123 research \
   "Map runtime behavior; write scratch/research-runtime.md"
 lf --wave context wave/operate \
@@ -49,7 +51,7 @@ lf task run DES-123 --directive "fix the flaky test" # keep one Task through mer
 lf task run DES-124 --stack-on DES-123                # dependent Task, separate worktree
 ```
 
-`--task` and `--wave` run a named skill or Flow about existing Work
+`--task` and `--wave` run a named skill, Flow or inline prompt about existing Work
 without advancing its managed Flow position. A direct bound Flow has its own
 invocation; attribution does not claim the Task worker's cursor. The most
 specific selector is the Run subject: a Task implies its Wave. Broader
@@ -57,10 +59,17 @@ selectors may qualify it and must match. Task binding supplies the Task seed,
 uses its existing worktree, and preloads the complete recursive scratch
 Markdown snapshot. Wave binding uses its repository. Several Runs may concern the same Work
 concurrently; each keeps a distinct Run id and none reserves the Work. Bound
-direct skills leave edits uncommitted; give parallel contributions distinct
+direct skills and flows leave edits uncommitted; give parallel contributions distinct
 paths, reconcile the shared tree, then checkpoint one coherent result with `lf
 commit` or aggregate it deliberately with `lf task restart`. Parent Runs use
 this same path without becoming the Task worker or taking its claim.
+A direct flow creates a fresh Run for each skill, with the same Work subject and
+an updated scratch snapshot. Explicit flow operations still execute as authored.
+Use `lf task run DES-123 --flow code` to bind and pursue the managed Task workflow.
+
+Bare names prefer skills when a skill and flow share a name. Select explicitly
+with `lf skill launch-plan` or `lf flow launch-plan`. `design` and `ship-5whys`
+are skills; they need no single-step flow wrapper.
 
 ## Browser Captures
 
@@ -287,7 +296,6 @@ for composition limitations.
 | `deploy` | gate → op: pr land |
 | `design-and-ship` | design → implement → reduce → polish → deploy |
 | `incident` | restore → 5whys |
-| `ship-5whys` | implement the next open prevention from the 5 Whys |
 | `queue` | compress → update-wave → gate |
 | `garden` | scan → assess → xor(garden-act, silence) |
 | `govern-coordination` | s2-scan → s2-assess → mutate |
@@ -651,6 +659,7 @@ lf activity                     # durable Work changes, newest first
 lf activity --task INF-123 --json # filter before the bounded typed snapshot
 lf runs                         # recent Home-local Run records
 lf runs --active --json          # current provider-backed Runs and observation gaps
+lf runs --active --watch --json  # retain discovery and stream snapshots (macOS)
 lf runs --active --task LOO-291  # exact Task attribution, independent of checkout
 lf runs --project parser        # one Project's Runs, filtered before the result cap
 lf runs --parent run_ab12 --json # every direct child Run, uncapped
@@ -701,20 +710,28 @@ orders durable Work creation, Run, Task PR, and Steer facts; it reuses
 `WorkRef` identity and does not read reconstructable Task or Project wake
 events. Historical `lf runs`, `lf replay`, and `lf usage` scan `$LF_HOME/runs/` directly.
 
-`lf runs --active` reads current capture bindings and native client receipts
-against one OS process observation. Native discovery visits retained Run
-directories but loads manifests only for nonempty client namespaces; it never
-requires an older native launcher to publish a new index entry. Generic captures
-use their current Exec binding. The read has no history window or
-result cap. Waiting native clients count while their owned process remains live;
-unfinished Run metadata alone does not. JSON includes `home`, `observed_at`,
-optional `task`, `runs`, and `gaps`. An empty `runs` array confirms no active Runs
-only when `gaps` is also empty. Missing or ambiguous ownership remains unavailable.
-Use the unfiltered Home observation to feed several Task views; filter by each
-row's typed `work`, never its checkout. The first active read supports Task scope;
-Wave/Project filters remain history reads. Native receipt discovery currently
-walks Run directories so already-running clients remain visible; it does not
-read historical events or reduce usage. Its cost still grows with retained Runs.
+`lf runs --active` discovers existing receipts once and checks current processes.
+Waiting native clients count while their owned process remains live; unfinished
+Run metadata alone does not. Exact native receipts and current Exec capture
+bindings supply ownership. No history window, result cap or new launcher marker
+is required. The one-shot cold scan still grows with retained history.
+
+On macOS, `--watch --json` keeps that reader alive, follows filesystem publication,
+and emits newline-delimited snapshots every two seconds. Unchanged warm reads
+recheck live candidates without enumerating historical Runs. Send
+`{"action":"refresh"}` on stdin for an immediate read or `{"action":"rescan"}`
+after sleep/wake or to retry discovery. Closing stdin or stdout exits only this
+reader. Notification loss requests a full cold rescan; errors remain explicit.
+Linux supports one-shot reads and reports continuous discovery as unsupported.
+
+JSON includes required `discovery` (`scanning`, `ready`, `unavailable`), `home`,
+`observed_at`, optional `task`, `runs`, and `gaps`. Empty `runs` confirms no active
+Runs only when discovery is ready and gaps are empty. Missing or ambiguous
+ownership stays incomplete. A replaced Home requires a fresh reader; repeated
+read failures wait for a request instead of repeatedly scanning history.
+Use one unfiltered Home observation for several Task views, matching each row's
+typed `work`, never its checkout. Wave/Project filters remain history reads.
+
 The `--parent` drill resolves one exact Run and returns all direct children
 without the seven-day presentation cap. The one-Run `--final` read projects the
 last durable provider conclusion from normalized conversation events. Records

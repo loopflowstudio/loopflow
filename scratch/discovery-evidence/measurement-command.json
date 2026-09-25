@@ -1,0 +1,34 @@
+{
+  "build_proof": "cargo test -p loopflow --lib run_record::active -- --nocapture",
+  "command": [
+    "/tmp/loo291-discovery-final/loopflow-78d151dc187ea4a1",
+    "run_record::active::reader::tests::discovery_cost_matrix",
+    "--ignored",
+    "--nocapture"
+  ],
+  "binary_sha256": "94a4a59d569ce3761a22504b037df4b076c8e88423784e036338a4fcaaf24ca2",
+  "host": "macOS-26.0.1-arm64-arm-64bit-Mach-O",
+  "sources": {
+    "rust/loopflow/src/run_record/active.rs": "157beee1e55565737e99babab2a4463fef25950b6491c6564934d8c064cdfab1",
+    "rust/loopflow/src/run_record/active/reader.rs": "ed9f9bc3b5f323ab15b1bc3920afb0bf45a95ffde011e8ebc922a7f249fe11a5",
+    "rust/loopflow/src/run_record/active/reader/tests.rs": "5ed401212846dde15df29bdac349cacc22d7983226562e3a2717be7d030a41fe",
+    "rust/loopflow/src/run_record/active/events.rs": "39946b8fa4f003836e6251699a82df642c2447e90564fcf648cc5059dd3af8db",
+    "rust/loopflow/src/lf/commands/runs_watch.rs": "184540e3e4128edd6f50ad8a00b393feca887f706e101e54b68184fb0b646ee8",
+    "rust/loopflow/src/lf/commands/runs.rs": "241ffbe8f7d4e68a8796ebf890f8e854d8e3acbedf66cb315df4a2ff9ba1534b",
+    "rust/loopflow/src/lf/commands/top.rs": "d3b74f0fe14e35558d74ae73a1cf81605b9cc2877d7425f782604871043d1259",
+    "rust/loopflow/src/journal/mod.rs": "30fef9d36a9999e16df5e211cebd6091a0d913326b7780434bc9504ae222e53d",
+    "rust/loopflow/src/lf/commands/mod.rs": "3d5b96bb9750281fb76f7d14245ae153569b31586f1a13be412c90e4983f090b",
+    "rust/loopflow/src/lf/mod.rs": "32bf98ac53fc71c13c252d0ff72112e299d923d2dcc7478b27b4a48ca5238d38",
+    "rust/loopflow/src/bin/lf.rs": "492e6f5b64c69cfbc603c591ea309d99c5812880d340349abde139fcf8855722",
+    "rust/loopflow/tests/active_runs_watch.rs": "b038db3da3d5afd1c728c3e7d25737747a574e6ae9ac98533fe8d990f0677a53",
+    "rust/loopflow/tests/dto_fixtures.rs": "727f2c6aca1d98e4c8c86f81af36a8e73323328cb418c21c7eb611bf2828768e",
+    "swift/Loopflow/Models/ActiveRunsSnapshot.swift": "9e9948ab10732f2848aed9e4a915cf13e2c5f5e4568ea1233b2d882f67fb5756",
+    "swift/LoopflowMac/Views/TaskMonitorView.swift": "d5f1bb27c6c799cb68b4155ff3924fdc968f0b5d7c4c30aa873142d20d1b1713",
+    "swift/LoopflowTests/TaskMonitorTests.swift": "f82b302e1ac4ef1ce420dfa33dd94160390d8dab7acb8cc8d3b5d5390e07822a",
+    "swift/LoopflowTests/DTOFixtureTests.swift": "4529ef3fabf78963d85e2cc1e5e707732e4373d571040cb1715850ed5e91b409",
+    "swift/LoopflowTests/DesktopPerformanceTests.swift": "bc8216995e64c99edda54a00b5df0f4f6fdc4927e3535f59599e84008dfdad7f",
+    "tests/fixtures/dto/active_runs.json": "c94d62f749ef3cce1121bda8a08350f64f65ec30141931fe1178f9ea28322274"
+  },
+  "population": "100/10000/100000 dead native receipts, stale owned bindings and Exec receipts; one live native client and one ownerless capture; resume and racing publication add owned clients",
+  "limits": "debug library reader, not release CLI or UI startup; CPU is reader-process usage and excludes ps child CPU; peak RSS is cumulative for the test process including fixture construction"
+}

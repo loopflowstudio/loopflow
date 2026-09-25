@@ -10,14 +10,14 @@ struct DTOFixtureTests {
     @Test("Active Runs preserve exact attribution, waiting clients, and evidence gaps")
     func activeRunsFixture() async throws {
         let data = try loadFixtureData("active_runs.json")
-        let query = RegistryQuery { _, _ in String(decoding: data, as: UTF8.self) }
-        let snapshot = try await query.activeRuns()
+        let snapshot = try JSONDecoder().decode(ActiveRunsSnapshot.self, from: data)
+        #expect(snapshot.discovery == .ready)
         #expect(snapshot.runs[0].work == snapshot.task)
         #expect(snapshot.runs[0].processes[0].state == .waiting)
         #expect(snapshot.gaps.count == 1)
         #expect(try JSONDecoder().decode(ActiveRunsSnapshot.self, from: JSONEncoder().encode(snapshot)) == snapshot)
         var missing = try #require(JSONSerialization.jsonObject(with: data) as? [String: Any])
-        missing.removeValue(forKey: "gaps")
+        missing.removeValue(forKey: "discovery")
         let incomplete = try JSONSerialization.data(withJSONObject: missing)
         #expect(throws: DecodingError.self) {
             try JSONDecoder().decode(ActiveRunsSnapshot.self, from: incomplete)

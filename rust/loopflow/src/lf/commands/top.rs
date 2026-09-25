@@ -112,7 +112,7 @@ struct ActivityData {
 }
 
 #[derive(Debug, Clone, PartialEq, Eq)]
-struct OsProcess {
+pub(crate) struct OsProcess {
     pid: u32,
     ppid: u32,
     process_group: u32,
@@ -123,10 +123,10 @@ struct OsProcess {
 }
 
 #[derive(Debug, Clone)]
-struct ProcessSnapshot {
-    processes: Vec<OsProcess>,
-    receipts: Vec<ExecProcessReceipt>,
-    opencode_servers: Vec<OpenCodeServerEntry>,
+pub(crate) struct ProcessSnapshot {
+    pub(crate) processes: Vec<OsProcess>,
+    pub(crate) receipts: Vec<ExecProcessReceipt>,
+    pub(crate) opencode_servers: Vec<OpenCodeServerEntry>,
 }
 
 #[derive(Debug, Clone)]
@@ -158,49 +158,44 @@ pub(crate) struct LiveRunProcesses {
 /// Run observations use the same process and ownership evidence as `ps`,
 /// without loading the Exec event ledger or provider output.
 pub(crate) fn live_exec_providers(
-    lf_home: &Path,
-    now: i64,
+    snapshot: &ProcessSnapshot,
     bound_owners: &[crate::durable::TaskWorkerOwner],
     clients: &[(
         crate::durable::RunId,
         crate::run_record::ProviderClientRef,
         String,
     )],
-) -> Result<LiveRunProcesses> {
-    let snapshot = observe_processes(now, lf_home)?;
+) -> LiveRunProcesses {
     let mut native = Vec::new();
-    for process in &snapshot.processes {
+    let by_pid: HashMap<_, _> = snapshot.processes.iter().map(|p| (p.pid, p)).collect();
+    for (run_id, client, harness) in clients {
+        let Some(process) = by_pid.get(&client.pid) else {
+            continue;
+        };
         if process.kernel_state.starts_with('Z') {
             continue;
         }
-        for (run_id, client, harness) in clients {
-            if crate::run_record::provider_client_matches(
-                client,
-                harness,
-                process.pid,
-                process.started_at,
-                &process.command,
-            ) {
-                native.push((
-                    run_id.clone(),
-                    LiveProviderProcess {
-                        pid: process.pid,
-                        provider: harness.clone(),
-                        state: os_activity_state(process),
-                    },
-                ));
-            }
+        if crate::run_record::provider_client_matches(
+            client,
+            harness,
+            process.pid,
+            process.started_at,
+            &process.command,
+        ) {
+            native.push((
+                run_id.clone(),
+                LiveProviderProcess {
+                    pid: process.pid,
+                    provider: harness.clone(),
+                    state: os_activity_state(process),
+                },
+            ));
         }
     }
     let native_pids = native
         .iter()
         .map(|(_, process)| process.pid)
         .collect::<HashSet<_>>();
-    let by_pid = snapshot
-        .processes
-        .iter()
-        .map(|process| (process.pid, process))
-        .collect::<HashMap<_, _>>();
     let receipts = snapshot
         .receipts
         .iter()
@@ -226,7 +221,7 @@ pub(crate) fn live_exec_providers(
             ));
         }
     }
-    let (providers, unclaimed) = claim_provider_processes(&snapshot, &by_pid, &owners);
+    let (providers, unclaimed) = claim_provider_processes(snapshot, &by_pid, &owners);
     let unclaimed = unclaimed
         .iter()
         .filter(|process| {
@@ -279,11 +274,11 @@ pub(crate) fn live_exec_providers(
     }
     gaps.sort();
     gaps.dedup();
-    Ok(LiveRunProcesses {
+    LiveRunProcesses {
         execs,
         clients: native,
         gaps,
-    })
+    }
 }
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
@@ -492,6 +487,16 @@ fn read_activity_data(path: &Path, live_execs: &[ExecProcessReceipt]) -> Result<
 }
 
 fn observe_processes(now: i64, lf_home: &Path) -> Result<ProcessSnapshot> {
+    Ok(ProcessSnapshot {
+        processes: sample_processes(now)?,
+        receipts: read_exec_process_receipts_at(lf_home)
+            .context("failed to read live Exec receipts")?,
+        opencode_servers: registered_opencode_servers_at(lf_home)
+            .context("OpenCode ownership registry unavailable")?,
+    })
+}
+
+pub(crate) fn sample_processes(now: i64) -> Result<Vec<OsProcess>> {
     let output = Command::new("ps")
         .args(["-axo", "pid=,ppid=,pgid=,state=,etime=,command="])
         .output()
@@ -499,15 +504,22 @@ fn observe_processes(now: i64, lf_home: &Path) -> Result<ProcessSnapshot> {
     if !output.status.success() {
         return Err(anyhow!("ps failed while collecting Loopflow activity"));
     }
-    let processes = parse_processes(&String::from_utf8_lossy(&output.stdout), now);
-    let opencode_servers = registered_opencode_servers_at(lf_home)
-        .context("OpenCode ownership registry unavailable")?;
-    Ok(ProcessSnapshot {
-        processes,
-        receipts: read_exec_process_receipts_at(lf_home)
-            .context("failed to read live Exec receipts")?,
-        opencode_servers,
-    })
+    Ok(parse_processes(
+        &String::from_utf8_lossy(&output.stdout),
+        now,
+    ))
+}
+
+impl OsProcess {
+    pub(crate) fn pid(&self) -> u32 {
+        self.pid
+    }
+
+    pub(crate) fn matches_start(&self, pid: u32, started_at: i64, tolerance: i64) -> bool {
+        self.pid == pid
+            && !self.kernel_state.starts_with('Z')
+            && (self.started_at - started_at).abs() <= tolerance
+    }
 }
 
 fn parse_processes(output: &str, now: i64) -> Vec<OsProcess> {

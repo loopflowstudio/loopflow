@@ -75,7 +75,8 @@ struct TaskMonitorProofTests {
         _ = NSApplication.shared
         GhosttyManager.shared.initialize()
         try #require(GhosttyManager.shared.state == .ready)
-        let query = try query()
+        let feed = ActiveRunsTestFeed()
+        let query = try query(feed: feed)
         let model = PodiumModel(query: query, repoPath: "/src/loopflow")
         await model.refresh()
         let registry = SessionsWorkspaceRegistry()
@@ -154,6 +155,25 @@ struct TaskMonitorProofTests {
             #expect(terminals[1].surface == surfaces[1])
             #expect(throws: Never.self) { try TaskMonitorView(taskId: "issue-review", model: model).inspect().find(text: "Retained Task Run") }
         }
+        // Automatic delivery and recovery occur while the original unfinished input
+        // and companion are retained. No Refresh or pane reopening drives these frames.
+        let original = try #require(model.activeRuns.value)
+        let scanning = ActiveRunsSnapshot(discovery: .scanning, home: original.home,
+            observedAt: original.observedAt, task: nil, runs: [], gaps: ["Recovering coverage"])
+        try await feed.send(String(decoding: JSONEncoder().encode(scanning), as: UTF8.self))
+        try await waitForActiveRuns { model.isRefreshingActiveRuns }
+        #expect(model.activeRuns.value == original)
+        #expect(!terminals.contains { window.firstResponder === $0 })
+        let empty = ActiveRunsSnapshot(discovery: .ready, home: original.home,
+            observedAt: original.observedAt + 1, task: nil, runs: [], gaps: [])
+        try await feed.send(String(decoding: JSONEncoder().encode(empty), as: UTF8.self))
+        try await waitForActiveRuns { model.activeRuns.value?.runs.isEmpty == true }
+        try await settle(window)
+        #expect(terminals[0].surface == surfaces[0])
+        #expect(terminals[1].surface == surfaces[1])
+        #expect(!terminals.contains { window.firstResponder === $0 })
+        try await feed.send(String(decoding: JSONEncoder().encode(original), as: UTF8.self))
+        try await waitForActiveRuns { model.activeRuns.value?.runs.count == original.runs.count }
         let stray = "monitor-only-input"
         for character in stray {
             let event = try #require(NSEvent.keyEvent(
@@ -213,7 +233,7 @@ struct TaskMonitorProofTests {
         try await Task.sleep(for: .milliseconds(100))
     }
 
-    private func query() throws -> RegistryQuery {
+    private func query(feed: ActiveRunsTestFeed = ActiveRunsTestFeed()) throws -> RegistryQuery {
         let root = URL(fileURLWithPath: #filePath).deletingLastPathComponent()
             .deletingLastPathComponent().deletingLastPathComponent()
         let roadmap = try String(contentsOf: root.appendingPathComponent("tests/fixtures/dto/roadmap_snapshot.json"), encoding: .utf8)
@@ -235,12 +255,11 @@ struct TaskMonitorProofTests {
         active["runs"] = [run]
         active["gaps"] = []
         let activeJSON = String(decoding: try JSONSerialization.data(withJSONObject: active), as: UTF8.self)
-        return RegistryQuery { args, _ in
+        return RegistryQuery(watchActiveRuns: { try await feed.open(initial: activeJSON) }) { args, _ in
             switch args.first {
             case "roadmap": return roadmap
             case "ls": return "[]"
             case "session" where args.dropFirst().first == "list": return records
-            case "runs": return activeJSON
             case "activity": return #"{"generated_at":1,"since":0,"limit":50,"truncated":false,"items":[]}"#
             default: throw RegistryQueryError("No provider launch is available in this proof")
             }

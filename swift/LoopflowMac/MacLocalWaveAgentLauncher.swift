@@ -201,6 +201,17 @@ enum LocalWaveAgentLauncher {
 
     // MARK: - Process plumbing
 
+    static func queryProcess(_ args: [String], cwd: String? = nil) -> Process {
+        let process = Process()
+        process.executableURL = URL(fileURLWithPath: "/usr/bin/env")
+        process.arguments = args
+        process.environment = GUIProcessEnvironment.enriched(ProcessInfo.processInfo.environment)
+        if let cwd {
+            process.currentDirectoryURL = URL(fileURLWithPath: cwd, isDirectory: true)
+        }
+        return process
+    }
+
     private static func runChecked(_ args: [String], cwd: String) throws {
         _ = try runCheckedOutput(args, cwd: cwd)
     }
@@ -226,21 +237,11 @@ enum LocalWaveAgentLauncher {
         _ args: [String],
         cwd: String? = nil
     ) -> (status: Int32, stdout: String, stderr: String)? {
-        let process = Process()
+        let process = queryProcess(args, cwd: cwd)
         let stdout = Pipe()
         let stderr = Pipe()
-        process.executableURL = URL(fileURLWithPath: "/usr/bin/env")
-        process.arguments = args
         process.standardOutput = stdout
         process.standardError = stderr
-        var environment = GUIProcessEnvironment.enriched(ProcessInfo.processInfo.environment)
-        // The GUI chooses Work explicitly; its launching agent's Wave is not
-        // ambient context for registry reads or controls in this window.
-        environment.removeValue(forKey: "LF_WAVE_ID")
-        process.environment = environment
-        if let cwd {
-            process.currentDirectoryURL = URL(fileURLWithPath: cwd, isDirectory: true)
-        }
 
         let outHandle = stdout.fileHandleForReading
         let errHandle = stderr.fileHandleForReading

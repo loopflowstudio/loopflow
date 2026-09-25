@@ -5202,6 +5202,12 @@ mod tests {
             select_task_worker_flow_from_project(repo.path(), &project, Some("incident")).unwrap(),
             "incident"
         );
+        for skill in ["design", "ship-5whys"] {
+            assert_eq!(
+                select_task_worker_flow_from_project(repo.path(), &project, Some(skill)).unwrap(),
+                skill
+            );
+        }
     }
 
     #[test]

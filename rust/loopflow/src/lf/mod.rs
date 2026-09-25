@@ -112,7 +112,7 @@ pub struct Cli {
     #[arg(long = "task", value_name = "ISSUE")]
     pub task: Option<String>,
 
-    /// Select one Work for a direct Skill or inline prompt
+    /// Select one Work for a direct skill, flow or inline prompt
     #[arg(
         long = "as",
         value_name = "WORK",
@@ -185,7 +185,7 @@ impl Cli {
         Self::toggle_setting(self.diff, self.no_diff)
     }
 
-    /// The most specific Work selected for a direct skill Run.
+    /// The most specific Work selected for direct execution.
     pub fn work_subject_selector(&self) -> Option<String> {
         self.as_work.clone().or_else(|| {
             self.task
@@ -541,6 +541,9 @@ pub enum Commands {
         /// Observe current provider-backed Runs without the history window or cap
         #[arg(long, conflicts_with_all = ["run", "parent", "wave", "project"])]
         active: bool,
+        /// Retain discovery and stream active snapshots until stdin closes
+        #[arg(long, requires_all = ["active", "json"])]
+        watch: bool,
         /// Inspect one Run by full id or unambiguous displayed prefix
         #[arg(conflicts_with_all = ["parent", "task", "project", "wave"])]
         run: Option<String>,

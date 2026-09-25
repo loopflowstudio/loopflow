@@ -11,14 +11,15 @@ use crate::controller::wave::journal::short_id;
 use crate::lf::commands::work_catalog::WorkCatalog;
 use crate::lf::commands::WorkFilter;
 use crate::lf::output::{format_cost, truncate, Colors};
-pub use crate::run_record::active::{ActiveRun, ActiveRunsSnapshot};
+pub use crate::run_record::active::{ActiveRun, ActiveRunsSnapshot, DiscoveryState};
 pub use crate::run_record::{AttributionSource, RunSnapshot, RunUsage, SubjectAttribution};
 
 const WINDOW_DAYS: i64 = 7;
 const MAX_RUNS: usize = 50;
 
-pub fn list_active(json: bool, task: Option<&str>) -> Result<()> {
-    tokio::runtime::Runtime::new()?.block_on(async {
+pub fn list_active(json: bool, watch: bool, task: Option<&str>) -> Result<()> {
+    let runtime = tokio::runtime::Runtime::new()?;
+    let (home, store, task) = runtime.block_on(async {
         let home = crate::store::observability_home_dir();
         let config =
             crate::store::StorageConfig::sqlite(crate::store::observability_database_path()?);
@@ -35,6 +36,12 @@ pub fn list_active(json: bool, task: Option<&str>) -> Result<()> {
             ),
             None => None,
         };
+        Ok::<_, anyhow::Error>((home, store, task))
+    })?;
+    if watch {
+        return super::runs_watch::run(&home, &store, task, &runtime);
+    }
+    runtime.block_on(async {
         let snapshot = crate::run_record::active::snapshot(&home, &store, task).await;
         if json {
             println!("{}", serde_json::to_string(&snapshot)?);

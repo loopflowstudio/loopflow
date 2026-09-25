@@ -1,0 +1,10 @@
+    Blocking waiting for file lock on package cache
+   Compiling loopflow v0.12.20 (/Users/jack/src/loopflow.main-view-task/rust/loopflow)
+    Finished `test` profile [unoptimized + debuginfo] target(s) in 25.20s
+     Running tests/active_runs_watch.rs (target/debug/deps/active_runs_watch-208b0e6fa1bae7e9)
+
+running 1 test
+test watch_updates_and_releases_only_its_reader_on_eof_or_closed_stdout ... ok
+
+test result: ok. 1 passed; 0 failed; 0 ignored; 0 measured; 0 filtered out; finished in 11.63s
+

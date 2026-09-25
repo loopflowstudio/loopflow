@@ -14,6 +14,10 @@ fn active_runs_preserve_identity_waiting_clients_and_incomplete_evidence() {
     use loopflow::lf::commands::top::ActivityState;
     let json = include_str!("../../../tests/fixtures/dto/active_runs.json");
     let snapshot: ActiveRunsSnapshot = serde_json::from_str(json).unwrap();
+    assert_eq!(
+        snapshot.discovery,
+        loopflow::lf::commands::runs::DiscoveryState::Ready
+    );
     assert_eq!(snapshot.runs[0].work, snapshot.task);
     assert_eq!(snapshot.runs[0].processes[0].state, ActivityState::Waiting);
     assert_eq!(snapshot.gaps.len(), 1);
@@ -23,7 +27,7 @@ fn active_runs_preserve_identity_waiting_clients_and_incomplete_evidence() {
         snapshot
     );
     let mut missing: serde_json::Value = serde_json::from_str(json).unwrap();
-    missing.as_object_mut().unwrap().remove("gaps");
+    missing.as_object_mut().unwrap().remove("discovery");
     assert!(serde_json::from_value::<ActiveRunsSnapshot>(missing).is_err());
 }
 

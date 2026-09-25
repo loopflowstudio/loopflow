@@ -68,9 +68,16 @@ fn run_lf(repo: &Path, home: &Path, args: &[&str], path: Option<&str>) -> std::p
         .env("HOME", home)
         .env("LF_HOME", home)
         .env_remove("LF_DB_PATH")
+        .env_remove("LF_CONTROL_BIN")
+        .env("LF_BIN", env!("CARGO_BIN_EXE_lf"))
         .env_remove("LF_CONTROL_HOME")
         .env_remove("LF_CONTROL_DB_PATH")
         .env("NO_COLOR", "1")
+        .env_remove("LF_RUN_ID")
+        .env_remove("LF_RUN_DIR")
+        .env_remove("LF_WAVE_ID")
+        .env_remove("LF_ACCOUNT_LEASE")
+        .env_remove("LF_HUMAN_SESSION")
         .env_remove("LF_TRACE_ID")
         .env_remove("LF_PROCESS_ID");
     if let Some(path) = path {
@@ -173,6 +180,186 @@ fn code_flow_records_each_skill_as_one_generic_run() {
     skills.sort_unstable();
     assert_eq!(skills, ["compress", "implement"]);
     assert!(runs.iter().all(|run| run["outcome"] == "completed"));
+}
+
+#[test]
+fn bound_flows_keep_task_context_and_leave_managed_flow_and_shared_edits_alone() {
+    use loopflow::controller::wave::playhead::QueuedInvocation;
+    use loopflow::durable::FlowPosition;
+    use loopflow_test_support::TestRepo;
+
+    let repo = TestRepo::new();
+    let caller = TestRepo::new();
+    let home = TempDir::new().unwrap();
+    let task = support::register_unrun_task(
+        home.path(),
+        repo.path(),
+        "task-contribution",
+        &repo.head_sha(),
+    );
+    for skill in ["first", "second"] {
+        write_skill(repo.path(), skill, &format!("Execute {skill}."));
+    }
+    write_flow(repo.path(), "contribution", "- first\n- second\n");
+    // A real collision: bare and explicit skill must choose the skill, explicit
+    // flow must execute both steps, including when Work-bound.
+    write_skill(
+        repo.path(),
+        "contribution",
+        "Execute the single contribution skill.",
+    );
+    fs::create_dir_all(repo.path().join("scratch")).unwrap();
+    fs::write(
+        repo.path().join("scratch/existing.md"),
+        "Another contributor's unfinished work.",
+    )
+    .unwrap();
+    let original_head = repo.head_sha();
+    let runtime = tokio::runtime::Runtime::new().unwrap();
+    let position = runtime
+        .block_on(task.store.set_flow_position(
+            &task.task.id,
+            FlowPosition {
+                task_id: task.task.id.clone(),
+                invocation: QueuedInvocation::load(repo.path(), "code").unwrap(),
+                session_run_id: None,
+                ready_summary: None,
+                step_index: 1,
+                iteration: 4,
+                version: 0,
+                worker_generation: 0,
+                claim: None,
+                failure: None,
+                updated_at: time::OffsetDateTime::now_utc(),
+            },
+        ))
+        .unwrap();
+
+    let bin = TempDir::new().unwrap();
+    let provider = codex_app_server_script("done", "if [ \"$1\" = --version ]; then exit 0; fi\npwd >> \"$LF_CONTROL_HOME/cwds\"").replace(
+        "read -r turn_start",
+        "read -r turn_start\nprintf '%s\\n' \"$turn_start\" >> \"$LF_CONTROL_HOME/prompts\"\nprintf '%s\\n' 'Evidence from preceding step.' > scratch/step.md",
+    );
+    write_executable(&bin.path().join("codex"), &provider);
+    let path = format!(
+        "{}:{}",
+        bin.path().display(),
+        std::env::var("PATH").unwrap()
+    );
+    // Distinct name tests bare flow dispatch without the collision above.
+    write_flow(repo.path(), "two-steps", "- first\n- second\n");
+    for args in [
+        vec!["--task", "INF-123", "two-steps"],
+        vec!["--task", "INF-123", "flow", "contribution"],
+        vec!["--as", "task:INF-123", "flow", "contribution"],
+    ] {
+        let _ = fs::remove_file(home.path().join("prompts"));
+        let _ = fs::remove_file(home.path().join("cwds"));
+        let _ = fs::remove_file(repo.path().join("scratch/step.md"));
+        let mut args = args;
+        args.extend(["-b", "--no-loopflow", "Keep the Task context."]);
+        let output = run_lf(caller.path(), home.path(), &args, Some(&path));
+        assert!(
+            output.status.success(),
+            "{args:?}: {}",
+            String::from_utf8_lossy(&output.stderr)
+        );
+        let prompts = fs::read_to_string(home.path().join("prompts")).unwrap();
+        let prompts: Vec<_> = prompts.lines().collect();
+        assert_eq!(
+            prompts.len(),
+            2,
+            "{args:?}: {}",
+            String::from_utf8_lossy(&output.stderr)
+        );
+        for prompt in &prompts {
+            assert!(prompt.contains("Exercise the persisted lifecycle."));
+            assert!(prompt.contains(task.task.id.as_str()));
+            assert!(prompt.contains("Another contributor's unfinished work."));
+            assert!(prompt.contains("Keep the Task context."));
+        }
+        assert!(!prompts[0].contains("Evidence from preceding step."));
+        assert!(prompts[1].contains("Evidence from preceding step."));
+        let cwds = fs::read_to_string(home.path().join("cwds")).unwrap();
+        for cwd in cwds.lines() {
+            assert_eq!(
+                Path::new(cwd).canonicalize().unwrap(),
+                repo.path().canonicalize().unwrap()
+            );
+        }
+        assert_eq!(repo.head_sha(), original_head);
+        assert_eq!(
+            runtime
+                .block_on(task.store.flow_position(&task.task.id))
+                .unwrap(),
+            Some(position.clone())
+        );
+        let staged = Command::new("git")
+            .args(["diff", "--cached", "--name-only"])
+            .current_dir(repo.path())
+            .output()
+            .unwrap();
+        assert!(staged.stdout.is_empty());
+    }
+    let output = run_lf(repo.path(), home.path(), &["runs", "--json"], None);
+    assert!(output.status.success());
+    let runs: Vec<serde_json::Value> = serde_json::from_slice(&output.stdout).unwrap();
+    assert_eq!(runs.len(), 6);
+    for run in runs {
+        assert!(run["subjects"]
+            .as_array()
+            .unwrap()
+            .iter()
+            .any(|subject| subject["selector"] == format!("task:{}", task.task.id)));
+        assert_eq!(run["outcome"], "completed");
+    }
+    for invocation in [
+        vec!["contribution"],
+        vec!["skill", "contribution"],
+        vec!["design"],
+    ] {
+        let _ = fs::remove_file(home.path().join("prompts"));
+        let mut args = vec!["--task", "INF-123"];
+        args.extend(invocation);
+        args.extend(["-b", "--no-loopflow"]);
+        let output = run_lf(caller.path(), home.path(), &args, Some(&path));
+        assert!(
+            output.status.success(),
+            "{args:?}: {}",
+            String::from_utf8_lossy(&output.stderr)
+        );
+        assert_eq!(
+            fs::read_to_string(home.path().join("prompts"))
+                .unwrap()
+                .lines()
+                .count(),
+            1
+        );
+    }
+    // A human boundary remains explicit and cannot silently run the next step
+    // just because the invocation has Task attribution.
+    write_flow(
+        repo.path(),
+        "review-contribution",
+        "- step:\n    id: accept\n    name: first\n    human: true\n- second\n",
+    );
+    fs::remove_file(home.path().join("prompts")).unwrap();
+    let output = run_lf(
+        caller.path(),
+        home.path(),
+        &["--task", "INF-123", "review-contribution", "-b"],
+        Some(&path),
+    );
+    assert!(!output.status.success());
+    assert!(String::from_utf8_lossy(&output.stderr).contains("requires an attached User surface"));
+    assert!(!home.path().join("prompts").exists());
+    assert_eq!(
+        runtime
+            .block_on(task.store.flow_position(&task.task.id))
+            .unwrap(),
+        Some(position)
+    );
+    assert_eq!(repo.head_sha(), original_head);
 }
 
 #[test]

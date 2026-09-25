@@ -1,0 +1,13 @@
+swift/LoopflowMac/Views/PodiumView.swift:13:    @State private var sessionWorkspaces = SessionsWorkspaceRegistry()
+swift/LoopflowMac/PodiumModel.swift:219:            activeRuns = .available(try await query.activeRuns())
+swift/Loopflow/Services/RegistryQuery.swift:128:    public func activeRuns(task: String? = nil) async throws -> ActiveRunsSnapshot {
+rust/loopflow/src/run_record.rs:804:pub(crate) fn write_provider_client(dir: &Path, pid: u32) -> std::io::Result<()> {
+rust/loopflow/src/run_record.rs:892:pub(crate) fn write_provider_client_stop(
+rust/loopflow/src/run_record.rs:1692:            self.binding = Some(active::RunBindingGuard::publish(&self.dir)?);
+rust/loopflow/src/run_record.rs:2186:        write_provider_client, write_provider_session, CaptureHandle, RunLaunchRequest,
+rust/loopflow/src/run_record.rs:2562:        write_provider_client(&dir, 101).unwrap();
+rust/loopflow/src/run_record.rs:2563:        write_provider_client(&dir, 202).unwrap();
+rust/loopflow/src/run_record.rs:2620:        write_provider_client(&dir, 101).unwrap();
+rust/loopflow/src/run_record/active/reader.rs:10:use crate::harness::opencode_runtime::{registered_opencode_servers_at, OpenCodeServerEntry};
+rust/loopflow/src/run_record/active/reader.rs:375:        match registered_opencode_servers_at(&self.home) {
+rust/loopflow/src/run_record/active/reader/tests.rs:20:                .env_remove("LF_RUN_DIR")

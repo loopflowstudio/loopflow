@@ -1,0 +1,73 @@
+[0/1] Planning build
+Building for debugging...
+[0/8] Write sources
+[3/8] Write swift-version--58304C5D6DBC2206.txt
+[5/10] Compiling Loopflow RegistryQuery.swift
+[6/10] Emitting module Loopflow
+[7/13] Compiling LoopflowMac TaskMonitorView.swift
+[8/13] Emitting module LoopflowMac
+[9/13] Compiling LoopflowMac LocalActiveRunsObservation.swift
+[10/24] Compiling LoopflowMac TaskWorkspaceView.swift
+[11/24] Compiling LoopflowMac TelemetryDashboardView.swift
+[12/24] Compiling LoopflowMac WaveChatView.swift
+[13/24] Compiling LoopflowMac WaveDetailPane.swift
+[14/24] Compiling LoopflowMac WavesView.swift
+[15/24] Compiling LoopflowMac LoopflowApp.swift
+[16/24] Compiling LoopflowMac RegistryQueryLocal.swift
+[17/24] Compiling LoopflowMac ChapterHistoryView.swift
+[18/24] Compiling LoopflowMac PodiumView.swift
+[19/24] Compiling LoopflowMac RoadmapView.swift
+[20/24] Compiling LoopflowMac SessionsView.swift
+[20/25] Write Objects.LinkFileList
+[21/25] Linking LoopflowMac
+[22/25] Applying LoopflowMac
+[24/28] Compiling LoopflowTests ActiveRunsObservationTests.swift
+[25/28] Emitting module LoopflowTests
+[26/28] Compiling LoopflowTests ActiveRunsLifetimeTests.swift
+/Users/jack/src/loopflow.main-view-task/swift/LoopflowTests/ActiveRunsLifetimeTests.swift:37:18: warning: weak variable 'reference' was never mutated; consider changing to 'let' constant [#WeakMutability]
+35 |         let query = RegistryQuery(watchActiveRuns: { try await feed.open(initial: wire) }) { _, _ in "[]" }
+36 |         var model: PodiumModel? = PodiumModel(query: query)
+37 |         weak var reference = model
+   |                  `- warning: weak variable 'reference' was never mutated; consider changing to 'let' constant [#WeakMutability]
+38 |         model?.observeActiveRuns()
+39 |         try await waitForActiveRuns { model?.activeRuns.value != nil }
+
+[#WeakMutability]: <https://docs.swift.org/compiler/documentation/diagnostics/weak-mutability>
+[26/28] Write Objects.LinkFileList
+[27/28] Linking LoopflowSwiftPackageTests
+Build complete! (11.43s)
+Test Suite 'Selected tests' started at 2026-09-24 18:38:04.736.
+Test Suite 'LoopflowSwiftPackageTests.xctest' started at 2026-09-24 18:38:04.737.
+Test Suite 'LoopflowSwiftPackageTests.xctest' passed at 2026-09-24 18:38:04.737.
+	 Executed 0 tests, with 0 failures (0 unexpected) in 0.000 (0.000) seconds
+Test Suite 'Selected tests' passed at 2026-09-24 18:38:04.737.
+	 Executed 0 tests, with 0 failures (0 unexpected) in 0.000 (0.001) seconds
+◇ Test run started.
+↳ Testing Library Version: 1501
+↳ Target Platform: arm64e-apple-macos14.0
+◇ Suite "Podium active Run lifetime" started.
+◇ Test "Home replacement drains the old generation and rejects its late evidence" started.
+✔ Test "Home replacement drains the old generation and rejects its late evidence" passed after 0.036 seconds.
+◇ Test "Window teardown releases the subscription even while its Monitor is hidden" started.
+✔ Test "Window teardown releases the subscription even while its Monitor is hidden" passed after 0.101 seconds.
+✔ Suite "Podium active Run lifetime" passed after 0.138 seconds.
+◇ Suite "Active Run transport" started.
+◇ Test "Fragmented frames, stderr backpressure, refresh and rescan use one reader" started.
+✔ Test "Fragmented frames, stderr backpressure, refresh and rescan use one reader" passed after 0.078 seconds.
+◇ Test "A stalled or noncooperative reader is reaped without touching other clients" started.
+✔ Test "A stalled or noncooperative reader is reaped without touching other clients" passed after 2.170 seconds.
+◇ Test "Silence expires the reading and stops the reader" started.
+✔ Test "Silence expires the reading and stops the reader" passed after 11.105 seconds.
+◇ Test "Malformed, oversized and wrong-Home observations fail rather than becoming empty" started.
+◇ Test case passing 1 argument kind → "malformed" to "Malformed, oversized and wrong-Home observations fail rather than becoming empty" started.
+◇ Test case passing 1 argument kind → "oversized" to "Malformed, oversized and wrong-Home observations fail rather than becoming empty" started.
+◇ Test case passing 1 argument kind → "wrong-home" to "Malformed, oversized and wrong-Home observations fail rather than becoming empty" started.
+◇ Test case passing 1 argument kind → "home-change" to "Malformed, oversized and wrong-Home observations fail rather than becoming empty" started.
+◇ Test case passing 1 argument kind → "partial-exit" to "Malformed, oversized and wrong-Home observations fail rather than becoming empty" started.
+✔ Test "Malformed, oversized and wrong-Home observations fail rather than becoming empty" with 5 test cases passed after 0.295 seconds.
+◇ Test "Configuration invalidation retires the exact reader" started.
+✔ Test "Configuration invalidation retires the exact reader" passed after 2.006 seconds.
+◇ Test "The real foreground CLI delivers automatic observations and rescan through Swift" started.
+✔ Test "The real foreground CLI delivers automatic observations and rescan through Swift" passed after 4.590 seconds.
+✔ Suite "Active Run transport" passed after 20.247 seconds.
+✔ Test run with 8 tests in 2 suites passed after 20.385 seconds.

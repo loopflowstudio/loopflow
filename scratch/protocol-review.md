@@ -1,5 +1,10 @@
 # Loopflow decision protocol — review surface
 
+Latest accepted simplification: remove Flow pass limits entirely. RepeatPolicy
+contains only its target; counters describe history and never exhaust an
+allowance. Earlier budget/exhaustion claims below are superseded. See
+no-pass-limits.md for implementation and replacement evidence.
+
 Human review clarification, 2026-09-25: Tasks are the current UI focus;
 Flows may run about Waves without adding a Wave loopflow UI. The human identifies
 Wave playhead as mostly old code and a deletion candidate. The Wave-parity

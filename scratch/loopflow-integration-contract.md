@@ -1,5 +1,16 @@
 # Current runtime integration contract
 
+Integration update, 2026-09-25: the contribution assignments and the earlier
+restriction against changing ConcreteStep below are historical. All bounded
+contributions have finished. ConcreteXor now captures the router and every
+branch, and Task FlowPosition uses the same ExecutionCursor as ordinary Flows.
+Human and autonomous navigation both call cursor.finish. Exact route candidates
+use `lf flow route PATH`; no shared route file remains. Backward edges have no
+pass limit. Current proof and remaining recovery/release work are in
+[cursor-integration.md](cursor-integration.md). The protocol below remains the
+accepted direction where it does not describe those superseded contribution
+boundaries.
+
 The human chose the skill name loop-decide. One ordinary Flow with backward
 edges runs standalone or with Task context; no new loopflow type or scheduler.
 The shared reducer remains engine/transitions.rs::finish_step.

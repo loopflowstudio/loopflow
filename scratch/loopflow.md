@@ -1,5 +1,16 @@
 # Loopflows: proposed usage and branch direction
 
+Current implementation and proof: [cursor-integration.md](cursor-integration.md).
+Task and ordinary Flow traversal now share ExecutionCursor, including captured
+XOR branches and nested human decisions. Earlier baseline claims below about
+Task-only loops, missing XOR capture or generic repeat rejection are historical,
+not current limitations. Live acceptance and legacy XOR recovery remain open.
+
+Latest accepted simplification: Flow backward edges have no pass limit. Neither
+automatic iteration nor human revision needs a budget reset. Advance/Iterate
+choose navigation; Blocked requests help. Earlier budget proposals in these
+design notes are superseded; see no-pass-limits.md.
+
 Latest human clarification, 2026-09-25: Task execution is the current UI focus.
 A loopflow may run about a Wave; that does not require a Wave-owned loopflow UI.
 Wave playhead is mostly old code and a candidate for deletion, not an interpreter

@@ -47,12 +47,12 @@ validation model; neither is a new runtime dependency.
 | Experience | Current representation / API |
 | --- | --- |
 | Choose the work sequence | Flow / ConcreteStep and RepeatPolicy |
-| Continue the same Task attempt | FlowPosition with captured QueuedInvocation |
+| Continue the same Task attempt | FlowPosition with captured QueuedInvocation and shared ExecutionCursor |
 | Track passes and direction | FlowProgress: per-edge counts, direction, pending verdict |
 | Choose a path | FlowVerdict with FlowDecision::Advance or Iterate; lf flow decide |
 | Ask for missing input | lf flow blocked → keyed Ask running unblock |
 | Authorize a human boundary | Exact Flow Session Advance/Iterate |
-| Interpret an edge | finish_step; persistence and authority belong to its caller |
+| Navigate the saved Flow | ExecutionCursor::finish delegates edges to finish_step; persistence and authority belong to its caller |
 
 ## Observed code and cleanup implications
 
@@ -71,11 +71,15 @@ would lose more than the obsolete concept.
 
 Separate remaining findings:
 
-- Task loading rejects XOR. This still matters to Flow composition; the Wave
-  clarification does not resolve it.
-- Ordinary XOR captures a selected body but loads router/branch content when
-  entered. Whole-invocation definition pinning remains incomplete wherever
-  those paths are supported.
+- Concurrent integration removes Task's XOR rejection and uses ExecutionCursor
+  for both adapters. Source inspection confirms human decisions and ordinary
+  boundary settlement now reach the same cursor.finish implementation. Live
+  parity remains a proof obligation, not a consequence of sharing the type.
+- XOR expansion now captures all router/branch content. The shared scratch
+  route file has been replaced by an exact Run-bound route candidate. See
+  xor-pinning-proof.md and task-cursor-proof.md for their separately scoped
+  proof. Legacy unresolved XOR records explicitly fail decoding; their recovery
+  disposition remains an integration concern.
 - The authoring and CLI docs mixed the old Task-only verdict protocol with
   the new protocol. This review removes those instructions, assigns decisions
   to loop-decide, and retains explicit Task XOR and pinning limitations.
@@ -120,24 +124,41 @@ instructions and duplicated semantics touched by LOO-295 belong in its review.
 
 ## Next proof
 
+The shared cursor integration realizes two deletion candidates above: separate
+Task human-navigation rules and mutable-source route-file interpretation.
+Do not count the duplicate continuation row as untouched work. Persistence and
+Task transactions still have different legitimate owners; sharing traversal
+does not require erasing their authority.
+
+One new cleanup candidate follows directly from full definition pinning:
+NestedCursor::Xor still serializes selected branch steps in addition to the
+same steps under the captured ConcreteXor. Prefer one definition owner and a
+cursor containing only selection/position. Before deleting that copy, preserve
+or explicitly dispose of saved selected bodies from the previous representation.
+This is a bounded data-model follow-up, not a UI-usage investigation or a
+precondition for removing pass limits.
+
 Defer the Wave/UI usage inventory. Its future deletion work must preserve
 Wave operating/cadence behavior and Task recovery without introducing a
 replacement Wave Flow lifecycle solely to make deletion fit.
 
-The next product choice is the pass budget after human revision. The current
-reducer retains per-edge counts for the entire invocation. If loop-decide
-uses its seven backward traversals, Advances to demo, and the human requests
-another implementation pass, loop-decide has no remaining Iterate allowance.
-The human demo edge has its own counter; it does not replenish loop-decide's.
-This is source-observed behavior, not an accepted decision that human revision
-must share the original autonomous allowance. Decide whether a new human
-revision starts a fresh bounded work cycle before changing persisted counters.
+Resolved by the human: there is no pass budget. Looping indefinitely is not
+inherently wrong. Delete limits instead of adding allowance resets or another
+configuration choice. Iterate follows its edge; Advance moves forward; Blocked
+expresses the decision agent's need for help. Counts remain descriptive history.
+The implementation and replacement proof are recorded in no-pass-limits.md.
 
 Task acceptance still needs the concrete interaction and recovery proof:
 initial steps once, backward traversal with direction, later forward completion,
 exact human approval, and Blocked → Ask → reassessment. Preserve stale-decision
 rejection and saved-result recovery. Existing fixture reports are in
 protocol-review.md; no tests or live runtime demo were run during this review.
+
+The subsequently authorized no-pass-limit implementation has now passed 29
+focused integrated tests plus all-target Clippy, formatting and whitespace
+checks. See no-pass-limits.md for the command and evidence boundary. This
+supersedes the earlier review-only verification status, not the remaining
+whole-branch/live acceptance obligations.
 
 Local cleanup verification: cargo fmt --all -- --check, all-target Clippy with
 warnings denied, and git diff --check passed. The Rust edit only removes a

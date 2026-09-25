@@ -8,4 +8,3 @@
     human: true
     repeat:
       from: kickoff
-      max_iterations: 8

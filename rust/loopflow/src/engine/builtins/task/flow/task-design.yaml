@@ -6,5 +6,3 @@
     id: review_kickoff
     name: review-design
     human: true
-    repeat:
-      from: kickoff

@@ -87,6 +87,11 @@ impl OccurrencePolicy {
                 "human steps return feedback; put the backward edge on a following loop-decide step".to_string(),
             ));
         }
+        if self.human && self.repeat.is_some() {
+            return Err(LoadError::InvalidFlow(
+                "human steps return feedback; put the backward edge on a following loop-decide step".to_string(),
+            ));
+        }
         if let Some(repeat) = &self.repeat {
             if self.id.is_none() || repeat.from.trim().is_empty() {
                 return Err(LoadError::InvalidFlow(

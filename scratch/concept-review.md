@@ -1,127 +1,133 @@
-# Concept review: loops as backward edges
+# Concept review: Flow execution and Wave attribution
 
-Working review, 2026-09-25. Product simplifications are valuable on their own;
-follow their effects through the implementation to capture further wins.
-The skill and its placement after review-slice are implemented locally. The
-runtime/API details below are proposals for discussion. The User subsequently
-clarified the branch objective: a loopflow is a Flow with one or more backward
-edges, accepted everywhere a Flow is accepted. [The usage-first redesign](loopflow.md)
-is the current target; the Task-only implementation is not an acceptable endpoint.
+Working human review, 2026-09-25, LOO-295. This records the current conversation,
+not implementation approval or runtime acceptance. Earlier proposals remain in
+Git history and the linked evidence notes.
 
-## The experience
+## Current human direction
 
-The User knows what a Flow is but cannot readily tell which loop is "the loop."
-A slice can be one stage of repeated work. They should be able to read one Flow,
-see where another pass returns, and understand what Advance or Iterate will do.
-They should not have to learn a separate Task phase sequence or review lifecycle.
+A loopflow remains a Flow with backward edges. Task execution is the present
+UI focus. A Flow can also run *about* a Wave; attribution does not require a
+Wave-owned execution lifecycle or a new Wave loopflow UI. The earlier
+anywhere-Flow direction must not be interpreted as a requirement to extend
+obsolete Wave machinery.
 
-## Usage draft before implementation design
+The human describes Wave playhead as mostly old code that should probably be
+deleted, though a similar capability may return someday. Treat deletion as a
+candidate simplification. Do not retain or extend it for hypothetical future
+use. This review has not authorized or performed an implementation rewrite.
 
-The actual authoring guide now explains the current loop as a backward edge and
-walks through the four-step body. The skill catalog starts concept-review with
-rewriting intended usage. These edits describe the implemented local Flow.
+## Proposed usage and skill guidance
 
-Proposed documentation for the unresolved delivery interaction:
-
-> At demo, Advance accepts the result and continues to the next Flow step.
-> Iterate sends your revision direction back to implementation, then runs
-> compression and both reviews before returning to demo. You continue the same
-> Flow; you do not choose or start a separate loop.
-
-Proposed review-skill instruction:
-
-> Explain which Flow step each decision reaches before asking the human to
-> choose. At a delivery gate after repeated implementation, Iterate means revise
-> the work, not review it again without first making the requested change.
-
-These passages are drafts for docs/lf.md and the human review guidance. They are
-not installed instructions or claims about today's Iterate implementation.
-The next product decision is whether that is the desired interaction. The
-candidate code changes below follow from it.
-
-```mermaid
-flowchart LR
-  design[Design review] --> implement
-  implement --> compress --> slice[Review slice] --> concepts[Concept review]
-  concepts -->|next| demo[Human demo]
-  concepts -->|repeat| implement
+```sh
+lf task run LOO-295 --flow feature
 ```
 
-Flow names the whole authored sequence. A loop is the path created by a backward
-edge in it. One pass traverses that path. Slice names a bounded unit of work;
-review names a judgment. "Loop" need not identify another running thing.
+Review the design, then let implement → compress → review-slice → concept-review
+→ loop-decide traverse the work. Iterate carries direction back to implement;
+Advance reaches the human demo. At demo, human Iterate revisits implementation;
+human Advance continues to the declared suffix or finishes the Flow. Delivery
+is explicit; the feature Flow does not itself grant merge authority.
 
-## What the implementation already proves
+Resume the same saved invocation after interruption. Preserve the captured
+steps, direction, accepted decisions, and exact human boundary. Blocked opens
+one Ask running unblock; human completion returns evidence for reassessment
+without approving another Flow gate. These are the intended interactions;
+source and fixture evidence do not establish the live end-to-end experience.
 
-- `engine/flow.rs::RepeatPolicy { from, max_iterations }` is already a backward
-  edge attached to one skill occurrence. Flow expansion validates the target is
-  earlier and the body is autonomous, with no nested repeat or operations.
-- `durable.rs::FlowPosition` pins one invocation and cursor. The driver follows
-  its saved position through fresh Runs; there is no separate Loop executor.
-- `LoopReview` persists the deciding node, prior pass count/direction, and a
-  pending verdict. This is progress across steps, not just a review.
-- `ReviewDecision::Continue` takes the backward edge. Complete moves forward;
-  the rest of the Flow still runs. The new local pursue definition runs concept
-  review after slice review and only then decides which edge to take.
-- Human Iterate currently chooses the nearest preceding autonomous skill. At
-  demo this is now concept-review, formerly review-slice. It does not directly
-  return to implementation. The generic rule is documented, but a request to
-  revise the work takes an indirect path.
+Skill guidance: operate on the selected invocation and its supplied decision
+protocol. Attribution supplies context. Work and review skills supply evidence;
+loop-decide records Advance/Iterate or requests help. Continue using lf's
+Codex/Claude Code harnesses. Jev/Pydantic informed the typed protocol and
+validation model; neither is a new runtime dependency.
 
-These are source observations. The focused controller/store fixture proves two
-four-step passes, direction carryover, unique Runs, and saved-verdict recovery
-with simulated provider and Linear transport. It does not establish a live
-human handoff or any proposed behavior below.
+## Core model
 
-## Candidate simplifications
+| Experience | Current representation / API |
+| --- | --- |
+| Choose the work sequence | Flow / ConcreteStep and RepeatPolicy |
+| Continue the same Task attempt | FlowPosition with captured QueuedInvocation |
+| Track passes and direction | FlowProgress: per-edge counts, direction, pending verdict |
+| Choose a path | FlowVerdict with FlowDecision::Advance or Iterate; lf flow decide |
+| Ask for missing input | lf flow blocked → keyed Ask running unblock |
+| Authorize a human boundary | Exact Flow Session Advance/Iterate |
+| Interpret an edge | finish_step; persistence and authority belong to its caller |
 
-| Product change | Data/API consequence | Further infrastructure effect |
-|---|---|---|
-| Explain a decision as Next, Repeat, or Blocked | Step disposition can describe the selected edge instead of review-specific Continue/Complete | One transition reducer can return its outcome directly instead of bool plus inferred cursor changes |
-| Show the repeated section and current pass in the Flow | Rename LoopReview to repeat progress; the stored node identifies its backward edge | Reuse the existing position and JSON storage; no Loop table, scheduler, or separate lifecycle |
-| Iterate at delivery means revise the work | Resolve the preceding repeat edge's target rather than rerunning its deciding review | Reuse authored topology rather than adding another retry target or special demo Flow |
-| Advance accepts a review and reports where the Flow is now | One optional approval value and the existing execution snapshot | Share output and driver launch plumbing across Task and Session commands |
+## Observed code and cleanup implications
 
-The first product win is a readable path and predictable controls, even if no
-code disappears. Only carry through infrastructure reductions that preserve
-the guarantees below. Keep the Flow representation and ordinary entry points.
-Do not introduce a separate loopflow runner; reconcile the generic Flow engine
-and Task execution so both interpret the same edges and decision protocols.
+The Wave resident still reads context.playhead in runner.rs::run_pass. Runtime
+ensure_playhead loads the root wave Flow; Playhead::finish_body increments its
+cursor, and settle wraps the root. These are reachable source paths in this
+checkout, not evidence that the human wants this model retained, nor a live UI
+inspection. Remove the prior requirement to add loopflow semantics to them.
 
-`from` currently names the beginning of the repeated body. Under an edge-based
-explanation, `to` or `back_to` would name the destination more directly. This is
-an authoring choice to evaluate, not a reason to change persisted definitions
-without migration. Likewise, transition names need not immediately rename the
-public verdict command; existing pinned invocations can contain old instructions.
+Task execution imports QueuedInvocation and StepRef from controller/wave/playhead.
+FlowPosition stores the former and exposes the latter; TaskExecutionSnapshot
+also uses StepRef. Deleting the Wave interpreter therefore requires preserving
+these still-used Flow representations under their proper owner. Saved Wave
+journal state also needs an explicit disposition. Removing a module blindly
+would lose more than the obsolete concept.
 
-## Counterexamples and constraints
+Separate remaining findings:
 
-- "Next" at concept review must still mean the whole approved Task has adequate
-  evidence. A clearer transition name cannot weaken the completion criterion.
-- Human approval is an exact authorized decision. Autonomous verdicts and human
-  decisions may select similar transitions but must retain distinct authority.
-- A saved verdict must survive driver death and settle once without rerunning a
-  model. It cannot be replaced by an in-memory return value.
-- A worker retry is not another loop pass. Neither is human revision necessarily
-  the same counter as repeat budget. Invocation identity, cursor version, worker
-  generation, and the human Session iteration currently fence different races.
-- Multiple sequential repeat sections need their own progress, so the global
-  iteration cannot simply replace the active edge's pass count.
-- Human gates and nested repeats are excluded from repeat bodies by the current
-  implementation. Whether to retain those restrictions needs to follow the
-  intended loopflow usage, including budget, reachability, and approval rules.
+- Task loading rejects XOR. This still matters to Flow composition; the Wave
+  clarification does not resolve it.
+- Ordinary XOR captures a selected body but loads router/branch content when
+  entered. Whole-invocation definition pinning remains incomplete wherever
+  those paths are supported.
+- docs/authoring.md still assigns decisions to concept-review and documents
+  continue/complete/blocked via lf task verdict. docs/lf.md mixes that older
+  baseline with the newer protocol. Reconcile them with the usage above before
+  shipment; do not present the current implementation as approved.
 
-## First decision and smallest next proof
+## Smallest next review and proof
 
-Decide the delivery interaction: should Iterate at the human demo directly
-repeat implementation → compression → both reviews? The proposed answer is yes.
-This changes the experience immediately and needs no new loop entity.
+## Deletion opportunities and proposed disposition
 
-If accepted, the smallest proof starts at demo after a completed pass, records
-an exact Iterate decision with revision direction, and observes implementation
-as the next step. It must retain design-review Iterate, stale-decision rejection,
-direction carryover, bounded repeat behavior, and fresh Run identities.
+Human direction: aggressively identify cleanup enabled by this change. A large
+deletion may become a bounded follow-up, but deferral must name what disappears,
+why it is separate, and the proof that closes it. Future usefulness is not a
+reason to preserve unused machinery. Apply this scrutiny to new branch code as
+well as inherited code. The dispositions below are review recommendations;
+no runtime edits or external Tasks have been created.
 
-This delivery interaction is one case of the broader accepted loopflow goal,
-not a sufficient fix on its own. The usage-first redesign now takes precedence
-over a Task-local repair. No runtime redesign was performed during this review.
+| Candidate | Delete or consolidate | Proposed disposition and proof |
+| --- | --- | --- |
+| Obsolete protocol documentation | Remove Task-only repetition claims, concept-review decision ownership, and continue/complete/blocked command examples from docs/authoring.md and docs/lf.md. | This branch: one usage account matching the accepted protocol and explicit remaining limitations. Search all shipped docs/skills for competing instructions. |
+| Wave Flow queue | WaveRuntime::enqueue_flow has no caller in the searched source. Playhead::enqueue and its queue/return bookkeeping support the old sequencer. | Wave cleanup follow-up if removal crosses the resident rewrite. Remove the unused entry point, then remove queue state only with a disposition for journaled continuations. Preserve readable history; prove no queued work silently disappears. |
+| Wave interpreter and its surfaces | Root wrap and frame settlement in playhead.rs; ensure_playhead and restart_legacy_playhead; __flow-step dispatch/run_step; Wave --restart-flow; /playhead, broadcasts, and their client projections. | One bounded Wave simplification: schedule the existing bounded wave/operate behavior without the obsolete Flow sequencer. Preserve cadence, chat, live provider ownership, interruption and visible failure/recovery. Verify the real consumers before deleting projections. |
+| Task types housed under Wave playhead | QueuedInvocation, StepRef and StepKind are used by durable.rs, controller/task/mod.rs and ops/task_execution.rs. QueuedInvocation itself stores identity, name and steps, not a queue. | Move the required Flow representation to its actual owner as part of deletion, with a name matching its contents. Do not copy it into a second implementation. Prove existing Task positions and exact human tokens still decode and resume. |
+| Duplicate continuation logic introduced or retained here | Task drive_task/decide_human_flow_step and ordinary execution/flow_session::next_cursor each manage traversal and human revision around finish_step. | Review in this branch while resolving Task XOR: consolidate traversal and pure human navigation where possible. Keep Task transactions, claims and domain effects at their owner. Do not merely wrap both existing interpreters or delete standalone support because its UI is absent. Proof: identical authored paths, directions, limits and stale-decision outcomes through both adapters. A larger persistence unification needs its own bounded design. |
+| Shared scratch route protocol | build_xor_routing_suffix and read_xor_verdict still use scratch/route-xor.md outside the exact navigation protocol. | Pair removal with XOR/pinning repair. Persist an exact route selection through the existing invocation authority, then delete the shared file protocol and source reloads on recovery. Prove stale/concurrent/nested route isolation and recovery after source deletion. |
+
+Source evidence: the builtin wave/flow/wave.yaml contains only wave/operate and
+assigns recurrence to the scheduler. The old resident still consumes playhead
+state, so removal is a behavior-preserving simplification, not a claim that the
+whole module is dead. Swift WaveChatClient decodes PlayheadView, and
+AttemptFailurePresentation consumes it; preserve useful failure presentation
+without preserving the obsolete execution concept. No live UI was inspected.
+
+Keep historical decoding only where recoverable persisted facts require it.
+The old decision aliases and migration readers cannot be deleted merely because
+their names are obsolete. Establish migration/disposition first. Likewise, the
+new ordinary FlowRun and FlowSession records must earn their shape, but ordinary
+Flow execution and Wave attribution remain supported goals.
+
+Deferral should leave a task-ready directive containing the deletion boundary,
+surviving behavior/data, prerequisites and completion proof. Do not make a vague
+"cleanup later" item. Large Wave removal may be separate from LOO-295; obsolete
+instructions and duplicated semantics touched by LOO-295 belong in its review.
+
+## Next proof
+
+Before a deletion design, inventory the live Wave interpreter callers, shared
+Task types, and persisted journal facts. Propose removal of the old interpreter
+while retaining the actual Wave operating/cadence behavior and Task recovery.
+Do not introduce a replacement Wave Flow lifecycle solely to make deletion fit.
+The possible future return of this capability is not a present requirement.
+
+Task acceptance still needs the concrete interaction and recovery proof:
+initial steps once, backward traversal with direction, later forward completion,
+exact human approval, and Blocked → Ask → reassessment. Preserve stale-decision
+rejection and saved-result recovery. Existing fixture reports are in
+protocol-review.md; no tests or live runtime demo were run during this review.

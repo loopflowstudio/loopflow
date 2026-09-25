@@ -1,5 +1,12 @@
 # Loopflows: proposed usage and branch direction
 
+Latest human clarification, 2026-09-25: Task execution is the current UI focus.
+A loopflow may run about a Wave; that does not require a Wave-owned loopflow UI.
+Wave playhead is mostly old code and a candidate for deletion, not an interpreter
+to extend for parity. The anywhere-Flow direction below does not require retaining
+that machinery. See concept-review.md for the current review and deletion
+dependencies. No implementation or deletion is approved by these notes.
+
 Status: human-directed redesign, 2026-09-25. This replaces the earlier Task-only
 continuation scope as the target of the Advance branch. Existing code and its
 tests are evidence to reconcile, not acceptance of that implementation.

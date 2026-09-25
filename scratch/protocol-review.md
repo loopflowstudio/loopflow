@@ -1,5 +1,12 @@
 # Loopflow decision protocol — review surface
 
+Human review clarification, 2026-09-25: Tasks are the current UI focus;
+Flows may run about Waves without adding a Wave loopflow UI. The human identifies
+Wave playhead as mostly old code and a deletion candidate. The Wave-parity
+requirement below is superseded: do not extend that interpreter merely to meet
+it. See concept-review.md for current direction and the shared Task types that
+must survive any deletion. Other execution and recovery findings remain open.
+
 This is LOO-295 / Advance, not the state-recovery work in LOO-296. The current
 branch is ready for a focused concept/code review, not release acceptance.
 The complete direction remains `loopflow.md`; this note does not reduce it.

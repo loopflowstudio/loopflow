@@ -587,7 +587,7 @@ pub fn status(wave: Option<&str>, json: bool) -> Result<()> {
 
 /// `lf roadmap [wave]` — the machine-wide intent plane. Every Wave (or one, when
 /// scoped) with its plan joined to live evidence and each row bucketed into a
-/// section. Deterministic and local: one `tmux list-sessions` for the whole
+/// section. Deterministic and local: one runtime observation for the whole
 /// read, bounded Git probes for Task Work, and no network. `lf status`
 /// answers "is it healthy"; this answers "what is being worked on and what
 /// could be".

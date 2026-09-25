@@ -28,10 +28,11 @@ use std::path::{Path, PathBuf};
 use serde::{Deserialize, Serialize};
 use time::OffsetDateTime;
 
+use crate::chat::turns::BodyProvenance;
 use crate::chat::turns::{ChatRole, ChatTurn};
 use crate::chat::types::{ConversationItem, Lifecycle};
 use crate::controller::wave::chat::{ChatBacking, ConversationEpoch};
-use crate::controller::wave::playhead::{BodyProvenance, Playhead, PlayheadEvent};
+use crate::controller::wave::playhead::{Playhead, PlayheadEvent};
 use crate::controller::wave::state::LoopState;
 use crate::work::project::ProjectObservation;
 use crate::work::task::TaskObservation;
@@ -95,15 +96,6 @@ pub struct PendingMessage {
     pub source: Option<DiscordMessageSource>,
 }
 
-impl PendingMessage {
-    pub fn destination(&self) -> MessageDestination {
-        self.source
-            .as_ref()
-            .map(|source| MessageDestination::Discord(source.binding.clone()))
-            .unwrap_or(MessageDestination::Local)
-    }
-}
-
 pub(crate) fn attributed_message(text: &str, name: Option<&str>) -> String {
     match name.and_then(crate::engine::config::normalize_user_name) {
         Some(name) => format!(
@@ -112,13 +104,6 @@ pub(crate) fn attributed_message(text: &str, name: Option<&str>) -> String {
         ),
         None => text.to_string(),
     }
-}
-
-/// The authored-chat destination a resident pass is allowed to answer.
-#[derive(Debug, Clone, PartialEq, Eq)]
-pub enum MessageDestination {
-    Local,
-    Discord(DiscordChatBinding),
 }
 
 /// One configured Discord guild text channel.
@@ -334,6 +319,14 @@ pub enum EventKind {
     PlayheadChanged {
         event: PlayheadEvent,
         playhead: Box<Playhead>,
+    },
+    BodySessionUpdated {
+        body_id: String,
+        session_id: String,
+    },
+    /// One cutover decision over the original saved Wave Flow boundary.
+    WaveFlowDisposition {
+        record: crate::controller::wave::recovery::RecordedDisposition,
     },
     // -- orchestration (observations, not commands) --
     RunObserved {
@@ -654,6 +647,13 @@ impl Narrator {
             EventKind::LoopState { from, to, reason } => {
                 info(format!("state {} → {} ({reason})", from.name(), to.name()))
             }
+            EventKind::BodySessionUpdated { session_id, .. } => {
+                info(format!("provider session {session_id}"))
+            }
+            EventKind::WaveFlowDisposition { record } => info(format!(
+                "Wave Flow at seq {}: {:?}",
+                record.source_seq, record.disposition
+            )),
             EventKind::PlayheadChanged { event, .. } => match event {
                 PlayheadEvent::FlowEnqueued { flow, .. } => {
                     info(format!("playhead enqueued · {flow}"))
@@ -1014,13 +1014,12 @@ pub struct ThreadFold {
     pub conversation_epoch_turns: HashMap<String, Vec<String>>,
     /// Provider backing for legacy turns with confirmed Discord provenance.
     pub discord_turn_bindings: HashMap<String, DiscordChatBinding>,
-    /// Turns started but never finished — the crash tail. The boot janitor
-    /// finalizes these as `Failed`.
+    /// Unfinished turns. Unknown attempt liveness blocks startup; bodyless
+    /// crash tails can be finalized by the boot janitor.
     pub open: Vec<ChatTurn>,
     /// Last `LoopState` transition's destination; `Idle` if none.
     pub state: LoopState,
-    /// Last durable playhead snapshot, absent before the first resident or
-    /// enqueue initializes the default wave flow.
+    /// Historical Flow snapshot retained for explicit recovery.
     pub playhead: Option<Playhead>,
     /// Chat messages and typed inputs not named by any `answers` event (minus
     /// what `MessagesRequeued` restored); this seeds the scheduler queue on
@@ -1392,6 +1391,7 @@ pub fn fold_thread(events: &[Event]) -> ThreadFold {
                         chat_reply_targets.insert(turn_id.clone(), message_id);
                     }
                 } else {
+                    restore_pending(&mut pending_messages, &messages, &claims);
                     reply_target_by_open_turn.remove(turn_id);
                 }
                 turns.push(turn);
@@ -1417,6 +1417,24 @@ pub fn fold_thread(events: &[Event]) -> ThreadFold {
                     }
                 }
                 playhead = Some(snapshot.as_ref().clone());
+            }
+            EventKind::BodySessionUpdated {
+                body_id,
+                session_id,
+            } => {
+                for turn in &mut open {
+                    if let Some(body) = turn.body.as_mut().filter(|body| &body.body_id == body_id) {
+                        body.session_id = Some(session_id.clone());
+                    }
+                }
+            }
+            EventKind::WaveFlowDisposition { record } => {
+                if !matches!(
+                    record.disposition,
+                    crate::controller::wave::recovery::FlowDisposition::Unresolved { .. }
+                ) {
+                    playhead = None;
+                }
             }
             // Steer consumption affects the queue fold, not the thread: the
             // steered text is already a user turn via its `UserMessage` row.
@@ -1657,7 +1675,8 @@ mod tests {
         let EventKind::PlayheadChanged { playhead, .. } = &events[0].kind else {
             panic!("first event must retain the historical playhead")
         };
-        assert!(!playhead.has_executable_definition());
+        assert!(matches!(&playhead.stack[0].steps[0],
+            crate::engine::ConcreteStep::Skill(step) if step.skill.content.is_none()));
     }
 
     #[test]
@@ -1691,9 +1710,10 @@ mod tests {
             let EventKind::PlayheadChanged { playhead, .. } = &events[0].kind else {
                 panic!("first event must retain the historical playhead")
             };
-            assert!(!playhead.has_executable_definition());
-            assert_eq!(playhead.legacy_flow_intents(), ["feature"]);
-            assert_eq!(playhead.current().unwrap().iteration, 3);
+            assert!(matches!(&playhead.stack[0].steps[0],
+                crate::engine::ConcreteStep::Xor(step) if step.paths.is_empty()));
+            assert_eq!(playhead.stack[0].queue[0].flow, "feature");
+            assert_eq!(playhead.stack.last().unwrap().iteration, 3);
             assert_eq!(read_events(&path).len(), 2);
             assert_eq!(std::fs::read_to_string(&path).unwrap(), raw);
         }

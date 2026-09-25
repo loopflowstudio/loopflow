@@ -127,11 +127,7 @@ struct WaveChatView: View {
     @ViewBuilder
     private var transcript: some View {
         let turns = connection?.turns ?? []
-        let failures = attemptFailurePresentations(
-            turns: turns,
-            playhead: connection?.playhead,
-            loopState: connection?.loopState ?? .idle
-        )
+        let failures = attemptFailurePresentations(turns: turns)
         let visible = visibleConversationTurns(turns, failures: failures)
         ScrollViewReader { proxy in
             ScrollView {

@@ -139,15 +139,16 @@ second database, no machine-wide service. What the CLI reads, it renders:
 - **Task workspace** — changed files, per-file patches, and local inspection tools.
 - **Telemetry** — token spend, codebase growth, registry health.
 
-## tmux
-
-Detached Wave and Task processes run as named tmux sessions — that
-is process lifetime and inspection, not the steering protocol:
+## Inspect and resume
 
 ```bash
-tmux ls                     # live agent processes
-tmux attach -r -t <name>    # read-only look inside one
+lf top                      # live Loopflow process activity
+lf status shipper           # work and its current conditions
+lf session open <id>        # start or resume the selected conversation
 ```
+
+Open a Session in the app or CLI to return to its provider-native conversation.
+Task workspace shells run directly in the app's terminal.
 
 Use the [Sessions lifecycle](../README.md#sessions) to open and explicitly
 resolve every unresolved Session.

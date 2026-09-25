@@ -1,7 +1,8 @@
 # Task continuation evidence
 
-Updated 2026-09-25 from the branch for
-[Task continuation · LOO-295](https://linear.app/loopflow/issue/LOO-295).
+Updated 2026-09-25 from
+[Task continuation · LOO-295](https://linear.app/loopflow/issue/LOO-295)
+and its Wave/terminal simplification follow-through.
 No exact Wave was named or bound for this memory pass; placement remains
 unresolved. This repository record does not change a Wave mandate, chapter
 plan, or Task status. Branch implementation and bounded demo acceptance do
@@ -168,9 +169,10 @@ recovery evidence would not simplify ownership.
   This branch's local recovery fixes do not establish that broader outcome.
 - Removing the Wave interpreter has a separate
   [deletion directive](https://github.com/loopflowstudio/loopflow/blob/f122a264bbf75916df60874966109d67afbd6838/scratch/wave-playhead-removal.md).
-  Preserve cadence, chat, failure presentation, journals and Task shared types;
-  do not extend obsolete Wave traversal for parity. Placement and a concrete
-  Task remain unresolved here, as does follow-up ownership for the handoff gaps.
+  The local simplification branch implements that removal; remaining proof and
+  recovery limits are recorded below. Placement and a concrete Task remain
+  unresolved here, as does follow-up ownership for the handoff gaps. Do not file
+  a duplicate implementation Task from the older directive.
 
 Retain scratch until normal delivery cleanup; these curated decisions and
 commit-addressed evidence must survive it. No Wave status or chapter evidence
@@ -199,3 +201,84 @@ passed the complete module. Architecture validation passed on a copy of the
 current tracked files; an in-place scan had included stale ignored
 `.lf/tmp/gate-materialized-source` content. These are local simulated Session
 proofs; CI on the published repair remains separate evidence.
+
+## Wave and terminal reduction boundaries
+
+The local branch runs one captured `wave/operate` harness attempt per wake.
+The turn journal owns its claims and outcome; historical Flow snapshots are
+read-only recovery evidence. Shared Task invocation values belong to the engine,
+with their saved representation preserved. The finite builtin `wave` Flow stays:
+`wave/product/GOAL.md` still names it in a cron, though the resident no longer
+loads it as control state. A deleted resident caller does not prove a catalog
+entry has no ordinary callers.
+
+One terminal governance event closes the attempt and restores noncompleted input
+claims, including on journal replay. Separate terminal and requeue writes leave
+a crash window. Independent chat replies append finalized turns without taking
+the open governance turn. `Inner.open` alone controls acceptance of turn output;
+pause and force-finalization already remove that authority. Keep late-delta and
+next-turn tests when deleting a redundant flag, and name any logging change:
+late output now follows the existing no-open-turn warning path.
+
+Cutover records one disposition against the original journal sequence and
+invocation IDs before old attempts can be changed. Only the captured idle default
+one-Skill root with no queued or active work retires automatically. Custom roots,
+nested/queued work and uncaptured definitions retain their bytes, ordering and
+return relationships as unresolved evidence. `lf wave recover <name>` inspects;
+`--cancel <source-seq> --reason <text>` records explicit cancellation under the
+existing locator lock. It neither recompiles nor launches saved work. Unknown
+active attempts cannot be cancelled without recorded termination. Missing
+listener evidence never proves provider death; startup with an unclosed attempt
+blocks. No termination-reconciliation command or faithful arbitrary-queue
+transfer is supplied by this reduction.
+
+Swift no longer consumes Wave playhead projections. Failure presentation uses
+recorded turns; historical logical-step identity retains retry evidence, while
+a later scheduled wake never proves recovery of an unrelated failed attempt.
+
+The branch removes the TPM plugin, layouts/status bar and Mac Task-shell tmux
+adapter. Recorded direction explicitly retains Session code and background tmux
+process wrappers; participant attribution is unresolved in the supplied notes.
+Task-shell view pools must have local workspace ownership: a global pooled
+NSView steals terminals between windows. This does not change provider-native
+Session semantics or their existing surface pools.
+
+Measure deleted production mechanisms separately from shared-type moves,
+historical readers, tests and scratch cleanup. Aggregate net deletion does not
+justify a new recovery surface by itself. Task-position normalization remains
+a separate forward-migration follow-up: materialize supported old positions and
+audit trigger/filter consumers before dropping mirrored columns. Never rewrite
+applied migrations or erase saved decisions, claims and human tokens.
+
+### Evidence and remaining acceptance
+
+The [simplification evidence at the compression checkpoint](https://github.com/loopflowstudio/loopflow/blob/6d952c4af427f653bb5fd34b433f2a977814550f/scratch/simplification-evidence.md)
+records populated journal cutover/restart, owned lifecycle simulations,
+Rust-listener SSE frames consumed by Swift, and post-rebase saved Task recovery.
+A decoder probe exposed the prior flat Swift/captured Rust shape mismatch;
+producer-generated frames now exercise the client. An old-shaped green fixture
+was insufficient. Original populated
+journal bytes, failed claims and unknown liveness distinguish migration proof
+from clean startup. Task/Session changes from merged
+[Continue Tasks through review, revision, and saved Flow recovery · PR #1283](https://github.com/loopflowstudio/loopflow/pull/1283)
+remain the base, not part of the Wave deletion.
+
+The 2026-09-25 gate cleared the prior resource block and passed the Xcode
+fallback app/test-runner build, 267 Swift tests, eight built-app fixture renders,
+229 Python tests, 78 website checks (3 skipped), architecture, Rustfmt and
+all-target Clippy. Provider effects remain simulated. Configured live
+operation/chat/interruption/failure recovery and Task-shell tab/window
+interaction still need acceptance; fixture renders do not prove those paths.
+
+Keep the default gate's failed receipt `20260925T221844Z-96933-933aee17`:
+the materializer pins `LF_CONTROL_HOME`, while an unchanged Flow Session test
+sets only its private `LF_HOME`. The same compiled test fails with that pin and
+passes without it. Isolated materialized Rust run
+`64ffd4ab-f575-4c37-8964-a0e0f53d35b4`, with the pin removed, passed 1,988 tests
+(6 skipped). `TESTING.md` records the fixture isolation requirement. The
+default runner/fixture mismatch remains outside the Wave deletion; no single
+green default-gate receipt or live acceptance is claimed.
+
+The checkpoint and cited scratch paths were verified in local Git history;
+remote availability was not checked. The gate establishes the checks above;
+it does not establish deployment, PM mutation or shipment.

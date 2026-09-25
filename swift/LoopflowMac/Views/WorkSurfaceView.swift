@@ -12,10 +12,7 @@ struct WorkSurfaceView: View {
     @Bindable var model: PodiumModel
 
     @Environment(\.palette) private var palette
-    // Externally-owned singleton: observe it, don't @StateObject-own it (see
-    // WaveDetailPane) — the create-and-own lifecycle fires the publisher during
-    // the first body pass and logs an AttributeGraph cycle at cold launch.
-    @ObservedObject private var terminalStore = TaskTerminalStore.shared
+    @StateObject private var terminalStore = TaskTerminalStore()
     @State private var controlError: String?
     @State private var activeControlId: String?
     @State private var workspaceSelection: WorkTaskSelection?

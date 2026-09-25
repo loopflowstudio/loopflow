@@ -51,7 +51,7 @@
 //!   - `POST /resident/deltas {deltas: [...]}` → `{accepted}` — ordered turn
 //!     deltas, applied to the journal fold
 //!     ([`WaveRuntime::apply_resident_delta`]).
-//!   - `GET /resident/context` → `{playhead, provider_session}` — the
+//!   - `GET /resident/context` → `{provider_session}` — the
 //!     pre-turn snapshot and optional typed provider thread; serving it drains
 //!     pending child observations first.
 //! - `POST /messages {id?, op, text, author_name?}` → `{message, state, epoch}`. `op` is
@@ -104,7 +104,6 @@ use crate::controller::wave::chat::{
 };
 use crate::controller::wave::discord::{DiscordError, DiscordProjection};
 use crate::controller::wave::journal::{MessageOp, PendingMessage};
-use crate::controller::wave::playhead::PlayheadView;
 use crate::controller::wave::registry::{process_alive, ObserverSlot, StoreObserver};
 use crate::controller::wave::runtime::{
     ChatWriteError, InboxItem, TurnBroadcast, TurnDeltaFrame, TurnFrame, WaveRuntime,
@@ -358,7 +357,6 @@ pub(crate) fn router_with_chat_projection(
         .route("/stop", post(stop_handler))
         .route("/conversation", get(conversation_handler))
         .route("/channel", get(channel_handler))
-        .route("/playhead", get(playhead_handler))
         .route("/events", get(events_handler))
         .route("/messages", post(messages_handler))
         .route("/observations", post(observations_handler))
@@ -397,16 +395,6 @@ async fn observations_handler(
 async fn stop_handler(State(state): State<ServerState>) -> StatusCode {
     state.shutdown.request();
     StatusCode::ACCEPTED
-}
-
-async fn playhead_handler(
-    State(state): State<ServerState>,
-) -> Result<Json<PlayheadView>, (StatusCode, String)> {
-    state
-        .runtime
-        .ensure_playhead()
-        .map(Json)
-        .map_err(|err| (StatusCode::INTERNAL_SERVER_ERROR, err.to_string()))
 }
 
 async fn health_handler(State(state): State<ServerState>) -> Json<HealthBody> {
@@ -476,10 +464,6 @@ async fn resident_attach_handler(
             .runtime
             .transition(LoopState::Idle, "resident attached");
     }
-    state
-        .runtime
-        .ensure_playhead()
-        .map_err(|err| (StatusCode::INTERNAL_SERVER_ERROR, err.to_string()))?;
     tracing::info!(pid = body.pid, "resident attached");
     Ok(Json(AttachResponse {
         wave: state.runtime.name().to_string(),
@@ -506,12 +490,7 @@ async fn resident_context_handler(
     state.resident.authorize(&headers)?;
     // Drain child observations before the resident captures its next turn.
     state.observer.poll_once().await;
-    let playhead = state
-        .runtime
-        .ensure_playhead()
-        .map_err(|err| (StatusCode::INTERNAL_SERVER_ERROR, err.to_string()))?;
     Ok(Json(ContextResponse {
-        playhead,
         provider_session: state.runtime.latest_provider_session(),
     }))
 }
@@ -826,7 +805,6 @@ async fn events_handler(
         epoch_replay
             .chain((!include_inbox).then(|| Ok(backing_health_event(&backing_health))))
             .chain(std::iter::once(Ok(state_event(&sub.state))))
-            .chain(sub.playhead.into_iter().map(|p| Ok(playhead_event(&p))))
             .chain(turn_replay)
             .chain(inbox_replay)
             .chain(chat_tail_replay),
@@ -851,11 +829,7 @@ async fn events_handler(
     };
     // Lagged: fine — the next transition carries the current state.
     let live_states = live_stream(sub.state_rx, |s| state_event(&s));
-    let live_playhead = live_stream(sub.playhead_rx, |p| playhead_event(&p));
-    let mut live: BoxedEventStream = Box::pin(stream::select(
-        live_turns,
-        stream::select(live_states, live_playhead),
-    ));
+    let mut live: BoxedEventStream = Box::pin(stream::select(live_turns, live_states));
     if include_inbox {
         // Lagged: the pending fold is the durable queue; a resident that
         // falls behind resubscribes.
@@ -1122,12 +1096,6 @@ fn turn_id_seq(turn_id: &str) -> Option<u64> {
     turn_id.strip_prefix("turn-")?.parse().ok()
 }
 
-fn playhead_event(playhead: &PlayheadView) -> Event {
-    Event::default()
-        .event("playhead")
-        .data(serde_json::to_string(playhead).expect("PlayheadView serializes to JSON"))
-}
-
 fn state_event(state: &LoopState) -> Event {
     Event::default().event("state").data(state.name())
 }
@@ -1164,7 +1132,6 @@ fn inbox_item_frame(item: &InboxItem) -> InboxFrame {
             parent: parent.clone(),
         },
         InboxItem::Interrupt => InboxFrame::Interrupt,
-        InboxItem::Skip => InboxFrame::Skip,
     }
 }
 

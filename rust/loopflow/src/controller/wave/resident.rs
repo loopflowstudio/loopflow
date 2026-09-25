@@ -215,7 +215,6 @@ fn inbox_item(frame: InboxFrame) -> InboxItem {
             parent,
         },
         InboxFrame::Interrupt => InboxItem::Interrupt,
-        InboxFrame::Skip => InboxItem::Skip,
     }
 }
 

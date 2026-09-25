@@ -45,7 +45,7 @@ wave/<name>/.wave-endpoint
 wave/<name>/.wave-resident-token
 ```
 
-The journal rebuilds the thread, playhead, and loop state after restart. The
+The journal rebuilds the thread and loop state after restart. The
 endpoint and resident token exist only while the listener owns that boot and
 are removed on shutdown.
 
@@ -54,13 +54,33 @@ instruments push typed observations into the local store; `lf status`,
 `lf roadmap`, Wave/Project turns, and Apple clients consume one Rust-derived
 portfolio. No read executes an instrument query, and no metric completes a KR.
 
-Expanded Wave plans stay pinned across restarts while their definitions remain
-unchanged. Before opening a body, the listener compares every journaled stack
-and queued plan with the current catalog. Any name, kind, order, policy, or
-shape change appends one reset snapshot and starts the current root at step
-zero. The reset drops cursors, iterations, nested invocations, and queued flow
-continuations; pending Work observations remain available to the fresh flow.
-An active body finishes against its pinned plan before this check runs.
+Inspect historical Flow work before deciding its disposition:
+
+```bash
+lf wave recover product
+lf wave recover product --cancel 42 --reason "Replan this continuation as Tasks"
+```
+
+Recovery prints the original saved snapshot, its source sequence and disposition.
+Cancellation names that exact sequence, records the reason and preserves the
+original journal. Repeating it does not cancel newer work or append another receipt.
+It does not run or recompile the saved Flow.
+
+Startup retires an idle default `wave/operate` root once. Custom roots, nested
+frames, queued work and definitions without captured Skill content remain
+unresolved until explicitly cancelled. An active historical attempt with no
+recorded termination stays unresolved; a missing listener does not prove its
+provider is dead, and cancellation cannot supply that proof.
+
+Each governance wake captures `wave/operate` once and runs one harness attempt.
+The turn journal owns its input claims, provider session and terminal outcome.
+Failed or interrupted attempts restore their input claims in that same terminal
+event. A restart with an unclosed attempt blocks until its termination is known.
+Chat replies append independently without replacing an active governance turn.
+
+New governance captures `wave/operate` directly. A custom `wave` Flow is no longer
+resident control; run multi-step work through an ordinary bound Flow. Chat,
+pending Work observations and failure/session history survive cutover.
 
 Wave Chat is local when `GOAL.md` has no `chat` block. A Discord channel binding
 replaces that backing on the next listener start. Each change appends one
@@ -120,9 +140,8 @@ do not require the resident token:
 | `GET /health` | Reports listener/resident state plus the active chat epoch and backing health. |
 | `GET /channel` | Reads unified channel messages after an optional `?since=<journal-seq>` cursor, including the Wave's own replies. |
 | `GET /conversation` | Returns one source-bearing epoch; `?limit=N` tails it and `?epoch=<id>` selects history. |
-| `GET /events` | Emits epoch and backing health, replays source-bearing messages, then streams message, local-only message-delta, state, and playhead events. |
+| `GET /events` | Emits epoch and backing health, replays source-bearing messages, then streams message, local-only message-delta, and state events. |
 | `POST /messages` | Sends locally, or returns `409` with Open in Discord when Discord is active. |
-| `GET /playhead` | Returns the durable pass cursor. |
 | `POST /stop` | Gracefully stops the listener and resident. |
 
 The hidden `/resident/*` routes carry listener/resident coordination and require

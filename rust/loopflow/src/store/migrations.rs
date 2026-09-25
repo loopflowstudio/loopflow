@@ -4799,11 +4799,14 @@ mod tests {
                 },
             )
             .unwrap();
-        let invocation: crate::controller::wave::playhead::QueuedInvocation =
+        let invocation: crate::engine::invocation::QueuedInvocation =
             serde_json::from_str(&invocation_json).unwrap();
-        let step = invocation.step_at(0, iteration as u32).unwrap();
-        assert_eq!(step.step, "review-design");
+        let crate::engine::ConcreteStep::Skill(step) = &invocation.steps[0] else {
+            panic!("migration retains the human Skill");
+        };
+        assert_eq!(step.skill.name, "review-design");
         assert!(step.policy.human);
+        assert_eq!(iteration, 3);
         assert_eq!(session_run_id.as_deref(), Some("run_human"));
         assert_eq!(ready_summary.as_deref(), Some("ready to approve"));
         assert_eq!(step_index, 0);
@@ -5206,7 +5209,7 @@ mod tests {
 
         let repo = std::path::Path::new(env!("CARGO_MANIFEST_DIR")).join("../..");
         for flow in ["slice", "slice", "ship-5whys"] {
-            let invocation = crate::controller::wave::playhead::QueuedInvocation::load(&repo, flow)
+            let invocation = crate::engine::invocation::QueuedInvocation::load(&repo, flow)
                 .expect("every repaired persisted loop flow resolves");
             assert_eq!(invocation.flow, flow);
         }

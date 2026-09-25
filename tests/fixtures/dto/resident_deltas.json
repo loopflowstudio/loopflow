@@ -1,14 +1,18 @@
 {
   "deltas": [
     {
-      "kind": "body_started",
+      "kind": "turn_opened",
+      "answers": [
+        "msg-4",
+        "msg-5"
+      ],
       "body": {
         "body_id": "body-3",
-        "invocation_id": "inv-wave-1",
-        "step_index": 1,
-        "flow": "wave",
-        "step": "wave/pursue",
-        "iteration": 2,
+        "invocation_id": null,
+        "step_index": null,
+        "flow": null,
+        "step": "wave/operate",
+        "iteration": null,
         "session_id": null,
         "harness": "codex",
         "model": "gpt-5",
@@ -25,19 +29,13 @@
       "session_id": "session-3"
     },
     {
-      "kind": "turn_opened",
-      "answers": [
-        "msg-4",
-        "msg-5"
-      ]
-    },
-    {
       "kind": "turn_text",
       "text": "Dispatching one worker for the parser."
     },
     {
-      "kind": "turn_reply_to",
-      "message_id": "msg-5"
+      "kind": "chat_reply",
+      "message_id": "msg-5",
+      "text": "A separate chat reply."
     },
     {
       "kind": "turn_item",
@@ -54,12 +52,6 @@
       "kind": "turn_finished",
       "status": "completed",
       "reason": null
-    },
-    {
-      "kind": "body_finished",
-      "body_id": "body-3",
-      "outcome": "completed",
-      "reason": "completed"
     },
     {
       "kind": "loop_state",

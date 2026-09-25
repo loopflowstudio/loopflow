@@ -218,7 +218,7 @@ DOCS_AREAS = (
             DocPage(
                 "Conducting",
                 "conducting",
-                "Monitor and steer work from the CLI, tmux, or Mac app",
+                "Monitor and steer work from the CLI or Mac app",
             ),
         ),
     ),

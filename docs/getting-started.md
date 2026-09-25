@@ -184,12 +184,12 @@ worktree. `lf pr land` keeps the PR under one durable watcher through CI repair
 and merge; review feedback returns to the same Task and linked events land in
 the Wave thread.
 
-Detached processes use named tmux sessions for process lifetime and read-only
-inspection:
+Inspect running work through Loopflow:
 
 ```bash
-tmux ls               # live agent sessions
-tmux attach -r -t <name> # inspect one; never mutate the session directly
+lf ps --json          # live processes and their ownership evidence
+lf status shipper     # Wave work, Runs, and Task conditions
+lf session list       # conversations waiting for a person
 ```
 
 Use `lf session list`, then `lf session open <session-id>`, for every unresolved
@@ -240,41 +240,6 @@ lf auth claude    # connect Claude
 lf auth linear    # connect Linear with OAuth
 lf auth status    # check connections
 ```
-
----
-
-## tmux Plugin
-
-Status bar, keybindings, layouts — all from the terminal.
-
-```bash
-# Add to .tmux.conf
-set -g @plugin 'loopflowstudio/loopflow.tmux'
-run '~/.tmux/plugins/tpm/tpm'
-```
-
-Status bar shows wave state: `[lf: main]` or `[lf: 3 waves | engbot]`. Customize with `@loopflow_status_format` (variables: `#{status}`, `#{branch}`, `#{skill}`, `#{waves}`, `#{wave}`):
-
-```bash
-# .tmux.conf
-set -g @loopflow_status_format '[lf: #{status}]'    # default
-```
-
-| Key | Action |
-|-----|--------|
-| `prefix+l r` | Run skill/wave |
-| `prefix+l s` | Stop |
-| `prefix+l o` | Open logs |
-| `prefix+l p` | Open PR |
-| `prefix+l n` | New worktree |
-| `prefix+l d` | Land PR |
-| `prefix+l w` | Pick wave/worktree |
-| `prefix+l L` | Pick layout |
-| `prefix+l ?` | Help |
-
-Works without `lf` installed — status shows a placeholder and keybindings explain themselves.
-
-Two built-in layouts: `lf-dev` (editor + agent + shell), `lf-swarm` (monitor + 3 worktree workers).
 
 ---
 

@@ -11,9 +11,7 @@ struct AttemptFailurePresentationTests {
         let retry = turn("turn-11", .running, body: body("body-2"))
 
         let result = attemptFailurePresentations(
-            turns: [failed, retry],
-            playhead: nil,
-            loopState: .turning
+            turns: [failed, retry]
         )[failed.id]
 
         #expect(result?.state == .retrying)
@@ -27,34 +25,11 @@ struct AttemptFailurePresentationTests {
         let retry = turn("turn-11", .completed, body: body("body-2"))
 
         let result = attemptFailurePresentations(
-            turns: [failed, retry],
-            playhead: nil,
-            loopState: .idle
+            turns: [failed, retry]
         )[failed.id]
 
         #expect(result?.state == .recoveredOnRetry)
         #expect(result?.title == "Attempt failed · recovered on retry")
-    }
-
-    @Test("the same selected step with no active body has a retry pending")
-    func retryPending() {
-        let failedBody = body("body-1", reason: capacityReason)
-        let failed = turn("turn-10", .failed, body: failedBody)
-        let playhead = PlayheadView(
-            stack: [],
-            active: nil,
-            now: stepRef(failedBody),
-            next: nil,
-            returnTo: nil
-        )
-
-        let result = attemptFailurePresentations(
-            turns: [failed],
-            playhead: playhead,
-            loopState: .idle
-        )[failed.id]
-
-        #expect(result?.state == .retryPending)
     }
 
     @Test("a later iteration is not a retry")
@@ -63,9 +38,7 @@ struct AttemptFailurePresentationTests {
         let later = turn("turn-11", .completed, body: body("body-2", iteration: 1))
 
         let result = attemptFailurePresentations(
-            turns: [failed, later],
-            playhead: nil,
-            loopState: .idle
+            turns: [failed, later]
         )[failed.id]
 
         #expect(result?.state == .failed)
@@ -81,30 +54,18 @@ struct AttemptFailurePresentationTests {
         )
 
         let result = attemptFailurePresentations(
-            turns: [failed, later],
-            playhead: nil,
-            loopState: .idle
+            turns: [failed, later]
         )[failed.id]
 
         #expect(result?.state == .failed)
     }
 
-    @Test("loop failure never invents terminal step failure")
-    func loopFailureKeepsAttemptLanguage() {
+    @Test("an attempt failure preserves its recorded reason")
+    func failureKeepsAttemptLanguage() {
         let failedBody = body("body-1", reason: capacityReason)
         let failed = turn("turn-10", .failed, body: failedBody)
-        let playhead = PlayheadView(
-            stack: [],
-            active: nil,
-            now: stepRef(failedBody),
-            next: nil,
-            returnTo: nil
-        )
-
         let result = attemptFailurePresentations(
-            turns: [failed],
-            playhead: playhead,
-            loopState: .failed
+            turns: [failed]
         )[failed.id]
 
         #expect(result?.state == .failed)
@@ -127,9 +88,7 @@ struct AttemptFailurePresentationTests {
         )
 
         #expect(attemptFailurePresentations(
-            turns: [turn],
-            playhead: nil,
-            loopState: .failed
+            turns: [turn]
         ).isEmpty)
     }
 
@@ -152,9 +111,7 @@ struct AttemptFailurePresentationTests {
         let turns = [first, second, third, authored]
 
         let failures = attemptFailurePresentations(
-            turns: turns,
-            playhead: nil,
-            loopState: .failed
+            turns: turns
         )
 
         #expect(failures.keys.sorted() == ["turn-12"])
@@ -192,9 +149,7 @@ struct AttemptFailurePresentationTests {
         )
 
         let failures = attemptFailurePresentations(
-            turns: [first, second],
-            playhead: nil,
-            loopState: .failed
+            turns: [first, second]
         )
 
         #expect(failures.count == 2)
@@ -248,15 +203,4 @@ struct AttemptFailurePresentationTests {
         )
     }
 
-    private func stepRef(_ body: BodyProvenance) -> PlayheadStepRef {
-        PlayheadStepRef(
-            invocationId: body.invocationId,
-            flow: body.flow,
-            step: body.step,
-            kind: .skill,
-            index: body.stepIndex,
-            total: 3,
-            iteration: body.iteration
-        )
-    }
 }

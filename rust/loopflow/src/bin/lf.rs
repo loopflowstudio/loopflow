@@ -868,12 +868,30 @@ fn print_task_control(
 
 fn run_wave_command(repo: &Path, command: &WaveCommand) -> anyhow::Result<()> {
     let (receipt, json, dry_run) = match command {
-        WaveCommand::Serve {
+        WaveCommand::Serve { name, force } => {
+            return loopflow::controller::wave::run(name, *force);
+        }
+        WaveCommand::Recover {
             name,
-            force,
-            restart_flow,
+            cancel,
+            reason,
         } => {
-            return loopflow::controller::wave::run(name, *force, *restart_flow);
+            let repo = loopflow::engine::worktrees::main_repo_root(repo)?;
+            let wave = loopflow::ops::normalize_wave_name(name)
+                .ok_or_else(|| anyhow::anyhow!("invalid wave name: '{name}'"))?;
+            let report = match cancel {
+                Some(seq) => loopflow::controller::wave::recovery::cancel(
+                    &repo,
+                    &wave,
+                    *seq,
+                    reason
+                        .as_deref()
+                        .expect("Clap requires a cancellation reason"),
+                )?,
+                None => loopflow::controller::wave::recovery::inspect(&repo, &wave)?,
+            };
+            println!("{}", serde_json::to_string_pretty(&report)?);
+            return Ok(());
         }
         WaveCommand::NewChapter {
             wave,
@@ -1476,9 +1494,6 @@ fn main() -> anyhow::Result<()> {
             Some(Commands::Resident { name }) => {
                 in_repo_runtime(&args, |_| loopflow::controller::wave::resident::run(name))
             }
-            Some(Commands::FlowStep { flow, index, seed }) => in_repo_runtime(&args, |repo| {
-                loopflow::lf::commands::flow::run_step(flow, *index, seed, &cli, repo)
-            }),
             Some(Commands::Task {
                 cmd: TaskCommand::Worker { task_id },
             }) => in_repo_runtime(&args, |_| {
@@ -2000,7 +2015,7 @@ mod tests {
         assert!(matches!(
             served.command,
             Some(Commands::Wave { cmd: WaveCommand::Serve {
-                name, force: false, restart_flow: false,
+                name, force: false,
             } }) if name == "goals"
         ));
 

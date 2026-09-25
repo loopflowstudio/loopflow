@@ -280,6 +280,28 @@ struct DTOFixtureTests {
         return try #require(json as? [String: Any])
     }
 
+    @Test("Governance bodies decode without historical Flow coordinates")
+    func governanceBody() throws {
+        let data = try loadFixtureData("resident_deltas.json")
+        let json = try #require(JSONSerialization.jsonObject(with: data) as? [String: Any])
+        let deltas = try #require(json["deltas"] as? [[String: Any]])
+        var value = try #require(deltas.first?["body"] as? [String: Any])
+        let body = try JSONDecoder().decode(BodyProvenance.self, from: JSONSerialization.data(withJSONObject: value))
+        #expect(body.invocationId == nil)
+        #expect(body.stepIndex == nil)
+        #expect(body.flow == nil)
+        #expect(body.iteration == nil)
+        #expect(body.step == "wave/operate")
+        let failed = try ChatTurn(id: "failed", role: .assistant, authorName: nil, text: "", status: .failed,
+                              items: [], createdAt: body.startedAt, body: body, activity: nil)
+        value["body_id"] = "different-attempt"
+        let laterBody = try JSONDecoder().decode(BodyProvenance.self, from: JSONSerialization.data(withJSONObject: value))
+        let later = try ChatTurn(id: "later", role: .assistant, authorName: nil, text: "", status: .completed,
+                             items: [], createdAt: body.startedAt, body: laterBody, activity: nil)
+        let failures = attemptFailurePresentations(turns: [failed, later])
+        #expect(failures[failed.id]?.state == .failed)
+    }
+
     private func loadFixtureData(_ name: String, sourceFile: String = #filePath) throws -> Data {
         let testFile = URL(fileURLWithPath: sourceFile)
         let fixtures = testFile

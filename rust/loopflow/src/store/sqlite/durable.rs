@@ -1692,7 +1692,7 @@ mod durable_store_tests {
     fn legacy_flow_decisions_preserve_pinned_progress() {
         let (_dir, store, task_id) = store_with_task();
         let mut position = autonomous_position(&task_id);
-        position.invocation = crate::controller::wave::playhead::QueuedInvocation::load(
+        position.invocation = crate::engine::invocation::QueuedInvocation::load(
             std::path::Path::new(env!("CARGO_MANIFEST_DIR")),
             "pursue",
         )
@@ -1752,7 +1752,7 @@ mod durable_store_tests {
         for legacy_shape in [true, false] {
             let (_dir, store, task_id) = store_with_task();
             let mut position = autonomous_position(&task_id);
-            position.invocation = crate::controller::wave::playhead::QueuedInvocation::load(
+            position.invocation = crate::engine::invocation::QueuedInvocation::load(
                 std::path::Path::new(env!("CARGO_MANIFEST_DIR")),
                 "pursue",
             )
@@ -1811,7 +1811,7 @@ mod durable_store_tests {
     fn loop_verdict_survives_recovery_and_rejects_unrelated_runs() {
         let (_dir, store, task_id) = store_with_task();
         let mut position = autonomous_position(&task_id);
-        position.invocation = crate::controller::wave::playhead::QueuedInvocation::load(
+        position.invocation = crate::engine::invocation::QueuedInvocation::load(
             std::path::Path::new(env!("CARGO_MANIFEST_DIR")),
             "feature",
         )
@@ -1881,7 +1881,7 @@ mod durable_store_tests {
         for routing in [true, false] {
             let (_dir, store, task_id) = store_with_task();
             let mut position = autonomous_position(&task_id);
-            let body = crate::controller::wave::playhead::QueuedInvocation::load(
+            let body = crate::engine::invocation::QueuedInvocation::load(
                 std::path::Path::new(env!("CARGO_MANIFEST_DIR")),
                 "pursue",
             )

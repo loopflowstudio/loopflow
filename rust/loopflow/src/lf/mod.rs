@@ -1701,6 +1701,9 @@ pub enum ReleaseCommand {
         version: String,
         #[arg(long = "prev-tag")]
         prev_tag: Option<String>,
+        /// Print notes without updating manifests or release archives
+        #[arg(long)]
+        preview: bool,
         #[arg(short = 't', long = "target")]
         target: Option<String>,
     },

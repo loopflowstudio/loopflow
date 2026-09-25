@@ -21,11 +21,11 @@ use crate::ops::{
     abandon_branch, abort_rebase_after_authorization, abort_rebase_for_resolution, arm,
     commit_workflow, continue_rebase_after_authorization, continue_rebase_for_resolution,
     create_or_update_pr, current_pr, finish_arm_after_rebase, finish_submit_after_rebase,
-    plan_rebase, rebase_class_name, rebase_strategy_name, rebase_with_recovery, recover_rebase,
-    release_bump, release_check, release_notes, release_publish, release_run, release_status,
-    release_tag, start_rebase_for_resolution, submit, AbandonOptions, CommitOptions, CronHost,
-    CronOutcome, CronSource, CronSpec, CronTargetKind, LandOptions, PrOptions, Progress,
-    RebaseOptions, SystemLaunchctl,
+    plan_rebase, preview_release_notes, rebase_class_name, rebase_strategy_name,
+    rebase_with_recovery, recover_rebase, release_bump, release_check, release_notes,
+    release_publish, release_run, release_status, release_tag, start_rebase_for_resolution, submit,
+    AbandonOptions, CommitOptions, CronHost, CronOutcome, CronSource, CronSpec, CronTargetKind,
+    LandOptions, PrOptions, Progress, RebaseOptions, SystemLaunchctl,
 };
 use crate::store::RegistryUnavailable;
 use anyhow::{anyhow, Result};
@@ -153,8 +153,15 @@ pub fn run_release(cmd: &ReleaseCommand) -> Result<()> {
         ReleaseCommand::Notes {
             version,
             prev_tag,
+            preview,
             target,
-        } => release_notes_cmd(version, prev_tag.as_deref(), target.as_deref(), &progress),
+        } => release_notes_cmd(
+            version,
+            prev_tag.as_deref(),
+            target.as_deref(),
+            *preview,
+            &progress,
+        ),
         ReleaseCommand::Bump { version, target } => {
             release_bump_cmd(version, target.as_deref(), &progress)
         }
@@ -1449,15 +1456,46 @@ fn release_notes_cmd(
     version: &str,
     prev_tag: Option<&str>,
     target_name: Option<&str>,
+    preview: bool,
     progress: &impl Progress,
 ) -> Result<()> {
     let repo_root = find_repo_root()?;
+    if preview {
+        print!(
+            "{}",
+            preview_release_notes(
+                &repo_root,
+                version,
+                prev_tag,
+                target_name,
+                &NotesPreviewProgress
+            )?
+        );
+        return Ok(());
+    }
     release_notes(&repo_root, version, prev_tag, target_name, progress)?;
     println!(
         "RELEASE_NOTES.md updated for v{}",
         version.trim_start_matches('v')
     );
     Ok(())
+}
+
+struct NotesPreviewProgress;
+
+impl Progress for NotesPreviewProgress {
+    fn status(&self, message: &str) {
+        eprintln!("{message}");
+    }
+    fn warning(&self, message: &str) {
+        eprintln!("{message}");
+    }
+    fn error(&self, message: &str) {
+        eprintln!("{message}");
+    }
+    fn confirm(&self, _message: &str) -> bool {
+        false
+    }
 }
 
 fn release_bump_cmd(

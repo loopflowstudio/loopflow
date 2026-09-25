@@ -1240,8 +1240,11 @@ Mechanical release subcommands; `lf release run` is the full workflow.
 
 ```bash
 lf release run patch          # full release workflow
+lf release run minor          # close/reuse a patch, then publish the cycle milestone
 lf release check              # exact commits in the target range
 lf release notes 1.2.3        # narrative notes from decisions + commits + PRs
+lf release notes 0.13.0 --preview  # print cycle notes since v0.12.0; no release writes
+lf release notes 0.12.0 --preview  # existing version: end at v0.12.0, not today's HEAD
 lf release bump 1.2.3         # bump manifests
 lf release tag 1.2.3          # create + push git tag
 lf release publish v1.2.3 --notes RELEASE_NOTES.md --asset dist/lf.tar.gz
@@ -1256,8 +1259,11 @@ with `publish --tag ... --artifacts ...` after tagging. The candidate phase
 builds the merged commit under a disposable ref, validates the installer and
 migration authority, notarizes the DMG, and records the exact artifact hashes.
 Only that prepared candidate receives the immutable version tag. Publication
-consumes the prepared bytes from an exact-tag worktree. No merged changes is a
-successful no-op. An incomplete latest tag resumes; it never cuts a newer tag
+consumes the prepared bytes from an exact-tag worktree. For patch releases,
+no merged changes is a successful no-op. A minor completes a closing patch only
+when changes remain, otherwise reuses the latest patch. Its notes span the
+preceding `.0` tag; both releases share a product snapshot. Retrying an interrupted
+minor finishes its recorded pair. An incomplete latest tag resumes; it never cuts a newer tag
 around a failed publication. Use `{repo}` in a publisher argument to name the
 current synchronized repository; `LF_RELEASE_SOURCE_REPO` names the leased
 candidate or exact-tag worktree.

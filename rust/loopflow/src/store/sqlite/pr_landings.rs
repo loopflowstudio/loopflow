@@ -372,10 +372,15 @@ impl super::SqliteStore {
 
 #[cfg(test)]
 mod tests {
-    use super::*;
-    use crate::pr_landing::{NewPrLanding, PrLandingState};
-    use crate::store::migrations::migration_sql_for_test;
+    use std::path::PathBuf;
+
+    use time::OffsetDateTime;
+
+    use crate::pr_landing::{
+        LandingPlacement, LandingSupervisor, NewPrLanding, PrLanding, PrLandingState,
+    };
     use crate::store::sqlite::SqliteStore;
+    use crate::work::task::{AfterMerge, TaskId};
 
     fn landing(now: OffsetDateTime) -> PrLanding {
         PrLanding::new(
@@ -397,19 +402,7 @@ mod tests {
     fn store() -> (tempfile::TempDir, SqliteStore) {
         let directory = tempfile::tempdir().unwrap();
         let path = directory.path().join("registry.db");
-        let store = SqliteStore::new(&path).unwrap();
-        let conn = rusqlite::Connection::open(path).unwrap();
-        let migrated = conn
-            .query_row(
-                "SELECT EXISTS(SELECT 1 FROM sqlite_master WHERE type='table' AND name='pr_landings')",
-                [],
-                |row| row.get::<_, bool>(0),
-            )
-            .unwrap();
-        if !migrated {
-            conn.execute_batch(&migration_sql_for_test("pr_landings"))
-                .unwrap();
-        }
+        let store = SqliteStore::open_ephemeral(&path).unwrap();
         (directory, store)
     }
 

@@ -1047,7 +1047,6 @@ mod tests {
         LandingPlacement, LandingSupervisor, NewPrLanding, PrLanding, PrLandingState,
         SUPERVISOR_STALE_AFTER,
     };
-    use crate::store::migrations::migration_sql_for_test;
     use crate::store::SharedStore;
     use crate::store::StorageConfig;
     use crate::work::task::{AfterMerge, CiCheck, CiIncident};
@@ -1085,21 +1084,6 @@ mod tests {
     async fn store() -> (tempfile::TempDir, SharedStore) {
         let directory = tempfile::tempdir().unwrap();
         let path = directory.path().join("registry.db");
-        crate::store::open_ephemeral_store(&StorageConfig::sqlite(path.clone()))
-            .await
-            .unwrap();
-        let conn = rusqlite::Connection::open(&path).unwrap();
-        let migrated = conn
-            .query_row(
-                "SELECT EXISTS(SELECT 1 FROM sqlite_master WHERE type='table' AND name='pr_landings')",
-                [],
-                |row| row.get::<_, bool>(0),
-            )
-            .unwrap();
-        if !migrated {
-            conn.execute_batch(&migration_sql_for_test("pr_landings"))
-                .unwrap();
-        }
         let store = Arc::new(
             crate::store::open_ephemeral_store(&StorageConfig::sqlite(path))
                 .await

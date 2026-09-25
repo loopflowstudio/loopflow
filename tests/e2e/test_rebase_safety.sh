@@ -123,6 +123,21 @@ export SENTINEL_MODE=noop SENTINEL_LOG="$TMP_ROOT/clean.log"
 test ! -s "$SENTINEL_LOG"
 echo "PASS clean rebase used no provider"
 
+# A deleted remote branch leaves tracking behind; the CLI must recreate it
+# after replaying main and leave its upstream usable on the next invocation.
+create_clean_repo deleted
+published_head=$(git -C "$REPO" rev-parse origin/feature)
+git --git-dir="$REMOTE" update-ref -d refs/heads/feature
+test "$(git -C "$REPO" rev-parse origin/feature)" = "$published_head"
+(cd "$REPO" && "$LF_BIN" rebase >/dev/null)
+git -C "$REPO" merge-base --is-ancestor origin/main HEAD
+test "$(git --git-dir="$REMOTE" rev-parse refs/heads/feature)" = "$(git -C "$REPO" rev-parse HEAD)"
+test "$(git --git-dir="$REMOTE" show feature:feature.txt)" = feature
+test "$(git --git-dir="$REMOTE" show feature:main.txt)" = main
+(cd "$REPO" && "$LF_BIN" rebase >/dev/null)
+test "$(git -C "$REPO" rev-parse '@{upstream}')" = "$(git -C "$REPO" rev-parse HEAD)"
+echo "PASS deleted remote branch recreated with usable tracking"
+
 # Publishing a deliberately behind branch pushes and updates the review surface
 # without entering the integration path. A later explicit rebase owns that work.
 create_clean_repo publication
@@ -144,6 +159,7 @@ case "${1:-} ${2:-}" in
     : >"$GH_STATE"
     printf 'https://example.com/pr/7\n'
     ;;
+  "api graphql") printf 'false\n' ;;
   "pr edit"|"pr ready") ;;
 esac
 GH_SENTINEL
@@ -268,8 +284,8 @@ test -f "$REPO/unrelated.tmp"
 test -z "$(git -C "$REPO" diff --cached --name-only)"
 echo "PASS repeated conflict reused resolution without a provider"
 
-# Land recovery resumes after the verified integration instead of replaying the
-# collapse/rebase path and pushing a second time.
+# The shared arm/land preparation resumes after the verified integration instead
+# of replaying collapse/rebase and pushing twice. Watcher proof is in land_tests.
 create_conflict_repo land-recovery
 printf 'checkpoint one\n' >"$REPO/first.txt"
 git -C "$REPO" add first.txt
@@ -287,14 +303,14 @@ PUSH_HOOK
 chmod +x "$REMOTE/hooks/update"
 export SENTINEL_MODE=resolve SENTINEL_LOG="$TMP_ROOT/land-recovery.provider.log"
 : >"$SENTINEL_LOG"; : >"$land_push_log"; rm -f "$GH_STATE"
-(cd "$REPO" && "$LF_BIN" pr land --title "one replay" --body "proof" >/dev/null)
+(cd "$REPO" && "$LF_BIN" pr arm --title "one replay" --body "proof" >/dev/null)
 test "$(wc -l <"$SENTINEL_LOG" | tr -d ' ')" = 1
 test "$(grep -c '^refs/heads/feature$' "$land_push_log")" = 1
 test "$(git -C "$REPO" rev-list --count origin/main..HEAD)" = 1
 test -f "$REPO/first.txt"
 test ! -e "$REPO/scratch/working.md"
 test -z "$(git -C "$REPO" diff --name-only origin/main...HEAD -- scratch)"
-echo "PASS recovered land integrated and pushed once"
+echo "PASS recovered arm integrated and pushed once"
 
 # Provider success without Git success fails the operation and retains both the
 # sequencer and descriptive owner metadata for explicit recovery.

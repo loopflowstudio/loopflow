@@ -49,6 +49,11 @@ direction: remove landing blockers rather than add receipt systems.
 - **Process success is not repair success.** Use the approved `published` or
   `blocked` result in the existing final answer. Surface the exact human action
   after reconciling GitHub; do not relaunch an impossible repair indefinitely.
+- **Queue membership needs explicit cancellation.** GitHub CLI 2.101.0 returns
+  success from `pr merge --disable-auto` for a queued PR without removing it.
+  Distinguish pending auto-merge from queue membership and use
+  `dequeuePullRequest` before publishing a replacement head. The regression's
+  remote rejects pushes while queued; a mock command exit cannot prove removal.
 - **Fence running effects, not only database writes.** Canceling an async waiter
   does not cancel its blocking repair. A replacement must wait for that operation
   to finish. Active joins must retain the checkout whose supervisor lock is held.
@@ -59,6 +64,33 @@ direction: remove landing blockers rather than add receipt systems.
   discrepancy remain unresolved; do not promote these tests into those claims.
 
 Current mechanics belong in [delivery documentation](../../docs/architecture/delivery.md).
+
+### Landing fixtures and deleted remote branches (2026-09-25)
+
+- Fresh landing fixtures use `open_ephemeral_store` or
+  `SqliteStore::open_ephemeral`. The constructor owns canonical migrations and
+  the draft tail without ambient installation authority. Probing for a table
+  and replaying its original migration misses later schema changes. Keep the
+  forward migration and populated historical preservation tests for installed
+  databases; see [TESTING.md](../../TESTING.md).
+- Reproduce remote deletion directly in the bare remote so the checkout keeps
+  its stale tracking ref. Deleting through the checkout's own push updates
+  tracking and misses the failure. An explicit empty lease permits recreation
+  while rejecting a branch created after the absence observation. Existing
+  branches retain their tracking lease; fetching to bypass rejection could
+  authorize overwriting unseen work.
+- Fixture and rebase proofs passed: 17 landing unit tests, 22 rebase tests,
+  11 CLI safety scenarios, and the authoritative-merge watcher test. Git
+  transport uses local bare remotes; provider/GitHub responses are simulated.
+  [PR #1289](https://github.com/loopflowstudio/loopflow/pull/1289) also recreated
+  the deleted branch on GitHub using `scripts/dev-lf`; the installed 0.12.21
+  command still reproduced the stale-lease failure. That publication proves
+  branch recovery, not the other live recovery gaps recorded above.
+- The installed `update-wave` skill explicitly sent unnamed-Wave learnings to
+  `.lf/`, even after source guidance had changed. Resolve the owning Wave from
+  repository objectives and refresh exported skills after changing their source.
+  A repository with zero Waves starts with one repo-wide Wave; missing launch
+  attribution is not a reason to create another memory location.
 
 ## Chapter boundaries and preservation (2026-09-23)
 

@@ -626,33 +626,16 @@ fn cherry_authored_count(repo: &Path, target_sha: &str, head: &str) -> OpsResult
 }
 
 fn push_rebased_branch(repo: &Path, branch: &str) -> OpsResult<()> {
-    let upstream = Command::new("git")
-        .arg("-C")
-        .arg(repo)
-        .args([
-            "rev-parse",
-            "--abbrev-ref",
-            "--symbolic-full-name",
-            "@{upstream}",
-        ])
-        .output()?;
-    let args = if upstream.status.success() {
-        vec!["push", "--force-with-lease"]
+    let reference = format!("refs/heads/{branch}");
+    let remote = git(repo, &["ls-remote", "--heads", "origin", &reference])?;
+    let lease = if remote.trim().is_empty() {
+        // Deletion leaves a stale tracking ref. Require absence atomically so a
+        // concurrently recreated branch cannot be overwritten.
+        format!("--force-with-lease={reference}:")
     } else {
-        vec!["push", "--force-with-lease", "-u", "origin", branch]
+        "--force-with-lease".to_string()
     };
-    let output = Command::new("git")
-        .arg("-C")
-        .arg(repo)
-        .args(&args)
-        .output()?;
-    if !output.status.success() {
-        return Err(OpsError::CommandFailed {
-            command: format!("git {}", args.join(" ")),
-            stderr: String::from_utf8_lossy(&output.stderr).trim().to_string(),
-        });
-    }
-    Ok(())
+    git(repo, &["push", &lease, "-u", "origin", &reference]).map(|_| ())
 }
 
 /// Validate a durable stacked fork base before it drives a `git rebase --onto`.

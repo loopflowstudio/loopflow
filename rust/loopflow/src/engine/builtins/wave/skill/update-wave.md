@@ -6,12 +6,18 @@ Keep the Wave's durable identity current and fold what the branch learned into m
 
 ## Read
 
-Read scratch, the diff, the identified Wave's GOAL/MEMORY and the repo guide.
+Read scratch, the diff, the owning Wave's GOAL/MEMORY and the repo guide.
+Use the named Wave when supplied; otherwise identify the owner from the work's
+context and repository Wave objectives. If the repository has no Waves, create
+one named for the repository, with a repo-wide GOAL grounded in its purpose and
+a MEMORY for its durable lessons. This local memory setup needs no PM binding
+or running Wave. If existing Waves leave ownership genuinely ambiguous, ask the
+present human; headless, record the question in scratch. Never use `.lf/` as a
+fallback memory location.
+
 Use `lf status <wave> --json` when chapter or Task state matters; memory curation
-alone needs no running Wave or PM connection. Do not infer a different Wave.
-With no named Wave, preserve actionable rules beside their code or in the local
-skill that exercises them; keep unresolved placement in the PR. Do not create
-root `.lf/` learning notes or make another copy of general customer guidance.
+alone needs no running Wave or PM connection. Put actionable rules beside their
+code or in the skill that exercises them, and durable lessons in Wave memory.
 
 ## Reconcile
 
@@ -38,7 +44,8 @@ chapter as incidental cleanup.
 
 ## New Wave
 
-Author GOAL and MEMORY, then initialize with `lf pm init --wave <wave>`. This
+Author GOAL and MEMORY. Local memory curation stops there. When connecting the
+Wave to durable planning, initialize with `lf pm init --wave <wave>`. This
 provisions the first empty chapter. Author its plan through `lf wave update-plan`.
 Do not create another Project or introduce a Project operator.
 

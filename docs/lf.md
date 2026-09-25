@@ -798,6 +798,9 @@ lf pr arm --next parser-proof
 Task disposition is recorded for the exact armed head, but completion and
 rotation wait for a later authoritative merged observation.
 
+Preparing a replacement head disables pending auto-merge or removes the PR
+from GitHub's merge queue before pushing, then arms the updated head.
+
 ### lf pr land
 
 Prepare and arm the PR, then watch GitHub until merged or actionably blocked.
@@ -900,6 +903,10 @@ target). An already-current main does not skip a behind caller's rebase.
 Staged, unstaged and untracked edits are saved and restored. If restoration
 conflicts, the error names the retained stash. `--plan` stays read-only and
 describes locally known refs without fetching.
+
+Rebase publishes the resulting branch to `origin` with a lease. If the remote
+branch was deleted, it recreates it even when local tracking is stale. Unseen
+remote changes or a branch recreated during the push still reject publication.
 
 Classifies the branch before mutating git: disposable branches can reset to
 their base, authored work uses a normal rebase path. Clean updates stay

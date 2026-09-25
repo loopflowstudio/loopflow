@@ -929,12 +929,17 @@ fn select_task_worker_flow_from_project(
     project: &crate::pm::PmProject,
     requested: Option<&str>,
 ) -> OpsResult<String> {
-    let recommended = project
+    let selected = requested.unwrap_or_else(|| recommended_task_flow(project));
+    load_task_flow(repo, selected).map(|(name, _)| name)
+}
+
+/// The Flow a Task starts without an explicit selection.
+pub(crate) fn recommended_task_flow(project: &crate::pm::PmProject) -> &str {
+    project
         .flows
         .as_ref()
-        .and_then(|flows| flows.recommended.as_deref());
-    let selected = requested.or(recommended).unwrap_or("feature");
-    load_task_flow(repo, selected).map(|(name, _)| name)
+        .and_then(|flows| flows.recommended.as_deref())
+        .unwrap_or("feature")
 }
 
 #[derive(Debug, Clone, PartialEq, Eq)]

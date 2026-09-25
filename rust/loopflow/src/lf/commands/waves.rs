@@ -193,6 +193,7 @@ pub enum TaskConditionState {
 pub use crate::ops::task_actions::{
     ci_failure_reason, derive_task_actions, TaskAction, TaskActionEvidence, TaskActionModel,
 };
+pub use crate::ops::task_flow::TaskFlowSnapshot;
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize)]
 #[serde(rename_all = "snake_case")]
@@ -256,6 +257,7 @@ pub struct TaskDetailSnapshot {
     pub next_move: NextMove,
     pub condition: TaskConditionSnapshot,
     pub actions: TaskActionModel,
+    pub flow: TaskFlowSnapshot,
     pub prs: Vec<PrSnapshot>,
     pub active_pr: Option<String>,
 }
@@ -495,6 +497,7 @@ pub struct RoadmapTask {
     pub next_move: NextMove,
     pub condition: TaskConditionSnapshot,
     pub actions: TaskActionModel,
+    pub flow: TaskFlowSnapshot,
     pub active_pr: Option<PrSnapshot>,
     pub section: RoadmapSection,
 }
@@ -756,6 +759,7 @@ fn roadmap_task(detail: TaskDetailSnapshot) -> RoadmapTask {
         next_move: detail.next_move,
         condition: detail.condition,
         actions: detail.actions,
+        flow: detail.flow,
         active_pr,
         section,
     }
@@ -977,7 +981,10 @@ async fn snapshot_tasks(
         let runtime_task = tasks.iter().find(|task| {
             task.plan.id.as_str() == item.id || task.plan.identifier == item.identifier
         });
-        details.push(snapshot_task_detail(store, item, runtime_task, probe_pr_empty).await?);
+        let recommended = recommended_flow(&planning.projects, &item.project_id);
+        details.push(
+            snapshot_task_detail(store, item, runtime_task, recommended, probe_pr_empty).await?,
+        );
     }
 
     for task in &tasks {
@@ -1017,7 +1024,10 @@ async fn snapshot_tasks(
             team_id: String::new(),
             assignee: None,
         };
-        details.push(snapshot_task_detail(store, item, Some(task), probe_pr_empty).await?);
+        let recommended = crate::ops::task::recommended_task_flow(plan).to_string();
+        details.push(
+            snapshot_task_detail(store, item, Some(task), recommended, probe_pr_empty).await?,
+        );
     }
     details.sort_by(|left, right| {
         left.task
@@ -1050,10 +1060,19 @@ fn unavailable_task(task: &Task, status: WorkStatus) -> UnavailableTaskEvidence 
     }
 }
 
+fn recommended_flow(projects: &[crate::pm::PmProject], project_id: &str) -> String {
+    projects
+        .iter()
+        .find(|project| project.id == project_id)
+        .map_or("feature", crate::ops::task::recommended_task_flow)
+        .to_string()
+}
+
 async fn snapshot_task_detail(
     store: &SharedStore,
     item: PmItem,
     task: Option<&Task>,
+    recommended: String,
     probe_pr_empty: bool,
 ) -> Result<TaskDetailSnapshot> {
     let prs = match task {
@@ -1063,9 +1082,10 @@ async fn snapshot_task_detail(
     let latest = prs.last();
     let active = prs.iter().find(|pr| pr.is_active());
     let observed_at = now();
-    let (runtime, execution) = match task {
+    let (runtime, execution, flow_record) = match task {
         Some(task) => {
-            let execution = crate::ops::task_execution::task_execution(store, &task.id).await?;
+            let (execution, flow_record) =
+                crate::ops::task_execution::task_execution_and_flow(store, &task.id).await?;
             let status = child_work_status(store, &ChildRef::Task(task.id.clone())).await?;
             let started = store.task_started(&task.id).await?
                 || prs
@@ -1074,9 +1094,10 @@ async fn snapshot_task_detail(
             (
                 Some(snapshot_task_runtime(&execution, task, status, started)),
                 Some(execution),
+                flow_record,
             )
         }
-        None => (None, None),
+        None => (None, None, crate::ops::task_flow::TaskFlowRecord::None),
     };
     let reference = task_reference(&item, task, active, &prs);
     let worktree_blocker = match task {
@@ -1191,6 +1212,25 @@ async fn snapshot_task_detail(
         Some(task) => current_direction(store, &task.id).await?,
         None => None,
     };
+    let flow_controls = crate::ops::task_flow::task_flow_controls(
+        &flow_record,
+        &crate::ops::task_flow::TaskFlowGate {
+            identifier: &item.identifier,
+            status: runtime.as_ref().map(|runtime| &runtime.status),
+            plan_completed: item.completed,
+            execution: execution.as_ref(),
+            worktree_blocker: worktree_blocker
+                .as_ref()
+                .map(|blocker| blocker.reason.as_str()),
+            launch_refusal: launch_refusal.as_deref(),
+            resume_refusal: resume_refusal.as_deref(),
+        },
+    );
+    let flow = TaskFlowSnapshot {
+        recommended,
+        record: flow_record,
+        controls: flow_controls,
+    };
     Ok(TaskDetailSnapshot {
         task: task_summary(item),
         reference,
@@ -1199,6 +1239,7 @@ async fn snapshot_task_detail(
         next_move,
         condition,
         actions,
+        flow,
         prs: prs
             .iter()
             .map(|pr| {

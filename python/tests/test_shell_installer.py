@@ -8,6 +8,7 @@ from __future__ import annotations
 
 import os
 import subprocess
+import sys
 from pathlib import Path
 
 import pytest
@@ -27,30 +28,30 @@ def _write_stubs(stub_dir: Path) -> None:
         '  [ "$prev" = "-o" ] && out="$a"\n'
         '  [ "$prev" = "-w" ] && effective="1"\n'
         '  url="$a"; prev="$a"\n'
-        'done\n'
+        "done\n"
         'echo "$@" >> "$LFTEST_LOG"\n'
-        'if [ -n "$out" ]; then\n'
+        'if [ -n "$out" ] && [ "$out" != "/dev/null" ]; then\n'
         '  if [ "${url##*/}" = "SHA256SUMS" ]; then\n'
-        '    digest=$(printf "dummy\\n" | shasum -a 256 | awk \'{ print $1 }\')\n'
+        "    digest=$(printf \"dummy\\n\" | shasum -a 256 | awk '{ print $1 }')\n"
         '    [ "${LFTEST_BAD_SUMS:-0}" = "1" ] && '
         'digest="0000000000000000000000000000000000000000000000000000000000000000"\n'
         "    for name in lf-aarch64-apple-darwin.tar.gz "
         "lf-x86_64-apple-darwin.tar.gz lf-x86_64-unknown-linux-gnu.tar.gz "
         "lf-aarch64-unknown-linux-gnu.tar.gz Loopflow.dmg install.sh; do\n"
         '      echo "$digest  $name" >> "$out"\n'
-        '    done\n'
-        '  else\n'
+        "    done\n"
+        "  else\n"
         '    echo dummy > "$out"\n'
-        '  fi\n'
-        'fi\n'
+        "  fi\n"
+        "fi\n"
         'if [ "$effective" = "1" ]; then\n'
         '  case "$url" in\n'
-        '    */releases/latest/download/*) printf "%s" '
+        '    */releases/latest) printf "%s" '
         '"https://github.com/loopflowstudio/loopflow/releases/'
-        'download/v9.9.9/SHA256SUMS" ;;\n'
-        '    *) printf "%s" "$url" ;;\n'
-        '  esac\n'
-        'fi\n'
+        'tag/v9.9.9" ;;\n'
+        '    *) printf "%s" "https://release-assets.githubusercontent.com/asset" ;;\n'
+        "  esac\n"
+        "fi\n"
         "exit ${LFTEST_CURL_RC:-0}\n"
     )
     tar = stub_dir / "tar"
@@ -59,12 +60,19 @@ def _write_stubs(stub_dir: Path) -> None:
         'dir=""; prev=""\n'
         'for a in "$@"; do [ "$prev" = "-C" ] && dir="$a"; prev="$a"; done\n'
         'if [ -n "$dir" ]; then\n'
-        '  cat > "$dir/lf" <<\'LF\'\n'
+        "  cat > \"$dir/lf\" <<'LF'\n"
         "#!/bin/sh\n"
-        "printf '%s\\n' \"$*\" >> \"$LFTEST_PROMOTE_LOG\"\n"
+        'printf \'%s\\n\' "$*" >> "$LFTEST_PROMOTE_LOG"\n'
+        'prev=""\n'
+        'for arg in "$@"; do\n'
+        '  case "$prev" in\n'
+        '    --cli-target|--daemon-target) cp "$0" "$arg" ;;\n'
+        "  esac\n"
+        '  prev="$arg"\n'
+        "done\n"
         "exit 0\n"
         "LF\n"
-        '  cat > "$dir/lfd" <<\'LFD\'\n'
+        "  cat > \"$dir/lfd\" <<'LFD'\n"
         "#!/bin/sh\n"
         "exit 0\n"
         "LFD\n"
@@ -134,9 +142,54 @@ def test_installer_syntax_is_valid(installer: Path) -> None:
     assert result.returncode == 0, result.stderr
 
 
-def test_removed_no_interactive_flag_fails_clearly(
-    installer: Path, env: dict[str, str]
+@pytest.mark.parametrize("explicit_directory", [False, True])
+def test_legacy_refresh_installs_published_binaries(
+    env: dict[str, str], tmp_path: Path, explicit_directory: bool
 ) -> None:
+    destination = tmp_path / "installed binaries"
+    args = [sys.executable, str(REPO_ROOT / "scripts/install.py"), "refresh"]
+    if explicit_directory:
+        args.extend(["--install-dir", str(destination)])
+    else:
+        env["LF_INSTALL_DIR"] = str(destination)
+
+    result = subprocess.run(args, env={**os.environ, **env}, capture_output=True, text=True)
+
+    assert result.returncode == 0, result.stdout + result.stderr
+    assert (destination / "lf").is_file()
+    assert (destination / "lfd").is_file()
+    assert f"Installed to {destination}/lf and {destination}/lfd" in result.stdout
+
+
+@pytest.mark.parametrize(
+    ("failure", "diagnostic"),
+    [({"LFTEST_CURL_RC": "22"}, "Download failed"), ({"LFTEST_BAD_SUMS": "1"}, "Digest mismatch")],
+)
+def test_legacy_refresh_preserves_installation_on_download_failure(
+    env: dict[str, str], tmp_path: Path, failure: dict[str, str], diagnostic: str
+) -> None:
+    destination = Path(env["LF_INSTALL_DIR"])
+    destination.mkdir()
+    for name in ("lf", "lfd"):
+        (destination / name).write_text("previous installation")
+
+    result = subprocess.run(
+        [sys.executable, str(REPO_ROOT / "scripts/install.py"), "refresh"],
+        env={**os.environ, **env, **failure},
+        capture_output=True,
+        text=True,
+    )
+
+    assert result.returncode != 0
+    assert diagnostic in result.stdout + result.stderr
+    assert "refresh failed" in result.stderr
+    assert all(
+        (destination / name).read_text() == "previous installation" for name in ("lf", "lfd")
+    )
+    assert not (tmp_path / "promote.log").exists()
+
+
+def test_removed_no_interactive_flag_fails_clearly(installer: Path, env: dict[str, str]) -> None:
     result = _run(installer, ["--no-interactive"], env)
     assert result.returncode != 0
     assert "Unknown option" in result.stderr
@@ -193,7 +246,8 @@ def test_latest_release_is_pinned_before_the_archive_download(
     result = _run(installer, [], env)
     assert result.returncode == 0, result.stderr
     downloads = (tmp_path / "curl.log").read_text()
-    assert "/releases/latest/download/SHA256SUMS" in downloads
+    assert "/releases/latest" in downloads
+    assert "/releases/download/v9.9.9/SHA256SUMS" in downloads
     assert "/releases/download/v9.9.9/lf-" in downloads
 
 
@@ -225,9 +279,7 @@ def test_macos_release_promotes_the_verified_app_with_the_control_plane(
     args = (tmp_path / "promote.log").read_text().split()
     assert "--app-source" in args
     assert args[args.index("--app-target") + 1] == str(applications / "Loopflow.app")
-    assert args[args.index("--legacy-app-target") + 1] == str(
-        applications / "Concerto.app"
-    )
+    assert args[args.index("--legacy-app-target") + 1] == str(applications / "Concerto.app")
 
 
 def test_missing_version_value_fails_clearly(installer: Path, env: dict[str, str]) -> None:

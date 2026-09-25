@@ -404,6 +404,28 @@ def _root() -> None:
     """Build and install loopflow locally."""
 
 
+@app.command(hidden=True)
+def refresh(
+    install_dir: Annotated[
+        Path | None,
+        typer.Option("--install-dir", help="Install lf here instead of the resolved local bin dir"),
+    ] = None,
+) -> None:
+    """Upgrade callers installed before native release installation."""
+    # Older installed CLIs update main before calling this entry point.
+    # Calling `lf install` here would recurse into that same older CLI.
+    directory = install_dir.expanduser() if install_dir else _resolve_install_dir()
+    try:
+        _run_or_raise(
+            ["sh", str(ROOT / "release" / "install.sh")],
+            "published release",
+            env={**os.environ, "LF_INSTALL_DIR": str(directory)},
+        )
+    except StageError as exc:
+        typer.echo(f"refresh failed: {exc}", err=True)
+        raise typer.Exit(code=1) from exc
+
+
 @app.command()
 def local(
     dry_run: bool = typer.Option(False, "-n", "--dry-run", help="Show what would be done"),

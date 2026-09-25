@@ -78,15 +78,28 @@ main() {
   done
 
   if [ "$version" = "latest" ]; then
-    manifest_url="https://github.com/$REPO/releases/latest/download/SHA256SUMS"
+    # Asset downloads end at a CDN URL that no longer contains the release tag.
+    if ! release_url=$(curl -fsSLI -o /dev/null -w '%{url_effective}' "https://github.com/$REPO/releases/latest"); then
+      echo "Download failed: latest release lookup" >&2
+      exit 1
+    fi
+    case "$release_url" in
+      "https://github.com/$REPO/releases/tag/v"*)
+        tag="${release_url##*/}"
+        ;;
+      *)
+        echo "Latest release did not resolve to a pinned tag" >&2
+        exit 1
+        ;;
+    esac
   else
     case "$version" in
       v*) tag="$version" ;;
       *) tag="v$version" ;;
     esac
-    release_base="https://github.com/$REPO/releases/download/$tag"
-    manifest_url="$release_base/SHA256SUMS"
   fi
+  release_base="https://github.com/$REPO/releases/download/$tag"
+  manifest_url="$release_base/SHA256SUMS"
 
   echo "Installing lf ($target)..."
   mkdir -p "$install_dir"
@@ -102,21 +115,10 @@ main() {
   trap cleanup EXIT INT TERM
 
   manifest="$tmpdir/SHA256SUMS"
-  if ! effective_manifest=$(curl -fsSL -o "$manifest" -w '%{url_effective}' "$manifest_url"); then
+  if ! curl -fsSL -o "$manifest" "$manifest_url"; then
     echo "Download failed: $manifest_url" >&2
     echo "No release found for version '$version' ($target)." >&2
     exit 1
-  fi
-  if [ "$version" = "latest" ]; then
-    case "$effective_manifest" in
-      */releases/download/v*/SHA256SUMS)
-        release_base="${effective_manifest%/SHA256SUMS}"
-        ;;
-      *)
-        echo "Latest release did not resolve to a pinned tag: $effective_manifest" >&2
-        exit 1
-        ;;
-    esac
   fi
 
   verify_asset() {
